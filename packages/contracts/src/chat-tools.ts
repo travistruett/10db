@@ -8,7 +8,19 @@ import { StartShapeInput } from './shape-files';
 // Sessions spec §6.6: a chat's agent reaches every builder tool through 10db's own server, held to the
 // chat's project, plus `set_title`. What each returns for a row the screen draws is `ChatToolResult`.
 
-export const ChatToolName = { ...BuilderToolName, SetTitle: 'set_title' } as const;
+/** The tools that change git in Your folder, which a chat reaches only through the daemon. */
+export const ChatGitToolName = {
+  MakeBranch: 'make_branch',
+  SwitchBranch: 'switch_branch',
+  Pull: 'pull',
+  CommitChanges: 'commit_changes',
+} as const;
+
+export const ChatToolName = {
+  ...BuilderToolName,
+  SetTitle: 'set_title',
+  ...ChatGitToolName,
+} as const;
 export type ChatToolName = (typeof ChatToolName)[keyof typeof ChatToolName];
 
 /** The most characters a chat's title keeps, cut at a word (UI spec §5.4). */
@@ -37,6 +49,13 @@ export const ChatToolInputs = {
   [ChatToolName.WithdrawKnowledge]: BuilderToolInputs.withdraw_knowledge,
   [ChatToolName.ListProposals]: BuilderToolInputs.list_proposals.omit({ projectId: true }),
   [ChatToolName.SetTitle]: z.object({ title: z.string().trim().min(1).max(80) }),
+  [ChatToolName.MakeBranch]: z.object({ name: z.string().min(1).max(200) }),
+  [ChatToolName.SwitchBranch]: z.object({ name: z.string().min(1).max(200) }),
+  [ChatToolName.Pull]: z.object({}),
+  [ChatToolName.CommitChanges]: z.object({
+    message: z.string().trim().min(1).max(20_000),
+    paths: z.array(z.string().min(1).max(1024)).min(1).max(500).optional(),
+  }),
 } as const satisfies Record<ChatToolName, z.ZodType>;
 
 /** The old value of each field an `edit_task` changed, which its Undo patches back. */

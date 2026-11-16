@@ -32,3 +32,8 @@
   turns, and from any session but the one the chat's hold belongs to (`holdingSession` in `hooks.ts`), its guard
   denies every call. At each turn's end `endJobs` stops what the session's commands left running, from the mark taken
   at its first Bash call (`sandbox/lane-processes.ts`).
+- `git-tools.ts` holds the chat's tools that change git in Your folder (`make_branch`, `switch_branch`, `pull`, `commit_changes`;
+  Git's side is `git/chat-git.ts`). Each runs only from the chat's open session while its turn holds the folder, refuses while a closed
+  pass waits for its pull request and while HEAD or the named branch is under `10db/` (`git-names.ts`), and answers a warning naming
+  the other chat when it commits everything in a shared folder. The shell's own git writes are refused with `CHAT_GIT_REFUSAL`
+  (`git-rule.ts`), which names these tools.

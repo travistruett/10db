@@ -2526,6 +2526,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         clock,
         builder: createBuilderTools(services),
         getTask: (id) => services.getTask(id),
+        gitTools: {
+          git,
+          folderHold,
+          live: chatLive,
+          repoOf: (projectId) => getProject(state.db, projectId).repoPath,
+          net: () => ({
+            env: delivery.networkEnv(),
+            timeoutMs: delivery.limits.networkTimeoutMs,
+          }),
+        },
       }),
     }),
   });

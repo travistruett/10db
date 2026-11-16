@@ -1,0 +1,248 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
+import {
+  ConversationOwnerKind,
+  ConversationProfile,
+  ConversationState,
+  mintId,
+  PassState,
+  type ChatId,
+  type ProjectDto,
+  type SessionId,
+} from '@10db/contracts';
+import {
+  createTestStore,
+  insertChat,
+  insertConversation,
+  insertPass,
+  insertTask,
+  schema,
+  seedProject,
+  type Store,
+} from '@10db/db';
+import { eq } from 'drizzle-orm';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  createTempRepoWithOrigin,
+  isolatedGitEnv,
+  NETWORK_ENV,
+  type TempDir,
+} from '../../test/fixtures';
+import { createEventBus, createStateStore } from '../events';
+import { createFolderHold, type FolderHold } from '../folder-hold';
+import { createGit } from '../git';
+import { createChatLiveSessions } from './live-sessions';
+import { chatGitTools } from './git-tools';
+
+// Sessions spec §7.3: the git tools run only while the turn holds Your folder, never on 10db's branches or
+// while a closed pass waits, and the daemon's git does the work in a real repository.
+
+let store: Store;
+let closeStore: () => void;
+let project: ProjectDto;
+let hold: FolderHold;
+let pair: ReturnType<typeof createTempRepoWithOrigin>;
+let repo: TempDir;
+
+beforeEach(() => {
+  ({ store, close: closeStore } = createTestStore());
+  const bus = createEventBus();
+  hold = createFolderHold({ state: createStateStore(store, bus), bus });
+  project = seedProject(store);
+  pair = createTempRepoWithOrigin();
+  repo = pair.repo;
+});
+afterEach(() => {
+  closeStore();
+  pair.cleanup();
+});
+
+function newChat(title: string): { id: ChatId; conversationId: ReturnType<typeof conv> } {
+  const id = mintId('Chat');
+  const c = conv(id);
+  store.write((ctx) => {
+    insertChat(ctx, {
+      id,
+      projectId: project.id,
+      conversationId: c,
+      title,
+      tabPosition: 0,
+    });
+  });
+  return { id, conversationId: c };
+}
+function conv(chatId: ChatId) {
+  return store.write(
+    (ctx) =>
+      insertConversation(ctx, {
+        projectId: project.id,
+        owner: { kind: ConversationOwnerKind.Chat, id: chatId },
+        profile: ConversationProfile.Explore,
+        state: ConversationState.IdleCold,
+      }).id,
+  ).value;
+}
+
+function closedPass(): void {
+  store.write((ctx) => {
+    const task = insertTask(ctx, project.id, {
+      title: 'Page',
+      acceptanceCriteria: ['x'],
+      areas: ['api'],
+    });
+    const opened = insertPass(ctx, {
+      id: mintId('Pass'),
+      projectId: project.id,
+      name: 'Settings pass',
+      pageCap: 4,
+      returnBranch: 'main',
+      startSha: 'a'.repeat(40),
+      branch: '10db/pass-abc123',
+      baseBranch: 'main',
+      repo: null,
+      taskIds: [task.id],
+      dirt: [],
+    });
+    ctx.tx
+      .update(schema.passes)
+      .set({ state: PassState.Closed })
+      .where(eq(schema.passes.id, opened.pass.id))
+      .run();
+  });
+}
+
+const rg = (...args: string[]) =>
+  execFileSync('git', ['-C', repo.path, ...args], { env: isolatedGitEnv(), stdio: 'pipe' })
+    .toString()
+    .trim();
+
+/** A chat's tools in a session of its own, open as the engine opens one. */
+function tools(chat: ReturnType<typeof newChat>, open = true) {
+  const live = createChatLiveSessions();
+  const sessionId: SessionId = mintId('Session');
+  if (open)
+    live.open(chat.conversationId, {
+      sessionId,
+      observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+      signal: new AbortController().signal,
+    });
+  return chatGitTools(
+    {
+      git: createGit(),
+      folderHold: hold,
+      live,
+      repoOf: () => repo.path,
+      net: () => ({ env: NETWORK_ENV, timeoutMs: 20_000 }),
+    },
+    { sessionId, conversationId: chat.conversationId, chatId: chat.id, projectId: project.id },
+  );
+}
+
+function write(rel: string, text: string): void {
+  const file = join(repo.path, rel);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, text);
+}
+
+type Tools = ReturnType<typeof tools>;
+const CALLS: readonly [string, (t: Tools) => Promise<unknown>][] = [
+  ['make_branch', (t) => t.make_branch({ name: 'topic' })],
+  ['switch_branch', (t) => t.switch_branch({ name: 'main' })],
+  ['pull', (t) => t.pull({})],
+  ['commit_changes', (t) => t.commit_changes({ message: 'x' })],
+];
+
+describe("a chat's git tools", () => {
+  it.each(CALLS)(
+    '%s refuses while the turn does not hold Your folder, naming who does',
+    async (_name, call) => {
+      const me = newChat('Me');
+      const reservation = hold.reserveGit(project.id, 'cutting a branch');
+      expect(reservation.reserved).toBe(true);
+      expect(hold.takeTurn(project.id, me.id).taken).toBe(false);
+      await expect(call(tools(me))).rejects.toThrow(/10db cutting a branch/);
+    },
+  );
+
+  it.each(CALLS)(
+    '%s refuses while a closed pass waits for its pull request',
+    async (_name, call) => {
+      closedPass();
+      const me = newChat('Me');
+      expect(hold.takeTurn(project.id, me.id).taken).toBe(true);
+      await expect(call(tools(me))).rejects.toThrow(/until its pull request merges/);
+    },
+  );
+
+  it.each(CALLS)('%s refuses from a session that has ended', async (_name, call) => {
+    const me = newChat('Me');
+    hold.takeTurn(project.id, me.id);
+    await expect(call(tools(me, false))).rejects.toThrow(/session has ended/);
+  });
+
+  it.each(CALLS)('%s refuses while Your folder is on a 10db branch', async (_name, call) => {
+    rg('switch', '-q', '-c', '10db/batch-abc123');
+    const me = newChat('Me');
+    hold.takeTurn(project.id, me.id);
+    await expect(call(tools(me))).rejects.toThrow(/10db's own/);
+  });
+
+  it.each([
+    ['make_branch', (t: Tools, name: string) => t.make_branch({ name })],
+    ['switch_branch', (t: Tools, name: string) => t.switch_branch({ name })],
+  ])('%s refuses 10db’s branches and names that read as options', async (_name, call) => {
+    const me = newChat('Me');
+    hold.takeTurn(project.id, me.id);
+    const t = tools(me);
+    for (const name of ['10db/x', '10DB/x', '-c', '+x'])
+      await expect(call(t, name)).rejects.toThrow();
+    expect(rg('branch', '--show-current')).toBe('main');
+  });
+
+  it('branches, then commits only the named files, with a path as the agent wrote it', async () => {
+    const me = newChat('Me');
+    hold.takeTurn(project.id, me.id);
+    const t = tools(me);
+    write('src/a.ts', 'a\n');
+    write('src/b.ts', 'b\n');
+    await t.make_branch({ name: 'topic' });
+    const result = await t.commit_changes({
+      message: 'Add a',
+      paths: [join(repo.path, 'src/a.ts')],
+    });
+    expect(result).toMatchObject({ done: true });
+    expect(rg('branch', '--show-current')).toBe('topic');
+    expect(rg('show', '--name-only', '--format=', 'HEAD')).toBe('src/a.ts');
+    expect(rg('ls-files', '--others', '--exclude-standard')).toBe('src/b.ts');
+    await expect(t.commit_changes({ message: 'x', paths: ['../outside.txt'] })).rejects.toThrow(
+      'inside Your folder',
+    );
+  });
+
+  it('commits everything while the folder is shared, and warns naming the other chat', async () => {
+    const me = newChat('Me');
+    const other = newChat('Retry login');
+    hold.takeTurn(project.id, other.id);
+    expect(hold.takeTurn(project.id, me.id)).toMatchObject({ taken: true });
+    write('a.txt', 'a\n');
+    const result = await tools(me).commit_changes({ message: 'All of it' });
+    expect(result).toHaveProperty('warning');
+    expect(JSON.stringify(result)).toContain('Retry login');
+    // Named paths are a chat's own, so no warning.
+    write('b.txt', 'b\n');
+    expect(
+      await tools(me).commit_changes({ message: 'Mine', paths: ['b.txt'] }),
+    ).not.toHaveProperty('warning');
+  });
+
+  it('pulls, and says when a branch is behind or has no upstream', async () => {
+    const me = newChat('Me');
+    hold.takeTurn(project.id, me.id);
+    rg('branch', '--set-upstream-to=origin/main', 'main');
+    const t = tools(me);
+    expect(await t.pull({})).toMatchObject({ done: true, kind: 'up_to_date' });
+    rg('switch', '-q', '-c', 'loose');
+    await expect(t.pull({})).rejects.toThrow('no upstream');
+  });
+});

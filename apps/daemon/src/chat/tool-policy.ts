@@ -36,4 +36,10 @@ export const CHAT_TOOL_POLICY: Readonly<Record<ChatToolName, ChatToolPolicy>> = 
   [BuilderToolName.WithdrawKnowledge]: A,
   [BuilderToolName.ListProposals]: R,
   [ChatToolName.SetTitle]: R,
+  // Branching, switching, pulling and committing change what the builder has in Your folder only while the turn
+  // holds it, and run at once like the edits they follow.
+  [ChatToolName.MakeBranch]: R,
+  [ChatToolName.SwitchBranch]: R,
+  [ChatToolName.Pull]: R,
+  [ChatToolName.CommitChanges]: R,
 };

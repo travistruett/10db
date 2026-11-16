@@ -1,23 +1,26 @@
-import { BuilderToolName, ChatToolName } from '@10db/contracts';
+import { BuilderToolName, ChatGitToolName, ChatToolName } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { CHAT_MCP_TOOLS, chatProfile } from './hooks';
 import { CHAT_TOOL_POLICY } from './tool-policy';
 
-// Sessions spec §6.6: every builder tool is on a chat's server, plus set_title; four ask the builder.
+// Sessions spec §6.6: every builder tool is on a chat's server, plus set_title and the git tools; four ask the builder.
 
 const ASKS = ['remove_task', 'retire_knowledge', 'withdraw_knowledge', 'supersede_knowledge'];
 
 describe('the chat tool policy', () => {
-  it.each([...Object.values(BuilderToolName), ChatToolName.SetTitle].map((name) => ({ name })))(
-    '$name has its policy',
-    ({ name }) => {
-      expect(CHAT_TOOL_POLICY[name]).toBe(ASKS.includes(name) ? 'asks' : 'runs');
-    },
-  );
+  it.each(
+    [
+      ...Object.values(BuilderToolName),
+      ChatToolName.SetTitle,
+      ...Object.values(ChatGitToolName),
+    ].map((name) => ({ name })),
+  )('$name has its policy', ({ name }) => {
+    expect(CHAT_TOOL_POLICY[name]).toBe(ASKS.includes(name) ? 'asks' : 'runs');
+  });
 
-  it('names every builder tool and set_title, and nothing else', () => {
+  it('names every builder tool, set_title and the git tools, and nothing else', () => {
     expect(new Set(Object.values(ChatToolName))).toEqual(
-      new Set([...Object.values(BuilderToolName), 'set_title']),
+      new Set([...Object.values(BuilderToolName), 'set_title', ...Object.values(ChatGitToolName)]),
     );
     expect(new Set(Object.keys(CHAT_TOOL_POLICY))).toEqual(new Set(Object.values(ChatToolName)));
   });
