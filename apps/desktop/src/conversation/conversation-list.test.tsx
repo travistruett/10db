@@ -58,13 +58,21 @@ describe('ConversationList', () => {
   });
 
   describe('windowing', () => {
-    it('mounts only the rows near the viewport of a 2,000-message conversation', () => {
-      count = LONG;
-      render(ui({ entries: conversation(LONG) }));
-      expect(screen.getByText('Message 0')).toBeTruthy();
-      expect(mounted()).toBeLessThan(NEAR_THE_VIEWPORT);
-      expect(screen.queryByText('Message 1999')).toBeNull();
-    });
+    it.each([
+      { name: 'drawn with its messages', loadsLater: false },
+      { name: 'whose messages load after it is drawn', loadsLater: true },
+    ])(
+      'opens a 2,000-message conversation $name at its newest message, mounting only the rows near it',
+      async ({ loadsLater }) => {
+        count = LONG;
+        const { rerender } = render(ui({ entries: loadsLater ? [] : conversation(LONG) }));
+        if (loadsLater) rerender(ui({ entries: conversation(LONG) }));
+        expect(await screen.findByText('Message 1999')).toBeTruthy();
+        expect(viewport().scrollTop).toBe(LONG * ROW - 600);
+        expect(mounted()).toBeLessThan(NEAR_THE_VIEWPORT);
+        expect(screen.queryByText('Message 0')).toBeNull();
+      },
+    );
 
     it('mounts the rows the builder scrolls to and lets go of the ones left behind', async () => {
       count = LONG;
@@ -140,7 +148,9 @@ describe('ConversationList', () => {
       );
       const onAllow = vi.fn();
       render(ui({ entries: [held, ...conversation(LONG)], onAllow }));
-      fireEvent.click(screen.getByRole('button', { name: 'Allow This' }));
+      // It opens at the newest message; the held call is the first row.
+      scrollViewportTo(0);
+      fireEvent.click(await screen.findByRole('button', { name: 'Allow This' }));
       scrollViewportTo(1000 * ROW);
       await screen.findByText('Message 1000');
       expect(screen.queryByText('You allowed this')).toBeNull();
@@ -154,7 +164,8 @@ describe('ConversationList', () => {
       count = LONG + 1;
       const row = toolEntry(commandCall({ id: 'cmd', outputTail: 'PASS all' }));
       render(ui({ entries: [row, ...conversation(LONG)] }));
-      fireEvent.click(screen.getByRole('button', { name: 'Worked · 1 Step' }));
+      scrollViewportTo(0);
+      fireEvent.click(await screen.findByRole('button', { name: 'Worked · 1 Step' }));
       fireEvent.click(screen.getByRole('button', { name: /^Ran pnpm/ }));
       scrollViewportTo(1000 * ROW);
       await screen.findByText('Message 1000');

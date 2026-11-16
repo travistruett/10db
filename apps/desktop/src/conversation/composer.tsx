@@ -23,7 +23,7 @@ import {
 import { ComposerInput, type ComposerMentions } from './composer-mentions';
 import { DictationButton } from './dictation-button';
 import type { ComposerPhase } from './composer-phase';
-import { EMPTY_DRAFT, hasContent, type Draft } from './drafts';
+import { afterSend, hasContent, type Draft } from './drafts';
 import { isComposing, isSendKey, OWNS_ESCAPE_ATTRIBUTE } from './escape';
 import { mentionText } from './mention-text';
 import { pickerAccept, withPictures } from './pictures';
@@ -49,6 +49,19 @@ export interface ComposerHeld {
   readonly onFileAsTasks?: () => Promise<void> | void;
 }
 
+/**
+ * Files that go to the conversation as they are added (Plan's documents), instead of waiting in the
+ * draft as pictures. The screen uploads them and keeps the reasons it refused any.
+ */
+export interface ComposerUploads {
+  /** What the file picker offers; a drop or paste skips it, so the screen checks each file again. */
+  readonly accept: string;
+  readonly onFiles: (files: File[]) => void;
+  /** Why files were refused, shown above the input until dismissed. */
+  readonly refused: readonly string[];
+  readonly onDismiss: () => void;
+}
+
 export interface ComposerProps {
   readonly draft: Draft;
   readonly onDraft: (draft: Draft) => void;
@@ -62,14 +75,23 @@ export interface ComposerProps {
   readonly disabledReason: string | null;
   /** Why the last send failed, from the screen that sent it: shown beside Send. */
   readonly error?: string | null;
+  /**
+   * The screen shows a failed send or Stop itself (Plan's alert): the composer hands the daemon's words
+   * over instead of showing them beside Send, and keeps the draft.
+   */
+  readonly onFailure?: (message: string) => void;
   /** Nothing can be typed either: the account has no chat to offer. */
   readonly locked?: boolean;
   /** Sends the draft; rejects with the daemon's words, and the draft stays. */
   readonly onSend: (draft: Draft) => Promise<void> | void;
   /** A plain Stop: the turn ends and nothing is sent; a rejection's words show beside Send. */
   readonly onStop: () => Promise<void> | void;
-  /** Stops the turn and sends the draft as the next one. */
-  readonly onRedo: (draft: Draft) => Promise<void> | void;
+  /** Stops the turn and sends the draft as the next one; needed only where the phase offers Stop and Redo. */
+  readonly onRedo?: (draft: Draft) => Promise<void> | void;
+  /** Files go to the screen as they are added; without it, pictures wait in the draft. */
+  readonly uploads?: ComposerUploads;
+  /** The screen's own lines under the hint (Plan's files and what Propose needs). */
+  readonly notes?: ReactNode;
   readonly inputRef?: RefObject<HTMLTextAreaElement | HTMLInputElement | null>;
   /** The input's accessible name. */
   readonly label?: string;
@@ -157,10 +179,19 @@ export function Composer({
   actions,
   modelControl,
   held,
+  uploads,
+  notes,
+  onFailure,
 }: ComposerProps) {
-  const [busy, setBusy] = useState<'send' | 'stop' | null>(null);
+  // A send and a Stop are on their way on their own: each clears only its own mark. The refs answer a
+  // second press before the screen has drawn the first.
+  const [sending, setSending] = useState(false);
+  const [stopping, setStopping] = useState<'stop' | 'redo' | null>(null);
+  const sendingNow = useRef(false);
+  const stoppingNow = useRef<'stop' | 'redo' | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
-  const [refused, setRefused] = useState<readonly string[]>([]);
+  const [ownRefused, setOwnRefused] = useState<readonly string[]>([]);
+  const refused = uploads?.refused ?? ownRefused;
   const [choosing, setChoosing] = useState<'send' | 'redo' | null>(null);
   const [dragging, setDragging] = useState(false);
   const waitButton = useRef<HTMLButtonElement>(null);
@@ -168,8 +199,13 @@ export function Composer({
   const picker = useRef<HTMLInputElement>(null);
   const ownInput = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
   const field = inputRef ?? ownInput;
-  const canAttach = capabilities.images.length > 0;
+  const canAttach = uploads !== undefined || capabilities.images.length > 0;
   const filled = hasContent(draft);
+  // The draft as it stands now, for a send that finishes after the builder typed more.
+  const current = useRef(draft);
+  useEffect(() => {
+    current.current = draft;
+  });
 
   // The choices belong to a held folder: when it frees, Send sends as it always does.
   const asking = held !== undefined && choosing !== null;
@@ -178,56 +214,89 @@ export function Composer({
     if (asking) waitButton.current?.focus();
   }, [asking]);
 
-  const addPictures = (files: readonly File[]): void => {
+  const addFiles = (files: readonly File[]): void => {
     if (files.length === 0 || locked) return;
+    if (uploads !== undefined) {
+      uploads.onFiles([...files]);
+      return;
+    }
     const added = withPictures(draft.pictures, files, capabilities.images);
-    setRefused(added.refused);
+    setOwnRefused(added.refused);
     onDraft({ ...draft, pictures: added.pictures });
   };
 
   const run = async (
-    which: 'send' | 'stop',
     action: () => Promise<void> | void,
-    clears: boolean,
+    sent: Draft | null,
+    done: () => void,
   ): Promise<void> => {
-    setBusy(which);
     setFailure(null);
     try {
       await action();
-      if (clears) onDraft(EMPTY_DRAFT);
+      // Only what went is cleared: words typed or pictures added on the way stay.
+      if (sent !== null) onDraft(afterSend(current.current, sent));
     } catch (error) {
-      setFailure(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      if (onFailure === undefined) setFailure(message);
+      else onFailure(message);
     } finally {
-      setBusy(null);
+      done();
     }
   };
   const send = (): void => {
-    if (locked || disabledReason !== null || !filled || busy !== null) return;
+    if (locked || disabledReason !== null || !filled) return;
+    // A plain Stop on its way doesn't hold a message back: it goes, or queues, as the agent takes it.
+    // Stop and Redo is already carrying this draft.
+    if (sendingNow.current || stoppingNow.current === 'redo') return;
     if (held !== undefined) {
       setChoosing('send');
       return;
     }
-    void run('send', () => onSend(outgoing(draft)), true);
+    startSend(() => onSend(outgoing(draft)), draft);
+  };
+  const startSend = (action: () => Promise<void> | void, sent: Draft | null): void => {
+    sendingNow.current = true;
+    setSending(true);
+    void run(action, sent, () => {
+      sendingNow.current = false;
+      setSending(false);
+    });
+  };
+  const startRedo = (action: () => Promise<void> | void): void => {
+    stoppingNow.current = 'redo';
+    setStopping('redo');
+    void run(action, draft, () => {
+      stoppingNow.current = null;
+      setStopping(null);
+    });
   };
   const stop = (): void => {
-    if (phase.stop !== 'stop_and_redo') {
-      void run('stop', onStop, false);
-    } else if (held !== undefined) {
+    if (stoppingNow.current !== null) return;
+    const redo = phase.stop === 'stop_and_redo' && onRedo !== undefined && !sendingNow.current;
+    if (redo && held !== undefined) {
       setChoosing('redo');
-    } else {
-      void run('stop', () => onRedo(outgoing(draft)), true);
+      return;
     }
+    if (redo) {
+      startRedo(() => onRedo(outgoing(draft)));
+      return;
+    }
+    stoppingNow.current = 'stop';
+    setStopping('stop');
+    void run(onStop, null, () => {
+      stoppingNow.current = null;
+      setStopping(null);
+    });
   };
   const choose = (choice: FolderWhileHeld): void => {
-    if (held === undefined || choosing === null || busy !== null) return;
+    if (held === undefined || choosing === null) return;
     if (locked || disabledReason !== null) return;
+    if (sendingNow.current || stoppingNow.current !== null) return;
     const how = choosing;
     setChoosing(null);
-    void run(
-      how === 'redo' ? 'stop' : 'send',
-      () => held.onChoose(outgoing(draft), choice, how),
-      true,
-    );
+    const action = (): Promise<void> | void => held.onChoose(outgoing(draft), choice, how);
+    if (how === 'redo') startRedo(action);
+    else startSend(action, draft);
   };
   const cancelChoice = (): void => {
     setChoosing(null);
@@ -240,7 +309,7 @@ export function Composer({
     const files = [...event.clipboardData.files];
     if (files.length === 0 || event.clipboardData.getData('text') !== '') return;
     event.preventDefault();
-    addPictures(files);
+    addFiles(files);
   };
 
   return (
@@ -270,12 +339,13 @@ export function Composer({
         setDragging(false);
         if (!hasFiles(event)) return;
         event.preventDefault();
-        addPictures([...event.dataTransfer.files]);
+        addFiles([...event.dataTransfer.files]);
       }}
     >
       {refused.length === 0 ? null : (
         <Group gap="xs" wrap="nowrap" align="flex-start">
-          <Stack gap={0} style={{ flex: 1 }}>
+          {/* Said as it appears: a drop has no other answer. */}
+          <Stack role="alert" gap={0} style={{ flex: 1 }}>
             {refused.map((reason) => (
               <Text key={reason} size="xs" c="red">
                 {reason}
@@ -286,7 +356,8 @@ export function Composer({
             size="sm"
             aria-label="Dismiss"
             onClick={() => {
-              setRefused([]);
+              if (uploads === undefined) setOwnRefused([]);
+              else uploads.onDismiss();
             }}
           />
         </Group>
@@ -312,7 +383,7 @@ export function Composer({
             }}
           >
             <Text size="sm" c="dimmed">
-              Drop Pictures to Attach
+              {uploads === undefined ? 'Drop Pictures to Attach' : 'Drop Files to Add'}
             </Text>
           </Center>
         ) : null}
@@ -368,10 +439,10 @@ export function Composer({
             type="file"
             multiple
             hidden
-            accept={pickerAccept(capabilities.images)}
-            aria-label="Choose pictures"
+            accept={uploads?.accept ?? pickerAccept(capabilities.images)}
+            aria-label={uploads === undefined ? 'Choose pictures' : 'Choose files'}
             onChange={(event) => {
-              addPictures([...(event.currentTarget.files ?? [])]);
+              addFiles([...(event.currentTarget.files ?? [])]);
               event.currentTarget.value = '';
             }}
           />
@@ -419,8 +490,7 @@ export function Composer({
                   variant="subtle"
                   onClick={() => {
                     setChoosing(null);
-                    if (held.onFileAsTasks !== undefined)
-                      void run('send', held.onFileAsTasks, false);
+                    if (held.onFileAsTasks !== undefined) startSend(held.onFileAsTasks, null);
                   }}
                 >
                   File as Tasks
@@ -466,7 +536,7 @@ export function Composer({
               <ActionIcon
                 variant="default"
                 size="lg"
-                loading={busy === 'stop'}
+                loading={stopping !== null}
                 disabled={locked}
                 aria-label={phase.stop === 'stop_and_redo' ? 'Stop and Redo' : 'Stop'}
                 onClick={stop}
@@ -479,7 +549,7 @@ export function Composer({
               <ActionIcon
                 variant={phase.send === 'filled' ? 'filled' : 'default'}
                 size="lg"
-                loading={busy === 'send'}
+                loading={sending}
                 disabled={locked || disabledReason !== null || !filled}
                 aria-label="Send"
                 onClick={send}
@@ -495,6 +565,7 @@ export function Composer({
           {phase.hint}
         </Text>
       )}
+      {notes}
     </Stack>
   );
 }

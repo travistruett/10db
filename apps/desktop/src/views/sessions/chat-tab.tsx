@@ -9,8 +9,10 @@ import {
 import { Box, Group, Text } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { ConversationList, toolDoing, WorkingLine } from '../../conversation';
 import { Composer } from '../../conversation/composer';
+import { ConversationLayout } from '../../conversation/conversation-layout';
 import { composerPhase } from '../../conversation/composer-phase';
 import { ContextRing } from '../../conversation/context-ring';
 import { EMPTY_DRAFT, hasContent, type Draft } from '../../conversation/drafts';
@@ -51,9 +53,6 @@ const NARROW_QUERY = '(max-width: 639px)';
 /** The message File as Tasks sends, as the builder's own turn (sessions design spec §7.2). */
 export const FILE_AS_TASKS_MESSAGE = 'File the work we agreed on as tasks on the Board.';
 
-/** After this long without the transcript, three static dim lines say it is on its way. */
-const LOADING_LINES_AFTER_MS = 300;
-
 /** A turn is under way in these states. */
 const WORKING_STATES: ReadonlySet<string> = new Set([
   'starting',
@@ -61,35 +60,6 @@ const WORKING_STATES: ReadonlySet<string> = new Set([
   'waiting_card',
   'stopping',
 ]);
-
-/** Three static dim lines, with no shimmer: what the column shows while a long transcript loads. */
-function LoadingLines({ loading }: { readonly loading: boolean }) {
-  const [late, setLate] = useState(false);
-  useEffect(() => {
-    if (!loading) return;
-    const timer = setTimeout(() => {
-      setLate(true);
-    }, LOADING_LINES_AFTER_MS);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [loading]);
-  if (!loading || !late) return null;
-  return (
-    <Box px="md" pt="md" aria-hidden="true" data-loading-lines>
-      {[0.9, 0.7, 0.8].map((width) => (
-        <Box
-          key={width}
-          h={12}
-          mb={10}
-          w={`${String(width * 100)}%`}
-          bg="var(--mantine-color-default-hover)"
-          style={{ borderRadius: 'var(--mantine-radius-sm)' }}
-        />
-      ))}
-    </Box>
-  );
-}
 
 export interface ChatTabProps {
   readonly chat: ChatDto;
@@ -104,8 +74,8 @@ export interface ChatTabProps {
 }
 
 /**
- * A chat's tab (sessions UI spec §4, §12): the session bar, the conversation in a 720 px column, the
- * cards it waits on pinned above the composer, and the composer. Each state M5a reaches has its words.
+ * A chat's tab (sessions UI spec §4, §12): the session bar, then the kit's conversation column: the
+ * conversation, the cards it waits on pinned above the composer, and the composer. Each state M5a reaches has its words.
  */
 export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRenamed }: ChatTabProps) {
   const conversationQuery = useConversation(chat.conversationId);
@@ -320,8 +290,9 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
   };
 
   return (
-    <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ flex: 'none' }}>
+    <ConversationLayout
+      label="Conversation"
+      header={
         <SessionBar
           chat={chat}
           conversation={conversation}
@@ -338,43 +309,29 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
             });
           }}
         />
-      </div>
-      <Box
-        maw={720}
-        w="100%"
-        mx="auto"
-        style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
-      >
-        <LoadingLines loading={loading} />
-        <ConversationList
-          entries={shown}
-          highlight={null}
-          loadFull={loadFull}
-          onAllow={allow}
-          agentLabel={caps.label}
-          busy={streaming !== null}
-        />
-        <WorkingLine
-          conversation={conversation}
-          streaming={streaming}
-          {...(tool === undefined ? {} : { tool })}
-        />
-        <PermissionRequest items={open} />
-        {waiting ? (
-          <FolderWait
-            holders={keeping}
-            onSendNow={() => {
-              stopWaiting.mutate(chat.id);
-            }}
-            onStop={stopNow}
+      }
+      footer={
+        <>
+          <WorkingLine
+            conversation={conversation}
+            streaming={streaming}
+            {...(tool === undefined ? {} : { tool })}
           />
-        ) : null}
-        {removed ? (
-          <Text size="sm" c="dimmed" px="md" py="md">
-            This project was removed from 10db.
-          </Text>
-        ) : (
-          <>
+          <PermissionRequest items={open} />
+          {waiting ? (
+            <FolderWait
+              holders={keeping}
+              onSendNow={() => {
+                stopWaiting.mutate(chat.id);
+              }}
+              onStop={stopNow}
+            />
+          ) : null}
+          {removed ? (
+            <Text size="sm" c="dimmed" px="md" py="md">
+              This project was removed from 10db.
+            </Text>
+          ) : (
             <Composer
               draft={draft}
               onDraft={(next) => {
@@ -448,9 +405,23 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
                 await redo.mutateAsync({ conversationId: chat.conversationId, text: d.text });
               }}
             />
-          </>
-        )}
-      </Box>
-    </Box>
+          )}
+        </>
+      }
+    >
+      {loading ? (
+        <Box px="md" pt="md">
+          <PageLoading shape={PageLoadingShape.Lines} label="Loading the conversation" />
+        </Box>
+      ) : null}
+      <ConversationList
+        entries={shown}
+        highlight={null}
+        loadFull={loadFull}
+        onAllow={allow}
+        agentLabel={caps.label}
+        busy={streaming !== null}
+      />
+    </ConversationLayout>
   );
 }

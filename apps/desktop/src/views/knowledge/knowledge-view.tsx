@@ -4,21 +4,10 @@ import {
   type PrincipleId,
   type ProjectViewDto,
 } from '@10db/contracts';
-import {
-  Badge,
-  Box,
-  Button,
-  Group,
-  Paper,
-  Stack,
-  Tabs,
-  Text,
-  Title,
-  VisuallyHidden,
-} from '@mantine/core';
+import { Badge, Button, Group, Paper, Stack, Tabs, Text, VisuallyHidden } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   useProposals,
   useProvenance,
@@ -26,6 +15,7 @@ import {
   type RecordRef,
   type TracedRecord,
 } from '../../daemon/knowledge-queries';
+import { PageHeader } from '../../shell/page-header';
 import { useSelectedProject } from '../../shell/selected-project';
 import { DecisionList } from './decision-list';
 import { NO_FILTERS, type FilterState, type ListControls } from './knowledge-filters';
@@ -132,6 +122,17 @@ function ShelfNote({
   );
 }
 
+/** The view's header; the project's create button rides in `actions` once a project is chosen. */
+function KnowledgeHeader({ actions }: { readonly actions?: ReactNode }) {
+  return (
+    <PageHeader
+      title="Knowledge"
+      description="What you, your agents and 10db have recorded for this project. The settings for 10db's own judgement calls are in Settings."
+      {...(actions === undefined ? {} : { actions })}
+    />
+  );
+}
+
 function ProjectKnowledge({
   project,
   linkedPrinciple,
@@ -194,6 +195,15 @@ function ProjectKnowledge({
   };
   return (
     <>
+      <KnowledgeHeader
+        actions={
+          tab === KnowledgeTab.Principles ? (
+            <NewPrincipleButton project={project} />
+          ) : (
+            <NewDecisionButton project={project} />
+          )
+        }
+      />
       <Tabs
         value={tab}
         onChange={(next) => {
@@ -201,20 +211,10 @@ function ProjectKnowledge({
         }}
         keepMounted={false}
       >
-        {/* The create button sits on the tab row, so nothing stands between the tabs and the list. */}
-        <Group justify="space-between" align="flex-end" wrap="nowrap" gap="md">
-          <Tabs.List style={{ flex: 1 }}>
-            <PrinciplesTab pending={pending} />
-            <Tabs.Tab value={KnowledgeTab.Decisions}>Decisions</Tabs.Tab>
-          </Tabs.List>
-          <Box pb={6}>
-            {tab === KnowledgeTab.Principles ? (
-              <NewPrincipleButton project={project} />
-            ) : (
-              <NewDecisionButton project={project} />
-            )}
-          </Box>
-        </Group>
+        <Tabs.List>
+          <PrinciplesTab pending={pending} />
+          <Tabs.Tab value={KnowledgeTab.Decisions}>Decisions</Tabs.Tab>
+        </Tabs.List>
         <Tabs.Panel value={KnowledgeTab.Principles} pt="md">
           <Stack gap="sm">
             <ShelfNote
@@ -283,17 +283,12 @@ export function KnowledgeView() {
   const { principle } = useSearch({ from: '/knowledge' });
   return (
     <Stack>
-      <Stack gap={2}>
-        <Title order={2}>Knowledge</Title>
-        <Text size="sm" c="dimmed">
-          What you, your agents and 10db have recorded for this project. The settings for
-          10db&apos;s own judgement calls are in Settings.
-        </Text>
-      </Stack>
       {project ? (
         // Keyed by project so filters, tab and an open provenance never carry into another one.
         <ProjectKnowledge key={project.id} project={project} linkedPrinciple={principle ?? null} />
-      ) : null}
+      ) : (
+        <KnowledgeHeader />
+      )}
     </Stack>
   );
 }

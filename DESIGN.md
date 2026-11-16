@@ -159,9 +159,25 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   beside the label in a control that has none; a row with a line of its own says it in words there ("4
   goals"). See `docs/architecture/decisions/2026-11-11-a-label-never-carries-its-count.md`. The Sessions badge
   counts the tabs that need the builder: Needs you and Stopped by an error, and Ready once M6 brings it.
-- **Picking several from a list that can grow** is one searchable `MultiSelect`: each option shows what tells
+  A count is a small pill no taller than its label's text, in the sidebar, on tabs and in buttons. It is muted
+  (`tone` neutral, the default) and blue (`tone="attention"`) only when it means something needs the builder:
+  Inbox's Open tab, the Sessions and Workbench needs-you counts.
+- **Page header:** Inbox, Factory, Knowledge, Board and the Workbench start page share `PageHeader`
+  (`apps/desktop/src/shell/page-header.tsx`): row 1 is the title (with an optional aside beside it) and the
+  view's actions at the right end; row 2 is an optional one-line dimmed byline; row 3 is an optional toolbar,
+  tabs left and filters right. A row that is absent takes no space. Workspaces, where the content is the
+  work, keep compact headers of their own: Sessions, Plan and an open Workbench pass.
+- **Loading:** a page draws its header first, since the title and byline are known before the data. After 300 ms
+  of waiting, quiet placeholder rows in the shape of what is coming take the content's place
+  (`PageLoading`, `apps/desktop/src/shell/page-loading.tsx`: a list, cards or transcript lines), always static,
+  with no shimmer. A page never shows a lone spinner as its whole content; a spinner
+  stays inside a button or a row.
+- **Picking several from a list that is bounded** (a project's pages, which the builder reads whole) is tickable
+  rows, each a checkbox named by the item, with its detail on the same line and why it can't be picked under it
+  (`views/workbench/page-list.tsx`).
+- **Picking several from a list that grows without bound** is one searchable `MultiSelect`: each option shows what tells
   it apart (a route, when it last changed), an option that can't be picked stays in the list, disabled, with
-  the reason under it, and the pills show what is picked. Never a column of checkboxes under a separate
+  the reason under it, and the pills show what is picked. A list that grows never gets a column of checkboxes under a separate
   filter box.
 - **Checks** mark the chosen row on the right, in `Select`, `MultiSelect`, `Combobox` and `Menu` alike.
 - **Forms:** textareas autosize and start small (one or two rows). The actions sit `xl` below the last

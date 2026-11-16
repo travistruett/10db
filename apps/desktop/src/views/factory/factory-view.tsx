@@ -1,11 +1,13 @@
 import { passHoldsTasks, type GoalId, type ProjectId, type ProjectViewDto } from '@10db/contracts';
-import { Alert, Box, Button, Group, Loader, Stack, Text, Title } from '@mantine/core';
+import { Alert, Box, Button, Group, Stack, Text, Title } from '@mantine/core';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { useId } from 'react';
 import { useGoals } from '../../daemon/goal-queries';
 import { useLivePass } from '../../daemon/pass-queries';
 import { useInbox } from '../../daemon/queries';
 import { useNow } from '../../shell/relative';
+import { PageHeader } from '../../shell/page-header';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { ProjectFilter } from '../../shell/project-filter';
 import { ProjectTile } from '../../shell/project-tile';
 import { useSelectedProject } from '../../shell/selected-project';
@@ -40,20 +42,14 @@ export function FactoryView() {
 
   return (
     <Stack>
-      <Group justify="space-between" align="flex-start">
-        <Stack gap={2}>
-          <Group gap="md">
-            <Title order={2}>Factory</Title>
-            <BenchmarkSyncNote />
-          </Group>
-          <UpdateDrainNote />
-          <AdmissionNote />
-          <Text size="sm" c="dimmed">
-            Goals 10db is pursuing, by project
-          </Text>
-        </Stack>
-        <ProjectFilter projects={all} value={filter ?? null} onChange={setFilter} />
-      </Group>
+      <PageHeader
+        title="Factory"
+        titleAside={<BenchmarkSyncNote />}
+        description="Goals 10db is pursuing, by project"
+        actions={<ProjectFilter projects={all} value={filter ?? null} onChange={setFilter} />}
+      />
+      <UpdateDrainNote />
+      <AdmissionNote />
       {projects.isError ? (
         <Alert color="red" title="Couldn't load the projects">
           {projects.error.message}
@@ -140,7 +136,9 @@ function ProjectGoals({
             {goals.error.message}
           </Alert>
         ) : null}
-        {goals.isLoading ? <Loader size="sm" aria-label="Loading goals" /> : null}
+        {goals.isLoading ? (
+          <PageLoading shape={PageLoadingShape.List} rows={2} label="Loading goals" />
+        ) : null}
         {goals.isSuccess && goals.data.goals.length === 0 ? (
           <Text size="sm" c="dimmed">
             Goals are outcomes 10db pursues across many tasks. Plan Work to start one, or ask Claude

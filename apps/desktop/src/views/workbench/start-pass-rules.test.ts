@@ -14,6 +14,7 @@ import {
   openRequest,
   pageCap,
   passName,
+  tickedWords,
   type PickTicks,
 } from './start-pass-rules';
 
@@ -196,20 +197,19 @@ describe('pageCap', () => {
 
 describe('openRequest', () => {
   const taskId: TaskId = mintId('Task');
-  it('opens the ticked pages and tasks, named by their pages, with the message only when written', () => {
+  it('opens the ticked pages and tasks, named by their pages, with no first message', () => {
     const ticks: PickTicks = {
       pages: ['settings'],
       tasks: [{ taskId, title: 'Tighten it', pages: ['people'] }],
     };
-    expect(openRequest(ticks, '  these feel cramped ', null, [])).toEqual({
+    expect(openRequest(ticks, null, [])).toEqual({
       name: 'Settings and People',
       pages: ['settings'],
       taskIds: [taskId],
       pageCap: 4,
-      firstMessage: 'these feel cramped',
     });
     const goalId = mintId('Goal');
-    expect(openRequest({ pages: ['settings'], tasks: [] }, ' ', goalId, [])).toEqual({
+    expect(openRequest({ pages: ['settings'], tasks: [] }, goalId, [])).toEqual({
       name: 'Settings',
       pages: ['settings'],
       taskIds: [],
@@ -229,7 +229,7 @@ describe('openRequest names the pass by labels', () => {
       pages: ['shape'],
       tasks: [{ taskId: mintId('Task'), title: 'Tighten it', pages: ['people'] }],
     };
-    expect(openRequest(ticks, '', null, labelled).name).toBe('Plan and People');
+    expect(openRequest(ticks, null, labelled).name).toBe('Plan and People');
   });
 });
 
@@ -253,5 +253,27 @@ describe('goalReadyForPass', () => {
     { name: 'no UI task', tasks: [ui('done', { areas: ['src'] })], ready: false },
   ])('$name: $ready', ({ tasks, ready }) => {
     expect(goalReadyForPass(tasks, areas)).toBe(ready);
+  });
+});
+
+describe('tickedWords', () => {
+  const task = (title: string) => ({ taskId: mintId('Task'), title, pages: ['people'] });
+  it.each<{ name: string; ticks: PickTicks; says: string }>([
+    { name: 'nothing', ticks: { pages: [], tasks: [] }, says: '' },
+    { name: 'one page', ticks: { pages: ['settings'], tasks: [] }, says: '1 page' },
+    { name: 'two pages', ticks: { pages: ['settings', 'people'], tasks: [] }, says: '2 pages' },
+    { name: 'one task', ticks: { pages: [], tasks: [task('a')] }, says: '1 task' },
+    {
+      name: 'pages and tasks, pages first',
+      ticks: { pages: ['settings', 'people'], tasks: [task('a')] },
+      says: '2 pages \u00b7 1 task',
+    },
+    {
+      name: 'several tasks',
+      ticks: { pages: [], tasks: [task('a'), task('b')] },
+      says: '2 tasks',
+    },
+  ])('says $name', ({ ticks, says }) => {
+    expect(tickedWords(ticks)).toBe(says);
   });
 });

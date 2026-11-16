@@ -14,7 +14,7 @@ import {
   type WorkstreamDto,
   type WorkstreamId,
 } from '@10db/contracts';
-import { Alert, Button, Group, Loader, Menu, Select, Stack, Text, Title } from '@mantine/core';
+import { Alert, Button, Group, Menu, Select, Stack, Text } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconColumns, IconPlayerPlay, IconPlus } from '@tabler/icons-react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
@@ -31,6 +31,8 @@ import {
   useTasks,
   useWorkstreams,
 } from '../../daemon/queries';
+import { PageHeader } from '../../shell/page-header';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { FormModal } from '../../shell/form-modal';
 import { useSelectedProject } from '../../shell/selected-project';
 import { SplitButton } from '../../shell/split-button';
@@ -545,39 +547,10 @@ export function BoardView() {
 
   return (
     <Stack flex="1 1 0px">
-      <Group justify="space-between" align="center">
-        <Group gap="md" align="center">
-          <Title order={2}>Board</Title>
-          {goalList.length > 0 ? (
-            <Select
-              aria-label="Goal"
-              w={220}
-              allowDeselect={false}
-              data={[
-                { value: ALL_GOALS, label: 'All goals' },
-                ...goalList.map((g) => ({ value: g.goal.id, label: g.goal.title })),
-              ]}
-              value={filterGoal?.goal.id ?? ALL_GOALS}
-              onChange={(id) => {
-                setFilterGoalId(goalList.find((g) => g.goal.id === id)?.goal.id ?? null);
-              }}
-            />
-          ) : null}
-          {filterGoal ? (
-            <GoalLine
-              summary={filterGoal}
-              ready={readyCountOf(filterGoal.goal.id, taskList)}
-              onStartReady={() => {
-                setSheetGoalId(filterGoal.goal.id);
-              }}
-              onOpenFactory={() => {
-                void navigate({ to: '/factory', search: { goal: filterGoal.goal.id } });
-              }}
-            />
-          ) : null}
-        </Group>
-        <Group>
-          {project ? (
+      <PageHeader
+        title="Board"
+        actions={
+          project ? (
             <SplitButton
               leftSection={<IconPlus size={16} stroke={1.5} />}
               onClick={taskModal.open}
@@ -613,9 +586,40 @@ export function BoardView() {
             >
               New Task
             </SplitButton>
-          ) : null}
-        </Group>
-      </Group>
+          ) : undefined
+        }
+        toolbar={
+          goalList.length === 0 ? undefined : (
+            <Group gap="md" align="center">
+              <Select
+                aria-label="Goal"
+                w={220}
+                allowDeselect={false}
+                data={[
+                  { value: ALL_GOALS, label: 'All goals' },
+                  ...goalList.map((g) => ({ value: g.goal.id, label: g.goal.title })),
+                ]}
+                value={filterGoal?.goal.id ?? ALL_GOALS}
+                onChange={(id) => {
+                  setFilterGoalId(goalList.find((g) => g.goal.id === id)?.goal.id ?? null);
+                }}
+              />
+              {filterGoal ? (
+                <GoalLine
+                  summary={filterGoal}
+                  ready={readyCountOf(filterGoal.goal.id, taskList)}
+                  onStartReady={() => {
+                    setSheetGoalId(filterGoal.goal.id);
+                  }}
+                  onOpenFactory={() => {
+                    void navigate({ to: '/factory', search: { goal: filterGoal.goal.id } });
+                  }}
+                />
+              ) : null}
+            </Group>
+          )
+        }
+      />
 
       {projects.isError ? (
         <Alert color="red" title="Couldn't load the projects">
@@ -657,7 +661,9 @@ export function BoardView() {
           {linked.error.message}
         </Alert>
       ) : null}
-      {projects.isPending ? <Loader size="sm" aria-label="Loading projects" /> : null}
+      {projects.isPending ? (
+        <PageLoading shape={PageLoadingShape.Cards} label="Loading projects" />
+      ) : null}
       {project && tasks.isSuccess && (columns.data !== undefined || columns.isError) ? (
         <BoardColumns
           key={project.id}

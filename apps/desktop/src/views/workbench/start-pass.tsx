@@ -8,15 +8,11 @@ import {
   type TaskDto,
   type TaskId,
 } from '@10db/contracts';
-import { Button, Code, Group, Stack, Text, Textarea } from '@mantine/core';
+import { Button, Code, Group, Stack, Text } from '@mantine/core';
 import { Fragment, useState, type ReactNode } from 'react';
-import { CountBadge } from '../../shell/count-badge';
-import { PagePicker } from './page-picker';
+import { PageList } from './page-list';
 import { StartLines } from './start-lines';
-import { joinableTasks, openRequest, type PickTicks } from './start-pass-rules';
-
-/** How many new pages the line names; the rest are counted. */
-const NEW_PAGES_SHOWN = 3;
+import { joinableTasks, openRequest, tickedWords, type PickTicks } from './start-pass-rules';
 
 export interface StartPassProps {
   readonly project: ProjectViewDto;
@@ -33,20 +29,22 @@ export interface StartPassProps {
   readonly starting: boolean;
   /** Why the daemon refused the last Start Pass; said beside the button. */
   readonly error: string | null;
-  /** The setup's suggestions still to look at, and how to open them; null when there are none. */
+  /** What the setup found, and how to open it; null when there is no setup to open. */
   readonly setUp?: {
-    readonly count: number;
     /** The pages the repository has that the project lacks and the builder has not left out. */
     readonly newPages: readonly PageRow[];
     readonly onOpen: () => void;
   } | null;
 }
 
-/** "New page found: Sessions /sessions", or the count and the first few of several. */
-function newPagesLine(pages: readonly PageRow[]): ReactNode {
-  const shown = pages.slice(0, NEW_PAGES_SHOWN).map((page, i) => (
+/** How many found pages the line names; the rest are counted. */
+const FOUND_PAGES_SHOWN = 3;
+
+/** "Sessions /sessions found in code", or the first few of several and a count of the rest. */
+function foundPagesLine(pages: readonly PageRow[]): ReactNode {
+  const shown = pages.slice(0, FOUND_PAGES_SHOWN).map((page, i) => (
     <Fragment key={page.name}>
-      {i === 0 ? ' ' : ', '}
+      {i === 0 ? '' : ', '}
       {pageLabel(page)}
       {page.route === undefined ? null : (
         <>
@@ -56,21 +54,18 @@ function newPagesLine(pages: readonly PageRow[]): ReactNode {
       )}
     </Fragment>
   ));
-  const more = pages.length - NEW_PAGES_SHOWN;
-  return pages.length === 1 ? (
-    <>New page found:{shown}</>
-  ) : (
+  const more = pages.length - FOUND_PAGES_SHOWN;
+  return (
     <>
-      {`${String(pages.length)} new pages found:`}
       {shown}
-      {more > 0 ? ` and ${String(more)} more` : null}
+      {more > 0 ? ` and ${String(more)} more` : null} found in code
     </>
   );
 }
 
 /**
- * The Workbench with no pass open (spec §4.2): its purpose, the pages and open UI tasks to tick, what
- * is bothering the builder, and Start Pass.
+ * The Workbench with no pass open (spec §4.2): the project's pages and open UI tasks to tick, then
+ * Start Pass with what is ticked beside it.
  */
 export function StartPass(props: StartPassProps) {
   const { project, start, tasks, initial, goalId, now, onStart, starting, error, setUp } = props;
@@ -79,25 +74,11 @@ export function StartPass(props: StartPassProps) {
     pages: initial.pages.filter((page) => start.pages.some((p) => p.area === page)),
     tasks: joinable.filter((task) => initial.taskIds.includes(task.taskId)),
   }));
-  const [bothering, setBothering] = useState('');
   const count = ticks.pages.length + ticks.tasks.length;
   const refusal = error ?? start.refusal?.message ?? null;
   return (
     <Stack gap="lg">
-      <Group justify="space-between" gap="sm">
-        <Text>Work through pages with the agents, live.</Text>
-        {setUp == null ? null : (
-          <Button
-            variant="default"
-            size="xs"
-            rightSection={setUp.count === 0 ? null : <CountBadge count={setUp.count} />}
-            onClick={setUp.onOpen}
-          >
-            Set Up
-          </Button>
-        )}
-      </Group>
-      <PagePicker
+      <PageList
         pages={start.pages}
         tasks={joinable}
         areas={project.areas}
@@ -106,23 +87,17 @@ export function StartPass(props: StartPassProps) {
         now={now}
       />
       {setUp == null || setUp.newPages.length === 0 ? null : (
-        // The header's Set Up opens the setup; this line only says why it has a count.
-        <Text size="sm" role="status">
-          {newPagesLine(setUp.newPages)}
-        </Text>
+        <Group gap="xs" role="status">
+          <Text size="sm" c="dimmed">
+            {foundPagesLine(setUp.newPages)}
+            {' · '}
+          </Text>
+          <Button variant="subtle" size="compact-sm" px={0} onClick={setUp.onOpen}>
+            Review
+          </Button>
+        </Group>
       )}
-      <Textarea
-        label="What's bothering you?"
-        description="Sent to every new page as its first message. Left empty, each page waits for yours."
-        autosize
-        minRows={1}
-        maxRows={6}
-        value={bothering}
-        onChange={(event) => {
-          setBothering(event.currentTarget.value);
-        }}
-      />
-      <Group justify="space-between" align="flex-end" gap="lg" wrap="nowrap" mt="xl" data-start-bar>
+      <Group justify="space-between" align="flex-end" gap="lg" wrap="nowrap" data-start-bar>
         <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
           <StartLines ticks={ticks} start={start} project={project} />
           {refusal === null ? null : (
@@ -131,16 +106,21 @@ export function StartPass(props: StartPassProps) {
             </Text>
           )}
         </Stack>
-        <Button
-          // The daemon would refuse to open now, for the reason beside the button.
-          disabled={count === 0 || start.refusal !== null}
-          loading={starting}
-          onClick={() => {
-            onStart(openRequest(ticks, bothering, goalId, project.areas));
-          }}
-        >
-          Start
-        </Button>
+        <Group gap="md" wrap="nowrap" style={{ flexShrink: 0 }}>
+          <Text size="sm" c="dimmed">
+            {tickedWords(ticks)}
+          </Text>
+          <Button
+            // The daemon would refuse to open now, for the reason beside the button.
+            disabled={count === 0 || start.refusal !== null}
+            loading={starting}
+            onClick={() => {
+              onStart(openRequest(ticks, goalId, project.areas));
+            }}
+          >
+            Start Pass
+          </Button>
+        </Group>
       </Group>
     </Stack>
   );

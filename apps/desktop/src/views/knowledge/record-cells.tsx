@@ -1,8 +1,9 @@
-import { Alert, Badge, Group, Loader, Text } from '@mantine/core';
+import { Alert, Badge, Group, Text } from '@mantine/core';
 import { IconSearchOff } from '@tabler/icons-react';
 import type { KnowledgeState } from '@10db/contracts';
 import type { UseQueryResult } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import type { KnowledgeAnswer } from '../../daemon/knowledge-queries';
 import { STATE_COLORS, STATE_LABELS } from './knowledge-labels';
 
@@ -50,12 +51,13 @@ export function ListStates({
         {query.error.message}
       </Alert>
     );
-  if (query.isPending) return <Loader size="sm" aria-label={`Loading ${what}`} />;
+  if (query.isPending)
+    return <PageLoading shape={PageLoadingShape.List} label={`Loading ${what}`} />;
   const { items, search } = query.data;
   // An empty answer to the previous filter says nothing about the new one: wait for it rather than
   // claim that nothing exists or nothing matched.
   if (query.isPlaceholderData && items.length === 0)
-    return <Loader size="sm" aria-label={`Loading ${what}`} />;
+    return <PageLoading shape={PageLoadingShape.List} label={`Loading ${what}`} />;
   return (
     <>
       {/* A damaged index clears only when 10db restarts, so it is a line, not an alert to act on. */}

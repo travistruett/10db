@@ -3,6 +3,7 @@ import { Box, Group, Select, Text } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
 import { Composer } from '../../conversation/composer';
+import { CONVERSATION_WIDTH } from '../../conversation/conversation-layout';
 import { composerPhase } from '../../conversation/composer-phase';
 import { hasContent, type Draft } from '../../conversation/drafts';
 import { ModelMenu } from '../../conversation/model-menu';
@@ -115,7 +116,7 @@ export function FreshTab({
 
   return (
     <Box style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-      <Box maw={720} mx="auto" px="md" pt="12vh" pb="xl">
+      <Box maw={CONVERSATION_WIDTH} mx="auto" px="md" pt="12vh" pb="xl">
         <Text size="sm" c="dimmed" mb="md">
           {web
             ? `A chat reads ${name}, runs commands and searches the web.`

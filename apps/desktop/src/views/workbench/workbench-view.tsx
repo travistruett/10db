@@ -14,7 +14,7 @@ import {
   type TaskDto,
   type TaskId,
 } from '@10db/contracts';
-import { Group, Loader, Stack, Text, Title } from '@mantine/core';
+import { Button, Stack, Text } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -29,6 +29,9 @@ import {
   useRenamePass,
 } from '../../daemon/pass-queries';
 import { useInbox, useTasks } from '../../daemon/queries';
+import { CountBadge } from '../../shell/count-badge';
+import { PageHeader } from '../../shell/page-header';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { useNow } from '../../shell/relative';
 import { useSelectedProject } from '../../shell/selected-project';
 import { AbandonModal } from './abandon-modal';
@@ -46,6 +49,35 @@ import { WorkbenchSetup } from './setup/workbench-setup';
 import { newPagesOf, setUpCount } from './setup/setup-rules';
 import { StartPass } from './start-pass';
 import type { WorkbenchSearch } from './workbench-search';
+
+/**
+ * The start page's header, the same while it loads, when it fails and once drawn. Workbench Settings
+ * opens the setup; it is disabled until the screen can show it.
+ */
+function StartPageHeader({
+  count,
+  onOpen,
+}: {
+  readonly count: number;
+  readonly onOpen?: () => void;
+}) {
+  return (
+    <PageHeader
+      title="UI Workbench"
+      description="Work through pages with the agents, live."
+      actions={
+        <Button
+          variant="default"
+          disabled={onOpen === undefined}
+          rightSection={count === 0 ? null : <CountBadge count={count} />}
+          {...(onOpen === undefined ? {} : { onClick: onOpen })}
+        >
+          Workbench Settings
+        </Button>
+      }
+    />
+  );
+}
 
 /** What the Workbench asks of the daemon; each answers once its route has. */
 export interface WorkbenchActions {
@@ -125,20 +157,28 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
     mutationFn: (request: PassOpenRequest) => actions.start(request),
   });
   const hasPages = project.areas.some((area) => area.role === AreaRole.Page);
-  const loading = (
-    <Group>
-      <Loader size="sm" role="status" aria-label="Loading the pages" />
-    </Group>
-  );
+  const loading = <PageLoading shape={PageLoadingShape.List} label="Loading the pages" />;
   if (!hasPages) return <WorkbenchSetup project={project} />;
-  if (live === undefined) return loading;
+  // The header is known before the data, so it draws while the pass is read.
+  if (live === undefined)
+    return (
+      <Stack gap="md">
+        <StartPageHeader count={0} />
+        {loading}
+      </Stack>
+    );
   // A pass that has closed and not settled is one line above the picker: the next pass may stack on it.
   if ((live === null || !passHoldsTasks(live.pass.state)) && dialog === 'setup')
     return <WorkbenchSetup project={project} onBack={closeDialog} onApplied={closeDialog} />;
   if (live === null || !passHoldsTasks(live.pass.state))
     return (
       <Stack gap="md">
-        <Title order={2}>UI Workbench</Title>
+        <StartPageHeader
+          count={setupCount}
+          onOpen={() => {
+            setDialog('setup');
+          }}
+        />
         {closed === null ? null : (
           <Text size="sm" role="status">
             {`${closed.name} finished; its work is on ${closed.returnBranch}.`}
@@ -168,7 +208,6 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
             starting={opening.isPending}
             error={opening.error?.message ?? null}
             setUp={{
-              count: setupCount,
               newPages,
               onOpen: () => {
                 setDialog('setup');
@@ -252,7 +291,7 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
   const goalPages = useGoalPassPages(search.goal ?? null).data?.pages ?? [];
   const now = useNow(CLOCK_TICK_MS);
   const opening = useOpenPass(project.id);
-  // Set Up shows only above the picker, so the setup is read only while no pass is open.
+  // Workbench Settings shows only above the list, so the setup is read only while no pass is open.
   const noPassOpen =
     live.data === null || (live.data !== undefined && !passHoldsTasks(live.data.pass.state));
   const setup = useWorkbenchSetup(project.id, hasPages && noPassOpen);
@@ -299,7 +338,7 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
   if (failed !== null)
     return (
       <Stack gap="md">
-        <Title order={2}>UI Workbench</Title>
+        <StartPageHeader count={0} />
         <Text size="sm" c="red">{`The UI Workbench could not be read: ${failed.message}`}</Text>
       </Stack>
     );
@@ -330,7 +369,7 @@ export function WorkbenchView() {
   if (project === null)
     return (
       <Stack gap="md">
-        <Title order={2}>UI Workbench</Title>
+        <StartPageHeader count={0} />
       </Stack>
     );
   return <ProjectWorkbench key={project.id} project={project} />;
