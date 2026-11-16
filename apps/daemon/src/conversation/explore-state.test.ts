@@ -472,6 +472,23 @@ const CELLS: Row[] = [
   ['hand_back', S_.paused, 'blank', {}, go('paused_account')],
   ['hand_back', S_.error, 'blank', {}, go('ended_error')],
   ['hand_back', S_.sealed, 'nothing', {}, go('sealed')],
+  // The terminal never opened: the chat is given back with no notice
+  ['terminal_failed', S_.cold, 'blank', {}, go('idle_cold')],
+  ['terminal_failed', S_.warm, 'blank', {}, go('idle_warm')],
+  ['terminal_failed', S_.starting, 'blank', {}, go('starting')],
+  ['terminal_failed', S_.running, 'blank', {}, go('running')],
+  ['terminal_failed', S_.card, 'blank', {}, go('waiting_card')],
+  ['terminal_failed', S_.stopping, 'blank', {}, go('stopping')],
+  [
+    'terminal_failed',
+    S_.taken,
+    '→ idle_cold; run held messages; no notice',
+    {},
+    go('idle_cold', 'run_queue'),
+  ],
+  ['terminal_failed', S_.paused, 'blank', {}, go('paused_account')],
+  ['terminal_failed', S_.error, 'blank', {}, go('ended_error')],
+  ['terminal_failed', S_.sealed, 'nothing', {}, go('sealed')],
   // daemon restart (§6.4: Send now when anything is queued)
   ['daemon_restart', S_.cold, 'nothing queued', {}, go('idle_cold')],
   ['daemon_restart', S_.cold, 'queued: Send now', Q, go('idle_cold', 'send_now')],
@@ -599,6 +616,7 @@ function eventOf(type: ExploreEvent['type'], extra: EventExtra = {}): ExploreEve
     case 'account_resumed':
     case 'open_terminal':
     case 'hand_back':
+    case 'terminal_failed':
     case 'daemon_restart':
     case 'do_it':
       return { type };
@@ -629,6 +647,7 @@ describe('reduceExplore', () => {
       'account_resumed',
       'open_terminal',
       'hand_back',
+      'terminal_failed',
       'daemon_restart',
       'archive',
       'do_it',
