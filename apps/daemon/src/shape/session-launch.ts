@@ -50,6 +50,11 @@ export interface ShapePrepareInput {
   readonly signal: AbortSignal;
   /** Told when a call waits on the builder's card. */
   readonly observer: WaitObserver;
+  /**
+   * The session's turn holds Your folder, so its commands may write the checkout (never git state). Absent, the
+   * sandbox is read-only, as Plan's always is.
+   */
+  readonly writes?: boolean;
   /** The limits 10db's judge stopped calls at, which the broker asks with the trust line's three answers. */
   readonly limits?: LimitNotes;
 }

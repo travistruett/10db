@@ -526,6 +526,34 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     }
   });
 
+  // Value: protects=a chat that holds Your folder writes the checkout but never git state or a login;
+  // fails_when=the writable profile opens .git or hands the shell an agent socket or credential helper;
+  // why_new=profiles were fixed per kind; no_claim=the guard's words.
+  it('lets a session that holds Your folder write the checkout, but not git state, and gives it no agent socket or helper', async () => {
+    const session = await sandbox().forSession(
+      input({
+        env: {
+          PATH: '/usr/bin:/bin',
+          HOME: home,
+          SSH_AUTH_SOCK: '/tmp/ssh-agent.sock',
+          GIT_ASKPASS: '/usr/bin/true',
+          GH_TOKEN: 'secret-token',
+        },
+      }),
+    );
+    try {
+      const { allowWrite, denyWrite } = session.spec.settings.filesystem;
+      expect(denyWrite).toContain(join(checkout, '.git'));
+      expect(denyWrite).not.toContain(checkout);
+      expect(allowWrite).toContain(session.tmpDir);
+      expect(session.spec.shellEnv['SSH_AUTH_SOCK']).toBeUndefined();
+      expect(session.spec.shellEnv['GH_TOKEN']).toBeUndefined();
+      expect(session.spec.settings.network.allowUnixSockets).toEqual([session.tmpDir]);
+    } finally {
+      session.dispose();
+    }
+  });
+
   it("makes every registered checkout's git state read-only, a project nested in this one included", async () => {
     // Project B sits inside this checkout, so this lane could otherwise write B's .git; project C is
     // elsewhere, with its git dir apart from its checkout.

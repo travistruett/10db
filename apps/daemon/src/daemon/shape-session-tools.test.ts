@@ -230,6 +230,25 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
     expect(existsSync(prepared.sandbox?.env['CLAUDE_CODE_TMPDIR'] ?? '/nonexistent')).toBe(false);
   });
 
+  // Value: protects=a chat's kernel can write the checkout only while its turn holds Your folder;
+  // fails_when=a writable profile outlives the hold or a read-only one opens the checkout; why_new=every
+  // prepared session was read-only; no_claim=the guard's words.
+  it('opens the checkout for writing only when the session turn holds Your folder, and never its git state', async () => {
+    const owner = conversation({});
+    const { prepare } = preparer();
+    const writing = await prepare({ ...inputFor(owner), writes: true });
+    const reading = await prepare(inputFor(owner));
+    try {
+      const writes = writing.sandbox?.settings.filesystem.denyWrite ?? [];
+      expect(writes).not.toContain(checkout);
+      expect(writes).toContain(join(checkout, '.git'));
+      expect(reading.sandbox?.settings.filesystem.denyWrite).toContain(checkout);
+    } finally {
+      await writing.release();
+      await reading.release();
+    }
+  });
+
   describe("the builder's own MCP servers", () => {
     function approveYours(approve = true): void {
       mkdirSync(join(root, 'home'), { recursive: true });

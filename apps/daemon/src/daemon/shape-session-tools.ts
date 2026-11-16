@@ -230,7 +230,7 @@ export function createShapePreparer(deps: {
         checkouts: allCheckouts(state.db),
         mcpServers: servers.stdio,
         yourMcpServers: yours.stdio,
-        readOnly: true,
+        readOnly: input.writes !== true,
         // The agent that runs the session, and a ChatGPT session's temp root, as its lane's would be.
         provider: providerOf(input.accountKind),
         ...(providerOf(input.accountKind) === Provider.Codex

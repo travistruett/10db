@@ -252,6 +252,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               accountKind: launch.account.kind,
               env: launch.env,
               resumeProviderSessionId: start.resume,
+              writes: deps.folderHold.holdsTurn(chat.id),
               signal: ending.signal,
               observer: start.observer,
               limits: limitNotes,
