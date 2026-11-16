@@ -354,6 +354,7 @@ import {
   createTakeoverService,
   liveTakeoverTempDirs,
   prepareTakeover,
+  type TakeoverServers,
   type TakeoverService,
   type TakeoverSource,
 } from '../takeover';
@@ -1722,6 +1723,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           worktreeBase: worktreeRoot,
           codexLaneTempRoot: (sandboxRoots ?? namedSandboxRoots({}, homedir())).codexLanes,
         });
+  const NO_SANDBOX_SERVERS: TakeoverServers = {
+    instructions: null,
+    pluginDirs: [],
+    projectMcpServers: {},
+    yourMcpServers: {},
+    notes: [
+      "The sandbox is unavailable, so this terminal has none of the chat's MCP servers or setup.",
+    ],
+    tempDirs: [],
+    remove: () => undefined,
+  };
   const takeoverCodexHomes = codexHomes();
   let takeoverService: TakeoverService | null = null;
   const takeover = createTakeoverService({
@@ -1740,10 +1752,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         {
           adapter,
           servers: (project, folder, source) => {
-            if (takeoverServers === null)
-              return Promise.reject(
-                new ConflictError('The sandbox is unavailable, so a terminal can not be prepared'),
-              );
+            // Without a sandbox nothing of the chat's servers or setup can be launched safely, so the terminal
+            // opens without them and the popover says so.
+            if (takeoverServers === null) return Promise.resolve(NO_SANDBOX_SERVERS);
             const row = getAccountRow(db, project.accountId);
             // The model is the launch id the source already holds, which the launcher takes as it is.
             const env = launcher.session(row, source.model, listAccountModels(db, row.id)).env;

@@ -50,6 +50,10 @@ const NOT_IN_TERMINAL = 'Not in your terminal';
 const ARCHIVED = 'This chat is archived';
 const NOT_A_CHAT = 'Only a chat opens in your terminal for now';
 const FOLDER_HELD_NOTE = 'Your folder is held until you hand back.';
+/** A note's longest length: a list of left-out skills can run to hundreds of lines. */
+const NOTE_MAX = 800;
+const capNote = (note: string): string =>
+  note.length <= NOTE_MAX ? note : `${note.slice(0, NOTE_MAX)}…`;
 const closedPassNote = (name: string): string =>
   `The pass ‘${name}’ is closed and waits for its pull request to merge: a commit made in the terminal makes its settle ask you.`;
 
@@ -303,7 +307,7 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
   }
 
   function dto(record: TakeoverRecord, notes: readonly string[], line: string | null): TakeoverDto {
-    return { since: record.since, app: record.app, notes: [...notes], line };
+    return { since: record.since, app: record.app, notes: notes.map(capNote), line };
   }
 
   return {
@@ -375,10 +379,10 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
         // An account that can't start a session is a reason, not a crash.
         return {
           refusal: refusal ?? (error instanceof Error ? error.message : String(error)),
-          notes,
+          notes: notes.map(capNote),
         };
       }
-      return { refusal, notes };
+      return { refusal, notes: notes.map(capNote) };
     },
 
     takeoverOf(conversationId) {

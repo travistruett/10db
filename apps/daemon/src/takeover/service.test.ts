@@ -356,6 +356,17 @@ describe('the popover’s preview', () => {
   });
 });
 
+describe('the notes the builder is shown', () => {
+  it('are each cut at a length a popover can show', async () => {
+    w = chatWorld();
+    const chat = await talked();
+    w.terminal.serverNotes = [`left out:\n${'- a skill\n'.repeat(2000)}`];
+    const answer = await w.takeover.open(chat.conversationId);
+    for (const note of answer.notes) expect(note.length).toBeLessThanOrEqual(1000);
+    expect(answer.notes.join('')).toContain('left out:');
+  });
+});
+
 describe('Open while a task holds Your folder', () => {
   it('is refused with the task named, and nothing is written', async () => {
     w = chatWorld();

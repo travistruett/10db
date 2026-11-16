@@ -64,6 +64,8 @@ export interface ChatWorld {
     changedFails: Error | null;
     /** Removing a set's servers throws. */
     removeFails: boolean;
+    /** What the servers' preparation says it left out. */
+    serverNotes: string[];
   };
   /** Moves the project to an account of this kind: the next launch and the next `models` see it. */
   launchOn(kind: AgentAccountKind): void;
@@ -200,6 +202,7 @@ export function chatWorld(
     changed: [],
     changedFails: null,
     removeFails: false,
+    serverNotes: [],
   };
   const opened: { app: string; script: string }[] = [];
   const takeover = createTakeoverService({
@@ -255,7 +258,7 @@ export function chatWorld(
                   },
                 },
               },
-              notes: [],
+              notes: terminal.serverNotes,
               tempDirs: [join(dir.path, 'server-temp')],
               remove: () => {
                 if (terminal.removeFails) throw new Error('could not remove a set');
