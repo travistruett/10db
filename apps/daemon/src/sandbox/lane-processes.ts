@@ -489,6 +489,9 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
     }, interval);
   }
 
+  /** The session's own process. */
+  let rootPid = -1;
+
   /** Who the session ran when it was marked, by `rowKey`; null before `markOwn`. */
   let marked: ReadonlySet<string> | null = null;
 
@@ -500,6 +503,9 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
   ): boolean {
     let at: ProcessRow | undefined = row;
     for (let step = 0; at !== undefined && at.pid > 1 && step < 64; step += 1) {
+      // The session's own process and what it ran at the mark bound the walk: a shell above it, such as the one
+      // `pnpm dev` started the daemon from, is not a job's shell.
+      if (at.pid === rootPid || before.has(rowKey(at))) return false;
       if (isShell(at.comm) && !before.has(rowKey(at))) return true;
       at = byPid.get(at.ppid);
     }
@@ -538,6 +544,7 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
     },
     async track(root) {
       watching.on = true;
+      rootPid = root.pid;
       if (root.startedAt === null) {
         unread = root.pid;
         known = [];
