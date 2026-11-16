@@ -1,6 +1,9 @@
+import { NotFoundError } from '@10db/contracts';
 import { getProject } from '@10db/db';
+import type { TakeoverService } from '../takeover';
 import type { ApiServices } from '../api';
 import {
+  patchSessionsSettings,
   sessionsSettings,
   sessionStarts,
   setSessionsSettings,
@@ -28,11 +31,18 @@ export type ChatApiServices = Pick<
   | 'sessionStarts'
   | 'sessionsSettings'
   | 'setSessionsSettings'
+  | 'patchSessionsSettings'
+  | 'openTakeover'
+  | 'takeoverCommand'
+  | 'handBack'
+  | 'takeoverOf'
+  | 'takeoverPreview'
 >;
 
 export function createChatApiServices(deps: {
   readonly state: StateStore;
   readonly chat: ChatService;
+  readonly takeover: TakeoverService;
   readonly folderHold: FolderHold;
   readonly git: StartGit;
   readonly now: () => Date;
@@ -82,5 +92,15 @@ export function createChatApiServices(deps: {
     },
     sessionsSettings: () => sessionsSettings(state.db),
     setSessionsSettings: (input) => setSessionsSettings(state, input),
+    patchSessionsSettings: (input) => patchSessionsSettings(state, input),
+    openTakeover: (id) => deps.takeover.open(id),
+    takeoverCommand: (id) => deps.takeover.command(id),
+    handBack: (id) => deps.takeover.handBack(id),
+    takeoverOf(id) {
+      const found = deps.takeover.takeoverOf(id);
+      if (found === null) throw new NotFoundError('Takeover', id);
+      return found;
+    },
+    takeoverPreview: (id) => deps.takeover.preview(id),
   };
 }

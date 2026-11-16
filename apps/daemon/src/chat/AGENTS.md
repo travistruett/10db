@@ -55,3 +55,4 @@
   a chat's wait from the folder's `waiting_chat` holder instead. A send with `folder: read_only` (Send Reading Only,
   or a Redo carrying it) runs its turn reading only even if the folder has freed (`FolderHold.chooseReadOnly`); a send
   with no `folder` takes the folder when it is free.
+- A chat in the builder's terminal (`taken_over`) is the takeover service's (`takeover/AGENTS.md`). Archiving it asks `takeover.serialized`/`ended` first, so the hold and the files go with the archive; the settings route `PATCH /settings/sessions` names only the field it changes (`terminalApp`, `notifyReplies`), and an older PUT without `terminalApp` reads as Terminal.

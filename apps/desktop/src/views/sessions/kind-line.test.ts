@@ -1,4 +1,5 @@
 import { FolderHolderKind } from '@10db/contracts';
+import dayjs from 'dayjs';
 import { describe, expect, it } from 'vitest';
 import { chatDto } from '../../test/chat-fixtures';
 import { folderDto, folderHolder } from '../../test/folder-fixtures';
@@ -81,5 +82,25 @@ describe('kindLine', () => {
 
   it.each(rows)('$name', ({ folder, line }) => {
     expect(kindLine(chat, 'ampsio', folder)).toBe(line);
+  });
+
+  it.each([
+    { name: 'its start unread', since: null, line: 'Chat · in your terminal' },
+    {
+      name: 'its start read',
+      since: '2026-11-16T12:04:00.000Z',
+      line: `Chat · in your terminal since ${dayjs('2026-11-16T12:04:00.000Z').format('HH:mm')}`,
+    },
+  ])('a chat in the builder’s terminal: $name', ({ since, line }) => {
+    const taken = chatDto({ conversation: { state: 'taken_over' } });
+    // The terminal holds the folder, which is no other holder's business here.
+    expect(
+      kindLine(
+        taken,
+        'ampsio',
+        folderDto({ holders: [folderHolder(FolderHolderKind.Lane, 'x')] }),
+        since,
+      ),
+    ).toBe(line);
   });
 });

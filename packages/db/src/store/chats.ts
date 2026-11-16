@@ -64,7 +64,7 @@ export function chatOfConversation(db: DbReader, conversationId: ConversationId)
   );
 }
 
-/** The project's chats whose conversation is taken over, so their agent runs in the builder's terminal. */
+/** The project's open chats whose conversation is taken over, so their agent runs in the builder's terminal. */
 export function takenOverChats(db: DbReader, projectId: ProjectId): ChatRow[] {
   return db
     .select({ chat: schema.chats })
@@ -74,6 +74,8 @@ export function takenOverChats(db: DbReader, projectId: ProjectId): ChatRow[] {
       and(
         eq(schema.chats.projectId, projectId),
         eq(schema.conversations.state, ConversationState.TakenOver),
+        // An archived chat holds nothing, whatever its conversation says.
+        isNull(schema.chats.archivedAt),
       ),
     )
     .orderBy(asc(schema.chats.createdAt), asc(schema.chats.id))

@@ -9,6 +9,7 @@ export const TabState = {
   Error: 'error',
   Paused: 'paused',
   Working: 'working',
+  InTerminal: 'in_terminal',
   NewReply: 'new_reply',
   Idle: 'idle',
 } as const;
@@ -35,6 +36,7 @@ export function tabState({ state, openCards, lastReplyAt, seenAt }: TabStateInpu
   if (state === 'ended_error') return TabState.Error;
   if (state === 'paused_account') return TabState.Paused;
   if (WORKING.has(state)) return TabState.Working;
+  if (state === 'taken_over') return TabState.InTerminal;
   if (lastReplyAt !== null && (seenAt === null || lastReplyAt > seenAt)) return TabState.NewReply;
   return TabState.Idle;
 }
@@ -46,9 +48,11 @@ export function needsYou(state: TabState): boolean {
 
 export interface TabWords {
   readonly spoken: string;
-  readonly mark: 'dot_blue' | 'dot_yellow' | 'alert_red' | 'pause_orange' | null;
+  readonly mark: 'dot_blue' | 'dot_yellow' | 'alert_red' | 'pause_orange' | 'terminal_dim' | null;
   readonly ring: 'yellow' | 'red' | null;
   readonly bold: boolean;
+  /** The title is dimmed. */
+  readonly dim: boolean;
 }
 
 export interface TabDetail {
@@ -67,6 +71,7 @@ export function tabWords(state: TabState, detail: TabDetail = {}): TabWords {
         mark: 'dot_yellow',
         ring: 'yellow',
         bold: false,
+        dim: false,
       };
     case TabState.Error:
       return {
@@ -74,6 +79,7 @@ export function tabWords(state: TabState, detail: TabDetail = {}): TabWords {
         mark: 'alert_red',
         ring: 'red',
         bold: false,
+        dim: false,
       };
     case TabState.Paused:
       return {
@@ -84,13 +90,22 @@ export function tabWords(state: TabState, detail: TabDetail = {}): TabWords {
         mark: 'pause_orange',
         ring: null,
         bold: false,
+        dim: false,
       };
     case TabState.Working:
-      return { spoken: 'working', mark: 'dot_blue', ring: null, bold: false };
+      return { spoken: 'working', mark: 'dot_blue', ring: null, bold: false, dim: false };
+    case TabState.InTerminal:
+      return {
+        spoken: 'in your terminal',
+        mark: 'terminal_dim',
+        ring: null,
+        bold: false,
+        dim: true,
+      };
     case TabState.NewReply:
-      return { spoken: 'new reply', mark: null, ring: null, bold: true };
+      return { spoken: 'new reply', mark: null, ring: null, bold: true, dim: false };
     case TabState.Idle:
-      return { spoken: '', mark: null, ring: null, bold: false };
+      return { spoken: '', mark: null, ring: null, bold: false, dim: false };
   }
 }
 

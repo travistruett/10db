@@ -409,12 +409,12 @@ describe('SettingsView', () => {
     });
   });
 
-  it('shows the Sessions switch on by default and saves it off', async () => {
-    const put: unknown[] = [];
+  it('shows the Sessions switch on by default and saves it off, naming only what it changes', async () => {
+    const patched: unknown[] = [];
     server.use(
-      http.put(daemonUrl('/settings/sessions'), async ({ request }) => {
-        put.push(await request.json());
-        return HttpResponse.json({ notifyReplies: false });
+      http.patch(daemonUrl('/settings/sessions'), async ({ request }) => {
+        patched.push(await request.json());
+        return HttpResponse.json({ notifyReplies: false, terminalApp: 'terminal' });
       }),
       ...baseHandlers(),
     );
@@ -423,8 +423,42 @@ describe('SettingsView', () => {
     expect((toggle as HTMLInputElement).checked).toBe(true);
     fireEvent.click(toggle);
     await waitFor(() => {
-      expect(put).toEqual([{ notifyReplies: false }]);
+      expect(patched).toEqual([{ notifyReplies: false }]);
     });
+  });
+
+  it('chooses where Open in Terminal opens and saves Copy the Command, keeping the notification switch', async () => {
+    const patched: unknown[] = [];
+    // The daemon answers what it holds, so a refetch after the save reads the saved choice back.
+    let terminalApp = 'terminal';
+    server.use(
+      http.get(daemonUrl('/settings/sessions'), () =>
+        HttpResponse.json({ notifyReplies: false, terminalApp }),
+      ),
+      http.patch(daemonUrl('/settings/sessions'), async ({ request }) => {
+        patched.push(await request.json());
+        terminalApp = 'copy';
+        return HttpResponse.json({ notifyReplies: false, terminalApp });
+      }),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/sessions');
+    const choice = await screen.findByRole('radiogroup', { name: 'Open sessions in' });
+    expect(within(choice).getByRole('radio', { name: 'Terminal' })).toHaveProperty('checked', true);
+    fireEvent.click(within(choice).getByRole('radio', { name: 'Copy the Command' }));
+    await waitFor(() => {
+      expect(patched).toEqual([{ terminalApp: 'copy' }]);
+    });
+    await waitFor(() => {
+      expect(within(choice).getByRole('radio', { name: 'Copy the Command' })).toHaveProperty(
+        'checked',
+        true,
+      );
+    });
+    expect(screen.getByRole('switch', { name: 'Notify when a chat replies' })).toHaveProperty(
+      'checked',
+      false,
+    );
   });
 
   it('shows the bad line of the extra allowed commands without calling the daemon', async () => {

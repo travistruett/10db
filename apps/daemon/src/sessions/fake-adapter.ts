@@ -32,6 +32,7 @@ import {
   type LaneSessionSpec,
   type SessionHandle,
 } from './types';
+import type { TakeoverCommand, TakeoverSpec } from './takeover-command';
 
 /** The email the fake reports for a subscription that expects none, and for an identity probe. */
 export const FAKE_ACCOUNT_EMAIL = 'builder@example.com';
@@ -231,6 +232,27 @@ export class FakeAdapter implements AgentAdapter {
       lane: (lane) => this.openLane(lane, id),
       explore: (explore) => this.openExplore(explore, id),
     });
+  }
+
+  /** Every takeover command asked for, in order. */
+  readonly takeovers: Omit<TakeoverSpec, 'binary'>[] = [];
+
+  /** A command that runs `/usr/bin/true` in the folder, so a terminal that opens it finishes at once. */
+  takeoverCommand(spec: Omit<TakeoverSpec, 'binary'>): TakeoverCommand {
+    this.takeovers.push(spec);
+    return {
+      cwd: spec.cwd,
+      unset: spec.launch.unset,
+      unsetPrefixes: spec.launch.unsetPrefixes,
+      set: spec.launch.set,
+      keychain: spec.launch.keychain,
+      sources: [],
+      argv: ['/usr/bin/true'],
+    };
+  }
+
+  takeoverNotes(): string[] {
+    return [];
   }
 
   complete(ask: CompletionSpec): Promise<string> {

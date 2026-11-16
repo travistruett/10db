@@ -629,12 +629,17 @@ export function createShipper(deps: ShipperDeps): Shipper {
    * batch's checkout is switched back to where the cut found it and its branch settled, which a
    * worktree batch's removal does itself.
    */
-  async function afterEnd(batchId: BatchId, worktreePath: string | null): Promise<void> {
+  async function afterEnd(
+    batchId: BatchId,
+    worktreePath: string | null,
+    signal: AbortSignal,
+  ): Promise<void> {
     if (worktreePath !== null) {
       await retire(batchId);
       return;
     }
-    await returnCheckout(deps, batchId);
+    // 'busy': the folder is a terminal's, or 10db is stopping; the branch is settled when it is tried again.
+    if ((await returnCheckout(deps, batchId, { signal })) === 'busy') return;
     await settleBranch(deps, batchId).catch((error: unknown) => {
       deps.logger.warn(
         { batchId, err: error instanceof Error ? error.message : String(error) },
@@ -1048,7 +1053,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
           else if (status.state === PrState.Open) reason = 'the fix made no commits of its own';
           deps.state.write((w) => transitionBatch(w, batchId, { to: BatchState.Closed, reason }));
           deps.logger.info({ batchId, reason, prUrl: status.url }, 'fix batch closed');
-          await afterEnd(batchId, worktreePath);
+          await afterEnd(batchId, worktreePath, signal);
           return;
         }
         fixPr = {
@@ -1066,7 +1071,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         const reason = 'no commits beyond the base';
         deps.state.write((w) => transitionBatch(w, batchId, { to: BatchState.Closed, reason }));
         deps.logger.info({ batchId, reason }, 'batch closed');
-        await afterEnd(batchId, worktreePath);
+        await afterEnd(batchId, worktreePath, signal);
         return;
       }
       // 2. The gate, or the pre-check in its place when the project sets one, on the branch as it
@@ -1263,7 +1268,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       );
       deps.logger.info({ batchId, branch, prUrl }, 'batch shipped');
       resolveShipCards(db, deps.inbox, getBatch(db, batchId));
-      await afterEnd(batchId, worktreePath);
+      await afterEnd(batchId, worktreePath, signal);
     } catch (error) {
       // Shutdown: leave SHIPPING; recovery re-runs from step 0.
       if (stopped()) return;
@@ -2356,8 +2361,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
         return moved;
       });
       for (const ws of toCancel) deps.inbox.cancelForWorkstream(ws.id);
-      deps.jobs.run(jobKey(abandoned, JobQueue.Ship), async () => {
-        await afterEnd(batchId, abandoned.worktreePath);
+      deps.jobs.run(jobKey(abandoned, JobQueue.Ship), async (signal) => {
+        await afterEnd(batchId, abandoned.worktreePath, signal);
       });
       return abandoned;
     },

@@ -2,7 +2,7 @@ import { Box, Text, Tooltip } from '@mantine/core';
 import { useHover } from '@mantine/hooks';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { IconAlertTriangle, IconPlayerPause, IconX } from '@tabler/icons-react';
+import { IconAlertTriangle, IconPlayerPause, IconTerminal2, IconX } from '@tabler/icons-react';
 import type { KeyboardEvent, ReactNode } from 'react';
 import { ProjectTile } from '../../shell/project-tile';
 import { tabName, type TabInfo } from './tab-info';
@@ -49,6 +49,15 @@ export function Mark({ mark }: { readonly mark: TabWords['mark'] }) {
           size={12}
           stroke={1.5}
           color="var(--mantine-color-orange-filled)"
+        />
+      );
+    case 'terminal_dim':
+      return (
+        <IconTerminal2
+          data-mark={mark}
+          size={12}
+          stroke={1.5}
+          color="var(--mantine-color-dimmed)"
         />
       );
     case null:
@@ -171,7 +180,11 @@ export function SessionTab({
             size="sm"
             lineClamp={1}
             fw={selected || info.words.bold ? 600 : 400}
-            {...(selected || ring !== null || info.words.bold ? { c: 'bright' } : {})}
+            {...(info.words.dim
+              ? { c: 'dimmed' }
+              : selected || ring !== null || info.words.bold
+                ? { c: 'bright' }
+                : {})}
             style={{ flex: 1, minWidth: 0 }}
           >
             {title}

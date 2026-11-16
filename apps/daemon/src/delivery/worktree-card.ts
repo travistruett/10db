@@ -158,12 +158,12 @@ export function createWorktreeCardAnswers(
         const batch = getBatch(ctx.state.db, offer.batchId);
         // The switch back forgets its place once it has tried, so the card puts it back for one more try.
         const place = toBase ? { branch: offer.base ?? null, sha: offer.place.sha } : offer.place;
-        ctx.jobs.run(jobKey(batch, JobQueue.Ship), async () => {
+        ctx.jobs.run(jobKey(batch, JobQueue.Ship), async (signal) => {
           if (getBatchRow(ctx.state.db, offer.batchId).returnSha === null)
             ctx.state.write((w) =>
               patchBatch(w, offer.batchId, { returnBranch: place.branch, returnSha: place.sha }),
             );
-          await returnCheckout(ctx, offer.batchId);
+          await returnCheckout(ctx, offer.batchId, { signal });
         });
         return;
       }

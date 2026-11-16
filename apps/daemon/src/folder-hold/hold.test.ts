@@ -14,6 +14,7 @@ import {
 } from '@10db/contracts';
 import {
   createTestStore,
+  getChat,
   insertChat,
   insertConversation,
   insertPass,
@@ -459,5 +460,213 @@ describe('10db’s git work waiting for the folder', () => {
     hold.releaseTurn(a);
     await reserved;
     expect(getEventListeners(signal, 'abort')).toHaveLength(0);
+  });
+
+  it('hands the reservation over inside the wake, so a take in the same tick is refused', async () => {
+    const hold = newHold();
+    const a = chat('A');
+    const b = chat('B');
+    hold.takeTurn(project.id, a);
+    const reserved = hold.reserveGitWhenFree(project.id, 'cutting a branch');
+    hold.releaseTurn(a);
+    // Same tick as the release: no await has run, so the waiter has not resumed yet.
+    expect(hold.holders(project.id).map((h) => h.what)).toEqual(['cutting a branch']);
+    expect(hold.takeTurn(project.id, b).taken).toBe(false);
+    hold.releaseGit(await reserved);
+    expect(hold.takeTurn(project.id, b).taken).toBe(true);
+  });
+
+  it('releases a handed-over reservation whose signal aborted in the same tick', async () => {
+    const hold = newHold();
+    const a = chat('A');
+    hold.takeTurn(project.id, a);
+    const abort = new AbortController();
+    const waiting = hold.reserveGitWhenFree(project.id, 'cutting a branch', abort.signal);
+    hold.releaseTurn(a);
+    abort.abort();
+    await expect(waiting).rejects.toBeInstanceOf(FolderWaitCancelledError);
+    expect(hold.holders(project.id)).toEqual([]);
+    expect(hold.reserveGit(project.id, 'next').reserved).toBe(true);
+  });
+
+  it('serves waiting git work oldest first', async () => {
+    const hold = newHold();
+    const a = chat('A');
+    hold.takeTurn(project.id, a);
+    const order: string[] = [];
+    const first = hold.reserveGitWhenFree(project.id, 'first').then((t) => {
+      order.push('first');
+      return t;
+    });
+    const second = hold.reserveGitWhenFree(project.id, 'second').then((t) => {
+      order.push('second');
+      return t;
+    });
+    hold.releaseTurn(a);
+    hold.releaseGit(await first);
+    hold.releaseGit(await second);
+    expect(order).toEqual(['first', 'second']);
+  });
+});
+
+describe('a takeover', () => {
+  const taking = (hold: FolderHold, id: ChatId, calls: { entered: number }) =>
+    hold.takeOver(project.id, id, () => {
+      calls.entered += 1;
+      setConversationState(id, ConversationState.TakenOver);
+      return 'entered';
+    });
+
+  function setConversationState(chatId: ChatId, to: ConversationState): void {
+    state.write((ctx) => {
+      const row = getChat(ctx.tx, chatId);
+      ctx.tx
+        .update(schema.conversations)
+        .set({ state: to })
+        .where(eq(schema.conversations.id, row.conversationId))
+        .run();
+    });
+  }
+
+  it.each<[string, (hold: FolderHold, other: ChatId) => void, string]>([
+    [
+      'a lane',
+      () => {
+        lane('Bump vite');
+      },
+      'the task ‘Bump vite’',
+    ],
+    [
+      'an open pass',
+      () => {
+        pass('Settings pass', PassState.Open);
+      },
+      'the pass ‘Settings pass’',
+    ],
+    [
+      '10db’s git work holding',
+      (hold) => {
+        hold.reserveGit(project.id, 'cutting a branch');
+      },
+      '10db cutting a branch',
+    ],
+    [
+      '10db’s git work waiting for a chat’s turn',
+      (hold, other) => {
+        hold.takeTurn(project.id, other);
+        void hold.reserveGitWhenFree(project.id, 'cutting a branch');
+      },
+      '10db cutting a branch',
+    ],
+  ])('is refused behind %s, with the holder named, and enters nothing', (_name, arrange, named) => {
+    const hold = newHold();
+    const me = chat('Me');
+    const other = chat('Other');
+    arrange(hold, other);
+    const calls = { entered: 0 };
+    const result = taking(hold, me, calls);
+    expect(result.taken).toBe(false);
+    expect(result.taken ? [] : result.blockers.map((b) => holderWords(b.holder))).toContain(named);
+    expect(calls.entered).toBe(0);
+  });
+
+  it('shares with a closed pass, another chat’s turn and another takeover, naming the chats', () => {
+    pass('Settings pass', PassState.Closed);
+    chat('In terminal', ConversationState.TakenOver);
+    const hold = newHold();
+    const other = chat('Other');
+    hold.takeTurn(project.id, other);
+    const calls = { entered: 0 };
+    const result = taking(hold, chat('Me'), calls);
+    expect(result).toMatchObject({
+      taken: true,
+      value: 'entered',
+      limits: [FolderLimit.FolderGitUntilMerge],
+      limitPass: 'Settings pass',
+    });
+    expect(result.taken && result.sharedWith.map(holderWords)).toEqual([
+      'the chat ‘In terminal’ in your terminal',
+      'the chat ‘Other’',
+    ]);
+    expect(calls.entered).toBe(1);
+  });
+
+  it('announces the take once, and nothing when the entering throws', () => {
+    const hold = newHold();
+    const me = chat('Me');
+    events.length = 0;
+    expect(() =>
+      hold.takeOver(project.id, me, () => {
+        throw new Error('refused');
+      }),
+    ).toThrow('refused');
+    expect(events).toEqual([]);
+    expect(hold.holders(project.id)).toEqual([]);
+    taking(hold, me, { entered: 0 });
+    expect(events.map((e) => e.type)).toEqual([EventType.FolderHoldChanged]);
+    expect(hold.holders(project.id).map(holderWords)).toEqual(['the chat ‘Me’ in your terminal']);
+  });
+
+  it('hands the folder to waiting git work before the chat’s own held message', async () => {
+    const hold = newHold();
+    const me = chat('Me');
+    taking(hold, me, { entered: 0 });
+    const git = hold.reserveGitWhenFree(project.id, 'switching Your folder back to `main`');
+    let served = 0;
+    hold.wait(project.id, me, () => {
+      served += 1;
+      return 'began';
+    });
+    expect(served).toBe(0);
+    events.length = 0;
+    hold.handBack(project.id, me, () => {
+      setConversationState(me, ConversationState.IdleCold);
+    });
+    // In the same tick: the git work holds, and the chat is still waiting behind it.
+    expect(hold.holders(project.id).map((h) => h.what)).toContain(
+      'switching Your folder back to `main`',
+    );
+    expect(served).toBe(0);
+    expect(hold.waiting(me)).toBe(true);
+    expect(events.some((e) => e.type === EventType.FolderHoldChanged)).toBe(true);
+    hold.releaseGit(await git);
+    expect(served).toBe(1);
+    expect(hold.holdsTurn(me)).toBe(true);
+  });
+
+  it('serves the chat’s waiter and leaves no git holder when the job aborts in the handover’s tick', async () => {
+    const hold = newHold();
+    const me = chat('Me');
+    taking(hold, me, { entered: 0 });
+    const abort = new AbortController();
+    const git = hold.reserveGitWhenFree(project.id, 'cutting a branch', abort.signal);
+    let served = 0;
+    hold.wait(project.id, me, () => {
+      served += 1;
+      return 'began';
+    });
+    hold.handBack(project.id, me, () => {
+      setConversationState(me, ConversationState.IdleCold);
+    });
+    abort.abort();
+    await expect(git).rejects.toBeInstanceOf(FolderWaitCancelledError);
+    expect(hold.holders(project.id).map((h) => h.kind)).toEqual(['chat_turn']);
+    expect(served).toBe(1);
+  });
+
+  it('serves a waiter at Hand Back when no git work waits, and lets a lane start after', () => {
+    const hold = newHold();
+    const me = chat('Me');
+    taking(hold, me, { entered: 0 });
+    let served = 0;
+    hold.handBack(project.id, me, () => {
+      setConversationState(me, ConversationState.IdleCold);
+    });
+    hold.wait(project.id, me, () => {
+      served += 1;
+      return 'began';
+    });
+    expect(served).toBe(1);
+    expect(words(hold, { kind: FolderAsker.LaneStart })).toEqual(['the chat ‘Me’']);
   });
 });

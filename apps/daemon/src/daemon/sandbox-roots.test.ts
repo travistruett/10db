@@ -50,7 +50,11 @@ function builders() {
     build: {
       lane: (): LaneSandbox => {
         built.push('lane');
-        return { forSession: never('lane session'), judgeSetup: never('setup judgement') };
+        return {
+          forSession: never('lane session'),
+          forTakeover: never('takeover'),
+          judgeSetup: never('setup judgement'),
+        };
       },
       gate: (): GateSandbox => {
         built.push('gate');

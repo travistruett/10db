@@ -15,6 +15,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { EdgeFade } from '../../shell/edge-fade';
 import { useHiddenEdges } from '../../shell/use-hidden-edges';
 import { AllTabsMenu } from './all-tabs-menu';
+import { canOpenTerminal } from './can-open-terminal';
 import type { ClosedTab } from './closed-tabs';
 import { TabMenuItems } from './tab-menu';
 import { SessionTab } from './session-tab';
@@ -48,6 +49,7 @@ export interface TabStripProps {
   readonly closed: readonly ClosedTab[];
   readonly onReopen: (entry: ClosedTab) => void;
   readonly onRename: (tab: StripTab) => void;
+  readonly onOpenInTerminal: (tab: StripTab) => void;
   readonly onArchive: (tab: StripTab) => void;
   readonly onCloseOthers: (tab: StripTab) => void;
   /** A chat's tab was dragged to this place. */
@@ -80,6 +82,7 @@ export function TabStrip({
   closed,
   onReopen,
   onRename,
+  onOpenInTerminal,
   onArchive,
   onCloseOthers,
   onReorder,
@@ -99,6 +102,7 @@ export function TabStrip({
 
   const projectName = (tab: StripTab): string =>
     projects.find((p) => p.id === tabProjectId(tab))?.name ?? '';
+  const hasProject = (id: string): boolean => projects.some((p) => p.id === id);
   const infos = new Map<string, TabInfo>(tabs.map((tab) => [tab.key, tabInfo(tab, cards, seen)]));
   const selectedIndex = tabs.findIndex((t) => t.key === selectedKey);
   const room = available - CONTROLS_WIDTH;
@@ -295,6 +299,15 @@ export function TabStrip({
                       onArchive: () => {
                         onArchive(menu.tab);
                       },
+                      // A chat whose project is gone has no folder to open a terminal in.
+                      ...(canOpenTerminal(menu.tab.chat.conversation) &&
+                      hasProject(menu.tab.chat.projectId)
+                        ? {
+                            onOpenInTerminal: () => {
+                              onOpenInTerminal(menu.tab);
+                            },
+                          }
+                        : {}),
                     }
                   : {}),
                 onClose: () => {

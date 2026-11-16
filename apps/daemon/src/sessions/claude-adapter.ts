@@ -4,6 +4,7 @@ import { AUTOUPDATE_OFF } from '../environment';
 import { checkAccount, seenFrom, type SeenAccount } from './account-check';
 import { onProfile } from './agent-profile';
 import { claudeCapabilities } from './capabilities';
+import { claudeTakeoverCommand, claudeTakeoverNotes } from './claude-takeover';
 import { createChannel } from './channel';
 import { startClaudeLogin, type LoginSpawn } from './claude-connect';
 import { createConnectorDirectory, type ConnectorDirectory } from './claude-connectors';
@@ -224,6 +225,8 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): AgentAdapter {
       await connectors?.stop();
     },
     capabilities: (account, model) => claudeCapabilities(account.kind, model),
+    takeoverCommand: (spec) => claudeTakeoverCommand({ ...spec, binary: opts.claudePath }),
+    takeoverNotes: () => claudeTakeoverNotes(),
     open: (spec) =>
       onProfile(spec, {
         lane: (lane) =>

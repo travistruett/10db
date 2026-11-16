@@ -1,10 +1,17 @@
-import { mintId, type AccountProblem, type AgentAccountKind } from '@10db/contracts';
+import {
+  mintId,
+  type AccountModelDto,
+  type AccountProblem,
+  type AgentAccountKind,
+} from '@10db/contracts';
 import type { AccountRow } from '@10db/db';
 import { describe, expect, it } from 'vitest';
 import { createMemoryKeychain } from '../../test/fixtures';
 import {
   AccountLaunchError,
   BILLING_SWITCH_VARS,
+  NESTED_SESSION_VARS,
+  SECRET_VARIABLES,
   createLauncher,
   claudeMcpSignInCommand,
   connectorProbeEnv,
@@ -546,5 +553,164 @@ describe('connectorProbeEnv', () => {
     });
     for (const name of ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_AUTH_TOKEN'])
       expect(env).not.toHaveProperty(name);
+  });
+});
+
+describe('a takeover launch', () => {
+  const CODEX_DIR = '/d/acc/codex';
+  const bedrockKey = keyed({
+    kind: 'bedrock',
+    settings: { region: 'eu-central-1', awsProfile: null },
+  });
+  const bedrockProfile = account({
+    kind: 'bedrock',
+    configDir: KEY_DIR,
+    expectedIdentity: null,
+    settings: { region: 'us-west-2', awsProfile: 'client-c' },
+  });
+  const codex = account({ kind: 'codex_signin', configDir: CODEX_DIR });
+
+  it.each<{
+    name: string;
+    row: AccountRow;
+    set: Record<string, string>;
+    keychain: { variable: string; account: string }[];
+    helper: string | null;
+    scrub: boolean;
+    /** Names the unset must hold beyond the billing switches and nested markers. */
+    unsets: string[];
+  }>([
+    {
+      name: 'a plan on its own directory',
+      row: account({}),
+      set: { CLAUDE_CONFIG_DIR: SUB_DIR },
+      keychain: [],
+      helper: null,
+      scrub: false,
+      unsets: [],
+    },
+    {
+      name: 'a plan on the default directory',
+      row: account({ configDir: null }),
+      set: {},
+      keychain: [],
+      helper: null,
+      scrub: false,
+      unsets: ['CLAUDE_CONFIG_DIR'],
+    },
+    {
+      name: 'an API key, read by the helper and never in the environment',
+      row: keyed({ kind: 'anthropic_api_key' }),
+      set: { CLAUDE_CONFIG_DIR: KEY_DIR, CLAUDE_SECURESTORAGE_CONFIG_DIR: '/h/b/.claude-other' },
+      keychain: [],
+      helper: 'account:k',
+      scrub: false,
+      unsets: ['ANTHROPIC_API_KEY'],
+    },
+    {
+      name: 'a Bedrock key, read by the script and scrubbed from commands',
+      row: bedrockKey,
+      set: {
+        CLAUDE_CODE_USE_BEDROCK: '1',
+        AWS_REGION: 'eu-central-1',
+        CLAUDE_CONFIG_DIR: KEY_DIR,
+        CLAUDE_SECURESTORAGE_CONFIG_DIR: '/h/b/.claude-other',
+      },
+      keychain: [{ variable: 'AWS_BEARER_TOKEN_BEDROCK', account: 'account:k' }],
+      helper: null,
+      scrub: true,
+      unsets: ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_PROFILE'],
+    },
+    {
+      name: 'a Bedrock profile',
+      row: bedrockProfile,
+      set: {
+        CLAUDE_CODE_USE_BEDROCK: '1',
+        AWS_REGION: 'us-west-2',
+        AWS_PROFILE: 'client-c',
+        CLAUDE_CONFIG_DIR: KEY_DIR,
+        CLAUDE_SECURESTORAGE_CONFIG_DIR: '/h/b/.claude-other',
+      },
+      keychain: [],
+      helper: null,
+      scrub: false,
+      unsets: ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_BEARER_TOKEN_BEDROCK'],
+    },
+    {
+      name: 'a gateway, read by the helper',
+      row: keyed({ kind: 'gateway', settings: { baseUrl: 'https://openrouter.ai/api' } }),
+      set: { ANTHROPIC_BASE_URL: 'https://openrouter.ai/api', CLAUDE_CONFIG_DIR: KEY_DIR },
+      keychain: [],
+      helper: 'account:k',
+      scrub: false,
+      unsets: ['ANTHROPIC_AUTH_TOKEN'],
+    },
+    {
+      name: 'a ChatGPT plan',
+      row: codex,
+      set: { CODEX_HOME: CODEX_DIR },
+      keychain: [],
+      helper: null,
+      scrub: false,
+      unsets: ['OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'CODEX_ACCESS_TOKEN'],
+    },
+  ])('$name', ({ row, set, keychain, helper, scrub, unsets }) => {
+    const launch = launcher().takeover(row, 'claude-sonnet-5-5', []);
+    expect(launch.set).toEqual(set);
+    expect(launch.keychain).toEqual(keychain);
+    expect(launch.apiKeyHelperAccount).toBe(helper);
+    expect(launch.scrub).toBe(scrub);
+    expect(launch.unset).toEqual(expect.arrayContaining([...unsets]));
+    expect(launch.unset).toEqual(expect.arrayContaining([...NESTED_SESSION_VARS]));
+    expect(launch.unsetPrefixes).toEqual(
+      expect.arrayContaining(['ANTHROPIC_DEFAULT_', 'CLAUDE_CODE_USE_', 'TENDB_']),
+    );
+    // No credential is in the environment, and nothing both set and unset.
+    for (const name of SECRET_VARIABLES) expect(launch.set).not.toHaveProperty(name);
+    const owned = [...Object.keys(launch.set), ...launch.keychain.map((k) => k.variable)];
+    for (const name of owned) expect(launch.unset).not.toContain(name);
+    // Every billing switch the account doesn't own is dropped from the builder's shell.
+    expect(launch.unset).toEqual(
+      expect.arrayContaining(BILLING_SWITCH_VARS.filter((name) => !owned.includes(name))),
+    );
+    expect(JSON.stringify(launch)).not.toContain(SECRET);
+  });
+
+  it('launches the account’s own ID for the model, or the canonical one', () => {
+    expect(launcher().takeover(account({}), 'claude-sonnet-5-5', []).model).toBe(
+      'claude-sonnet-5-5',
+    );
+    const row = account({});
+    const listed: AccountModelDto[] = [
+      {
+        accountId: row.id,
+        model: 'claude-sonnet-5-5',
+        family: null,
+        launchId: 'us.anthropic.sonnet-5-5',
+        efforts: [],
+        unusable: false,
+        wordingMarkEndsAt: null,
+        inputPrice: null,
+        outputPrice: null,
+        lastSeenAt: '2026-10-22T12:00:00.000Z',
+      },
+    ];
+    expect(launcher().takeover(row, 'claude-sonnet-5-5', listed).model).toBe(
+      'us.anthropic.sonnet-5-5',
+    );
+  });
+
+  it.each([
+    ['missing', {}, 'secret_missing'],
+    ['changed', { 'account:k': 'another-secret' }, 'secret_changed'],
+  ] as const)('refuses a keyed account whose secret is %s', (_name, items, problem) => {
+    let error: unknown;
+    try {
+      launcher(items).takeover(keyed({ kind: 'anthropic_api_key' }), 'claude-sonnet-5-5', []);
+    } catch (caught) {
+      error = caught;
+    }
+    if (!(error instanceof AccountLaunchError)) throw new Error('no AccountLaunchError');
+    expect(error.problem).toBe(problem);
   });
 });

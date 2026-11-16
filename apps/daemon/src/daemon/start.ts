@@ -8,6 +8,7 @@ import {
   AccountKind,
   ConversationOwnerKind,
   EventType,
+  ConflictError,
   InvalidError,
   InboxItemId,
   JUDGE_TIMEOUT_MS,
@@ -167,8 +168,11 @@ import {
 } from '../delivery';
 import type { LogLevel } from '../env';
 import {
+  AccountLaunchError,
   ACCOUNT_NAMES_VERIFIED_ON,
   CODEX_VERIFIED_ON,
+  ModelNotLaunchableError,
+  sessionConfigDir,
   createLauncher,
   exportAwsCredentials,
   REQUIRED_TOOLS,
@@ -228,6 +232,7 @@ import {
   createChatService,
   createChatTools,
   createConversationFiles,
+  sessionsSettings,
 } from '../chat';
 import {
   ClaimWaits,
@@ -284,7 +289,7 @@ import { createPlanRecordServices } from './plan-record-services';
 import { createShapeServices } from './shape-services';
 import { createConversationServices } from './conversation-services';
 import { createChatApiServices } from './chat-services';
-import { createShapePreparer } from './shape-session-tools';
+import { createShapePreparer, createTakeoverPreparer } from './shape-session-tools';
 import {
   applyCheckAnswer,
   applyPlanAnswer,
@@ -337,7 +342,22 @@ import {
   type ScriptInstaller,
   type SelfUpdate,
 } from '../self-update';
-import { connectorProbeRoot, sweepConnectorProbeRoot, type AgentAdapter } from '../sessions';
+import {
+  codexHomes,
+  connectorProbeRoot,
+  markOnboarded,
+  sweepConnectorProbeRoot,
+  type AgentAdapter,
+} from '../sessions';
+import {
+  createOpener,
+  createTakeoverService,
+  liveTakeoverTempDirs,
+  prepareTakeover,
+  type TakeoverServers,
+  type TakeoverService,
+  type TakeoverSource,
+} from '../takeover';
 import { conversationRun, planConversationModel, routingInputs, seedTeam } from '../team';
 import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
@@ -1075,10 +1095,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // is neither swept nor claimed.
   const claimedRoots =
     sandboxRoots?.refusal === null
-      ? claimSandboxRoots({
-          temps: [sandboxRoots.temp, sandboxRoots.codexLanes],
-          files: sandboxRoots.files,
-        })
+      ? claimSandboxRoots(
+          {
+            temps: [sandboxRoots.temp, sandboxRoots.codexLanes],
+            files: sandboxRoots.files,
+          },
+          process.pid,
+          // The servers of a chat still in the builder's terminal run on, so their temp dirs stay.
+          liveTakeoverTempDirs(db, opts.dataDir),
+        )
       : null;
   // Off the event loop and never waited on by a start: `tmutil` can be slow, and a root it could
   // not exclude costs backup space, not a lane. `stop()` ends what still runs.
@@ -1654,7 +1679,108 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         { kind: agentKind(getAccountRow(db, getProject(db, projectId).accountId).kind) },
         null,
       ).webSearch,
+    takeover: () => takeoverService,
   });
+  // What the chat's session ran with, for the builder's terminal: a launch that names no secret.
+  const takeoverSource = (
+    conv: { readonly model: string | null; readonly effort: Effort | null },
+    project: ProjectDto,
+  ): TakeoverSource => {
+    const row = getAccountRow(db, project.accountId);
+    const run = conversationRun(db, project, conv.model, conv.effort);
+    if (run === undefined) throw new ConflictError(`${row.label} offers no model for a chat`);
+    const kind = agentKind(row.kind);
+    try {
+      const launch = launcher.takeover(row, run.model, listAccountModels(db, row.id));
+      return {
+        cwd: project.repoPath,
+        kind,
+        model: launch.model,
+        effort: run.effort,
+        launch,
+        web: adapter.capabilities({ kind }, run.model).webSearch,
+      };
+    } catch (error) {
+      if (error instanceof AccountLaunchError || error instanceof ModelNotLaunchableError)
+        throw new ConflictError(error.message);
+      throw error;
+    }
+  };
+  const takeoverServers =
+    laneSandbox === null
+      ? null
+      : createTakeoverPreparer({
+          state,
+          inbox,
+          git,
+          logger: logger.child({ component: 'takeover' }),
+          laneSandbox,
+          protectedPaths: guarded,
+          projectEnv: () => launcher.projectEnv(),
+          exportAwsCredentials,
+          builderHome,
+          laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
+          worktreeBase: worktreeRoot,
+          codexLaneTempRoot: (sandboxRoots ?? namedSandboxRoots({}, homedir())).codexLanes,
+        });
+  const NO_SANDBOX_NOTE =
+    "The sandbox is unavailable, so this terminal has none of the chat's MCP servers or setup.";
+  const NO_SANDBOX_SERVERS: TakeoverServers = {
+    instructions: null,
+    pluginDirs: [],
+    projectMcpServers: {},
+    yourMcpServers: {},
+    notes: [NO_SANDBOX_NOTE],
+    tempDirs: [],
+    remove: () => undefined,
+  };
+  const takeoverCodexHomes = codexHomes();
+  let takeoverService: TakeoverService | null = null;
+  const takeover = createTakeoverService({
+    state,
+    engine: exploreEngine,
+    folderHold,
+    chats: () => chat,
+    dataDir: opts.dataDir,
+    now: () => clock.now(),
+    log: logger.child({ component: 'takeover' }),
+    app: () => sessionsSettings(db).terminalApp,
+    opener: createOpener(),
+    sourceOf: takeoverSource,
+    prepare: (input, signal) =>
+      prepareTakeover(
+        {
+          adapter,
+          servers: (project, folder, source) => {
+            // Without a sandbox nothing of the chat's servers or setup can be launched safely, so the terminal
+            // opens without them and the popover says so.
+            if (takeoverServers === null) return Promise.resolve(NO_SANDBOX_SERVERS);
+            const row = getAccountRow(db, project.accountId);
+            // The model is the launch id the source already holds, which the launcher takes as it is.
+            const env = launcher.session(row, source.model, listAccountModels(db, row.id)).env;
+            return takeoverServers({
+              project,
+              folder,
+              env,
+              configDir: sessionConfigDir(agentKind(row.kind), env, homedir()),
+            });
+          },
+          onboard: async (source) => {
+            const claudeDir = source.launch.set['CLAUDE_CONFIG_DIR'];
+            if (claudeDir !== undefined) await markOnboarded(claudeDir, source.cwd);
+            const codexDir = source.launch.set['CODEX_HOME'];
+            if (codexDir !== undefined) await takeoverCodexHomes(codexDir).prepare(source.cwd);
+          },
+          newSetId: () => randomBytes(5).toString('hex'),
+        },
+        input,
+        signal,
+      ),
+    notesOf: (kind) => adapter.takeoverNotes({ kind }),
+    setupNotes: () => (takeoverServers === null ? [NO_SANDBOX_NOTE] : []),
+    changedPaths: (checkout) => git.changedPaths(checkout),
+  });
+  takeoverService = takeover;
   const chatLive = createChatLiveSessions();
   exploreEngine.register(
     ConversationOwnerKind.Chat,
@@ -2245,6 +2371,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     chat: createChatApiServices({
       state,
       chat,
+      takeover,
       folderHold,
       git: (repo, args) => runGit(repo, args, { bin: gitBin }),
       now: () => clock.now(),
@@ -2548,6 +2675,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // What a restart found of each explore conversation is settled before the API serves it.
   await exploreEngine.recover();
+  // A takeover the daemon lost while it was opening left files for a chat that is not in the terminal.
+  takeover.recover();
   const wss = new WebSocketServer({ noServer: true });
   const server = serve({
     fetch: app.fetch,
@@ -2665,6 +2794,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // A gate that waits must not start because shutdown freed the slot of the one it killed.
       gateSlots.close();
       // Aborts a shipping gate and any git or gh child; the batch stays SHIPPING for recovery.
+      // Before the delivery jobs: a takeover's open or opener ends, so nothing waits on the terminal.
+      await takeover.stop();
       await Promise.all([deliveryJobs.stop(), selfUpdateStopped]);
       benchmarks.stop();
       openRouterSync?.stop();

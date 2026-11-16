@@ -1,4 +1,4 @@
-import { ConversationState, type SteerMode } from '@10db/contracts';
+import { ConversationState, SteerMode } from '@10db/contracts';
 
 // Sessions spec §6.7: an explore conversation's state × event table, as a pure reducer. The engine
 // stores a builder message before it reduces, so "store" is no effect here; every other phrase of a
@@ -19,6 +19,8 @@ export type ExploreEvent =
   | { readonly type: 'account_resumed' }
   | { readonly type: 'open_terminal' }
   | { readonly type: 'hand_back' }
+  /** The builder's terminal never opened after the chat was taken over. */
+  | { readonly type: 'terminal_failed' }
   | { readonly type: 'daemon_restart' }
   | { readonly type: 'archive'; readonly confirmed: boolean }
   | { readonly type: 'do_it' };
@@ -161,6 +163,7 @@ function sealed(event: ExploreEvent): ExploreOutcome {
     case 'ended':
     case 'account_resumed':
     case 'hand_back':
+    case 'terminal_failed':
     case 'daemon_restart':
     case 'do_it':
       return to(S.Sealed);
@@ -259,6 +262,8 @@ export function reduceExplore(
       return stay;
     case 'hand_back':
       return state === S.TakenOver ? to(S.IdleCold, E.HandBackNotice, E.RunQueue) : stay;
+    case 'terminal_failed':
+      return state === S.TakenOver ? to(S.IdleCold, E.RunQueue) : stay;
     case 'daemon_restart':
       switch (state) {
         case S.IdleCold:
@@ -316,4 +321,23 @@ export function reduceExplore(
       }
       return stay;
   }
+}
+
+/** The table's words for refusing Open in Terminal in `state`, or null when it would go ahead. */
+export function openTerminalRefusal(
+  state: ConversationState,
+  providerSessionId: boolean,
+): string | null {
+  const outcome = reduceExplore(
+    state,
+    { type: 'open_terminal' },
+    {
+      queued: 0,
+      providerSessionId,
+      restartedWhilePaused: false,
+      steer: SteerMode.Queue,
+      resuming: false,
+    },
+  );
+  return 'refused' in outcome ? outcome.refused : null;
 }

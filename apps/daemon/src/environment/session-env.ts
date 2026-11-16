@@ -23,7 +23,7 @@ export const BILLING_SWITCH_VARS = [
  * Whole families of provider switches, so a provider added in a later Claude Code release is stripped too.
  * `CLAUDE_CODE_USE_*` also catches non-billing toggles; none of them matter to a managed session on macOS.
  */
-const BILLING_SWITCH_PREFIXES = [
+export const BILLING_SWITCH_PREFIXES = [
   'ANTHROPIC_DEFAULT_',
   'CLAUDE_CODE_USE_',
   'ANTHROPIC_VERTEX_',
@@ -37,7 +37,8 @@ export const NESTED_SESSION_VARS = [
   'CLAUDE_PROJECT_DIR',
 ] as const;
 
-const OWN_PREFIX = 'TENDB_';
+/** The prefix of 10db's own variables. */
+export const OWN_PREFIX = 'TENDB_';
 const SWITCHES: readonly string[] = BILLING_SWITCH_VARS;
 const NESTED: readonly string[] = NESTED_SESSION_VARS;
 

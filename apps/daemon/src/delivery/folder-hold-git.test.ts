@@ -183,4 +183,23 @@ describe('a batch’s cut and its switch back', () => {
     expect(h.git$('branch', '--show-current')).toBe('main');
     expect(h.ctx.folderHold.holders(h.project.id)).toEqual([]);
   });
+
+  it('a switch back waiting for a terminal stops with the jobs and keeps its place', async () => {
+    h = createDeliveryHarness({});
+    const task = h.addTask('Alpha');
+    const started = h.only(
+      h.starter.startBatch(h.project.id, { title: 'Greetings', taskIds: [task.id] }),
+    );
+    await h.jobs.idle();
+    h.commit('src/api/alpha.txt');
+    const terminal = chat('In terminal');
+    setConversationState(terminal, ConversationState.TakenOver);
+    h.shipper.abandon(started.id);
+    await yieldToJobs();
+    expect(waitLine(started.id)).not.toBeNull();
+    await h.jobs.stop();
+    expect(getBatchRow(h.store.db, started.id).returnSha).not.toBeNull();
+    expect(waitLine(started.id)).toBeNull();
+    expect(h.ctx.folderHold.holders(h.project.id).map((x) => x.kind)).not.toContain('git_work');
+  });
 });

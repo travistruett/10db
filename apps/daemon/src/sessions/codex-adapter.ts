@@ -4,6 +4,7 @@ import type { SeenAccount } from './account-check';
 import { codexCapabilities } from './capabilities';
 import { CODEX_CLIENT_INFO, readSeenAccount } from './codex-account-read';
 import { startCodexLogin } from './codex-connect';
+import { codexTakeoverCommand, codexTakeoverNotes } from './codex-takeover';
 import { codexMcpAuthStatus, startCodexMcpSignIn } from './codex-mcp-sign-in';
 import { codexHomes } from './codex-home';
 import { InitializeResponse } from './codex-protocol';
@@ -92,6 +93,8 @@ export function createCodexAdapter(opts: CodexAdapterOptions): AgentAdapter {
   const homes = codexHomes();
   return {
     capabilities: (account) => codexCapabilities(account.kind),
+    takeoverCommand: (spec) => codexTakeoverCommand({ ...spec, binary: opts.codexPath }),
+    takeoverNotes: () => codexTakeoverNotes(),
     probeAccount: (probe) => probeAccount(probe, opts),
     startLogin: (login) => startCodexLogin(login, opts),
     startMcpSignIn: (spec) => startCodexMcpSignIn(spec, { ...opts, homes }),

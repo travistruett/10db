@@ -213,8 +213,41 @@ export interface SetupJudgement {
   readonly leftOut: SessionSetup['leftOut'];
 }
 
+/** What the builder's terminal takes along from a chat's session: its setup and servers, made in a folder of its own. */
+export interface TakeoverSandboxInput {
+  readonly project: LaneSessionInput['project'];
+  /** The session's launch env, which the project's servers are allowlisted from. */
+  readonly env: Readonly<Record<string, string>>;
+  /** The config dir of the account the chat runs on. */
+  readonly configDir: string;
+  readonly checkouts: readonly string[];
+  readonly setup: SetupInput;
+  readonly yourMcpServers: Readonly<Record<string, UnsandboxedStdioServer>>;
+  /** The project's approved stdio servers, each launched under srt. */
+  readonly projectStdio: Readonly<Record<string, StdioMcpServer>>;
+  /** The takeover folder: the setup dir and each server's sealed files are made in it. */
+  readonly filesRoot: string;
+}
+
+export interface TakeoverSandbox {
+  readonly setup: SessionSetup;
+  readonly yourMcpServers: Readonly<Record<string, YourMcpServer>>;
+  readonly projectMcpServers: Readonly<Record<string, SandboxedMcpServer>>;
+  /** The project servers' temp dirs, which the startup sweep leaves alone while the takeover lives. */
+  readonly tempDirs: readonly string[];
+  /** What the setup, the builder's servers and the project's servers left out, and why. */
+  readonly leftOut: readonly { readonly what: string; readonly why: string }[];
+  /** Removes the setup dir, the servers' sealed files and temp dirs. */
+  remove(): void;
+}
+
 export interface LaneSandbox {
   forSession(input: LaneSessionInput): Promise<LaneSession>;
+  /**
+   * The setup and servers of a chat's session, for its terminal: judged as the session's are, with no profile
+   * of its own and no lane process to watch.
+   */
+  forTakeover(input: TakeoverSandboxInput): Promise<TakeoverSandbox>;
   /** The Settings preview of a project's setup: `keepSetup` against the project's access. */
   judgeSetup(
     project: LaneSessionInput['project'],
@@ -669,6 +702,99 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           ]);
         } catch {
           // The error that stopped the session is the one to report.
+        }
+        throw error;
+      }
+    },
+    async forTakeover(input) {
+      const laneRoots = laneRootsOf({ ...deps, tmpRoot });
+      const access = await projectAccess(
+        { ...deps, tmpRoot, laneWritableRoots: laneRoots },
+        {
+          project: input.project,
+          env: input.env,
+          rules: [],
+          configDirs: [input.configDir],
+          checkouts: input.checkouts,
+        },
+      );
+      const sandboxRoots = [...new Set([...access.sandboxRoots, tmpRoot])];
+      let setupDir: ReturnType<typeof createSetupDir> | null = null;
+      let mcp: McpSandboxes | null = null;
+      let yours: ReturnType<typeof launchYourMcpServers> | null = null;
+      try {
+        setupDir = createSetupDir(
+          input.filesRoot,
+          input.setup,
+          setupJudge(deps.home, { ...access, sandboxRoots }, deps.worktreeRoot),
+          deps.home,
+        );
+        mcp = sandboxMcpServers({
+          access,
+          home: deps.home,
+          tmpRoot,
+          filesRoot: input.filesRoot,
+          sandboxRoots,
+          runtime: deps.runtime,
+          env: input.env,
+          checkouts: input.checkouts,
+          servers: input.projectStdio,
+          ...(deps.log === undefined ? {} : { log: deps.log }),
+          ...(deps.clock === undefined ? {} : { clock: deps.clock }),
+        });
+        yours = launchYourMcpServers({
+          home: deps.home,
+          filesRoot: input.filesRoot,
+          laneWritable: laneWritableRoots({
+            checkouts: [...input.checkouts, input.project.repoPath],
+            worktreeBase: deps.worktreeRoot,
+            sandboxTempRoots: laneRoots,
+            systemTempRoots: SYSTEM_TEMP_ROOTS,
+          }),
+          servers: input.yourMcpServers,
+        });
+        const ownSetup = setupDir;
+        const ownMcp = mcp;
+        const ownYours = yours;
+        return {
+          setup: ownSetup.setup,
+          yourMcpServers: ownYours.servers,
+          projectMcpServers: ownMcp.servers,
+          tempDirs: ownMcp.tempDirs,
+          leftOut: [
+            ...ownSetup.setup.leftOut,
+            ...ownYours.leftOut,
+            ...ownMcp.failures.map((f) => ({ what: f.name, why: f.message })),
+          ],
+          remove() {
+            removeAll([
+              () => {
+                ownMcp.dispose();
+              },
+              () => {
+                ownYours.dispose();
+              },
+              () => {
+                ownSetup.remove();
+              },
+            ]);
+          },
+        };
+      } catch (error) {
+        try {
+          removeAll([
+            () => {
+              mcp?.dispose();
+            },
+            () => {
+              yours?.dispose();
+            },
+            () => {
+              setupDir?.remove();
+            },
+          ]);
+        } catch {
+          // The error that stopped the takeover is the one to report.
         }
         throw error;
       }

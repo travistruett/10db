@@ -1,4 +1,11 @@
+export { markOnboarded } from './claude-onboarding';
+export { codexHomes } from './codex-home';
 export { createClaudeAdapter } from './claude-adapter';
+export { claudeTakeoverNotes } from './claude-takeover';
+export { claudeTakeoverMcp, codexTakeoverServers } from './takeover-servers';
+export { tomlString } from './codex-takeover';
+export { setupPromptText } from './setup-prompt';
+export { codexTakeoverNotes } from './codex-takeover';
 export { capabilitiesOf, claudeCapabilities, codexCapabilities } from './capabilities';
 export { createCodexAdapter } from './codex-adapter';
 export { McpAuthState } from './codex-mcp-auth';
@@ -9,6 +16,13 @@ export { spawnAppServer, type CodexChild } from './codex-rpc';
 export { guardSocketPath } from './codex-session';
 export { codexLoginStatus } from './codex-sign-in-check';
 export { createRoutedAdapter } from './routed-adapter';
+export {
+  isArgFromFile,
+  TakeoverRefusedError,
+  type TakeoverArg,
+  type TakeoverCommand,
+  type TakeoverSpec,
+} from './takeover-command';
 export { FAKE_ACCOUNT_EMAIL, FakeAdapter } from './fake-adapter';
 export { FakeScriptBook, loadFakeScriptBook } from './fake-script';
 export { scriptedShapeBehaviour } from './fake-plan-script';

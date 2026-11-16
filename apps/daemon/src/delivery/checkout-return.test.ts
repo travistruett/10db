@@ -21,7 +21,7 @@ import {
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
-import { tempDir } from '../../test/fixtures';
+import { tempDir, waitForAsync } from '../../test/fixtures';
 import { silentLogger } from '../log';
 import { systemProcesses } from '../recovery';
 import { recoverBatches } from './index';
@@ -314,6 +314,41 @@ describe('a batch that ended while the daemon was down', () => {
     });
     await h.jobs.idle();
     expect(where()).toEqual({ ...start, status: '' });
+  });
+
+  it('settles no branch while the checkout is held by a terminal and 10db stops', async () => {
+    h = createDeliveryHarness({}, { trigger: false });
+    const batch = await openBatch('SHIPPED');
+    h.state.write((ctx) => {
+      const id = mintId('Chat');
+      const conv = insertConversation(ctx, {
+        projectId: h.project.id,
+        owner: { kind: ConversationOwnerKind.Chat, id },
+        profile: ConversationProfile.Explore,
+        state: ConversationState.TakenOver,
+      });
+      insertChat(ctx, {
+        id,
+        projectId: h.project.id,
+        conversationId: conv.id,
+        title: 'In terminal',
+        tabPosition: 0,
+      });
+    });
+    h.shipper.abandon(batch.id);
+    // The abandon's ship job waits for the terminal before it moves the checkout.
+    await waitForAsync(
+      () =>
+        Promise.resolve(
+          getBatchRow(h.store.db, batch.id).notices.some((n) => n.key === 'folder-hold') ||
+            undefined,
+        ),
+      30_000,
+    );
+    await h.jobs.stop();
+    // Nothing ran git in the held folder: no card about the branch the checkout is still on.
+    expect(h.cards().filter((card) => card.title.startsWith('Delete '))).toEqual([]);
+    expect(where().branch).toBe(batch.branch);
   });
 
   it('unwinds batches that ended one after another back to where the first found the checkout', async () => {

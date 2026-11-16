@@ -4,9 +4,19 @@
   "properties": {
     "notifyReplies": {
       "type": "boolean"
+    },
+    "terminalApp": {
+      "default": "terminal",
+      "type": "string",
+      "enum": [
+        "terminal",
+        "iterm",
+        "copy"
+      ]
     }
   },
   "required": [
-    "notifyReplies"
+    "notifyReplies",
+    "terminalApp"
   ]
 }

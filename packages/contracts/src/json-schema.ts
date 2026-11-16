@@ -16,7 +16,9 @@ import {
   ProjectFileMatchDto,
   SessionStartDto,
   SessionsSettingsDto,
+  SessionsSettingsPatch,
 } from './chat';
+import { TakeoverCommandDto, TakeoverDto, TakeoverPreviewDto } from './takeover';
 import { ChatToolResult } from './chat-tools';
 import { FolderDto } from './folder-hold';
 import {
@@ -333,6 +335,10 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'project-file-match-dto': ProjectFileMatchDto,
   'session-start-dto': SessionStartDto,
   'sessions-settings-dto': SessionsSettingsDto,
+  'sessions-settings-patch': SessionsSettingsPatch,
+  'takeover-command-dto': TakeoverCommandDto,
+  'takeover-dto': TakeoverDto,
+  'takeover-preview-dto': TakeoverPreviewDto,
   'conversation-delta-frame': ConversationDeltaFrame,
   'conversation-dto': ConversationDto,
   'conversation-full-dto': ConversationFullDto,
