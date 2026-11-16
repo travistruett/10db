@@ -429,13 +429,16 @@ describe('SettingsView', () => {
 
   it('chooses where Open in Terminal opens and saves Copy the Command, keeping the notification switch', async () => {
     const patched: unknown[] = [];
+    // The daemon answers what it holds, so a refetch after the save reads the saved choice back.
+    let terminalApp = 'terminal';
     server.use(
       http.get(daemonUrl('/settings/sessions'), () =>
-        HttpResponse.json({ notifyReplies: false, terminalApp: 'terminal' }),
+        HttpResponse.json({ notifyReplies: false, terminalApp }),
       ),
       http.patch(daemonUrl('/settings/sessions'), async ({ request }) => {
         patched.push(await request.json());
-        return HttpResponse.json({ notifyReplies: false, terminalApp: 'copy' });
+        terminalApp = 'copy';
+        return HttpResponse.json({ notifyReplies: false, terminalApp });
       }),
       ...baseHandlers(),
     );
