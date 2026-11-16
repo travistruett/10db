@@ -216,6 +216,19 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   await page.getByRole('checkbox', { name: 'People', exact: true }).check();
   await page.getByRole('button', { name: 'Start Pass', exact: true }).click();
 
+  // The pages open waiting on the builder; each is sent its first message on its own page.
+  for (const area of ['Settings', 'People']) {
+    await expect(row(page, area)).toContainText('Your turn');
+    await row(page, area)
+      .getByRole('button', { name: new RegExp(`^${area}`) })
+      .click();
+    const first = page
+      .getByRole('region', { name: area })
+      .getByRole('textbox', { name: `Message to ${area}` });
+    await first.fill('these feel cramped');
+    await first.press('Meta+Enter');
+  }
+
   // People asks, so it rises to the top of the queue; it is answered on the page.
   await expect(row(page, 'People')).toContainText('Asks a question');
   expect((await queueOrder(page))[0]).toBe('People');
@@ -223,7 +236,7 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
     .getByRole('button', { name: /^People/ })
     .click();
   const people = page.getByRole('region', { name: 'People' });
-  await expect(people.getByText('Which spacing?')).toBeVisible();
+  await expect(people.getByText('Which spacing?', { exact: true })).toBeVisible();
   await people.getByRole('radio', { name: /Roomy/ }).check();
   await people.getByRole('button', { name: 'Send answer' }).click();
   await expect(row(page, 'People')).toContainText('Ready');
