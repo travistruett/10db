@@ -9,6 +9,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it } from 'vitest';
 import { chatDto, chatServer } from '../../test/chat-fixtures';
+import { FILE_AS_TASKS_MESSAGE } from './chat-tab';
 import { builderItem, CLAUDE_CAPABILITIES, toolItem } from '../../test/conversation-fixtures';
 import { folderKeys } from '../../daemon/project-folder-queries';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
@@ -529,6 +530,36 @@ describe('ChatTab: the composer and Your folder', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send Now Reading Only' }));
     await waitFor(() => {
       expect(served.stoppedWaiting).toEqual([chat.id]);
+    });
+  });
+
+  describe('a message parked for Your folder with nothing keeping the chat out', () => {
+    const parked = (chat: ChatDto) =>
+      folderDto({
+        projectId: project.id,
+        holders: [folderHolder(FolderHolderKind.WaitingChat, chat.title, { chatId: chat.id })],
+      });
+    const openParked = () => {
+      const chat = chatDto({ projectId: project.id });
+      const { served } = openChat({ id: chat.id, conversationId: chat.conversationId }, () => [], [
+        http.get(daemonUrl('/projects/:projectId/folder'), () => HttpResponse.json(parked(chat))),
+      ]);
+      return { chat, served };
+    };
+
+    it('keeps the waiting row and its Stop', async () => {
+      openParked();
+      expect(await screen.findByText(/^Waits for Your folder/)).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
+    });
+
+    it('sends File as Tasks with wait, so it does not cancel the wait', async () => {
+      const { served } = openParked();
+      await screen.findByText(/^Waits for Your folder/);
+      fireEvent.click(screen.getByRole('button', { name: 'File as Tasks' }));
+      await waitFor(() => {
+        expect(bodies(served)).toEqual([{ text: FILE_AS_TASKS_MESSAGE, folder: 'wait' }]);
+      });
     });
   });
 });

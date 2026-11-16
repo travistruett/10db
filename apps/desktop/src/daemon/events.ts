@@ -55,9 +55,8 @@ const KNOWLEDGE: readonly QueryKey[] = [['knowledge'], ['proposals'], ['provenan
 /** What to refetch when an event about an entity type arrives. */
 export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // 10db adds to a project's hazards by itself, so the page that lists the additions follows the project.
-  // Your folder's holders change with a hold event, which is the project's.
-  // A chat's wait for it shows on its stream.
-  project: [queryKeys.projects, CANDIDATES, HAZARD_ASSESSMENT_KEY, folderKeys.all, liveKeys.all],
+  // Your folder's holders, a chat's wait among them, change with a hold event, which is the project's.
+  project: [queryKeys.projects, CANDIDATES, HAZARD_ASSESSMENT_KEY, folderKeys.all],
   // A run's skip is recorded under its task's event; a task becoming done, or changing rigor, moves the rigor
   // figures.
   task: [['tasks'], goalKeys.all, CANDIDATES, skipKeys.all, rigorFiguresKeys.all],

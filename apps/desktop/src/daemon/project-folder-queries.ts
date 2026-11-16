@@ -2,7 +2,7 @@ import { FolderDto, type ChatId, type ProjectId } from '@10db/contracts';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { readJson } from './client';
 import { chatKeys } from './chat-queries';
-import { conversationKeys, liveKeys } from './conversation-queries';
+import { conversationKeys } from './conversation-queries';
 import { useDaemon } from './provider';
 
 // Sessions spec §7.3: who holds a project's checkout, Your folder. The daemon says it changed with a
@@ -42,7 +42,6 @@ export function useStopWaiting() {
     onSettled: () => {
       void queries.invalidateQueries({ queryKey: chatKeys.all });
       void queries.invalidateQueries({ queryKey: conversationKeys.all });
-      void queries.invalidateQueries({ queryKey: liveKeys.all });
       void queries.invalidateQueries({ queryKey: folderKeys.all });
     },
   });

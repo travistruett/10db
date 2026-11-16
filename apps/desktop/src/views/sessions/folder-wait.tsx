@@ -4,8 +4,8 @@ import { Button, Group, Text } from '@mantine/core';
 // Send Now Reading Only runs it at once, changing nothing, and Stop drops it.
 
 export interface FolderWaitProps {
-  /** The holders, as a sentence part: "the task ‘Bump vite’". */
-  readonly holders: string;
+  /** The holders still in the way, as a sentence part: "the task ‘Bump vite’"; null when none is. */
+  readonly holders: string | null;
   readonly onSendNow: () => void;
   readonly onStop: () => void;
 }
@@ -22,7 +22,7 @@ export function FolderWait({ holders, onSendNow, onStop }: FolderWaitProps) {
       style={{ flex: 'none' }}
     >
       <Text size="sm" c="dimmed" lineClamp={2}>
-        Waits for Your folder: in use by {holders}
+        {holders === null ? 'Waits for Your folder' : `Waits for Your folder: in use by ${holders}`}
       </Text>
       <Group gap="xs" wrap="nowrap" style={{ flex: 'none' }}>
         <Button size="xs" variant="default" onClick={onSendNow}>

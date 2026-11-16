@@ -1,8 +1,8 @@
 import {
   FolderHolderKind,
+  FolderWhileHeld,
   type ChatDto,
   type Effort,
-  type FolderWhileHeld,
   type ProjectViewDto,
   type ToolCallView,
 } from '@10db/contracts';
@@ -130,16 +130,14 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
   const models = useChatModels(chat.projectId);
   const folder = useProjectFolder(chat.projectId);
   const stopWaiting = useStopWaiting();
-  // Holders that keep this chat's turn from writing: Send asks before a message runs, and a message
-  // that chose to wait is listed by the daemon as this chat waiting.
+  // Holders that keep this chat's turn from writing: Send asks before a message runs.
   const keeping = keepingWords(chat, folder);
-  const waitingOn =
-    keeping !== null &&
-    (folder?.holders ?? []).some(
-      (h) => h.kind === FolderHolderKind.WaitingChat && h.chatId === chat.id,
-    )
-      ? keeping
-      : null;
+  // A message that chose to wait is listed by the daemon as this chat waiting, whoever still holds the folder.
+  const waiting = (folder?.holders ?? []).some(
+    (h) => h.kind === FolderHolderKind.WaitingChat && h.chatId === chat.id,
+  );
+  // A send that names no folder would cancel the wait, so while the chat waits it asks to keep waiting.
+  const whileWaiting: FolderWhileHeld | undefined = waiting ? FolderWhileHeld.Wait : undefined;
   const modelRows = useModels(null);
   const offered = models.data?.offered ?? [];
   const named = conversation.model ?? models.data?.default ?? null;
@@ -149,12 +147,13 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
   const removed = project === undefined;
 
   const post = async (d: Draft, folderChoice?: FolderWhileHeld): Promise<void> => {
+    const chosen = folderChoice ?? whileWaiting;
     await send.mutateAsync({
       conversationId: chat.conversationId,
       text: d.text,
       mentions: d.mentions,
       pictures: d.pictures,
-      ...(folderChoice === undefined ? {} : { folder: folderChoice }),
+      ...(chosen === undefined ? {} : { folder: chosen }),
     });
   };
 
@@ -249,7 +248,9 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
   const allow = (call: ToolCallView): void => {
     const text = `Go ahead: ${call.title}`;
     if (keeping === null) {
-      send.mutate({ conversationId: chat.conversationId, text });
+      void post({ ...EMPTY_DRAFT, text }).catch((error: unknown) => {
+        setSendError(error instanceof Error ? error.message : String(error));
+      });
       return;
     }
     const current = sessionDrafts.get(key);
@@ -332,7 +333,9 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
           {...(renaming === undefined ? {} : { renaming })}
           {...(onRenamed === undefined ? {} : { onRenamed })}
           onFileAsTasks={() => {
-            send.mutate({ conversationId: chat.conversationId, text: FILE_AS_TASKS_MESSAGE });
+            void post({ ...EMPTY_DRAFT, text: FILE_AS_TASKS_MESSAGE }).catch((error: unknown) => {
+              setSendError(error instanceof Error ? error.message : String(error));
+            });
           }}
         />
       </div>
@@ -357,15 +360,15 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
           {...(tool === undefined ? {} : { tool })}
         />
         <PermissionRequest items={open} />
-        {waitingOn === null ? null : (
+        {waiting ? (
           <FolderWait
-            holders={waitingOn}
+            holders={keeping}
             onSendNow={() => {
               stopWaiting.mutate(chat.id);
             }}
             onStop={stopNow}
           />
-        )}
+        ) : null}
         {removed ? (
           <Text size="sm" c="dimmed" px="md" py="md">
             This project was removed from 10db.
@@ -434,10 +437,7 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
                           });
                       },
                       onFileAsTasks: async () => {
-                        await send.mutateAsync({
-                          conversationId: chat.conversationId,
-                          text: FILE_AS_TASKS_MESSAGE,
-                        });
+                        await post({ ...EMPTY_DRAFT, text: FILE_AS_TASKS_MESSAGE });
                       },
                     },
                   })}
