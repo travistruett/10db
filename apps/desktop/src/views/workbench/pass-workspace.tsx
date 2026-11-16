@@ -18,7 +18,7 @@ import { nextWaiting, stepIndex, WorkbenchKey } from './workbench-keys';
 import { WorkbenchLayout, workbenchLayout } from './workbench-layout';
 
 /** The queue's width beside the thread in the wide layout. */
-const QUEUE_WIDTH_PX = 280;
+const QUEUE_WIDTH_PX = 220;
 
 /** A working line's minutes move once a minute; half that keeps them on time. */
 const CLOCK_TICK_MS = 30_000;

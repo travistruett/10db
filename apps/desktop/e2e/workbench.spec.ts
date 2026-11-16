@@ -142,6 +142,13 @@ async function threadScrollsInside(page: Page, region: Locator, label: string, w
     return root.scrollHeight > root.clientHeight + 1 || root.scrollWidth > root.clientWidth + 1;
   });
   expect(scrolls, `the window scrolls at ${String(width)}x420`).toBe(false);
+  // A thread read at its end stays at its end as the window shrinks, as a chat does.
+  const messages = region.getByRole('group', { name: 'Messages' });
+  await expect
+    .poll(() => messages.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight), {
+      message: `the thread keeps its newest message in view at ${String(width)}x420`,
+    })
+    .toBeLessThanOrEqual(2);
   const box = await region.getByRole('textbox', { name: `Message to ${label}` }).boundingBox();
   expect(box, `the composer is drawn at ${String(width)}x420`).not.toBeNull();
   if (box !== null)

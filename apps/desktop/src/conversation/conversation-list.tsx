@@ -174,10 +174,27 @@ function WindowedArticles({
     if (nearBottom || entryCount <= 1) virtualizer.scrollToEnd();
   }, [virtualizer, entryCount]);
 
+  // Whether the builder reads at the end. A window that shrinks or grows keeps a reader at the end
+  // there, as a chat does; one who scrolled up to read stays where they were.
+  const atEnd = useRef(true);
+  useEffect(() => {
+    const el = viewport.current;
+    if (el === null) return;
+    const keep = new ResizeObserver(() => {
+      if (atEnd.current) virtualizer.scrollToEnd();
+    });
+    keep.observe(el);
+    return () => {
+      keep.disconnect();
+    };
+  }, [virtualizer]);
+
   const onScroll = useCallback(() => {
     const el = viewport.current;
     if (el === null) return;
-    setAboveTail(el.scrollHeight - el.scrollTop - el.clientHeight >= FOLLOW_DISTANCE);
+    const above = el.scrollHeight - el.scrollTop - el.clientHeight >= FOLLOW_DISTANCE;
+    atEnd.current = !above;
+    setAboveTail(above);
   }, []);
 
   const items = virtualizer.getVirtualItems();
