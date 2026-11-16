@@ -112,6 +112,12 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
     .filter({ has: page.getByRole('heading', { name: 'Claude Code' }) });
   await expect(reply.getByRole('heading', { name: 'What I found' })).toBeVisible();
   await expect(reply.getByText('const retry = once;')).toBeVisible();
+  // The agent's todo list and what it left running sit above the composer.
+  await expect(page.getByText('Todos · 1 of 3 done')).toBeVisible();
+  await expect(page.getByLabel('Find why the retry is skipped, in progress')).toBeVisible();
+  await expect(page.getByText('Running in the background · 2')).toBeVisible();
+  await expect(page.getByText('Subagent · Explore')).toBeVisible();
+  await expect(page.getByText('pnpm exec vitest run login.test.ts')).toBeVisible();
   await expect(page.getByText(/Read 1 file/)).toHaveCount(0);
   await reply
     .getByRole('button', { name: /^Worked/ })
