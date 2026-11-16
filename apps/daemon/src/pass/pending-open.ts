@@ -17,8 +17,8 @@ export interface PendingOpen extends PendingOpenDto {
 export interface PendingOpens {
   /** Registers the project's wait and answers the signal its open waits on; refused while one exists. */
   begin(projectId: ProjectId, open: PendingOpen): AbortSignal;
-  /** Forgets the wait once its open has finished or been refused. Idempotent. */
-  end(projectId: ProjectId): void;
+  /** Forgets the wait `signal` belongs to once its open has finished or been refused; a newer wait stays. Idempotent. */
+  end(projectId: ProjectId, signal: AbortSignal): void;
   /** The wait, as the folder view shows it. */
   view(projectId: ProjectId): PendingOpenDto | null;
   /** The wait with the chat that asked for it. */
@@ -54,8 +54,10 @@ export function createPendingOpens(deps: { readonly state: StateStore }): Pendin
       changed(projectId);
       return controller.signal;
     },
-    end(projectId) {
-      if (waits.delete(projectId)) changed(projectId);
+    end(projectId, signal) {
+      if (waits.get(projectId)?.controller.signal !== signal) return;
+      waits.delete(projectId);
+      changed(projectId);
     },
     get,
     view(projectId) {

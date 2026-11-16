@@ -209,6 +209,11 @@ Left to right:
 first, down to 96 px; the selected tab keeps its natural width. Titles are short by design: `set_title` asks the
 agent for at most 28 characters (§5.4).
 
+**A Task's tab lives in the window (call).** Which Tasks are open as tabs, and their order, are kept in the window's
+`localStorage`, as a Chat's tab position is kept by its row; the daemon stores no tab for a Task, so no migration is
+needed. A cleared store loses the tab, never the Task: the Board, the Workbench, the Inbox and the Chat's "Started a
+task" row open it again.
+
 **The agent and model are not on the tab (call).** They do not fit at six tabs, and they rarely change. They are
 in the tooltip and the session bar.
 
@@ -732,15 +737,21 @@ opens a centred form modal (DESIGN.md "Modals"), 560 px wide:
 └──────────────────────────────────────────────────────────────┘
 ```
 
-- **The brief** is written by the chat's agent when the modal opens (design spec §7.3; the call is adopted). A short
-  turn calls `write_brief`, and the brief streams into the field under "Writing the brief…". Typing in the
-  field stops it. If the agent is unavailable or takes more than 60 seconds, the brief is the chat's digest plus the
-  builder's last message, and a dimmed line says so.
+- **The brief** is written by the chat's agent when the modal opens, but only between turns (design spec §7.3; the
+  call is adopted). A short read-only turn calls `write_brief`, and the field reads "Writing the brief…" until the
+  call lands; it does not stream (a follow-up). Typing in the field stops the sheet taking the agent's brief and
+  stops nothing else. While the chat's turn runs or waits (on a card or on the folder), or its account is paused,
+  no turn is asked and the brief is the chat's digest plus the builder's last message at once; the builder's turn is
+  never stopped. The same fallback follows when the agent has not written within 60 seconds. A dimmed line says
+  which, and why.
 - **Where** is the Board's `PlacementChoice`, in the Board's words, with **Separate copy** picked by default
   **(call)**. Your folder, as a pass, is the option for work that wants the pass's ceremony. Each choice's line says
   where it works and **how it lands, before it starts**:
   - **Separate copy:** "An ordinary task in its own copy, on a new branch. It lands by ampsio's delivery: the gate,
-    a review, and a pull request."
+    a review, and a pull request." It starts from the project's base branch, and when HEAD has commits the base
+    lacks the sheet says so: "Starts from `main`. The 2 commits on `feature` that `main` lacks stay out of it."
+    On a `local` project there are no copies: the choice is disabled, "This project lands locally, so it has no
+    separate copies.", and Your folder is picked.
   - **Your folder, as a pass:** "A pass of one on its own branch from `main`. Sign Off lands each turn's work; Close
     Pass… opens one pull request, and `main` fast-forwards to it when it merges. Your folder is held until then." On
     a `local` project the last sentence reads "`main` fast-forwards to it when the pass closes."
@@ -751,6 +762,8 @@ opens a centred form modal (DESIGN.md "Modals"), 560 px wide:
 
     The list shows five paths and folds the rest behind **Show 4 More**. The builder can cancel and commit them
     first; nothing from before joins or stays behind unseen.
+  - **When chats' turns are the only thing in the way** (Your folder), the refusal offers **Stop the Turn and Open**
+    and **Open When It Ends** (one per project; Cancel withdraws it; an update or a restart cancels it).
   - **Refused** (Your folder): the choice stays in the list, disabled, with its reason and a link (DESIGN.md), and
     Separate copy stays picked:
     - "Your folder is in use by the UI Workbench pass ‘Settings pass’." with Open UI Workbench
@@ -780,14 +793,14 @@ opens a centred form modal (DESIGN.md "Modals"), 560 px wide:
 - **The read-only Chat stays reachable** from the Task's "From chat" link, ⌘⇧T and ⌘K. Opened, it shows:
   - its transcript, with one row at its end: "Started a task: Retry login on a 401 · Separate copy · Open"
   - in the composer's place, one line on `bg_0` with a 1 px `bg_2` border: "This chat handed its work to **Retry
-    login on a 401**. It's read-only now.", with **Open Task** and **New Chat From This**
+    login on a 401**. It's read-only now.", with **Open Task**
   - a session bar without Open in Terminal or Do It…; its `⋯` menu keeps Rename and Archive, and Archive is refused
     until the task is finished (§5.6)
-- **New Chat From This** opens a fresh Chat in the read-only one's place, seeded with its digest as the first
-  message's context. It never resumes the sealed session, so the design spec's §6.7 holds: one writer per agent
-  session.
+- **New Chat From This** is deferred to a follow-up task: the sealed Chat offers **Open Task** alone, and the
+  builder starts a fresh Chat by hand. When built, it opens a fresh Chat seeded with the digest and never resumes the
+  sealed session, so the design spec's §6.7 holds: one writer per agent session.
 - **Why the Chat doesn't stay as a tab:** the Task is a different agent session with its own memory, place and end,
-  and the builder can keep talking through New Chat From This.
+  and the builder can start a fresh Chat beside it.
 
 **A pass of one opens beside the Chat** (design spec S15). The Chat is not sealed.
 
@@ -865,7 +878,11 @@ a Chat.
   - Your folder: the pass's branch and its kept work against the pass's start.
   - A Separate copy: the task's branch against its base.
 
-  It reads `GET /workstreams/:id/changes`, the route the builder's check card already uses (design spec §7.3).
+  It reads `GET /workstreams/:id/changes`, the route the builder's check card already uses (design spec §7.3). A
+  pass of one's task passes `scope`: all of the pass's kept turns, or the last. A Task whose copy is gone (its branch
+  merged and the copy removed, or the checkout deleted) makes the route answer 404, and the panel says "This task's
+  copy is gone" in place of the diffs. A pass of one's turns are read from their kept commits, so they survive. `GET /tasks/:taskId/session` tells the tab where the
+  task works (copy or pass), its branch, its pass and the chat it came from.
 - **Layout:** a pane on the right of the conversation, 44% of the width by default, resizable between 360 px and 60%.
   The conversation's column re-centres in what is left.
 

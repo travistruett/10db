@@ -19,6 +19,7 @@ import {
   InvalidError,
   mintId,
   TASK_MESSAGE_MAX_CHARS,
+  TaskStatus,
   TASK_MESSAGE_PICTURES_MAX,
   TASK_MESSAGE_PICTURES_MAX_BYTES,
   type ChatCreateInput,
@@ -36,6 +37,7 @@ import {
   chatOfConversation,
   chatView,
   getChat,
+  getTask,
   getConversation,
   getProject,
   hasItemOfKind,
@@ -75,9 +77,11 @@ const FIRST_LINE_TITLE_MAX = 40;
 
 /** What a message to an archived chat is refused with. */
 export const CHAT_ARCHIVED = 'This session is archived.';
-/** What Redo, archive and a second Do It are refused with while an open has stopped the chat's turn. */
+/** What Redo, archive and a second Do It are refused with while a pass's open has stopped the chat's turn. */
 export const DO_IT_UNDER_WAY =
   'A pass is opening and has stopped this chat’s turn; try again once it has opened';
+/** The same refusal while Do It makes a task in a separate copy. */
+export const DO_IT_COPY_UNDER_WAY = 'Do It is already under way for this chat';
 /** What a send is refused with while Do It hands the chat's work to a task in a separate copy. */
 export const HANDING_OFF = 'This chat is handing its work to a task';
 /** What Do It and archive are refused with while a pass waits to open for the chat. */
@@ -199,13 +203,17 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
   // Chats whose last request for a brief was sent as a turn of its own, until that turn ends.
   const briefTurns = new Set<ChatId>();
   const refuseWhileDoing = (chatId: ChatId): void => {
-    if (stoppedForOpen.has(chatId)) throw new ConflictError(DO_IT_UNDER_WAY);
+    const place = stoppedForOpen.get(chatId);
+    if (place === undefined) return;
+    throw new ConflictError(place === DoItPlace.Worktree ? DO_IT_COPY_UNDER_WAY : DO_IT_UNDER_WAY);
   };
 
   // A chat sealed into a task of its own has nothing left to archive until that task ends: the tab it
   // closed is the builder's only link to it.
   const refuseWhileHandedTaskRuns = (chat: ChatRow): void => {
     if (chat.taskId === null || chat.passId !== null) return;
+    // A task the builder removed or finished is over, whatever its last run reads.
+    if (getTask(state.db, chat.taskId).status !== TaskStatus.Open) return;
     const run = latestWorkstreamOf(state.db, chat.taskId);
     if (run === undefined || ACTIVE_STATES.includes(run.state))
       throw new ConflictError(HANDED_TASK_RUNNING);
@@ -325,9 +333,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       if (briefTurnRunning(chat)) {
         briefTurns.delete(chat.id);
         engine.holdStarts(conversationId);
-        void stopHeld(conversationId, () => {
-          dispatch(chat, conversationId, folder);
-        });
+        void stopHeld(conversationId, () => dispatch(chat, conversationId, folder));
         return item;
       }
       dispatch(chat, conversationId, folder);
@@ -493,9 +499,10 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
   /**
    * Stops the turn with starts held, runs `next` (the queue's half of the send, so its folder choice is made
-   * before anything starts), then lets the starts go unless an open holds them.
+   * before anything starts, and whether it parked the message), then lets the starts go unless an open holds
+   * them or the message waits for the folder.
    */
-  async function stopHeld(conversationId: ConversationId, next: () => void): Promise<void> {
+  async function stopHeld(conversationId: ConversationId, next: () => boolean): Promise<void> {
     const chat = chatOfConversation(state.db, conversationId);
     try {
       await engine.stop(conversationId);
@@ -503,8 +510,9 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     } catch {
       // A stop that fails leaves the turn as it was; the message still runs after it.
     }
+    let parked = false;
     try {
-      next();
+      parked = next();
     } catch (error) {
       deps.log.warn(
         { conversationId, err: error instanceof Error ? error.message : String(error) },
@@ -512,7 +520,9 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       );
     } finally {
       // The starts of a chat an open stopped are held for the open, which gives them back itself.
-      if (chat === null || !stoppedForOpen.has(chat.id)) engine.releaseStarts(conversationId);
+      // A message that waits for the folder keeps its starts held; the wait releases them.
+      if (!parked && (chat === null || !stoppedForOpen.has(chat.id)))
+        engine.releaseStarts(conversationId);
     }
   }
 
@@ -529,7 +539,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     chat: ChatRow,
     conversationId: ConversationId,
     folder: FolderWhileHeld | undefined,
-  ): void {
+  ): boolean {
     const waiting = deps.folderHold.waiting(chat.id);
     const parks = folder === FolderWhileHeld.Wait && (waiting || mustWait(chat));
     // A read-only send applies to everything queued, and to the turn that runs it even if the folder frees.
@@ -543,6 +553,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     engine.queued(conversationId);
     if (parks) watchFolder(chat);
     else if (waiting) engine.releaseStarts(conversationId);
+    return parks;
   }
 
   function requireChat(conversationId: ConversationId): ChatRow {

@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { chatWorld, type ChatWorld } from './chat-world';
-import { createTempRepo, isolatedGitEnv, type TempDir } from './fixtures';
+import { createTempRepo, isolatedGitEnv, waitFor, type TempDir } from './fixtures';
 
 // Sessions spec §7.3: a chat holds Your folder exactly while its turn runs, takes it only when nothing of
 // 10db's holds it, and says so in its thread, on a real store, the explore engine and the fake adapter.
@@ -202,6 +202,38 @@ describe('a message that waits for Your folder', () => {
     expect(notices(chat)).toEqual([]);
     expect(w.folderHold.holders(w.project.id)).toEqual([]);
     expect(listItems(w.state.db, chat.conversationId, {}).length).toBeGreaterThan(1);
+  });
+
+  it('keeps a Wait message parked after it stopped a brief turn, until the folder frees', async () => {
+    w = chatWorld();
+    runningTask('Bump vite');
+    const chat = w.open();
+    let finish: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      w.adapter.shapeBehaviour = async () => {
+        resolve();
+        await new Promise<void>((r) => {
+          finish = r;
+        });
+        w.adapter.shapeBehaviour = () => Promise.resolve({ text: 'Done.' });
+        return { text: 'Brief.' };
+      };
+    });
+    w.chat.askBrief(chat.id);
+    await started;
+
+    sayWith(chat, 'edit it', FolderWhileHeld.Wait);
+
+    finish();
+    await waitFor(() => w.folderHold.waiting(chat.id) || undefined);
+    await w.engine.settled(chat.conversationId);
+    // The stop that the send made ended, and the message still waits: it was not released read only.
+    expect(w.folderHold.waiting(chat.id)).toBe(true);
+    expect(w.engine.parked(chat.conversationId)).toBe(true);
+    laneEnds();
+    await w.engine.settled(chat.conversationId);
+    expect(w.folderHold.waiting(chat.id)).toBe(false);
+    expect(w.folderHold.holders(w.project.id)).toEqual([]);
   });
 
   it('sends at once when nothing holds the folder', async () => {

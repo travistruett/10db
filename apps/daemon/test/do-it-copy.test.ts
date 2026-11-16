@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -316,6 +317,24 @@ describe('Do It in a separate copy', () => {
     expect(res.status).toBe(409);
     expect(getChat(daemon.state.db, chat.id).archivedAt).toBeNull();
   });
+
+  it.each(['cancelled', 'done'] as const)(
+    'archives the chat once its task is %s, even with no run to read',
+    async (status) => {
+      const made = await project();
+      const chat = await chatWithReply(made);
+      const done = await api().post(`/chats/${chat.id}/do-it`, DoItResult, request);
+      if (!('taskId' in done)) throw new Error('Do It answered pending');
+      daemon.state.write((ctx) => {
+        ctx.tx.update(schema.tasks).set({ status }).where(eq(schema.tasks.id, done.taskId)).run();
+      });
+
+      const res = await post(`/chats/${chat.id}/archive`, {});
+
+      expect(res.status).toBe(200);
+      expect(getChat(daemon.state.db, chat.id).archivedAt).not.toBeNull();
+    },
+  );
 
   it("refuses the old session token's calls once the chat is sealed", async () => {
     const made = await project();

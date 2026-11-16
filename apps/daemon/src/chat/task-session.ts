@@ -10,7 +10,9 @@ import {
   getBatch,
   getPass,
   getTask,
+  isWholeProjectPass,
   latestWorkstreamOf,
+  passThatMadeTask,
   taskConversationOf,
   type DbReader,
 } from '@10db/db';
@@ -25,7 +27,10 @@ import {
 export function taskSession(db: DbReader, taskId: TaskId): TaskSessionDto {
   const task = getTask(db, taskId);
   const run = latestWorkstreamOf(db, taskId);
-  const passId: PassId | null = task.passId ?? null;
+  // A pass of one's task leaves its pass when the pass closes, but it was still that pass's page.
+  const madeBy = passThatMadeTask(db, taskId);
+  const passId: PassId | null =
+    task.passId ?? (madeBy !== null && isWholeProjectPass(db, madeBy) ? madeBy : null);
   const pass = passId === null ? null : getPass(db, passId);
   const batchId = pass?.batchId ?? run?.batchId ?? null;
   const batch = batchId === null ? null : getBatch(db, batchId);

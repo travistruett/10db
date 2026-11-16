@@ -9,6 +9,7 @@ import {
   ProjectDto,
   TaskDto,
   TaskSessionDto,
+  WHOLE_PROJECT_PAGE,
   WorkstreamChangesDto,
   WorkstreamDto,
 } from '@10db/contracts';
@@ -24,11 +25,15 @@ import {
   insertBatch,
   insertInboxItem,
   insertWorkstream,
+  leavePass,
+  markTasksMadeByPass,
   patchProject,
+  schema,
   patchWorkstream,
   transitionBatch,
   transitionWorkstream,
 } from '@10db/db';
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
@@ -530,6 +535,24 @@ describe('GET /tasks/:taskId/session', () => {
       fromChat: { title: 'Login bug' },
       pullRequest: null,
     });
+    expect(session.branch).toBe('10db/polish-abcdef');
+  });
+
+  it('still reads a pass of one as a pass once the pass closed and its task left it', async () => {
+    const { task, pass, ws } = await passTaskWithTurns();
+    daemon.state.write((ctx) => {
+      ctx.tx
+        .update(schema.tasks)
+        .set({ areas: [WHOLE_PROJECT_PAGE.name] })
+        .where(eq(schema.tasks.id, task.id))
+        .run();
+      markTasksMadeByPass(ctx, pass.id, [task.id]);
+      leavePass(ctx, task.id);
+    });
+
+    const session = await api().get(`/tasks/${task.id}/session`, TaskSessionDto);
+
+    expect(session).toMatchObject({ place: 'pass', passId: pass.id, workstreamId: ws.id });
     expect(session.branch).toBe('10db/polish-abcdef');
   });
 

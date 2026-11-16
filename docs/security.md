@@ -141,6 +141,30 @@ the folder back. Not covered: the builder's own MCP servers run outside the sand
 not held (`docs/superpowers/specs/2026-11-11-10db-sessions-design.md` §7.3). The decision is
 `architecture/decisions/2026-11-15-a-chat-writes-under-the-folder-hold-and-10dbs-writers-keep-it-alone.md`.
 
+## Do It: a chat's work handed to a task
+
+Do It makes the chat's work a task in a separate copy, or a pass of one in Your folder (`docs/superpowers/specs/2026-11-11-10db-sessions-design.md`
+§7.3; decision `architecture/decisions/2026-11-16-do-it-hands-a-chat-to-a-task-or-a-pass-of-one.md`). The whole-project
+page of a pass of one is judged like any lane: the sandbox, the guard and the judge decide, not the page's breadth.
+The attempts it was reviewed against, with what stops each (rows continue the numbering of the chat's table in the
+sessions M6 plan):
+
+| #   | Attempt                                                                                         | What stops it                                                                                                                                 |
+| --- | ----------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| 15  | A whole-project page writes or keeps a hazard file (a lockfile, a migration) without the hazard | The judge checks hazards after the page; kept work counts a hazard file only with its claim, else it goes to the close's "files no page owns" |
+| 16  | It writes `.git`, a gitfile, a protected path or agent config                                   | The lane's rules 1 and 2 still apply; agent config loads only once its hash is approved                                                       |
+| 17  | A sealed chat calls later (a background agent, an old token, `write_brief`, a git tool)         | The seal ends the session row, so the token reaches nothing; git tools need the chat's own hold                                               |
+| 18  | The brief smuggles instructions to the task's agent                                             | The builder reads and edits it before Do It; the task's lane rules apply; its size is capped                                                  |
+| 19  | Do It Here opens under another writer                                                           | The hold's handover, the open's wait for lanes, the `STARTING` recheck and a second `refuseOpen` after the wait                               |
+| 20  | Abandoning a pass of one loses earlier uncommitted work                                         | Abandon puts the folder's dirt back (`decisions/2026-11-14-abandon-pass-deletes-unsigned-pages-work.md`)                                      |
+| 21  | The file list or the brief floods the daemon or the UI                                          | The list is cut at 200 entries; the brief and its lists have caps                                                                             |
+| 22  | A pass of one's writes hide among stray-write cards, or a stray hides inside the whole page     | The watcher classifies by the pass's areas; a write outside every claim is still carded                                                       |
+| 23  | The brief turn runs on a writable hold, or a builder message chains onto it                     | It is sent only between turns, read only; a send or Cancel stops it first                                                                     |
+| 24  | An abort or a throw after the hold's handover leaves an unowned git holder                      | A handed-over token is released before the wait rejects, and every caller releases in a `finally`                                             |
+
+Not covered: a resumed agent session keeps the brief request in its own transcript; a pass of one does not wait for
+a page claim against a copy task editing the same files.
+
 ## Reporting a problem
 
 If you find a way out, please report it privately as described in [SECURITY.md](../SECURITY.md).

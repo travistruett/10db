@@ -59,6 +59,7 @@ export { reopenSignedOffPage } from './reopen';
 export { subscribeMergedPasses } from './merged-open';
 export {
   openWhenBusy,
+  refuseWaitWhileDraining,
   STOPPED_TURNS_DEADLINE_MS,
   type OpenPending,
   type OpenWhenBusyDeps,

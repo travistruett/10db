@@ -446,6 +446,17 @@ describe('a chat whose Do It is under way', () => {
     release();
   });
 
+  it('words the refusal by the place the open is for', async () => {
+    w = chatWorld();
+    const chat = w.open();
+    const release = await w.chat.stopForOpen(chat.id, 'worktree');
+
+    expect(() => {
+      w.chat.askBrief(chat.id);
+    }).toThrow('Do It is already under way for this chat');
+    release();
+  });
+
   it('refuses a message to a sealed chat, parking nothing in it', () => {
     w = chatWorld();
     const chat = w.open();
