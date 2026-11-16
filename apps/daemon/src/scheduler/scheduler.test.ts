@@ -1237,6 +1237,16 @@ describe('Your folder and chats', () => {
     expect(getWorkstream(store.db, run.workstream.id).notice).toBeNull();
   });
 
+  it('holds a first start for 10db’s own git work without a notice: it is over in moments', async () => {
+    const run = queue();
+    const reserved = folderHold.reserveGit(run.project.id, 'cutting a branch');
+    expect(reserved.reserved).toBe(true);
+    expect(await scheduler().tick()).toBe(0);
+    expect(getWorkstream(store.db, run.workstream.id).notice).toBeNull();
+    if (reserved.reserved) folderHold.releaseGit(reserved.token);
+    expect(await scheduler().tick()).toBe(1);
+  });
+
   it('holds a first start behind a chat that waits, and lets a task already started go on', async () => {
     const run = queue({
       areas: [

@@ -303,6 +303,8 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
 
   /** Shows on a task that it waits for a chat's turn to finish with Your folder, naming the holder. */
   function waitForFolder(id: WorkstreamId, blockers: readonly FolderBlocker[]): void {
+    // 10db's own git work is over in moments, and says nothing the builder acts on.
+    if (blockers.every((b) => b.holder.kind === FolderHolderKind.GitWork)) return;
     const line = `Waits for ${blockers.map((b) => holderWords(b.holder)).join(' and ')} to finish with Your folder`;
     const stale = (notice: WorkstreamDto['notice']): boolean =>
       notice === null || (notice.key === FOLDER_HOLD_WAIT_NOTICE_KEY && notice.line !== line);
