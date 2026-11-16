@@ -59,3 +59,23 @@ export function copyFooter(
       return { kind: 'waiting', text: 'Queued · it starts when a lane is free.' };
   }
 }
+
+/**
+ * What a pass of one's tab says once its pass is no longer live, by where the task stands: finished,
+ * or abandoned (its unfinished changes wait on the Board). A task still running has a pass the live
+ * list has not shown yet, so it says nothing and the tab keeps loading.
+ */
+export function passGoneLine(board: BoardStatus): string | null {
+  switch (board) {
+    case BoardStatus.Done:
+      return 'Done · this task’s pass has finished.';
+    case BoardStatus.InReview:
+      return 'Finished · in review: its pull request has the changes.';
+    case BoardStatus.InProgress:
+      return null;
+    case BoardStatus.Blocked:
+    case BoardStatus.Backlog:
+    case BoardStatus.Ready:
+      return 'Abandoned · its unfinished changes wait on this task on the Board.';
+  }
+}

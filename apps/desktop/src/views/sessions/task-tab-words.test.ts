@@ -1,6 +1,6 @@
 import { BoardStatus } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { copyFooter, pullRequestNumber } from './task-tab-words';
+import { copyFooter, passGoneLine, pullRequestNumber } from './task-tab-words';
 
 const pr = (state: string | null) => ({ url: 'https://github.com/a/b/pull/212', state });
 
@@ -42,5 +42,42 @@ describe('pullRequestNumber', () => {
     ['https://github.com/a/b', null],
   ])('%s is %s', (url, want) => {
     expect(pullRequestNumber(url)).toBe(want);
+  });
+});
+
+describe('passGoneLine', () => {
+  it.each([
+    {
+      name: 'a finished task',
+      board: BoardStatus.Done,
+      want: 'Done · this task’s pass has finished.',
+    },
+    {
+      name: 'an in-review task',
+      board: BoardStatus.InReview,
+      want: 'Finished · in review: its pull request has the changes.',
+    },
+    {
+      name: 'an abandoned pass, whose task waits on the Board',
+      board: BoardStatus.Ready,
+      want: 'Abandoned · its unfinished changes wait on this task on the Board.',
+    },
+    {
+      name: 'a blocked task',
+      board: BoardStatus.Blocked,
+      want: 'Abandoned · its unfinished changes wait on this task on the Board.',
+    },
+    {
+      name: 'a backlog task',
+      board: BoardStatus.Backlog,
+      want: 'Abandoned · its unfinished changes wait on this task on the Board.',
+    },
+    {
+      name: 'a task still running, whose pass has not been read yet',
+      board: BoardStatus.InProgress,
+      want: null,
+    },
+  ])('says $name', ({ board, want }) => {
+    expect(passGoneLine(board)).toBe(want);
   });
 });

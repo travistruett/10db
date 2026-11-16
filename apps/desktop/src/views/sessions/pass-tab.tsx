@@ -28,6 +28,7 @@ import { draftKey, useSessionDraft } from './session-drafts';
 import { withQuote } from './changes-files';
 import { TASK_BAR_BUTTON, TaskBar } from './task-bar';
 import type { Quote } from './quote';
+import { passGoneLine } from './task-tab-words';
 
 // Sessions UI §8.5: a task in Your folder is a pass of one. Its tab is the Workbench's page: the same thread,
 // composer, Sign Off and close, under the task's bar.
@@ -56,15 +57,23 @@ export function PassTab({ session, project, changes, quote = null }: PassTabProp
         </Box>
       </Box>
     );
-  if (view === null)
+  if (view === null) {
+    const gone = passGoneLine(session.board);
     return (
       <Box style={{ flex: 1 }}>
         <TaskBar title={session.title} taskId={session.taskId} kindLine="Task · Your folder" />
-        <Text px="md" pt="md" size="sm" role="status">
-          Done · this task’s pass has finished.
-        </Text>
+        {gone === null ? (
+          <Box px="md" pt="md">
+            <PageLoading shape={PageLoadingShape.Lines} label="Loading the task" />
+          </Box>
+        ) : (
+          <Text px="md" pt="md" size="sm" role="status">
+            {gone}
+          </Text>
+        )}
       </Box>
     );
+  }
   return (
     <PassTabBody session={session} project={project} view={view} changes={changes} quote={quote} />
   );

@@ -8,6 +8,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { readJson } from './client';
 import { chatKeys } from './chat-queries';
+import { passKeys } from './pass-queries';
 import { useDaemon } from './provider';
 
 // Sessions spec §7.3 (Do it): the sheet's preview, the brief the chat's agent writes for it, and the hand-off.
@@ -88,6 +89,8 @@ export function useDoIt(onHandedOff: (result: DoItResult, request: DoItRequest) 
     onSettled: () => {
       void queries.invalidateQueries({ queryKey: chatKeys.all });
       void queries.invalidateQueries({ queryKey: ['tasks'] });
+      // A pass of one is a new live pass: its tab reads the list and must not find it missing.
+      void queries.invalidateQueries({ queryKey: passKeys.all });
     },
   });
 }

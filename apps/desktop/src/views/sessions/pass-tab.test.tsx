@@ -1,4 +1,4 @@
-import type { PassViewDto } from '@10db/contracts';
+import { mintId, type PassViewDto } from '@10db/contracts';
 import { fireEvent, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { baseHandlers, renderWithDaemonAndRouter, server } from '../../test/daemon';
@@ -70,6 +70,28 @@ describe('a pass of one’s tab', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: /Abandon Pass…/ }));
     expect(await screen.findByRole('dialog', { name: 'Abandon' })).toBeTruthy();
+  });
+
+  it.each([
+    { name: 'finished', board: 'done', line: 'Done · this task’s pass has finished.' },
+    {
+      name: 'abandoned',
+      board: 'ready',
+      line: 'Abandoned · its unfinished changes wait on this task on the Board.',
+    },
+  ])('says a pass that is gone is $name', async ({ board, line }) => {
+    const session = taskSessionDto({ place: 'pass', branch: null, passId: mintId('Pass'), board });
+    server.use(...passHandlers({ live: [] }), ...baseHandlers());
+    await renderWithDaemonAndRouter(<PassTab session={session} project={projectViewDto()} />);
+    expect(await screen.findByText(line)).toBeTruthy();
+  });
+
+  it('keeps loading, not saying Done, while a running task’s pass is not in the live list yet', async () => {
+    const session = taskSessionDto({ place: 'pass', branch: null, passId: mintId('Pass') });
+    server.use(...passHandlers({ live: [] }), ...baseHandlers());
+    await renderWithDaemonAndRouter(<PassTab session={session} project={projectViewDto()} />);
+    expect(await screen.findByRole('status', { name: 'Loading the task' })).toBeTruthy();
+    expect(screen.queryByText(/Done ·/)).toBeNull();
   });
 
   it('shows a closed pass’s line instead of the composer', async () => {
