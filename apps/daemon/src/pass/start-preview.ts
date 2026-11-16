@@ -140,32 +140,40 @@ function holderOf(db: DbReader, project: ProjectDto, area: string): PassStartPag
  * changed in the folder and the task holding it; the folder's other changed files counted; what the
  * project lacks; and the first reason a pass can't open now, or null. Reads only.
  */
-export async function passStartPreview(
-  deps: PassStartDeps,
-  projectId: ProjectId,
-): Promise<PassStartDto> {
+export function passStartPreview(deps: PassStartDeps, projectId: ProjectId): Promise<PassStartDto> {
+  // One operation shares the checkout's trust check between every git call below, instead of each
+  // call running it again.
+  return deps.git.operation(() => readPreview(deps, projectId));
+}
+
+async function readPreview(deps: PassStartDeps, projectId: ProjectId): Promise<PassStartDto> {
   const project = getProject(deps.db, projectId);
   const pages = project.areas.filter((a) => a.role === AreaRole.Page);
+  // The first call finds the checkout's pin; the independent reads that follow run together.
+  const branch = await deps.git.currentBranch(project.repoPath);
+  const rowReason = rowRefusal(deps.db, project);
+  const [changed, lastChanged, lacks, folder] = await Promise.all([
+    deps.git.changedPaths(project.repoPath),
+    Promise.all(pages.map((page) => deps.git.lastChangedAt(project.repoPath, page.globs))),
+    lacksOf(deps, project, branch),
+    rowReason === null ? folderRefusal(deps, project, branch) : null,
+  ]);
   const counts = new Map<string | null, number>();
-  for (const path of await deps.git.changedPaths(project.repoPath)) {
+  for (const path of changed) {
     const page = pageOf(path, project, pages);
     counts.set(page, (counts.get(page) ?? 0) + 1);
   }
-  const listed: PassStartPageDto[] = [];
-  for (const page of pages)
-    listed.push({
+  return {
+    pages: pages.map((page, i) => ({
       area: page.name,
       label: pageLabel(page),
       route: page.route ?? null,
-      lastChangedAt: await deps.git.lastChangedAt(project.repoPath, page.globs),
+      lastChangedAt: lastChanged[i] ?? null,
       uncommitted: counts.get(page.name) ?? 0,
       heldBy: holderOf(deps.db, project, page.name),
-    });
-  const branch = await deps.git.currentBranch(project.repoPath);
-  return {
-    pages: listed,
+    })),
     otherUncommitted: counts.get(null) ?? 0,
-    lacks: await lacksOf(deps, project, branch),
-    refusal: rowRefusal(deps.db, project) ?? (await folderRefusal(deps, project, branch)),
+    lacks,
+    refusal: rowReason ?? folder,
   };
 }
