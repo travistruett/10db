@@ -15,8 +15,10 @@ function mount(
 ): {
   arrive: (draft: string) => void;
   settle: () => void;
+  refuse: (message: string) => void;
 } {
   let settle = (): void => undefined;
+  let refuse: (message: string) => void = () => undefined;
   let arrive: (draft: string) => void = () => undefined;
   function Host() {
     const [late, setLate] = useState<LateOutcome | null>(null);
@@ -33,8 +35,11 @@ function mount(
         canPropose={false}
         nothingDecided={false}
         onSend={() =>
-          new Promise<void>((resolve) => {
+          new Promise<void>((resolve, reject) => {
             settle = resolve;
+            refuse = (message) => {
+              reject(new Error(message));
+            };
           })
         }
         onPropose={() => undefined}
@@ -68,6 +73,11 @@ function mount(
     settle: () => {
       act(() => {
         settle();
+      });
+    },
+    refuse: (message) => {
+      act(() => {
+        refuse(message);
       });
     },
   };
@@ -126,6 +136,19 @@ describe('the composer’s alert', () => {
     expect(alert.textContent).toContain(title);
     expect(alert.textContent).toContain(failure);
     expect(screen.queryAllByRole('alert')).toHaveLength(1);
+  });
+});
+
+describe('a send the daemon refuses', () => {
+  it('says why in the alert that names the agent, and keeps the text', async () => {
+    const { refuse } = mount(LATE_FAILURE, 'Codex');
+    fireEvent.change(input(), { target: { value: 'a message' } });
+    fireEvent.keyDown(input(), { key: 'Enter' });
+    refuse('The database is locked');
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain("Couldn't reach Codex");
+    expect(alert.textContent).toContain('The database is locked');
+    expect(input().value).toBe('a message');
   });
 });
 

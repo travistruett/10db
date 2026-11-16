@@ -186,6 +186,116 @@ describe('Composer', () => {
     expect((input() as HTMLTextAreaElement).value).toBe('second thought');
   });
 
+  describe('a send and a Stop on their way together', () => {
+    const held = (): { promise: Promise<void>; settle: () => void } => {
+      let settle = (): void => undefined;
+      const promise = new Promise<void>((resolve) => {
+        settle = resolve;
+      });
+      return { promise, settle };
+    };
+    // Plan's phase: a plain Stop while a turn runs, and Send beside it.
+    const PLAIN_STOP: ComposerPhase = {
+      stop: 'stop',
+      send: 'default',
+      placeholder: 'Talk it through…',
+      hint: null,
+    };
+    const working = composerPhase({
+      state: 'running',
+      hasText: true,
+      steer: 'inject',
+      project: 'ampsio',
+      fresh: false,
+      narrow: false,
+    });
+
+    it('sends while a plain Stop is on its way', async () => {
+      const stopping = held();
+      const onSend = vi.fn();
+      renderWithTheme(
+        <Held
+          phase={PLAIN_STOP}
+          onStop={() => stopping.promise}
+          onSend={onSend}
+          start={{ ...EMPTY_DRAFT, text: 'one more thing' }}
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+      fireEvent.keyDown(input(), { key: 'Enter' });
+      await waitFor(() => {
+        expect(onSend).toHaveBeenCalledTimes(1);
+      });
+      stopping.settle();
+    });
+
+    it('refuses a send while Stop and Redo carries the draft', async () => {
+      const redoing = held();
+      const onRedo = vi.fn(() => redoing.promise);
+      const onSend = vi.fn();
+      renderWithTheme(
+        <Held
+          phase={working}
+          onRedo={onRedo}
+          onSend={onSend}
+          start={{ ...EMPTY_DRAFT, text: 'no, this' }}
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Stop and Redo' }));
+      fireEvent.keyDown(input(), { key: 'Enter' });
+      fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+      redoing.settle();
+      await waitFor(() => {
+        expect(onRedo).toHaveBeenCalledTimes(1);
+      });
+      expect(onSend).not.toHaveBeenCalled();
+    });
+
+    it('keeps Send busy until its own send settles, though a Stop settles first', async () => {
+      const sending = held();
+      const onSend = vi.fn(() => sending.promise);
+      renderWithTheme(
+        <Held
+          phase={PLAIN_STOP}
+          onSend={onSend}
+          onStop={vi.fn()}
+          start={{ ...EMPTY_DRAFT, text: 'once' }}
+        />,
+      );
+      fireEvent.keyDown(input(), { key: 'Enter' });
+      fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: 'Stop' }).hasAttribute('data-loading')).toBe(
+          false,
+        );
+      });
+      fireEvent.keyDown(input(), { key: 'Enter' });
+      expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('data-loading')).toBe(true);
+      sending.settle();
+      await waitFor(() => {
+        expect((input() as HTMLTextAreaElement).value).toBe('');
+      });
+      expect(onSend).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('hands a failed send to the screen when it shows failures itself, keeping the draft', async () => {
+    const onFailure = vi.fn();
+    renderWithTheme(
+      <Held
+        onSend={vi.fn().mockRejectedValue(new Error('The database is locked'))}
+        onFailure={onFailure}
+        start={{ ...EMPTY_DRAFT, text: 'hi' }}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => {
+      expect(onFailure).toHaveBeenCalledWith('The database is locked');
+    });
+    expect(screen.queryByText('The database is locked')).toBeNull();
+    expect((input() as HTMLTextAreaElement).value).toBe('hi');
+  });
+
   it('with uploads, hands a dropped or picked file over at once and shows the screen’s refusals', () => {
     const onFiles = vi.fn();
     const onDismiss = vi.fn();

@@ -147,6 +147,8 @@ export function PlanComposer(props: PlanComposerProps) {
         }}
         phase={planComposerPhase(props)}
         disabledReason={null}
+        // A refused send is Plan's alert, which names the agent, not a line beside Send.
+        onFailure={setFailure}
         inputRef={input}
         attachLabel="Attach Files"
         modelControl={props.modelControl}

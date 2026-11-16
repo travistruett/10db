@@ -57,6 +57,11 @@ export interface ComposerProps {
   readonly disabledReason: string | null;
   /** Why the last send failed, from the screen that sent it: shown beside Send. */
   readonly error?: string | null;
+  /**
+   * The screen shows a failed send or Stop itself (Plan's alert): the composer hands the daemon's words
+   * over instead of showing them beside Send, and keeps the draft.
+   */
+  readonly onFailure?: (message: string) => void;
   /** Nothing can be typed either: the account has no chat to offer. */
   readonly locked?: boolean;
   /** Sends the draft; rejects with the daemon's words, and the draft stays. */
@@ -155,8 +160,14 @@ export function Composer({
   modelControl,
   uploads,
   notes,
+  onFailure,
 }: ComposerProps) {
-  const [busy, setBusy] = useState<'send' | 'stop' | null>(null);
+  // A send and a Stop are on their way on their own: each clears only its own mark. The refs answer a
+  // second press before the screen has drawn the first.
+  const [sending, setSending] = useState(false);
+  const [stopping, setStopping] = useState<'stop' | 'redo' | null>(null);
+  const sendingNow = useRef(false);
+  const stoppingNow = useRef<'stop' | 'redo' | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [ownRefused, setOwnRefused] = useState<readonly string[]>([]);
   const refused = uploads?.refused ?? ownRefused;
@@ -185,31 +196,50 @@ export function Composer({
   };
 
   const run = async (
-    which: 'send' | 'stop',
     action: () => Promise<void> | void,
     sent: Draft | null,
+    done: () => void,
   ): Promise<void> => {
-    setBusy(which);
     setFailure(null);
     try {
       await action();
       // Only what went is cleared: words typed or pictures added on the way stay.
       if (sent !== null) onDraft(afterSend(current.current, sent));
     } catch (error) {
-      setFailure(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      if (onFailure === undefined) setFailure(message);
+      else onFailure(message);
     } finally {
-      setBusy(null);
+      done();
     }
   };
   const send = (): void => {
-    // A Stop on its way doesn't hold a message back: it goes, or queues, as the agent takes it.
-    if (locked || disabledReason !== null || !filled || busy === 'send') return;
-    void run('send', () => onSend(outgoing(draft)), draft);
+    if (locked || disabledReason !== null || !filled) return;
+    // A plain Stop on its way doesn't hold a message back: it goes, or queues, as the agent takes it.
+    // Stop and Redo is already carrying this draft.
+    if (sendingNow.current || stoppingNow.current === 'redo') return;
+    sendingNow.current = true;
+    setSending(true);
+    void run(
+      () => onSend(outgoing(draft)),
+      draft,
+      () => {
+        sendingNow.current = false;
+        setSending(false);
+      },
+    );
   };
   const stop = (): void => {
-    if (phase.stop === 'stop_and_redo' && onRedo !== undefined)
-      void run('stop', () => onRedo(outgoing(draft)), draft);
-    else void run('stop', onStop, null);
+    if (stoppingNow.current !== null) return;
+    const redo = phase.stop === 'stop_and_redo' && onRedo !== undefined && !sendingNow.current;
+    stoppingNow.current = redo ? 'redo' : 'stop';
+    setStopping(stoppingNow.current);
+    const finish = (): void => {
+      stoppingNow.current = null;
+      setStopping(null);
+    };
+    if (redo) void run(() => onRedo(outgoing(draft)), draft, finish);
+    else void run(onStop, null, finish);
   };
 
   const hasFiles = (event: DragEvent): boolean => event.dataTransfer.types.includes('Files');
@@ -378,7 +408,7 @@ export function Composer({
               <ActionIcon
                 variant="default"
                 size="lg"
-                loading={busy === 'stop'}
+                loading={stopping !== null}
                 disabled={locked}
                 aria-label={phase.stop === 'stop_and_redo' ? 'Stop and Redo' : 'Stop'}
                 onClick={stop}
@@ -391,7 +421,7 @@ export function Composer({
               <ActionIcon
                 variant={phase.send === 'filled' ? 'filled' : 'default'}
                 size="lg"
-                loading={busy === 'send'}
+                loading={sending}
                 disabled={locked || disabledReason !== null || !filled}
                 aria-label="Send"
                 onClick={send}
