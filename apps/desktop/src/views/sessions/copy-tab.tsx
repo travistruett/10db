@@ -1,7 +1,7 @@
 import type { ProjectViewDto, TaskSessionDto } from '@10db/contracts';
 import { Anchor, Box, Button, Group, Text, Textarea } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ConversationList } from '../../conversation';
 import { ConversationLayout } from '../../conversation/conversation-layout';
 import { itemEntries } from '../../conversation/item-entries';
@@ -16,6 +16,8 @@ import { useTasks, useWorkstreams } from '../../daemon/queries';
 import { ExternalLink } from '../board/pull-request-link';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { useOpenSession } from './open-session';
+import { withQuote } from './changes-files';
+import type { Quote } from './quote';
 import { TASK_BAR_BUTTON, TaskBar } from './task-bar';
 import { copyFooter } from './task-tab-words';
 
@@ -28,9 +30,13 @@ const NO_REPLIES = '';
 export interface CopyTabProps {
   readonly session: TaskSessionDto;
   readonly project: ProjectViewDto | undefined;
+  /** The bar's Changes control, from the tab that owns the panel. */
+  readonly changes?: ReactNode;
+  /** A line quoted from Changes, to add to the composer once. */
+  readonly quote?: Quote | null;
 }
 
-export function CopyTab({ session, project }: CopyTabProps) {
+export function CopyTab({ session, project, changes, quote = null }: CopyTabProps) {
   const { items, loading } = useConversationItemsState(session.conversationId);
   const live = useConversationLive(session.conversationId);
   const loadFull = useToolCallFull(session.conversationId, items);
@@ -87,9 +93,10 @@ export function CopyTab({ session, project }: CopyTabProps) {
           title={session.title}
           taskId={session.taskId}
           kindLine={`Task · Separate copy${session.branch === null ? '' : ` · \`${session.branch}\``}`}
+          actions={changes}
         />
       }
-      footer={<CopyFooter session={session} footer={footer} />}
+      footer={<CopyFooter session={session} footer={footer} quote={quote} />}
     >
       {loading ? (
         <Box px="md" pt="md">
@@ -111,11 +118,19 @@ export function CopyTab({ session, project }: CopyTabProps) {
 function CopyFooter({
   session,
   footer,
+  quote,
 }: {
   readonly session: TaskSessionDto;
   readonly footer: ReturnType<typeof copyFooter>;
+  readonly quote: Quote | null;
 }) {
   const [text, setText] = useState(NO_REPLIES);
+  // A quote from Changes lands in the message once, however often this renders.
+  const [quoted, setQuoted] = useState(0);
+  if (quote !== null && quote.id !== quoted) {
+    setQuoted(quote.id);
+    setText(withQuote(text, quote.text));
+  }
   const post = usePostTaskMessage(session.taskId);
   if (footer.kind === 'running')
     return (

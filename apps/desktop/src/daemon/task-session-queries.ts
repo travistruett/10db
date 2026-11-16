@@ -12,20 +12,11 @@ export const taskSessionKeys = {
   one: (taskId: TaskId) => ['tasks', 'session', taskId] as const,
 } as const;
 
-/** The route the typed client names once the daemon's own type carries it. */
-interface SessionRoute {
-  readonly session: {
-    readonly $get: (args: { param: { taskId: TaskId } }) => Promise<Response>;
-  };
-}
-
 function sessionOptions(client: DaemonClient, taskId: TaskId) {
-  // The typed client of this build predates the route, so its type is narrowed to the route's shape here;
-  // the response is parsed with its contract below, as every read is.
-  const route = client.tasks[':taskId'] as (typeof client.tasks)[':taskId'] & SessionRoute;
   return {
     queryKey: taskSessionKeys.one(taskId),
-    queryFn: async () => readJson(await route.session.$get({ param: { taskId } }), TaskSessionDto),
+    queryFn: async () =>
+      readJson(await client.tasks[':taskId'].session.$get({ param: { taskId } }), TaskSessionDto),
   };
 }
 

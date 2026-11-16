@@ -78,3 +78,17 @@
 .content.removed {
   color: var(--mantine-color-red-text);
 }
+
+/* A number that quotes its line: the number's own look, a button underneath. */
+.number {
+  all: unset;
+  cursor: pointer;
+}
+
+.number:hover {
+  text-decoration: underline;
+}
+
+.number:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+}

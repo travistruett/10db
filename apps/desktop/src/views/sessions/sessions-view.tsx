@@ -294,6 +294,7 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
       }
       // The selected chat tab hears this one.
       case 'do_it':
+      case 'changes':
       case 'stop':
         return false;
     }

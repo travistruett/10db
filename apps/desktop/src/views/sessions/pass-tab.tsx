@@ -8,7 +8,8 @@ import {
 } from '@10db/contracts';
 import { ActionIcon, Anchor, Box, Button, Menu, Stack, Text } from '@mantine/core';
 import { IconDots } from '@tabler/icons-react';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
+import { mentionText } from '../../conversation/mention-text';
 import { EMPTY_DRAFT, type Draft } from '../../conversation/drafts';
 import { useAbandonPass, usePassView } from '../../daemon/pass-queries';
 import { useInbox } from '../../daemon/queries';
@@ -24,7 +25,9 @@ import { PageStatus } from '../workbench/page-status';
 import { PrButton } from '../workbench/pr-button';
 import { queueRows } from '../workbench/queue-rows';
 import { useOpenSession } from './open-session';
+import { withQuote } from './changes-files';
 import { TASK_BAR_BUTTON, TaskBar } from './task-bar';
+import type { Quote } from './quote';
 
 // Sessions UI §8.5: a task in Your folder is a pass of one. Its tab is the Workbench's page: the same thread,
 // composer, Sign Off and close, under the task's bar.
@@ -35,9 +38,13 @@ const CLOCK_TICK_MS = 30_000;
 export interface PassTabProps {
   readonly session: TaskSessionDto;
   readonly project: ProjectViewDto | undefined;
+  /** The bar's Changes control, from the tab that owns the panel. */
+  readonly changes?: ReactNode;
+  /** A line quoted from Changes, to add to the composer once. */
+  readonly quote?: Quote | null;
 }
 
-export function PassTab({ session, project }: PassTabProps) {
+export function PassTab({ session, project, changes, quote = null }: PassTabProps) {
   const read = usePassView(session.passId);
   const view = read.data;
   if (view === undefined || project === undefined)
@@ -58,21 +65,32 @@ export function PassTab({ session, project }: PassTabProps) {
         </Text>
       </Box>
     );
-  return <PassTabBody session={session} project={project} view={view} />;
+  return (
+    <PassTabBody session={session} project={project} view={view} changes={changes} quote={quote} />
+  );
 }
 
 interface BodyProps {
   readonly session: TaskSessionDto;
   readonly project: ProjectViewDto;
   readonly view: PassViewDto;
+  readonly changes: ReactNode;
+  readonly quote: Quote | null;
 }
 
-function PassTabBody({ session, project, view }: BodyProps) {
+function PassTabBody({ session, project, view, changes, quote }: BodyProps) {
   const now = useNow(CLOCK_TICK_MS);
   const inbox = useInbox().data ?? [];
   const openSession = useOpenSession();
   const abandon = useAbandonPass();
   const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
+  // A quote from Changes lands in the composer once, however often this renders.
+  const [quoted, setQuoted] = useState(0);
+  if (quote !== null && quote.id !== quoted) {
+    setQuoted(quote.id);
+    const text = withQuote(draft.text, quote.text);
+    setDraft({ ...draft, text, mentions: mentionText(text).mentions });
+  }
   const [dialog, setDialog] = useState<'close' | 'abandon' | null>(null);
   const row = queueRows(view, inbox, now)[0];
   const open = view.pass.state === PassState.Open;
@@ -91,6 +109,7 @@ function PassTabBody({ session, project, view }: BodyProps) {
       kindLine={`Task · Your folder · lands on \`${view.pass.returnBranch}\``}
       actions={
         <>
+          {changes}
           {signedOff ? (
             <Button
               {...TASK_BAR_BUTTON}
