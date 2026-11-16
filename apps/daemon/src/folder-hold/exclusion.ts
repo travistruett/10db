@@ -12,22 +12,24 @@ type Row = Record<FolderAsker, FolderOutcome>;
  * What each holder does to each asker (sessions spec §7.3). Attended holders (a chat's turn, a takeover) share
  * with each other; only 10db's own writers exclude a chat, and a chat excludes them in turn.
  */
+// A lane or a pass does not exclude 10db's git work here: the callers keep today's checks for them
+// (`lanesInProjectCheckout`, `passHoldingFolder`), and a batch's own row must never block its cut or switch back.
 const TABLE: Record<FolderHolderKind, Row> = {
   [FolderHolderKind.Lane]: {
     [FolderAsker.LaneStart]: FolderOutcome.Shares,
-    [FolderAsker.GitWork]: FolderOutcome.Refused,
+    [FolderAsker.GitWork]: FolderOutcome.Shares,
     [FolderAsker.ChatTurn]: FolderOutcome.ReadsOrWaits,
     [FolderAsker.Takeover]: FolderOutcome.Refused,
   },
   [FolderHolderKind.PassOpen]: {
     [FolderAsker.LaneStart]: FolderOutcome.Waits,
-    [FolderAsker.GitWork]: FolderOutcome.Refused,
+    [FolderAsker.GitWork]: FolderOutcome.Shares,
     [FolderAsker.ChatTurn]: FolderOutcome.ReadsOrWaits,
     [FolderAsker.Takeover]: FolderOutcome.Refused,
   },
   [FolderHolderKind.PassClosed]: {
     [FolderAsker.LaneStart]: FolderOutcome.Waits,
-    [FolderAsker.GitWork]: FolderOutcome.Refused,
+    [FolderAsker.GitWork]: FolderOutcome.Shares,
     [FolderAsker.ChatTurn]: FolderOutcome.Shares,
     [FolderAsker.Takeover]: FolderOutcome.Shares,
   },

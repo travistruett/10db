@@ -13,11 +13,12 @@ const W = FolderOutcome.Waits;
 const R = FolderOutcome.Refused;
 const RW = FolderOutcome.ReadsOrWaits;
 
-// Rows are holders; columns are lane start, 10db git work, chat turn, takeover.
+// 10db's git work shares with a lane or a pass here: those keep today's checks, so a batch's own row never
+// blocks its cut. Rows are holders; columns are lane start, 10db git work, chat turn, takeover.
 const TABLE: [FolderHolderKind, FolderOutcome[]][] = [
-  [FolderHolderKind.Lane, [S, R, RW, R]],
-  [FolderHolderKind.PassOpen, [W, R, RW, R]],
-  [FolderHolderKind.PassClosed, [W, R, S, S]],
+  [FolderHolderKind.Lane, [S, S, RW, R]],
+  [FolderHolderKind.PassOpen, [W, S, RW, R]],
+  [FolderHolderKind.PassClosed, [W, S, S, S]],
   [FolderHolderKind.GitWork, [W, W, RW, R]],
   [FolderHolderKind.ChatTurn, [W, W, S, S]],
   [FolderHolderKind.WaitingChat, [W, S, S, S]],
