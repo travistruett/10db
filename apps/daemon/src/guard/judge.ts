@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
 import {
   ClaimKind,
+  WHOLE_PROJECT_PAGE,
   type AreaDef,
   type Delivery,
   type HazardDef,
@@ -212,7 +213,7 @@ function judgeRelative(input: GuardInput, rel: string): GuardVerdict {
   const page = unheldPage(input, hit.areas);
   if (page !== null)
     return deny(
-      `${rel} belongs to page "${page}", which this task does not hold in the pass. Leave it to the task that holds that page.`,
+      `${rel} belongs to page "${page === WHOLE_PROJECT_PAGE.name ? WHOLE_PROJECT_PAGE.label : page}", which this task does not hold in the pass. Leave it to the task that holds that page.`,
     );
   const missingHazard = hit.hazards.find((h) => !claimed(input, ClaimKind.Hazard, h));
   if (missingHazard) {

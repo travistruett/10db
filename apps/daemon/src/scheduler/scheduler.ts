@@ -53,6 +53,7 @@ import {
   renewLeases,
   setWorkstreamNotice,
   transitionWorkstream,
+  passAreasOf,
 } from '@10db/db';
 import {
   unready,
@@ -510,7 +511,10 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       // A page holds its pass's areas for its life; one that waited at the open for a page another
       // task held claims it here, and runs only once it has it.
       const requests = inPass
-        ? passHeldAreas(project.areas, task).map((name) => ({ kind: ClaimKind.Area, name }))
+        ? passHeldAreas(passAreasOf(db, inPass.id), task).map((name) => ({
+            kind: ClaimKind.Area,
+            name,
+          }))
         : claimRequestsForTask(task, project);
       const ask = {
         projectId: project.id,

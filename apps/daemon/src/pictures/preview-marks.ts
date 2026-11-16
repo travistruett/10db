@@ -19,6 +19,7 @@ import {
   getPassProgress,
   getPassTurn,
   getProject,
+  isWholeProjectPass,
   getTask,
   insertPreviewMark,
   insertSystemNotice,
@@ -219,6 +220,7 @@ export function judgePreview(deps: PreviewMarksDeps, input: JudgedLoad): void {
           step.offerMove &&
           mark.cardId === null &&
           project.delivery === Delivery.PullRequest &&
+          !isWholeProjectPass(ctx.tx, pass.id) &&
           task.workstreamId !== null
         ) {
           const asked = askMoveToCopy(ctx, {

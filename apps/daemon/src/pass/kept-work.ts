@@ -28,6 +28,8 @@ import {
   passPageAreas,
   setPassTurnKept,
   type DbReader,
+  isWholeProjectPass,
+  passAreasOf,
 } from '@10db/db';
 import type { Clock } from '../clock';
 import type { DeliveryJobs } from '../delivery';
@@ -123,10 +125,14 @@ interface HeldClaim {
  * holds now; once a crash path has released them, what the pass holds for it and the hazards it
  * names. A shared area is held a turn at a time, and its files are never page work.
  */
-function pageClaims(db: DbReader, project: ProjectDto, task: TaskDto): readonly HeldClaim[] {
-  const shared = new Set(
-    project.areas.filter((a) => a.role === AreaRole.Shared).map((a) => a.name),
-  );
+function pageClaims(
+  db: DbReader,
+  project: ProjectDto,
+  task: TaskDto,
+  passId: PassId,
+): readonly HeldClaim[] {
+  const areas = passAreasOf(db, passId);
+  const shared = new Set(areas.filter((a) => a.role === AreaRole.Shared).map((a) => a.name));
   const active =
     task.workstreamId === null
       ? []
@@ -134,7 +140,7 @@ function pageClaims(db: DbReader, project: ProjectDto, task: TaskDto): readonly 
           .filter((c) => !(c.kind === ClaimKind.Area && shared.has(c.name)))
           .map((c) => ({ kind: c.kind, name: c.name }));
   if (active.length > 0) return active;
-  const held = new Set(passHeldAreas(project.areas, task));
+  const held = new Set(passHeldAreas(areas, task));
   return claimRequestsForTask(task, project).filter(
     (r) => r.kind === ClaimKind.Hazard || held.has(r.name),
   );
@@ -143,7 +149,9 @@ function pageClaims(db: DbReader, project: ProjectDto, task: TaskDto): readonly 
 /**
  * Whether a path is one of the task's page files, as the guard's judge reads a pass (spec §7.1): a
  * path in any page area of the pass belongs only to the task holding that page, whatever hazard also
- * matches it; a hazard or another held area counts only outside the pass's pages.
+ * matches it; a hazard or another held area counts only outside the pass's pages. The whole-project page
+ * of a pass of one is every file, so a hazard's file is page work only with its hazard claim and
+ * otherwise goes to the files no page owns.
  */
 export function pageMatcher(
   db: DbReader,
@@ -151,14 +159,17 @@ export function pageMatcher(
   task: TaskDto,
   passId: PassId,
 ): (path: string) => boolean {
-  const claims = pageClaims(db, project, task);
+  const claims = pageClaims(db, project, task, passId);
   const held = (kind: ClaimKind) =>
     new Set(claims.filter((c) => c.kind === kind).map((c) => c.name));
   const areas = held(ClaimKind.Area);
   const hazards = held(ClaimKind.Hazard);
   const passPages = new Set(passPageAreas(db, passId));
+  const whole = isWholeProjectPass(db, passId);
+  const passAreas = passAreasOf(db, passId);
   return (path) => {
-    const hit = classifyPath(path, project.areas, project.hazards);
+    const hit = classifyPath(path, passAreas, project.hazards);
+    if (whole && hit.hazards.length > 0) return hit.hazards.every((h) => hazards.has(h));
     const pages = hit.areas.filter((a) => passPages.has(a));
     if (pages.length > 0) return pages.some((a) => areas.has(a));
     return hit.hazards.some((h) => hazards.has(h)) || hit.areas.some((a) => areas.has(a));

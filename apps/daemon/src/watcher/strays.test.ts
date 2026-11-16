@@ -1,4 +1,4 @@
-import { DEFAULT_HAZARDS, mintId } from '@10db/contracts';
+import { DEFAULT_HAZARDS, mintId, WHOLE_PROJECT_PAGE } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import {
   bulkFoldKey,
@@ -135,6 +135,23 @@ describe('findStrays', () => {
     ['no claims at all', ['src/api/a.ts'], [], ['src/api/a.ts']],
   ])('%s', (_name, paths, claims, expected) => {
     expect(findStrays(paths, project, claims)).toEqual(expected);
+  });
+});
+
+describe('findStrays in a pass of one', () => {
+  const whole = { areas: [WHOLE_PROJECT_PAGE], hazards: [...DEFAULT_HAZARDS] };
+  const page = [{ kind: 'area' as const, name: WHOLE_PROJECT_PAGE.name }];
+  it.each([
+    ['a source file with the whole page held', ['src/a.ts'], page, []],
+    ['an unclaimed hazard’s file', ['package.json'], page, ['package.json']],
+    [
+      'a hazard file with its claim',
+      ['package.json'],
+      [...page, { kind: 'hazard' as const, name: 'deps' }],
+      [],
+    ],
+  ])('%s', (_name, paths, claims, expected) => {
+    expect(findStrays(paths, whole, claims)).toEqual(expected);
   });
 });
 

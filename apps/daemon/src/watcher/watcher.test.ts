@@ -18,6 +18,7 @@ import {
   ClaimKind,
   EventType,
   mintId,
+  WHOLE_PROJECT_PAGE,
   WorkstreamState,
   type BatchId,
   type PassId,
@@ -37,6 +38,8 @@ import {
   insertBatch,
   endPassTurn,
   insertPass,
+  insertWholeProjectTask,
+  markTasksMadeByPass,
   insertPassTurn,
   insertPermissionRule,
   insertTask,
@@ -1023,6 +1026,51 @@ describe('a UI Workbench pass in Your folder', () => {
         title: 'Write outside every claim',
         body: 'docs/notes.md\nWritten while Beta was working',
         targets: [{ workstreamId: beta.id, sessionId: null }],
+      }),
+    ]);
+  });
+
+  it("raises no card for a pass of one's page writes, and still cards an unclaimed hazard's file", async () => {
+    const lane = state.write((ctx) => {
+      const task = insertWholeProjectTask(ctx, project.id, { title: 'One', brief: 'Do it.' });
+      const id = mintId('Pass');
+      const { batch } = insertPass(ctx, {
+        id,
+        projectId: project.id,
+        name: 'One',
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha: 'a'.repeat(40),
+        branch: '10db/one-abc123',
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [task.id],
+        dirt: [],
+      });
+      markTasksMadeByPass(ctx, id, [task.id]);
+      const ws = insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: batch.id,
+      });
+      acquireClaims(ctx, {
+        projectId: project.id,
+        workstreamId: ws.id,
+        requests: [{ kind: 'area', name: WHOLE_PROJECT_PAGE.name }],
+        leaseExpiresAt: '2999-01-01T00:00:00.000Z',
+      });
+      for (const to of [WorkstreamState.Starting, WorkstreamState.Running])
+        transitionWorkstream(ctx, ws.id, { to, fence: null });
+      return ws;
+    });
+    watcher.sync();
+    await write('src/api/a.ts', 'src/ui/b.tsx', 'docs/notes.md');
+    expect(flags()).toEqual([]);
+
+    await write('package.json');
+    expect(flags()).toEqual([
+      expect.objectContaining({
+        title: 'Write outside every claim',
+        targets: [{ workstreamId: lane.id, sessionId: null }],
       }),
     ]);
   });

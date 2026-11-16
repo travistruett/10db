@@ -11,7 +11,7 @@ import {
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { DeliveryHarness } from '../../test/delivery-harness';
-import { openPassWorld, type PassWorld } from '../../test/pass-world';
+import { openPassWorld, openWholeProjectWorld, type PassWorld } from '../../test/pass-world';
 import { PassFolderOffBranchError } from '../git';
 import { keepTurnWork, keptWorkFacts, passFolderOn, passKeptRef } from './index';
 
@@ -165,6 +165,34 @@ describe('keepTurnWork', () => {
       keepTurnWork(deps(), { workstreamId: runOf(settings), turnId: null }),
     ).rejects.toThrow(PassFolderOffBranchError);
     expect(h.git$('for-each-ref', `refs/10db/passes/${opened.pass.id}/${settings.id}`)).toBe('');
+  });
+});
+
+describe('keepTurnWork in a pass of one', () => {
+  it("keeps every file but a hazard's, which it keeps only once the task holds the hazard", async () => {
+    const one = await openWholeProjectWorld();
+    try {
+      const { h: world, task } = one;
+      one.write('src/a.ts', 'a\n');
+      one.write('src/settings/page.tsx', 'edited\n');
+      one.write('pnpm-lock.yaml', 'lock: 2\n');
+
+      const kept = await keepTurnWork(one.deps, { workstreamId: one.runOf(task), turnId: null });
+
+      expect(paths(kept.pageFiles)).toEqual(['src/a.ts', 'src/settings/page.tsx']);
+      world.state.write((c) =>
+        acquireClaims(c, {
+          projectId: world.project.id,
+          workstreamId: one.runOf(task),
+          requests: [{ kind: 'hazard', name: 'deps' }],
+          leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+        }),
+      );
+      const again = await keepTurnWork(one.deps, { workstreamId: one.runOf(task), turnId: null });
+      expect(paths(again.pageFiles)).toContain('pnpm-lock.yaml');
+    } finally {
+      one.close();
+    }
   });
 });
 

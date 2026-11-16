@@ -1,5 +1,6 @@
 import {
   mintId,
+  WHOLE_PROJECT_PAGE,
   PASS_RETRY_TURN_CHOICE,
   PASS_SIGN_OFF_CHOICE,
   PassTurnEnding,
@@ -26,7 +27,9 @@ import {
   insertPass,
   insertPassTurn,
   insertTask,
+  markTasksMadeByPass,
   insertWorkstream,
+  insertWholeProjectTask,
   leavePass,
   patchWorkstream,
   seedProject,
@@ -225,6 +228,37 @@ describe('the view of a pass', () => {
 });
 
 describe("the view of a pass's close", () => {
+  it('reads a pass of one as one page, "Whole project", and an ordinary pass as not', () => {
+    const ordinary = openPass([task('Settings', 'settings')]);
+    expect(passView(store.db, ordinary.pass.id).wholeProject).toBe(false);
+
+    const other = seedProject(store, { name: 'one', delivery: 'local' });
+    const id = mintId('Pass');
+    store.write((ctx) => {
+      const one = insertWholeProjectTask(ctx, other.id, { title: 'Do it', brief: 'Do it.' });
+      insertPass(ctx, {
+        id,
+        projectId: other.id,
+        name: 'One',
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha: 'a'.repeat(40),
+        branch: '10db/one-abc123',
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [one.id],
+        dirt: [],
+      });
+      markTasksMadeByPass(ctx, id, [one.id]);
+    });
+
+    const view = passView(store.db, id);
+    expect(view.wholeProject).toBe(true);
+    expect(view.pages.map((p) => [p.area, p.label, p.route])).toEqual([
+      [WHOLE_PROJECT_PAGE.name, 'Whole project', null],
+    ]);
+  });
+
   it('names the page a sign-off waits for, marks a signed-off page done, and reads the chain, pull request, step and notices', () => {
     const settings = task('Settings: UI work', 'settings');
     const people = task('People: UI work', 'people');

@@ -1,5 +1,5 @@
 import type { ClaimId, PassDto, PassId } from '@10db/contracts';
-import { getProject, listPassTasks, passPageAreas, type DbReader } from '@10db/db';
+import { getProject, listPassTasks, passAreasOf, passPageAreas, type DbReader } from '@10db/db';
 import { classifyPath } from '../guard';
 import {
   KeptRefMovedError,
@@ -46,9 +46,10 @@ export async function chainTip(deps: SharedDeps, repo: string, pass: PassDto): P
 export function sharedPathOf(db: DbReader, pass: PassDto, area: string): (path: string) => boolean {
   const project = getProject(db, pass.projectId);
   const pages = new Set(passPageAreas(db, pass.id));
+  const passAreas = passAreasOf(db, pass.id);
   const owners = listPassTasks(db, pass.id).map((task) => pageMatcher(db, project, task, pass.id));
   return (path) => {
-    const hit = classifyPath(path, project.areas, project.hazards);
+    const hit = classifyPath(path, passAreas, project.hazards);
     if (!hit.areas.includes(area)) return false;
     if (hit.areas.some((a) => pages.has(a))) return false;
     return !owners.some((owns) => owns(path));

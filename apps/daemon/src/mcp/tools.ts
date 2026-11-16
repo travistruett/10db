@@ -786,7 +786,9 @@ export function createToolHandlers(
         return recordClaim(
           input.opId,
           settled,
-          settled.granted && passAsk.kind === 'slow' ? slowPageLine(input.name) : null,
+          settled.granted && passAsk.kind === 'slow'
+            ? slowPageLine(input.name, passAsk.wholeProject)
+            : null,
         );
       } finally {
         clearTimeout(timer);

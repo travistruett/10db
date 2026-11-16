@@ -26,7 +26,6 @@ import {
   getPassPreview,
   getPassProgress,
   getPassPullRequest,
-  getProject,
   getTask,
   getWorkstream,
   latestTurnActivity,
@@ -37,6 +36,8 @@ import {
   listTaskThreadRows,
   openHolds,
   taskConversationOf,
+  isWholeProjectPass,
+  passAreasOf,
   openPreviewMark,
   type DbReader,
 } from '@10db/db';
@@ -161,7 +162,7 @@ function previewOf(db: DbReader, pass: PassDto, task: TaskDto): PassPageDto['pre
  */
 export function passView(db: DbReader, passId: PassId): PassViewDto {
   const pass = getPass(db, passId);
-  const { areas } = getProject(db, pass.projectId);
+  const areas = passAreasOf(db, passId);
   const turns = listPassTurns(db, passId);
   const waits = listSignOffWaits(db, passId);
   const progress = getPassProgress(db, passId);
@@ -183,7 +184,7 @@ export function passView(db: DbReader, passId: PassId): PassViewDto {
     signOffWaits: waits,
     pullRequest: getPassPullRequest(db, passId),
     checks: getPassChecks(db, passId),
-    wholeProject: false,
+    wholeProject: isWholeProjectPass(db, passId),
     closeStep: progress.closeStep,
     stackedOn: progress.stackedOn,
     notices: [...progress.notices],

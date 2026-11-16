@@ -1,4 +1,4 @@
-import { ClaimKind, type ProjectDto, type WorkstreamId } from '@10db/contracts';
+import { ClaimKind, WHOLE_PROJECT_PAGE, type ProjectDto, type WorkstreamId } from '@10db/contracts';
 import { classifyPath } from '../guard';
 import { isInsideClaudeCodeBookkeeping } from '../git';
 
@@ -66,6 +66,9 @@ function isClaimed(
   held: ReadonlySet<string>,
 ): boolean {
   const hit = classifyPath(rel, project.areas, project.hazards);
+  // The whole-project page covers every file but a hazard's, which is covered only by its hazard claim.
+  if (hit.areas.includes(WHOLE_PROJECT_PAGE.name) && hit.hazards.length > 0)
+    return hit.hazards.every((h) => held.has(`hazard:${h}`));
   return (
     hit.areas.some((a) => held.has(`area:${a}`)) || hit.hazards.some((h) => held.has(`hazard:${h}`))
   );

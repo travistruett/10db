@@ -19,6 +19,7 @@ import {
   getBatch,
   getPass,
   getProject,
+  passAreasOf,
   getTask,
   getWorkstreamRow,
   listPassTakeOuts,
@@ -137,7 +138,7 @@ async function droppedShared(deps: TakeOutDeps, pass: PassDto) {
  * deleted, then those signed off, which stay.
  */
 function pagesLine(db: DbReader, pass: PassDto): string {
-  const { areas } = getProject(db, pass.projectId);
+  const areas = passAreasOf(db, pass.id);
   const label = (task: TaskDto): string =>
     pageLabel(pageOf(areas, task) ?? { name: task.areas[0] ?? task.title });
   // Only the pages this Abandon took out, as its confirm named them: not one taken out before it.

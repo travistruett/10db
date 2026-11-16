@@ -4,6 +4,7 @@ import {
   PassNoticeKind,
   Rigor,
   TaskMessageAuthor,
+  WHOLE_PROJECT_PAGE,
   type AreaDef,
   type Finding,
   type PassId,
@@ -57,6 +58,17 @@ describe('findingTargets', () => {
     expect(findingTargets([finding(location)], pages, AREAS)).toEqual([
       { finding: finding(location), taskId: to },
     ]);
+  });
+
+  it('sends every file finding of a pass of one to its one page', () => {
+    const one = 'tsk_one' as TaskId;
+    expect(
+      findingTargets(
+        [finding('README.md:1'), finding('src/lib/c.ts:1'), finding(null)],
+        [{ taskId: one, areas: [WHOLE_PROJECT_PAGE.name] }],
+        [WHOLE_PROJECT_PAGE],
+      ).map((t) => t.taskId),
+    ).toEqual([one, one, null]);
   });
 });
 

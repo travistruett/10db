@@ -28,6 +28,7 @@ import {
   setReviewedSha,
   type DbReader,
   offerToAgent,
+  passAreasOf,
 } from '@10db/db';
 import { passReviewPrompt } from '../briefing';
 import { classifyPath } from '../guard';
@@ -229,11 +230,12 @@ export async function reviewPassTip(
     signal: input.signal,
   });
   const findings = /^\s*no findings\.?\s*$/i.test(answer) ? [] : parseFindings(answer);
+  const passAreas = passAreasOf(deps.state.db, input.passId);
   const pages = tasks.map((task) => ({
     taskId: task.id,
-    areas: passHeldAreas(project.areas, task),
+    areas: passHeldAreas(passAreas, task),
   }));
-  const targets = findingTargets(findings, pages, project.areas);
+  const targets = findingTargets(findings, pages, passAreas);
   deps.state.write((w) => {
     const prefix = `${FINDING_NOTICE}${input.sha.slice(0, 12)}:`;
     // A review of a newer tip replaces the header's findings; one that reads on at the same tip
