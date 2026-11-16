@@ -419,6 +419,8 @@ export function ConversationPane({
         </>
       )}
       <Transcript
+        // Its own per conversation, so another Plan from History opens at its newest message.
+        key={shapeId ?? 'new'}
         shapeId={shapeId}
         conversation={conversation}
         items={items}

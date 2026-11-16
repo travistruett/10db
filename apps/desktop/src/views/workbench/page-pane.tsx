@@ -178,6 +178,8 @@ export function PagePane(props: PagePaneProps) {
             </Group>
           ) : null}
           <PageComposer
+            // Its own per page: a send that settles after a switch clears the page that sent it.
+            key={page.taskId}
             label={page.label}
             status={status}
             firstMessage={!page.spokenTo}
@@ -192,6 +194,8 @@ export function PagePane(props: PagePaneProps) {
       }
     >
       <PageThread
+        // Its own per page, so each page opens at its newest message.
+        key={page.taskId}
         page={page}
         turns={turns}
         live={live}
