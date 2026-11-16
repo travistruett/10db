@@ -4,7 +4,8 @@ import type { ReactNode } from 'react';
 /**
  * The header a top-level view shares with the others: the title with the view's actions on the same
  * row, an optional one-line byline under it, and an optional row for tabs (left) and filters (right)
- * that the view fills. A row that is absent takes no space.
+ * that the view fills. A row that is absent takes no space. The byline is cut to one line, so a text
+ * byline carries its whole text as a tooltip.
  */
 export function PageHeader({
   title,
@@ -36,7 +37,12 @@ export function PageHeader({
         )}
       </Group>
       {description === undefined ? null : (
-        <Text size="sm" c="dimmed" lineClamp={1}>
+        <Text
+          size="sm"
+          c="dimmed"
+          lineClamp={1}
+          {...(typeof description === 'string' ? { title: description } : {})}
+        >
           {description}
         </Text>
       )}

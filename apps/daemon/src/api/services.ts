@@ -16,6 +16,10 @@ import type {
   ProjectFileMatchDto,
   SessionStartDto,
   SessionsSettingsDto,
+  SessionsSettingsPatch,
+  TakeoverCommandDto,
+  TakeoverDto,
+  TakeoverPreviewDto,
   ConversationDeltaFrame,
   ConversationDto,
   ConversationFullDto,
@@ -689,6 +693,16 @@ export interface ApiServices extends PlanRecordServices {
   sessionStarts(projectId: ProjectId): Promise<SessionStartDto[]>;
   sessionsSettings(): SessionsSettingsDto;
   setSessionsSettings(input: SessionsSettingsDto): SessionsSettingsDto;
+  /** Sets the fields given and keeps the rest. */
+  patchSessionsSettings(input: SessionsSettingsPatch): SessionsSettingsDto;
+  /** Sessions spec §7.5: the chat in the builder's terminal. Refusals are ConflictError, in words. */
+  openTakeover(id: ConversationId): Promise<TakeoverDto>;
+  /** A fresh command to paste, for a chat that is in the terminal. */
+  takeoverCommand(id: ConversationId): Promise<TakeoverCommandDto>;
+  handBack(id: ConversationId): Promise<void>;
+  /** NotFoundError when the chat isn't in the terminal. */
+  takeoverOf(id: ConversationId): TakeoverDto;
+  takeoverPreview(id: ConversationId): Promise<TakeoverPreviewDto>;
   /** Sends what waits under "Send now"; ConflictError, with the state's words, when nothing would run. */
   sendConversationNow(id: ConversationId): ConversationDto;
   /** Stops the turn; answers once it is stopping or settled. */

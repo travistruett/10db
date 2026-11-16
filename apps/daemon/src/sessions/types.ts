@@ -20,6 +20,7 @@ import type { ClaudeOAuth } from './claude-oauth';
 import type { AgentCapabilities } from './capabilities';
 import type { McpAuthState } from './codex-mcp-auth';
 import type { RemoteMcpServer } from './project-mcp';
+import type { TakeoverCommand, TakeoverSpec } from './takeover-command';
 import type { DeniedCall, PatchHunk, ReportedMode } from '../trust';
 
 export interface ToolRequest {
@@ -640,4 +641,11 @@ export interface AgentAdapter {
   startMcpSignIn(spec: McpSignInSpec): Promise<McpSignIn>;
   /** Whether each server is signed in on the account; an agent with no such read answers none. */
   mcpAuthStatus(spec: McpAuthSpec): Promise<Readonly<Record<string, McpAuthState>>>;
+  /**
+   * What the builder's own terminal runs to continue a chat in this agent, on its pinned binary. Throws a
+   * `TakeoverRefusedError`, with the reason in words, when the agent's copy is not ready.
+   */
+  takeoverCommand(spec: Omit<TakeoverSpec, 'binary'>): TakeoverCommand;
+  /** What the builder is told about the agent in their terminal, as text the daemon wrote: first screens and gaps. */
+  takeoverNotes(account: Pick<AccountExpectation, 'kind'>): string[];
 }

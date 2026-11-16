@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "notifyReplies": {
+      "type": "boolean"
+    },
+    "terminalApp": {
+      "type": "string",
+      "enum": [
+        "terminal",
+        "iterm",
+        "copy"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

@@ -140,6 +140,7 @@ import {
   ChatPatchInput,
   ConversationFilesQuery,
   SessionsSettingsDto,
+  SessionsSettingsPatch,
   CapacitySettingsDto,
 } from '@10db/contracts';
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
@@ -708,6 +709,26 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
+    .post('/conversations/:conversationId/takeover', async (c) =>
+      c.json(await deps.services.openTakeover(ConversationId.parse(c.req.param('conversationId')))),
+    )
+    .post('/conversations/:conversationId/takeover/command', async (c) =>
+      c.json(
+        await deps.services.takeoverCommand(ConversationId.parse(c.req.param('conversationId'))),
+      ),
+    )
+    .get('/conversations/:conversationId/takeover/preview', async (c) =>
+      c.json(
+        await deps.services.takeoverPreview(ConversationId.parse(c.req.param('conversationId'))),
+      ),
+    )
+    .get('/conversations/:conversationId/takeover', (c) =>
+      c.json(deps.services.takeoverOf(ConversationId.parse(c.req.param('conversationId')))),
+    )
+    .post('/conversations/:conversationId/hand-back', async (c) => {
+      await deps.services.handBack(ConversationId.parse(c.req.param('conversationId')));
+      return c.body(null, 204);
+    })
     .get('/conversations/:conversationId/live', (c) =>
       c.json(deps.services.conversationLive(ConversationId.parse(c.req.param('conversationId')))),
     )
@@ -1910,6 +1931,11 @@ export function createApp(deps: ApiDeps) {
       '/settings/sessions',
       validator('json', (value): SessionsSettingsDto => SessionsSettingsDto.parse(value)),
       (c) => c.json(deps.services.setSessionsSettings(c.req.valid('json'))),
+    )
+    .patch(
+      '/settings/sessions',
+      validator('json', (value): SessionsSettingsPatch => SessionsSettingsPatch.parse(value)),
+      (c) => c.json(deps.services.patchSessionsSettings(c.req.valid('json'))),
     )
     .get('/settings/trust', async (c) => c.json(await deps.services.trustSettings()))
     .put(

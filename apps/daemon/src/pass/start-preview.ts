@@ -21,6 +21,7 @@ import {
 import { lanesInProjectCheckout, returnBranchProblem } from '../delivery';
 import type { Git } from '../git';
 import { classifyPath } from '../guard';
+import { mapAtMost } from './map-at-most';
 
 // Workbench spec §4.2: what Start Pass says before it starts. It reads the folder and the rows, and
 // writes nothing; the open refuses again whatever changed since.
@@ -31,6 +32,9 @@ export interface PassStartDeps {
   /** Whether the project's gate is seen to call Docker, read from its committed base. */
   readonly gateCallsDocker: (project: ProjectDto) => Promise<boolean>;
 }
+
+/** The most page-history reads that run at once, so a project with many pages spawns few gits. */
+const HISTORY_READS_AT_ONCE = 8;
 
 /** Why a pass can't open now, as a code the picker keys on, beside the words it shows. */
 const PassStartRefusal = {
@@ -154,7 +158,9 @@ async function readPreview(deps: PassStartDeps, projectId: ProjectId): Promise<P
   const rowReason = rowRefusal(deps.db, project);
   const [changed, lastChanged, lacks, folder] = await Promise.all([
     deps.git.changedPaths(project.repoPath),
-    Promise.all(pages.map((page) => deps.git.lastChangedAt(project.repoPath, page.globs))),
+    mapAtMost(pages, HISTORY_READS_AT_ONCE, (page) =>
+      deps.git.lastChangedAt(project.repoPath, page.globs),
+    ),
     lacksOf(deps, project, branch),
     rowReason === null ? folderRefusal(deps, project, branch) : null,
   ]);

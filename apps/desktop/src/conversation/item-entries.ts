@@ -26,6 +26,8 @@ export interface ItemEntryOptions {
   readonly receipts: boolean;
   /** A turn is under way. */
   readonly working: boolean;
+  /** The session is in the builder's terminal: a message not yet sent waits for Hand Back. */
+  readonly inTerminal?: boolean;
   /** The Inbox cards the conversation has asked, open or answered: an answered one leaves a history line. */
   readonly cards: readonly InboxItemDto[];
   /** Opens the task Do It made, from the row that says the chat handed its work to it; without it the row has no Open. */
@@ -57,14 +59,18 @@ function answeredWords(card: InboxItemDto): string | null {
 }
 
 function messageEntry(item: Item<'message'>, opts: ItemEntryOptions): ConversationEntry {
-  const waiting = opts.working && opts.receipts && item.deliveredAt === null;
+  const unsent = item.deliveredAt === null;
+  const held = opts.inTerminal === true && unsent;
+  const waiting = opts.working && opts.receipts && unsent;
+  const line = held
+    ? 'Held until you hand back'
+    : waiting
+      ? `Waiting for ${opts.label} to read it`
+      : null;
   const extra =
-    item.mentions.length === 0 && !waiting
+    item.mentions.length === 0 && line === null
       ? null
-      : createElement(MentionChips, {
-          paths: item.mentions,
-          waiting: waiting ? `Waiting for ${opts.label} to read it` : null,
-        });
+      : createElement(MentionChips, { paths: item.mentions, waiting: line });
   return { kind: 'builder', id: item.id, text: item.text, extra };
 }
 

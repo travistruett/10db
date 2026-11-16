@@ -40,3 +40,4 @@
   and ends its row, so the session's token reaches nothing and `onState(sealed)` gives the folder hold back. It
   refuses first for a taken-over conversation and touches nothing. A message body may carry `purpose: 'brief'` (the
   brief request, which digests skip), and a notice may carry `handedTo` (the task the chat became).
+- `openTerminal`, `handBack` and `terminalFailed` move a conversation to and from `taken_over` (the reducer's rows, `explore-state.ts`); a message sent while taken over is stored held, with `holdStarts` keeping its turn from starting until Hand Back parks it on the folder (`releaseStarts` if Hand Back fails).

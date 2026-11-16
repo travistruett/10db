@@ -1,4 +1,5 @@
 import {
+  ConversationState,
   DoItPlace,
   FolderHolderKind,
   FolderWhileHeld,
@@ -9,7 +10,7 @@ import {
   type ToolCallView,
 } from '@10db/contracts';
 import { Box, Button, Group, Text } from '@mantine/core';
-import { useMediaQuery } from '@mantine/hooks';
+import { useClipboard, useMediaQuery } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { ConversationList, toolDoing, WorkingLine } from '../../conversation';
@@ -41,6 +42,7 @@ import { useModels } from '../../daemon/model-queries';
 import { useProjectFolder, useStopWaiting } from '../../daemon/project-folder-queries';
 import { useDaemon, useDaemonStatus } from '../../daemon/provider';
 import { useResolvedInbox } from '../../daemon/queries';
+import { useHandBack, useTakeover, useTakeoverCommand } from '../../daemon/takeover-queries';
 import dayjs from 'dayjs';
 import { chatEntries } from './chat-entries';
 import { FolderWait } from './folder-wait';
@@ -53,6 +55,7 @@ import { useSessionKeys } from './use-session-keys';
 import { sessionAnnouncement, type SessionEvent } from './session-announcements';
 import { SessionBar } from './session-bar';
 import type { TabActions } from './tab-menu';
+import { TerminalBanner } from './terminal-banner';
 import { draftKey, sessionDrafts, useSessionDraft } from './session-drafts';
 
 const CONTEXT_TIP = 'Past 70%, the next turn continues in a fresh session with a summary.';
@@ -80,6 +83,9 @@ export interface ChatTabProps {
   readonly actions?: Omit<TabActions, 'onRename'>;
   readonly renaming?: boolean;
   readonly onRenamed?: () => void;
+  /** The builder asked to open the chat in a terminal from the strip. */
+  readonly openingTerminal?: boolean;
+  readonly onTerminalAsked?: () => void;
   /** Do It was accepted; the screen puts the task's tab where it belongs. */
   readonly onHandedOff?: (result: DoItResult, title: string) => void;
 }
@@ -150,6 +156,8 @@ export function ChatTab({
   renaming,
   onRenamed,
   onHandedOff,
+  openingTerminal,
+  onTerminalAsked,
 }: ChatTabProps) {
   const conversationQuery = useConversation(chat.conversationId);
   const conversation = conversationQuery.data ?? chat.conversation;
@@ -170,6 +178,14 @@ export function ChatTab({
   const openTask = useOpenTask();
   const open = useConversationCards(chat.conversationId);
   const [sendError, setSendError] = useState<string | null>(null);
+  const inTerminal = conversation.state === ConversationState.TakenOver;
+  const takeover = useTakeover(chat.conversationId, inTerminal);
+  const handBack = useHandBack();
+  const takeoverCommand = useTakeoverCommand();
+  const clipboard = useClipboard({ timeout: 1500 });
+  // A command the clipboard refused, which the banner shows to copy by hand: the open's, or Copy Command's.
+  const [uncopied, setUncopied] = useState<string | null>(null);
+  const [lastCommand, setLastCommand] = useState<string | null>(null);
   const [modelRefusal, setModelRefusal] = useState<string | null>(null);
   const models = useChatModels(chat.projectId);
   const folder = useProjectFolder(chat.projectId);
@@ -214,9 +230,12 @@ export function ChatTab({
   // The caret goes to the end of what was typed before the tab was a chat, which WebKit leaves at the start.
   useEffect(() => {
     const field = input.current;
-    if (field === null) return;
+    // A chat in the terminal puts the focus on Hand Back, the likely next act.
+    if (field === null || inTerminal) return;
     field.focus();
     field.setSelectionRange(field.value.length, field.value.length);
+    // The focus moves when the tab is shown, not each time the chat changes state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chat.id]);
 
   // A chat made by a send in a fresh tab sends that draft as soon as it is drawn; a failure leaves the
@@ -319,6 +338,7 @@ export function ChatTab({
       label: caps.label,
       receipts: caps.receipts,
       working,
+      inTerminal,
       cards: [...(resolved.data ?? []), ...open],
       openTask: (task) => {
         void openTask({
@@ -389,6 +409,11 @@ export function ChatTab({
           conversation={conversation}
           projectName={project?.name ?? ''}
           folder={folder}
+          projectPath={project?.repoPath ?? null}
+          terminalSince={takeover.data?.since ?? null}
+          {...(openingTerminal === undefined ? {} : { openingTerminal })}
+          {...(onTerminalAsked === undefined ? {} : { onTerminalAsked })}
+          onTerminalUncopied={setUncopied}
           loading={loading}
           fileDisabledReason={removed ? 'This project was removed from 10db.' : disabledReason}
           {...(actions === undefined ? {} : { actions })}
@@ -421,6 +446,30 @@ export function ChatTab({
             tasks={conversation.backgroundTasks}
             cardWaiting={open.length > 0}
           />
+          {inTerminal ? (
+            <TerminalBanner
+              label={caps.label}
+              since={takeover.data?.since ?? null}
+              notes={takeover.data?.notes ?? []}
+              onHandBack={() => {
+                setUncopied(null);
+                setLastCommand(null);
+                handBack.mutate(chat.conversationId);
+              }}
+              handingBack={handBack.isPending}
+              onCopyCommand={() => {
+                takeoverCommand.mutate(chat.conversationId, {
+                  onSuccess: ({ line }) => {
+                    setLastCommand(line);
+                    clipboard.copy(line);
+                  },
+                });
+              }}
+              copied={clipboard.copied}
+              line={uncopied ?? (clipboard.error === null ? null : lastCommand)}
+              error={handBack.error?.message ?? takeoverCommand.error?.message ?? null}
+            />
+          ) : null}
           {waiting ? (
             <FolderWait
               holders={keeping}
@@ -485,7 +534,7 @@ export function ChatTab({
                   />
                 </Group>
               }
-              {...(keeping === null
+              {...(keeping === null || inTerminal
                 ? {}
                 : {
                     held: {

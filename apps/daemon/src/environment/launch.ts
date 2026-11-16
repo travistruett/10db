@@ -20,7 +20,13 @@ import type { AccountRow } from '@10db/db';
 import { CLAUDE_CODE_VERIFIED_ON } from './agent-pins';
 import { readAccountSecret } from './account-secret';
 import type { Keychain } from './keychain';
-import { stripBillingSwitches } from './session-env';
+import {
+  BILLING_SWITCH_PREFIXES,
+  BILLING_SWITCH_VARS,
+  NESTED_SESSION_VARS,
+  OWN_PREFIX,
+  stripBillingSwitches,
+} from './session-env';
 
 /** The Claude Code version the account variables and `accountInfo()` fields were verified on: the pinned release. */
 export const ACCOUNT_NAMES_VERIFIED_ON = CLAUDE_CODE_VERIFIED_ON;
@@ -49,6 +55,8 @@ const CODEX_LOGIN_VARS: readonly string[] = [
   'CODEX_ACCESS_TOKEN',
   'CODEX_HOME',
 ];
+/** The families of provider switches a terminal clears, with 10db's own variables. */
+const UNSET_PREFIXES: readonly string[] = [...BILLING_SWITCH_PREFIXES, OWN_PREFIX];
 const CLIENT_APP_VAR = 'CLAUDE_AGENT_SDK_CLIENT_APP';
 
 /** What a session on an account must report before its prompt (accounts spec §5). */
@@ -65,6 +73,25 @@ export interface SessionLaunch {
   /** What the CLI is launched with: the account's own ID for the model, or the canonical ID when it lists none. */
   readonly model: string;
   readonly expect: AccountExpectation;
+}
+
+/**
+ * What the builder's own terminal runs an account's agent with: the variables to set and to unset (a name, or
+ * every name under a prefix), and where its key is read. It holds no secret value: a key is read from the
+ * Keychain by the helper or the script at run time.
+ */
+export interface TakeoverLaunch {
+  readonly set: Readonly<Record<string, string>>;
+  readonly unset: readonly string[];
+  readonly unsetPrefixes: readonly string[];
+  /** Variables the script fills from the Keychain account named, and exports. */
+  readonly keychain: readonly { readonly variable: string; readonly account: string }[];
+  /** The Keychain account the agent's key helper reads, for the kinds that allow one. */
+  readonly apiKeyHelperAccount: string | null;
+  /** The agent keeps its credentials from the commands it runs. */
+  readonly scrub: boolean;
+  /** What the CLI is launched with for the model. */
+  readonly model: string;
 }
 
 interface ProbeLaunch {
@@ -108,6 +135,15 @@ export interface Launcher {
     model: string,
     accountModels: readonly AccountModelDto[],
   ): SessionLaunch;
+  /**
+   * The environment of the builder's own terminal on `account`: what a session sets, with a keyed account's secret
+   * checked now and read by the terminal's helper or script, never held here. Throws what `session` does.
+   */
+  takeover(
+    account: AccountRow,
+    model: string,
+    accountModels: readonly AccountModelDto[],
+  ): TakeoverLaunch;
   /** The same environment, for reading who the account is without a prompt. */
   probe(account: AccountRow): ProbeLaunch;
   /** Where the builder's own login lives when the login shell moves it: an absolute directory, or null for Claude Code's default. */
@@ -228,17 +264,21 @@ export function sessionConfigDir(
     : (env['CLAUDE_CONFIG_DIR'] ?? join(home, '.claude'));
 }
 
+/** The names a kind takes from its account only, so a terminal unsets them from the builder's shell. */
+function droppedBy(kind: AgentAccountKind): readonly string[] {
+  return kind === AccountKind.Bedrock
+    ? AWS_LOGIN_VARS
+    : kind === AccountKind.CodexSignin
+      ? CODEX_LOGIN_VARS
+      : [];
+}
+
 /** The login env minus what the kind takes from its account only. */
 function withoutVars(
   login: Readonly<Record<string, string>>,
   kind: AgentAccountKind,
 ): Record<string, string> {
-  const dropped =
-    kind === AccountKind.Bedrock
-      ? AWS_LOGIN_VARS
-      : kind === AccountKind.CodexSignin
-        ? CODEX_LOGIN_VARS
-        : [];
+  const dropped = droppedBy(kind);
   return Object.fromEntries(Object.entries(login).filter(([name]) => !dropped.includes(name)));
 }
 
@@ -336,6 +376,67 @@ export function createLauncher(opts: {
     }
   }
 
+  /** What the account sets for a terminal, and how its key reaches the agent. */
+  function takeoverOf(account: AccountRow): Omit<TakeoverLaunch, 'unset' | 'model'> {
+    const kind = agentKindOf(account);
+    const set: Record<string, string> = {};
+    if (account.configDir !== null)
+      set[kind === AccountKind.CodexSignin ? 'CODEX_HOME' : 'CLAUDE_CONFIG_DIR'] =
+        account.configDir;
+    const none = { keychain: [], apiKeyHelperAccount: null, scrub: false };
+    // A key is checked here and read later by whoever uses it; secretRef is set when the secret passes.
+    const keyRef = (): string => {
+      secretOf(account);
+      if (account.secretRef === null) throw new Error('a checked secret has a reference');
+      return account.secretRef;
+    };
+    switch (kind) {
+      case AccountKind.ClaudeSubscription:
+        SubscriptionSettings.parse(account.settings);
+        return { set, unsetPrefixes: UNSET_PREFIXES, ...none };
+      case AccountKind.AnthropicApiKey:
+        ApiKeySettings.parse(account.settings);
+        set['CLAUDE_SECURESTORAGE_CONFIG_DIR'] = sharedEntryDir();
+        return {
+          set,
+          unsetPrefixes: UNSET_PREFIXES,
+          ...none,
+          apiKeyHelperAccount: keyRef(),
+        };
+      case AccountKind.Bedrock: {
+        const settings = BedrockSettings.parse(account.settings);
+        set['CLAUDE_CODE_USE_BEDROCK'] = '1';
+        set['AWS_REGION'] = settings.region;
+        set['CLAUDE_SECURESTORAGE_CONFIG_DIR'] = sharedEntryDir();
+        if (settings.awsProfile !== null) {
+          set['AWS_PROFILE'] = settings.awsProfile;
+          return { set, unsetPrefixes: UNSET_PREFIXES, ...none };
+        }
+        // The key sits in the agent's environment, so it is kept from the commands the agent runs.
+        return {
+          set,
+          unsetPrefixes: UNSET_PREFIXES,
+          keychain: [{ variable: 'AWS_BEARER_TOKEN_BEDROCK', account: keyRef() }],
+          apiKeyHelperAccount: null,
+          scrub: true,
+        };
+      }
+      case AccountKind.Gateway: {
+        const settings = GatewaySettings.parse(account.settings);
+        set['ANTHROPIC_BASE_URL'] = settings.baseUrl;
+        return {
+          set,
+          unsetPrefixes: UNSET_PREFIXES,
+          ...none,
+          apiKeyHelperAccount: keyRef(),
+        };
+      }
+      case AccountKind.CodexSignin:
+        SubscriptionSettings.parse(account.settings);
+        return { set, unsetPrefixes: UNSET_PREFIXES, ...none };
+    }
+  }
+
   const expectation = (account: AccountRow): AccountExpectation => ({
     accountId: account.id,
     label: account.label,
@@ -353,6 +454,23 @@ export function createLauncher(opts: {
         model: own?.launchId ?? model,
         expect: expectation(account),
       };
+    },
+    takeover(account, model, accountModels) {
+      if (isModelTier(model)) throw new ModelNotLaunchableError(model);
+      const own = accountModels.find((m) => m.model === model);
+      const launch = takeoverOf(account);
+      const owned = new Set([
+        ...Object.keys(launch.set),
+        ...launch.keychain.map((k) => k.variable),
+      ]);
+      const unset = [
+        ...new Set([
+          ...BILLING_SWITCH_VARS,
+          ...NESTED_SESSION_VARS,
+          ...droppedBy(agentKindOf(account)),
+        ]),
+      ].filter((name) => !owned.has(name));
+      return { ...launch, unset, model: own?.launchId ?? model };
     },
     probe(account) {
       return { env: build(account), expect: expectation(account) };

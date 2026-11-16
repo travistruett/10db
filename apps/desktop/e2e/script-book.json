@@ -530,5 +530,19 @@
     ],
     [{ "do": "consume" }, { "do": "say", "text": "Looked again." }, { "do": "turn_complete" }]
   ],
-  "Hold the folder": [[{ "do": "await_message", "contains": "release" }, { "do": "turn_complete" }]]
+  "Hold the folder": [
+    [{ "do": "await_message", "contains": "release" }, { "do": "turn_complete" }]
+  ],
+  "Chat: Move to the terminal": [
+    [
+      { "do": "consume" },
+      { "do": "say", "text": "Ready for the terminal." },
+      { "do": "turn_complete" }
+    ],
+    [
+      { "do": "consume" },
+      { "do": "say", "text": "Back from the terminal." },
+      { "do": "turn_complete" }
+    ]
+  ]
 }

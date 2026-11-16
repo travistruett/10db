@@ -71,3 +71,4 @@
   transcript, which no digest can edit; that is accepted.
 - Do It's tasks get a `chat_tasks` row on purpose (Recent counts them as filed, `edit_task` reaches them,
   `remove_task` on one doesn't ask, `chatMadeTask` in `tools.ts`). A copy's areas come from `chat-areas.ts`.
+- A chat in the builder's terminal (`taken_over`) is the takeover service's (`takeover/AGENTS.md`). Archiving it asks `takeover.serialized`/`ended` first, so the hold and the files go with the archive; the settings route `PATCH /settings/sessions` names only the field it changes (`terminalApp`, `notifyReplies`), and an older PUT without `terminalApp` reads as Terminal.

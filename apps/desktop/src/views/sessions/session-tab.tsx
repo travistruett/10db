@@ -7,6 +7,7 @@ import {
   IconFolder,
   IconGitBranch,
   IconPlayerPause,
+  IconTerminal2,
   IconX,
 } from '@tabler/icons-react';
 import type { KeyboardEvent, ReactNode } from 'react';
@@ -55,6 +56,15 @@ export function Mark({ mark }: { readonly mark: TabWords['mark'] }) {
           size={12}
           stroke={1.5}
           color="var(--mantine-color-orange-filled)"
+        />
+      );
+    case 'terminal_dim':
+      return (
+        <IconTerminal2
+          data-mark={mark}
+          size={12}
+          stroke={1.5}
+          color="var(--mantine-color-dimmed)"
         />
       );
     case null:
@@ -192,7 +202,11 @@ export function SessionTab({
             size="sm"
             lineClamp={1}
             fw={selected || info.words.bold ? 600 : 400}
-            {...(selected || ring !== null || info.words.bold ? { c: 'bright' } : {})}
+            {...(info.words.dim
+              ? { c: 'dimmed' }
+              : selected || ring !== null || info.words.bold
+                ? { c: 'bright' }
+                : {})}
             style={{ flex: 1, minWidth: 0 }}
           >
             {title}

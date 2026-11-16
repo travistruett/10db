@@ -13,3 +13,4 @@
   open). Its job waits with `reserveGitWhenFree(…, { signal, lanesWait })`, runs `refuseOpen` again after the wait,
   and releases the token in a `finally`. A pass of one stacks on a closed pass as Start Pass does, refuses
   `BISECT_LOG`, and `workstream-changes.ts` reads a pass's kept turns by `ChangesScope`.
+- A switch back, a branch cut or a settle that waits for a chat's terminal (`folder-wait.ts`) takes its signal from 10db's shutdown, so quitting never hangs on it, and redoes the wait at the next start; no branch is settled while a terminal holds the folder, and each wait names the chat and keeps the project's delivery slot.

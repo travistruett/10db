@@ -979,30 +979,45 @@ already do (research T1), and the attended profile writes the checkout on both (
 
 1. The engine closes the live session, and the conversation goes to `taken_over`.
 2. The adapter's `takeoverCommand` builds the command:
-   - **Claude:** the pinned `claude` with `--resume <id>`, `--setting-sources` matching the session's (none for
-     explore), `--strict-mcp-config` and an `--mcp-config` file naming only the servers the session had (the
+   - **Claude:** the pinned `claude` with `--resume <id>`, `--setting-sources ''` (no settings file loads, whatever
+     the session had), `--strict-mcp-config` and an `--mcp-config` file naming only the servers the session had (the
      project's approved ones and the builder's own, trust line §6), a `--plugin-dir` for each plugin dir the session
      had, and the instructions it had appended, with `CLAUDE_CONFIG_DIR` set to the account's directory.
    - **Codex:** the pinned `codex resume <id>` under the account's `CODEX_HOME`, with the project still pinned
-     `untrusted`, and the session's skill roots and instructions.
-   - **Sessions that wrote** (a chat, a pass, a worktree task) load a project hook only when the builder approved
-     its hash (trust line §6). A file the agent changed has a new hash, so it doesn't load. The banner lists such
-     files.
-3. The daemon writes the command to `<dataDir>/conversations/<id>/takeover.command` with mode 700, holding no
-   secret.
-   - A keyed account's key is read inside the script with
-     `security find-generic-password -s 10db -a account:<id> -w`. That is the Keychain item `keychain.ts` reads.
+     `untrusted` and the session's instructions. It gets no skills folders.
+   - **No project hook loads in the terminal,** for any session: nothing project-owned is read from the checkout
+     (Claude's settings sources are empty; Codex's checkout is `untrusted` and runs no 10db hook). The popover lists
+     the project's setting files that differ from HEAD, so the builder knows they won't load. What a launch left out
+     (a server the agent can't take, a skill list too long to show) comes back in the open's answer and is kept with
+     the takeover for the banner, each note cut at 800 characters.
+   - **Without a sandbox runtime** a terminal still opens, with none of the chat's servers, plugins or instructions,
+     and the popover and banner say so.
+3. The daemon writes the command as a script in `<dataDir>/takeovers/<conversation id>/` (mode 700, outside the
+   chat's own files), holding no secret. Every launch writes a fresh set; nothing is read back, since the
+   terminal's agent can write there.
+   - A keyed account's key is read by the agent's `apiKeyHelper` (API key, gateway) or, for a Bedrock key, inside
+     the script into the agent's environment under the subprocess scrub. The Keychain item is the one
+     `keychain.ts` reads.
    - The daemon then runs `open -a <Terminal|iTerm> <file>` itself. The webview gets no new capability.
    - The script's first line deletes itself (`rm -- "$0"`). The daemon cannot observe when the terminal has read
      it.
-   - The terminal app is a setting, Terminal by default **(call)**.
+   - **Three choices (call),** set in Settings › Sessions: Terminal (the default), iTerm, or Copy the Command,
+     which opens nothing and gives a `/bin/sh -c` line for zsh or bash to paste into any terminal.
+   - **Again.** The banner's Copy Command makes a fresh line for a second window (the daemon also takes a second
+     Open, which the UI doesn't offer while the chat is in the terminal): two writers on one session, which the
+     builder chose. If the clipboard refuses the line, the banner shows it to copy by hand.
+   - **`terminal_failed`.** A window that doesn't open (the app is missing, the opener times out) gives the chat
+     back with no notice and removes the files; the answer says which app to change in Settings.
 4. A banner: "In your terminal. This runs outside 10db's sandbox. 10db won't touch this session until you hand it
    back."
+5. **Codex runs as Codex does by default** (the `lane` permission profile, login shell, shell environment and
+   disabled features are Codex's own again), keeping the billing line, the sign-in store and the `untrusted` pin.
+   It gets no skills folders, since Codex has no flag for them; the popover says so.
 
 **Hand Back.**
 
 - The conversation goes to `idle_cold`, and messages held meanwhile run.
-- A notice reads "Turns from your terminal are in the agent's memory; they aren't shown here." 10db imports no
+- A notice reads "Turns from your terminal are in the agent's memory; they aren't shown here." Messages typed in 10db meanwhile run afterwards as Wait for It, behind 10db's own waiting git work. 10db imports no
   history **(call: the agent's own resume carries the context; showing the terminal's turns is a later nicety)**.
 - 10db doesn't watch the terminal process, so Hand Back trusts the builder.
 
@@ -1218,9 +1233,15 @@ Plan's and the thread's routes move onto these, and the old ones go in the same 
   write outside it (trust line §11).
 - **Takeover (S17).**
   - Isolation flags go on every launch, beside the session's setup.
-  - No secret is in the file, and the file is mode 700 and removed after launch.
-  - The daemon runs `open` itself, so the webview never can.
-  - Project setting files the agent changed are named in the banner and never loaded.
+  - No secret is in the file, and the file is mode 700 and removed after launch. A key is read by the agent's
+    `apiKeyHelper`, or for a Bedrock key in the script under the subprocess scrub; none reaches a command line.
+  - The daemon runs `open` itself, so the webview never can. The terminal setting is a closed set of three, mapped
+    to fixed app names, read through zod.
+  - No project settings file loads (`--setting-sources ''`; Codex keeps the checkout `untrusted`), so a file the
+    agent changed is named in the popover and banner and never loaded.
+  - The takeover folder is outside the chat's own files, and a link in it or above it is never followed.
+  - The terminal itself runs outside the sandbox and the judge, by design: the agent's own prompts guard it, and the
+    popover says so every time.
   - The launch command is a pure table test per harness and profile.
 - **File mentions.** `git ls-files` only. A mention reaches the agent as a path, and the session's judge decides each
   read.
@@ -1390,6 +1411,10 @@ rows of §5.3 and §5.5. Results of both lists go in the research notes.
 6. **The OpenCode handshake** (research T3 §3), for the ACP spec.
 7. **A go-ahead clears a soft deny** (with the trust line's L2): after auto mode denies a call at a limit, the
    builder's "Go ahead" message lets the retry through, and a `$defaults` hard deny stays denied.
+8. **Open in Terminal (M7).** Six checks on the builder's accounts, listed in the research record's "M7 live
+   checks": a Claude plan in Terminal (no onboarding or trust screen, the servers, no project hook, the script
+   gone), connectors, one turn on each key account kind, a Codex plan, iTerm, and quitting 10db while a waiting
+   switch back holds.
 
 ## 17. Calls to review
 

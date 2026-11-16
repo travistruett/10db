@@ -41,7 +41,9 @@ import { defaultDataDir } from './runtime-files';
 import { readBuildInfo } from './self-update';
 import {
   claudeCapabilities,
+  claudeTakeoverNotes,
   codexCapabilities,
+  codexTakeoverNotes,
   codexLoginStatus,
   connectorProbeRoot,
   createClaudeAdapter,
@@ -150,6 +152,7 @@ function chooseAdapter(): AgentAdapter | ((logger: Logger) => AgentAdapter) {
             connectorProbeRoot: connectorProbeRoot(dataDir),
           }),
         (account, model) => claudeCapabilities(account.kind, model),
+        claudeTakeoverNotes,
       ),
       codex: createPinnedAdapter(
         () => sourceOf(AgentTool.Codex),
@@ -160,6 +163,7 @@ function chooseAdapter(): AgentAdapter | ((logger: Logger) => AgentAdapter) {
             signInCheck: (sessionEnv) => codexLoginStatus(codexPath, sessionEnv),
           }),
         (account) => codexCapabilities(account.kind),
+        codexTakeoverNotes,
       ),
     });
 }

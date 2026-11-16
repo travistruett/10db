@@ -48,6 +48,7 @@ export {
   type BackupExclusion,
 } from './temp-dir';
 export {
+  claudeProtectedPaths,
   expandHome,
   fileAccessJudge,
   isOutsideCopy,

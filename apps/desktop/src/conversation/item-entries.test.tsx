@@ -149,6 +149,22 @@ describe('itemEntries', () => {
     }
   });
 
+  it('in the builder’s terminal, a message not yet sent is held and a sent one is not', () => {
+    const draw = (deliveredAt: string | null) => {
+      const entry = entries([{ ...builderItem(conv, 'Hi'), deliveredAt }], {
+        inTerminal: true,
+        receipts: false,
+      })[0];
+      if (entry?.kind !== 'builder') throw new Error('no builder entry');
+      return renderWithTheme(<>{entry.extra}</>);
+    };
+    const held = draw(null);
+    expect(screen.queryByText('Held until you hand back')).not.toBeNull();
+    held.unmount();
+    draw('2026-11-13T09:00:00.000Z');
+    expect(screen.queryByText('Held until you hand back')).toBeNull();
+  });
+
   it('draws a message’s mentions as chips', () => {
     const item = { ...builderItem(conv, 'See @src/a.ts'), mentions: ['src/a.ts'] };
     const entry = entries([item])[0];

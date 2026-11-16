@@ -10,6 +10,7 @@ export * from './catalogue';
 export * from './command-runners';
 export * from './chat';
 export * from './chat-tools';
+export * from './takeover';
 export * from './conversation';
 export * from './conversation-dto';
 export * from './decision-models';

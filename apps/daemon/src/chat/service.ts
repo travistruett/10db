@@ -167,6 +167,19 @@ export interface ChatService {
   underWay(chatId: ChatId): boolean;
   /** Seals the chat once Do It has handed its work to a task: its session ends and its brief is forgotten. */
   seal(chatId: ChatId): Promise<void>;
+  /**
+   * Waits for Your folder on the chat's behalf: each time it can be the chat's, its parked starters run. What
+   * Hand Back does for the messages held while the chat was in the builder's terminal.
+   */
+  watchFolder(conversationId: ConversationId): void;
+}
+
+/** What a takeover does to a chat's archive: runs it in order with the takeover's own calls, and ends the takeover. */
+export interface ArchiveTakeover {
+  /** Runs `job` after the chat's earlier takeover calls, before its later ones. */
+  serialized<T>(chatId: ChatId, job: () => Promise<T>): Promise<T>;
+  /** The chat is archived: its hold is released, waiters served and its files removed. */
+  ended(chatId: ChatId): void;
 }
 
 export interface ChatServiceDeps {
@@ -184,6 +197,8 @@ export interface ChatServiceDeps {
   modelsOf(projectId: ProjectId): { default: string | null; offered: readonly ShapeModelOption[] };
   /** Whether the agent of the project's account searches the web (`capabilities.webSearch`). */
   webSearchOf(projectId: ProjectId): boolean;
+  /** The takeover service, read when a chat is archived (it is made after this service). */
+  readonly takeover?: () => ArchiveTakeover | null;
 }
 
 export function createChatService(deps: ChatServiceDeps): ChatService {
@@ -295,21 +310,27 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     },
 
     async archive(id) {
-      const chat = getChat(state.db, id);
-      if (chat.archivedAt !== null) return dtoOf(id);
-      refuseWhileDoing(id);
-      refuseWhileHandedTaskRuns(chat);
-      if (deps.pendingOpens.get(chat.projectId)?.chatId === id)
-        throw new ConflictError(PENDING_OPEN_FOR_CHAT);
-      // The session ends first (a start cancelled, a turn stopped, a card withdrawn), so nothing it
-      // does lands after the chat is archived; then the folder made only from its id goes.
-      deps.folderHold.cancelWait(id);
-      await engine.retire(chat.conversationId);
-      state.write((ctx) => {
-        archiveChat(ctx, id, ctx.now);
-      });
-      rmSync(chatFolder(deps.dataDir, chat.conversationId), { recursive: true, force: true });
-      return dtoOf(id);
+      const takeover = deps.takeover?.() ?? null;
+      const archive = async (): Promise<ChatDto> => {
+        const chat = getChat(state.db, id);
+        if (chat.archivedAt !== null) return dtoOf(id);
+        refuseWhileDoing(id);
+        refuseWhileHandedTaskRuns(chat);
+        if (deps.pendingOpens.get(chat.projectId)?.chatId === id)
+          throw new ConflictError(PENDING_OPEN_FOR_CHAT);
+        // The session ends first (a start cancelled, a turn stopped, a card withdrawn), so nothing it
+        // does lands after the chat is archived; then the folder made only from its id goes.
+        deps.folderHold.cancelWait(id);
+        await engine.retire(chat.conversationId);
+        state.write((ctx) => {
+          archiveChat(ctx, id, ctx.now);
+        });
+        // A chat in the builder's terminal gives the folder back and its files go.
+        takeover?.ended(id);
+        rmSync(chatFolder(deps.dataDir, chat.conversationId), { recursive: true, force: true });
+        return dtoOf(id);
+      };
+      return takeover === null ? archive() : takeover.serialized(id, archive);
     },
 
     unarchive(id) {
@@ -476,6 +497,10 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       if (at === ConversationState.PausedAccount)
         return { ...fromChat, reason: BriefReason.Paused };
       return { ...fromChat, reason: briefAskable(chat) ? null : BriefReason.MidTurn };
+    },
+
+    watchFolder: (conversationId) => {
+      watchFolder(requireChat(conversationId));
     },
   };
 

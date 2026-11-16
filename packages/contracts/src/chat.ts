@@ -7,6 +7,7 @@ import { TASK_MESSAGE_MAX_CHARS } from './task-thread';
 import { Title } from './entities';
 import { ShapeModelOption } from './shape-view';
 import { Effort } from './states';
+import { TerminalApp, TerminalAppSchema } from './takeover';
 
 // Sessions spec §7.1, §10, §11: a chat (a tab of its own over an attended conversation), what the
 // Sessions screen reads about it, and the routes that serve its `@` files and its Start from lines.
@@ -112,8 +113,19 @@ export const SessionStartDto = z.object({ kind: z.enum(SessionStartKind), text: 
 export type SessionStartDto = z.infer<typeof SessionStartDto>;
 
 /** Settings › Sessions. */
-export const SessionsSettingsDto = z.object({ notifyReplies: z.boolean() });
+export const SessionsSettingsDto = z.object({
+  notifyReplies: z.boolean(),
+  /** A value that is not one of the three choices reads as Terminal. */
+  terminalApp: TerminalAppSchema.catch(TerminalApp.Terminal),
+});
 export type SessionsSettingsDto = z.infer<typeof SessionsSettingsDto>;
+
+/** Settings › Sessions as a change: only the fields given are set. */
+export const SessionsSettingsPatch = z.strictObject({
+  notifyReplies: z.boolean().optional(),
+  terminalApp: TerminalAppSchema.optional(),
+});
+export type SessionsSettingsPatch = z.infer<typeof SessionsSettingsPatch>;
 
 // Sessions spec §7.3 (Do it): the sheet's request, its preview, and the brief.
 

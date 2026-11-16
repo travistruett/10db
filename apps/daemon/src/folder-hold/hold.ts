@@ -43,6 +43,8 @@ export interface TurnTaken {
   /** The closed pass the limits wait on. */
   readonly limitPass: string | null;
 }
+/** A takeover that was entered: what `enter` answered, and what the chat now shares the folder with. */
+export type TakeoverTaken<T> = { readonly value: T } & TurnTaken;
 export interface TurnBlocked {
   readonly taken: false;
   readonly blockers: readonly FolderBlocker[];
@@ -112,6 +114,17 @@ export interface FolderHold {
   blockers(projectId: ProjectId, asker: FolderAskerInput): FolderBlocker[];
   /** Takes the folder for the chat's turn, or says who is in the way. Idempotent for a chat that holds it. */
   takeTurn(projectId: ProjectId, chatId: ChatId): TurnTaken | TurnBlocked;
+  /**
+   * Takes the folder for a chat that moves to the builder's terminal, or says who is in the way. `enter`
+   * writes the change (the chat's state) in the same synchronous call as the check, so nothing starts between
+   * the two; a throw from it takes nothing and announces nothing.
+   */
+  takeOver<T>(projectId: ProjectId, chatId: ChatId, enter: () => T): TakeoverTaken<T> | TurnBlocked;
+  /**
+   * Gives a chat's takeover back: `leave` writes the change, then the folder's change is announced and waiters
+   * are served, with 10db's waiting git work handed the folder first.
+   */
+  handBack(projectId: ProjectId, chatId: ChatId, leave: () => void): void;
   /** Gives the folder back. Idempotent. */
   releaseTurn(chatId: ChatId): void;
   holdsTurn(chatId: ChatId): boolean;
@@ -262,6 +275,15 @@ export function createFolderHold(deps: FolderHoldDeps): FolderHold {
       return outcome === FolderOutcome.Shares ? [] : [{ holder, outcome }];
     });
   };
+
+  /** What a take shares the folder with, and the limits that sharing puts on it. */
+  const sharing = (others: readonly FolderHolderDto[]): Omit<TurnTaken, 'taken'> => ({
+    sharedWith: others.filter(
+      (h) => h.kind === FolderHolderKind.ChatTurn || h.kind === FolderHolderKind.Takeover,
+    ),
+    limits: [...new Set(others.flatMap((h) => limitsOf(h.kind)))],
+    limitPass: others.find((h) => h.kind === FolderHolderKind.PassClosed)?.name ?? null,
+  });
 
   const reserveGit = (
     projectId: ProjectId,
@@ -441,15 +463,20 @@ export function createFolderHold(deps: FolderHoldDeps): FolderHold {
         waiters.splice(waiter, 1);
         changed(projectId);
       }
-      const limits = [...new Set(others.flatMap((h) => limitsOf(h.kind)))];
-      return {
-        taken: true,
-        sharedWith: others.filter(
-          (h) => h.kind === FolderHolderKind.ChatTurn || h.kind === FolderHolderKind.Takeover,
-        ),
-        limits,
-        limitPass: others.find((h) => h.kind === FolderHolderKind.PassClosed)?.name ?? null,
-      };
+      return { taken: true, ...sharing(others) };
+    },
+    takeOver(projectId, chatId, enter) {
+      const blocked = blockers(projectId, { kind: FolderAsker.Takeover, chatId });
+      if (blocked.length > 0) return { taken: false, blockers: blocked };
+      const others = holders(projectId, chatId);
+      const value = enter();
+      changed(projectId);
+      return { taken: true, value, ...sharing(others) };
+    },
+    handBack(projectId, _chatId, leave) {
+      leave();
+      changed(projectId);
+      serveWaiters();
     },
     releaseTurn(chatId) {
       const mine = turns.get(chatId);

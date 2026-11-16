@@ -1382,3 +1382,40 @@ To run it: `TENDB_LIVE_CODEX=1 pnpm --filter @10db/daemon exec vitest run test/c
 open the sign-in address the run prints (`TENDB_LIVE_REPORT=<file>` collects it) and finish the ChatGPT sign-in in the
 browser within 10 minutes. It then asks for a patch, a commit and a shell `git commit`, and expects the file, the
 `lc3` commit, a done `commit_changes` call, no `shell` commit and a refusal that names `commit_changes`.
+
+## M7 live checks (2026-11-16)
+
+`apps/daemon/test/takeover.live.test.ts` drives the real daemon (`live-chat-daemon.ts`, a real repository outside
+every temp root) to one reply, sets Settings › Sessions to Copy the Command, opens the chat in the terminal and runs
+the line the daemon answers under a pty the test spawns (Python's `pty`; macOS `script` needs a terminal of its own).
+No Terminal or iTerm window opens. Manual, never CI: `TENDB_LIVE_CLAUDE=1`, `TENDB_LIVE_CODEX=1`. What needs a window,
+a sign-in the builder must finish, or the builder's eyes on the TUI is listed under "For the builder".
+
+### LC1 (pty part): pass, with one finding
+
+Claude plan, Claude Code from `PATH`, a default account (no `CLAUDE_CONFIG_DIR` of its own).
+
+- The line started the TUI and it was still running after 25 s; the scratch folder's output showed the trust
+  question ("Quick safety check: is this a project you trust?") and no first-run or text-style screen.
+- **Finding:** for the builder's default account the marks are in the builder's own `~/.claude.json`, which 10db never
+  edits, so a folder they haven't trusted asks once. An account with a directory of its own has its marks written
+  (`markOnboarded`, tested). Claude Code remembers the answer. Accepted; the popover does not warn of it.
+- `ps` showed no Anthropic key and no Bedrock key variable on any command line.
+- The takeover folder held one script until Hand Back (the test ran the line, not the script, so the script's own
+  `rm` did not run), and was empty after it.
+- The popover's notes for a builder with many skills ran to thousands of characters ("left out of this session": each
+  skill). Each note is now cut at 800 characters.
+
+### For the builder
+
+| Check      | Account                                                                   | What to look at                                                                                                                                                                                                                                                                                                                                                                        |
+| ---------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| LC1 (rest) | Claude plan, Terminal                                                     | Last turns show. `/mcp`: your servers and the project's (via `srt`), no `10db`. `/plugin`: the setup. Instructions apply; `/status` shows the effort. A `.claude/settings.json` marker hook doesn't run; whether a changed `.claude/skills` file loads. `~/.local/bin/claude` unchanged; the script gone once it ran. After Hand Back a 10db turn recalls a word said in the terminal. |
+| LC2        | Claude plan                                                               | Connectors from `mcp.json` show in `/mcp`; else they are left out with a note.                                                                                                                                                                                                                                                                                                         |
+| LC3        | API key, gateway, Bedrock key, Bedrock profile                            | One turn each. `--settings` loads under `--setting-sources ''`; `apiKeyHelper` reads the Keychain unprompted (API key, gateway), as does the Bedrock key's script. `ps -o command= -p <pid>` and a TUI Bash `env` show no key. A shell `AWS_ACCESS_KEY_ID` doesn't change the Bedrock profile's account.                                                                               |
+| LC4        | Codex plan (`TENDB_LIVE_CODEX=1` covers the pty start and the `ps` check) | "Open restricted", then history. A command runs (no guard hook); a write asks, then lands. `/status` matches a plain `codex` in a scratch home; subagents and skill instructions on. `env` shows no `TENDB_MCP_TOKEN_`. `/mcp`: the servers. `developer_instructions` apply on resume. `~/.agents/skills` noted. After Hand Back the 10db turn recalls the terminal.                   |
+| LC5        | Claude plan, iTerm                                                        | `open -a iTerm` runs the `.command`. Else the iTerm choice goes, and the decision says why.                                                                                                                                                                                                                                                                                            |
+| LC6        | any                                                                       | With a waiting switch back, quit 10db: it stops within 10 s. Restart: still in your terminal. Hand Back: the switch back runs first. (The restart test proves the same on a real store.)                                                                                                                                                                                               |
+
+Not run: LC2 to LC6, since each needs a window, a Keychain item or Bedrock profile, or a sign-in the builder finishes.
+Until they pass, the pull request names what is unproven.

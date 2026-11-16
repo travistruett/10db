@@ -522,3 +522,105 @@ test('Do It in a separate copy on a pull request project: the task opens in a ta
   for (const stream of streams)
     await request.post(`${daemonUrl}/workstreams/${stream.id}/cancel`, { headers: auth });
 });
+
+test('a chat goes to the builder’s terminal and back: the banner, a held message, a task that waits for it, Hand Back and the notice', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(300_000);
+  const projectId = await createProject(
+    request,
+    'sessions-terminal',
+    [{ name: 'repo', globs: ['**'] }],
+    { 'src/login.ts': 'export const login = () => null;\n' },
+  );
+  // Copy the Command opens no window, so the run needs no Terminal on the screen.
+  const setting = async (terminalApp: 'terminal' | 'copy'): Promise<void> => {
+    const saved = await request.patch(`${daemonUrl}/settings/sessions`, {
+      headers: auth,
+      data: { terminalApp },
+    });
+    expect(saved.ok()).toBe(true);
+  };
+  await setting('copy');
+  try {
+    await claudeIsInstalled(page);
+    await page.addInitScript((id) => {
+      window.localStorage.setItem('tendb.project', JSON.stringify(id));
+      if (window.localStorage.getItem('mantine-color-scheme-value') === null)
+        window.localStorage.setItem('mantine-color-scheme-value', 'dark');
+    }, projectId);
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/board');
+    await expect(page.getByRole('button', { name: /^Project: sessions-terminal/ })).toBeVisible();
+    await page.keyboard.press('Meta+t');
+    await expect(page).toHaveURL(/\/sessions\?fresh=/);
+
+    // A reply gives the chat an agent session to resume.
+    const composer = page.getByRole('textbox', { name: 'Message' });
+    await composer.click();
+    await composer.pressSequentially('Move to the terminal');
+    await composer.press('Enter');
+    await expect(page.getByText('Ready for the terminal.')).toBeVisible();
+
+    // Open in Terminal warns first; Copy the Command takes the chat and shows the banner.
+    await page.getByRole('button', { name: 'Open in Terminal' }).click();
+    const popover = page.getByRole('dialog', { name: 'Open in Terminal' });
+    await expect(popover.getByText(/runs outside 10db's sandbox/)).toBeVisible();
+    await expect(popover.getByText('Your folder is held until you hand back.')).toBeVisible();
+    await popover.getByRole('button', { name: 'Copy the Command' }).click();
+    const banner = page.getByRole('region', { name: 'In your terminal' });
+    await expect(banner).toBeVisible();
+    await expect(page.getByText(/^Chat · in your terminal since \d\d:\d\d$/)).toBeVisible();
+    await expect(banner.getByRole('button', { name: 'Hand Back' })).toBeFocused();
+    await scan(page, [1280, 480], 'a chat in the terminal');
+
+    // A message typed meanwhile is held.
+    await composer.click();
+    // The fake agent scripts a chat by the line it starts with, so the held message starts with it again.
+    await composer.pressSequentially('Move to the terminal again');
+    await composer.press('Enter');
+    await expect(page.getByText('Held until you hand back', { exact: true })).toBeVisible();
+
+    // A task that wants Your folder waits, naming the chat in the terminal.
+    const made = await request.post(`${daemonUrl}/projects/${projectId}/tasks`, {
+      headers: auth,
+      data: { title: 'Hold the folder', acceptanceCriteria: ['It holds'], areas: ['repo'] },
+    });
+    expect(made.ok()).toBe(true);
+    const taskId = z.looseObject({ id: z.string() }).parse(await made.json()).id;
+    expect((await request.post(`${daemonUrl}/tasks/${taskId}/start`, { headers: auth })).ok()).toBe(
+      true,
+    );
+    await expect
+      .poll(async () =>
+        WorkstreamNotices.parse(
+          await (
+            await request.get(`${daemonUrl}/workstreams?active=true`, { headers: auth })
+          ).json(),
+        )
+          .filter((w) => w.projectId === projectId)
+          .flatMap((w) => (w.notice?.key === 'folder-hold' ? [w.notice.line] : [])),
+      )
+      .toEqual([expect.stringContaining('in your terminal')]);
+
+    // Hand Back asks first, then gives the chat back with its notice.
+    await banner.getByRole('button', { name: 'Hand Back' }).click();
+    const question = page.getByRole('dialog', { name: 'Hand Back' });
+    await expect(question.getByText('Is Claude Code closed in your terminal?')).toBeVisible();
+    await question.getByRole('button', { name: 'Hand Back' }).click();
+    await expect(banner).toHaveCount(0);
+    await expect(page.getByText("aren't shown here")).toBeVisible();
+
+    // The task has the folder now; once it ends, the held message runs.
+    const streams = Workstreams.parse(
+      await (await request.get(`${daemonUrl}/workstreams?active=true`, { headers: auth })).json(),
+    ).filter((w) => w.projectId === projectId);
+    for (const stream of streams)
+      await request.post(`${daemonUrl}/workstreams/${stream.id}/cancel`, { headers: auth });
+    await expect(page.getByText('Back from the terminal.')).toBeVisible();
+    await scan(page, [1280], 'a chat handed back');
+  } finally {
+    await setting('terminal');
+  }
+});

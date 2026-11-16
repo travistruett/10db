@@ -17,3 +17,9 @@ lane's start can't interleave.
   wait takes its delivery job's signal. A token handed over in the same tick as an abort is released before the
   call rejects, so an abort leaves no git holder. A caller wraps everything it does after the await, its re-checks
   included, in `try { … } finally { releaseGit(token) }`, so a throw never leaves an unowned `git_work` entry.
+- `takeOver(projectId, chatId, enter)` is a chat's move to the builder's terminal: it checks `blockers` for a
+  `Takeover` asker, runs `enter` (which writes `taken_over`) in the same synchronous call, then announces the
+  change; a throw from `enter` takes and announces nothing. `handBack(projectId, chatId, leave)` runs `leave`,
+  announces, and serves waiters, so 10db's git work that waited for the takeover is handed the folder (the wake's
+  reservation) before the chat's held message, which `chat/service.ts` parks as a waiter. `takenOverChats` skips
+  archived chats, so an archived chat never holds.

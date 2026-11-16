@@ -5142,6 +5142,7 @@ describe("a lane's settled read-only line", () => {
 
   const standInSandbox = (): LaneSandbox => ({
     judgeSetup: () => Promise.reject(new Error('no preview here')),
+    forTakeover: () => Promise.reject(new Error('no takeover here')),
     forSession: (input) =>
       Promise.resolve({
         spec: {} as LaneSession['spec'],
@@ -5246,6 +5247,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     return {
       laneSandbox: {
         judgeSetup: (project, setup, checkouts) => real.judgeSetup(project, setup, checkouts),
+        forTakeover: (input) => real.forTakeover(input),
         async forSession(input) {
           inputs.push(input);
           if (fail) fail();

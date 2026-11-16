@@ -4,6 +4,11 @@ import {
   EventType,
   FolderDto,
   FolderHolderKind,
+  TakeoverCommandDto,
+  TakeoverDto,
+  TakeoverPreviewDto,
+  UpstreamError,
+  type ChatDto,
   WorkstreamState,
 } from '@10db/contracts';
 import { insertTask, insertWorkstream, listItemFiles, listItems, schema } from '@10db/db';
@@ -42,6 +47,7 @@ function appOf(world: ChatWorld) {
       ...createChatApiServices({
         state: world.state,
         chat: world.chat,
+        takeover: world.takeover,
         folderHold: world.folderHold,
         pendingOpens: createPendingOpens({ state: world.state }),
         doItPreview: () => Promise.reject(new Error('not read here')),
@@ -275,3 +281,79 @@ describe('the folder and a chat that meets it held', () => {
 function never(): never {
   throw new Error('no message stored');
 }
+
+describe("a chat's takeover routes", () => {
+  const headers = { Authorization: `Bearer ${TOKEN}` };
+  const call = (world: ChatWorld, method: string, path: string, withToken = true) =>
+    appOf(world).request(path, { method, headers: withToken ? headers : {} });
+
+  /** A chat with one finished turn, kept off the folder so its session stays warm. */
+  async function talked(): Promise<ChatDto> {
+    const chat = w.open();
+    const held = w.folderHold.reserveGit(w.project.id, 'warming up');
+    w.chat.send(chat.conversationId, { text: 'Hello', mentions: [], pictures: [] });
+    await w.engine.settled(chat.conversationId);
+    if (held.reserved) w.folderHold.releaseGit(held.token);
+    return chat;
+  }
+
+  it('answers 401 with no token', async () => {
+    w = chatWorld();
+    const chat = w.open();
+    const base = `/conversations/${chat.conversationId}`;
+    for (const [method, path] of [
+      ['POST', '/takeover'],
+      ['POST', '/takeover/command'],
+      ['POST', '/hand-back'],
+      ['GET', '/takeover'],
+      ['GET', '/takeover/preview'],
+    ] as const)
+      expect((await call(w, method, base + path, false)).status).toBe(401);
+  });
+
+  it('opens with the line, reads back, previews and hands back', async () => {
+    w = chatWorld();
+    const chat = await talked();
+    const base = `/conversations/${chat.conversationId}`;
+    expect((await call(w, 'GET', `${base}/takeover`)).status).toBe(404);
+    const preview = TakeoverPreviewDto.parse(
+      await (await call(w, 'GET', `${base}/takeover/preview`)).json(),
+    );
+    expect(preview.refusal).toBeNull();
+    const opened = await call(w, 'POST', `${base}/takeover`);
+    expect(opened.status).toBe(200);
+    expect(TakeoverDto.parse(await opened.json()).line).toMatch(/^\/bin\/sh -c /);
+    expect(TakeoverDto.parse(await (await call(w, 'GET', `${base}/takeover`)).json()).app).toBe(
+      'copy',
+    );
+    expect(
+      TakeoverCommandDto.parse(await (await call(w, 'POST', `${base}/takeover/command`)).json())
+        .line,
+    ).toMatch(/^\/bin\/sh -c /);
+    expect((await call(w, 'POST', `${base}/hand-back`)).status).toBe(204);
+    expect((await call(w, 'GET', `${base}/takeover`)).status).toBe(404);
+  });
+
+  it('answers 409 with the refusal’s words, and 502 when the terminal does not open', async () => {
+    w = chatWorld();
+    const chat = await talked();
+    const base = `/conversations/${chat.conversationId}`;
+    const notIn = await call(w, 'POST', `${base}/hand-back`);
+    expect(notIn.status).toBe(409);
+    expect(await notIn.text()).toContain('Not in your terminal');
+    w.folderHold.reserveGit(w.project.id, 'a switch back');
+    const held = await call(w, 'POST', `${base}/takeover`);
+    expect(held.status).toBe(409);
+    expect(await held.text()).toContain('Your folder is in use by');
+  });
+
+  it('answers 502 when the terminal does not open', async () => {
+    w = chatWorld();
+    w.terminal.app = 'iterm';
+    w.terminal.openerFails = new UpstreamError("iTerm isn't installed or didn't open.");
+    const chat = await talked();
+    const res = await call(w, 'POST', `/conversations/${chat.conversationId}/takeover`);
+    expect(res.status).toBe(502);
+    expect(await res.text()).toContain("iTerm isn't installed");
+  });
+});

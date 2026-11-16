@@ -165,6 +165,31 @@ sessions M6 plan):
 Not covered: a resumed agent session keeps the brief request in its own transcript; a pass of one does not wait for
 a page claim against a copy task editing the same files.
 
+## A chat in your own terminal
+
+Open in Terminal continues a chat in the agent's own TUI, in Terminal, iTerm or a terminal you paste a command into.
+**That terminal runs outside 10db's sandbox and judge.** The agent's own prompts guard it, and the popover says so
+every time. What still holds:
+
+| Held                                                      | How                                                                                                                                                                                                                                                                                                               |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No key in the script, a command line or the agent's shell | an API-key or gateway account reads its key through Claude Code's `apiKeyHelper`; a Bedrock key is read in the script under Claude Code's subprocess scrub; Codex's `TENDB_MCP_TOKEN_*` header variables are excluded from its commands, and the sealed file that carries them is removed before the agent starts |
+| No settings file and no project hook                      | `--setting-sources ''` for Claude; Codex keeps the checkout `untrusted` and runs no 10db hook                                                                                                                                                                                                                     |
+| No sandbox runtime, nothing project-owned                 | the terminal opens with none of the chat's servers, plugins or instructions, and says so; the checkout's settings, hooks and skills never load                                                                                                                                                                    |
+| Only approved MCP servers                                 | yours and the project's approved ones, the project's still under `srt`; never 10db's own server                                                                                                                                                                                                                   |
+| The script leaves nothing                                 | its first line deletes it; Hand Back and archive remove the folder, which is outside the chat's own files; a link planted in it is never followed                                                                                                                                                                 |
+| 10db's own git and Your folder                            | the chat holds Your folder until Hand Back, so no task, pass or switch-back writes under it                                                                                                                                                                                                                       |
+
+| Not covered                                 | Why                                                                                                                 |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| What the terminal's agent does              | it runs as the builder's own agent, with the builder's files and keys it can reach; the TUI's prompts are the guard |
+| A Bedrock key in the terminal's environment | Claude Code has no helper for it; the scrub keeps it from the agent's commands, at the cost of auto mode            |
+| Codex's skills folders                      | Codex has no flag for them, so it gets none (a gap, not a hole)                                                     |
+| A forgotten Hand Back                       | it holds Your folder; every wait it causes names the chat                                                           |
+
+The decision is
+`architecture/decisions/2026-11-16-open-in-terminal-runs-the-agents-own-tui-outside-the-sandbox-holding-your-folder.md`.
+
 ## Reporting a problem
 
 If you find a way out, please report it privately as described in [SECURITY.md](../SECURITY.md).

@@ -1,9 +1,11 @@
 import {
+  ConversationState,
   FolderHolderKind,
   type ChatDto,
   type FolderDto,
   type FolderHolderView,
 } from '@10db/contracts';
+import dayjs from 'dayjs';
 
 /** The holders a chat shares the folder with: other chats, here or in a terminal. */
 const SHARED_KINDS: ReadonlySet<FolderHolderKind> = new Set([
@@ -29,9 +31,19 @@ export function keepingWords(chat: ChatDto | null, folder: FolderDto | null): st
 
 /**
  * The dimmed line under a session's title, saying what the session is and what it does to Your folder
- * (sessions UI spec §4). Until the folder is read, a chat reads the project.
+ * (sessions UI spec §4). Until the folder is read, a chat reads the project. A chat in the builder's terminal
+ * says since when, once `since` (an ISO time) is read.
  */
-export function kindLine(chat: ChatDto, projectName: string, folder: FolderDto | null): string {
+export function kindLine(
+  chat: ChatDto,
+  projectName: string,
+  folder: FolderDto | null,
+  since: string | null = null,
+): string {
+  if (chat.conversation.state === ConversationState.TakenOver)
+    return since === null
+      ? 'Chat · in your terminal'
+      : `Chat · in your terminal since ${dayjs(since).format('HH:mm')}`;
   if (folder === null) return `Chat · reads ${projectName}`;
   const keeping = keepingWords(chat, folder);
   const parts: string[] = [];
