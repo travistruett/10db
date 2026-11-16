@@ -243,8 +243,9 @@ export async function recoverBatches(deps: {
     // A chat taken over in the builder's terminal holds Your folder: the switch waits in the project's
     // queue, and startup goes on.
     if (returned === 'busy')
-      deps.jobs.run(jobKey({ projectId: batch.projectId, worktreePath: null }, JobQueue.Ship), () =>
-        returnCheckout(deps, batch.id).then(() => undefined),
+      deps.jobs.run(
+        jobKey({ projectId: batch.projectId, worktreePath: null }, JobQueue.Ship),
+        (signal) => returnCheckout(deps, batch.id, { signal }).then(() => undefined),
       );
   }
 

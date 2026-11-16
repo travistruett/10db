@@ -2,7 +2,7 @@ import { reserveGitNaming } from './folder-wait';
 import { BatchState, type BatchId } from '@10db/contracts';
 import { getBatch, getBatchRow, getProject, patchBatch } from '@10db/db';
 import type { StateStore } from '../events';
-import type { FolderHold } from '../folder-hold';
+import { FolderWaitCancelledError, type FolderHold } from '../folder-hold';
 import type { CheckoutPlace, Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
@@ -28,7 +28,10 @@ export type CheckoutReturn =
   | 'moved'
   /** Left as it is, with a card saying why. */
   | 'left'
-  /** Not tried: a chat's turn holds Your folder and the caller chose not to wait. The place is kept. */
+  /**
+   * Not tried: a chat's turn or a takeover holds Your folder and the caller chose not to wait, or 10db stopped
+   * while it waited. The place is kept.
+   */
   | 'busy';
 
 const FINISHED: readonly BatchState[] = [
@@ -50,7 +53,7 @@ const message = (error: unknown): string =>
 export async function returnCheckout(
   deps: CheckoutReturnDeps,
   batchId: BatchId,
-  opts: { readonly wait?: boolean } = {},
+  opts: { readonly wait?: boolean; readonly signal?: AbortSignal } = {},
 ): Promise<CheckoutReturn> {
   const db = deps.state.db;
   const row = getBatchRow(db, batchId);
@@ -80,7 +83,20 @@ export async function returnCheckout(
     const reserved = deps.folderHold.reserveGit(project.id, what);
     if (!reserved.reserved) return 'busy';
     token = reserved.token;
-  } else token = await reserveGitNaming(deps, { projectId: project.id, batchId, what });
+  } else {
+    try {
+      token = await reserveGitNaming(deps, {
+        projectId: project.id,
+        batchId,
+        what,
+        ...(opts.signal === undefined ? {} : { signal: opts.signal }),
+      });
+    } catch (error) {
+      // 10db is stopping: the place stays, and the next start switches back.
+      if (error instanceof FolderWaitCancelledError) return 'busy';
+      throw error;
+    }
+  }
   try {
     const outcome = await deps.git.switchBack(project.repoPath, row.branch, place);
     switch (outcome.kind) {
