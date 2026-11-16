@@ -38,7 +38,7 @@ describe('kindLine', () => {
           }),
         ],
       }),
-      line: 'Chat · reads only: Your folder is in use by the pass ‘Settings pass’ and 10db switching Your folder back to `main`',
+      line: 'Chat · reads only: Your folder is in use by the pass ‘Settings pass’ and 10db switching Your folder back to main',
     },
     {
       name: 'another chat shares it',
@@ -53,7 +53,22 @@ describe('kindLine', () => {
     {
       name: 'a closed pass limits commits',
       folder: folderDto({ holders: [folderHolder(FolderHolderKind.PassClosed, 'Settings pass')] }),
-      line: "Chat · Your folder · on main · commits wait until the pass ‘Settings pass’'s pull request merges",
+      line: "Chat · Your folder · on main · commits, branch moves and pulls wait until the pass ‘Settings pass’'s pull request merges",
+    },
+    {
+      name: 'a task keeps the chat out while a closed pass limits git',
+      folder: folderDto({
+        holders: [
+          folderHolder(FolderHolderKind.Lane, 'Bump vite'),
+          folderHolder(FolderHolderKind.PassClosed, 'Settings pass'),
+        ],
+      }),
+      line: "Chat · reads only: Your folder is in use by the task ‘Bump vite’ · commits, branch moves and pulls wait until the pass ‘Settings pass’'s pull request merges",
+    },
+    {
+      name: 'a waiting chat is not using the folder',
+      folder: folderDto({ holders: [folderHolder(FolderHolderKind.WaitingChat, 'Retry login')] }),
+      line: 'Chat · Your folder · on main',
     },
     {
       name: 'the chat’s own turn is not another chat',

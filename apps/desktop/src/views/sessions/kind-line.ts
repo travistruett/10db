@@ -9,7 +9,6 @@ import {
 const SHARED_KINDS: ReadonlySet<FolderHolderKind> = new Set([
   FolderHolderKind.ChatTurn,
   FolderHolderKind.Takeover,
-  FolderHolderKind.WaitingChat,
 ]);
 
 function andJoin(parts: readonly string[]): string {
@@ -17,7 +16,8 @@ function andJoin(parts: readonly string[]): string {
   return `${parts.slice(0, -1).join(', ')} and ${parts.at(-1) ?? ''}`;
 }
 
-const wordsOf = (holder: FolderHolderView): string => holder.words;
+/** The daemon writes a branch name in backticks; the lines here are plain text, as the free line's branch is. */
+const wordsOf = (holder: FolderHolderView): string => holder.words.replaceAll('`', '');
 
 /** The holders that keep this chat's turn from writing, as a sentence part; null when none does. */
 export function keepingWords(chat: ChatDto | null, folder: FolderDto | null): string | null {
@@ -34,12 +34,17 @@ export function keepingWords(chat: ChatDto | null, folder: FolderDto | null): st
 export function kindLine(chat: ChatDto, projectName: string, folder: FolderDto | null): string {
   if (folder === null) return `Chat · reads ${projectName}`;
   const keeping = keepingWords(chat, folder);
-  if (keeping !== null) return `Chat · reads only: Your folder is in use by ${keeping}`;
-  const others = folder.holders.filter((holder) => holder.chatId !== chat.id);
-  const alongside = others.filter((holder) => SHARED_KINDS.has(holder.kind));
-  const parts = [folder.branch === null ? 'Your folder' : `Your folder · on ${folder.branch}`];
-  if (alongside.length > 0) parts.push(`also in use by ${andJoin(alongside.map(wordsOf))}`);
+  const parts: string[] = [];
+  if (keeping !== null) parts.push(`reads only: Your folder is in use by ${keeping}`);
+  else {
+    const others = folder.holders.filter((holder) => holder.chatId !== chat.id);
+    const alongside = others.filter((holder) => SHARED_KINDS.has(holder.kind));
+    parts.push(folder.branch === null ? 'Your folder' : `Your folder · on ${folder.branch}`);
+    if (alongside.length > 0) parts.push(`also in use by ${andJoin(alongside.map(wordsOf))}`);
+  }
   if (folder.limitPass !== null)
-    parts.push(`commits wait until the pass ‘${folder.limitPass}’'s pull request merges`);
+    parts.push(
+      `commits, branch moves and pulls wait until the pass ‘${folder.limitPass}’'s pull request merges`,
+    );
   return `Chat · ${parts.join(' · ')}`;
 }
