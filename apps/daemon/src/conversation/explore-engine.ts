@@ -68,6 +68,9 @@ export const WARM_CAP = 4;
 const CREDENTIALS_MARGIN_MS = 5 * 60_000;
 /** What a conversation reads when its next session starts fresh past the context limit. */
 export const FRESH_SESSION_NOTICE = 'Continued in a fresh session. Nothing is lost.';
+/** What a chat reads once it is handed back from the builder's terminal. */
+export const HAND_BACK_NOTICE =
+  "Turns from your terminal are in the agent's memory; they aren't shown here.";
 /** What a conversation paused for the account's usage limit reads, naming when it resumes. */
 export const pausedNotice = (until: Date): string =>
   `Paused for the account's usage limit until ${until.toISOString()}. What you send waits, and runs then.`;
@@ -77,6 +80,7 @@ export const CAPPED_NOTICE =
 
 const S = ConversationState;
 const E = ExploreEffect;
+const NOT_IN_TERMINAL_WORDS = 'Not in your terminal';
 
 /** The events whose outcome never starts a turn, so a hold does not hide the queue from them. */
 const COUNTED_UNDER_HOLD: ReadonlySet<ExploreEvent['type']> = new Set([
@@ -116,6 +120,15 @@ export interface ExploreEngine {
    */
   retire(id: ConversationId): Promise<void>;
   unretire(id: ConversationId): void;
+  /**
+   * Takes the chat to the builder's terminal: `taken_over`, with its session closed. `closed` settles once the
+   * close has run. Throws `ConflictError` for a retired chat or the state's busy words.
+   */
+  openTerminal(id: ConversationId): { readonly closed: Promise<void> };
+  /** Gives the chat back, with the notice, and runs what waited. Throws `ConflictError` unless `taken_over`. */
+  handBack(id: ConversationId): void;
+  /** The terminal never opened: gives the chat back with no notice, and runs what waited. */
+  terminalFailed(id: ConversationId): void;
   recover(): Promise<void>;
   close(): Promise<void>;
 }
@@ -264,8 +277,8 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       event.type === 'builder_message' &&
       !BUSY.has(rt.state) &&
       !rt.retired &&
-      factsOf(rt, event).queued > 0 &&
-      hooks.turnStarting !== undefined
+      hooks.turnStarting !== undefined &&
+      takesTurn(reduceExplore(rt.state, event, factsOf(rt, event)))
     ) {
       const { writes } = hooks.turnStarting(conv);
       const open = rt.session?.open;
@@ -398,8 +411,14 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         await stops.stopSession(rt, session, reason);
         return;
       }
+      case E.HandBackNotice:
+        notice(rt, HAND_BACK_NOTICE);
+        return;
       case E.RunQueue:
-        if (unpushed(rt).length > 0) reduce(rt, { type: 'builder_message' });
+        if (unpushed(rt).length === 0) return;
+        // Under a hold the queue waits, parked, for the release.
+        if (holding(rt)) park(rt);
+        else reduce(rt, { type: 'builder_message' });
         return;
       case E.Inject: {
         // One push each, under its own uuid, so a receipt can name each one.
@@ -502,7 +521,6 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       case E.StorePartial:
       case E.DropPendingStart:
       case E.WithdrawCard:
-      case E.HandBackNotice:
       case E.Archive:
       case E.ArchiveAfterStop:
         return;
@@ -754,6 +772,25 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     },
     unretire(id) {
       runtimeOf(id).retired = false;
+    },
+    openTerminal(id) {
+      const rt = runtimeOf(id);
+      if (rt.retired) throw new ConflictError('This chat is archived');
+      const outcome = reduce(rt, { type: 'open_terminal' });
+      if ('refused' in outcome) throw new ConflictError(outcome.refused);
+      // Queued behind the close the reduce asked for, so it settles once that has run.
+      const closed = new Promise<void>((resolve) => {
+        enqueue(rt, resolve);
+      });
+      return { closed };
+    },
+    handBack(id) {
+      const rt = runtimeOf(id);
+      if (rt.state !== S.TakenOver) throw new ConflictError(NOT_IN_TERMINAL_WORDS);
+      reduce(rt, { type: 'hand_back' });
+    },
+    terminalFailed(id) {
+      reduce(runtimeOf(id), { type: 'terminal_failed' });
     },
     recover,
     close,
