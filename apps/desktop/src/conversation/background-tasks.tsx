@@ -38,7 +38,7 @@ export interface BackgroundTasksProps {
 export function BackgroundTasks({ capabilities, tasks }: BackgroundTasksProps) {
   if (!capabilities.backgroundTasks)
     return (
-      <Box px="md" py={4} data-background-tasks="unavailable">
+      <Box px="md" py={4} data-background-tasks="unavailable" style={{ flex: 'none' }}>
         <Text size="xs" c="dimmed">
           {capabilities.label} doesn’t report background tasks.
         </Text>
@@ -50,7 +50,7 @@ export function BackgroundTasks({ capabilities, tasks }: BackgroundTasksProps) {
       px="md"
       py={6}
       data-background-tasks
-      style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}
+      style={{ flex: 'none', borderTop: '1px solid var(--mantine-color-default-border)' }}
     >
       <Text size="xs" c="dimmed">
         Running in the background · {tasks.length}

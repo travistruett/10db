@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { z } from 'zod';
 import { claudeIsInstalled } from './claude-is-installed';
+import { inConversationColumn } from './conversation-column';
 import { daemonUrl } from './daemon-url';
 import { expectAccessible } from './expect-accessible';
 import { auth, createProject } from './shape-project';
@@ -102,6 +103,7 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   await page.getByRole('option', { name: /login\.ts/ }).click();
   await composer.press('Enter');
   await expect(page.getByRole('tab', { name: /Login fails after sleep/ })).toBeVisible();
+  await inConversationColumn(page.getByRole('tabpanel'), composer, 'Sessions at 1280');
 
   // The reply, in an article headed by the agent's label; its settled work is one Worked row that
   // opens to a read row and a search row.

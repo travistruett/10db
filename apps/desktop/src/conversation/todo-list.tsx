@@ -45,7 +45,7 @@ export function TodoList({ steps }: { readonly steps: readonly TodoStep[] }) {
       px="md"
       py={6}
       data-todo-list
-      style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}
+      style={{ flex: 'none', borderTop: '1px solid var(--mantine-color-default-border)' }}
     >
       <UnstyledButton
         aria-expanded={open}
