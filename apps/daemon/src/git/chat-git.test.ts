@@ -219,6 +219,44 @@ describe('commitInFolder', () => {
   });
 });
 
+// A repository the agent made inside the folder is its own: its config is the agent's to write, so no call here
+// may run a git in it.
+describe('a nested repository the agent controls', () => {
+  /** A committed gitlink whose own config runs a marker program on any status, and a change inside it. */
+  function plantNested(): string {
+    const marker = join(scratch.path, 'fsmonitor-ran');
+    const program = join(scratch.path, 'monitor.sh');
+    writeFileSync(program, `#!/bin/sh\ntouch '${marker}'\n`);
+    chmodSync(program, 0o755);
+    mkdirSync(join(repo, 'sub'));
+    raw(join(repo, 'sub'), 'init', '-q');
+    raw(join(repo, 'sub'), 'config', 'user.email', 'a@b.invalid');
+    raw(join(repo, 'sub'), 'config', 'user.name', 'a');
+    raw(join(repo, 'sub'), 'config', 'commit.gpgsign', 'false');
+    write('f.txt', 'one\n', join(repo, 'sub'));
+    raw(join(repo, 'sub'), 'add', '-A');
+    raw(join(repo, 'sub'), 'commit', '-q', '-m', 'one');
+    rg('add', 'sub');
+    rg('commit', '-q', '-m', 'Add the gitlink');
+    raw(join(repo, 'sub'), 'config', 'core.fsmonitor', program);
+    // A clean filter its own attributes select, which a status of it would run on the changed file.
+    raw(join(repo, 'sub'), 'config', 'filter.mark.clean', `${program} %f; cat`);
+    write('.gitattributes', '*.txt filter=mark\n', join(repo, 'sub'));
+    write('f.txt', 'two\n', join(repo, 'sub'));
+    return marker;
+  }
+
+  it('is never asked for its status by a commit, a switch or a branch', async () => {
+    const marker = plantNested();
+    rg('branch', 'other');
+    write('mine.txt', 'mine\n');
+    await git.commitInFolder(repo, { message: 'Mine' });
+    await git.switchBranch(repo, 'other');
+    await git.makeBranchHere(repo, 'topic');
+    expect(existsSync(marker)).toBe(false);
+  });
+});
+
 describe('switchBranch', () => {
   beforeEach(() => {
     rg('switch', '-q', '-c', 'other');

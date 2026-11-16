@@ -134,6 +134,11 @@ function refuseSecrets(secrets: readonly string[]): void {
 
 const LITERAL = { GIT_LITERAL_PATHSPECS: '1' } as const;
 const NO_SUBMODULES = ['-c', 'submodule.recurse=false'] as const;
+/**
+ * A nested repository's own state is never read: its status would run in a git dir the agent can write. A
+ * moved gitlink still shows; only what is dirty inside it is left unread.
+ */
+const NO_NESTED_STATUS = ['-c', 'diff.ignoreSubmodules=dirty', ...NO_SUBMODULES] as const;
 
 /** Files whose presence in the git dir says an operation is half done. */
 const OPERATION_FILES = [
@@ -247,6 +252,7 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
             ctx.git(c, ['add', '--pathspec-from-file=-', '--pathspec-file-nul'], {
               input: changed.map((path) => `${path}\0`).join(''),
               env: LITERAL,
+              config: NO_NESTED_STATUS,
             }),
           'git add failed',
         );
@@ -256,6 +262,7 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
             ['diff', '--cached', '--name-only', '-z', ...(named ? ['--', ...named] : [])],
             {
               env: LITERAL,
+              config: NO_NESTED_STATUS,
             },
           )
         )
@@ -275,7 +282,11 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
                 ...flags,
                 ...(named === undefined ? [] : ['--', ...named]),
               ],
-              { input: `${message}\n`, env: LITERAL, config: sign.config },
+              {
+                input: `${message}\n`,
+                env: LITERAL,
+                config: [...NO_NESTED_STATUS, ...sign.config],
+              },
             ),
           'git commit failed',
         );
@@ -298,7 +309,7 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
         await said(
           () =>
             ctx.git(c, ['switch', '--no-guess', '--no-recurse-submodules', '--', branch], {
-              config: NO_SUBMODULES,
+              config: NO_NESTED_STATUS,
             }),
           `Git could not switch to ${branch}`,
         );

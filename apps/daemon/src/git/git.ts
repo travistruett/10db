@@ -1367,7 +1367,8 @@ function readIfPresent(path: string): string {
  * fsmonitor, a hook or a submodule's git in the working tree: commits are plumbing over a private
  * index, changes are found by hashing files the daemon reads itself, every call passes
  * `DAEMON_GIT_CONFIG` and a cleaned environment, and the one checkout it makes (a batch's new
- * branch) reads no attributes from the tree. Every call first checks that the checkout's git dirs
+ * branch) reads no attributes from the tree. The chat's calls (`chat-git.ts`) are porcelain in the checkout, so
+ * they pin the config and environment that keep git out of a nested repository's status. Every call first checks that the checkout's git dirs
  * are the ones pinned for it and that it borrows no objects. Fetch and push go only to the URLs
  * pinned with it, with the builder's own transport config.
  */
