@@ -65,8 +65,12 @@ export function useCancelBrief() {
   });
 }
 
-/** Hands the chat's work on. Rejects with the daemon's words, which the sheet shows beside Do It. */
-export function useDoIt() {
+/**
+ * Hands the chat's work on. Rejects with the daemon's words, which the sheet shows beside Do It.
+ * `onHandedOff` is the mutation's own callback, not `mutate`'s: the seal can drop the chat's tab, and
+ * the sheet with it, before the answer comes, and only the mutation's callbacks still run then.
+ */
+export function useDoIt(onHandedOff: (result: DoItResult, request: DoItRequest) => void) {
   const { client } = useDaemon();
   const queries = useQueryClient();
   return useMutation({
@@ -78,6 +82,9 @@ export function useDoIt() {
         }),
         DoItResult,
       ),
+    onSuccess: (result, input) => {
+      onHandedOff(result, input.request);
+    },
     onSettled: () => {
       void queries.invalidateQueries({ queryKey: chatKeys.all });
       void queries.invalidateQueries({ queryKey: ['tasks'] });

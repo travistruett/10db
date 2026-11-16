@@ -53,6 +53,8 @@ export interface DoItServerOptions {
   readonly result?: DoItResult;
   /** Runs when the hand-off is accepted, so a test can seal the chat in the server it stands in for. */
   readonly onDoIt?: (request: DoItRequest, taskId: TaskId) => void;
+  /** The hand-off answers only once this settles, so a test can change the window while it is under way. */
+  readonly holdDoIt?: Promise<void>;
 }
 
 export interface DoItServer {
@@ -89,6 +91,7 @@ export function doItServer(opts: DoItServerOptions): DoItServer {
       const body = DoItRequest.parse(await request.json());
       server.requests.push(body);
       opts.onDoIt?.(body, taskId);
+      if (opts.holdDoIt !== undefined) await opts.holdDoIt;
       if (opts.refusal !== undefined)
         return HttpResponse.json({ error: 'conflict', message: opts.refusal }, { status: 409 });
       return HttpResponse.json(DoItResult.parse(opts.result ?? { taskId, place: body.place }), {

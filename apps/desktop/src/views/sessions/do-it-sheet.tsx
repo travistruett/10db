@@ -104,7 +104,9 @@ export function DoItSheet({
   const preview = useDoItPreview(chat.id, true);
   const ask = useAskBrief();
   const cancel = useCancelBrief();
-  const doIt = useDoIt();
+  const doIt = useDoIt((result, request) => {
+    onDone(result, request.title);
+  });
   const { select } = useSelectedProject();
   // What the builder typed; null while the field still takes the daemon's brief. Typing stops the brief
   // being taken, not the agent writing it.
@@ -169,9 +171,6 @@ export function DoItSheet({
         },
       },
       {
-        onSuccess: (result) => {
-          onDone(result, title.trim());
-        },
         onError: (failure) => {
           setError(failure.message);
         },
@@ -180,6 +179,8 @@ export function DoItSheet({
   };
 
   const close = (): void => {
+    // Leaving while the hand-off is under way would hide its answer, and a refusal with it.
+    if (doIt.isPending) return;
     // A brief still being written is dropped with the sheet; a turn the builder began since is not touched.
     if (brief?.writing === true) cancel.mutate(chat.id);
     onClose();
@@ -202,7 +203,7 @@ export function DoItSheet({
       error={error}
       actions={
         <>
-          <Button variant="default" onClick={close}>
+          <Button variant="default" disabled={doIt.isPending} onClick={close}>
             Cancel
           </Button>
           {busy ? (

@@ -94,6 +94,52 @@ describe('a hand-off to a separate copy', () => {
   });
 });
 
+describe('a hand-off whose chat leaves the strip before the daemon answers', () => {
+  it('still opens the task’s tab', async () => {
+    const [a, b] = [chatIn(0, 'First'), chatIn(1, 'Login fails')] as [ChatDto, ChatDto];
+    const served = chatServer({ chats: [a, b] });
+    const sessions: TaskSessionDto[] = [];
+    let release: () => void = () => undefined;
+    const holdDoIt = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const doIt = doItServer({
+      preview: doItPreviewDto(),
+      holdDoIt,
+      onDoIt: (request, taskId) => {
+        sessions.push(taskSessionDto({ taskId, title: request.title }));
+        // The seal reaches the window as a chat event before the POST is answered.
+        served.chats.splice(1, 1, chatDto({ ...b, tabPosition: null, taskId }));
+      },
+    });
+    server.use(
+      ...doIt.handlers,
+      ...taskSessionHandlers(() => sessions),
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      ...served.handlers,
+      ...baseHandlers(),
+    );
+    const { queryClient } = renderApp(`/sessions?chat=${b.id}`);
+    fireEvent.click(await screen.findByRole('button', { name: 'Do It…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Do It' });
+    await within(sheet).findByDisplayValue('Retry login once on a 401');
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Do It' }));
+    await waitFor(() => {
+      expect(doIt.requests).toHaveLength(1);
+    });
+    await queryClient.invalidateQueries({ queryKey: ['chats'] });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Do It' })).toBeNull();
+    });
+    release();
+    expect(
+      (await screen.findByRole('tab', { name: /Retry login once on a 401/ })).getAttribute(
+        'aria-selected',
+      ),
+    ).toBe('true');
+  });
+});
+
 describe('the sealed chat', () => {
   it('reads only, says where its work went, and Open Task opens the task’s tab', async () => {
     const taskId = mintId('Task');
