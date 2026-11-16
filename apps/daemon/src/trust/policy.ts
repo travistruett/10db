@@ -46,9 +46,11 @@ function environmentLines(input: TrustPolicyInput): string[] {
   const checkout = quotedValue(input.checkout);
   return [
     `Organization: one builder working alone on their own Mac, with 10db running agent sessions for the project ${quotedValue(input.projectName)}.`,
-    works(input.surface)
-      ? `Host containment: a macOS sandbox. This session writes only in ${checkout} and its own temp folder, and the commands it runs reach only the project's allowed network hosts; other folders, other sessions' copies and credentials are closed to it.`
-      : `Host containment: a macOS sandbox. This session reads ${checkout} and writes nothing outside its own temp folder.`,
+    input.surface === TrustSurface.Chat
+      ? `Host containment: a macOS sandbox. This session reads ${checkout}, writes in it only while its turn holds the folder, and writes nothing else outside its own temp folder; other folders and credentials are closed to it.`
+      : works(input.surface)
+        ? `Host containment: a macOS sandbox. This session writes only in ${checkout} and its own temp folder, and the commands it runs reach only the project's allowed network hosts; other folders, other sessions' copies and credentials are closed to it.`
+        : `Host containment: a macOS sandbox. This session reads ${checkout} and writes nothing outside its own temp folder.`,
     ...(works(input.surface)
       ? [
           "Trusted repo: files tracked in this checkout are the session's to change; git keeps them, so deleting or rewriting them is not destroying data. Untracked or ignored files, files outside the checkout, databases and history others have are.",

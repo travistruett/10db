@@ -271,3 +271,24 @@ describe("a chat's shell and git", () => {
     expect('reason' in verdict && verdict.reason).not.toContain('make_branch');
   });
 });
+
+// Sessions spec §7.3: the tools that reach GitHub are the judge's: a bare allow where one runs, a question where none does.
+describe('a chat’s tools that reach GitHub', () => {
+  it.each([
+    ['push_branch', JudgeKind.Native, 'allow'],
+    ['open_pull_request', JudgeKind.Tendb, 'allow'],
+    ['merge_pull_request', JudgeKind.Native, 'allow'],
+    ['push_branch', JudgeKind.Rules, 'ask'],
+    ['open_pull_request', JudgeKind.Rules, 'ask'],
+    ['merge_pull_request', JudgeKind.Rules, 'ask'],
+    ['commit_changes', JudgeKind.Rules, 'allow'],
+    ['make_branch', JudgeKind.Rules, 'allow'],
+  ])('%s on a %s judge: %s', (tool, judge, decision) => {
+    const verdict = judgeChatCall(
+      { toolName: `mcp__10db__${tool}`, input: {} },
+      { ...access, judge },
+      holding,
+    );
+    expect(verdict.decision).toBe(decision);
+  });
+});

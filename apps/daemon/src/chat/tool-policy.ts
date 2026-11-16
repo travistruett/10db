@@ -42,4 +42,8 @@ export const CHAT_TOOL_POLICY: Readonly<Record<ChatToolName, ChatToolPolicy>> = 
   [ChatToolName.SwitchBranch]: R,
   [ChatToolName.Pull]: R,
   [ChatToolName.CommitChanges]: R,
+  // These reach GitHub, so they stay out of `allowedTools` and the session's judge sees each call.
+  [ChatToolName.PushBranch]: R,
+  [ChatToolName.OpenPullRequest]: R,
+  [ChatToolName.MergePullRequest]: R,
 };

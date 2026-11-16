@@ -25,7 +25,7 @@ describe('the chat tool policy', () => {
     expect(new Set(Object.keys(CHAT_TOOL_POLICY))).toEqual(new Set(Object.values(ChatToolName)));
   });
 
-  it('asks on exactly four, and puts every one in allowedTools', () => {
+  it('asks on exactly four, and puts every tool but the three that reach GitHub in allowedTools', () => {
     expect(
       Object.entries(CHAT_TOOL_POLICY)
         .filter(([, policy]) => policy === 'asks')
@@ -33,7 +33,13 @@ describe('the chat tool policy', () => {
         .sort(),
     ).toEqual([...ASKS].sort());
     const allowed = chatProfile(true).allowedTools;
-    for (const name of Object.values(ChatToolName)) expect(allowed).toContain(`mcp__10db__${name}`);
+    const judged = [
+      ChatToolName.PushBranch,
+      ChatToolName.OpenPullRequest,
+      ChatToolName.MergePullRequest,
+    ];
+    for (const name of Object.values(ChatToolName))
+      expect(allowed.includes(`mcp__10db__${name}`)).toBe(!judged.some((j) => j === name));
     expect(CHAT_MCP_TOOLS).toHaveLength(Object.values(ChatToolName).length);
   });
 });

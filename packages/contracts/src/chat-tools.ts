@@ -14,6 +14,9 @@ export const ChatGitToolName = {
   SwitchBranch: 'switch_branch',
   Pull: 'pull',
   CommitChanges: 'commit_changes',
+  PushBranch: 'push_branch',
+  OpenPullRequest: 'open_pull_request',
+  MergePullRequest: 'merge_pull_request',
 } as const;
 
 export const ChatToolName = {
@@ -56,6 +59,13 @@ export const ChatToolInputs = {
     message: z.string().trim().min(1).max(20_000),
     paths: z.array(z.string().min(1).max(1024)).min(1).max(500).optional(),
   }),
+  [ChatToolName.PushBranch]: z.object({}),
+  [ChatToolName.OpenPullRequest]: z.object({
+    title: z.string().trim().min(1).max(256),
+    body: z.string().max(60_000),
+    base: z.string().min(1).max(200).optional(),
+  }),
+  [ChatToolName.MergePullRequest]: z.object({ number: z.number().int().positive() }),
 } as const satisfies Record<ChatToolName, z.ZodType>;
 
 /** The old value of each field an `edit_task` changed, which its Undo patches back. */

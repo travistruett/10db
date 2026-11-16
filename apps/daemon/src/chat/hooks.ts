@@ -63,6 +63,7 @@ import {
   startingJudge,
 } from '../trust';
 import { judgeChatCall, type ChatFolder } from './confinement';
+import { JUDGED_CHAT_TOOLS } from './git-rule';
 import type { ChatLiveSessions } from './live-sessions';
 import { chatSystemPrompt } from './prompt';
 
@@ -105,7 +106,14 @@ export function chatProfile(
       ...AGENT_TOOLS,
       ...(sandboxed ? ['Bash', ...EDIT_TOOLS] : []),
     ],
-    allowedTools: ['Read', 'Grep', 'Glob', 'Skill', ...CHAT_MCP_TOOLS],
+    // The tools that reach GitHub are left off: an allow rule would approve them before any judge sees them.
+    allowedTools: [
+      'Read',
+      'Grep',
+      'Glob',
+      'Skill',
+      ...CHAT_MCP_TOOLS.filter((tool) => !JUDGED_CHAT_TOOLS.has(tool.slice('mcp__10db__'.length))),
+    ],
     disallowedTools: [...WATCH_TOOLS, ...(sandboxed ? [] : ['Bash', ...EDIT_TOOLS])],
     agents: {},
   };

@@ -4,7 +4,7 @@
 
 export { chatFolderInUse, judgeChatCall, type ChatFolder } from './confinement';
 export { createConversationFiles } from './conversation-files';
-export { chatHooks, type ChatHooksDeps } from './hooks';
+export { chatFolder, chatHooks, type ChatHooksDeps } from './hooks';
 export { createChatLiveSessions } from './live-sessions';
 export { createChatService, type ChatService } from './service';
 export { sessionStarts } from './session-starts';

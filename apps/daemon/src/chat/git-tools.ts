@@ -1,4 +1,6 @@
-import { isAbsolute, relative, resolve } from 'node:path';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import {
   ChatToolInputs,
   ChatToolName,
@@ -12,8 +14,8 @@ import {
   type SessionId,
 } from '@10db/contracts';
 import { holderWords, type FolderHold } from '../folder-hold';
-import type { Git } from '../git';
-import type { NetworkCall } from '../git';
+import type { Git, NetworkCall } from '../git';
+import { githubRepoOf, type Gh } from '../github';
 import type { ChatLiveSessions } from './live-sessions';
 import { chatBranchName, isTenDbBranch } from './git-names';
 
@@ -23,8 +25,19 @@ import { chatBranchName, isTenDbBranch } from './git-names';
 export interface ChatGitToolsDeps {
   readonly git: Pick<
     Git,
-    'currentBranch' | 'makeBranchHere' | 'switchBranch' | 'pullFastForward' | 'commitInFolder'
+    | 'currentBranch'
+    | 'makeBranchHere'
+    | 'switchBranch'
+    | 'pullFastForward'
+    | 'commitInFolder'
+    | 'push'
+    | 'head'
+    | 'remoteTrackingCommit'
+    | 'pinnedPushUrl'
   >;
+  readonly gh: Pick<Gh, 'prCreate' | 'prMerge' | 'prHead'>;
+  /** A folder of the chat's own, where a pull request's body is written for the call. */
+  readonly filesDir: (conversationId: ConversationId) => string;
   readonly folderHold: FolderHold;
   readonly live: ChatLiveSessions;
   /** The project's checkout. */
@@ -92,6 +105,21 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
     };
   }
 
+  /** The checkout, on a branch of the builder's own: not detached, not under 10db/. */
+  async function onBranch(): Promise<{ repo: string; branch: string }> {
+    const { repo } = await holding();
+    const branch = await deps.git.currentBranch(repo);
+    if (branch === null) throw new ConflictError('Your folder is on no branch (a detached HEAD).');
+    return { repo, branch };
+  }
+
+  /** The GitHub repository the checkout's pinned origin names. */
+  async function pinnedRepo(repo: string): Promise<string> {
+    const slug = githubRepoOf(await deps.git.pinnedPushUrl(repo));
+    if (slug === null) throw new InvalidError("Your folder's origin is not a GitHub repository");
+    return slug;
+  }
+
   return {
     [ChatToolName.MakeBranch]: async (args: unknown) => {
       const { name } = ChatToolInputs.make_branch.parse(args);
@@ -115,6 +143,54 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
       ChatToolInputs.pull.parse(args);
       const { repo } = await holding();
       return { done: true, ...(await deps.git.pullFastForward(repo, deps.net())) };
+    },
+    [ChatToolName.PushBranch]: async (args: unknown) => {
+      ChatToolInputs.push_branch.parse(args);
+      const { repo, branch } = await onBranch();
+      // Never forced: the daemon's push names one fully qualified ref and no option.
+      const run = await deps.git.push(repo, branch, deps.net());
+      return { done: true, branch, note: run.output.trim().slice(-500) };
+    },
+    [ChatToolName.OpenPullRequest]: async (args: unknown) => {
+      const input = ChatToolInputs.open_pull_request.parse(args);
+      if (input.base !== undefined && isTenDbBranch(input.base))
+        throw new InvalidError("A pull request's base is never one of 10db's own branches");
+      const { repo, branch } = await onBranch();
+      const head = await deps.git.head(repo);
+      if ((await deps.git.remoteTrackingCommit(repo, branch)) !== head)
+        throw new ConflictError(
+          `${branch} is not pushed at its current commit; call push_branch first.`,
+        );
+      const slug = await pinnedRepo(repo);
+      const dir = deps.filesDir(session.conversationId);
+      mkdirSync(dir, { recursive: true });
+      const bodyFile = join(dir, `pr-body-${randomUUID()}.md`);
+      writeFileSync(bodyFile, input.body, { flag: 'wx', mode: 0o600 });
+      try {
+        const url = await deps.gh.prCreate(
+          { repo: slug, base: input.base ?? 'main', head: branch, title: input.title, bodyFile },
+          deps.net(),
+        );
+        return { done: true, url };
+      } finally {
+        rmSync(bodyFile, { force: true });
+      }
+    },
+    [ChatToolName.MergePullRequest]: async (args: unknown) => {
+      const { number } = ChatToolInputs.merge_pull_request.parse(args);
+      const { repo } = await holding();
+      const slug = await pinnedRepo(repo);
+      // The address comes from the pinned repository and the number alone, so another repository's pull
+      // request cannot be named.
+      const url = `https://github.com/${slug}/pull/${String(number)}`;
+      const head = await deps.gh.prHead({ repo: slug, ref: url }, deps.net());
+      if (head === null) throw new InvalidError(`${slug} has no pull request #${String(number)}`);
+      if (isTenDbBranch(head))
+        throw new ConflictError(
+          `Pull request #${String(number)} comes from ${head}, which is 10db's own; 10db merges those, not a chat.`,
+        );
+      await deps.gh.prMerge({ repo: slug, url }, deps.net());
+      return { done: true, url };
     },
     [ChatToolName.CommitChanges]: async (args: unknown) => {
       const input = ChatToolInputs.commit_changes.parse(args);

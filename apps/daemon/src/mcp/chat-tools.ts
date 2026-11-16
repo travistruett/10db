@@ -45,6 +45,12 @@ const GIT_DESCRIPTIONS: Readonly<Record<string, string>> = {
   pull: "Fetch the current branch's upstream on origin and fast-forward to it. A diverged branch, a detached HEAD or changes in the way are reported and nothing moves.",
   commit_changes:
     "Commit changes in Your folder with the builder's identity. With paths, only those files are committed (other staged files stay staged); with none, everything that changed is. Git hooks do not run here, and the message is taken as text. Commit only when the builder asks.",
+  push_branch:
+    "Push the current branch to origin under its own name. Never forced; a branch that moved on the remote is reported, not overwritten. 10db's branches (10db/…) are refused. A judge sees each call; push only when the builder asks.",
+  open_pull_request:
+    'Open a pull request from the current branch, which must be pushed at its current commit. base defaults to main. A judge sees each call; open one only when the builder asks.',
+  merge_pull_request:
+    "Merge this project's pull request by its number (squash). Pull requests from 10db's own branches are refused. A judge sees each call; merge only when the builder asked for that merge.",
 };
 
 export const CHAT_TOOL_DESCRIPTIONS: Readonly<Record<ChatToolName, string>> = Object.fromEntries(

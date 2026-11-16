@@ -22,6 +22,7 @@ export type GhMethod =
   | 'repoView'
   | 'repoAllowsAutoMerge'
   | 'prView'
+  | 'prHead'
   | 'prStatus'
   | 'prRequiredChecks'
   | 'prInMergeQueue'
@@ -80,6 +81,7 @@ export class FakeGh implements Gh {
     string,
     {
       pr: { url: string; state: PrState };
+      head: string;
       isDraft: boolean;
       baseRef: string | null;
       headSha: string | null;
@@ -136,6 +138,10 @@ export class FakeGh implements Gh {
       const found = this.byRef.get(input.ref);
       return found ? { ...found.pr, isDraft: found.isDraft, baseRef: found.baseRef } : null;
     });
+  }
+
+  prHead(input: { readonly repo: string; readonly ref: string }): Promise<string | null> {
+    return this.call('prHead', input, () => this.byRef.get(input.ref)?.head ?? null);
   }
 
   prStatus(input: {
@@ -367,6 +373,7 @@ export class FakeGh implements Gh {
     const url = `https://github.com/${this.repo}/pull/${String(this.next++)}`;
     const entry = {
       pr: { url, state },
+      head: branch,
       isDraft: create?.draft ?? false,
       baseRef: create?.base ?? null,
       headSha: null,

@@ -20,7 +20,7 @@ describe('buildTrustPolicy', () => {
     ['lane', false, 3, 'This session writes only in "/w/demo"'],
     ['pass', true, 3, 'This session writes only in "/w/demo"'],
     ['plan', true, 0, 'This session reads "/w/demo" and writes nothing'],
-    ['chat', true, 0, 'This session reads "/w/demo" and writes nothing'],
+    ['chat', true, 1, 'This session reads "/w/demo", writes in it only while its turn holds'],
   ])('a %s session: attended %s, %i coordination lines', (surface, attended, lines, host) => {
     const policy = buildTrustPolicy(input({ surface }));
     expect(policy.surface).toBe(surface);
@@ -177,5 +177,16 @@ describe('approved calls', () => {
   it('an exact skip makes no allow line', () => {
     const policy = buildTrustPolicy(input({ approved: [approved('vercel deploy', 'deploy')] }));
     expect(policy.allow).toEqual([]);
+  });
+});
+
+describe('a chat’s policy and GitHub', () => {
+  it('tells the judge a push and a pull request send data out, and a merge writes to a live system', () => {
+    const [line] = buildTrustPolicy(input({ surface: 'chat' })).coordination;
+    expect(line?.text).toContain('push_branch');
+    expect(line?.text).toContain('open_pull_request');
+    expect(line?.text).toContain('Sending Data Out');
+    expect(line?.text).toContain('merge_pull_request');
+    expect(line?.text).toContain('Writing To Live Systems');
   });
 });

@@ -222,6 +222,7 @@ import {
   pictureLimitsFor,
 } from '../conversation';
 import {
+  chatFolder,
   chatHooks,
   createChatLiveSessions,
   createChatService,
@@ -2530,6 +2531,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           git,
           folderHold,
           live: chatLive,
+          gh: delivery.gh,
+          filesDir: (conversationId) => chatFolder(opts.dataDir, conversationId),
           repoOf: (projectId) => getProject(state.db, projectId).repoPath,
           net: () => ({
             env: delivery.networkEnv(),

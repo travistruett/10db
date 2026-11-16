@@ -4,7 +4,7 @@ import { isWithinOnEveryReading, stringField } from '../guard';
 import type { ShapeVerdict } from '../sessions';
 import { expandHome } from '../sandbox';
 import { judgeShapeCall, type ShapeAccess } from '../shape';
-import { CHAT_GIT_REFUSAL } from './git-rule';
+import { CHAT_GIT_REFUSAL, JUDGED_CHAT_TOOL_ASK, JUDGED_CHAT_TOOLS } from './git-rule';
 
 // Sessions spec §7.1, trust line §5: what a chat's PreToolUse hook settles before the judge sees a
 // call. A chat reads the project and its pictures, runs commands in its read-only sandbox, searches the
@@ -125,10 +125,14 @@ export function judgeChatCall(
       stringField(call.input, 'isolation') !== null;
     return isolated ? deny('A chat launches its agents in place, with no isolation set.') : ALLOW;
   }
-  if (call.toolName.startsWith(OWN_PREFIX))
-    return CHAT_TOOLS.has(call.toolName.slice(OWN_PREFIX.length))
-      ? ALLOW
-      : deny(`${call.toolName} is not one of this chat's tools.`);
+  if (call.toolName.startsWith(OWN_PREFIX)) {
+    const own = call.toolName.slice(OWN_PREFIX.length);
+    if (!CHAT_TOOLS.has(own)) return deny(`${call.toolName} is not one of this chat's tools.`);
+    // A judge sees these; with none, the builder is asked.
+    if (JUDGED_CHAT_TOOLS.has(own) && access.judge === JudgeKind.Rules)
+      return { decision: 'ask', reason: JUDGED_CHAT_TOOL_ASK };
+    return ALLOW;
+  }
   // A tool of one of the project's approved servers is judged as Plan's are.
   if (call.toolName.startsWith('mcp__')) return judgeShapeCall(asSession, access);
   return deny(`${call.toolName} is not a tool this chat uses.`);

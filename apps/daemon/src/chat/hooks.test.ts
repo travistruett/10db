@@ -143,8 +143,10 @@ describe("a chat's session", () => {
     expect(spec.setup?.plugins).toEqual(['/setup/yours', '/setup/project']);
     expect(spec.instructions).toBe('Use pnpm.');
     expect(spec.policy).toMatchObject({ surface: 'chat', attended: true });
+    // The tools that reach GitHub are the judge's, so no allow rule approves them first.
+    const judged = new Set(['push_branch', 'open_pull_request', 'merge_pull_request']);
     for (const name of Object.values(ChatToolName))
-      expect(profile.allowedTools).toContain(`mcp__10db__${name}`);
+      expect(profile.allowedTools.includes(`mcp__10db__${name}`)).toBe(!judged.has(name));
   });
 
   // A tendb chat starts on its judge only when 10db's judge is ready: "a chat's judge" below.

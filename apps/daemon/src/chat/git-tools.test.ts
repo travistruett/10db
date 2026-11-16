@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import {
@@ -24,11 +24,15 @@ import {
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  createTempClone,
   createTempRepoWithOrigin,
+  githubOrigin,
   isolatedGitEnv,
   NETWORK_ENV,
+  tempDir,
   type TempDir,
 } from '../../test/fixtures';
+import { FakeGh } from '../../test/fake-gh';
 import { createEventBus, createStateStore } from '../events';
 import { createFolderHold, type FolderHold } from '../folder-hold';
 import { createGit } from '../git';
@@ -44,6 +48,9 @@ let project: ProjectDto;
 let hold: FolderHold;
 let pair: ReturnType<typeof createTempRepoWithOrigin>;
 let repo: TempDir;
+let network: ReturnType<typeof githubOrigin>;
+let scratch: TempDir;
+let gh: FakeGh;
 
 beforeEach(() => {
   ({ store, close: closeStore } = createTestStore());
@@ -52,8 +59,13 @@ beforeEach(() => {
   project = seedProject(store);
   pair = createTempRepoWithOrigin();
   repo = pair.repo;
+  network = githubOrigin(repo.path, pair.origin.path);
+  scratch = tempDir('chat-git-tools');
+  gh = new FakeGh();
 });
 afterEach(() => {
+  network.cleanup();
+  scratch.cleanup();
   closeStore();
   pair.cleanup();
 });
@@ -132,8 +144,13 @@ function tools(chat: ReturnType<typeof newChat>, open = true) {
       git: createGit(),
       folderHold: hold,
       live,
+      gh,
+      filesDir: () => join(scratch.path, 'files'),
       repoOf: () => repo.path,
-      net: () => ({ env: NETWORK_ENV, timeoutMs: 20_000 }),
+      net: () => ({
+        env: { ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global },
+        timeoutMs: 20_000,
+      }),
     },
     { sessionId, conversationId: chat.conversationId, chatId: chat.id, projectId: project.id },
   );
@@ -244,5 +261,97 @@ describe("a chat's git tools", () => {
     expect(await t.pull({})).toMatchObject({ done: true, kind: 'up_to_date' });
     rg('switch', '-q', '-c', 'loose');
     await expect(t.pull({})).rejects.toThrow('no upstream');
+  });
+});
+
+describe("a chat's tools that reach GitHub", () => {
+  /** The chat holds the folder on a branch of its own with one commit on it. */
+  async function branchWithCommit(name = 'topic') {
+    const me = newChat('Me');
+    hold.takeTurn(project.id, me.id);
+    const t = tools(me);
+    await t.make_branch({ name });
+    write('a.txt', 'a\n');
+    await t.commit_changes({ message: 'Add a' });
+    return t;
+  }
+  const originTip = (branch: string) =>
+    execFileSync('git', ['--git-dir', pair.origin.path, 'rev-parse', `refs/heads/${branch}`], {
+      env: isolatedGitEnv(),
+      stdio: 'pipe',
+    })
+      .toString()
+      .trim();
+
+  it('pushes the branch under its own name, and refuses a rewritten one without forcing', async () => {
+    const t = await branchWithCommit();
+    await t.push_branch({});
+    expect(originTip('topic')).toBe(rg('rev-parse', 'HEAD'));
+    // The remote moves on; the folder rewrites its commit: the push is rejected and the remote keeps its own.
+    const clone = createTempClone(pair.origin.path);
+    execFileSync('git', ['-C', clone.path, 'switch', '-q', 'topic'], { env: isolatedGitEnv() });
+    writeFileSync(join(clone.path, 'remote.txt'), 'r\n');
+    execFileSync('git', ['-C', clone.path, 'add', '-A'], { env: isolatedGitEnv() });
+    execFileSync('git', ['-C', clone.path, 'commit', '-q', '-m', 'Remote'], {
+      env: isolatedGitEnv(),
+    });
+    execFileSync('git', ['-C', clone.path, 'push', '-q', 'origin', 'topic'], {
+      env: isolatedGitEnv(),
+    });
+    const remote = originTip('topic');
+    rg('commit', '-q', '--amend', '-m', 'Add a, rewritten');
+    await expect(t.push_branch({})).rejects.toThrow();
+    expect(originTip('topic')).toBe(remote);
+    clone.cleanup();
+  });
+
+  it('refuses to push from, or open from, a 10db branch', async () => {
+    rg('switch', '-q', '-c', '10db/pass-abc123');
+    const me = newChat('Me');
+    hold.takeTurn(project.id, me.id);
+    const t = tools(me);
+    await expect(t.push_branch({})).rejects.toThrow(/10db's own/);
+    await expect(t.open_pull_request({ title: 'x', body: 'y' })).rejects.toThrow(/10db's own/);
+  });
+
+  it('opens a pull request only for a branch pushed at its commit, with the body in a file it removes', async () => {
+    const t = await branchWithCommit();
+    await expect(t.open_pull_request({ title: 'Add a', body: 'Why' })).rejects.toThrow(
+      'push_branch',
+    );
+    await t.push_branch({});
+    const opened = await t.open_pull_request({ title: 'Add a', body: '--body is text\nWhy' });
+    const { url } = opened as { url: string };
+    expect(gh.prCreates()).toEqual([
+      { repo: 'acme/widgets', base: 'main', head: 'topic', title: 'Add a' },
+    ]);
+    expect(gh.body(url)).toBe('--body is text\nWhy');
+    expect(readdirSync(join(scratch.path, 'files'))).toEqual([]);
+    await expect(
+      t.open_pull_request({ title: 'x', body: 'y', base: '10db/pass-abc123' }),
+    ).rejects.toThrow(/10db's own/);
+  });
+
+  it('merges a pull request of this repository by number, and refuses an unknown one and 10db’s own', async () => {
+    const t = await branchWithCommit();
+    await t.push_branch({});
+    const mine = (await t.open_pull_request({ title: 'Add a', body: 'Why' })) as { url: string };
+    mkdirSync(scratch.path, { recursive: true });
+    writeFileSync(join(scratch.path, 'b.md'), 'batch\n');
+    const batch = await gh.prCreate({
+      repo: 'acme/widgets',
+      base: 'main',
+      head: '10db/batch-abc123',
+      title: 'Batch',
+      bodyFile: join(scratch.path, 'b.md'),
+    });
+    await expect(
+      t.merge_pull_request({ number: Number(/\/pull\/(\d+)$/.exec(batch)?.[1]) }),
+    ).rejects.toThrow(/10db's own/);
+    await expect(t.merge_pull_request({ number: 99 })).rejects.toThrow('no pull request #99');
+    expect(gh.merged).toEqual([]);
+    const number = Number(/\/pull\/(\d+)$/.exec(mine.url)?.[1]);
+    await t.merge_pull_request({ number });
+    expect(gh.merged).toEqual([mine.url]);
   });
 });
