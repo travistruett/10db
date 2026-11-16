@@ -8,6 +8,7 @@ import { chatWorld, type ChatWorld } from '../../test/chat-world';
 import { gate } from '../../test/explore-world';
 import { waitFor } from '../../test/fixtures';
 import { takeoverFolderOf } from './files';
+import { liveTakeoverTempDirs } from './live-temp-dirs';
 
 const McpFile = z.object({ mcpServers: z.record(z.string(), z.unknown()) });
 const serversIn = (path: string): string[] =>
@@ -244,6 +245,19 @@ describe('the opening phase', () => {
     expect(await opening).toBeInstanceOf(Error);
     expect(stateOf(chat)).toBe('idle_warm');
     expect(existsSync(folderOf(chat))).toBe(false);
+  });
+});
+
+describe('the temp dirs a takeover keeps', () => {
+  it('are named while the chat is in the terminal and not after Hand Back', async () => {
+    w = chatWorld();
+    const chat = await talked();
+    const temp = join(w.dataDir, 'server-temp');
+    expect(liveTakeoverTempDirs(w.state.db, w.dataDir).has(temp)).toBe(false);
+    await w.takeover.open(chat.conversationId);
+    expect(liveTakeoverTempDirs(w.state.db, w.dataDir).has(temp)).toBe(true);
+    await w.takeover.handBack(chat.conversationId);
+    expect(liveTakeoverTempDirs(w.state.db, w.dataDir).has(temp)).toBe(false);
   });
 });
 

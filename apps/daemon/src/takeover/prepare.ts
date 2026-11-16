@@ -52,7 +52,7 @@ export interface TakeoverServers {
 export interface PrepareDeps {
   readonly adapter: Pick<AgentAdapter, 'takeoverCommand' | 'takeoverNotes'>;
   /** Launches the servers and the setup for the chat's project into `folder`. */
-  servers(project: ProjectDto, folder: string): Promise<TakeoverServers>;
+  servers(project: ProjectDto, folder: string, source: TakeoverSource): Promise<TakeoverServers>;
   /** Marks the agent's own first-run screens done for the folder, as the account needs. */
   onboard(source: TakeoverSource): Promise<void>;
   /** A short name for one set's files. */
@@ -88,7 +88,7 @@ export async function prepareTakeover(
   signal.throwIfAborted();
   await deps.onboard(source);
   signal.throwIfAborted();
-  const servers = await deps.servers(input.project, folder);
+  const servers = await deps.servers(input.project, folder, source);
   const written: string[] = [];
   const remove = (): void => {
     for (const file of written.splice(0)) {

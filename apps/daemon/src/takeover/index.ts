@@ -7,3 +7,4 @@ export {
 } from './prepare';
 export { createTakeoverService, type TakeoverService, type TakeoverServiceDeps } from './service';
 export { readTakeoverRecord, takeoverFolderOf } from './files';
+export { liveTakeoverTempDirs } from './live-temp-dirs';

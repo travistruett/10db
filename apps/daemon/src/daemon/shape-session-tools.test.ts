@@ -21,6 +21,7 @@ import {
 } from '@10db/contracts';
 import {
   createTestStore,
+  getProject,
   insertShape,
   listInbox,
   recordMcpApproval,
@@ -44,7 +45,7 @@ import { readYourMcpConfig } from '../session-setup';
 import { silentLogger } from '../log';
 import { createLaneSandbox, SandboxedMcpServer, type LaneSandbox } from '../sandbox';
 import { readRepoMcp } from '../sessions';
-import { createShapePreparer } from './shape-session-tools';
+import { createShapePreparer, createTakeoverPreparer } from './shape-session-tools';
 
 // Shape spec §5.2: a Plan conversation's session gets a read-only lane sandbox, the project's
 // approved MCP servers as a lane gets them, and the lanes' broker, which cards for the conversation.
@@ -149,6 +150,7 @@ function preparer(
 ) {
   const laneSandbox: LaneSandbox = {
     judgeSetup: () => Promise.reject(new Error('a Plan session never previews its setup')),
+    forTakeover: () => Promise.reject(new Error('no takeover here')),
     ...given,
   };
   const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
@@ -592,5 +594,55 @@ describe('the config dir a Plan session’s sandbox is given', () => {
     );
     await prepared.release();
     expect(seen).toEqual([{ configDir: expected, provider, tempRoot }]);
+  });
+});
+
+describe.skipIf(SANDBOXED)('a takeover’s prepared servers', () => {
+  // Value: protects=a repo stdio server runs in the terminal only as the srt launch the chat's session had, and
+  // an unapproved one doesn't come along; fails_when=a stdio entry reaches the terminal as written or an
+  // unapproved server is added; why_new=the preparer for a terminal is new; no_claim=the terminal's own start.
+  it('gives each approved stdio server as its srt launch, every approved remote one, and no unapproved one', async () => {
+    const owner = conversation(
+      {
+        mcpServers: {
+          docs: { type: 'http', url: 'https://docs.example.com/mcp' },
+          billing: { command: 'uvx', args: ['awslabs.billing@0.0.44'], env: {} },
+          waiting: { command: 'uvx', args: ['other'], env: {} },
+        },
+      },
+      { unapproved: ['waiting'] },
+    );
+    const folder = join(root, 'takeover-folder');
+    mkdirSync(folder);
+    const prepare = createTakeoverPreparer({
+      state,
+      inbox: createInboxService({ state, onParkedAnswer: () => undefined }),
+      git: NO_GIT,
+      logger: silentLogger,
+      laneSandbox: realSandbox(),
+      protectedPaths: [],
+      projectEnv: () => ({ PATH: '/usr/bin:/bin', HOME: homeDir.path }),
+      lookup: lookupWith(),
+      builderHome: homeDir.path,
+      laneWritableRoots: [join(root, 't')],
+      worktreeBase: join(root, 'worktrees'),
+      codexLaneTempRoot: CODEX_LANES,
+      exportAwsCredentials: () => Promise.resolve({}),
+    });
+    const servers = await prepare({
+      project: getProject(state.db, owner.projectId),
+      folder,
+      env: launchEnv(),
+      configDir: join(root, 'config'),
+    });
+    try {
+      expect(Object.keys(servers.projectMcpServers).sort()).toEqual(['billing', 'docs']);
+      expect(servers.projectMcpServers['billing']).toBeInstanceOf(SandboxedMcpServer);
+      expect(servers.tempDirs).toHaveLength(1);
+      expect(existsSync(servers.tempDirs[0] ?? '/nonexistent')).toBe(true);
+    } finally {
+      servers.remove();
+    }
+    expect(existsSync(servers.tempDirs[0] ?? '/nonexistent')).toBe(false);
   });
 });

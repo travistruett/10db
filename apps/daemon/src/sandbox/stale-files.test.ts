@@ -144,6 +144,23 @@ describe('claimSandboxTempRoot', () => {
     expect(readdirSync(root).sort()).toEqual(others);
   });
 
+  it('leaves the temp dirs a live takeover names, and removes the others', () => {
+    leaveStaleFiles();
+    const kept = join(root, LANE_DIRS[0]);
+    const claim = claimSandboxTempRoot(
+      root,
+      process.pid,
+      'temp',
+      new Set([kept, join(outside, 'x')]),
+    );
+    try {
+      expect(existsSync(kept)).toBe(true);
+      expect(existsSync(join(root, LANE_DIRS[1]))).toBe(false);
+    } finally {
+      claim.release();
+    }
+  });
+
   it("removes nothing while another daemon's mark names a live process, since its sessions may be running", () => {
     leaveStaleFiles();
     const other = liveProcess();

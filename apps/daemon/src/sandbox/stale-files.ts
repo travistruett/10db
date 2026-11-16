@@ -160,6 +160,8 @@ export function claimSandboxTempRoot(
   root: string,
   pid: number = process.pid,
   where: 'temp' | 'files' = 'temp',
+  /** Paths a live takeover still uses: left alone though no session of this daemon owns them. */
+  keep: ReadonlySet<string> = new Set(),
 ): TempRootClaim {
   const uid = process.getuid?.();
   let removed = 0;
@@ -172,6 +174,7 @@ export function claimSandboxTempRoot(
         ? [...namesIn(root)].flatMap((name) => {
             const kind = staleKind(name, where);
             const path = join(root, name);
+            if (keep.has(path)) return [];
             const owned = ownedKind(path, uid);
             return kind !== null && (owned === kind || (kind === 'setup' && owned === 'dir'))
               ? [{ path, kind }]
@@ -212,9 +215,10 @@ export function claimSandboxTempRoot(
 export function claimSandboxRoots(
   roots: { readonly temps: readonly string[]; readonly files: string },
   pid: number = process.pid,
+  keep: ReadonlySet<string> = new Set(),
 ): TempRootClaim {
   const claims = [
-    ...roots.temps.map((root) => claimSandboxTempRoot(root, pid, 'temp')),
+    ...roots.temps.map((root) => claimSandboxTempRoot(root, pid, 'temp', keep)),
     claimSandboxTempRoot(roots.files, pid, 'files'),
   ];
   return {

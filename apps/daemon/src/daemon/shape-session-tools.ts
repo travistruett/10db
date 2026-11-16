@@ -31,6 +31,7 @@ import {
   type ProjectMcp,
   type YourSessionServer,
 } from '../sessions';
+import type { TakeoverServers } from '../takeover';
 import { privateHostProblem, type ShapePrepareInput, type ShapePrepared } from '../shape';
 
 /** What a Plan conversation's session is told when one of the project's servers is left out. */
@@ -103,7 +104,7 @@ function earliestExpiry(mcp: ProjectMcp): string | null {
  * and the lanes' permission broker for the conversation. A config or a sandbox that can't be built
  * leaves the session with less, said in its first message, never with no Plan at all.
  */
-export function createShapePreparer(deps: {
+export interface SessionReadDeps {
   readonly state: StateStore;
   readonly inbox: InboxService;
   readonly git: Pick<Git, 'commitAt' | 'folderAt' | 'fileAt'>;
@@ -123,7 +124,10 @@ export function createShapePreparer(deps: {
   readonly worktreeBase: string;
   /** Where a ChatGPT session's temp dir is made, apart from Claude sessions', as a ChatGPT lane's is. */
   readonly codexLaneTempRoot: string;
-}): (input: ShapePrepareInput) => Promise<ShapePrepared> {
+}
+
+/** What a session's reads share: the project's servers as the config reads them, and the setup and the builder's servers planned. */
+function sessionReads(deps: SessionReadDeps) {
   const { state, inbox, logger } = deps;
   const reader = createProjectMcpReader({
     state,
@@ -157,8 +161,8 @@ export function createShapePreparer(deps: {
     }
   }
 
-  return async (input) => {
-    const project = getProject(state.db, input.projectId);
+  /** The project's servers as the config reads them, and the setup and the builder's servers planned from them. */
+  async function plan(project: ProjectDto) {
     const { mcp: projectMcp, problem } = await readServers(project);
     const servers = splitProjectMcp(projectMcp.servers);
     // A remote server is a connection Claude Code makes outside every sandbox: one on this Mac or its
@@ -233,6 +237,91 @@ export function createShapePreparer(deps: {
         ]),
       ),
     });
+    return {
+      projectMcp,
+      problem,
+      servers,
+      remote,
+      offMac,
+      setupPlan,
+      instructions,
+      yours,
+      yourServers,
+    };
+  }
+
+  return { plan };
+}
+
+/**
+ * Prepares what a chat's session had, for the builder's terminal (sessions spec §7.5): the setup and the builder's
+ * servers as a session plans them, and the project's approved stdio servers each under srt, never as written. Every
+ * approved remote server comes along: the public-host filter protects a sandboxed agent's connection from 10db's own
+ * window, and the terminal makes its connections outside any sandbox anyway.
+ */
+export function createTakeoverPreparer(
+  deps: SessionReadDeps,
+): (input: {
+  readonly project: ProjectDto;
+  readonly folder: string;
+  readonly env: Readonly<Record<string, string>>;
+  readonly configDir: string;
+}) => Promise<TakeoverServers> {
+  const { state } = deps;
+  const { plan } = sessionReads(deps);
+  return async ({ project, folder, env, configDir }) => {
+    const { problem, servers, setupPlan, instructions, yours, yourServers } = await plan(project);
+    const sandbox = await deps.laneSandbox.forTakeover({
+      project,
+      env,
+      configDir,
+      checkouts: allCheckouts(state.db),
+      setup: setupPlan.input,
+      yourMcpServers: yours.stdio,
+      projectStdio: servers.stdio,
+      filesRoot: folder,
+    });
+    try {
+      const notes = [
+        problem,
+        leftOutNote([...setupPlan.leftOut, ...sandbox.leftOut, ...yours.leftOut]),
+      ].filter((line) => line !== null);
+      return {
+        instructions,
+        pluginDirs: sandbox.setup.pluginDirs,
+        projectMcpServers: { ...servers.remote, ...sandbox.projectMcpServers },
+        yourMcpServers: yourServers(sandbox.yourMcpServers),
+        notes,
+        tempDirs: sandbox.tempDirs,
+        remove: () => {
+          sandbox.remove();
+        },
+      };
+    } catch (error) {
+      sandbox.remove();
+      throw error;
+    }
+  };
+}
+
+export function createShapePreparer(
+  deps: SessionReadDeps,
+): (input: ShapePrepareInput) => Promise<ShapePrepared> {
+  const { state, inbox, logger } = deps;
+  const { plan } = sessionReads(deps);
+  return async (input) => {
+    const project = getProject(state.db, input.projectId);
+    const {
+      projectMcp,
+      problem,
+      servers,
+      remote,
+      offMac,
+      setupPlan,
+      instructions,
+      yours,
+      yourServers,
+    } = await plan(project);
     let session: LaneSession;
     try {
       session = await deps.laneSandbox.forSession({

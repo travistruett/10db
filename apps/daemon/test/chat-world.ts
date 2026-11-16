@@ -250,7 +250,7 @@ export function chatWorld(
                 },
               },
               notes: [],
-              tempDirs: [],
+              tempDirs: [join(dir.path, 'server-temp')],
               remove: () => undefined,
             };
           },

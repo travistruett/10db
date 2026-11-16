@@ -133,6 +133,8 @@ export interface McpSandboxFailure {
 export interface McpSandboxes {
   readonly servers: Readonly<Record<string, SandboxedMcpServer>>;
   readonly failures: readonly McpSandboxFailure[];
+  /** Each built server's temp dir, which a startup sweep must leave alone while the session lives. */
+  readonly tempDirs: readonly string[];
   /** Removes every server's temp dir and files. Run it once the lane process is gone. */
   dispose(): void;
 }
@@ -150,9 +152,11 @@ function sandboxOne(
   server: StdioMcpServer,
   input: McpSandboxInput,
   removals: (() => void)[],
+  tempDirs: string[],
 ): SandboxedMcpServer {
   const { access, tmpRoot, filesRoot } = input;
   const tmpDir = createLaneTempDir(tmpRoot);
+  tempDirs.push(tmpDir);
   removals.push(() => {
     removeLaneTempDir(tmpDir, tmpRoot);
   });
@@ -268,17 +272,21 @@ function sandboxOne(
  */
 export function sandboxMcpServers(input: McpSandboxInput): McpSandboxes {
   const entries = Object.entries(input.servers);
-  if (entries.length === 0) return { servers: {}, failures: [], dispose: () => undefined };
+  if (entries.length === 0)
+    return { servers: {}, failures: [], tempDirs: [], dispose: () => undefined };
   checkRuntime(input.runtime, input.access.writableRoots);
   const removals: (() => void)[] = [];
   try {
     const servers: Record<string, SandboxedMcpServer> = {};
     const failures: McpSandboxFailure[] = [];
+    const tempDirs: string[] = [];
     for (const [name, server] of entries) {
       const own: (() => void)[] = [];
+      const ownTemps: string[] = [];
       try {
-        servers[name] = sandboxOne(name, server, input, own);
+        servers[name] = sandboxOne(name, server, input, own, ownTemps);
         removals.push(...own);
+        tempDirs.push(...ownTemps);
       } catch (error) {
         try {
           removeAll(own);
@@ -293,6 +301,7 @@ export function sandboxMcpServers(input: McpSandboxInput): McpSandboxes {
     return {
       servers,
       failures,
+      tempDirs,
       dispose: () => {
         removeAll(removals);
       },
