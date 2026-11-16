@@ -251,21 +251,18 @@ function folderInUse(blockers: readonly FolderBlocker[]): string {
 }
 
 /**
- * Opens a pass on Your folder, in the project's delivery queue and under the checkout's repo lock:
- * the pass's branch at HEAD with no file written, the folder's dirt recorded with its content, the
- * pass and its batch on any delivery, each task's run on the implement step alone, and each task's
- * pages claimed through `acquireClaims`, as the scheduler claims them. A page another task holds makes
- * that task wait with the holder named. What the database already refuses is refused before anything
- * is queued; a start that slips in while git works, or a HEAD on a branch that can't be returned to,
- * is refused by the write, and the branch is taken back. Every refusal rejects; once the pass is
- * written it resolves, after each task's saved work has been put back, still in the job.
+ * What the database alone refuses an open of a pass, thrown before anything is queued or waited for, and what
+ * the open then works with. A request that would be refused whatever the folder does is never answered as waiting.
  */
-export async function openPass(
-  ctx: DeliveryContext,
+export function checkPassOpen(
+  db: DbReader,
   input: PassOpenInput,
-  deps: PassOpenDeps,
-): Promise<PassOpened> {
-  const db = ctx.state.db;
+): {
+  readonly project: ProjectDto;
+  readonly pageCap: number;
+  readonly tasks: TaskDto[];
+  readonly newPages: NewPageTask[];
+} {
   const project = getProject(db, input.projectId);
   const cap = PassPageCap.safeParse(input.pageCap ?? PASS_PAGE_CAP_DEFAULT);
   if (!cap.success)
@@ -281,6 +278,27 @@ export async function openPass(
   const tasks = input.taskIds.map((id) => getTask(db, id));
   const newPages = newPageTasks(db, project, input.pages ?? [], input.goalId ?? null);
   refuseOpen(db, project, tasks, pageCap, newPages, whole !== undefined);
+  return { project, pageCap, tasks, newPages };
+}
+
+/**
+ * Opens a pass on Your folder, in the project's delivery queue and under the checkout's repo lock:
+ * the pass's branch at HEAD with no file written, the folder's dirt recorded with its content, the
+ * pass and its batch on any delivery, each task's run on the implement step alone, and each task's
+ * pages claimed through `acquireClaims`, as the scheduler claims them. A page another task holds makes
+ * that task wait with the holder named. What the database already refuses is refused before anything
+ * is queued; a start that slips in while git works, or a HEAD on a branch that can't be returned to,
+ * is refused by the write, and the branch is taken back. Every refusal rejects; once the pass is
+ * written it resolves, after each task's saved work has been put back, still in the job.
+ */
+export async function openPass(
+  ctx: DeliveryContext,
+  input: PassOpenInput,
+  deps: PassOpenDeps,
+): Promise<PassOpened> {
+  const db = ctx.state.db;
+  const { project, pageCap, tasks, newPages } = checkPassOpen(db, input);
+  const whole = input.wholeProject;
   // The chat that asks to open is stopped before the open, so its own turn and wait are not in the way.
   const inUse = ctx.folderHold
     .blockers(project.id, { kind: FolderAsker.GitWork })

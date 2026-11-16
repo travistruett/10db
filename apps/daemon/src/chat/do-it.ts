@@ -34,12 +34,17 @@ import {
 } from '@10db/db';
 import type { ExploreEngine } from '../conversation';
 import type { StateStore } from '../events';
-import { holderWords, type FolderHold } from '../folder-hold';
+import { FolderWaitCancelledError, holderWords, type FolderHold } from '../folder-hold';
 import type { Git } from '../git';
 import type { Logger } from '../log';
-import type { PendingOpens } from '../pass';
+import {
+  openWhenBusy,
+  STOPPED_TURNS_DEADLINE_MS,
+  type OpenWhenBusyDeps,
+  type PendingOpens,
+} from '../pass';
 import { areasOfChat, editedPathsOf } from './chat-areas';
-import type { ChatService } from './service';
+import { PENDING_OPEN_FOR_CHAT, type ChatService } from './service';
 
 // Sessions spec §7.3 (Do it): what the sheet shows before the builder decides, and the refusals each place
 // has. The refusals are read here so the sheet says them up front, not only at submit.
@@ -53,7 +58,7 @@ export interface DoItDeps {
     Git,
     'changedEntries' | 'currentBranch' | 'operationInProgress' | 'trackingTip' | 'commitsSince'
   >;
-  readonly chat: Pick<ChatService, 'briefOf' | 'stopForOpen' | 'seal'>;
+  readonly chat: Pick<ChatService, 'briefOf' | 'stopForOpen' | 'seal' | 'underWay'>;
   /** Why a pass of one can't open in the project, from the database alone, or null. */
   readonly openProblem: (db: DbReader, project: ProjectDto) => string | null;
   /** Why the branch HEAD names can't be a pass's return branch, or null. */
@@ -97,8 +102,14 @@ export async function previewDoIt(deps: DoItDeps, chatId: ChatId): Promise<DoItP
   const chat = getChat(db, chatId);
   const project = getProject(db, chat.projectId);
   const at = deps.engine.view(chat.conversationId).state;
-  const own = refusalOfChat(chat.archivedAt !== null, at, chatId);
-  const changed = await deps.git.changedEntries(project.repoPath, DO_IT_CHANGED_MAX);
+  const own =
+    refusalOfChat(chat.archivedAt !== null, at, chatId) ??
+    pendingRefusal(deps, project, chatId) ??
+    underWayRefusal(deps, chatId);
+  // A folder that can't be read lists nothing; the sheet still shows where Do It can go.
+  const changed = await deps.git
+    .changedEntries(project.repoPath, DO_IT_CHANGED_MAX)
+    .catch(() => ({ entries: [], more: 0 }));
   const branch = await deps.git.currentBranch(project.repoPath).catch(() => null);
   return {
     brief: deps.chat.briefOf(chatId),
@@ -143,6 +154,22 @@ function refusalOfChat(
       `${DoItLink.Session}:${chatId}`,
     );
   return null;
+}
+
+function underWayRefusal(deps: Pick<DoItDeps, 'chat'>, chatId: ChatId): DoItRefusalDto | null {
+  return deps.chat.underWay(chatId)
+    ? refusal('under_way', 'Do It is already under way for this chat.', null)
+    : null;
+}
+
+function pendingRefusal(
+  deps: Pick<DoItDeps, 'pendingOpens'>,
+  project: ProjectDto,
+  chatId: ChatId,
+): DoItRefusalDto | null {
+  return deps.pendingOpens.get(project.id)?.chatId === chatId
+    ? refusal('pending_open', PENDING_OPEN_FOR_CHAT, `${DoItLink.Workbench}:${project.id}`)
+    : null;
 }
 
 async function hereOffer(
@@ -234,11 +261,9 @@ export async function doItInCopy(
   const db = deps.state.db;
   const chat = getChat(db, chatId);
   const project = getProject(db, chat.projectId);
-  const own = refusalOfChat(
-    chat.archivedAt !== null,
-    deps.engine.view(chat.conversationId).state,
-    chatId,
-  );
+  const own =
+    refusalOfChat(chat.archivedAt !== null, deps.engine.view(chat.conversationId).state, chatId) ??
+    pendingRefusal(deps, project, chatId);
   if (own !== null) throw new ConflictError(own.message);
   if (project.delivery === Delivery.Local)
     throw new ConflictError(
@@ -309,6 +334,80 @@ export async function doItInCopy(
   return { taskId: task.id, place: DoItPlace.Worktree };
 }
 
+export interface DoItHereDeps extends DoItDeps {
+  readonly openWhenBusy: OpenWhenBusyDeps;
+  /**
+   * Opens the pass of one for the chat, waiting for the folder until `signal` aborts, with the brief posted
+   * as the page's first message; it rejects with the refusal when it can't open.
+   */
+  readonly openWholeProject: (input: {
+    readonly projectId: ProjectId;
+    readonly title: string;
+    readonly brief: string;
+    readonly chatId: ChatId;
+    readonly acceptanceCriteria?: readonly string[];
+    readonly signal: AbortSignal;
+  }) => Promise<unknown>;
+}
+
+/**
+ * Do It in Your folder: the chat's turn stops, and a pass of one opens on the folder with the brief as its page's
+ * first message and the chat linked to it, which stays a chat. Refusals are read first, so nothing stops for a
+ * folder that can't open; chats' turns holding the folder are stopped or waited for as `whenBusy` says. The chat's
+ * starts are let go once the open is done, or at once when it waits.
+ */
+export async function doItHere(
+  deps: DoItHereDeps,
+  chatId: ChatId,
+  input: DoItRequest,
+): Promise<DoItResult> {
+  const db = deps.state.db;
+  const chat = getChat(db, chatId);
+  const project = getProject(db, chat.projectId);
+  const own =
+    refusalOfChat(chat.archivedAt !== null, deps.engine.view(chat.conversationId).state, chatId) ??
+    pendingRefusal(deps, project, chatId);
+  if (own !== null) throw new ConflictError(own.message);
+  const branch = await deps.git.currentBranch(project.repoPath).catch(() => null);
+  const offer = await hereOffer(deps, project, chatId, branch);
+  if (!offer.offered && !(offer.whenBusy && input.whenBusy !== undefined))
+    throw new ConflictError(offer.refusal?.message ?? 'Your folder is not free for a pass');
+  const release = await deps.chat.stopForOpen(chatId, DoItPlace.Here);
+  try {
+    const opened = await openWhenBusy(deps.openWhenBusy, {
+      projectId: project.id,
+      name: input.title,
+      chatId,
+      whenBusy: input.whenBusy,
+      open: async (wait) => {
+        try {
+          await deps.openWholeProject({
+            projectId: project.id,
+            title: input.title,
+            brief: input.brief,
+            chatId,
+            ...(input.acceptanceCriteria === undefined
+              ? {}
+              : { acceptanceCriteria: input.acceptanceCriteria }),
+            // Our own turn gives the folder back a moment after it stops; a wait for other chats is the builder's.
+            signal: wait?.signal ?? AbortSignal.timeout(STOPPED_TURNS_DEADLINE_MS),
+          });
+        } catch (error) {
+          if (wait === undefined && error instanceof FolderWaitCancelledError)
+            throw new ConflictError("The chat's turn didn't stop in time");
+          throw error;
+        }
+      },
+    });
+    if (opened !== undefined) return { pending: true };
+    const taskId = getChat(db, chatId).taskId;
+    if (taskId === null) throw new ConflictError('The pass opened without a task for this chat');
+    return { taskId, place: DoItPlace.Here };
+  } finally {
+    release();
+  }
+}
+
 export interface FinishSealsDeps {
   readonly state: StateStore;
   readonly engine: Pick<ExploreEngine, 'view'>;
@@ -327,8 +426,15 @@ export async function finishSeals(deps: FinishSealsDeps): Promise<void> {
     if (chat.taskId === null) continue;
     const taskId = chat.taskId;
     try {
-      if (deps.engine.view(chat.conversationId).state !== ConversationState.Sealed)
-        await deps.chat.seal(chat.id);
+      const sealed = deps.engine.view(chat.conversationId).state === ConversationState.Sealed;
+      // A Do It that finished (sealed, tab closed, task run) has nothing left to do at start-up.
+      if (
+        sealed &&
+        chat.tabPosition === null &&
+        latestWorkstreamOf(deps.state.db, taskId) !== undefined
+      )
+        continue;
+      if (!sealed) await deps.chat.seal(chat.id);
       if (latestWorkstreamOf(deps.state.db, taskId) === undefined) {
         try {
           deps.tasks.start(taskId);

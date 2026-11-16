@@ -14,11 +14,14 @@ export { startFacts, type StartGit } from './start-facts';
 export { createChatTools } from './tools';
 export { areasOfChat, editedPathsOf } from './chat-areas';
 export {
+  doItHere,
   doItInCopy,
   finishSeals,
   previewDoIt,
   type DoItCopyDeps,
   type DoItDeps,
+  type DoItHereDeps,
   type DoItTasks,
   type FinishSealsDeps,
 } from './do-it';
+export { taskSession } from './task-session';

@@ -1,8 +1,12 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import {
   ChatDto,
   ConversationItemDto,
+  DoItBriefDto,
   DoItResult,
   ProjectDto,
   TaskDto,
@@ -22,20 +26,40 @@ import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
+import { FakeGh } from './fake-gh';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
-import { createTempRepo, tempDir, waitFor, waitForAsync } from './fixtures';
+import {
+  createTempRepoWithOrigin,
+  githubOrigin,
+  isolatedGitEnv,
+  NETWORK_ENV,
+  tempDir,
+  waitFor,
+  waitForAsync,
+} from './fixtures';
 
 // Sessions spec §7.3: Do It in a separate copy, through the real daemon, a real repository and the fake agent.
 
 let data: { path: string; cleanup(): void };
 let worktrees: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
+let network: { global: string; cleanup(): void };
+let gh: FakeGh;
 let daemon: RunningDaemon;
 let adapter: FakeAdapter;
 beforeEach(async () => {
   data = tempDir('do it copy');
   worktrees = tempDir('do it copy worktrees');
-  repo = createTempRepo();
+  // An origin that reads as github.com, so a copy's cut can run and the tests look at copies that exist.
+  const remote = createTempRepoWithOrigin();
+  network = githubOrigin(remote.repo.path, remote.origin.path);
+  repo = {
+    path: remote.repo.path,
+    cleanup: () => {
+      remote.cleanup();
+    },
+  };
+  gh = new FakeGh();
   adapter = new FakeAdapter({});
   daemon = await boot();
 });
@@ -53,11 +77,14 @@ function boot(): Promise<RunningDaemon> {
     watch: false,
     // A tick long enough that no lane starts while the test looks.
     tickMs: 3_600_000,
+    gh,
+    networkEnv: () => ({ ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global }),
   });
 }
 afterEach(async () => {
   await daemon.stop();
   repo.cleanup();
+  network.cleanup();
   data.cleanup();
   worktrees.cleanup();
 });
@@ -150,8 +177,11 @@ describe('Do It in a separate copy', () => {
         .find((w) => w.id === id);
       return row?.batchId == null ? undefined : getBatch(daemon.state.db, row.batchId);
     });
-    if (batch.worktreePath !== null)
-      expect(existsSync(join(batch.worktreePath, 'notes.md'))).toBe(false);
+    const copy = batch.worktreePath;
+    if (copy === null) throw new Error('the copy has no worktree');
+    // Read once the cut has made it, so the check can see what the copy was cut with.
+    await waitFor(() => existsSync(join(copy, 'README.md')) || undefined);
+    expect(existsSync(join(copy, 'notes.md'))).toBe(false);
   });
 
   it('stops a running turn first, keeping its partial text, and a second submit makes no second task', async () => {
@@ -220,4 +250,146 @@ describe('Do It in a separate copy', () => {
       ),
     ).toHaveLength(1);
   });
+
+  it('leaves a chat whose Do It finished alone at the next start', async () => {
+    const made = await project();
+    const chat = await chatWithReply(made);
+    await api().post(`/chats/${chat.id}/do-it`, DoItResult, request);
+    const before = getChat(daemon.state.db, chat.id).updatedAt;
+    const notices = () =>
+      listItems(daemon.state.db, chat.conversationId).filter((i) => i.kind === 'notice').length;
+    const noticed = notices();
+    await daemon.stop();
+
+    daemon = await boot();
+
+    expect(getChat(daemon.state.db, chat.id).updatedAt).toBe(before);
+    expect(notices()).toBe(noticed);
+  });
+
+  it('refuses a start the daemon cannot make, leaving the chat as it was and its queue running', async () => {
+    const made = await project();
+    const chat = await chatWithReply(made);
+    // The copy's worktree root can't be made, so the start is refused after the task exists.
+    rmSync(worktrees.path, { recursive: true, force: true });
+    writeFileSync(worktrees.path, 'a file where the root should be\n');
+
+    const res = await post(`/chats/${chat.id}/do-it`, request);
+
+    expect(res.status).toBe(400);
+    // The task is taken off the Board, not left to run.
+    expect(
+      daemon.state.db
+        .select()
+        .from(schema.tasks)
+        .all()
+        .map((t) => t.status),
+    ).toEqual(['cancelled']);
+    expect(getConversation(daemon.state.db, chat.conversationId).state).not.toBe('sealed');
+    expect(getChat(daemon.state.db, chat.id)).toMatchObject({
+      mode: 'explore',
+      taskId: null,
+      tabPosition: 0,
+    });
+    expect(daemon.state.db.select().from(schema.chatTasks).all()).toEqual([]);
+    // Its starts were let go: a message sent now runs.
+    adapter.shapeBehaviour = () => Promise.resolve({ text: 'Still here.' });
+    await api().post(`/conversations/${chat.conversationId}/messages`, ConversationItemDto, {
+      text: 'Hello again',
+    });
+    await waitFor(
+      () =>
+        listItems(daemon.state.db, chat.conversationId).some(
+          (i) => JSON.stringify(i.body).includes('Still here.') || undefined,
+        ) || undefined,
+    );
+  });
+
+  it('refuses to archive the chat while its task runs', async () => {
+    const made = await project();
+    const chat = await chatWithReply(made);
+    const done = await api().post(`/chats/${chat.id}/do-it`, DoItResult, request);
+    if (!('taskId' in done)) throw new Error('Do It answered pending');
+
+    const res = await post(`/chats/${chat.id}/archive`, {});
+
+    expect(res.status).toBe(409);
+    expect(getChat(daemon.state.db, chat.id).archivedAt).toBeNull();
+  });
+
+  it("refuses the old session token's calls once the chat is sealed", async () => {
+    const made = await project();
+    const chat = await api().post('/chats', ChatDto, {
+      projectId: made.id,
+      model: null,
+      tabPosition: 0,
+    });
+    writeFileSync(join(repo.path, 'notes.md'), 'my notes\n');
+    const head = execFileSync('git', ['-C', repo.path, 'rev-parse', 'HEAD'], {
+      env: isolatedGitEnv(),
+    })
+      .toString()
+      .trim();
+    let old: Client | null = null;
+    let release: () => void = () => undefined;
+    const connected = new Promise<void>((resolve) => {
+      adapter.shapeBehaviour = async (turn) => {
+        const client = new Client({ name: 'test', version: '0' });
+        await client.connect(
+          new StreamableHTTPClientTransport(new URL(turn.spec.mcp.url), {
+            requestInit: { headers: { Authorization: `Bearer ${turn.spec.mcp.token}` } },
+          }),
+        );
+        old = client;
+        resolve();
+        await new Promise<void>((r) => {
+          release = r;
+        });
+        return { text: 'Done.' };
+      };
+    });
+    await api().post(`/conversations/${chat.conversationId}/messages`, ConversationItemDto, {
+      text: 'Working on it',
+    });
+    await connected;
+    await api().post(`/chats/${chat.id}/do-it`, DoItResult, request);
+    release();
+
+    const client = old as Client | null;
+    if (client === null) throw new Error('the session never connected');
+    const answers: string[] = [];
+    for (const call of [
+      { name: 'write_brief', arguments: { title: 'Late', brief: 'Too late.' } },
+      { name: 'commit_changes', arguments: { message: 'late', paths: ['notes.md'] } },
+    ])
+      answers.push(
+        await client.callTool(call).then(
+          (r) => JSON.stringify(r),
+          () => 'refused',
+        ),
+      );
+
+    for (const answer of answers) expect(answer).not.toContain('"kept":true');
+    expect(
+      execFileSync('git', ['-C', repo.path, 'rev-parse', 'HEAD'], { env: isolatedGitEnv() })
+        .toString()
+        .trim(),
+    ).toBe(head);
+    expect(
+      (
+        await api()
+          .post(`/chats/${chat.id}/brief`, DoItBriefDto, {})
+          .catch(() => null)
+      )?.source,
+    ).not.toBe('agent');
+  });
 });
+
+/** A POST whose status is wanted, not its body. */
+function post(path: string, body: unknown): Promise<Response> {
+  return fetch(`${daemon.url}${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${daemon.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}

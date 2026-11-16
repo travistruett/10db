@@ -7,8 +7,8 @@ import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-se
 import {
   AccountKind,
   ConversationOwnerKind,
+  DoItPlace,
   EventType,
-  ConflictError,
   InvalidError,
   InboxItemId,
   JUDGE_TIMEOUT_MS,
@@ -148,6 +148,7 @@ import {
   flagWorktreeMissing,
   flagWrongBranch,
   moveRetiredLandings,
+  checkPassOpen,
   openPass,
   passBelow,
   passOpenProblem,
@@ -230,6 +231,7 @@ import {
   chatHooks,
   createChatLiveSessions,
   createChatService,
+  doItHere,
   doItInCopy,
   finishSeals,
   previewDoIt,
@@ -255,6 +257,9 @@ import {
   createPassCloses,
   discardKeptWork,
   createPendingOpens,
+  openFailure,
+  postFirstMessages,
+  type OpenWhenBusyDeps,
   joinPass,
   putBackKeptWork,
   resumePassWork,
@@ -1659,9 +1664,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     engine: exploreEngine,
     folderHold,
+    pendingOpens,
     briefs: chatBriefs,
     clock,
     dataDir: opts.dataDir,
+    log: logger.child({ component: 'chat-service' }),
     now: () => clock.now(),
     modelsOf: conversationModels,
     webSearchOf: (projectId) =>
@@ -2172,6 +2179,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     plan: appMcpPlan,
     logger: logger.child({ component: 'mcp-sign-ins' }),
   });
+  const openWhenBusyDeps: OpenWhenBusyDeps = {
+    folderHold,
+    pendingOpens,
+    stopChatForOpen: (chatId) => chat.stopForOpen(chatId),
+    logger: logger.child({ component: 'pass-open' }),
+    draining: () => updateDrain.draining,
+    notify: (projectId, title, body) => {
+      inbox.flag({ projectId, workstreamId: null, title, body });
+    },
+  };
   const doItDeps: DoItDeps = {
     state,
     engine: exploreEngine,
@@ -2275,16 +2292,48 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       pendingOpens,
       doItPreview: (chatId) => previewDoIt(doItDeps, chatId),
       doIt: (chatId, input) =>
-        input.place === 'here'
-          ? Promise.reject(new ConflictError('Do It in Your folder is not available yet'))
+        input.place === DoItPlace.Here
+          ? doItHere(
+              {
+                ...doItDeps,
+                openWhenBusy: openWhenBusyDeps,
+                openWholeProject: async ({ signal, ...whole }) => {
+                  try {
+                    await openPass(
+                      delivery,
+                      {
+                        projectId: whole.projectId,
+                        name: whole.title,
+                        taskIds: [],
+                        wholeProject: {
+                          title: whole.title,
+                          brief: whole.brief,
+                          chatId: whole.chatId,
+                          ...(whole.acceptanceCriteria === undefined
+                            ? {}
+                            : { acceptanceCriteria: whole.acceptanceCriteria }),
+                        },
+                        wait: { signal },
+                      },
+                      passOpenDeps,
+                    ).then((opened) => {
+                      postFirstMessages(state, opened.pass.id, undefined);
+                    });
+                  } catch (error) {
+                    throw openFailure(error);
+                  }
+                  createdScheduler.requestTick();
+                },
+              },
+              chatId,
+              input,
+            )
           : doItInCopy(
               {
                 ...doItDeps,
                 tasks: {
-                  create: async (projectId, task) => {
-                    const made = await services.createTask(projectId, task);
-                    return made;
-                  },
+                  create: (projectId, task) =>
+                    Promise.resolve(services.createTask(projectId, task)),
                   settleSizing: (taskIds) => services.settleSizing(taskIds),
                   start: (taskId) => services.startTask(taskId),
                   remove: (taskId) => services.removeTask(taskId),
@@ -2314,13 +2363,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     starter,
     sizing,
     sizingWaitMs: opts.sizingWaitMs ?? JUDGE_TIMEOUT_MS,
-    openWhenBusy: {
-      folderHold,
-      pendingOpens,
-      stopChatForOpen: (chatId) => chat.stopForOpen(chatId),
-      logger: logger.child({ component: 'pass-open' }),
-    },
+    openWhenBusy: openWhenBusyDeps,
     openPass: (input) => openPass(delivery, input, passOpenDeps),
+    checkPassOpen: (input) => {
+      checkPassOpen(state.db, input);
+    },
     takeOut: (input) => takeOut(passTakeOuts, input),
     abandonPass: (passId) => startAbandon(passAbandons, passId),
     joinPass: (passId, input) => joinPass(delivery, passId, input, passOpenDeps),
@@ -2462,7 +2509,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           begin: (since) => {
             updateDrain.begin(since);
             // An open that waits for chats' turns would hold the update's wait on 10db's jobs for good.
-            pendingOpens.cancelAll();
+            for (const { projectId, name } of pendingOpens.cancelAll())
+              inbox.flag({
+                projectId,
+                workstreamId: null,
+                title: `Pass ‘${name}’ was cancelled for 10db’s update`,
+                body: 'It was waiting for chats’ turns to end. Open it again once the update is done.',
+              });
           },
           end: () => {
             updateDrain.end();

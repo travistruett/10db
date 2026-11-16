@@ -64,3 +64,4 @@ export {
   type OpenWhenBusyDeps,
 } from './open-when-busy';
 export { createPendingOpens, type PendingOpen, type PendingOpens } from './pending-open';
+export { openFailure, postFirstMessages } from './first-messages';

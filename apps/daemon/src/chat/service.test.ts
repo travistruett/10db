@@ -380,3 +380,82 @@ describe('the brief for Do It', () => {
     await w.engine.settled(chat.conversationId);
   });
 });
+
+describe('a chat whose Do It is under way', () => {
+  const say = (chatId: ChatId, text: string, folder?: 'read_only') => {
+    const chat = w.chat.get(chatId);
+    return w.chat.send(chat.conversationId, { text, mentions: [], pictures: [] }, folder);
+  };
+
+  it('keeps its starts held when a send that stopped the brief turn finishes after the open stopped it', async () => {
+    w = chatWorld();
+    const chat = w.open();
+    const held = gate();
+    w.adapter.shapeBehaviour = async () => {
+      await held.promise;
+      return { text: 'Done.' };
+    };
+    w.chat.askBrief(chat.id);
+    await waitFor(() => w.engine.view(chat.conversationId).state === 'running');
+    say(chat.id, 'Just the logout');
+
+    const release = await w.chat.stopForOpen(chat.id);
+
+    // The send's own stop ends after the open's hold began; the hold is the open's to give back.
+    await waitFor(() => w.engine.parked(chat.conversationId) || undefined);
+    expect(w.engine.view(chat.conversationId).state).not.toBe('running');
+    release();
+    held.release();
+    await w.engine.settled(chat.conversationId);
+  });
+
+  it("applies a send's Reading Only choice to the turn that follows the brief turn it stopped", async () => {
+    w = chatWorld();
+    const chat = w.open();
+    const brief = gate();
+    w.adapter.shapeBehaviour = async () => {
+      await brief.promise;
+      return { text: 'Done.' };
+    };
+    w.chat.askBrief(chat.id);
+    await waitFor(() => w.engine.view(chat.conversationId).state === 'running');
+    const mine = gate();
+    w.adapter.shapeBehaviour = async () => {
+      await mine.promise;
+      return { text: 'Done.' };
+    };
+
+    say(chat.id, 'Just the logout', 'read_only');
+
+    await waitFor(() => w.engine.view(chat.conversationId).state === 'running' || undefined);
+    await waitFor(() => !w.engine.parked(chat.conversationId) || undefined);
+    expect(w.folderHold.holdsTurn(chat.id)).toBe(false);
+    brief.release();
+    mine.release();
+    await w.engine.settled(chat.conversationId);
+  });
+
+  it('refuses a request for a brief', async () => {
+    w = chatWorld();
+    const chat = w.open();
+    const release = await w.chat.stopForOpen(chat.id);
+
+    expect(() => {
+      w.chat.askBrief(chat.id);
+    }).toThrow(/pass is opening/);
+    release();
+  });
+
+  it('refuses a message to a sealed chat, parking nothing in it', () => {
+    w = chatWorld();
+    const chat = w.open();
+    w.state.write((ctx) => {
+      patchConversation(ctx, chat.conversationId, { state: ConversationState.Sealed });
+    });
+
+    expect(() => say(chat.id, 'Anything')).toThrow(/work to a task/);
+    expect(listItems(w.state.db, chat.conversationId).filter((i) => i.kind === 'message')).toEqual(
+      [],
+    );
+  });
+});

@@ -55,3 +55,10 @@
   a chat's wait from the folder's `waiting_chat` holder instead. A send with `folder: read_only` (Send Reading Only,
   or a Redo carrying it) runs its turn reading only even if the folder has freed (`FolderHold.chooseReadOnly`); a send
   with no `folder` takes the folder when it is free.
+- `do-it.ts` hands a chat's work on (sessions spec §7.3). `previewDoIt` reads the refusals of both places up front
+  (`GET /chats/:chatId/do-it`); `doItInCopy` makes an ordinary task in a separate copy, links the chat and seals it
+  (`finishSeals` completes one the daemon stopped, once, after recovery); `doItHere` stops the chat's turn
+  (`ChatService.stopForOpen`, whose hold on the chat's starts only the open gives back) and opens a pass of one
+  through `openWhenBusy`, with `whenBusy` for other chats' turns. While a pass waits to open for a chat, Do It
+  and archive are refused for it; a chat sealed into a copy can't be archived while the copy's task is unfinished.
+  `task-session.ts` is `GET /tasks/:taskId/session`; the Changes scope is `workstream-changes.ts`'s.

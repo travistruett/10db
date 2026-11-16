@@ -22,6 +22,10 @@ export interface OpenWhenBusyDeps {
   /** Stops a chat's turn and holds its starts until the returned release runs. */
   readonly stopChatForOpen: (chatId: ChatId) => Promise<() => void>;
   readonly logger: Logger;
+  /** Whether 10db is draining for an update: nothing then waits to open, as the drain would cancel it. */
+  readonly draining: () => boolean;
+  /** Leaves the builder a visible note that a pass they were waiting for did not open. */
+  readonly notify: (projectId: ProjectId, title: string, body: string) => void;
 }
 
 /** What the open is for, in the words a refusal and the pending open use. */
@@ -32,6 +36,8 @@ export interface OpenRequest<T> {
   /** The chat whose Do It asks, when one does. */
   readonly chatId: ChatId | null;
   readonly whenBusy: PassWhenBusy | undefined;
+  /** Throws what refuses the open whatever the folder does; run before a request is answered as waiting. */
+  readonly check?: () => void;
   /** Opens the pass; with `wait`, it waits for chats' turns to end until the signal aborts. */
   readonly open: (wait?: { readonly signal: AbortSignal }) => Promise<T>;
 }
@@ -54,19 +60,28 @@ export async function openWhenBusy<T>(
   const { projectId, whenBusy } = request;
   deps.pendingOpens.refuseWhilePending(projectId);
   const blockers = deps.folderHold.blockers(projectId, { kind: FolderAsker.GitWork });
-  const chats = blockers.flatMap((b) =>
+  const allChats = blockers.flatMap((b) =>
     b.holder.kind === FolderHolderKind.ChatTurn && b.holder.chatId !== null
       ? [b.holder.chatId]
       : [],
   );
-  const onlyChats = blockers.length > 0 && chats.length === blockers.length;
-  const onlyOwn = request.chatId !== null && chats.every((id) => id === request.chatId);
-  if (whenBusy === undefined || !onlyChats || onlyOwn) return request.open();
+  const onlyChats = blockers.length > 0 && allChats.length === blockers.length;
+  // The requesting chat's own turn is already stopped by the caller, so it is neither stopped again nor waited on.
+  const chats = allChats.filter((id) => id !== request.chatId);
+  if (whenBusy === undefined || !onlyChats || chats.length === 0) return request.open();
 
   if (whenBusy === PassWhenBusy.Wait) {
+    if (deps.draining())
+      throw new ConflictError(
+        "10db is about to update, so a pass can't wait to open; try again after it",
+      );
+    request.check?.();
     const signal = deps.pendingOpens.begin(projectId, {
       name: request.name,
-      waitsFor: blockers.map((b) => holderWords(b.holder)).join(' and '),
+      waitsFor: blockers
+        .filter((b) => b.holder.chatId !== request.chatId)
+        .map((b) => holderWords(b.holder))
+        .join(' and '),
       chatId: request.chatId,
     });
     request.open({ signal }).then(
@@ -76,11 +91,11 @@ export async function openWhenBusy<T>(
       (error: unknown) => {
         deps.pendingOpens.end(projectId);
         // A cancelled wait is the builder's or an update's doing; any other refusal has no one waiting on it.
-        if (!(error instanceof FolderWaitCancelledError))
-          deps.logger.warn(
-            { projectId, err: error instanceof Error ? error.message : String(error) },
-            'a pass waiting to open was refused',
-          );
+        if (!(error instanceof FolderWaitCancelledError)) {
+          const why = error instanceof Error ? error.message : String(error);
+          deps.logger.warn({ projectId, err: why }, 'a pass waiting to open was refused');
+          deps.notify(projectId, `Pass ‘${request.name}’ did not open`, why);
+        }
       },
     );
     return { pending: true };

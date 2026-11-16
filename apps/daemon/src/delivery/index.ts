@@ -28,6 +28,7 @@ export {
   passOpenProblem,
   refusePassTask,
   returnBranchProblem,
+  checkPassOpen,
   startPassTasks,
   writePageTasks,
   type NewPageTask,

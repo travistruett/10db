@@ -212,6 +212,8 @@ import type {
   TaskMove,
   TaskPatch,
   WorkstreamChangesDto,
+  ChangesScope,
+  TaskSessionDto,
   SkippedActionDto,
   WorkstreamDto,
   WorkstreamId,
@@ -615,7 +617,9 @@ export interface ApiServices extends PlanRecordServices {
   cancelWorkstream(id: WorkstreamId): Promise<WorkstreamDto>;
   retryWorkstream(id: WorkstreamId, note?: string): WorkstreamDto;
   /** The diff, commits and file counts of the workstream's work in its checkout, for the builder's check. */
-  workstreamChanges(id: WorkstreamId): Promise<WorkstreamChangesDto>;
+  workstreamChanges(id: WorkstreamId, scope?: ChangesScope): Promise<WorkstreamChangesDto>;
+  /** What a task's tab reads of it: where it works and what it came from. */
+  taskSession(taskId: TaskId): TaskSessionDto;
   /** What the run skipped and the questions it was answered at once, oldest first. */
   listWorkstreamSkips(id: WorkstreamId): SkippedActionDto[];
   /** With `recent`, only that many, the most recently updated first. */
