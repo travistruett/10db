@@ -34,3 +34,5 @@
   items; `explore-recovery.ts` is what a start does for each conversation before the restart row;
   `explore-hooks.ts` is what an owner gives it. It imports none of `pass`, `pictures`, `mcp`, `screens`, `thread`,
   `shape` or `runner`.
+
+- A session's `background_tasks` report is kept by `openSession` in memory (never stored): `ExploreEngine.view` reads it from the open session, so it is empty with no session, and each report emits a `conversation.state` event with `backgroundTasks: true` for the screen to read the view again.

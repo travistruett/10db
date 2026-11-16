@@ -91,6 +91,9 @@
         "subagents": {
           "type": "boolean"
         },
+        "backgroundTasks": {
+          "type": "boolean"
+        },
         "webSearch": {
           "type": "boolean"
         },
@@ -127,6 +130,7 @@
         "plan",
         "reasoning",
         "subagents",
+        "backgroundTasks",
         "webSearch",
         "modelSwitch",
         "takeover",
@@ -227,6 +231,42 @@
           "type": "null"
         }
       ]
+    },
+    "backgroundTasks": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "shell",
+              "monitor",
+              "agent",
+              "other"
+            ]
+          },
+          "agent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "description",
+          "kind",
+          "agent"
+        ]
+      }
     }
   },
   "required": [

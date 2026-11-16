@@ -77,6 +77,29 @@ export function agentCommands(commands: readonly SlashCommand[]): AgentCommand[]
   }));
 }
 
+// The system frames whose fields are read, validated where they arrive: a shape that does not fit
+// maps to nothing rather than to a half-read event.
+const CommandsReport = z.looseObject({
+  commands: z.array(
+    z.looseObject({
+      name: z.string(),
+      description: z.string(),
+      argumentHint: z.string().default(''),
+    }),
+  ),
+});
+const BackgroundTasksReport = z.looseObject({
+  tasks: z.array(
+    z.looseObject({
+      task_id: z.string(),
+      description: z.string(),
+      task_type: z.string().optional(),
+      subagent_type: z.string().optional(),
+      ambient: z.boolean().optional(),
+    }),
+  ),
+});
+
 /** What one session's mapping keeps between messages: its stream and its tool calls. */
 export interface ClaudeMapContext {
   readonly pid: number | null;
@@ -112,21 +135,33 @@ export function mapSdkMessage(msg: SDKMessage, ctx: ClaudeMapContext): SessionEv
     });
   }
   if (msg.type === 'system') {
-    if (msg.subtype === 'commands_changed')
-      return [{ type: 'commands', commands: agentCommands(msg.commands) }];
+    if (msg.subtype === 'commands_changed') {
+      const report = CommandsReport.safeParse(msg);
+      return report.success
+        ? [{ type: 'commands', commands: agentCommands(report.data.commands) }]
+        : [];
+    }
     if (msg.subtype === 'init')
       return [{ type: 'started', providerSessionId: msg.session_id, pid: ctx.pid }];
     if (msg.subtype === 'compact_boundary')
       return [{ type: 'compacted', trigger: msg.compact_metadata.trigger }];
-    if (msg.subtype === 'background_tasks_changed')
+    if (msg.subtype === 'background_tasks_changed') {
+      const report = BackgroundTasksReport.safeParse(msg);
+      if (!report.success) return [];
       return [
         {
           type: 'background_tasks',
-          tasks: msg.tasks
+          tasks: report.data.tasks
             .filter((t) => t.ambient !== true)
-            .map((t) => ({ id: t.task_id, description: t.description })),
+            .map((t) => ({
+              id: t.task_id,
+              description: t.description,
+              ...(t.task_type === undefined ? {} : { kind: t.task_type }),
+              ...(t.subagent_type === undefined ? {} : { agent: t.subagent_type }),
+            })),
         },
       ];
+    }
     return [];
   }
   if (msg.type === 'assistant') {

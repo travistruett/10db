@@ -478,6 +478,59 @@ describe('the start checks', () => {
     expect(server.sent()).toEqual([]);
   });
 
+  it('starts an explore session with no lane sandbox on a read-only profile', async () => {
+    const server = fakeAppServer({ ...FINE });
+    const handle = startCodexSession(
+      {
+        ...specOf({ sandbox: null }),
+        profile: {
+          kind: 'explore',
+          judge: JudgeKind.Tendb,
+          systemPrompt: 'You are a chat.',
+          tools: [],
+          allowedTools: [],
+          disallowedTools: [],
+          agents: {},
+        },
+      },
+      depsOf(server),
+    );
+    expect(await firstEvent(handle)).toMatchObject({ type: 'started' });
+    await handle.stop();
+  });
+
+  it('a read-only explore session denies the secret files of the checkout, nested ones too', async () => {
+    await mkdir(join(checkout, 'app'));
+    await writeFile(join(checkout, '.env'), 'K=1\n');
+    await writeFile(join(checkout, 'app', '.env.local'), 'K=2\n');
+    const server = fakeAppServer({ ...FINE });
+    const handle = startCodexSession(
+      {
+        ...specOf({ sandbox: null }),
+        profile: {
+          kind: 'explore',
+          judge: JudgeKind.Tendb,
+          systemPrompt: 'You are a chat.',
+          tools: [],
+          allowedTools: [],
+          disallowedTools: [],
+          agents: {},
+        },
+      },
+      depsOf(server),
+    );
+    expect(await firstEvent(handle)).toMatchObject({ type: 'started' });
+    const config = (sentParams(server, 'thread/start') as { config: Record<string, unknown> })
+      .config;
+    const lane = (config['permissions'] as Record<string, Record<string, unknown>>)['lane'];
+    const filesystem = lane?.['filesystem'] as Record<string, string>;
+    const real = await realpath(checkout);
+    expect(filesystem[join(real, '.env')]).toBe('deny');
+    expect(filesystem[join(real, 'app', '.env.local')]).toBe('deny');
+    expect(filesystem[real]).toBe('read');
+    await handle.stop();
+  });
+
   it('refuses a session with no CODEX_HOME, spawning nothing', async () => {
     const spawn = vi.fn();
     const { handle } = startWith({}, { env: { PATH: '/usr/bin' } }, { spawn });
@@ -2352,6 +2405,31 @@ describe('codexThreadConfig', () => {
     }
   });
 
+  it('an explore thread with no lane sandbox gets a read-only profile: the checkout read, no host, no env', () => {
+    const config = codexThreadConfig({
+      ...specOf({ sandbox: null }),
+      profile: {
+        kind: 'explore',
+        judge: JudgeKind.Tendb,
+        systemPrompt: 'You are a chat.',
+        tools: [],
+        allowedTools: [],
+        disallowedTools: [],
+        agents: {},
+      },
+    });
+    const lane = (config['permissions'] as Record<string, Record<string, unknown>>)['lane'];
+    const filesystem = lane?.['filesystem'] as Record<string, string>;
+    expect(Object.values(filesystem).every((access) => access === 'read')).toBe(true);
+    expect(Object.keys(filesystem)).toContain(realpathSync(checkout));
+    expect(lane?.['network']).toMatchObject({ enabled: true, domains: {} });
+    expect(config['shell_environment_policy']).toEqual({ inherit: 'none', set: {} });
+  });
+
+  it('a lane thread with no lane sandbox has no config to send', () => {
+    expect(() => codexThreadConfig(specOf({ sandbox: null }))).toThrow(/lane sandbox/);
+  });
+
   // The sandboxed launch is made under a short root in the shared `/tmp`, which no sandbox can write.
   it.skipIf(SANDBOXED)(
     'maps a sandboxed stdio server to its launch, with no env block',
@@ -2466,7 +2544,7 @@ describe('the guard socket', () => {
       }
       expect(calls).toMatchObject([
         {
-          id: 'exec-1',
+          parentId: 'exec-1',
           kind: 'command',
           command: 'vercel deploy --prod',
           status: 'denied',

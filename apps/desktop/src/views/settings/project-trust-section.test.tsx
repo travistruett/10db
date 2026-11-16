@@ -113,9 +113,28 @@ describe('Settings › project Trust', () => {
     });
     expect(
       await within(region).findByText(
-        'Nothing yet. "Always in this project" on a card adds a line here. Every judge reads a line that describes a kind of call; a line that quotes one call is matched only by 10db\'s own judge, never by Claude\'s auto mode.',
+        "Nothing yet. \"Always in this project\" on a card adds a line here. Every judge reads a line that describes a kind of call. A line that quotes one call lets exactly that call through in Claude's auto mode and under 10db's judge, with no judge reading it; Codex's own Auto-review can still refuse it.",
       ),
     ).toBeTruthy();
+  });
+
+  it('lists a quoted call saved before grants named their tool as one to grant again, not as live', async () => {
+    const grant: TrustGrantDto = {
+      id: mintId('TrustGrant'),
+      projectId: project.id,
+      limit: null,
+      target: 'the call "pnpm test"',
+      createdAt: '2026-11-14T10:00:00.000Z',
+    };
+    serve(NOTHING, {}, [], [grant]);
+    renderApp('/settings/project-trust');
+    const region = await screen.findByRole('region', { name: 'Allowed in this project' });
+    expect(
+      await within(region).findByText(
+        /^Grant again: this was saved before grants named their tool · /,
+      ),
+    ).toBeTruthy();
+    expect(within(region).queryByText(/^Any limit · /)).toBeNull();
   });
 
   it('shows the empty line', async () => {
@@ -125,7 +144,7 @@ describe('Settings › project Trust', () => {
     expect(await within(region).findByText(/^Nothing yet\./)).toBeTruthy();
     expect(
       within(region).getByText(
-        "10db's judge reads a change from the next call; auto mode from the next session.",
+        "A line that quotes one call applies, and stops, from the next call. A line in your own words is read by 10db's judge from the next call and by auto mode from the next session.",
       ),
     ).toBeTruthy();
   });

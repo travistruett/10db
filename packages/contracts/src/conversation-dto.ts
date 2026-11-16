@@ -23,6 +23,25 @@ import { ToolCallView } from './tool-call-view';
 
 const Timestamp = z.iso.datetime();
 
+/** A background command or subagent the session started and that still runs. */
+export const BackgroundTaskKind = {
+  Shell: 'shell',
+  Monitor: 'monitor',
+  Agent: 'agent',
+  Other: 'other',
+} as const;
+export type BackgroundTaskKind = (typeof BackgroundTaskKind)[keyof typeof BackgroundTaskKind];
+
+export const BackgroundTaskDto = z.object({
+  id: z.string(),
+  /** What the task does: a command's line, a monitor's or subagent's description. */
+  description: z.string(),
+  kind: z.enum(BackgroundTaskKind),
+  /** A subagent's type; null for any other kind. */
+  agent: z.string().nullable(),
+});
+export type BackgroundTaskDto = z.infer<typeof BackgroundTaskDto>;
+
 /** A slash command the agent offers in its session. */
 export const AgentCommandDto = z.object({
   name: z.string().min(1),
@@ -50,6 +69,8 @@ export const ConversationDto = z.object({
   pausedUntil: Timestamp.nullable(),
   /** The commands the agent last listed, kept so a cold conversation still offers `/`; null before any. */
   commands: z.array(AgentCommandDto).nullable(),
+  /** What the open session runs in the background now; empty when none, or when no session is open. */
+  backgroundTasks: z.array(BackgroundTaskDto).default([]),
 });
 export type ConversationDto = z.infer<typeof ConversationDto>;
 

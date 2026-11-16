@@ -67,6 +67,7 @@ import {
   callKey,
   grantCallSummary,
   grantTargetOf,
+  isGrantedCall,
   projectGrantedCalls,
   routedToPerson,
   skipMessage,
@@ -76,7 +77,13 @@ import {
 import { foundHostReason } from './gate-host-card';
 import { leftWithBuilder } from './builder-card';
 import type { LimitNotes } from './hook-judge';
-import { LIMIT_DETAIL, limitCardTitle, limitOptions, NOTE_NEEDED_DETAIL } from './limit-card';
+import {
+  GRANT_CALL_DETAIL,
+  LIMIT_DETAIL,
+  limitCardTitle,
+  limitOptions,
+  NOTE_NEEDED_DETAIL,
+} from './limit-card';
 import { AnsweredAwayError, ParkedError, type InboxService } from './service';
 
 export interface WaitObserver {
@@ -559,7 +566,11 @@ export function createPermissionBroker(
       return { behavior: 'allow' };
     }
     // The builder's Always in this project on this very call, matched as written.
-    if (judged && !onceOnly && projectGrantedCalls(deps.state.db, ctx.projectId).has(summary))
+    if (
+      judged &&
+      !onceOnly &&
+      isGrantedCall(projectGrantedCalls(deps.state.db, ctx.projectId), req.toolName, req.input)
+    )
       return { behavior: 'allow' };
     if (ctx.unattended !== undefined) return skipUnattended(req, ask, ctx.unattended);
     const storable =
@@ -570,7 +581,8 @@ export function createPermissionBroker(
         ? null
         : mcpToolGrant(req.toolName, req.listedTools, ctx.mcpApproved);
     // Always in this project keeps the call itself only when it is short enough to keep whole.
-    const noteNeeded = judged && !onceOnly && grantTargetOf(null, summary) === null;
+    const grantCall = grantCallSummary(req.toolName, req.input);
+    const noteNeeded = judged && !onceOnly && grantTargetOf(null, grantCall, req.toolName) === null;
     // A once-only call offers no rule to store, Always in this project included.
     const options = onceOnly
       ? ONCE_OPTIONS
@@ -597,6 +609,8 @@ export function createPermissionBroker(
       detail: {
         toolName: req.toolName,
         summary,
+        // What Always in this project quotes, as the hook judge names the call when it matches it.
+        ...(judged && !onceOnly ? { [GRANT_CALL_DETAIL]: grantCall } : {}),
         ...(grant === null ? {} : { [MCP_TOOL_GRANT_DETAIL]: grant }),
         ...editDetail(req, ask),
         ...(req.escalated ? { [ESCALATED_KEY]: true } : {}),

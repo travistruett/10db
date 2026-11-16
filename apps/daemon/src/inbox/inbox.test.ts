@@ -1883,7 +1883,7 @@ describe('limit cards', () => {
     await settle();
     inbox.answer(onlyOpenCard().id, { choice: 'always_in_project' });
     expect(listTrustGrants(state.db, ws.project.id)).toMatchObject([
-      { target: 'the call "vercel deploy --prod # and any other command"' },
+      { target: 'the Bash call "vercel deploy --prod # and any other command"' },
     ]);
   });
 
@@ -1901,6 +1901,52 @@ describe('limit cards', () => {
     void broker(ws)(bash(`${DEPLOY} --force`));
     await settle();
     expect(onlyOpenCard().body).toBe(`${DEPLOY} --force`);
+  });
+
+  it('a grant is of its tool: a Bash grant of a path never answers an Edit or Write of that file', async () => {
+    const ws = seedWorkstream(base);
+    const path = '/w/release.sh';
+    limits.note('t1', WRITES_LIVE);
+    void broker(ws)(bash(path));
+    await settle();
+    inbox.answer(onlyOpenCard().id, { choice: 'always_in_project' });
+    for (const toolName of ['Edit', 'Write']) {
+      limits.note('t1', WRITES_LIVE);
+      const pending = broker(ws)({
+        toolName,
+        input: { file_path: path, content: 'x', old_string: 'a', new_string: 'b' },
+        toolUseId: 't1',
+        escalated: false,
+        signal: new AbortController().signal,
+      });
+      await settle();
+      const card = onlyOpenCard();
+      inbox.answer(card.id, { choice: 'deny' });
+      expect((await pending).behavior).toBe('deny');
+    }
+  });
+
+  it('an Edit grant never answers a Write with the same input', async () => {
+    const ws = seedWorkstream(base);
+    const input = { file_path: '/w/release.sh' };
+    const call = (toolName: string) => ({
+      toolName,
+      input,
+      toolUseId: 't1',
+      escalated: false,
+      signal: new AbortController().signal,
+    });
+    limits.note('t1', WRITES_LIVE);
+    void broker(ws)(call('Edit'));
+    await settle();
+    inbox.answer(onlyOpenCard().id, { choice: 'always_in_project' });
+    limits.note('t1', WRITES_LIVE);
+    expect(await broker(ws)(call('Edit'))).toEqual({ behavior: 'allow' });
+    limits.note('t1', WRITES_LIVE);
+    const pending = broker(ws)(call('Write'));
+    await settle();
+    inbox.answer(onlyOpenCard().id, { choice: 'deny' });
+    expect((await pending).behavior).toBe('deny');
   });
 
   it("a grant with the builder's note is a line every judge reads", async () => {
@@ -1923,7 +1969,7 @@ describe('limit cards', () => {
     expect(card.detail).toMatchObject({ noteNeeded: true });
     expect(card.options[1]?.description).toContain('Say in your note what to allow');
     expect(() => inbox.answer(card.id, { choice: 'always_in_project' })).toThrow(
-      'Say in the note what to allow: this call is too long to keep as it is.',
+      "Say in the note what to allow: this call can't be kept as it is.",
     );
     expect(listTrustGrants(state.db, ws.project.id)).toEqual([]);
     expect(onlyOpenCard().id).toBe(card.id);
@@ -1937,7 +1983,7 @@ describe('limit cards', () => {
     await settle();
     inbox.answer(onlyOpenCard().id, { choice: 'always_in_project' });
     expect(listTrustGrants(state.db, ws.project.id)).toMatchObject([
-      { limit: null, target: 'the call "pnpm test"' },
+      { limit: null, target: 'the Bash call "pnpm test"' },
     ]);
   });
 
@@ -4487,7 +4533,7 @@ describe('permission broker in a pass', () => {
   });
 
   /** A pass's broker over a real repository, running what the builder allows as the runner does. */
-  function passBroker(ws: ReturnType<typeof seedWorkstream>, repo: string) {
+  function passBroker(ws: ReturnType<typeof seedWorkstream>, repo: string, limits?: LimitNotes) {
     const env = { ...isolatedGitEnv(), PATH: process.env['PATH'] ?? '/usr/bin:/bin' };
     const home = join(roots, 'home');
     const gitDirs = createGit();
@@ -4514,6 +4560,7 @@ describe('permission broker in a pass', () => {
         sessionId: mintId('Session'),
         signal,
         observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+        ...(limits === undefined ? {} : { limits }),
         passGit: {
           baseBranch: 'main',
           run: async (call) =>
@@ -4578,6 +4625,25 @@ describe('permission broker in a pass', () => {
       expect(execFileSync('/bin/sh', ['-c', result], { encoding: 'utf8' })).toContain(
         'Add the page',
       );
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("a pass-git run 10db's judge noted at a limit gets the one pass-git card and no second", async () => {
+    const repo = createTempRepo();
+    try {
+      const ws = seedWorkstream(base);
+      const limits = createLimitNotes();
+      limits.note('t1', { limit: 'writes_live', reason: "10db's judge: Writing To Live Systems" });
+      const { decide } = passBroker(ws, repo.path, limits);
+      const decision = decide(bash('git commit --allow-empty -m x'));
+      const item = card();
+      expect(item.title).toBe('Allow git commit?');
+      inbox.answer(item.id, { choice: 'allow_once' });
+      await decision;
+      expect(listInbox(state.db, { states: ['OPEN'] })).toEqual([]);
+      expect(limits.take('t1')).toBeUndefined();
     } finally {
       repo.cleanup();
     }
