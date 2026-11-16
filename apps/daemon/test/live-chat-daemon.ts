@@ -220,11 +220,15 @@ export async function addProject(
 }
 
 export async function addAccount(daemon: LiveDaemon, input: AccountInput): Promise<string> {
-  const created = await daemon.api(z.looseObject({ id: z.string() }), '/accounts', {
-    method: 'POST',
-    body: input,
-  });
-  return created.id;
+  const created = await daemon.api(
+    z.object({ account: z.looseObject({ id: z.string() }) }),
+    '/accounts',
+    {
+      method: 'POST',
+      body: input,
+    },
+  );
+  return created.account.id;
 }
 
 export async function openChat(

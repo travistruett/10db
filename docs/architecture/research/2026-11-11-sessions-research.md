@@ -1356,3 +1356,15 @@ a question was then started, so a lane held the folder. Turn 2, sent with `folde
 
 Meaning: between turns the session closes and reopens on the other profile, and the conversation carries over. The
 timing was not measured.
+
+### LC5: one edit turn on Bedrock: pass
+
+What ran: `chat-write.live.test.ts` with `TENDB_LIVE_CLAUDE=1 TENDB_LIVE_BEDROCK=1`. The daemon's environment drops
+`AWS_*`; the test adds a Bedrock account through the API with the shell's signed-in AWS profile name (a name, no
+credential) and `us-east-1`, and puts the project on it. A chat was asked to create `lc5.txt` with its edit tool.
+
+- The file holds `bedrock`; the edit call is done, and the scratch database's session for the chat has an account of
+  kind `bedrock`.
+
+Meaning: the write profile, the hold and the edit tool work on Bedrock as on the plan. An API-key account was not
+run (none is stored for unattended use here); it takes the same Claude adapter path as Bedrock.

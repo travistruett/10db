@@ -12,6 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { loadEnv } from '../src/env';
 import {
+  addAccount,
   addProject,
   builderIdentity,
   gitIn,
@@ -33,6 +34,8 @@ import {
  */
 const liveEnv = loadEnv(process.env);
 const live = liveEnv.TENDB_LIVE_CLAUDE === '1';
+// Needs `AWS_PROFILE` (a signed-in profile) and, when it is not us-east-1, `AWS_REGION`.
+const bedrockLive = live && liveEnv.TENDB_LIVE_BEDROCK === '1';
 
 function note(text: string): void {
   console.info(text);
@@ -213,4 +216,46 @@ describe.skipIf(!live)('a chat that writes in Your folder, live, Claude plan', (
       await daemon.stop();
     }
   }, 600_000);
+});
+
+describe.skipIf(!bedrockLive)('a chat that writes in Your folder, live, Bedrock', () => {
+  it('edits a file in one turn', async () => {
+    const profile = process.env['AWS_PROFILE'];
+    const region = process.env['AWS_REGION'] ?? 'us-east-1';
+    if (profile === undefined) throw new Error('LC5 needs AWS_PROFILE set to a signed-in profile');
+    const daemon = await startLiveDaemon('lc5', { claudePath: localClaude() });
+    try {
+      const accountId = await addAccount(daemon, {
+        kind: 'bedrock',
+        label: 'Bedrock live check',
+        settings: { region, awsProfile: profile },
+      });
+      const project = await addProject(daemon, accountId);
+      const chat = await openChat(daemon, project.id, null);
+      const items = await sendAndWait(
+        daemon,
+        chat.conversationId,
+        'Create the file lc5.txt containing exactly the word bedrock, with your edit tool, then reply done.',
+        'wait',
+      );
+      expect(readFileSync(join(daemon.repo, 'lc5.txt'), 'utf8').trim()).toBe('bedrock');
+      // The turn ran on the Bedrock account, as the scratch database records it.
+      const kinds = execFileSync(
+        'sqlite3',
+        [
+          '-readonly',
+          join(daemon.work.path, 'data', '10db.sqlite'),
+          `select distinct a.kind from sessions s join accounts a on a.id = s.account_id where s.conversation_id = '${chat.conversationId}'`,
+        ],
+        { encoding: 'utf8' },
+      ).trim();
+      note(`LC5 account kind of the session: ${kinds}`);
+      expect(kinds).toBe('bedrock');
+      note(
+        `LC5 edit calls: ${JSON.stringify(items.flatMap((i) => (i.kind === 'tool_call' ? [[i.call.kind, i.call.status]] : [])))}`,
+      );
+    } finally {
+      await daemon.stop();
+    }
+  }, 420_000);
 });
