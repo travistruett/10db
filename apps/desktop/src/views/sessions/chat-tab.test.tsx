@@ -1,4 +1,5 @@
 import {
+  FolderHolderKind,
   mintId,
   type ChatDto,
   type ChatToolResult,
@@ -9,7 +10,9 @@ import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it } from 'vitest';
 import { chatDto, chatServer } from '../../test/chat-fixtures';
 import { builderItem, CLAUDE_CAPABILITIES, toolItem } from '../../test/conversation-fixtures';
+import { folderKeys } from '../../daemon/project-folder-queries';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
+import { folderDto, folderHolder } from '../../test/folder-fixtures';
 import { inboxItemDto, projectViewDto, taskDto } from '../../test/fixtures';
 import { modelEffortDto, modelRowDto } from '../../test/model-fixtures';
 import { commandCall, mcpCall } from '../../test/tool-call-fixtures';
@@ -74,7 +77,7 @@ describe('ChatTab: the session bar', () => {
     expect((await screen.findByTitle('Double-click to rename')).textContent).toBe(
       'Login fails after sleep',
     );
-    expect(screen.getByText('Chat · reads ampsio')).toBeTruthy();
+    expect(await screen.findByText('Chat · Your folder · on main')).toBeTruthy();
     expect(await screen.findByText('Claude Code')).toBeTruthy();
     expect((await screen.findByRole('button', { name: 'Model and effort' })).textContent).toContain(
       'claude-opus-5',
@@ -404,6 +407,95 @@ describe('ChatTab: cards, held-back calls and states', () => {
     fireEvent.click(await screen.findByRole('menuitemradio', { name: 'Low', hidden: true }));
     await waitFor(() => {
       expect(chip.textContent).toBe('Opus 5 Low');
+    });
+  });
+});
+
+describe('ChatTab: the session bar and Your folder', () => {
+  it('says what holds Your folder and follows it when a task starts or ends', async () => {
+    let folder = folderDto({ projectId: project.id });
+    const { queryClient } = openChat({}, () => [], [
+      http.get(daemonUrl('/projects/:projectId/folder'), () => HttpResponse.json(folder)),
+    ]);
+    expect(await screen.findByText('Chat · Your folder · on main')).toBeTruthy();
+
+    folder = folderDto({
+      projectId: project.id,
+      holders: [folderHolder(FolderHolderKind.Lane, 'Bump vite')],
+    });
+    await queryClient.invalidateQueries({ queryKey: folderKeys.all });
+    expect(
+      await screen.findByText('Chat · reads only: Your folder is in use by the task ‘Bump vite’'),
+    ).toBeTruthy();
+
+    folder = folderDto({ projectId: project.id, branch: 'fix/login' });
+    await queryClient.invalidateQueries({ queryKey: folderKeys.all });
+    expect(await screen.findByText('Chat · Your folder · on fix/login')).toBeTruthy();
+  });
+});
+
+describe('ChatTab: the composer and Your folder', () => {
+  const lane = () =>
+    folderDto({
+      projectId: project.id,
+      holders: [folderHolder(FolderHolderKind.Lane, 'Bump vite')],
+    });
+  const typeAndSend = async (text: string) => {
+    const field = await screen.findByRole('textbox', { name: 'Message' });
+    fireEvent.change(field, { target: { value: text } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+  };
+  const bodies = (served: ReturnType<typeof chatServer>) => served.messages.map((m) => m.body);
+
+  it('sends at once when nothing holds the folder', async () => {
+    const { served } = openChat();
+    await screen.findByText('Chat · Your folder · on main');
+    await typeAndSend('fix the typo');
+    await waitFor(() => {
+      expect(bodies(served)).toEqual([{ text: 'fix the typo' }]);
+    });
+  });
+
+  it.each([
+    { button: 'Wait for It', folder: 'wait' },
+    { button: 'Send Reading Only', folder: 'read_only' },
+  ])(
+    'asks while a task holds the folder, and $button sends folder $folder',
+    async ({ button, folder }) => {
+      const { served } = openChat({}, () => [], [
+        http.get(daemonUrl('/projects/:projectId/folder'), () => HttpResponse.json(lane())),
+      ]);
+      await screen.findByText('Chat · reads only: Your folder is in use by the task ‘Bump vite’');
+      await typeAndSend('fix the typo');
+      expect(
+        await screen.findByText('Your folder is in use by the task ‘Bump vite’.'),
+      ).toBeTruthy();
+      expect(served.messages).toEqual([]);
+      fireEvent.click(screen.getByRole('button', { name: button }));
+      await waitFor(() => {
+        expect(bodies(served)).toEqual([{ text: 'fix the typo', folder }]);
+      });
+    },
+  );
+
+  it('shows the waiting row for a message that waits, and Send Now Reading Only runs it', async () => {
+    const chat = chatDto({ projectId: project.id });
+    const waiting = folderDto({
+      projectId: project.id,
+      holders: [
+        folderHolder(FolderHolderKind.Lane, 'Bump vite'),
+        folderHolder(FolderHolderKind.WaitingChat, chat.title, { chatId: chat.id }),
+      ],
+    });
+    const { served } = openChat({ id: chat.id, conversationId: chat.conversationId }, () => [], [
+      http.get(daemonUrl('/projects/:projectId/folder'), () => HttpResponse.json(waiting)),
+    ]);
+    expect(
+      await screen.findByText('Waits for Your folder: in use by the task ‘Bump vite’'),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Send Now Reading Only' }));
+    await waitFor(() => {
+      expect(served.stoppedWaiting).toEqual([chat.id]);
     });
   });
 });

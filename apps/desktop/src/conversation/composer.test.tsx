@@ -323,3 +323,100 @@ describe('Composer: @ files and / commands', () => {
     });
   });
 });
+
+describe('Composer while Your folder is held', () => {
+  const held = (onChoose = vi.fn(), onFileAsTasks = vi.fn()) => ({
+    holders: 'the task ‘Bump vite’',
+    onChoose,
+    onFileAsTasks,
+  });
+  const typed = { text: 'fix the typo', mentions: [], pictures: [] };
+
+  it('asks before a message runs, and sends nothing until a choice is made', () => {
+    const onSend = vi.fn();
+    const onChoose = vi.fn();
+    renderWithTheme(<Held held={held(onChoose)} onSend={onSend} start={typed} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(screen.getByText('Your folder is in use by the task ‘Bump vite’.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Send' })).toBeNull();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(onChoose).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { button: 'Wait for It', choice: 'wait' },
+    { button: 'Send Reading Only', choice: 'read_only' },
+  ])('$button sends the draft with folder $choice and clears it', async ({ button, choice }) => {
+    const onChoose = vi.fn();
+    renderWithTheme(<Held held={held(onChoose)} start={typed} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(screen.getByRole('button', { name: button }));
+    await waitFor(() => {
+      expect(onChoose).toHaveBeenCalledWith(typed, choice, 'send');
+    });
+    await waitFor(() => {
+      expect((input() as HTMLTextAreaElement).value).toBe('');
+    });
+  });
+
+  it('picks Wait for It with ⌘↩ and cancels with Escape, leaving the draft', async () => {
+    const onChoose = vi.fn();
+    renderWithTheme(<Held held={held(onChoose)} start={typed} />);
+    fireEvent.keyDown(input(), { key: 'Enter' });
+    fireEvent.keyDown(input(), { key: 'Escape' });
+    expect(screen.queryByRole('group', { name: 'Your folder is in use' })).toBeNull();
+    expect((input() as HTMLTextAreaElement).value).toBe('fix the typo');
+    fireEvent.keyDown(input(), { key: 'Enter' });
+    fireEvent.keyDown(input(), { key: 'Enter', metaKey: true });
+    await waitFor(() => {
+      expect(onChoose).toHaveBeenCalledWith(typed, 'wait', 'send');
+    });
+  });
+
+  it('files the standing request without sending the draft', async () => {
+    const onFileAsTasks = vi.fn();
+    const onChoose = vi.fn();
+    renderWithTheme(<Held held={held(onChoose, onFileAsTasks)} start={typed} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(screen.getByRole('button', { name: 'File as Tasks' }));
+    await waitFor(() => {
+      expect(onFileAsTasks).toHaveBeenCalled();
+    });
+    expect(onChoose).not.toHaveBeenCalled();
+    expect((input() as HTMLTextAreaElement).value).toBe('fix the typo');
+  });
+
+  it('sends at once when nothing holds the folder', async () => {
+    const onSend = vi.fn();
+    renderWithTheme(<Held onSend={onSend} start={typed} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => {
+      expect(onSend).toHaveBeenCalledWith(typed);
+    });
+    expect(screen.queryByRole('group', { name: 'Your folder is in use' })).toBeNull();
+  });
+
+  it('drops the choices when the folder frees', () => {
+    function Frees() {
+      const [on, setOn] = useState(true);
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              setOn(false);
+            }}
+          >
+            Free
+          </button>
+          <Held {...(on ? { held: held() } : {})} start={typed} />
+        </>
+      );
+    }
+    renderWithTheme(<Frees />);
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(screen.getByRole('group', { name: 'Your folder is in use' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Free' }));
+    expect(screen.queryByRole('group', { name: 'Your folder is in use' })).toBeNull();
+  });
+});

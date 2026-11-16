@@ -1,4 +1,11 @@
-import type { ChatDto, Effort, ProjectViewDto, ToolCallView } from '@10db/contracts';
+import {
+  FolderHolderKind,
+  type ChatDto,
+  type Effort,
+  type FolderWhileHeld,
+  type ProjectViewDto,
+  type ToolCallView,
+} from '@10db/contracts';
 import { Box, Group, Text } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
@@ -25,10 +32,13 @@ import {
   useToolCallFull,
 } from '../../daemon/conversation-queries';
 import { useModels } from '../../daemon/model-queries';
+import { useProjectFolder, useStopWaiting } from '../../daemon/project-folder-queries';
 import { useDaemon, useDaemonStatus } from '../../daemon/provider';
 import { useResolvedInbox } from '../../daemon/queries';
 import dayjs from 'dayjs';
 import { chatEntries } from './chat-entries';
+import { FolderWait } from './folder-wait';
+import { keepingWords } from './kind-line';
 import { sessionAnnouncement, type SessionEvent } from './session-announcements';
 import { SessionBar } from './session-bar';
 import type { TabActions } from './tab-menu';
@@ -118,6 +128,18 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
   const [sendError, setSendError] = useState<string | null>(null);
   const [modelRefusal, setModelRefusal] = useState<string | null>(null);
   const models = useChatModels(chat.projectId);
+  const folder = useProjectFolder(chat.projectId);
+  const stopWaiting = useStopWaiting();
+  // Holders that keep this chat's turn from writing: Send asks before a message runs, and a message
+  // that chose to wait is listed by the daemon as this chat waiting.
+  const keeping = keepingWords(chat, folder);
+  const waitingOn =
+    keeping !== null &&
+    (folder?.holders ?? []).some(
+      (h) => h.kind === FolderHolderKind.WaitingChat && h.chatId === chat.id,
+    )
+      ? keeping
+      : null;
   const modelRows = useModels(null);
   const offered = models.data?.offered ?? [];
   const named = conversation.model ?? models.data?.default ?? null;
@@ -126,12 +148,13 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
   const working = WORKING_STATES.has(conversation.state);
   const removed = project === undefined;
 
-  const post = async (d: Draft): Promise<void> => {
+  const post = async (d: Draft, folderChoice?: FolderWhileHeld): Promise<void> => {
     await send.mutateAsync({
       conversationId: chat.conversationId,
       text: d.text,
       mentions: d.mentions,
       pictures: d.pictures,
+      ...(folderChoice === undefined ? {} : { folder: folderChoice }),
     });
   };
 
@@ -292,6 +315,7 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
           chat={chat}
           conversation={conversation}
           projectName={project?.name ?? ''}
+          folder={folder}
           loading={loading}
           fileDisabledReason={removed ? 'This project was removed from 10db.' : disabledReason}
           {...(actions === undefined ? {} : { actions })}
@@ -323,6 +347,15 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
           {...(tool === undefined ? {} : { tool })}
         />
         <PermissionRequest items={open} />
+        {waitingOn === null ? null : (
+          <FolderWait
+            holders={waitingOn}
+            onSendNow={() => {
+              stopWaiting.mutate(chat.id);
+            }}
+            onStop={stopNow}
+          />
+        )}
         {removed ? (
           <Text size="sm" c="dimmed" px="md" py="md">
             This project was removed from 10db.
@@ -376,6 +409,28 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
                   />
                 </Group>
               }
+              {...(keeping === null
+                ? {}
+                : {
+                    held: {
+                      holders: keeping,
+                      onChoose: async (d: Draft, choice: FolderWhileHeld, how: 'send' | 'redo') => {
+                        if (how === 'send') await post(d, choice);
+                        else
+                          await redo.mutateAsync({
+                            conversationId: chat.conversationId,
+                            text: d.text,
+                            folder: choice,
+                          });
+                      },
+                      onFileAsTasks: async () => {
+                        await send.mutateAsync({
+                          conversationId: chat.conversationId,
+                          text: FILE_AS_TASKS_MESSAGE,
+                        });
+                      },
+                    },
+                  })}
               onSend={post}
               onStop={stopNow}
               onRedo={async (d) => {

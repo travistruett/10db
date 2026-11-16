@@ -4,13 +4,16 @@ import {
   ChatPatchInput,
   ConversationItemDto,
   mintId,
+  ProjectId,
   type ChatCreateInput,
+  type FolderDto,
   type ConversationId,
   type ProjectFileMatchDto,
   type SessionStartDto,
 } from '@10db/contracts';
 import { http, HttpResponse, type HttpHandler } from 'msw';
 import { daemonUrl } from './daemon';
+import { folderDto } from './folder-fixtures';
 import { builderItem, conversationDto } from './conversation-fixtures';
 
 // Sessions fixtures. Every DTO is parsed with its contract, so a contract change breaks the fixture
@@ -79,6 +82,8 @@ export interface ChatServerOptions {
   readonly createRefusal?: string;
   /** The status the message route answers; 202 by default. */
   readonly messageStatus?: number;
+  /** Who holds Your folder; free, on `main`, by default. Read on every request, so a test may change it. */
+  readonly folder?: () => FolderDto;
 }
 
 export interface ChatServer {
@@ -89,6 +94,8 @@ export interface ChatServer {
   readonly patches: { readonly chatId: string; readonly body: ChatPatchInput }[];
   readonly archived: string[];
   readonly unarchived: string[];
+  /** The chats whose wait for Your folder was stopped. */
+  readonly stoppedWaiting: string[];
   readonly fileQueries: { readonly conversationId: string; readonly q: string }[];
   /** The chats the server holds, including the ones `POST /chats` made. */
   readonly chats: ChatDto[];
@@ -104,6 +111,7 @@ export function chatServer(opts: ChatServerOptions = {}): ChatServer {
     patches: [],
     archived: [],
     unarchived: [],
+    stoppedWaiting: [],
     fileQueries: [],
     chats,
   };
@@ -172,6 +180,17 @@ export function chatServer(opts: ChatServerOptions = {}): ChatServer {
       chats.splice(chats.indexOf(chat), 1, changed);
       return HttpResponse.json(changed);
     }),
+    http.get(daemonUrl('/projects/:projectId/folder'), ({ params }) =>
+      HttpResponse.json(
+        opts.folder?.() ?? folderDto({ projectId: ProjectId.parse(params['projectId']) }),
+      ),
+    ),
+    http.post(daemonUrl('/chats/:chatId/stop-waiting'), ({ params }) => {
+      const chat = byId(String(params['chatId']));
+      if (chat === undefined) return HttpResponse.json({ error: 'gone' }, { status: 404 });
+      server.stoppedWaiting.push(chat.id);
+      return HttpResponse.json(chat);
+    }),
     http.get(daemonUrl('/projects/:projectId/chat-models'), () =>
       HttpResponse.json(opts.models ?? chatModelsDto()),
     ),
@@ -198,7 +217,11 @@ export function chatServer(opts: ChatServerOptions = {}): ChatServer {
       }),
     ),
     http.get(daemonUrl('/conversations/:conversationId/live'), ({ params }) =>
-      HttpResponse.json({ conversationId: params['conversationId'], items: [] }),
+      HttpResponse.json({
+        conversationId: params['conversationId'],
+        items: [],
+        waitingForFolder: false,
+      }),
     ),
     http.post(daemonUrl('/conversations/:conversationId/messages'), async ({ params, request }) => {
       const conversationId = String(params['conversationId']);
