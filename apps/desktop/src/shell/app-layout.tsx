@@ -259,6 +259,7 @@ function FullLayout() {
                       to={to}
                       active={pathname === to || pathname.startsWith(`${to}/`)}
                       label={label}
+                      noWrap
                       leftSection={<Icon size={16} stroke={1.5} />}
                       rightSection={
                         to === '/inbox' && openCards > 0 ? (
@@ -270,7 +271,7 @@ function FullLayout() {
                     />
                   ))}
                 </Stack>
-                <Stack gap={2} mt="lg">
+                <Stack gap={2} mt="md">
                   <Text size="xs" fw={600} c="dimmed" px="sm" pb={4}>
                     Project
                   </Text>
@@ -285,6 +286,7 @@ function FullLayout() {
                         to={to}
                         active={pathname === to || pathname.startsWith(`${to}/`)}
                         label={label}
+                        noWrap
                         leftSection={<Icon size={16} stroke={1.5} />}
                         rightSection={
                           to === '/workbench' && project !== null ? (

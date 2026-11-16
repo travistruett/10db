@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { z } from 'zod';
 import { claudeIsInstalled } from './claude-is-installed';
+import { inConversationColumn } from './conversation-column';
 import { daemonUrl } from './daemon-url';
 import { expectAccessible } from './expect-accessible';
 import { auth, createProject } from './shape-project';
@@ -276,6 +277,7 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   // Two turns outgrow a short window: the thread scrolls inside the page, never the window.
   for (const width of [1280, 480]) await threadScrollsInside(page, settings, 'Settings', width);
   await page.setViewportSize({ width: 1280, height: 900 });
+  await inConversationColumn(settings, message, 'the Workbench at 1280');
 
   // Sign Off: "Signing off…", then green "Signed off".
   await settings.getByRole('button', { name: 'Sign Off' }).click();

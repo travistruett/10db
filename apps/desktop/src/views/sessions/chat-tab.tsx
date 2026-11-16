@@ -4,6 +4,7 @@ import { useMediaQuery } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
 import { ConversationList, toolDoing, WorkingLine } from '../../conversation';
 import { Composer } from '../../conversation/composer';
+import { ConversationLayout } from '../../conversation/conversation-layout';
 import { composerPhase } from '../../conversation/composer-phase';
 import { ContextRing } from '../../conversation/context-ring';
 import { EMPTY_DRAFT, hasContent, type Draft } from '../../conversation/drafts';
@@ -94,8 +95,8 @@ export interface ChatTabProps {
 }
 
 /**
- * A chat's tab (sessions UI spec §4, §12): the session bar, the conversation in a 720 px column, the
- * cards it waits on pinned above the composer, and the composer. Each state M5a reaches has its words.
+ * A chat's tab (sessions UI spec §4, §12): the session bar, then the kit's conversation column: the
+ * conversation, the cards it waits on pinned above the composer, and the composer. Each state M5a reaches has its words.
  */
 export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRenamed }: ChatTabProps) {
   const conversationQuery = useConversation(chat.conversationId);
@@ -286,8 +287,9 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
   };
 
   return (
-    <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ flex: 'none' }}>
+    <ConversationLayout
+      label="Conversation"
+      header={
         <SessionBar
           chat={chat}
           conversation={conversation}
@@ -301,34 +303,20 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
             send.mutate({ conversationId: chat.conversationId, text: FILE_AS_TASKS_MESSAGE });
           }}
         />
-      </div>
-      <Box
-        maw={720}
-        w="100%"
-        mx="auto"
-        style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
-      >
-        <LoadingLines loading={loading} />
-        <ConversationList
-          entries={shown}
-          highlight={null}
-          loadFull={loadFull}
-          onAllow={allow}
-          agentLabel={caps.label}
-          busy={streaming !== null}
-        />
-        <WorkingLine
-          conversation={conversation}
-          streaming={streaming}
-          {...(tool === undefined ? {} : { tool })}
-        />
-        <PermissionRequest items={open} />
-        {removed ? (
-          <Text size="sm" c="dimmed" px="md" py="md">
-            This project was removed from 10db.
-          </Text>
-        ) : (
-          <>
+      }
+      footer={
+        <>
+          <WorkingLine
+            conversation={conversation}
+            streaming={streaming}
+            {...(tool === undefined ? {} : { tool })}
+          />
+          <PermissionRequest items={open} />
+          {removed ? (
+            <Text size="sm" c="dimmed" px="md" py="md">
+              This project was removed from 10db.
+            </Text>
+          ) : (
             <Composer
               draft={draft}
               onDraft={(next) => {
@@ -382,9 +370,19 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
                 await redo.mutateAsync({ conversationId: chat.conversationId, text: d.text });
               }}
             />
-          </>
-        )}
-      </Box>
-    </Box>
+          )}
+        </>
+      }
+    >
+      <LoadingLines loading={loading} />
+      <ConversationList
+        entries={shown}
+        highlight={null}
+        loadFull={loadFull}
+        onAllow={allow}
+        agentLabel={caps.label}
+        busy={streaming !== null}
+      />
+    </ConversationLayout>
   );
 }

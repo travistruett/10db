@@ -170,7 +170,8 @@ export function PageThread({ page, turns, live, busy, canSend, onAllow }: PageTh
   const befores = screens.filter((s) => s.kind === ScreenKind.Before);
   if (loading)
     return (
-      <Text size="sm" c="dimmed" px="md">
+      // It holds the list's place, so the composer is at the foot before the thread arrives.
+      <Text size="sm" c="dimmed" px="md" style={{ flex: 1, minHeight: 0 }}>
         Loading the thread…
       </Text>
     );

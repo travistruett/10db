@@ -377,6 +377,58 @@ describe('PassWorkspace composer', () => {
     fireEvent.click(screen.getByRole('button', { name: /^Settings/ }));
     expect(message('Settings').value).toBe('half a thought');
   });
+
+  it('clears only the page that sent when its send settles after another page is shown', async () => {
+    let release = (): void => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.post(daemonUrl('/conversations/:conversationId/messages'), async ({ params }) => {
+        await held;
+        const conversationId = ConversationId.parse(params['conversationId']);
+        return HttpResponse.json(
+          pageItemDto(conversationId, { kind: 'message', text: 'Fix the header' }),
+          { status: 202 },
+        );
+      }),
+    );
+    const pages = pagesByStatus();
+    const view = passViewDto({ pages: Object.values(pages) });
+    function Selecting() {
+      const [selected, setSelected] = useState<TaskId>(pages.ready.taskId);
+      return (
+        <PassWorkspace
+          view={view}
+          inbox={[]}
+          project={projectViewDto()}
+          selected={selected}
+          onSelect={setSelected}
+        />
+      );
+    }
+    renderWithDaemon(<Selecting />);
+    const message = (page: string) =>
+      screen.getByRole<HTMLTextAreaElement>('textbox', { name: `Message to ${page}` });
+    await screen.findByRole('textbox', { name: 'Message to Settings' });
+    fireEvent.change(message('Settings'), { target: { value: 'Fix the header' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Billing/ }));
+    fireEvent.change(message('Billing'), { target: { value: 'Check the footer' } });
+    release();
+    const billing = screen.getByRole('region', { name: 'Billing' });
+    await waitFor(() => {
+      expect(
+        within(billing).getByRole('button', { name: 'Send' }).hasAttribute('data-loading'),
+      ).toBe(false);
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^Settings/ }));
+    await waitFor(() => {
+      expect(message('Settings').value).toBe('');
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^Billing/ }));
+    expect(message('Billing').value).toBe('Check the footer');
+  });
 });
 
 describe('PassWorkspace page actions', () => {
