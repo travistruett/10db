@@ -671,6 +671,43 @@ describe('abandonPass', () => {
     expect(w.h.ctx.folderHold.holders(w.h.project.id)).toEqual([]);
   });
 
+  it('stops with 10db when the Move on its card waits for a chat in your terminal, and asks again', async () => {
+    w = await openPassWorld();
+    w.h.commit('src/settings/page.tsx', 'landed\n');
+    await abandonPass(deps(), w.opened.pass.id);
+    const [card] = abandonCards();
+    if (!card) throw new Error('no Abandon card');
+    w.h.state.write((ctx) => {
+      const id = mintId('Chat');
+      const conv = insertConversation(ctx, {
+        projectId: w.h.project.id,
+        owner: { kind: ConversationOwnerKind.Chat, id },
+        profile: ConversationProfile.Explore,
+        state: ConversationState.TakenOver,
+      });
+      insertChat(ctx, {
+        id,
+        projectId: w.h.project.id,
+        conversationId: conv.id,
+        title: 'In terminal',
+        tabPosition: 0,
+      });
+    });
+
+    answerPassCard({ ...w.deps, folderHold: w.h.ctx.folderHold }, card, { choice: 'Move to main' });
+    await waitFor(
+      () =>
+        getBatchRow(w.h.store.db, w.opened.batch.id).notices.find((n) => n.key === 'folder-hold')
+          ?.line,
+    );
+    await w.h.jobs.stop();
+
+    expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe(w.branch);
+    expect(abandonCards().map((c) => c.body)).toEqual([
+      expect.stringContaining('10db stopped before it moved Your folder.'),
+    ]);
+  });
+
   it('names on its card only the pages it discarded, not one taken out before it, whose work stays', async () => {
     w = await openPassWorld();
     w.h.commit('src/shared.ts', 'landed\n');

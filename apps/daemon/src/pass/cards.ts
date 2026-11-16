@@ -8,7 +8,7 @@ import {
 import { findPass, getBatch, getPass, getProject } from '@10db/db';
 import { z } from 'zod';
 import { jobKey, JobQueue, reserveGitNaming } from '../delivery';
-import type { FolderHold } from '../folder-hold';
+import { FolderWaitCancelledError, type FolderHold } from '../folder-hold';
 import { GitError, type SwitchBack } from '../git';
 import {
   PASS_CARD_DETAIL,
@@ -46,7 +46,12 @@ function refusal(outcome: Exclude<SwitchBack, { kind: 'switched' }>): string {
 }
 
 /** The folder card's answer: the built switch back to the pass's branch. */
-async function switchToPass(deps: PassCardDeps, passId: PassId, choice: string): Promise<void> {
+async function switchToPass(
+  deps: PassCardDeps,
+  passId: PassId,
+  choice: string,
+  signal: AbortSignal,
+): Promise<void> {
   const db = deps.state.db;
   const pass = getPass(db, passId);
   if (!passHoldsFolder(pass.state)) {
@@ -62,7 +67,7 @@ async function switchToPass(deps: PassCardDeps, passId: PassId, choice: string):
     return;
   }
   if (on !== branch) {
-    const why = await switchFolder(deps, pass, repo, on, branch, refusal({ kind: 'gone' }));
+    const why = await switchFolder(deps, pass, repo, on, branch, refusal({ kind: 'gone' }), signal);
     if (why !== null) {
       raiseFolderCard(deps, pass, on, why);
       return;
@@ -72,7 +77,12 @@ async function switchToPass(deps: PassCardDeps, passId: PassId, choice: string):
 }
 
 /** The Abandon card's answer: the built switch from the pass's branch to the one it came from. */
-async function moveHome(deps: PassCardDeps, passId: PassId, choice: string): Promise<void> {
+async function moveHome(
+  deps: PassCardDeps,
+  passId: PassId,
+  choice: string,
+  signal: AbortSignal,
+): Promise<void> {
   const db = deps.state.db;
   const pass = getPass(db, passId);
   if (choice !== moveToLabel(pass.returnBranch)) return;
@@ -94,6 +104,7 @@ async function moveHome(deps: PassCardDeps, passId: PassId, choice: string): Pro
       on,
       pass.returnBranch,
       `${pass.returnBranch} is gone`,
+      signal,
     );
     if (why !== null) {
       again(why);
@@ -114,6 +125,7 @@ async function switchFolder(
   from: string,
   branch: string,
   gone: string,
+  signal: AbortSignal,
 ): Promise<string | null> {
   const sha = await deps.git.commitAt(repo, branch).catch((error: unknown) => {
     if (error instanceof GitError) return null;
@@ -121,11 +133,19 @@ async function switchFolder(
   });
   if (sha === null) return gone;
   // The switch moves Your folder's branch, so it waits for a chat's turn, which may be editing there.
-  const token = await reserveGitNaming(deps, {
-    projectId: pass.projectId,
-    batchId: pass.batchId,
-    what: `moving Your folder to \`${branch}\``,
-  });
+  let token: symbol;
+  try {
+    token = await reserveGitNaming(deps, {
+      projectId: pass.projectId,
+      batchId: pass.batchId,
+      what: `moving Your folder to \`${branch}\``,
+      signal,
+    });
+  } catch (error) {
+    if (error instanceof FolderWaitCancelledError)
+      return '10db stopped before it moved Your folder.';
+    throw error;
+  }
   try {
     const outcome = await deps.git.switchBack(repo, from, { branch, sha }, { keepChanges: true });
     return outcome.kind === 'switched' ? null : refusal(outcome);
@@ -150,13 +170,13 @@ export function answerPassCard(deps: PassCardDeps, item: InboxItemDto, answer: I
   if (!found) return;
   deps.jobs.run(
     jobKey({ projectId: found.projectId, worktreePath: null }, JobQueue.Cut),
-    async () => {
+    async (signal) => {
       switch (kind.data) {
         case PassCardKind.Folder:
-          await switchToPass(deps, found.id, answer.choice);
+          await switchToPass(deps, found.id, answer.choice, signal);
           return;
         case PassCardKind.Abandon:
-          await moveHome(deps, found.id, answer.choice);
+          await moveHome(deps, found.id, answer.choice, signal);
           return;
       }
     },
