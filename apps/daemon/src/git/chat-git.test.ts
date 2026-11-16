@@ -139,6 +139,35 @@ describe('commitInFolder', () => {
     expect(rg('rev-list', '--count', 'HEAD')).toBe('2');
   });
 
+  // Git's objects stay readable to a sandboxed session though the kernel denies it the file, so a commit of a
+  // secret would hand it over.
+  describe('with files the session may not read', () => {
+    it.each([
+      ['an env file the folder does not ignore', '.env.local', undefined],
+      ['an env file in a folder, in capitals', 'app/.ENV.prod', undefined],
+      ['a file the session lists as secret', 'config/prod.txt', ['config/prod.txt']],
+    ])('refuses %s, names it and commits nothing', async (_what, secret, listed) => {
+      write(secret, 'TOKEN=1\n');
+      write('README.md', '# edited\n');
+      const before = rg('rev-parse', 'HEAD');
+      const input = {
+        message: 'x',
+        ...(listed === undefined ? {} : { secretFiles: listed.map((f) => join(repo, f)) }),
+      };
+      await expect(git.commitInFolder(repo, input)).rejects.toThrow(secret);
+      await expect(git.commitInFolder(repo, { ...input, paths: [secret] })).rejects.toThrow(secret);
+      expect(rg('rev-parse', 'HEAD')).toBe(before);
+      expect(rg('diff', '--cached', '--name-only')).toBe('');
+    });
+
+    it('commits the named files that are not secret even when a secret sits beside them', async () => {
+      write('.env.local', 'TOKEN=1\n');
+      write('README.md', '# edited\n');
+      await git.commitInFolder(repo, { message: 'readme', paths: ['README.md'] });
+      expect(rg('show', '--name-only', '--format=', 'HEAD')).toBe('README.md');
+    });
+  });
+
   it('refuses a path outside the folder, git state, an empty message and nothing changed', async () => {
     write('a.txt', 'a\n');
     for (const paths of [['../outside.txt'], ['/etc/hosts'], ['.git/config'], ['sub/.GIT/x']])

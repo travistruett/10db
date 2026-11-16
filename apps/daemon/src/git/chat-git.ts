@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
-import { isAbsolute, join, normalize, sep } from 'node:path';
+import { basename, isAbsolute, join, normalize, sep } from 'node:path';
 import { InvalidError } from '@10db/contracts';
+import { foldPathCase, isSecretFileName } from '../guard';
 import type { NetworkCall, NetworkRun } from './network';
 import { GitError } from './run';
 import { isGitComponent } from './worktree-files';
@@ -81,12 +82,41 @@ export interface ChatGit {
    */
   commitInFolder(
     repo: string,
-    input: { readonly message: string; readonly paths?: readonly string[] },
+    input: {
+      readonly message: string;
+      readonly paths?: readonly string[];
+      /** The session's secret files, absolute; with every `.env*` file, a commit holding one is refused. */
+      readonly secretFiles?: readonly string[];
+    },
   ): Promise<{ readonly sha: string }>;
   /** Checks out the local branch `name`, keeping changes git can carry, and refusing what it would overwrite. */
   switchBranch(repo: string, name: string): Promise<void>;
   /** Fetches the branch's upstream and moves the checked-out branch to it when that is a fast-forward. */
   pullFastForward(repo: string, net: NetworkCall): Promise<PullResult>;
+}
+
+/**
+ * The paths among `paths` (relative to the checkout, which `roots` name as given and as resolved) that a sandboxed session may not read: a `.env*` file, or
+ * one of `secretFiles`. A commit would put them in git's objects, which the session can read.
+ */
+function secretsAmong(
+  roots: readonly string[],
+  paths: readonly string[],
+  secretFiles: readonly string[],
+): string[] {
+  const listed = new Set(secretFiles.map(foldPathCase));
+  return paths.filter(
+    (path) =>
+      isSecretFileName(basename(path)) ||
+      roots.some((root) => listed.has(foldPathCase(join(root, path)))),
+  );
+}
+
+function refuseSecrets(secrets: readonly string[]): void {
+  if (secrets.length === 0) return;
+  throw new InvalidError(
+    `${secrets.join(', ')} ${secrets.length === 1 ? 'is a secret file' : 'are secret files'} the session may not read, so ${secrets.length === 1 ? 'it is' : 'they are'} never committed. Add ${secrets.length === 1 ? 'it' : 'them'} to .gitignore, or name the paths to commit.`,
+  );
 }
 
 const LITERAL = { GIT_LITERAL_PATHSPECS: '1' } as const;
@@ -191,6 +221,8 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
         const changed = await ctx.changes(c, named);
         if (changed.length === 0 && named === undefined)
           throw new InvalidError('Nothing has changed');
+        const secretFiles = input.secretFiles ?? [];
+        refuseSecrets(secretsAmong([repo, c.real], changed, secretFiles));
         refuseFilters(await ctx.worktreeFilters(c, changed));
         const sign = await ctx.signing(c);
         const flags = sign.flags.length > 0 ? sign.flags : ['--no-gpg-sign'];
@@ -209,6 +241,7 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
           .split('\0')
           .filter(Boolean);
         if (staged.length === 0) throw new InvalidError('Nothing has changed there');
+        refuseSecrets(secretsAmong([repo, c.real], staged, secretFiles));
         await said(
           () =>
             ctx.git(

@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import {
@@ -36,6 +36,7 @@ import { FakeGh } from '../../test/fake-gh';
 import { createEventBus, createStateStore } from '../events';
 import { createFolderHold, type FolderHold } from '../folder-hold';
 import { createGit } from '../git';
+import { secretFilesIn } from '../sandbox';
 import { createChatLiveSessions } from './live-sessions';
 import { chatGitTools } from './git-tools';
 
@@ -147,6 +148,7 @@ function tools(chat: ReturnType<typeof newChat>, open = true) {
       gh,
       filesDir: () => join(scratch.path, 'files'),
       repoOf: () => repo.path,
+      secretFilesOf: secretFilesIn,
       net: () => ({
         env: { ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global },
         timeoutMs: 20_000,
@@ -228,6 +230,23 @@ describe("a chat's git tools", () => {
     for (const [name, message] of REFUSED_BRANCH_NAMES)
       await expect(call(t, name)).rejects.toThrow(message);
     expect(rg('branch', '--show-current')).toBe('main');
+  });
+
+  // The kernel denies the session the file but not git's objects, so a commit would hand it over.
+  it.each([
+    ['an env file no ignore rule covers', { secret: '.env.local', paths: undefined }],
+    ['a file an env link points at', { secret: 'config/prod.txt', paths: ['config/prod.txt'] }],
+  ])('commit_changes refuses %s and names it', async (_what, { secret, paths }) => {
+    const me = newChat('Me');
+    hold.takeTurn(project.id, me.id);
+    write(secret, 'TOKEN=1\n');
+    if (secret !== '.env.local') symlinkSync(secret, join(repo.path, '.env.link'));
+    write('src/a.ts', 'a\n');
+    const before = rg('rev-parse', 'HEAD');
+    await expect(
+      tools(me).commit_changes({ message: 'x', ...(paths === undefined ? {} : { paths }) }),
+    ).rejects.toThrow(secret);
+    expect(rg('rev-parse', 'HEAD')).toBe(before);
   });
 
   it('branches, then commits only the named files, with a path as the agent wrote it', async () => {

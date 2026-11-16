@@ -42,6 +42,8 @@ export interface ChatGitToolsDeps {
   readonly live: ChatLiveSessions;
   /** The project's checkout. */
   readonly repoOf: (projectId: ProjectId) => string;
+  /** The checkout's secret files as a sandboxed session sees them (absolute): a commit never takes one. */
+  readonly secretFilesOf: (repo: string) => Promise<readonly string[]>;
   /** How a fetch is made: in the login environment, bounded in time. */
   readonly net: () => NetworkCall;
 }
@@ -198,6 +200,7 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
       const paths = input.paths?.map((p) => insideCheckout(repo, p));
       const { sha } = await deps.git.commitInFolder(repo, {
         message: input.message,
+        secretFiles: await deps.secretFilesOf(repo),
         ...(paths === undefined ? {} : { paths }),
       });
       return {

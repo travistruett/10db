@@ -307,6 +307,7 @@ import {
   createLaneSandbox,
   createLedgerSweep,
   reapLaneProcessLedgers,
+  secretFilesIn,
   sweepSystemTempDirs,
   sweepSystemTempFiles,
   type SweepReport,
@@ -2534,6 +2535,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           gh: delivery.gh,
           filesDir: (conversationId) => chatFolder(opts.dataDir, conversationId),
           repoOf: (projectId) => getProject(state.db, projectId).repoPath,
+          secretFilesOf: secretFilesIn,
           net: () => ({
             env: delivery.networkEnv(),
             timeoutMs: delivery.limits.networkTimeoutMs,
