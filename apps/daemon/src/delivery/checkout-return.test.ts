@@ -73,6 +73,7 @@ function endedWhileDown(batch: BatchDto, end: End): void {
 
 const recover = () =>
   recoverBatches({
+    folderHold: h.ctx.folderHold,
     state: h.state,
     git: h.git,
     inbox: h.inbox,

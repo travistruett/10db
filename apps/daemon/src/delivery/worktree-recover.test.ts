@@ -41,6 +41,7 @@ afterEach(() => {
 /** Startup batch recovery as the daemon runs it, with `git` as the restarted daemon's. */
 const recover = (git: Git = h.git) =>
   recoverBatches({
+    folderHold: h.ctx.folderHold,
     state: h.state,
     git,
     inbox: h.inbox,

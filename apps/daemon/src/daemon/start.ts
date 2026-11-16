@@ -1928,6 +1928,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // A move back that came due reads the pauses.
   moveBack.restore();
   await recoverBatches({
+    folderHold,
     state,
     git,
     inbox,

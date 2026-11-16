@@ -4,6 +4,7 @@ import {
   BRANCH_PREFIX,
   ClaimKind,
   ConflictError,
+  FolderAsker,
   InvalidError,
   mintId,
   PASS_PAGE_CAP_DEFAULT,
@@ -51,6 +52,7 @@ import {
   type DbReader,
   type WriteContext,
 } from '@10db/db';
+import { holderWords, type FolderBlocker } from '../folder-hold';
 import { githubRepoOf } from '../github';
 import { insertPlannedWorkstream, resolveStepPlan } from '../team';
 import { lanesInProjectCheckout } from './checkout';
@@ -208,6 +210,11 @@ export function returnBranchProblem(
   return null;
 }
 
+/** Why a pass can't open now: the attended holders of Your folder, named. */
+function folderInUse(blockers: readonly FolderBlocker[]): string {
+  return `Your folder is in use by ${blockers.map((b) => holderWords(b.holder)).join(' and ')}; a pass opens once it has finished`;
+}
+
 /**
  * Opens a pass on Your folder, in the project's delivery queue and under the checkout's repo lock:
  * the pass's branch at HEAD with no file written, the folder's dirt recorded with its content, the
@@ -232,17 +239,27 @@ export async function openPass(
   const tasks = input.taskIds.map((id) => getTask(db, id));
   const newPages = newPageTasks(db, project, input.pages ?? [], input.goalId ?? null);
   refuseOpen(db, project, tasks, pageCap, newPages);
+  const inUse = ctx.folderHold.blockers(project.id, { kind: FolderAsker.GitWork });
+  if (inUse.length > 0) throw new ConflictError(folderInUse(inUse));
   const id = mintId('Pass');
   const branch = passBranchName(input.name, id);
   const dirtRef = passDirtRef(id);
   return new Promise<PassOpened>((resolve, reject) => {
     ctx.jobs.run(jobKey({ projectId: project.id, worktreePath: null }, JobQueue.Cut), async () => {
+      // 10db never moves Your folder's branch under a chat's turn: the open's git calls hold the folder.
+      const reserved = ctx.folderHold.reserveGit(project.id, 'opening a pass in Your folder');
+      if (!reserved.reserved) {
+        reject(new ConflictError(folderInUse(reserved.blockers)));
+        return;
+      }
       let opened: PassOpened;
       try {
         opened = await ctx.git.operation(() => open());
       } catch (error) {
         reject(error instanceof Error ? error : new Error(String(error)));
         return;
+      } finally {
+        ctx.folderHold.releaseGit(reserved.token);
       }
       for (const task of tasks) if (getTaskKeptWork(db, task.id) !== null) await putBack(task.id);
       resolve(opened);

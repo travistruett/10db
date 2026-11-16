@@ -1,6 +1,7 @@
 import { BatchState, type BatchId } from '@10db/contracts';
 import { getBatch, getBatchRow, getProject, patchBatch } from '@10db/db';
 import type { StateStore } from '../events';
+import type { FolderHold } from '../folder-hold';
 import type { CheckoutPlace, Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
@@ -11,6 +12,7 @@ import { raise } from './context';
 /** What a switch back needs; startup recovery has these without a delivery context. */
 export interface CheckoutReturnDeps {
   readonly state: StateStore;
+  readonly folderHold: FolderHold;
   readonly git: Git;
   readonly inbox: InboxService;
   readonly logger: Logger;
@@ -67,6 +69,11 @@ export async function returnCheckout(
   // Lanes in a separate copy edit other files and don't hold the checkout where it is.
   const running = lanesInProjectCheckout(db, project);
   if (running > 0) return leave(checkoutCards.lanesRunning(batch, project, place, running));
+  // The switch moves Your folder's branch: it waits for a chat's turn, and holds the folder meanwhile.
+  const token = await deps.folderHold.reserveGitWhenFree(
+    project.id,
+    `switching Your folder back to ${place.branch === null ? 'where it was' : `\`${place.branch}\``}`,
+  );
   try {
     const outcome = await deps.git.switchBack(project.repoPath, row.branch, place);
     switch (outcome.kind) {
@@ -94,5 +101,7 @@ export async function returnCheckout(
     // A git refusal raised its own trust card, which says why; this one says the checkout stays.
     deps.logger.warn({ ...log, err: message(error) }, 'checkout not switched back');
     return leave(checkoutCards.failed(batch, project, place, error));
+  } finally {
+    deps.folderHold.releaseGit(token);
   }
 }

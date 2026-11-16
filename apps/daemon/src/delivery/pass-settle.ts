@@ -322,13 +322,22 @@ export function queuePassSettle(
     jobKey({ projectId: pass.projectId, worktreePath: null }, JobQueue.Ship),
     async (signal) => {
       if (signal.aborted) return;
+      // The settle moves the return branch, so it waits for a chat's turn, which may be editing there.
+      let token: symbol | null = null;
       try {
+        token = await ctx.folderHold.reserveGitWhenFree(
+          pass.projectId,
+          'moving your branch for a pass',
+          signal,
+        );
         await step(ctx, passId, signal);
       } catch (error) {
         ctx.logger.warn(
           { passId, err: error instanceof Error ? error.message : String(error) },
           'closed pass not settled',
         );
+      } finally {
+        if (token !== null) ctx.folderHold.releaseGit(token);
       }
     },
   );

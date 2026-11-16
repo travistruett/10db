@@ -90,6 +90,7 @@ function fixBatchOf(
 /** Startup batch recovery as the daemon runs it. */
 const recover = () =>
   recoverBatches({
+    folderHold: h.ctx.folderHold,
     state: h.state,
     git: h.git,
     inbox: h.inbox,

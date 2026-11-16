@@ -76,6 +76,7 @@ const cardsAbout = (branch: string | null): InboxItemDto[] =>
 /** Startup batch recovery as the daemon runs it, with this test's inbox. */
 const recover = () =>
   recoverBatches({
+    folderHold: h.ctx.folderHold,
     state: h.state,
     git: h.git,
     inbox,

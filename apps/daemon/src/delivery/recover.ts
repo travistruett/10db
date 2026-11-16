@@ -23,6 +23,7 @@ import { stopCiFixing } from './ci-stop';
 import { forTasks, startCards, worktreeCards, wrongBranchCard, type Card } from './cards';
 import { cuttingTasks, forgetCuttingTasks } from './cutting-tasks';
 import { forgetStartSiblings } from './start-siblings';
+import type { FolderHold } from '../folder-hold';
 import { returnCheckout } from './checkout-return';
 import { raise, type DeliveryContext } from './context';
 import { settleLeftOutCards } from './left-out-settle';
@@ -72,6 +73,7 @@ const message = (error: unknown): string =>
  * ships. Without `worktrees`, worktree removal and the sweep are skipped.
  */
 export async function recoverBatches(deps: {
+  readonly folderHold: FolderHold;
   readonly state: StateStore;
   readonly git: Git;
   readonly inbox: InboxService;

@@ -956,6 +956,7 @@ describe('a restart during an Open Pull Request gate', () => {
           });
 
         await recoverBatches({
+          folderHold: h.ctx.folderHold,
           state: h.state,
           git: h.git,
           inbox: h.inbox,

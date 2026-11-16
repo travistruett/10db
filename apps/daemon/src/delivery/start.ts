@@ -674,8 +674,35 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     signal: AbortSignal,
     sameStart?: SameStart,
   ): Promise<void> {
-    // One operation: the checkout's git dirs are read once for the cut, not once per git call.
-    return ctx.git.operation(() => cutSteps(batchId, tasks, plans, inBatch, signal, sameStart));
+    // One operation: the checkout's git dirs are read once for the cut, not once per git call. The cut moves
+    // Your folder's branch, so it waits for a chat's turn and holds the folder meanwhile.
+    return holdFolder(batchId, signal, () =>
+      ctx.git.operation(() => cutSteps(batchId, tasks, plans, inBatch, signal, sameStart)),
+    );
+  }
+
+  async function holdFolder(
+    batchId: BatchId,
+    signal: AbortSignal,
+    run: () => Promise<void>,
+  ): Promise<void> {
+    const project = getProject(db, getBatch(db, batchId).projectId);
+    let token: symbol;
+    try {
+      token = await ctx.folderHold.reserveGitWhenFree(
+        project.id,
+        `cutting a branch in Your folder`,
+        signal,
+      );
+    } catch {
+      // Stopped while waiting: the CUTTING row stays and startup cuts it again.
+      return;
+    }
+    try {
+      await run();
+    } finally {
+      ctx.folderHold.releaseGit(token);
+    }
   }
 
   async function cutSteps(
