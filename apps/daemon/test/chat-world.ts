@@ -12,7 +12,9 @@ import { createTestStore, seedProject, type Store } from '@10db/db';
 import { ManualClock } from '../src/clock';
 import {
   chatHooks,
+  createBriefs,
   createChatLiveSessions,
+  type Briefs,
   createChatService,
   type ChatHooksDeps,
   type ChatService,
@@ -40,6 +42,7 @@ export interface ChatWorld {
   readonly adapter: FakeAdapter;
   readonly clock: ManualClock;
   readonly chat: ChatService;
+  readonly briefs: Briefs;
   readonly folderHold: FolderHold;
   readonly inbox: InboxService;
   readonly project: ProjectDto;
@@ -156,10 +159,13 @@ export function chatWorld(
       ...(opts.tendb === undefined ? {} : { judge: opts.tendb({ store }) }),
     }),
   );
+  const briefs = createBriefs(clock);
   const chat = createChatService({
     state,
     engine,
     folderHold,
+    briefs,
+    clock,
     dataDir: dir.path,
     now: () => clock.now(),
     modelsOf: () => ({
@@ -178,6 +184,7 @@ export function chatWorld(
     adapter,
     clock,
     chat,
+    briefs,
     folderHold,
     inbox,
     project,

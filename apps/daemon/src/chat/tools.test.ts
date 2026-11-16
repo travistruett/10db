@@ -8,6 +8,7 @@ import {
   ChatDto,
   ChatToolName,
   ConversationDto,
+  DoItBriefDto,
   DecisionItem,
   PrincipleItem,
   ProjectDto,
@@ -291,6 +292,26 @@ describe("a chat's tools on /mcp", () => {
     expect(openCards()).toEqual([]);
     expect(getPrinciple(running().state.db, rule.id).state).toBe('current');
     expect(getDecisionDto(running().state.db, decision.id).state).toBe('current');
+  });
+
+  it('keeps the brief the agent writes for Do It, and the sheet reads it back', async () => {
+    const chat = await newChat();
+    await agentTurn(chat, async (call) => {
+      await call('write_brief', {
+        title: 'Fix the login',
+        brief: 'Retry once on a 401.',
+        areas: ['src'],
+        acceptanceCriteria: ['A 401 retries once'],
+      });
+    });
+    const brief = await api.post(`/chats/${chat.id}/brief`, DoItBriefDto, {});
+    expect(brief).toMatchObject({
+      title: 'Fix the login',
+      text: 'Retry once on a 401.',
+      areas: ['src'],
+      criteria: ['A 401 retries once'],
+      source: 'agent',
+    });
   });
 
   it("renames an agent-titled chat cut at a word, and leaves the builder's name", async () => {

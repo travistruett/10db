@@ -23,6 +23,8 @@ export type ChatApiServices = Pick<
   | 'archiveChat'
   | 'unarchiveChat'
   | 'stopChatWaiting'
+  | 'askChatBrief'
+  | 'cancelChatBrief'
   | 'projectFolder'
   | 'chatModels'
   | 'sessionStarts'
@@ -49,6 +51,14 @@ export function createChatApiServices(deps: {
     stopChatWaiting(id) {
       chat.stopWaiting(id);
       return chat.get(id);
+    },
+    askChatBrief(id, input) {
+      chat.askBrief(id, input.draft);
+      return chat.briefOf(id);
+    },
+    async cancelChatBrief(id) {
+      await chat.cancelBrief(id);
+      return chat.briefOf(id);
     },
     async projectFolder(projectId) {
       const project = getProject(state.db, projectId);

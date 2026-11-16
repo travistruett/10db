@@ -226,6 +226,7 @@ import {
   chatHooks,
   createChatLiveSessions,
   createChatService,
+  createBriefs,
   createChatTools,
   createConversationFiles,
 } from '../chat';
@@ -1642,10 +1643,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     models: conversationModels,
     launch: conversationLaunch,
   });
+  const chatBriefs = createBriefs(clock);
   const chat = createChatService({
     state,
     engine: exploreEngine,
     folderHold,
+    briefs: chatBriefs,
+    clock,
     dataDir: opts.dataDir,
     now: () => clock.now(),
     modelsOf: conversationModels,
@@ -2523,6 +2527,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       dependencyChanges,
       shapeTools: shape.toolsFor,
       chatTools: createChatTools({
+        briefs: chatBriefs,
         state,
         bus,
         inbox,

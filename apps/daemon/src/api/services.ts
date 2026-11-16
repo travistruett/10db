@@ -7,7 +7,9 @@ import type {
   ChatDto,
   ChatId,
   ChatModelsDto,
+  BriefRequest,
   ChatPatchInput,
+  DoItBriefDto,
   ProjectFileMatchDto,
   SessionStartDto,
   SessionsSettingsDto,
@@ -663,6 +665,10 @@ export interface ApiServices extends PlanRecordServices {
   unarchiveChat(id: ChatId): ChatDto;
   /** Stops a chat's wait for Your folder: what it queued runs reading only. */
   stopChatWaiting(id: ChatId): ChatDto;
+  /** Asks the chat's agent for a task's brief (between turns only) and answers the brief the sheet shows now. */
+  askChatBrief(id: ChatId, input: BriefRequest): DoItBriefDto;
+  /** Cancels the request for a brief, stopping its turn when it is still the brief's. */
+  cancelChatBrief(id: ChatId): Promise<DoItBriefDto>;
   /** Who holds the project's checkout now, and the branch it is on. */
   projectFolder(projectId: ProjectId): Promise<FolderDto>;
   chatModels(projectId: ProjectId): ChatModelsDto;

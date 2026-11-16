@@ -134,6 +134,7 @@ import {
   type FolderWhileHeld,
   ChatCreateInput,
   ChatId,
+  BriefRequest,
   ChatPatchInput,
   ConversationFilesQuery,
   SessionsSettingsDto,
@@ -766,6 +767,17 @@ export function createApp(deps: ApiDeps) {
     )
     .post('/chats/:chatId/stop-waiting', (c) =>
       c.json(deps.services.stopChatWaiting(ChatId.parse(c.req.param('chatId')))),
+    )
+    .post(
+      '/chats/:chatId/brief',
+      validator('json', (value): BriefRequest => BriefRequest.parse(value ?? {})),
+      (c) =>
+        c.json(
+          deps.services.askChatBrief(ChatId.parse(c.req.param('chatId')), c.req.valid('json')),
+        ),
+    )
+    .delete('/chats/:chatId/brief', async (c) =>
+      c.json(await deps.services.cancelChatBrief(ChatId.parse(c.req.param('chatId')))),
     )
     .get('/projects/:projectId/folder', async (c) =>
       c.json(await deps.services.projectFolder(ProjectId.parse(c.req.param('projectId')))),

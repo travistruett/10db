@@ -1,8 +1,17 @@
-import { AccountKind, ConflictError, ConversationState, InvalidError } from '@10db/contracts';
+import {
+  AccountKind,
+  ConflictError,
+  ConversationState,
+  InvalidError,
+  mintId,
+  parseItemBody,
+} from '@10db/contracts';
 import { getConversation, listItems, patchConversation } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { chatWorld, type ChatWorld } from '../../test/chat-world';
+import { gate } from '../../test/explore-world';
 import { waitFor } from '../../test/fixtures';
+import { BRIEF_KEEP_MS, BRIEF_WAIT_MS } from './briefs';
 import { firstMessageTitle } from './service';
 
 // Sessions spec §7.1, §10: a chat's life on the daemon, on a real store and the explore engine.
@@ -170,5 +179,122 @@ describe('a chat view: background tasks', () => {
     w.adapter.signal('hold');
     await w.engine.retire(chat.conversationId);
     expect(w.chat.get(chat.id).conversation.backgroundTasks).toEqual([]);
+  });
+});
+
+describe('the brief for Do It', () => {
+  const say = (chatId: string, text: string) => {
+    const chat = w.chat.get(chatId as ReturnType<typeof w.open>['id']);
+    return w.chat.send(chat.conversationId, { text, mentions: [], pictures: [] });
+  };
+  const briefRequests = (conversationId: ReturnType<typeof w.open>['conversationId']) =>
+    listItems(w.state.db, conversationId).filter(
+      (i) => i.kind === 'message' && parseItemBody(i.kind, i.body).purpose === 'brief',
+    );
+
+  it('asks an idle chat with a reading-only turn that never holds the folder, and shows what the agent wrote', async () => {
+    w = chatWorld();
+    const chat = w.open();
+    const held = gate();
+    w.adapter.shapeBehaviour = async () => {
+      await held.promise;
+      return { text: 'Done.' };
+    };
+    w.chat.askBrief(chat.id, 'with tests');
+    await waitFor(() => w.adapter.shapeSessions.length === 1);
+    expect(briefRequests(chat.conversationId)).toHaveLength(1);
+    expect(w.folderHold.holdsTurn(chat.id)).toBe(false);
+    expect(w.chat.briefOf(chat.id)).toMatchObject({ writing: true, source: null });
+
+    w.briefs.write(
+      chat.id,
+      { title: 'Fix login', brief: 'Do it.', areas: ['api'], acceptanceCriteria: ['It works'] },
+      mintId('Session'),
+    );
+
+    expect(w.chat.briefOf(chat.id)).toEqual({
+      title: 'Fix login',
+      text: 'Do it.',
+      areas: ['api'],
+      criteria: ['It works'],
+      source: 'agent',
+      reason: null,
+      writing: false,
+    });
+    held.release();
+    await w.engine.settled(chat.conversationId);
+  });
+
+  it('falls back to the chat so far after 60 seconds, and drops a written brief after 30 minutes', async () => {
+    w = chatWorld();
+    const chat = w.open();
+    const held = gate();
+    w.adapter.shapeBehaviour = async () => {
+      await held.promise;
+      return { text: 'Done.' };
+    };
+    w.chat.askBrief(chat.id);
+    await waitFor(() => w.adapter.shapeSessions.length === 1);
+    w.clock.advance(BRIEF_WAIT_MS);
+    const late = w.chat.briefOf(chat.id);
+    expect(late).toMatchObject({ source: 'chat', reason: 'timeout', writing: false });
+    expect(late.text).not.toMatch(/Change nothing/);
+    held.release();
+    await w.engine.settled(chat.conversationId);
+
+    w.briefs.write(chat.id, { title: 'T', brief: 'B' }, mintId('Session'));
+    w.clock.advance(BRIEF_KEEP_MS + 1);
+    expect(w.chat.briefOf(chat.id).source).toBe('chat');
+  });
+
+  it('sends nothing while a turn runs: the chat so far is the brief at once and the turn goes on', async () => {
+    w = chatWorld();
+    const chat = w.open();
+    const held = gate();
+    w.adapter.shapeBehaviour = async () => {
+      await held.promise;
+      return { text: 'Done.' };
+    };
+    say(chat.id, 'Knock out the login bug');
+    await waitFor(() => w.engine.view(chat.conversationId).state === 'running');
+
+    w.chat.askBrief(chat.id);
+
+    expect(briefRequests(chat.conversationId)).toEqual([]);
+    expect(w.chat.briefOf(chat.id)).toMatchObject({ source: 'chat', reason: 'mid_turn' });
+    expect(w.chat.briefOf(chat.id).text).toContain('Knock out the login bug');
+    expect(w.engine.view(chat.conversationId).state).toBe('running');
+    held.release();
+    await w.engine.settled(chat.conversationId);
+  });
+
+  it('stops the brief turn on Cancel, and on a builder send, which then runs as its own turn', async () => {
+    w = chatWorld();
+    const chat = w.open();
+    const held = gate();
+    w.adapter.shapeBehaviour = async () => {
+      await held.promise;
+      return { text: 'Done.' };
+    };
+    w.chat.askBrief(chat.id);
+    await waitFor(() => w.engine.view(chat.conversationId).state === 'running');
+    await w.chat.cancelBrief(chat.id);
+    await w.engine.settled(chat.conversationId);
+    expect(w.briefs.asked(chat.id)).toBeNull();
+    expect(w.engine.view(chat.conversationId).state).not.toBe('running');
+
+    w.adapter.shapeBehaviour = async () => {
+      await held.promise;
+      return { text: 'Done.' };
+    };
+    w.chat.askBrief(chat.id);
+    await waitFor(() => w.engine.view(chat.conversationId).state === 'running');
+    const mine = say(chat.id, 'Actually, just the logout');
+    held.release();
+    await w.engine.settled(chat.conversationId);
+    expect(w.briefs.asked(chat.id)).toBeNull();
+    expect(
+      listItems(w.state.db, chat.conversationId).find((i) => i.id === mine.id)?.deliveredAt,
+    ).not.toBeNull();
   });
 });

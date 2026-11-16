@@ -1,6 +1,8 @@
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  BriefReason,
+  BriefSource,
   CHAT_DEFAULT_TITLE,
   ChatTitleSource,
   ConflictError,
@@ -23,6 +25,7 @@ import {
   type ChatModelsDto,
   type ChatPatchInput,
   type ConversationId,
+  type DoItBriefDto,
   type ProjectId,
   type ShapeModelOption,
 } from '@10db/contracts';
@@ -38,6 +41,7 @@ import {
   insertConversation,
   insertFiles,
   insertItem,
+  listItems,
   moveChatTab,
   openChats,
   patchConversation,
@@ -48,9 +52,12 @@ import {
   type ChatRow,
   type ConversationItemRow,
 } from '@10db/db';
+import type { Clock } from '../clock';
 import { keepBuilderMessage, type ExploreEngine, type PastedFile } from '../conversation';
 import type { StateStore } from '../events';
 import type { FolderHold, ServeResult } from '../folder-hold';
+import { briefFromChat, briefRequestText, briefTitle } from './brief';
+import type { Briefs } from './briefs';
 import { chatFolder } from './hooks';
 
 // Sessions spec §7.1, §10: a chat's life on the daemon. It is made with its conversation on the
@@ -122,12 +129,23 @@ export interface ChatService {
   ): Promise<ConversationItemRow>;
   /** The message stored queued and the chat touched, with no turn asked for: what a Redo posts. */
   post(conversationId: ConversationId, input: ChatMessageInput): ConversationItemRow;
+  /**
+   * Asks the agent for a task's brief, between turns only: a reading-only turn that never takes the folder.
+   * Mid-turn, waiting for the folder or paused, nothing is sent and the sheet takes the chat read back.
+   */
+  askBrief(chatId: ChatId, draft?: string): void;
+  /** Cancels the request for a brief, stopping its turn when it is still the brief's. */
+  cancelBrief(chatId: ChatId): Promise<void>;
+  /** The brief the sheet shows now. */
+  briefOf(chatId: ChatId): DoItBriefDto;
 }
 
 export interface ChatServiceDeps {
   readonly state: StateStore;
   readonly engine: ExploreEngine;
   readonly folderHold: FolderHold;
+  readonly briefs: Briefs;
+  readonly clock: Pick<Clock, 'now'>;
   readonly dataDir: string;
   readonly now: () => Date;
   /** The models a project's account offers for a conversation, and its default. */
@@ -248,6 +266,12 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     send(conversationId, input, folder) {
       const item = post(conversationId, input);
       const chat = requireChat(conversationId);
+      // A message from the builder replaces a brief request: one still running is stopped, and this runs next.
+      if (deps.briefs.asked(chat.id) !== null) {
+        deps.briefs.endAsk(chat.id);
+        if (BUSY.has(engine.view(conversationId).state))
+          void engine.stop(conversationId).catch(() => undefined);
+      }
       const waiting = deps.folderHold.waiting(chat.id);
       const parks = folder === FolderWhileHeld.Wait && (waiting || mustWait(chat));
       // A read-only send applies to everything queued, and to the turn that runs it even if the folder frees.
@@ -303,6 +327,78 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     },
 
     post: (conversationId, input) => post(conversationId, input),
+
+    askBrief(chatId, draft) {
+      const chat = getChat(state.db, chatId);
+      const { state: at } = engine.view(chat.conversationId);
+      const between: readonly ConversationState[] = [
+        ConversationState.IdleCold,
+        ConversationState.IdleWarm,
+        ConversationState.EndedError,
+      ];
+      if (!between.includes(at) || deps.folderHold.waiting(chat.id)) return;
+      // A brief already written is kept for the sheet, and a request still waiting is not asked twice.
+      if (deps.briefs.written(chat.id) !== null) return;
+      if (deps.briefs.asked(chat.id) !== null && !deps.briefs.expired(chat.id)) return;
+      deps.briefs.ask(chat.id);
+      post(
+        chat.conversationId,
+        { text: briefRequestText(draft), mentions: [], pictures: [] },
+        'brief',
+      );
+      // The turn reads only, so it never runs on a writable hold, and a brief is never chained.
+      deps.folderHold.chooseReadOnly(chat.id);
+      engine.queued(chat.conversationId);
+    },
+
+    async cancelBrief(chatId) {
+      const chat = getChat(state.db, chatId);
+      if (deps.briefs.asked(chat.id) === null) return;
+      deps.briefs.endAsk(chat.id);
+      if (BUSY.has(engine.view(chat.conversationId).state)) await engine.stop(chat.conversationId);
+    },
+
+    briefOf(chatId) {
+      const chat = getChat(state.db, chatId);
+      const written = deps.briefs.written(chat.id);
+      if (written !== null)
+        return {
+          title: written.title,
+          text: written.brief,
+          areas: written.areas ?? [],
+          criteria: written.acceptanceCriteria ?? [],
+          source: BriefSource.Agent,
+          reason: null,
+          writing: false,
+        };
+      const askedAt = deps.briefs.asked(chat.id);
+      const expired = deps.briefs.expired(chat.id);
+      const at = engine.view(chat.conversationId).state;
+      const items = listItems(state.db, chat.conversationId);
+      const fromChat = {
+        title: briefTitle(chatView(state.db, chat.id).title),
+        text: briefFromChat(items),
+        areas: [],
+        criteria: [],
+        source: BriefSource.Chat,
+        writing: false,
+      };
+      if (askedAt !== null && !expired)
+        return { ...fromChat, title: '', text: '', source: null, reason: null, writing: true };
+      if (askedAt !== null) return { ...fromChat, reason: BriefReason.Timeout };
+      if (at === ConversationState.PausedAccount)
+        return { ...fromChat, reason: BriefReason.Paused };
+      const between: readonly ConversationState[] = [
+        ConversationState.IdleCold,
+        ConversationState.IdleWarm,
+        ConversationState.EndedError,
+      ];
+      return {
+        ...fromChat,
+        reason:
+          between.includes(at) && !deps.folderHold.waiting(chat.id) ? null : BriefReason.MidTurn,
+      };
+    },
   };
 
   function requireChat(conversationId: ConversationId): ChatRow {
@@ -341,7 +437,11 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     if (!engine.releaseStarts(chat.conversationId)) engine.sendNow(chat.conversationId);
   }
 
-  function post(conversationId: ConversationId, input: ChatMessageInput): ConversationItemRow {
+  function post(
+    conversationId: ConversationId,
+    input: ChatMessageInput,
+    purpose?: 'brief',
+  ): ConversationItemRow {
     const chat = chatOfConversation(state.db, conversationId);
     if (chat === null) throw new ConflictError('This conversation is no chat’s');
     if (chat.archivedAt !== null) throw new ConflictError(CHAT_ARCHIVED);
@@ -358,13 +458,15 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
           const row = insertItem(ctx, conversationId, {
             author: ConversationItemAuthor.Builder,
             kind: ConversationItemKind.Message,
-            body:
-              input.mentions.length === 0
-                ? { text: body }
-                : { text: body, mentions: [...input.mentions] },
+            body: {
+              text: body,
+              ...(input.mentions.length === 0 ? {} : { mentions: [...input.mentions] }),
+              ...(purpose === undefined ? {} : { purpose }),
+            },
           });
           insertFiles(ctx, conversationId, row.id, files);
-          if (first) setChatTitle(ctx, chat.id, firstMessageTitle(body), ChatTitleSource.Agent);
+          if (first && purpose === undefined)
+            setChatTitle(ctx, chat.id, firstMessageTitle(body), ChatTitleSource.Agent);
           touchChat(ctx, chat.id, ctx.now);
           return row;
         }),

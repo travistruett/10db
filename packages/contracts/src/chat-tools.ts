@@ -23,6 +23,7 @@ export const ChatGitToolName = {
 export const ChatToolName = {
   ...BuilderToolName,
   SetTitle: 'set_title',
+  WriteBrief: 'write_brief',
   ...ChatGitToolName,
 } as const;
 export type ChatToolName = (typeof ChatToolName)[keyof typeof ChatToolName];
@@ -65,6 +66,7 @@ export const ChatToolInputs = {
   [ChatToolName.WithdrawKnowledge]: BuilderToolInputs.withdraw_knowledge,
   [ChatToolName.ListProposals]: BuilderToolInputs.list_proposals.omit({ projectId: true }),
   [ChatToolName.SetTitle]: z.object({ title: z.string().trim().min(1).max(80) }),
+  [ChatToolName.WriteBrief]: WriteBriefInput,
   [ChatToolName.MakeBranch]: z.object({ name: z.string().min(1).max(200) }),
   [ChatToolName.SwitchBranch]: z.object({ name: z.string().min(1).max(200) }),
   [ChatToolName.Pull]: z.object({}),

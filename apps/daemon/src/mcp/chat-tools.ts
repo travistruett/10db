@@ -60,6 +60,11 @@ export const CHAT_TOOL_DESCRIPTIONS: Readonly<Record<ChatToolName, string>> = Ob
         name,
         'Name this session in at most 28 characters, in sentence case, with no trailing period. Call it once, after your first reply.',
       ];
+    if (name === ChatToolName.WriteBrief)
+      return [
+        name,
+        'Write the brief for a task that does the work agreed in this chat: its title, the brief itself, the areas it works in and its acceptance criteria. Call it only when asked for the brief; it changes nothing.',
+      ];
     const git = GIT_DESCRIPTIONS[name];
     if (git !== undefined) return [name, git];
     const words = BUILDER_DESCRIPTIONS.get(name) ?? '';
