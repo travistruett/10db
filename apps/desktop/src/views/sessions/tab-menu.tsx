@@ -4,6 +4,8 @@ import { Menu } from '@mantine/core';
 export interface TabActions {
   readonly onRename?: () => void;
   readonly onArchive?: () => void;
+  /** A chat's: the agent offers Open in Terminal and the chat can go there now. */
+  readonly onOpenInTerminal?: () => void;
   readonly onClose: () => void;
   readonly onCloseOthers: () => void;
   /** Close Other Tabs has nothing to close with one tab open. */
@@ -16,6 +18,9 @@ export function TabMenuItems({ actions }: { readonly actions: TabActions }) {
     <>
       {actions.onRename === undefined ? null : (
         <Menu.Item onClick={actions.onRename}>Rename</Menu.Item>
+      )}
+      {actions.onOpenInTerminal === undefined ? null : (
+        <Menu.Item onClick={actions.onOpenInTerminal}>Open in Terminal</Menu.Item>
       )}
       {actions.onArchive === undefined ? null : (
         <Menu.Item onClick={actions.onArchive}>Archive</Menu.Item>

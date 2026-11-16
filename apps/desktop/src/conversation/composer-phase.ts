@@ -34,6 +34,7 @@ const WORKING: ReadonlySet<ConversationState> = new Set([
 
 function placeholderOf(input: ComposerPhaseInput, working: boolean): string {
   if (input.fresh) return `Ask about ${input.project}…`;
+  if (input.state === ConversationState.TakenOver) return 'Held until you hand back…';
   if (!working) return 'Reply…';
   return input.steer === 'inject' ? 'Add to this turn…' : 'Queue for the next turn…';
 }
@@ -42,6 +43,7 @@ function hintOf(input: ComposerPhaseInput, working: boolean): string | null {
   if (input.narrow) return null;
   if (input.state === ConversationState.PausedAccount) return 'Sends when the limit resets';
   if (input.fresh) return '↵ sends · ⇧↵ new line · @ files';
+  if (input.state === ConversationState.TakenOver) return '↵ holds it · ⇧↵ new line · @ files';
   if (working && input.steer === 'inject') return '↵ adds to this turn · ⇧↵ new line';
   const parts = ['↵ sends', '⇧↵ new line', 'Esc stops'];
   if (input.slashCommands === true) parts.push('/ commands');

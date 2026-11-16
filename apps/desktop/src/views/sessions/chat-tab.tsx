@@ -1,4 +1,5 @@
 import {
+  ConversationState,
   FolderHolderKind,
   FolderWhileHeld,
   type ChatDto,
@@ -7,7 +8,7 @@ import {
   type ToolCallView,
 } from '@10db/contracts';
 import { Box, Group, Text } from '@mantine/core';
-import { useMediaQuery } from '@mantine/hooks';
+import { useClipboard, useMediaQuery } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { ConversationList, toolDoing, WorkingLine } from '../../conversation';
@@ -39,6 +40,7 @@ import { useModels } from '../../daemon/model-queries';
 import { useProjectFolder, useStopWaiting } from '../../daemon/project-folder-queries';
 import { useDaemon, useDaemonStatus } from '../../daemon/provider';
 import { useResolvedInbox } from '../../daemon/queries';
+import { useHandBack, useTakeover, useTakeoverCommand } from '../../daemon/takeover-queries';
 import dayjs from 'dayjs';
 import { chatEntries } from './chat-entries';
 import { FolderWait } from './folder-wait';
@@ -46,6 +48,7 @@ import { keepingWords } from './kind-line';
 import { sessionAnnouncement, type SessionEvent } from './session-announcements';
 import { SessionBar } from './session-bar';
 import type { TabActions } from './tab-menu';
+import { TerminalBanner } from './terminal-banner';
 import { draftKey, sessionDrafts, useSessionDraft } from './session-drafts';
 
 const CONTEXT_TIP = 'Past 70%, the next turn continues in a fresh session with a summary.';
@@ -73,13 +76,25 @@ export interface ChatTabProps {
   readonly actions?: Omit<TabActions, 'onRename'>;
   readonly renaming?: boolean;
   readonly onRenamed?: () => void;
+  /** The builder asked to open the chat in a terminal from the strip. */
+  readonly openingTerminal?: boolean;
+  readonly onTerminalAsked?: () => void;
 }
 
 /**
  * A chat's tab (sessions UI spec §4, §12): the session bar, then the kit's conversation column: the
  * conversation, the cards it waits on pinned above the composer, and the composer. Each state M5a reaches has its words.
  */
-export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRenamed }: ChatTabProps) {
+export function ChatTab({
+  chat,
+  project,
+  onAnnounce,
+  actions,
+  renaming,
+  onRenamed,
+  openingTerminal,
+  onTerminalAsked,
+}: ChatTabProps) {
   const conversationQuery = useConversation(chat.conversationId);
   const conversation = conversationQuery.data ?? chat.conversation;
   const { items, loading } = useConversationItemsState(chat.conversationId);
@@ -98,6 +113,11 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
   const resolved = useResolvedInbox();
   const open = useConversationCards(chat.conversationId);
   const [sendError, setSendError] = useState<string | null>(null);
+  const inTerminal = conversation.state === ConversationState.TakenOver;
+  const takeover = useTakeover(chat.conversationId, inTerminal);
+  const handBack = useHandBack();
+  const takeoverCommand = useTakeoverCommand();
+  const clipboard = useClipboard({ timeout: 1500 });
   const [modelRefusal, setModelRefusal] = useState<string | null>(null);
   const models = useChatModels(chat.projectId);
   const folder = useProjectFolder(chat.projectId);
@@ -133,9 +153,12 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
   // The caret goes to the end of what was typed before the tab was a chat, which WebKit leaves at the start.
   useEffect(() => {
     const field = input.current;
-    if (field === null) return;
+    // A chat in the terminal puts the focus on Hand Back, the likely next act.
+    if (field === null || inTerminal) return;
     field.focus();
     field.setSelectionRange(field.value.length, field.value.length);
+    // The focus moves when the tab is shown, not each time the chat changes state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chat.id]);
 
   // A chat made by a send in a fresh tab sends that draft as soon as it is drawn; a failure leaves the
@@ -238,6 +261,7 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
       label: caps.label,
       receipts: caps.receipts,
       working,
+      inTerminal,
       cards: [...(resolved.data ?? []), ...open],
     }),
     { chatId: chat.id, projectId: chat.projectId },
@@ -300,6 +324,10 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
           conversation={conversation}
           projectName={project?.name ?? ''}
           folder={folder}
+          projectPath={project?.repoPath ?? null}
+          terminalSince={takeover.data?.since ?? null}
+          {...(openingTerminal === undefined ? {} : { openingTerminal })}
+          {...(onTerminalAsked === undefined ? {} : { onTerminalAsked })}
           loading={loading}
           fileDisabledReason={removed ? 'This project was removed from 10db.' : disabledReason}
           {...(actions === undefined ? {} : { actions })}
@@ -328,6 +356,26 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
             tasks={conversation.backgroundTasks}
             cardWaiting={open.length > 0}
           />
+          {inTerminal ? (
+            <TerminalBanner
+              label={caps.label}
+              since={takeover.data?.since ?? null}
+              notes={takeover.data?.notes ?? []}
+              onHandBack={() => {
+                handBack.mutate(chat.conversationId);
+              }}
+              handingBack={handBack.isPending}
+              onCopyCommand={() => {
+                takeoverCommand.mutate(chat.conversationId, {
+                  onSuccess: ({ line }) => {
+                    clipboard.copy(line);
+                  },
+                });
+              }}
+              copied={clipboard.copied}
+              error={handBack.error?.message ?? takeoverCommand.error?.message ?? null}
+            />
+          ) : null}
           {waiting ? (
             <FolderWait
               holders={keeping}
@@ -390,7 +438,7 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
                   />
                 </Group>
               }
-              {...(keeping === null
+              {...(keeping === null || inTerminal
                 ? {}
                 : {
                     held: {

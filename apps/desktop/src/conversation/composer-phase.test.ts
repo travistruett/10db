@@ -76,6 +76,15 @@ const rows: readonly {
     input: { state: ConversationState.PausedAccount },
     want: { stop: null, hint: 'Sends when the limit resets', placeholder: 'Reply…' },
   },
+  {
+    name: 'in the builder’s terminal',
+    input: { state: ConversationState.TakenOver },
+    want: {
+      stop: null,
+      placeholder: 'Held until you hand back…',
+      hint: '↵ holds it · ⇧↵ new line · @ files',
+    },
+  },
   { name: 'narrow hides the hint', input: { narrow: true }, want: { hint: null } },
 ];
 

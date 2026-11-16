@@ -15,6 +15,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { EdgeFade } from '../../shell/edge-fade';
 import { useHiddenEdges } from '../../shell/use-hidden-edges';
 import { AllTabsMenu } from './all-tabs-menu';
+import { canOpenTerminal } from './can-open-terminal';
 import type { ClosedTab } from './closed-tabs';
 import { TabMenuItems } from './tab-menu';
 import { SessionTab } from './session-tab';
@@ -48,6 +49,7 @@ export interface TabStripProps {
   readonly closed: readonly ClosedTab[];
   readonly onReopen: (entry: ClosedTab) => void;
   readonly onRename: (tab: StripTab) => void;
+  readonly onOpenInTerminal: (tab: StripTab) => void;
   readonly onArchive: (tab: StripTab) => void;
   readonly onCloseOthers: (tab: StripTab) => void;
   /** A chat's tab was dragged to this place. */
@@ -80,6 +82,7 @@ export function TabStrip({
   closed,
   onReopen,
   onRename,
+  onOpenInTerminal,
   onArchive,
   onCloseOthers,
   onReorder,
@@ -295,6 +298,13 @@ export function TabStrip({
                       onArchive: () => {
                         onArchive(menu.tab);
                       },
+                      ...(canOpenTerminal(menu.tab.chat.conversation)
+                        ? {
+                            onOpenInTerminal: () => {
+                              onOpenInTerminal(menu.tab);
+                            },
+                          }
+                        : {}),
                     }
                   : {}),
                 onClose: () => {

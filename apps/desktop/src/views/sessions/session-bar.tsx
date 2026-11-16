@@ -16,8 +16,10 @@ import { useRef, useState } from 'react';
 import { JudgeLine } from '../../conversation';
 import { OWNS_ESCAPE_ATTRIBUTE } from '../../conversation/escape';
 import { usePatchChat } from '../../daemon/chat-queries';
+import { canOpenTerminal } from './can-open-terminal';
 import { kindLine } from './kind-line';
 import { TabMenuItems, type TabActions } from './tab-menu';
+import { TerminalButton } from './terminal-button';
 
 // Sessions UI spec §4, §7.10: the 44 px row under the header. At its left the title over what the session
 // is; at its right the agent's name, File as Tasks and the ⋯ menu. The model's menu and the
@@ -29,6 +31,10 @@ export interface SessionBarProps {
   readonly projectName: string;
   /** Who holds Your folder, once read. */
   readonly folder: FolderDto | null;
+  /** The project's folder; null once the project was removed from 10db. */
+  readonly projectPath: string | null;
+  /** When the chat went to the builder's terminal, once read. */
+  readonly terminalSince?: string | null;
   /** The transcript is still being read. */
   readonly loading: boolean;
   /** File as Tasks, disabled with this reason when it cannot be sent. */
@@ -39,6 +45,9 @@ export interface SessionBarProps {
   /** The builder asked to rename from the strip. */
   readonly renaming?: boolean;
   readonly onRenamed?: () => void;
+  /** The builder asked to open the chat in a terminal from the strip. */
+  readonly openingTerminal?: boolean;
+  readonly onTerminalAsked?: () => void;
 }
 
 /** The title, edited in place: Enter saves through `usePatchChat`, Esc puts the old one back. */
@@ -121,10 +130,18 @@ export function SessionBar({
   actions,
   renaming = false,
   onRenamed,
+  projectPath,
+  terminalSince = null,
+  openingTerminal = false,
+  onTerminalAsked,
 }: SessionBarProps) {
   const [typing, setEditing] = useState(false);
+  const [askedHere, setAskedHere] = useState(false);
   const editing = typing || renaming;
   const { capabilities } = conversation;
+  // Only a chat the agent can take to a terminal, and not one in it already or sealed.
+  const offersTerminal = projectPath !== null && canOpenTerminal(conversation);
+  const terminalOpen = offersTerminal && (askedHere || openingTerminal);
   return (
     <Box style={{ flex: 'none' }}>
       <Group h={44} px="md" justify="space-between" wrap="nowrap" gap="sm">
@@ -143,7 +160,7 @@ export function SessionBar({
               }}
             />
             <Text size="xs" c="dimmed" lineClamp={1}>
-              {kindLine(chat, projectName, folder)}
+              {kindLine(chat, projectName, folder, terminalSince)}
             </Text>
           </Stack>
         </Group>
@@ -161,6 +178,18 @@ export function SessionBar({
               File as Tasks
             </Button>
           </Tooltip>
+          {offersTerminal ? (
+            <TerminalButton
+              chat={chat}
+              conversation={conversation}
+              path={projectPath}
+              opened={terminalOpen}
+              onOpened={(opened) => {
+                setAskedHere(opened);
+                if (!opened) onTerminalAsked?.();
+              }}
+            />
+          ) : null}
           <Menu position="bottom-end" withinPortal>
             <Menu.Target>
               <ActionIcon variant="subtle" aria-label="More session actions">
@@ -177,6 +206,13 @@ export function SessionBar({
                   onRename: () => {
                     setEditing(true);
                   },
+                  ...(offersTerminal
+                    ? {
+                        onOpenInTerminal: () => {
+                          setAskedHere(true);
+                        },
+                      }
+                    : {}),
                 }}
               />
             </Menu.Dropdown>

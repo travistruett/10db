@@ -1,5 +1,5 @@
-import type { ChatDto, ProjectId } from '@10db/contracts';
-import { Box, Button, Group, Paper, Text } from '@mantine/core';
+import { ConversationState, type ChatDto, type ProjectId } from '@10db/contracts';
+import { Box, Button, Group, Modal, Paper, Text } from '@mantine/core';
 import { useEffect, useRef, useState } from 'react';
 import { useOpenChats, usePatchChat, useUnarchiveChat } from '../../daemon/chat-queries';
 import { useInbox } from '../../daemon/queries';
@@ -151,6 +151,14 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
     },
   });
   const [renaming, setRenaming] = useState<string | null>(null);
+  const [terminalFor, setTerminalFor] = useState<string | null>(null);
+  // Archiving a chat in the builder's terminal asks first: it ends the takeover.
+  const [endingTakeover, setEndingTakeover] = useState<StripTab | null>(null);
+  const askArchive = (tab: StripTab): void => {
+    if (tab.kind === 'chat' && tab.chat.conversation.state === ConversationState.TakenOver)
+      setEndingTakeover(tab);
+    else closing.archiveTab(tab);
+  };
   const closed = useClosedTabs();
 
   const newTab = (): void => {
@@ -247,6 +255,38 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
   return (
     <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <Announcer message={announcement} label="Sessions announcements" />
+      <Modal
+        opened={endingTakeover !== null}
+        onClose={() => {
+          setEndingTakeover(null);
+        }}
+        title="End takeover and archive?"
+        centered
+      >
+        <Text size="sm">
+          This chat is in your terminal. Archiving ends the takeover and closes the chat. What you
+          did in the terminal stays in the agent&apos;s own session.
+        </Text>
+        <Group justify="flex-end" gap="xs" mt="md">
+          <Button
+            variant="subtle"
+            onClick={() => {
+              setEndingTakeover(null);
+            }}
+          >
+            Cancel
+          </Button>
+          <Button
+            data-autofocus
+            onClick={() => {
+              if (endingTakeover !== null) closing.archiveTab(endingTakeover);
+              setEndingTakeover(null);
+            }}
+          >
+            End Takeover and Archive
+          </Button>
+        </Group>
+      </Modal>
       <HeaderSlot>
         <TabStrip
           tabs={tabs}
@@ -264,7 +304,11 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
             select_(tab);
             if (tab.kind === 'chat') setRenaming(tab.chat.id);
           }}
-          onArchive={closing.archiveTab}
+          onArchive={askArchive}
+          onOpenInTerminal={(tab) => {
+            select_(tab);
+            if (tab.kind === 'chat') setTerminalFor(tab.chat.id);
+          }}
           onCloseOthers={closing.closeOthers}
           onNew={newTab}
           onReorder={(tab, position) => {
@@ -321,7 +365,7 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
               onAnnounce={setAnnouncement}
               actions={{
                 onArchive: () => {
-                  closing.archiveTab(selected);
+                  askArchive(selected);
                 },
                 onClose: () => {
                   closing.close(selected);
@@ -330,6 +374,10 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
                   closing.closeOthers(selected);
                 },
                 othersOpen: tabs.length > 1,
+              }}
+              openingTerminal={terminalFor === selected.chat.id}
+              onTerminalAsked={() => {
+                setTerminalFor(null);
               }}
               renaming={renaming === selected.chat.id}
               onRenamed={() => {
