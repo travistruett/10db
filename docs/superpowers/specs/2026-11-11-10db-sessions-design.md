@@ -779,10 +779,13 @@ and Undo. **File as tasks** in the header is a prompt shortcut that asks the age
 
 **A chat writes in Your folder** (S2), as Claude Code does in a terminal.
 
-- **It writes while its turn holds the folder** (the folder hold, below). A turn that couldn't take the hold still
-  runs, but writes nothing. The guard's coordination rule refuses its edits, and any command the read-only line
-  doesn't pass (`guard/read-only.ts`), with "Your folder is in use by {holder}." The session bar says so. The
-  sandbox profile is fixed when a session starts, so the hold is the guard's, not the kernel's.
+- **It writes while its turn holds the folder** (the folder hold, below), on a sandbox profile that follows the
+  hold: the checkout writable with `.git` denied while the turn holds, Plan's read-only profile with its judged
+  commands (`pnpm test`, `tsc`) while it doesn't. A turn that can't take the hold runs only after the builder picks
+  Send Reading Only (or Wait for It, which runs it once the folder frees). The guard also judges each Edit, Write
+  and NotebookEdit call on the real path, and refuses every call from a session that is not the one the hold
+  belongs to, so a background agent can't write after its turn. A warm session opened with the other profile is
+  closed first, and the next turn resumes the same agent session (a few seconds).
 - **Background jobs** a chat's turn starts stop when the turn ends, so nothing it started writes after it gives the
   hold back **(call)**. They run under the lanes' process tracking.
 - **Git goes through the daemon** **(call)**. The sandbox keeps `.git` closed, as it does for lanes
@@ -815,38 +818,57 @@ and Undo. **File as tasks** in the header is a prompt shortcut that asks the age
 
 **The folder hold** (Workbench W9, made a primitive here, M6) **(call)**.
 
-- **One daemon module** (`apps/daemon/src/folder-hold/`) holds, per project, who has Your folder, by kind and id:
-  - `pass`: a pass, a pass of one included, for its life. One at a time.
-  - `chat_turn`: a chat's running turn. One at a time.
-  - `takeover`: a chat in the builder's terminal (§7.5). One at a time.
-  - `lane`: a Board task that runs in Your folder (`WorkspaceMode.Shared`, or any task on a `local` project,
-    `placement/propose.ts`). **Counted:** the scheduler runs several of them in Your folder at once today, up to
-    the project's `maxLanes`, coordinated by claims and hazards (`scheduler/scheduler.ts`). A lane holds from its
-    task's first start in the folder until the task lands or ends, between its steps too.
-  - The kinds exclude each other: while any lane holds, no chat turn, takeover or pass takes the folder, and while
-    one of those holds, no Your-folder lane starts.
-- **Its readers** are the scheduler's W9 wait (`scheduler/scheduler.ts`), `proposePlacement`, pass open, the Do it
-  refusals, a chat turn's start and Open in Terminal. Each refusal and wait reason names the holder: "Your folder is
-  in use by the pass ‘Settings pass’", "… by the chat ‘Retry login’ in your terminal", "… by the task ‘Bump
-  vite’".
-- **It lives in memory** and is rebuilt at daemon start from live state: open passes, running Your-folder lanes and
-  chats in `taken_over`. A chat turn doesn't survive a restart (§6.7), so its hold doesn't either.
+- **One daemon module** (`apps/daemon/src/folder-hold/`), every call synchronous. Per project it says who has Your
+  folder. A `pass` (open, closing, or closed and unsettled), a `lane` and a `takeover` are **derived from rows**, so
+  a restart keeps them; a `chat_turn`, a waiting chat and 10db's `git_work` in progress live in memory only.
+  - `lane`: a Board task that runs in Your folder (`WorkspaceMode.Shared`, or any task on a `local` project). It is
+    **counted**: the scheduler runs several at once, coordinated by claims and hazards. A lane holds from its
+    `STARTING` write until the task lands or ends, between its steps and through `WAITING_HUMAN` and
+    `PAUSED_LIMIT`; a shared batch holds from `CUTTING` until its switch back has run.
+  - `git_work`: 10db's own git calls that move HEAD (a batch's branch cut, the switch back, a pass's open, a
+    settle's two branch moves).
+- **What excludes what** (`exclusion.ts` is this table as a pure function):
+
+| Holder ↓ \ wants the folder → | a lane's first start | 10db git work | a chat's turn | takeover |
+| --- | --- | --- | --- | --- |
+| lane | shares (claims decide) | today's checks | reads only, or waits | refused |
+| pass, open or closing | waits | refused | reads only, or waits | refused |
+| pass, closed and unsettled | waits | refused | **writes**; the four folder git tools wait until its pull request merges | the same limit |
+| 10db git work | waits | one at a time | reads only, or waits | refused |
+| chat turn | waits, naming it | waits, naming it | **shares, warned** | shares, warned |
+| a waiting chat | waits | runs | n/a | n/a |
+| takeover | waits | waits | shares, warned | shares, warned |
+
+  Reasons: a running lane or an open pass would commit a chat's edits as its own; a lane in `WAITING_HUMAN` or
+  `PAUSED_LIMIT` still has uncommitted work in the folder; a closed pass's settle moves the return branch by
+  compare-and-swap, which a commit or switch would break.
+- **A turn takes the hold** when the engine reduces a builder message from outside `BUSY` (`turnStarting`), and gives
+  it back after every reduce that leaves `BUSY` (`onState`): jobs stop, then the hold releases. A turn that can't
+  take it asks the builder: Wait for It parks the message (`FolderHold.wait`), and it runs, holding, once the folder
+  frees, ahead of any task that hasn't started; Send Reading Only runs it now. The latest send's choice applies to
+  everything queued. Stop, Redo, archive and a restart drop the wait.
+- **Warnings, not refusals:** two chats (and, from M7, a chat in the terminal) share the folder and each is told
+  about the other; committing everything while shared warns. A folder with uncommitted changes never refuses a chat.
+- **Its readers** are the scheduler's wait (`scheduler/scheduler.ts`, which also rechecks inside the `STARTING`
+  write), `proposePlacement`, pass open, the batch cut, the switch back, the settle, the Do it refusals and Open in
+  Terminal. Each wait and refusal names the holder: "the pass ‘Settings pass’ (until its pull request merges)",
+  "the chat ‘Retry login’ in your terminal", "the task ‘Bump vite’ and 2 more", "10db switching Your folder back to
+  `main`".
 - **A chat's hold, by state** (the §6.7 states):
 
 | Event | The hold |
 | --- | --- |
-| a turn starts (`starting` → `running`) and the folder is free | taken, as `chat_turn` |
-| a turn starts and another holds the folder | not taken; the turn runs and writes nothing |
+| a turn starts and nothing of 10db's holds | taken, as `chat_turn`, on the write profile |
+| a turn starts and a task, a pass or git work holds | not taken; the builder picked Wait for It (parked) or Send Reading Only (read-only profile, with a notice naming the holder) |
 | the holder leaves while the turn runs | not taken mid-turn; the next turn takes it |
-| a turn starts between two steps of a Your-folder task | not taken: the task's lane still holds, so the turn writes nothing |
 | `turn_complete` with messages queued (a chained turn) | kept for the next turn |
-| `turn_complete` with nothing queued | released |
-| any other exit from `running`, `waiting_card` or `stopping`: `ended` error, rate-limited or unasked, the stop grace's `stop()`, archive, Do it (`sealed`) | released, after the session's background jobs stop |
+| `turn_complete` with nothing queued | released; the writable session closes, so the next turn starts cold and resumes |
+| any other exit from `BUSY`: error end, rate limit, the stop grace's `stop()`, archive, Do it (`sealed`) | released, after the session's jobs stop |
 | Do it in Your folder | the running turn is stopped, and the pass opens only once the stop has settled and released the hold |
 | Open in Terminal, the folder free or held by this chat | taken, as `takeover` |
 | Open in Terminal, another holder | refused, naming it |
 | Hand Back, or archive from `taken_over` | released |
-| daemon restart | a `chat_turn` hold is gone; a `takeover` is taken again from the `taken_over` row |
+| daemon restart | a `chat_turn` and a wait are gone; a `takeover`, a lane and a pass are read from their rows |
 
 **Do it.** The Do It sheet (UI spec §8.1) hands bigger work to a task. It offers two places.
 
@@ -1368,7 +1390,7 @@ Each call is marked **(call)** where it is made. Grouped by what the builder is 
     reviewers stay Plan's (§7.1).
 17. **A chat's git goes through the daemon's tools** (§7.3), with `.git` closed to the sandbox, and plain `git
     commit` or `git push` in its shell is refused, naming the tool.
-18. **The folder hold is one daemon module** with four holder kinds, in memory and rebuilt at start (§7.3).
+18. **The folder hold is one daemon module**: a pass, a lane and a takeover read from rows, a chat turn, a waiting chat and 10db's git work in memory (§7.3).
 
 ## 18. Where the round-1 findings went
 

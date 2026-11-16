@@ -44,3 +44,8 @@
   the session's judge sees each call (`JUDGED_CHAT_TOOLS` in `git-rule.ts`); the hook answers a bare allow where a judge runs and
   asks on the rules floor, and the chat's trust policy tells the judge a push and a pull request send data out and a merge writes
   to a live system.
+- The folder routes (sessions spec §7.3): `GET /projects/:projectId/folder` (`FolderDto`, built by `folderView` in
+  `folder-hold/view.ts` with each holder's words and whether it keeps a chat out; the branch is `symbolic-ref`, null
+  when detached or unreadable), `folder` (`wait` | `read_only`) in the message and redo bodies (JSON and multipart),
+  and `POST /chats/:chatId/stop-waiting`. `conversationLive` carries `waitingForFolder` for a chat; the desktop reads
+  a chat's wait from the folder's `waiting_chat` holder instead.

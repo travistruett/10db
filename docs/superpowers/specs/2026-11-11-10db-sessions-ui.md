@@ -152,8 +152,11 @@ kind line never competes with the buttons for width. It shows:
 - the full title (weight 600; click to rename)
 - under it, a dimmed `xs` line saying what the session is:
   - "Chat · Your folder · on `main`"
-  - "Chat · reads only: Your folder is in use by the pass ‘Settings pass’" (another writer holds the folder; the
-    turn still runs and changes nothing, design spec §7.3)
+  - "Chat · reads only: Your folder is in use by the pass ‘Settings pass’" (a task, a pass or 10db's git work holds
+    the folder; a turn sent now reads only, or waits, design spec §7.3)
+  - "Chat · Your folder · on `main` · also in use by the chat ‘Retry login’" (another chat shares the folder)
+  - "Chat · Your folder · on `main` · commits wait until the pass ‘Settings pass’'s pull request merges" (a closed
+    pass waits for its merge)
   - "Chat · read-only: its work moved to a task"
   - "Chat · in your terminal since 12:04"
   - "Task · Your folder · lands on `main`"
@@ -1015,7 +1018,7 @@ The mockups' frame (c) shows the inject composer with its read receipt, beside a
 | **An error ended the session** (`ended_error`) | The red alert icon and a red ring on the tab; it counts as needs-you. The transcript ends with one line: "The session stopped: Claude Code exited with code 1. Send a message to start it again." with **Show Details**. |
 | **A turn the model refused** | A dimmed notice: "{label} declined to continue this turn." |
 | **Read-only Chat** (`sealed`) | §8.2: no tab of its own; opened from "From chat", ⌘⇧T or ⌘K, it shows the line with Open Task and New Chat From This, and no composer. |
-| **Your folder in use** | Another holder has the folder: a pass, another Chat's turn, a Chat in your terminal, or a task running in Your folder. {holder} names it: "the pass ‘Settings pass’", "the chat ‘Retry login’ in your terminal", "the task ‘Bump vite’". The kind line, dimmed: "Chat · reads only: Your folder is in use by {holder}". The Chat's turns run and change nothing; an edit shows as "10db stopped this: Your folder is in use by {holder}". No new color, and no tab state. |
+| **Your folder in use** | A task, a pass or 10db's git work holds the folder (an attended holder, another chat's turn or a chat in your terminal, is shared, not in the way). {holder} names it: "the pass ‘Settings pass’", "the task ‘Bump vite’ and 2 more", "10db switching Your folder back to `main`". The kind line, dimmed: "Chat · reads only: Your folder is in use by {holder}". Send then asks first: Wait for It, Send Reading Only and File as Tasks (Esc cancels, ⌘↩ waits). A message that waits shows a row above the composer, "Waits for Your folder: in use by {holder}", with Send Now Reading Only and Stop. A turn sent reading only runs and changes nothing; an edit shows as "10db stopped this: Your folder is in use by {holder}". No new color, and no tab state. |
 | **A call held back at a limit** | A dimmed row, "Held back: this would {limit}", with **Allow This** (§7.3). An escalated call is a card instead (§7.7). |
 | **Judged by 10db's rules** (`judge: 'rules'`) | The dimmed `info` line under the session bar (§11). |
 | **A model change** | The divider "Now on {label} · {model}" where the next turn starts (§7.1). |
@@ -1098,6 +1101,7 @@ Buttons, menu items and names are Title Case; everything else is sentence case (
 | Placeholders | Ask about {project}… · Reply… · Add to this turn… · Queue for the next turn… · Reply, or paste a screenshot… · Held until you hand back… |
 | Hint line | ⌘↩ sends · Esc stops · / commands · @ files · ⌘↩ adds to this turn · ⌘↩ holds it |
 | Composer buttons | Attach · Send · Stop · Stop and Redo · Sign Off |
+| Your folder held | Your folder is in use by {holder}. · Wait for It · Send Reading Only · File as Tasks · Waits for Your folder: in use by {holder} · Send Now Reading Only · Stop · Also in use by {holder} · Commits wait until {pass}'s pull request merges |
 | Queue chip | Queued · Edit · Remove |
 | Read receipt | Waiting for {label} to read it · Held until you hand back |
 | After a restart | These waited through a restart. Nothing was sent. · Send Now |
