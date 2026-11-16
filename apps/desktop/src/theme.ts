@@ -118,7 +118,8 @@ export const theme = createTheme({
     Switch: Switch.extend({ defaultProps: { withThumbIndicator: false } }),
     NavLink: NavLink.extend({
       styles: (_theme, props) => ({
-        root: { borderRadius: 'var(--mantine-radius-md)' },
+        // Dense rows, as a sidebar of a dozen links reads at a glance.
+        root: { borderRadius: 'var(--mantine-radius-md)', paddingBlock: 5, paddingInline: 10 },
         label: props.active ? { fontWeight: 600 } : {},
       }),
     }),

@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { z } from 'zod';
 import { claudeIsInstalled } from './claude-is-installed';
+import { inConversationColumn } from './conversation-column';
 import { daemonUrl } from './daemon-url';
 import { expectAccessible } from './expect-accessible';
 import { auth, createProject } from './shape-project';
@@ -55,6 +56,11 @@ for (const scheme of ['dark', 'light'] as const) {
     // The first run: the input has focus and says what nothing does until you act.
     const input = page.getByRole('textbox', { name: 'Message' });
     await expect(input).toBeFocused();
+    await inConversationColumn(
+      page.getByRole('region', { name: 'Conversation' }),
+      input,
+      `Plan at 1440, ${scheme}`,
+    );
     await expect(
       page.getByText(
         'Nothing is proposed until you press Propose. Nothing starts until you Convert.',
@@ -236,6 +242,12 @@ test('a 2,000-message conversation mounts only the blocks near the viewport as W
 
   const transcript = page.getByRole('group', { name: 'Messages' });
   const blocks = transcript.locator('[data-message-id]');
+  // It opens at its newest message, as a chat does, mounting only the blocks near it.
+  await expect(transcript.getByText('Message 1999', { exact: false })).toBeInViewport();
+  expect(await blocks.count()).toBeLessThan(NEAR_THE_VIEWPORT);
+  await transcript.evaluate((el) => {
+    el.scrollTop = 0;
+  });
   await expect(transcript.getByText('Message 0.', { exact: false })).toBeVisible();
   expect(await blocks.count()).toBeLessThan(NEAR_THE_VIEWPORT);
 

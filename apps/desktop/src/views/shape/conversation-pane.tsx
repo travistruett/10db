@@ -6,12 +6,13 @@ import {
   type ShapeViewDto,
   type ToolCallView,
 } from '@10db/contracts';
-import { ActionIcon, Box, Button, Flex, Group, Loader, Text, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Button, Flex, Group, Loader, Text, Title, Tooltip } from '@mantine/core';
 import { IconBooks, IconPlus } from '@tabler/icons-react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import dayjs from 'dayjs';
 import { useEffect, useRef } from 'react';
 import { JudgeLine, toolDoing, WorkingLine } from '../../conversation';
+import { ConversationLayout } from '../../conversation/conversation-layout';
 import { ContextRing } from '../../conversation/context-ring';
 import { streamingOf } from '../../conversation/live-items';
 import {
@@ -31,7 +32,7 @@ import {
 } from '../../daemon/shape-queries';
 import { formatTokens } from '../factory/format-tokens';
 import { AgentsLine } from './agents-line';
-import { Composer } from './composer';
+import { PlanComposer } from './plan-composer';
 import { addFiles } from '../../conversation/dropped-files';
 import { HistoryButton } from './history-button';
 import { PlanModelMenu } from './plan-model-menu';
@@ -224,69 +225,190 @@ export function ConversationPane({
   useShapeKeys({ onPropose: doPropose, onStop: doStop, answering });
 
   return (
-    <Box
-      component="section"
-      aria-label="Conversation"
+    <ConversationLayout
+      label="Conversation"
       h="100%"
-      style={{ display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 }}
-    >
-      <Group
-        px="md"
-        pt="md"
-        pb="xs"
-        gap="sm"
-        wrap="nowrap"
-        justify="space-between"
-        style={{ flex: 'none' }}
-      >
-        <Group gap="sm" wrap="nowrap" miw={0}>
-          <Title order={2} size="h4">
-            Plan
-          </Title>
-          {shapeId === null ? null : (
-            <Text size="sm" fw={500} lineClamp={1}>
-              {view?.shape.title}
-            </Text>
-          )}
-          {shapeId !== null && (view?.tokens ?? 0) > 0 ? (
-            <Text size="xs" c="dimmed" style={{ flex: 'none', whiteSpace: 'nowrap' }}>
-              {formatTokens(view?.tokens ?? 0)} tokens
-            </Text>
-          ) : null}
-          {loading && shapeId !== null ? (
-            <Loader size="xs" aria-label="Loading the conversation" />
-          ) : null}
-        </Group>
-        {shapeId === null ? null : (
-          <Group gap="xs" wrap="nowrap" align="flex-start">
-            {hasRecord ? (
-              // An icon, so the header still fits beside the Proposed pane at its narrowest.
-              <Tooltip label="Record" withArrow>
-                <ActionIcon
-                  variant="default"
-                  size={30}
-                  aria-label="Record"
-                  onClick={() => {
-                    void navigate({ to: '/shape/$shapeId/record', params: { shapeId } });
-                  }}
-                >
-                  <IconBooks size={16} stroke={1.5} />
-                </ActionIcon>
-              </Tooltip>
+      header={
+        <Group
+          px="md"
+          pt="md"
+          pb="xs"
+          gap="sm"
+          wrap="nowrap"
+          justify="space-between"
+          style={{ flex: 'none' }}
+        >
+          <Group gap="sm" wrap="nowrap" miw={0}>
+            <Title order={2} size="h4">
+              Plan
+            </Title>
+            {shapeId === null ? null : (
+              <Text size="sm" fw={500} lineClamp={1}>
+                {view?.shape.title}
+              </Text>
+            )}
+            {shapeId !== null && (view?.tokens ?? 0) > 0 ? (
+              <Text size="xs" c="dimmed" style={{ flex: 'none', whiteSpace: 'nowrap' }}>
+                {formatTokens(view?.tokens ?? 0)} tokens
+              </Text>
             ) : null}
-            <Button
-              component={Link}
-              to="/shape"
-              variant="default"
-              size="xs"
-              leftSection={<IconPlus size={14} stroke={1.5} />}
-            >
-              New
-            </Button>
-            <HistoryButton projectId={projectId} current={shapeId} />
+            {loading && shapeId !== null ? (
+              <Loader size="xs" aria-label="Loading the conversation" />
+            ) : null}
           </Group>
-        )}
-      </Group>
+          {shapeId === null ? null : (
+            <Group gap="xs" wrap="nowrap" align="flex-start">
+              {hasRecord ? (
+                // An icon, so the header still fits beside the Proposed pane at its narrowest.
+                <Tooltip label="Record" withArrow>
+                  <ActionIcon
+                    variant="default"
+                    size={30}
+                    aria-label="Record"
+                    onClick={() => {
+                      void navigate({ to: '/shape/$shapeId/record', params: { shapeId } });
+                    }}
+                  >
+                    <IconBooks size={16} stroke={1.5} />
+                  </ActionIcon>
+                </Tooltip>
+              ) : null}
+              <Button
+                component={Link}
+                to="/shape"
+                variant="default"
+                size="xs"
+                leftSection={<IconPlus size={14} stroke={1.5} />}
+              >
+                New
+              </Button>
+              <HistoryButton projectId={projectId} current={shapeId} />
+            </Group>
+          )}
+        </Group>
+      }
+      footer={
+        <>
+          {conversation === undefined ? null : (
+            <WorkingLine
+              conversation={shownState(conversation, {
+                sending: send.isPending || propose.isPending,
+                stopping: stop.isPending,
+              })}
+              streaming={now.streaming}
+              {...(now.call === null ? {} : { tool: toolDoing(now.call) })}
+            />
+          )}
+          <WaitingPermissions shapeId={shapeId} />
+          {view?.turn.waitingForUpdate === true ? (
+            <Text role="status" size="sm" c="dimmed" px="md" py="xs" style={{ flex: 'none' }}>
+              Waiting for an update to install. If 10db quits for it, this won’t run: send or press
+              it again afterwards, even if the install then fails. If the update is called off
+              before 10db quits, this runs.
+            </Text>
+          ) : null}
+          <PlanComposer
+            modelControl={
+              view === undefined ? null : (
+                <>
+                  <PlanModelMenu view={view} />
+                  <ContextRing percent={conversation?.contextPct ?? null} />
+                </>
+              )
+            }
+            firstRun={!heardBuilder}
+            answering={answering}
+            agentLabel={conversation?.capabilities.label ?? 'the agent'}
+            proposing={(view?.turn.proposing ?? false) || propose.isPending}
+            proposeLabel={(view?.shape.round ?? 0) > 0 ? 'Propose Again' : 'Propose'}
+            canPropose={canPropose}
+            nothingDecided={(view?.heard.length ?? 0) === 0 && (view?.proposals.length ?? 0) === 0}
+            error={shownError}
+            files={(view?.files ?? []).map((f) => f.name)}
+            late={late}
+            {...(imported === undefined ? {} : { imported })}
+            onDraft={(text) => {
+              typed.current = text;
+            }}
+            onLateTaken={() => {
+              if (shapeId !== null) takeLate(shapeId);
+            }}
+            onFiles={async (dropped) => {
+              // A drop into a conversation that doesn't exist yet starts it, as the first message does.
+              const made: { id: ShapeId | null } = { id: shapeId };
+              const problems = await addFiles(dropped, view?.files.length ?? 0, {
+                ensureConversation: async () => {
+                  made.id ??= await ensureId();
+                },
+                upload: (file) => {
+                  if (made.id === null)
+                    return Promise.reject(new Error('No conversation to add to.'));
+                  return upload.mutateAsync({ shapeId: made.id, file });
+                },
+              });
+              if (shapeId !== null || made.id === null) return problems;
+              open(made.id);
+              // This input is leaving for the conversation, so the reasons go to the one that replaces it.
+              if (problems.length > 0) leaveLate(made.id, { refused: problems });
+              return [];
+            }}
+            onSend={async (text) => {
+              const before = latest.current;
+              failedSend.current = null;
+              sent.current = text;
+              let id: ShapeId;
+              // Set once the conversation exists, even if the send into it then fails.
+              let made: ShapeId | null = null;
+              try {
+                id = await ensureId();
+                made = id;
+                await send.mutateAsync({ conversationId: await conversationOf(id), text });
+              } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                sent.current = null;
+                if (shapeId !== null) throw error;
+                // Where the input went: the conversation a drop opened, or, when the builder left this
+                // screen first, the one this send made, so opening it later still shows why.
+                const gone = opened.current ?? (here.current ? null : made);
+                if (gone === null) {
+                  // The drop may still open the conversation and take this input with it.
+                  failedSend.current = message;
+                  throw error;
+                }
+                // Its input is gone, so the conversation's new one gets the reason and the text, beside
+                // whatever the builder's edits left there.
+                leaveLate(gone, { failure: message, draft: text });
+                return;
+              }
+              // The daemon took the message, so a refusal of Propose or Stop from before the send is out
+              // of date. Only that one is cleared: `mutateAsync` settles after the refetch, so a refusal
+              // that arrived during the send is news, and a Propose or Stop still in flight keeps its
+              // observer, so its loading state lasts and a refusal that comes later is shown.
+              const { propose: nowPropose, stop: nowStop } = latest.current;
+              if (nowPropose.isError && nowPropose.error === before.propose.error)
+                nowPropose.reset();
+              if (nowStop.isError && nowStop.error === before.stop.error) nowStop.reset();
+              if (shapeId === null) open(id);
+            }}
+            onPropose={doPropose}
+            onStop={doStop}
+          />
+        </>
+      }
+      after={
+        shapeId === null ? (
+          <Flex
+            wrap="wrap"
+            gap="md"
+            align="flex-start"
+            style={{ flex: 'none', maxHeight: '45%', overflowY: 'auto' }}
+          >
+            <RecentConversations projectId={projectId} />
+            <PlanMeasures />
+          </Flex>
+        ) : null
+      }
+    >
       {conversation === undefined ? null : (
         <>
           <JudgeLine judge={conversation.capabilities.judge} />
@@ -297,6 +419,8 @@ export function ConversationPane({
         </>
       )}
       <Transcript
+        // Its own per conversation, so another Plan from History opens at its newest message.
+        key={shapeId ?? 'new'}
         shapeId={shapeId}
         conversation={conversation}
         items={items}
@@ -311,119 +435,6 @@ export function ConversationPane({
             send.mutate({ conversationId, text: `Go ahead: ${call.title}` });
         }}
       />
-      {conversation === undefined ? null : (
-        <WorkingLine
-          conversation={shownState(conversation, {
-            sending: send.isPending || propose.isPending,
-            stopping: stop.isPending,
-          })}
-          streaming={now.streaming}
-          {...(now.call === null ? {} : { tool: toolDoing(now.call) })}
-        />
-      )}
-      <WaitingPermissions shapeId={shapeId} />
-      {view?.turn.waitingForUpdate === true ? (
-        <Text role="status" size="sm" c="dimmed" px="md" py="xs" style={{ flex: 'none' }}>
-          Waiting for an update to install. If 10db quits for it, this won’t run: send or press it
-          again afterwards, even if the install then fails. If the update is called off before 10db
-          quits, this runs.
-        </Text>
-      ) : null}
-      <Composer
-        modelControl={
-          view === undefined ? null : (
-            <>
-              <PlanModelMenu view={view} />
-              <ContextRing percent={conversation?.contextPct ?? null} />
-            </>
-          )
-        }
-        firstRun={!heardBuilder}
-        answering={answering}
-        agentLabel={conversation?.capabilities.label ?? 'the agent'}
-        proposing={(view?.turn.proposing ?? false) || propose.isPending}
-        proposeLabel={(view?.shape.round ?? 0) > 0 ? 'Propose Again' : 'Propose'}
-        canPropose={canPropose}
-        nothingDecided={(view?.heard.length ?? 0) === 0 && (view?.proposals.length ?? 0) === 0}
-        error={shownError}
-        files={(view?.files ?? []).map((f) => f.name)}
-        late={late}
-        {...(imported === undefined ? {} : { imported })}
-        onDraft={(text) => {
-          typed.current = text;
-        }}
-        onLateTaken={() => {
-          if (shapeId !== null) takeLate(shapeId);
-        }}
-        onFiles={async (dropped) => {
-          // A drop into a conversation that doesn't exist yet starts it, as the first message does.
-          const made: { id: ShapeId | null } = { id: shapeId };
-          const problems = await addFiles(dropped, view?.files.length ?? 0, {
-            ensureConversation: async () => {
-              made.id ??= await ensureId();
-            },
-            upload: (file) => {
-              if (made.id === null) return Promise.reject(new Error('No conversation to add to.'));
-              return upload.mutateAsync({ shapeId: made.id, file });
-            },
-          });
-          if (shapeId !== null || made.id === null) return problems;
-          open(made.id);
-          // This input is leaving for the conversation, so the reasons go to the one that replaces it.
-          if (problems.length > 0) leaveLate(made.id, { refused: problems });
-          return [];
-        }}
-        onSend={async (text) => {
-          const before = latest.current;
-          failedSend.current = null;
-          sent.current = text;
-          let id: ShapeId;
-          // Set once the conversation exists, even if the send into it then fails.
-          let made: ShapeId | null = null;
-          try {
-            id = await ensureId();
-            made = id;
-            await send.mutateAsync({ conversationId: await conversationOf(id), text });
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            sent.current = null;
-            if (shapeId !== null) throw error;
-            // Where the input went: the conversation a drop opened, or, when the builder left this
-            // screen first, the one this send made, so opening it later still shows why.
-            const gone = opened.current ?? (here.current ? null : made);
-            if (gone === null) {
-              // The drop may still open the conversation and take this input with it.
-              failedSend.current = message;
-              throw error;
-            }
-            // Its input is gone, so the conversation's new one gets the reason and the text, beside
-            // whatever the builder's edits left there.
-            leaveLate(gone, { failure: message, draft: text });
-            return;
-          }
-          // The daemon took the message, so a refusal of Propose or Stop from before the send is out
-          // of date. Only that one is cleared: `mutateAsync` settles after the refetch, so a refusal
-          // that arrived during the send is news, and a Propose or Stop still in flight keeps its
-          // observer, so its loading state lasts and a refusal that comes later is shown.
-          const { propose: nowPropose, stop: nowStop } = latest.current;
-          if (nowPropose.isError && nowPropose.error === before.propose.error) nowPropose.reset();
-          if (nowStop.isError && nowStop.error === before.stop.error) nowStop.reset();
-          if (shapeId === null) open(id);
-        }}
-        onPropose={doPropose}
-        onStop={doStop}
-      />
-      {shapeId === null ? (
-        <Flex
-          wrap="wrap"
-          gap="md"
-          align="flex-start"
-          style={{ flex: 'none', maxHeight: '45%', overflowY: 'auto' }}
-        >
-          <RecentConversations projectId={projectId} />
-          <PlanMeasures />
-        </Flex>
-      ) : null}
-    </Box>
+    </ConversationLayout>
   );
 }

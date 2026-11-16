@@ -901,7 +901,8 @@ describe('dictation', () => {
     const input = await screen.findByRole('textbox', { name: 'Message' });
     expect(input.tagName).toBe('TEXTAREA');
     expect(input.closest('[contenteditable]')).toBeNull();
-    for (const attribute of ['readonly', 'disabled', 'inputmode', 'autocorrect', 'spellcheck']) {
+    // Spellcheck is off, as the kit's input needs for its mention overlay; it doesn't stop insertion.
+    for (const attribute of ['readonly', 'disabled', 'inputmode', 'autocorrect']) {
       expect(input.hasAttribute(attribute), attribute).toBe(false);
     }
     // Dictation inserts its text as an input event on the control; the draft follows.

@@ -4,9 +4,10 @@ import {
   type PassTurnId,
   type ToolCallView,
 } from '@10db/contracts';
-import { Anchor, Box, Group, Text, Title } from '@mantine/core';
+import { Anchor, Group, Text, Title } from '@mantine/core';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { toolDoing, WorkingLine } from '../../conversation';
+import { ConversationLayout } from '../../conversation/conversation-layout';
 import type { Draft } from '../../conversation/drafts';
 import { streamingOf } from '../../conversation/live-items';
 import { useConversationItems, useConversationLive } from '../../daemon/conversation-queries';
@@ -106,98 +107,104 @@ export function PagePane(props: PagePaneProps) {
       input.current?.focus();
   }, [page.taskId, composerFocus]);
   return (
-    <Box
-      component="section"
-      aria-label={page.label}
-      style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+    <ConversationLayout
+      label={page.label}
+      header={
+        <Title order={2} size="h4" px="md" pt="sm">
+          {page.label}
+        </Title>
+      }
+      footer={
+        <>
+          {working === null ? null : (
+            <WorkingLine
+              conversation={{ state: ConversationState.Running, pausedUntil: null }}
+              streaming={streaming.streaming}
+              startedAt={working.startedAt}
+              {...(tool === null ? {} : { tool })}
+              extra={
+                <>
+                  {working.line.files === null ? null : (
+                    <Text size="xs" c="dimmed" style={{ flex: 'none' }}>
+                      {working.line.files}
+                    </Text>
+                  )}
+                  <Anchor
+                    component="button"
+                    type="button"
+                    size="xs"
+                    style={{ flex: 'none' }}
+                    onClick={() => {
+                      setLogTurn(working.id);
+                    }}
+                  >
+                    Show Log
+                  </Anchor>
+                </>
+              }
+            />
+          )}
+          {page.turn === null ? null : (
+            <TurnLogDrawer
+              turnId={page.turn.id}
+              title={`${page.label} · Turn ${String(page.turn.seq)}`}
+              opened={logTurn === page.turn.id}
+              onClose={() => {
+                setLogTurn(null);
+              }}
+            />
+          )}
+          {status === PageStatus.Asks && row.ask !== null ? (
+            <PageAsk key={row.ask.id} item={row.ask} />
+          ) : null}
+          {passOpen && status === PageStatus.Failed && page.failure !== null ? (
+            <RetryTurn itemId={page.failure.retryItemId} line={row.state.line} />
+          ) : null}
+          {status === PageStatus.SigningOff || status === PageStatus.Waiting ? (
+            <SignOffLine
+              passId={passId}
+              taskId={page.taskId}
+              line={row.state.line}
+              waiting={passOpen && status === PageStatus.Waiting}
+            />
+          ) : null}
+          {passOpen && status === PageStatus.SignedOff && pullRequest !== undefined ? (
+            // The next step sits where the builder signed off, not only in the header above the thread.
+            <Group px="md" py="xs" gap="sm" justify="space-between" wrap="wrap">
+              <Text size="sm" c="dimmed">
+                Signed off. CI checks it once it is in the pull request.
+              </Text>
+              {pullRequest}
+            </Group>
+          ) : null}
+          <PageComposer
+            // Its own per page: a send that settles after a switch clears the page that sent it.
+            key={page.taskId}
+            label={page.label}
+            status={status}
+            firstMessage={!page.spokenTo}
+            draft={draft}
+            onDraft={onDraft}
+            actions={actions}
+            openPage={openPage}
+            inputRef={input}
+            disabled={!passOpen}
+          />
+        </>
+      }
     >
-      <Title order={2} size="h4" px="md" pt="sm">
-        {page.label}
-      </Title>
-      <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-        <PageThread
-          page={page}
-          turns={turns}
-          live={live}
-          busy={streaming.streaming === 'text'}
-          canSend={passOpen}
-          onAllow={(call: ToolCallView) => {
-            void actions.send({ text: `Go ahead: ${call.title}`, mentions: [], pictures: [] });
-          }}
-        />
-      </Box>
-      {working === null ? null : (
-        <WorkingLine
-          conversation={{ state: ConversationState.Running, pausedUntil: null }}
-          streaming={streaming.streaming}
-          startedAt={working.startedAt}
-          {...(tool === null ? {} : { tool })}
-          extra={
-            <>
-              {working.line.files === null ? null : (
-                <Text size="xs" c="dimmed" style={{ flex: 'none' }}>
-                  {working.line.files}
-                </Text>
-              )}
-              <Anchor
-                component="button"
-                type="button"
-                size="xs"
-                style={{ flex: 'none' }}
-                onClick={() => {
-                  setLogTurn(working.id);
-                }}
-              >
-                Show Log
-              </Anchor>
-            </>
-          }
-        />
-      )}
-      {page.turn === null ? null : (
-        <TurnLogDrawer
-          turnId={page.turn.id}
-          title={`${page.label} · Turn ${String(page.turn.seq)}`}
-          opened={logTurn === page.turn.id}
-          onClose={() => {
-            setLogTurn(null);
-          }}
-        />
-      )}
-      {status === PageStatus.Asks && row.ask !== null ? (
-        <PageAsk key={row.ask.id} item={row.ask} />
-      ) : null}
-      {passOpen && status === PageStatus.Failed && page.failure !== null ? (
-        <RetryTurn itemId={page.failure.retryItemId} line={row.state.line} />
-      ) : null}
-      {status === PageStatus.SigningOff || status === PageStatus.Waiting ? (
-        <SignOffLine
-          passId={passId}
-          taskId={page.taskId}
-          line={row.state.line}
-          waiting={passOpen && status === PageStatus.Waiting}
-        />
-      ) : null}
-      {passOpen && status === PageStatus.SignedOff && pullRequest !== undefined ? (
-        // The next step sits where the builder signed off, not only in the header above the thread.
-        <Group px="md" py="xs" gap="sm" justify="space-between" wrap="wrap">
-          <Text size="sm" c="dimmed">
-            Signed off. CI checks it once it is in the pull request.
-          </Text>
-          {pullRequest}
-        </Group>
-      ) : null}
-      <PageComposer
-        label={page.label}
-        status={status}
-        firstMessage={!page.spokenTo}
-        draft={draft}
-        onDraft={onDraft}
-        actions={actions}
-        openPage={openPage}
-        inputRef={input}
-        disabled={!passOpen}
+      <PageThread
+        // Its own per page, so each page opens at its newest message.
+        key={page.taskId}
+        page={page}
+        turns={turns}
+        live={live}
+        busy={streaming.streaming === 'text'}
+        canSend={passOpen}
+        onAllow={(call: ToolCallView) => {
+          void actions.send({ text: `Go ahead: ${call.title}`, mentions: [], pictures: [] });
+        }}
       />
-    </Box>
+    </ConversationLayout>
   );
 }
