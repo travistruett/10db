@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { BuilderToolInputs, BuilderToolName } from './builder-mcp-tools';
-import { TaskPatchFields } from './entities';
+import { TaskPatchFields, Title } from './entities';
 import { TaskId } from './ids';
 import { TaskLanding } from './landing';
 import { StartShapeInput } from './shape-files';
@@ -36,7 +36,7 @@ export const BRIEF_LIST_MAX = 8;
 
 /** What the chat's agent writes for Do It: the task's title, brief, areas and acceptance criteria. */
 export const WriteBriefInput = z.object({
-  title: z.string().trim().min(1).max(200),
+  title: Title,
   brief: z.string().trim().min(1).max(TASK_MESSAGE_MAX_CHARS),
   areas: z.array(z.string().min(1).max(100)).max(BRIEF_LIST_MAX).optional(),
   acceptanceCriteria: z.array(z.string().min(1).max(1000)).max(BRIEF_LIST_MAX).optional(),

@@ -15,6 +15,8 @@ import {
   cutTitle,
   mintId,
   PostConversationMessage,
+  TASK_MESSAGE_MAX_CHARS,
+  WriteBriefInput,
 } from './index';
 
 // Sessions spec §10, §11: the wire shapes Sessions reads, and what the chat's tools return.
@@ -215,5 +217,34 @@ describe('cutTitle', () => {
     { name: 'one long word is cut at the cap', title: 'a'.repeat(40), cut: 'a'.repeat(28) },
   ])('$name', ({ title, cut }) => {
     expect(cutTitle(title)).toBe(cut);
+  });
+});
+
+describe('write_brief input', () => {
+  const ok = { title: 'Fix login', brief: 'Do it.' };
+  it.each([
+    { name: 'a title and a brief', input: ok, accepted: true },
+    { name: 'a title with a newline', input: { ...ok, title: 'Fix\nlogin' }, accepted: false },
+    { name: 'a title with a tab', input: { ...ok, title: 'Fix\tlogin' }, accepted: false },
+    { name: 'an empty brief', input: { ...ok, brief: '  ' }, accepted: false },
+    {
+      name: 'a brief at the cap',
+      input: { ...ok, brief: 'a'.repeat(TASK_MESSAGE_MAX_CHARS) },
+      accepted: true,
+    },
+    {
+      name: 'a brief over the cap',
+      input: { ...ok, brief: 'a'.repeat(TASK_MESSAGE_MAX_CHARS + 1) },
+      accepted: false,
+    },
+    { name: 'eight areas', input: { ...ok, areas: Array(8).fill('api') }, accepted: true },
+    { name: 'nine areas', input: { ...ok, areas: Array(9).fill('api') }, accepted: false },
+    {
+      name: 'nine criteria',
+      input: { ...ok, acceptanceCriteria: Array(9).fill('x') },
+      accepted: false,
+    },
+  ])('$name', ({ input, accepted }) => {
+    expect(WriteBriefInput.safeParse(input).success).toBe(accepted);
   });
 });
