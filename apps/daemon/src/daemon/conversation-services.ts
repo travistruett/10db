@@ -86,7 +86,7 @@ export function createConversationServices(deps: {
   readonly state: StateStore;
   readonly engine: ExploreEngine;
   readonly shape: Pick<ShapeService, 'send' | 'redo' | 'sendNow'>;
-  readonly chat: Pick<ChatService, 'send' | 'post'>;
+  readonly chat: Pick<ChatService, 'send' | 'post' | 'sendNow' | 'stop' | 'redo'>;
   /** The tracked files of the conversation's checkout an `@` query matches. */
   readonly files: (id: ConversationId, q: string) => Promise<ProjectFileMatchDto[]>;
   readonly dataDir: string;
@@ -173,11 +173,12 @@ export function createConversationServices(deps: {
     sendConversationNow(id) {
       const owner = ownerOf(explore(id));
       if (owner.kind === 'shape') deps.shape.sendNow(owner.shapeId);
-      else engine.sendNow(id);
+      else deps.chat.sendNow(id);
       return engine.view(id);
     },
     async stopConversation(id) {
-      await engine.stop(explore(id));
+      if (ownerOf(explore(id)).kind === 'chat') await deps.chat.stop(id);
+      else await engine.stop(id);
       return engine.view(id);
     },
     async redoConversation(id, message) {
@@ -186,9 +187,11 @@ export function createConversationServices(deps: {
         case 'shape':
           return dtoOf(id, (await deps.shape.redo(owner.shapeId, message.text)).id);
         case 'chat': {
-          const edit = await engine.redo(id, () =>
-            deps.chat.post(id, { text: message.text, mentions: [], pictures: message.pictures }),
-          );
+          const edit = await deps.chat.redo(id, {
+            text: message.text,
+            mentions: [],
+            pictures: message.pictures,
+          });
           return dtoOf(id, edit.id);
         }
         // A page's Stop and Redo stops its running turn, then the message goes in (Workbench §6.3).

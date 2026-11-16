@@ -1642,6 +1642,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const chat = createChatService({
     state,
     engine: exploreEngine,
+    folderHold,
     dataDir: opts.dataDir,
     now: () => clock.now(),
     modelsOf: conversationModels,
@@ -2405,6 +2406,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           },
           end: () => {
             updateDrain.end();
+            // A chat that waited for Your folder through the drain runs now.
+            folderHold.serveWaiters();
             // Lanes start again, and a batch whose work finished while new ships were held ships.
             createdScheduler.requestTick();
             shipper.checkOpenBatches();
@@ -2419,6 +2422,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         },
         resume: () => {
           installHold.end();
+          folderHold.serveWaiters();
           createdScheduler.start();
           createdScheduler.requestTick();
         },

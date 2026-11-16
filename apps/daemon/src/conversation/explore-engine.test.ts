@@ -1239,6 +1239,18 @@ describe('the owner’s turn hooks', () => {
     expect(endsOutsideATurn(w)).toBe(true);
   });
 
+  it('takes once per turn when the next one starts fresh from a digest', async () => {
+    w = exploreWorld();
+    w.adapter.shapeBehaviour = () => Promise.resolve({ text: 'Understood.', contextPercent: 71 });
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    w.adapter.shapeBehaviour = () => Promise.resolve({ text: 'Again.' });
+    w.send('two');
+    await w.engine.settled(w.conv.id);
+    expect(takes(w)).toBe(2);
+    expect(endsOutsideATurn(w)).toBe(true);
+  });
+
   it('closes a warm session opened for the other kind of turn, and keeps the take it just made', async () => {
     w = exploreWorld();
     w.writes = false;

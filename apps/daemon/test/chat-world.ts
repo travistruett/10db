@@ -56,10 +56,15 @@ export function chatWorld(
     readonly judge?: JudgeKind;
     /** 10db's judge, made over the world's store; absent, a `tendb` chat is on the rules. */
     readonly tendb?: (world: { readonly store: Store }) => Judge;
+    /** A daemon restart: a new engine, hold and service over the earlier world's store and folders. */
+    readonly over?: ChatWorld;
   } = {},
 ): ChatWorld {
-  const { store, close } = createTestStore();
-  const project = seedProject(store, { name: 'alpha' });
+  const { store, close } =
+    opts.over === undefined
+      ? createTestStore()
+      : { store: opts.over.store, close: () => undefined };
+  const project = opts.over?.project ?? seedProject(store, { name: 'alpha' });
   const bus = createEventBus();
   const events: DaemonEvent[] = [];
   bus.subscribe((e) => events.push(e));
@@ -67,7 +72,10 @@ export function chatWorld(
   const folderHold = createFolderHold({ state, bus });
   const adapter = new FakeAdapter({});
   const clock = new ManualClock();
-  const dir = tempDir('chat');
+  const dir =
+    opts.over === undefined
+      ? tempDir('chat')
+      : { path: opts.over.dataDir, cleanup: () => undefined };
   const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
   const launched = { kind: AccountKind.ClaudeSubscription as AgentAccountKind };
   const engine = createExploreEngine({
@@ -122,6 +130,7 @@ export function chatWorld(
   const chat = createChatService({
     state,
     engine,
+    folderHold,
     dataDir: dir.path,
     now: () => clock.now(),
     modelsOf: () => ({

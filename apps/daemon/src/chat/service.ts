@@ -10,6 +10,8 @@ import {
   ConversationProfile,
   ConversationState,
   cutTitle,
+  FolderAsker,
+  FolderWhileHeld,
   InvalidError,
   mintId,
   TASK_MESSAGE_MAX_CHARS,
@@ -43,10 +45,12 @@ import {
   setChatTitle,
   touchChat,
   unarchiveChat,
+  type ChatRow,
   type ConversationItemRow,
 } from '@10db/db';
 import { keepBuilderMessage, type ExploreEngine, type PastedFile } from '../conversation';
 import type { StateStore } from '../events';
+import type { FolderHold, ServeResult } from '../folder-hold';
 import { chatFolder } from './hooks';
 
 // Sessions spec §7.1, §10: a chat's life on the daemon. It is made with its conversation on the
@@ -92,8 +96,28 @@ export interface ChatService {
   models(projectId: ProjectId): ChatModelsDto;
   archive(id: ChatId): Promise<ChatDto>;
   unarchive(id: ChatId): ChatDto;
-  /** The chat branch of the message route: the message stored queued, the chat touched, a turn asked for. */
-  send(conversationId: ConversationId, input: ChatMessageInput): ConversationItemRow;
+  /**
+   * The chat branch of the message route: the message stored queued, the chat touched, a turn asked for.
+   * With `wait`, a turn Your folder keeps out waits for it to free, ahead of any task that hasn't started;
+   * the latest send's choice applies to everything queued.
+   */
+  send(
+    conversationId: ConversationId,
+    input: ChatMessageInput,
+    folder?: FolderWhileHeld,
+  ): ConversationItemRow;
+  /** Stops the turn, or drops what waits for Your folder. */
+  stop(conversationId: ConversationId): Promise<void>;
+  /** Runs what waits for Your folder now, reading only. Refused with the engine's words when nothing waits. */
+  sendNow(conversationId: ConversationId): void;
+  /** Stops waiting for Your folder: the queue runs reading only. */
+  stopWaiting(chatId: ChatId): void;
+  /** Stop, then the edited message as the next turn, with its own choice for a folder in use. */
+  redo(
+    conversationId: ConversationId,
+    input: ChatMessageInput,
+    folder?: FolderWhileHeld,
+  ): Promise<ConversationItemRow>;
   /** The message stored queued and the chat touched, with no turn asked for: what a Redo posts. */
   post(conversationId: ConversationId, input: ChatMessageInput): ConversationItemRow;
 }
@@ -101,6 +125,7 @@ export interface ChatService {
 export interface ChatServiceDeps {
   readonly state: StateStore;
   readonly engine: ExploreEngine;
+  readonly folderHold: FolderHold;
   readonly dataDir: string;
   readonly now: () => Date;
   /** The models a project's account offers for a conversation, and its default. */
@@ -201,6 +226,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       if (chat.archivedAt !== null) return dtoOf(id);
       // The session ends first (a start cancelled, a turn stopped, a card withdrawn), so nothing it
       // does lands after the chat is archived; then the folder made only from its id goes.
+      deps.folderHold.cancelWait(id);
       await engine.retire(chat.conversationId);
       state.write((ctx) => {
         archiveChat(ctx, id, ctx.now);
@@ -217,14 +243,94 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       return dtoOf(id);
     },
 
-    send(conversationId, input) {
+    send(conversationId, input, folder = FolderWhileHeld.ReadOnly) {
       const item = post(conversationId, input);
+      const chat = requireChat(conversationId);
+      const waiting = deps.folderHold.waiting(chat.id);
+      const parks = folder === FolderWhileHeld.Wait && (waiting || mustWait(chat));
+      // Starts are held before the queue is asked, so the message parks.
+      if (parks) engine.holdStarts(conversationId);
       engine.queued(conversationId);
+      if (parks) watchFolder(chat);
+      else if (waiting) {
+        // A read-only send applies to everything queued.
+        deps.folderHold.cancelWait(chat.id);
+        engine.releaseStarts(conversationId);
+      }
       return item;
+    },
+
+    async stop(conversationId) {
+      const chat = requireChat(conversationId);
+      // The parked start is dropped by the stop; the hold on new starts goes with the wait.
+      deps.folderHold.cancelWait(chat.id);
+      await engine.stop(conversationId);
+      engine.releaseStarts(conversationId);
+    },
+
+    sendNow(conversationId) {
+      const chat = requireChat(conversationId);
+      if (deps.folderHold.waiting(chat.id)) {
+        stopWaiting(chat);
+        return;
+      }
+      engine.sendNow(conversationId);
+    },
+
+    stopWaiting: (chatId) => {
+      stopWaiting(getChat(state.db, chatId));
+    },
+
+    async redo(conversationId, input, folder = FolderWhileHeld.ReadOnly) {
+      const chat = requireChat(conversationId);
+      deps.folderHold.cancelWait(chat.id);
+      await engine.stop(conversationId);
+      engine.releaseStarts(conversationId);
+      const wait = folder === FolderWhileHeld.Wait && mustWait(chat);
+      if (wait) engine.holdStarts(conversationId);
+      const edit = await engine.redo(conversationId, () => post(conversationId, input));
+      if (wait) watchFolder(chat);
+      return edit;
     },
 
     post: (conversationId, input) => post(conversationId, input),
   };
+
+  function requireChat(conversationId: ConversationId): ChatRow {
+    const chat = chatOfConversation(state.db, conversationId);
+    if (chat === null) throw new ConflictError('This conversation is no chat’s');
+    return chat;
+  }
+
+  /** Whether a turn of this chat can't take Your folder now: something other than an attended chat holds it. */
+  function mustWait(chat: ChatRow): boolean {
+    return (
+      !deps.folderHold.holdsTurn(chat.id) &&
+      deps.folderHold.blockers(chat.projectId, { kind: FolderAsker.ChatTurn, chatId: chat.id })
+        .length > 0
+    );
+  }
+
+  /** Registers the wait: each time the folder can be this chat's, its parked starters run. */
+  function watchFolder(chat: ChatRow): void {
+    const serve = (): ServeResult => {
+      if (getChat(state.db, chat.id).archivedAt !== null) {
+        engine.releaseStarts(chat.conversationId);
+        return 'dropped';
+      }
+      if (engine.releaseStarts(chat.conversationId)) return 'began';
+      if (!engine.parked(chat.conversationId)) return 'dropped';
+      // Nothing could start (the update hold is on): keep waiting, and keep the starters parked.
+      engine.holdStarts(chat.conversationId);
+      return 'kept';
+    };
+    deps.folderHold.wait(chat.projectId, chat.id, serve);
+  }
+
+  function stopWaiting(chat: ChatRow): void {
+    deps.folderHold.cancelWait(chat.id);
+    if (!engine.releaseStarts(chat.conversationId)) engine.sendNow(chat.conversationId);
+  }
 
   function post(conversationId: ConversationId, input: ChatMessageInput): ConversationItemRow {
     const chat = chatOfConversation(state.db, conversationId);

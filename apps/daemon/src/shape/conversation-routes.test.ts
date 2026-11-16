@@ -67,7 +67,7 @@ beforeEach(() => {
         state: f.state,
         engine: f.engine,
         shape: f.service,
-        chat: { send: noChat, post: noChat },
+        chat: { send: noChat, post: noChat, sendNow: noChat, stop: noChat, redo: noChat },
         files: () => Promise.resolve([]),
         dataDir: f.filesDir,
         laneLive: createLiveRegistry(),
