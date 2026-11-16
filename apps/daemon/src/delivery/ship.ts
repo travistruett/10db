@@ -638,7 +638,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
       await retire(batchId);
       return;
     }
-    await returnCheckout(deps, batchId, { signal });
+    // 'busy': the folder is a terminal's, or 10db is stopping; the branch is settled when it is tried again.
+    if ((await returnCheckout(deps, batchId, { signal })) === 'busy') return;
     await settleBranch(deps, batchId).catch((error: unknown) => {
       deps.logger.warn(
         { batchId, err: error instanceof Error ? error.message : String(error) },
