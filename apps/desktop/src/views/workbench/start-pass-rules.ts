@@ -1,10 +1,12 @@
 import {
   AreaRole,
+  areaLabel,
+  pageLabel,
+  WHOLE_PROJECT_PAGE,
   BoardStatus,
   globsOverlap,
   PASS_PAGE_CAP_DEFAULT,
   PASS_PAGE_CAP_MAX,
-  pageLabel,
   passHeldAreas,
   TaskStatus,
   WorkspaceMode,
@@ -69,7 +71,8 @@ export function joinableTasks(
 
 /** A page area's label by its name, the name's own fallback when the project lacks the area. */
 export function pageLabelIn(areas: readonly AreaDef[], name: string): string {
-  return pageLabel(areas.find((a) => a.name === name) ?? { name });
+  const area = areas.find((a) => a.name === name) ?? { name };
+  return name === WHOLE_PROJECT_PAGE.name ? areaLabel(name, areas) : pageLabel(area);
 }
 
 /** The first pair of globs, one of each area, that can match the same file; the catch-all shares none. */

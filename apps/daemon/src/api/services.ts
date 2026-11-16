@@ -7,7 +7,12 @@ import type {
   ChatDto,
   ChatId,
   ChatModelsDto,
+  BriefRequest,
   ChatPatchInput,
+  DoItBriefDto,
+  DoItPreviewDto,
+  DoItRequest,
+  DoItResult,
   ProjectFileMatchDto,
   SessionStartDto,
   SessionsSettingsDto,
@@ -129,7 +134,7 @@ import type {
   WorkbenchSetupDto,
   PassDto,
   PassId,
-  PassOpenedDto,
+  PassOpenResponse,
   PassAbandonedDto,
   PassCloseAnswerDto,
   PassCloseContinueDto,
@@ -211,6 +216,8 @@ import type {
   TaskMove,
   TaskPatch,
   WorkstreamChangesDto,
+  ChangesScope,
+  TaskSessionDto,
   SkippedActionDto,
   WorkstreamDto,
   WorkstreamId,
@@ -384,7 +391,9 @@ export interface ApiServices extends PlanRecordServices {
    * given, else the task's description when it has one. Refused (409) for whatever the open itself
    * refuses. A pass runs on the project's own account, Claude or Codex.
    */
-  openPass(projectId: ProjectId, input: PassOpenRequest): Promise<PassOpenedDto>;
+  openPass(projectId: ProjectId, input: PassOpenRequest): Promise<PassOpenResponse>;
+  /** Cancels the open that waits for chats' turns; whether there was one. */
+  cancelPendingOpen(projectId: ProjectId): boolean;
   /** The pass as the Workbench reads it: its pages and every turn's timing. */
   passView(passId: PassId): PassViewDto;
   /**
@@ -612,7 +621,9 @@ export interface ApiServices extends PlanRecordServices {
   cancelWorkstream(id: WorkstreamId): Promise<WorkstreamDto>;
   retryWorkstream(id: WorkstreamId, note?: string): WorkstreamDto;
   /** The diff, commits and file counts of the workstream's work in its checkout, for the builder's check. */
-  workstreamChanges(id: WorkstreamId): Promise<WorkstreamChangesDto>;
+  workstreamChanges(id: WorkstreamId, scope?: ChangesScope): Promise<WorkstreamChangesDto>;
+  /** What a task's tab reads of it: where it works and what it came from. */
+  taskSession(taskId: TaskId): TaskSessionDto;
   /** What the run skipped and the questions it was answered at once, oldest first. */
   listWorkstreamSkips(id: WorkstreamId): SkippedActionDto[];
   /** With `recent`, only that many, the most recently updated first. */
@@ -667,6 +678,14 @@ export interface ApiServices extends PlanRecordServices {
   unarchiveChat(id: ChatId): ChatDto;
   /** Stops a chat's wait for Your folder: what it queued runs reading only. */
   stopChatWaiting(id: ChatId): ChatDto;
+  /** Asks the chat's agent for a task's brief (between turns only) and answers the brief the sheet shows now. */
+  askChatBrief(id: ChatId, input: BriefRequest): DoItBriefDto;
+  /** Cancels the request for a brief, stopping its turn when it is still the brief's. */
+  cancelChatBrief(id: ChatId): Promise<DoItBriefDto>;
+  /** What the Do It sheet shows: the brief, the uncommitted files, and each place with its refusal. */
+  doItPreview(id: ChatId): Promise<DoItPreviewDto>;
+  /** Hands the chat's work to a task in a separate copy, or to a pass of one in Your folder. */
+  doIt(id: ChatId, input: DoItRequest): Promise<DoItResult>;
   /** Who holds the project's checkout now, and the branch it is on. */
   projectFolder(projectId: ProjectId): Promise<FolderDto>;
   chatModels(projectId: ProjectId): ChatModelsDto;

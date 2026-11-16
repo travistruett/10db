@@ -236,7 +236,11 @@ export function TabStrip({
                       selected={selected}
                       width={widths?.[index] ?? null}
                       compact={compact}
-                      kindLine={`${projectName(tab)} · Chat${label === '' ? '' : ` · ${label} ${model}`.trimEnd()}`}
+                      kindLine={
+                        tab.kind === 'task'
+                          ? `${projectName(tab)} · Task · ${tab.task.place === 'pass' ? 'Your folder' : 'Separate copy'}`
+                          : `${projectName(tab)} · Chat${label === '' ? '' : ` · ${label} ${model}`.trimEnd()}`
+                      }
                       panelId={selected ? panelId(tab.key) : null}
                       onSelect={() => {
                         onSelect(tab);

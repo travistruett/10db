@@ -98,6 +98,16 @@ describe('WorkbenchScreen', () => {
     expect(screen.queryByRole('button', { name: /^Start/ })).toBeNull();
   });
 
+  it('shows a live pass before the setup, for a project with no page area', async () => {
+    server.use(...passHandlers());
+    await draw({
+      project: projectViewDto({ name: 'ampsio', areas: [{ name: 'src', globs: ['src/**'] }] }),
+      live: passViewDto({ rest: { wholeProject: true } }),
+    });
+    expect(await screen.findByTestId('workspace')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: /Set up ampsio/ })).toBeNull();
+  });
+
   it('offers Workbench Settings above the list while suggestions are left, and Back to Pages returns', async () => {
     server.use(...passHandlers());
     await draw({ setupCount: 2 });

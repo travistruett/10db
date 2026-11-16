@@ -41,6 +41,17 @@ export type FolderOutcome = (typeof FolderOutcome)[keyof typeof FolderOutcome];
 /** The notice a task in Your folder shows while a chat holds or waits for the folder. */
 export const FOLDER_HOLD_WAIT_NOTICE_KEY = 'folder-hold';
 
+/**
+ * What to do when a pass is refused because chats are mid-turn: stop their turns and open, or open when they
+ * have ended.
+ */
+export const PassWhenBusy = { StopTurns: 'stop_turns', Wait: 'wait' } as const;
+export type PassWhenBusy = (typeof PassWhenBusy)[keyof typeof PassWhenBusy];
+
+/** An open that waits for Your folder: the pass's name and what it waits for, in words. */
+export const PendingOpenDto = z.object({ name: z.string(), waitsFor: z.string() });
+export type PendingOpenDto = z.infer<typeof PendingOpenDto>;
+
 /** What a chat's send does when Your folder is held: wait for it, or run reading only. */
 export const FolderWhileHeld = { Wait: 'wait', ReadOnly: 'read_only' } as const;
 export type FolderWhileHeld = (typeof FolderWhileHeld)[keyof typeof FolderWhileHeld];
@@ -86,5 +97,7 @@ export const FolderDto = z.object({
   limits: z.array(z.enum(FolderLimit)),
   /** The name of the closed pass the limit waits on, when there is one. */
   limitPass: z.string().nullable(),
+  /** The pass open waiting for chats to end, or null. */
+  pendingOpen: PendingOpenDto.nullable(),
 });
 export type FolderDto = z.infer<typeof FolderDto>;

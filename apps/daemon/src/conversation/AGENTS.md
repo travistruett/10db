@@ -36,4 +36,8 @@
   `shape` or `runner`.
 
 - A session's `background_tasks` report is kept by `openSession` in memory (never stored): `ExploreEngine.view` reads it from the open session, so it is empty with no session, and each report emits a `conversation.state` event with `backgroundTasks: true` for the screen to read the view again.
+- `ExploreEngine.seal` ends a conversation that Do It handed to a task (reducer event `do_it`): it closes the session
+  and ends its row, so the session's token reaches nothing and `onState(sealed)` gives the folder hold back. It
+  refuses first for a taken-over conversation and touches nothing. A message body may carry `purpose: 'brief'` (the
+  brief request, which digests skip), and a notice may carry `handedTo` (the task the chat became).
 - `openTerminal`, `handBack` and `terminalFailed` move a conversation to and from `taken_over` (the reducer's rows, `explore-state.ts`); a message sent while taken over is stored held, with `holdStarts` keeping its turn from starting until Hand Back parks it on the folder (`releaseStarts` if Hand Back fails).

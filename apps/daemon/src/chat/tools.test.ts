@@ -8,13 +8,15 @@ import {
   ChatDto,
   ChatToolName,
   ConversationDto,
+  ConversationState,
+  DoItBriefDto,
   DecisionItem,
   PrincipleItem,
   ProjectDto,
   TaskDto,
   TaskId,
 } from '@10db/contracts';
-import { chatMadeTask, getDecisionDto, getPrinciple, listInbox } from '@10db/db';
+import { chatMadeTask, getDecisionDto, getPrinciple, listInbox, patchConversation } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { apiClient } from '../../test/api-client';
@@ -291,6 +293,40 @@ describe("a chat's tools on /mcp", () => {
     expect(openCards()).toEqual([]);
     expect(getPrinciple(running().state.db, rule.id).state).toBe('current');
     expect(getDecisionDto(running().state.db, decision.id).state).toBe('current');
+  });
+
+  it('keeps the brief the agent writes for Do It, and the sheet reads it back', async () => {
+    const chat = await newChat();
+    await agentTurn(chat, async (call) => {
+      await call('write_brief', {
+        title: 'Fix the login',
+        brief: 'Retry once on a 401.',
+        areas: ['src'],
+        acceptanceCriteria: ['A 401 retries once'],
+      });
+    });
+    const brief = await api.post(`/chats/${chat.id}/brief`, DoItBriefDto, {});
+    expect(brief).toMatchObject({
+      title: 'Fix the login',
+      text: 'Retry once on a 401.',
+      areas: ['src'],
+      criteria: ['A 401 retries once'],
+      source: 'agent',
+    });
+  });
+
+  it('refuses a brief once Do It has sealed the chat, and keeps nothing', async () => {
+    const chat = await newChat();
+    let said = '';
+    await agentTurn(chat, async (call) => {
+      running().state.write((ctx) => {
+        patchConversation(ctx, chat.conversationId, { state: ConversationState.Sealed });
+      });
+      said = await call('write_brief', { title: 'Late', brief: 'Too late.' });
+    });
+    expect(said).toContain('handed to a task');
+    const brief = await api.post(`/chats/${chat.id}/brief`, DoItBriefDto, {});
+    expect(brief.source).not.toBe('agent');
   });
 
   it("renames an agent-titled chat cut at a word, and leaves the builder's name", async () => {

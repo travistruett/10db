@@ -1,6 +1,9 @@
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  ACTIVE_STATES,
+  BriefReason,
+  BriefSource,
   CHAT_DEFAULT_TITLE,
   ChatTitleSource,
   ConflictError,
@@ -9,12 +12,14 @@ import {
   ConversationOwnerKind,
   ConversationProfile,
   ConversationState,
+  DoItPlace,
   cutTitle,
   FolderAsker,
   FolderWhileHeld,
   InvalidError,
   mintId,
   TASK_MESSAGE_MAX_CHARS,
+  TaskStatus,
   TASK_MESSAGE_PICTURES_MAX,
   TASK_MESSAGE_PICTURES_MAX_BYTES,
   type ChatCreateInput,
@@ -23,6 +28,7 @@ import {
   type ChatModelsDto,
   type ChatPatchInput,
   type ConversationId,
+  type DoItBriefDto,
   type ProjectId,
   type ShapeModelOption,
 } from '@10db/contracts';
@@ -31,6 +37,7 @@ import {
   chatOfConversation,
   chatView,
   getChat,
+  getTask,
   getConversation,
   getProject,
   hasItemOfKind,
@@ -38,6 +45,9 @@ import {
   insertConversation,
   insertFiles,
   insertItem,
+  latestWorkstreamOf,
+  listQueuedTurnStarters,
+  listItems,
   moveChatTab,
   openChats,
   patchConversation,
@@ -48,9 +58,14 @@ import {
   type ChatRow,
   type ConversationItemRow,
 } from '@10db/db';
+import type { Clock } from '../clock';
 import { keepBuilderMessage, type ExploreEngine, type PastedFile } from '../conversation';
 import type { StateStore } from '../events';
 import type { FolderHold, ServeResult } from '../folder-hold';
+import type { Logger } from '../log';
+import type { PendingOpens } from '../pass';
+import { briefFromChat, briefRequestText, briefTitle } from './brief';
+import type { Briefs } from './briefs';
 import { chatFolder } from './hooks';
 
 // Sessions spec §7.1, §10: a chat's life on the daemon. It is made with its conversation on the
@@ -62,6 +77,17 @@ const FIRST_LINE_TITLE_MAX = 40;
 
 /** What a message to an archived chat is refused with. */
 export const CHAT_ARCHIVED = 'This session is archived.';
+/** What Redo, archive and a second Do It are refused with while a pass's open has stopped the chat's turn. */
+export const DO_IT_UNDER_WAY =
+  'A pass is opening and has stopped this chat’s turn; try again once it has opened';
+/** The same refusal while Do It makes a task in a separate copy. */
+export const DO_IT_COPY_UNDER_WAY = 'Do It is already under way for this chat';
+/** What a send is refused with while Do It hands the chat's work to a task in a separate copy. */
+export const HANDING_OFF = 'This chat is handing its work to a task';
+/** What Do It and archive are refused with while a pass waits to open for the chat. */
+export const PENDING_OPEN_FOR_CHAT = 'A pass is waiting to open for this chat; Cancel it first';
+/** What archive is refused with while the task a chat was handed to is unfinished. */
+export const HANDED_TASK_RUNNING = 'The task this session was handed to is still running';
 /** What a model change while a turn runs is refused with. */
 export const CHANGE_MODEL_BETWEEN_TURNS = 'Change the model between turns.';
 /** What a model the account doesn't offer is refused with. */
@@ -123,6 +149,25 @@ export interface ChatService {
   /** The message stored queued and the chat touched, with no turn asked for: what a Redo posts. */
   post(conversationId: ConversationId, input: ChatMessageInput): ConversationItemRow;
   /**
+   * Asks the agent for a task's brief, between turns only: a reading-only turn that never takes the folder.
+   * Mid-turn, waiting for the folder or paused, nothing is sent and the sheet takes the chat read back.
+   */
+  askBrief(chatId: ChatId, draft?: string): void;
+  /** Cancels the request for a brief, stopping its turn when it is still the brief's. */
+  cancelBrief(chatId: ChatId): Promise<void>;
+  /** The brief the sheet shows now. */
+  briefOf(chatId: ChatId): DoItBriefDto;
+  /**
+   * Stops the chat's turn so a pass can open under it, keeping its queued messages parked: its starts stay
+   * held, its Stop answers at once and changes nothing, and Redo and archive are refused until the returned
+   * `release` runs, which lets what is queued run. Refused when the chat is already stopped for one.
+   */
+  stopForOpen(chatId: ChatId, place?: DoItPlace): Promise<() => void>;
+  /** Whether an open has stopped the chat's turn and not yet given its starts back. */
+  underWay(chatId: ChatId): boolean;
+  /** Seals the chat once Do It has handed its work to a task: its session ends and its brief is forgotten. */
+  seal(chatId: ChatId): Promise<void>;
+  /**
    * Waits for Your folder on the chat's behalf: each time it can be the chat's, its parked starters run. What
    * Hand Back does for the messages held while the chat was in the builder's terminal.
    */
@@ -141,7 +186,12 @@ export interface ChatServiceDeps {
   readonly state: StateStore;
   readonly engine: ExploreEngine;
   readonly folderHold: FolderHold;
+  /** A pass waiting to open names the chat that asked, and the chat can't be archived meanwhile. */
+  readonly pendingOpens: Pick<PendingOpens, 'get'>;
+  readonly briefs: Briefs;
+  readonly clock: Pick<Clock, 'now'>;
   readonly dataDir: string;
+  readonly log: Logger;
   readonly now: () => Date;
   /** The models a project's account offers for a conversation, and its default. */
   modelsOf(projectId: ProjectId): { default: string | null; offered: readonly ShapeModelOption[] };
@@ -161,6 +211,27 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
   const offered = (projectId: ProjectId, model: string): void => {
     if (!deps.modelsOf(projectId).offered.some((m) => m.model === model))
       throw new InvalidError(MODEL_NOT_OFFERED);
+  };
+
+  // Chats a pass's open has stopped, until it is done: Stop must not give back the starts it holds.
+  const stoppedForOpen = new Map<ChatId, DoItPlace>();
+  // Chats whose last request for a brief was sent as a turn of its own, until that turn ends.
+  const briefTurns = new Set<ChatId>();
+  const refuseWhileDoing = (chatId: ChatId): void => {
+    const place = stoppedForOpen.get(chatId);
+    if (place === undefined) return;
+    throw new ConflictError(place === DoItPlace.Worktree ? DO_IT_COPY_UNDER_WAY : DO_IT_UNDER_WAY);
+  };
+
+  // A chat sealed into a task of its own has nothing left to archive until that task ends: the tab it
+  // closed is the builder's only link to it.
+  const refuseWhileHandedTaskRuns = (chat: ChatRow): void => {
+    if (chat.taskId === null || chat.passId !== null) return;
+    // A task the builder removed or finished is over, whatever its last run reads.
+    if (getTask(state.db, chat.taskId).status !== TaskStatus.Open) return;
+    const run = latestWorkstreamOf(state.db, chat.taskId);
+    if (run === undefined || ACTIVE_STATES.includes(run.state))
+      throw new ConflictError(HANDED_TASK_RUNNING);
   };
 
   return {
@@ -243,6 +314,10 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       const archive = async (): Promise<ChatDto> => {
         const chat = getChat(state.db, id);
         if (chat.archivedAt !== null) return dtoOf(id);
+        refuseWhileDoing(id);
+        refuseWhileHandedTaskRuns(chat);
+        if (deps.pendingOpens.get(chat.projectId)?.chatId === id)
+          throw new ConflictError(PENDING_OPEN_FOR_CHAT);
         // The session ends first (a start cancelled, a turn stopped, a card withdrawn), so nothing it
         // does lands after the chat is archived; then the folder made only from its id goes.
         deps.folderHold.cancelWait(id);
@@ -267,26 +342,30 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     },
 
     send(conversationId, input, folder) {
+      // A chat handing its work to a task is sealed in a moment: nothing is left parked in it.
+      const doing = chatOfConversation(state.db, conversationId);
+      if (doing !== null && stoppedForOpen.get(doing.id) === DoItPlace.Worktree)
+        throw new ConflictError(HANDING_OFF);
       const item = post(conversationId, input);
       const chat = requireChat(conversationId);
-      const waiting = deps.folderHold.waiting(chat.id);
-      const parks = folder === FolderWhileHeld.Wait && (waiting || mustWait(chat));
-      // A read-only send applies to everything queued, and to the turn that runs it even if the folder frees.
-      if (!parks && waiting) deps.folderHold.cancelWait(chat.id);
-      // A running turn's chained successor inherits its profile and starts without asking the folder, so a
-      // choice made then would wait for some later turn.
-      if (folder === FolderWhileHeld.ReadOnly && !BUSY.has(engine.view(conversationId).state))
-        deps.folderHold.chooseReadOnly(chat.id);
-      // Starts are held before the queue is asked, so the message parks.
-      if (parks) engine.holdStarts(conversationId);
-      engine.queued(conversationId);
-      if (parks) watchFolder(chat);
-      else if (waiting) engine.releaseStarts(conversationId);
+      // A message from the builder replaces a brief request. A brief turn still running reads only, so it is
+      // stopped first and the message runs as its own turn, taking the folder like any other.
+      deps.briefs.endAsk(chat.id);
+      if (briefTurnRunning(chat)) {
+        briefTurns.delete(chat.id);
+        engine.holdStarts(conversationId);
+        void stopHeld(conversationId, () => dispatch(chat, conversationId, folder));
+        return item;
+      }
+      dispatch(chat, conversationId, folder);
       return item;
     },
 
     async stop(conversationId) {
       const chat = requireChat(conversationId);
+      // The turn is already stopping, and the open's hold on its starts is not Stop's to undo.
+      if (stoppedForOpen.has(chat.id)) return;
+      briefTurns.delete(chat.id);
       // The parked start is dropped by the stop; the hold on new starts goes with the wait.
       deps.folderHold.cancelWait(chat.id);
       await engine.stop(conversationId);
@@ -295,6 +374,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
     sendNow(conversationId) {
       const chat = requireChat(conversationId);
+      briefTurns.delete(chat.id);
       if (deps.folderHold.waiting(chat.id)) {
         stopWaiting(chat);
         return;
@@ -312,6 +392,8 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
     async redo(conversationId, input, folder) {
       const chat = requireChat(conversationId);
+      refuseWhileDoing(chat.id);
+      briefTurns.delete(chat.id);
       deps.folderHold.cancelWait(chat.id);
       await engine.stop(conversationId);
       engine.releaseStarts(conversationId);
@@ -325,10 +407,179 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
     post: (conversationId, input) => post(conversationId, input),
 
+    async seal(chatId) {
+      const chat = getChat(state.db, chatId);
+      await engine.seal(chat.conversationId);
+      deps.briefs.forget(chatId);
+      briefTurns.delete(chatId);
+    },
+
+    underWay: (chatId) => stoppedForOpen.has(chatId),
+
+    async stopForOpen(chatId, place = DoItPlace.Here) {
+      const chat = getChat(state.db, chatId);
+      refuseWhileDoing(chatId);
+      stoppedForOpen.set(chatId, place);
+      // Starts are held first, so a chained or queued message parks instead of beginning a turn.
+      engine.holdStarts(chat.conversationId);
+      try {
+        deps.folderHold.cancelWait(chatId);
+        await engine.stop(chat.conversationId);
+        await engine.settled(chat.conversationId);
+      } catch (error) {
+        stoppedForOpen.delete(chatId);
+        engine.releaseStarts(chat.conversationId);
+        throw error;
+      }
+      return () => {
+        if (!stoppedForOpen.delete(chatId)) return;
+        engine.releaseStarts(chat.conversationId);
+      };
+    },
+
+    askBrief(chatId, draft) {
+      const chat = getChat(state.db, chatId);
+      refuseWhileDoing(chatId);
+      if (!briefAskable(chat)) return;
+      // A brief already written is kept for the sheet, and a request still waiting is not asked twice.
+      if (deps.briefs.written(chat.id) !== null) return;
+      if (deps.briefs.asked(chat.id) !== null && !deps.briefs.expired(chat.id)) return;
+      // Posted first: a chat that can't take a message is never marked as asked.
+      post(
+        chat.conversationId,
+        { text: briefRequestText(draft), mentions: [], pictures: [] },
+        'brief',
+      );
+      deps.briefs.ask(chat.id);
+      briefTurns.add(chat.id);
+      // The turn reads only, so it never runs on a writable hold, and a brief is never chained.
+      deps.folderHold.chooseReadOnly(chat.id);
+      engine.queued(chat.conversationId);
+    },
+
+    async cancelBrief(chatId) {
+      const chat = getChat(state.db, chatId);
+      deps.briefs.endAsk(chat.id);
+      // Only the brief's own turn is stopped: a turn the builder began since is theirs.
+      if (!briefTurnRunning(chat)) return;
+      briefTurns.delete(chat.id);
+      await engine.stop(chat.conversationId);
+    },
+
+    briefOf(chatId) {
+      const chat = getChat(state.db, chatId);
+      const written = deps.briefs.written(chat.id);
+      if (written !== null)
+        return {
+          title: written.title,
+          text: written.brief,
+          areas: written.areas ?? [],
+          criteria: written.acceptanceCriteria ?? [],
+          source: BriefSource.Agent,
+          reason: null,
+          writing: false,
+        };
+      const askedAt = deps.briefs.asked(chat.id);
+      const expired = deps.briefs.expired(chat.id);
+      const at = engine.view(chat.conversationId).state;
+      const items = listItems(state.db, chat.conversationId);
+      const fromChat = {
+        title: briefTitle(chatView(state.db, chat.id).title),
+        text: briefFromChat(items),
+        areas: [],
+        criteria: [],
+        source: BriefSource.Chat,
+        writing: false,
+      };
+      if (askedAt !== null && !expired)
+        return { ...fromChat, title: '', text: '', source: null, reason: null, writing: true };
+      if (askedAt !== null) return { ...fromChat, reason: BriefReason.Timeout };
+      if (at === ConversationState.PausedAccount)
+        return { ...fromChat, reason: BriefReason.Paused };
+      return { ...fromChat, reason: briefAskable(chat) ? null : BriefReason.MidTurn };
+    },
+
     watchFolder: (conversationId) => {
       watchFolder(requireChat(conversationId));
     },
   };
+
+  /**
+   * Whether the agent can be asked for a brief now: between turns, with nothing waiting for the folder, no
+   * start held and no message of the builder's not yet delivered, so the request never shares a turn with it.
+   */
+  function briefAskable(chat: ChatRow): boolean {
+    const between: readonly ConversationState[] = [
+      ConversationState.IdleCold,
+      ConversationState.IdleWarm,
+      ConversationState.EndedError,
+    ];
+    return (
+      between.includes(engine.view(chat.conversationId).state) &&
+      !deps.folderHold.waiting(chat.id) &&
+      !engine.parked(chat.conversationId) &&
+      listQueuedTurnStarters(state.db, chat.conversationId).length === 0
+    );
+  }
+
+  /**
+   * Stops the turn with starts held, runs `next` (the queue's half of the send, so its folder choice is made
+   * before anything starts, and whether it parked the message), then lets the starts go unless an open holds
+   * them or the message waits for the folder.
+   */
+  async function stopHeld(conversationId: ConversationId, next: () => boolean): Promise<void> {
+    const chat = chatOfConversation(state.db, conversationId);
+    try {
+      await engine.stop(conversationId);
+      await engine.settled(conversationId);
+    } catch {
+      // A stop that fails leaves the turn as it was; the message still runs after it.
+    }
+    let parked = false;
+    try {
+      parked = next();
+    } catch (error) {
+      deps.log.warn(
+        { conversationId, err: error instanceof Error ? error.message : String(error) },
+        'a message sent during a brief turn could not be queued',
+      );
+    } finally {
+      // The starts of a chat an open stopped are held for the open, which gives them back itself.
+      // A message that waits for the folder keeps its starts held; the wait releases them.
+      if (!parked && (chat === null || !stoppedForOpen.has(chat.id)))
+        engine.releaseStarts(conversationId);
+    }
+  }
+
+  /** Whether the turn running now is the one that was asked for a brief; forgets the mark once it ended. */
+  function briefTurnRunning(chat: ChatRow): boolean {
+    if (!briefTurns.has(chat.id)) return false;
+    if (BUSY.has(engine.view(chat.conversationId).state)) return true;
+    briefTurns.delete(chat.id);
+    return false;
+  }
+
+  /** The queue's half of a send: the folder choice, the wait for the folder, and the turn asked for. */
+  function dispatch(
+    chat: ChatRow,
+    conversationId: ConversationId,
+    folder: FolderWhileHeld | undefined,
+  ): boolean {
+    const waiting = deps.folderHold.waiting(chat.id);
+    const parks = folder === FolderWhileHeld.Wait && (waiting || mustWait(chat));
+    // A read-only send applies to everything queued, and to the turn that runs it even if the folder frees.
+    if (!parks && waiting) deps.folderHold.cancelWait(chat.id);
+    // A running turn's chained successor inherits its profile and starts without asking the folder, so a
+    // choice made then would wait for some later turn.
+    if (folder === FolderWhileHeld.ReadOnly && !BUSY.has(engine.view(conversationId).state))
+      deps.folderHold.chooseReadOnly(chat.id);
+    // Starts are held before the queue is asked, so the message parks.
+    if (parks) engine.holdStarts(conversationId);
+    engine.queued(conversationId);
+    if (parks) watchFolder(chat);
+    else if (waiting) engine.releaseStarts(conversationId);
+    return parks;
+  }
 
   function requireChat(conversationId: ConversationId): ChatRow {
     const chat = chatOfConversation(state.db, conversationId);
@@ -366,10 +617,17 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     if (!engine.releaseStarts(chat.conversationId)) engine.sendNow(chat.conversationId);
   }
 
-  function post(conversationId: ConversationId, input: ChatMessageInput): ConversationItemRow {
+  function post(
+    conversationId: ConversationId,
+    input: ChatMessageInput,
+    purpose?: 'brief',
+  ): ConversationItemRow {
     const chat = chatOfConversation(state.db, conversationId);
     if (chat === null) throw new ConflictError('This conversation is no chat’s');
     if (chat.archivedAt !== null) throw new ConflictError(CHAT_ARCHIVED);
+    // A sealed chat runs no turn again: a message kept in it would wait for ever.
+    if (getConversation(state.db, conversationId).state === ConversationState.Sealed)
+      throw new ConflictError(HANDING_OFF);
     return keepBuilderMessage(input, {
       limits: {
         maxChars: TASK_MESSAGE_MAX_CHARS,
@@ -383,13 +641,15 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
           const row = insertItem(ctx, conversationId, {
             author: ConversationItemAuthor.Builder,
             kind: ConversationItemKind.Message,
-            body:
-              input.mentions.length === 0
-                ? { text: body }
-                : { text: body, mentions: [...input.mentions] },
+            body: {
+              text: body,
+              ...(input.mentions.length === 0 ? {} : { mentions: [...input.mentions] }),
+              ...(purpose === undefined ? {} : { purpose }),
+            },
           });
           insertFiles(ctx, conversationId, row.id, files);
-          if (first) setChatTitle(ctx, chat.id, firstMessageTitle(body), ChatTitleSource.Agent);
+          if (first && purpose === undefined)
+            setChatTitle(ctx, chat.id, firstMessageTitle(body), ChatTitleSource.Agent);
           touchChat(ctx, chat.id, ctx.now);
           return row;
         }),

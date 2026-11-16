@@ -1,7 +1,7 @@
 import { InvalidError } from '@10db/contracts';
 import { insertSession } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
-import { openPassWorld, type PassWorld } from '../../test/pass-world';
+import { openPassWorld, openWholeProjectWorld, type PassWorld } from '../../test/pass-world';
 import { silentLogger } from '../log';
 import { passKeptRef } from '../pass';
 import { createToolHandlers } from './tools';
@@ -85,5 +85,27 @@ describe('the commit tool in a pass lane', () => {
       tools.commit({ opId: 'op-pass-3', paths: ['src/people/page.tsx'], message: 'People' }),
     ).rejects.toThrow(InvalidError);
     expect(w.h.git$('for-each-ref', 'refs/10db/passes/')).not.toContain(w.settings.id);
+  });
+});
+
+describe('the commit tool in a pass of one', () => {
+  it("keeps any file of the whole project, and refuses a hazard's file without its claim", async () => {
+    w = await openWholeProjectWorld();
+    const tools = settingsTools(w);
+    w.write('src/shared.ts', 'a shared edit\n');
+    w.write('pnpm-lock.yaml', 'lock: 2\n');
+
+    const kept = await tools.commit({
+      opId: 'op-one-1',
+      paths: ['src/shared.ts'],
+      message: 'Shared',
+    });
+    await expect(
+      tools.commit({ opId: 'op-one-2', paths: ['pnpm-lock.yaml'], message: 'Lock' }),
+    ).rejects.toThrow(InvalidError);
+
+    const ref = passKeptRef(w.opened.pass.id, w.settings.id);
+    expect(kept.sha).toBe(w.h.git$('rev-parse', ref));
+    expect(w.h.git$('show', `${ref}:src/shared.ts`)).toBe('a shared edit');
   });
 });

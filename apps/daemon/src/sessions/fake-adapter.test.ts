@@ -13,6 +13,7 @@ import {
   type LaneProfile,
   type LaneSessionSpec,
   type SessionEvent,
+  type SessionHandle,
   type ToolRequest,
 } from './index';
 
@@ -524,5 +525,31 @@ describe('a chat session from the book', () => {
     await handle.stop();
     const said = events.find((e) => e.type === 'message');
     expect(said !== undefined && 'text' in said && said.text === 'From the book.').toBe(scripted);
+  });
+
+  it('runs a resumed session, whose prompt names no line of the chat, as the next script of its chat', async () => {
+    const twoSessions: FakeScriptBook = {
+      'Chat: Why does login fail after sleep?': [
+        [{ do: 'say', text: 'First.' }, { do: 'turn_complete' }],
+        [{ do: 'say', text: 'Second.' }, { do: 'turn_complete' }],
+      ],
+    };
+    const adapter = new FakeAdapter(twoSessions);
+    const said = async (handle: SessionHandle): Promise<string | null> => {
+      for await (const e of handle.events) {
+        if (e.type === 'message') {
+          await handle.stop();
+          return e.text;
+        }
+      }
+      return null;
+    };
+    const first = adapter.open(chatSpec('[m:cvi_1] Why does login fail after sleep?'));
+    expect(await said(first)).toBe('First.');
+    const resumed = adapter.open({
+      ...chatSpec('[m:cvi_2] Write the brief.'),
+      resumeProviderSessionId: 'fake-shape-1',
+    });
+    expect(await said(resumed)).toBe('Second.');
   });
 });

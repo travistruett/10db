@@ -57,6 +57,30 @@ describe('sessionKey', () => {
       place: off,
       want: null,
     },
+    {
+      name: '⌘⇧↩ is Do It',
+      press: press('Enter', { meta: true, shift: true }),
+      place: on,
+      want: { kind: 'do_it' },
+    },
+    {
+      name: '⌘⇧↩ off Sessions',
+      press: press('Enter', { meta: true, shift: true }),
+      place: off,
+      want: null,
+    },
+    {
+      name: '⌘⇧D is Changes',
+      press: press('D', { meta: true, shift: true }),
+      place: on,
+      want: { kind: 'changes' },
+    },
+    {
+      name: '⌘⇧D off Sessions',
+      press: press('D', { meta: true, shift: true }),
+      place: off,
+      want: null,
+    },
     { name: '⌘1', press: press('1', { meta: true }), place: on, want: { kind: 'go', index: 0 } },
     { name: '⌘8', press: press('8', { meta: true }), place: on, want: { kind: 'go', index: 7 } },
     {

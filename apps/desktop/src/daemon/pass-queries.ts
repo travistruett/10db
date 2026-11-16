@@ -4,7 +4,7 @@ import {
   PassAbandonedDto,
   PassDto,
   passHoldsTasks,
-  PassOpenedDto,
+  PassOpenResponse,
   PassStartDto,
   PassTurnWithFilesDto,
   PassViewDto,
@@ -151,6 +151,15 @@ export function useLivePass(projectId: ProjectId) {
   });
 }
 
+/** One pass of the live list by id: null when it is not there, undefined until the list is read. */
+export function usePassView(passId: PassId | null) {
+  const { client } = useDaemon();
+  return useQuery({
+    ...livePassesOptions(client),
+    select: (passes) => passes.find((view) => view.pass.id === passId) ?? null,
+  });
+}
+
 /** What Start Pass and Add Page offer: the project's pages, what is changed in them, what it lacks. */
 export function usePassStart(projectId: ProjectId, enabled: boolean) {
   const { client } = useDaemon();
@@ -231,7 +240,7 @@ export function useOpenPass(projectId: ProjectId) {
     mutationFn: async (request: PassOpenRequest) =>
       readJson(
         await client.projects[':projectId'].passes.$post({ param: { projectId }, json: request }),
-        PassOpenedDto,
+        PassOpenResponse,
       ),
     onSuccess: refetch,
   });

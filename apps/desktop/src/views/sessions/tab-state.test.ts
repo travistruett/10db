@@ -84,9 +84,9 @@ describe('tabState', () => {
     expect(tabState(input)).toBe(want);
   });
 
-  it('counts needs you and an error for the badge and ⌘J, and no other state', () => {
+  it('counts needs you, a ready page and an error for the badge and ⌘J, and no other state', () => {
     const counted = Object.values(TabState).filter(needsYou);
-    expect(counted).toEqual([TabState.NeedsYou, TabState.Error]);
+    expect(counted).toEqual([TabState.NeedsYou, TabState.Ready, TabState.Error]);
   });
 });
 

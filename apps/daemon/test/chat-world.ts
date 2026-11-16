@@ -6,6 +6,7 @@ import {
   type DaemonEvent,
   type Effort,
   type ProjectDto,
+  type ProjectInput,
 } from '@10db/contracts';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
@@ -13,12 +14,15 @@ import { createTestStore, seedProject, type Store } from '@10db/db';
 import { ManualClock } from '../src/clock';
 import {
   chatHooks,
+  createBriefs,
   createChatLiveSessions,
+  type Briefs,
   createChatService,
   type ChatHooksDeps,
   type ChatService,
 } from '../src/chat';
 import { createFolderHold, type FolderHold } from '../src/folder-hold';
+import { createPendingOpens } from '../src/pass';
 import { createExploreEngine, pictureLimitsFor, type ExploreEngine } from '../src/conversation';
 import { createEventBus, createLiveFrames, createStateStore, type StateStore } from '../src/events';
 import { createInboxService, type InboxService } from '../src/inbox';
@@ -42,6 +46,7 @@ export interface ChatWorld {
   readonly adapter: FakeAdapter;
   readonly clock: ManualClock;
   readonly chat: ChatService;
+  readonly briefs: Briefs;
   readonly folderHold: FolderHold;
   readonly inbox: InboxService;
   readonly project: ProjectDto;
@@ -87,13 +92,15 @@ export function chatWorld(
     readonly over?: ChatWorld;
     /** The project's checkout the session works in: a real repository, where a test reads what landed. */
     readonly checkout?: string;
+    /** The project's own fields, such as the real `repoPath` a git-reading test needs. */
+    readonly project?: Partial<ProjectInput>;
   } = {},
 ): ChatWorld {
   const { store, close } =
     opts.over === undefined
       ? createTestStore()
       : { store: opts.over.store, close: () => undefined };
-  const project = opts.over?.project ?? seedProject(store, { name: 'alpha' });
+  const project = opts.over?.project ?? seedProject(store, { name: 'alpha', ...opts.project });
   const bus = createEventBus();
   const events: DaemonEvent[] = [];
   bus.subscribe((e) => events.push(e));
@@ -179,12 +186,17 @@ export function chatWorld(
       ...(opts.tendb === undefined ? {} : { judge: opts.tendb({ store }) }),
     }),
   );
+  const briefs = createBriefs(clock);
   let takeoverService: TakeoverService | null = null;
   const chat = createChatService({
     state,
     engine,
     folderHold,
+    pendingOpens: createPendingOpens({ state }),
+    briefs,
+    clock,
     dataDir: dir.path,
+    log: silentLogger,
     now: () => clock.now(),
     modelsOf: () => ({
       default: 'claude-opus-5-5',
@@ -288,6 +300,7 @@ export function chatWorld(
     adapter,
     clock,
     chat,
+    briefs,
     folderHold,
     inbox,
     project,

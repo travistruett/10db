@@ -1,4 +1,5 @@
 import {
+  ChangesScope,
   BatchDto,
   AgentSkillStatus,
   BoardColumnDto,
@@ -58,8 +59,8 @@ export const queryKeys = {
   inbox: ['inbox'],
   // Under `inbox`, so the events that refresh the open cards refresh these too.
   inboxResolved: ['inbox', 'resolved'],
-  workstreamChanges: (id: WorkstreamId | undefined, head: string | null) =>
-    ['workstream-changes', id, head] as const,
+  workstreamChanges: (id: WorkstreamId | undefined, head: string | null, scope: ChangesScope) =>
+    ['workstream-changes', id, head, scope] as const,
   keepAwake: ['keep-awake'],
   agentSkill: ['agent-skill'],
   lanePermissions: ['lane-permissions'],
@@ -171,16 +172,20 @@ export function useWorkstreams(filter: { readonly active: boolean }) {
  * What a workstream changed since it started: the diff a finished, ungated task is checked by. It is
  * keyed by the head the card names, so a new round never shows the previous round's diff.
  */
-export function useWorkstreamChanges(id: WorkstreamId | undefined, head: string | null) {
+export function useWorkstreamChanges(
+  id: WorkstreamId | undefined,
+  head: string | null,
+  scope: ChangesScope = ChangesScope.All,
+) {
   const { client } = useDaemon();
   return useQuery({
-    queryKey: queryKeys.workstreamChanges(id, head),
+    queryKey: queryKeys.workstreamChanges(id, head, scope),
     queryFn:
       id === undefined
         ? skipToken
         : async () =>
             readJson(
-              await client.workstreams[':id'].changes.$get({ param: { id } }),
+              await client.workstreams[':id'].changes.$get({ param: { id }, query: { scope } }),
               WorkstreamChangesDto,
             ),
   });

@@ -1,6 +1,7 @@
-import { ConversationId, type ChatDto, type InboxItemDto } from '@10db/contracts';
+import { ConversationId, type ChatDto, type InboxItemDto, type TaskId } from '@10db/contracts';
 import { Anchor, Badge, Text } from '@mantine/core';
 import { useOpenChats, useRecentChats } from '../../daemon/chat-queries';
+import { useWorkstreams } from '../../daemon/queries';
 import { useOpenSession } from '../sessions/open-session';
 
 /** The chat a card was raised by, when its detail names a chat's conversation. */
@@ -41,4 +42,15 @@ export function OpenSessionLink({ chat }: { readonly chat: ChatDto }) {
       Open Session
     </Anchor>
   );
+}
+
+/**
+ * The task a card's lane works on, for a card a task's run raised: Open Session then opens the task's tab.
+ * A card that names no workstream has none.
+ */
+export function useTaskOfCard(item: InboxItemDto): TaskId | null {
+  const workstreamId = item.targets[0]?.workstreamId;
+  const workstreams = useWorkstreams({ active: true });
+  if (workstreamId === undefined) return null;
+  return workstreams.data?.find((w) => w.id === workstreamId)?.taskId ?? null;
 }

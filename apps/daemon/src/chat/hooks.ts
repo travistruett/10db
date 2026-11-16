@@ -62,6 +62,7 @@ import {
   projectLiveSystems,
   startingJudge,
 } from '../trust';
+import { digestText } from './brief';
 import { judgeChatCall, type ChatFolder } from './confinement';
 import { JUDGED_CHAT_TOOLS } from './git-rule';
 import type { ChatLiveSessions } from './live-sessions';
@@ -627,20 +628,9 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
   };
 }
 
-/** The most characters of the conversation a fresh session is told, newest kept. */
-const DIGEST_MAX_CHARS = 12_000;
-
 /** What a fresh session is told of the chat so far: the builder's messages and the agent's replies. */
 export function chatDigest(state: StateStore, conversationId: ConversationId): string {
-  const lines: string[] = [];
-  for (const item of listItems(state.db, conversationId, {})) {
-    if (item.kind === ConversationItemKind.Message)
-      lines.push(`Builder: ${parseItemBody(item.kind, item.body).text}`);
-    else if (item.kind === ConversationItemKind.AgentMessage && !item.partial)
-      lines.push(`You: ${parseItemBody(item.kind, item.body).text}`);
-  }
-  if (lines.length === 0) return '';
-  let text = lines.join('\n\n');
-  if (text.length > DIGEST_MAX_CHARS) text = `…${text.slice(text.length - DIGEST_MAX_CHARS)}`;
+  const text = digestText(listItems(state.db, conversationId, {}));
+  if (text === '') return '';
   return `This chat continues in a fresh session. What was said so far:\n\n${text}`;
 }

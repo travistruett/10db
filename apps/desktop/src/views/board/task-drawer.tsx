@@ -1,4 +1,5 @@
 import {
+  areaLabel,
   isTerminal,
   NEW_TASK_NO_AREAS,
   NEW_TASK_NO_CRITERIA,
@@ -38,6 +39,7 @@ import {
 } from '@mantine/core';
 import { useState } from 'react';
 import { OpenConversation } from '../shape/open-conversation';
+import { OpenTaskLink } from '../sessions/open-task-link';
 import { PlanContextDisclosure } from './plan-context-disclosure';
 import { TaskSizeLine } from '../shape/task-size-line';
 import {
@@ -450,6 +452,7 @@ export function TaskDrawer({
               {onOpenConversation ? (
                 <OpenConversation target={{ taskId: task.id }} onOpen={onOpenConversation} />
               ) : null}
+              <OpenTaskLink taskId={task.id} projectId={task.projectId} />
               <CopyTaskId id={task.id} />
             </Stack>
           </Tabs.Panel>
@@ -490,7 +493,7 @@ export function TaskDrawer({
                   <Group gap={6}>
                     {task.areas.map((area) => (
                       <Badge key={area} size="sm" variant="light" color="gray" tt="none" fw={500}>
-                        {area}
+                        {areaLabel(area, [])}
                       </Badge>
                     ))}
                   </Group>

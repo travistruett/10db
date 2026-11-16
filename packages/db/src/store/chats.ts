@@ -2,7 +2,9 @@ import {
   CHAT_DEFAULT_TITLE,
   ChatMode,
   ChatTitleSource,
+  ConversationItemAuthor,
   ConversationItemKind,
+  HandedToNotice,
   ConversationState,
   EventType,
   mintId,
@@ -11,11 +13,13 @@ import {
   WorkstreamState,
   type ChatId,
   type ConversationId,
+  type PassId,
   type ProjectId,
   type TaskId,
 } from '@10db/contracts';
 import { and, asc, desc, eq, gte, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 import * as schema from '../schema';
+import { insertItem, listItems } from './conversation-items';
 import type { DbReader, WriteContext } from './store';
 
 // Sessions spec §7.1, §9.1: a chat's row (a tab of its own over a conversation), its place in the
@@ -229,6 +233,106 @@ export function recordChatTask(ctx: WriteContext, chatId: ChatId, taskId: TaskId
     .onConflictDoNothing()
     .run();
   changed(ctx, row);
+}
+
+/**
+ * Hands the chat's work to a task (Do It), in the caller's write: the chat's `task_id` (and `pass_id` for a pass
+ * of one), its mode, and a `chat_tasks` row, so Recent counts the task as filed and the chat's `edit_task`
+ * reaches it. Called again with the same task, it changes nothing more.
+ */
+export function linkChatToTask(
+  ctx: WriteContext,
+  chatId: ChatId,
+  input: { readonly taskId: TaskId; readonly passId: PassId | null },
+): void {
+  const row = getChat(ctx.tx, chatId);
+  ctx.tx
+    .update(schema.chats)
+    .set({
+      mode: ChatMode.HandsOn,
+      taskId: input.taskId,
+      passId: input.passId,
+      updatedAt: ctx.now,
+    })
+    .where(eq(schema.chats.id, chatId))
+    .run();
+  ctx.tx
+    .insert(schema.chatTasks)
+    .values({ chatId, taskId: input.taskId, createdAt: ctx.now })
+    .onConflictDoNothing()
+    .run();
+  changed(ctx, row);
+}
+
+/**
+ * Puts a chat back as it was before `linkChatToTask`, for a start that was refused: explore mode, no task, no
+ * pass. The `chat_tasks` row goes too, since the task it names is removed with it.
+ */
+export function unlinkChatFromTask(ctx: WriteContext, chatId: ChatId, taskId: TaskId): void {
+  const row = getChat(ctx.tx, chatId);
+  ctx.tx
+    .update(schema.chats)
+    .set({ mode: ChatMode.Explore, taskId: null, passId: null, updatedAt: ctx.now })
+    .where(eq(schema.chats.id, chatId))
+    .run();
+  ctx.tx
+    .delete(schema.chatTasks)
+    .where(and(eq(schema.chatTasks.chatId, chatId), eq(schema.chatTasks.taskId, taskId)))
+    .run();
+  changed(ctx, row);
+}
+
+/**
+ * Stores the notice that Do It handed the chat's work to a task, in the caller's write, and with `closeTab`
+ * takes the chat's tab away, since the task's tab takes its place. Stored once per task.
+ */
+export function storeHandedTo(
+  ctx: WriteContext,
+  chatId: ChatId,
+  notice: HandedToNotice,
+  closeTab: boolean,
+): void {
+  const row = getChat(ctx.tx, chatId);
+  const stored = listItems(ctx.tx, row.conversationId).some((item) => {
+    if (item.kind !== ConversationItemKind.Notice) return false;
+    const parsed = HandedToNotice.safeParse(item.body);
+    return parsed.success && parsed.data.taskId === notice.taskId;
+  });
+  if (!stored)
+    insertItem(ctx, row.conversationId, {
+      author: ConversationItemAuthor.System,
+      kind: ConversationItemKind.Notice,
+      body: notice,
+    });
+  if (closeTab) placeTab(ctx, chatId, null);
+  changed(ctx, row);
+}
+
+/** Chats whose work Do It handed to a task in a separate copy: linked to a task with no pass of their own. */
+export function chatsHandedToCopies(db: DbReader): ChatRow[] {
+  return db
+    .select()
+    .from(schema.chats)
+    .where(
+      and(
+        eq(schema.chats.mode, ChatMode.HandsOn),
+        isNull(schema.chats.passId),
+        isNotNull(schema.chats.taskId),
+      ),
+    )
+    .all();
+}
+
+/** The chat Do It made the task from: the latest to file it, or undefined for a task no chat filed. */
+export function chatThatMadeTask(db: DbReader, taskId: TaskId): ChatRow | undefined {
+  const link = db
+    .select({ chatId: schema.chatTasks.chatId })
+    .from(schema.chatTasks)
+    .where(eq(schema.chatTasks.taskId, taskId))
+    .orderBy(desc(schema.chatTasks.createdAt))
+    .limit(1)
+    .get();
+  return link === undefined ? undefined : getChat(db, link.chatId);
 }
 
 export function chatMadeTask(db: DbReader, chatId: ChatId, taskId: TaskId): boolean {

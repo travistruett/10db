@@ -37,7 +37,7 @@ import {
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { waitFor } from '../../test/fixtures';
-import { openPassWorld, type PassWorld } from '../../test/pass-world';
+import { openPassWorld, openWholeProjectWorld, type PassWorld } from '../../test/pass-world';
 import { openPass } from '../delivery';
 import type { Git } from '../git';
 import {
@@ -601,6 +601,32 @@ describe('abandonPass', () => {
         "Your folder was on main, not on the pass's branch, so the page's files were left as they are.",
       );
     });
+  });
+
+  it('abandons a pass of one: the uncommitted file is back as it was, its task is retired and the card says "Whole project"', async () => {
+    const one = await openWholeProjectWorld({
+      before: ({ write }) => {
+        write('notes.md', 'before the pass\n');
+      },
+    });
+    w = one;
+    one.startTurn(one.task);
+    one.h.commit('src/landed.ts', 'landed\n');
+    one.write('notes.md', 'before the pass\nand in the turn\n');
+    one.write('src/a.ts', 'a\n');
+
+    const result = await abandonPass(deps(), one.opened.pass.id);
+
+    expect(result.folder).toEqual({ branch: one.branch, returned: false });
+    expect(read('notes.md')).toBe('before the pass\n');
+    expect(existsSync(join(one.h.repo, 'src/a.ts'))).toBe(false);
+    expect(getTask(one.h.store.db, one.task.id)).toMatchObject({
+      passId: null,
+      status: 'cancelled',
+    });
+    const [card] = abandonCards();
+    if (!card) throw new Error('no Abandon card');
+    expect(card.body).toContain('Discards: Whole project (their changes are deleted).');
   });
 
   it('leaves the folder on the branch that holds landed work, with a card whose answer moves it home', async () => {

@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import {
   ConflictError,
   ConversationItemKind,
+  DoItPlace,
   mintId,
   PassState,
   UpstreamError,
@@ -206,11 +207,9 @@ describe('Hand Back', () => {
     expect(w.folderHold.holdsTurn(chat.id)).toBe(false);
     // 10db's git work waits for the terminal.
     const controller = new AbortController();
-    const waiting = w.folderHold.reserveGitWhenFree(
-      w.project.id,
-      'a switch back',
-      controller.signal,
-    );
+    const waiting = w.folderHold.reserveGitWhenFree(w.project.id, 'a switch back', {
+      signal: controller.signal,
+    });
     await w.takeover.handBack(chat.conversationId);
     // The git work holds the folder first; the held message is not running yet.
     const handed = await waiting;
@@ -403,6 +402,41 @@ describe('Open while a task holds Your folder', () => {
     );
     expect(stateOf(chat)).toBe('idle_warm');
     expect(existsSync(folderOf(chat))).toBe(false);
+  });
+});
+
+describe('Open while Do It is under way for the chat', () => {
+  // A chat in the terminal can't be sealed, so a Do It that has stopped the chat would be left half done.
+  const DOING_IT = 'Do It is under way for this chat';
+
+  it.each([DoItPlace.Worktree, DoItPlace.Here])(
+    'is refused, in the preview too, for %s, and nothing is written',
+    async (place) => {
+      w = chatWorld();
+      const chat = await talked();
+      const release = await w.chat.stopForOpen(chat.id, place);
+      expect((await w.takeover.preview(chat.conversationId)).refusal).toBe(DOING_IT);
+      await expect(w.takeover.open(chat.conversationId)).rejects.toThrow(DOING_IT);
+      expect(stateOf(chat)).not.toBe('taken_over');
+      expect(existsSync(folderOf(chat))).toBe(false);
+      release();
+    },
+  );
+
+  it('is refused when Do It begins while the open prepares, and nothing is left', async () => {
+    w = chatWorld();
+    const chat = await talked();
+    const preparing = gate();
+    w.terminal.prepareGate = preparing.promise;
+    const opening = w.takeover.open(chat.conversationId).catch((e: unknown) => e);
+    await waitFor(() => existsSync(folderOf(chat)));
+    const release = await w.chat.stopForOpen(chat.id, DoItPlace.Worktree);
+    preparing.release();
+    expect(await opening).toMatchObject({ message: DOING_IT });
+    expect(stateOf(chat)).not.toBe('taken_over');
+    expect(existsSync(folderOf(chat))).toBe(false);
+    expect(w.folderHold.holders(w.project.id)).toEqual([]);
+    release();
   });
 });
 

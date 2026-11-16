@@ -612,6 +612,40 @@ describe('changedPaths', () => {
   });
 });
 
+describe('changedEntries', () => {
+  it('says how each path differs from HEAD, sorted, and a rename as the old gone and the new untracked', async () => {
+    write('old.txt', 'o');
+    rawGit('add', 'old.txt');
+    rawGit('commit', '-q', '-m', 'old');
+    write('README.md', 'edited');
+    write('new.txt', 'n');
+    rawGit('mv', 'old.txt', 'moved.txt');
+
+    expect(await git.changedEntries(repo.path, 10)).toEqual({
+      entries: [
+        { path: 'README.md', status: 'M' },
+        { path: 'moved.txt', status: '?' },
+        { path: 'new.txt', status: '?' },
+        { path: 'old.txt', status: 'D' },
+      ],
+      more: 0,
+    });
+  });
+
+  it('cuts at the cap and counts the rest', async () => {
+    for (const name of ['a', 'b', 'c', 'd']) write(`${name}.txt`, name);
+
+    expect(await git.changedEntries(repo.path, 3)).toEqual({
+      entries: [
+        { path: 'a.txt', status: '?' },
+        { path: 'b.txt', status: '?' },
+        { path: 'c.txt', status: '?' },
+      ],
+      more: 1,
+    });
+  });
+});
+
 describe('branches and remotes', () => {
   it('reads the current branch, and null when HEAD is detached', async () => {
     expect(await git.currentBranch(repo.path)).toBe('main');

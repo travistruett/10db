@@ -1,13 +1,16 @@
 import {
   ConversationState,
+  Delivery,
+  DoItPlace,
   FolderHolderKind,
   FolderWhileHeld,
   type ChatDto,
+  type DoItResult,
   type Effort,
   type ProjectViewDto,
   type ToolCallView,
 } from '@10db/contracts';
-import { Box, Group, Text } from '@mantine/core';
+import { Box, Button, Group, Text } from '@mantine/core';
 import { useClipboard, useMediaQuery } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
@@ -45,6 +48,11 @@ import dayjs from 'dayjs';
 import { chatEntries } from './chat-entries';
 import { FolderWait } from './folder-wait';
 import { keepingWords } from './kind-line';
+import { DoItSheet } from './do-it-sheet';
+import { useOpenTask } from './open-session';
+import { TaskTabPlace } from './task-tabs';
+import { useTaskSession } from '../../daemon/task-session-queries';
+import { useSessionKeys } from './use-session-keys';
 import { sessionAnnouncement, type SessionEvent } from './session-announcements';
 import { SessionBar } from './session-bar';
 import type { TabActions } from './tab-menu';
@@ -79,6 +87,62 @@ export interface ChatTabProps {
   /** The builder asked to open the chat in a terminal from the strip. */
   readonly openingTerminal?: boolean;
   readonly onTerminalAsked?: () => void;
+  /** Do It was accepted; the screen puts the task's tab where it belongs. */
+  readonly onHandedOff?: (result: DoItResult, title: string) => void;
+}
+
+/** What stands where a sealed chat's composer was: its work moved to a task, which the line opens. */
+function HandedOffLine({ chat }: { readonly chat: ChatDto }) {
+  const session = useTaskSession(chat.taskId).data;
+  const openTask = useOpenTask();
+  return (
+    <Group
+      mx="md"
+      my="sm"
+      px="sm"
+      py="xs"
+      gap="sm"
+      wrap="nowrap"
+      justify="space-between"
+      style={{
+        border: '1px solid var(--mantine-color-default-border)',
+        borderRadius: 'var(--mantine-radius-md)',
+      }}
+    >
+      <Text size="sm" role="status">
+        This chat handed its work to <b>{session?.title ?? 'a task'}</b>. It&apos;s read-only now.
+      </Text>
+      {session === undefined ? null : (
+        <Button
+          size="xs"
+          variant="default"
+          onClick={() => {
+            void openTask({
+              taskId: session.taskId,
+              projectId: chat.projectId,
+              title: session.title,
+              place: session.place === 'pass' ? TaskTabPlace.Pass : TaskTabPlace.Copy,
+            });
+          }}
+        >
+          Open Task
+        </Button>
+      )}
+    </Group>
+  );
+}
+
+/** Why Do It… is off for the chat, or null when it is on. */
+function doItOff(
+  chat: ChatDto,
+  state: string,
+  removed: boolean,
+  reason: string | null,
+): string | null {
+  if (state === 'taken_over') return 'Hand back first';
+  if (removed) return 'This project was removed from 10db.';
+  if (chat.archivedAt !== null) return 'This session is archived.';
+  return reason;
 }
 
 /**
@@ -92,6 +156,7 @@ export function ChatTab({
   actions,
   renaming,
   onRenamed,
+  onHandedOff,
   openingTerminal,
   onTerminalAsked,
 }: ChatTabProps) {
@@ -111,6 +176,7 @@ export function ChatTab({
   const sendNow = useSendNow();
   const patch = usePatchChat();
   const resolved = useResolvedInbox();
+  const openTask = useOpenTask();
   const open = useConversationCards(chat.conversationId);
   const [sendError, setSendError] = useState<string | null>(null);
   const inTerminal = conversation.state === ConversationState.TakenOver;
@@ -140,6 +206,15 @@ export function ChatTab({
   const caps = conversation.capabilities;
   const working = WORKING_STATES.has(conversation.state);
   const removed = project === undefined;
+  // The Do It sheet, when open: the place it opens on and the unsent words that go with it.
+  const [doIt, setDoIt] = useState<{ place?: DoItPlace; draft?: string } | null>(null);
+  const doItReason = doItOff(chat, conversation.state, removed, null);
+  useSessionKeys((key) => {
+    if (key.kind !== 'do_it' || doItReason !== null || conversation.state === 'sealed')
+      return false;
+    setDoIt({});
+    return true;
+  });
 
   const post = async (d: Draft, folderChoice?: FolderWhileHeld): Promise<void> => {
     const chosen = folderChoice ?? whileWaiting;
@@ -266,6 +341,14 @@ export function ChatTab({
       working,
       inTerminal,
       cards: [...(resolved.data ?? []), ...open],
+      openTask: (task) => {
+        void openTask({
+          taskId: task.taskId,
+          projectId: chat.projectId,
+          title: task.title,
+          place: task.place === 'here' ? TaskTabPlace.Pass : TaskTabPlace.Copy,
+        });
+      },
     }),
     { chatId: chat.id, projectId: chat.projectId },
   );
@@ -337,6 +420,10 @@ export function ChatTab({
           {...(actions === undefined ? {} : { actions })}
           {...(renaming === undefined ? {} : { renaming })}
           {...(onRenamed === undefined ? {} : { onRenamed })}
+          doItDisabledReason={doItReason}
+          onDoIt={() => {
+            setDoIt({});
+          }}
           onFileAsTasks={() => {
             void post({ ...EMPTY_DRAFT, text: FILE_AS_TASKS_MESSAGE }).catch((error: unknown) => {
               setSendError(error instanceof Error ? error.message : String(error));
@@ -393,7 +480,9 @@ export function ChatTab({
               onStop={stopNow}
             />
           ) : null}
-          {removed ? (
+          {conversation.state === 'sealed' ? (
+            <HandedOffLine chat={chat} />
+          ) : removed ? (
             <Text size="sm" c="dimmed" px="md" py="md">
               This project was removed from 10db.
             </Text>
@@ -463,6 +552,14 @@ export function ChatTab({
                       onFileAsTasks: async () => {
                         await post({ ...EMPTY_DRAFT, text: FILE_AS_TASKS_MESSAGE });
                       },
+                      // A project that lands locally has no separate copies to offer.
+                      ...(doItReason === null && project.delivery !== Delivery.Local
+                        ? {
+                            onDoItSeparately: (d: Draft) => {
+                              setDoIt({ place: DoItPlace.Worktree, draft: d.text });
+                            },
+                          }
+                        : {}),
                     },
                   })}
               onSend={post}
@@ -488,6 +585,23 @@ export function ChatTab({
         agentLabel={caps.label}
         busy={streaming !== null}
       />
+      {doIt === null || project === undefined ? null : (
+        <DoItSheet
+          chat={chat}
+          project={project}
+          agentLabel={caps.label}
+          model={conversation.model}
+          {...(doIt.place === undefined ? {} : { place: doIt.place })}
+          {...(doIt.draft === undefined ? {} : { draft: doIt.draft })}
+          onClose={() => {
+            setDoIt(null);
+          }}
+          onDone={(result, title) => {
+            setDoIt(null);
+            onHandedOff?.(result, title);
+          }}
+        />
+      )}
     </ConversationLayout>
   );
 }

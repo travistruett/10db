@@ -141,6 +141,8 @@ import {
   deniedPermissionsForWorkstream,
   openItemsForWorkstream,
   openPassTurn,
+  passAreasOf,
+  passHoldingTask,
   passPageAreas,
   patchWorkstream,
   questionRoutesForTask,
@@ -3017,7 +3019,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         toolInput: req.input,
         repoPath: checkout,
         ...(req.cwd === undefined ? {} : { cwd: req.cwd }),
-        areas: project.areas,
+        areas: pass ? passAreasOf(db, pass.id) : project.areas,
         hazards: project.hazards,
         claims: claims(),
         readOnly,
@@ -4005,7 +4007,10 @@ export function createRunner(opts: RunnerOptions): Runner {
     const project = getProject(db, row.projectId);
     const changed = await opts.git.changedPaths(checkoutOf(db, row));
     const claims = activeClaims(db, row.id).map((c) => ({ kind: c.kind, name: c.name }));
-    return findClaimed(changed, project, claims).sort();
+    // A pass lane's claims name the pass's own areas: the whole-project page for a pass of one.
+    const pass = passHoldingTask(db, getTask(db, row.taskId));
+    const areas = pass ? [...passAreasOf(db, pass.id)] : project.areas;
+    return findClaimed(changed, { areas, hazards: project.hazards }, claims).sort();
   }
 
   /**

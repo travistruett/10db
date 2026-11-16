@@ -1,8 +1,9 @@
-import type { ChatId, ProjectId } from '@10db/contracts';
+import type { ChatId, ProjectId, TaskId } from '@10db/contracts';
 import { useState } from 'react';
 import { useArchiveChat, usePatchChat, useUnarchiveChat } from '../../daemon/chat-queries';
 import { closedTabs, type ClosedTab } from './closed-tabs';
 import { tabTitle, type StripTab } from './strip-tabs';
+import { taskTabs } from './task-tabs';
 
 export interface TabClosing {
   readonly tabs: readonly StripTab[];
@@ -13,6 +14,8 @@ export interface TabClosing {
   /** A reopened chat is the one to show. */
   readonly onOpenChat: (chatId: ChatId, projectId: ProjectId) => void;
   readonly removeFresh: (id: string) => void;
+  /** A reopened task's tab is the one to show. */
+  readonly onOpenTask: (taskId: TaskId, projectId: ProjectId) => void;
 }
 
 /**
@@ -26,6 +29,7 @@ export function useTabClosing({
   onSelect,
   onOpenChat,
   removeFresh,
+  onOpenTask,
 }: TabClosing) {
   const patch = usePatchChat();
   const archive = useArchiveChat();
@@ -50,12 +54,36 @@ export function useTabClosing({
     });
   };
 
+  /** A task's tab leaves the strip and goes on the closed stack; the task itself is untouched. */
+  const rememberTask = (tab: StripTab & { readonly kind: 'task' }): void => {
+    taskTabs.close(tab.task.taskId);
+    closedTabs.push({
+      taskId: tab.task.taskId,
+      projectId: tab.task.projectId,
+      title: tab.task.title,
+      place: tab.task.place,
+      position: tab.task.position,
+    });
+  };
+
+  const dropTab = (tab: StripTab): void => {
+    switch (tab.kind) {
+      case 'chat':
+        remember(tab, false);
+        patch.mutate({ chatId: tab.chat.id, tabPosition: null });
+        return;
+      case 'task':
+        rememberTask(tab);
+        return;
+      case 'fresh':
+        removeFresh(tab.tab.id);
+        return;
+    }
+  };
+
   const close = (tab: StripTab): void => {
     setNotice(null);
-    if (tab.kind === 'chat') {
-      remember(tab, false);
-      patch.mutate({ chatId: tab.chat.id, tabPosition: null });
-    } else removeFresh(tab.tab.id);
+    dropTab(tab);
     moveFrom(tab);
   };
 
@@ -63,10 +91,7 @@ export function useTabClosing({
     setNotice(null);
     for (const tab of tabs) {
       if (tab.key === keep.key) continue;
-      if (tab.kind === 'chat') {
-        remember(tab, false);
-        patch.mutate({ chatId: tab.chat.id, tabPosition: null });
-      } else removeFresh(tab.tab.id);
+      dropTab(tab);
     }
     if (selected?.key !== keep.key) onSelect(keep);
   };
@@ -88,6 +113,18 @@ export function useTabClosing({
   /** Puts a closed tab back at the place it held, clamped to the strip; an archived one comes back first. */
   const reopen = async (entry: ClosedTab): Promise<void> => {
     setNotice(null);
+    if ('taskId' in entry) {
+      taskTabs.open({
+        taskId: entry.taskId,
+        projectId: entry.projectId,
+        title: entry.title,
+        place: entry.place,
+        position: Math.min(entry.position, chatCount + taskTabs.list().length),
+      });
+      closedTabs.take(entry.taskId);
+      onOpenTask(entry.taskId, entry.projectId);
+      return;
+    }
     try {
       if (entry.archived === true) await unarchive.mutateAsync(entry.chatId);
       const chat = await patch.mutateAsync({

@@ -139,7 +139,8 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   await expect(confirm).toBeHidden();
 
   // File as Tasks: the task row, its start row, then the judge's card for the builder's own task.
-  await page.getByRole('button', { name: 'File as Tasks' }).click();
+  await page.getByRole('button', { name: 'More ways to hand off' }).click();
+  await page.getByRole('menuitem', { name: 'File as Tasks' }).click();
   await expect(page.getByText('Retry login once on a 401').first()).toBeVisible();
   await expect(page.getByText('Added to Ready')).toBeVisible();
   await expect(page.getByText(/Started Retry login once on a 401/)).toBeVisible();
@@ -375,6 +376,151 @@ test('a chat writes in Your folder: an edit and a commit, a task that waits for 
     await request.post(`${daemonUrl}/workstreams/${stream.id}/cancel`, { headers: auth });
   await expect(page.getByRole('article').getByText('Looked again.')).toBeVisible();
   await expect(page.getByText('Chat · Your folder · on main')).toBeVisible();
+});
+
+/** The folder's branch tip, with git's own config kept out. */
+function git(repo: string, ...args: string[]): string {
+  return execFileSync('git', args, {
+    cwd: repo,
+    encoding: 'utf8',
+    env: {
+      PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: '/dev/null',
+    },
+  }).trim();
+}
+
+test('Do It in Your folder: a chat’s uncommitted file joins a pass of one, which signs off, closes onto main and gives the chat its line back', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(300_000);
+  const projectId = await createProject(
+    request,
+    'sessions-do-it',
+    [{ name: 'repo', globs: ['**'] }],
+    { 'src/login.ts': 'export const login = () => null;\n' },
+  );
+  const repo = join(E2E_DIR, 'sessions-do-it-repo');
+  writeFileSync(join(repo, 'notes.md'), '# Notes\n\nTidied by a chat.\n');
+  await claudeIsInstalled(page);
+  await page.addInitScript((id) => {
+    window.localStorage.setItem('tendb.project', JSON.stringify(id));
+    if (window.localStorage.getItem('mantine-color-scheme-value') === null)
+      window.localStorage.setItem('mantine-color-scheme-value', 'dark');
+  }, projectId);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/board');
+  await expect(page.getByRole('button', { name: /^Project: sessions-do-it/ })).toBeVisible();
+  await page.keyboard.press('Meta+t');
+  await expect(page).toHaveURL(/\/sessions\?fresh=/);
+
+  // The chat's turn commits the notes; the builder's todo list stays uncommitted in the folder.
+  const composer = page.getByRole('textbox', { name: 'Message' });
+  await composer.click();
+  await composer.pressSequentially('Tidy the notes');
+  await composer.press('Enter');
+  await expect(page.getByRole('article').getByText('Committed the tidy notes.')).toBeVisible();
+  await expect(page.getByText('Chat · Your folder · on main')).toBeVisible();
+  expect(git(repo, 'log', '-1', '--format=%s')).toBe('Tidy the notes');
+  writeFileSync(join(repo, 'todo.md'), '# Todo\n');
+
+  // Do It…: the scripted brief fills in, the sheet lists the file, and Your folder is a pass.
+  await page.getByRole('button', { name: 'Do It…' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Do It' });
+  await expect(sheet.getByRole('textbox', { name: 'Title' })).toHaveValue('Finish the todo notes');
+  await expect(sheet.getByRole('textbox', { name: 'Brief' })).toHaveValue(/Finish the todo list/);
+  await expect(sheet.getByText(/Brief · written by/)).toBeVisible();
+  await sheet.getByText('Your folder, as a pass').click();
+  await expect(sheet.getByText('1 file already changed in your folder:')).toBeVisible();
+  await expect(sheet.getByText('? todo.md')).toBeVisible();
+  await expect(sheet.getByText("These will be part of this task's work.")).toBeVisible();
+  // A modal covers the scheme switch, so the page's own attribute stands in for it while the sheet is open.
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.evaluate((value) => {
+      document.documentElement.setAttribute('data-mantine-color-scheme', value);
+    }, scheme);
+    await expectAccessible(page, `the Do It sheet, ${scheme}`);
+  }
+  await sheet.getByRole('button', { name: 'Do It', exact: true }).click();
+
+  // The pass's tab opens to the right of the chat, and its scripted first turn leaves it Ready.
+  const passTab = page.getByRole('tab', { name: /Finish the todo notes/ });
+  await expect(passTab).toBeVisible();
+  await expect(page.getByText('Task · Your folder · lands on main')).toBeVisible();
+  await expect(page.getByRole('article').getByText('Finished the todo list.')).toBeVisible();
+  await scan(page, [1280], 'the pass of one');
+
+  // Sign Off lands the turn; Close Pass… finishes the pass onto main.
+  await page.getByRole('button', { name: 'Sign Off' }).click();
+  await expect(page.getByText(/Signed off/).first()).toBeVisible();
+  await page.getByRole('button', { name: 'Close Pass…' }).click();
+  const finish = page.getByRole('dialog', { name: 'Finish' });
+  await expect(finish).toBeVisible();
+  await finish.getByRole('button', { name: 'Finish' }).click();
+  await expect(page.getByText(/Done · /).first()).toBeVisible();
+  // main fast-forwards to the pass: its kept turn is on it, and the folder is back on main with the file.
+  await expect
+    .poll(() => git(repo, 'log', 'main', '--format=%s'))
+    .toContain('Finish the todo notes');
+  expect(git(repo, 'branch', '--show-current')).toBe('main');
+  expect(git(repo, 'show', 'main:todo.md')).toBe('# Todo\n\n- done');
+
+  // The chat's line reads as it did before the pass.
+  await page.getByRole('tab', { name: /Tidy the notes/ }).click();
+  await expect(page.getByText('Chat · Your folder · on main')).toBeVisible();
+});
+
+test('Do It in a separate copy on a pull request project: the task opens in a tab of its own and the chat is sealed', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(300_000);
+  const projectId = await createProject(
+    request,
+    'sessions-copy',
+    [{ name: 'repo', globs: ['**'] }],
+    { 'src/login.ts': 'export const login = () => null;\n' },
+    'pull_request',
+  );
+  await claudeIsInstalled(page);
+  await page.addInitScript((id) => {
+    window.localStorage.setItem('tendb.project', JSON.stringify(id));
+    if (window.localStorage.getItem('mantine-color-scheme-value') === null)
+      window.localStorage.setItem('mantine-color-scheme-value', 'dark');
+  }, projectId);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/board');
+  await expect(page.getByRole('button', { name: /^Project: sessions-copy/ })).toBeVisible();
+  await page.keyboard.press('Meta+t');
+  const composer = page.getByRole('textbox', { name: 'Message' });
+  await composer.click();
+  await composer.pressSequentially('Copy the notes');
+  await composer.press('Enter');
+  await expect(page.getByRole('article').getByText('Looked at the notes.')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Do It…' }).click();
+  const sheet = page.getByRole('dialog', { name: 'Do It' });
+  await expect(sheet.getByRole('textbox', { name: 'Title' })).toHaveValue('Hold the copy');
+  await expect(sheet.getByText('An ordinary task in its own copy, on a new branch.')).toBeVisible();
+  await expect(
+    sheet.getByText("The task takes this chat's place. The chat becomes read-only."),
+  ).toBeVisible();
+  await sheet.getByRole('button', { name: 'Do It', exact: true }).click();
+
+  // The task's tab takes the chat's place, and the chat is sealed behind it.
+  await expect(page.getByRole('tab', { name: /Hold the copy/ })).toBeVisible();
+  await expect(page.getByText(/^Task · Separate copy/)).toBeVisible();
+  await expect(page.getByRole('tab', { name: /Copy the notes/ })).toHaveCount(0);
+  await scan(page, [1280], 'a separate copy’s tab');
+
+  // Later specs read Factory across projects: nothing of this task is left running.
+  const streams = Workstreams.parse(
+    await (await request.get(`${daemonUrl}/workstreams?active=true`, { headers: auth })).json(),
+  ).filter((w) => w.projectId === projectId);
+  for (const stream of streams)
+    await request.post(`${daemonUrl}/workstreams/${stream.id}/cancel`, { headers: auth });
 });
 
 test('a chat goes to the builder’s terminal and back: the banner, a held message, a task that waits for it, Hand Back and the notice', async ({

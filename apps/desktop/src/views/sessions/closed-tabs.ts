@@ -1,4 +1,4 @@
-import { ChatId, ProjectId } from '@10db/contracts';
+import { ChatId, ProjectId, TaskId } from '@10db/contracts';
 import { useSyncExternalStore } from 'react';
 import { z } from 'zod';
 
@@ -11,7 +11,7 @@ export const CLOSED_TABS_KEY = 'tendb.sessions.closed';
 /** How many closed tabs are remembered. */
 export const CLOSED_LIMIT = 5;
 
-export const ClosedTab = z.object({
+export const ClosedChat = z.object({
   chatId: ChatId,
   projectId: ProjectId,
   /** The title it had, for All Tabs. */
@@ -20,13 +20,34 @@ export const ClosedTab = z.object({
   /** The tab was archived, not only closed: reopening it unarchives it first. */
   archived: z.boolean().optional(),
 });
+export type ClosedChat = z.infer<typeof ClosedChat>;
+
+/** A task's tab closed: reopening it puts the tab back, and the task itself was never touched. */
+export const ClosedTask = z.object({
+  taskId: TaskId,
+  projectId: ProjectId,
+  title: z.string(),
+  place: z.enum(['copy', 'pass']),
+  position: z.int().nonnegative(),
+});
+export type ClosedTask = z.infer<typeof ClosedTask>;
+
+export const ClosedTab = z.union([ClosedChat, ClosedTask]);
 export type ClosedTab = z.infer<typeof ClosedTab>;
+
+/** The id a closed tab is kept under: its chat's or its task's. */
+export function closedId(entry: ClosedTab): string {
+  return 'chatId' in entry ? entry.chatId : entry.taskId;
+}
 
 const Stored = z.array(ClosedTab);
 
 /** `entry` on top of the stack; a tab already in it moves to the top, and only the newest five stay. */
 export function pushClosed(stack: readonly ClosedTab[], entry: ClosedTab): readonly ClosedTab[] {
-  return [entry, ...stack.filter((held) => held.chatId !== entry.chatId)].slice(0, CLOSED_LIMIT);
+  return [entry, ...stack.filter((held) => closedId(held) !== closedId(entry))].slice(
+    0,
+    CLOSED_LIMIT,
+  );
 }
 
 /** The newest closed tab and the stack without it. */
@@ -37,14 +58,14 @@ export function popClosed(stack: readonly ClosedTab[]): {
   return { entry: stack[0] ?? null, rest: stack.slice(1) };
 }
 
-/** The entry for `chatId`, wherever it sits, and the stack without it. */
+/** The entry for the chat or task `id`, wherever it sits, and the stack without it. */
 export function takeClosed(
   stack: readonly ClosedTab[],
-  chatId: string,
+  id: string,
 ): { readonly entry: ClosedTab | null; readonly rest: readonly ClosedTab[] } {
   return {
-    entry: stack.find((held) => held.chatId === chatId) ?? null,
-    rest: stack.filter((held) => held.chatId !== chatId),
+    entry: stack.find((held) => closedId(held) === id) ?? null,
+    rest: stack.filter((held) => closedId(held) !== id),
   };
 }
 
@@ -88,8 +109,8 @@ export const closedTabs = {
     if (entry !== null) replace(rest);
     return entry;
   },
-  take: (chatId: string): ClosedTab | null => {
-    const { entry, rest } = takeClosed(current(), chatId);
+  take: (id: string): ClosedTab | null => {
+    const { entry, rest } = takeClosed(current(), id);
     if (entry !== null) replace(rest);
     return entry;
   },

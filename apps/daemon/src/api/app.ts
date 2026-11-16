@@ -113,6 +113,7 @@ import {
   ConversationFileId,
   TaskScreenId,
   TaskId,
+  ChangesScope,
   TaskInput,
   TaskMessageInput,
   TASK_MESSAGE_PICTURES_MAX_BYTES,
@@ -134,6 +135,8 @@ import {
   type FolderWhileHeld,
   ChatCreateInput,
   ChatId,
+  BriefRequest,
+  DoItRequest,
   ChatPatchInput,
   ConversationFilesQuery,
   SessionsSettingsDto,
@@ -788,6 +791,26 @@ export function createApp(deps: ApiDeps) {
     .post('/chats/:chatId/stop-waiting', (c) =>
       c.json(deps.services.stopChatWaiting(ChatId.parse(c.req.param('chatId')))),
     )
+    .post(
+      '/chats/:chatId/brief',
+      validator('json', (value): BriefRequest => BriefRequest.parse(value ?? {})),
+      (c) =>
+        c.json(
+          deps.services.askChatBrief(ChatId.parse(c.req.param('chatId')), c.req.valid('json')),
+        ),
+    )
+    .delete('/chats/:chatId/brief', async (c) =>
+      c.json(await deps.services.cancelChatBrief(ChatId.parse(c.req.param('chatId')))),
+    )
+    .post(
+      '/chats/:chatId/do-it',
+      validator('json', (value): DoItRequest => DoItRequest.parse(value)),
+      async (c) =>
+        c.json(await deps.services.doIt(ChatId.parse(c.req.param('chatId')), c.req.valid('json'))),
+    )
+    .get('/chats/:chatId/do-it', async (c) =>
+      c.json(await deps.services.doItPreview(ChatId.parse(c.req.param('chatId')))),
+    )
     .get('/projects/:projectId/folder', async (c) =>
       c.json(await deps.services.projectFolder(ProjectId.parse(c.req.param('projectId')))),
     )
@@ -1124,6 +1147,11 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
+    .delete('/projects/:projectId/pending-open', async (c) => {
+      const projectId = ProjectId.parse(c.req.param('projectId'));
+      deps.services.cancelPendingOpen(projectId);
+      return c.json(await deps.services.projectFolder(projectId));
+    })
     .get('/passes/:passId', (c) =>
       c.json(deps.services.passView(PassId.parse(c.req.param('passId')))),
     )
@@ -1789,8 +1817,22 @@ export function createApp(deps: ApiDeps) {
         );
       },
     )
-    .get('/workstreams/:id/changes', async (c) =>
-      c.json(await deps.services.workstreamChanges(WorkstreamId.parse(c.req.param('id')))),
+    .get(
+      '/workstreams/:id/changes',
+      validator('query', (query): { scope?: ChangesScope } => {
+        const scope = query['scope'];
+        return scope === undefined ? {} : { scope: z.enum(ChangesScope).parse(scope) };
+      }),
+      async (c) =>
+        c.json(
+          await deps.services.workstreamChanges(
+            WorkstreamId.parse(c.req.param('id')),
+            c.req.valid('query').scope,
+          ),
+        ),
+    )
+    .get('/tasks/:taskId/session', (c) =>
+      c.json(deps.services.taskSession(TaskId.parse(c.req.param('taskId')))),
     )
     .get('/workstreams/:id/skips', (c) =>
       c.json(deps.services.listWorkstreamSkips(WorkstreamId.parse(c.req.param('id')))),

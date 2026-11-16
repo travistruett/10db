@@ -5,9 +5,19 @@
 export { chatFolderInUse, judgeChatCall, type ChatFolder } from './confinement';
 export { createConversationFiles } from './conversation-files';
 export { chatFolder, chatHooks, type ChatHooksDeps } from './hooks';
+export { createBriefs, type Briefs } from './briefs';
 export { createChatLiveSessions } from './live-sessions';
 export { createChatService, type ChatService } from './service';
 export { sessionStarts } from './session-starts';
 export { patchSessionsSettings, sessionsSettings, setSessionsSettings } from './settings';
 export { startFacts, type StartGit } from './start-facts';
 export { createChatTools } from './tools';
+export {
+  doItHere,
+  doItInCopy,
+  finishSeals,
+  previewDoIt,
+  type DoItDeps,
+  type DoItHereDeps,
+} from './do-it';
+export { taskSession } from './task-session';

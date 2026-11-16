@@ -7,6 +7,7 @@ import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-se
 import {
   AccountKind,
   ConversationOwnerKind,
+  DoItPlace,
   EventType,
   ConflictError,
   InvalidError,
@@ -148,7 +149,11 @@ import {
   flagWorktreeMissing,
   flagWrongBranch,
   moveRetiredLandings,
+  checkPassOpen,
   openPass,
+  passBelow,
+  passOpenProblem,
+  returnBranchProblem,
   readPnpmVersion,
   recoverBatches,
   removeMergedBranches,
@@ -230,6 +235,12 @@ import {
   chatHooks,
   createChatLiveSessions,
   createChatService,
+  doItHere,
+  doItInCopy,
+  finishSeals,
+  previewDoIt,
+  type DoItDeps,
+  createBriefs,
   createChatTools,
   createConversationFiles,
   sessionsSettings,
@@ -250,6 +261,10 @@ import {
   closeGateOf,
   createPassCloses,
   discardKeptWork,
+  createPendingOpens,
+  openFailure,
+  postFirstMessages,
+  type OpenWhenBusyDeps,
   joinPass,
   putBackKeptWork,
   resumePassWork,
@@ -703,6 +718,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     bus,
   );
   const folderHold = createFolderHold({ state, bus });
+  // Opens of a pass that wait for chats' turns: memory only, so a restart drops them.
+  const pendingOpens = createPendingOpens({ state });
   const liveFrames =
     opts.liveFrames ??
     createLiveFrames((error) => {
@@ -1667,11 +1684,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     models: conversationModels,
     launch: conversationLaunch,
   });
+  const chatBriefs = createBriefs(clock);
   const chat = createChatService({
     state,
     engine: exploreEngine,
     folderHold,
+    pendingOpens,
+    briefs: chatBriefs,
+    clock,
     dataDir: opts.dataDir,
+    log: logger.child({ component: 'chat-service' }),
     now: () => clock.now(),
     modelsOf: conversationModels,
     webSearchOf: (projectId) =>
@@ -2283,6 +2305,27 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     plan: appMcpPlan,
     logger: logger.child({ component: 'mcp-sign-ins' }),
   });
+  const openWhenBusyDeps: OpenWhenBusyDeps = {
+    folderHold,
+    pendingOpens,
+    stopChatForOpen: (chatId) => chat.stopForOpen(chatId),
+    logger: logger.child({ component: 'pass-open' }),
+    draining: () => updateDrain.draining,
+    notify: (projectId, title, body) => {
+      inbox.flag({ projectId, workstreamId: null, title, body });
+    },
+  };
+  const doItDeps: DoItDeps = {
+    state,
+    engine: exploreEngine,
+    folderHold,
+    pendingOpens,
+    git: delivery.git,
+    chat,
+    openProblem: passOpenProblem,
+    returnBranchProblem,
+    stacksOn: (readDb, project) => passBelow(readDb, project.id)?.name ?? null,
+  };
   const services = createServices({
     state,
     github: {
@@ -2373,6 +2416,59 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       chat,
       takeover,
       folderHold,
+      pendingOpens,
+      doItPreview: (chatId) => previewDoIt(doItDeps, chatId),
+      doIt: (chatId, input) =>
+        input.place === DoItPlace.Here
+          ? doItHere(
+              {
+                ...doItDeps,
+                openWhenBusy: openWhenBusyDeps,
+                openWholeProject: async ({ signal, ...whole }) => {
+                  try {
+                    await openPass(
+                      delivery,
+                      {
+                        projectId: whole.projectId,
+                        name: whole.title,
+                        taskIds: [],
+                        wholeProject: {
+                          title: whole.title,
+                          brief: whole.brief,
+                          chatId: whole.chatId,
+                          ...(whole.acceptanceCriteria === undefined
+                            ? {}
+                            : { acceptanceCriteria: whole.acceptanceCriteria }),
+                        },
+                        wait: { signal },
+                      },
+                      passOpenDeps,
+                    ).then((opened) => {
+                      postFirstMessages(state, opened.pass.id, undefined);
+                    });
+                  } catch (error) {
+                    throw openFailure(error);
+                  }
+                  createdScheduler.requestTick();
+                },
+              },
+              chatId,
+              input,
+            )
+          : doItInCopy(
+              {
+                ...doItDeps,
+                tasks: {
+                  create: (projectId, task) =>
+                    Promise.resolve(services.createTask(projectId, task)),
+                  settleSizing: (taskIds) => services.settleSizing(taskIds),
+                  start: (taskId) => services.startTask(taskId),
+                  remove: (taskId) => services.removeTask(taskId),
+                },
+              },
+              chatId,
+              input,
+            ),
       git: (repo, args) => runGit(repo, args, { bin: gitBin }),
       now: () => clock.now(),
       log: logger.child({ component: 'chat' }),
@@ -2394,7 +2490,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     starter,
     sizing,
     sizingWaitMs: opts.sizingWaitMs ?? JUDGE_TIMEOUT_MS,
+    openWhenBusy: openWhenBusyDeps,
     openPass: (input) => openPass(delivery, input, passOpenDeps),
+    checkPassOpen: (input) => {
+      checkPassOpen(state.db, input);
+    },
     takeOut: (input) => takeOut(passTakeOuts, input),
     abandonPass: (passId) => startAbandon(passAbandons, passId),
     joinPass: (passId, input) => joinPass(delivery, passId, input, passOpenDeps),
@@ -2535,6 +2635,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         drain: {
           begin: (since) => {
             updateDrain.begin(since);
+            // An open that waits for chats' turns would hold the update's wait on 10db's jobs for good.
+            for (const { projectId, name } of pendingOpens.cancelAll())
+              inbox.flag({
+                projectId,
+                workstreamId: null,
+                title: `Pass ‘${name}’ was cancelled for 10db’s update`,
+                body: 'It was waiting for chats’ turns to end. Open it again once the update is done.',
+              });
           },
           end: () => {
             updateDrain.end();
@@ -2650,6 +2758,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       dependencyChanges,
       shapeTools: shape.toolsFor,
       chatTools: createChatTools({
+        briefs: chatBriefs,
         state,
         bus,
         inbox,
@@ -2677,6 +2786,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   await exploreEngine.recover();
   // A takeover the daemon lost while it was opening left files for a chat that is not in the terminal.
   takeover.recover();
+  await finishSeals({
+    state,
+    engine: exploreEngine,
+    chat,
+    tasks: { start: (taskId) => services.startTask(taskId) },
+    logger: logger.child({ component: 'do-it' }),
+  });
   const wss = new WebSocketServer({ noServer: true });
   const server = serve({
     fetch: app.fetch,

@@ -28,6 +28,7 @@ import {
   useWorkbenchSetup,
   useRenamePass,
 } from '../../daemon/pass-queries';
+import { useProjectFolder } from '../../daemon/project-folder-queries';
 import { useInbox, useTasks } from '../../daemon/queries';
 import { CountBadge } from '../../shell/count-badge';
 import { PageHeader } from '../../shell/page-header';
@@ -153,12 +154,15 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
   const closeDialog = () => {
     setDialog(null);
   };
+  const folder = useProjectFolder(project.id);
   const opening = useMutation({
     mutationFn: (request: PassOpenRequest) => actions.start(request),
   });
   const hasPages = project.areas.some((area) => area.role === AreaRole.Page);
   const loading = <PageLoading shape={PageLoadingShape.List} label="Loading the pages" />;
-  if (!hasPages) return <WorkbenchSetup project={project} />;
+  // A pass already open, a task's pass of one among them, is shown even where the project names no page.
+  const holding = live != null && passHoldsTasks(live.pass.state);
+  if (!hasPages && !holding) return <WorkbenchSetup project={project} />;
   // The header is known before the data, so it draws while the pass is read.
   if (live === undefined)
     return (
@@ -201,6 +205,7 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
             tasks={tasks}
             initial={{ pages: goalPages, taskIds: search.tasks ?? [] }}
             goalId={search.goal ?? null}
+            folder={folder}
             now={now}
             onStart={(request) => {
               opening.mutate(request);

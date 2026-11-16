@@ -54,6 +54,7 @@ export async function createProject(
   name: string,
   areas: readonly Area[] = [{ name: 'repo', globs: ['**'] }],
   files: Readonly<Record<string, string>> = {},
+  delivery: 'local' | 'pull_request' = 'local',
 ): Promise<string> {
   const repo = join(E2E_DIR, `${name}-repo`);
   createRepository(repo, files);
@@ -66,7 +67,7 @@ export async function createProject(
       areas,
       handoffPct: 40,
       nudgePct: 50,
-      delivery: 'local',
+      delivery,
     },
   });
   expect(created.ok()).toBe(true);

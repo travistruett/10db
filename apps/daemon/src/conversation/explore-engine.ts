@@ -121,6 +121,12 @@ export interface ExploreEngine {
   retire(id: ConversationId): Promise<void>;
   unretire(id: ConversationId): void;
   /**
+   * Do It hands the conversation's work to a task (sessions spec §7.3): a start is cancelled, a turn stopped
+   * with its partial text kept, a card withdrawn, and a warm session closed with its row ended, so its token
+   * reaches nothing. The conversation is `sealed` and its owner hears it. Refused while it is taken over.
+   */
+  seal(id: ConversationId): Promise<void>;
+  /**
    * Takes the chat to the builder's terminal: `taken_over`, with its session closed. `closed` settles once the
    * close has run. Throws `ConflictError` for a retired chat or the state's busy words.
    */
@@ -772,6 +778,23 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     },
     unretire(id) {
       runtimeOf(id).retired = false;
+    },
+    async seal(id) {
+      const rt = runtimeOf(id);
+      // Refused before anything is touched: a taken-over conversation keeps what waits in it.
+      const would = reduceExplore(rt.state, { type: 'do_it' }, factsOf(rt, { type: 'do_it' }));
+      if ('refused' in would) throw new ConflictError(would.refused);
+      rt.parked = false;
+      reduce(rt, { type: 'do_it' });
+      await settled(id);
+      // A stop leaves its session warm, and a sealed conversation keeps none.
+      const session = rt.session;
+      if (session !== null) {
+        turns.handBack(rt);
+        await stops.stopSession(rt, session, 'stopped');
+      }
+      await rt.chain;
+      await rt.closing;
     },
     openTerminal(id) {
       const rt = runtimeOf(id);

@@ -1,15 +1,16 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
+  mintId,
   PassNoticeKind,
   Rigor,
   TaskMessageAuthor,
+  WHOLE_PROJECT_PAGE,
   type AreaDef,
   type Finding,
   type PassId,
   type ProjectInput,
   type TaskDto,
-  type TaskId,
 } from '@10db/contracts';
 import { getPassProgress, listTaskThread, offeredText, patchProject } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -36,8 +37,8 @@ const finding = (location: string | null): Finding => ({
 });
 
 describe('findingTargets', () => {
-  const settings = 'tsk_settings' as TaskId;
-  const people = 'tsk_people' as TaskId;
+  const settings = mintId('Task');
+  const people = mintId('Task');
   const pages = [
     { taskId: settings, areas: ['settings'] },
     { taskId: people, areas: ['people'] },
@@ -57,6 +58,17 @@ describe('findingTargets', () => {
     expect(findingTargets([finding(location)], pages, AREAS)).toEqual([
       { finding: finding(location), taskId: to },
     ]);
+  });
+
+  it('sends every file finding of a pass of one to its one page', () => {
+    const one = mintId('Task');
+    expect(
+      findingTargets(
+        [finding('README.md:1'), finding('src/lib/c.ts:1'), finding(null)],
+        [{ taskId: one, areas: [WHOLE_PROJECT_PAGE.name] }],
+        [WHOLE_PROJECT_PAGE],
+      ).map((t) => t.taskId),
+    ).toEqual([one, one, null]);
   });
 });
 

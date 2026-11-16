@@ -441,12 +441,14 @@ describe('10db’s git work waiting for the folder', () => {
     const a = chat('A');
     hold.takeTurn(project.id, a);
     const during = new AbortController();
-    const waiting = hold.reserveGitWhenFree(project.id, 'cutting a branch', during.signal);
+    const waiting = hold.reserveGitWhenFree(project.id, 'cutting a branch', {
+      signal: during.signal,
+    });
     during.abort();
     await expect(waiting).rejects.toMatchObject({ name: 'FolderWaitCancelledError' });
     const before = AbortSignal.abort();
     await expect(
-      hold.reserveGitWhenFree(project.id, 'cutting a branch', before),
+      hold.reserveGitWhenFree(project.id, 'cutting a branch', { signal: before }),
     ).rejects.toBeInstanceOf(FolderWaitCancelledError);
   });
 
@@ -455,7 +457,7 @@ describe('10db’s git work waiting for the folder', () => {
     const a = chat('A');
     hold.takeTurn(project.id, a);
     const signal = new AbortController().signal;
-    const reserved = hold.reserveGitWhenFree(project.id, 'cutting a branch', signal);
+    const reserved = hold.reserveGitWhenFree(project.id, 'cutting a branch', { signal });
     expect(getEventListeners(signal, 'abort')).toHaveLength(1);
     hold.releaseTurn(a);
     await reserved;
@@ -481,12 +483,47 @@ describe('10db’s git work waiting for the folder', () => {
     const a = chat('A');
     hold.takeTurn(project.id, a);
     const abort = new AbortController();
-    const waiting = hold.reserveGitWhenFree(project.id, 'cutting a branch', abort.signal);
+    const waiting = hold.reserveGitWhenFree(project.id, 'cutting a branch', {
+      signal: abort.signal,
+    });
     hold.releaseTurn(a);
     abort.abort();
     await expect(waiting).rejects.toBeInstanceOf(FolderWaitCancelledError);
     expect(hold.holders(project.id)).toEqual([]);
     expect(hold.reserveGit(project.id, 'next').reserved).toBe(true);
+  });
+
+  it('keeps a lane’s first start out while an open that waits with lanesWait waits, and not for other git work', async () => {
+    const hold = newHold();
+    const a = chat('A');
+    hold.takeTurn(project.id, a);
+    const other = hold.reserveGitWhenFree(project.id, 'cutting a branch');
+    // Other git work that waits keeps chats out but not a lane.
+    expect(
+      hold.blockers(project.id, { kind: FolderAsker.LaneStart }).map((b) => b.holder.kind),
+    ).toEqual(['chat_turn']);
+    hold.releaseTurn(a);
+    hold.releaseGit(await other);
+
+    hold.takeTurn(project.id, a);
+    const opening = hold.reserveGitWhenFree(project.id, 'opening a pass', {
+      lanesWait: { passName: 'Polish' },
+    });
+    expect(hold.opening(project.id)).toBe('Polish');
+    expect(
+      hold
+        .blockers(project.id, { kind: FolderAsker.LaneStart })
+        .map((b) => [b.holder.kind, b.holder.what]),
+    ).toEqual([
+      ['chat_turn', null],
+      ['git_work', 'opening a pass'],
+    ]);
+    // A chat's take is refused behind it too.
+    expect(hold.takeTurn(project.id, chat('B')).taken).toBe(false);
+    hold.releaseTurn(a);
+    hold.releaseGit(await opening);
+    expect(hold.opening(project.id)).toBeNull();
+    expect(hold.blockers(project.id, { kind: FolderAsker.LaneStart })).toEqual([]);
   });
 
   it('serves waiting git work oldest first', async () => {
@@ -639,7 +676,7 @@ describe('a takeover', () => {
     const me = chat('Me');
     taking(hold, me, { entered: 0 });
     const abort = new AbortController();
-    const git = hold.reserveGitWhenFree(project.id, 'cutting a branch', abort.signal);
+    const git = hold.reserveGitWhenFree(project.id, 'cutting a branch', { signal: abort.signal });
     let served = 0;
     hold.wait(project.id, me, () => {
       served += 1;

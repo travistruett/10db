@@ -35,7 +35,11 @@ export async function reserveGitNaming(
   });
   let token: symbol;
   try {
-    token = await ctx.folderHold.reserveGitWhenFree(wait.projectId, wait.what, wait.signal);
+    token = await ctx.folderHold.reserveGitWhenFree(
+      wait.projectId,
+      wait.what,
+      wait.signal === undefined ? {} : { signal: wait.signal },
+    );
   } catch (error) {
     hideNotices(ctx.state, wait.batchId, [FOLDER_HOLD_WAIT_NOTICE_KEY]);
     throw error;

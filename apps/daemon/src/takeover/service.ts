@@ -50,6 +50,8 @@ import { settingFilesChanged } from './setting-files';
 const NOT_IN_TERMINAL = 'Not in your terminal';
 const ARCHIVED = 'This chat is archived';
 const NOT_A_CHAT = 'Only a chat opens in your terminal for now';
+/** A chat in the terminal can't be sealed, so Open waits for a Do It that has stopped the chat. */
+const DOING_IT = 'Do It is under way for this chat';
 const FOLDER_HELD_NOTE = 'Your folder is held until you hand back.';
 const closedPassNote = (name: string): string =>
   `The pass ‘${name}’ is closed and waits for its pull request to merge: a commit made in the terminal makes its settle ask you.`;
@@ -58,8 +60,8 @@ export interface TakeoverServiceDeps {
   readonly state: StateStore;
   readonly engine: ExploreEngine;
   readonly folderHold: FolderHold;
-  /** Hand Back parks the held messages on the folder through the chat service. */
-  readonly chats: () => Pick<ChatService, 'watchFolder'>;
+  /** Hand Back parks the held messages on the folder through the chat service, which knows a Do It under way. */
+  readonly chats: () => Pick<ChatService, 'watchFolder' | 'underWay'>;
   readonly dataDir: string;
   readonly now: () => Date;
   readonly log: Logger;
@@ -138,6 +140,7 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
   /** Why Open can't go ahead now, or null. A chat already in the terminal opens another window. */
   function refusalOf(chat: ChatRow): string | null {
     if (chat.archivedAt !== null) return ARCHIVED;
+    if (deps.chats().underWay(chat.id)) return DOING_IT;
     const conv = getConversation(state.db, chat.conversationId);
     if (conv.state === ConversationState.TakenOver) return null;
     const words = openTerminalRefusal(
@@ -241,6 +244,8 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
         // The archived row is read at the moment of the take: a chat archived before a restart has no
         // retired flag in the engine.
         if (getChat(state.db, chat.id).archivedAt !== null) throw new ConflictError(ARCHIVED);
+        // Read at the take too: a Do It may have stopped the chat while the files were prepared.
+        if (deps.chats().underWay(chat.id)) throw new ConflictError(DOING_IT);
         return engine.openTerminal(chat.conversationId);
       });
       if (!taken.taken) throw new ConflictError(blockedWords(taken.blockers));

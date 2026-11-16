@@ -2,7 +2,16 @@ import { Box, Text, Tooltip } from '@mantine/core';
 import { useHover } from '@mantine/hooks';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { IconAlertTriangle, IconPlayerPause, IconTerminal2, IconX } from '@tabler/icons-react';
+import {
+  IconAlertTriangle,
+  IconCheck,
+  IconFolder,
+  IconGitBranch,
+  IconGitPullRequest,
+  IconPlayerPause,
+  IconTerminal2,
+  IconX,
+} from '@tabler/icons-react';
 import type { KeyboardEvent, ReactNode } from 'react';
 import { ProjectTile } from '../../shell/project-tile';
 import { tabName, type TabInfo } from './tab-info';
@@ -49,6 +58,28 @@ export function Mark({ mark }: { readonly mark: TabWords['mark'] }) {
           size={12}
           stroke={1.5}
           color="var(--mantine-color-orange-filled)"
+        />
+      );
+    case 'review_dim':
+      return (
+        <IconGitPullRequest
+          data-mark={mark}
+          size={12}
+          stroke={1.5}
+          color="var(--mantine-color-dimmed)"
+        />
+      );
+    case 'check_dim':
+      return (
+        <IconCheck data-mark={mark} size={12} stroke={1.5} color="var(--mantine-color-dimmed)" />
+      );
+    case 'check_green':
+      return (
+        <IconCheck
+          data-mark={mark}
+          size={12}
+          stroke={1.5}
+          color="var(--mantine-color-green-filled)"
         />
       );
     case 'terminal_dim':
@@ -105,7 +136,7 @@ export function SessionTab({
   // dnd-kit's sortable handle is a bag of refs and listeners the compiler cannot analyze.
   'use no memo';
   const { hovered, ref: hoverRef } = useHover<HTMLDivElement>();
-  const sortable = useSortable({ id: tab.key, disabled: tab.kind === 'fresh' });
+  const sortable = useSortable({ id: tab.key, disabled: tab.kind !== 'chat' });
   const title = tabTitle(tab);
   const ring = info.words.ring;
   const showClose = hovered || selected;
@@ -175,6 +206,21 @@ export function SessionTab({
         }}
       >
         <ProjectTile name={projectName} size={16} />
+        {tab.kind === 'task' ? (
+          <Box
+            component="span"
+            aria-hidden="true"
+            data-glyph={tab.task.place === 'pass' ? 'folder' : 'git-branch'}
+            c="dimmed"
+            style={{ flex: 'none', display: 'grid', placeItems: 'center' }}
+          >
+            {tab.task.place === 'pass' ? (
+              <IconFolder size={12} stroke={1.5} />
+            ) : (
+              <IconGitBranch size={12} stroke={1.5} />
+            )}
+          </Box>
+        ) : null}
         {compact && !selected ? null : (
           <Text
             size="sm"

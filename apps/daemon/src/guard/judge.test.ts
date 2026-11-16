@@ -1,7 +1,13 @@
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { DEFAULT_HAZARDS, JudgeKind, type ClaimKind, type Delivery } from '@10db/contracts';
+import {
+  DEFAULT_HAZARDS,
+  JudgeKind,
+  WHOLE_PROJECT_PAGE,
+  type ClaimKind,
+  type Delivery,
+} from '@10db/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SANDBOXED, tempDir } from '../../test/fixtures';
 import {
@@ -347,6 +353,80 @@ describe('file edits', () => {
       claims,
       readOnly: false,
       ...(inPass === undefined ? {} : { inPass }),
+      protectedPaths: guarded(),
+    });
+    expect(verdict.decision).toBe(decision);
+    if (reason && verdict.decision === 'deny') expect(verdict.reason).toContain(reason);
+  });
+
+  // A pass of one: the whole-project page is every file, and a hazard keeps its claim.
+  it.each<{
+    name: string;
+    claims: Claims;
+    path: string;
+    decision: 'allow' | 'deny';
+    reason?: string;
+  }>([
+    {
+      name: 'a source file is allowed to the lane holding the whole page',
+      claims: [{ kind: 'area', name: WHOLE_PROJECT_PAGE.name }],
+      path: 'src/a.ts',
+      decision: 'allow',
+    },
+    {
+      name: 'a lockfile is refused naming deps while the hazard is not held',
+      claims: [{ kind: 'area', name: WHOLE_PROJECT_PAGE.name }],
+      path: 'package.json',
+      decision: 'deny',
+      reason: 'deps',
+    },
+    {
+      name: 'a lockfile is allowed once the hazard is held',
+      claims: [
+        { kind: 'area', name: WHOLE_PROJECT_PAGE.name },
+        { kind: 'hazard', name: 'deps' },
+      ],
+      path: 'package.json',
+      decision: 'allow',
+    },
+    {
+      name: 'a migration is refused naming migrations while the hazard is not held',
+      claims: [{ kind: 'area', name: WHOLE_PROJECT_PAGE.name }],
+      path: 'db/migrations/0001.sql',
+      decision: 'deny',
+      reason: 'migrations',
+    },
+    {
+      name: '.git/config is refused even with the whole page held',
+      claims: [{ kind: 'area', name: WHOLE_PROJECT_PAGE.name }],
+      path: '.git/config',
+      decision: 'deny',
+    },
+    {
+      name: 'a nested .git entry (a gitfile) is refused with the whole page held',
+      claims: [{ kind: 'area', name: WHOLE_PROJECT_PAGE.name }],
+      path: 'packages/sub/.git',
+      decision: 'deny',
+    },
+    {
+      name: 'a file is refused when the whole page is not held',
+      claims: [],
+      path: 'src/a.ts',
+      decision: 'deny',
+      reason: 'Whole project',
+    },
+  ])('a pass of one: $name', ({ claims, path, decision, reason }) => {
+    const verdict = judgeToolUse({
+      judge: JudgeKind.Rules,
+      coveredByAllowRule: false,
+      toolName: 'Edit',
+      toolInput: { file_path: path, old_string: 'a', new_string: 'b' },
+      repoPath: repo.path,
+      areas: [WHOLE_PROJECT_PAGE],
+      hazards: DEFAULT_HAZARDS,
+      claims,
+      readOnly: false,
+      inPass: { pages: [WHOLE_PROJECT_PAGE.name], baseBranch: 'main' },
       protectedPaths: guarded(),
     });
     expect(verdict.decision).toBe(decision);

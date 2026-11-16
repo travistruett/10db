@@ -18,6 +18,7 @@ import {
   activeClaims,
   copyHazardNames,
   findOpenPass,
+  passAreasOf,
   getAppSetting,
   getBatch,
   getProject,
@@ -271,6 +272,16 @@ export function createWatcher(deps: {
       return;
     }
     ordinary.forEach(single);
+  }
+
+  /**
+   * The project as a checkout's writes are classified: while a pass holds Your folder, the pass's own areas
+   * (the whole-project page for a pass of one); a batch's worktree and every other time, the project's.
+   */
+  function forCheckout(project: ProjectDto, batchId: BatchId | null): ProjectDto {
+    if (batchId !== null) return project;
+    const pass = findOpenPass(db, project.id);
+    return pass ? { ...project, areas: [...passAreasOf(db, pass.id)] } : project;
   }
 
   /**
@@ -736,7 +747,7 @@ export function createWatcher(deps: {
       (item) => item.kind === InboxKind.Flag && isStrayTitle(item.title) && names(item, lane),
     );
     if (open.length === 0) return;
-    const project = getProject(db, ws.projectId);
+    const project = forCheckout(getProject(db, ws.projectId), worktreeBatchOf(ws));
     const root = checkoutOf(db, ws);
     const site = siteOf(project, worktreeBatchOf(ws), root);
     // Every claim the lane holds counts in its own checkout, the one its per-copy claims are scoped to.
@@ -899,7 +910,7 @@ export function createWatcher(deps: {
         throw error;
       }),
     );
-    const project = getProject(db, projectId);
+    const project = forCheckout(getProject(db, projectId), batchId);
     const reported = paths.filter((rel) => changed.has(rel));
     const site = siteOf(project, batchId, entry.root);
     const { strays, candidates } = straysIn(project, batchId, reported, ACTIVE_STATES, null);
@@ -1067,10 +1078,10 @@ export function createWatcher(deps: {
 
     async stepEnd(workstreamId) {
       const ws = getWorkstream(db, workstreamId);
-      const project = getProject(db, ws.projectId);
+      const batchId = worktreeBatchOf(ws);
+      const project = forCheckout(getProject(db, ws.projectId), batchId);
       const root = checkoutOf(db, ws);
       if (!existsSync(root)) return [];
-      const batchId = worktreeBatchOf(ws);
       // A file restored since its excused deletion is no longer in git's changes, so check every one here.
       forgetRestored(root);
       const changed = await withoutDaemonWrites(

@@ -3,6 +3,10 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import {
   AccountCreatedDto,
+  ChatDto,
+  ConversationItemDto,
+  FolderDto,
+  PassOpenResponse,
   mintId,
   PASS_SIGN_OFF_CHOICE,
   PassAbandonedDto,
@@ -65,7 +69,7 @@ import type { RunningDaemon } from '../src/daemon';
 import { createEventBus, createStateStore } from '../src/events';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
-import { createTempRepo, isolatedGitEnv, tempDir, waitFor } from './fixtures';
+import { createTempRepo, isolatedGitEnv, tempDir, waitFor, waitForAsync } from './fixtures';
 import { alive, orphanGateGroup } from './orphan-gate';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
 
@@ -87,6 +91,8 @@ let data: { path: string; cleanup(): void };
 let worktrees: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
 let daemon: RunningDaemon;
+/** The daemon's fake agent: a test's chat turn runs the behaviour set on it. */
+let adapter: FakeAdapter;
 beforeEach(async () => {
   data = tempDir('pass api');
   worktrees = tempDir('pass api worktrees');
@@ -101,7 +107,7 @@ function startDaemon(): Promise<RunningDaemon> {
     dataDir: data.path,
     worktreeRoot: worktrees.path,
     port: 0,
-    adapter: new FakeAdapter({
+    adapter: (adapter = new FakeAdapter({
       [SHARED]: [
         [
           { do: 'consume' },
@@ -140,7 +146,7 @@ function startDaemon(): Promise<RunningDaemon> {
           { do: 'await_message', contains: 'never sent' },
         ],
       ],
-    }),
+    })),
     logLevel: 'debug',
     caffeinate: () => null,
     watch: false,
@@ -988,5 +994,166 @@ describe('POST /passes/:passId/abandon', () => {
       taskIds: [next.id],
     });
     expect(opened.pass.state).toBe('OPEN');
+  });
+});
+
+describe('POST /projects/:projectId/passes while chats hold the folder', () => {
+  /** A chat whose turn runs until `release`, holding Your folder meanwhile. */
+  async function chatHolding(project: ProjectDto) {
+    let release: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      adapter.shapeBehaviour = async () => {
+        resolve();
+        await new Promise<void>((r) => {
+          release = r;
+        });
+        return { text: 'Done.' };
+      };
+    });
+    const chat = await api().post('/chats', ChatDto, {
+      projectId: project.id,
+      model: null,
+      tabPosition: 0,
+    });
+    await api().post(`/conversations/${chat.conversationId}/messages`, ConversationItemDto, {
+      text: 'work on it',
+    });
+    await started;
+    return {
+      chat,
+      release: () => {
+        release();
+      },
+    };
+  }
+  const chatState = async (chat: ChatDto) =>
+    (await api().get('/chats?open=1', z.array(ChatDto))).find((c) => c.id === chat.id)?.conversation
+      .state;
+  const folderOf = (project: ProjectDto) => api().get(`/projects/${project.id}/folder`, FolderDto);
+  const body = (tasks: TaskDto[], whenBusy?: string) => ({
+    name: 'Polish pages',
+    taskIds: tasks.map((t) => t.id),
+    ...(whenBusy === undefined ? {} : { whenBusy }),
+  });
+
+  it('refuses at once without whenBusy, naming the chat', async () => {
+    const project = await projectWith(PAGES);
+    const task = await taskOn(project, 'Settings: tidy', ['settings']);
+    const { release } = await chatHolding(project);
+
+    const res = await post(`/projects/${project.id}/passes`, body([task]));
+
+    release();
+    expect(res.status).toBe(409);
+    expect(JSON.stringify(res.body)).toMatch(/in use by the chat/);
+  });
+
+  it('answers pending for wait, shows the open, refuses a second, and opens when the turn ends', async () => {
+    const project = await projectWith(PAGES);
+    const task = await taskOn(project, 'Settings: tidy', ['settings']);
+    const { release } = await chatHolding(project);
+
+    const pending = await api().post(
+      `/projects/${project.id}/passes`,
+      PassOpenResponse,
+      body([task], 'wait'),
+    );
+    expect(pending).toEqual({ pending: true });
+    const waiting = await folderOf(project);
+    expect(waiting.pendingOpen).toMatchObject({ name: 'Polish pages' });
+    expect(waiting.pendingOpen?.waitsFor).toMatch(/chat/);
+    const second = await post(`/projects/${project.id}/passes`, body([task], 'wait'));
+    expect(second.status).toBe(409);
+    expect(JSON.stringify(second.body)).toMatch(/already waiting to open/);
+
+    release();
+    const opened = await waitFor(() => {
+      const [pass] = daemon.state.db.select().from(schema.passes).all();
+      return pass;
+    });
+    expect(opened).toMatchObject({ name: 'Polish pages', state: 'OPEN' });
+    await waitForAsync(async () => (await folderOf(project)).pendingOpen === null);
+  });
+
+  it('cancels a waiting open with DELETE, leaving no pass', async () => {
+    const project = await projectWith(PAGES);
+    const task = await taskOn(project, 'Settings: tidy', ['settings']);
+    const { chat, release } = await chatHolding(project);
+    await api().post(`/projects/${project.id}/passes`, PassOpenResponse, body([task], 'wait'));
+
+    const res = await fetch(`${daemon.url}/projects/${project.id}/pending-open`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${daemon.token}` },
+    });
+    expect(res.status).toBe(200);
+    expect(FolderDto.parse(await res.json()).pendingOpen).toBeNull();
+    // The record is gone at once, though the chat's turn still runs: a new wait is not refused for it.
+    const again = await api().post(
+      `/projects/${project.id}/passes`,
+      PassOpenResponse,
+      body([task], 'wait'),
+    );
+    expect(again).toEqual({ pending: true });
+    await fetch(`${daemon.url}/projects/${project.id}/pending-open`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${daemon.token}` },
+    });
+    release();
+
+    await waitForAsync(async () => (await chatState(chat)) !== 'running');
+    expect(daemon.state.db.select().from(schema.passes).all()).toEqual([]);
+    expect(rawGit('symbolic-ref', '--short', 'HEAD')).toBe('main');
+  });
+
+  it.each([
+    { what: 'a page cap the tasks exceed', extra: { pageCap: 1 } },
+    { what: 'a page that is not a page area', extra: { pages: ['nope'] } },
+  ])('refuses a wait at once for $what, answering no pending open', async ({ extra }) => {
+    const project = await projectWith(PAGES);
+    const one = await taskOn(project, 'Settings: tidy', ['settings']);
+    const two = await taskOn(project, 'People: tidy', ['people']);
+    const { release } = await chatHolding(project);
+
+    const res = await post(`/projects/${project.id}/passes`, {
+      ...body([one, two], 'wait'),
+      ...extra,
+    });
+
+    release();
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect((await folderOf(project)).pendingOpen).toBeNull();
+  });
+
+  it('raises a card when a waiting open is refused once the turn ends', async () => {
+    const project = await projectWith(PAGES);
+    const task = await taskOn(project, 'Settings: tidy', ['settings']);
+    const { release } = await chatHolding(project);
+    await api().post(`/projects/${project.id}/passes`, PassOpenResponse, body([task], 'wait'));
+    daemon.state.db.update(schema.tasks).set({ status: 'cancelled' }).run();
+
+    release();
+
+    await waitFor(
+      () =>
+        listInbox(daemon.state.db, {}).find((i) => i.title.includes('did not open')) ?? undefined,
+    );
+    expect(daemon.state.db.select().from(schema.passes).all()).toEqual([]);
+  });
+
+  it("stops the chat's turn and opens with stop_turns", async () => {
+    const project = await projectWith(PAGES);
+    const task = await taskOn(project, 'Settings: tidy', ['settings']);
+    const { chat, release } = await chatHolding(project);
+
+    const opened = await api().post(
+      `/projects/${project.id}/passes`,
+      PassOpenResponse,
+      body([task], 'stop_turns'),
+    );
+    release();
+
+    expect(opened).toHaveProperty('pass.state', 'OPEN');
+    expect((await folderOf(project)).holders.map((h) => h.kind)).not.toContain('chat_turn');
+    await waitForAsync(async () => (await chatState(chat)) !== 'running');
   });
 });

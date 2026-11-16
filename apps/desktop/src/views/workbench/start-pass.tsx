@@ -1,5 +1,7 @@
 import {
   pageLabel,
+  PassWhenBusy,
+  type FolderDto,
   type GoalId,
   type PageRow,
   type PassOpenRequest,
@@ -10,6 +12,8 @@ import {
 } from '@10db/contracts';
 import { Button, Code, Group, Stack, Text } from '@mantine/core';
 import { Fragment, useState, type ReactNode } from 'react';
+import { PendingOpenLine } from '../sessions/pending-open-line';
+import { whenBusyChats } from '../sessions/when-busy';
 import { PageList } from './page-list';
 import { StartLines } from './start-lines';
 import { joinableTasks, openRequest, tickedWords, type PickTicks } from './start-pass-rules';
@@ -26,6 +30,8 @@ export interface StartPassProps {
   /** Now, in epoch milliseconds. */
   readonly now: number;
   readonly onStart: (request: PassOpenRequest) => void;
+  /** Your folder, for the way out of a refusal that only chats' turns cause, and a pass waiting to open. */
+  readonly folder?: FolderDto | null;
   readonly starting: boolean;
   /** Why the daemon refused the last Start Pass; said beside the button. */
   readonly error: string | null;
@@ -68,7 +74,20 @@ function foundPagesLine(pages: readonly PageRow[]): ReactNode {
  * Start Pass with what is ticked beside it.
  */
 export function StartPass(props: StartPassProps) {
-  const { project, start, tasks, initial, goalId, now, onStart, starting, error, setUp } = props;
+  const {
+    project,
+    start,
+    tasks,
+    initial,
+    goalId,
+    now,
+    onStart,
+    starting,
+    error,
+    setUp,
+    folder = null,
+  } = props;
+  const busyChats = start.refusal === null ? null : whenBusyChats(folder);
   const joinable = joinableTasks(tasks, project.areas);
   const [ticks, setTicks] = useState<PickTicks>(() => ({
     pages: initial.pages.filter((page) => start.pages.some((p) => p.area === page)),
@@ -110,6 +129,34 @@ export function StartPass(props: StartPassProps) {
           <Text size="sm" c="dimmed">
             {tickedWords(ticks)}
           </Text>
+          {busyChats === null ? null : (
+            <>
+              <Button
+                variant="default"
+                disabled={count === 0 || starting}
+                onClick={() => {
+                  onStart({
+                    ...openRequest(ticks, goalId, project.areas),
+                    whenBusy: PassWhenBusy.StopTurns,
+                  });
+                }}
+              >
+                Stop the Turn and Open
+              </Button>
+              <Button
+                variant="default"
+                disabled={count === 0 || starting || folder?.pendingOpen != null}
+                onClick={() => {
+                  onStart({
+                    ...openRequest(ticks, goalId, project.areas),
+                    whenBusy: PassWhenBusy.Wait,
+                  });
+                }}
+              >
+                Open When It Ends
+              </Button>
+            </>
+          )}
           <Button
             // The daemon would refuse to open now, for the reason beside the button.
             disabled={count === 0 || start.refusal !== null}
@@ -122,6 +169,7 @@ export function StartPass(props: StartPassProps) {
           </Button>
         </Group>
       </Group>
+      <PendingOpenLine folder={folder} />
     </Stack>
   );
 }

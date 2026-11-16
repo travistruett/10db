@@ -450,6 +450,70 @@
       }
     ]
   ],
+  "Chat: Tidy the notes": [
+    [
+      { "do": "consume" },
+      {
+        "do": "mcp",
+        "tool": "commit_changes",
+        "args": { "message": "Tidy the notes", "paths": ["notes.md"] }
+      },
+      { "do": "say", "text": "Committed the tidy notes." },
+      { "do": "turn_complete" }
+    ],
+    [
+      { "do": "consume" },
+      {
+        "do": "mcp",
+        "tool": "write_brief",
+        "args": {
+          "title": "Finish the todo notes",
+          "brief": "Finish the todo list the chat started, then keep the notes in step with it.",
+          "acceptanceCriteria": ["The todo list is complete"]
+        }
+      },
+      { "do": "say", "text": "The brief is written." },
+      { "do": "turn_complete" }
+    ]
+  ],
+  "Chat: Copy the notes": [
+    [
+      { "do": "consume" },
+      { "do": "say", "text": "Looked at the notes." },
+      { "do": "turn_complete" }
+    ],
+    [
+      { "do": "consume" },
+      {
+        "do": "mcp",
+        "tool": "write_brief",
+        "args": {
+          "title": "Hold the copy",
+          "brief": "Work on the notes in a copy of its own.",
+          "acceptanceCriteria": ["The notes are tidy"]
+        }
+      },
+      { "do": "say", "text": "The brief is written." },
+      { "do": "turn_complete" }
+    ]
+  ],
+  "Hold the copy": [[{ "do": "await_message", "contains": "release" }, { "do": "turn_complete" }]],
+  "Finish the todo notes": [
+    [
+      { "do": "consume" },
+      {
+        "do": "tool",
+        "toolName": "Write",
+        "input": { "file_path": "todo.md", "content": "# Todo\n\n- done\n" }
+      },
+      {
+        "do": "mcp",
+        "tool": "commit",
+        "args": { "opId": "op-e2e-todo1", "paths": ["todo.md"], "message": "Finish the todo list" }
+      },
+      { "do": "turn_complete", "text": "Finished the todo list." }
+    ]
+  ],
   "Chat: Fix the notes": [
     [
       { "do": "consume" },

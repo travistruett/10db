@@ -33,6 +33,7 @@ import {
   type BoardColumnId,
   type CiStopped,
   type PassId,
+  WHOLE_PROJECT_PAGE,
   WorkspaceMode,
   type ProjectDto,
   type ProjectId,
@@ -291,6 +292,34 @@ export function insertPassPageTask(
     reason: null,
     proposalId: null,
     ...(input.goalId === null ? {} : { goalId: input.goalId }),
+  });
+}
+
+/**
+ * Writes the task of a pass of one, in the caller's write: the whole-project page alone, in Your folder, the
+ * brief as its description. The page is no project area, so the unknown-area check is skipped. The caller marks
+ * the task as the pass's (`markTasksMadeByPass`) once the pass row exists.
+ */
+export function insertWholeProjectTask(
+  ctx: WriteContext,
+  projectId: ProjectId,
+  input: {
+    readonly title: string;
+    readonly brief: string;
+    readonly acceptanceCriteria?: readonly string[];
+  },
+): TaskDto {
+  const project = getProject(ctx.tx, projectId);
+  return writeTask(ctx, projectId, {
+    title: Title.parse(input.title),
+    description: input.brief,
+    acceptanceCriteria: [...(input.acceptanceCriteria ?? [])],
+    areas: [WHOLE_PROJECT_PAGE.name],
+    dependsOn: [],
+    landing: taskLandingFor(project),
+    workspaceMode: WorkspaceMode.Shared,
+    reason: null,
+    proposalId: null,
   });
 }
 

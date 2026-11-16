@@ -3,7 +3,11 @@ import { join } from 'node:path';
 import type { ShapeMessageDto } from '@10db/contracts';
 import {
   BatchDto,
+  ChatDto,
+  ConversationItemDto,
+  FolderDto,
   HealthResponse,
+  PassOpenResponse,
   PersonDto,
   ProjectDto,
   SelfUpdateStatusDto,
@@ -861,6 +865,72 @@ describe('self-update in the daemon', () => {
       expect(after.turn.queued).toBe(1);
       expect(adapter.shapeSessions).toHaveLength(0);
     });
+  });
+
+  it("cancels a pass waiting to open for a chat's turn when the drain begins, so the update's wait is not held", async () => {
+    head = RUNNING;
+    const adapter = new FakeAdapter({});
+    let release: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      adapter.shapeBehaviour = async () => {
+        resolve();
+        await new Promise<void>((r) => {
+          release = r;
+        });
+        return { text: 'Done.' };
+      };
+    });
+    const api = await start({ adapter });
+    await api.put('/settings/self-update/wait', SelfUpdateStatusDto, { minutes: 0 });
+    const project = await api.post('/projects', ProjectDto, {
+      name: '10db',
+      repoPath: repo.path,
+      gateCommand: 'true',
+      areas: [{ name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' }],
+    });
+    const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
+      title: 'Settings: tidy',
+      acceptanceCriteria: ['it works'],
+      areas: ['settings'],
+    });
+    const chat = await api.post('/chats', ChatDto, {
+      projectId: project.id,
+      model: null,
+      tabPosition: 0,
+    });
+    await api.post(`/conversations/${chat.conversationId}/messages`, ConversationItemDto, {
+      text: 'work on it',
+    });
+    await started;
+    const pending = await api.post(`/projects/${project.id}/passes`, PassOpenResponse, {
+      name: 'Polish',
+      taskIds: [task.id],
+      whenBusy: 'wait',
+    });
+    expect(pending).toEqual({ pending: true });
+    expect((await api.get(`/projects/${project.id}/folder`, FolderDto)).pendingOpen).not.toBeNull();
+
+    head = NEW;
+    await waitForAsync(async () => (await selfUpdate(api)).draining);
+
+    expect((await api.get(`/projects/${project.id}/folder`, FolderDto)).pendingOpen).toBeNull();
+    expect((await selfUpdate(api)).midSession.jobs).toBe(0);
+    // The builder is told, and a wait begun during the drain is refused, not left to hold the update.
+    expect(
+      (await api.get('/inbox', z.array(inboxCard))).some((card) =>
+        card.title.includes('cancelled for 10db’s update'),
+      ),
+    ).toBe(true);
+    const during = await fetch(`${daemon?.url ?? ''}/projects/${project.id}/passes`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${daemon?.token ?? ''}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ name: 'Again', taskIds: [task.id], whenBusy: 'wait' }),
+    });
+    expect(during.status).toBe(409);
+    release();
   });
 
   it('names the conversation whose turn is all a drain waits for, with no lane running', async () => {

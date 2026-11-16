@@ -20,6 +20,7 @@ import { chatWorld, type ChatWorld } from '../../test/chat-world';
 import { createLiveRegistry } from '../conversation';
 import { createApp } from '../api';
 import { createChatApiServices, createConversationServices } from '../daemon';
+import { createPendingOpens } from '../pass';
 import { silentLogger } from '../log';
 
 // Sessions spec §10: the message route's chat branch, over real HTTP, a real store and the engine on
@@ -48,6 +49,9 @@ function appOf(world: ChatWorld) {
         chat: world.chat,
         takeover: world.takeover,
         folderHold: world.folderHold,
+        pendingOpens: createPendingOpens({ state: world.state }),
+        doItPreview: () => Promise.reject(new Error('not read here')),
+        doIt: () => Promise.reject(new Error('not done here')),
         // The world's checkout is no repository: its branch can't be read.
         git: () => Promise.reject(new Error('not a repository')),
         now: () => new Date(),

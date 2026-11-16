@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { InvalidError } from './errors';
-import { InboxItemId } from './ids';
+import { InboxItemId, TaskId } from './ids';
 import { ToolCallView } from './tool-call-view';
 
 // Sessions spec docs/superpowers/specs/2026-11-11-10db-sessions-design.md §6.2, §6.7, §9.1: a
@@ -80,19 +80,38 @@ export const ModelChangeNotice = z.object({
 });
 export type ModelChangeNotice = z.infer<typeof ModelChangeNotice>;
 
-/** What a notice reads as text: its own, or the model change in words. */
-export function noticeText(body: { text: string } | ModelChangeNotice): string {
-  return 'text' in body ? body.text : `Now on ${body.label} · ${body.model}`;
+/** A notice that Do It handed the chat's work to a task. */
+export const HandedToNotice = z.object({
+  kind: z.literal('handed_to'),
+  taskId: TaskId,
+  title: z.string(),
+  place: z.enum(['worktree', 'here']),
+});
+export type HandedToNotice = z.infer<typeof HandedToNotice>;
+
+/** What a notice reads as text: its own, the model change or the handover in words. */
+export function noticeText(body: { text: string } | ModelChangeNotice | HandedToNotice): string {
+  if ('text' in body) return body.text;
+  if (body.kind === 'handed_to')
+    return body.place === 'here'
+      ? `Handed to the pass ‘${body.title}’ in Your folder`
+      : `Handed to the task ‘${body.title}’ in its own copy`;
+  return `Now on ${body.label} · ${body.model}`;
 }
 
 /** Each item kind's body, as it is stored in `conversation_items.body`. */
 export const ConversationItemBody = {
   /** A builder's message, with the paths its `@` mentions name (the `@path` stays in the text). */
-  message: z.object({ text: z.string(), mentions: z.array(z.string()).optional() }),
+  message: z.object({
+    text: z.string(),
+    mentions: z.array(z.string()).optional(),
+    /** Set on the request that asks the agent for a task's brief, which no digest or brief repeats. */
+    purpose: z.literal('brief').optional(),
+  }),
   agent_message: TextBody,
   reasoning: TextBody,
   tool_call: ToolCallView,
-  notice: z.union([TextBody, ModelChangeNotice]),
+  notice: z.union([TextBody, ModelChangeNotice, HandedToNotice]),
   digest: TextBody,
   card: z.object({ inboxItemId: InboxItemId }),
   plan: z.object({

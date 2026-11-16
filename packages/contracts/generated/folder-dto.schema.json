@@ -86,6 +86,28 @@
         "string",
         "null"
       ]
+    },
+    "pendingOpen": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "waitsFor": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "waitsFor"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "required": [
@@ -93,6 +115,7 @@
     "branch",
     "holders",
     "limits",
-    "limitPass"
+    "limitPass",
+    "pendingOpen"
   ]
 }

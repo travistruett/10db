@@ -19,6 +19,7 @@ import {
   getTask,
   insertSystemNotice,
   listInbox,
+  isWholeProjectPass,
   passHoldingTask,
   placeTaskByRule,
   type DbReader,
@@ -43,7 +44,7 @@ const moveToCopyKey = (taskId: TaskId): string => `pass-move-copy:${taskId}`;
 /** What a pass lane's ask for a hazard meets: the move's card, a slow page, or nothing of a pass. */
 export type PassHazardAsk =
   | { readonly kind: 'move'; readonly pass: PassDto }
-  | { readonly kind: 'slow' }
+  | { readonly kind: 'slow'; readonly wholeProject: boolean }
   | { readonly kind: 'none' };
 
 /** How a pass treats `task` asking for hazard `name` in `project`. */
@@ -56,11 +57,17 @@ export function passHazardAsk(
   if (!COPY_HAZARDS.includes(name)) return { kind: 'none' };
   const pass = passHoldingTask(db, task);
   if (pass === undefined) return { kind: 'none' };
-  return project.delivery === Delivery.PullRequest ? { kind: 'move', pass } : { kind: 'slow' };
+  // A pass of one has no other page to keep in Your folder, and moving its only page would end the pass.
+  if (isWholeProjectPass(db, pass.id)) return { kind: 'slow', wholeProject: true };
+  return project.delivery === Delivery.PullRequest
+    ? { kind: 'move', pass }
+    : { kind: 'slow', wholeProject: false };
 }
 
 /** The thread's line when a page of a project with no copies gets hazard `name` in Your folder. */
-export function slowPageLine(name: string): string {
+export function slowPageLine(name: string, wholeProject = false): string {
+  if (wholeProject)
+    return `Granted the ${name} hazard in Your folder: this pass holds the whole project, so the preview may be slow while it changes.`;
   return `Granted the ${name} hazard in Your folder: this project has no separate copies, so the page may be slow while it changes.`;
 }
 

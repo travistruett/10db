@@ -32,6 +32,7 @@ import {
   takeOffer,
   type DbReader,
   type WriteContext,
+  passAreasOf,
 } from '@10db/db';
 import type { Clock } from '../clock';
 import { allCheckouts } from '../delivery';
@@ -281,9 +282,10 @@ function createTurnChecks(
     const changed = await deps.git.changedPaths(project.repoPath);
     if (stopped()) return;
     whileOpen(passId, (w) => {
+      const passAreas = passAreasOf(w.tx, passId);
       const pages = listPassTasks(w.tx, passId).map((task) => ({
         taskId: task.id,
-        areas: passHeldAreas(project.areas, task),
+        areas: passHeldAreas(passAreas, task),
         signedOff:
           task.workstreamId !== null &&
           getWorkstream(w.tx, task.workstreamId).state === WorkstreamState.Done,
@@ -293,7 +295,7 @@ function createTurnChecks(
         output,
         changed,
         roots: rootsOf(project.repoPath),
-        areas: project.areas,
+        areas: passAreas,
         pages,
         ran: turns.map((t) => t.taskId),
       });

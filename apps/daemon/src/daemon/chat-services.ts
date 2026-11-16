@@ -1,4 +1,10 @@
-import { NotFoundError } from '@10db/contracts';
+import {
+  NotFoundError,
+  type ChatId,
+  type DoItPreviewDto,
+  type DoItRequest,
+  type DoItResult,
+} from '@10db/contracts';
 import { getProject } from '@10db/db';
 import type { TakeoverService } from '../takeover';
 import type { ApiServices } from '../api';
@@ -14,6 +20,7 @@ import {
 import type { StateStore } from '../events';
 import { folderView, type FolderHold } from '../folder-hold';
 import type { Logger } from '../log';
+import type { PendingOpens } from '../pass';
 
 // Sessions spec §10: a chat's own routes. Its conversation is served by the conversation routes.
 
@@ -26,6 +33,10 @@ export type ChatApiServices = Pick<
   | 'archiveChat'
   | 'unarchiveChat'
   | 'stopChatWaiting'
+  | 'askChatBrief'
+  | 'cancelChatBrief'
+  | 'doItPreview'
+  | 'doIt'
   | 'projectFolder'
   | 'chatModels'
   | 'sessionStarts'
@@ -44,7 +55,12 @@ export function createChatApiServices(deps: {
   readonly chat: ChatService;
   readonly takeover: TakeoverService;
   readonly folderHold: FolderHold;
+  readonly pendingOpens: Pick<PendingOpens, 'view'>;
   readonly git: StartGit;
+  /** What the Do It sheet shows for a chat. */
+  readonly doItPreview: (chatId: ChatId) => Promise<DoItPreviewDto>;
+  /** Hands the chat's work on, in the place the request names. */
+  readonly doIt: (chatId: ChatId, input: DoItRequest) => Promise<DoItResult>;
   readonly now: () => Date;
   readonly log: Logger;
 }): ChatApiServices {
@@ -60,6 +76,16 @@ export function createChatApiServices(deps: {
       chat.stopWaiting(id);
       return chat.get(id);
     },
+    askChatBrief(id, input) {
+      chat.askBrief(id, input.draft);
+      return chat.briefOf(id);
+    },
+    async cancelChatBrief(id) {
+      await chat.cancelBrief(id);
+      return chat.briefOf(id);
+    },
+    doItPreview: deps.doItPreview,
+    doIt: deps.doIt,
     async projectFolder(projectId) {
       const project = getProject(state.db, projectId);
       let branch: string | null = null;
@@ -75,6 +101,7 @@ export function createChatApiServices(deps: {
         projectId,
         branch === '' ? null : branch,
         deps.folderHold.holders(projectId),
+        deps.pendingOpens.view(projectId),
       );
     },
     chatModels: (projectId) => chat.models(projectId),

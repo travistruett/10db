@@ -13,7 +13,12 @@ import {
   transitionWorkstream,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
-import { openPassWorld, PASS_PROJECT, type PassWorld } from '../../test/pass-world';
+import {
+  openPassWorld,
+  openWholeProjectWorld,
+  PASS_PROJECT,
+  type PassWorld,
+} from '../../test/pass-world';
 import type { PassOpenDeps, PutBackKeptWork } from '../delivery';
 import { joinPass } from './join';
 import { putBackKeptWork } from './put-back';
@@ -58,6 +63,16 @@ const builderMessages = (taskId: TaskDto['id']) =>
   listTaskThread(w.h.store.db, taskId)
     .filter((m) => m.author === 'builder')
     .map((m) => m.body);
+
+describe('Add Page to a pass of one', () => {
+  it('is refused, naming why, and joins nothing', async () => {
+    w = await openWholeProjectWorld({ project: PROJECT });
+    await expect(join({ pages: ['billing'] })).rejects.toThrow(
+      /pass of one holds the whole project/,
+    );
+    expect(w.h.store.db.select().from(schema.tasks).all()).toHaveLength(1);
+  });
+});
 
 describe('Add Page', () => {
   it('marks the task it makes for a new page with its pass and leaves a joined task unmarked', async () => {

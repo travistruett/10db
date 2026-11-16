@@ -1,12 +1,8 @@
 import { matchesGlob } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { PathPattern } from './entities';
-import {
-  AreaProposalInput,
-  AreaProposalResult,
-  AreaProposalSource,
-  WHOLE_REPOSITORY_GLOBS,
-} from './folders';
+import { AreaProposalInput, AreaProposalResult, AreaProposalSource } from './folders';
+import { WHOLE_REPOSITORY_GLOBS } from './page-areas';
 
 const area = { name: 'daemon', globs: ['apps/daemon/**'], reason: 'The daemon app.' };
 

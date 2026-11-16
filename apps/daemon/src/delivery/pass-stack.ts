@@ -74,7 +74,11 @@ function unmergedPr(db: DbReader, passId: PassId): boolean {
  * it stacks on the newest settled pass while that one's record pull request is unmerged, only so its
  * own record pull request takes that pass's branch as its base.
  */
-function passBelow(db: DbReader, projectId: ProjectId, opening?: PassId): PassDto | undefined {
+export function passBelow(
+  db: DbReader,
+  projectId: ProjectId,
+  opening?: PassId,
+): PassDto | undefined {
   const others = (state: PassState) =>
     listPassesIn(db, state).filter((p) => p.projectId === projectId && p.id !== opening);
   if (getProject(db, projectId).delivery === Delivery.PullRequest)

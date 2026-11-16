@@ -300,6 +300,7 @@ export function passViewDto(
     checks: { gate: { state: 'not_run', logPath: null }, review: { reviewedSha: null } },
     closeStep: null,
     stackedOn: null,
+    wholeProject: false,
     notices: [],
     ...overrides.rest,
   });

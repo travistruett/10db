@@ -4,6 +4,7 @@ import {
   EventType,
   mintId,
   PassState,
+  WHOLE_PROJECT_PAGE,
   WorkstreamState as S,
   type PassId,
   type ProjectDto,
@@ -41,6 +42,10 @@ import {
   insertBatch,
   insertPass,
   insertSystemNotice,
+  insertWholeProjectTask,
+  isWholeProjectPass,
+  markTasksMadeByPass,
+  passAreasOf,
   insertTask,
   insertWorkstream,
   joinPass,
@@ -53,6 +58,7 @@ import {
   listPassTasks,
   listTaskThread,
   listUnfinishedAbandons,
+  madeByPass,
   passHoldingFolder,
   passHoldingTask,
   passPageAreas,
@@ -616,6 +622,37 @@ describe("a pass's pages", () => {
     expect(passPageAreas(store.db, id)).toEqual(['people', 'profile', 'settings']);
     expect(listPassTasks(store.db, id).map((t) => t.id)).toEqual([inPass]);
     expect(outside).toBeDefined();
+  });
+});
+
+describe("a pass of one's areas", () => {
+  it('read the project’s areas for an ordinary pass and the whole-project page for a pass of one', () => {
+    const ordinary = mintId('Pass');
+    store.write((ctx) => insertPass(ctx, passInput([task()], ordinary)));
+    expect(isWholeProjectPass(store.db, ordinary)).toBe(false);
+    expect(passAreasOf(store.db, ordinary)).toEqual(project.areas);
+
+    const one = mintId('Pass');
+    const other = seedProject(store, { name: 'other' });
+    const made = store.write((ctx) => {
+      const t = insertWholeProjectTask(ctx, other.id, {
+        title: 'Do the thing',
+        brief: 'The brief.',
+      });
+      insertPass(ctx, { ...passInput([t.id], one), projectId: other.id });
+      markTasksMadeByPass(ctx, one, [t.id]);
+      return t;
+    }).value;
+    expect(isWholeProjectPass(store.db, one)).toBe(true);
+    expect(passAreasOf(store.db, one)).toEqual([WHOLE_PROJECT_PAGE]);
+    expect(passPageAreas(store.db, one)).toEqual([WHOLE_PROJECT_PAGE.name]);
+    expect(getTask(store.db, made.id)).toMatchObject({
+      description: 'The brief.',
+      areas: [WHOLE_PROJECT_PAGE.name],
+      workspaceMode: 'shared',
+      passId: one,
+    });
+    expect(madeByPass(store.db, one, made.id)).toBe(true);
   });
 });
 

@@ -61,6 +61,7 @@ import {
   listToolOps,
   listStepToolOpResults,
   openPassTurn,
+  passAreasOf,
   passHoldingTask,
   passPageAreas,
   replaceToolOp,
@@ -786,7 +787,9 @@ export function createToolHandlers(
         return recordClaim(
           input.opId,
           settled,
-          settled.granted && passAsk.kind === 'slow' ? slowPageLine(input.name) : null,
+          settled.granted && passAsk.kind === 'slow'
+            ? slowPageLine(input.name, passAsk.wholeProject)
+            : null,
         );
       } finally {
         clearTimeout(timer);
@@ -855,7 +858,7 @@ export function createToolHandlers(
               toolName: 'Write',
               toolInput: { file_path: path },
               repoPath: checkout,
-              areas: project.areas,
+              areas: passAreasOf(db, pass.id),
               hazards: project.hazards,
               claims: claimed,
               readOnly: false,

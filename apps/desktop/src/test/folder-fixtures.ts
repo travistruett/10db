@@ -70,6 +70,7 @@ export function folderDto(
     holders,
     limits: closed === undefined ? [] : ['folder_git_until_merge'],
     limitPass: closed?.name ?? null,
+    pendingOpen: null,
     ...overrides,
   });
 }

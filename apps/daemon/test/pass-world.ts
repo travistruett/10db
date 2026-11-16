@@ -1,7 +1,12 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
+  ConversationOwnerKind,
+  ConversationProfile,
+  ConversationState,
+  mintId,
   PASS_SIGN_OFF_CHOICE,
+  type ChatId,
   WorkstreamState,
   type PassTurnDto,
   type ProjectInput,
@@ -13,6 +18,8 @@ import {
   endPassTurn,
   getTask,
   getWorkstreamRow,
+  insertChat,
+  insertConversation,
   insertInboxItem,
   insertPassTurn,
   listPassTasks,
@@ -122,6 +129,19 @@ export async function openPassWorld(
     boardPeople ??
     listPassTasks(h.store.db, opened.pass.id).find((t) => t.areas.includes('people'));
   if (!people) throw new Error('the pass made no People task');
+  return {
+    ...bindWorld(h, opened, write),
+    settings: getTask(h.store.db, settings.id),
+    people: getTask(h.store.db, people.id),
+  };
+}
+
+/** What a pass world shares whatever its pages: the folder's writes, the turns and the restart. */
+function bindWorld(
+  h: DeliveryHarness,
+  opened: PassOpened,
+  write: (path: string, content: string) => void,
+): Omit<PassWorld, 'settings' | 'people'> {
   const reopened: (() => void)[] = [];
   const runOf = (task: TaskDto): WorkstreamId => {
     const id = getTask(h.store.db, task.id).workstreamId;
@@ -132,8 +152,6 @@ export async function openPassWorld(
     h,
     opened,
     branch: h.git$('symbolic-ref', '--short', 'HEAD'),
-    settings: getTask(h.store.db, settings.id),
-    people: getTask(h.store.db, people.id),
     deps: {
       state: h.state,
       git: h.git,
@@ -207,4 +225,62 @@ export async function openPassWorld(
       h.close();
     },
   };
+}
+
+export interface WholeProjectWorld extends PassWorld {
+  /** The pass's one task, whose page is the whole project; `settings` and `people` are it too. */
+  readonly task: TaskDto;
+  readonly chatId: ChatId;
+}
+
+/**
+ * A pass of one on Your folder of a real repository and database, opened for a chat as Do It opens it. The
+ * project has the Settings, People and shared `src` areas and the `deps` hazard, but the pass holds none of them.
+ */
+export async function openWholeProjectWorld(
+  opts: {
+    readonly before?: (world: Pick<PassWorld, 'write'>) => void;
+    readonly project?: Partial<ProjectInput>;
+  } = {},
+): Promise<WholeProjectWorld> {
+  const h = createDeliveryHarness({ ...PASS_PROJECT, ...opts.project });
+  const write = (path: string, content: string): void => {
+    const file = join(h.repo, path);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, content);
+  };
+  h.commit('src/settings/page.tsx', 'settings\n');
+  h.commit('src/people/page.tsx', 'people\n');
+  h.commit('src/shared.ts', 'shared\n');
+  h.commit('pnpm-lock.yaml', 'lock: 1\n');
+  opts.before?.({ write });
+  const chatId = mintId('Chat');
+  h.store.write((ctx) => {
+    const conv = insertConversation(ctx, {
+      projectId: h.project.id,
+      owner: { kind: ConversationOwnerKind.Chat, id: chatId },
+      profile: ConversationProfile.Explore,
+      state: ConversationState.IdleCold,
+    });
+    insertChat(ctx, {
+      id: chatId,
+      projectId: h.project.id,
+      conversationId: conv.id,
+      title: 'A chat',
+      tabPosition: 0,
+    });
+  });
+  const opened = await openPass(
+    h.ctx,
+    {
+      projectId: h.project.id,
+      name: 'Knock it out',
+      taskIds: [],
+      wholeProject: { title: 'Knock it out', brief: 'Do the thing.', chatId },
+    },
+    { leaseMs: 60_000, putBack: nothingKept },
+  );
+  const [task] = listPassTasks(h.store.db, opened.pass.id);
+  if (!task) throw new Error('the pass of one made no task');
+  return { ...bindWorld(h, opened, write), settings: task, people: task, task, chatId };
 }

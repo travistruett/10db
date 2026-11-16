@@ -9,7 +9,8 @@ window, Hand Back.
   files of every chat that isn't `taken_over`.
 - The open takes the folder with `folderHold.takeOver` (blockers re-checked in the same synchronous call as the
   state write, and the chat's archived row re-read there, since an archived chat has no retired flag after a
-  restart). Hand Back holds the chat's starts, gives the folder back (waiting git work is handed it first), then
+  restart, and `ChatService.underWay`, so a Do It that stopped the chat while the files were prepared refuses the
+  take: a taken-over chat can't be sealed). Hand Back holds the chat's starts, gives the folder back (waiting git work is handed it first), then
   parks the held messages on the folder.
 - `files.ts`: everything lives in `<data dir>/takeovers/<conversation id>/` (outside the chat's own files, which its session may read; mode 700; the script 700, the rest
   600). A link at the takeovers folder, the takeover folder or a file is refused or unlinked, never followed.

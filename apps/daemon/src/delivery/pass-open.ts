@@ -5,6 +5,7 @@ import {
   ClaimKind,
   ConflictError,
   FolderAsker,
+  FolderHolderKind,
   InvalidError,
   mintId,
   PASS_PAGE_CAP_DEFAULT,
@@ -19,6 +20,7 @@ import {
   TaskStatus,
   type BatchDto,
   type BatchId,
+  type ChatId,
   type GoalId,
   type Notice,
   type AreaDef,
@@ -36,6 +38,7 @@ import {
   copyHazardNames,
   findOpenPass,
   findUnfinishedBatch,
+  getChat,
   getGoal,
   getProject,
   getTask,
@@ -44,6 +47,9 @@ import {
   getWorkstreamRow,
   insertPass,
   insertPassPageTask,
+  insertWholeProjectTask,
+  linkChatToTask,
+  storeHandedTo,
   markTasksMadeByPass,
   listBatches,
   listPassDirt,
@@ -51,6 +57,7 @@ import {
   setWorkstreamNotice,
   type DbReader,
   type WriteContext,
+  passAreasOf,
 } from '@10db/db';
 import { holderWords, type FolderBlocker } from '../folder-hold';
 import { githubRepoOf } from '../github';
@@ -73,6 +80,22 @@ export interface PassOpenInput {
   readonly pages?: readonly string[];
   /** The goal those new tasks join; null or absent for none. */
   readonly goalId?: GoalId | null;
+  /**
+   * A pass of one, made from a chat's Do It: its one page is the whole project, with `title` and `brief`
+   * for its task, and the chat linked to it in the open's own write. It replaces `taskIds` and `pages`.
+   */
+  readonly wholeProject?: {
+    readonly title: string;
+    readonly brief: string;
+    readonly chatId: ChatId;
+    readonly acceptanceCriteria?: readonly string[];
+  };
+  /**
+   * Waits for chats' turns to end instead of refusing while they hold Your folder, until `signal` aborts.
+   * Lanes' first starts wait for the open meanwhile, so it can't be starved. Anything else that holds the
+   * folder still refuses at once.
+   */
+  readonly wait?: { readonly signal: AbortSignal };
 }
 
 /** What a put-back of a task's saved work did: the files it wrote, and those it left and named. */
@@ -158,19 +181,20 @@ function refuseOpen(
   tasks: readonly TaskDto[],
   pageCap: number,
   newPages: readonly NewPageTask[],
+  wholeProject: boolean,
 ) {
-  if (!project.areas.some((a) => a.role === AreaRole.Page))
+  if (!wholeProject && !project.areas.some((a) => a.role === AreaRole.Page))
     throw new ConflictError(
       `${project.name} has no page area; mark the areas that are pages in Settings › Areas and hazards first`,
     );
-  const count = tasks.length + newPages.length;
+  const count = wholeProject ? 1 : tasks.length + newPages.length;
   if (count === 0) throw new InvalidError('A pass needs at least one task');
   if (count > pageCap)
     throw new InvalidError(
       `A pass holds ${String(pageCap)} pages; ${String(count)} tasks and pages were named`,
     );
   for (const task of tasks) refusePassTask(db, project, task);
-  const pages = passPagesProblem(project.areas, [...tasks, ...newPages]);
+  const pages = wholeProject ? null : passPagesProblem(project.areas, [...tasks, ...newPages]);
   if (pages !== null) throw new InvalidError(pages);
   const open = findOpenPass(db, project.id);
   if (open)
@@ -187,6 +211,17 @@ function refuseOpen(
     throw new ConflictError(
       `${String(lanes)} task${lanes === 1 ? ' is' : 's are'} running in Your folder; a pass opens once they stop`,
     );
+}
+
+/** Why a pass of one can't open in the project now, in words, or null; reads the database only. */
+export function passOpenProblem(db: DbReader, project: ProjectDto): string | null {
+  try {
+    refuseOpen(db, project, [], PASS_PAGE_CAP_DEFAULT, [], true);
+    return null;
+  } catch (error) {
+    if (error instanceof ConflictError) return error.message;
+    throw error;
+  }
 }
 
 /**
@@ -216,6 +251,37 @@ function folderInUse(blockers: readonly FolderBlocker[]): string {
 }
 
 /**
+ * What the database alone refuses an open of a pass, thrown before anything is queued or waited for, and what
+ * the open then works with. A request that would be refused whatever the folder does is never answered as waiting.
+ */
+export function checkPassOpen(
+  db: DbReader,
+  input: PassOpenInput,
+): {
+  readonly project: ProjectDto;
+  readonly pageCap: number;
+  readonly tasks: TaskDto[];
+  readonly newPages: NewPageTask[];
+} {
+  const project = getProject(db, input.projectId);
+  const cap = PassPageCap.safeParse(input.pageCap ?? PASS_PAGE_CAP_DEFAULT);
+  if (!cap.success)
+    throw new InvalidError(`A pass holds from 1 to ${String(PASS_PAGE_CAP_MAX)} pages`);
+  const pageCap = cap.data;
+  const whole = input.wholeProject;
+  if (whole !== undefined) {
+    if (input.taskIds.length > 0 || (input.pages?.length ?? 0) > 0)
+      throw new InvalidError('A pass of one holds the whole project; it takes no other pages');
+    if (getChat(db, whole.chatId).projectId !== project.id)
+      throw new InvalidError('That chat belongs to another project');
+  }
+  const tasks = input.taskIds.map((id) => getTask(db, id));
+  const newPages = newPageTasks(db, project, input.pages ?? [], input.goalId ?? null);
+  refuseOpen(db, project, tasks, pageCap, newPages, whole !== undefined);
+  return { project, pageCap, tasks, newPages };
+}
+
+/**
  * Opens a pass on Your folder, in the project's delivery queue and under the checkout's repo lock:
  * the pass's branch at HEAD with no file written, the folder's dirt recorded with its content, the
  * pass and its batch on any delivery, each task's run on the implement step alone, and each task's
@@ -231,39 +297,65 @@ export async function openPass(
   deps: PassOpenDeps,
 ): Promise<PassOpened> {
   const db = ctx.state.db;
-  const project = getProject(db, input.projectId);
-  const cap = PassPageCap.safeParse(input.pageCap ?? PASS_PAGE_CAP_DEFAULT);
-  if (!cap.success)
-    throw new InvalidError(`A pass holds from 1 to ${String(PASS_PAGE_CAP_MAX)} pages`);
-  const pageCap = cap.data;
-  const tasks = input.taskIds.map((id) => getTask(db, id));
-  const newPages = newPageTasks(db, project, input.pages ?? [], input.goalId ?? null);
-  refuseOpen(db, project, tasks, pageCap, newPages);
-  const inUse = ctx.folderHold.blockers(project.id, { kind: FolderAsker.GitWork });
+  const { project, pageCap, tasks, newPages } = checkPassOpen(db, input);
+  const whole = input.wholeProject;
+  // The chat that asks to open is stopped before the open, so its own turn and wait are not in the way.
+  const inUse = ctx.folderHold
+    .blockers(project.id, { kind: FolderAsker.GitWork })
+    .filter((b) => b.holder.chatId !== whole?.chatId)
+    .filter((b) => input.wait === undefined || b.holder.kind !== FolderHolderKind.ChatTurn);
   if (inUse.length > 0) throw new ConflictError(folderInUse(inUse));
   const id = mintId('Pass');
   const branch = passBranchName(input.name, id);
   const dirtRef = passDirtRef(id);
   return new Promise<PassOpened>((resolve, reject) => {
-    ctx.jobs.run(jobKey({ projectId: project.id, worktreePath: null }, JobQueue.Cut), async () => {
-      // 10db never moves Your folder's branch under a chat's turn: the open's git calls hold the folder.
-      const reserved = ctx.folderHold.reserveGit(project.id, 'opening a pass in Your folder');
-      if (!reserved.reserved) {
-        reject(new ConflictError(folderInUse(reserved.blockers)));
-        return;
-      }
-      let opened: PassOpened;
-      try {
-        opened = await ctx.git.operation(() => open());
-      } catch (error) {
-        reject(error instanceof Error ? error : new Error(String(error)));
-        return;
-      } finally {
-        ctx.folderHold.releaseGit(reserved.token);
-      }
-      for (const task of tasks) if (getTaskKeptWork(db, task.id) !== null) await putBack(task.id);
-      resolve(opened);
-    });
+    ctx.jobs.run(
+      jobKey({ projectId: project.id, worktreePath: null }, JobQueue.Cut),
+      async (jobSignal) => {
+        // 10db never moves Your folder's branch under a chat's turn: the open's git calls hold the folder.
+        const what = 'opening a pass in Your folder';
+        let token: symbol;
+        if (input.wait) {
+          try {
+            token = await ctx.folderHold.reserveGitWhenFree(project.id, what, {
+              signal: AbortSignal.any([jobSignal, input.wait.signal]),
+              lanesWait: { passName: input.name },
+            });
+          } catch (error) {
+            reject(error instanceof Error ? error : new Error(String(error)));
+            return;
+          }
+        } else {
+          const reserved = ctx.folderHold.reserveGit(project.id, what);
+          if (!reserved.reserved) {
+            reject(new ConflictError(folderInUse(reserved.blockers)));
+            return;
+          }
+          token = reserved.token;
+        }
+        let opened: PassOpened;
+        try {
+          // What held at the call may not hold after the wait: a start, a batch or a pass slipped in.
+          if (input.wait)
+            refuseOpen(
+              db,
+              getProject(db, input.projectId),
+              input.taskIds.map((id) => getTask(db, id)),
+              pageCap,
+              newPages,
+              whole !== undefined,
+            );
+          opened = await ctx.git.operation(() => open());
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error(String(error)));
+          return;
+        } finally {
+          ctx.folderHold.releaseGit(token);
+        }
+        for (const task of tasks) if (getTaskKeptWork(db, task.id) !== null) await putBack(task.id);
+        resolve(opened);
+      },
+    );
   });
 
   async function open(): Promise<PassOpened> {
@@ -284,7 +376,17 @@ export async function openPass(
       written = ctx.state.write((w) => {
         const stray = returnBranchProblem(w.tx, project, start.returnBranch);
         if (stray !== null) throw new ConflictError(stray);
-        const made = writePageTasks(w, project, newPages);
+        const made = whole
+          ? [
+              insertWholeProjectTask(w, project.id, {
+                title: whole.title,
+                brief: whole.brief,
+                ...(whole.acceptanceCriteria === undefined
+                  ? {}
+                  : { acceptanceCriteria: whole.acceptanceCriteria }),
+              }),
+            ]
+          : writePageTasks(w, project, newPages);
         const pageTasks = [...tasks, ...made];
         const inserted = insertPass(w, {
           id,
@@ -304,9 +406,27 @@ export async function openPass(
           id,
           made.map((t) => t.id),
         );
+        if (whole) {
+          const [task] = made;
+          if (task === undefined) throw new InvalidError('A pass of one has no task');
+          linkChatToTask(w, whole.chatId, { taskId: task.id, passId: id });
+          storeHandedTo(
+            w,
+            whole.chatId,
+            { kind: 'handed_to', taskId: task.id, title: whole.title, place: 'here' },
+            false,
+          );
+        }
         stackOn(w, id, below);
         const leaseExpiresAt = new Date(ctx.clock.now().getTime() + deps.leaseMs).toISOString();
-        const waiting = startPassTasks(w, project, inserted.batch.id, pageTasks, leaseExpiresAt);
+        const waiting = startPassTasks(
+          w,
+          project,
+          id,
+          inserted.batch.id,
+          pageTasks,
+          leaseExpiresAt,
+        );
         return { ...inserted, waiting };
       });
     } catch (error) {
@@ -455,17 +575,19 @@ export function refusePassTask(db: DbReader, project: ProjectDto, task: TaskDto)
 export function startPassTasks(
   w: WriteContext,
   project: ProjectDto,
+  passId: PassId,
   batchId: BatchId,
   tasks: readonly TaskDto[],
   leaseExpiresAt: string,
 ): PassPageWait[] {
   const waiting: PassPageWait[] = [];
+  const areas = passAreasOf(w.tx, passId);
   for (const task of tasks) {
     const ws = insertPlannedWorkstream(w, task.id, passPlan(w.tx, task), batchId);
     const claimed = acquireClaims(w, {
       projectId: project.id,
       workstreamId: ws.id,
-      requests: passHeldAreas(project.areas, task).map((name) => ({
+      requests: passHeldAreas(areas, task).map((name) => ({
         kind: ClaimKind.Area,
         name,
       })),

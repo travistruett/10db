@@ -6,9 +6,14 @@ import {
   TaskScreenDto,
   TaskScreensDto,
 } from './task-screens';
+import { TaskSessionDto } from './task-session';
 import { TaskFileDto, TaskMessageDto, TaskMessageInput, TaskThreadDto } from './task-thread';
 import {
+  BriefRequest,
   ChatCreateInput,
+  DoItPreviewDto,
+  DoItRequest,
+  DoItResult,
   ChatDto,
   ChatModelsDto,
   ChatPatchInput,
@@ -36,6 +41,7 @@ import {
   PassCheckDetail,
   PassDto,
   PassOpenedDto,
+  PassOpenResponse,
   PassOpenRequest,
   PassTurnDto,
   PassViewDto,
@@ -328,6 +334,11 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'agent-command-dto': AgentCommandDto,
   'chat-create-input': ChatCreateInput,
   'chat-dto': ChatDto,
+  'do-it-request': DoItRequest,
+  'do-it-preview-dto': DoItPreviewDto,
+  'do-it-result': DoItResult,
+  'brief-request': BriefRequest,
+  'task-session-dto': TaskSessionDto,
   'chat-models-dto': ChatModelsDto,
   'chat-patch-input': ChatPatchInput,
   'chat-tool-result': ChatToolResult,
@@ -550,6 +561,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'pass-check-detail': PassCheckDetail,
   'pass-open-request': PassOpenRequest,
   'pass-opened-dto': PassOpenedDto,
+  'pass-open-response': PassOpenResponse,
   'take-out-result-dto': TakeOutResultDto,
   'pass-abandoned-dto': PassAbandonedDto,
   'shared-choice': SharedChoice,

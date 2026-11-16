@@ -13,6 +13,7 @@ import {
   joinableTasks,
   openRequest,
   pageCap,
+  pageLabelIn,
   passName,
   tickedWords,
   type PickTicks,
@@ -230,6 +231,11 @@ describe('openRequest names the pass by labels', () => {
       tasks: [{ taskId: mintId('Task'), title: 'Tighten it', pages: ['people'] }],
     };
     expect(openRequest(ticks, null, labelled).name).toBe('Plan and People');
+  });
+  it('reads the whole-project page as Whole project, never its stored name', () => {
+    const ticks: PickTicks = { pages: ['10db-whole-project'], tasks: [] };
+    expect(openRequest(ticks, null, labelled).name).toBe('Whole project');
+    expect(pageLabelIn(labelled, '10db-whole-project')).toBe('Whole project');
   });
 });
 

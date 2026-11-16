@@ -13,6 +13,7 @@ import type { DaemonConnection } from './connection';
 import { useDaemon } from './provider';
 import { accountKeys, accountLoginKey } from './account-queries';
 import { chatKeys } from './chat-queries';
+import { taskSessionKeys } from './task-session-queries';
 import { conversationKeys, liveKeys, writeLiveFrame } from './conversation-queries';
 import { githubKeys } from './github-queries';
 import { goalKeys } from './goal-queries';
@@ -77,10 +78,10 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // An explore conversation stored or changed an item, or moved state: its items and its state.
   conversation: [conversationKeys.all, chatKeys.all],
   // A chat was created, renamed, moved, archived or touched: the open tabs and Recent.
-  chat: [chatKeys.all],
+  chat: [chatKeys.all, taskSessionKeys.all],
   // A pass opening, a turn starting or ending, a page Ready or signed off, a close step: each changes
   // the pass and its pages' turns.
-  pass: [passKeys.all, folderKeys.all],
+  pass: [passKeys.all, folderKeys.all, taskSessionKeys.all],
   board_column: [['board-columns'], CANDIDATES],
   network_hosts: [NETWORK_HOSTS_KEY],
   // One account's sign-in to one of the builder's MCP servers started, ended or was cancelled.
@@ -98,6 +99,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
     humanTouchKeys.all,
     passKeys.live,
     folderKeys.all,
+    taskSessionKeys.all,
   ],
   // A session's span says which tasks ran that day.
   session: [...WORK, humanTouchKeys.all],

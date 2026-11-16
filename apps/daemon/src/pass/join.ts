@@ -16,6 +16,7 @@ import {
   getProject,
   getTask,
   getTaskKeptWork,
+  isWholeProjectPass,
   insertBuilderMessage,
   joinPass as joinPassRows,
   listPassTasks,
@@ -56,6 +57,8 @@ function refuseJoin(
     throw new ConflictError(
       `Pass "${pass.name}" is ${pass.state.toLowerCase()}: a page joins only an open pass`,
     );
+  if (isWholeProjectPass(db, pass.id))
+    throw new ConflictError('A pass of one holds the whole project; there is no page to add');
   const held = listPassTasks(db, pass.id);
   const count = held.length + tasks.length + newPages.length;
   if (count > pass.pageCap)
@@ -100,7 +103,7 @@ export async function joinPass(
           markTasksMadeByPass(w, passId, made);
           const leaseExpiresAt = new Date(ctx.clock.now().getTime() + deps.leaseMs).toISOString();
           const all = ids.map((id) => getTask(w.tx, id));
-          const waiting = startPassTasks(w, project, pass.batchId, all, leaseExpiresAt);
+          const waiting = startPassTasks(w, project, pass.id, pass.batchId, all, leaseExpiresAt);
           return { joined: ids, waiting };
         });
       } catch (error) {

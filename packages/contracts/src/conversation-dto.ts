@@ -13,6 +13,7 @@ import {
   ConversationItemId,
   InboxItemId,
   PassTurnId,
+  TaskId,
 } from './ids';
 import { FolderWhileHeldInput } from './folder-hold';
 import { Effort } from './states';
@@ -123,6 +124,10 @@ export const ConversationItemDto = z.discriminatedUnion('kind', [
     text: z.string(),
     /** Set on the notice that the model changed: its display name and id. */
     change: z.object({ label: z.string(), model: z.string() }).optional(),
+    /** Set on the notice that Do It handed the chat's work to a task. */
+    handedTo: z
+      .object({ taskId: TaskId, title: z.string(), place: z.enum(['worktree', 'here']) })
+      .optional(),
     /** What a task's notice offers the builder to send; absent when it offers nothing. */
     offer: NoticeOffer.optional(),
   }),

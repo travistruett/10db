@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "taskId": {
+      "type": "string",
+      "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "title": {
+      "type": "string"
+    },
+    "place": {
+      "type": "string",
+      "enum": [
+        "copy",
+        "pass"
+      ]
+    },
+    "branch": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "board": {
+      "type": "string",
+      "enum": [
+        "backlog",
+        "ready",
+        "in_progress",
+        "in_review",
+        "blocked",
+        "done"
+      ]
+    },
+    "conversationId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^cnv_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "fromChat": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "chatId": {
+              "type": "string",
+              "pattern": "^cht_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            "title": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "chatId",
+            "title"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "passId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^pas_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "workstreamId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^ws_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "pullRequest": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "state": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "url",
+            "state"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "taskId",
+    "title",
+    "place",
+    "branch",
+    "board",
+    "conversationId",
+    "fromChat",
+    "passId",
+    "workstreamId",
+    "pullRequest"
+  ]
+}

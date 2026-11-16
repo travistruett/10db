@@ -17,7 +17,7 @@ import {
   listTaskThread,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
-import { openPassWorld, type PassWorld } from '../../test/pass-world';
+import { openPassWorld, openWholeProjectWorld, type PassWorld } from '../../test/pass-world';
 import { silentLogger } from '../log';
 import { answerMoveToCopy, askMoveToCopy } from '../pass';
 import { ClaimWaits } from './claim-wait';
@@ -33,7 +33,7 @@ afterEach(() => {
 });
 
 /** The task's lane tools, as its session's MCP server builds them, in a turn. */
-function laneTools(world: PassWorld, task: TaskDto) {
+function laneTools(world: Pick<PassWorld, 'h' | 'runOf' | 'startTurn'>, task: TaskDto) {
   const workstreamId = world.runOf(task);
   world.startTurn(task);
   const session = world.h.state.write((ctx) =>
@@ -134,6 +134,33 @@ describe('a pass lane asking for the deps hazard', () => {
     expect(listTaskThread(w.h.store.db, w.settings.id).at(-1)?.body).toMatch(
       /deps .*Your folder.*slow/,
     );
+  });
+});
+
+describe('a pass of one asking for the deps hazard', () => {
+  it('is granted in Your folder on a project with copies, with no Move card and a line that says why', async () => {
+    const one = await openWholeProjectWorld();
+    try {
+      const tools = laneTools(one, one.task);
+
+      const answer = await tools.request_claim({
+        opId: 'op-deps-1',
+        kind: 'hazard',
+        name: 'deps',
+        reason: 'add a date library',
+      });
+
+      expect(answer.granted).toBe(true);
+      expect(
+        activeClaims(one.h.store.db, one.runOf(one.task)).map((c) => `${c.kind}:${c.name}`),
+      ).toContain('hazard:deps');
+      expect(one.h.cards()).toEqual([]);
+      expect(listTaskThread(one.h.store.db, one.task.id).at(-1)?.body).toMatch(
+        /deps .*Your folder.*whole project/,
+      );
+    } finally {
+      one.close();
+    }
   });
 });
 

@@ -43,6 +43,10 @@ export interface HunkDiffProps {
   readonly first: boolean;
   /** Draws at most this many lines. */
   readonly maxLines?: number;
+  /** When given, each line's number is a button that hands the line to it. */
+  readonly onQuote?: (line: GutterLine) => void;
+  /** What a number's button is called, for a screen reader. */
+  readonly quoteLabel?: (line: GutterLine) => string;
 }
 
 /**
@@ -50,7 +54,7 @@ export interface HunkDiffProps {
  * numbered from the hunk's starts (`hunkGutter`). The drawing is hidden from screen readers, which
  * read a list of the lines instead.
  */
-export function HunkDiff({ hunk, first, maxLines }: HunkDiffProps) {
+export function HunkDiff({ hunk, first, maxLines, onQuote, quoteLabel }: HunkDiffProps) {
   const shown = maxLines === undefined ? hunk : cutHunk(hunk, maxLines);
   const lines = hunkGutter(shown);
   return (
@@ -67,7 +71,7 @@ export function HunkDiff({ hunk, first, maxLines }: HunkDiffProps) {
           ))}
         </ul>
       </VisuallyHidden>
-      <div className={classes['body']} aria-hidden="true">
+      <div className={classes['body']} {...(onQuote === undefined ? { 'aria-hidden': true } : {})}>
         <div className={classes['gutter']}>
           {lines.map((line, i) => (
             <div
@@ -77,25 +81,40 @@ export function HunkDiff({ hunk, first, maxLines }: HunkDiffProps) {
               data-kind={line.kind}
               data-number={line.number}
             >
-              <span>{line.number}</span>
+              {onQuote === undefined ? (
+                <span>{line.number}</span>
+              ) : (
+                <button
+                  type="button"
+                  className={classes['number']}
+                  aria-label={quoteLabel?.(line) ?? `Quote line ${String(line.number)}`}
+                  onClick={() => {
+                    onQuote(line);
+                  }}
+                >
+                  {line.number}
+                </button>
+              )}
               <span className={classes['marker']}>{MARKER[line.kind]}</span>
             </div>
           ))}
         </div>
-        <Diff
-          previousValue={shown.before}
-          currentValue={shown.after}
-          withLineNumbers={false}
-          diffMethod="lines"
-          contextLines={Infinity}
-          mode="unified"
-          classNames={{
-            root: classes['diff'],
-            content: classes['content'],
-            addedLine: classes['added'],
-            removedLine: classes['removed'],
-          }}
-        />
+        <div aria-hidden="true" style={{ flex: 1, minWidth: 0 }}>
+          <Diff
+            previousValue={shown.before}
+            currentValue={shown.after}
+            withLineNumbers={false}
+            diffMethod="lines"
+            contextLines={Infinity}
+            mode="unified"
+            classNames={{
+              root: classes['diff'],
+              content: classes['content'],
+              addedLine: classes['added'],
+              removedLine: classes['removed'],
+            }}
+          />
+        </div>
       </div>
     </Box>
   );

@@ -53,6 +53,7 @@ import {
   renewLeases,
   setWorkstreamNotice,
   transitionWorkstream,
+  passAreasOf,
 } from '@10db/db';
 import {
   unready,
@@ -302,10 +303,24 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
   }
 
   /** Shows on a task that it waits for a chat's turn to finish with Your folder, naming the holder. */
-  function waitForFolder(id: WorkstreamId, blockers: readonly FolderBlocker[]): void {
+  function waitForFolder(
+    id: WorkstreamId,
+    projectId: ProjectId,
+    blockers: readonly FolderBlocker[],
+  ): void {
+    // A pass that waits to open holds the folder next, so its name is the answer, not 10db's git work.
+    const opening = opts.folderHold.opening(projectId);
     // 10db's own git work is over in moments, and says nothing the builder acts on.
-    if (blockers.every((b) => b.holder.kind === FolderHolderKind.GitWork)) return;
-    const line = `Waits for ${blockers.map((b) => holderWords(b.holder)).join(' and ')} to finish with Your folder`;
+    if (opening === null && blockers.every((b) => b.holder.kind === FolderHolderKind.GitWork))
+      return;
+    // 10db's git work is the open itself while a pass waits to open, so the pass is named in its place.
+    const words = blockers
+      .filter((b) => opening === null || b.holder.kind !== FolderHolderKind.GitWork)
+      .map((b) => holderWords(b.holder));
+    const line =
+      opening === null
+        ? `Waits for ${words.join(' and ')} to finish with Your folder`
+        : `Waits for ${[...words, `the pass \u2018${opening}\u2019, opening`].join(' and ')}`;
     const stale = (notice: WorkstreamDto['notice']): boolean =>
       notice === null || (notice.key === FOLDER_HOLD_WAIT_NOTICE_KEY && notice.line !== line);
     if (!stale(getWorkstreamRow(db, id).notice)) return;
@@ -315,7 +330,10 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         key: FOLDER_HOLD_WAIT_NOTICE_KEY,
         tone: 'info',
         line,
-        body: 'This task starts once the chat is done in Your folder. A message the chat sends meanwhile waits for it too.',
+        body:
+          opening === null
+            ? 'This task starts once the chat is done in Your folder. A message the chat sends meanwhile waits for it too.'
+            : 'This task starts once the pass has opened and the folder is free for it.',
       });
     });
   }
@@ -433,7 +451,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       if (firstInFolder) {
         const held = chatHolders(project.id);
         if (held.length > 0) {
-          waitForFolder(ws.id, held);
+          waitForFolder(ws.id, project.id, held);
           continue;
         }
       }
@@ -510,7 +528,10 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       // A page holds its pass's areas for its life; one that waited at the open for a page another
       // task held claims it here, and runs only once it has it.
       const requests = inPass
-        ? passHeldAreas(project.areas, task).map((name) => ({ kind: ClaimKind.Area, name }))
+        ? passHeldAreas(passAreasOf(db, inPass.id), task).map((name) => ({
+            kind: ClaimKind.Area,
+            name,
+          }))
         : claimRequestsForTask(task, project);
       const ask = {
         projectId: project.id,
