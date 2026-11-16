@@ -172,6 +172,7 @@ export function chatWorld(
     briefs,
     clock,
     dataDir: dir.path,
+    log: silentLogger,
     now: () => clock.now(),
     modelsOf: () => ({
       default: 'claude-opus-5-5',

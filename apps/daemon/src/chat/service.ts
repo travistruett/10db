@@ -60,6 +60,7 @@ import type { Clock } from '../clock';
 import { keepBuilderMessage, type ExploreEngine, type PastedFile } from '../conversation';
 import type { StateStore } from '../events';
 import type { FolderHold, ServeResult } from '../folder-hold';
+import type { Logger } from '../log';
 import type { PendingOpens } from '../pass';
 import { briefFromChat, briefRequestText, briefTitle } from './brief';
 import type { Briefs } from './briefs';
@@ -74,8 +75,9 @@ const FIRST_LINE_TITLE_MAX = 40;
 
 /** What a message to an archived chat is refused with. */
 export const CHAT_ARCHIVED = 'This session is archived.';
-/** What Redo and archive are refused with while Do It, or an open that stopped the chat's turn, is under way. */
-export const DO_IT_UNDER_WAY = 'Do It is already under way for this chat';
+/** What Redo, archive and a second Do It are refused with while an open has stopped the chat's turn. */
+export const DO_IT_UNDER_WAY =
+  'A pass is opening and has stopped this chat’s turn; try again once it has opened';
 /** What a send is refused with while Do It hands the chat's work to a task in a separate copy. */
 export const HANDING_OFF = 'This chat is handing its work to a task';
 /** What Do It and archive are refused with while a pass waits to open for the chat. */
@@ -157,6 +159,8 @@ export interface ChatService {
    * `release` runs, which lets what is queued run. Refused when the chat is already stopped for one.
    */
   stopForOpen(chatId: ChatId, place?: DoItPlace): Promise<() => void>;
+  /** Whether an open has stopped the chat's turn and not yet given its starts back. */
+  underWay(chatId: ChatId): boolean;
   /** Seals the chat once Do It has handed its work to a task: its session ends and its brief is forgotten. */
   seal(chatId: ChatId): Promise<void>;
 }
@@ -170,6 +174,7 @@ export interface ChatServiceDeps {
   readonly briefs: Briefs;
   readonly clock: Pick<Clock, 'now'>;
   readonly dataDir: string;
+  readonly log: Logger;
   readonly now: () => Date;
   /** The models a project's account offers for a conversation, and its default. */
   modelsOf(projectId: ProjectId): { default: string | null; offered: readonly ShapeModelOption[] };
@@ -320,7 +325,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       if (briefTurnRunning(chat)) {
         briefTurns.delete(chat.id);
         engine.holdStarts(conversationId);
-        void stopHeld(conversationId).then(() => {
+        void stopHeld(conversationId, () => {
           dispatch(chat, conversationId, folder);
         });
         return item;
@@ -382,6 +387,8 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       briefTurns.delete(chatId);
     },
 
+    underWay: (chatId) => stoppedForOpen.has(chatId),
+
     async stopForOpen(chatId, place = DoItPlace.Here) {
       const chat = getChat(state.db, chatId);
       refuseWhileDoing(chatId);
@@ -405,6 +412,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
     askBrief(chatId, draft) {
       const chat = getChat(state.db, chatId);
+      refuseWhileDoing(chatId);
       if (!briefAskable(chat)) return;
       // A brief already written is kept for the sheet, and a request still waiting is not asked twice.
       if (deps.briefs.written(chat.id) !== null) return;
@@ -483,15 +491,28 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     );
   }
 
-  /** Stops the turn with starts held, then lets them go: what is queued after it starts fresh. */
-  async function stopHeld(conversationId: ConversationId): Promise<void> {
+  /**
+   * Stops the turn with starts held, runs `next` (the queue's half of the send, so its folder choice is made
+   * before anything starts), then lets the starts go unless an open holds them.
+   */
+  async function stopHeld(conversationId: ConversationId, next: () => void): Promise<void> {
+    const chat = chatOfConversation(state.db, conversationId);
     try {
       await engine.stop(conversationId);
       await engine.settled(conversationId);
     } catch {
       // A stop that fails leaves the turn as it was; the message still runs after it.
+    }
+    try {
+      next();
+    } catch (error) {
+      deps.log.warn(
+        { conversationId, err: error instanceof Error ? error.message : String(error) },
+        'a message sent during a brief turn could not be queued',
+      );
     } finally {
-      engine.releaseStarts(conversationId);
+      // The starts of a chat an open stopped are held for the open, which gives them back itself.
+      if (chat === null || !stoppedForOpen.has(chat.id)) engine.releaseStarts(conversationId);
     }
   }
 
@@ -568,6 +589,9 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     const chat = chatOfConversation(state.db, conversationId);
     if (chat === null) throw new ConflictError('This conversation is no chat’s');
     if (chat.archivedAt !== null) throw new ConflictError(CHAT_ARCHIVED);
+    // A sealed chat runs no turn again: a message kept in it would wait for ever.
+    if (getConversation(state.db, conversationId).state === ConversationState.Sealed)
+      throw new ConflictError(HANDING_OFF);
     return keepBuilderMessage(input, {
       limits: {
         maxChars: TASK_MESSAGE_MAX_CHARS,

@@ -7,6 +7,7 @@ import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-se
 import {
   AccountKind,
   ConversationOwnerKind,
+  DoItPlace,
   EventType,
   InvalidError,
   InboxItemId,
@@ -1667,6 +1668,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     briefs: chatBriefs,
     clock,
     dataDir: opts.dataDir,
+    log: logger.child({ component: 'chat-service' }),
     now: () => clock.now(),
     modelsOf: conversationModels,
     webSearchOf: (projectId) =>
@@ -2290,7 +2292,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       pendingOpens,
       doItPreview: (chatId) => previewDoIt(doItDeps, chatId),
       doIt: (chatId, input) =>
-        input.place === 'here'
+        input.place === DoItPlace.Here
           ? doItHere(
               {
                 ...doItDeps,
@@ -2330,10 +2332,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
               {
                 ...doItDeps,
                 tasks: {
-                  create: async (projectId, task) => {
-                    const made = await services.createTask(projectId, task);
-                    return made;
-                  },
+                  create: (projectId, task) =>
+                    Promise.resolve(services.createTask(projectId, task)),
                   settleSizing: (taskIds) => services.settleSizing(taskIds),
                   start: (taskId) => services.startTask(taskId),
                   remove: (taskId) => services.removeTask(taskId),
