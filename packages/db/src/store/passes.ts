@@ -13,6 +13,8 @@ import {
   passHoldsTasks,
   TaskStatus,
   PassGateState,
+  WHOLE_PROJECT_PAGE,
+  type AreaDef,
   type BatchDto,
   type PassChecksView,
   type PassCloseRequest,
@@ -355,13 +357,26 @@ export function leavePass(ctx: WriteContext, taskId: TaskId): void {
   });
 }
 
+/** Whether the pass is a pass of one: a task of it names the whole-project page. */
+export function isWholeProjectPass(db: DbReader, passId: PassId): boolean {
+  return listPassTasks(db, passId).some((task) => task.areas.includes(WHOLE_PROJECT_PAGE.name));
+}
+
+/**
+ * The areas every rule of the pass reads: the whole-project page alone for a pass of one, else the
+ * project's areas. A pass of one is named by its task, never by a project's own areas.
+ */
+export function passAreasOf(db: DbReader, passId: PassId): readonly AreaDef[] {
+  if (isWholeProjectPass(db, passId)) return [WHOLE_PROJECT_PAGE];
+  return getProject(db, getPass(db, passId).projectId).areas;
+}
+
 /**
  * The areas that are pages in the pass (spec §7.1, §7.3): every page area of the project, and each area
  * with no role that a task of the pass holds. A file under one belongs to the task holding it alone.
  */
 export function passPageAreas(db: DbReader, passId: PassId): string[] {
-  const pass = getPass(db, passId);
-  const { areas } = getProject(db, pass.projectId);
+  const areas = passAreasOf(db, passId);
   const pages = new Set(areas.filter((a) => a.role === AreaRole.Page).map((a) => a.name));
   for (const task of listPassTasks(db, passId))
     for (const name of passHeldAreas(areas, task)) pages.add(name);
