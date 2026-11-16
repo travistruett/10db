@@ -36,4 +36,32 @@ describe('mapAtMost', () => {
       ),
     ).rejects.toThrow('two');
   });
+
+  it('keeps item order when an earlier item finishes last', async () => {
+    const { promise: first, resolve: releaseFirst } = Promise.withResolvers<undefined>();
+    const out = await mapAtMost([0, 1, 2], 2, async (n) => {
+      if (n === 0) await first;
+      else if (n === 2) releaseFirst(undefined);
+      return n;
+    });
+    expect(out).toEqual([0, 1, 2]);
+  });
+
+  it('starts no more items once one has failed', async () => {
+    const started: number[] = [];
+    await expect(
+      mapAtMost([0, 1, 2, 3, 4, 5], 2, async (n) => {
+        started.push(n);
+        if (n === 0) throw new Error('zero');
+        await new Promise<void>((resolve) => {
+          setImmediate(resolve);
+        });
+        return n;
+      }),
+    ).rejects.toThrow('zero');
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    expect(started).toEqual([0, 1]);
+  });
 });

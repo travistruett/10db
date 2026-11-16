@@ -37,8 +37,15 @@ describe('PageHeader', () => {
     expect(header.textContent).toBe('Board');
   });
 
-  it('gives a text byline its whole text as a tooltip, since it is cut to one line', () => {
-    renderHeader(<PageHeader title="Knowledge" description="A long byline" />);
-    expect(screen.getByText('A long byline').getAttribute('title')).toBe('A long byline');
+  it.each([
+    {
+      name: 'a text byline has its whole text',
+      description: 'A long byline',
+      title: 'A long byline',
+    },
+    { name: 'a byline of markup has none', description: <em>A long byline</em>, title: null },
+  ])('tooltip, since the byline is cut to one line: $name', ({ description, title }) => {
+    const header = renderHeader(<PageHeader title="Knowledge" description={description} />);
+    expect(header.children[1]?.getAttribute('title')).toBe(title);
   });
 });

@@ -346,10 +346,15 @@ describe('claudeToolCall', () => {
       },
     },
     {
-      name: 'AskUserQuestion previews its questions, not its JSON',
+      name: 'AskUserQuestion previews its questions and options, not its JSON',
       use: use('AskUserQuestion', {
         questions: [
-          { question: 'Which page first?', header: 'Page', options: [], multiSelect: false },
+          {
+            question: 'Which page first?',
+            header: 'Page',
+            options: [{ label: 'Settings' }, { label: 'People' }],
+            multiSelect: false,
+          },
           { question: 'Keep the byline?', header: 'Byline', options: [], multiSelect: false },
         ],
       }),
@@ -360,7 +365,7 @@ describe('claudeToolCall', () => {
         title: 'AskUserQuestion',
         kind: 'other',
         name: 'AskUserQuestion',
-        inputPreview: 'Which page first? · Keep the byline?',
+        inputPreview: 'Which page first? (Settings / People) · Keep the byline?',
       },
     },
     {
