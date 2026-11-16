@@ -81,6 +81,22 @@ function recording(name: string): AgentAdapter & { readonly calls: string[] } {
       calls.push('mcpAuthStatus');
       return Promise.resolve({});
     },
+    takeoverCommand: (spec) => {
+      calls.push('takeoverCommand');
+      return {
+        cwd: spec.cwd,
+        unset: [],
+        unsetPrefixes: [],
+        set: {},
+        keychain: [],
+        sources: [],
+        argv: [name],
+      };
+    },
+    takeoverNotes: () => {
+      calls.push('takeoverNotes');
+      return [name];
+    },
   };
 }
 
@@ -112,6 +128,8 @@ const METHODS = [
   'readClientUuids',
   'startMcpSignIn',
   'mcpAuthStatus',
+  'takeoverCommand',
+  'takeoverNotes',
 ] as const;
 
 async function callAll(adapter: AgentAdapter, kind: AgentAccountKind): Promise<void> {
@@ -136,6 +154,29 @@ async function callAll(adapter: AgentAdapter, kind: AgentAccountKind): Promise<v
     wanted: ['u1'],
     since: '2026-11-11T00:00:00.000Z',
   });
+  adapter.takeoverCommand({
+    kind,
+    cwd: '/d',
+    providerSessionId: 'thr-1',
+    model: 'm',
+    effort: 'high',
+    launch: {
+      set: {},
+      unset: [],
+      unsetPrefixes: [],
+      keychain: [],
+      apiKeyHelperAccount: null,
+      scrub: false,
+      model: 'm',
+    },
+    pluginDirs: [],
+    instructionsFile: null,
+    mcpConfigFile: null,
+    codexServers: [],
+    sealedEnvFile: null,
+    web: false,
+  });
+  adapter.takeoverNotes({ kind });
 }
 
 describe('createRoutedAdapter', () => {

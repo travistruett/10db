@@ -18,6 +18,7 @@ const NONE: TakeoverLaunch = {
 
 function spec(launch: TakeoverLaunch, over: Partial<TakeoverSpec> = {}): TakeoverSpec {
   return {
+    kind: 'claude_subscription',
     binary: '/pinned/claude',
     cwd: '/work/repo',
     providerSessionId: 'abc-123',

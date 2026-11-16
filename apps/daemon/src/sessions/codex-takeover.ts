@@ -102,6 +102,14 @@ function parseExtras(extras: Readonly<Record<string, unknown>>): Record<string, 
   }
 }
 
+/** What the builder is told of Codex in their terminal: its first screen, and what it does not get. */
+export function codexTakeoverNotes(): string[] {
+  return [
+    'Codex asks how to open the folder first: choose Open restricted.',
+    "Codex in your terminal doesn't get your skills folders.",
+  ];
+}
+
 export function codexTakeoverCommand(spec: TakeoverSpec): TakeoverCommand {
   const { launch } = spec;
   const defaults = CODEX_TUI_DEFAULTS;

@@ -1,4 +1,5 @@
 import { createChannel } from './channel';
+import { TakeoverRefusedError } from './takeover-command';
 import {
   AccountLoginError,
   AccountProbeError,
@@ -16,6 +17,7 @@ import {
 export function createUnavailableAdapter(
   message: string,
   capabilities: AgentAdapter['capabilities'],
+  notes: AgentAdapter['takeoverNotes'] = () => [],
 ): AgentAdapter {
   const ended = () => {
     const channel = createChannel<SessionEvent>();
@@ -25,6 +27,10 @@ export function createUnavailableAdapter(
   };
   return {
     capabilities: (account, model) => capabilities(account, model),
+    takeoverCommand: () => {
+      throw new TakeoverRefusedError(message);
+    },
+    takeoverNotes: (account) => notes(account),
     probeAccount: () => Promise.reject(new AccountProbeError(message)),
     startLogin: () => Promise.reject(new AccountLoginError(message)),
     startMcpSignIn: () => Promise.reject(new McpSignInError(message)),

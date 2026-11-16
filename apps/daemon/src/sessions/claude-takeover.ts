@@ -10,6 +10,11 @@ import { validSessionId, type TakeoverCommand, type TakeoverSpec } from './takeo
 const keyHelper = (account: string): string =>
   `/usr/bin/security find-generic-password -s 10db -a ${singleQuoted(account)} -w`;
 
+/** What the builder is told of Claude Code in their terminal. */
+export function claudeTakeoverNotes(): string[] {
+  return ['Project settings and hooks are not loaded; only the servers and plugins this chat had.'];
+}
+
 export function claudeTakeoverCommand(spec: TakeoverSpec): TakeoverCommand {
   const { launch } = spec;
   const settings = JSON.stringify({

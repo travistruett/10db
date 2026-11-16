@@ -15,16 +15,19 @@ export function createPinnedAdapter(
   source: () => AdapterSource,
   build: (path: string) => AgentAdapter,
   capabilities: AgentAdapter['capabilities'],
+  notes: AgentAdapter['takeoverNotes'] = () => [],
 ): AgentAdapter {
   let built: { readonly path: string; readonly adapter: AgentAdapter } | null = null;
   const current = (): AgentAdapter => {
     const now = source();
-    if (!now.ready) return createUnavailableAdapter(now.message, capabilities);
+    if (!now.ready) return createUnavailableAdapter(now.message, capabilities, notes);
     if (built?.path !== now.path) built = { path: now.path, adapter: build(now.path) };
     return built.adapter;
   };
   return {
     capabilities: (account, model) => capabilities(account, model),
+    takeoverCommand: (spec) => current().takeoverCommand(spec),
+    takeoverNotes: (account) => notes(account),
     complete: (spec) => current().complete(spec),
     open: (spec) => current().open(spec),
     probeAccount: (probe) => current().probeAccount(probe),

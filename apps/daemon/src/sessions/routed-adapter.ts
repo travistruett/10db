@@ -20,6 +20,8 @@ export function createRoutedAdapter(
     startLogin: (login) => by(login).startLogin(login),
     startMcpSignIn: (spec) => by(spec).startMcpSignIn(spec),
     mcpAuthStatus: (spec) => by(spec).mcpAuthStatus(spec),
+    takeoverCommand: (spec) => by(spec).takeoverCommand(spec),
+    takeoverNotes: (account) => by(account).takeoverNotes(account),
     readClientUuids: (spec) => by(spec.account).readClientUuids(spec),
     stop: async () => {
       await Promise.all(

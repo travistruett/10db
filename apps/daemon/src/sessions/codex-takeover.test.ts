@@ -22,6 +22,7 @@ const LAUNCH: TakeoverLaunch = {
 
 function spec(over: Partial<TakeoverSpec> = {}): TakeoverSpec {
   return {
+    kind: 'codex_signin',
     binary: '/pinned/codex',
     cwd: '/work/repo',
     providerSessionId: '0198a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b',

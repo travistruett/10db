@@ -1,4 +1,6 @@
 export { createClaudeAdapter } from './claude-adapter';
+export { claudeTakeoverNotes } from './claude-takeover';
+export { codexTakeoverNotes } from './codex-takeover';
 export { capabilitiesOf, claudeCapabilities, codexCapabilities } from './capabilities';
 export { createCodexAdapter } from './codex-adapter';
 export { McpAuthState } from './codex-mcp-auth';
