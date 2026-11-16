@@ -4,8 +4,10 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import {
   IconAlertTriangle,
+  IconCheck,
   IconFolder,
   IconGitBranch,
+  IconGitPullRequest,
   IconPlayerPause,
   IconTerminal2,
   IconX,
@@ -56,6 +58,28 @@ export function Mark({ mark }: { readonly mark: TabWords['mark'] }) {
           size={12}
           stroke={1.5}
           color="var(--mantine-color-orange-filled)"
+        />
+      );
+    case 'review_dim':
+      return (
+        <IconGitPullRequest
+          data-mark={mark}
+          size={12}
+          stroke={1.5}
+          color="var(--mantine-color-dimmed)"
+        />
+      );
+    case 'check_dim':
+      return (
+        <IconCheck data-mark={mark} size={12} stroke={1.5} color="var(--mantine-color-dimmed)" />
+      );
+    case 'check_green':
+      return (
+        <IconCheck
+          data-mark={mark}
+          size={12}
+          stroke={1.5}
+          color="var(--mantine-color-green-filled)"
         />
       );
     case 'terminal_dim':

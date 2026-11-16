@@ -6,10 +6,15 @@ import type { ConversationState } from '@10db/contracts';
  */
 export const TabState = {
   NeedsYou: 'needs_you',
+  /** A pass of one's page ended a turn and waits for the builder to look. */
+  Ready: 'ready',
   Error: 'error',
   Paused: 'paused',
   Working: 'working',
   InTerminal: 'in_terminal',
+  InReview: 'in_review',
+  SignedOff: 'signed_off',
+  Done: 'done',
   NewReply: 'new_reply',
   Idle: 'idle',
 } as const;
@@ -41,14 +46,23 @@ export function tabState({ state, openCards, lastReplyAt, seenAt }: TabStateInpu
   return TabState.Idle;
 }
 
-/** The states the Sessions badge and ⌘J count: a card to answer, or a session stopped by an error. */
+/** The states the Sessions badge and ⌘J count: a card to answer, a page to look at, or a stop by an error. */
 export function needsYou(state: TabState): boolean {
-  return state === TabState.NeedsYou || state === TabState.Error;
+  return state === TabState.NeedsYou || state === TabState.Ready || state === TabState.Error;
 }
 
 export interface TabWords {
   readonly spoken: string;
-  readonly mark: 'dot_blue' | 'dot_yellow' | 'alert_red' | 'pause_orange' | 'terminal_dim' | null;
+  readonly mark:
+    | 'dot_blue'
+    | 'dot_yellow'
+    | 'alert_red'
+    | 'pause_orange'
+    | 'terminal_dim'
+    | 'review_dim'
+    | 'check_dim'
+    | 'check_green'
+    | null;
   readonly ring: 'yellow' | 'red' | null;
   readonly bold: boolean;
   /** The title is dimmed. */
@@ -68,6 +82,14 @@ export function tabWords(state: TabState, detail: TabDetail = {}): TabWords {
     case TabState.NeedsYou:
       return {
         spoken: detail.cardTitle === undefined ? 'needs you' : `needs you: ${detail.cardTitle}`,
+        mark: 'dot_yellow',
+        ring: 'yellow',
+        bold: false,
+        dim: false,
+      };
+    case TabState.Ready:
+      return {
+        spoken: 'ready: look at the changes',
         mark: 'dot_yellow',
         ring: 'yellow',
         bold: false,
@@ -102,6 +124,18 @@ export function tabWords(state: TabState, detail: TabDetail = {}): TabWords {
         bold: false,
         dim: true,
       };
+    case TabState.InReview:
+      return { spoken: 'in review', mark: 'review_dim', ring: null, bold: false, dim: false };
+    case TabState.SignedOff:
+      return {
+        spoken: 'signed off: close the pass to land it',
+        mark: 'check_dim',
+        ring: null,
+        bold: false,
+        dim: false,
+      };
+    case TabState.Done:
+      return { spoken: 'done', mark: 'check_green', ring: null, bold: false, dim: false };
     case TabState.NewReply:
       return { spoken: 'new reply', mark: null, ring: null, bold: true, dim: false };
     case TabState.Idle:

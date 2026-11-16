@@ -1,10 +1,6 @@
-import {
-  CHAT_DEFAULT_TITLE,
-  type BoardStatus,
-  type ChatDto,
-  type ProjectId,
-} from '@10db/contracts';
+import { CHAT_DEFAULT_TITLE, type ChatDto, type ProjectId } from '@10db/contracts';
 import type { FreshTab } from './fresh-tabs';
+import type { TaskTabFacts } from './task-tab-state';
 import type { TaskTab } from './task-tabs';
 
 /** One tab of the strip: a chat, a task Do It made, or a fresh tab not yet made into a chat. */
@@ -25,8 +21,8 @@ export type StripTab =
       readonly kind: 'task';
       readonly key: string;
       readonly task: TaskTab;
-      /** Where the task stands on the Board, once read; null before. */
-      readonly board: BoardStatus | null;
+      /** What the strip has read of the task, for its mark. */
+      readonly facts: TaskTabFacts;
       readonly position: number;
     };
 

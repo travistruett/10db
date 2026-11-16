@@ -1,4 +1,4 @@
-import { mintId, type PassViewDto } from '@10db/contracts';
+import { BoardStatus, mintId, type PassViewDto } from '@10db/contracts';
 import { fireEvent, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { baseHandlers, renderWithDaemonAndRouter, server } from '../../test/daemon';
@@ -73,10 +73,10 @@ describe('a pass of one’s tab', () => {
   });
 
   it.each([
-    { name: 'finished', board: 'done', line: 'Done · this task’s pass has finished.' },
+    { name: 'finished', board: BoardStatus.Done, line: 'Done · this task’s pass has finished.' },
     {
       name: 'abandoned',
-      board: 'ready',
+      board: BoardStatus.Ready,
       line: 'Abandoned · its unfinished changes wait on this task on the Board.',
     },
   ])('says a pass that is gone is $name', async ({ board, line }) => {

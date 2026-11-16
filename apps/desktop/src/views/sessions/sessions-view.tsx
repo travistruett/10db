@@ -40,11 +40,15 @@ import { tabInfo } from './tab-info';
 import { needsYou } from './tab-state';
 import { useSessionKeys } from './use-session-keys';
 import { panelId, TabStrip, type StripTab } from './tab-strip';
+import { useTaskTabFacts } from './task-tab-facts';
+import type { TaskTabFacts } from './task-tab-state';
 
 export interface SessionsViewProps {
   readonly search: SessionsSearch;
   readonly onSearch: (search: SessionsSearch, replace: boolean) => void;
 }
+
+const NO_FACTS: TaskTabFacts = { board: null, failed: false, page: null, passClosed: false };
 
 /** The strip's order: by place, a fresh tab before the chat that waits to move after it. */
 function stripOf(
@@ -52,6 +56,7 @@ function stripOf(
   fresh: readonly FreshTabState[],
   tasks: readonly TaskTab[],
   sessions: ReadonlyMap<TaskId, TaskSessionDto>,
+  facts: ReadonlyMap<TaskId, TaskTabFacts>,
 ): readonly StripTab[] {
   const tabs: StripTab[] = [
     ...tasks.map((task): StripTab => {
@@ -60,7 +65,7 @@ function stripOf(
         kind: 'task',
         key: taskTabKey(task.taskId),
         task: session === undefined ? task : { ...task, title: session.title },
-        board: session?.board ?? null,
+        facts: facts.get(task.taskId) ?? NO_FACTS,
         position: task.position,
       };
     }),
@@ -120,7 +125,8 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
   const chats = open.data ?? [];
   const taskList = useTaskTabs();
   const sessions = useTaskSessions(taskList.map((t) => t.taskId));
-  const tabs = stripOf(chats, fresh, taskList, sessions);
+  const facts = useTaskTabFacts(sessions, inbox.data ?? []);
+  const tabs = stripOf(chats, fresh, taskList, sessions, facts);
   const loaded = open.isSuccess && projects.isSuccess;
 
   // The screen is never blank: with nothing open, a fresh tab opens (UI spec §12, "No tabs").

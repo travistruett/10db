@@ -18,7 +18,7 @@ export function tabInfo(
 ): TabInfo {
   if (tab.kind === 'fresh') return { state: 'idle', words: tabWords('idle') };
   if (tab.kind === 'task') {
-    const state = taskTabState(tab.board);
+    const state = taskTabState(tab.facts);
     return { state, words: tabWords(state) };
   }
   const open = cards.get(tab.chat.conversationId) ?? [];

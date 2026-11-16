@@ -7,6 +7,7 @@ import { CLAUDE_CAPABILITIES, systemItem } from '../../test/conversation-fixture
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { doItPreviewDto, doItServer } from '../../test/do-it-fixtures';
 import { inboxItemDto, projectViewDto, taskDto, workstreamDto } from '../../test/fixtures';
+import { pagesByStatus, passHandlers, passViewDto } from '../../test/pass-fixtures';
 import { taskSessionDto, taskSessionHandlers } from '../../test/task-session-fixtures';
 import { taskTabs, TASK_TABS_KEY } from './task-tabs';
 import { closedTabs } from './closed-tabs';
@@ -137,6 +138,43 @@ describe('a hand-off whose chat leaves the strip before the daemon answers', () 
         'aria-selected',
       ),
     ).toBe('true');
+  });
+});
+
+describe('a pass of one’s tab', () => {
+  it('is marked ready, with the yellow ring, when its page waits for a look', async () => {
+    const view = passViewDto({ pages: [pagesByStatus().ready] });
+    const page = view.pages[0];
+    if (page === undefined) throw new Error('a pass of one has its page');
+    const session = taskSessionDto({
+      taskId: page.taskId,
+      title: 'Fix the settings page',
+      place: 'pass',
+      branch: null,
+      passId: view.pass.id,
+      conversationId: page.conversationId,
+      workstreamId: page.workstreamId,
+    });
+    taskTabs.open({
+      taskId: session.taskId,
+      projectId: project.id,
+      title: session.title,
+      place: 'pass',
+      position: 0,
+    });
+    server.use(
+      ...passHandlers({ live: [view] }),
+      ...taskSessionHandlers([session]),
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      ...chatServer({ chats: [] }).handlers,
+      ...baseHandlers(),
+    );
+    renderApp(`/sessions?task=${session.taskId}`);
+    const tab = await screen.findByRole('tab', { name: /Fix the settings page/ });
+    await waitFor(() => {
+      expect(tab.getAttribute('data-state')).toBe('ready');
+    });
+    expect(tab.getAttribute('data-ring')).toBe('yellow');
   });
 });
 
@@ -284,6 +322,51 @@ describe('a separate copy’s tab', () => {
       await screen.findByText(/stopped|failed|session/i, { selector: '[role=status] *' }),
     ).toBeTruthy();
     expect(screen.getAllByRole('link', { name: 'Open on Board' })).toHaveLength(2);
+  });
+
+  it.each([
+    {
+      name: 'blocked on the builder is yellow, not red',
+      board: 'blocked',
+      ring: 'yellow',
+      state: 'needs_you',
+    },
+    {
+      name: 'in review is a dimmed pull request glyph, no ring',
+      board: 'in_review',
+      ring: null,
+      state: 'in_review',
+    },
+    { name: 'merged is a green check, no ring', board: 'done', ring: null, state: 'done' },
+  ] as const)('its tab, $name', async ({ board, ring, state }) => {
+    openCopy({ board });
+    const tab = await screen.findByRole('tab', { name: /Retry login once on a 401/ });
+    await waitFor(() => {
+      expect(tab.getAttribute('data-state')).toBe(state);
+    });
+    expect(tab.getAttribute('data-ring')).toBe(ring);
+  });
+
+  it('a failed run’s tab is the one red ring', async () => {
+    const workstreamId = mintId('Workstream');
+    openCopy({ board: 'in_progress', workstreamId }, [
+      http.get(daemonUrl('/workstreams'), () =>
+        HttpResponse.json([
+          workstreamDto({
+            id: workstreamId,
+            taskId,
+            projectId: project.id,
+            state: 'FAILED',
+            failureKind: 'session_failed',
+            failureReason: 'it stopped',
+          }),
+        ]),
+      ),
+    ]);
+    const tab = await screen.findByRole('tab', { name: /Retry login once on a 401/ });
+    await waitFor(() => {
+      expect(tab.getAttribute('data-ring')).toBe('red');
+    });
   });
 
   it('⌘W closes the tab and ⌘⇧T brings it back where it was', async () => {
