@@ -227,6 +227,19 @@ describe('a message that waits for Your folder', () => {
     ]);
   });
 
+  it('runs a message sent reading only without the folder even when it has freed since the choice', async () => {
+    w = chatWorld();
+    const chat = w.open();
+    sayWith(chat, 'look', FolderWhileHeld.ReadOnly);
+    expect(w.folderHold.holdsTurn(chat.id)).toBe(false);
+    await w.engine.settled(chat.conversationId);
+    expect(notices(chat)).toEqual([]);
+    // The choice was for that message alone: the next one takes the folder as it always does.
+    say(chat, 'now edit it');
+    expect(w.folderHold.holdsTurn(chat.id)).toBe(true);
+    await w.engine.settled(chat.conversationId);
+  });
+
   it('runs reading only under Send Now', async () => {
     w = chatWorld();
     runningTask('Bump vite');

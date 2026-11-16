@@ -245,20 +245,19 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       return dtoOf(id);
     },
 
-    send(conversationId, input, folder = FolderWhileHeld.ReadOnly) {
+    send(conversationId, input, folder) {
       const item = post(conversationId, input);
       const chat = requireChat(conversationId);
       const waiting = deps.folderHold.waiting(chat.id);
       const parks = folder === FolderWhileHeld.Wait && (waiting || mustWait(chat));
+      // A read-only send applies to everything queued, and to the turn that runs it even if the folder frees.
+      if (!parks && waiting) deps.folderHold.cancelWait(chat.id);
+      if (folder === FolderWhileHeld.ReadOnly) deps.folderHold.chooseReadOnly(chat.id);
       // Starts are held before the queue is asked, so the message parks.
       if (parks) engine.holdStarts(conversationId);
       engine.queued(conversationId);
       if (parks) watchFolder(chat);
-      else if (waiting) {
-        // A read-only send applies to everything queued.
-        deps.folderHold.cancelWait(chat.id);
-        engine.releaseStarts(conversationId);
-      }
+      else if (waiting) engine.releaseStarts(conversationId);
       return item;
     },
 
@@ -285,11 +284,12 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       stopWaiting(getChat(state.db, chatId));
     },
 
-    async redo(conversationId, input, folder = FolderWhileHeld.ReadOnly) {
+    async redo(conversationId, input, folder) {
       const chat = requireChat(conversationId);
       deps.folderHold.cancelWait(chat.id);
       await engine.stop(conversationId);
       engine.releaseStarts(conversationId);
+      if (folder === FolderWhileHeld.ReadOnly) deps.folderHold.chooseReadOnly(chat.id);
       const wait = folder === FolderWhileHeld.Wait && mustWait(chat);
       if (wait) engine.holdStarts(conversationId);
       const edit = await engine.redo(conversationId, () => post(conversationId, input));

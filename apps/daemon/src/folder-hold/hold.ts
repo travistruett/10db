@@ -117,6 +117,10 @@ export interface FolderHold {
   wait(projectId: ProjectId, chatId: ChatId, serve: () => ServeResult): void;
   /** Stops waiting, and gives back a reservation whose turn never began. Idempotent. */
   cancelWait(chatId: ChatId): void;
+  /** The chat's next turn reads only, whatever the folder is by then: the builder chose Send Reading Only. */
+  chooseReadOnly(chatId: ChatId): void;
+  /** Whether the choice was made, taking it: it covers one turn. */
+  takeReadOnlyChoice(chatId: ChatId): boolean;
   waiting(chatId: ChatId): boolean;
   /** Serves every waiter that can run now: after an account or the update hold changes. */
   serveWaiters(): void;
@@ -134,6 +138,7 @@ export function createFolderHold(deps: FolderHoldDeps): FolderHold {
   const turns = new Map<ChatId, TurnEntry>();
   const gits = new Map<symbol, GitEntry>();
   const waiters: Waiter[] = [];
+  const readOnlyChoices = new Set<ChatId>();
 
   const changed = (projectId: ProjectId): void => {
     deps.state.write((ctx) => {
@@ -320,7 +325,12 @@ export function createFolderHold(deps: FolderHoldDeps): FolderHold {
       }
       serveWaiters();
     },
+    chooseReadOnly: (chatId) => {
+      readOnlyChoices.add(chatId);
+    },
+    takeReadOnlyChoice: (chatId) => readOnlyChoices.delete(chatId),
     cancelWait(chatId) {
+      readOnlyChoices.delete(chatId);
       const at = waiters.findIndex((w) => w.chatId === chatId);
       const reservation = turns.get(chatId);
       if (at < 0 && reservation?.reserved !== true) return;

@@ -267,6 +267,15 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         waiting.cancelled = true;
         pendingReleases.delete(chat.id);
       }
+      if (deps.folderHold.takeReadOnlyChoice(chat.id)) {
+        // The builder chose reading only: the turn reads even when the folder has freed, and says who held it.
+        const blockers = deps.folderHold.blockers(conv.projectId, {
+          kind: FolderAsker.ChatTurn,
+          chatId: chat.id,
+        });
+        notices.set(chat.id, blockers.length === 0 ? [] : [readOnlyNotice(blockers)]);
+        return { writes: false };
+      }
       const taken = deps.folderHold.takeTurn(conv.projectId, chat.id);
       if (!taken.taken) {
         notices.set(chat.id, [readOnlyNotice(taken.blockers)]);
