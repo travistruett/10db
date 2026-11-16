@@ -51,7 +51,11 @@ function statements(cmd: TakeoverCommand): string[] {
       `for v in $(/usr/bin/env | /usr/bin/sed -n 's/^\\(${prefix}[A-Za-z0-9_]*\\)=.*/\\1/p'); do unset "$v"; done`,
     );
   }
-  for (const file of cmd.sources) out.push(`. ${quoted(file, 'a sealed file')}`);
+  // A sealed file holds secret values: it is read once and gone before the agent starts.
+  for (const file of cmd.sources) {
+    const sealed = quoted(file, 'a sealed file');
+    out.push(`. ${sealed}`, `rm -- ${sealed}`);
+  }
   for (const { variable, account } of cmd.keychain) {
     const name = nameOf(variable, 'a Keychain variable');
     out.push(

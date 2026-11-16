@@ -37,6 +37,7 @@ describe('the script and the line, as text', () => {
     const at = (needle: string): number => lines.findIndex((l) => l.includes(needle));
     expect(at('ANTHROPIC_DEFAULT_')).toBeLessThan(at('TENDB_'));
     expect(at('TENDB_')).toBeLessThan(at(". '/data/t/sealed.env'"));
+    expect(lines[at(". '/data/t/sealed.env'") + 1]).toBe("rm -- '/data/t/sealed.env'");
     expect(at(". '/data/t/sealed.env'")).toBeLessThan(at('find-generic-password'));
     expect(at('find-generic-password')).toBeLessThan(at('export AWS_BEARER_TOKEN_BEDROCK'));
     expect(at('export AWS_BEARER_TOKEN_BEDROCK')).toBeLessThan(at('/usr/bin/env -u'));
@@ -204,24 +205,28 @@ describe('run under /bin/sh', () => {
     },
   );
 
-  it('exports a sealed file’s variables to the program', () => {
-    dir = tempDir('render');
-    const s = stub();
-    const sealed = join(dir.path, 'sealed.env');
-    writeFileSync(sealed, "export INJ='from-the-sealed-file'\n");
-    run(
-      {
-        cwd: dir.path,
-        unset: [],
-        unsetPrefixes: [],
-        set: {},
-        keychain: [],
-        sources: [sealed],
-        argv: [s.path],
-      },
-      'script',
-      { PATH: '/usr/bin:/bin', HOME: dir.path },
-    );
-    expect(s.inj()).toBe('from-the-sealed-file');
-  });
+  it.each(['script', 'line'] as const)(
+    'exports a sealed file’s variables to the program and leaves no file (%s)',
+    (how) => {
+      dir = tempDir('render');
+      const s = stub();
+      const sealed = join(dir.path, 'sealed.env');
+      writeFileSync(sealed, "export INJ='from-the-sealed-file'\n");
+      run(
+        {
+          cwd: dir.path,
+          unset: [],
+          unsetPrefixes: [],
+          set: {},
+          keychain: [],
+          sources: [sealed],
+          argv: [s.path],
+        },
+        how,
+        { PATH: '/usr/bin:/bin', HOME: dir.path },
+      );
+      expect(s.inj()).toBe('from-the-sealed-file');
+      expect(existsSync(sealed)).toBe(false);
+    },
+  );
 });
