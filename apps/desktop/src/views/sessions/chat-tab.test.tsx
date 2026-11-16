@@ -5,13 +5,13 @@ import {
   type ChatToolResult,
   type ConversationItemDto,
 } from '@10db/contracts';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { chatDto, chatServer } from '../../test/chat-fixtures';
 import { FILE_AS_TASKS_MESSAGE } from './chat-tab';
 import { builderItem, CLAUDE_CAPABILITIES, toolItem } from '../../test/conversation-fixtures';
-import { folderKeys } from '../../daemon/project-folder-queries';
+import { FOLDER_REFRESH_MS, folderKeys } from '../../daemon/project-folder-queries';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { folderDto, folderHolder } from '../../test/folder-fixtures';
 import { inboxItemDto, projectViewDto, taskDto } from '../../test/fixtures';
@@ -431,6 +431,29 @@ describe('ChatTab: the session bar and Your folder', () => {
 
     folder = folderDto({ projectId: project.id, branch: 'fix/login' });
     await queryClient.invalidateQueries({ queryKey: folderKeys.all });
+    expect(await screen.findByText('Chat · Your folder · on fix/login')).toBeTruthy();
+  });
+});
+
+describe('ChatTab: the branch on the bar', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('follows a branch switched in a terminal without an event', async () => {
+    let branch = 'main';
+    // Only the interval is faked, so the poll is stepped by hand and everything else runs for real.
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    openChat({}, () => [], [
+      http.get(daemonUrl('/projects/:projectId/folder'), () =>
+        HttpResponse.json(folderDto({ projectId: project.id, branch })),
+      ),
+    ]);
+    expect(await screen.findByText('Chat · Your folder · on main')).toBeTruthy();
+    branch = 'fix/login';
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(FOLDER_REFRESH_MS);
+    });
     expect(await screen.findByText('Chat · Your folder · on fix/login')).toBeTruthy();
   });
 });

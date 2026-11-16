@@ -8,6 +8,12 @@ import { useDaemon } from './provider';
 // Sessions spec §7.3: who holds a project's checkout, Your folder. The daemon says it changed with a
 // `project` event (`FolderHoldChanged`); a lane, a pass or a chat's turn starting or ending says so too.
 
+/**
+ * How often an open folder line is read again. The branch changes in a terminal with no event, and a
+ * window's focus is not always seen by the webview.
+ */
+export const FOLDER_REFRESH_MS = 15_000;
+
 export const folderKeys = {
   all: ['project-folder'],
   of: (projectId: ProjectId) => ['project-folder', projectId] as const,
@@ -26,6 +32,7 @@ export function useProjectFolder(projectId: ProjectId | null): FolderDto | null 
             FolderDto,
           ),
     enabled: projectId !== null,
+    refetchInterval: FOLDER_REFRESH_MS,
   });
   return query.data ?? null;
 }

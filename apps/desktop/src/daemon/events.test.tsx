@@ -15,6 +15,7 @@ import { daemonEvent } from '../test/fixtures';
 import { passActivityData, passViewDto, pagesByStatus } from '../test/pass-fixtures';
 import { useAccounts, useAccountUsage } from './account-queries';
 import { liveKeys, useConversationLive } from './conversation-queries';
+import { folderKeys } from './project-folder-queries';
 import { EVENT_INVALIDATIONS, eventStreamUrl, INVALIDATIONS, useEventStream } from './events';
 import { screenKeys } from './screen-queries';
 import { passKeys, useTurnActivity } from './pass-queries';
@@ -384,6 +385,12 @@ describe('useEventStream', () => {
     for (const entity of ['decision', 'principle']) {
       expect(INVALIDATIONS[entity]).toEqual(expect.arrayContaining([['shapes']]));
     }
+  });
+
+  it('re-reads Your folder on a hold change, and not on every stored conversation item', () => {
+    // Each re-read of the folder runs git once per cached project; a transcript item changes no holder.
+    expect(INVALIDATIONS['project']).toEqual(expect.arrayContaining([folderKeys.all]));
+    expect(INVALIDATIONS['conversation']).not.toContainEqual(folderKeys.all);
   });
 
   it('refetches the Models page when a profile, an account or its list, a persona, the playbook or a kind changes', () => {
