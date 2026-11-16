@@ -110,7 +110,7 @@ export interface ChatService {
   stop(conversationId: ConversationId): Promise<void>;
   /** Runs what waits for Your folder now, reading only. Refused with the engine's words when nothing waits. */
   sendNow(conversationId: ConversationId): void;
-  /** Stops waiting for Your folder: the queue runs reading only. */
+  /** Stops waiting for Your folder: the queue runs reading only. A chat that waits for nothing is left as it is. */
   stopWaiting(chatId: ChatId): void;
   /** Whether the conversation's message waits for Your folder. */
   waiting(conversationId: ConversationId): boolean;
@@ -281,7 +281,9 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     waiting: (conversationId) => deps.folderHold.waiting(requireChat(conversationId).id),
 
     stopWaiting: (chatId) => {
-      stopWaiting(getChat(state.db, chatId));
+      const chat = getChat(state.db, chatId);
+      // The wait may have ended since the builder saw it: there is then nothing to run or to refuse.
+      if (deps.folderHold.waiting(chat.id)) stopWaiting(chat);
     },
 
     async redo(conversationId, input, folder) {

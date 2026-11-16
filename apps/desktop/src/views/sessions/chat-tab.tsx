@@ -389,7 +389,7 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
               }}
               phase={phase}
               disabledReason={disabledReason}
-              error={sendError}
+              error={sendError ?? stopWaiting.error?.message ?? null}
               inputRef={input}
               modelControl={
                 <Group gap={4} wrap="nowrap">

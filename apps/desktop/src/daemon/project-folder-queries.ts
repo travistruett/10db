@@ -1,4 +1,4 @@
-import { FolderDto, type ChatId, type ProjectId } from '@10db/contracts';
+import { ChatDto, FolderDto, type ChatId, type ProjectId } from '@10db/contracts';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { readJson } from './client';
 import { chatKeys } from './chat-queries';
@@ -36,8 +36,10 @@ export function useStopWaiting() {
   const queries = useQueryClient();
   return useMutation({
     mutationFn: async (chatId: ChatId) => {
-      const res = await client.chats[':chatId']['stop-waiting'].$post({ param: { chatId } });
-      if (!res.ok) throw new Error('The daemon could not run the message reading only.');
+      await readJson(
+        await client.chats[':chatId']['stop-waiting'].$post({ param: { chatId } }),
+        ChatDto,
+      );
     },
     onSettled: () => {
       void queries.invalidateQueries({ queryKey: chatKeys.all });

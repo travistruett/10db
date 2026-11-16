@@ -553,6 +553,19 @@ describe('ChatTab: the composer and Your folder', () => {
       expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
     });
 
+    it('shows why Send Now Reading Only failed and keeps the row', async () => {
+      const chat = chatDto({ projectId: project.id });
+      openChat({ id: chat.id, conversationId: chat.conversationId }, () => [], [
+        http.post(daemonUrl('/chats/:chatId/stop-waiting'), () =>
+          HttpResponse.json({ error: 'conflict', message: 'The daemon is busy.' }, { status: 409 }),
+        ),
+        http.get(daemonUrl('/projects/:projectId/folder'), () => HttpResponse.json(parked(chat))),
+      ]);
+      fireEvent.click(await screen.findByRole('button', { name: 'Send Now Reading Only' }));
+      expect(await screen.findByText('The daemon is busy.')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
+    });
+
     it('sends File as Tasks with wait, so it does not cancel the wait', async () => {
       const { served } = openParked();
       await screen.findByText(/^Waits for Your folder/);
