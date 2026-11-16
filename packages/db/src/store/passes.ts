@@ -357,9 +357,17 @@ export function leavePass(ctx: WriteContext, taskId: TaskId): void {
   });
 }
 
-/** Whether the pass is a pass of one: a task of it names the whole-project page. */
+/**
+ * Whether the pass is a pass of one: a task of it, or one it made that has since left it (an Abandon
+ * retires it), names the whole-project page.
+ */
 export function isWholeProjectPass(db: DbReader, passId: PassId): boolean {
-  return listPassTasks(db, passId).some((task) => task.areas.includes(WHOLE_PROJECT_PAGE.name));
+  return db
+    .select({ areas: schema.tasks.areas })
+    .from(schema.tasks)
+    .where(or(eq(schema.tasks.passId, passId), eq(schema.tasks.madeByPassId, passId)))
+    .all()
+    .some((task) => task.areas.includes(WHOLE_PROJECT_PAGE.name));
 }
 
 /**

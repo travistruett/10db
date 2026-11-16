@@ -310,6 +310,7 @@ const OPERATIONS_IN_PROGRESS = [
   },
   { entry: 'REVERT_HEAD', what: 'a revert', end: 'git revert --continue or git revert --abort' },
   { entry: 'rebase-merge', what: 'a rebase', end: 'git rebase --continue or git rebase --abort' },
+  { entry: 'BISECT_LOG', what: 'a bisect', end: 'git bisect reset' },
   {
     entry: 'rebase-apply',
     what: 'a rebase or git am',

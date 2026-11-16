@@ -10,7 +10,11 @@ import {
 import { dirname, join, relative } from 'node:path';
 import {
   BranchName,
+  ConversationOwnerKind,
+  ConversationProfile,
+  ConversationState,
   mintId,
+  WHOLE_PROJECT_PAGE,
   Rigor,
   TaskKindSource,
   WorkstreamState,
@@ -22,6 +26,12 @@ import {
 import {
   activeClaims,
   getBatch,
+  getChat,
+  insertChat,
+  insertConversation,
+  listItems,
+  listPassTasks,
+  madeByPass,
   getTask,
   getWorkstream,
   insertBatch,
@@ -748,5 +758,113 @@ describe('other work in Your folder while a pass is open (W9)', () => {
     h.state.write((w) => patchTask(w, placed.id, { workspaceMode: 'shared' }));
     expect(() => h.starter.startTask(placed.id)).toThrow(/UI Workbench pass "Polish pages"/);
     await h.jobs.idle();
+  });
+});
+
+describe('a pass of one', () => {
+  /** A chat of the project with a conversation, as Do It reads it. */
+  function chat() {
+    return h.store.write((ctx) => {
+      const id = mintId('Chat');
+      const conv = insertConversation(ctx, {
+        projectId: h.project.id,
+        owner: { kind: ConversationOwnerKind.Chat, id },
+        profile: ConversationProfile.Explore,
+        state: ConversationState.IdleCold,
+      });
+      return insertChat(ctx, {
+        id,
+        projectId: h.project.id,
+        conversationId: conv.id,
+        title: 'A chat',
+        tabPosition: 0,
+      });
+    }).value;
+  }
+  const wholeOf = (chatId: ReturnType<typeof chat>['id']) => ({
+    projectId: h.project.id,
+    name: 'Knock it out',
+    taskIds: [],
+    wholeProject: { title: 'Knock it out', brief: 'Do the thing.', chatId },
+  });
+
+  it('opens on a project with no page area, on a branch at HEAD, linking the chat, its task and the brief', async () => {
+    harness({ areas: [{ name: 'src', globs: ['src/**'] }] });
+    const startSha = h.commit('src/a.ts', 'a\n');
+    write('src/dirty.ts', 'dirt\n');
+    const mine = chat();
+
+    const opened = await openPass(h.ctx, wholeOf(mine.id), LEASE);
+
+    const branch = passBranchName('Knock it out', opened.pass.id);
+    expect(h.git$('symbolic-ref', 'HEAD')).toBe(`refs/heads/${branch}`);
+    expect(h.git$('rev-parse', branch)).toBe(startSha);
+    expect(opened.pass).toMatchObject({ returnBranch: 'main', startSha, state: 'OPEN' });
+    expect(opened.dirt.map((d) => d.path)).toEqual(['src/dirty.ts']);
+    expect(h.store.db.select().from(schema.tasks).all()).toHaveLength(1);
+    const [task] = listPassTasks(h.store.db, opened.pass.id);
+    if (!task) throw new Error('the pass made no task');
+    expect(task).toMatchObject({
+      title: 'Knock it out',
+      description: 'Do the thing.',
+      areas: [WHOLE_PROJECT_PAGE.name],
+      passId: opened.pass.id,
+    });
+    expect(madeByPass(h.store.db, opened.pass.id, task.id)).toBe(true);
+    expect(getChat(h.store.db, mine.id)).toMatchObject({
+      mode: 'hands_on',
+      taskId: task.id,
+      passId: opened.pass.id,
+      tabPosition: 0,
+    });
+    expect(
+      h.store.db
+        .select()
+        .from(schema.chatTasks)
+        .all()
+        .map((r) => [r.chatId, r.taskId]),
+    ).toEqual([[mine.id, task.id]]);
+    expect(listItems(h.store.db, mine.conversationId).map((i) => i.body)).toEqual([
+      { kind: 'handed_to', taskId: task.id, title: 'Knock it out', place: 'here' },
+    ]);
+    // The one page is claimed whole.
+    expect(
+      activeClaims(h.store.db, runOf(task)?.id ?? mintId('Workstream')).map((c) => c.name),
+    ).toEqual([WHOLE_PROJECT_PAGE.name]);
+  });
+
+  it('leaves no task, link or branch when the write is refused (a return branch under 10db/)', async () => {
+    harness();
+    h.git$('switch', '-q', '-c', '10db/stray');
+    const mine = chat();
+
+    await expect(openPass(h.ctx, wholeOf(mine.id), LEASE)).rejects.toThrow(/10db branch/);
+
+    expect(h.store.db.select().from(schema.tasks).all()).toEqual([]);
+    expect(h.store.db.select().from(schema.chatTasks).all()).toEqual([]);
+    expect(getChat(h.store.db, mine.id)).toMatchObject({
+      mode: 'explore',
+      taskId: null,
+      passId: null,
+    });
+    expect(listItems(h.store.db, mine.conversationId)).toEqual([]);
+    expect(h.git$('for-each-ref', '--format=%(refname)', 'refs/heads/10db/')).toBe(
+      'refs/heads/10db/stray',
+    );
+  });
+
+  it.each([
+    ['a bisect', 'BISECT_LOG'],
+    ['a merge', 'MERGE_HEAD'],
+  ])('is refused mid-%s, and so is a page pass', async (_name, entry) => {
+    harness();
+    writeFileSync(join(h.repo, '.git', entry), 'x\n');
+    const mine = chat();
+
+    await expect(openPass(h.ctx, wholeOf(mine.id), LEASE)).rejects.toThrow(/middle of/);
+    const people = page('People: UI work', ['people']);
+    await expect(open([people])).rejects.toThrow(/middle of/);
+
+    expect(h.store.db.select().from(schema.passes).all()).toEqual([]);
   });
 });

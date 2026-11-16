@@ -19,6 +19,7 @@ import {
   TaskStatus,
   type BatchDto,
   type BatchId,
+  type ChatId,
   type GoalId,
   type Notice,
   type AreaDef,
@@ -44,6 +45,9 @@ import {
   getWorkstreamRow,
   insertPass,
   insertPassPageTask,
+  insertWholeProjectTask,
+  linkChatToTask,
+  storeHandedTo,
   markTasksMadeByPass,
   listBatches,
   listPassDirt,
@@ -51,6 +55,7 @@ import {
   setWorkstreamNotice,
   type DbReader,
   type WriteContext,
+  passAreasOf,
 } from '@10db/db';
 import { holderWords, type FolderBlocker } from '../folder-hold';
 import { githubRepoOf } from '../github';
@@ -73,6 +78,16 @@ export interface PassOpenInput {
   readonly pages?: readonly string[];
   /** The goal those new tasks join; null or absent for none. */
   readonly goalId?: GoalId | null;
+  /**
+   * A pass of one, made from a chat's Do It: its one page is the whole project, with `title` and `brief`
+   * for its task, and the chat linked to it in the open's own write. It replaces `taskIds` and `pages`.
+   */
+  readonly wholeProject?: {
+    readonly title: string;
+    readonly brief: string;
+    readonly chatId: ChatId;
+    readonly acceptanceCriteria?: readonly string[];
+  };
 }
 
 /** What a put-back of a task's saved work did: the files it wrote, and those it left and named. */
@@ -158,19 +173,20 @@ function refuseOpen(
   tasks: readonly TaskDto[],
   pageCap: number,
   newPages: readonly NewPageTask[],
+  wholeProject: boolean,
 ) {
-  if (!project.areas.some((a) => a.role === AreaRole.Page))
+  if (!wholeProject && !project.areas.some((a) => a.role === AreaRole.Page))
     throw new ConflictError(
       `${project.name} has no page area; mark the areas that are pages in Settings › Areas and hazards first`,
     );
-  const count = tasks.length + newPages.length;
+  const count = wholeProject ? 1 : tasks.length + newPages.length;
   if (count === 0) throw new InvalidError('A pass needs at least one task');
   if (count > pageCap)
     throw new InvalidError(
       `A pass holds ${String(pageCap)} pages; ${String(count)} tasks and pages were named`,
     );
   for (const task of tasks) refusePassTask(db, project, task);
-  const pages = passPagesProblem(project.areas, [...tasks, ...newPages]);
+  const pages = wholeProject ? null : passPagesProblem(project.areas, [...tasks, ...newPages]);
   if (pages !== null) throw new InvalidError(pages);
   const open = findOpenPass(db, project.id);
   if (open)
@@ -236,10 +252,14 @@ export async function openPass(
   if (!cap.success)
     throw new InvalidError(`A pass holds from 1 to ${String(PASS_PAGE_CAP_MAX)} pages`);
   const pageCap = cap.data;
+  const whole = input.wholeProject;
   const tasks = input.taskIds.map((id) => getTask(db, id));
   const newPages = newPageTasks(db, project, input.pages ?? [], input.goalId ?? null);
-  refuseOpen(db, project, tasks, pageCap, newPages);
-  const inUse = ctx.folderHold.blockers(project.id, { kind: FolderAsker.GitWork });
+  refuseOpen(db, project, tasks, pageCap, newPages, whole !== undefined);
+  // The chat that asks to open is stopped before the open, so its own turn and wait are not in the way.
+  const inUse = ctx.folderHold
+    .blockers(project.id, { kind: FolderAsker.GitWork })
+    .filter((b) => b.holder.chatId !== whole?.chatId);
   if (inUse.length > 0) throw new ConflictError(folderInUse(inUse));
   const id = mintId('Pass');
   const branch = passBranchName(input.name, id);
@@ -284,7 +304,17 @@ export async function openPass(
       written = ctx.state.write((w) => {
         const stray = returnBranchProblem(w.tx, project, start.returnBranch);
         if (stray !== null) throw new ConflictError(stray);
-        const made = writePageTasks(w, project, newPages);
+        const made = whole
+          ? [
+              insertWholeProjectTask(w, project.id, {
+                title: whole.title,
+                brief: whole.brief,
+                ...(whole.acceptanceCriteria === undefined
+                  ? {}
+                  : { acceptanceCriteria: whole.acceptanceCriteria }),
+              }),
+            ]
+          : writePageTasks(w, project, newPages);
         const pageTasks = [...tasks, ...made];
         const inserted = insertPass(w, {
           id,
@@ -304,9 +334,27 @@ export async function openPass(
           id,
           made.map((t) => t.id),
         );
+        if (whole) {
+          const [task] = made;
+          if (task === undefined) throw new InvalidError('A pass of one has no task');
+          linkChatToTask(w, whole.chatId, { taskId: task.id, passId: id });
+          storeHandedTo(
+            w,
+            whole.chatId,
+            { kind: 'handed_to', taskId: task.id, title: whole.title, place: 'here' },
+            false,
+          );
+        }
         stackOn(w, id, below);
         const leaseExpiresAt = new Date(ctx.clock.now().getTime() + deps.leaseMs).toISOString();
-        const waiting = startPassTasks(w, project, inserted.batch.id, pageTasks, leaseExpiresAt);
+        const waiting = startPassTasks(
+          w,
+          project,
+          id,
+          inserted.batch.id,
+          pageTasks,
+          leaseExpiresAt,
+        );
         return { ...inserted, waiting };
       });
     } catch (error) {
@@ -455,17 +503,19 @@ export function refusePassTask(db: DbReader, project: ProjectDto, task: TaskDto)
 export function startPassTasks(
   w: WriteContext,
   project: ProjectDto,
+  passId: PassId,
   batchId: BatchId,
   tasks: readonly TaskDto[],
   leaseExpiresAt: string,
 ): PassPageWait[] {
   const waiting: PassPageWait[] = [];
+  const areas = passAreasOf(w.tx, passId);
   for (const task of tasks) {
     const ws = insertPlannedWorkstream(w, task.id, passPlan(w.tx, task), batchId);
     const claimed = acquireClaims(w, {
       projectId: project.id,
       workstreamId: ws.id,
-      requests: passHeldAreas(project.areas, task).map((name) => ({
+      requests: passHeldAreas(areas, task).map((name) => ({
         kind: ClaimKind.Area,
         name,
       })),
