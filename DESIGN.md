@@ -162,6 +162,11 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   A count is a small pill no taller than its label's text, in the sidebar, on tabs and in buttons. It is muted
   (`tone` neutral, the default) and blue (`tone="attention"`) only when it means something needs the builder:
   Inbox's Open tab, the Sessions and Workbench needs-you counts.
+- **Page header:** Inbox, Factory, Knowledge, Board and the Workbench start page share `PageHeader`
+  (`apps/desktop/src/shell/page-header.tsx`): row 1 is the title (with an optional aside beside it) and the
+  view's actions at the right end; row 2 is an optional one-line dimmed byline; row 3 is an optional toolbar,
+  tabs left and filters right. A row that is absent takes no space. Workspaces, where the content is the
+  work, keep compact headers of their own: Sessions, Plan and an open Workbench pass.
 - **Picking several from a list that can grow** is one searchable `MultiSelect`: each option shows what tells
   it apart (a route, when it last changed), an option that can't be picked stays in the list, disabled, with
   the reason under it, and the pills show what is picked. Never a column of checkboxes under a separate

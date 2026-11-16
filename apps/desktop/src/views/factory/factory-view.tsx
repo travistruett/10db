@@ -6,6 +6,7 @@ import { useGoals } from '../../daemon/goal-queries';
 import { useLivePass } from '../../daemon/pass-queries';
 import { useInbox } from '../../daemon/queries';
 import { useNow } from '../../shell/relative';
+import { PageHeader } from '../../shell/page-header';
 import { ProjectFilter } from '../../shell/project-filter';
 import { ProjectTile } from '../../shell/project-tile';
 import { useSelectedProject } from '../../shell/selected-project';
@@ -40,20 +41,14 @@ export function FactoryView() {
 
   return (
     <Stack>
-      <Group justify="space-between" align="flex-start">
-        <Stack gap={2}>
-          <Group gap="md">
-            <Title order={2}>Factory</Title>
-            <BenchmarkSyncNote />
-          </Group>
-          <UpdateDrainNote />
-          <AdmissionNote />
-          <Text size="sm" c="dimmed">
-            Goals 10db is pursuing, by project
-          </Text>
-        </Stack>
-        <ProjectFilter projects={all} value={filter ?? null} onChange={setFilter} />
-      </Group>
+      <PageHeader
+        title="Factory"
+        titleAside={<BenchmarkSyncNote />}
+        description="Goals 10db is pursuing, by project"
+        actions={<ProjectFilter projects={all} value={filter ?? null} onChange={setFilter} />}
+      />
+      <UpdateDrainNote />
+      <AdmissionNote />
       {projects.isError ? (
         <Alert color="red" title="Couldn't load the projects">
           {projects.error.message}
