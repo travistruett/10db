@@ -160,7 +160,9 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
   });
   const hasPages = project.areas.some((area) => area.role === AreaRole.Page);
   const loading = <PageLoading shape={PageLoadingShape.List} label="Loading the pages" />;
-  if (!hasPages) return <WorkbenchSetup project={project} />;
+  // A pass already open, a task's pass of one among them, is shown even where the project names no page.
+  const holding = live != null && passHoldsTasks(live.pass.state);
+  if (!hasPages && !holding) return <WorkbenchSetup project={project} />;
   // The header is known before the data, so it draws while the pass is read.
   if (live === undefined)
     return (

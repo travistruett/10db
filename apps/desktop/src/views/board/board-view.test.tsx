@@ -1942,7 +1942,7 @@ describe('BoardView', () => {
       title: 'Wired',
       boardStatus: 'ready',
       boardOrder: 2,
-      areas: ['api', 'ui'],
+      areas: ['api', '10db-whole-project'],
       acceptanceCriteria: ['one', 'two'],
       dependsOn: [dep.id],
     });
@@ -1956,7 +1956,7 @@ describe('BoardView', () => {
         .join(' | ');
     await screen.findByRole('button', { name: 'Wired' });
     expect(describedBy('Wired')).toBe(
-      'Areas: api, ui. 2 criteria. Runs in Your folder. Waits on Base.',
+      'Areas: api, Whole project. 2 criteria. Runs in Your folder. Waits on Base.',
     );
     expect(describedBy('Running')).toBe(
       // This fixture's task has no run yet, so its placement is still open.

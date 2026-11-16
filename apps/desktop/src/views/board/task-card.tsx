@@ -1,4 +1,5 @@
 import {
+  areaLabel,
   BoardStatus,
   Rigor,
   TaskStatus,
@@ -86,7 +87,9 @@ export function cardSummary(
   const sentBack = reviewSentBackLine(workstream);
   const atLimit = shippedAtLimitLine(workstream);
   return [
-    task.areas.length > 0 ? `Areas: ${task.areas.join(', ')}.` : null,
+    task.areas.length > 0
+      ? `Areas: ${task.areas.map((area) => areaLabel(area, [])).join(', ')}.`
+      : null,
     criteria > 0 ? `${String(criteria)} ${criteria === 1 ? 'criterion' : 'criteria'}.` : null,
     placement ? `Runs in ${placement}.` : null,
     batch?.passId != null ? 'A page open in the UI Workbench.' : null,

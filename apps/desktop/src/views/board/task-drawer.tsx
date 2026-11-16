@@ -1,4 +1,5 @@
 import {
+  areaLabel,
   isTerminal,
   NEW_TASK_NO_AREAS,
   NEW_TASK_NO_CRITERIA,
@@ -492,7 +493,7 @@ export function TaskDrawer({
                   <Group gap={6}>
                     {task.areas.map((area) => (
                       <Badge key={area} size="sm" variant="light" color="gray" tt="none" fw={500}>
-                        {area}
+                        {areaLabel(area, [])}
                       </Badge>
                     ))}
                   </Group>

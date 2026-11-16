@@ -180,7 +180,7 @@ export function useWorkstreamChanges(id: WorkstreamId | undefined, head: string 
         ? skipToken
         : async () =>
             readJson(
-              await client.workstreams[':id'].changes.$get({ param: { id } }),
+              await client.workstreams[':id'].changes.$get({ param: { id }, query: {} }),
               WorkstreamChangesDto,
             ),
   });

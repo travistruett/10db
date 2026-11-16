@@ -43,6 +43,8 @@ export interface PagePaneProps {
   readonly onDraft: (draft: Draft) => void;
   /** The pass's pull request control, shown under a signed-off page as its next step. */
   readonly pullRequest?: ReactNode;
+  /** The pane's own header, in place of the page's label. */
+  readonly header?: ReactNode;
 }
 
 /**
@@ -52,6 +54,7 @@ export interface PagePaneProps {
 export function PagePane(props: PagePaneProps) {
   const { passId, appUrl, row, passOpen, openedAt, composerFocus, draft, onDraft, pullRequest } =
     props;
+  const { header } = props;
   const { page, status } = row;
   const actions = usePageActions(passId, page.taskId, page.conversationId);
   const turns = useTurns(page.taskId).data ?? [];
@@ -110,9 +113,11 @@ export function PagePane(props: PagePaneProps) {
     <ConversationLayout
       label={page.label}
       header={
-        <Title order={2} size="h4" px="md" pt="sm">
-          {page.label}
-        </Title>
+        header ?? (
+          <Title order={2} size="h4" px="md" pt="sm">
+            {page.label}
+          </Title>
+        )
       }
       footer={
         <>
