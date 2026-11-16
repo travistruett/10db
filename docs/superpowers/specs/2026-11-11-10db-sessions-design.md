@@ -975,7 +975,9 @@ already do (research T1), and the attended profile writes the checkout on both (
 
 ### 7.5 Open in Terminal, and Hand Back
 
-**Open in Terminal** (S17) works on a session that has a provider session id and no running turn.
+**Open in Terminal** (S17) works on a session that has a provider session id and no running turn. It is refused
+for a sealed chat, and while Do It has stopped the chat ("Do It is under way for this chat"), read again at the take,
+since a chat in the terminal can't be sealed; Do It in turn refuses a chat in the terminal ("Hand back first").
 
 1. The engine closes the live session, and the conversation goes to `taken_over`.
 2. The adapter's `takeoverCommand` builds the command:

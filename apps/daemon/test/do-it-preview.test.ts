@@ -87,6 +87,24 @@ describe('the Do It preview', () => {
     expect(unreadable.changed).toEqual([]);
   });
 
+  it('offers neither place while the chat is in the builder’s terminal, linking to its tab', async () => {
+    world();
+    const chat = w.open();
+    // Held off the folder by 10db's own git work, so the turn leaves an agent session to take over.
+    const token = w.folderHold.reserveGit(w.project.id, 'warming up');
+    w.chat.send(chat.conversationId, { text: 'Hello', mentions: [], pictures: [] });
+    await w.engine.settled(chat.conversationId);
+    if (token.reserved) w.folderHold.releaseGit(token.token);
+    await w.takeover.open(chat.conversationId);
+
+    const read = await preview(chat);
+
+    const handBackFirst = { code: 'taken_over', link: `session:${chat.id}` };
+    expect(read.here).toMatchObject({ offered: false, refusal: handBackFirst });
+    expect(read.worktree).toMatchObject({ offered: false, refusal: handBackFirst });
+    expect(read.here.refusal?.message).toMatch(/^Hand back first/);
+  });
+
   it('refuses here naming a lane in the folder, and offers whenBusy for another chat’s turn only', async () => {
     world();
     const chat = w.open(0);
