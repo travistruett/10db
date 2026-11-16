@@ -220,17 +220,43 @@ export async function settleClosedPass(
     offerMove(ctx, pass, PassMoveReason.Drift, ask);
     return;
   }
-  const moved = await ctx.git.moveBranchCas({
-    repo,
-    branch: pass.returnBranch,
-    to: base,
-    expect: tip,
-  });
+  const moved = await movingBranch(ctx, pass, signal, () =>
+    ctx.git.moveBranchCas({
+      repo,
+      branch: pass.returnBranch,
+      to: base,
+      expect: tip,
+    }),
+  );
   if (moved === 'raced') {
     offerMove(ctx, pass, PassMoveReason.Drift, ask);
     return;
   }
   settled(ctx, pass, 'realigned');
+}
+
+/**
+ * Runs the move of the return branch holding Your folder: it waits for a chat's turn, which may be editing
+ * there, and the reads before it hold nothing. A chat can't commit while a closed pass waits, so the tips read
+ * before the wait still stand; a move that raced is refused by its compare-and-swap.
+ */
+async function movingBranch<T>(
+  ctx: DeliveryContext,
+  pass: PassDto,
+  signal: AbortSignal,
+  move: () => Promise<T>,
+): Promise<T> {
+  const token = await reserveGitNaming(ctx, {
+    projectId: pass.projectId,
+    batchId: pass.batchId,
+    what: 'moving your branch for a pass',
+    signal,
+  });
+  try {
+    return await move();
+  } finally {
+    ctx.folderHold.releaseGit(token);
+  }
 }
 
 /** Why a move left the folder as it was, in words. */
@@ -298,12 +324,14 @@ export async function movePassBranch(
     );
     return;
   }
-  const outcome = await ctx.git.moveCheckedOutBranch({
-    repo,
-    branch: pass.returnBranch,
-    from: at,
-    to: base,
-  });
+  const outcome = await movingBranch(ctx, pass, signal, () =>
+    ctx.git.moveCheckedOutBranch({
+      repo,
+      branch: pass.returnBranch,
+      from: at,
+      to: base,
+    }),
+  );
   if (outcome.kind !== 'switched') {
     refuse(refusalOf(outcome, pass.returnBranch));
     return;
@@ -323,23 +351,13 @@ export function queuePassSettle(
     jobKey({ projectId: pass.projectId, worktreePath: null }, JobQueue.Ship),
     async (signal) => {
       if (signal.aborted) return;
-      // The settle moves the return branch, so it waits for a chat's turn, which may be editing there.
-      let token: symbol | null = null;
       try {
-        token = await reserveGitNaming(ctx, {
-          projectId: pass.projectId,
-          batchId: pass.batchId,
-          what: 'moving your branch for a pass',
-          signal,
-        });
         await step(ctx, passId, signal);
       } catch (error) {
         ctx.logger.warn(
           { passId, err: error instanceof Error ? error.message : String(error) },
           'closed pass not settled',
         );
-      } finally {
-        if (token !== null) ctx.folderHold.releaseGit(token);
       }
     },
   );
