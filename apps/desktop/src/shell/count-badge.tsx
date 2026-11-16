@@ -1,4 +1,4 @@
-import { Badge, VisuallyHidden } from '@mantine/core';
+import { Badge, useMantineTheme, VisuallyHidden } from '@mantine/core';
 
 export const CountTone = { Neutral: 'neutral', Attention: 'attention' } as const;
 export type CountTone = (typeof CountTone)[keyof typeof CountTone];
@@ -19,6 +19,7 @@ export function CountBadge({
   readonly phrase?: string;
 }) {
   const attention = tone === CountTone.Attention;
+  const { primaryColor } = useMantineTheme();
   return (
     <Badge
       size="xs"
@@ -26,7 +27,7 @@ export function CountBadge({
       px={5}
       miw={16}
       variant={attention ? 'filled' : 'light'}
-      color={attention ? 'blue' : 'gray'}
+      color={attention ? primaryColor : 'gray'}
     >
       {phrase === undefined ? (
         count

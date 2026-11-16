@@ -30,4 +30,14 @@ describe('CountBadge', () => {
     expect(screen.getByText('2 open cards')).toBeTruthy();
     expect(screen.getByText('2').getAttribute('aria-hidden')).toBe('true');
   });
+
+  it("draws an attention count in the theme's primary colour", () => {
+    render(
+      <MantineProvider theme={{ primaryColor: 'grape' }}>
+        <CountBadge count={4} tone={CountTone.Attention} />
+      </MantineProvider>,
+    );
+    const badge = screen.getByText('4').closest('.mantine-Badge-root');
+    expect(badge?.getAttribute('style')).toContain('grape');
+  });
 });
