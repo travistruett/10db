@@ -9,6 +9,13 @@ export { spawnAppServer, type CodexChild } from './codex-rpc';
 export { guardSocketPath } from './codex-session';
 export { codexLoginStatus } from './codex-sign-in-check';
 export { createRoutedAdapter } from './routed-adapter';
+export {
+  isArgFromFile,
+  TakeoverRefusedError,
+  type ArgFromFile,
+  type TakeoverArg,
+  type TakeoverCommand,
+} from './takeover-command';
 export { FAKE_ACCOUNT_EMAIL, FakeAdapter } from './fake-adapter';
 export { FakeScriptBook, loadFakeScriptBook } from './fake-script';
 export { scriptedShapeBehaviour } from './fake-plan-script';
