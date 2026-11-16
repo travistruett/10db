@@ -27,7 +27,9 @@ export type CheckoutReturn =
   /** Left as it is: the builder moved it off the batch's branch on purpose, so no card. */
   | 'moved'
   /** Left as it is, with a card saying why. */
-  | 'left';
+  | 'left'
+  /** Not tried: a chat's turn holds Your folder and the caller chose not to wait. The place is kept. */
+  | 'busy';
 
 const FINISHED: readonly BatchState[] = [
   BatchState.Shipped,
@@ -48,6 +50,7 @@ const message = (error: unknown): string =>
 export async function returnCheckout(
   deps: CheckoutReturnDeps,
   batchId: BatchId,
+  opts: { readonly wait?: boolean } = {},
 ): Promise<CheckoutReturn> {
   const db = deps.state.db;
   const row = getBatchRow(db, batchId);
@@ -71,11 +74,13 @@ export async function returnCheckout(
   const running = lanesInProjectCheckout(db, project);
   if (running > 0) return leave(checkoutCards.lanesRunning(batch, project, place, running));
   // The switch moves Your folder's branch: it waits for a chat's turn, and holds the folder meanwhile.
-  const token = await reserveGitNaming(deps, {
-    projectId: project.id,
-    batchId,
-    what: `switching Your folder back to ${place.branch === null ? 'where it was' : `\`${place.branch}\``}`,
-  });
+  const what = `switching Your folder back to ${place.branch === null ? 'where it was' : `\`${place.branch}\``}`;
+  let token: symbol;
+  if (opts.wait === false) {
+    const reserved = deps.folderHold.reserveGit(project.id, what);
+    if (!reserved.reserved) return 'busy';
+    token = reserved.token;
+  } else token = await reserveGitNaming(deps, { projectId: project.id, batchId, what });
   try {
     const outcome = await deps.git.switchBack(project.repoPath, row.branch, place);
     switch (outcome.kind) {

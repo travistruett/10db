@@ -1934,6 +1934,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     git,
     inbox,
+    jobs: delivery.jobs,
     processes,
     shipper,
     starter,

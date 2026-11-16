@@ -77,6 +77,7 @@ const cardsAbout = (branch: string | null): InboxItemDto[] =>
 const recover = () =>
   recoverBatches({
     folderHold: h.ctx.folderHold,
+    jobs: h.jobs,
     state: h.state,
     git: h.git,
     inbox,

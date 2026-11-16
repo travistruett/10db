@@ -35,6 +35,7 @@ const labels = (card: InboxItemDto): string[] => card.options.map((o) => o.label
 const recover = () =>
   recoverBatches({
     folderHold: h.ctx.folderHold,
+    jobs: h.jobs,
     state: h.state,
     git: h.git,
     inbox: h.inbox,

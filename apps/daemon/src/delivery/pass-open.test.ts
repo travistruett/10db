@@ -138,6 +138,7 @@ function stopsOnConflict(...args: string[]): void {
 const recover = () =>
   recoverBatches({
     folderHold: h.ctx.folderHold,
+    jobs: h.jobs,
     state: h.state,
     git: h.git,
     inbox: h.inbox,
