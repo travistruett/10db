@@ -3,13 +3,15 @@ import type { LimitAt } from '../trust';
 
 /** Where a limit card's detail names the limit 10db's judge stopped the call at. */
 export const LIMIT_DETAIL = 'limit';
+/** Where a limit card's detail holds the call as a grant quotes it (`grantCallSummary`). */
+export const GRANT_CALL_DETAIL = 'grantCall';
 /** Set on a limit card whose call is too long to keep as a grant: Always in this project needs a note. */
 export const NOTE_NEEDED_DETAIL = 'noteNeeded';
 
 const ALWAYS =
   'Allow calls like this in this project from now on. Your note, if you write one, says what to allow, such as "deploys to staging with vercel"; without one, this exact call is allowed.';
 const ALWAYS_NEEDS_NOTE =
-  'Allow calls like this in this project from now on. Say in your note what to allow: this call is too long to keep as it is.';
+  "Allow calls like this in this project from now on. Say in your note what to allow: this call can't be kept as it is.";
 
 /** The trust line's three answers to a limit or an escalation: once, always in this project, or deny. */
 export function limitOptions(noteNeeded: boolean): InboxOption[] {

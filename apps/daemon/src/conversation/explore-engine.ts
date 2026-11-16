@@ -728,6 +728,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
             ? rt.pausedUntil.toISOString()
             : null,
         commands: conv.commands,
+        backgroundTasks: [...(rt.session?.open.backgroundTasks() ?? [])],
       };
     },
     live(id) {

@@ -80,7 +80,7 @@ import { grantTargetOf } from '../trust';
 import { applyDockerChoice } from './docker-card';
 import { applyGateHostChoice } from './gate-host-card';
 import { applyHazardChoice } from './hazard-card';
-import { LIMIT_DETAIL } from './limit-card';
+import { GRANT_CALL_DETAIL, LIMIT_DETAIL } from './limit-card';
 import { applyMcpApproval } from './mcp-approval';
 import { declaredKinds, taskFieldsFromProposal } from './proposal-task';
 
@@ -413,7 +413,7 @@ function applyPermissionChoice(ctx: WriteContext, item: InboxItemDto, answer: In
     return;
   }
   if (answer.choice === PermissionChoice.AlwaysInProject) {
-    applyGrantChoice(ctx, item, answer, summary);
+    applyGrantChoice(ctx, item, answer, toolName);
     return;
   }
   const rule = storableRule(toolName, summary);
@@ -453,19 +453,19 @@ function applyPermissionChoice(ctx: WriteContext, item: InboxItemDto, answer: In
 
 /**
  * Always in this project on a limit or an escalation card: a grant of the card's limit, whose target is the
- * builder's note or the call quoted. A call too long to keep needs a note, so the answer is refused without one.
+ * builder's note or the call quoted with its tool. A call that can't be kept as written (too long, or holding
+ * `$defaults`) needs a note, so the answer is refused without one.
  */
 function applyGrantChoice(
   ctx: WriteContext,
   item: InboxItemDto,
   answer: InboxAnswer,
-  summary: string,
+  toolName: string,
 ): void {
-  const target = grantTargetOf(answer.note ?? null, summary);
-  if (target === null)
-    throw new InvalidError(
-      'Say in the note what to allow: this call is too long to keep as it is.',
-    );
+  const call = item.detail?.[GRANT_CALL_DETAIL];
+  const target = grantTargetOf(answer.note ?? null, typeof call === 'string' ? call : '', toolName);
+  if (target === null || (typeof call !== 'string' && (answer.note ?? '').trim() === ''))
+    throw new InvalidError("Say in the note what to allow: this call can't be kept as it is.");
   // The detail is JSON the broker wrote; read the limit back by its schema.
   const limit = z.enum(LimitName).safeParse(item.detail?.[LIMIT_DETAIL]);
   insertTrustGrant(ctx, {

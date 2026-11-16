@@ -1,5 +1,5 @@
 import { SandboxedMcpServer } from '../sandbox';
-import { lanePermissions } from './codex-lane-permissions';
+import { lanePermissions, readOnlyPermissions } from './codex-lane-permissions';
 import { codexYourServers } from './codex-your-servers';
 import type { AgentSessionSpec, SessionMcpServer } from './types';
 
@@ -35,17 +35,22 @@ function projectServer(server: SessionMcpServer): Record<string, unknown> {
 
 /**
  * The per-session `config` for `thread/start` and `thread/resume`: a lane's, or an explore
- * conversation's on its read-only sandbox, whose checkout the profile makes `read`. The project's servers come
+ * conversation's on its read-only sandbox, whose checkout the profile makes `read`; with no lane sandbox it is
+ * read-only too, `secretFiles` of the checkout denied. The project's servers come
  * first, then the builder's, then 10db's. It travels over stdin, never on a
  * command line, and holds the name of the token variable, never the token.
  */
-export function codexThreadConfig(spec: AgentSessionSpec): Record<string, unknown> {
+export function codexThreadConfig(
+  spec: AgentSessionSpec,
+  secretFiles: readonly string[] = [],
+): Record<string, unknown> {
   const projects = Object.fromEntries(
     Object.entries(spec.projectMcpServers).map(([name, server]) => [name, projectServer(server)]),
   );
   const yours = codexYourServers(spec);
   const { sandbox } = spec;
-  if (sandbox === null) {
+  // A conversation with no lane sandbox reads the checkout and runs no command; a lane never starts without one.
+  if (sandbox === null && spec.profile.kind !== 'explore') {
     throw new CodexLaneConfigError('a Codex session needs the lane sandbox');
   }
   // With the setup's skill roots listed, Codex tells the model of its skills; every other thread keeps
@@ -53,10 +58,11 @@ export function codexThreadConfig(spec: AgentSessionSpec): Record<string, unknow
   const skills = (spec.setup?.skillRoots ?? []).length > 0;
   return {
     ...(skills ? { skills: { include_instructions: true } } : {}),
-    permissions: lanePermissions(sandbox),
+    permissions:
+      sandbox === null ? readOnlyPermissions(spec.cwd, secretFiles) : lanePermissions(sandbox),
     // The thread's own setting over the home's `disabled`.
     web_search: spec.webSearch ?? 'disabled',
-    shell_environment_policy: { inherit: 'none', set: { ...sandbox.shellEnv } },
+    shell_environment_policy: { inherit: 'none', set: { ...sandbox?.shellEnv } },
     mcp_servers: {
       ...projects,
       ...yours,

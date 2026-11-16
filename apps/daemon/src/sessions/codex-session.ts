@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { systemClock, type Clock } from '../clock';
 import { CODEX_VERIFIED_ON } from '../environment';
 import { checkAccount, missingAccountRefusal, modelMatches, noAccountWhy } from './account-check';
-import { YourMcpServer } from '../sandbox';
+import { secretFilesIn, YourMcpServer } from '../sandbox';
 import { createChannel } from './channel';
 import { CODEX_CLIENT_INFO, readSeenAccount, type CodexCall } from './codex-account-read';
 import type { CodexAdapterOptions } from './codex-adapter';
@@ -223,6 +223,8 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
   let rpc: CodexRpc | null = null;
   let done = false;
   let started = false;
+  /** Refused calls shown so far, so two refused calls of one script keep distinct ids. */
+  let refusals = 0;
   /** `stop` was called: the process is expected to end, and what it says no longer matters. */
   let stopRequested = false;
   /** The session is ending (a stop, or a failed turn that ends it), so notifications are no longer read. */
@@ -499,11 +501,22 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
 
   const startThread = async (): Promise<z.infer<typeof ThreadResponse>> => {
     const developerInstructions = codexDeveloperInstructions(spec);
+    // With no lane sandbox the profile is read-only over the checkout, whose secret files it denies.
+    let secretFiles: string[] = [];
+    if ((spec.sandbox ?? null) === null) {
+      try {
+        secretFiles = await secretFilesIn(spec.cwd);
+      } catch {
+        throw sandboxRefused(
+          "The checkout's secret files could not be listed, so none could be denied.",
+        );
+      }
+    }
     const params = {
       cwd: spec.cwd,
       model: spec.model,
       approvalPolicy: 'never',
-      config: codexThreadConfig(spec),
+      config: codexThreadConfig(spec, secretFiles),
       ...(developerInstructions === null ? {} : { developerInstructions }),
     };
     const resumeId = spec.resumeProviderSessionId;
@@ -911,7 +924,7 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
           }
           // Codex reports no item for a call its hook refused: the thread shows the call from the hook's input.
           if (started)
-            for (const call of refusedToolCalls(refused, denial, clock.now().getTime()))
+            for (const call of refusedToolCalls(refused, denial, clock.now().getTime(), refusals++))
               events.push({ type: 'tool_call', call });
         },
       );
@@ -955,7 +968,8 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
   };
 
   const run = async (): Promise<void> => {
-    if ((spec.sandbox ?? null) === null)
+    // A conversation with no lane sandbox runs read-only (`readOnlyPermissions`); a lane never starts without one.
+    if ((spec.sandbox ?? null) === null && spec.profile.kind !== 'explore')
       throw sandboxRefused('10db refused to start Codex without the lane sandbox.');
     const codexHome = spec.env['CODEX_HOME'];
     if (codexHome === undefined || codexHome === '')

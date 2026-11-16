@@ -33,9 +33,9 @@ import {
 import { SettingRow, SettingsCard } from './setting-row';
 import { TrustRowText } from './trust-section';
 import {
-  GRANT_LIMIT_LABELS,
   GRANTS_DESCRIPTION,
   GRANTS_EMPTY,
+  grantDescription,
   LIVE_SYSTEMS_DESCRIPTION,
   TRUST_ROWS,
 } from './trust-rows';
@@ -258,7 +258,7 @@ function AllowedInProject({ projectId }: { readonly projectId: ProjectDto['id'] 
             <SettingRow
               key={grant.id}
               label={grant.target}
-              description={`${grant.limit === null ? 'Any limit' : GRANT_LIMIT_LABELS[grant.limit]} · ${new Date(grant.createdAt).toLocaleDateString()}`}
+              description={grantDescription(grant, new Date(grant.createdAt).toLocaleDateString())}
             >
               <Button
                 variant="subtle"

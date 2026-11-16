@@ -1612,6 +1612,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           exportAwsCredentials,
           builderHome,
           laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
+          worktreeBase: worktreeRoot,
           codexLaneTempRoot: (sandboxRoots ?? namedSandboxRoots({}, homedir())).codexLanes,
         });
   const shape = createShapeService({

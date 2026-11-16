@@ -147,10 +147,12 @@ import {
   createMemoryKeychain,
   FAKE_SRT,
   handoffArgs,
+  homeOutsideTemp,
   isolatedGitEnv,
   SANDBOXED,
   tempDir,
   waitFor,
+  type TempDir,
 } from '../../test/fixtures';
 import {
   createTestEngine,
@@ -5210,17 +5212,23 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     readonly codexLanes: string;
   }
   let probeRoot: string | null = null;
+  let probeHome: TempDir | null = null;
   afterEach(() => {
     if (probeRoot !== null) rmSync(probeRoot, { recursive: true, force: true });
     probeRoot = null;
+    probeHome?.cleanup();
+    probeHome = null;
   });
   const sandboxProbe = (fail?: () => never, processes?: LaneProcessSetup): SandboxProbe => {
     probeRoot = realpathSync(mkdtempSync('/tmp/sbr-'));
-    const home = join(probeRoot, 'h');
+    // The builder's home is outside every temp root: under one, 10db leaves out what its files lead into.
+    probeHome = homeOutsideTemp('sbr');
+    const home = join(probeHome.path, 'h');
+    mkdirSync(home);
     const tmpRoot = join(probeRoot, 't');
     const filesRoot = join(probeRoot, 'r');
     const codexLanes = join(probeRoot, 'l');
-    for (const dir of [home, tmpRoot, filesRoot, codexLanes]) mkdirSync(dir);
+    for (const dir of [tmpRoot, filesRoot, codexLanes]) mkdirSync(dir);
     const real = createLaneSandbox({
       home,
       dataDir: join(probeRoot, 'd'),
@@ -5418,11 +5426,8 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         });
         approve(probe, 'mine', 'docs');
         const spec = await startOne();
-        // The probe's home is under a temp root an agent can write, so a stdio server run from it is refused.
-        expect(Object.keys(spec.yourMcpServers)).toEqual(['docs']);
-        expect(spec.prompt).toContain(
-          'your MCP server mine: Its argument 1 points at a temp folder, which an agent can write.',
-        );
+        // The home is outside every temp root, so the approved stdio server launches beside the url one.
+        expect(Object.keys(spec.yourMcpServers).sort()).toEqual(['docs', 'mine']);
         expect(spec.yourMcpServers['docs']?.connect).toEqual({
           type: 'http',
           url: 'https://docs.example/mcp',
@@ -5489,7 +5494,8 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         });
         approve(probe, 'mine', 'broken', 'unsafe');
         const spec = await startOne();
-        expect(Object.keys(spec.yourMcpServers)).toEqual([]);
+        // `mine` launches; `broken` and `unsafe` are left out.
+        expect(Object.keys(spec.yourMcpServers)).toEqual(['mine']);
         expect(spec.prompt).toContain('broken (~/.claude.json)');
         expect(spec.prompt).toContain('your MCP server unsafe');
         const everything = JSON.stringify([spec.prompt, logs.lines()]);

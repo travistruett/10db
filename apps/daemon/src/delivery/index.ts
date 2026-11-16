@@ -16,7 +16,7 @@ export { uncarriedSaid } from './notices';
 export { createDependencyChanges, type DependencyChanges } from './dependency-change';
 export { retireWorktree } from './worktree-cleanup';
 export { ensureWorktreeWhole } from './worktree-repair';
-export { reserveGitNaming, type FolderGitWait } from './folder-wait';
+export { reserveGitNaming } from './folder-wait';
 export { DEFAULT_DELIVERY_LIMITS, type DeliveryContext, type DeliveryLimits } from './context';
 export { createDeliveryJobs, jobKey, JobQueue, type DeliveryJobs } from './jobs';
 export { createBatchStarter, type BatchStarter } from './start';

@@ -273,11 +273,13 @@ import {
 import { resolveStep } from './resolve-step';
 import {
   fileAccessJudge,
+  laneWritableRoots,
   SandboxProfileError,
   SandboxTempDirError,
   type GateSandbox,
   type LaneSandbox,
   type LaneSession,
+  SYSTEM_TEMP_ROOTS,
 } from '../sandbox';
 import {
   SessionEndReason,
@@ -2444,11 +2446,18 @@ export function createRunner(opts: RunnerOptions): Runner {
       limit: skip.limit,
       kind: skip.kind,
     }));
+    // The roots the launch judges a builder's file and server against, so the readers of the builder's config do too.
+    const writableRoots = laneWritableRoots({
+      checkouts: allCheckouts(db),
+      worktreeBase: opts.worktreeRoot,
+      sandboxTempRoots: opts.laneWritableRoots,
+      systemTempRoots: SYSTEM_TEMP_ROOTS,
+    }).map((root) => root.path);
     const setupPlan = planSessionSetup({
       home: opts.builderHome,
       checkout,
       switches,
-      laneWritable: [...allCheckouts(db), opts.worktreeRoot, ...opts.laneWritableRoots],
+      laneWritable: writableRoots,
     });
     // The builder's own MCP servers, planned from their files, switches and approvals as the session starts.
     const yours = yourMcpForSession({
@@ -2462,7 +2471,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         ...projectMcp.failures.map((failure) => failure.name),
       ],
       loginEnv: opts.launcher.projectEnv(),
-      laneWritable: [...allCheckouts(db), opts.worktreeRoot, ...opts.laneWritableRoots],
+      laneWritable: writableRoots,
       localBinding: listProjects(db).some((other) => other.sandboxLoopback),
       plugins: setupPlan.input.plugins.map((p) => ({ id: p.id, installPath: p.path })),
       onInvalid: (stored) => {

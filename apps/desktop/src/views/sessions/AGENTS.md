@@ -17,3 +17,4 @@
   out. While the chat waits, a send that names no folder passes `wait`, since it would cancel the wait. Send Now
   Reading Only is `POST /chats/:id/stop-waiting`, harmless when nothing waits any more. Before the folder is read the
   line is "Chat · reads {project}".
+- A chat's footer shows the agent's plan just above the working line (`conversation/todo-list.tsx`: the transcript's latest `plan` item as "Plan · 3 of 7 done · Now: …", open while work remains, folded once every step is done, reopened by a new list, an unfinished step of an ended turn read as interrupted; hidden without `capabilities.plan`) and its background tasks above the composer (`conversation/background-tasks.tsx`: `conversation.backgroundTasks`, the open session's running commands, monitors and subagents; foldable). Each scrolls inside a height cap. An agent with `capabilities.backgroundTasks` false (Codex) gets one dim line saying so, never an empty panel.

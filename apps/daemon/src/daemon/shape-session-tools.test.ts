@@ -5,6 +5,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -27,7 +28,13 @@ import {
   shapeConversation,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTempRepo, FAKE_SRT, SANDBOXED, type TempDir } from '../../test/fixtures';
+import {
+  createTempRepo,
+  FAKE_SRT,
+  homeOutsideTemp,
+  SANDBOXED,
+  type TempDir,
+} from '../../test/fixtures';
 import { SECRET_VARIABLES } from '../environment';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
@@ -50,6 +57,8 @@ const NO_GIT = {
 const SECRET = 'sk-ant-api03-the-accounts-own-key';
 
 let root: string;
+/** The builder's home: outside every temp root, which 10db counts as lane-writable. */
+let homeDir: TempDir;
 let repo: TempDir;
 let checkout: string;
 let close: () => void;
@@ -57,7 +66,7 @@ let state: StateStore;
 let base: ReturnType<typeof createTestStore>['store'];
 beforeEach(() => {
   root = realpathSync(mkdtempSync('/tmp/sst-'));
-  mkdirSync(join(root, 'home'));
+  homeDir = homeOutsideTemp('sst');
   mkdirSync(join(root, 't'));
   mkdirSync(join(root, 'run'));
   repo = createTempRepo();
@@ -70,12 +79,13 @@ beforeEach(() => {
 afterEach(() => {
   close();
   repo.cleanup();
+  homeDir.cleanup();
   rmSync(root, { recursive: true, force: true });
 });
 
 const realSandbox = (): LaneSandbox =>
   createLaneSandbox({
-    home: join(root, 'home'),
+    home: homeDir.path,
     dataDir: join(root, 'data'),
     loginConfigDir: null,
     tmpRoot: join(root, 't'),
@@ -151,10 +161,11 @@ function preparer(
     laneSandbox,
     protectedPaths: [],
     // The project env: the login shell's, with every billing switch and account secret stripped.
-    projectEnv: () => ({ PATH: '/usr/bin:/bin', HOME: join(root, 'home') }),
+    projectEnv: () => ({ PATH: '/usr/bin:/bin', HOME: homeDir.path }),
     lookup,
-    builderHome: join(root, 'home'),
+    builderHome: homeDir.path,
     laneWritableRoots: [join(root, 't')],
+    worktreeBase: join(root, 'worktrees'),
     codexLaneTempRoot: CODEX_LANES,
     exportAwsCredentials: (profile) => {
       profiles.push(profile);
@@ -171,7 +182,7 @@ function preparer(
 /** The session's launch env, which holds the account's own key. */
 const launchEnv = (): Record<string, string> => ({
   PATH: '/usr/bin:/bin',
-  HOME: join(root, 'home'),
+  HOME: homeDir.path,
   ANTHROPIC_API_KEY: SECRET,
 });
 
@@ -273,9 +284,8 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
 
   describe("the builder's own MCP servers", () => {
     function approveYours(approve = true): void {
-      mkdirSync(join(root, 'home'), { recursive: true });
       writeFileSync(
-        join(root, 'home', '.claude.json'),
+        join(homeDir.path, '.claude.json'),
         JSON.stringify({
           mcpServers: {
             mine: { type: 'http', url: 'https://mine.example.com/mcp' },
@@ -284,7 +294,7 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
         }),
       );
       const { entries } = readYourMcpConfig({
-        home: join(root, 'home'),
+        home: homeDir.path,
         laneWritable: [],
         plugins: [],
       });
@@ -296,6 +306,35 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
         });
       }
     }
+
+    it('a config file that leads into the worktree base leaves its servers out, as the launch judges it', async () => {
+      const owner = conversation({ mcpServers: {} });
+      const shared = join(root, 'worktrees', 'shared.json');
+      mkdirSync(join(root, 'worktrees'));
+      writeFileSync(
+        shared,
+        JSON.stringify({
+          mcpServers: { mine: { type: 'http', url: 'https://mine.example.com/mcp' } },
+        }),
+      );
+      symlinkSync(shared, join(homeDir.path, '.claude.json'));
+      // Approved, so only where the file leads can leave it out.
+      const { entries } = readYourMcpConfig({ home: homeDir.path, laneWritable: [], plugins: [] });
+      for (const entry of entries) {
+        const hash = entry.configHash;
+        if (hash === null) throw new Error('unreadable probe entry');
+        state.write((ctx) => {
+          approveMcpServer(ctx, entry.key, hash);
+        });
+      }
+      const { prepare } = preparer();
+      const prepared = await prepare(inputFor(owner));
+      try {
+        expect(Object.keys(prepared.yourMcpServers)).toEqual([]);
+      } finally {
+        await prepared.release();
+      }
+    });
 
     it('a Plan session starts with your approved server, and the project’s are unchanged', async () => {
       const owner = conversation({ mcpServers: {} });
@@ -354,7 +393,7 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
       }
     });
 
-    it('Codex Plan plans the same servers as Claude Plan: your remote one, and the stdio one left out with its reason', async () => {
+    it('Codex Plan plans the same servers as Claude Plan: your remote one and the stdio one', async () => {
       const owner = conversation({ mcpServers: {} });
       approveYours();
       // The real sandbox, with a Codex temp root it can make under the test's own root.
@@ -365,9 +404,8 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
       });
       const prepared = await prepare(inputFor(owner, AccountKind.CodexSignin));
       try {
-        expect(Object.keys(prepared.yourMcpServers)).toEqual(['mine']);
-        expect(prepared.note).toContain('your MCP server local');
-        expect(prepared.note).not.toContain('Codex chats and Plan');
+        expect(Object.keys(prepared.yourMcpServers).sort()).toEqual(['local', 'mine']);
+        expect(prepared.note ?? '').not.toContain('Codex chats and Plan');
       } finally {
         await prepared.release();
       }
@@ -403,7 +441,7 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
   it('starts a Plan session with the instructions, the builder’s skills and their reads', async () => {
     const owner = conversation({ mcpServers: {} });
     writeFileSync(join(checkout, 'AGENTS.md'), '# Rules\n\nUse pnpm.\n');
-    const skill = join(root, 'home', '.claude', 'skills', 's');
+    const skill = join(homeDir.path, '.claude', 'skills', 's');
     mkdirSync(skill, { recursive: true });
     writeFileSync(join(skill, 'SKILL.md'), '---\nname: s\ndescription: a skill\n---\n');
     writeFileSync(join(skill, '.env'), 'TOKEN=x');
@@ -415,7 +453,7 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
       expect(prepared.setup.pluginDirs[0]).toMatch(/\/yours$/);
       expect(prepared.setup.secretFiles).toEqual([join(skill, '.env')]);
       expect(prepared.sandbox?.settings.filesystem.allowRead).toContain(
-        join(root, 'home', '.claude', 'skills'),
+        join(homeDir.path, '.claude', 'skills'),
       );
     } finally {
       await prepared.release();

@@ -199,9 +199,9 @@ export const unreadableImagesNotice = (
   readFirst: boolean,
   limits: PictureLimits,
 ): string =>
-  `Claude probably won't be able to Read ${names.join(', ')}: this conversation is out of room for pictures under ${limits.limitText}. ` +
+  `The agent probably won't be able to Read ${names.join(', ')}: this conversation is out of room for pictures under ${limits.limitText}. ` +
   (readFirst
-    ? `Tell Claude which picture matters most so it Reads that one first, or send ` +
+    ? `Tell the agent which picture matters most so it Reads that one first, or send ` +
       `${names.length === 1 ? 'it' : 'them'} in a new conversation.`
     : `Send ${names.length === 1 ? 'it' : 'them'} in a new conversation.`);
 
@@ -213,7 +213,7 @@ export const unreadableImagesNotice = (
  * Reading it first is no remedy: only a new conversation is offered.
  */
 export const refusedImageNotice = (name: string, limits: PictureLimits): string =>
-  `Claude couldn't Read ${name}: this conversation is out of room for pictures under ${limits.limitText}. ` +
+  `The agent couldn't Read ${name}: this conversation is out of room for pictures under ${limits.limitText}. ` +
   `Send it in a new conversation.`;
 
 const megabytes = (bytes: number): string => `${(bytes / 1_000_000).toFixed(1)} MB`;
@@ -234,7 +234,7 @@ export const carriedNotice = (
     ? `a picture sent earlier is over the ${megabytes(over.allowed)} one image can be there, `
     : `the pictures and PDF pages in this conversation (${megabytes(over.carried)}) are more than ` +
       `${megabytes(over.allowed)}, what a resumed session can resend under ${limits.limitText}, `) +
-  `so Claude starts from the digest and no longer sees them. Send a picture again to show it.`;
+  `so the agent starts from the digest and no longer sees them. Send a picture again to show it.`;
 
 /**
  * Why a Read is refused, or null when it fits within `ceiling` (`readCeiling`) beside the pictures and

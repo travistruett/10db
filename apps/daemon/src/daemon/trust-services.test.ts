@@ -1,8 +1,8 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createTestStore, seedAccount, seedProject } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { tempDir, type TempDir } from '../../test/fixtures';
+import { homeOutsideTemp, type TempDir } from '../../test/fixtures';
 import { createEventBus, createStateStore } from '../events';
 import { signInCandidates } from '../accounts';
 import { FakeAdapter } from '../sessions';
@@ -12,7 +12,7 @@ let root: TempDir;
 let home: string;
 
 beforeEach(() => {
-  root = tempDir('trust-services');
+  root = homeOutsideTemp('trust-services');
   home = join(root.path, 'home');
   const plugin = join(home, '.claude/plugins/cache/m/p/1');
   mkdirSync(join(plugin, '.claude-plugin'), { recursive: true });
@@ -154,6 +154,42 @@ describe("the app-wide plan of the builder's servers", () => {
       expect(signInCandidates(plan).map((candidate) => candidate.name)).toEqual(['linear']);
     } finally {
       test.close();
+    }
+  });
+});
+
+describe("the builder's config files and the lane's writable roots", () => {
+  it('lists no server from a file that leads into the worktree base, which a lane writes and the launch refuses', async () => {
+    const outside = homeOutsideTemp('trust-services-roots');
+    const test = createTestStore();
+    try {
+      const worktrees = join(outside.path, 'worktrees');
+      const builderHome = join(outside.path, 'home');
+      mkdirSync(worktrees, { recursive: true });
+      mkdirSync(builderHome, { recursive: true });
+      writeFileSync(
+        join(worktrees, 'shared.json'),
+        JSON.stringify({
+          mcpServers: { linear: { type: 'http', url: 'https://linear.example/mcp' } },
+        }),
+      );
+      symlinkSync(join(worktrees, 'shared.json'), join(builderHome, '.claude.json'));
+      const trust = createTrustServices({
+        state: createStateStore(test.store, createEventBus()),
+        builderHome,
+        laneWritableRoots: [],
+        worktreeBase: worktrees,
+        login: { configDir: () => null, codexHome: () => null },
+        laneSandbox: null,
+        adapter: new FakeAdapter({}),
+        judge: { ready: () => Promise.resolve(false) },
+        log: { warn: () => undefined },
+        loginEnv: () => ({}),
+      });
+      expect((await trust.trustSettings()).mcpServers.map((server) => server.name)).toEqual([]);
+    } finally {
+      test.close();
+      outside.cleanup();
     }
   });
 });
