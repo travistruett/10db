@@ -5,12 +5,17 @@ import {
   FolderWhileHeld,
   parseItemBody,
   WorkstreamState,
+  mintId,
   type ChatDto,
 } from '@10db/contracts';
-import { insertTask, insertWorkstream, listItems, schema } from '@10db/db';
+import { insertPass, insertTask, insertWorkstream, listItems, schema } from '@10db/db';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { chatWorld, type ChatWorld } from './chat-world';
+import { createTempRepo, isolatedGitEnv, type TempDir } from './fixtures';
 
 // Sessions spec §7.3: a chat holds Your folder exactly while its turn runs, takes it only when nothing of
 // 10db's holds it, and says so in its thread, on a real store, the explore engine and the fake adapter.
@@ -305,5 +310,99 @@ describe('a message that waits for Your folder', () => {
     expect(stateOf(chat)).toBe(ConversationState.IdleCold);
     w.chat.sendNow(chat.conversationId);
     await w.engine.settled(chat.conversationId);
+  });
+});
+
+// A chat's edit lands only while its turn holds Your folder. The agent here edits as a real one does: the
+// guard's verdict decides whether the file is written, in a real repository, and git says what changed.
+describe('what lands in a real repository', () => {
+  let repo: TempDir | undefined;
+  afterEach(() => {
+    repo?.cleanup();
+    repo = undefined;
+  });
+
+  const porcelain = (path: string): string =>
+    execFileSync('git', ['-C', path, 'status', '--porcelain'], {
+      env: isolatedGitEnv(),
+      encoding: 'utf8',
+    });
+
+  /** A task that is between its steps: its run isn't going, and its edits are still in the folder. */
+  function taskBetweenSteps(): void {
+    runningTask('Bump vite');
+    w.state.write((ctx) => {
+      ctx.tx
+        .update(schema.workstreams)
+        .set({ state: WorkstreamState.WaitingHuman })
+        .where(eq(schema.workstreams.state, WorkstreamState.Running))
+        .run();
+    });
+  }
+
+  function openPass(): void {
+    w.state.write((ctx) => {
+      const task = insertTask(ctx, w.project.id, {
+        title: 'Page',
+        acceptanceCriteria: ['x'],
+        areas: ['api'],
+      });
+      insertPass(ctx, {
+        id: mintId('Pass'),
+        projectId: w.project.id,
+        name: 'Settings pass',
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha: 'a'.repeat(40),
+        branch: '10db/pass-abc123',
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [task.id],
+        dirt: [],
+      });
+    });
+  }
+
+  const rows: {
+    readonly name: string;
+    readonly holder: (() => void) | null;
+    readonly lands: boolean;
+  }[] = [
+    { name: 'nothing else holds the folder', holder: null, lands: true },
+    {
+      name: 'a task runs in Your folder',
+      holder: () => {
+        runningTask('Bump vite');
+      },
+      lands: false,
+    },
+    { name: 'a task waits between its steps', holder: taskBetweenSteps, lands: false },
+    { name: 'a pass is open', holder: openPass, lands: false },
+  ];
+
+  it.each(rows)('edits notes.md only when it can: $name', async ({ holder, lands }) => {
+    repo = createTempRepo();
+    w = chatWorld({ checkout: repo.path });
+    holder?.();
+    const chat = w.open();
+    const target = join(repo.path, 'notes.md');
+    let verdict = '';
+    w.adapter.shapeBehaviour = () => {
+      const spec = w.adapter.shapeSessions[0]?.spec;
+      const decided = spec?.preToolUse({
+        toolName: 'Write',
+        input: { file_path: target, content: 'edited\n' },
+      });
+      verdict = decided?.decision ?? 'none';
+      // The agent writes only what the guard lets through.
+      if (decided?.decision === 'allow') writeFileSync(target, 'edited\n');
+      return Promise.resolve({ text: 'Done.' });
+    };
+    say(chat, 'add notes.md');
+    await w.engine.settled(chat.conversationId);
+    expect(verdict).toBe(lands ? 'allow' : 'deny');
+    expect(existsSync(target)).toBe(lands);
+    expect(porcelain(repo.path)).toBe(lands ? '?? notes.md\n' : '');
+    if (lands) expect(readFileSync(target, 'utf8')).toBe('edited\n');
   });
 });

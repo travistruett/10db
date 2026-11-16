@@ -7,6 +7,7 @@ import {
   type Effort,
   type ProjectDto,
 } from '@10db/contracts';
+import { join } from 'node:path';
 import { createTestStore, seedProject, type Store } from '@10db/db';
 import { ManualClock } from '../src/clock';
 import {
@@ -23,6 +24,7 @@ import { createInboxService, type InboxService } from '../src/inbox';
 import type { Judge } from '../src/judge';
 import { silentLogger } from '../src/log';
 import { mintSessionToken } from '../src/mcp';
+import { fileAccessJudge } from '../src/sandbox';
 import { FakeAdapter } from '../src/sessions';
 import type { ShapeLaunch } from '../src/shape';
 import { shapeAgentModels } from '../src/shape';
@@ -58,6 +60,8 @@ export function chatWorld(
     readonly tendb?: (world: { readonly store: Store }) => Judge;
     /** A daemon restart: a new engine, hold and service over the earlier world's store and folders. */
     readonly over?: ChatWorld;
+    /** The project's checkout the session works in: a real repository, where a test reads what landed. */
+    readonly checkout?: string;
   } = {},
 ): ChatWorld {
   const { store, close } =
@@ -94,7 +98,7 @@ export function chatWorld(
     },
   });
   const launch = (model: string | null, effort: Effort | null): ShapeLaunch => ({
-    cwd: '/repo',
+    cwd: opts.checkout ?? '/repo',
     model: model ?? 'claude-opus-5-5',
     modelId: model ?? 'claude-opus-5-5',
     effort: effort ?? 'high',
@@ -106,7 +110,30 @@ export function chatWorld(
       kind: launched.kind,
       identity: null,
     },
-    access: { checkout: '/repo', home: '/home', protectedReads: [], sandboxRoots: ['/tmp/10db'] },
+    access: {
+      checkout: opts.checkout ?? '/repo',
+      home: '/home',
+      protectedReads: [],
+      sandboxRoots: ['/tmp/10db'],
+      // A real checkout is judged on its real paths, as a session's file access is.
+      ...(opts.checkout === undefined
+        ? {}
+        : {
+            commands: {
+              protectedPaths: [],
+              fileAccess: fileAccessJudge({
+                checkout: opts.checkout,
+                home: '/home',
+                protectedReads: [],
+                readList: [],
+                systemDocRoots: [],
+                configDir: join(dir.path, 'no-claude-config'),
+                providerSessionId: null,
+                sandboxTemp: { roots: ['/tmp/10db'], own: '/tmp/10db/own' },
+              }),
+            },
+          }),
+    },
   });
   engine.register(
     'chat',

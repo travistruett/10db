@@ -1237,6 +1237,25 @@ describe('Your folder and chats', () => {
     expect(getWorkstream(store.db, run.workstream.id).notice).toBeNull();
   });
 
+  // Value: protects=a task never starts in Your folder under a chat that took it a moment before the write;
+  // fails_when=the write that moves the task to STARTING skips its own look at the chat holders;
+  // why_new=every other row holds the folder before the tick, so the earlier check alone passes them;
+  // no_claim=a take that lands after the write, which the hold's own rows cover.
+  it('does not start a first start when a chat takes the folder after the earlier checks', async () => {
+    const run = queue();
+    const me = chat('Retry login', run.project.id);
+    const takes = {
+      ready: () => {
+        folderHold.takeTurn(run.project.id, me);
+        return true;
+      },
+    };
+    expect(await scheduler({ global: 4 }, new Set(), takes).tick()).toBe(0);
+    expect(getWorkstream(store.db, run.workstream.id).state).toBe('QUEUED');
+    folderHold.releaseTurn(me);
+    expect(await scheduler().tick()).toBe(1);
+  });
+
   it('holds a first start for 10db’s own git work without a notice: it is over in moments', async () => {
     const run = queue();
     const reserved = folderHold.reserveGit(run.project.id, 'cutting a branch');
