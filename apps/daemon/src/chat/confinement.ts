@@ -1,7 +1,6 @@
-import { existsSync, realpathSync } from 'node:fs';
-import { dirname, join, resolve, sep } from 'node:path';
+import { resolve } from 'node:path';
 import { ChatToolName, JudgeKind } from '@10db/contracts';
-import { stringField } from '../guard';
+import { isWithinOnEveryReading, stringField } from '../guard';
 import type { ShapeVerdict } from '../sessions';
 import { judgeShapeCall, type ShapeAccess } from '../shape';
 
@@ -38,17 +37,6 @@ export interface ChatFolder {
 /** What a chat's agent reads when it edits while another holder has Your folder. */
 export const chatFolderInUse = (holder: string): string => `Your folder is in use by ${holder}.`;
 
-/** The nearest existing ancestor's real path with the rest appended: where a new file would land. */
-function realTarget(path: string): string {
-  let existing = path;
-  const rest: string[] = [];
-  while (!existsSync(existing) && dirname(existing) !== existing) {
-    rest.unshift(existing.slice(dirname(existing).length + 1));
-    existing = dirname(existing);
-  }
-  return join(realpathSync(existing), ...rest);
-}
-
 /** The path a file tool names, resolved from the call's directory. */
 function editedPath(call: ChatCall, checkout: string): string | null {
   if (typeof call.input !== 'object' || call.input === null) return null;
@@ -70,9 +58,8 @@ function judgeEdit(
   const path = editedPath(call, access.checkout);
   if (judge === undefined || path === null) return deny(`${call.toolName} could not be judged.`);
   try {
-    const checkout = realpathSync(access.checkout);
-    const real = realTarget(path);
-    if (real !== checkout && !real.startsWith(checkout + sep))
+    // Every reading must land inside: a link, even a dangling one, is followed through its target.
+    if (!isWithinOnEveryReading(access.checkout, path))
       return deny(`${path} is outside Your folder.`);
     const verdict = judge.write(path);
     if (verdict !== 'ok') return deny(verdict.refuse);

@@ -84,6 +84,7 @@ describe('a chat’s edits', () => {
     ['a file outside the checkout', join('..', 'outside', 'x')],
     ['a file reached through a link out of the checkout', join('link', 'x')],
     ['a relative path that climbs out', join('src', '..', '..', 'x')],
+    ['a dangling link whose target is outside', 'dangling'],
     ['a Claude Code configuration path', join('.claude', 'settings.json')],
   ])('refuses %s while its turn holds the folder', (_name, rel) => {
     const verdict = judgeChatCall(edit('Edit', join(checkout, rel)), access, holding);
