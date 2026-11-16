@@ -41,6 +41,7 @@ import {
   insertConversation,
   insertFiles,
   insertItem,
+  listQueuedTurnStarters,
   listItems,
   moveChatTab,
   openChats,
@@ -176,6 +177,8 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
   // Chats a pass's open has stopped, until it is done: Stop must not give back the starts it holds.
   const stoppedForOpen = new Set<ChatId>();
+  // Chats whose last request for a brief was sent as a turn of its own, until that turn ends.
+  const briefTurns = new Set<ChatId>();
   const refuseWhileDoing = (chatId: ChatId): void => {
     if (stoppedForOpen.has(chatId)) throw new ConflictError(DO_IT_UNDER_WAY);
   };
@@ -281,25 +284,18 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     send(conversationId, input, folder) {
       const item = post(conversationId, input);
       const chat = requireChat(conversationId);
-      // A message from the builder replaces a brief request: one still running is stopped, and this runs next.
-      if (deps.briefs.asked(chat.id) !== null) {
-        deps.briefs.endAsk(chat.id);
-        if (BUSY.has(engine.view(conversationId).state))
-          void engine.stop(conversationId).catch(() => undefined);
+      // A message from the builder replaces a brief request. A brief turn still running reads only, so it is
+      // stopped first and the message runs as its own turn, taking the folder like any other.
+      deps.briefs.endAsk(chat.id);
+      if (briefTurnRunning(chat)) {
+        briefTurns.delete(chat.id);
+        engine.holdStarts(conversationId);
+        void stopHeld(conversationId).then(() => {
+          dispatch(chat, conversationId, folder);
+        });
+        return item;
       }
-      const waiting = deps.folderHold.waiting(chat.id);
-      const parks = folder === FolderWhileHeld.Wait && (waiting || mustWait(chat));
-      // A read-only send applies to everything queued, and to the turn that runs it even if the folder frees.
-      if (!parks && waiting) deps.folderHold.cancelWait(chat.id);
-      // A running turn's chained successor inherits its profile and starts without asking the folder, so a
-      // choice made then would wait for some later turn.
-      if (folder === FolderWhileHeld.ReadOnly && !BUSY.has(engine.view(conversationId).state))
-        deps.folderHold.chooseReadOnly(chat.id);
-      // Starts are held before the queue is asked, so the message parks.
-      if (parks) engine.holdStarts(conversationId);
-      engine.queued(conversationId);
-      if (parks) watchFolder(chat);
-      else if (waiting) engine.releaseStarts(conversationId);
+      dispatch(chat, conversationId, folder);
       return item;
     },
 
@@ -307,6 +303,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       const chat = requireChat(conversationId);
       // The turn is already stopping, and the open's hold on its starts is not Stop's to undo.
       if (stoppedForOpen.has(chat.id)) return;
+      briefTurns.delete(chat.id);
       // The parked start is dropped by the stop; the hold on new starts goes with the wait.
       deps.folderHold.cancelWait(chat.id);
       await engine.stop(conversationId);
@@ -315,6 +312,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
     sendNow(conversationId) {
       const chat = requireChat(conversationId);
+      briefTurns.delete(chat.id);
       if (deps.folderHold.waiting(chat.id)) {
         stopWaiting(chat);
         return;
@@ -333,6 +331,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     async redo(conversationId, input, folder) {
       const chat = requireChat(conversationId);
       refuseWhileDoing(chat.id);
+      briefTurns.delete(chat.id);
       deps.folderHold.cancelWait(chat.id);
       await engine.stop(conversationId);
       engine.releaseStarts(conversationId);
@@ -369,22 +368,18 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
     askBrief(chatId, draft) {
       const chat = getChat(state.db, chatId);
-      const { state: at } = engine.view(chat.conversationId);
-      const between: readonly ConversationState[] = [
-        ConversationState.IdleCold,
-        ConversationState.IdleWarm,
-        ConversationState.EndedError,
-      ];
-      if (!between.includes(at) || deps.folderHold.waiting(chat.id)) return;
+      if (!briefAskable(chat)) return;
       // A brief already written is kept for the sheet, and a request still waiting is not asked twice.
       if (deps.briefs.written(chat.id) !== null) return;
       if (deps.briefs.asked(chat.id) !== null && !deps.briefs.expired(chat.id)) return;
-      deps.briefs.ask(chat.id);
+      // Posted first: a chat that can't take a message is never marked as asked.
       post(
         chat.conversationId,
         { text: briefRequestText(draft), mentions: [], pictures: [] },
         'brief',
       );
+      deps.briefs.ask(chat.id);
+      briefTurns.add(chat.id);
       // The turn reads only, so it never runs on a writable hold, and a brief is never chained.
       deps.folderHold.chooseReadOnly(chat.id);
       engine.queued(chat.conversationId);
@@ -392,9 +387,11 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
     async cancelBrief(chatId) {
       const chat = getChat(state.db, chatId);
-      if (deps.briefs.asked(chat.id) === null) return;
       deps.briefs.endAsk(chat.id);
-      if (BUSY.has(engine.view(chat.conversationId).state)) await engine.stop(chat.conversationId);
+      // Only the brief's own turn is stopped: a turn the builder began since is theirs.
+      if (!briefTurnRunning(chat)) return;
+      briefTurns.delete(chat.id);
+      await engine.stop(chat.conversationId);
     },
 
     briefOf(chatId) {
@@ -427,18 +424,68 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       if (askedAt !== null) return { ...fromChat, reason: BriefReason.Timeout };
       if (at === ConversationState.PausedAccount)
         return { ...fromChat, reason: BriefReason.Paused };
-      const between: readonly ConversationState[] = [
-        ConversationState.IdleCold,
-        ConversationState.IdleWarm,
-        ConversationState.EndedError,
-      ];
-      return {
-        ...fromChat,
-        reason:
-          between.includes(at) && !deps.folderHold.waiting(chat.id) ? null : BriefReason.MidTurn,
-      };
+      return { ...fromChat, reason: briefAskable(chat) ? null : BriefReason.MidTurn };
     },
   };
+
+  /**
+   * Whether the agent can be asked for a brief now: between turns, with nothing waiting for the folder, no
+   * start held and no message of the builder's not yet delivered, so the request never shares a turn with it.
+   */
+  function briefAskable(chat: ChatRow): boolean {
+    const between: readonly ConversationState[] = [
+      ConversationState.IdleCold,
+      ConversationState.IdleWarm,
+      ConversationState.EndedError,
+    ];
+    return (
+      between.includes(engine.view(chat.conversationId).state) &&
+      !deps.folderHold.waiting(chat.id) &&
+      !engine.parked(chat.conversationId) &&
+      listQueuedTurnStarters(state.db, chat.conversationId).length === 0
+    );
+  }
+
+  /** Stops the turn with starts held, then lets them go: what is queued after it starts fresh. */
+  async function stopHeld(conversationId: ConversationId): Promise<void> {
+    try {
+      await engine.stop(conversationId);
+      await engine.settled(conversationId);
+    } catch {
+      // A stop that fails leaves the turn as it was; the message still runs after it.
+    } finally {
+      engine.releaseStarts(conversationId);
+    }
+  }
+
+  /** Whether the turn running now is the one that was asked for a brief; forgets the mark once it ended. */
+  function briefTurnRunning(chat: ChatRow): boolean {
+    if (!briefTurns.has(chat.id)) return false;
+    if (BUSY.has(engine.view(chat.conversationId).state)) return true;
+    briefTurns.delete(chat.id);
+    return false;
+  }
+
+  /** The queue's half of a send: the folder choice, the wait for the folder, and the turn asked for. */
+  function dispatch(
+    chat: ChatRow,
+    conversationId: ConversationId,
+    folder: FolderWhileHeld | undefined,
+  ): void {
+    const waiting = deps.folderHold.waiting(chat.id);
+    const parks = folder === FolderWhileHeld.Wait && (waiting || mustWait(chat));
+    // A read-only send applies to everything queued, and to the turn that runs it even if the folder frees.
+    if (!parks && waiting) deps.folderHold.cancelWait(chat.id);
+    // A running turn's chained successor inherits its profile and starts without asking the folder, so a
+    // choice made then would wait for some later turn.
+    if (folder === FolderWhileHeld.ReadOnly && !BUSY.has(engine.view(conversationId).state))
+      deps.folderHold.chooseReadOnly(chat.id);
+    // Starts are held before the queue is asked, so the message parks.
+    if (parks) engine.holdStarts(conversationId);
+    engine.queued(conversationId);
+    if (parks) watchFolder(chat);
+    else if (waiting) engine.releaseStarts(conversationId);
+  }
 
   function requireChat(conversationId: ConversationId): ChatRow {
     const chat = chatOfConversation(state.db, conversationId);

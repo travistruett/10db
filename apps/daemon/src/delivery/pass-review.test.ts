@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
+  mintId,
   PassNoticeKind,
   Rigor,
   TaskMessageAuthor,
@@ -10,7 +11,6 @@ import {
   type PassId,
   type ProjectInput,
   type TaskDto,
-  type TaskId,
 } from '@10db/contracts';
 import { getPassProgress, listTaskThread, offeredText, patchProject } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -37,8 +37,8 @@ const finding = (location: string | null): Finding => ({
 });
 
 describe('findingTargets', () => {
-  const settings = 'tsk_settings' as TaskId;
-  const people = 'tsk_people' as TaskId;
+  const settings = mintId('Task');
+  const people = mintId('Task');
   const pages = [
     { taskId: settings, areas: ['settings'] },
     { taskId: people, areas: ['people'] },
@@ -61,7 +61,7 @@ describe('findingTargets', () => {
   });
 
   it('sends every file finding of a pass of one to its one page', () => {
-    const one = 'tsk_one' as TaskId;
+    const one = mintId('Task');
     expect(
       findingTargets(
         [finding('README.md:1'), finding('src/lib/c.ts:1'), finding(null)],

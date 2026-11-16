@@ -1,5 +1,6 @@
 import {
   AccountKind,
+  type ChatId,
   ConflictError,
   ConversationState,
   InvalidError,
@@ -183,8 +184,8 @@ describe('a chat view: background tasks', () => {
 });
 
 describe('the brief for Do It', () => {
-  const say = (chatId: string, text: string) => {
-    const chat = w.chat.get(chatId as ReturnType<typeof w.open>['id']);
+  const say = (chatId: ChatId, text: string) => {
+    const chat = w.chat.get(chatId);
     return w.chat.send(chat.conversationId, { text, mentions: [], pictures: [] });
   };
   const briefRequests = (conversationId: ReturnType<typeof w.open>['conversationId']) =>
@@ -291,10 +292,91 @@ describe('the brief for Do It', () => {
     await waitFor(() => w.engine.view(chat.conversationId).state === 'running');
     const mine = say(chat.id, 'Actually, just the logout');
     held.release();
-    await w.engine.settled(chat.conversationId);
     expect(w.briefs.asked(chat.id)).toBeNull();
-    expect(
-      listItems(w.state.db, chat.conversationId).find((i) => i.id === mine.id)?.deliveredAt,
-    ).not.toBeNull();
+    await waitFor(
+      () =>
+        listItems(w.state.db, chat.conversationId).find((i) => i.id === mine.id)?.deliveredAt !==
+        null,
+    );
+    await w.engine.settled(chat.conversationId);
+  });
+  it("runs a send during the brief turn as the builder's own turn, with the folder, after the agent wrote", async () => {
+    w = chatWorld();
+    const chat = w.open();
+    const brief = gate();
+    w.adapter.shapeBehaviour = async () => {
+      await brief.promise;
+      return { text: 'Done.' };
+    };
+    w.chat.askBrief(chat.id);
+    await waitFor(() => w.engine.view(chat.conversationId).state === 'running');
+    // The agent's write ends the request while its read-only turn goes on.
+    w.briefs.write(chat.id, { title: 'T', brief: 'B' }, mintId('Session'));
+    const mine = gate();
+    w.adapter.shapeBehaviour = async () => {
+      await mine.promise;
+      return { text: 'Done.' };
+    };
+
+    say(chat.id, 'Just the logout');
+
+    await waitFor(() => w.folderHold.holdsTurn(chat.id));
+    expect(w.engine.view(chat.conversationId).state).toBe('running');
+    brief.release();
+    mine.release();
+    await w.engine.settled(chat.conversationId);
+  });
+
+  it("Cancel stops only the brief's turn, never the builder's own", async () => {
+    w = chatWorld();
+    const chat = w.open();
+    const brief = gate();
+    w.adapter.shapeBehaviour = async () => {
+      await brief.promise;
+      return { text: 'Done.' };
+    };
+    w.chat.askBrief(chat.id);
+    await waitFor(() => w.engine.view(chat.conversationId).state === 'running');
+    brief.release();
+    await w.engine.settled(chat.conversationId);
+    const mine = gate();
+    w.adapter.shapeBehaviour = async () => {
+      await mine.promise;
+      return { text: 'Done.' };
+    };
+    await w.chat.redo(chat.conversationId, { text: 'Mine', mentions: [], pictures: [] });
+    await waitFor(() => w.engine.view(chat.conversationId).state === 'running');
+
+    await w.chat.cancelBrief(chat.id);
+
+    expect(w.engine.view(chat.conversationId).state).toBe('running');
+    mine.release();
+    await w.engine.settled(chat.conversationId);
+  });
+  it("is never asked of an archived chat, and never beside the builder's undelivered message", async () => {
+    w = chatWorld();
+    const archived = w.open(0);
+    await w.chat.archive(archived.id);
+    expect(() => {
+      w.chat.askBrief(archived.id);
+    }).toThrow(/archived/);
+    expect(w.briefs.asked(archived.id)).toBeNull();
+
+    const chat = w.open(1);
+    const held = gate();
+    w.adapter.shapeBehaviour = async () => {
+      await held.promise;
+      return { text: 'Done.' };
+    };
+    w.engine.holdStarts(chat.conversationId);
+    say(chat.id, 'Fix the login');
+
+    w.chat.askBrief(chat.id);
+
+    expect(briefRequests(chat.conversationId)).toEqual([]);
+    expect(w.chat.briefOf(chat.id)).toMatchObject({ source: 'chat', reason: 'mid_turn' });
+    w.engine.releaseStarts(chat.conversationId);
+    held.release();
+    await w.engine.settled(chat.conversationId);
   });
 });
