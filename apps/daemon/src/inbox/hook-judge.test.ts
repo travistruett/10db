@@ -294,6 +294,58 @@ describe('the hook judge, attended', () => {
     expect(sent).toHaveLength(1);
   });
 
+  it.each<[string, JudgedCallRequest, boolean]>([
+    ['the very call', bash(DEPLOY), true],
+    ['an extra argument', bash(`${DEPLOY} --force`), false],
+    ['a `;` tail', bash(`${DEPLOY}; rm -rf x`), false],
+    ['a `&&` tail', bash(`${DEPLOY} && true`), false],
+    ['a trailing space', bash(`${DEPLOY} `), false],
+    ['a leading space', bash(` ${DEPLOY}`), false],
+    ['a tab for a space', bash('vercel\tdeploy --prod'), false],
+    ['a newline tail', bash(`${DEPLOY}\ntrue`), false],
+    ['a quoted argument', bash('vercel deploy "--prod"'), false],
+    ['another case', bash('Vercel deploy --prod'), false],
+    ['a Cyrillic look-alike', bash('vеrcel deploy --prod'), false],
+    ['a non-breaking space', bash('vercel deploy --prod'), false],
+    ['a full-width hyphen', bash('vercel deploy －－prod'), false],
+    ['a zero-width joiner', bash('vercel deploy --pr‍od'), false],
+    [
+      'the sandbox switched off for the call',
+      request('Bash', { command: DEPLOY, dangerouslyDisableSandbox: true }),
+      false,
+    ],
+    [
+      'a wider domain list for the call',
+      request('Bash', { command: DEPLOY, allowed_domains: ['example.com'] }),
+      false,
+    ],
+    [
+      'a label alone changes nothing',
+      request('Bash', { command: DEPLOY, description: 'ship' }),
+      true,
+    ],
+  ])(
+    'on a native session a quoted grant meets %s: settled only for the very call, before the classifier',
+    async (_name, req, settled) => {
+      model = null;
+      const judgeCall = hookJudge({ now: JudgeKind.Native });
+      store.write((ctx) =>
+        insertTrustGrant(ctx, {
+          projectId: seeded,
+          limit: 'writes_live',
+          target: `the call ${JSON.stringify(DEPLOY)}`,
+          sourceInboxId: null,
+        }),
+      );
+      expect(await run(judgeCall, req)).toEqual(
+        settled
+          ? { decision: 'allow', settled: 'The builder allowed this very call in this project.' }
+          : { decision: 'allow' },
+      );
+      expect(sent).toEqual([]);
+    },
+  );
+
   it("a call the builder's allowed commands cover is settled before any model, on every surface", async () => {
     for (const surface of ['pass', 'lane'] as const) {
       model = null;

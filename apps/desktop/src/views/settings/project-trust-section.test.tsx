@@ -113,7 +113,7 @@ describe('Settings › project Trust', () => {
     });
     expect(
       await within(region).findByText(
-        'Nothing yet. "Always in this project" on a card adds a line here. Every judge reads a line that describes a kind of call; a line that quotes one call is matched only by 10db\'s own judge, never by Claude\'s auto mode.',
+        "Nothing yet. \"Always in this project\" on a card adds a line here. Every judge reads a line that describes a kind of call. A line that quotes one call lets exactly that call through in Claude's auto mode and under 10db's judge, with no judge reading it; Codex's own Auto-review can still refuse it.",
       ),
     ).toBeTruthy();
   });

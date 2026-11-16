@@ -53,13 +53,25 @@ export function grantedCallOf(target: string): string | null {
   }
 }
 
-/** How a card and the hook judge name a call a grant can match: a command as written, else the input as JSON. */
+/** The Bash fields that only label a command; any other field changes what the call may do. */
+const BASH_LABELS: ReadonlySet<string> = new Set(['command', 'description', 'timeout']);
+
+/**
+ * How a card and the hook judge name a call a grant can match: a command as written, else the input as JSON.
+ * A Bash call that carries a field beyond its command and labels (the sandbox switched off, a wider host list)
+ * is named by its whole input, so a grant of the bare command never covers it.
+ */
 export function grantCallSummary(
   toolName: string,
   input: Readonly<Record<string, unknown>>,
 ): string {
   const command = input['command'];
-  if (toolName === 'Bash' && typeof command === 'string') return command;
+  if (
+    toolName === 'Bash' &&
+    typeof command === 'string' &&
+    Object.keys(input).every((key) => BASH_LABELS.has(key))
+  )
+    return command;
   return JSON.stringify(input).slice(0, 2000);
 }
 
