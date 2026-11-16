@@ -94,7 +94,7 @@ const ToolText = z.object({
  * promise settles once the turn has ended.
  */
 async function agentTurn(chat: ChatDto, work: (call: Call, turn: FakeShapeTurn) => Promise<void>) {
-  const outcome: { failure: Error | null } = { failure: null };
+  const outcome: { failure: Error | null; ended: boolean } = { failure: null, ended: false };
   adapter.shapeBehaviour = async (turn) => {
     const client = await connect(turn.spec.mcp.url, turn.spec.mcp.token);
     try {
@@ -107,12 +107,16 @@ async function agentTurn(chat: ChatDto, work: (call: Call, turn: FakeShapeTurn) 
     } finally {
       await client.close();
     }
+    outcome.ended = true;
     return { text: 'Done.' };
   };
   await api.post(`/conversations/${chat.conversationId}/messages`, z.unknown(), { text: 'Go on.' });
   await waitForAsync(async () => {
     const conv = await api.get(`/conversations/${chat.conversationId}`, ConversationDto);
-    return conv.state === 'idle_warm' ? conv : false;
+    // A session that held Your folder closes with its turn, so the chat rests cold.
+    return outcome.ended && (conv.state === 'idle_warm' || conv.state === 'idle_cold')
+      ? conv
+      : false;
   });
   if (outcome.failure !== null) throw outcome.failure;
 }

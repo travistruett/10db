@@ -94,6 +94,8 @@ async function firstSpec(
   tendb?: (w: Pick<ChatWorld, 'store'>) => Judge,
 ): Promise<ExploreSessionSpec> {
   w = chatWorld({ prepare: prepared, judge, ...(tendb === undefined ? {} : { tendb }) });
+  // 10db's own git work holds Your folder, so the session opens read-only and its hook answers as a read-only chat's.
+  w.folderHold.reserveGit(w.project.id, 'cutting a branch');
   const chat =
     model === null ? w.open() : w.chat.create({ projectId: w.project.id, model, tabPosition: 0 });
   w.chat.send(chat.conversationId, { text: 'Why does login fail?', mentions: [], pictures: [] });

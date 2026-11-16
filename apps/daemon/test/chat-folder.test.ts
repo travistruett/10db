@@ -213,7 +213,7 @@ describe('a message that waits for Your folder', () => {
     // The chat takes the next message as any other.
     say(chat, 'again');
     await w.engine.settled(chat.conversationId);
-    expect(stateOf(chat)).toBe(ConversationState.IdleWarm);
+    expect(stateOf(chat)).toBe(ConversationState.IdleCold);
   });
 
   it('is replaced by Redo, which carries its own choice', async () => {

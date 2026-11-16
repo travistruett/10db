@@ -31,9 +31,15 @@ export const CHAT_NO_WEB =
 export interface ChatFolder {
   /** Whether the chat's turn holds Your folder now. */
   holds(): boolean;
+  /** Whether this session was opened able to write Your folder. */
+  readonly writable: boolean;
   /** Who keeps the turn from holding it, in words. */
   heldBy(): string;
 }
+
+/** What a chat's agent reads when it calls a tool after its turn gave Your folder back. */
+export const CHAT_TURN_ENDED =
+  'This turn has ended and given Your folder back, so nothing it started may act.';
 
 /** What a chat's agent reads when it edits while another holder has Your folder. */
 export const chatFolderInUse = (holder: string): string => `Your folder is in use by ${holder}.`;
@@ -98,6 +104,9 @@ export function judgeChatCall(
     toolInput: call.input,
     ...(call.cwd === undefined ? {} : { cwd: call.cwd }),
   };
+  // A session that can write keeps no call once its turn has given the folder back (a background agent's
+  // or a job's); its turn's end closes it, and this holds until that close lands.
+  if (folder?.writable === true && !folder.holds()) return deny(CHAT_TURN_ENDED);
   if (EDIT_TOOLS.has(call.toolName)) return judgeEdit(call, access, folder);
   if (READ_TOOLS.has(call.toolName) || call.toolName === 'Bash')
     return judgeShapeCall(asSession, access);

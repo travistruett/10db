@@ -280,6 +280,12 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     }
     const outcome = reduceOnce(rt, event);
     hooks.onState?.(conversation(rt.id), rt.state);
+    // A session that could write Your folder ends with the turn that held it: nothing it started (a
+    // background agent, a job) can write once the folder is given back.
+    if (rt.state === S.IdleWarm && rt.session?.open.launch.writes === true) {
+      rt.closeReason = 'the folder was given back';
+      reduce(rt, { type: 'idle_close' });
+    }
     return outcome;
   };
 

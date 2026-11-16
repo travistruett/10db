@@ -1251,6 +1251,19 @@ describe('the owner’s turn hooks', () => {
     expect(endsOutsideATurn(w)).toBe(true);
   });
 
+  it('closes a session that can write when its turn ends, so nothing it started writes later', async () => {
+    w = exploreWorld();
+    w.writes = true;
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('idle_cold');
+    // A session that only reads stays warm.
+    w.writes = false;
+    w.send('two');
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('idle_warm');
+  });
+
   it('closes a warm session opened for the other kind of turn, and keeps the take it just made', async () => {
     w = exploreWorld();
     w.writes = false;

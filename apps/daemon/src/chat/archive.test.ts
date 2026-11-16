@@ -92,6 +92,8 @@ describe('archiving a chat', () => {
   it('from idle_warm closes the warm handle and ends its session row', async () => {
     w = chatWorld();
     const chat = w.open();
+    // A turn that can't write keeps its session warm; 10db's own git work keeps Your folder from it.
+    w.folderHold.reserveGit(w.project.id, 'cutting a branch');
     w.chat.send(chat.conversationId, { text: 'Hello', ...say });
     await w.engine.settled(chat.conversationId);
     expect(stateOf(w, chat)).toBe('idle_warm');

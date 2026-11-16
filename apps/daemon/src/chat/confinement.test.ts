@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { tempDir, type TempDir } from '../../test/fixtures';
 import { fileAccessJudge } from '../sandbox';
 import type { ShapeAccess } from '../shape';
-import { chatFolderInUse, judgeChatCall, type ChatFolder } from './confinement';
+import { CHAT_TURN_ENDED, chatFolderInUse, judgeChatCall, type ChatFolder } from './confinement';
 
 // Sessions spec §7.3: a chat edits only while its turn holds Your folder, on the real path of each file, and
 // never git state or a protected path; a turn that doesn't hold is told who does.
@@ -57,13 +57,42 @@ afterAll(() => {
   dir.cleanup();
 });
 
-const holding: ChatFolder = { holds: () => true, heldBy: () => 'nobody' };
-const notHolding: ChatFolder = { holds: () => false, heldBy: () => 'the task ‘Bump vite’' };
+const holding: ChatFolder = { holds: () => true, writable: true, heldBy: () => 'nobody' };
+const notHolding: ChatFolder = {
+  holds: () => false,
+  writable: false,
+  heldBy: () => 'the task ‘Bump vite’',
+};
 
 const edit = (tool: string, path: string, more: Partial<{ agentId: string }> = {}) => ({
   toolName: tool,
   input: tool === 'NotebookEdit' ? { notebook_path: path } : { file_path: path },
   ...more,
+});
+
+describe('a session that was opened able to write', () => {
+  const ended: ChatFolder = {
+    holds: () => false,
+    writable: true,
+    heldBy: () => 'the task ‘Bump vite’',
+  };
+
+  it.each([
+    ['Bash', { command: 'echo x >> src/a.ts' }],
+    ['Read', { file_path: 'src/a.ts' }],
+    ['Agent', { prompt: 'go' }],
+    ['mcp__10db__commit_changes', {}],
+  ])('refuses a %s call once its turn no longer holds the folder', (toolName, input) => {
+    expect(judgeChatCall({ toolName, input, cwd: checkout }, access, ended)).toEqual({
+      decision: 'deny',
+      reason: CHAT_TURN_ENDED,
+    });
+  });
+
+  it('still lets a session opened read-only read', () => {
+    const call = { toolName: 'Read', input: { file_path: join(checkout, 'src', 'a.ts') } };
+    expect(judgeChatCall(call, access, notHolding).decision).toBe('allow');
+  });
 });
 
 describe('a chat’s edits', () => {
@@ -165,7 +194,7 @@ describe('a chat’s edits', () => {
 
   it('reads the hold at each call', () => {
     let held = true;
-    const folder: ChatFolder = { holds: () => held, heldBy: () => 'the pass ‘P’' };
+    const folder: ChatFolder = { holds: () => held, writable: true, heldBy: () => 'the pass ‘P’' };
     const call = edit('Write', join(checkout, 'src/new.ts'));
     expect(judgeChatCall(call, access, folder).decision).toBe('allow');
     held = false;

@@ -247,8 +247,10 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         true,
         tendbReady,
       );
+      const writable = deps.folderHold.holdsTurn(chat.id);
       const folder: ChatFolder = {
         holds: () => deps.folderHold.holdsTurn(chat.id),
+        writable,
         heldBy: () =>
           deps.folderHold
             .blockers(conv.projectId, { kind: FolderAsker.ChatTurn, chatId: chat.id })
@@ -268,7 +270,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               accountKind: launch.account.kind,
               env: launch.env,
               resumeProviderSessionId: start.resume,
-              writes: deps.folderHold.holdsTurn(chat.id),
+              writes: writable,
               signal: ending.signal,
               observer: start.observer,
               limits: limitNotes,
