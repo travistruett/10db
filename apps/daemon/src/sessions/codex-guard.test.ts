@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { DeniedBy } from '@10db/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SANDBOXED } from '../../test/fixtures';
+import { chatFolderInUse, judgeChatCall, type ChatFolder } from '../chat';
 import { judgeShapeCall, type ShapeAccess } from '../shape';
 import { codexHomes } from './codex-home';
 import {
@@ -414,6 +415,34 @@ describe('judgeHookCall', () => {
       allow: false,
       reason: 'stop',
       interrupt: true,
+    });
+  });
+
+  it('refuses a patch from a chat whose turn does not hold Your folder, naming the holder', async () => {
+    const access: ShapeAccess = {
+      checkout: '/repo',
+      home: '/home',
+      protectedReads: [],
+      filesDir: '/files',
+      sandboxRoots: [],
+    };
+    const folder = (holds: boolean): ChatFolder => ({
+      holds: () => holds,
+      writable: false,
+      heldBy: () => 'the task ‘Bump vite’',
+    });
+    const spec: Spec = {
+      ...ALLOW_ALL,
+      preToolUse: (call) => judgeChatCall(call, access, folder(false)),
+    };
+    const hook = {
+      tool_name: 'apply_patch',
+      tool_input: { command: '*** Add File: new.ts\n+x' },
+      cwd: '/repo',
+    };
+    expect(await judgeHookCall(spec, hook, NEVER)).toMatchObject({
+      allow: false,
+      reason: chatFolderInUse('the task ‘Bump vite’'),
     });
   });
 

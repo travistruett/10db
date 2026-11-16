@@ -26,6 +26,8 @@ describe.skipIf(!SEATBELT)('git state under a lane profile (Seatbelt)', () => {
   let commonDir: string;
   let gitDir: string;
   let session: LaneSession;
+  /** The profile of a turn that doesn't hold Your folder: the checkout is read-only. */
+  let reading: LaneSession;
 
   beforeAll(async () => {
     // A short root: the lane temp dir's whole path must fit Claude Code's limit.
@@ -42,7 +44,7 @@ describe.skipIf(!SEATBELT)('git state under a lane profile (Seatbelt)', () => {
       stdio: 'pipe',
     });
     const git = createGit();
-    session = await createLaneSandbox({
+    const sandbox = createLaneSandbox({
       home: join(root, 'home'),
       dataDir: join(root, 'home', 'Library', 'Application Support', '10db'),
       loginConfigDir: null,
@@ -51,7 +53,8 @@ describe.skipIf(!SEATBELT)('git state under a lane profile (Seatbelt)', () => {
       filesRoot: join(root, 'r'),
       runtime: resolveSandboxRuntime(),
       worktreeRoot: join(root, 'w'),
-    }).forSession({
+    });
+    const input = {
       project: {
         id: mintId('Project'),
         repoPath: checkout,
@@ -64,20 +67,23 @@ describe.skipIf(!SEATBELT)('git state under a lane profile (Seatbelt)', () => {
       configDir: join(root, 'home', '.claude'),
       checkouts: [checkout],
       mcpServers: {},
-    });
+    };
+    session = await sandbox.forSession(input);
+    reading = await sandbox.forSession({ ...input, readOnly: true });
     // It reads the toolchain and walks the checkout, which takes a while on a loaded machine.
   }, 60_000);
 
   afterAll(() => {
     session.dispose();
+    reading.dispose();
     main.cleanup();
     rmSync(root, { recursive: true, force: true });
   });
 
   /** Runs `command` under the session's profile through srt: "ok" when it exits 0, else "denied". */
-  function probe(command: string): 'ok' | 'denied' {
+  function probe(command: string, using: LaneSession = session): 'ok' | 'denied' {
     const settings = join(root, `settings-${String(Date.now())}-${String(Math.random())}.json`);
-    const profile = srtSettings(session.spec.settings);
+    const profile = srtSettings(using.spec.settings);
     // Claude Code opens the checkout for writing itself, and a linked worktree's git dirs with it.
     // The profile's denyWrite on git state is all that closes them again.
     writeFileSync(
@@ -93,7 +99,7 @@ describe.skipIf(!SEATBELT)('git state under a lane profile (Seatbelt)', () => {
     const runtime = resolveSandboxRuntime();
     const ran = spawnSync(runtime.node, [runtime.cli, '--settings', settings, '-c', command], {
       cwd: checkout,
-      env: { ...isolatedGitEnv(), ...session.commandEnv, CLAUDE_CODE_TMPDIR: session.tmpDir },
+      env: { ...isolatedGitEnv(), ...using.commandEnv, CLAUDE_CODE_TMPDIR: using.tmpDir },
       encoding: 'utf8',
       timeout: 30_000,
     });
@@ -118,6 +124,22 @@ describe.skipIf(!SEATBELT)('git state under a lane profile (Seatbelt)', () => {
       'git-branch': 'denied',
       'rm-git-file': 'denied',
       'rm-common-dir': 'denied',
+    });
+  }, 120_000);
+
+  it('opens no part of the checkout to a turn that does not hold Your folder, and still runs a command', () => {
+    expect({
+      'git-status': probe('git status', reading),
+      'write-checkout': probe('echo x > b.txt', reading),
+      'write-new-dir': probe('mkdir -p newdir/inner', reading),
+      'git-commit': probe('git commit --allow-empty -m x', reading),
+      'write-temp': probe('echo x > "$CLAUDE_CODE_TMPDIR/probe.txt"', reading),
+    }).toEqual({
+      'git-status': 'ok',
+      'write-checkout': 'denied',
+      'write-new-dir': 'denied',
+      'git-commit': 'denied',
+      'write-temp': 'ok',
     });
   }, 120_000);
 });

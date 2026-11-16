@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 /** A lane profile as the lane sandbox builds it, with only what these rows read. */
-function spec(allowRead: readonly string[]): LaneSandboxSpec {
+function spec(allowRead: readonly string[], denyWrite: readonly string[] = []): LaneSandboxSpec {
   const settings = {
     enabled: true,
     failIfUnavailable: true,
@@ -34,7 +34,7 @@ function spec(allowRead: readonly string[]): LaneSandboxSpec {
       denyRead: ['/', join(home, '.claude')],
       allowRead: ['/usr', checkout, ...allowRead],
       allowWrite: [join(root.path, 'tmp')],
-      denyWrite: [],
+      denyWrite: [...denyWrite],
     },
     network: {
       allowedDomains: [],
@@ -53,8 +53,11 @@ function spec(allowRead: readonly string[]): LaneSandboxSpec {
   };
 }
 
-function filesystem(allowRead: readonly string[]): Record<string, unknown> {
-  const lane = lanePermissions(spec(allowRead))['lane'];
+function filesystem(
+  allowRead: readonly string[],
+  denyWrite: readonly string[] = [],
+): Record<string, unknown> {
+  const lane = lanePermissions(spec(allowRead, denyWrite))['lane'];
   if (typeof lane !== 'object' || lane === null || !('filesystem' in lane))
     throw new Error('no lane');
   const fs = lane.filesystem;
@@ -79,5 +82,22 @@ describe('lanePermissions and the setup reads', () => {
     const plain = Object.keys(filesystem([])).length;
     const withSetup = Object.keys(filesystem([join(home, '.claude', 'skills'), ...outside])).length;
     expect(withSetup - plain).toBeLessThanOrEqual(25);
+  });
+
+  // A chat's profile: writable while its turn holds Your folder, with git state read-only; read-only while it doesn't.
+  it.each([
+    {
+      name: 'a writing chat: the checkout writes and its git state only reads',
+      denyWrite: () => [join(checkout, '.git')],
+      expected: () => ({ [checkout]: 'write', [join(checkout, '.git')]: 'read' }),
+    },
+    {
+      name: 'a reading chat: the whole checkout only reads',
+      denyWrite: () => [checkout],
+      expected: () => ({ [checkout]: 'read' }),
+    },
+  ])('maps $name', ({ denyWrite, expected }) => {
+    mkdirSync(join(checkout, '.git'));
+    expect(filesystem([], denyWrite())).toMatchObject(expected());
   });
 });
