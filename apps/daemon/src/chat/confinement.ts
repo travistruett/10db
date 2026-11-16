@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import { ChatToolName, JudgeKind } from '@10db/contracts';
 import { isWithinOnEveryReading, stringField } from '../guard';
 import type { ShapeVerdict } from '../sessions';
+import { expandHome } from '../sandbox';
 import { judgeShapeCall, type ShapeAccess } from '../shape';
 
 // Sessions spec §7.1, trust line §5: what a chat's PreToolUse hook settles before the judge sees a
@@ -37,13 +38,13 @@ export interface ChatFolder {
 /** What a chat's agent reads when it edits while another holder has Your folder. */
 export const chatFolderInUse = (holder: string): string => `Your folder is in use by ${holder}.`;
 
-/** The path a file tool names, resolved from the call's directory. */
-function editedPath(call: ChatCall, checkout: string): string | null {
+/** The path a file tool names, with `~` read as the home folder and the rest resolved from the call's directory. */
+function editedPath(call: ChatCall, access: ShapeAccess): string | null {
   if (typeof call.input !== 'object' || call.input === null) return null;
   const named =
     stringField(call.input, 'file_path') ?? stringField(call.input, 'notebook_path') ?? null;
   if (named === null || named === '') return null;
-  return resolve(call.cwd ?? checkout, named);
+  return resolve(call.cwd ?? access.checkout, expandHome(named, access.home));
 }
 
 /** Judges an edit: the folder must be held, the file inside the checkout, and its real path not git state or protected. */
@@ -55,7 +56,7 @@ function judgeEdit(
   if (folder === undefined) return deny(CHAT_WRITES_LATER);
   if (!folder.holds()) return deny(chatFolderInUse(folder.heldBy()));
   const judge = access.commands?.fileAccess;
-  const path = editedPath(call, access.checkout);
+  const path = editedPath(call, access);
   if (judge === undefined || path === null) return deny(`${call.toolName} could not be judged.`);
   try {
     // Every reading must land inside: a link, even a dangling one, is followed through its target.

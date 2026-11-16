@@ -91,6 +91,11 @@ describe('a chat’s edits', () => {
     expect(verdict.decision).toBe('deny');
   });
 
+  it('reads a home-relative name as Claude Code does, outside the checkout', () => {
+    expect(judgeChatCall(edit('Write', '~/x'), access, holding).decision).toBe('deny');
+    expect(judgeChatCall(edit('Write', '~'), access, holding).decision).toBe('deny');
+  });
+
   it.each(['Edit', 'Write', 'NotebookEdit'])(
     'refuses %s while another holder has the folder, naming it',
     (tool) => {
