@@ -26,6 +26,7 @@ export {
   type AccountExpectation,
   type Launcher,
   type SessionLaunch,
+  type TakeoverLaunch,
   sessionConfigDir,
   signInCommand,
   signInCommandFor,

@@ -7,3 +7,8 @@
   both to strip them from the login env, and `connectorProbeEnv` and `staleNeedsAuthCache` are the one rule for the
   connector probe's env and the cache a keyed session clears. A Gateway account never gets the shared entry
   (`docs/architecture/decisions/2026-11-14-mcp-sign-ins-stay-in-each-agents-own-store.md`).
+- `Launcher.takeover` is the environment of the builder's own terminal on an account: what to set, which names and
+  prefixes to unset from the builder's shell (`BILLING_SWITCH_VARS`, `NESTED_SESSION_VARS`, the kind's dropped login
+  variables, minus what the account sets), and where a key is read. It checks a keyed account's secret and holds no
+  value: an API key or gateway key is read by the agent's `apiKeyHelper` from `apiKeyHelperAccount`, a Bedrock key
+  by the script (`keychain`) with `scrub` set so the agent keeps it from the commands it runs.
