@@ -107,6 +107,8 @@ export const EventType = {
   GateStarted: 'gate.started',
   /** The gate that `gate.started` began has ended, with its exit code. */
   GateFinished: 'gate.finished',
+  /** Who holds a project's checkout changed (`entityType: 'project'`, `entityId` the project). */
+  FolderHoldChanged: 'folder_hold.changed',
 } as const;
 export type EventType = (typeof EventType)[keyof typeof EventType];
 

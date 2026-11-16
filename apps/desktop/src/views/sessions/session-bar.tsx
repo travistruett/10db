@@ -1,4 +1,4 @@
-import type { ChatDto, ConversationDto } from '@10db/contracts';
+import type { ChatDto, ConversationDto, FolderDto } from '@10db/contracts';
 import {
   ActionIcon,
   Box,
@@ -27,6 +27,8 @@ export interface SessionBarProps {
   readonly chat: ChatDto;
   readonly conversation: ConversationDto;
   readonly projectName: string;
+  /** Who holds Your folder, once read. */
+  readonly folder: FolderDto | null;
   /** The transcript is still being read. */
   readonly loading: boolean;
   /** File as Tasks, disabled with this reason when it cannot be sent. */
@@ -112,6 +114,7 @@ export function SessionBar({
   chat,
   conversation,
   projectName,
+  folder,
   loading,
   fileDisabledReason,
   onFileAsTasks,
@@ -140,7 +143,7 @@ export function SessionBar({
               }}
             />
             <Text size="xs" c="dimmed" lineClamp={1}>
-              {kindLine(chat, projectName)}
+              {kindLine(chat, projectName, folder)}
             </Text>
           </Stack>
         </Group>

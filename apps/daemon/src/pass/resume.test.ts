@@ -144,7 +144,9 @@ describe('resumePassWork', () => {
     if (!card) throw new Error('no folder card');
     expect(card.options.map((o) => o.label)).toEqual([`Switch to ${w.branch}`]);
 
-    answerPassCard(w.deps, card, { choice: `Switch to ${w.branch}` });
+    answerPassCard({ ...w.deps, folderHold: w.h.ctx.folderHold }, card, {
+      choice: `Switch to ${w.branch}`,
+    });
     await w.h.jobs.idle();
 
     expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe(w.branch);
@@ -166,7 +168,9 @@ describe('resumePassWork', () => {
     const [card] = folderCards(w);
     if (!card) throw new Error('no folder card');
 
-    answerPassCard(w.deps, card, { choice: `Switch to ${w.branch}` });
+    answerPassCard({ ...w.deps, folderHold: w.h.ctx.folderHold }, card, {
+      choice: `Switch to ${w.branch}`,
+    });
     await w.h.jobs.idle();
 
     expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
@@ -182,7 +186,9 @@ describe('resumePassWork', () => {
     if (!card) throw new Error('no folder card');
 
     w.h.git$('branch', '-D', w.branch);
-    answerPassCard(w.deps, card, { choice: `Switch to ${w.branch}` });
+    answerPassCard({ ...w.deps, folderHold: w.h.ctx.folderHold }, card, {
+      choice: `Switch to ${w.branch}`,
+    });
     await w.h.jobs.idle();
     expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
     expect(folderCards(w)[0]?.body).toContain("the pass's branch is gone");
@@ -192,7 +198,9 @@ describe('resumePassWork', () => {
       setAbandonStep(ctx, w.opened.pass.id, AbandonStep.Abandoning);
       abandonPassAndBatch(ctx, w.opened.pass.id);
     });
-    answerPassCard(w.deps, card, { choice: `Switch to ${w.branch}` });
+    answerPassCard({ ...w.deps, folderHold: w.h.ctx.folderHold }, card, {
+      choice: `Switch to ${w.branch}`,
+    });
     await w.h.jobs.idle();
     expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
     expect(folderCards(w)).toEqual([]);

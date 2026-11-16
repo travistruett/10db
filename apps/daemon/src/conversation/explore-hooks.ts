@@ -1,5 +1,6 @@
 import type {
   AccountId,
+  ConversationState,
   ConversationFileId,
   ConversationItemId,
   Effort,
@@ -45,6 +46,11 @@ export interface ExploreLaunch {
   readonly accountId: AccountId;
   /** The model by its own id, for a refusal to mark. */
   readonly model: string;
+  /**
+   * Whether the session can write Your folder, as `turnStarting` answered for the turn that opened it; false
+   * where absent. A warm session whose answer differs from the next turn's is closed first.
+   */
+  readonly writes?: boolean;
   /** Ends what the session was prepared with; runs once, however often it is called. */
   release(): Promise<void>;
   /** Watches what runs under the agent's process, whose pid its start reports. */
@@ -110,6 +116,17 @@ export interface ExploreOwnerHooks {
    */
   keepsResume?(conv: ConversationRow): boolean;
   readonly words?: Partial<ExploreWords>;
+  /**
+   * Asked just before the engine reduces a builder message from a state outside a turn, when a starter waits
+   * and no update hold parks it: the owner takes what the turn needs and says whether the turn writes. Not
+   * every such reduce begins a turn, so `onState` releases what this took.
+   */
+  turnStarting?(conv: ConversationRow): { readonly writes: boolean };
+  /**
+   * Told after every reduce, a transition or not. Outside a turn (`starting`, `running`, `waiting_card` and
+   * `stopping`) the owner gives back what `turnStarting` took.
+   */
+  onState?(conv: ConversationRow, state: ConversationState): void;
   /** Told when a starter begins and ends waiting on a hold, for a view that says so. */
   onParked?(conv: ConversationRow, parked: boolean): void;
 }

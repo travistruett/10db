@@ -2,7 +2,11 @@ import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   AbandonStep,
+  ConversationOwnerKind,
+  ConversationProfile,
+  ConversationState,
   InboxState,
+  mintId,
   PassState,
   WorkstreamState,
   type WorkstreamId,
@@ -10,10 +14,13 @@ import {
 import {
   activeClaims,
   getBatch,
+  getBatchRow,
   getPass,
   getTask,
   getTaskKeptWork,
   getWorkstreamRow,
+  insertChat,
+  insertConversation,
   insertPassPageTask,
   insertTask,
   joinPass as joinPassRows,
@@ -29,6 +36,7 @@ import {
   setTaskKeptWork,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
+import { waitFor } from '../../test/fixtures';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
 import { openPass } from '../delivery';
 import type { Git } from '../git';
@@ -614,13 +622,53 @@ describe('abandonPass', () => {
     expect(card.options.map((o) => o.label)).toEqual(['Move to main']);
 
     w.write('src/shared.ts', 'an uncommitted edit\n');
-    answerPassCard(w.deps, card, { choice: 'Move to main' });
+    answerPassCard({ ...w.deps, folderHold: w.h.ctx.folderHold }, card, { choice: 'Move to main' });
     await w.h.jobs.idle();
 
     expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
     expect(read('src/settings/page.tsx')).toBe('settings\n');
     expect(read('src/shared.ts')).toBe('an uncommitted edit\n');
     expect(abandonCards()).toEqual([]);
+  });
+
+  it('waits for a chat’s turn before the Move on its card switches the folder, then moves it', async () => {
+    w = await openPassWorld();
+    w.h.commit('src/settings/page.tsx', 'landed\n');
+    await abandonPass(deps(), w.opened.pass.id);
+    const [card] = abandonCards();
+    if (!card) throw new Error('no Abandon card');
+    const me = w.h.state.write((ctx) => {
+      const id = mintId('Chat');
+      const conv = insertConversation(ctx, {
+        projectId: w.h.project.id,
+        owner: { kind: ConversationOwnerKind.Chat, id },
+        profile: ConversationProfile.Explore,
+        state: ConversationState.IdleCold,
+      });
+      return insertChat(ctx, {
+        id,
+        projectId: w.h.project.id,
+        conversationId: conv.id,
+        title: 'Retry login',
+        tabPosition: 0,
+      }).id;
+    });
+    w.h.ctx.folderHold.takeTurn(w.h.project.id, me);
+
+    answerPassCard({ ...w.deps, folderHold: w.h.ctx.folderHold }, card, { choice: 'Move to main' });
+    // The Move says it waits, naming the chat, before it has switched anything.
+    const waiting = await waitFor(
+      () =>
+        getBatchRow(w.h.store.db, w.opened.batch.id).notices.find((n) => n.key === 'folder-hold')
+          ?.line,
+    );
+    expect(waiting).toBe('Waits for the chat ‘Retry login’ to finish with Your folder');
+    expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe(w.branch);
+
+    w.h.ctx.folderHold.releaseTurn(me);
+    await w.h.jobs.idle();
+    expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
+    expect(w.h.ctx.folderHold.holders(w.h.project.id)).toEqual([]);
   });
 
   it('names on its card only the pages it discarded, not one taken out before it, whose work stays', async () => {
@@ -665,7 +713,7 @@ describe('abandonPass', () => {
 
     // An uncommitted edit lies where the switch writes, so the Move is refused.
     w.write('src/settings/page.tsx', 'an uncommitted edit\n');
-    answerPassCard(w.deps, card, { choice: 'Move to main' });
+    answerPassCard({ ...w.deps, folderHold: w.h.ctx.folderHold }, card, { choice: 'Move to main' });
     await w.h.jobs.idle();
 
     const [again] = abandonCards();

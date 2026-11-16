@@ -9,6 +9,8 @@ export interface ProcessRow {
   readonly pgid: number;
   /** `ps`'s start time, the same text `recovery/processes.ts` stores beside a pid. */
   readonly startedAt: string;
+  /** The program's name as `ps` shows it (its path, or `-zsh` for a login shell); absent when not read. */
+  readonly comm?: string;
 }
 
 /** Reads every process of this machine. */
@@ -16,9 +18,17 @@ export type ProcessTable = () => Promise<readonly ProcessRow[]>;
 
 const run = promisify(execFile);
 
-const ROW = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S.*?)\s*$/;
+/**
+ * How long a reading may take before it is killed and fails: `lsof` can block on a network mount nothing
+ * answers, and a caller waiting on it would never give anything back.
+ */
+const READ_TIMEOUT_MS = 15_000;
 
-/** Parses `ps -axo pid=,ppid=,pgid=,lstart=`; a line that does not fit is left out. */
+const ROW = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\S.*?)\s*$/;
+// `lstart` is five words (`Thu Oct 30 12:00:00 2026`), so a program name that follows it can hold spaces.
+const START_THEN_COMM = /^(\S+\s+\S+\s+\d+\s+\d+:\d+:\d+\s+\d{4})(?:\s+(\S.*))?$/;
+
+/** Parses `ps -axo pid=,ppid=,pgid=,lstart=,comm=`; a line that does not fit is left out. */
 export function parseProcessTable(output: string): ProcessRow[] {
   const rows: ProcessRow[] = [];
   for (const line of output.split('\n')) {
@@ -28,16 +38,26 @@ export function parseProcessTable(output: string): ProcessRow[] {
     if (pid === undefined || ppid === undefined || pgid === undefined || startedAt === undefined) {
       continue;
     }
-    rows.push({ pid: Number(pid), ppid: Number(ppid), pgid: Number(pgid), startedAt });
+    const split = START_THEN_COMM.exec(startedAt);
+    const comm = split?.[2];
+    rows.push({
+      pid: Number(pid),
+      ppid: Number(ppid),
+      pgid: Number(pgid),
+      startedAt: split?.[1] ?? startedAt,
+      ...(comm === undefined ? {} : { comm }),
+    });
   }
   return rows;
 }
 
 /** The system's process table. Throws when `ps` cannot run, so a caller never mistakes that for an empty machine. */
 export const systemProcessTable: ProcessTable = async () => {
-  const { stdout } = await run('/bin/ps', ['-axo', 'pid=,ppid=,pgid=,lstart='], {
+  const { stdout } = await run('/bin/ps', ['-axo', 'pid=,ppid=,pgid=,lstart=,comm='], {
     env: { LC_ALL: 'C' },
     maxBuffer: 64 * 1024 * 1024,
+    timeout: READ_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
   });
   return parseProcessTable(stdout);
 };
@@ -68,11 +88,14 @@ export function parseOpenPaths(output: string): Map<number, string[]> {
 /** Open paths by `lsof`. Throws when `lsof` cannot run; a pid it could not list is left out. */
 export const systemOpenPaths: OpenPathReader = async (pids) => {
   if (pids.length === 0) return new Map();
-  const args = ['-w', '-n', '-P', '-Fn', '-p', pids.join(',')];
+  // `-b` keeps it from calling into the kernel where that could block on an unreachable mount.
+  const args = ['-w', '-b', '-n', '-P', '-Fn', '-p', pids.join(',')];
   try {
     const { stdout } = await run('/usr/sbin/lsof', args, {
       env: { LC_ALL: 'C' },
       maxBuffer: 16 * 1024 * 1024,
+      timeout: READ_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
     });
     return parseOpenPaths(stdout);
   } catch (error) {

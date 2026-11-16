@@ -99,7 +99,8 @@ export interface ExploreEngine {
   sendNow(id: ConversationId): void;
   modelChanged(id: ConversationId, model: string | null): Promise<void>;
   holdStarts(id: ConversationId): void;
-  releaseStarts(id: ConversationId): void;
+  /** Lets parked starters run; whether a turn began, which it doesn't when nothing waits or the update hold is on. */
+  releaseStarts(id: ConversationId): boolean;
   view(id: ConversationId): ConversationDto;
   live(id: ConversationId): ConversationLiveDto;
   /** Conversations `starting`, `running`, `waiting_card` or `stopping`: what an update drain waits for. */
@@ -249,8 +250,45 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       });
   };
 
-  /** Reduces `event` and applies what it says; answers the outcome. */
+  /**
+   * Reduces `event` and applies what it says; answers the outcome. A builder message from outside a turn asks
+   * its owner to take what the turn needs first, closing a warm session opened for the other kind of turn so
+   * this one starts cold on the right profile; the owner is told the state after every reduce, so what the
+   * take held goes back when no turn began. The close and the reduce that follow run in one synchronous
+   * sequence with one state report at its end, so the close cannot release what was just taken.
+   */
   const reduce = (rt: Runtime, event: ExploreEvent): ExploreOutcome => {
+    const conv = conversation(rt.id);
+    const hooks = hooksOf(conv);
+    if (
+      event.type === 'builder_message' &&
+      !BUSY.has(rt.state) &&
+      !rt.retired &&
+      factsOf(rt, event).queued > 0 &&
+      hooks.turnStarting !== undefined
+    ) {
+      const { writes } = hooks.turnStarting(conv);
+      const open = rt.session?.open;
+      if (
+        rt.state === S.IdleWarm &&
+        open !== undefined &&
+        (open.launch.writes ?? false) !== writes
+      ) {
+        rt.closeReason = 'the folder changed hands';
+        reduceOnce(rt, { type: 'idle_close' });
+      }
+    }
+    let outcome: ExploreOutcome;
+    try {
+      outcome = reduceOnce(rt, event);
+    } finally {
+      // The owner hears the state even when the reduce threw, so what the take held goes back.
+      hooks.onState?.(conversation(rt.id), rt.state);
+    }
+    return outcome;
+  };
+
+  const reduceOnce = (rt: Runtime, event: ExploreEvent): ExploreOutcome => {
     const queued = queuedNow(rt);
     const facts = factsOf(rt, event, queued);
     const outcome = reduceExplore(rt.state, event, facts);
@@ -492,13 +530,15 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     if (runs(reduce(rt, { type: 'builder_message' }))) turns.resolveSendNow(rt);
   };
 
-  const release = (rt: Runtime): void => {
-    if (closed || holding(rt) || !rt.parked) return;
+  /** Runs what a hold parked; whether a turn began. */
+  const release = (rt: Runtime): boolean => {
+    if (closed || holding(rt) || !rt.parked) return false;
     rt.parked = false;
-    if (unpushed(rt).length > 0 && runs(reduce(rt, { type: 'builder_message' })))
-      turns.resolveSendNow(rt);
+    const began = unpushed(rt).length > 0 && runs(reduce(rt, { type: 'builder_message' }));
+    if (began) turns.resolveSendNow(rt);
     const conv = conversation(rt.id);
     hooksOf(conv).onParked?.(conv, false);
+    return began;
   };
 
   /**
@@ -666,7 +706,7 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     releaseStarts(id) {
       const rt = runtimeOf(id);
       rt.held = false;
-      release(rt);
+      return release(rt);
     },
     view(id) {
       const rt = runtimeOf(id);
@@ -692,7 +732,11 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
       };
     },
     live(id) {
-      return { conversationId: id, items: runtimeOf(id).session?.open.buffers.snapshot() ?? [] };
+      return {
+        conversationId: id,
+        items: runtimeOf(id).session?.open.buffers.snapshot() ?? [],
+        waitingForFolder: false,
+      };
     },
     busy: () => [...runtimes.values()].filter((rt) => BUSY.has(rt.state)).map((rt) => rt.id),
     parked: (id) => runtimeOf(id).parked,

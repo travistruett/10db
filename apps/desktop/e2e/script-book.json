@@ -449,5 +449,22 @@
         "do": "turn_complete"
       }
     ]
-  ]
+  ],
+  "Chat: Fix the notes": [
+    [
+      { "do": "consume" },
+      {
+        "do": "mcp",
+        "tool": "commit_changes",
+        "args": { "message": "Add the notes", "paths": ["notes.md"] }
+      },
+      { "do": "say", "text": "Committed the notes." },
+      { "do": "await_message", "contains": "wrap up" },
+      { "do": "consume" },
+      { "do": "say", "text": "Wrapped up." },
+      { "do": "turn_complete" }
+    ],
+    [{ "do": "consume" }, { "do": "say", "text": "Looked again." }, { "do": "turn_complete" }]
+  ],
+  "Hold the folder": [[{ "do": "await_message", "contains": "release" }, { "do": "turn_complete" }]]
 }

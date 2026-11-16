@@ -2,9 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import {
   ChatToolName,
+  FolderAsker,
   JudgeDecision,
   JudgeKind,
+  CHAT_DEFAULT_TITLE,
   ConversationId,
+  FolderHolderKind,
   ConversationItemAuthor,
   ConversationItemKind,
   DeniedBy,
@@ -16,9 +19,12 @@ import {
   type Effort,
   type AgentAccountKind,
   type ProjectId,
+  type ChatId,
 } from '@10db/contracts';
 import {
   chatOfConversation,
+  getChat,
+  getConversation,
   getProject,
   insertItem,
   listFiles,
@@ -29,6 +35,7 @@ import {
   type ConversationRow,
 } from '@10db/db';
 import {
+  BUSY,
   heldInlineBytes,
   outgoingMessage,
   type DeliverableMessage,
@@ -38,6 +45,7 @@ import {
 import { storedModelNames } from '../catalogue';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
+import { holderWords, type FolderBlocker, type FolderHold } from '../folder-hold';
 import { createHookJudge, createLimitNotes } from '../inbox';
 import type { Judge } from '../judge';
 import { principlesBrief } from '../knowledge';
@@ -54,14 +62,40 @@ import {
   projectLiveSystems,
   startingJudge,
 } from '../trust';
-import { judgeChatCall } from './confinement';
+import { judgeChatCall, type ChatFolder } from './confinement';
+import { JUDGED_CHAT_TOOLS } from './git-rule';
 import type { ChatLiveSessions } from './live-sessions';
 import { chatSystemPrompt } from './prompt';
 
 // Sessions spec §7.1, trust line §5: a chat as an owner of the explore engine. Its session is the
 // explore profile as the attended one: Plan's read-only sandbox and read tools, commands judged, the
 // web where a judge sees each call, Claude Code's own subagents, the builder's setup, and 10db's own
-// server with every builder tool. It writes nothing in the checkout until M6.
+// server with every builder tool. It edits the checkout only while its turn holds Your folder.
+
+/**
+ * How long a turn's jobs get to stop before the session is closed instead: a process table that cannot be read
+ * must not keep Your folder from the builder.
+ */
+export const JOBS_STOP_DEADLINE_MS = 30_000;
+
+/** `work`, or a rejection once `ms` pass on `clock`; the timer is cleared when `work` settles first. */
+function withDeadline<T>(work: Promise<T>, clock: Clock, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = clock.setTimeout(() => {
+      reject(new Error('stopping the jobs took too long'));
+    }, ms);
+    work.then(
+      (value) => {
+        timer.cancel();
+        resolve(value);
+      },
+      (error: unknown) => {
+        timer.cancel();
+        reject(error instanceof Error ? error : new Error(String(error)));
+      },
+    );
+  });
+}
 
 /** The share of the context window past which a chat moves to a fresh session. */
 export const CHAT_FRESH_AT_CONTEXT_PCT = 70;
@@ -72,8 +106,10 @@ const NOTHING_TO_ASK = 'This chat has no sandbox, so it runs no command and asks
 const READ_TOOLS = ['Read', 'Grep', 'Glob', 'Skill'] as const;
 const WEB_TOOLS = ['WebSearch', 'WebFetch'] as const;
 const AGENT_TOOLS = ['Task', 'Agent'] as const;
-/** Named so that a built-in that writes, or watches without end, never reaches a chat. */
-const WRITE_TOOLS = ['Edit', 'Write', 'NotebookEdit', 'Monitor'] as const;
+/** The file tools a chat edits with, judged on each call by whether its turn holds Your folder. */
+const EDIT_TOOLS = ['Edit', 'Write', 'NotebookEdit'] as const;
+/** Named so that a built-in that watches without end never reaches a chat. */
+const WATCH_TOOLS = ['Monitor'] as const;
 
 /** Every chat tool as the session names it on 10db's own server. */
 export const CHAT_MCP_TOOLS: readonly string[] = Object.values(ChatToolName).map(
@@ -89,10 +125,24 @@ export function chatProfile(
   sandboxed: boolean,
 ): Omit<ExploreProfile, 'kind' | 'systemPrompt' | 'judge'> {
   return {
-    tools: [...READ_TOOLS, ...WEB_TOOLS, ...AGENT_TOOLS, ...(sandboxed ? ['Bash'] : [])],
-    allowedTools: ['Read', 'Grep', 'Glob', 'Skill', ...CHAT_MCP_TOOLS],
-    disallowedTools: [...WRITE_TOOLS, ...(sandboxed ? [] : ['Bash'])],
+    tools: [
+      ...READ_TOOLS,
+      ...WEB_TOOLS,
+      ...AGENT_TOOLS,
+      ...(sandboxed ? ['Bash', ...EDIT_TOOLS] : []),
+    ],
+    // The tools that reach GitHub are left off: an allow rule would approve them before any judge sees them.
+    allowedTools: [
+      'Read',
+      'Grep',
+      'Glob',
+      'Skill',
+      ...CHAT_MCP_TOOLS.filter((tool) => !JUDGED_CHAT_TOOLS.has(tool.slice('mcp__10db__'.length))),
+    ],
+    disallowedTools: [...WATCH_TOOLS, ...(sandboxed ? [] : ['Bash', ...EDIT_TOOLS])],
     agents: {},
+    // Only a session with the file tools can edit, so only it keeps file history.
+    fileCheckpointing: sandboxed,
   };
 }
 
@@ -103,6 +153,8 @@ export function chatFolder(dataDir: string, conversationId: ConversationId): str
 
 export interface ChatHooksDeps {
   readonly state: StateStore;
+  /** Who holds Your folder: a chat's turn takes it, and writes only while it holds it. */
+  readonly folderHold: FolderHold;
   readonly log: Logger;
   readonly dataDir: string;
   readonly now: () => Date;
@@ -142,6 +194,11 @@ function deliverable(state: StateStore, item: ConversationItemRow): DeliverableM
   };
 }
 
+/** The thread's line for a turn that can only read: who has Your folder. */
+function readOnlyNotice(blockers: readonly FolderBlocker[]): string {
+  return `Your folder is in use by ${blockers.map((b) => holderWords(b.holder)).join(' and ')}, so this turn reads only.`;
+}
+
 /** A call as the chat's confinement reads it. */
 const chatCallOf = (req: Omit<ShapeToolRequest, 'toolUseId'>) => ({
   toolName: req.toolName,
@@ -169,15 +226,142 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
     };
   };
 
+  // What the thread says once the turn that took the folder has begun, keyed by chat: the take is made before
+  // anyone knows a turn will start, so nothing is written until the state says it did.
+  const notices = new Map<ChatId, string[]>();
+  /** Chats whose turn is under way, so the end of one is told from an idle report of a parked start. */
+  const running = new Set<ChatId>();
+  // What the chats already in the folder are told once the joining chat's turn has begun.
+  const toldOthers = new Map<
+    ChatId,
+    { readonly conversationId: ConversationId; readonly line: string }[]
+  >();
+  // The open sessions' ways to stop what their commands left running, keyed by conversation: it stops when
+  // a turn ends and the folder goes back, so nothing a warm session started outlives its turn.
+  const sessionJobs = new Map<ConversationId, () => Promise<void>>();
+  // The session each chat's hold belongs to now: a session that is not it (an older one, closed, whose
+  // background agent is still calling) holds nothing even when the chat's next turn holds Your folder.
+  const holdingSession = new Map<ChatId, string>();
+  // Each chat's release of Your folder that waits for its jobs to stop. The chat's next turn cancels it: the
+  // hold stays with the chat, and what is stopped meanwhile is the turn's before.
+  const pendingReleases = new Map<ChatId, { cancelled: boolean }>();
+  // How each conversation's open session is closed, for a job that would not stop.
+  const sessionClosers = new Map<ConversationId, () => Promise<void>>();
+  const say = (conv: ConversationRow, lines: readonly string[]): void => {
+    if (lines.length === 0) return;
+    state.write((ctx) => {
+      for (const text of lines)
+        insertItem(ctx, conv.id, {
+          author: ConversationItemAuthor.System,
+          kind: ConversationItemKind.Notice,
+          body: { text },
+        });
+    });
+  };
+
   return {
     freshAtContextPct: CHAT_FRESH_AT_CONTEXT_PCT,
+
+    turnStarting(conv) {
+      const chat = chatOf(conv);
+      const waiting = pendingReleases.get(chat.id);
+      if (waiting !== undefined) {
+        waiting.cancelled = true;
+        pendingReleases.delete(chat.id);
+      }
+      if (deps.folderHold.takeReadOnlyChoice(chat.id)) {
+        // The builder chose reading only: the turn reads even when the folder has freed, and says who held it.
+        const blockers = deps.folderHold.blockers(conv.projectId, {
+          kind: FolderAsker.ChatTurn,
+          chatId: chat.id,
+        });
+        notices.set(chat.id, blockers.length === 0 ? [] : [readOnlyNotice(blockers)]);
+        return { writes: false };
+      }
+      const taken = deps.folderHold.takeTurn(conv.projectId, chat.id);
+      if (!taken.taken) {
+        notices.set(chat.id, [readOnlyNotice(taken.blockers)]);
+        return { writes: false };
+      }
+      const others = taken.sharedWith.map((h) => holderWords(h));
+      const joined = holderWords({
+        kind: FolderHolderKind.ChatTurn,
+        name: chat.title ?? CHAT_DEFAULT_TITLE,
+        more: 0,
+        chatId: chat.id,
+        what: null,
+      });
+      toldOthers.set(
+        chat.id,
+        taken.sharedWith.flatMap((h) =>
+          h.kind === FolderHolderKind.ChatTurn && h.chatId !== null
+            ? [
+                {
+                  conversationId: getChat(state.db, h.chatId).conversationId,
+                  line: `Your folder is also in use by ${joined}.`,
+                },
+              ]
+            : [],
+        ),
+      );
+      notices.set(
+        chat.id,
+        others.length === 0 ? [] : [`Your folder is also in use by ${others.join(' and ')}.`],
+      );
+      return { writes: true };
+    },
+
+    onState(conv, to) {
+      const chat = chatOf(conv);
+      if (BUSY.has(to)) {
+        running.add(chat.id);
+        const lines = notices.get(chat.id) ?? [];
+        notices.delete(chat.id);
+        say(conv, lines);
+        for (const other of toldOthers.get(chat.id) ?? [])
+          say(getConversation(state.db, other.conversationId), [other.line]);
+        toldOthers.delete(chat.id);
+        return;
+      }
+      notices.delete(chat.id);
+      toldOthers.delete(chat.id);
+      // A reading-only choice no turn start took (a chained turn starts without one) ends with the turn.
+      if (running.delete(chat.id)) deps.folderHold.takeReadOnlyChoice(chat.id);
+      // A release already waits for this chat's jobs: a later change outside a turn (an idle close) joins it, so the
+      // chat's next turn has one release to cancel and no earlier one outlives the cancel.
+      if (pendingReleases.has(chat.id)) return;
+      const endJobs = sessionJobs.get(conv.id);
+      if (endJobs === undefined) {
+        deps.folderHold.releaseTurn(chat.id);
+        return;
+      }
+      // The folder goes back once nothing the turn left running can write to it.
+      const release = { cancelled: false };
+      pendingReleases.set(chat.id, release);
+      void (async () => {
+        try {
+          await withDeadline(endJobs(), deps.clock, JOBS_STOP_DEADLINE_MS);
+        } catch (error) {
+          log.warn(
+            { err: error, conversationId: conv.id },
+            'a chat’s jobs could not be stopped, so its session is closed',
+          );
+          // A job that could not be stopped runs inside this session's sandbox: closing it ends them. A next turn
+          // that already began is using the session, so it is left to that turn's own end.
+          if (!release.cancelled) await sessionClosers.get(conv.id)?.();
+        }
+        if (release.cancelled) return;
+        if (pendingReleases.get(chat.id) === release) pendingReleases.delete(chat.id);
+        deps.folderHold.releaseTurn(chat.id);
+      })();
+    },
 
     limits(conv) {
       return deps.limitsFor(deps.launch(conv.projectId, conv.model, conv.effort).account.kind);
     },
 
     async spec(conv, start) {
-      chatOf(conv);
+      const chat = chatOf(conv);
       const launch = deps.launch(conv.projectId, conv.model, conv.effort);
       const limits = deps.limitsFor(launch.account.kind);
       // A chat asks for its agent's judge, as Plan does; 10db's judge where it is the account's and ready.
@@ -187,6 +371,17 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         true,
         tendbReady,
       );
+      const writable = deps.folderHold.holdsTurn(chat.id);
+      const folder: ChatFolder = {
+        holds: () =>
+          deps.folderHold.holdsTurn(chat.id) && holdingSession.get(chat.id) === start.sessionId,
+        writable,
+        heldBy: () =>
+          deps.folderHold
+            .blockers(conv.projectId, { kind: FolderAsker.ChatTurn, chatId: chat.id })
+            .map((b) => holderWords(b.holder))
+            .join(' and ') || 'something else',
+      };
       const limitNotes = createLimitNotes();
       const project = getProject(state.db, conv.projectId);
       const ending = new AbortController();
@@ -200,6 +395,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               accountKind: launch.account.kind,
               env: launch.env,
               resumeProviderSessionId: start.resume,
+              writes: writable,
               signal: ending.signal,
               observer: start.observer,
               limits: limitNotes,
@@ -209,10 +405,17 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         observer: start.observer,
         signal: ending.signal,
       });
+      holdingSession.set(chat.id, start.sessionId);
+      const endJobs = ready === null ? undefined : () => ready.endJobs();
+      if (endJobs !== undefined) sessionJobs.set(conv.id, endJobs);
+      let marked = false;
       let released: Promise<void> | null = null;
       const release = (): Promise<void> => {
         released ??= (async () => {
           ending.abort();
+          if (sessionJobs.get(conv.id) === endJobs) sessionJobs.delete(conv.id);
+          if (sessionClosers.get(conv.id) === release) sessionClosers.delete(conv.id);
+          if (holdingSession.get(chat.id) === start.sessionId) holdingSession.delete(chat.id);
           deps.live.end(conv.id, start.sessionId);
           try {
             await ready?.release();
@@ -225,6 +428,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         })();
         return released;
       };
+      sessionClosers.set(conv.id, release);
       const setup = ready?.setup ?? null;
       const access: ShapeAccess = {
         ...launch.access,
@@ -312,11 +516,21 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               ? Promise.resolve({ behavior: 'deny', message: NOTHING_TO_ASK, by: DeniedBy.TenDb })
               : ready.canUseTool(req),
           // Each call by its own judge: a native session's call outside auto mode has no classifier behind it.
-          preToolUse: (req) =>
-            judgeChatCall(chatCallOf(req), {
-              ...access,
-              judge: judgeForCall(judge, req.reportedMode ?? null, tendbReady),
-            }),
+          preToolUse: (req) => {
+            // The first command marks what the session runs, so the jobs its commands start can be told apart.
+            if (req.toolName === 'Bash' && !marked) {
+              marked = true;
+              ready?.markOwn();
+            }
+            return judgeChatCall(
+              chatCallOf(req),
+              {
+                ...access,
+                judge: judgeForCall(judge, req.reportedMode ?? null, tendbReady),
+              },
+              folder,
+            );
+          },
           ...(deps.judge === undefined || judge === JudgeKind.Rules
             ? {}
             : {
@@ -326,7 +540,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
                     projectId: project.id,
                     workstreamId: null,
                     taskId: null,
-                    // A chat writes nothing, so its edits never reach the fast path's write rule.
+                    // The fast path's write rule is a lane's; a chat's edits are judged by `folder` above it.
                     fastPath: {
                       checkout: launch.cwd,
                       tmpDir: launch.cwd,
@@ -339,10 +553,11 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
                     // A chat's allow list holds none of the project's allowed commands.
                     coveredByBuilderRule: () => false,
                     floorVerdict: (req) => {
-                      const floor = judgeChatCall(chatCallOf(req), {
-                        ...access,
-                        judge: JudgeKind.Rules,
-                      });
+                      const floor = judgeChatCall(
+                        chatCallOf(req),
+                        { ...access, judge: JudgeKind.Rules },
+                        folder,
+                      );
                       // A rewrite of the call is the guard's; its decision is what the floor gives.
                       return 'updatedInput' in floor ? { decision: 'allow' } : floor;
                     },
@@ -370,6 +585,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               }),
         },
         limits,
+        writes: deps.folderHold.holdsTurn(chat.id),
         expiresAt: ready?.credentialsExpireAt ?? null,
         accountId: launch.account.accountId,
         model: launch.modelId,

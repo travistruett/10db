@@ -32,6 +32,7 @@ import {
   TIMERS_KEY,
 } from './people';
 import { passKeys, writePassActivity } from './pass-queries';
+import { folderKeys } from './project-folder-queries';
 import { queryKeys } from './queries';
 import { shapeKeys } from './shape-queries';
 import { screenKeys } from './screen-queries';
@@ -54,7 +55,8 @@ const KNOWLEDGE: readonly QueryKey[] = [['knowledge'], ['proposals'], ['provenan
 /** What to refetch when an event about an entity type arrives. */
 export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // 10db adds to a project's hazards by itself, so the page that lists the additions follows the project.
-  project: [queryKeys.projects, CANDIDATES, HAZARD_ASSESSMENT_KEY],
+  // Your folder's holders, a chat's wait among them, change with a hold event, which is the project's.
+  project: [queryKeys.projects, CANDIDATES, HAZARD_ASSESSMENT_KEY, folderKeys.all],
   // A run's skip is recorded under its task's event; a task becoming done, or changing rigor, moves the rigor
   // figures.
   task: [['tasks'], goalKeys.all, CANDIDATES, skipKeys.all, rigorFiguresKeys.all],
@@ -78,7 +80,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   chat: [chatKeys.all],
   // A pass opening, a turn starting or ending, a page Ready or signed off, a close step: each changes
   // the pass and its pages' turns.
-  pass: [passKeys.all],
+  pass: [passKeys.all, folderKeys.all],
   board_column: [['board-columns'], CANDIDATES],
   network_hosts: [NETWORK_HOSTS_KEY],
   // One account's sign-in to one of the builder's MCP servers started, ended or was cancelled.
@@ -89,7 +91,14 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   batch: [queryKeys.projects, ['batches'], ...WORK, CANDIDATES, rigorFiguresKeys.all],
   // Lanes changing can switch keep-awake on or off. A pass page's state is its run's, paused or resumed
   // by a usage limit with no pass event.
-  workstream: [...WORK, queryKeys.keepAwake, CANDIDATES, humanTouchKeys.all, passKeys.live],
+  workstream: [
+    ...WORK,
+    queryKeys.keepAwake,
+    CANDIDATES,
+    humanTouchKeys.all,
+    passKeys.live,
+    folderKeys.all,
+  ],
   // A session's span says which tasks ran that day.
   session: [...WORK, humanTouchKeys.all],
   claim: [...WORK, CANDIDATES],

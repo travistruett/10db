@@ -23,7 +23,9 @@ import { stopCiFixing } from './ci-stop';
 import { forTasks, startCards, worktreeCards, wrongBranchCard, type Card } from './cards';
 import { cuttingTasks, forgetCuttingTasks } from './cutting-tasks';
 import { forgetStartSiblings } from './start-siblings';
+import type { FolderHold } from '../folder-hold';
 import { returnCheckout } from './checkout-return';
+import { jobKey, JobQueue, type DeliveryJobs } from './jobs';
 import { raise, type DeliveryContext } from './context';
 import { settleLeftOutCards } from './left-out-settle';
 import { recoverUnopenedPasses } from './pass-recover';
@@ -72,9 +74,12 @@ const message = (error: unknown): string =>
  * ships. Without `worktrees`, worktree removal and the sweep are skipped.
  */
 export async function recoverBatches(deps: {
+  readonly folderHold: FolderHold;
   readonly state: StateStore;
   readonly git: Git;
   readonly inbox: InboxService;
+  /** Where a switch back that must wait for a chat's turn goes, so startup never waits for it. */
+  readonly jobs: DeliveryJobs;
   readonly processes: GateTerminator;
   readonly shipper: Shipper;
   /** Cuts again a CUTTING batch the restart interrupted. */
@@ -232,8 +237,16 @@ export async function recoverBatches(deps: {
 
   // 4. Finished shared batches whose checkout was never switched back: the daemon stopped between
   // recording the end and the switch.
-  for (const batch of listCheckoutReturns(db))
-    if ((await returnCheckout(deps, batch.id)) === 'switched') report.switchedBack.push(batch.id);
+  for (const batch of listCheckoutReturns(db)) {
+    const returned = await returnCheckout(deps, batch.id, { wait: false });
+    if (returned === 'switched') report.switchedBack.push(batch.id);
+    // A chat taken over in the builder's terminal holds Your folder: the switch waits in the project's
+    // queue, and startup goes on.
+    if (returned === 'busy')
+      deps.jobs.run(jobKey({ projectId: batch.projectId, worktreePath: null }, JobQueue.Ship), () =>
+        returnCheckout(deps, batch.id).then(() => undefined),
+      );
+  }
 
   if (deps.worktrees) {
     // 5. Finished batches whose path is still set: the removal and clear a crash cut short. A dirty

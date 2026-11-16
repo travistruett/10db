@@ -2,7 +2,7 @@
 
 - `trust/` builds each session's `TrustPolicy` (`@10db/contracts`): the four limits, whose prose lives in one
   place (`trust/limits.ts`), the environment the judge reads them in, and the coordination lines of its surface.
-- 10db's judge: `fast-path.ts` (`fastPathAllows`, `namesSecret`) answers the calls that can't cross a limit
+- 10db's judge: `fast-path.ts` (`fastPathAllows`, `namesSecret`; its `JUDGED_OWN_TOOLS`, a chat's push, pull request and merge, are never fast) answers the calls that can't cross a limit
   with no model, a shell command only when every segment is in `read-allowlist.ts` (each read command with the
   only options it may carry, and its files regular, non-secret and inside the checkout or the temp dir, which the Read, LS, Glob and Grep tools meet too, and a path of theirs that starts with `~` or has leading or trailing whitespace goes to the judge, since Claude Code trims and expands it; a Glob runs `rg --files --null --glob <pattern> --sort=modified --no-ignore --hidden` in its search folder, which follows no link inside the tree, so only the search folder, the pattern's literal prefix and its syntax are checked (a `RIPGREP_CONFIG_PATH` is Claude Code's own environment, which the agent can't set); `ls` and `stat` never carry `-L`, which would follow a link inside the checkout out of it; `git log --stat` runs no textconv driver, since a diffstat counts lines of the stored blobs, and the driver's command could only come from the git config the agent can't write); `crosses-limit.ts` asks the `crosses_limit` decision the rest, with the call fenced as data, and
   reads `unsure`, a below-floor `allow` and an input over `CALL_INPUT_MAX_CHARS` as a limit; `grants.ts` turns a

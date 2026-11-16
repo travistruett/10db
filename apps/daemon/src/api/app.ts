@@ -130,6 +130,8 @@ import {
   NotFoundError,
   ConversationItemId,
   PostConversationMessage,
+  FolderWhileHeldInput,
+  type FolderWhileHeld,
   ChatCreateInput,
   ChatId,
   ChatPatchInput,
@@ -282,6 +284,7 @@ type TaskMessageForm = z.infer<typeof TaskMessageForm>;
 
 /** A conversation message as a multipart form: its text, a `mention` part per path, and its pictures. */
 const ConversationMessageForm = TaskMessageForm.extend({
+  folder: FolderWhileHeldInput.optional(),
   mention: z
     .union([z.string(), z.array(z.string())])
     .optional()
@@ -308,14 +311,25 @@ async function builderMessage(c: Context): Promise<{
   readonly text: string;
   readonly mentions: readonly string[];
   readonly pictures: readonly { readonly name: string; readonly bytes: Uint8Array }[];
+  readonly folder?: FolderWhileHeld;
 }> {
   if ((c.req.header('content-type') ?? '').startsWith('multipart/form-data')) {
     const form = ConversationMessageForm.parse(await c.req.parseBody({ all: true }));
     const { mentions } = PostConversationMessage.parse({ text: form.text, mentions: form.mention });
-    return { text: form.text, mentions, pictures: await pastedPictures(form.picture) };
+    return {
+      text: form.text,
+      mentions,
+      pictures: await pastedPictures(form.picture),
+      ...(form.folder === undefined ? {} : { folder: form.folder }),
+    };
   }
   const body = PostConversationMessage.parse(await c.req.json());
-  return { text: body.text, mentions: body.mentions, pictures: [] };
+  return {
+    text: body.text,
+    mentions: body.mentions,
+    pictures: [],
+    ...(body.folder === undefined ? {} : { folder: body.folder }),
+  };
 }
 
 /** `GET /chats?open=1`: the open tabs, the only list this route serves. */
@@ -749,6 +763,12 @@ export function createApp(deps: ApiDeps) {
         c.json(
           await deps.services.patchChat(ChatId.parse(c.req.param('chatId')), c.req.valid('json')),
         ),
+    )
+    .post('/chats/:chatId/stop-waiting', (c) =>
+      c.json(deps.services.stopChatWaiting(ChatId.parse(c.req.param('chatId')))),
+    )
+    .get('/projects/:projectId/folder', async (c) =>
+      c.json(await deps.services.projectFolder(ProjectId.parse(c.req.param('projectId')))),
     )
     .post('/chats/:chatId/archive', async (c) =>
       c.json(await deps.services.archiveChat(ChatId.parse(c.req.param('chatId')))),

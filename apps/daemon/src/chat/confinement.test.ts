@@ -1,0 +1,299 @@
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { JudgeKind } from '@10db/contracts';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { tempDir, type TempDir } from '../../test/fixtures';
+import { fileAccessJudge } from '../sandbox';
+import { judgeShapeCall, type ShapeAccess } from '../shape';
+import { CHAT_GIT_REFUSAL } from './git-rule';
+import { CHAT_TURN_ENDED, chatFolderInUse, judgeChatCall, type ChatFolder } from './confinement';
+
+// Sessions spec §7.3: a chat edits only while its turn holds Your folder, on the real path of each file, and
+// never git state or a protected path; a turn that doesn't hold is told who does.
+
+let dir: TempDir;
+let checkout: string;
+let access: ShapeAccess;
+
+beforeAll(() => {
+  dir = tempDir('chat-confinement');
+  checkout = join(dir.path, 'checkout');
+  mkdirSync(join(checkout, 'src'), { recursive: true });
+  mkdirSync(join(checkout, '.git'), { recursive: true });
+  writeFileSync(join(checkout, 'src', 'a.ts'), 'a\n');
+  writeFileSync(join(checkout, '.git', 'config'), '[core]\n');
+  mkdirSync(join(dir.path, 'outside'));
+  symlinkSync(join(dir.path, 'outside'), join(checkout, 'link'));
+  // A link whose target does not exist yet: a write through it creates the target.
+  symlinkSync(join(dir.path, 'outside', 'not-yet'), join(checkout, 'dangling'));
+  mkdirSync(join(checkout, '.claude'));
+  writeFileSync(join(checkout, '.claude', 'settings.json'), '{}\n');
+  mkdirSync(join(dir.path, 'home'));
+  const base = {
+    checkout,
+    home: join(dir.path, 'home'),
+    protectedReads: [] as string[],
+    filesDir: join(dir.path, 'files'),
+    sandboxRoots: [join(dir.path, 'tmp')],
+  };
+  access = {
+    ...base,
+    judge: JudgeKind.Native,
+    commands: {
+      protectedPaths: [],
+      fileAccess: fileAccessJudge({
+        checkout,
+        home: base.home,
+        protectedReads: [],
+        readList: [],
+        systemDocRoots: [],
+        configDir: join(dir.path, 'no-claude-config'),
+        providerSessionId: null,
+        sandboxTemp: { roots: base.sandboxRoots, own: join(dir.path, 'tmp', '10db-own') },
+      }),
+    },
+  };
+});
+afterAll(() => {
+  dir.cleanup();
+});
+
+const holding: ChatFolder = { holds: () => true, writable: true, heldBy: () => 'nobody' };
+const notHolding: ChatFolder = {
+  holds: () => false,
+  writable: false,
+  heldBy: () => 'the task ‘Bump vite’',
+};
+
+const edit = (tool: string, path: string, more: Partial<{ agentId: string }> = {}) => ({
+  toolName: tool,
+  input: tool === 'NotebookEdit' ? { notebook_path: path } : { file_path: path },
+  ...more,
+});
+
+describe('a session that was opened able to write', () => {
+  const ended: ChatFolder = {
+    holds: () => false,
+    writable: true,
+    heldBy: () => 'the task ‘Bump vite’',
+  };
+
+  it.each([
+    ['Bash', { command: 'echo x >> src/a.ts' }],
+    ['Read', { file_path: 'src/a.ts' }],
+    ['Agent', { prompt: 'go' }],
+    ['mcp__10db__commit_changes', {}],
+  ])('refuses a %s call once its turn no longer holds the folder', (toolName, input) => {
+    expect(judgeChatCall({ toolName, input, cwd: checkout }, access, ended)).toEqual({
+      decision: 'deny',
+      reason: CHAT_TURN_ENDED,
+    });
+  });
+
+  it('still lets a session opened read-only read', () => {
+    const call = { toolName: 'Read', input: { file_path: join(checkout, 'src', 'a.ts') } };
+    expect(judgeChatCall(call, access, notHolding).decision).toBe('allow');
+  });
+});
+
+describe('a chat’s edits', () => {
+  it.each([
+    ['Edit', 'src/a.ts'],
+    ['Write', 'src/new.ts'],
+    ['NotebookEdit', 'src/nb.ipynb'],
+    ['Write', 'src/deeper/than/yet/new.ts'],
+  ])('allows %s of %s while its turn holds the folder', (tool, rel) => {
+    expect(judgeChatCall(edit(tool, join(checkout, rel)), access, holding)).toEqual({
+      decision: 'allow',
+    });
+  });
+
+  it.each([
+    ['a path in .git', join('.git', 'config')],
+    ['a path under .git that does not exist', join('.git', 'hooks', 'pre-commit')],
+    ['a file outside the checkout', join('..', 'outside', 'x')],
+    ['a file reached through a link out of the checkout', join('link', 'x')],
+    ['a relative path that climbs out', join('src', '..', '..', 'x')],
+    ['a dangling link whose target is outside', 'dangling'],
+    ['a Claude Code configuration path', join('.claude', 'settings.json')],
+  ])('refuses %s while its turn holds the folder', (_name, rel) => {
+    const verdict = judgeChatCall(edit('Edit', join(checkout, rel)), access, holding);
+    expect(verdict.decision).toBe('deny');
+  });
+
+  it.each([
+    ['MultiEdit', 'file_path'],
+    ['NotebookEdit', 'notebook_path'],
+  ])(
+    'judges %s on its own path field, even when the other field names a safe file',
+    (tool, field) => {
+      const inside = join(checkout, 'src', 'a.ts');
+      const git = join(checkout, '.git', 'config');
+      expect(
+        judgeChatCall({ toolName: tool, input: { [field]: inside } }, access, holding),
+      ).toEqual({
+        decision: 'allow',
+      });
+      const other = field === 'file_path' ? 'notebook_path' : 'file_path';
+      const crafted = { [field]: git, [other]: inside };
+      expect(judgeChatCall({ toolName: tool, input: crafted }, access, holding).decision).toBe(
+        'deny',
+      );
+    },
+  );
+
+  it('names a tool it does not know as none of this chat’s, not as a read-only chat', () => {
+    const verdict = judgeChatCall({ toolName: 'Teleport', input: {} }, access, holding);
+    expect(verdict.decision).toBe('deny');
+    expect(JSON.stringify(verdict)).not.toContain('changes nothing');
+  });
+
+  describe.runIf(process.platform === 'darwin')(
+    'on a file system that folds case and Unicode',
+    () => {
+      it('refuses git state however its name is spelled', () => {
+        for (const rel of [join('.GIT', 'config'), join('.Git', 'hooks', 'pre-commit')])
+          expect(judgeChatCall(edit('Edit', join(checkout, rel)), access, holding).decision).toBe(
+            'deny',
+          );
+      });
+
+      it('allows a file inside the checkout spelled in another case or normalisation', () => {
+        writeFileSync(join(checkout, 'src', 'é.ts'), 'e\n');
+        for (const rel of [join('SRC', 'a.ts'), join('src', 'e\u0301.ts')])
+          expect(judgeChatCall(edit('Edit', join(checkout, rel)), access, holding)).toEqual({
+            decision: 'allow',
+          });
+      });
+    },
+  );
+
+  it('reads a home-relative name as Claude Code does, outside the checkout', () => {
+    expect(judgeChatCall(edit('Write', '~/x'), access, holding).decision).toBe('deny');
+    expect(judgeChatCall(edit('Write', '~'), access, holding).decision).toBe('deny');
+  });
+
+  it.each(['Edit', 'Write', 'NotebookEdit'])(
+    'refuses %s while another holder has the folder, naming it',
+    (tool) => {
+      expect(judgeChatCall(edit(tool, join(checkout, 'src/a.ts')), access, notHolding)).toEqual({
+        decision: 'deny',
+        reason: chatFolderInUse('the task ‘Bump vite’'),
+      });
+    },
+  );
+
+  it('holds a subagent’s edit to the same rule', () => {
+    const call = edit('Edit', join(checkout, 'src/a.ts'), { agentId: 'sub-1' });
+    expect(judgeChatCall(call, access, notHolding).decision).toBe('deny');
+    expect(judgeChatCall(call, access, holding).decision).toBe('allow');
+  });
+
+  it('keeps refusing every write where no folder is given', () => {
+    expect(judgeChatCall(edit('Edit', join(checkout, 'src/a.ts')), access).decision).toBe('deny');
+  });
+
+  it('reads the hold at each call', () => {
+    let held = true;
+    const folder: ChatFolder = { holds: () => held, writable: true, heldBy: () => 'the pass ‘P’' };
+    const call = edit('Write', join(checkout, 'src/new.ts'));
+    expect(judgeChatCall(call, access, folder).decision).toBe('allow');
+    held = false;
+    expect(judgeChatCall(call, access, folder).decision).toBe('deny');
+  });
+});
+
+// Sessions spec §7.3: a chat's shell never writes git or GitHub; the way is its tools.
+describe("a chat's shell and git", () => {
+  const verdictOf = (command: string) =>
+    judgeChatCall({ toolName: 'Bash', input: { command }, cwd: checkout }, access, holding);
+
+  it.each([
+    'git commit -m x',
+    'git commit --amend --no-edit',
+    'git push origin HEAD',
+    'git push --force',
+    'git -C . push',
+    'git branch topic',
+    'git switch main',
+    'git checkout -b topic',
+    'git merge topic',
+    'git reset --hard',
+    'git add .',
+    'git stash',
+    'git pull',
+    'git tag v1',
+    'git rebase main',
+    'env git push',
+    'command git commit -m x',
+    'sh -c "git commit -am x"',
+    'bash -lc "cd . && git push"',
+    'git status && git commit -m x',
+    'gh pr create --title x --body y',
+    'gh pr merge 12 --squash',
+    'gh api -X POST repos/o/r/issues',
+    'gh api repos/o/r/issues -f title=x',
+    'gh release create v1',
+  ])('refuses %s and names the chat’s tools', (command) => {
+    expect(verdictOf(command)).toEqual({ decision: 'deny', reason: CHAT_GIT_REFUSAL });
+  });
+
+  it.each([
+    'git status',
+    'git diff HEAD~1',
+    'git log --oneline -5',
+    'git show HEAD:src/a.ts',
+    'git branch --show-current',
+    'git status && git diff',
+    'gh pr view 12',
+    'gh api repos/o/r/pulls',
+  ])('lets the read %s run', (command) => {
+    expect(verdictOf(command).decision).toBe('allow');
+  });
+
+  it.each([
+    'git -c core.pager=sh status',
+    'git --git-dir=/x status',
+    'git diff --output=out.txt',
+    'git grep -O sh foo',
+    'gh auth status --show-token',
+  ])('keeps its own words for %s, which is about running a program or a secret', (command) => {
+    const verdict = verdictOf(command);
+    expect(verdict.decision).toBe('deny');
+    expect('reason' in verdict && verdict.reason).not.toBe(CHAT_GIT_REFUSAL);
+  });
+
+  it('leaves Plan’s words alone: only a chat names its tools', () => {
+    const verdict = judgeShapeCall(
+      { toolName: 'Bash', toolInput: { command: 'git commit -m x' } },
+      access,
+    );
+    expect('reason' in verdict && verdict.reason).not.toContain('make_branch');
+  });
+});
+
+// Sessions spec §7.3: the tools that reach GitHub are 10db's judge's: a bare allow where it runs, a question where it
+// does not. Claude's auto mode approved all three unasked when it was the judge, so it earns no bare allow.
+describe('a chat’s tools that reach GitHub', () => {
+  it.each([
+    ['push_branch', JudgeKind.Native, 'ask'],
+    ['open_pull_request', JudgeKind.Native, 'ask'],
+    ['merge_pull_request', JudgeKind.Native, 'ask'],
+    ['push_branch', JudgeKind.Tendb, 'allow'],
+    ['open_pull_request', JudgeKind.Tendb, 'allow'],
+    ['merge_pull_request', JudgeKind.Tendb, 'allow'],
+    ['commit_changes', JudgeKind.Native, 'allow'],
+    ['push_branch', JudgeKind.Rules, 'ask'],
+    ['open_pull_request', JudgeKind.Rules, 'ask'],
+    ['merge_pull_request', JudgeKind.Rules, 'ask'],
+    ['commit_changes', JudgeKind.Rules, 'allow'],
+    ['make_branch', JudgeKind.Rules, 'allow'],
+  ])('%s on a %s judge: %s', (tool, judge, decision) => {
+    const verdict = judgeChatCall(
+      { toolName: `mcp__10db__${tool}`, input: {} },
+      { ...access, judge },
+      holding,
+    );
+    expect(verdict.decision).toBe(decision);
+  });
+});

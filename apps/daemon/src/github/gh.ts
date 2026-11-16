@@ -177,6 +177,11 @@ export interface Gh {
     input: { readonly repo: string; readonly jobId: string },
     call: GhCall,
   ): Promise<boolean>;
+  /** The branches the pull request merges from and into, or null when GitHub has no such pull request. */
+  prBranches(
+    input: { readonly repo: string; readonly ref: string },
+    call: GhCall,
+  ): Promise<{ readonly head: string; readonly base: string } | null>;
   prCreate(
     input: {
       readonly repo: string;
@@ -733,6 +738,19 @@ export function createGh(exec: GhExec): Gh {
       if (out.exitCode !== 0) throw failure(args, out);
       const view = parseOutput(PrView, args, out.stdout);
       return { url: view.url, state: view.state, isDraft: view.isDraft, baseRef: view.baseRefName };
+    },
+    async prBranches({ repo, ref }, call) {
+      const args = ['pr', 'view', ref, '-R', repo, '--json', 'headRefName,baseRefName'];
+      const out = await exec(args, call);
+      if (out.exitCode !== 0 && (NO_PR.test(out.stderr) || PR_NOT_FOUND.test(out.stderr)))
+        return null;
+      if (out.exitCode !== 0) throw failure(args, out);
+      const view = parseOutput(
+        z.object({ headRefName: z.string(), baseRefName: z.string() }),
+        args,
+        out.stdout,
+      );
+      return { head: view.headRefName, base: view.baseRefName };
     },
     async prStatus({ repo, ref }, call) {
       const args = [

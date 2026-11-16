@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "projectId": {
+      "type": "string",
+      "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "branch": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "holders": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "lane",
+              "pass_open",
+              "pass_closed",
+              "git_work",
+              "chat_turn",
+              "waiting_chat",
+              "takeover"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "more": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "chatId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^cht_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "what": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "words": {
+            "type": "string"
+          },
+          "keepsChatOut": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "more",
+          "chatId",
+          "what",
+          "words",
+          "keepsChatOut"
+        ]
+      }
+    },
+    "limits": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "folder_git_until_merge"
+        ]
+      }
+    },
+    "limitPass": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "projectId",
+    "branch",
+    "holders",
+    "limits",
+    "limitPass"
+  ]
+}

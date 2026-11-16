@@ -1,6 +1,8 @@
+import { reserveGitNaming } from './folder-wait';
 import { BatchState, type BatchId } from '@10db/contracts';
 import { getBatch, getBatchRow, getProject, patchBatch } from '@10db/db';
 import type { StateStore } from '../events';
+import type { FolderHold } from '../folder-hold';
 import type { CheckoutPlace, Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
@@ -11,6 +13,7 @@ import { raise } from './context';
 /** What a switch back needs; startup recovery has these without a delivery context. */
 export interface CheckoutReturnDeps {
   readonly state: StateStore;
+  readonly folderHold: FolderHold;
   readonly git: Git;
   readonly inbox: InboxService;
   readonly logger: Logger;
@@ -24,7 +27,9 @@ export type CheckoutReturn =
   /** Left as it is: the builder moved it off the batch's branch on purpose, so no card. */
   | 'moved'
   /** Left as it is, with a card saying why. */
-  | 'left';
+  | 'left'
+  /** Not tried: a chat's turn holds Your folder and the caller chose not to wait. The place is kept. */
+  | 'busy';
 
 const FINISHED: readonly BatchState[] = [
   BatchState.Shipped,
@@ -45,6 +50,7 @@ const message = (error: unknown): string =>
 export async function returnCheckout(
   deps: CheckoutReturnDeps,
   batchId: BatchId,
+  opts: { readonly wait?: boolean } = {},
 ): Promise<CheckoutReturn> {
   const db = deps.state.db;
   const row = getBatchRow(db, batchId);
@@ -67,6 +73,14 @@ export async function returnCheckout(
   // Lanes in a separate copy edit other files and don't hold the checkout where it is.
   const running = lanesInProjectCheckout(db, project);
   if (running > 0) return leave(checkoutCards.lanesRunning(batch, project, place, running));
+  // The switch moves Your folder's branch: it waits for a chat's turn, and holds the folder meanwhile.
+  const what = `switching Your folder back to ${place.branch === null ? 'where it was' : `\`${place.branch}\``}`;
+  let token: symbol;
+  if (opts.wait === false) {
+    const reserved = deps.folderHold.reserveGit(project.id, what);
+    if (!reserved.reserved) return 'busy';
+    token = reserved.token;
+  } else token = await reserveGitNaming(deps, { projectId: project.id, batchId, what });
   try {
     const outcome = await deps.git.switchBack(project.repoPath, row.branch, place);
     switch (outcome.kind) {
@@ -94,5 +108,7 @@ export async function returnCheckout(
     // A git refusal raised its own trust card, which says why; this one says the checkout stays.
     deps.logger.warn({ ...log, err: message(error) }, 'checkout not switched back');
     return leave(checkoutCards.failed(batch, project, place, error));
+  } finally {
+    deps.folderHold.releaseGit(token);
   }
 }

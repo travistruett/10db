@@ -2,10 +2,15 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   AbandonStep,
+  ConversationOwnerKind,
+  ConversationProfile,
+  ConversationState,
+  mintId,
   PASS_MOVE_CHOICE,
   PASS_RETARGET_CHOICE,
   PassNoticeKind,
   PassState,
+  type ChatId,
   type InboxItemDto,
   type PassId,
   type ProjectInput,
@@ -15,6 +20,9 @@ import {
   closePass,
   findOpenByFoldKey,
   getBatch,
+  getBatchRow,
+  insertChat,
+  insertConversation,
   getPass,
   getPassProgress,
   getTask,
@@ -26,7 +34,9 @@ import {
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { waitFor } from '../../test/fixtures';
 import { ManualClock } from '../clock';
+import type { Git } from '../git';
 import { GhError, PrState } from '../github';
 import {
   answerPassMoveCard,
@@ -87,8 +97,8 @@ const read = (path: string): string => readFileSync(join(h.repo, path), 'utf8');
  * request ready, `main` fast-forwarded to its tip and the folder on `main` (D8), the pass CLOSED and
  * its batch SHIPPED.
  */
-async function closedPass(): Promise<Closed> {
-  h = createDeliveryHarness(PAGES);
+async function closedPass(wrapGit?: (git: Git) => Git): Promise<Closed> {
+  h = createDeliveryHarness(PAGES, wrapGit === undefined ? {} : { wrapGit });
   unsubscribe = subscribePassSettles(h.bus, h.ctx);
   h.commit('src/settings/page.tsx', 'settings\n');
   h.git$('push', '-q', 'origin', 'main');
@@ -145,7 +155,67 @@ function answerMove(card: InboxItemDto): Promise<void> {
   return h.jobs.idle();
 }
 
+/** A chat of the project, as a turn takes the folder for it. */
+function chatOf(title: string) {
+  return h.state.write((ctx) => {
+    const id = mintId('Chat');
+    const conv = insertConversation(ctx, {
+      projectId: h.project.id,
+      owner: { kind: ConversationOwnerKind.Chat, id },
+      profile: ConversationProfile.Explore,
+      state: ConversationState.IdleCold,
+    });
+    return insertChat(ctx, {
+      id,
+      projectId: h.project.id,
+      conversationId: conv.id,
+      title,
+      tabPosition: 0,
+    }).id;
+  });
+}
+
 describe('a closed pass', () => {
+  it('holds Your folder for the move alone, so a chat may take it while the move reads', async () => {
+    const me: { id: ChatId | null } = { id: null };
+    const taken: boolean[] = [];
+    const { passId } = await closedPass((git) => ({
+      ...git,
+      fetch: (...args) => {
+        if (me.id !== null) {
+          const turn = h.ctx.folderHold.takeTurn(h.project.id, me.id);
+          taken.push(turn.taken);
+          h.ctx.folderHold.releaseTurn(me.id);
+        }
+        return git.fetch(...args);
+      },
+    }));
+    me.id = chatOf('Retry login');
+    await answerMove(h.only(moveCards(passId)));
+    expect(taken).toEqual([true]);
+    expect(getPass(h.store.db, passId).state).toBe(PassState.Settled);
+  });
+
+  it('waits for a chat’s turn before Move moves the branch, naming the chat on its batch', async () => {
+    const { passId } = await closedPass();
+    const me = chatOf('Retry login');
+    h.ctx.folderHold.takeTurn(h.project.id, me);
+    const before = h.git$('rev-parse', 'refs/heads/main');
+    answerPassMoveCard(h.ctx, h.only(moveCards(passId)), { choice: PASS_MOVE_CHOICE });
+    const batchId = getPass(h.store.db, passId).batchId;
+    const line = await waitFor(
+      () => getBatchRow(h.store.db, batchId).notices.find((n) => n.key === 'folder-hold')?.line,
+    );
+    expect(h.git$('rev-parse', 'refs/heads/main')).toBe(before);
+    expect(line).toBe('Waits for the chat ‘Retry login’ to finish with Your folder');
+    h.ctx.folderHold.releaseTurn(me);
+    await h.jobs.idle();
+    expect(getPass(h.store.db, passId).state).toBe(PassState.Settled);
+    expect(getBatchRow(h.store.db, batchId).notices.some((n) => n.key === 'folder-hold')).toBe(
+      false,
+    );
+  });
+
   it('offers Move as it closes, and Move before the merge puts the folder on the base and settles it', async () => {
     const { passId } = await closedPass();
     const card = h.only(moveCards(passId));

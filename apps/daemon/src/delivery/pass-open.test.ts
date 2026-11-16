@@ -137,6 +137,8 @@ function stopsOnConflict(...args: string[]): void {
 /** Start-up's batch recovery, as the daemon runs it after a restart. */
 const recover = () =>
   recoverBatches({
+    folderHold: h.ctx.folderHold,
+    jobs: h.jobs,
     state: h.state,
     git: h.git,
     inbox: h.inbox,

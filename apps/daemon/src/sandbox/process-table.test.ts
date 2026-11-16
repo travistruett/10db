@@ -54,6 +54,19 @@ describe('parseProcessTable', () => {
     ]);
   });
 
+  it('reads the program name after the start time, spaces and a login shell’s dash included', () => {
+    const output = [
+      '  501   1   501 Thu Oct  5 12:00:00 2026 /bin/zsh',
+      '  502 501   501 Thu Oct 30 12:34:56 2026 -zsh',
+      '  503 501   503 Thu Oct 30 12:34:56 2026 /Applications/My App.app/Contents/MacOS/app',
+    ].join('\n');
+    expect(parseProcessTable(output).map((r) => [r.startedAt, r.comm])).toEqual([
+      ['Thu Oct  5 12:00:00 2026', '/bin/zsh'],
+      ['Thu Oct 30 12:34:56 2026', '-zsh'],
+      ['Thu Oct 30 12:34:56 2026', '/Applications/My App.app/Contents/MacOS/app'],
+    ]);
+  });
+
   it('gives the same start time text as ps -o lstart= -p, trimmed', () => {
     const [row] = parseProcessTable('  501   1   501 Thu Oct  5 12:00:00 2026\n');
     expect(row?.startedAt).toBe('Thu Oct  5 12:00:00 2026');

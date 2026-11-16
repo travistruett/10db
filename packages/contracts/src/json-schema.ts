@@ -18,6 +18,7 @@ import {
   SessionsSettingsDto,
 } from './chat';
 import { ChatToolResult } from './chat-tools';
+import { FolderDto } from './folder-hold';
 import {
   AgentCommandDto,
   ConversationDeltaFrame,
@@ -338,6 +339,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'conversation-item-dto': ConversationItemDto,
   'conversation-items-page': ConversationItemsPage,
   'conversation-live-dto': ConversationLiveDto,
+  'folder-dto': FolderDto,
   'post-conversation-message': PostConversationMessage,
   'account-created-dto': AccountCreatedDto,
   'account-dto': AccountDto,

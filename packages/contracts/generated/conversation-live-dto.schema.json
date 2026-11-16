@@ -1237,10 +1237,14 @@
           }
         ]
       }
+    },
+    "waitingForFolder": {
+      "type": "boolean"
     }
   },
   "required": [
     "conversationId",
-    "items"
+    "items",
+    "waitingForFolder"
   ]
 }

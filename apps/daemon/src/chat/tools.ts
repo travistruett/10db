@@ -34,6 +34,7 @@ import { ParkedError, type InboxService } from '../inbox';
 import type { ChatToolHandlers, ChatToolsFor } from '../mcp';
 import { z } from 'zod';
 import type { ChatLiveSessions } from './live-sessions';
+import { chatGitTools, type ChatGitToolsDeps } from './git-tools';
 import { CHAT_TOOL_POLICY, ChatToolPolicy } from './tool-policy';
 
 // Sessions spec §6.6: a chat's tools. Each is the builder's own tool held to the chat's project.
@@ -51,6 +52,8 @@ export interface ChatToolsDeps {
   readonly live: ChatLiveSessions;
   readonly builder: BuilderTools;
   readonly getTask: (id: TaskId) => TaskDto;
+  /** What the tools that change git in Your folder act through. */
+  readonly gitTools: ChatGitToolsDeps;
 }
 
 /** What a tool says when the builder kept their work. */
@@ -310,6 +313,7 @@ export function createChatTools(deps: ChatToolsDeps): ChatToolsFor {
         ),
       [ChatToolName.ListProposals]: (args) =>
         run(BuilderToolName.ListProposals, inProject(args, projectId)),
+      ...chatGitTools(deps.gitTools, session),
       [ChatToolName.SetTitle]: (args) => {
         const title = cutTitle(ChatToolInputs.set_title.parse(args).title);
         const previousTitle = chatView(state.db, chatId).title;

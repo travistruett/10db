@@ -1,11 +1,20 @@
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
 import { join } from 'node:path';
-import { DeniedBy } from '@10db/contracts';
+import { DeniedBy, JudgeKind, TRUST_DEFAULTS, TrustSurface } from '@10db/contracts';
+import { createTestStore, seedProject } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SANDBOXED } from '../../test/fixtures';
+import { ManualClock } from '../clock';
+import { createEventBus, createStateStore } from '../events';
+import { createHookJudge, createLimitNotes } from '../inbox';
+import { createJudge } from '../judge';
+import { silentLogger } from '../log';
+import { buildTrustPolicy } from '../trust';
+import { chatFolderInUse, judgeChatCall, type ChatFolder } from '../chat';
 import { judgeShapeCall, type ShapeAccess } from '../shape';
 import { codexHomes } from './codex-home';
 import {
@@ -417,6 +426,34 @@ describe('judgeHookCall', () => {
     });
   });
 
+  it('refuses a patch from a chat whose turn does not hold Your folder, naming the holder', async () => {
+    const access: ShapeAccess = {
+      checkout: '/repo',
+      home: '/home',
+      protectedReads: [],
+      filesDir: '/files',
+      sandboxRoots: [],
+    };
+    const folder = (holds: boolean): ChatFolder => ({
+      holds: () => holds,
+      writable: false,
+      heldBy: () => 'the task ‘Bump vite’',
+    });
+    const spec: Spec = {
+      ...ALLOW_ALL,
+      preToolUse: (call) => judgeChatCall(call, access, folder(false)),
+    };
+    const hook = {
+      tool_name: 'apply_patch',
+      tool_input: { command: '*** Add File: new.ts\n+x' },
+      cwd: '/repo',
+    };
+    expect(await judgeHookCall(spec, hook, NEVER)).toMatchObject({
+      allow: false,
+      reason: chatFolderInUse('the task ‘Bump vite’'),
+    });
+  });
+
   it('refuses the whole patch when one path is refused', async () => {
     const spec: Spec = {
       ...ALLOW_ALL,
@@ -667,6 +704,102 @@ describe('judgeHookCall with the session judge', () => {
     });
     expect(canUseTool).toHaveBeenCalledWith(expect.objectContaining({ toolUseId: 'call_1' }));
   });
+
+  // A chat on Codex reaches 10db's judge through the hook: its tools that send work out or merge are read by the
+  // model, never settled by the fast path.
+  it.each(['push_branch', 'open_pull_request', 'merge_pull_request'])(
+    "asks 10db's model before a Codex chat's %s runs",
+    async (name) => {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), 'codex-judged-')));
+      const { store, close } = createTestStore();
+      const asked: string[] = [];
+      try {
+        const state = createStateStore(store, createEventBus());
+        const judgeCall = createHookJudge(
+          {
+            state,
+            logger: silentLogger,
+            judge: createJudge({
+              state,
+              clock: new ManualClock(),
+              fetch: (_input, init) => {
+                asked.push(typeof init?.body === 'string' ? init.body : '');
+                return Promise.resolve(
+                  new Response(
+                    JSON.stringify({
+                      id: 'gen-1',
+                      model: 'typesafe/jev-1.13-20260917',
+                      provider: 'TypeSafe',
+                      answers: {
+                        decision: {
+                          type: 'choice',
+                          choice: 'writes_live',
+                          confidence: 0.95,
+                          probabilities: { writes_live: 0.95 },
+                        },
+                      },
+                      usage: { input_tokens: 300, output_tokens: 10, cost: 0.00002 },
+                    }),
+                    { status: 200, headers: { 'content-type': 'application/json' } },
+                  ),
+                );
+              },
+              readKey: () => Promise.resolve('router-key-0123'),
+              decisionModelIds: () => new Set(['typesafe/jev-1.13']),
+              off: false,
+              logger: silentLogger,
+            }),
+          },
+          {
+            projectId: seedProject(store).id,
+            workstreamId: null,
+            taskId: null,
+            fastPath: { checkout: root, tmpDir: root, secretFiles: [], preExisting: [] },
+            policy: buildTrustPolicy({
+              surface: TrustSurface.Chat,
+              projectName: 'demo',
+              checkout: root,
+              gateCommand: null,
+              liveSystems: [],
+              switches: TRUST_DEFAULTS,
+              grants: [],
+              yourMcpServers: [],
+              claudeConnectors: false,
+            }),
+            allowLines: () => [],
+            judgeNow: () => JudgeKind.Tendb,
+            coveredByBuilderRule: () => false,
+            floorVerdict: () => ({ decision: 'ask', reason: 'rules' }),
+            skips: null,
+            limits: createLimitNotes(),
+            onFloor: () => undefined,
+            clock: new ManualClock(),
+          },
+        );
+        const spec: Spec = {
+          preToolUse: () => ({ decision: 'allow' }),
+          canUseTool: () =>
+            Promise.resolve({ behavior: 'deny', message: 'the builder said no', by: 'builder' }),
+          judgeCall,
+        };
+        const answer = await judgeHookCall(
+          spec,
+          {
+            tool_name: `mcp__10db__${name}`,
+            tool_input: {},
+            tool_use_id: 'call_1',
+            cwd: root,
+          },
+          NEVER,
+        );
+        expect(answer).toMatchObject({ allow: false, reason: 'the builder said no' });
+        expect(asked).toHaveLength(1);
+      } finally {
+        close();
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("a judgeCall that throws denies, naming 10db's guard", async () => {
     const spec = judging(() => Promise.reject(new Error('judge down')));

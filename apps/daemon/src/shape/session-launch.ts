@@ -50,6 +50,11 @@ export interface ShapePrepareInput {
   readonly signal: AbortSignal;
   /** Told when a call waits on the builder's card. */
   readonly observer: WaitObserver;
+  /**
+   * The session's turn holds Your folder, so its commands may write the checkout (never git state). Absent, the
+   * sandbox is read-only, as Plan's always is.
+   */
+  readonly writes?: boolean;
   /** The limits 10db's judge stopped calls at, which the broker asks with the trust line's three answers. */
   readonly limits?: LimitNotes;
 }
@@ -77,6 +82,10 @@ export interface ShapePrepared {
   canUseTool(req: ToolRequest): Promise<ToolDecision>;
   /** Watches what runs under the session's Claude Code process, so its commands end with it. */
   trackProcesses(pid: number): void;
+  /** Remembers what the session runs now (its agent and servers), at its first command. */
+  markOwn(): void;
+  /** Stops the jobs its commands left running since the mark, with the session still open. */
+  endJobs(): Promise<void>;
   /** Stops what the session's commands left running, then removes the sandbox; once the session has ended. */
   release(): Promise<void>;
 }

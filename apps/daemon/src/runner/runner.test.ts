@@ -5163,6 +5163,8 @@ describe("a lane's settled read-only line", () => {
         setProviderSession: () => undefined,
         trackProcesses: () => Promise.resolve(true),
         endProcesses: () => Promise.resolve(),
+        markOwn: () => undefined,
+        endJobs: () => Promise.resolve(),
         dispose: () => undefined,
       }),
   });

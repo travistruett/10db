@@ -28,6 +28,7 @@ export {
   type LaneProcessSetup,
   type LedgerSweep,
 } from './lane-processes';
+export { secretFilesIn } from './project-access';
 export { systemProcessTable, type ProcessRow } from './process-table';
 export {
   claudeCodeTmpPath,
@@ -80,7 +81,6 @@ export type { SetupInput } from './setup-input';
 export { readFrontmatter, writeFrontmatter } from './frontmatter';
 export { EMPTY_SETUP, type SessionSetup } from './setup-dir';
 export { writeSecretRead } from './secret-reads';
-export { secretFilesIn } from './project-access';
 export { laneWritableRoots, type LaneWritableRoot } from './lane-writable';
 export {
   launchYourMcpServers,

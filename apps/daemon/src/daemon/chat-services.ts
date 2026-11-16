@@ -9,6 +9,7 @@ import {
   type StartGit,
 } from '../chat';
 import type { StateStore } from '../events';
+import { folderView, type FolderHold } from '../folder-hold';
 import type { Logger } from '../log';
 
 // Sessions spec §10: a chat's own routes. Its conversation is served by the conversation routes.
@@ -21,6 +22,8 @@ export type ChatApiServices = Pick<
   | 'patchChat'
   | 'archiveChat'
   | 'unarchiveChat'
+  | 'stopChatWaiting'
+  | 'projectFolder'
   | 'chatModels'
   | 'sessionStarts'
   | 'sessionsSettings'
@@ -30,6 +33,7 @@ export type ChatApiServices = Pick<
 export function createChatApiServices(deps: {
   readonly state: StateStore;
   readonly chat: ChatService;
+  readonly folderHold: FolderHold;
   readonly git: StartGit;
   readonly now: () => Date;
   readonly log: Logger;
@@ -42,6 +46,27 @@ export function createChatApiServices(deps: {
     patchChat: (id, input) => chat.patch(id, input),
     archiveChat: (id) => chat.archive(id),
     unarchiveChat: (id) => chat.unarchive(id),
+    stopChatWaiting(id) {
+      chat.stopWaiting(id);
+      return chat.get(id);
+    },
+    async projectFolder(projectId) {
+      const project = getProject(state.db, projectId);
+      let branch: string | null = null;
+      try {
+        branch = (
+          await deps.git(project.repoPath, ['symbolic-ref', '--short', '-q', 'HEAD'])
+        ).trim();
+      } catch (error) {
+        // A detached HEAD or an unreadable repository has no branch to show; the holders still do.
+        deps.log.debug({ err: error, projectId }, 'Your folder is on no branch');
+      }
+      return folderView(
+        projectId,
+        branch === '' ? null : branch,
+        deps.folderHold.holders(projectId),
+      );
+    },
     chatModels: (projectId) => chat.models(projectId),
     async sessionStarts(projectId) {
       const project = getProject(state.db, projectId);

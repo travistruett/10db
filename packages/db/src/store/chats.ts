@@ -3,6 +3,7 @@ import {
   ChatMode,
   ChatTitleSource,
   ConversationItemKind,
+  ConversationState,
   EventType,
   mintId,
   NotFoundError,
@@ -61,6 +62,23 @@ export function chatOfConversation(db: DbReader, conversationId: ConversationId)
     db.select().from(schema.chats).where(eq(schema.chats.conversationId, conversationId)).get() ??
     null
   );
+}
+
+/** The project's chats whose conversation is taken over, so their agent runs in the builder's terminal. */
+export function takenOverChats(db: DbReader, projectId: ProjectId): ChatRow[] {
+  return db
+    .select({ chat: schema.chats })
+    .from(schema.chats)
+    .innerJoin(schema.conversations, eq(schema.conversations.id, schema.chats.conversationId))
+    .where(
+      and(
+        eq(schema.chats.projectId, projectId),
+        eq(schema.conversations.state, ConversationState.TakenOver),
+      ),
+    )
+    .orderBy(asc(schema.chats.createdAt), asc(schema.chats.id))
+    .all()
+    .map((r) => r.chat);
 }
 
 /** Every open tab, by its place in the strip, across every project. */

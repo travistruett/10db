@@ -1,4 +1,11 @@
-import type { ChatDto, Effort, ProjectViewDto, ToolCallView } from '@10db/contracts';
+import {
+  FolderHolderKind,
+  FolderWhileHeld,
+  type ChatDto,
+  type Effort,
+  type ProjectViewDto,
+  type ToolCallView,
+} from '@10db/contracts';
 import { Box, Group, Text } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
@@ -29,10 +36,13 @@ import {
   useToolCallFull,
 } from '../../daemon/conversation-queries';
 import { useModels } from '../../daemon/model-queries';
+import { useProjectFolder, useStopWaiting } from '../../daemon/project-folder-queries';
 import { useDaemon, useDaemonStatus } from '../../daemon/provider';
 import { useResolvedInbox } from '../../daemon/queries';
 import dayjs from 'dayjs';
 import { chatEntries } from './chat-entries';
+import { FolderWait } from './folder-wait';
+import { keepingWords } from './kind-line';
 import { sessionAnnouncement, type SessionEvent } from './session-announcements';
 import { SessionBar } from './session-bar';
 import type { TabActions } from './tab-menu';
@@ -90,6 +100,16 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
   const [sendError, setSendError] = useState<string | null>(null);
   const [modelRefusal, setModelRefusal] = useState<string | null>(null);
   const models = useChatModels(chat.projectId);
+  const folder = useProjectFolder(chat.projectId);
+  const stopWaiting = useStopWaiting();
+  // Holders that keep this chat's turn from writing: Send asks before a message runs.
+  const keeping = keepingWords(chat, folder);
+  // A message that chose to wait is listed by the daemon as this chat waiting, whoever still holds the folder.
+  const waiting = (folder?.holders ?? []).some(
+    (h) => h.kind === FolderHolderKind.WaitingChat && h.chatId === chat.id,
+  );
+  // A send that names no folder would cancel the wait, so while the chat waits it asks to keep waiting.
+  const whileWaiting: FolderWhileHeld | undefined = waiting ? FolderWhileHeld.Wait : undefined;
   const modelRows = useModels(null);
   const offered = models.data?.offered ?? [];
   const named = conversation.model ?? models.data?.default ?? null;
@@ -98,12 +118,14 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
   const working = WORKING_STATES.has(conversation.state);
   const removed = project === undefined;
 
-  const post = async (d: Draft): Promise<void> => {
+  const post = async (d: Draft, folderChoice?: FolderWhileHeld): Promise<void> => {
+    const chosen = folderChoice ?? whileWaiting;
     await send.mutateAsync({
       conversationId: chat.conversationId,
       text: d.text,
       mentions: d.mentions,
       pictures: d.pictures,
+      ...(chosen === undefined ? {} : { folder: chosen }),
     });
   };
 
@@ -119,8 +141,9 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
   // A chat made by a send in a fresh tab sends that draft as soon as it is drawn; a failure leaves the
   // draft here, so the next send goes to this conversation and never to a second chat.
   useEffect(() => {
-    if (!sessionDrafts.takeSendRequest(key)) return;
-    post(sessionDrafts.get(key))
+    const request = sessionDrafts.takeSendRequest(key);
+    if (request === null) return;
+    post(sessionDrafts.get(key), request.folder)
       .then(() => {
         sessionDrafts.set(key, EMPTY_DRAFT);
       })
@@ -192,8 +215,19 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversation.state]);
 
+  // While Your folder is held the go-ahead is a message like any other: it waits in the composer, whose Send
+  // asks how it runs.
   const allow = (call: ToolCallView): void => {
-    send.mutate({ conversationId: chat.conversationId, text: `Go ahead: ${call.title}` });
+    const text = `Go ahead: ${call.title}`;
+    if (keeping === null) {
+      void post({ ...EMPTY_DRAFT, text }).catch((error: unknown) => {
+        setSendError(error instanceof Error ? error.message : String(error));
+      });
+      return;
+    }
+    const current = sessionDrafts.get(key);
+    setDraft({ ...current, text: current.text === '' ? text : `${current.text}\n${text}` });
+    input.current?.focus();
   };
 
   const entries = chatEntries(
@@ -265,13 +299,16 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
           chat={chat}
           conversation={conversation}
           projectName={project?.name ?? ''}
+          folder={folder}
           loading={loading}
           fileDisabledReason={removed ? 'This project was removed from 10db.' : disabledReason}
           {...(actions === undefined ? {} : { actions })}
           {...(renaming === undefined ? {} : { renaming })}
           {...(onRenamed === undefined ? {} : { onRenamed })}
           onFileAsTasks={() => {
-            send.mutate({ conversationId: chat.conversationId, text: FILE_AS_TASKS_MESSAGE });
+            void post({ ...EMPTY_DRAFT, text: FILE_AS_TASKS_MESSAGE }).catch((error: unknown) => {
+              setSendError(error instanceof Error ? error.message : String(error));
+            });
           }}
         />
       }
@@ -291,6 +328,15 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
             tasks={conversation.backgroundTasks}
             cardWaiting={open.length > 0}
           />
+          {waiting ? (
+            <FolderWait
+              holders={keeping}
+              onSendNow={() => {
+                stopWaiting.mutate(chat.id);
+              }}
+              onStop={stopNow}
+            />
+          ) : null}
           {removed ? (
             <Text size="sm" c="dimmed" px="md" py="md">
               This project was removed from 10db.
@@ -300,6 +346,7 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
               draft={draft}
               onDraft={(next) => {
                 setSendError(null);
+                stopWaiting.reset();
                 setDraft(next);
               }}
               capabilities={caps}
@@ -310,7 +357,7 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
               }}
               phase={phase}
               disabledReason={disabledReason}
-              error={sendError}
+              error={sendError ?? stopWaiting.error?.message ?? null}
               inputRef={input}
               modelControl={
                 <Group gap={4} wrap="nowrap">
@@ -343,6 +390,25 @@ export function ChatTab({ chat, project, onAnnounce, actions, renaming, onRename
                   />
                 </Group>
               }
+              {...(keeping === null
+                ? {}
+                : {
+                    held: {
+                      holders: keeping,
+                      onChoose: async (d: Draft, choice: FolderWhileHeld, how: 'send' | 'redo') => {
+                        if (how === 'send') await post(d, choice);
+                        else
+                          await redo.mutateAsync({
+                            conversationId: chat.conversationId,
+                            text: d.text,
+                            folder: choice,
+                          });
+                      },
+                      onFileAsTasks: async () => {
+                        await post({ ...EMPTY_DRAFT, text: FILE_AS_TASKS_MESSAGE });
+                      },
+                    },
+                  })}
               onSend={post}
               onStop={stopNow}
               onRedo={async (d) => {

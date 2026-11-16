@@ -14,6 +14,7 @@ import {
   InboxItemId,
   PassTurnId,
 } from './ids';
+import { FolderWhileHeldInput } from './folder-hold';
 import { Effort } from './states';
 import { ToolCallView } from './tool-call-view';
 
@@ -180,6 +181,8 @@ export type LiveItemDto = z.infer<typeof LiveItemDto>;
 export const ConversationLiveDto = z.object({
   conversationId: ConversationId,
   items: z.array(LiveItemDto),
+  /** A chat's message waits for Your folder to free. */
+  waitingForFolder: z.boolean(),
 });
 export type ConversationLiveDto = z.infer<typeof ConversationLiveDto>;
 
@@ -226,5 +229,7 @@ export const MentionPath = z
 export const PostConversationMessage = z.object({
   text: z.string(),
   mentions: z.array(MentionPath).default([]),
+  /** What a chat's send does when Your folder is held: absent takes it when free, and reads only otherwise; read_only never takes it. */
+  folder: FolderWhileHeldInput.optional(),
 });
 export type PostConversationMessage = z.infer<typeof PostConversationMessage>;

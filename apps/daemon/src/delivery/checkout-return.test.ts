@@ -1,13 +1,24 @@
 import { realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { BatchDto } from '@10db/contracts';
+import {
+  ConversationOwnerKind,
+  ConversationProfile,
+  ConversationState,
+  EventType,
+  mintId,
+  type BatchDto,
+} from '@10db/contracts';
 import {
   getBatch,
   getBatchRow,
+  insertChat,
+  insertConversation,
   insertWorkstream,
   listWorkstreams,
+  schema,
   transitionBatch,
 } from '@10db/db';
+import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { tempDir } from '../../test/fixtures';
@@ -73,6 +84,8 @@ function endedWhileDown(batch: BatchDto, end: End): void {
 
 const recover = () =>
   recoverBatches({
+    folderHold: h.ctx.folderHold,
+    jobs: h.jobs,
     state: h.state,
     git: h.git,
     inbox: h.inbox,
@@ -257,6 +270,50 @@ describe('a batch that ended while the daemon was down', () => {
     rmSync(alternates);
     expect((await recover()).switchedBack).toEqual([]);
     expect(where().branch).toBe(batch.branch);
+  });
+
+  it('does not hold startup for a chat in the terminal, and switches back once it hands back', async () => {
+    h = createDeliveryHarness({}, { trigger: false });
+    const start = where();
+    const batch = await openBatch('CLOSED');
+    endedWhileDown(batch, 'CLOSED');
+    const terminal = h.state.write((ctx) => {
+      const id = mintId('Chat');
+      const conv = insertConversation(ctx, {
+        projectId: h.project.id,
+        owner: { kind: ConversationOwnerKind.Chat, id },
+        profile: ConversationProfile.Explore,
+        state: ConversationState.TakenOver,
+      });
+      insertChat(ctx, {
+        id,
+        projectId: h.project.id,
+        conversationId: conv.id,
+        title: 'In terminal',
+        tabPosition: 0,
+      });
+      return conv.id;
+    });
+    // Startup returns with the checkout where it was and the place kept.
+    expect((await recover()).switchedBack).toEqual([]);
+    expect(where().branch).toBe(batch.branch);
+    expect(getBatchRow(h.store.db, batch.id).returnSha).not.toBeNull();
+    // The hand back says so, and the queued switch back runs.
+    h.state.write((ctx) => {
+      ctx.tx
+        .update(schema.conversations)
+        .set({ state: ConversationState.IdleCold })
+        .where(eq(schema.conversations.id, terminal))
+        .run();
+      ctx.emit({
+        type: EventType.ConversationState,
+        entityType: 'conversation',
+        entityId: terminal,
+        data: { state: ConversationState.IdleCold },
+      });
+    });
+    await h.jobs.idle();
+    expect(where()).toEqual({ ...start, status: '' });
   });
 
   it('unwinds batches that ended one after another back to where the first found the checkout', async () => {

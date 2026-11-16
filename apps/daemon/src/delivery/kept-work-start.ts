@@ -109,7 +109,21 @@ export function createKeptWorkGate(ctx: DeliveryContext): KeptWorkGate {
             putting.delete(run.id);
             return;
           }
-          await putBackForStart(ctx, [now.taskId], checkoutOf(db, now));
+          // In Your folder the put-back writes files: it waits for a chat's turn, and is asked for again
+          // when the folder frees.
+          const inFolder = checkoutOf(db, now) === getProject(db, now.projectId).repoPath;
+          const reserved = inFolder
+            ? ctx.folderHold.reserveGit(now.projectId, 'putting saved work back in Your folder')
+            : null;
+          if (reserved?.reserved === false) {
+            putting.delete(run.id);
+            return;
+          }
+          try {
+            await putBackForStart(ctx, [now.taskId], checkoutOf(db, now));
+          } finally {
+            if (reserved?.reserved === true) ctx.folderHold.releaseGit(reserved.token);
+          }
           putting.delete(run.id);
           back.add(run.id);
           ctx.onWorkQueued();

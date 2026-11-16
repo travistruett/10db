@@ -5,6 +5,9 @@ import {
   isTerminal,
   passHeldAreas,
   PASS_FOLDER_WAIT_LINE,
+  FOLDER_HOLD_WAIT_NOTICE_KEY,
+  FolderAsker,
+  FolderHolderKind,
   PASS_FOLDER_WAIT_NOTICE_KEY,
   PASS_PR_WAIT_LINE,
   PassState,
@@ -17,6 +20,7 @@ import {
   type AccountId,
   type PassDto,
   type PassId,
+  type ProjectId,
   type ProjectDto,
   type TaskDto,
   type WorkstreamDto,
@@ -40,6 +44,7 @@ import {
   lastTakeOut,
   listBatches,
   listProjects,
+  listSessions,
   listWorkstreams,
   latestPassTurn,
   passHoldingFolder,
@@ -58,6 +63,7 @@ import {
 import type { Clock, Timer } from '../clock';
 import { batchLaunchVerdict, claimScopeOf, LaunchVerdict } from '../delivery';
 import type { StateStore } from '../events';
+import { holderWords, type FolderBlocker, type FolderHold } from '../folder-hold';
 import { existsAsEntry, GitTrustError } from '../git';
 import type { Logger } from '../log';
 import { folderCardOpen, folderSeenOn } from '../pass';
@@ -68,6 +74,8 @@ import { FREE_SESSION_WAIT_KEY, freeSessionWait, laneToYield, type WarmLane } fr
 
 export interface SchedulerOptions {
   readonly state: StateStore;
+  /** Who holds Your folder: a chat's turn or a waiting chat keeps a Your-folder task from starting. */
+  readonly folderHold: FolderHold;
   readonly runner: {
     launch(id: WorkstreamId, fence: number): void;
     isRunning(id: WorkstreamId): boolean;
@@ -279,6 +287,47 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     });
   }
 
+  /**
+   * The chats, 10db's git work and takeovers that keep a Your-folder task from starting. A pass is read
+   * from its own row, and a running task shares the folder with another.
+   */
+  function chatHolders(projectId: ProjectId): FolderBlocker[] {
+    return opts.folderHold
+      .blockers(projectId, { kind: FolderAsker.LaneStart })
+      .filter(
+        (b) =>
+          b.holder.kind !== FolderHolderKind.PassOpen &&
+          b.holder.kind !== FolderHolderKind.PassClosed,
+      );
+  }
+
+  /** Shows on a task that it waits for a chat's turn to finish with Your folder, naming the holder. */
+  function waitForFolder(id: WorkstreamId, blockers: readonly FolderBlocker[]): void {
+    // 10db's own git work is over in moments, and says nothing the builder acts on.
+    if (blockers.every((b) => b.holder.kind === FolderHolderKind.GitWork)) return;
+    const line = `Waits for ${blockers.map((b) => holderWords(b.holder)).join(' and ')} to finish with Your folder`;
+    const stale = (notice: WorkstreamDto['notice']): boolean =>
+      notice === null || (notice.key === FOLDER_HOLD_WAIT_NOTICE_KEY && notice.line !== line);
+    if (!stale(getWorkstreamRow(db, id).notice)) return;
+    opts.state.write((ctx) => {
+      if (!stale(getWorkstreamRow(ctx.tx, id).notice)) return;
+      setWorkstreamNotice(ctx, id, {
+        key: FOLDER_HOLD_WAIT_NOTICE_KEY,
+        tone: 'info',
+        line,
+        body: 'This task starts once the chat is done in Your folder. A message the chat sends meanwhile waits for it too.',
+      });
+    });
+  }
+
+  /** Takes down the folder wait once the run no longer waits for it; any other notice stays. */
+  function endFolderWait(id: WorkstreamId): void {
+    opts.state.write((ctx) => {
+      if (getWorkstreamRow(ctx.tx, id).notice?.key === FOLDER_HOLD_WAIT_NOTICE_KEY)
+        setWorkstreamNotice(ctx, id, null);
+    });
+  }
+
   /** Takes down the pass's wait once the run no longer waits for it; any other notice stays. */
   function endPassWait(id: WorkstreamId): void {
     opts.state.write((ctx) => {
@@ -377,6 +426,18 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         continue;
       }
       if (ws.notice?.key === PASS_FOLDER_WAIT_NOTICE_KEY) endPassWait(ws.id);
+      // A task's first start in Your folder waits for a chat's turn, or a chat waiting for the folder; a task
+      // already started goes on between its steps.
+      const firstInFolder =
+        inPass === null && batch?.worktreePath == null && listSessions(db, ws.id).length === 0;
+      if (firstInFolder) {
+        const held = chatHolders(project.id);
+        if (held.length > 0) {
+          waitForFolder(ws.id, held);
+          continue;
+        }
+      }
+      if (ws.notice?.key === FOLDER_HOLD_WAIT_NOTICE_KEY) endFolderWait(ws.id);
       const account = getAccountRow(db, project.accountId);
       if (account.id === signingIn) continue;
       if (opts.modelWait?.holds(account.id)) continue;
@@ -462,6 +523,8 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       // that would launch now, and never writes where another lane holds the area.
       if (claimConflict(db, ask) !== null || !opts.keptWork.ready(ws)) continue;
       const fence = opts.state.write((ctx) => {
+        // The take and the start are both synchronous: read again here, a chat can't slip between.
+        if (firstInFolder && chatHolders(project.id).length > 0) return null;
         const claimed = acquireClaims(ctx, { ...ask, leaseExpiresAt: leaseUntil });
         if (!claimed.ok) return null;
         const f = acquireLease(ctx, ws.id, opts.instanceId, leaseUntil);

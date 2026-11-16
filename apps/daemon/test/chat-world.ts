@@ -7,6 +7,7 @@ import {
   type Effort,
   type ProjectDto,
 } from '@10db/contracts';
+import { join } from 'node:path';
 import { createTestStore, seedProject, type Store } from '@10db/db';
 import { ManualClock } from '../src/clock';
 import {
@@ -16,12 +17,14 @@ import {
   type ChatHooksDeps,
   type ChatService,
 } from '../src/chat';
+import { createFolderHold, type FolderHold } from '../src/folder-hold';
 import { createExploreEngine, pictureLimitsFor, type ExploreEngine } from '../src/conversation';
 import { createEventBus, createLiveFrames, createStateStore, type StateStore } from '../src/events';
 import { createInboxService, type InboxService } from '../src/inbox';
 import type { Judge } from '../src/judge';
 import { silentLogger } from '../src/log';
 import { mintSessionToken } from '../src/mcp';
+import { fileAccessJudge } from '../src/sandbox';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import type { ShapeLaunch } from '../src/shape';
 import { shapeAgentModels } from '../src/shape';
@@ -37,6 +40,7 @@ export interface ChatWorld {
   readonly adapter: FakeAdapter;
   readonly clock: ManualClock;
   readonly chat: ChatService;
+  readonly folderHold: FolderHold;
   readonly inbox: InboxService;
   readonly project: ProjectDto;
   readonly dataDir: string;
@@ -56,17 +60,28 @@ export function chatWorld(
     readonly judge?: JudgeKind;
     /** 10db's judge, made over the world's store; absent, a `tendb` chat is on the rules. */
     readonly tendb?: (world: { readonly store: Store }) => Judge;
+    /** A daemon restart: a new engine, hold and service over the earlier world's store and folders. */
+    readonly over?: ChatWorld;
+    /** The project's checkout the session works in: a real repository, where a test reads what landed. */
+    readonly checkout?: string;
   } = {},
 ): ChatWorld {
-  const { store, close } = createTestStore();
-  const project = seedProject(store, { name: 'alpha' });
+  const { store, close } =
+    opts.over === undefined
+      ? createTestStore()
+      : { store: opts.over.store, close: () => undefined };
+  const project = opts.over?.project ?? seedProject(store, { name: 'alpha' });
   const bus = createEventBus();
   const events: DaemonEvent[] = [];
   bus.subscribe((e) => events.push(e));
   const state = createStateStore(store, bus);
+  const folderHold = createFolderHold({ state, bus });
   const adapter = new FakeAdapter(opts.book ?? {});
   const clock = new ManualClock();
-  const dir = tempDir('chat');
+  const dir =
+    opts.over === undefined
+      ? tempDir('chat')
+      : { path: opts.over.dataDir, cleanup: () => undefined };
   const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
   const launched = { kind: AccountKind.ClaudeSubscription as AgentAccountKind };
   const engine = createExploreEngine({
@@ -85,7 +100,7 @@ export function chatWorld(
     },
   });
   const launch = (model: string | null, effort: Effort | null): ShapeLaunch => ({
-    cwd: '/repo',
+    cwd: opts.checkout ?? '/repo',
     model: model ?? 'claude-opus-5-5',
     modelId: model ?? 'claude-opus-5-5',
     effort: effort ?? 'high',
@@ -97,13 +112,37 @@ export function chatWorld(
       kind: launched.kind,
       identity: null,
     },
-    access: { checkout: '/repo', home: '/home', protectedReads: [], sandboxRoots: ['/tmp/10db'] },
+    access: {
+      checkout: opts.checkout ?? '/repo',
+      home: '/home',
+      protectedReads: [],
+      sandboxRoots: ['/tmp/10db'],
+      // A real checkout is judged on its real paths, as a session's file access is.
+      ...(opts.checkout === undefined
+        ? {}
+        : {
+            commands: {
+              protectedPaths: [],
+              fileAccess: fileAccessJudge({
+                checkout: opts.checkout,
+                home: '/home',
+                protectedReads: [],
+                readList: [],
+                systemDocRoots: [],
+                configDir: join(dir.path, 'no-claude-config'),
+                providerSessionId: null,
+                sandboxTemp: { roots: ['/tmp/10db'], own: '/tmp/10db/own' },
+              }),
+            },
+          }),
+    },
   });
   engine.register(
     'chat',
     chatHooks({
       live: createChatLiveSessions(),
       state,
+      folderHold,
       log: silentLogger,
       dataDir: dir.path,
       now: () => clock.now(),
@@ -120,6 +159,7 @@ export function chatWorld(
   const chat = createChatService({
     state,
     engine,
+    folderHold,
     dataDir: dir.path,
     now: () => clock.now(),
     modelsOf: () => ({
@@ -138,6 +178,7 @@ export function chatWorld(
     adapter,
     clock,
     chat,
+    folderHold,
     inbox,
     project,
     dataDir: dir.path,

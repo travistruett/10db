@@ -1,15 +1,19 @@
+import { resolve } from 'node:path';
 import { ChatToolName, JudgeKind } from '@10db/contracts';
-import { stringField } from '../guard';
+import { isWithinOnEveryReading, stringField } from '../guard';
 import type { ShapeVerdict } from '../sessions';
+import { expandHome } from '../sandbox';
 import { judgeShapeCall, type ShapeAccess } from '../shape';
+import { CHAT_GIT_REFUSAL, JUDGED_CHAT_TOOL_ASK, JUDGED_CHAT_TOOLS } from './git-rule';
 
 // Sessions spec §7.1, trust line §5: what a chat's PreToolUse hook settles before the judge sees a
 // call. A chat reads the project and its pictures, runs commands in its read-only sandbox, searches the
 // web where a judge sees each call, launches Claude Code's own agents and calls its own builder tools.
-// It writes nothing until M6, so every tool that writes is refused.
+// It edits files only while its turn holds Your folder (`ChatFolder`), on the real path of each file.
 
 const READ_TOOLS: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob']);
 const WEB_TOOLS: ReadonlySet<string> = new Set(['WebSearch', 'WebFetch']);
+const EDIT_TOOLS: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const AGENT_TOOLS: ReadonlySet<string> = new Set(['Agent', 'Task']);
 const OWN_PREFIX = 'mcp__10db__';
 const CHAT_TOOLS: ReadonlySet<string> = new Set(Object.values(ChatToolName));
@@ -24,6 +28,60 @@ export const CHAT_WRITES_LATER =
 export const CHAT_NO_WEB =
   "The web needs a judge that sees each call, and this project's account has none yet, so this chat reads the project only.";
 
+/** What a chat's guard reads of the folder hold at each call: a turn's hold can change between calls. */
+export interface ChatFolder {
+  /** Whether the chat's turn holds Your folder now, for this session: an older session of the chat never does. */
+  holds(): boolean;
+  /** Whether this session was opened able to write Your folder. */
+  readonly writable: boolean;
+  /** Who keeps the turn from holding it, in words. */
+  heldBy(): string;
+}
+
+/** What a chat's agent reads when it calls a tool after its turn gave Your folder back, or from another session. */
+export const CHAT_TURN_ENDED =
+  'This turn has ended and given Your folder back, so nothing it started may act.';
+
+/** What a chat's agent reads when it edits while another holder has Your folder. */
+export const chatFolderInUse = (holder: string): string => `Your folder is in use by ${holder}.`;
+
+/** The path a file tool names, with `~` read as the home folder and the rest resolved from the call's directory. */
+function editedPath(call: ChatCall, access: ShapeAccess): string | null {
+  if (typeof call.input !== 'object' || call.input === null) return null;
+  // The field is the tool's own: another field in the same input is never read, as Claude Code reads it.
+  const named = stringField(
+    call.input,
+    call.toolName === 'NotebookEdit' ? 'notebook_path' : 'file_path',
+  );
+  if (named === null || named === '') return null;
+  return resolve(call.cwd ?? access.checkout, expandHome(named, access.home));
+}
+
+/** Judges an edit: the folder must be held, the file inside the checkout, and its real path not git state or protected. */
+function judgeEdit(
+  call: ChatCall,
+  access: ShapeAccess,
+  folder: ChatFolder | undefined,
+): ShapeVerdict {
+  if (folder === undefined) return deny(CHAT_WRITES_LATER);
+  if (!folder.holds()) return deny(chatFolderInUse(folder.heldBy()));
+  const judge = access.commands?.fileAccess;
+  const path = editedPath(call, access);
+  if (judge === undefined || path === null) return deny(`${call.toolName} could not be judged.`);
+  try {
+    // Every reading must land inside: a link, even a dangling one, is followed through its target.
+    if (!isWithinOnEveryReading(access.checkout, path))
+      return deny(`${path} is outside Your folder.`);
+    const verdict = judge.write(path);
+    if (verdict !== 'ok') return deny(verdict.refuse);
+    // A chat has no card for an edit the lane's guard would ask about (a Claude Code configuration path).
+    const asked = judge.writeAsk(path);
+    return asked === null ? ALLOW : deny(`${asked} A chat never edits it.`);
+  } catch {
+    return deny(`${path} could not be resolved to one real path; 10db refuses it.`);
+  }
+}
+
 /** A call as the hook sees it; `agentId` is set inside a subagent. */
 export interface ChatCall {
   readonly toolName: string;
@@ -37,14 +95,23 @@ export interface ChatCall {
  * The PreToolUse answer for a chat's call or its subagent's. A subagent of a chat is Claude Code's
  * own, so it reads and runs commands as the chat does.
  */
-export function judgeChatCall(call: ChatCall, access: ShapeAccess): ShapeVerdict {
+export function judgeChatCall(
+  call: ChatCall,
+  access: ShapeAccess,
+  folder?: ChatFolder,
+): ShapeVerdict {
   const asSession = {
     toolName: call.toolName,
     toolInput: call.input,
     ...(call.cwd === undefined ? {} : { cwd: call.cwd }),
   };
-  if (READ_TOOLS.has(call.toolName) || call.toolName === 'Bash')
-    return judgeShapeCall(asSession, access);
+  // A session that can write keeps no call while its turn doesn't hold the folder (a background agent's
+  // or a job's), however long it stays warm, and none from a session the chat has since replaced.
+  if (folder?.writable === true && !folder.holds()) return deny(CHAT_TURN_ENDED);
+  if (EDIT_TOOLS.has(call.toolName)) return judgeEdit(call, access, folder);
+  if (READ_TOOLS.has(call.toolName)) return judgeShapeCall(asSession, access);
+  if (call.toolName === 'Bash')
+    return judgeShapeCall(asSession, { ...access, gitWriteRefusal: CHAT_GIT_REFUSAL });
   if (WEB_TOOLS.has(call.toolName))
     return access.judge === JudgeKind.Native
       ? judgeShapeCall(asSession, access)
@@ -58,11 +125,16 @@ export function judgeChatCall(call: ChatCall, access: ShapeAccess): ShapeVerdict
       stringField(call.input, 'isolation') !== null;
     return isolated ? deny('A chat launches its agents in place, with no isolation set.') : ALLOW;
   }
-  if (call.toolName.startsWith(OWN_PREFIX))
-    return CHAT_TOOLS.has(call.toolName.slice(OWN_PREFIX.length))
-      ? ALLOW
-      : deny(`${call.toolName} is not one of this chat's tools.`);
+  if (call.toolName.startsWith(OWN_PREFIX)) {
+    const own = call.toolName.slice(OWN_PREFIX.length);
+    if (!CHAT_TOOLS.has(own)) return deny(`${call.toolName} is not one of this chat's tools.`);
+    // Only 10db's judge settles these. Claude's auto mode lets a push, a pull request and a merge through unasked,
+    // so on it, and on the rules floor, the builder is asked.
+    if (JUDGED_CHAT_TOOLS.has(own) && access.judge !== JudgeKind.Tendb)
+      return { decision: 'ask', reason: JUDGED_CHAT_TOOL_ASK };
+    return ALLOW;
+  }
   // A tool of one of the project's approved servers is judged as Plan's are.
   if (call.toolName.startsWith('mcp__')) return judgeShapeCall(asSession, access);
-  return deny(CHAT_WRITES_LATER);
+  return deny(`${call.toolName} is not a tool this chat uses.`);
 }

@@ -13,6 +13,7 @@ export * from './events';
 export * from './evidence';
 export * from './goal-digest';
 export * from './goal-removal';
+export * from './folder-lanes';
 export * from './goals';
 export * from './handoffs';
 export * from './hazard-assessment';

@@ -1,3 +1,6 @@
+import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { InboxItemDto } from '@10db/contracts';
@@ -15,7 +18,7 @@ import { chatMadeTask, getDecisionDto, getPrinciple, listInbox } from '@10db/db'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { apiClient } from '../../test/api-client';
-import { createTempRepo, tempDir, waitForAsync } from '../../test/fixtures';
+import { createTempRepo, isolatedGitEnv, tempDir, waitForAsync } from '../../test/fixtures';
 import { seedProfiles } from '../../test/seed-profiles';
 import { ManualClock, type Clock } from '../clock';
 import { startDaemon, type RunningDaemon } from '../daemon';
@@ -94,7 +97,7 @@ const ToolText = z.object({
  * promise settles once the turn has ended.
  */
 async function agentTurn(chat: ChatDto, work: (call: Call, turn: FakeShapeTurn) => Promise<void>) {
-  const outcome: { failure: Error | null } = { failure: null };
+  const outcome: { failure: Error | null; ended: boolean } = { failure: null, ended: false };
   adapter.shapeBehaviour = async (turn) => {
     const client = await connect(turn.spec.mcp.url, turn.spec.mcp.token);
     try {
@@ -107,12 +110,15 @@ async function agentTurn(chat: ChatDto, work: (call: Call, turn: FakeShapeTurn) 
     } finally {
       await client.close();
     }
+    outcome.ended = true;
     return { text: 'Done.' };
   };
   await api.post(`/conversations/${chat.conversationId}/messages`, z.unknown(), { text: 'Go on.' });
   await waitForAsync(async () => {
     const conv = await api.get(`/conversations/${chat.conversationId}`, ConversationDto);
-    return conv.state === 'idle_warm' ? conv : false;
+    return outcome.ended && (conv.state === 'idle_warm' || conv.state === 'idle_cold')
+      ? conv
+      : false;
   });
   if (outcome.failure !== null) throw outcome.failure;
 }
@@ -364,5 +370,43 @@ describe("a chat's tools on /mcp", () => {
     expect((await post(`${running().url}/builder/mcp`, token)).status).toBe(401);
     await api.post(`/chats/${chat.id}/archive`, ChatDto);
     expect((await post(url, token)).status).toBe(401);
+  });
+});
+
+// Sessions spec §7.3: a turn that holds Your folder branches and commits through the daemon, and its tools
+// stop working the moment the turn gives the folder back.
+describe("a chat's git tools through the daemon", () => {
+  const gitOf = (...args: string[]) =>
+    execFileSync('git', ['-C', repo.path, ...args], { env: isolatedGitEnv(), stdio: 'pipe' })
+      .toString()
+      .trim();
+
+  it('branches and commits what the turn edited with the builder’s identity, then refuses once the turn is over', async () => {
+    const chat = await newChat();
+    let token = '';
+    let url = '';
+    await agentTurn(chat, async (call, turn) => {
+      token = turn.spec.mcp.token;
+      url = turn.spec.mcp.url;
+      writeFileSync(join(repo.path, 'login.ts'), 'export const retry = 1;\n');
+      await call('make_branch', { name: 'retry-login' });
+      const answer = JSON.parse(
+        await call('commit_changes', { message: 'Retry login once', paths: ['login.ts'] }),
+      ) as { done: boolean; sha: string };
+      expect(answer.done).toBe(true);
+    });
+    expect(gitOf('branch', '--show-current')).toBe('retry-login');
+    expect(gitOf('show', '--name-only', '--format=', 'HEAD')).toBe('login.ts');
+    expect(gitOf('log', '-1', '--format=%an <%ae>|%s')).toBe(
+      '10db test <test@10db.invalid>|Retry login once',
+    );
+    // The turn ended and the folder went back: the warm session's tool no longer changes git.
+    const client = await connect(url, token);
+    const late = ToolText.parse(
+      await client.callTool({ name: 'commit_changes', arguments: { message: 'late' } }),
+    );
+    await client.close();
+    expect(late.content.map((c) => c.text).join('')).toMatch(/does not hold Your folder/);
+    expect(gitOf('rev-list', '--count', 'HEAD')).toBe('2');
   });
 });

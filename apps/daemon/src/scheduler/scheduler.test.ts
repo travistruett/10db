@@ -1,11 +1,16 @@
 import { createDeliveryJobs } from '../delivery';
+import { createFolderHold, type FolderHold } from '../folder-hold';
 import { rmSync } from 'node:fs';
 import {
+  ConversationOwnerKind,
+  ConversationProfile,
+  ConversationState,
   mintId,
   REVERTED_NOTICE_KEY,
   type AccountId,
   type BatchId,
   type BatchState,
+  type ChatId,
   type ProjectId,
   type WorkstreamDto,
   type WorkstreamId,
@@ -15,6 +20,9 @@ import {
   activeClaims,
   countLanes,
   insertPass,
+  insertChat,
+  insertConversation,
+  insertSession,
   countMidSession,
   createTestStore,
   listBoardColumns,
@@ -30,7 +38,6 @@ import {
   insertBatch,
   insertBuilderMessage,
   insertPassTurn,
-  insertSession,
   insertTakeOut,
   insertTask,
   insertWorkstream,
@@ -60,7 +67,7 @@ import {
   type AccountRuntime,
 } from '../accounts';
 import { ManualClock } from '../clock';
-import { createEventBus, createStateStore, type StateStore } from '../events';
+import { createEventBus, createStateStore, type EventBus, type StateStore } from '../events';
 import { createGit, GitTrustError } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
@@ -71,6 +78,8 @@ import { createScheduler } from './index';
 let store: Store;
 let close: () => void;
 let state: StateStore;
+let bus: EventBus;
+let folderHold: FolderHold;
 let clock: ManualClock;
 let launched: { id: WorkstreamId; fence: number }[];
 /** The warm sessions the scheduler asked the runner to close. */
@@ -103,7 +112,9 @@ beforeEach(() => {
   connecting = null;
   clock = new ManualClock(new Date(2026, 9, 20, 12));
   ({ store, close } = createTestStore(() => clock.now()));
-  state = createStateStore(store, createEventBus());
+  bus = createEventBus();
+  state = createStateStore(store, bus);
+  folderHold = createFolderHold({ state, bus });
   inbox = createInboxService({ state, onParkedAnswer: () => undefined });
   pauses = createAccountPauses({
     state,
@@ -144,6 +155,7 @@ function scheduler(
   keptWork: { ready(run: WorkstreamDto): boolean } = { ready: () => true },
 ) {
   return createScheduler({
+    folderHold,
     keptWork,
     state,
     clock,
@@ -1189,6 +1201,122 @@ describe('UI Workbench passes', () => {
       );
       expect(await scheduler().tick()).toBe(1);
       expect(launched.map((l) => l.id)).toEqual([ordinary.id]);
+    } finally {
+      dir.cleanup();
+    }
+  });
+});
+
+// Sessions spec §7.3: a task's first start in Your folder waits for a chat's turn and for a chat waiting for the
+// folder; a task already started goes on between its steps, and a task in a separate copy never waits.
+describe('Your folder and chats', () => {
+  function chat(title: string, projectId: ProjectId): ChatId {
+    return state.write((ctx) => {
+      const id = mintId('Chat');
+      const conv = insertConversation(ctx, {
+        projectId,
+        owner: { kind: ConversationOwnerKind.Chat, id },
+        profile: ConversationProfile.Explore,
+        state: ConversationState.IdleCold,
+      });
+      return insertChat(ctx, { id, projectId, conversationId: conv.id, title, tabPosition: 0 });
+    }).id;
+  }
+
+  it('holds a first start while a chat’s turn holds the folder, naming it, and launches after the release', async () => {
+    const run = queue();
+    const me = chat('Retry login', run.project.id);
+    folderHold.takeTurn(run.project.id, me);
+    expect(await scheduler().tick()).toBe(0);
+    expect(getWorkstream(store.db, run.workstream.id).notice).toMatchObject({
+      key: 'folder-hold',
+      line: 'Waits for the chat \u2018Retry login\u2019 to finish with Your folder',
+    });
+    folderHold.releaseTurn(me);
+    expect(await scheduler().tick()).toBe(1);
+    expect(getWorkstream(store.db, run.workstream.id).notice).toBeNull();
+  });
+
+  // Value: protects=a task never starts in Your folder under a chat that took it a moment before the write;
+  // fails_when=the write that moves the task to STARTING skips its own look at the chat holders;
+  // why_new=every other row holds the folder before the tick, so the earlier check alone passes them;
+  // no_claim=a take that lands after the write, which the hold's own rows cover.
+  it('does not start a first start when a chat takes the folder after the earlier checks', async () => {
+    const run = queue();
+    const me = chat('Retry login', run.project.id);
+    const takes = {
+      ready: () => {
+        folderHold.takeTurn(run.project.id, me);
+        return true;
+      },
+    };
+    expect(await scheduler({ global: 4 }, new Set(), takes).tick()).toBe(0);
+    expect(getWorkstream(store.db, run.workstream.id).state).toBe('QUEUED');
+    folderHold.releaseTurn(me);
+    expect(await scheduler().tick()).toBe(1);
+  });
+
+  it('holds a first start for 10db’s own git work without a notice: it is over in moments', async () => {
+    const run = queue();
+    const reserved = folderHold.reserveGit(run.project.id, 'cutting a branch');
+    expect(reserved.reserved).toBe(true);
+    expect(await scheduler().tick()).toBe(0);
+    expect(getWorkstream(store.db, run.workstream.id).notice).toBeNull();
+    if (reserved.reserved) folderHold.releaseGit(reserved.token);
+    expect(await scheduler().tick()).toBe(1);
+  });
+
+  it('holds a first start behind a chat that waits, and lets a task already started go on', async () => {
+    const run = queue({
+      areas: [
+        { name: 'api', globs: ['api/**'] },
+        { name: 'web', globs: ['web/**'] },
+      ],
+    });
+    const started = add(run.project, ['web']);
+    state.write((ctx) => {
+      insertSession(ctx, {
+        workstreamId: started.workstream.id,
+        provider: 'claude',
+        model: 'sonnet',
+        effort: 'medium',
+        mode: 'managed',
+        mcpTokenHash: 'hash-started',
+        accountId: run.project.accountId,
+      });
+    });
+    const me = chat('Retry login', run.project.id);
+    folderHold.wait(run.project.id, me, () => 'kept');
+    expect(await scheduler().tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([started.workstream.id]);
+    expect(getWorkstream(store.db, run.workstream.id).notice?.key).toBe('folder-hold');
+  });
+
+  it('does not hold a run in a separate copy', async () => {
+    const dir = tempDir('worktree');
+    try {
+      const project = seedProject(store, {});
+      const batch = state.write((ctx) => {
+        const b = insertBatch(ctx, {
+          projectId: project.id,
+          title: 'Copy',
+          baseBranch: 'main',
+          worktreePath: dir.path,
+        });
+        return b;
+      });
+      const task = state.write((ctx) =>
+        insertTask(ctx, project.id, { title: 'c', acceptanceCriteria: ['x'], areas: ['api'] }),
+      );
+      const ws = state.write((ctx) =>
+        insertWorkstream(ctx, task.id, {
+          batchId: batch.id,
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        }),
+      );
+      folderHold.takeTurn(project.id, chat('Retry login', project.id));
+      await scheduler().tick();
+      expect(getWorkstream(store.db, ws.id).notice?.key).not.toBe('folder-hold');
     } finally {
       dir.cleanup();
     }

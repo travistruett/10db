@@ -222,6 +222,7 @@ import {
   pictureLimitsFor,
 } from '../conversation';
 import {
+  chatFolder,
   chatHooks,
   createChatLiveSessions,
   createChatService,
@@ -306,6 +307,7 @@ import {
   createLaneSandbox,
   createLedgerSweep,
   reapLaneProcessLedgers,
+  secretFilesIn,
   sweepSystemTempDirs,
   sweepSystemTempFiles,
   type SweepReport,
@@ -316,6 +318,7 @@ import {
   type LedgerSweep,
   type SandboxRuntime,
 } from '../sandbox';
+import { createFolderHold } from '../folder-hold';
 import { createAdmission, createScheduler, type Scheduler } from '../scheduler';
 import {
   createDrain,
@@ -679,6 +682,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     createStore(db, () => clock.now()),
     bus,
   );
+  const folderHold = createFolderHold({ state, bus });
   const liveFrames =
     opts.liveFrames ??
     createLiveFrames((error) => {
@@ -1246,6 +1250,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   };
   const delivery: DeliveryContext = {
     state,
+    folderHold,
     git,
     gh: opts.gh ?? createGh(createSystemGhExec(ghTools)),
     inbox,
@@ -1640,6 +1645,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const chat = createChatService({
     state,
     engine: exploreEngine,
+    folderHold,
     dataDir: opts.dataDir,
     now: () => clock.now(),
     modelsOf: conversationModels,
@@ -1655,6 +1661,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     chatHooks({
       live: chatLive,
       state,
+      folderHold,
       log: logger.child({ component: 'chat' }),
       dataDir: opts.dataDir,
       now: () => clock.now(),
@@ -1735,6 +1742,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   runner = createdRunner;
   const createdScheduler = createScheduler({
     state,
+    folderHold,
     runner: createdRunner,
     accounts: {
       ...accounts,
@@ -1890,7 +1898,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
   };
   answerPassCards = (item, answer) => {
-    answerPassCard(passWork, item, answer);
+    answerPassCard({ ...passWork, folderHold }, item, answer);
     answerPassMoveCard(delivery, item, answer);
     void answerMoveToCopy(passMoves, item, answer);
   };
@@ -1925,9 +1933,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // A move back that came due reads the pauses.
   moveBack.restore();
   await recoverBatches({
+    folderHold,
     state,
     git,
     inbox,
+    jobs: delivery.jobs,
     processes,
     shipper,
     starter,
@@ -2064,6 +2074,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       keepAwake.refresh();
       watcher?.sync();
     }
+  });
+  // A task waiting for a chat's turn, and a put-back that waited for it, start once the folder frees.
+  const unsubscribeFolderHold = bus.subscribe((event) => {
+    if (event.type === EventType.FolderHoldChanged) createdScheduler.requestTick();
   });
   // A yield the builder chose for a task that then ended is never delivered; drop it.
   const unsubscribeYields = forgetEndedYields(bus, claimWaits);
@@ -2231,6 +2245,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     chat: createChatApiServices({
       state,
       chat,
+      folderHold,
       git: (repo, args) => runGit(repo, args, { bin: gitBin }),
       now: () => clock.now(),
       log: logger.child({ component: 'chat' }),
@@ -2396,6 +2411,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           },
           end: () => {
             updateDrain.end();
+            // A chat that waited for Your folder through the drain runs now.
+            folderHold.serveWaiters();
             // Lanes start again, and a batch whose work finished while new ships were held ships.
             createdScheduler.requestTick();
             shipper.checkOpenBatches();
@@ -2410,6 +2427,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         },
         resume: () => {
           installHold.end();
+          folderHold.serveWaiters();
           createdScheduler.start();
           createdScheduler.requestTick();
         },
@@ -2512,6 +2530,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         clock,
         builder: createBuilderTools(services),
         getTask: (id) => services.getTask(id),
+        gitTools: {
+          git,
+          folderHold,
+          live: chatLive,
+          gh: delivery.gh,
+          filesDir: (conversationId) => chatFolder(opts.dataDir, conversationId),
+          repoOf: (projectId) => getProject(state.db, projectId).repoPath,
+          secretFilesOf: secretFilesIn,
+          net: () => ({
+            env: delivery.networkEnv(),
+            timeoutMs: delivery.limits.networkTimeoutMs,
+          }),
+        },
       }),
     }),
   });
@@ -2650,6 +2681,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       moveBack.stop();
       nightly.cancel();
       unsubscribeLanes();
+      unsubscribeFolderHold();
+      folderHold.close();
       unsubscribeYields();
       unsubscribeHazards();
       hazardAssessor.stop();

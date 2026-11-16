@@ -39,6 +39,8 @@ afterEach(() => {
 
 const recover = () =>
   recoverBatches({
+    folderHold: h.ctx.folderHold,
+    jobs: h.jobs,
     state: h.state,
     git: h.git,
     inbox: h.inbox,
@@ -222,6 +224,7 @@ describe('recoverBatches', () => {
     );
     const launched: string[] = [];
     const scheduler = createScheduler({
+      folderHold: h.ctx.folderHold,
       keptWork: createKeptWorkGate(h.ctx),
       state: h.state,
       clock: new ManualClock(),

@@ -86,6 +86,36 @@ describe('lane processes on the real machine', () => {
     expect(left).toEqual([]);
   });
 
+  it('stops what a command started after the mark, and leaves the session’s own process running', async (ctx) => {
+    if (!psWorks) ctx.skip();
+    // The session waits for a line, then runs a command: a shell with a job in a subshell, as `pnpm dev &` is.
+    const session = spawn(
+      '/bin/sh',
+      ['-c', 'read go; /bin/sh -c "(sleep 306 &) ; sleep 307" ; sleep 308'],
+      { detached: true, stdio: ['pipe', 'ignore', 'ignore'] },
+    );
+    started.push(session);
+    const pid = session.pid ?? 0;
+    await until(() => alive(pid));
+    const row = (await systemProcessTable()).find((r) => r.pid === pid);
+    if (row === undefined) throw new Error('session not listed');
+    const watch = createLaneProcessWatch({
+      table: systemProcessTable,
+      ledger: null,
+      graceMs: 3_000,
+    });
+    await watch.track({ pid, startedAt: row.startedAt });
+    watch.markOwn();
+    session.stdin.write('go\n');
+    // The inner shell, its subshell's orphaned sleep and the foreground sleep share the session's group.
+    await until(async () => (await systemProcessTable()).filter((r) => r.pgid === pid).length >= 4);
+    await watch.endJobs();
+    // The job the subshell handed to launchd is gone; the session's own process runs on.
+    expect((await systemProcessTable()).filter((r) => r.pgid === pid && r.ppid === 1)).toEqual([]);
+    expect(await alive(pid)).toBe(true);
+    await watch.end();
+  });
+
   it('stops a job a command handed to launchd before any sample by its open output file, and leaves one in the checkout alone', async (ctx) => {
     if (!psWorks || !lsofWorks) ctx.skip();
     // The lane's temp dir, and the checkout other lanes and the builder share.

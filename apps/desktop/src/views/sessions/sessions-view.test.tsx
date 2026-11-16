@@ -1,4 +1,4 @@
-import { mintId } from '@10db/contracts';
+import { FolderHolderKind, mintId } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -10,6 +10,8 @@ import {
   type ChatServerOptions,
 } from '../../test/chat-fixtures';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
+import { folderKeys } from '../../daemon/project-folder-queries';
+import { folderDto, folderHolder } from '../../test/folder-fixtures';
 import { projectViewDto } from '../../test/fixtures';
 
 // Sessions' first screen: a fresh tab that starts a chat, and Recent and Start from beneath it.
@@ -169,6 +171,43 @@ describe('Sessions: a fresh tab', () => {
       body: { text: 'Why does login fail?' },
     });
   });
+
+  it.each([
+    { button: 'Wait for It', folder: 'wait' },
+    { button: 'Send Reading Only', folder: 'read_only' },
+  ])(
+    'with Your folder held, the first message makes and posts nothing until a choice: $button sends folder $folder',
+    async ({ button, folder }) => {
+      const { chat, queryClient } = open('/sessions', {}, [
+        http.get(daemonUrl('/projects/:projectId/folder'), () =>
+          HttpResponse.json(
+            folderDto({
+              projectId: ampsio.id,
+              holders: [folderHolder(FolderHolderKind.Lane, 'Bump vite')],
+            }),
+          ),
+        ),
+      ]);
+      await screen.findByRole('textbox', { name: 'Message' });
+      await waitFor(() => {
+        expect(queryClient.getQueryData(folderKeys.of(ampsio.id))).toBeDefined();
+      });
+      type('Why does login fail?');
+      send();
+      expect(
+        await screen.findByText('Your folder is in use by the task ‘Bump vite’.'),
+      ).toBeTruthy();
+      expect(chat.created).toHaveLength(0);
+      expect(chat.messages).toHaveLength(0);
+      expect(screen.queryByRole('button', { name: 'File as Tasks' })).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: button }));
+      await waitFor(() => {
+        expect(chat.messages).toHaveLength(1);
+      });
+      expect(chat.created).toHaveLength(1);
+      expect(chat.messages[0]?.body).toEqual({ text: 'Why does login fail?', folder });
+    },
+  );
 
   it('a first @ makes the chat before any send, then lists the files of its conversation', async () => {
     const { chat, router } = open('/sessions', {

@@ -1,4 +1,4 @@
-import type { ChatDto, Effort, ProjectId, ProjectViewDto } from '@10db/contracts';
+import type { ChatDto, Effort, FolderWhileHeld, ProjectId, ProjectViewDto } from '@10db/contracts';
 import { Box, Group, Select, Text } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
@@ -7,6 +7,7 @@ import { CONVERSATION_WIDTH } from '../../conversation/conversation-layout';
 import { composerPhase } from '../../conversation/composer-phase';
 import { hasContent, type Draft } from '../../conversation/drafts';
 import { ModelMenu } from '../../conversation/model-menu';
+import { useProjectFolder } from '../../daemon/project-folder-queries';
 import {
   useChatModels,
   useCreateChat,
@@ -14,8 +15,9 @@ import {
   useSessionStarts,
 } from '../../daemon/chat-queries';
 import type { FreshTab as FreshTabState } from './fresh-tabs';
+import { keepingWords } from './kind-line';
 import { RecentSessions } from './recent-sessions';
-import { draftKey, useSessionDraft } from './session-drafts';
+import { draftKey, useSessionDraft, type SendRequest } from './session-drafts';
 import { StartFrom } from './start-from';
 
 // Sessions UI spec §6.2: a tab that is not yet a chat. The chat is made at the first `@` or
@@ -33,8 +35,8 @@ export interface FreshTabProps {
   readonly projects: readonly ProjectViewDto[];
   readonly onProject: (projectId: ProjectId) => void;
   readonly onModel: (model: string | null, effort: Effort | null) => void;
-  /** The chat exists: the screen replaces this tab with it and, when `send`, sends the draft there. */
-  readonly onChatMade: (chat: ChatDto, send: boolean) => void;
+  /** The chat exists: the screen replaces this tab with it and, when `send` is set, sends the draft there. */
+  readonly onChatMade: (chat: ChatDto, send: SendRequest | null) => void;
   readonly onOpenRecent: (chat: ChatDto) => void;
 }
 
@@ -56,18 +58,22 @@ export function FreshTab({
   const starts = useSessionStarts(tab.projectId);
   const recent = useRecentChats(tab.projectId);
   const create = useCreateChat();
+  // Holders that would keep the new chat's first message from writing: Send asks before it runs.
+  const keeping = keepingWords(null, useProjectFolder(tab.projectId));
   const [createError, setCreateError] = useState<string | null>(null);
   const input = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
   // The chat being made, shared by an `@` and a send that come together, so there is only ever one.
-  const making = useRef<{ promise: Promise<ChatDto>; want: { send: boolean } } | null>(null);
+  const making = useRef<{ promise: Promise<ChatDto>; want: { send: SendRequest | null } } | null>(
+    null,
+  );
 
   useEffect(() => {
     input.current?.focus();
   }, [tab.id]);
 
-  const ensureChat = (send: boolean): Promise<ChatDto> => {
+  const ensureChat = (send: SendRequest | null): Promise<ChatDto> => {
     if (making.current !== null) {
-      making.current.want.send ||= send;
+      making.current.want.send ??= send;
       return making.current.promise;
     }
     const want = { send };
@@ -93,7 +99,7 @@ export function FreshTab({
     setDraft(next);
     setCreateError(null);
     if (!OPEN_MENTION.test(next.text)) return;
-    ensureChat(false).catch((error: unknown) => {
+    ensureChat(null).catch((error: unknown) => {
       setCreateError(error instanceof Error ? error.message : String(error));
     });
   };
@@ -160,8 +166,18 @@ export function FreshTab({
                 />
               )
             }
+            {...(keeping === null
+              ? {}
+              : {
+                  held: {
+                    holders: keeping,
+                    onChoose: async (_draft: Draft, choice: FolderWhileHeld) => {
+                      await ensureChat({ folder: choice });
+                    },
+                  },
+                })}
             onSend={async () => {
-              await ensureChat(true);
+              await ensureChat({});
             }}
             onStop={() => undefined}
             onRedo={() => undefined}

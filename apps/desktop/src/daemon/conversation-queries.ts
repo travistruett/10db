@@ -8,6 +8,7 @@ import {
   type ConversationFileId,
   type ConversationId,
   type ConversationItemId,
+  type FolderWhileHeld,
 } from '@10db/contracts';
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
@@ -198,17 +199,26 @@ export interface ConversationMessageSend {
   readonly text: string;
   readonly mentions?: readonly string[];
   readonly pictures?: readonly File[];
+  /** What a chat's send does when Your folder is held; absent reads only. */
+  readonly folder?: FolderWhileHeld;
 }
 
 /** The request body: JSON for words alone, a multipart form when pictures go with them. */
-function messageRequest({ text, mentions = [], pictures = [] }: ConversationMessageSend) {
+function messageRequest({ text, mentions = [], pictures = [], folder }: ConversationMessageSend) {
   if (pictures.length === 0)
     return {
       headers: { 'content-type': 'application/json' },
-      init: { body: JSON.stringify(mentions.length === 0 ? { text } : { text, mentions }) },
+      init: {
+        body: JSON.stringify({
+          text,
+          ...(mentions.length === 0 ? {} : { mentions }),
+          ...(folder === undefined ? {} : { folder }),
+        }),
+      },
     };
   const form = new FormData();
   form.append('text', text);
+  if (folder !== undefined) form.append('folder', folder);
   for (const path of mentions) form.append('mention', path);
   // Each picture goes under its own name.
   for (const picture of pictures) form.append('picture', picture);

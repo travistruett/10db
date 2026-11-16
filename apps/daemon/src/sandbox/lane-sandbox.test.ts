@@ -476,15 +476,29 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     }
   });
 
-  it('opens no git dir beyond the checkout for an ordinary repository, and makes its own read-only', async () => {
-    const session = await sandbox().forSession(input());
+  it('opens no git dir beyond the checkout for an ordinary repository, makes its own read-only, and gives the shell no agent socket or helper', async () => {
+    const session = await sandbox().forSession(
+      input({
+        env: {
+          PATH: '/usr/bin:/bin',
+          HOME: home,
+          SSH_AUTH_SOCK: '/tmp/ssh-agent.sock',
+          GIT_ASKPASS: '/usr/bin/true',
+          GH_TOKEN: 'secret-token',
+        },
+      }),
+    );
     try {
+      expect(session.spec.shellEnv['SSH_AUTH_SOCK']).toBeUndefined();
+      expect(session.spec.shellEnv['GH_TOKEN']).toBeUndefined();
+      expect(session.spec.settings.network.allowUnixSockets).toEqual([session.tmpDir]);
       const { allowRead, allowWrite, denyWrite } = session.spec.settings.filesystem;
       expect(allowRead.filter((path) => path.includes('.git'))).toEqual([]);
       expect(allowWrite.filter((path) => path.includes('.git'))).toEqual([]);
       // The checkout is writable to Claude Code's sandbox; its git dir is not, nor are the pinned
       // agent copies, even where a checkout holds the data dir they live in.
       expect(denyWrite).toEqual([join(checkout, '.git'), pinnedToolsRoot(dataDir)]);
+      expect(allowWrite).toContain(session.tmpDir);
     } finally {
       session.dispose();
     }

@@ -246,6 +246,16 @@ describe('claudeQueryOptions', () => {
     },
   );
 
+  // Sessions spec §7.2: a chat that edits keeps file history so the builder can rewind; Plan and a lane don't.
+  it.each([
+    ['a chat', { ...explore(), fileCheckpointing: true }, true],
+    ['Plan', explore(), false],
+    ['a lane', lane('auto'), false],
+  ] as const)('turns file checkpointing on for %s only when it edits: %s', (_who, profile, on) => {
+    const options = claudeQueryOptions(profile, sandbox);
+    expect('enableFileCheckpointing' in options && options.enableFileCheckpointing).toBe(on);
+  });
+
   it('leaves sandbox and disallowedTools out of an unsandboxed lane', () => {
     const options = claudeQueryOptions(lane('auto'), null);
     expect(options).not.toHaveProperty('sandbox');

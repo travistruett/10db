@@ -10,7 +10,7 @@ export { AWAY_ANSWER, SKIP_RESUMES_MAX, skipMessage, stoppedBySkip } from './ski
 export { createSkipRecorder, type SkipRecorder } from './skip-recorder';
 export { answerAway, routedToPerson, type AwayLane } from './away-question';
 export { writtenConfig } from './written-config';
-export { PatchHunk, type FastPathContext } from './fast-path';
+export { JUDGED_OWN_TOOLS, PatchHunk, type FastPathContext } from './fast-path';
 export {
   CROSSES_LIMIT_QUESTION,
   crossesLimit,

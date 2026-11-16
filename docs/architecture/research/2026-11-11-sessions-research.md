@@ -1295,3 +1295,90 @@ remains as written in T3 §3.
 
 The Codex threads these checks started (L1, S3) remain in the ChatGPT-plan account's `CODEX_HOME/sessions`,
 with the runtime files Codex creates there on first use. Nothing was written to 10db's database or settings.
+
+## M6a live checks (2026-11-16)
+
+Run on the builder's Mac against the real daemon (`apps/daemon/test/live-chat-daemon.ts`: `tsx src/main.ts` on a
+scratch data dir, driven over HTTP) with the Claude Code that `claude` resolves to on `PATH` (`2.1.325`, not the
+pin, so nothing is fetched into the app's tools folder), the signed-in Claude plan and ChatGPT plan, and a real git
+repository under `apps/daemon/node_modules/.cache/10db-test-homes/` (outside every temp root). The daemon's
+environment drops `GIT_*`, `ANTHROPIC_*`, `AWS_*` and `CLAUDE_CODE_*`. Nothing was read from or written to the app's
+own data dir. Manual, never CI: `TENDB_LIVE_CLAUDE=1` and `TENDB_LIVE_CODEX=1`.
+
+### LC1: a chat edits and commits as the builder: pass
+
+What ran: `chat-write.live.test.ts`. A chat on the Claude plan, folder free, asked to create `notes.txt` with its
+edit tool and commit it with `commit_changes`. The repository has a `.git/hooks/pre-commit` that writes a marker
+file and no `user.*` of its own.
+
+- The file holds `marker`, and `git log -1` shows the subject `add notes`.
+- The commit's author name and email equal the builder's global git identity (compared, not printed).
+- The marker file does not exist: the repository's hook did not run, as `commit_changes` promises.
+- The chat's MCP calls were `commit_changes` and `set_title`, both done.
+
+Meaning: a Claude-plan chat reaches the write profile, the folder hold and the commit tool end to end, and a commit
+takes the builder's identity because the daemon's git reads the builder's own global config. A test run that leaves
+its isolation variables (`GIT_CONFIG_GLOBAL=/dev/null`) in the daemon's environment commits as `user@host`
+instead, so the harness drops `GIT_*`.
+
+### LC2: Claude's auto mode and a chat's push, pull request and merge: approved unasked
+
+What ran: `chat-write.live.test.ts`. A chat on the Claude plan (auto mode is its judge; `TENDB_JUDGE` off), in a
+repository whose `origin` is `https://github.com/tendb-live-check/does-not-exist.git`, a repository no one owns, so
+nothing that got through could reach a real one. It was told to call `make_branch`, write a file, `commit_changes`,
+`push_branch`, `open_pull_request` and `merge_pull_request` in order. None of the last three is in `allowedTools`,
+and the hook answered each with a bare allow, leaving the call to auto mode.
+
+- `push_branch` ran: the daemon log holds `GitNetworkError: git push ... https://github.com/tendb-live-check/does-not-exist.git
+refs/heads/lc2-work:refs/heads/lc2-work: failed: remote: Repository not found.` The real `git push` reached GitHub.
+- `open_pull_request` ran its own checks ("lc2-work is not pushed at its current commit") and `merge_pull_request`
+  reached `gh` ("tendb-live-check/does-not-exist has no pull request #1").
+- No call was denied (`deniedBy` and `refusal` null on all three), and no card opened.
+
+Decision: auto mode approves these three unasked, so a bare allow leaves them unjudged. On native the hook now asks,
+as it does on the rules floor, and only 10db's judge gets the bare allow (`chat/confinement.ts`, a red-first row per
+tool in `confinement.test.ts`). The cost if wrong: a Claude-plan chat asks the builder before every push, pull
+request and merge, where it could have run those the classifier judged harmless.
+
+Side finding: a failed push reaches the agent only as "The push_branch call failed inside 10db and was not
+completed", because `GitNetworkError` is not a `DomainError` (`mcp/server.ts` `errorText`). The agent could not tell
+a missing remote from a bug.
+
+### LC4: a warm session reopened on the other profile resumes: pass
+
+What ran: `chat-write.live.test.ts`. Turn 1 on the Claude plan, folder free: "remember the word quokka-lc4" and create
+`lc4.txt` with the edit tool (the write profile; the session stays warm). A Your-folder task that asks the builder
+a question was then started, so a lane held the folder. Turn 2, sent with `folder: read_only`: "what was the word?".
+
+- The chat said, in its thread, "Your folder is in use by the task 'Wait for an answer', so this turn reads only."
+- The reply was the word. The daemon's scratch database holds two sessions for the conversation with the same
+  agent session id; the first ended with "the folder changed hands", the second resumed it.
+
+Meaning: between turns the session closes and reopens on the other profile, and the conversation carries over. The
+timing was not measured.
+
+### LC5: one edit turn on Bedrock: pass
+
+What ran: `chat-write.live.test.ts` with `TENDB_LIVE_CLAUDE=1 TENDB_LIVE_BEDROCK=1`. The daemon's environment drops
+`AWS_*`; the test adds a Bedrock account through the API with the shell's signed-in AWS profile name (a name, no
+credential) and `us-east-1`, and puts the project on it. A chat was asked to create `lc5.txt` with its edit tool.
+
+- The file holds `bedrock`; the edit call is done, and the scratch database's session for the chat has an account of
+  kind `bedrock`.
+
+Meaning: the write profile, the hold and the edit tool work on Bedrock as on the plan. An API-key account was not
+run (none is stored for unattended use here); it takes the same Claude adapter path as Bedrock.
+
+### LC3: Codex `apply_patch`, `commit_changes` and a refused `git commit`: not run, needs a sign-in
+
+`chat-write-codex.live.test.ts` is written and typechecks, but it has not passed. A Codex account keeps its login in a
+folder of its own (`<dataDir>/accounts/<id>/codex`), so the scratch daemon's new Codex account is signed out, and a
+message to it ends with "Codex is not signed in for account ... No prompt was sent." Reusing the builder's login
+would mean copying a credential out of the app's data dir, which these runs never do. The first two attempts also
+showed that a message sent before the daemon has fetched its pinned Codex ends with "still being downloaded" and is
+not retried, so the test waits for the install (`waitForPinnedCodex`).
+
+To run it: `TENDB_LIVE_CODEX=1 pnpm --filter @10db/daemon exec vitest run test/chat-write-codex.live.test.ts`, then
+open the sign-in address the run prints (`TENDB_LIVE_REPORT=<file>` collects it) and finish the ChatGPT sign-in in the
+browser within 10 minutes. It then asks for a patch, a commit and a shell `git commit`, and expects the file, the
+`lc3` commit, a done `commit_changes` call, no `shell` commit and a refusal that names `commit_changes`.

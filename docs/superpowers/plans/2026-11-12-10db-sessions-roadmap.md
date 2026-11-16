@@ -39,8 +39,9 @@ M1 → T2 → M2a → M2b → T3 → M2c → M3 and M4a (in parallel) → M4b �
 | M5a | Sessions on Claude, attended and judged | `2026-11-12-10db-sessions-m5a-sessions.md` | M4c | `feat/sessions-m5a` |
 | M5b | Codex conversations on the attended profile, and Plan without subagents | outlined below | M5a | `feat/sessions-m5b` |
 | T6 | Your MCP servers in Settings, approved once, run as Claude Code runs them, calls judged | `2026-11-12-10db-trust-t6-your-mcp-servers.md` | M5b | `feat/trust-t6` |
-| M6 | The folder hold; a chat writes in Your folder through daemon git; Do it: a separate copy, or a pass of one | outlined below | T6 | `feat/sessions-m6` |
-| M7 | Open in Terminal, Hand Back | outlined below | M6 | `feat/sessions-m7` |
+| M6a | The folder hold; a chat writes in Your folder through daemon git | `2026-11-15-10db-sessions-m6.md` | T6 | `feat/sessions-m6` |
+| M6b | Do it: a separate copy, or a pass of one; Changes; the tab handover | planned once M6a merges | M6a | — |
+| M7 | Open in Terminal, Hand Back | outlined below | M6a | `feat/sessions-m7` |
 | M8 | Spotlight | outlined below | M5b | `feat/sessions-m8` |
 | — | ACP spec, then OpenCode | a spec first (§5.6) | M5a soaked | — |
 | M9 | Lane steps as conversations | a spec first (§6.9) | M6, two weeks | — |
@@ -59,7 +60,7 @@ predecessors have merged.
   it behind, so M5a and M5b ship in the same release: no release is cut between their merges.
 - T6 can land any time after T2. It goes after M5b, so Settings › Trust lists the servers a chat will run on both
   agents.
-- M7 follows M6, whose folder hold a takeover takes.
+- M7 follows M6a, whose folder hold a takeover takes. It does not need M6b.
 
 **What can run in parallel:**
 

@@ -1,11 +1,21 @@
-import { listItems, listItemFiles } from '@10db/db';
+import {
+  ConversationLiveDto,
+  ConversationState,
+  EventType,
+  FolderDto,
+  FolderHolderKind,
+  WorkstreamState,
+} from '@10db/contracts';
+import { insertTask, insertWorkstream, listItemFiles, listItems, schema } from '@10db/db';
+import { eq } from 'drizzle-orm';
 import { defineWebSocketHelper } from 'hono/ws';
 import { afterEach, describe, expect, it } from 'vitest';
 import { stubServices } from '../../test/api-stub';
 import { chatWorld, type ChatWorld } from '../../test/chat-world';
 import { createLiveRegistry } from '../conversation';
 import { createApp } from '../api';
-import { createConversationServices } from '../daemon';
+import { createChatApiServices, createConversationServices } from '../daemon';
+import { silentLogger } from '../log';
 
 // Sessions spec §10: the message route's chat branch, over real HTTP, a real store and the engine on
 // the fake adapter.
@@ -27,8 +37,17 @@ function appOf(world: ChatWorld) {
     allowedOrigins: [],
     token: TOKEN,
     onUnexpectedError: () => undefined,
-    services: stubServices(
-      createConversationServices({
+    services: stubServices({
+      ...createChatApiServices({
+        state: world.state,
+        chat: world.chat,
+        folderHold: world.folderHold,
+        // The world's checkout is no repository: its branch can't be read.
+        git: () => Promise.reject(new Error('not a repository')),
+        now: () => new Date(),
+        log: silentLogger,
+      }),
+      ...createConversationServices({
         state: world.state,
         engine: world.engine,
         shape: {
@@ -44,7 +63,7 @@ function appOf(world: ChatWorld) {
         laneLive: createLiveRegistry(),
         task: { post: () => Promise.reject(new Error('no task here')) },
       }),
-    ),
+    }),
     upgradeWebSocket: defineWebSocketHelper(() => new Response(null, { status: 426 })),
     mcp: () => Promise.resolve(new Response('mcp')),
   });
@@ -92,6 +111,160 @@ describe("a chat's message route", () => {
       body: JSON.stringify({ text: 'x', mentions: ['../secrets'] }),
     });
     expect(res.status).toBe(400);
+  });
+});
+
+/** A task of the project running in Your folder, as the scheduler leaves it once it started. */
+function runningTask(title: string): void {
+  w.state.write((ctx) => {
+    const task = insertTask(ctx, w.project.id, {
+      title,
+      acceptanceCriteria: ['x'],
+      areas: ['api'],
+    });
+    const ws = insertWorkstream(ctx, task.id, {
+      first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+    });
+    ctx.tx
+      .update(schema.workstreams)
+      .set({ state: WorkstreamState.Running, workspaceMode: 'shared' })
+      .where(eq(schema.workstreams.id, ws.id))
+      .run();
+  });
+}
+
+/** The task ends and says so, as the runner's transition does. */
+function laneEnds(): void {
+  w.state.write((ctx) => {
+    ctx.tx
+      .update(schema.workstreams)
+      .set({ state: WorkstreamState.Failed })
+      .where(eq(schema.workstreams.state, WorkstreamState.Running))
+      .run();
+    ctx.emit({
+      type: EventType.WorkstreamChanged,
+      entityType: 'workstream',
+      entityId: 'wst_x',
+      data: {},
+    });
+  });
+}
+
+const headers = { Authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' };
+
+async function send(chatConversation: string, body: Record<string, unknown>): Promise<Response> {
+  return appOf(w).request(`/conversations/${chatConversation}/messages`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ text: 'edit notes.md', ...body }),
+  });
+}
+
+async function live(conversation: string): Promise<ConversationLiveDto> {
+  const res = await appOf(w).request(`/conversations/${conversation}/live`, { headers });
+  return ConversationLiveDto.parse(await res.json());
+}
+
+describe('the folder and a chat that meets it held', () => {
+  it('names the holders of Your folder, the words and whether a chat is kept out', async () => {
+    w = chatWorld();
+    runningTask('Bump vite');
+    const res = await appOf(w).request(`/projects/${w.project.id}/folder`, { headers });
+    expect(res.status).toBe(200);
+    const folder = FolderDto.parse(await res.json());
+    expect(folder.branch).toBeNull();
+    expect(folder.holders).toEqual([
+      expect.objectContaining({
+        kind: FolderHolderKind.Lane,
+        name: 'Bump vite',
+        words: expect.stringContaining('Bump vite') as string,
+        keepsChatOut: true,
+      }),
+    ]);
+  });
+
+  it('parks a send with folder wait, and runs it once the task ends', async () => {
+    w = chatWorld();
+    runningTask('Bump vite');
+    const chat = w.open();
+    expect((await send(chat.conversationId, { folder: 'wait' })).status).toBe(202);
+    expect((await live(chat.conversationId)).waitingForFolder).toBe(true);
+    expect(w.engine.view(chat.conversationId).state).toBe(ConversationState.IdleCold);
+    laneEnds();
+    await w.engine.settled(chat.conversationId);
+    expect((await live(chat.conversationId)).waitingForFolder).toBe(false);
+    expect(w.adapter.shapeSessions).toHaveLength(1);
+  });
+
+  it('runs a send with folder read_only at once, and without one', async () => {
+    w = chatWorld();
+    runningTask('Bump vite');
+    const chat = w.open();
+    await send(chat.conversationId, { folder: 'read_only' });
+    expect((await live(chat.conversationId)).waitingForFolder).toBe(false);
+    await w.engine.settled(chat.conversationId);
+    expect(w.adapter.shapeSessions).toHaveLength(1);
+    await send(chat.conversationId, {});
+    await w.engine.settled(chat.conversationId);
+    expect(w.folderHold.waiting(chat.id)).toBe(false);
+  });
+
+  it('reads the folder choice from a multipart form too', async () => {
+    w = chatWorld();
+    runningTask('Bump vite');
+    const chat = w.open();
+    const form = new FormData();
+    form.append('text', 'edit notes.md');
+    form.append('folder', 'wait');
+    const res = await appOf(w).request(`/conversations/${chat.conversationId}/messages`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}` },
+      body: form,
+    });
+    expect(res.status).toBe(202);
+    expect(w.folderHold.waiting(chat.id)).toBe(true);
+  });
+
+  it('refuses a folder choice that is neither wait nor read_only', async () => {
+    w = chatWorld();
+    const chat = w.open();
+    expect((await send(chat.conversationId, { folder: 'now' })).status).toBe(400);
+  });
+
+  it('answers stop-waiting for a chat that waits for nothing with the chat, and starts nothing', async () => {
+    w = chatWorld();
+    const chat = w.open();
+    const stopped = await appOf(w).request(`/chats/${chat.id}/stop-waiting`, {
+      method: 'POST',
+      headers,
+    });
+    expect(stopped.status).toBe(200);
+    expect(await stopped.json()).toMatchObject({ id: chat.id });
+    expect(w.adapter.shapeSessions).toHaveLength(0);
+    expect(w.folderHold.holders(w.project.id)).toEqual([]);
+  });
+
+  it('runs what waits reading only on stop-waiting, and the edited message of a redo carries its own choice', async () => {
+    w = chatWorld();
+    runningTask('Bump vite');
+    const chat = w.open();
+    await send(chat.conversationId, { folder: 'wait' });
+    const stopped = await appOf(w).request(`/chats/${chat.id}/stop-waiting`, {
+      method: 'POST',
+      headers,
+    });
+    expect(stopped.status).toBe(200);
+    await w.engine.settled(chat.conversationId);
+    expect(w.folderHold.waiting(chat.id)).toBe(false);
+    expect(w.adapter.shapeSessions).toHaveLength(1);
+
+    const redo = await appOf(w).request(`/conversations/${chat.conversationId}/redo`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ text: 'edit again', folder: 'wait' }),
+    });
+    expect(redo.status).toBe(202);
+    expect(w.folderHold.waiting(chat.id)).toBe(true);
   });
 });
 

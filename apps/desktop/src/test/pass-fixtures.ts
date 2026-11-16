@@ -516,6 +516,7 @@ export function passHandlers(routes: PassRoutes = {}): HttpHandler[] {
         ConversationLiveDto.parse({
           conversationId,
           items: routes.streams?.[conversationId] ?? [],
+          waitingForFolder: false,
         }),
       );
     }),

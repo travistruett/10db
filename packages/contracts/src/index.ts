@@ -19,6 +19,7 @@ export * from './entities';
 export * from './errors';
 export * from './events';
 export * from './dev-ui-handoff';
+export * from './folder-hold';
 export * from './folders';
 export * from './git-names';
 export * from './goals';

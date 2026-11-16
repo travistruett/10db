@@ -24,6 +24,7 @@ export function createLiveRegistry(): LiveRegistry {
     live: (conversationId) => ({
       conversationId,
       items: served.get(conversationId)?.snapshot() ?? [],
+      waitingForFolder: false,
     }),
   };
 }

@@ -99,10 +99,17 @@ const realSandbox = (): LaneSandbox =>
 /** A project at the temp repo with `mcp` as its `.mcp.json`, every server but `unapproved` approved. */
 function conversation(
   mcp: unknown,
-  opts: { unapproved?: readonly string[]; variables?: Readonly<Record<string, string[]>> } = {},
+  opts: {
+    unapproved?: readonly string[];
+    variables?: Readonly<Record<string, string[]>>;
+    docker?: boolean;
+  } = {},
 ): { projectId: ProjectId; shapeId: ShapeId } {
   writeFileSync(join(checkout, '.mcp.json'), typeof mcp === 'string' ? mcp : JSON.stringify(mcp));
-  const project = seedProject(base, { repoPath: checkout });
+  const project = seedProject(base, {
+    repoPath: checkout,
+    ...(opts.docker === true ? { sandboxDocker: true } : {}),
+  });
   const shape = base.write((ctx) =>
     insertShape(ctx, project.id, { title: 'Audit', origin: ShapeOrigin.App }),
   ).value;
@@ -239,6 +246,40 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
       await prepared.release();
     }
     expect(existsSync(prepared.sandbox?.env['CLAUDE_CODE_TMPDIR'] ?? '/nonexistent')).toBe(false);
+  });
+
+  // Value: protects=a chat's kernel can write the checkout only while its turn holds Your folder;
+  // fails_when=a writable profile outlives the hold or a read-only one opens the checkout; why_new=every
+  // prepared session was read-only; no_claim=the guard's words.
+  it('opens the checkout for writing only when the session turn holds Your folder, and never its git state', async () => {
+    const owner = conversation({});
+    const { prepare } = preparer();
+    const writing = await prepare({ ...inputFor(owner), writes: true });
+    const reading = await prepare(inputFor(owner));
+    try {
+      const writes = writing.sandbox?.settings.filesystem.denyWrite ?? [];
+      expect(writes).not.toContain(checkout);
+      expect(writes).toContain(join(checkout, '.git'));
+      expect(reading.sandbox?.settings.filesystem.denyWrite).toContain(checkout);
+    } finally {
+      await writing.release();
+      await reading.release();
+    }
+  });
+
+  it('opens the Docker socket only for a writing turn, on a project whose Docker switch is on', async () => {
+    const owner = conversation({}, { docker: true });
+    const { prepare } = preparer();
+    const sockets = async (writes: boolean): Promise<readonly string[]> => {
+      const prepared = await prepare({ ...inputFor(owner), writes });
+      try {
+        return prepared.sandbox?.settings.network.allowUnixSockets ?? [];
+      } finally {
+        await prepared.release();
+      }
+    };
+    expect(await sockets(true)).toContain('/var/run/docker.sock');
+    expect(await sockets(false)).not.toContain('/var/run/docker.sock');
   });
 
   describe("the builder's own MCP servers", () => {
