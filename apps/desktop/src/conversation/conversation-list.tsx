@@ -166,12 +166,19 @@ function WindowedArticles({
     };
   }, [virtualizer, highlightNonce, targetIndex]);
 
-  // A new entry scrolls into view, unless the builder has scrolled up to read.
+  // A conversation opens at its newest message, as a chat does, unless Why? points elsewhere. After
+  // that a new entry scrolls into view, unless the builder has scrolled up to read.
+  const drawn = useRef(0);
+  const pointed = highlightNonce !== undefined && targetIndex !== -1;
   useEffect(() => {
     const el = viewport.current;
     if (el === null) return;
+    const opening = drawn.current === 0;
+    drawn.current = entryCount;
     const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_DISTANCE;
-    if (nearBottom || entryCount <= 1) virtualizer.scrollToEnd();
+    if ((opening && !pointed) || nearBottom) virtualizer.scrollToEnd();
+    // Only a new entry moves the list; Why? pointing elsewhere is read as it stands then.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [virtualizer, entryCount]);
 
   // Whether the builder reads at the end. A window that shrinks or grows keeps a reader at the end
