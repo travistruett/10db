@@ -176,6 +176,7 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
   /**
    * Removes everything of the chat's takeover: its sets' servers and the folder. One set that won't go is
    * logged and the rest still go, so the folder, which holds sealed headers, never stays for want of another.
+   * Never throws: its callers have already given the chat back.
    */
   function release(chat: ChatRow): void {
     const sets = live.get(chat.id)?.sets ?? [];
@@ -189,7 +190,12 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
         }
       }
     } finally {
-      removeTakeoverFolder(deps.dataDir, chat.conversationId);
+      try {
+        removeTakeoverFolder(deps.dataDir, chat.conversationId);
+      } catch (error) {
+        // The chat is already given back; a folder that stays is swept at the next start.
+        deps.log.warn({ err: error, chatId: chat.id }, 'the takeover folder was not removed');
+      }
     }
   }
 
@@ -430,7 +436,16 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
           chat !== null &&
           chat.archivedAt === null &&
           getConversation(state.db, id.data).state === ConversationState.TakenOver;
-        if (!kept) removeTakeoverFolder(deps.dataDir, id.data);
+        if (kept) continue;
+        try {
+          removeTakeoverFolder(deps.dataDir, id.data);
+        } catch (error) {
+          // One folder that won't go never stops the daemon starting.
+          deps.log.warn(
+            { err: error, conversationId: id.data },
+            'a takeover folder was not removed',
+          );
+        }
       }
     },
 

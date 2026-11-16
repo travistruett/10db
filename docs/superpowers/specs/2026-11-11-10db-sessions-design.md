@@ -948,15 +948,19 @@ already do (research T1), and the attended profile writes the checkout on both (
 
 1. The engine closes the live session, and the conversation goes to `taken_over`.
 2. The adapter's `takeoverCommand` builds the command:
-   - **Claude:** the pinned `claude` with `--resume <id>`, `--setting-sources` matching the session's (none for
-     explore), `--strict-mcp-config` and an `--mcp-config` file naming only the servers the session had (the
+   - **Claude:** the pinned `claude` with `--resume <id>`, `--setting-sources ''` (no settings file loads, whatever
+     the session had), `--strict-mcp-config` and an `--mcp-config` file naming only the servers the session had (the
      project's approved ones and the builder's own, trust line §6), a `--plugin-dir` for each plugin dir the session
      had, and the instructions it had appended, with `CLAUDE_CONFIG_DIR` set to the account's directory.
    - **Codex:** the pinned `codex resume <id>` under the account's `CODEX_HOME`, with the project still pinned
-     `untrusted`, and the session's skill roots and instructions.
-   - **Sessions that wrote** (a chat, a pass, a worktree task) load a project hook only when the builder approved
-     its hash (trust line §6). A file the agent changed has a new hash, so it doesn't load. The banner lists such
-     files.
+     `untrusted` and the session's instructions. It gets no skills folders.
+   - **No project hook loads in the terminal,** for any session: nothing project-owned is read from the checkout
+     (Claude's settings sources are empty; Codex's checkout is `untrusted` and runs no 10db hook). The popover lists
+     the project's setting files that differ from HEAD, so the builder knows they won't load. What a launch left out
+     (a server the agent can't take, a skill list too long to show) comes back in the open's answer and is kept with
+     the takeover for the banner, each note cut at 800 characters.
+   - **Without a sandbox runtime** a terminal still opens, with none of the chat's servers, plugins or instructions,
+     and the popover and banner say so.
 3. The daemon writes the command as a script in `<dataDir>/takeovers/<conversation id>/` (mode 700, outside the
    chat's own files), holding no secret. Every launch writes a fresh set; nothing is read back, since the
    terminal's agent can write there.
@@ -968,8 +972,9 @@ already do (research T1), and the attended profile writes the checkout on both (
      it.
    - **Three choices (call),** set in Settings › Sessions: Terminal (the default), iTerm, or Copy the Command,
      which opens nothing and gives a `/bin/sh -c` line for zsh or bash to paste into any terminal.
-   - **Again.** Opening again while open opens another window, and the banner's Copy Command makes a fresh line:
-     two writers on one session, which the builder chose.
+   - **Again.** The banner's Copy Command makes a fresh line for a second window (the daemon also takes a second
+     Open, which the UI doesn't offer while the chat is in the terminal): two writers on one session, which the
+     builder chose. If the clipboard refuses the line, the banner shows it to copy by hand.
    - **`terminal_failed`.** A window that doesn't open (the app is missing, the opener times out) gives the chat
      back with no notice and removes the files; the answer says which app to change in Settings.
 4. A banner: "In your terminal. This runs outside 10db's sandbox. 10db won't touch this session until you hand it

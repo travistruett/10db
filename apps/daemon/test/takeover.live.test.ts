@@ -119,7 +119,7 @@ async function takenOver(
 }
 
 describe.skipIf(!claudeLive)('Open in Terminal, live, Claude plan (LC1, pty only)', () => {
-  it('starts the TUI with no onboarding or trust screen, leaves no script, and hands back', async () => {
+  it('starts the TUI with no first-run screen, leaves its script until Hand Back, and hands back', async () => {
     const daemon = await startLiveDaemon('lc1-takeover', { claudePath: localClaude() });
     try {
       const taken = await takenOver(daemon, null);

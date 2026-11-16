@@ -102,6 +102,7 @@ export function TabStrip({
 
   const projectName = (tab: StripTab): string =>
     projects.find((p) => p.id === tabProjectId(tab))?.name ?? '';
+  const hasProject = (id: string): boolean => projects.some((p) => p.id === id);
   const infos = new Map<string, TabInfo>(tabs.map((tab) => [tab.key, tabInfo(tab, cards, seen)]));
   const selectedIndex = tabs.findIndex((t) => t.key === selectedKey);
   const room = available - CONTROLS_WIDTH;
@@ -298,7 +299,9 @@ export function TabStrip({
                       onArchive: () => {
                         onArchive(menu.tab);
                       },
-                      ...(canOpenTerminal(menu.tab.chat.conversation)
+                      // A chat whose project is gone has no folder to open a terminal in.
+                      ...(canOpenTerminal(menu.tab.chat.conversation) &&
+                      hasProject(menu.tab.chat.projectId)
                         ? {
                             onOpenInTerminal: () => {
                               onOpenInTerminal(menu.tab);

@@ -56,7 +56,8 @@ export function TerminalButton({
       app={app}
       label={conversation.capabilities.label}
       path={path}
-      refusal={preview.data === undefined ? undefined : preview.data.refusal}
+      // An answer read before the popover opened again is not this one's.
+      refusal={preview.isFetching || preview.data === undefined ? undefined : preview.data.refusal}
       notes={preview.data?.notes ?? []}
       pending={open.isPending}
       error={open.error?.message ?? (preview.isError ? preview.error.message : null)}
@@ -76,7 +77,8 @@ export function TerminalButton({
           aria-label="Open in Terminal"
           aria-expanded={opened}
           onClick={() => {
-            onOpened(!opened);
+            if (opened) close();
+            else onOpened(true);
           }}
         >
           <IconTerminal2 size={16} stroke={1.5} />

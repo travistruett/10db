@@ -40,41 +40,45 @@ describe('prepareTakeover for a Codex chat', () => {
     const made = createTestStore();
     const project: ProjectDto = seedProject(made.store, { name: 'alpha' });
     const adapter = createCodexAdapter({ codexPath: '/usr/local/bin/codex', logger: silentLogger });
-    const set = await prepareTakeover(
-      {
-        adapter,
-        servers: () =>
-          Promise.resolve({
-            instructions: 'Say "hi"\nthen stop.',
-            pluginDirs: ['/plugins/one'],
-            projectMcpServers: {},
-            yourMcpServers: {
-              docs: {
-                connect: {
-                  type: 'http',
-                  url: 'https://docs.example/mcp',
-                  headers: { Authorization: 'Bearer sk-canary' },
-                },
-                claudeOAuth: null,
-                codex: {
-                  enabledTools: null,
-                  disabledTools: [],
-                  startupTimeoutSec: null,
-                  toolTimeoutSec: null,
+    let set: Awaited<ReturnType<typeof prepareTakeover>>;
+    try {
+      set = await prepareTakeover(
+        {
+          adapter,
+          servers: () =>
+            Promise.resolve({
+              instructions: 'Say "hi"\nthen stop.',
+              pluginDirs: ['/plugins/one'],
+              projectMcpServers: {},
+              yourMcpServers: {
+                docs: {
+                  connect: {
+                    type: 'http',
+                    url: 'https://docs.example/mcp',
+                    headers: { Authorization: 'Bearer sk-canary' },
+                  },
+                  claudeOAuth: null,
+                  codex: {
+                    enabledTools: null,
+                    disabledTools: [],
+                    startupTimeoutSec: null,
+                    toolTimeoutSec: null,
+                  },
                 },
               },
-            },
-            notes: [],
-            tempDirs: [],
-            remove: () => undefined,
-          }),
-        onboard: () => Promise.resolve(),
-        newSetId: () => 'ab12',
-      },
-      { project, source: SOURCE, providerSessionId: 'thread-1', folder: dir.path },
-      new AbortController().signal,
-    );
-    made.close();
+              notes: [],
+              tempDirs: [],
+              remove: () => undefined,
+            }),
+          onboard: () => Promise.resolve(),
+          newSetId: () => 'ab12',
+        },
+        { project, source: SOURCE, providerSessionId: 'thread-1', folder: dir.path },
+        new AbortController().signal,
+      );
+    } finally {
+      made.close();
+    }
     const files = readdirSync(dir.path);
     const sealed = files.find((f) => f.startsWith('sealed-'));
     expect(sealed).toBeDefined();

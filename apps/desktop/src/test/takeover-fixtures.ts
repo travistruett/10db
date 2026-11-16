@@ -32,8 +32,8 @@ export interface TakeoverServer {
   readonly opened: ChatId[];
   readonly handedBack: ChatId[];
   readonly commands: ChatId[];
-  /** Each change Settings › Sessions sent. */
-  readonly settingsPatches: unknown[];
+  /** While set, the preview waits for it before it answers. */
+  previewGate: Promise<void> | null;
 }
 
 export function takeoverServer(
@@ -50,7 +50,7 @@ export function takeoverServer(
     opened: [],
     handedBack: [],
     commands: [],
-    settingsPatches: [],
+    previewGate: null,
   };
   const byConversation = (id: string) => chats.chats.find((c) => c.conversationId === id);
   const move = (id: string, state: 'taken_over' | 'idle_cold'): ChatId | null => {
@@ -64,9 +64,10 @@ export function takeoverServer(
     return chat.id;
   };
   server.handlers.push(
-    http.get(daemonUrl('/conversations/:conversationId/takeover/preview'), () =>
-      HttpResponse.json(TakeoverPreviewDto.parse(opts.preview ?? { refusal: null, notes })),
-    ),
+    http.get(daemonUrl('/conversations/:conversationId/takeover/preview'), async () => {
+      await server.previewGate;
+      return HttpResponse.json(TakeoverPreviewDto.parse(opts.preview ?? { refusal: null, notes }));
+    }),
     http.post(daemonUrl('/conversations/:conversationId/takeover'), ({ params }) => {
       if (opts.openFails !== undefined)
         return HttpResponse.json({ error: 'upstream', message: opts.openFails }, { status: 502 });
@@ -93,8 +94,7 @@ export function takeoverServer(
     http.get(daemonUrl('/settings/sessions'), () =>
       HttpResponse.json({ notifyReplies: true, terminalApp: app }),
     ),
-    http.patch(daemonUrl('/settings/sessions'), async ({ request }) => {
-      server.settingsPatches.push(await request.json());
+    http.patch(daemonUrl('/settings/sessions'), () => {
       return HttpResponse.json({ notifyReplies: true, terminalApp: app });
     }),
   );

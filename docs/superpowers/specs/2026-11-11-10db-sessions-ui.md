@@ -915,7 +915,8 @@ It opens a **popover anchored to the button**, not a modal:
 
 - **It warns every time (call),** in one short popover. The sandbox is why 10db exists, and Enter confirms, so the
   warning costs one key.
-- **Refused,** with the button disabled and the reason as its tooltip (design spec §6.7):
+- **Refused,** the popover's Open in Terminal is disabled and shows the reason (design spec §6.7); the icon's tooltip
+  stays "Open in Terminal":
   - no agent session yet: "Send a message first"
   - a turn running: "Stop first"
   - starting, waiting on a card, or stopping: "Wait for the turn to settle"
@@ -933,7 +934,8 @@ It opens a **popover anchored to the button**, not a modal:
 - **Refusals** are the reducer's and the folder's words, shown in the popover with Open in Terminal disabled.
 - **The terminal app** is a setting, Settings › Sessions: "Open sessions in" Terminal, iTerm or Copy the Command.
   Terminal is the default (design spec §7.5). With Copy the Command the popover's button reads "Copy the Command",
-  nothing opens, and the line is for zsh or bash; the banner offers it again.
+  nothing opens, and the line is for zsh or bash; the banner offers it again. The popover is gone once the chat is in
+  the terminal, so when the clipboard refuses the line the banner shows it to copy by hand.
 
 ### 10.2 While it is in the terminal
 
@@ -952,9 +954,11 @@ spec's §6.7 stores a message sent now and holds it until Hand Back:
 │ Held until you hand back…                                     │
 │ 📎                                                      Send  │
 └───────────────────────────────────────────────────────────────┘
-⌘↩ holds it
+↵ holds it
 ```
 
+- **The banner lists the notes the open left** (what the terminal lacks: servers left out, no sandbox), beside the
+  popover's.
 - **A held message** shows in the transcript on its panel, with one dimmed line under it: "Held until you hand back".
   Hand Back sends the held messages in order.
 
@@ -1119,7 +1123,7 @@ Buttons, menu items and names are Title Case; everything else is sentence case (
 | Find link | Find a Session ⌘K |
 | Session bar lines | Chat · Your folder · on `{branch}` · Chat · reads only: Your folder is in use by {holder} · Chat · read-only: its work moved to a task · Chat · in your terminal since {time} · Task · Your folder · lands on `{branch}` · Task · Separate copy · `{branch}` |
 | Placeholders | Ask about {project}… · Reply… · Add to this turn… · Queue for the next turn… · Reply, or paste a screenshot… · Held until you hand back… |
-| Hint line | ⌘↩ sends · Esc stops · / commands · @ files · ⌘↩ adds to this turn · ⌘↩ holds it |
+| Hint line | ⌘↩ sends · Esc stops · / commands · @ files · ⌘↩ adds to this turn · ↵ holds it |
 | Composer buttons | Attach · Send · Stop · Stop and Redo · Sign Off |
 | Your folder held | Your folder is in use by {holder}. · Wait for It · Send Reading Only · File as Tasks · Waits for Your folder: in use by {holder} · Send Now Reading Only · Stop · Also in use by {holder} · Commits wait until {pass}'s pull request merges |
 | Queue chip | Queued · Edit · Remove |
@@ -1385,7 +1389,7 @@ the condensed list.
 | 1 | Tab titles unreadable at 1080 px with five tabs | §5.1 (the strip starts at 84 px), §5.2 (× in the state mark's place; the selected tab keeps its width; others shrink first), §5.4 (`set_title` at most 28 characters); mockup frame a redrawn |
 | 2 | Tab state by color alone (WCAG 1.4.1) | §5.3: dot for Working, dot and ring for Needs you and Ready, icons for Error, Paused and Done; legend in frame a |
 | 3 | Who speaks is invisible to a screen reader | §7.1 and §13.1: each message an `article` with a hidden "You" or "{label}" heading |
-| 4 | Takeover says messages wait, with no composer | §10.2: the composer stays under the banner, "Held until you hand back…", "⌘↩ holds it"; frame g |
+| 4 | Takeover says messages wait, with no composer | §10.2: the composer stays under the banner, "Held until you hand back…", "↵ holds it"; frame g |
 | 5 | "Waiting for your answer above" points the wrong way | §7.5, §14: "Waiting for your answer"; frame d |
 | 6 | "Start from" broke the Nudges rule | §6.2: not nudges, no sparkles, a source icon each, three kept; frame b |
 | 7 | Do It must list the uncommitted paths | §8.1: the list, folded after five, "These will be part of this task's work."; the §20 question removed; frame e, with the refused Your folder choice |

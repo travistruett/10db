@@ -146,6 +146,39 @@ describe('Open in Terminal', () => {
     expect(taken.opened).toEqual([]);
   });
 
+  it('reopened, Open in Terminal waits for the new answer, not the last one', async () => {
+    const { taken } = openChat();
+    const popover = await openPopover();
+    await within(popover).findByText('Your folder is held until you hand back.');
+    fireEvent.click(within(popover).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Open in Terminal' })).toBeNull();
+    });
+    let answer = (): void => undefined;
+    taken.previewGate = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    const again = await openPopover();
+    expect(within(again).getByRole('button', { name: 'Open in Terminal' })).toHaveProperty(
+      'disabled',
+      true,
+    );
+    answer();
+    await waitFor(() => {
+      expect(within(again).getByRole('button', { name: 'Open in Terminal' })).toHaveProperty(
+        'disabled',
+        false,
+      );
+    });
+  });
+
+  it('the ⋯ menu opens the popover on the chat', async () => {
+    openChat();
+    fireEvent.click(await screen.findByRole('button', { name: 'More session actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Open in Terminal' }));
+    await screen.findByRole('dialog', { name: 'Open in Terminal' });
+  });
+
   it('the tab menu opens the popover on the chat', async () => {
     openChat();
     fireEvent.contextMenu(await screen.findByRole('tab'));

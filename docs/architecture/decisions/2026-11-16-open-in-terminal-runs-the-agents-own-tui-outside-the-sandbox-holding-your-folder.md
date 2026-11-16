@@ -27,13 +27,18 @@ runs outside 10db's sandbox and judge; the agent's own prompts guard it, and the
   session may read those). Every launch writes a fresh set and never reads one back: the terminal's agent can write
   there.
 - **Three choices.** Settings › Sessions picks Terminal, iTerm or Copy the Command, which opens nothing and gives a
-  line to paste into any terminal (Ghostty, Warp, kitty). Opening again while open opens another window: two
-  writers on one session, as Copy the Command allows.
+  line to paste into any terminal (Ghostty, Warp, kitty). A second window is the banner's Copy Command (the
+  daemon also takes a second Open, which the UI doesn't offer): two writers on one session. A clipboard that
+  refuses the line leaves it in the banner to copy by hand.
 - **The hold.** A takeover keeps Your folder, so tasks, branch cuts, switch-backs and passes wait, each naming "the
   chat ‘X’ in your terminal". A wait keeps its project's delivery slot, so a forgotten Hand Back stalls that
   project's delivery. A closed pass allows Open, with a warning: a commit made in the terminal makes its settle ask.
   The waits stop with 10db and resume at the next start; Hand Back runs 10db's waiting git work before a held
   message's turn.
+- **Without a sandbox runtime** (the daemon could not build one) a terminal still opens, with none of the chat's
+  servers, plugins or instructions, and the popover and banner say so. Nothing project-owned loads either way.
+- **Notes.** What a launch left out is kept with the takeover (display data, read through zod, each note cut at 800
+  characters) so the banner shows it after the open's answer is gone.
 - **Chats only.** A task's Open in Terminal needs runner work and is a follow-up.
 - **No history import.** Hand Back leaves one notice; the agent's own resume carries the terminal's turns.
 

@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import {
   ConflictError,
@@ -408,6 +416,26 @@ describe('Hand Back when a set will not go', () => {
     expect(stateOf(chat)).toBe('idle_cold');
     expect(existsSync(folderOf(chat))).toBe(false);
     expect(w.folderHold.reserveGit(w.project.id, 'free').reserved).toBe(true);
+  });
+});
+
+describe('Hand Back when the folder will not go', () => {
+  it('still answers once the chat is given back', async () => {
+    w = chatWorld();
+    const chat = await talked();
+    await w.takeover.open(chat.conversationId);
+    // A folder inside the takeover folder that can't be emptied: removing it fails.
+    const locked = join(folderOf(chat), 'locked');
+    mkdirSync(locked);
+    writeFileSync(join(locked, 'file'), 'x');
+    chmodSync(locked, 0o500);
+    try {
+      await w.takeover.handBack(chat.conversationId);
+      expect(stateOf(chat)).toBe('idle_cold');
+      expect(w.folderHold.reserveGit(w.project.id, 'free').reserved).toBe(true);
+    } finally {
+      chmodSync(locked, 0o700);
+    }
   });
 });
 
