@@ -362,7 +362,13 @@ export function createFolderHold(deps: FolderHoldDeps): FolderHold {
         const blocked = blockers(projectId, { kind: FolderAsker.ChatTurn, chatId });
         if (blocked.length > 0) return { taken: false, blockers: blocked };
         turns.set(chatId, { projectId, chatId, reserved: false });
-        changed(projectId);
+        try {
+          changed(projectId);
+        } catch (error) {
+          // A take that could not say so is not a take.
+          turns.delete(chatId);
+          throw error;
+        }
       }
       const reservation = turns.get(chatId);
       if (reservation) reservation.reserved = false;
