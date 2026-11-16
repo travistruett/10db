@@ -313,10 +313,14 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     // 10db's own git work is over in moments, and says nothing the builder acts on.
     if (opening === null && blockers.every((b) => b.holder.kind === FolderHolderKind.GitWork))
       return;
+    // 10db's git work is the open itself while a pass waits to open, so the pass is named in its place.
+    const words = blockers
+      .filter((b) => opening === null || b.holder.kind !== FolderHolderKind.GitWork)
+      .map((b) => holderWords(b.holder));
     const line =
-      opening !== null && blockers.every((b) => b.holder.kind === FolderHolderKind.GitWork)
-        ? `Waits for the pass ‘${opening}’, opening`
-        : `Waits for ${blockers.map((b) => holderWords(b.holder)).join(' and ')} to finish with Your folder`;
+      opening === null
+        ? `Waits for ${words.join(' and ')} to finish with Your folder`
+        : `Waits for ${[...words, `the pass \u2018${opening}\u2019, opening`].join(' and ')}`;
     const stale = (notice: WorkstreamDto['notice']): boolean =>
       notice === null || (notice.key === FOLDER_HOLD_WAIT_NOTICE_KEY && notice.line !== line);
     if (!stale(getWorkstreamRow(db, id).notice)) return;
@@ -326,7 +330,10 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         key: FOLDER_HOLD_WAIT_NOTICE_KEY,
         tone: 'info',
         line,
-        body: 'This task starts once the chat is done in Your folder. A message the chat sends meanwhile waits for it too.',
+        body:
+          opening === null
+            ? 'This task starts once the chat is done in Your folder. A message the chat sends meanwhile waits for it too.'
+            : 'This task starts once the pass has opened and the folder is free for it.',
       });
     });
   }

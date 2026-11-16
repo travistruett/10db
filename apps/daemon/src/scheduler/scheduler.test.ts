@@ -1255,6 +1255,23 @@ describe('Your folder and chats', () => {
     expect(await scheduler().tick()).toBe(1);
   });
 
+  it('names the chat and the opening pass together, not 10db\u2019s git work, while an open waits behind a turn', async () => {
+    const run = queue();
+    const me = chat('Retry login', run.project.id);
+    folderHold.takeTurn(run.project.id, me);
+    const opening = folderHold.reserveGitWhenFree(run.project.id, 'opening a pass', {
+      lanesWait: { passName: 'Polish' },
+    });
+
+    expect(await scheduler().tick()).toBe(0);
+
+    expect(getWorkstream(store.db, run.workstream.id).notice).toMatchObject({
+      line: 'Waits for the chat \u2018Retry login\u2019 and the pass \u2018Polish\u2019, opening',
+    });
+    folderHold.releaseTurn(me);
+    folderHold.releaseGit(await opening);
+  });
+
   // Value: protects=a task never starts in Your folder under a chat that took it a moment before the write;
   // fails_when=the write that moves the task to STARTING skips its own look at the chat holders;
   // why_new=every other row holds the folder before the tick, so the earlier check alone passes them;

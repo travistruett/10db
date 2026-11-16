@@ -827,6 +827,20 @@ describe('cards', () => {
     await w.engine.settled(w.conv.id);
   });
 
+  it('withdraws a waiting card when Do It seals the conversation', async () => {
+    const withdrawn: string[] = [];
+    w = exploreWorld({ deps: { withdrawCard: (id) => withdrawn.push(id) } });
+    const gates = stoppableTurns(w);
+    w.send('one');
+    await waitFor(() => gates.length === 1);
+    const card = raiseCard(w);
+
+    await w.engine.seal(w.conv.id);
+
+    expect(withdrawn).toEqual([card.item.id]);
+    expect(w.stateOf()).toBe('sealed');
+  });
+
   it('withdraws a card on Stop, and on an end', async () => {
     const withdrawn: string[] = [];
     w = exploreWorld({ deps: { withdrawCard: (id) => withdrawn.push(id) } });
@@ -1385,6 +1399,19 @@ describe('sealing a conversation (Do It)', () => {
 
     expect(w.engine.parked(w.conv.id)).toBe(true);
     expect(w.stateOf()).toBe('taken_over');
+  });
+
+  it('stays sealed across a restart, with no session started', async () => {
+    w = exploreWorld();
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    await w.engine.seal(w.conv.id);
+
+    const next = w.restart();
+    await next.engine.recover();
+
+    expect(w.stateOf()).toBe('sealed');
+    expect(next.adapter.shapeSessions).toEqual([]);
   });
 
   it('starts no turn for a message sent to a sealed conversation', async () => {

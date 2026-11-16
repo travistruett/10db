@@ -403,6 +403,12 @@ describe('file edits', () => {
       decision: 'deny',
     },
     {
+      name: 'a nested .git entry (a gitfile) is refused with the whole page held',
+      claims: [{ kind: 'area', name: WHOLE_PROJECT_PAGE.name }],
+      path: 'packages/sub/.git',
+      decision: 'deny',
+    },
+    {
       name: 'a file is refused when the whole page is not held',
       claims: [],
       path: 'src/a.ts',
