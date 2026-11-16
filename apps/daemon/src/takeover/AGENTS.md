@@ -20,3 +20,4 @@ window, Hand Back.
   Earlier sets stay until Hand Back, since an earlier window may use them.
 - `render.ts` is the pure script and line; the line is for zsh and bash, not fish.
 - `opener.ts` is the only place 10db starts the terminal: `/usr/bin/open -a Terminal|iTerm <script>`.
+- With no sandbox runtime (`start.ts`) a terminal still opens, without the chat's servers, plugins or instructions, and a note says so. Each note is cut at 800 characters, since a long list of skills left out would fill the popover.

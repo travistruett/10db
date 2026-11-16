@@ -36,3 +36,4 @@
   `shape` or `runner`.
 
 - A session's `background_tasks` report is kept by `openSession` in memory (never stored): `ExploreEngine.view` reads it from the open session, so it is empty with no session, and each report emits a `conversation.state` event with `backgroundTasks: true` for the screen to read the view again.
+- `openTerminal`, `handBack` and `terminalFailed` move a conversation to and from `taken_over` (the reducer's rows, `explore-state.ts`); a message sent while taken over is stored held, with `holdStarts` keeping its turn from starting until Hand Back parks it on the folder (`releaseStarts` if Hand Back fails).

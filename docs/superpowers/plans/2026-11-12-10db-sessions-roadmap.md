@@ -243,7 +243,15 @@ per behaviour.
     refused while another holder has it, naming the holder. A restart takes it again from the `taken_over` row.
   - The `taken_over` and Hand Back rows of the state table apply.
   - Terminal or iTerm is set in Settings.
-- **Decision:** M7's §14 record. Its security table goes through adversarial review.
+- **Built (M7):** chats only, in Terminal, iTerm or Copy the Command (Settings › Sessions), on every account kind;
+  the waits for Your folder stop with 10db and resume at the next start. Changed from the outline above:
+  - no lane-profile column: a task's Open in Terminal is a follow-up (below)
+  - no per-hash hook approval: no project settings file loads at all
+  - Codex gets no skills folders (no flag), and runs as Codex does by default
+  - the takeover files live in `<data dir>/takeovers/<conversation id>/`
+  - six live checks (LC1 to LC6) in the research record's "M7 live checks"
+- **Decision:** `decisions/2026-11-16-open-in-terminal-runs-the-agents-own-tui-outside-the-sandbox-holding-your-folder.md`.
+  Its security table goes through adversarial review.
 
 ### M8: Spotlight
 
@@ -268,6 +276,13 @@ per behaviour.
   (`mcpServerStatus/list`) mapped into the same note as Claude's `needs-auth`; the system temp dirs in the list
   the readers of the builder's files check, as the launch's already is.
 - Keyboard reordering of tabs (UI spec review, finding 22).
+- Open in Terminal for a Task: a pass of one and a worktree lane, through the runner's `TAKEN_OVER`.
+- Codex skill roots in the terminal.
+- A wait for a takeover leaves the delivery slot and retries on `FolderHoldChanged`.
+- The update drain counts folder waits that a restart redoes (the waiting job, the jobs queued behind it, a waiting
+  cut's `CUTTING` row; not M6b's pending open, which a restart drops).
+- Show the terminal's turns after Hand Back.
+- A reminder for a takeover held past a day.
 
 ## Live checks
 

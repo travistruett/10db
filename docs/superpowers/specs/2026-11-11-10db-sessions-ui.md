@@ -822,6 +822,8 @@ a Chat.
 | Its Chat | stays open beside it, and changes nothing while the pass holds the folder | read-only, reached from "From chat" |
 | In your terminal | the banner adds "Your folder stays held." | the banner adds "Its claims stay held." |
 
+A Task has no Open in Terminal row yet: a task's takeover needs runner work and is a later milestone, so its session bar shows none.
+
 ### 8.5 Landing
 
 **A Task in Your folder lands as a pass lands** (design spec §7.3, the fast-forward decision), word for word:
@@ -921,10 +923,17 @@ It opens a **popover anchored to the button**, not a modal:
 - **A Chat** adds a line: "Your folder is held until you hand back." Its turns in the terminal can write, so the
   Chat takes the hold for the whole takeover (design spec §7.5).
 - **A Task** adds a line: "Your folder stays held." or "Its claims stay held."
-- When the agent changed project setting files, it also says "These project files changed and won't be loaded:
-  `.claude/settings.json`." A project hook loads only when the builder approved its hash.
-- **The terminal app** is a setting, Settings › General: "Open sessions in Terminal / iTerm". Terminal is the
-  default (design spec §7.5).
+- **What the popover adds** comes from the daemon's preview (`GET …/takeover/preview`), in its words, so the UI
+  never branches on the agent:
+  - "Your folder is held until you hand back."
+  - "These project files changed and won't be loaded: `.claude/settings.json`." No project settings file loads.
+  - the agent's first screen and gaps (Codex: "Codex doesn't get your skills folders.")
+  - a closed pass: a commit made in the terminal makes its settle ask
+  - any server left out
+- **Refusals** are the reducer's and the folder's words, shown in the popover with Open in Terminal disabled.
+- **The terminal app** is a setting, Settings › Sessions: "Open sessions in" Terminal, iTerm or Copy the Command.
+  Terminal is the default (design spec §7.5). With Copy the Command the popover's button reads "Copy the Command",
+  nothing opens, and the line is for zsh or bash; the banner offers it again.
 
 ### 10.2 While it is in the terminal
 
@@ -952,7 +961,7 @@ spec's §6.7 stores a message sent now and holds it until Hand Back:
 - **Hand Back** is the banner's filled primary. 10db does not watch the terminal process (design spec §7.5), so
   Hand Back trusts the builder. It asks first, in a popover: "Is Claude Code closed in your terminal?" (with
   `capabilities.label`), with **Hand Back** and Cancel.
-- **Copy Command** copies the launch line for a second terminal. The script file deletes itself once it runs, so
+- **Copy Command** copies the launch line for a second terminal (zsh or bash). The script file deletes itself once it runs, so
   the copy is the way back in.
 - **The banner is neutral, not orange (call).** Orange means a usage limit in this app, and nothing here is wrong.
 - Do It… is disabled while the session is here: "Hand back first".

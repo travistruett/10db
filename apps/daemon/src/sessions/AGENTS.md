@@ -42,3 +42,4 @@
   reads `mcpAuthStatus` (`codex-mcp-auth.ts`) on the same home sessions use; it opens only plain https pages and keeps
   no token (`docs/architecture/decisions/2026-11-14-mcp-sign-ins-stay-in-each-agents-own-store.md`). A session that
   finds a server signed out says where to sign in (`mcpSignInWhere`).
+- `takeoverCommand` and `takeoverNotes` on `AgentAdapter` are pure: Claude's (`claude-takeover.ts`, `--setting-sources ''`, `apiKeyHelper` or the scrubbed Bedrock key, `markOnboarded` for the account's first-run marks) and Codex's (`codex-takeover.ts`, Codex's own defaults except the billing line, the sign-in store and the `untrusted` pin; header tokens through `env_http_headers` from a sealed file). `takeover-servers.ts` maps the servers each agent takes and names what it leaves out. A change to a row is a change to a test table, never a flag only a test reads.
