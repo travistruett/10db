@@ -76,6 +76,23 @@ const TodoInput = z.looseObject({
   todos: z.array(z.looseObject({ content: Text, status: z.enum(PlanStepStatus) })),
 });
 const TextBlock = z.looseObject({ type: z.literal('text'), text: Text });
+const AskInput = z.looseObject({
+  questions: z
+    .array(
+      z.looseObject({
+        question: Text,
+        options: z.array(z.looseObject({ label: Text })).default([]),
+      }),
+    )
+    .min(1),
+});
+
+/** A question with the labels it offered, so the row still says what was offered once answered. */
+function askedLine(q: { question: string; options: readonly { label: string }[] }): string {
+  return q.options.length === 0
+    ? q.question
+    : `${q.question} (${q.options.map((o) => o.label).join(' / ')})`;
+}
 
 /** The tools whose target's previous text an edit card diffs against. */
 const DIFFED = new Set(['Write', 'Edit', 'MultiEdit']);
@@ -386,6 +403,14 @@ function untitled(
         agent: input.data.subagent_type,
         promptPreview: input.data.prompt.slice(0, PREVIEW_CHARS),
         model: input.data.model ?? null,
+      };
+    }
+    case 'AskUserQuestion': {
+      const input = AskInput.safeParse(use.input);
+      if (!input.success) return other;
+      return {
+        ...other,
+        inputPreview: input.data.questions.map(askedLine).join(' · ').slice(0, PREVIEW_CHARS),
       };
     }
     case 'WebFetch': {

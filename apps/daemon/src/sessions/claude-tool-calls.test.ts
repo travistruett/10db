@@ -346,6 +346,29 @@ describe('claudeToolCall', () => {
       },
     },
     {
+      name: 'AskUserQuestion previews its questions and options, not its JSON',
+      use: use('AskUserQuestion', {
+        questions: [
+          {
+            question: 'Which page first?',
+            header: 'Page',
+            options: [{ label: 'Settings' }, { label: 'People' }],
+            multiSelect: false,
+          },
+          { question: 'Keep the byline?', header: 'Byline', options: [], multiSelect: false },
+        ],
+      }),
+      view: {
+        ...common,
+        id: 'toolu_1',
+        harnessTool: 'AskUserQuestion',
+        title: 'AskUserQuestion',
+        kind: 'other',
+        name: 'AskUserQuestion',
+        inputPreview: 'Which page first? (Settings / People) · Keep the byline?',
+      },
+    },
+    {
       name: 'a known tool whose input is the wrong shape',
       use: use('Edit', { file_path: 3 }),
       view: {

@@ -26,7 +26,8 @@ export function CountBadge({
       px={5}
       miw={16}
       variant={attention ? 'filled' : 'light'}
-      color={attention ? 'blue' : 'gray'}
+      // An attention count takes the theme's primary colour, Badge's own default.
+      {...(attention ? {} : { color: 'gray' })}
     >
       {phrase === undefined ? (
         count
