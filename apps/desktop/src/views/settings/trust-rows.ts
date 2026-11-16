@@ -101,7 +101,7 @@ export const GRANT_LIMIT_LABELS: Readonly<Record<LimitName, string>> = {
 };
 
 export const GRANTS_DESCRIPTION =
-  "10db's judge reads a change from the next call; auto mode from the next session.";
+  "A line that quotes one call applies, and stops, from the next call. A line in your own words is read by 10db's judge from the next call and by auto mode from the next session.";
 
 export const GRANTS_EMPTY =
   "Nothing yet. \"Always in this project\" on a card adds a line here. Every judge reads a line that describes a kind of call. A line that quotes one call lets exactly that call through in Claude's auto mode and under 10db's judge, with no judge reading it; Codex's own Auto-review can still refuse it.";

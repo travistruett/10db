@@ -18,7 +18,7 @@ import {
   callKey,
   callSummary,
   crossesLimit,
-  grantCallSummary,
+  isGrantedCall,
   projectGrantedCalls,
   skipMessage,
   type FastPathContext,
@@ -126,9 +126,7 @@ export function createHookJudge(
     // The builder's Always in this project on this very call settles it in the hook, ahead of Claude's auto
     // mode classifier as well as 10db's judge: the hook's allow ends the check, as Claude Code's own "don't ask
     // again" does. No judge reads the call, since it is the agent's text.
-    if (
-      projectGrantedCalls(deps.state.db, ctx.projectId).has(grantCallSummary(req.toolName, input))
-    )
+    if (isGrantedCall(projectGrantedCalls(deps.state.db, ctx.projectId), req.toolName, input))
       return { decision: 'allow', settled: GRANT_SETTLED };
     if (judging !== JudgeKind.Tendb) return { decision: 'allow' };
     if (ctx.coveredByBuilderRule(req)) return { decision: 'allow', settled: RULE_SETTLED };

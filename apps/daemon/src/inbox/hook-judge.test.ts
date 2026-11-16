@@ -26,7 +26,13 @@ import { judgePreToolUse, type GuardVerdict } from '../guard';
 import { createJudge } from '../judge';
 import { silentLogger } from '../log';
 import type { JudgedCallRequest } from '../sessions';
-import { buildTrustPolicy, createSkipRecorder, type SkipRecorder } from '../trust';
+import {
+  buildTrustPolicy,
+  createSkipRecorder,
+  grantCallSummary,
+  grantTargetOf,
+  type SkipRecorder,
+} from '../trust';
 import { createHookJudge, createLimitNotes, type LimitNotes } from './hook-judge';
 
 const json = (body: unknown): Response =>
@@ -281,7 +287,7 @@ describe('the hook judge, attended', () => {
       insertTrustGrant(ctx, {
         projectId: seeded,
         limit: 'writes_live',
-        target: `the call ${JSON.stringify(DEPLOY)}`,
+        target: `the Bash call ${JSON.stringify(DEPLOY)}`,
         sourceInboxId: null,
       }),
     );
@@ -333,7 +339,7 @@ describe('the hook judge, attended', () => {
         insertTrustGrant(ctx, {
           projectId: seeded,
           limit: 'writes_live',
-          target: `the call ${JSON.stringify(DEPLOY)}`,
+          target: `the Bash call ${JSON.stringify(DEPLOY)}`,
           sourceInboxId: null,
         }),
       );
@@ -345,6 +351,44 @@ describe('the hook judge, attended', () => {
       expect(sent).toEqual([]);
     },
   );
+
+  it.each<[string, JudgedCallRequest]>([
+    ['an Edit of the file the command names', request('Edit', { file_path: DEPLOY })],
+    ['a Write of the same input', request('Write', { file_path: DEPLOY })],
+  ])('a Bash grant of a command settles no %s', async (_name, req) => {
+    model = null;
+    const judgeCall = hookJudge({ now: JudgeKind.Native });
+    store.write((ctx) =>
+      insertTrustGrant(ctx, {
+        projectId: seeded,
+        limit: 'writes_live',
+        target: `the Bash call ${JSON.stringify(DEPLOY)}`,
+        sourceInboxId: null,
+      }),
+    );
+    expect(await run(judgeCall, req)).toEqual({ decision: 'allow' });
+  });
+
+  it('an Edit grant settles that Edit and not a Bash call whose command is the path', async () => {
+    model = null;
+    const judgeCall = hookJudge({ now: JudgeKind.Native });
+    const edit = request('Edit', { file_path: '/w/release.sh' });
+    store.write((ctx) =>
+      insertTrustGrant(ctx, {
+        projectId: seeded,
+        limit: 'writes_live',
+        target:
+          grantTargetOf(null, grantCallSummary('Edit', { file_path: '/w/release.sh' }), 'Edit') ??
+          '',
+        sourceInboxId: null,
+      }),
+    );
+    expect(await run(judgeCall, edit)).toEqual({
+      decision: 'allow',
+      settled: 'The builder allowed this very call in this project.',
+    });
+    expect(await run(judgeCall, bash('/w/release.sh'))).toEqual({ decision: 'allow' });
+  });
 
   it("a call the builder's allowed commands cover is settled before any model, on every surface", async () => {
     for (const surface of ['pass', 'lane'] as const) {

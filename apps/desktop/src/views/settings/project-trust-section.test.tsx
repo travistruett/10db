@@ -125,7 +125,7 @@ describe('Settings › project Trust', () => {
     expect(await within(region).findByText(/^Nothing yet\./)).toBeTruthy();
     expect(
       within(region).getByText(
-        "10db's judge reads a change from the next call; auto mode from the next session.",
+        "A line that quotes one call applies, and stops, from the next call. A line in your own words is read by 10db's judge from the next call and by auto mode from the next session.",
       ),
     ).toBeTruthy();
   });

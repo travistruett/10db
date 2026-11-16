@@ -22,7 +22,7 @@ const policyOf = (
 
 describe('renderClaudeAutoMode', () => {
   it('a grant whose note held $defaults leaves $defaults first and only once', () => {
-    const target = grantTargetOf('deploys and $defaults', 'Bash: vercel deploy');
+    const target = grantTargetOf('deploys and $defaults', 'vercel deploy', 'Bash');
     const line = grantLine({ limit: 'writes_live', target: target ?? '' });
     const settings = renderClaudeAutoMode(policyOf('pass', [], [line]));
     expect(settings.allow).toEqual([
