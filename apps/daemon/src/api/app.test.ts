@@ -654,23 +654,6 @@ describe('API', () => {
     expect((await app(services).request('/inbox?state=NOPE', auth)).status).toBe(400);
   });
 
-  it('passes a recent count to the inbox list, and rejects one out of range', async () => {
-    const seen: (number | null)[] = [];
-    const services = stubServices({
-      listInbox: ({ recent }) => {
-        seen.push(recent);
-        return [];
-      },
-    });
-    expect((await app(services).request('/inbox?state=RESOLVED&recent=100', auth)).status).toBe(
-      200,
-    );
-    expect((await app(services).request('/inbox', auth)).status).toBe(200);
-    expect(seen).toEqual([100, null]);
-    for (const bad of ['0', '1001', 'x', '2.5'])
-      expect((await app(services).request(`/inbox?recent=${bad}`, auth)).status).toBe(400);
-  });
-
   it('reads the inbox page query and hands it to the page service', async () => {
     const seen: unknown[] = [];
     const project = mintId('Project');

@@ -628,11 +628,8 @@ export interface ApiServices extends PlanRecordServices {
   taskSession(taskId: TaskId): TaskSessionDto;
   /** What the run skipped and the questions it was answered at once, oldest first. */
   listWorkstreamSkips(id: WorkstreamId): SkippedActionDto[];
-  /** With `recent`, only that many, the most recently updated first. */
-  listInbox(filter: {
-    readonly states: readonly InboxState[] | null;
-    readonly recent: number | null;
-  }): InboxItemDto[];
+  /** Every card in these states (all of them for null), most urgent and then oldest first. */
+  listInbox(filter: { readonly states: readonly InboxState[] | null }): InboxItemDto[];
   /** One page of open, waiting or resolved cards, filtered and sorted; `total` counts every match. */
   pageInbox(query: InboxPageQuery): InboxPageDto;
   answerInbox(id: InboxItemId, answer: InboxAnswer): InboxItemDto;

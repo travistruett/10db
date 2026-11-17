@@ -228,14 +228,6 @@ const Cursor = z.coerce.number().int().min(0).catch(0);
 /** `recheck` is `1` or absent; anything else is a 400. */
 const SystemQuery = z.object({ recheck: z.literal('1').optional() });
 const Limit = z.coerce.number().int().min(1).max(1000).catch(500);
-/** How many of the most recently updated inbox items to list; absent lists them all. */
-const RecentCount = z
-  .string()
-  .regex(/^\d+$/)
-  .transform(Number)
-  .pipe(z.number().int().min(1).max(1000))
-  .optional()
-  .transform((n) => n ?? null);
 /** How many judge calls to list: 1 to 100, and a larger number is read as 100. */
 const JudgeCallsQuery = z.object({
   limit: z.coerce
@@ -1840,19 +1832,11 @@ export function createApp(deps: ApiDeps) {
     )
     .get(
       '/inbox',
-      validator('query', (query): { state?: string; recent?: string } => ({
-        ...(typeof query['state'] === 'string' ? { state: query['state'] } : {}),
-        ...(typeof query['recent'] === 'string' ? { recent: query['recent'] } : {}),
-      })),
-      (c) => {
-        const query = c.req.valid('query');
-        return c.json(
-          deps.services.listInbox({
-            states: StateList.parse(query.state),
-            recent: RecentCount.parse(query.recent),
-          }),
-        );
-      },
+      validator('query', (query): { state?: string } =>
+        typeof query['state'] === 'string' ? { state: query['state'] } : {},
+      ),
+      (c) =>
+        c.json(deps.services.listInbox({ states: StateList.parse(c.req.valid('query').state) })),
     )
     .get(
       '/inbox/page',
