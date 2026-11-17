@@ -265,7 +265,11 @@ describe('a separate copy’s tab', () => {
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
       http.get(daemonUrl('/projects/:projectId/tasks'), () =>
         HttpResponse.json([
-          taskDto({ id: taskId, projectId: project.id, description: 'The brief text' }),
+          taskDto({
+            id: taskId,
+            projectId: project.id,
+            description: '**Where:** `src/api/client.ts`\n\nThe brief text',
+          }),
         ]),
       ),
       ...served.handlers,
@@ -274,10 +278,13 @@ describe('a separate copy’s tab', () => {
     return renderApp(`/sessions?task=${taskId}`);
   };
 
-  it('opens with the chat it came from, the brief, and the run’s bar', async () => {
+  it('opens with the chat it came from, the brief as a card, and the run’s bar', async () => {
     openCopy({});
     expect(await screen.findByText('From chat: Login fails')).toBeTruthy();
-    expect(await screen.findByText('The brief text')).toBeTruthy();
+    const brief = await screen.findByRole('region', { name: 'Brief' });
+    expect(within(brief).getByText('The brief text')).toBeTruthy();
+    expect(within(brief).getByText('Where:').closest('[data-streamdown="strong"]')).not.toBeNull();
+    expect(brief.textContent).not.toContain('**');
     expect(screen.getByText('Task · Separate copy ·')).toBeTruthy();
     expect(screen.getByRole('textbox', { name: 'Message' })).toHaveProperty(
       'placeholder',

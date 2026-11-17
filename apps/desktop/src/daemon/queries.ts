@@ -174,15 +174,23 @@ export function useWorkstreams(filter: { readonly active: boolean }) {
 /**
  * What a workstream changed since it started: the diff a finished, ungated task is checked by. It is
  * keyed by the head the card names, so a new round never shows the previous round's diff.
+ *
+ * A view that follows a running task (`follow`) keys it by the run's last change instead, which moves
+ * often: while the newer read is on its way, the same workstream and scope's last diff stays on screen.
  */
 export function useWorkstreamChanges(
   id: WorkstreamId | undefined,
   head: string | null,
   scope: ChangesScope = ChangesScope.All,
+  follow = false,
 ) {
   const { client } = useDaemon();
   return useQuery({
     queryKey: queryKeys.workstreamChanges(id, head, scope),
+    placeholderData: (previous, previousQuery) =>
+      follow && previousQuery?.queryKey[1] === id && previousQuery?.queryKey[3] === scope
+        ? previous
+        : undefined,
     queryFn:
       id === undefined
         ? skipToken
