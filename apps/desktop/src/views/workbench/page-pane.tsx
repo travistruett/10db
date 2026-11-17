@@ -114,7 +114,7 @@ export function PagePane(props: PagePaneProps) {
       label={page.label}
       header={
         header ?? (
-          <Title order={2} size="h4" px="md" pt="sm">
+          <Title order={2} size="h4" px="md" pt="md" pb="sm">
             {page.label}
           </Title>
         )

@@ -118,7 +118,7 @@ export function WorkingLine({ conversation, streaming, tool, startedAt, extra }:
   const line = lineOf(conversation, streaming, tool, elapsedMs);
   if (line === null) return null;
   return (
-    <Group gap="xs" px="md" pb="xs" wrap="nowrap" style={{ flex: 'none' }}>
+    <Group gap="xs" px="md" pt="xs" pb="xs" wrap="nowrap" style={{ flex: 'none' }}>
       {line.mark === 'dot' ? (
         <Box
           aria-hidden="true"

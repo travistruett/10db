@@ -1,0 +1,21 @@
+/* The bar casts a shadow over the list once the list scrolls under it. */
+.header {
+  position: relative;
+  z-index: 2;
+  flex: none;
+  border-bottom: 1px solid transparent;
+  transition:
+    box-shadow 150ms ease,
+    border-color 150ms ease;
+}
+
+.header[data-scrolled] {
+  border-bottom-color: var(--mantine-color-default-border);
+  box-shadow: 0 6px 12px -6px light-dark(rgba(0, 0, 0, 0.18), rgba(0, 0, 0, 0.55));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .header {
+    transition: none;
+  }
+}

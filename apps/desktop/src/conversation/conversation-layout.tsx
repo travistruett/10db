@@ -1,5 +1,7 @@
 import { Box } from '@mantine/core';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
+import classes from './conversation-layout.module.css';
+import { ListScrolledContext } from './list-scrolled';
 
 /** The widest a conversation's column is drawn, so a line of the reply stays readable. */
 export const CONVERSATION_WIDTH = 720;
@@ -22,7 +24,8 @@ export interface ConversationLayoutProps {
 /**
  * Every conversation's frame (Sessions, Plan, the Workbench): the screen's bar on top, then one centred
  * column at most `CONVERSATION_WIDTH` wide, whose list takes the height left over and scrolls inside
- * itself, with what the footer holds pinned at its foot.
+ * itself, with what the footer holds pinned at its foot. The bar casts a shadow while the list is
+ * scrolled under it.
  */
 export function ConversationLayout({
   label,
@@ -32,6 +35,7 @@ export function ConversationLayout({
   after,
   h,
 }: ConversationLayoutProps) {
+  const [scrolled, setScrolled] = useState(false);
   return (
     <Box
       component="section"
@@ -39,7 +43,11 @@ export function ConversationLayout({
       h={h}
       style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}
     >
-      {header === undefined ? null : <Box style={{ flex: 'none' }}>{header}</Box>}
+      {header === undefined ? null : (
+        <Box className={classes['header']} data-scrolled={scrolled || undefined}>
+          {header}
+        </Box>
+      )}
       <Box
         maw={CONVERSATION_WIDTH}
         w="100%"
@@ -48,7 +56,7 @@ export function ConversationLayout({
       >
         {/* Each part is the column's own item, as the list sizes itself by `flex: 1` and the rest keep
             their height: another box between them would make the list's height a nested flex's. */}
-        {children}
+        <ListScrolledContext value={setScrolled}>{children}</ListScrolledContext>
         {footer}
         {after}
       </Box>

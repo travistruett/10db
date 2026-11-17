@@ -1,0 +1,26 @@
+/* What the footer holds casts a shadow up over the list while more of it is below. */
+.below {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 16px;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(
+    to top,
+    light-dark(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.4)),
+    transparent
+  );
+  transition: opacity 150ms ease;
+}
+
+.below[data-shown] {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .below {
+    transition: none;
+  }
+}

@@ -1,18 +1,24 @@
-.reply {
-  position: relative;
-}
-
-/* The reply's Copy shows on hover and focus only. */
+/* The reply's Copy sits under its last line, shown on hover and focus only, never over the words. */
 .copy {
-  position: absolute;
-  top: 0;
-  right: 0;
+  display: flex;
+  margin-top: 2px;
+  margin-left: -4px;
   opacity: 0;
+  transition: opacity 120ms ease;
 }
 
 .reply:hover .copy,
 .reply:focus-within .copy {
   opacity: 1;
+}
+
+.copy button {
+  color: var(--mantine-color-dimmed);
+}
+
+.copy button:hover,
+.copy button:focus-visible {
+  color: var(--mantine-color-text);
 }
 
 .reasoning {

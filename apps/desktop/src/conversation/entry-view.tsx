@@ -52,20 +52,21 @@ function Reply({ entry }: { readonly entry: Entry<'reply'> }) {
           Stopped here.
         </Text>
       )}
-      <CopyButton value={entry.text}>
-        {({ copied, copy }) => (
-          <ActionIcon
-            className={classes['copy']}
-            variant="subtle"
-            color="gray"
-            size="sm"
-            aria-label={copied ? 'Copied' : 'Copy'}
-            onClick={copy}
-          >
-            {copied ? <IconCheck size={14} stroke={1.5} /> : <IconCopy size={14} stroke={1.5} />}
-          </ActionIcon>
-        )}
-      </CopyButton>
+      <Box className={classes['copy']}>
+        <CopyButton value={entry.text}>
+          {({ copied, copy }) => (
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              size="md"
+              aria-label={copied ? 'Copied' : 'Copy'}
+              onClick={copy}
+            >
+              {copied ? <IconCheck size={16} stroke={1.5} /> : <IconCopy size={16} stroke={1.5} />}
+            </ActionIcon>
+          )}
+        </CopyButton>
+      </Box>
     </Box>
   );
 }
