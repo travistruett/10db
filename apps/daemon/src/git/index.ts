@@ -41,10 +41,11 @@ export { GitTrustError, GitTrustFailure } from './trust-error';
 export { firstExecutable, installCandidates, INSTALL_PREFIXES_TEXT } from './install-prefixes';
 export { GitVersionError, resolveGit } from './version';
 export {
-  lockedBatchId,
+  lockedOwner,
   parseWorktreeList,
   WORKTREE_LOCK_PREFIX,
   type WorktreeEntry,
+  type WorktreeOwner,
 } from './worktree-list';
 export {
   builderCommandLine,

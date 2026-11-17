@@ -7,7 +7,7 @@ import {
   comparablePath,
   equalOrUnder,
   existsAsEntry,
-  lockedBatchId,
+  lockedOwner,
   samePath,
   surelyInside,
   type Git,
@@ -81,8 +81,9 @@ interface NotOrphan {
 
 function orphanVerdict(state: StateStore, entry: WorktreeEntry, root: string): Orphan | NotOrphan {
   if (entry.bare) return { why: 'it is a bare repository entry' };
-  // The lock reason is git's output: parse the id it names.
-  const parsed = BatchId.safeParse(lockedBatchId(entry));
+  // The lock reason is git's output: the owner it names must be a batch.
+  const owner = lockedOwner(entry);
+  const parsed = BatchId.safeParse(owner?.kind === 'batch' ? owner.id : null);
   if (!parsed.success)
     return { why: '10db no longer has it locked (its lock reason does not name a batch)' };
   if (!underRoot(entry.path, root)) return { why: "it is outside 10db's worktree root" };

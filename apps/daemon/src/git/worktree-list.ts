@@ -11,10 +11,10 @@ export interface WorktreeEntry {
   readonly bare: boolean;
 }
 
-/** What a 10db worktree's lock reason starts with; the rest is the batch's id. */
+/** What a 10db worktree's lock reason starts with; the rest is its owner's id. */
 export const WORKTREE_LOCK_PREFIX = '10db ';
 
-const LOCK_REASON = /^10db (bat_[0-9a-f-]+)$/;
+const LOCK_REASON = /^10db ((?:bat|cht)_[0-9a-f-]+)$/;
 const HEADS = 'refs/heads/';
 
 /**
@@ -70,7 +70,16 @@ export function parseWorktreeList(porcelainZ: string): WorktreeEntry[] {
   return entries;
 }
 
-/** The batch id a 10db lock reason names, or null. */
-export function lockedBatchId(entry: WorktreeEntry): string | null {
-  return entry.locked === null ? null : (LOCK_REASON.exec(entry.locked)?.[1] ?? null);
+/**
+ * What owns a 10db worktree: a Board task's batch or a session. The id is git's text, so a caller parses it
+ * into an id of its kind before trusting it.
+ */
+export type WorktreeOwner =
+  { readonly kind: 'batch'; readonly id: string } | { readonly kind: 'chat'; readonly id: string };
+
+/** The owner a 10db lock reason names, or null. */
+export function lockedOwner(entry: WorktreeEntry): WorktreeOwner | null {
+  const id = entry.locked === null ? null : (LOCK_REASON.exec(entry.locked)?.[1] ?? null);
+  if (id === null) return null;
+  return { kind: id.startsWith('bat_') ? 'batch' : 'chat', id };
 }

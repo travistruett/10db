@@ -47,7 +47,7 @@ import { localRemotePath, parseRemoteUrl } from './remote-url';
 import { GitError, runGit, runGitCapped, type RunOptions } from './run';
 import { GitTrustError, GitTrustFailure, type GitTrustDetail } from './trust-error';
 import { embeddedRepository, GitMode, isGitComponent } from './worktree-files';
-import { lockedBatchId, parseWorktreeList, type WorktreeEntry } from './worktree-list';
+import { lockedOwner, parseWorktreeList, type WorktreeEntry } from './worktree-list';
 
 const OP_TRAILER = '10db-Op';
 const OP_TRAILER_LINE = new RegExp(`^${OP_TRAILER}:`, 'm');
@@ -4093,7 +4093,7 @@ export function createGit(opts: GitOptions = {}): Git {
         pins.delete(target);
         return 'absent';
       }
-      if (lockedBatchId(entry) === null)
+      if (lockedOwner(entry) === null)
         throw new WorktreeNotOursError(path, 'the worktree is not locked by 10db');
       await git(main, ['worktree', 'remove', '--force', '--force', '--', target]);
       pins.delete(target);
@@ -4116,7 +4116,7 @@ export function createGit(opts: GitOptions = {}): Git {
     const main = await pinned(repo);
     const entry = (await listWorktrees(main)).find((e) => samePath(comparablePath(e.path), target));
     if (!entry) throw new WorktreeNotOursError(path, 'git lists no worktree there');
-    if (lockedBatchId(entry) === null)
+    if (lockedOwner(entry) === null)
       throw new WorktreeNotOursError(path, 'the worktree is not locked by 10db');
     let gitDir: string;
     try {
