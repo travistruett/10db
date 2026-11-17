@@ -5,7 +5,8 @@ import { useEffect, useRef, useState } from 'react';
 import { markPassNotificationsActed, shownPassNotifications } from '../../desktop/notify-pass';
 import { useNow } from '../../shell/relative';
 import { Announcer } from './announcer';
-import { EMPTY_DRAFT, hasContent, type Draft } from '../../conversation/drafts';
+import { hasContent } from '../../conversation/drafts';
+import { draftKey, sessionDrafts, useSessionDraft } from '../sessions/session-drafts';
 import { focusTarget } from './focus-target';
 import { PagePane } from './page-pane';
 import { PrButton } from './pr-button';
@@ -26,7 +27,8 @@ const CLOCK_TICK_MS = 30_000;
 /**
  * The open pass's queue and the shown page's thread (Workbench spec §4.3). Narrow: the queue is a strip
  * of rows across the top and the thread fills the rest. Wide: the queue on the left, the thread beside
- * it. With no page selected the thread shows the queue's first page. Each page keeps its own draft.
+ * it. With no page selected the thread shows the queue's first page. Each page keeps its own draft,
+ * after the Workbench is left too.
  */
 export function PassWorkspace({ view, inbox, project, selected, onSelect }: PassWorkspaceProps) {
   const now = useNow(CLOCK_TICK_MS);
@@ -34,8 +36,9 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
   const rows = queueRows(view, inbox, now);
   const shown = shownRow(rows, selected);
   const wide = layout === WorkbenchLayout.Wide;
-  // Each page's unsent draft, kept while another page is shown.
-  const [drafts, setDrafts] = useState<ReadonlyMap<TaskId, Draft>>(new Map());
+  // Each page's unsent draft is kept by its task, as Sessions keeps a task tab's, so another page, another
+  // view or a restart (its words) finds it where it was left.
+  const [draft, setDraft] = useSessionDraft(draftKey.task(shown?.page.taskId ?? ''));
   // The page whose Take Out confirm is open.
   const [takingOut, setTakingOut] = useState<TaskId | null>(null);
   const takingOutPage = view.pages.find((page) => page.taskId === takingOut) ?? null;
@@ -53,7 +56,9 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
         rows: rows.map((row) => ({ taskId: row.page.taskId, status: row.status })),
         selected: shown?.page.taskId ?? null,
         drafts: new Set(
-          [...drafts].filter(([, draft]) => hasContent(draft)).map(([taskId]) => taskId),
+          rows
+            .map((row) => row.page.taskId)
+            .filter((taskId) => hasContent(sessionDrafts.get(draftKey.task(taskId)))),
         ),
       });
       if (target !== null) {
@@ -139,11 +144,8 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
             )?.openedAt ?? null
           }
           composerFocus={composerFocus}
-          draft={drafts.get(shown.page.taskId) ?? EMPTY_DRAFT}
-          onDraft={(draft) => {
-            const taskId = shown.page.taskId;
-            setDrafts((held) => new Map(held).set(taskId, draft));
-          }}
+          draft={draft}
+          onDraft={setDraft}
           pullRequest={<PrButton view={view} />}
         />
       )}

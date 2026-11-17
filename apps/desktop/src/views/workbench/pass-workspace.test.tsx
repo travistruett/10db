@@ -13,7 +13,7 @@ import {
   TaskId,
   mintId,
 } from '@10db/contracts';
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -352,7 +352,7 @@ describe('PassWorkspace composer', () => {
     });
   });
 
-  it('keeps each page’s draft while another page is shown', async () => {
+  it('keeps each page’s draft while another page is shown, and after the Workbench is left', async () => {
     const pages = pagesByStatus();
     const view = passViewDto({ pages: Object.values(pages) });
     function Selecting() {
@@ -376,6 +376,13 @@ describe('PassWorkspace composer', () => {
     expect(message('Billing').value).toBe('');
     fireEvent.click(screen.getByRole('button', { name: /^Settings/ }));
     expect(message('Settings').value).toBe('half a thought');
+    // Another view and back: the Workbench is drawn afresh and finds the words where they were.
+    cleanup();
+    renderWithDaemon(<Selecting />);
+    expect(
+      (await screen.findByRole<HTMLTextAreaElement>('textbox', { name: 'Message to Settings' }))
+        .value,
+    ).toBe('half a thought');
   });
 
   it('clears only the page that sent when its send settles after another page is shown', async () => {
