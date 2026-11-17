@@ -11,6 +11,12 @@
   the viewport); one who scrolled up stays put. The shell's main area is exactly the window's height and scrolls
   inside itself (`shell/app-layout.tsx`), so a list with its composer at the foot is bounded by the window; the
   Workbench e2e measures it in a 420 px tall window.
+- `ConversationLayout` gives its list `ListScrolledContext` (`list-scrolled.ts`): the bar gains a hairline and a soft
+  shadow while the list is scrolled from its start, and the list draws a shadow at its foot while more of it is below
+  (`useHiddenEdges`). Send takes what it sends out of the input as it is pressed (`afterSend`); a send that fails puts
+  it back ahead of what was typed since (`afterFailedSend`), so a screen that reads the input after Send gets the sent
+  draft from `onSend`, never from the input. A tool row's output drops the terminal's escape codes
+  (`terminal-text.ts`). `ZoomablePicture` is a picture in a thread that opens in a dialog on a click.
 - The composer's `held` prop (sessions spec §7.3): while a writer keeps the turn from Your folder, Send (and Stop and
   Redo) shows Wait for It, Send Reading Only and File as Tasks in place of sending; Esc cancels (the group owns Esc,
   so it never stops the turn), ⌘↩ waits. With no `held` it sends at once. The caller says when (`keepingWords`).
