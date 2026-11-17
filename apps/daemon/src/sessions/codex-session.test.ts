@@ -994,6 +994,28 @@ describe('the thread and the first turn', () => {
     });
   });
 
+  it('resumes a session moved to a worktree there, writable at the worktree only', async () => {
+    const worktree = join(root, 'worktree');
+    await mkdir(worktree);
+    const moved: LaneSandboxSpec = { ...sandbox, checkout: worktree };
+    const { handle, server, spec } = startWith(
+      {},
+      { resumeProviderSessionId: 'thr-old', cwd: worktree, sandbox: moved },
+    );
+    expect(await firstEvent(handle)).toMatchObject({ type: 'started' });
+    const sent = sentParams(server, 'thread/resume') as {
+      cwd: string;
+      config: { permissions: { lane: { filesystem: Record<string, string> } } };
+    };
+    expect(sent.cwd).toBe(worktree);
+    expect(sent.config).toEqual(codexThreadConfig(spec));
+    const writable = Object.entries(sent.config.permissions.lane.filesystem)
+      .filter(([, access]) => access === 'write')
+      .map(([path]) => path);
+    expect(writable).toEqual([await realpath(worktree)]);
+    expect(Object.keys(sent.config.permissions.lane.filesystem)).not.toContain(checkout);
+  });
+
   it('passes the instructions as developer instructions on start and on resume', async () => {
     for (const resumeProviderSessionId of [null, 'thr-old']) {
       const { handle, server } = startWith(
