@@ -45,6 +45,21 @@ export function createChatMove(deps: {
         pathOf,
       );
     },
+    pathFor(project: ProjectDto, branch: string) {
+      const root = madeWorktreeRoot(delivery.worktreeRoot);
+      const recorded = takenBranchesAndPaths(state.db, project.id).paths.map((p) =>
+        p.toLowerCase(),
+      );
+      for (let n = 1; ; n += 1) {
+        const path = worktreePathFor(
+          root,
+          project,
+          `chat-${n === 1 ? branch : `${branch}-${String(n)}`}`,
+        );
+        if (!existsSync(path) && !recorded.includes(path.toLowerCase()))
+          return Promise.resolve(path);
+      }
+    },
     cut: (chat, project, signal) => cutChatWorktree(delivery, chat, project, signal),
   };
 }

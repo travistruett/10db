@@ -49,6 +49,7 @@ import { tempDir } from './fixtures';
 const NO_MOVE: ChatMoveDeps = {
   signal: new AbortController().signal,
   pick: () => Promise.reject(new Error('This world has no git for a move.')),
+  pathFor: () => Promise.reject(new Error('This world has no git for a move.')),
   cut: () => Promise.reject(new Error('This world has no git for a move.')),
 };
 
@@ -255,6 +256,7 @@ export function chatWorld(
     }),
     webSearchOf: () => adapter.capabilities({ kind: launched.kind }, null).webSearch,
     takeover: () => takeoverService,
+    reopenBranch: (chatId) => work.reopen(chatId),
     ...(opts.worktrees === undefined ? {} : { worktrees: opts.worktrees({ state }) }),
   });
   chatService = chat;

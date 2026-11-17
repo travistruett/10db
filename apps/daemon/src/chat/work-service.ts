@@ -57,6 +57,8 @@ export interface ChatMoveDeps {
     project: ProjectDto,
     title: string,
   ): Promise<{ readonly branch: string; readonly path: string }>;
+  /** A free worktree path for a branch that already exists, for a session reopened from it. */
+  pathFor(project: ProjectDto, branch: string): Promise<string>;
   /** Cuts the worktree the row names; null when the daemon is stopping, with everything left for the restart. */
   cut(
     chat: ChatRow,
@@ -81,6 +83,11 @@ export interface ChatWorkService {
   moveFailure(chatId: ChatId): string | null;
   /** Resolves once the session's move, if one runs, has ended; for a caller that must not act mid-move. */
   moveSettled(chatId: ChatId): Promise<void>;
+  /**
+   * A branch session with no worktree (archived, swept) is reopened: it records a fresh path and remakes the
+   * worktree from its branch, with no turn, notice or carry-on. One that is not such a session is left alone.
+   */
+  reopen(chatId: ChatId): Promise<void>;
   /** Holds the starts of every session a restart found moving, before the engine recovers. */
   holdMoving(): void;
   /** Runs each session's interrupted move again, idempotent by path, and waits for them. */
@@ -328,6 +335,41 @@ export function createChatWorkService(deps: ChatWorkServiceDeps): ChatWorkServic
   }
 
   return {
+    async reopen(chatId) {
+      const chat = getChat(state.db, chatId);
+      if (
+        chat.workPlace !== WorkPlace.Branch ||
+        chat.worktreePath !== null ||
+        chat.branch === null ||
+        chat.baseHead === null ||
+        chat.archivedAt !== null ||
+        moves.has(chatId)
+      )
+        return;
+      const project = getProject(state.db, chat.projectId);
+      engine.holdStarts(chat.conversationId);
+      let recorded = false;
+      try {
+        for (let attempt = 0; !recorded && attempt < 2; attempt += 1) {
+          const path = await deps.move.pathFor(project, chat.branch);
+          try {
+            recorded = state.write((ctx) =>
+              setChatWork(ctx, chatId, WorkPlace.Branch, {
+                place: WorkPlace.Moving,
+                worktreePath: path,
+              }),
+            );
+            if (!recorded) return;
+          } catch {
+            // Another session took the same path between the pick and the write: pick again, once.
+          }
+        }
+      } finally {
+        if (!recorded) engine.releaseStarts(chat.conversationId);
+      }
+      if (recorded) startMove(chatId);
+    },
+
     holdMoving() {
       for (const chat of chatsInPlace(state.db, WorkPlace.Moving))
         engine.holdStarts(chat.conversationId);

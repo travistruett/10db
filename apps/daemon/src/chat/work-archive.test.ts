@@ -2,7 +2,14 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ArchivePreviewDto } from '@10db/contracts';
-import { getAppSetting, getChat, setChatWork } from '@10db/db';
+import {
+  getAppSetting,
+  getChat,
+  listItems,
+  moveChatTab,
+  setChatWork,
+  unarchiveChat,
+} from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { chatRequest } from '../../test/chat-app';
 import { chatWorld, type ChatWorld } from '../../test/chat-world';
@@ -122,5 +129,63 @@ describe('archiving a session on its own branch', () => {
     const done = await chatRequest(w, `/chats/${plain.id}/archive`, 'POST');
     expect(done.status).toBe(200);
     await waitFor(() => getChat(w.state.db, plain.id).archivedAt !== null);
+  });
+});
+
+describe('reopening a branch session whose worktree was removed', () => {
+  /** Archives a session that moved, with nothing at risk. */
+  async function archived() {
+    const made = await onABranch();
+    const done = await chatRequest(w, `/chats/${made.chat.id}/archive`, 'POST');
+    expect(done.status).toBe(200);
+    return made;
+  }
+  const counts = (conversationId: Parameters<typeof listItems>[1]) =>
+    listItems(w.state.db, conversationId, {}).length;
+
+  it('remakes the worktree from the branch on unarchive, with no turn, notice or carry-on, keeping base_head (row 36)', async () => {
+    const { chat, branch } = await archived();
+    const before = getChat(w.state.db, chat.id);
+    const items = counts(chat.conversationId);
+    const sessions = w.adapter.shapeSessions.length;
+    await chatRequest(w, `/chats/${chat.id}/unarchive`, 'POST');
+    await waitFor(
+      () =>
+        getChat(w.state.db, chat.id).worktreePath !== null &&
+        getChat(w.state.db, chat.id).workPlace === 'branch',
+    );
+    await w.work.moveSettled(chat.id);
+    const row = getChat(w.state.db, chat.id);
+    expect(row).toMatchObject({ workPlace: 'branch', baseHead: before.baseHead, branch });
+    expect(gitIn(row.worktreePath ?? '', 'branch', '--show-current')).toBe(branch);
+    expect(counts(chat.conversationId)).toBe(items);
+    expect(w.adapter.shapeSessions).toHaveLength(sessions);
+  });
+
+  it('remakes it when the chat is reopened from Recently closed (row 36)', async () => {
+    const { chat } = await onABranch();
+    await chatRequest(w, `/chats/${chat.id}/archive`, 'POST');
+    // Closed, not archived, with its worktree gone (as a sweep leaves it): placed in a tab again.
+    w.state.write((ctx) => {
+      unarchiveChat(ctx, chat.id);
+      moveChatTab(ctx, chat.id, null);
+    });
+    await w.chat.patch(chat.id, { tabPosition: 0 });
+    await waitFor(() => getChat(w.state.db, chat.id).worktreePath !== null);
+    await w.work.moveSettled(chat.id);
+    expect(existsSync(getChat(w.state.db, chat.id).worktreePath ?? '')).toBe(true);
+  });
+
+  it('stays with no worktree, reading only, when the branch is gone, and says why (row 37)', async () => {
+    const { chat, branch } = await archived();
+    gitIn(checkout.path, 'branch', '-D', branch);
+    await chatRequest(w, `/chats/${chat.id}/unarchive`, 'POST');
+    await waitFor(() => w.work.moveFailure(chat.id) !== null);
+    await w.work.moveSettled(chat.id);
+    expect(getChat(w.state.db, chat.id)).toMatchObject({ workPlace: 'branch', worktreePath: null });
+    const notices = listItems(w.state.db, chat.conversationId, {}).map((i) =>
+      JSON.stringify(i.body),
+    );
+    expect(notices.join()).toContain('could not be made again');
   });
 });

@@ -1699,6 +1699,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     engine: exploreEngine,
     folderHold,
     worktrees: createChatWorktrees({ state, git }),
+    reopenBranch: (chatId) => chatWork.reopen(chatId),
     pendingOpens,
     briefs: chatBriefs,
     clock,

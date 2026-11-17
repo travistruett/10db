@@ -238,6 +238,8 @@ export interface ChatServiceDeps {
   readonly takeover?: () => ArchiveTakeover | null;
   /** The worktrees of sessions on their own branch; absent where nothing makes one. */
   readonly worktrees?: ChatWorktrees;
+  /** Remakes the worktree of a branch session that has none, once it is open again. */
+  readonly reopenBranch?: (chatId: ChatId) => Promise<void>;
 }
 
 export function createChatService(deps: ChatServiceDeps): ChatService {
@@ -284,6 +286,11 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       preview.ignored.some((path) => !told.ignored.has(path))
     )
       throw new ChatArchiveWarning(preview);
+  };
+  const reopen = (chatId: ChatId): void => {
+    deps.reopenBranch?.(chatId).catch((error: unknown) => {
+      deps.log.warn({ err: error, chatId }, 'a reopened session’s worktree could not be remade');
+    });
   };
   const refuseWhileDoing = (chatId: ChatId): void => {
     const place = stoppedForOpen.get(chatId);
@@ -365,6 +372,8 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
         if (input.title !== undefined) setChatTitle(ctx, id, input.title, ChatTitleSource.Builder);
         if (input.tabPosition !== undefined) moveChatTab(ctx, id, input.tabPosition);
       });
+      // Reopened from Recently closed: a branch session with no worktree gets it back.
+      if (input.tabPosition !== undefined && input.tabPosition !== null) reopen(id);
       return dtoOf(id);
     },
 
@@ -433,6 +442,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
         unarchiveChat(ctx, id);
       });
       engine.unretire(getChat(state.db, id).conversationId);
+      reopen(id);
       return dtoOf(id);
     },
 
