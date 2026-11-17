@@ -12,7 +12,7 @@ const OTHER = 'Tidy the readme';
 const QUESTION = 'Which greeting?';
 const VIEWS = ['Board', 'Factory', 'Inbox', 'Knowledge', 'Settings'] as const;
 
-/** The Board has no page heading, so its link in the sidebar marks it as the open view. */
+/** The Board has no page heading, so its link in the rail marks it as the open view. */
 async function expectView(page: Page, view: (typeof VIEWS)[number]): Promise<void> {
   if (view === 'Board') {
     await expect(page.getByRole('link', { name: 'Board', exact: true })).toHaveAttribute(
@@ -22,23 +22,24 @@ async function expectView(page: Page, view: (typeof VIEWS)[number]): Promise<voi
     return;
   }
   if (view === 'Settings') {
-    // Settings has no page title: it takes over the sidebar, led by a way back.
-    await expect(page.getByRole('link', { name: 'Back to Board' })).toBeVisible();
+    // Settings lists its sections in the panel beside the rail.
+    await expect(page.getByRole('navigation', { name: 'Settings sections' })).toBeVisible();
     return;
   }
-  await expect(page.getByRole('heading', { name: view, level: 2 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: view, level: 1 })).toBeVisible();
   // Axe must not scan a list that is still loading.
   if (view === 'Knowledge') await expect(page.getByLabel(/^Loading /)).toHaveCount(0);
 }
 
-/** Settings shows one scope at a time; the builder picks it in the sidebar's switch. */
+/** Settings shows one scope at a time; the builder picks it in the panel's switch. */
 async function chooseScope(page: Page, scope: 'This project' | 'All projects'): Promise<void> {
   await page.getByRole('radiogroup', { name: 'Settings scope' }).getByText(scope).click();
 }
 
 async function open(page: Page, view: (typeof VIEWS)[number]): Promise<void> {
   await page
-    .getByRole('link', { name: new RegExp(`^(Back to )?${view}( \\d+ open cards?)?$`) })
+    .getByRole('navigation', { name: 'Sections' })
+    .getByRole('link', { name: new RegExp(`^${view}\\s*(\\d+ open cards?)?$`) })
     .click();
   await expectView(page, view);
 }
@@ -514,7 +515,7 @@ test('records, edits, retires and withdraws knowledge, and a reload loses nothin
 
   // Reopening the window loses nothing: every record, its state and its history.
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Knowledge', level: 2 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Knowledge', level: 1 })).toBeVisible();
   const reloadedPrinciples = page.getByRole('table', { name: 'Principles' });
   await showShelf(page, 'Principle', 'Past');
   await expect(

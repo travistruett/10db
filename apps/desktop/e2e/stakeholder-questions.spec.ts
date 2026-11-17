@@ -93,7 +93,7 @@ test('routes a question to someone outside Slack from its card, and the table sh
 
   // Settings › People: add Priya, who is not in Slack. With Slack off the modal opens on a name.
   await page.goto('/settings/people');
-  await expect(page.getByRole('heading', { name: 'People', level: 3 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'People', level: 1 })).toBeVisible();
   await page.getByRole('button', { name: 'Add Person' }).click();
   const person = page.getByRole('dialog', { name: 'Add Person' });
   await expect(person.getByText("10db can't message them.", { exact: false })).toBeVisible();
@@ -139,7 +139,7 @@ test('routes a question to someone outside Slack from its card, and the table sh
 
   // Who Answers shows the route the card wrote.
   await page.goto('/settings/routing-rules');
-  await expect(page.getByRole('heading', { name: 'Who Answers', level: 3 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Who Answers', level: 1 })).toBeVisible();
   const row = page.getByRole('row', { name: /Priya Shah/ });
   await expect(row).toContainText('Project');
   await expect(row).toContainText('Product');
