@@ -12,7 +12,7 @@ import { baseHandlers, daemonUrl, renderWithDaemonAndRouter, server } from '../.
 import { projectViewDto } from '../../test/fixtures';
 import { pagesByStatus, PASS_NOW, passHandlers, passViewDto } from '../../test/pass-fixtures';
 import { taskSessionDto, taskSessionHandlers } from '../../test/task-session-fixtures';
-import { resetWindowWidth, windowWidth } from '../../test/window-width';
+import { observeWidthsOf, resetObservedWidth } from '../../test/sized-observer';
 import { EMPTY_DRAFT } from '../../conversation/drafts';
 import { changesChoice } from './changes-choice';
 import { draftKey, sessionDrafts } from './session-drafts';
@@ -51,7 +51,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.useRealTimers();
-  resetWindowWidth();
+  resetObservedWidth();
   // Every test opens the same ready page's task: what one left in the window is not the next one's.
   changesChoice.forget(ready.taskId);
   sessionDrafts.set(draftKey.task(ready.taskId), EMPTY_DRAFT);
@@ -133,7 +133,7 @@ const switchAwayAndBack = async (): Promise<void> => {
 
 describe('a task’s Changes', () => {
   it('says how much changed in the bar, and opens the panel on a click', async () => {
-    windowWidth(900);
+    observeWidthsOf(900);
     await renderTask({});
     const button = await screen.findByRole('button', { name: /^Changes\s*\+41\s*−6/ });
     expect(screen.queryByRole('complementary', { name: 'Changes' })).toBeNull();
@@ -143,7 +143,7 @@ describe('a task’s Changes', () => {
   });
 
   it('opens by itself once at 1100 px, then keeps the builder’s choice', async () => {
-    windowWidth(1200);
+    observeWidthsOf(1200);
     await renderTask({});
     expect(await screen.findByRole('complementary', { name: 'Changes' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /^Changes/ }));
@@ -156,9 +156,12 @@ describe('a task’s Changes', () => {
     { name: 'closed at 1100 px', width: 1200, open: false },
     { name: 'opened at 900 px', width: 900, open: true },
   ])('keeps the builder’s choice across a tab switch: $name', async ({ width, open }) => {
-    windowWidth(width);
+    observeWidthsOf(width);
     await renderTask({});
-    fireEvent.click(await screen.findByRole('button', { name: /^Changes/ }));
+    const button = await screen.findByRole('button', { name: /^Changes/ });
+    // Once the tab has measured itself, a wide one opens the panel by itself and the click closes it.
+    if (width >= 1100) await screen.findByRole('complementary', { name: 'Changes' });
+    fireEvent.click(button);
     await waitFor(() => {
       expect(screen.queryByRole('complementary', { name: 'Changes' }) !== null).toBe(open);
     });
@@ -168,7 +171,7 @@ describe('a task’s Changes', () => {
   });
 
   it('keeps an unsent message across a tab switch', async () => {
-    windowWidth(900);
+    observeWidthsOf(900);
     await renderTask({});
     fireEvent.change(await screen.findByRole('textbox', { name: /Message to/ }), {
       target: { value: 'half a thought' },
@@ -181,7 +184,7 @@ describe('a task’s Changes', () => {
   });
 
   it('keeps a separate copy’s unsent message across a tab switch', async () => {
-    windowWidth(900);
+    observeWidthsOf(900);
     await renderTask({
       session: { place: 'copy', passId: null, board: 'in_progress', branch: '10db/x' },
     });
@@ -196,7 +199,7 @@ describe('a task’s Changes', () => {
   });
 
   it('asks for the last turn when Last Turn is picked, and ⌘⇧D toggles the panel', async () => {
-    windowWidth(900);
+    observeWidthsOf(900);
     const served = await renderTask({});
     await screen.findByRole('button', { name: /^Changes/ });
     fireEvent.keyDown(document.body, { key: 'D', metaKey: true, shiftKey: true });
@@ -212,7 +215,7 @@ describe('a task’s Changes', () => {
   });
 
   it('quotes a clicked line into the composer', async () => {
-    windowWidth(900);
+    observeWidthsOf(900);
     await renderTask({});
     fireEvent.click(await screen.findByRole('button', { name: /^Changes/ }));
     fireEvent.click(
@@ -234,7 +237,7 @@ describe('a task’s Changes', () => {
       quote: '@src/api/client.ts:43\n> if (res.status === 401 && req.retried) {',
     },
   ])('quotes $name, with a button of its own', async ({ label, quote }) => {
-    windowWidth(900);
+    observeWidthsOf(900);
     await renderTask({});
     fireEvent.click(await screen.findByRole('button', { name: /^Changes/ }));
     fireEvent.click(await screen.findByRole('button', { name: label }));
@@ -243,7 +246,7 @@ describe('a task’s Changes', () => {
   });
 
   it('says a finished copy is gone and points at its pull request', async () => {
-    windowWidth(900);
+    observeWidthsOf(900);
     await renderTask({
       session: {
         place: 'copy',

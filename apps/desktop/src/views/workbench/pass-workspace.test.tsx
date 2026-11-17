@@ -21,6 +21,8 @@ import { z } from 'zod';
 import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
 import { inboxItemDto, projectViewDto } from '../../test/fixtures';
 import { multipartParts, useNodeMultipart } from '../../test/multipart';
+import { observeWidthsOf, resetObservedWidth } from '../../test/sized-observer';
+import { resetViewportWidth, viewportWidth } from '../../test/window-width';
 import {
   askItem,
   minutesBeforeNow,
@@ -73,6 +75,31 @@ function queueRows() {
     .getAllByRole('button')
     .filter((button) => !button.hasAttribute('aria-haspopup'));
 }
+
+describe('PassWorkspace layout', () => {
+  afterEach(() => {
+    resetObservedWidth();
+    resetViewportWidth();
+  });
+
+  it.each([
+    { name: 'beside the browser in a wide window', container: 600, layout: 'column' },
+    { name: 'with room for the queue beside the thread', container: 1000, layout: 'row' },
+  ])(
+    'lays out by its own width, with the window held at 1280: $name',
+    async ({ container, layout }) => {
+      viewportWidth(1280);
+      observeWidthsOf(container);
+      await renderWorkspace();
+      const root = screen
+        .getByRole('list', { name: 'Open pages' })
+        .closest<HTMLElement>('[style*="flex-direction"]');
+      await waitFor(() => {
+        expect(root?.style.flexDirection).toBe(layout);
+      });
+    },
+  );
+});
 
 describe('PassWorkspace queue', () => {
   it('lists the pages as buttons in queue order, each with its state line', async () => {

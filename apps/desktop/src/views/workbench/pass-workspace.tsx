@@ -1,7 +1,7 @@
 import { PassState, type TaskId } from '@10db/contracts';
 import { Box, Button, Flex } from '@mantine/core';
 import { IconPlus } from '@tabler/icons-react';
-import { useViewportSize } from '@mantine/hooks';
+import { useElementSize } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
 import { markPassNotificationsActed, shownPassNotifications } from '../../desktop/notify-pass';
 import { useNow } from '../../shell/relative';
@@ -34,7 +34,9 @@ const CLOCK_TICK_MS = 30_000;
 export function PassWorkspace(props: PassWorkspaceProps) {
   const { view, inbox, project, selected, onSelect, onAddPage } = props;
   const now = useNow(CLOCK_TICK_MS);
-  const layout = workbenchLayout(useViewportSize().width);
+  // The Workbench's own width, not the window's: the rail and panel take some of the window.
+  const { ref: rootRef, width } = useElementSize();
+  const layout = workbenchLayout(width);
   const rows = queueRows(view, inbox, now);
   const shown = shownRow(rows, selected);
   const wide = layout === WorkbenchLayout.Wide;
@@ -120,7 +122,7 @@ export function PassWorkspace(props: PassWorkspaceProps) {
   });
 
   return (
-    <Flex direction={wide ? 'row' : 'column'} style={{ flex: 1, minHeight: 0 }}>
+    <Flex ref={rootRef} direction={wide ? 'row' : 'column'} style={{ flex: 1, minHeight: 0 }}>
       <Box
         ref={queue}
         style={{
