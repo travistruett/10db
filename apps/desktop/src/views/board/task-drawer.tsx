@@ -39,6 +39,7 @@ import {
 } from '@mantine/core';
 import { useState } from 'react';
 import { SurfaceDrawer } from '../../shell/surface-drawer';
+import { useReportUnsaved } from '../../shell/unsaved-guard';
 import { OpenConversation } from '../shape/open-conversation';
 import { OpenTaskLink } from '../sessions/open-task-link';
 import { PlanContextDisclosure } from './plan-context-disclosure';
@@ -236,6 +237,8 @@ export function TaskDrawer({
     modelSettingChanged ||
     areasChanged ||
     (pullRequestBase !== undefined && landingEditable && landingChanged(task.landing, landing));
+
+  useReportUnsaved(dirty);
 
   // Every way out (close button, Escape, outside click, Cancel) comes through here.
   const requestClose = () => {

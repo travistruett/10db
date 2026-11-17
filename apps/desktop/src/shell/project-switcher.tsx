@@ -16,6 +16,7 @@ import { useState } from 'react';
 import { NewProjectModal } from './new-project-modal';
 import { ProjectTile } from './project-tile';
 import { useSelectedProject } from './selected-project';
+import { useUnsavedGuard } from './unsaved-guard';
 import { SettingsSectionKey } from '../views/settings/sections';
 import classes from './rail.module.css';
 
@@ -28,6 +29,7 @@ const tildePath = (path: string) => path.replace(/^\/Users\/[^/]+/u, '~');
  */
 export function ProjectSwitcher() {
   const { projects, project, select } = useSelectedProject();
+  const guard = useUnsavedGuard();
   const [search, setSearch] = useState('');
   const [creating, creator] = useDisclosure(false);
   const combobox = useCombobox({
@@ -53,7 +55,12 @@ export function ProjectSwitcher() {
         width={300}
         position="right-start"
         onOptionSubmit={(value) => {
-          select(ProjectId.parse(value));
+          const chosen = ProjectId.parse(value);
+          if (chosen !== project?.id) {
+            guard.attempt(() => {
+              select(chosen);
+            });
+          }
           combobox.closeDropdown();
         }}
       >
@@ -150,7 +157,9 @@ export function ProjectSwitcher() {
         <NewProjectModal
           onClose={creator.close}
           onCreated={(created) => {
-            select(created.id);
+            guard.attempt(() => {
+              select(created.id);
+            });
             creator.close();
           }}
         />

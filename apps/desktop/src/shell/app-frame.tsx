@@ -7,6 +7,7 @@ import { usePanelHidden } from './panel-hidden';
 import { Rail } from './rail';
 import { railSectionForPath, type RailSection } from './rail-items';
 import { shellLayout, ShellBand } from './shell-layout';
+import { UnsavedGuardProvider } from './unsaved-guard';
 import { useShellBand } from './use-shell-band';
 import classes from './app-frame.module.css';
 
@@ -119,81 +120,85 @@ export function AppFrame({
 
   return (
     <FrameSlotsContext value={slots}>
-      <Box
-        className={classes['root']}
-        style={{
-          gridTemplateColumns: `${String(railColumn)}px ${String(panelColumn)}px minmax(0, 1fr)`,
-          gridTemplateRows: `${String(TITLE_ROW_HEIGHT)}px minmax(0, 1fr)`,
-        }}
-      >
-        <div
-          className={classes['rail']}
-          data-sheet={layout.rail === 'overlay' ? '' : undefined}
-          style={railStyle}
-          inert={layout.rail === 'hidden'}
-        >
-          <div className={classes['railDrag']} data-tauri-drag-region />
-          <div className={classes['railBody']}>
-            <Rail />
-          </div>
-        </div>
-        <div
-          ref={setPanelHost}
-          className={classes['panel']}
-          data-sheet={layout.panel === 'overlay' ? '' : undefined}
-          style={panelStyle}
-          inert={layout.panel === 'hidden'}
-          data-panel={layout.panel}
-        />
-        {buttonShown ? (
-          <div className={classes['topLeft']}>
-            <Tooltip label={`${label} ${noun}`} position="bottom" openDelay={300}>
-              <ActionIcon
-                className={classes['sidebarButton']}
-                style={layout.panel === 'column' ? { right: 8 } : { left: 80 }}
-                variant="subtle"
-                color="gray"
-                size={28}
-                aria-label={`${label} ${noun}`}
-                aria-expanded={band === ShellBand.Wide ? !panelHidden : overlayOpen}
-                onClick={toggleSidebar}
-              >
-                <IconLayoutSidebar size={16} stroke={1.6} />
-              </ActionIcon>
-            </Tooltip>
-          </div>
-        ) : null}
-        <div
-          ref={setTitleHost}
-          className={classes['titleRow']}
+      <UnsavedGuardProvider>
+        <Box
+          className={classes['root']}
           style={{
-            paddingLeft: titleStart,
-            ...(layout.rail === 'shown' ? {} : { gridColumn: '1 / -1' }),
+            gridTemplateColumns: `${String(railColumn)}px ${String(panelColumn)}px minmax(0, 1fr)`,
+            gridTemplateRows: `${String(TITLE_ROW_HEIGHT)}px minmax(0, 1fr)`,
           }}
-          data-title-row=""
-          data-pipe={layout.panel === 'column' ? '' : undefined}
-          data-tauri-drag-region
-        />
-        <div
-          className={classes['surface']}
-          style={narrow ? { gridColumn: '1 / -1', margin: '0 6px 6px' } : { margin: '0 8px 8px 0' }}
         >
-          {banner}
-          <main className={classes['content']}>{children}</main>
-          <div ref={setDrawerHost} className={classes['drawerLayer']} />
-        </div>
-        {layout.rail === 'overlay' || layout.panel === 'overlay' ? (
           <div
-            className={classes['backdrop']}
-            style={{ left: railColumn }}
-            data-frame-backdrop
-            onClick={() => {
-              setOpenedAt(null);
-            }}
-            aria-hidden="true"
+            className={classes['rail']}
+            data-sheet={layout.rail === 'overlay' ? '' : undefined}
+            style={railStyle}
+            inert={layout.rail === 'hidden'}
+          >
+            <div className={classes['railDrag']} data-tauri-drag-region />
+            <div className={classes['railBody']}>
+              <Rail />
+            </div>
+          </div>
+          <div
+            ref={setPanelHost}
+            className={classes['panel']}
+            data-sheet={layout.panel === 'overlay' ? '' : undefined}
+            style={panelStyle}
+            inert={layout.panel === 'hidden'}
+            data-panel={layout.panel}
           />
-        ) : null}
-      </Box>
+          {buttonShown ? (
+            <div className={classes['topLeft']}>
+              <Tooltip label={`${label} ${noun}`} position="bottom" openDelay={300}>
+                <ActionIcon
+                  className={classes['sidebarButton']}
+                  style={layout.panel === 'column' ? { right: 8 } : { left: 80 }}
+                  variant="subtle"
+                  color="gray"
+                  size={28}
+                  aria-label={`${label} ${noun}`}
+                  aria-expanded={band === ShellBand.Wide ? !panelHidden : overlayOpen}
+                  onClick={toggleSidebar}
+                >
+                  <IconLayoutSidebar size={16} stroke={1.6} />
+                </ActionIcon>
+              </Tooltip>
+            </div>
+          ) : null}
+          <div
+            ref={setTitleHost}
+            className={classes['titleRow']}
+            style={{
+              paddingLeft: titleStart,
+              ...(layout.rail === 'shown' ? {} : { gridColumn: '1 / -1' }),
+            }}
+            data-title-row=""
+            data-pipe={layout.panel === 'column' ? '' : undefined}
+            data-tauri-drag-region
+          />
+          <div
+            className={classes['surface']}
+            style={
+              narrow ? { gridColumn: '1 / -1', margin: '0 6px 6px' } : { margin: '0 8px 8px 0' }
+            }
+          >
+            {banner}
+            <main className={classes['content']}>{children}</main>
+            <div ref={setDrawerHost} className={classes['drawerLayer']} />
+          </div>
+          {layout.rail === 'overlay' || layout.panel === 'overlay' ? (
+            <div
+              className={classes['backdrop']}
+              style={{ left: railColumn }}
+              data-frame-backdrop
+              onClick={() => {
+                setOpenedAt(null);
+              }}
+              aria-hidden="true"
+            />
+          ) : null}
+        </Box>
+      </UnsavedGuardProvider>
     </FrameSlotsContext>
   );
 }

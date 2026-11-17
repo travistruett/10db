@@ -1882,6 +1882,50 @@ describe('BoardView', () => {
     expect(within(drawer).getByLabelText<HTMLInputElement>('Title').value).toBe('One');
   });
 
+  describe('with unsaved edits in the open drawer', () => {
+    async function dirtyDrawerOnOne(): Promise<HTMLElement> {
+      boardWith(
+        [
+          taskDto({ title: 'One', boardStatus: 'ready' }),
+          taskDto({ title: 'Two', boardStatus: 'ready' }),
+        ],
+        [],
+      );
+      fireEvent.click(await screen.findByRole('button', { name: 'One' }));
+      const drawer = await screen.findByRole('dialog', { name: 'Task' });
+      openEditTab(drawer);
+      type('Title', 'One, edited', drawer);
+      return drawer;
+    }
+
+    it('asks before another card replaces the drawer, and keeps the edits on Keep Editing', async () => {
+      const drawer = await dirtyDrawerOnOne();
+      fireEvent.click(screen.getByRole('button', { name: 'Two' }));
+      const confirm = await screen.findByRole('dialog', { name: 'Discard your changes?' });
+      fireEvent.click(within(confirm).getByRole('button', { name: 'Keep Editing' }));
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: 'Discard your changes?' })).toBeNull();
+      });
+      expect(within(drawer).getByLabelText<HTMLInputElement>('Title').value).toBe('One, edited');
+    });
+
+    it('opens the other card once the edits are discarded', async () => {
+      await dirtyDrawerOnOne();
+      fireEvent.click(screen.getByRole('button', { name: 'Two' }));
+      const confirm = await screen.findByRole('dialog', { name: 'Discard your changes?' });
+      fireEvent.click(within(confirm).getByRole('button', { name: 'Discard' }));
+      const drawer = await screen.findByRole('heading', { name: 'Two' });
+      expect(drawer).toBeTruthy();
+    });
+
+    it('asks before a rail item leaves the board', async () => {
+      await dirtyDrawerOnOne();
+      fireEvent.click(screen.getByRole('link', { name: /^Knowledge/ }));
+      expect(await screen.findByRole('dialog', { name: 'Discard your changes?' })).toBeTruthy();
+      expect(screen.getByRole('dialog', { name: 'Task' })).toBeTruthy();
+    });
+  });
+
   it('Enter on a focused card opens its details', async () => {
     boardWith([taskDto({ title: 'One', boardStatus: 'ready' })], []);
     fireEvent.keyDown(await screen.findByRole('button', { name: 'One' }), { key: 'Enter' });
