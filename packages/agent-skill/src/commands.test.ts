@@ -111,6 +111,7 @@ function harness(routes: Record<string, Handler> = {}, files: Record<string, str
 
 const draft = {
   title: 'Keep the scrollbar off the columns',
+  why: 'The scrollbar hides the last column on a narrow window.',
   acceptanceCriteria: ['The scrollbar stays inside the Board'],
   areas: ['daemon'],
 };
@@ -154,6 +155,16 @@ describe('create', () => {
     },
     { name: 'a rigor that is not one', draft: { ...draft, rigor: 'extreme' }, contains: 'rigor' },
     { name: 'a title with a newline', draft: { ...draft, title: 'a\nb' }, contains: 'title' },
+    {
+      name: 'a draft with no why',
+      draft: {
+        title: draft.title,
+        acceptanceCriteria: draft.acceptanceCriteria,
+        areas: ['daemon'],
+      },
+      contains: 'why: say in one sentence why this task matters',
+    },
+    { name: 'a blank why', draft: { ...draft, why: '   ' }, contains: 'why: say in one sentence' },
   ];
   it.each(rows)('refuses $name and posts nothing', async ({ draft: d, contains }) => {
     const h = harness({}, { '/d.json': JSON.stringify(d) });

@@ -5,6 +5,9 @@ import type { KindView, ProjectView, TaskView } from './api-views';
 const taskDraft = TaskInput.strict();
 const taskPatch = TaskPatch.strict();
 
+const WHY_REQUIRED =
+  'why: say in one sentence why this task matters to the builder (one line, at most 200 characters)';
+
 /** A draft names kinds by key; the daemon takes each with who gave it, and this skill acts for the builder. */
 export function withKindObjects(draft: unknown): unknown {
   if (typeof draft !== 'object' || draft === null || !('kinds' in draft)) return draft;
@@ -45,6 +48,8 @@ export function draftProblems(
     out.push(...issues(parsed.error).filter((p) => !p.startsWith('kinds')));
     return out;
   }
+  // The form leaves why optional for the builder; an agent filing for the builder always says why.
+  if (parsed.data.why.trim() === '') out.push(WHY_REQUIRED);
   const areaNames = project.areas.map((a) => a.name);
   for (const a of parsed.data.areas) {
     if (!AreaName.safeParse(a).success || areaNames.includes(a)) continue;

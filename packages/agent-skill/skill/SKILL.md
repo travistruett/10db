@@ -40,8 +40,10 @@ task as soon as it is drafted, then report it. No confirmation step: a wrong tas
      the columns"), not the activity ("Fix scrollbar bug").
    - **headline**: always. The plain-words what, a few words on one line, at most 80 characters
      ("Odd files can't freeze 10db"). The Board names the card by it; the title stays the PR's.
-   - **why**: whenever the reason isn't obvious from the headline. One sentence, one line, at most
-     200 characters, on why the task matters to the user.
+   - **why**: always; `create` refuses a draft without one. One sentence, one line, at most 200
+     characters, on why the task matters to the user: what they get, or what goes wrong for them
+     until it's done, in their words where they gave them. It's what tells them later why the task
+     exists, so say the reason, not the change.
    - **description**: what is wrong or wanted, where, and why it matters; name the files or views
      involved. State what the user reported; a cause or effect you inferred is marked as a guess.
      Leave the approach to the agent unless the user chose one.
