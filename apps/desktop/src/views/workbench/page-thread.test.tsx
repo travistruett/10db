@@ -215,6 +215,18 @@ describe('PageThread', () => {
       'Settings after, turn 1, 1440 by 900',
     ]);
     expect(screen.queryByRole('img', { name: /turn 2/ })).toBeNull();
+    // A click on a picture or a sent thumbnail opens it at the size the window allows.
+    for (const name of ['Settings after, turn 1, 1440 by 900', 'tight padding.png']) {
+      fireEvent.click(screen.getByRole('button', { name: `Enlarge ${name}` }));
+      const dialog = await screen.findByRole('dialog', { name });
+      expect(within(dialog).getByRole('img', { name }).getAttribute('src')).toMatch(
+        /^data:image\/png;base64,/,
+      );
+      fireEvent.keyDown(dialog, { key: 'Escape' });
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).toBeNull();
+      });
+    }
   });
 
   it("leads with the goal's earlier pictures of the page, then its own before", async () => {
