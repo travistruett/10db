@@ -25,7 +25,6 @@ import {
   Anchor,
   Badge,
   Button,
-  Drawer,
   Group,
   List,
   Modal,
@@ -39,6 +38,7 @@ import {
   Tooltip,
 } from '@mantine/core';
 import { useState } from 'react';
+import { SurfaceDrawer } from '../../shell/surface-drawer';
 import { OpenConversation } from '../shape/open-conversation';
 import { OpenTaskLink } from '../sessions/open-task-link';
 import { PlanContextDisclosure } from './plan-context-disclosure';
@@ -210,8 +210,6 @@ export function TaskDrawer({
     (areas.length !== task.areas.length || areas.some((a) => !task.areas.includes(a)));
   const [error, setError] = useState<string | null>(null);
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
-  // An enlarged picture keeps Esc for itself, as Mantine would close the drawer on the same key.
-  const [pictureOpen, setPictureOpen] = useState(false);
   const waitsOn = task.dependsOn.flatMap((id) => {
     const peer = peers.get(id);
     return peer ? [peer.title] : [];
@@ -299,17 +297,7 @@ export function TaskDrawer({
         : null);
 
   return (
-    <Drawer
-      opened
-      onClose={requestClose}
-      closeOnEscape={!confirmingDiscard && !pictureOpen}
-      position="right"
-      // A side panel: the Board stays visible beside it, so it is never wider than half the window.
-      size="min(640px, 50vw)"
-      title="Task"
-      padding="lg"
-      closeButtonProps={{ 'aria-label': 'Close' }}
-    >
+    <SurfaceDrawer opened onClose={requestClose} label="Task">
       <Stack gap="md">
         <Stack gap={4}>
           <Title order={3} size="h4" fw={600}>
@@ -449,7 +437,7 @@ export function TaskDrawer({
                   </Anchor>
                 </Group>
               ) : null}
-              <TaskPictures taskId={task.id} onZoom={setPictureOpen} />
+              <TaskPictures taskId={task.id} />
               <TaskSkips workstreamId={workstream?.id} />
               <TaskSizeLine taskId={task.id} />
               <PlanContextDisclosure taskId={task.id} />
@@ -656,7 +644,7 @@ export function TaskDrawer({
           </Button>
         </Group>
       </Modal>
-    </Drawer>
+    </SurfaceDrawer>
   );
 }
 

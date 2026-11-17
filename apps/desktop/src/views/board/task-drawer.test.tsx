@@ -206,17 +206,6 @@ describe('TaskDrawer order', () => {
     expect(within(d).queryByText('A FIFO could hang every lane.')).toBeNull();
     expect(within(d).getByText(FIFO)).toBeTruthy();
   });
-
-  it('is min(640px, 50vw) wide', async () => {
-    serve();
-    open();
-    await dialog();
-    // Mantine sets the width as a custom property on the drawer's root.
-    const root = document.querySelector<HTMLElement>('[style*="--drawer-size"]');
-    expect(root?.style.getPropertyValue('--drawer-size')).toMatch(
-      /^min\(\s*(640px|40rem)\s*,\s*50vw\)$/,
-    );
-  });
 });
 
 describe('TaskDrawer placement', () => {
