@@ -488,6 +488,16 @@ export function findChatByWorktreePath(db: DbReader, path: string): ChatRow | un
   return db.select().from(schema.chats).where(eq(schema.chats.worktreePath, path)).get();
 }
 
+/** The worktree paths chats have recorded: a worktree a chat owns is its own until the row lets it go. */
+export function chatWorktreePaths(db: DbReader): string[] {
+  return db
+    .select({ path: schema.chats.worktreePath })
+    .from(schema.chats)
+    .where(isNotNull(schema.chats.worktreePath))
+    .all()
+    .flatMap((row) => (row.path === null ? [] : [row.path]));
+}
+
 /** Every chat in `place`, archived ones included, oldest first. */
 export function chatsInPlace(db: DbReader, place: WorkPlace): ChatRow[] {
   return db

@@ -1,6 +1,21 @@
 import { join } from 'node:path';
-import type { ProjectId } from '@10db/contracts';
-import { clearWorktreePath, createTestStore, insertBatch, seedProject, type Store } from '@10db/db';
+import {
+  ConversationOwnerKind,
+  ConversationProfile,
+  ConversationState,
+  mintId,
+  type ProjectId,
+} from '@10db/contracts';
+import {
+  clearWorktreePath,
+  createTestStore,
+  insertBatch,
+  insertChat,
+  insertConversation,
+  seedProject,
+  setChatWork,
+  type Store,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { allCheckouts, batchCheckout, checkoutOf, projectAtCheckout } from './checkout';
 
@@ -54,7 +69,30 @@ describe('checkoutOf', () => {
   });
 });
 
+function chatOf(projectId: ProjectId, worktreePath: string | null) {
+  const id = mintId('Chat');
+  store.write((ctx) => {
+    const conversation = insertConversation(ctx, {
+      projectId,
+      owner: { kind: ConversationOwnerKind.Chat, id },
+      profile: ConversationProfile.Explore,
+      state: ConversationState.IdleCold,
+    });
+    insertChat(ctx, { id, projectId, conversationId: conversation.id, title: 'C', tabPosition: 0 });
+    if (worktreePath !== null)
+      setChatWork(ctx, id, null, { place: 'branch', worktreePath, branch: 'chat/c' });
+  });
+  return id;
+}
+
 describe('allCheckouts', () => {
+  it("lists a chat's worktree, so no other session can write it, and not a chat without one", () => {
+    const a = seedProject(store, { repoPath: '/repos/a' });
+    chatOf(a.id, '/wt/chat');
+    chatOf(a.id, null);
+    expect(allCheckouts(store.db).sort()).toEqual(['/repos/a', '/wt/chat']);
+  });
+
   it('lists every project and every live worktree, not a cleared one', () => {
     const a = seedProject(store, { repoPath: '/repos/a' });
     const b = seedProject(store, { repoPath: '/repos/b' });
