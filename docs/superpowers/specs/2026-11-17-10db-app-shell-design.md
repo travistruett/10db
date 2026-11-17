@@ -9,6 +9,8 @@ light (the buttons at the top switch), at 1280, 900 and 480 px.
 first change asks where the work happens). This spec draws the frame those sessions live in. Where they meet, the
 Sessions spec says what a session shows and this one says where.
 
+**Depends on:** #651 (Changes keeps its last diff), whose rule §1.4 and §1.5 generalise.
+
 **Supersedes:** `2026-11-11-10db-sessions-ui.md` §5 (tabs in the title bar, the tab strip, the All Tabs menu, the
 narrow table) and DESIGN.md's "Navigation" and "Page header" paragraphs. Everything else in those files stands.
 
@@ -43,8 +45,9 @@ titles where your eye expects them. Sessions stops filling the title bar with ta
 - *The Workbench beside your browser (420–520 px) gets cramped.* The rail folds under 640 px, so at 480 px the
   content gets the whole width less a 6 px margin. Its queue strip stays on top, as Workbench §4.3 asks. An e2e
   measures the Workbench at 420, 520, 900 and 1280 px.
-- *Workbench and Plan lay out by the window's width, not their own.* With a rail and panel, the window no longer
-  says how wide the content is. Both switch to measuring their container, with a rendered test each.
+- *Some views lay out by the window's width, not their own.* With a rail and panel, the window no longer says how
+  wide the content is. The Workbench and the session composer switch to measuring their container, with a rendered
+  test each. Plan already does.
 - *Many tests select today's sidebar, tab strip and header.* About 16 unit files and 5 e2e specs change. Sessions'
   tests change most, and change anyway with the simplified sessions.
 
@@ -140,9 +143,11 @@ The rest is for the agents building it.
 - It's 260 px wide, on the frame (bg1), with no border of its own. Its right edge is where the content surface
   begins. **The hairline "pipe"** is a 1 px `bg2` line in the title row at that same x, from 10 px below the
   window's top down to the surface. The panel's edge reads as one line from the top of the window to the bottom.
-- **Head:** 34 px high, holding the section's name (14 px, weight 600) and the section's own controls: Sessions has
-  search and New Session; Inbox has its project filter.
-- **Rows:** 30 px high, radius `md`, 8 px side padding. The selected row takes the `bg2` fill.
+- **Head:** a 34 px row with the section's name (14 px, weight 600) and its own controls, and, where a section
+  needs one, a second row. Sessions has search and New Session in the first row. The Inbox has search and its
+  filter menu in the first row, and the `Open · Waiting · Resolved` switch in a second (§4.1).
+- **Rows:** radius `md` and 8 px side padding, at the section's height: one-line rows are 30 px (Sessions, Settings,
+  the Workbench), and the Inbox's two-line rows are 52 px. The selected row takes the `bg2` fill.
 - **Group labels:** 11.5 px, weight 600, dim, with an optional 14 px project tile.
 - **Narrow layouts:** the panel's list is the content's own state, not the shell's. The shell asks each view for a
   `panel` element and draws it, in the column or in the overlay (§2).
@@ -186,11 +191,12 @@ drawer, from the content surface's right edge.
   - narrower, the drawer covers it until closed.
 - **Closing:** Esc (when focus is inside it), its ×, or the key that opened it.
 - **One at a time:** opening another replaces it.
-- **Remembered per session:** whether it's open is kept for each session (#651's rule for Changes).
+- **Remembered for Changes only:** whether Changes is open is kept per session (#651's rule). The Board's and the
+  Inbox's drawers open when asked and don't reopen by themselves.
 - **Built once:** a `Drawer` shell component used by every caller, replacing `ChangesPanel`'s side column and the
   Board's `task-drawer.tsx` layout.
 
-### 1.5 Spacing that makes it read as one
+### 1.6 Spacing that makes it read as one
 
 - **The content column:** conversations keep their 720 px column. Its left edge is where the title row's text
   starts when the content fills the surface (Board, Factory, Inbox detail). In a centred conversation, the title row
@@ -277,21 +283,29 @@ One pattern for all three states: the panel lists the state's rows, and the cont
 
 **Performance.** The Inbox grows without limit, so nothing loads all of it.
 
-- **Paging.** Every state reads `GET /inbox/page` with a cursor (`after`), one page of 50 rows. Open uses rows
-  grouped by the daemon (`2026-11-16-the-open-inbox-is-paged-by-row-and-the-daemon-groups-the-rows.md`): that
-  decision is built in this step, before the panel. Waiting and Resolved use the paged routes #647 built.
-  `useInfiniteQuery` holds the pages.
+- **The route grows a cursor.** Today `GET /inbox/page` (`app.ts:1842`, `packages/contracts/src/inbox-page.ts`)
+  pages by number (`page`, `pageSize` ≤ 100) and has no search. Page numbers skip or repeat rows when cards come and
+  go, so this step extends `InboxPageQuery` with:
+  - `after`: a keyset cursor, the last row's sort key and id;
+  - `q`: server-side search over titles and bodies;
+  - for Resolved, a date range.
+
+  Page-number reads stay for anything else that uses them. Open uses rows grouped by the daemon
+  (`2026-11-16-the-open-inbox-is-paged-by-row-and-the-daemon-groups-the-rows.md`): that decision is built in this
+  step, before the panel. Pages are 50 rows, held by `useInfiniteQuery`.
 - **Lazy load on scroll.** The next page loads when the list is within 10 rows of its end, or when j/k moves the
   selection past what is loaded. A row placeholder shows while it loads; the list never jumps.
 - **Virtualised rows.** The list renders only the rows in view plus an overscan of 10, with `@tanstack/react-virtual`
-  (already a dependency, used by `conversation-list.tsx`). Row height is fixed at 52 px, so no measuring is needed.
+  (already a dependency, used by `conversation-list.tsx`). Rows are a fixed 52 px, so no measuring is needed.
 - **Counts never load lists.** The segmented control's counts and the rail badge read the `total` of a page-size-1
   query, as the paged-row decision says. They're refreshed from the event stream, not by polling.
-- **Search and filters run on the server.** Search is debounced by 250 ms and passed to the paged route. A change
-  resets the list to its first page, and the previous results stay on screen until the new page arrives
-  (`placeholderData: keepPreviousData`), so it doesn't flicker.
-- **Live updates.** An event for a card patches the loaded pages: a new Open card lands at the top, and an answered
-  one is removed. The list isn't refetched. A whole refetch happens only on reconnect.
+- **Search and filters run on the server.** Search is debounced by 250 ms. A change resets the list to its first
+  page, and the previous results stay on screen until the new page arrives (`placeholderData: keepPreviousData`),
+  so it doesn't flicker.
+- **Live updates.** An answered or dismissed card is removed from the loaded pages. A new card is inserted where
+  its sort key puts it: Open sorts most urgent first, then oldest, so a new card is not always at the top. If it
+  falls past what is loaded, only the counts change. A card that joins or leaves a grouped row refetches that one
+  row, so the client never copies the daemon's grouping. A whole refetch happens only on reconnect.
 - **The detail loads on selection.** The detail is fetched when a row is selected. j/k prefetches the next row's
   detail, so moving down never waits.
 - **Budget:** a list of 10,000 resolved items scrolls at 60 fps and keeps under 100 row elements in the DOM. A
@@ -332,7 +346,7 @@ and a title row with a switcher, like any section.
   and `TRAFFIC_LIGHTS_WIDTH` / `SESSIONS_STRIP_START`.
 - The fold queries at 899 and 767 px (replaced by §2).
 - `PageHeader`'s title and actions rows (renamed `PageIntro`).
-- #645's scroll shadow and composer gradient (§1.5).
+- #645's scroll shadow and composer gradient (§1.6).
 - In Sessions, through its own spec: the tab strip, All Tabs, the tab context menu's placement and the session bar.
 
 ## 6. Provider parity
@@ -347,7 +361,8 @@ for views.
 
 1. **The frame.** `AppFrame`, the rail, the title row, the panel column and overlay, widths, ⌘\, and the shadow
    change. Every view moves onto it with no panel yet. `PageHeader` becomes `PageIntro`, and its title and actions
-   go to `TitleRow`. The Workbench and Plan measure their containers. Settings' nav becomes its panel. The
+   go to `TitleRow`. The Workbench and the session views measure their containers. `SurfaceDrawer` is built, and the Board's task
+   drawer uses it. Settings' nav becomes its panel. The
    Sessions tab strip stays for now: it renders in the title row's switcher slot until step 2.
 2. **Sessions on the frame,** with the simplified sessions (its own spec and plan).
 3. **The Inbox on the panel:** build the paged Open rows (the 2026-11-16 decision), then all three states as paged,
@@ -362,7 +377,7 @@ for views.
   - The rail: names, the active item, badges and their phrases, the project tile's switcher with Project Settings.
   - The title row: a view's title and actions land there, and the drag region excludes the controls.
   - The panel: hidden and remembered per section; the overlay opens and closes; Esc closes it.
-  - The Workbench and Plan switch layout on their container's width.
+  - The Workbench switches layout on its container's width.
   - The Inbox: j/k move the panel's selection, and answering selects the next row. Scrolling near the end loads the
     next page. The DOM holds under 100 rows with 10,000 loaded. A filter change keeps the old rows until the new
     page arrives.

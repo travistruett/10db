@@ -111,7 +111,7 @@ A first change is any of:
 - an edit tool call: Claude's Edit, Write, MultiEdit or NotebookEdit; Codex's apply_patch. A subagent's edit counts
   too.
 - one of 10db's git tools that changes files: `make_branch`, `switch_branch`, `pull`, `commit_changes`.
-- a shell command the sandbox refuses to let write (§3.2).
+- a shell command the sandbox refuses to let write (§4.3).
 
 When it sees one, 10db:
 
@@ -175,6 +175,11 @@ compare-and-set on the state it expects. The choice route is `POST /chats/:id/wo
 | moving | daemon restart | recovery finishes the move: makes the worktree if missing (idempotent by path), records branch |
 | branch | Archive | warn (§4.4), remove the worktree, keep the branch |
 | branch (archived) | Reopen | remake the worktree from the branch, re-seed, then start as branch |
+| choosing | Archive | the Inbox card is withdrawn, then Archive runs as for reading |
+| moving | Open in Terminal | refused: "Wait for the move to finish" |
+| moving | daemon restart after the cut, before seed and install finish | recovery reruns the seed and install (both idempotent) before recording branch |
+| branch (archived) | Reopen while its branch is checked out in another worktree | reopens read-only, saying where the branch is checked out |
+| here | a title-row git step while a Board task or pass holds your checkout | refused with the holder's words (§4.6) |
 | here | Open in Terminal | the takeover holds your checkout, as today |
 | branch | Open in Terminal | the takeover runs in the worktree and holds nothing (§4.5) |
 
@@ -212,7 +217,8 @@ badge, ⌘J and the needs-you mirror read it as they read any open card, and it 
   - the same refusals (filters such as LFS);
   - `seedWorktree` with `project.worktreeSeed`;
   - the install and its cards.
-- **Path:** `~/.10db/worktrees/<project>/chat-<slug>`. The `chat-` prefix keeps it apart from lanes' paths
+- **Path:** `worktreePathFor(root, project, 'chat-<slug>')`, the lanes' layout under the same root and project
+  folder, so the sweep's `underRoot` finds it. The `chat-` prefix keeps it apart from lanes' paths
   (`worktree-path.ts`).
 - **Branch:** `<slug>`. The slug comes from the session's title. Add `-2`, `-3`… until neither the branch nor the
   path exists.
@@ -220,21 +226,23 @@ badge, ⌘J and the needs-you mirror read it as they read any open card, and it 
   - **Lock reason:** `10db chat_<id>`. `worktree-list.ts`'s `LOCK_REASON` accepts both shapes, so `removeWorktree`,
     `lockedWorktree` (and with it `worktreeChanges` and `worktreeIgnoredFiles`) and the sweep's `orphanVerdict` all
     recognise it.
-  - **Pins:** `checkout-pins.ts`'s `pinOwner` finds a chat's worktree by `chats.worktree_path`, so the pin is stored
-    and survives a restart. Without this, every git call there fails after a restart as `Unpinned`.
+  - **Pins:** `checkout-pins.ts`'s `pinOwner` finds a chat's worktree by `chats.worktree_path` and keys its pin as
+    `chatWorktreePinKey(chat.id)`, so the pin is stored and survives a restart. Without this, every git call there
+    fails after a restart as `Unpinned`. Archive and the sweep delete the pin with the worktree.
   - **Sandboxes:** `allCheckouts` (`delivery/checkout.ts`) includes chat worktrees, so lanes and other sessions are
     denied writes to them.
-  - **The sweep:** `sweepWorktrees` also runs for local projects, for chat worktrees only. An orphan is a
-    `chat_`-locked worktree whose chat is archived or missing, with no changes (the sweep's own checks).
+  - **The sweep:** `sweepWorktrees` also runs for local projects, for chat worktrees only, with its own branch
+    beside `orphanVerdict`'s `BatchId` check (a widened `LOCK_REASON` alone would read a chat's worktree as not
+    10db's). It removes a `chat_`-locked worktree when its chat is archived or missing, **or** closed with its branch
+    merged. In every case the worktree must have no changes (the sweep's own checks).
 
 ### 4.2 Moving the session (both providers)
 
-- **Claude** (plan, Bedrock, API key: one adapter, the system `claude`):
+- **Claude** (plan, Bedrock, API key: one adapter, 10db's pinned Claude Code, `sessions/AGENTS.md`):
   - Close the warm session and start it with the same `resume` id and the worktree as `cwd`.
   - The adapter already passes `cwd` and `resume` on every start, with `settingSources: []`.
   - Don't copy the transcript: a duplicate breaks `--resume`.
-  - Claude Code ≥ 2.1.223 finds the session from any folder. Older versions find it from the checkout's worktrees,
-    which this is.
+  - The pinned Claude Code (≥ 2.1.223) finds the session from any folder.
 - **Codex:**
   - End the thread's session.
   - Call `thread/resume` with `cwd` set to the worktree, and `config.permissions` rebuilt from the worktree's sandbox
@@ -278,8 +286,8 @@ badge, ⌘J and the needs-you mirror read it as they read any open card, and it 
 - Archive removes the worktree and keeps the branch.
 - **Reopen** (unarchive) remakes the worktree from the branch and re-seeds it. If the branch is gone, it reopens
   read-only, with "Its branch `x` was deleted."
-- **Closing** (×) keeps the worktree. When a closed session's branch has merged and its worktree is clean, the sweep
-  removes the worktree. Nothing unmerged is ever removed without Archive.
+- **Closing** (×) keeps the worktree. The sweep's rule (§4.1) removes it once the branch has merged and the
+  worktree is clean. Nothing unmerged is ever removed without Archive.
 
 ### 4.5 Open in Terminal
 
@@ -302,6 +310,12 @@ url, checks, mergeable, merged } | null }`.
   fixes) draws it in the drawer.
 
 **The title row's next step.** It runs a daemon route. It needs no warm session and no turn.
+
+**Holds:** on a **Here** session, every title-row route takes a GitWork reservation on your checkout
+(`reserveGitWhenFree`). While a Board task or a pass holds the checkout, the route refuses at once with the
+holder's words ("A Board task is changing files on `main`"), and the button shows that reason. A chat turn sharing
+the checkout doesn't block it, but the route waits for that turn's end before switching branches (call 6). A
+**branch** session's routes act on its own worktree and take no hold.
 
 | State | Button | Daemon |
 |---|---|---|
@@ -457,6 +471,10 @@ together is step 7's e2e, before any review of the view.
      checkout.**
 6. **Daemon: the work read model, Changes, the title-row routes and the git tools' root.**
    - Tests through `app.request` with `test/fake-gh.ts` for push, PR and merge.
+   - The reservation rows: each route refused while a lane or a pass holds the checkout, and call 6 waiting for a
+     sharing chat turn. These run on a real store and a real repo.
+   - **Search:** `GET /chats/search?q=&after=` covers open, closed and archived sessions, keyset-paged by last
+     activity, for the panel's search (shell §1.4).
    - A real repo for Commit's default paths, the main-to-branch move (call 6) and Merge into `main`.
 7. **Desktop:**
    - the panel rows, the title row, the bar, the git button and the Changes drawer;
@@ -464,13 +482,16 @@ together is step 7's e2e, before any review of the view.
    - removing Do It, the task tabs and the strip;
    - the links.
 
-   e2e through the real daemon (WebKit), on a **local** project (no GitHub):
+   e2e through the real daemon (WebKit), on a **local** project (no GitHub). The fake adapter gains a script step
+   that writes a file relative to the session's working directory, which follows the resumed `cwd`. Today's
+   `FakeStep` can't write:
    - read → first change → On a New Branch → the edit lands in the worktree → Commit → Merge into `main`;
    - read → first change → Here.
 8. **Removal.**
    - The Do It and brief routes, with their tests.
-   - The pass-of-one page and `finishSeals`, once a check at startup finds no open pass of one and no unfinished
-     seal. Until then the Workbench shows and closes passes of one as today.
+   - The pass-of-one page and `finishSeals` are **not** removed in this PR. The Workbench keeps showing and closing
+     passes of one, and recovery keeps finishing seals. Their removal is a follow-up, made once the builder's
+     database has no open pass of one and no unfinished seal.
 9. **Live checks**, on the Claude plan, Bedrock and Codex: a session reads, chooses On a New Branch, recalls a word
    from before the move, edits a file, and the checkout is untouched. Commit and Open Pull Request run against a
    real GitHub repository.
@@ -502,6 +523,7 @@ UI names a provider only in the title row's agent label and the bar's sentence.
   - an "always" setting for the bar
   - renaming a branch before its first push
 - **Depends on #651** (Changes keeps its last diff; the Brief card). Merge it first.
+- Follow-up: remove the pass-of-one page and `finishSeals` (step 8).
 
 ## 10. Review round 1: where each finding went
 
@@ -533,3 +555,9 @@ UI names a provider only in the title row's agent label and the bar's sentence.
 - N17: §4.1.
 - N18: §9, §6.8.
 - N4, N12 and N13: the shell spec.
+
+**Round 2:**
+- Blocking 1 (title-row routes and the hold): §4.6, §2, step 6.
+- Blocking 2 (Inbox paging): shell §4.1.
+- N-a: step 7. N-b: §4.1. N-c: §2. N-d: §4.1, §4.4. N-e: step 8. N-g: §4.2, §1.2.
+- N-f, N-h, N-j: the shell spec. N-i: step 6.
