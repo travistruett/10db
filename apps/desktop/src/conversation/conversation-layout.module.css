@@ -1,17 +1,16 @@
-/* The bar casts a shadow over the list once the list scrolls under it. */
+/* The bar casts a shadow over the list once the list scrolls under it. The hairline is part of the
+   shadow, so the bar's height never changes and a short window keeps the composer in view. */
 .header {
   position: relative;
   z-index: 2;
   flex: none;
-  border-bottom: 1px solid transparent;
-  transition:
-    box-shadow 150ms ease,
-    border-color 150ms ease;
+  transition: box-shadow 150ms ease;
 }
 
 .header[data-scrolled] {
-  border-bottom-color: var(--mantine-color-default-border);
-  box-shadow: 0 6px 12px -6px light-dark(rgba(0, 0, 0, 0.18), rgba(0, 0, 0, 0.55));
+  box-shadow:
+    0 1px 0 var(--mantine-color-default-border),
+    0 6px 12px -6px light-dark(rgba(0, 0, 0, 0.18), rgba(0, 0, 0, 0.55));
 }
 
 @media (prefers-reduced-motion: reduce) {
