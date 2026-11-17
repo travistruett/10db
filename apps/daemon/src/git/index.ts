@@ -1,4 +1,10 @@
-export { CheckoutPin, memoryPinStore, worktreePinKey, type PinStore } from './checkout-pin';
+export {
+  chatWorktreePinKey,
+  CheckoutPin,
+  memoryPinStore,
+  worktreePinKey,
+  type PinStore,
+} from './checkout-pin';
 export {
   bookkeepingAt,
   ignoredBookkeepingWrite,
