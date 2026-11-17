@@ -89,6 +89,7 @@ function file(name: string, content: unknown): string {
 
 const draft = (title: string, extra: Record<string, unknown> = {}) => ({
   title,
+  why: 'It matters to the builder.',
   acceptanceCriteria: ['It holds'],
   areas: ['src'],
   ...extra,

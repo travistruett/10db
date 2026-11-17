@@ -389,11 +389,11 @@ describe('the drafting guidance', () => {
     }
   });
 
-  it('asks for a headline on every task and a why whenever the reason is not obvious', () => {
+  it('asks for a headline and a why on every task', () => {
     const edit = builderToolList().find((t) => t.name === BuilderToolName.EditTask);
     for (const text of [BUILDER_INSTRUCTIONS, create(), edit?.description ?? '']) {
       expect(text).toContain('headline on every task');
-      expect(text).toContain("why whenever the reason isn't obvious from the headline");
+      expect(text).toContain('why on every task');
     }
     expect(BUILDER_INSTRUCTIONS).toContain('80 characters');
     expect(BUILDER_INSTRUCTIONS).toContain('200 characters');

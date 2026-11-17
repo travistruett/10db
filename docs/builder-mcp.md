@@ -79,8 +79,8 @@ The knowledge tools are in [Decisions and principles](#decisions-and-principles)
 
 `create_task` refuses what the New Task form refuses, with the same words ("Add at least one acceptance
 criterion", "Choose at least one area", and the API's messages for an unknown area or a title with a line break).
-The drafting guidance asks for a `headline` on every task (the plain words the Board names it by, one line of at most
-80 characters) and a `why` whenever the reason isn't obvious from the headline (one sentence, at most 200). Both are
+The drafting guidance asks for a `headline` (the plain words the Board names it by, one line of at most 80
+characters) and a `why` (one sentence, at most 200) on every task. The API still takes both as
 optional and empty by default, and either one too long or with a line break is refused in the API's words, which name
 the field. Git never sees them: the title stays the pull request's.
 `landing` (`{kind:'base'}`, `{kind:'branch', branch}` or `{kind:'hold'}`) says where the task's pull request goes;

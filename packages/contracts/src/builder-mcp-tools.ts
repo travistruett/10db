@@ -240,7 +240,7 @@ export const BUILDER_INSTRUCTIONS = [
   'Drafting a task (create_task, edit_task):',
   '- The title is the outcome, in one line under 200 characters. It becomes the pull request title in pull-request delivery.',
   '- Write a headline on every task: the plain-words what, a few words in one line of at most 80 characters ("Odd files can\'t freeze 10db"). The Board names the task by it; git never sees it.',
-  "- Write a why whenever the reason isn't obvious from the headline: one sentence, one line of at most 200 characters, on why the task matters.",
+  '- Write a why on every task: one sentence, one line of at most 200 characters, on why the task matters to the builder, in their words where they gave them. It is what tells the builder later why the task exists, so give the reason, not the change.',
   '- Acceptance criteria are things the builder can see or measure. Never "tests pass": say what the behaviour is, and the agent writes the tests that prove it.',
   "- Areas come from list_projects, for the project the task belongs to. An area marked catchAll holds every file that no other area holds, so a task that adds a new package or folder no other area's globs cover names the catchAll area, even though its globs list only the top of the repository. A hazard (migrations, deps) is not an area an agent works in, but naming one from the project's isolate list (shown by list_projects) among a task's areas sends the task to a separate copy of the repository. Name it for a task that changes migrations or dependencies, with the kind migration or dependency; a task that touches neither names no hazard.",
   '- A task is about one pull request (~300 changed lines), design and docs tasks included. A large design is split into one task per decision, not written as one long document: a document that big is rejected round after round, each fix moving the target.',
@@ -267,7 +267,7 @@ const PRINCIPLE_ID =
   'id is a principle (pri_…) from search_knowledge, and must be current: the API refuses any other.';
 
 const DRAFTING =
-  'Draft it as the instructions say: the title is the outcome in one line, a headline on every task says it in plain words (at most 80 characters), a why whenever the reason isn\'t obvious from the headline says why it matters (one sentence, at most 200 characters), and criteria are seen or measured, never "tests pass".';
+  'Draft it as the instructions say: the title is the outcome in one line, a headline on every task says it in plain words (at most 80 characters), a why on every task says why it matters to the builder (one sentence, at most 200 characters), and criteria are seen or measured, never "tests pass".';
 
 const DESCRIPTIONS: Record<BuilderToolName, string> = {
   [BuilderToolName.ListProjects]:
