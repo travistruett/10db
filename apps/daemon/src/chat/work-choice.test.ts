@@ -269,3 +269,28 @@ describe('one choice wins, from the bar or the card', () => {
     expect(carryOns(chat.conversationId)).toHaveLength(1);
   });
 });
+
+describe('a restart while choosing', () => {
+  it('keeps the place and its one card, and the choice still lands (row 15)', async () => {
+    world();
+    const { chat } = await choosing();
+    const before = w;
+    // A restart: a new engine, hold and services over the same store; the old engine is gone with its process.
+    await before.engine.close();
+    const after = chatWorld({ over: before, checkout: repo.path });
+    w = after;
+    try {
+      await after.engine.recover();
+      expect(getChat(after.state.db, chat.id).workPlace).toBe('choosing');
+      expect(after.chat.get(chat.id).work).toMatchObject({ place: 'choosing' });
+      expect(cards()).toHaveLength(1);
+      after.adapter.shapeBehaviour = () => Promise.resolve({ text: 'Done.' });
+      expect((await choose('here', chat.id)).status).toBe(200);
+      await after.engine.settled(chat.conversationId);
+      expect(cards()).toEqual([]);
+    } finally {
+      w = before;
+      await after.engine.close();
+    }
+  });
+});
