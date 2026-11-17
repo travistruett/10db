@@ -3,8 +3,8 @@ import { FrameSlotsContext } from '../shell/frame-slots';
 
 /**
  * The frame's slots without the frame, for a component rendered alone: a title row and a panel box a
- * view's `TitleRow` and `Panel` draw into, and a layer for a drawer. Find them with `titleRowOf` and
- * `panelOf`.
+ * view's `TitleRow` and `Panel` draw into, and a layer for a drawer. Find the title row with
+ * `titleRowOf`.
  */
 export function FrameSlots({ children }: { readonly children: ReactNode }) {
   const [titleHost, setTitleHost] = useState<HTMLElement | null>(null);
@@ -29,4 +29,3 @@ function slot(testId: string): HTMLElement {
 }
 
 export const titleRowOf = (): HTMLElement => slot('title-row');
-export const panelOf = (): HTMLElement => slot('panel');

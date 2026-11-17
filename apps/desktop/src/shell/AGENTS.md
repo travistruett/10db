@@ -59,8 +59,8 @@ task); never Mantine's `Drawer`.
 jsdom has no layout, so a component that draws into the frame or measures itself is tested with the helpers in
 `src/test/`:
 
-- `frame.tsx`: `FrameSlots` wraps a component with a title row, a panel and a drawer layer; find them with
-  `titleRowOf()` and `panelOf()`.
+- `frame.tsx`: `FrameSlots` wraps a component with a title row, a panel and a drawer layer; find the title row with
+  `titleRowOf()`.
 - `sized-observer.ts`: `observeWidthsOf(width)` makes every `ResizeObserver` report `width`, `resizeObservedTo`
   changes it, `resetObservedWidth` restores the real one. Use it for a view that measures its container.
 - `window-width.ts`: `windowWidth` sets the width media queries answer for, `viewportWidth` sets `innerWidth`
