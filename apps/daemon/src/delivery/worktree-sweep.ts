@@ -248,14 +248,25 @@ async function sweepChatEntry(
     keptWorktreeKey.orphanChanges(entry.path),
     keptWorktreeKey.orphanIgnored(entry.path),
   ]);
-  // The pin and the row's path go together, so a restart never finds one without the other.
-  deps.state.write((w) => {
-    deleteAppSetting(w, chatWorktreePinKey(verdict.id));
-    const row = verdict.chat;
-    if (row !== undefined && row.workPlace !== null)
-      setChatWork(w, verdict.id, row.workPlace, { place: row.workPlace, worktreePath: null });
-  });
   if (outcome !== 'removed') return false;
+  // The pin and the row's path go together, so a restart never finds one without the other. They are the chat's
+  // only when this entry is the worktree the row names (or the chat is gone or archived): a stale entry of a chat
+  // that lives elsewhere leaves them alone.
+  const row = verdict.chat;
+  const ownsPin = ((): boolean => {
+    // Gone, or archived: undefined and a set time both differ from null.
+    if (row?.archivedAt !== null) return true;
+    return (
+      row.worktreePath !== null &&
+      samePath(comparablePath(row.worktreePath), comparablePath(entry.path))
+    );
+  })();
+  if (ownsPin)
+    deps.state.write((w) => {
+      deleteAppSetting(w, chatWorktreePinKey(verdict.id));
+      if (row !== undefined && row.workPlace !== null)
+        setChatWork(w, verdict.id, row.workPlace, { place: row.workPlace, worktreePath: null });
+    });
   deps.logger.info({ chatId: verdict.id, path: entry.path }, 'chat worktree removed');
   return true;
 }

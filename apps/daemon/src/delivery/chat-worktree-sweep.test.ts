@@ -17,6 +17,7 @@ import {
   insertConversation,
   listInbox,
   moveChatTab,
+  setAppSetting,
   setChatWork,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -205,6 +206,34 @@ describe('the startup sweep and a chat worktree', () => {
       archive(chat);
       await sweep();
       expect(kept(chat)).toBe(true);
+    });
+
+    it('removes a stale entry of a chat and leaves its live worktree, pin and path alone', async () => {
+      const live = await cut('live');
+      const stale = join(h.worktreeRoot, 'stale');
+      await h.git.addWorktree({
+        repo: h.repo,
+        path: stale,
+        branch: 'chat/stale',
+        startPoint: gitIn(h.repo, 'rev-parse', 'main'),
+        lockReason: `10db ${live.id}`,
+      });
+      // The live worktree's pin, as a cut records it (the harness keeps pins in memory).
+      const pin = {
+        gitDir: live.path,
+        commonDir: h.repo,
+        id: '1:1/1:1',
+        fetchUrl: null,
+        pushUrl: null,
+      };
+      h.state.write((ctx) => {
+        setAppSetting(ctx, chatWorktreePinKey(live.id), pin);
+      });
+      await sweep();
+      expect(existsSync(stale)).toBe(false);
+      expect(kept(live)).toBe(true);
+      expect(getChat(h.state.db, live.id).worktreePath).toBe(live.path);
+      expect(getAppSetting(h.state.db, chatWorktreePinKey(live.id))).toEqual(pin);
     });
 
     it('removes the worktree of a chat that is gone', async () => {
