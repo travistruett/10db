@@ -162,11 +162,22 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   A count is a small pill no taller than its label's text, in the sidebar, on tabs and in buttons. It is muted
   (`tone` neutral, the default) and blue (`tone="attention"`) only when it means something needs the builder:
   Inbox's Open tab, the Sessions and Workbench needs-you counts.
-- **Page header:** Inbox, Factory, Knowledge, Board and the Workbench start page share `PageHeader`
-  (`apps/desktop/src/shell/page-header.tsx`): row 1 is the title (with an optional aside beside it) and the
-  view's actions at the right end; row 2 is an optional one-line dimmed byline; row 3 is an optional toolbar,
-  tabs left and filters right. A row that is absent takes no space. Workspaces, where the content is the
-  work, keep compact headers of their own: Sessions, Plan and an open Workbench pass.
+- **Page header:** a view's title and actions go in the frame's title row (`TitleRow`,
+  `apps/desktop/src/shell/title-row.tsx`): the title at 14 px, an optional switcher beside it, an optional dim
+  meta line, then the actions at the right. Under it, at the top of the content, `PageIntro`
+  (`apps/desktop/src/shell/page-intro.tsx`) holds an optional one-line dimmed byline and an optional toolbar,
+  tabs left and filters right. A part that is absent takes no space. Workspaces, where the content is the work,
+  keep compact headers of their own: Sessions, Plan and an open Workbench pass.
+- **Surfaces:** the frame (rail, panel and title row) is flat and has no border or shadow. The rail is `bg0`,
+  one step darker, so it reads as the window's edge; the panel and the title row are `bg1`. The content sits on
+  one rounded `md` surface in `bg0`, inset 8 px from the right and bottom (6 px under 640 px), with a 1 px `bg2`
+  ring and one tight shadow (`0 1px 2px`). That is the only shadow in the window: a conversation's header takes
+  a 1 px hairline while its list scrolls under it, and nothing else casts one. Cards on the surface do not wear a
+  border and a shadow as well.
+- **Drawers:** one slide-out kind, `SurfaceDrawer` (`apps/desktop/src/shell/surface-drawer.tsx`), from the
+  content surface's right edge: half the surface, 480 to 760 px, all of it under 640 px, in the surface's tone with
+  a 1 px `bg2` left edge. It slides in over 150 ms (at once with reduced motion), is not modal, and closes with
+  Esc inside it or its ×.
 - **Loading:** a page draws its header first, since the title and byline are known before the data. After 300 ms
   of waiting, quiet placeholder rows in the shape of what is coming take the content's place
   (`PageLoading`, `apps/desktop/src/shell/page-loading.tsx`: a list, cards or transcript lines), always static,
@@ -185,10 +196,12 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   above the form where it can be scrolled away.
 - **Modals:** a form modal is centered, with a header and a footer of actions that stay put while its
   body scrolls.
-- **Navigation:** nav links take the `md` radius, so their hover and active fills are rounded pills
-  inset from the sidebar's edge. The fill marks where you are; no outline on each item. On Sessions only, the
-  header holds the tab strip from 88 px, just after the traffic lights; its empty space stays a drag region and
-  zooms the window on a double-click.
+- **Navigation:** a 52 px icon rail holds the sections, global ones above the project's, with Settings at the
+  foot; the active item fills with `bg1`, the panel's tone, with no outline. A section with a list has a 260 px
+  panel beside the rail (Settings' sections today). From 1000 px both show
+  and ⌘\ hides the panel; from 640 px the rail shows and the panel opens over the content from the sidebar
+  button; under 640 px both fold behind it. The title row sits beside the traffic lights, 44 px tall; a pipe
+  carries the panel's edge up through it.
 - **Scope follows the question, not the screen**
   (`docs/architecture/decisions/2026-11-09-scope-follows-the-question.md`). A view that answers "what needs
   me?" or "what is running, and on what?" is global: the Inbox and Factory. They show every project and

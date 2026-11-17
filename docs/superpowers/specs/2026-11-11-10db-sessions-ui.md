@@ -172,6 +172,8 @@ kind line never competes with the buttons for width. It shows:
 
 ### 5.1 Where it sits
 
+> The app shell spec (`2026-11-17-10db-app-shell-design.md`) replaces the header with a 44 px title row on the frame; the strip is the title row's switcher and starts after the traffic lights and the sidebar button, not at 88 px.
+
 **The tabs live in the header, in the 48 px row the window already has (call, the one bold move).**
 
 - On Sessions the strip starts just after the traffic lights, at 88 px, not at the sidebar's edge, so five tabs
