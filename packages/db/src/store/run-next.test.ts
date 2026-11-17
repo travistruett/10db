@@ -1,6 +1,7 @@
 import {
   ConflictError,
   EventType,
+  mintId,
   NotFoundError,
   queueOrder,
   TaskStatus,
@@ -12,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { insertBatch, recordPullRequestStatus, transitionBatch } from './batches';
 import { listEventsAfter } from './events';
 import { holdTask, resumeTask } from './holds';
+import { insertPass } from './passes';
 import { createTestStore, seedProject } from './test-support';
 import type { Store } from './store';
 import { insertTask, setTaskStatus } from './tasks';
@@ -143,6 +145,37 @@ describe('runNext', () => {
     expect(getWorkstream(store.db, c.workstream.id).runNextAt).toBeNull();
     store.write((ctx) => resumeTask(ctx, c.task.id));
     expect(lineOf()).toEqual(['a', 'b', 'c']);
+  });
+
+  it('refuses a page of an open pass: it runs when the builder writes to it, never from the line', () => {
+    const page = store.write((ctx) =>
+      insertTask(ctx, project.id, { title: 'Inbox', acceptanceCriteria: ['x'], areas: ['api'] }),
+    ).value;
+    const { batch } = store.write((ctx) =>
+      insertPass(ctx, {
+        id: mintId('Pass'),
+        projectId: project.id,
+        name: 'Polish',
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha: 'a'.repeat(40),
+        branch: '10db/polish-abc123',
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [page.id],
+        dirt: [],
+      }),
+    ).value;
+    const run = store.write((ctx) =>
+      insertWorkstream(ctx, page.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: batch.id,
+      }),
+    ).value;
+    expect(() => store.write((ctx) => runNext(ctx, page.id))).toThrow(
+      'Inbox is a page of the UI Workbench pass "Polish": it runs when you write to it there',
+    );
+    expect(getWorkstream(store.db, run.id).runNextAt).toBeNull();
   });
 
   it('refuses a task that never started', () => {

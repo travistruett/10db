@@ -219,7 +219,7 @@ function BoardColumns({
     layout.flatMap((c) => (c.key.kind === 'human' ? [[c.key.id, c.label] as const] : [])),
   );
   const allTasks = new Map(layout.flatMap((c) => c.tasks).map((t) => [t.id, t] as const));
-  const places = queuePlaces(workstreams);
+  const places = queuePlaces(workstreams, batchById);
   const openPlace = openWorkstream ? places.get(openWorkstream.id) : undefined;
   // What the card says about a Start: asked and on its way, or refused and why.
   const noteOf = (task: TaskDto) => {
@@ -384,7 +384,7 @@ function BoardColumns({
                       },
                     }
                   : {})}
-                {...(canRunNext(task, ws?.state)
+                {...(canRunNext(task, ws?.state, batch)
                   ? {
                       onRunNext: () => {
                         retry.reset();

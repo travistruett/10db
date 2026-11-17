@@ -455,6 +455,15 @@ export function taskState(
   };
 }
 
+/**
+ * A pass's queued page, said in two parts so the drawer can set the hint beside the state: it is not
+ * in the line, and starts a turn when the builder writes to it in the UI Workbench.
+ */
+export const PASS_PAGE_QUEUED = {
+  state: 'In the UI Workbench',
+  hint: 'runs when you write to it there',
+} as const;
+
 function stateOf(
   workstream: WorkstreamDto | undefined,
   batch: BatchDto | undefined,
@@ -466,6 +475,8 @@ function stateOf(
   if (!workstream) return null;
   switch (workstream.state) {
     case S.Queued:
+      if (batch?.passId != null)
+        return { line: `${PASS_PAGE_QUEUED.state} · ${PASS_PAGE_QUEUED.hint}`, color: 'gray' };
       if (place === undefined) return { line: 'Queued', color: 'gray' };
       return {
         line: place === 1 ? 'Queued · next in line' : `Queued · ${ordinal(place)} in line`,

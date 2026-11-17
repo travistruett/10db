@@ -358,6 +358,12 @@ export function runNext(
     .get();
   if (latest?.state !== WorkstreamState.Queued)
     throw new ConflictError(`Task ${task.title} isn't waiting for a lane`);
+  // A pass's page starts a turn when the builder writes to it, whatever its place in the line.
+  const pass = passHoldingTask(ctx.tx, task);
+  if (pass)
+    throw new ConflictError(
+      `${task.title} is a page of the UI Workbench pass "${pass.name}": it runs when you write to it there`,
+    );
   ctx.tx
     .update(schema.workstreams)
     .set({ runNextAt: ctx.now, updatedAt: ctx.now })

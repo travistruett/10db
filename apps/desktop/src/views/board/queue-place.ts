@@ -1,13 +1,25 @@
 import {
   queueOrder,
   WorkstreamState,
+  type BatchDto,
+  type BatchId,
   type WorkstreamDto,
   type WorkstreamId,
 } from '@10db/contracts';
 
-/** Each queued workstream's place in line, counting from 1, in the order the scheduler takes them. */
-export function queuePlaces(workstreams: readonly WorkstreamDto[]): Map<WorkstreamId, number> {
-  const line = workstreams.filter((w) => w.state === WorkstreamState.Queued).toSorted(queueOrder);
+/**
+ * Each queued workstream's place in line, counting from 1, in the order the scheduler takes them. A
+ * pass's page is not in the line: it runs when the builder writes to it in the UI Workbench.
+ */
+export function queuePlaces(
+  workstreams: readonly WorkstreamDto[],
+  batchById: ReadonlyMap<BatchId, Pick<BatchDto, 'passId'>>,
+): Map<WorkstreamId, number> {
+  const passPage = (w: WorkstreamDto) =>
+    w.batchId !== null && batchById.get(w.batchId)?.passId != null;
+  const line = workstreams
+    .filter((w) => w.state === WorkstreamState.Queued && !passPage(w))
+    .toSorted(queueOrder);
   return new Map(line.map((w, index) => [w.id, index + 1] as const));
 }
 

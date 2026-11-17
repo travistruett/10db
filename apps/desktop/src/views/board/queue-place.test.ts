@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { workstreamDto } from '../../test/fixtures';
+import { mintId } from '@10db/contracts';
+import { batchDto, workstreamDto } from '../../test/fixtures';
 import { ordinal, queuePlaces, runNextNote } from './queue-place';
 
 describe('queuePlaces', () => {
@@ -12,9 +13,33 @@ describe('queuePlaces', () => {
       runNextAt: '2026-10-29T12:30:00.000Z',
     });
     const running = workstreamDto({ state: 'RUNNING', createdAt: '2026-10-29T09:00:00.000Z' });
-    const places = queuePlaces([newer, running, old, pushed]);
+    const places = queuePlaces([newer, running, old, pushed], new Map());
     expect([pushed, old, newer].map((w) => places.get(w.id))).toEqual([1, 2, 3]);
     expect(places.has(running.id)).toBe(false);
+  });
+
+  it("leaves out a pass's page, which runs when the builder writes to it, not from the line", () => {
+    const pass = batchDto({ passId: mintId('Pass') });
+    const ordinary = batchDto();
+    const page = workstreamDto({
+      state: 'QUEUED',
+      createdAt: '2026-10-29T09:00:00.000Z',
+      batchId: pass.id,
+    });
+    const task = workstreamDto({
+      state: 'QUEUED',
+      createdAt: '2026-10-29T10:00:00.000Z',
+      batchId: ordinary.id,
+    });
+    const places = queuePlaces(
+      [page, task],
+      new Map([
+        [pass.id, pass],
+        [ordinary.id, ordinary],
+      ]),
+    );
+    expect(places.get(task.id)).toBe(1);
+    expect(places.has(page.id)).toBe(false);
   });
 });
 

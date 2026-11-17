@@ -7,6 +7,7 @@ import {
   reviewRounds,
   SYSTEM_COLUMN_LABEL,
   TaskStatus,
+  WorkstreamState,
   type AccountId,
   type BatchDto,
   type Effort,
@@ -93,6 +94,7 @@ import {
   canRetryRun,
   canStartOver,
   failureLine,
+  PASS_PAGE_QUEUED,
   pullRequestClosed,
   shippedAnywayAndClosed,
   shippedAtLimitLine,
@@ -749,7 +751,9 @@ function StatusLine({
   const closable =
     workstream !== undefined && canCloseRun(workstream, batch) && !pullRequestClosed(batch);
   // A parked task never takes a lane, so putting it first would change nothing.
-  const queued = workstream !== undefined && canRunNext(task, workstream.state);
+  const queued = workstream !== undefined && canRunNext(task, workstream.state, batch);
+  // A pass's queued page is not in the line: it waits for the builder in the UI Workbench.
+  const passPageQueued = workstream?.state === WorkstreamState.Queued && batch?.passId != null;
   const held = isHeld(workstream);
   // A finished run is no state to show: the column says it. A live, held or failed one is.
   const runState = workstream !== undefined && (!isTerminal(workstream.state) || failed);
@@ -762,7 +766,16 @@ function StatusLine({
     <Stack gap={4} data-testid="status-line">
       <Group justify="space-between" align="center" gap="xs">
         <Group gap="xs" align="center">
-          {runState ? (
+          {passPageQueued ? (
+            <>
+              <Text size="sm" fw={500}>
+                {PASS_PAGE_QUEUED.state}
+              </Text>
+              <Text size="xs" c="dimmed">
+                {PASS_PAGE_QUEUED.hint}
+              </Text>
+            </>
+          ) : runState ? (
             <StateBadge state={workstream.state} />
           ) : (
             <Text size="sm" fw={500}>
