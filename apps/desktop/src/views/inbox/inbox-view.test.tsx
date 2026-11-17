@@ -45,11 +45,9 @@ const key = (k: string, init: { shiftKey?: boolean } = {}): void => {
   fireEvent.keyDown(document.body, { key: k, ...init });
 };
 
-/** The option groups of the cards, not the header's Open/Resolved switch. */
+/** The option groups of the cards. */
 function optionGroups(): HTMLElement[] {
-  return screen
-    .getAllByRole('radiogroup')
-    .filter((g) => g.getAttribute('aria-label') !== 'Inbox view');
+  return screen.getAllByRole('radiogroup');
 }
 
 /** The expanded card. */
@@ -1015,7 +1013,7 @@ describe("a UI Workbench pass's Ready pages", () => {
     const { answers } = inbox([ready('Ready: Settings'), ready('Ready: People')]);
     const { router } = renderApp('/inbox');
     expect(await screen.findByText('UI Workbench: 2 pages ready')).toBeTruthy();
-    expect(screen.getByRole('radio', { name: 'Open 1' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: /^Open\s?1$/ })).toBeTruthy();
     const card = selectedCard();
     expect(within(card).getByText('Ready: Settings')).toBeTruthy();
     expect(within(card).getByText('Ready: People')).toBeTruthy();
@@ -1175,29 +1173,31 @@ describe('the resolved view', () => {
     await screen.findByText('Which badge color?');
 
     const title = screen.getByRole('heading', { name: 'Inbox' });
-    const switcher = screen.getByRole('radiogroup', { name: 'Inbox view' });
-    const openRadio = screen.getByRole('radio', { name: 'Open 1' });
-    expect((openRadio as HTMLInputElement).checked).toBe(true);
+    const switcher = screen.getByRole('tablist', { name: 'Inbox view' });
+    const openTab = screen.getByRole('tab', { name: /^Open\s?1$/ });
+    expect(openTab.getAttribute('aria-selected')).toBe('true');
     const help = screen.getByRole('button', { name: 'Keyboard shortcuts' });
     expect(help.getAttribute('data-size')).toBe('xs');
     expect(help.getAttribute('data-variant')).toBe('subtle');
 
-    fireEvent.click(screen.getByRole('radio', { name: 'Resolved' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Resolved' }));
     await screen.findAllByTestId('resolved-card');
 
     // The same elements stay mounted, so nothing in the header moves or resizes.
     expect(screen.getByRole('heading', { name: 'Inbox' })).toBe(title);
-    expect(screen.getByRole('radiogroup', { name: 'Inbox view' })).toBe(switcher);
+    expect(screen.getByRole('tablist', { name: 'Inbox view' })).toBe(switcher);
     expect(screen.getByRole('button', { name: 'Keyboard shortcuts' })).toBe(help);
-    expect(screen.getByRole<HTMLInputElement>('radio', { name: 'Resolved' }).checked).toBe(true);
-    expect(screen.getByRole('radio', { name: 'Open 1' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Resolved' }).getAttribute('aria-selected')).toBe(
+      'true',
+    );
+    expect(screen.getByRole('tab', { name: /^Open\s?1$/ })).toBeTruthy();
   });
 
   it('keeps the ? key on Open only', async () => {
     serveBoth([color], [answered]);
     renderApp('/inbox');
     await screen.findByText('Which badge color?');
-    fireEvent.click(screen.getByRole('radio', { name: 'Resolved' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Resolved' }));
     await screen.findAllByTestId('resolved-card');
     key('?', { shiftKey: true });
     expect(screen.queryByRole('dialog', { name: 'Keyboard Shortcuts' })).toBeNull();
@@ -1207,7 +1207,7 @@ describe('the resolved view', () => {
     const recent = serveBoth([color], [closedBy10db, answered]);
     renderApp('/inbox');
     await screen.findByText('Which badge color?');
-    fireEvent.click(screen.getByRole('radio', { name: /^Resolved/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /^Resolved/ }));
 
     const rows = await screen.findAllByTestId('resolved-card');
     // Only the most recent ones are fetched: the resolved list only grows.
@@ -1263,7 +1263,7 @@ describe('the resolved view', () => {
       ],
     );
     renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('radio', { name: /^Resolved/ }));
+    fireEvent.click(await screen.findByRole('tab', { name: /^Resolved/ }));
     await screen.findAllByTestId('resolved-card');
     for (const words of [
       'Answered: This Project',
@@ -1282,7 +1282,7 @@ describe('the resolved view', () => {
     serveBoth([color], []);
     renderApp('/inbox');
     await screen.findByText('Which badge color?');
-    fireEvent.click(screen.getByRole('radio', { name: /^Resolved/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /^Resolved/ }));
     expect(await screen.findByText('Nothing has been resolved yet.')).toBeTruthy();
   });
 });
@@ -1578,7 +1578,7 @@ describe('a resolved answer that proposed a principle', () => {
 
   async function clickOpenInKnowledge(): Promise<void> {
     renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('radio', { name: 'Resolved' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Resolved' }));
     await screen.findAllByTestId('resolved-card');
     fireEvent.click(screen.getByRole('link', { name: 'Open in Knowledge' }));
   }
@@ -1586,7 +1586,7 @@ describe('a resolved answer that proposed a principle', () => {
   it('says a principle was proposed, on the card that proposed it only', async () => {
     serveResolved([answered, plain]);
     renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('radio', { name: 'Resolved' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Resolved' }));
     const rows = await screen.findAllByTestId('resolved-card');
     expect(rows[0]?.textContent).toContain('A principle was proposed');
     expect(rows[1]?.textContent).not.toContain('principle');
@@ -1662,7 +1662,7 @@ describe('a resolved answer that proposed a principle', () => {
     serveResolved([answered]);
     serveProvenance(provenanceDto({ id: principleId, state: 'proposed' }));
     const { router } = renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('radio', { name: 'Resolved' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Resolved' }));
     fireEvent.click(await screen.findByRole('link', { name: 'Open in Knowledge' }));
     const drawer = await openDrawer();
     await waitFor(() => {
@@ -1689,7 +1689,7 @@ describe('a resolved answer that proposed a principle', () => {
       provenanceDto({ id: second, text: 'Always keep queues in Postgres.' }),
     );
     renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('radio', { name: 'Resolved' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Resolved' }));
     const [row] = await screen.findAllByTestId('resolved-card');
     expect(row?.textContent).toContain('2 principles were proposed');
     expect(screen.getByRole('link', { name: 'Open principle 1' })).toBeTruthy();
@@ -1701,7 +1701,7 @@ describe('a resolved answer that proposed a principle', () => {
   it('ignores a detail that is not a list of proposals', async () => {
     serveResolved([inboxItemDto({ ...answered, detail: { proposedPrinciples: 'nope' } })]);
     renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('radio', { name: 'Resolved' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Resolved' }));
     const [row] = await screen.findAllByTestId('resolved-card');
     expect(row?.textContent).not.toContain('principle');
   });
@@ -1732,7 +1732,7 @@ describe('Inbox across projects', () => {
     await waitFor(() => {
       expect(header('Beta question?')).toContain('beta');
     });
-    expect(screen.getByRole('radio', { name: 'Open 2' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: /^Open\s?2$/ })).toBeTruthy();
   });
 
   it('narrows the cards and the Open count by its own project filter', async () => {
@@ -1740,7 +1740,7 @@ describe('Inbox across projects', () => {
     renderApp(`/inbox?project=${beta.id}`);
     expect(await screen.findByText('Beta question?')).toBeTruthy();
     expect(screen.queryByText('Alpha question?')).toBeNull();
-    expect(screen.getByRole('radio', { name: 'Open 1' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: /^Open\s?1$/ })).toBeTruthy();
     expect(screen.getByRole('combobox', { name: 'Project' })).toBe(
       screen.getByDisplayValue('beta'),
     );

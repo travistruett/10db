@@ -75,7 +75,7 @@ function serve(
   return calls;
 }
 
-const tabs = () => within(screen.getByRole('radiogroup', { name: 'Inbox view' }));
+const tabs = () => within(screen.getByRole('tablist', { name: 'Inbox view' }));
 
 describe('the Waiting tab', () => {
   it('holds a sent card, in no count and none of Open', async () => {
@@ -87,7 +87,7 @@ describe('the Waiting tab', () => {
     // Open counts the card that needs the builder; Waiting shows its number in the neutral tone.
     expect(tabs().getByText('Open').parentElement?.textContent).toBe('Open1');
     expect(tabs().getByText('Waiting').parentElement?.textContent).toBe('Waiting1');
-    fireEvent.click(tabs().getByRole('radio', { name: /Waiting/ }));
+    fireEvent.click(tabs().getByRole('tab', { name: /Waiting/ }));
     expect(await screen.findByText('How long should access last?')).toBeTruthy();
     expect(screen.getByText('Mark Ellis')).toBeTruthy();
     expect(screen.getByText('· sent 3h ago')).toBeTruthy();
@@ -96,7 +96,7 @@ describe('the Waiting tab', () => {
   it('keeps the Waiting count in the neutral badge, not the filled one', async () => {
     serve([card({})]);
     renderApp('/inbox');
-    await screen.findByRole('radio', { name: /Waiting/ });
+    await screen.findByRole('tab', { name: /Waiting/ });
     const badge = await waitFor(() => {
       const found = tabs().getByText('Waiting').parentElement?.querySelector('.mantine-Badge-root');
       if (!found) throw new Error('no Waiting count yet');
@@ -110,7 +110,7 @@ describe('the Waiting tab', () => {
   it('says nothing is out with anyone when empty', async () => {
     serve([]);
     renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('radio', { name: /Waiting/ }));
+    fireEvent.click(await screen.findByRole('tab', { name: /Waiting/ }));
     expect(await screen.findByText('Nothing is out with anyone.')).toBeTruthy();
   });
 
@@ -126,7 +126,7 @@ describe('the Waiting tab', () => {
       }),
     ]);
     renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('radio', { name: /Waiting/ }));
+    fireEvent.click(await screen.findByRole('tab', { name: /Waiting/ }));
     expect(await screen.findByText('Mark Ellis + Ana Ortiz')).toBeTruthy();
     expect(screen.getByText('with Priya')).toBeTruthy();
     expect(screen.getByText('· reminded 1h ago')).toBeTruthy();
@@ -143,7 +143,7 @@ describe('the Waiting tab', () => {
       }),
     ]);
     renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('radio', { name: /Waiting/ }));
+    fireEvent.click(await screen.findByRole('tab', { name: /Waiting/ }));
     fireEvent.click(await screen.findByText('How long should access last?'));
     expect(await screen.findByText(/B is the only one legal signs/)).toBeTruthy();
     expect(screen.getByText(/agreed, but send the email/)).toBeTruthy();
@@ -153,7 +153,7 @@ describe('the Waiting tab', () => {
   it('the thread link opens the permalink', async () => {
     serve([card({ permalink: 'https://acme.slack.com/archives/D1/p1' })]);
     renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('radio', { name: /Waiting/ }));
+    fireEvent.click(await screen.findByRole('tab', { name: /Waiting/ }));
     const link = await screen.findByRole('link', { name: 'Open in Slack' });
     expect(link.getAttribute('href')).toBe('https://acme.slack.com/archives/D1/p1');
   });
@@ -161,7 +161,7 @@ describe('the Waiting tab', () => {
   it('Take Back from the row menu asks first, since it posts in Slack, then returns the card', async () => {
     const calls = serve([card({})]);
     renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('radio', { name: /Waiting/ }));
+    fireEvent.click(await screen.findByRole('tab', { name: /Waiting/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'More for this question' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Take Back' }));
     const ask = await screen.findByRole('dialog', { name: 'Take this back from Mark Ellis?' });
@@ -184,7 +184,7 @@ describe('the Waiting tab', () => {
   it('Answer Myself answers with an option', async () => {
     const calls = serve([card({})]);
     renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('radio', { name: /Waiting/ }));
+    fireEvent.click(await screen.findByRole('tab', { name: /Waiting/ }));
     fireEvent.click(await screen.findByText('How long should access last?'));
     fireEvent.click(
       await screen.findByRole('button', { name: 'Answer Myself: Cut access at once' }),
@@ -341,7 +341,7 @@ describe('Resolved cards answered in Slack', () => {
       }),
     );
     renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('radio', { name: 'Resolved' }));
+    fireEvent.click(await screen.findByRole('tab', { name: 'Resolved' }));
     for (const text of texts) expect(await screen.findByText(new RegExp(text))).toBeTruthy();
     // The thread it was answered in.
     const thread = await screen.findByRole('link', { name: 'Open in Slack' });

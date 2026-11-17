@@ -57,7 +57,7 @@ describe('10db cards in the Inbox', () => {
 
     expect(await screen.findByText("Codex 0.167.0 can't be used")).toBeTruthy();
     expect(screen.getByText(/was refused: changed files/)).toBeTruthy();
-    expect(screen.getByRole('radio', { name: 'Open 1' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: /^Open\s?1$/ })).toBeTruthy();
     expect(screen.getByRole('link', { name: /Inbox.*1 open card/ })).toBeTruthy();
     expect(screen.queryByText('Nothing needs you right now.')).toBeNull();
 
@@ -106,7 +106,7 @@ describe('10db cards in the Inbox', () => {
     renderApp('/inbox');
     expect(await screen.findByText(title)).toBeTruthy();
     expect(screen.getByText(body)).toBeTruthy();
-    expect(screen.getByRole('radio', { name: 'Open 1' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: /^Open\s?1$/ })).toBeTruthy();
   });
 
   it.each([

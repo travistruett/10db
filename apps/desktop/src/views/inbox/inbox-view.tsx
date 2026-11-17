@@ -4,7 +4,7 @@ import {
   type InboxItemDto,
   type ProjectId,
 } from '@10db/contracts';
-import { Alert, Group, SegmentedControl, Stack, Text } from '@mantine/core';
+import { Alert, Group, Stack, Tabs, Text } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
@@ -48,11 +48,17 @@ interface Draft {
   readonly error: string | null;
 }
 
-type Tab = 'open' | 'waiting' | 'resolved';
+const InboxTab = { Open: 'open', Waiting: 'waiting', Resolved: 'resolved' } as const;
+type InboxTab = (typeof InboxTab)[keyof typeof InboxTab];
+
+const INBOX_TABS: readonly string[] = Object.values(InboxTab);
+function isInboxTab(value: string | null): value is InboxTab {
+  return value !== null && INBOX_TABS.includes(value);
+}
 
 /** The Inbox: the cards that wait on the builder, and a view of the ones already closed. */
 export function InboxView() {
-  const [tab, setTab] = useState<Tab>('open');
+  const [tab, setTab] = useState<InboxTab>(InboxTab.Open);
   const [helpOpen, setHelpOpen] = useState(false);
   const inbox = useInbox();
   const projects = useProjects();
@@ -69,80 +75,81 @@ export function InboxView() {
   const openTotal = inbox.isSuccess ? openCount(openItems) + cards.length : null;
   // Each view is its own component, so the open view's keys are only live while it is shown.
   return (
-    <Stack>
-      <PageHeader
-        title="Inbox"
-        toolbar={
-          <>
-            <SegmentedControl
-              aria-label="Inbox view"
-              value={tab}
-              onChange={(value) => {
-                setTab(
-                  value === 'resolved' ? 'resolved' : value === 'waiting' ? 'waiting' : 'open',
-                );
-              }}
-              data={[
-                {
-                  value: 'open',
-                  label: (
-                    <Group gap={6} wrap="nowrap">
-                      Open
-                      {openTotal === null || openTotal === 0 ? null : (
-                        <CountBadge count={openTotal} tone={CountTone.Attention} />
-                      )}
-                    </Group>
-                  ),
-                },
-                {
-                  value: 'waiting',
-                  label: (
-                    <Group gap={6} wrap="nowrap">
-                      Waiting
-                      {/* Nothing in it needs the builder, so its count is neutral. */}
-                      {waitingItems.length === 0 ? null : (
-                        <CountBadge count={waitingItems.length} />
-                      )}
-                    </Group>
-                  ),
-                },
-                { value: 'resolved', label: 'Resolved' },
-              ]}
-            />
-            <Group gap="sm">
-              <ProjectFilter
-                projects={projects.data ?? []}
-                value={project ?? null}
-                onChange={(next) => {
-                  void navigate({ search: next === null ? {} : { project: next } });
-                }}
-              />
-              <InboxShortcuts
-                opened={helpOpen}
-                onOpen={() => {
-                  setHelpOpen(true);
-                }}
-                onClose={() => {
-                  setHelpOpen(false);
-                }}
-              />
-            </Group>
-          </>
-        }
-      />
-      {tab === 'waiting' ? <WaitingInbox items={waitingItems} /> : null}
-      {tab === 'open' ? (
-        <OpenInbox
-          items={openItems}
-          project={project}
-          systemCards={cards}
-          onHelp={() => {
-            setHelpOpen(true);
-          }}
+    <Tabs
+      value={tab}
+      onChange={(value) => {
+        if (isInboxTab(value)) setTab(value);
+      }}
+      keepMounted={false}
+    >
+      <Stack>
+        <PageHeader
+          title="Inbox"
+          toolbar={
+            <>
+              <Tabs.List aria-label="Inbox view" style={{ flex: 1 }}>
+                <Tabs.Tab
+                  value={InboxTab.Open}
+                  rightSection={
+                    openTotal === null || openTotal === 0 ? undefined : (
+                      <CountBadge count={openTotal} tone={CountTone.Attention} />
+                    )
+                  }
+                >
+                  Open
+                </Tabs.Tab>
+                <Tabs.Tab
+                  value={InboxTab.Waiting}
+                  rightSection={
+                    // Nothing in it needs the builder, so its count is neutral.
+                    waitingItems.length === 0 ? undefined : (
+                      <CountBadge count={waitingItems.length} />
+                    )
+                  }
+                >
+                  Waiting
+                </Tabs.Tab>
+                <Tabs.Tab value={InboxTab.Resolved}>Resolved</Tabs.Tab>
+              </Tabs.List>
+              <Group gap="sm">
+                <ProjectFilter
+                  projects={projects.data ?? []}
+                  value={project ?? null}
+                  onChange={(next) => {
+                    void navigate({ search: next === null ? {} : { project: next } });
+                  }}
+                />
+                <InboxShortcuts
+                  opened={helpOpen}
+                  onOpen={() => {
+                    setHelpOpen(true);
+                  }}
+                  onClose={() => {
+                    setHelpOpen(false);
+                  }}
+                />
+              </Group>
+            </>
+          }
         />
-      ) : null}
-      {tab === 'resolved' ? <ResolvedInbox project={project} /> : null}
-    </Stack>
+        <Tabs.Panel value={InboxTab.Waiting}>
+          <WaitingInbox items={waitingItems} />
+        </Tabs.Panel>
+        <Tabs.Panel value={InboxTab.Open}>
+          <OpenInbox
+            items={openItems}
+            project={project}
+            systemCards={cards}
+            onHelp={() => {
+              setHelpOpen(true);
+            }}
+          />
+        </Tabs.Panel>
+        <Tabs.Panel value={InboxTab.Resolved}>
+          <ResolvedInbox project={project} />
+        </Tabs.Panel>
+      </Stack>
+    </Tabs>
   );
 }
 
