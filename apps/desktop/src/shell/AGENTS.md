@@ -11,7 +11,7 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
   The window's width, not a container's, decides it (`useShellBand`), because the frame decides what its content
   gets. A hidden panel is remembered per section (`panel-hidden.ts`, `tendb.shell.panel.<section>`); ⌘\ and the
   sidebar button flip it when wide and open the overlay otherwise; Esc, or moving anywhere, closes the overlay.
-- The rail is `rail.tsx` over `rail-items.ts` (`RAIL_ITEMS`, grouped global, project and foot; a route maps to its
+- The rail is `rail.tsx` over `rail-items.ts` (`RAIL_ITEMS`, one flat list with no group type; a route maps to its
   section with `railSectionForPath`). `rail-badges.tsx` draws the counts.
 
 ## Drawing into the frame
@@ -22,6 +22,7 @@ is mounted:
 - `TitleRow` (`title-row.tsx`): the title, an optional `switcher`, a dim `meta` line and `actions` at the right.
   The row's box and the space between its parts carry `data-tauri-drag-region`; a control a view puts in never
   does. A view with no title passes `title={null}` (Sessions draws its tab strip as the switcher; today only Settings has a panel).
+  `lines` (1 or 2) is how many lines a long title takes before it is cut; two reads whole at a narrow width.
 - `Panel` (`panel.tsx`): a section's list. Mounting it is what tells the frame the section has a panel
   (`registerPanel`); unmounting withdraws it.
 - `PageIntro` (`page-intro.tsx`): not a slot, but the top of a view's content: an optional one-line byline and an
@@ -30,6 +31,20 @@ is mounted:
   (a view rendered alone) every host is null and nothing is drawn.
 - Views lay out by their container's width (`useElementSize` on their own root), not the window's: the rail and
   panel take some of the window.
+
+- `CountBadge` (`count-badge.tsx`): a count in the rail and lists; `cap` shows `cap+` above that number.
+- `RenderLayout` (`screens/render-layout.tsx`), the layout a Plan screen frame renders in place of the shell,
+  provides title-row slots too, so a view that draws a `TitleRow` still draws it there.
+- `shape-nav.tsx` keeps only `latestOpenShape`, where Plan's rail item opens; the `ShapeNav` component is gone.
+- Settings' scope switch is styled in `views/settings/settings-nav.module.css`.
+- The tooltip theme (bright ink on the base tone, 12 px, tight) is in `theme.ts`, not per use.
+
+## Unsaved edits
+
+`unsaved-guard.tsx`: a view with edits in progress reports them with `useReportUnsaved(dirty)`. A route change
+(rail item, link, back) is then held by the router until the builder answers "discard your changes?"; a change
+that stays on the same route (another card, another project) goes through `attempt()` from `useUnsavedGuard`.
+Known limit: the guard holds one flag per frame, not one per view, so two dirty views mounted at once share it.
 
 ## Drawers
 

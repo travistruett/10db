@@ -202,6 +202,8 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   and ⌘\ hides the panel; from 640 px the rail shows and the panel opens over the content from the sidebar
   button; under 640 px both fold behind it. The title row sits beside the traffic lights, 44 px tall; a pipe
   carries the panel's edge up through it.
+- **Tooltips:** the bright ink on the base tone in both schemes, 12 px and tight (`theme.ts`); a view never styles
+  its own. A view with unsaved edits asks before anything discards them (`shell/unsaved-guard.tsx`).
 - **Scope follows the question, not the screen**
   (`docs/architecture/decisions/2026-11-09-scope-follows-the-question.md`). A view that answers "what needs
   me?" or "what is running, and on what?" is global: the Inbox and Factory. They show every project and
