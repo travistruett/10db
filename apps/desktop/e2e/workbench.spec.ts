@@ -215,6 +215,22 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   await page.getByRole('checkbox', { name: 'Settings', exact: true }).check();
   await page.getByRole('checkbox', { name: 'People', exact: true }).check();
   await page.getByRole('button', { name: 'Start Pass', exact: true }).click();
+  await expect(row(page, 'Settings')).toContainText('Your turn');
+
+  // On the Board a page waiting on its first message is in no line: its drawer says where it runs,
+  // with no place in line and no Run Next.
+  await page.goto('/board');
+  await page
+    .getByRole('list', { name: 'In progress tasks' })
+    .getByRole('button', { name: /^Settings/ })
+    .first()
+    .click();
+  const status = page.getByRole('dialog', { name: 'Task' }).getByTestId('status-line');
+  await expect(status.getByText('In the UI Workbench', { exact: true })).toBeVisible();
+  await expect(status.getByText('runs when you write to it there')).toBeVisible();
+  await expect(status.getByText(/in line/)).toHaveCount(0);
+  await expect(status.getByRole('button', { name: 'Run Next' })).toHaveCount(0);
+  await page.goto('/workbench');
 
   // The pages open waiting on the builder; each is sent its first message on its own page.
   for (const area of ['Settings', 'People']) {

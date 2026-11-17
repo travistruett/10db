@@ -1096,6 +1096,18 @@ describe('TaskDrawer', () => {
       expect(within(await dialog()).queryByRole('button', { name: 'Run Next' })).toBeNull();
     });
 
+    it("says a pass's queued page runs from the UI Workbench, with no place in line or Run Next", async () => {
+      serve();
+      const batch = batchDto({ passId: mintId('Pass') });
+      open({ workstream: workstreamDto({ state: 'QUEUED', batchId: batch.id }), batch });
+      const d = await dialog();
+      expect(within(d).getByText('In the UI Workbench')).toBeTruthy();
+      expect(within(d).getByText('runs when you write to it there')).toBeTruthy();
+      expect(within(d).queryByText('QUEUED')).toBeNull();
+      expect(within(d).queryByText(/in line/)).toBeNull();
+      expect(within(d).queryByRole('button', { name: 'Run Next' })).toBeNull();
+    });
+
     it('offers no Run Next to a parked task whose run is queued', async () => {
       serve();
       open({
