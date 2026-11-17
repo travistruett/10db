@@ -136,7 +136,8 @@ for (const scheme of ['dark', 'light'] as const) {
 test('under 1100 px the sidebar is a drawer, and the summary line stays on screen', async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 1280, height: 720 });
+  // Plan measures its own width, and the rail takes 60 px of the window's.
+  await page.setViewportSize({ width: 1140, height: 720 });
   const projectId = projects.get('dark');
   if (projectId === undefined) throw new Error('The dark run makes the project this test opens');
   await openShape(page, projectId, 'dark');
