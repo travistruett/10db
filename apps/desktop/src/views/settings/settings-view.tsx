@@ -1,6 +1,8 @@
 import { Stack } from '@mantine/core';
 import { useParams } from '@tanstack/react-router';
+import { Panel } from '../../shell/panel';
 import { useSelectedProject } from '../../shell/selected-project';
+import { SettingsNav } from './settings-nav';
 import { useFocusTarget } from './focus-target';
 import { SectionBody } from './section-body';
 import { isSettingsSectionKey, SettingsSectionKey } from './sections';
@@ -13,8 +15,13 @@ export function SettingsView() {
   // `?focus=<section>` lands on the section's first control.
   const { ref } = useFocusTarget<HTMLDivElement>(key);
   return (
-    <Stack ref={ref}>
-      <SectionBody sectionKey={key} project={project} />
-    </Stack>
+    <>
+      <Panel section="settings">
+        <SettingsNav />
+      </Panel>
+      <Stack ref={ref}>
+        <SectionBody sectionKey={key} project={project} />
+      </Stack>
+    </>
   );
 }

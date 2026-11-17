@@ -72,7 +72,12 @@ describe('KnowledgeView', () => {
     const links = (await screen.findAllByRole('link')).map((l) => l.textContent);
     expect(links.indexOf('Knowledge')).toBeGreaterThan(links.indexOf('Inbox'));
     expect(links.indexOf('Knowledge')).toBeLessThan(links.indexOf('Settings'));
-    expect(await screen.findByRole('heading', { name: 'Knowledge', level: 2 })).toBeTruthy();
+    // The title is drawn again when the project's list takes the loading state's place, so ask until it settles.
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { name: 'Knowledge', level: 1 }).closest('[data-title-row]'),
+      ).not.toBeNull();
+    });
   });
 
   it('asks for principles policies first, and lists them with scope, kind and date', async () => {

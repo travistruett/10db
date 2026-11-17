@@ -3,6 +3,7 @@ import { fireEvent, screen, within } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { baseHandlers, renderWithDaemonAndRouter, server } from '../../test/daemon';
+import { FrameSlots } from '../../test/frame';
 import { projectViewDto } from '../../test/fixtures';
 import {
   PASS_NOW,
@@ -84,7 +85,11 @@ function screenProps(overrides: Partial<WorkbenchScreenProps> = {}) {
 async function draw(overrides: Partial<WorkbenchScreenProps> = {}) {
   server.use(...baseHandlers());
   const drawn = screenProps(overrides);
-  await renderWithDaemonAndRouter(<WorkbenchScreen {...drawn.props} />);
+  await renderWithDaemonAndRouter(
+    <FrameSlots>
+      <WorkbenchScreen {...drawn.props} />
+    </FrameSlots>,
+  );
   return drawn;
 }
 
@@ -164,7 +169,9 @@ describe('WorkbenchScreen', () => {
   it('waits for the picker until what Start Pass says has loaded', async () => {
     await draw({ start: undefined });
     expect(await screen.findByRole('status', { name: 'Loading the pages' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'UI Workbench' })).toBeTruthy();
+    expect(
+      screen.getByRole('heading', { name: 'UI Workbench' }).closest('[data-title-row]'),
+    ).not.toBeNull();
   });
 
   it('sends Start Pass and says its refusal beside the button', async () => {
@@ -237,7 +244,11 @@ describe('WorkbenchScreen', () => {
         </>
       );
     }
-    await renderWithDaemonAndRouter(<Settling {...screenProps().props} />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <Settling {...screenProps().props} />
+      </FrameSlots>,
+    );
     await screen.findByRole('button', { name: 'More actions' });
     fireEvent.click(screen.getByRole('button', { name: 'Settle' }));
     expect(await screen.findByRole('button', { name: /^Start/ })).toBeTruthy();

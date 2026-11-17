@@ -167,7 +167,9 @@ describe('Shape: the first run', () => {
     serve(...conversations());
     renderApp('/shape');
     await screen.findByRole('textbox', { name: 'Message' });
-    expect(screen.getByRole('heading', { name: 'Plan' })).toBeTruthy();
+    expect(
+      screen.getByRole('heading', { name: 'Plan' }).closest('[data-title-row]'),
+    ).not.toBeNull();
     expect(screen.queryByRole('list', { name: 'Recent conversations' })).toBeNull();
     expect(screen.queryByText(/No conversations yet/)).toBeNull();
   });
@@ -335,13 +337,13 @@ describe('Shape: the conversation', () => {
     const fresh = shapeViewDto({ shape: shapeDto({ ...inProject, title: 'Fresh' }), tokens: 0 });
     serve(...conversations(used, fresh));
     open(used);
-    const conversation = await screen.findByRole('region', { name: 'Conversation' });
-    expect(await within(conversation).findByText('88k tokens')).toBeTruthy();
+    const tokens = await screen.findByText('88k tokens');
+    expect(tokens.closest('[data-title-row]')).not.toBeNull();
     cleanup();
     open(fresh);
-    const next = await screen.findByRole('region', { name: 'Conversation' });
-    await within(next).findByText('Fresh');
-    expect(within(next).queryByText(/tokens/)).toBeNull();
+    const title = await screen.findByText('Fresh');
+    expect(title.closest('[data-title-row]')).not.toBeNull();
+    expect(screen.queryByText(/tokens/)).toBeNull();
   });
 
   it('offers the Record once the Plan holds a document, and opens it', async () => {
@@ -359,9 +361,8 @@ describe('Shape: the conversation', () => {
       ...planRecordHandlers(),
     );
     const { router } = open(bare);
-    const fresh = await screen.findByRole('region', { name: 'Conversation' });
-    await within(fresh).findByText('Fresh');
-    expect(within(fresh).queryByRole('button', { name: 'Record' })).toBeNull();
+    await screen.findByText('Fresh');
+    expect(screen.queryByRole('button', { name: 'Record' })).toBeNull();
     await act(() => router.navigate({ to: '/shape/$shapeId', params: { shapeId: held.shape.id } }));
     fireEvent.click(await screen.findByRole('button', { name: 'Record' }));
     await waitFor(() => {

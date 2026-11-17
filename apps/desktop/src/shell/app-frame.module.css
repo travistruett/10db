@@ -1,0 +1,129 @@
+/* The window's frame: the rail, the panel and the title row share one flat tone, and the content sits on
+   one rounded surface inset from it. The grid's columns and rows are set inline from the layout. */
+.root {
+  position: relative;
+  display: grid;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--mantine-color-default);
+  color: var(--mantine-color-text);
+}
+
+.rail {
+  grid-column: 1;
+  grid-row: 1 / 3;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--mantine-color-body);
+}
+
+.railDrag {
+  flex: none;
+  height: 44px;
+}
+
+.railBody {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.topLeft {
+  grid-column: 1 / 3;
+  grid-row: 1;
+  position: relative;
+  z-index: 22;
+  pointer-events: none;
+}
+
+.sidebarButton {
+  position: absolute;
+  top: 8px;
+  pointer-events: auto;
+}
+
+.panel {
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 8px 10px 4px;
+  background: var(--mantine-color-default);
+}
+
+.titleRow {
+  grid-column: 3;
+  grid-row: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding-right: 12px;
+}
+
+/* The pipe: the panel's edge, carried up through the title row. */
+.titleRow[data-pipe]::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 0;
+  width: 1px;
+  background: var(--mantine-color-default-border);
+}
+
+.surface {
+  grid-column: 3;
+  grid-row: 2;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 10px;
+  background: var(--mantine-color-body);
+  box-shadow:
+    0 0 0 1px var(--mantine-color-default-border),
+    0 1px 2px light-dark(rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0.35));
+}
+
+/* Inside the surface, the column a view fills: it holds the scroll, so the window never scrolls. */
+.content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 16px 24px;
+}
+
+.drawerLayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* Folded rail and panel stand over the content as sheets. */
+.rail[data-sheet],
+.panel[data-sheet] {
+  position: absolute;
+  border-radius: 10px;
+  top: 44px;
+  bottom: 8px;
+  z-index: 20;
+  box-shadow:
+    0 0 0 1px var(--mantine-color-default-border),
+    0 1px 2px light-dark(rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0.35));
+}
+
+.backdrop {
+  position: absolute;
+  inset: 44px 0 0 0;
+  z-index: 19;
+}

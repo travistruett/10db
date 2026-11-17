@@ -27,7 +27,7 @@ function open(path: string, chats: ReturnType<typeof chatDto>[], inbox: unknown[
 }
 
 describe('Sessions at narrow widths', () => {
-  it('at 600 px shows one switcher with the selected title and the count of other tabs that need you, and the sidebar is folded', async () => {
+  it('at 600 px shows one switcher with the selected title and the count of other tabs that need you, ', async () => {
     windowWidth(600);
     const a = chatDto({ projectId: ampsio.id, title: 'Login fails', tabPosition: 0 });
     const b = chatDto({
@@ -42,7 +42,6 @@ describe('Sessions at narrow widths', () => {
     expect(switcher.textContent).toContain('1');
     expect(switcher.getAttribute('aria-label')).toContain('1 others need you');
     expect(screen.queryByRole('tab')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Show navigation' })).toBeTruthy();
     const panel = await screen.findByRole('tabpanel');
     expect(document.getElementById(panel.getAttribute('aria-labelledby') ?? '')?.textContent).toBe(
       'Login fails, ampsio',
@@ -61,12 +60,11 @@ describe('Sessions at narrow widths', () => {
     });
   });
 
-  it('at 800 px the sidebar is folded and unselected tabs keep only their tile', async () => {
+  it('at 800 px the strip keeps its tabs', async () => {
     windowWidth(800);
     const a = chatDto({ projectId: ampsio.id, title: 'Login fails', tabPosition: 0 });
     open(`/sessions?chat=${a.id}`, [a]);
-    await screen.findAllByRole('tab');
-    expect(screen.getByRole('button', { name: 'Show navigation' })).toBeTruthy();
+    expect((await screen.findAllByRole('tab')).length).toBeGreaterThan(0);
   });
 
   it('says another tab that begins to need you, once, in the polite region', async () => {

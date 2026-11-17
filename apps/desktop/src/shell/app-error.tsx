@@ -10,7 +10,7 @@ export function AppError({ error, reset }: ErrorComponentProps) {
   const message = error instanceof Error ? error.message : String(error);
   return (
     <Box h="100vh" style={{ display: 'flex', flexDirection: 'column' }}>
-      <Box h={48} data-tauri-drag-region style={{ flex: 'none' }} />
+      <Box h={44} data-tauri-drag-region style={{ flex: 'none' }} />
       <Box p="xl" pt="md">
         <Alert
           color="red"

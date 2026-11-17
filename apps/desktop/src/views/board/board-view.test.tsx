@@ -1695,7 +1695,9 @@ describe('BoardView', () => {
     );
     renderApp('/board');
     expect(await screen.findByRole('button', { name: 'New Task' })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: 'Board', level: 2 })).toBeTruthy();
+    expect(
+      screen.getByRole('heading', { name: 'Board', level: 1 }).closest('[data-title-row]'),
+    ).not.toBeNull();
     expect(screen.queryByText(/make gate-marker/)).toBeNull();
   });
 

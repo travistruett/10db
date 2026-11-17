@@ -3,6 +3,7 @@ import { fireEvent, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { projectViewDto } from '../../test/fixtures';
 import { minutesBeforeNow, PASS_NOW, pagesByStatus, passViewDto } from '../../test/pass-fixtures';
+import { FrameSlots, titleRowOf } from '../../test/frame';
 import { renderWithTheme } from '../../test/theme';
 import { PageStatus } from './page-status';
 import { headerLine, PassHeader, type PassHeaderProps } from './pass-header';
@@ -58,7 +59,11 @@ function draw(view: PassViewDto, overrides: Partial<PassHeaderProps> = {}) {
     onAbandon: vi.fn(),
     ...overrides,
   };
-  renderWithTheme(<PassHeader {...props} />);
+  renderWithTheme(
+    <FrameSlots>
+      <PassHeader {...props} />
+    </FrameSlots>,
+  );
   return props;
 }
 
@@ -68,7 +73,12 @@ describe('PassHeader', () => {
   it("says the project, the pass and its counts, with the pass's own actions", async () => {
     const { ready, working } = pagesByStatus();
     const props = draw(passViewDto({ pages: [ready, working] }));
-    expect(screen.getByText('ampsio · Settings pass · 1 ready · 1 working')).toBeTruthy();
+    // The line and the pass's own actions are in the title row.
+    const row = within(titleRowOf());
+    expect(
+      row.getByRole('heading', { name: 'ampsio · Settings pass · 1 ready · 1 working' }),
+    ).toBeTruthy();
+    expect(row.getByRole('button', { name: 'More actions' })).toBeTruthy();
     // No page is signed off, so there is nothing to open a pull request for.
     expect(screen.queryByRole('button', { name: 'Open Pull Request' })).toBeNull();
     expect(screen.queryByText('ampsio has no origin')).toBeNull();

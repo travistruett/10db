@@ -31,7 +31,8 @@ import {
   useTasks,
   useWorkstreams,
 } from '../../daemon/queries';
-import { PageHeader } from '../../shell/page-header';
+import { PageIntro } from '../../shell/page-intro';
+import { TitleRow } from '../../shell/title-row';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { FormModal } from '../../shell/form-modal';
 import { useSelectedProject } from '../../shell/selected-project';
@@ -547,7 +548,7 @@ export function BoardView() {
 
   return (
     <Stack flex="1 1 0px">
-      <PageHeader
+      <TitleRow
         title="Board"
         actions={
           project ? (
@@ -588,6 +589,8 @@ export function BoardView() {
             </SplitButton>
           ) : undefined
         }
+      />
+      <PageIntro
         toolbar={
           goalList.length === 0 ? undefined : (
             <Group gap="md" align="center">
