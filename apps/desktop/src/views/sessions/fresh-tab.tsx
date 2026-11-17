@@ -171,13 +171,13 @@ export function FreshTab({
               : {
                   held: {
                     holders: keeping,
-                    onChoose: async (_draft: Draft, choice: FolderWhileHeld) => {
-                      await ensureChat({ folder: choice });
+                    onChoose: async (sent: Draft, choice: FolderWhileHeld) => {
+                      await ensureChat({ draft: sent, folder: choice });
                     },
                   },
                 })}
-            onSend={async () => {
-              await ensureChat({});
+            onSend={async (sent) => {
+              await ensureChat({ draft: sent });
             }}
             onStop={() => undefined}
             onRedo={() => undefined}

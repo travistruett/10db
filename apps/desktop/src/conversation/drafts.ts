@@ -27,10 +27,28 @@ export function withoutSent(typed: string, sent: string): string {
   return text.endsWith(tail) ? text.slice(0, -tail.length) : typed;
 }
 
-/** What the composer holds once `sent` has gone: whatever was added to it while the send was on its way. */
+/** What the composer holds once `sent` has gone: whatever was added to it since. */
 export function afterSend(now: Draft, sent: Draft): Draft {
   const text = withoutSent(now.text, sent.text.trim());
   const pictures = now.pictures.filter((picture) => !sent.pictures.includes(picture));
   if (text.trim() === '' && pictures.length === 0) return EMPTY_DRAFT;
+  return { text, mentions: mentionText(text).mentions, pictures };
+}
+
+/**
+ * What the composer holds once the send of `sent` fails: its words and pictures back where they were,
+ * ahead of whatever was typed or added while the send was on its way, since the input emptied as Send
+ * was pressed.
+ */
+export function afterFailedSend(now: Draft, sent: Draft): Draft {
+  const typed = now.text.trim();
+  const text =
+    typed === '' || typed === sent.text.trim()
+      ? sent.text
+      : `${sent.text.trimEnd()}\n\n${now.text}`;
+  const pictures = [
+    ...sent.pictures,
+    ...now.pictures.filter((picture) => !sent.pictures.includes(picture)),
+  ];
   return { text, mentions: mentionText(text).mentions, pictures };
 }

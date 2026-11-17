@@ -19,7 +19,7 @@ import { Composer } from '../../conversation/composer';
 import { ConversationLayout } from '../../conversation/conversation-layout';
 import { composerPhase } from '../../conversation/composer-phase';
 import { ContextRing } from '../../conversation/context-ring';
-import { EMPTY_DRAFT, hasContent, type Draft } from '../../conversation/drafts';
+import { afterFailedSend, EMPTY_DRAFT, hasContent, type Draft } from '../../conversation/drafts';
 import { escapeHasOwner, escapeIsTaken } from '../../conversation/escape';
 import { itemEntries } from '../../conversation/item-entries';
 import { ModelMenu } from '../../conversation/model-menu';
@@ -239,18 +239,15 @@ export function ChatTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chat.id]);
 
-  // A chat made by a send in a fresh tab sends that draft as soon as it is drawn; a failure leaves the
-  // draft here, so the next send goes to this conversation and never to a second chat.
+  // A chat made by a send in a fresh tab sends what the fresh tab sent as soon as it is drawn; a failure
+  // puts it back in this tab's input, so the next send goes to this conversation and never to a second chat.
   useEffect(() => {
     const request = sessionDrafts.takeSendRequest(key);
     if (request === null) return;
-    post(sessionDrafts.get(key), request.folder)
-      .then(() => {
-        sessionDrafts.set(key, EMPTY_DRAFT);
-      })
-      .catch((error: unknown) => {
-        setSendError(error instanceof Error ? error.message : String(error));
-      });
+    post(request.draft, request.folder).catch((error: unknown) => {
+      sessionDrafts.set(key, afterFailedSend(sessionDrafts.get(key), request.draft));
+      setSendError(error instanceof Error ? error.message : String(error));
+    });
     // The request is taken once per tab; `post` is the tab's own.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);

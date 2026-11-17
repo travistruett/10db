@@ -36,7 +36,7 @@ import { PlanComposer } from './plan-composer';
 import { addFiles } from '../../conversation/dropped-files';
 import { HistoryButton } from './history-button';
 import { PlanModelMenu } from './plan-model-menu';
-import { leaveLate, takeLate, useLate } from './late-outcome';
+import { keepBoth, leaveLate, takeLate, useLate } from './late-outcome';
 import { PlanMeasures } from './plan-measures';
 import { RecentConversations } from './recent-conversations';
 import { Transcript, type TranscriptProps } from './transcript';
@@ -147,8 +147,8 @@ export function ConversationPane({
   // What the input holds now. The input unmounts when the conversation opens, so this is what its
   // replacement is given, whatever the builder has typed, edited or cleared since a send failed.
   const typed = useRef('');
-  // The text of the last send, unless it failed. The input still shows it during the send, but it is
-  // on its way, so carrying it too would put it back after the send succeeds. Edited, it is the
+  // The text of the last send, unless it failed. The input empties as Send is pressed; one typed again
+  // during the send is on its way, so carrying it too would put it back after the send succeeds. Edited, it is the
   // builder's again and is carried as it stands, since nothing can tell which part they meant to
   // keep. A failure clears this at once, so the input's text counts from that moment.
   const sent = useRef<string | null>(null);
@@ -371,8 +371,11 @@ export function ConversationPane({
                 // screen first, the one this send made, so opening it later still shows why.
                 const gone = opened.current ?? (here.current ? null : made);
                 if (gone === null) {
-                  // The drop may still open the conversation and take this input with it.
+                  // The drop may still open the conversation and take this input with it. The composer
+                  // puts the failed text back ahead of what was typed since; it is counted here at once,
+                  // since the drop can open the conversation before the input redraws.
                   failedSend.current = message;
+                  typed.current = keepBoth(typed.current, text);
                   throw error;
                 }
                 // Its input is gone, so the conversation's new one gets the reason and the text, beside

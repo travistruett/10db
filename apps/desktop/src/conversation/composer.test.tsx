@@ -79,6 +79,24 @@ describe('Composer', () => {
     expect((input() as HTMLTextAreaElement).value).toBe('hi');
   });
 
+  it('puts a failed send back ahead of what was typed while it was on its way', async () => {
+    let refuse = (): void => undefined;
+    const onSend = vi.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          refuse = () => {
+            reject(new Error('The database is locked'));
+          };
+        }),
+    );
+    renderWithTheme(<Held onSend={onSend} start={{ ...EMPTY_DRAFT, text: 'first' }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.change(input(), { target: { value: 'second thought' } });
+    refuse();
+    expect(await screen.findByText('The database is locked')).toBeTruthy();
+    expect((input() as HTMLTextAreaElement).value).toBe('first\n\nsecond thought');
+  });
+
   it('refuses a picture type outside the capabilities, in words, and holds a png', () => {
     renderWithTheme(<Held />);
     const gif = new File(['x'], 'pasted.gif', { type: 'image/gif' });
@@ -178,6 +196,8 @@ describe('Composer', () => {
     );
     renderWithTheme(<Held onSend={onSend} start={{ ...EMPTY_DRAFT, text: 'first' }} />);
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    // The input empties as Send is pressed, not once the daemon answers.
+    expect((input() as HTMLTextAreaElement).value).toBe('');
     fireEvent.change(input(), { target: { value: 'second thought' } });
     settle();
     await waitFor(() => {

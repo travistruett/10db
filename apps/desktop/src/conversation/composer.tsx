@@ -23,7 +23,7 @@ import {
 import { ComposerInput, type ComposerMentions } from './composer-mentions';
 import { DictationButton } from './dictation-button';
 import type { ComposerPhase } from './composer-phase';
-import { afterSend, hasContent, type Draft } from './drafts';
+import { afterFailedSend, afterSend, hasContent, type Draft } from './drafts';
 import { isComposing, isSendKey, OWNS_ESCAPE_ATTRIBUTE } from './escape';
 import { mentionText } from './mention-text';
 import { pickerAccept, withPictures } from './pictures';
@@ -236,11 +236,13 @@ export function Composer({
     done: () => void,
   ): Promise<void> => {
     setFailure(null);
+    // What goes leaves the input as Send is pressed, so the message never shows in the list and the
+    // input at once; a send that fails puts it back.
+    if (sent !== null) onDraft(afterSend(current.current, sent));
     try {
       await action();
-      // Only what went is cleared: words typed or pictures added on the way stay.
-      if (sent !== null) onDraft(afterSend(current.current, sent));
     } catch (error) {
+      if (sent !== null) onDraft(afterFailedSend(current.current, sent));
       const message = error instanceof Error ? error.message : String(error);
       if (onFailure === undefined) setFailure(message);
       else onFailure(message);

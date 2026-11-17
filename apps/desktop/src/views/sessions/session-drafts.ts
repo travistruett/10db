@@ -11,8 +11,12 @@ import { EMPTY_DRAFT, type Draft } from '../../conversation/drafts';
 
 export const DRAFTS_KEY = 'tendb.sessions.drafts';
 
-/** A send a fresh tab asked its chat to make: how it runs when Your folder is held, when it was asked. */
+/**
+ * A send a fresh tab asked its chat to make: what it sends, since the fresh tab's input emptied as Send
+ * was pressed, and how it runs when Your folder is held, when it was asked.
+ */
 export interface SendRequest {
+  readonly draft: Draft;
   readonly folder?: FolderWhileHeld;
 }
 
@@ -60,7 +64,7 @@ class SessionDrafts {
   }
 
   /** The tab `key` should send its draft as soon as it is drawn. */
-  requestSend(key: string, request: SendRequest = {}): void {
+  requestSend(key: string, request: SendRequest): void {
     this.sends.set(key, request);
   }
 
@@ -118,7 +122,7 @@ export const sessionDrafts = {
   move: (from: string, to: string): void => {
     store.move(from, to);
   },
-  requestSend: (key: string, request?: SendRequest): void => {
+  requestSend: (key: string, request: SendRequest): void => {
     store.requestSend(key, request);
   },
   takeSendRequest: (key: string): SendRequest | null => store.takeSendRequest(key),
