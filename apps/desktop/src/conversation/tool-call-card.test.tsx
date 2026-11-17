@@ -39,8 +39,11 @@ describe('ToolCallCard', () => {
       expect(loadFull).toHaveBeenCalledWith('c1');
     });
 
-    it('opens by itself when it failed, to its last 8 lines', () => {
-      const tail = Array.from({ length: 12 }, (_, i) => `out ${String(i)}`).join('\n');
+    it("opens by itself when it failed, to its last 8 lines, without the terminal's colour codes", () => {
+      const tail = Array.from(
+        { length: 12 },
+        (_, i) => `\u001b[31mout ${String(i)}\u001b[39m`,
+      ).join('\n');
       const call = commandCall({ status: 'failed', exitCode: 1, outputTail: tail });
       renderWithTheme(<ToolCallCard entry={toolEntry(call)} nested={[]} />);
       const row = screen.getByRole('button', { name: /failed, exit 1/ });
@@ -49,6 +52,7 @@ describe('ToolCallCard', () => {
       expect(shown).toContain('out 11');
       expect(shown).toContain('out 4');
       expect(shown).not.toContain('out 3');
+      expect(shown).not.toContain('\u001b');
     });
   });
 

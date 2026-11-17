@@ -1,7 +1,8 @@
 import { OUTPUT_TAIL_CHARS, type ToolCallView } from '@10db/contracts';
 import { Anchor, Box, Group, Stack, Text } from '@mantine/core';
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { HunkDiff } from './hunk-diff';
+import { withoutTerminalCodes } from './terminal-text';
 
 // What an opened row holds, by the call's kind (sessions UI spec §7.3). Full output and patches
 // load from disk only when the screen passes `loadFull`.
@@ -21,8 +22,8 @@ function formatBytes(bytes: number): string {
   return `${(kb / 1024).toFixed(1)} MB`;
 }
 
-/** Mono text on `bg_0` inside a 1 px `bg_2` border, at most 320 px tall. */
-function Output({ children, testId }: { readonly children: ReactNode; readonly testId?: string }) {
+/** Mono text on `bg_0` inside a 1 px `bg_2` border, at most 320 px tall, less the terminal's codes. */
+function Output({ children, testId }: { readonly children: string; readonly testId?: string }) {
   return (
     <Box
       component="pre"
@@ -41,7 +42,7 @@ function Output({ children, testId }: { readonly children: ReactNode; readonly t
         borderRadius: 'var(--mantine-radius-sm)',
       }}
     >
-      {children}
+      {withoutTerminalCodes(children)}
     </Box>
   );
 }
