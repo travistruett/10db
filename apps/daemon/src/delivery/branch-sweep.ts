@@ -10,6 +10,7 @@ import {
 import { getPass, hasAnsweredByFoldKey, listBatches, listProjects } from '@10db/db';
 import { PrState } from '../github';
 import { removeBranch, settleBranch } from './branch-cleanup';
+import { batchBranchName } from './branch-name';
 import { branchCardKey, branchCards, detailOf } from './cards';
 import { ghCall, networkCall, raise, withdraw, type DeliveryContext } from './context';
 import { ghDown } from './pr-watch';
@@ -162,8 +163,14 @@ export async function listStrayBranches(ctx: DeliveryContext): Promise<void> {
   for (const project of listProjects(ctx.state.db)) {
     if (project.delivery !== Delivery.PullRequest || !existsSync(project.repoPath)) continue;
     try {
+      // A batch being cut records its branch only after making it, and its name is fixed by its
+      // title and id, so the branch such a cut may already have made is named too.
       const named = new Set(
-        listBatches(ctx.state.db, { projectId: project.id }).map((batch) => batch.branch),
+        listBatches(ctx.state.db, { projectId: project.id }).map((batch) =>
+          batch.state === BatchState.Cutting
+            ? batchBranchName(batch.title, batch.id)
+            : batch.branch,
+        ),
       );
       const stray = (await ctx.git.localBranches(project.repoPath, BRANCH_PREFIX))
         .map((b) => b.name)
