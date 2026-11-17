@@ -32,6 +32,8 @@ export function chatLines(items: readonly ConversationItemRow[]): string[] {
   for (const item of items) {
     if (item.kind === ConversationItemKind.Message) {
       const body = parseItemBody(item.kind, item.body);
+      // A carry-on is 10db's line to the session, not something the builder said.
+      if (body.purpose === 'carry_on') continue;
       inBriefTurn = body.purpose === 'brief';
       if (!inBriefTurn) lines.push(`Builder: ${body.text}`);
     } else if (
@@ -50,7 +52,7 @@ export function lastBuilderMessage(items: readonly ConversationItemRow[]): strin
   for (const item of [...items].reverse()) {
     if (item.kind !== ConversationItemKind.Message) continue;
     const body = parseItemBody(item.kind, item.body);
-    if (body.purpose !== 'brief') return body.text;
+    if (body.purpose !== 'brief' && body.purpose !== 'carry_on') return body.text;
   }
   return null;
 }

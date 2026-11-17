@@ -14,7 +14,9 @@ import {
   sessionStarts,
   setSessionsSettings,
   startFacts,
+  ChatWorkConflict,
   type ChatService,
+  type ChatWorkService,
   type StartGit,
 } from '../chat';
 import type { StateStore } from '../events';
@@ -32,6 +34,7 @@ export type ChatApiServices = Pick<
   | 'patchChat'
   | 'archiveChat'
   | 'unarchiveChat'
+  | 'chooseChatWork'
   | 'stopChatWaiting'
   | 'askChatBrief'
   | 'cancelChatBrief'
@@ -53,6 +56,7 @@ export type ChatApiServices = Pick<
 export function createChatApiServices(deps: {
   readonly state: StateStore;
   readonly chat: ChatService;
+  readonly work: ChatWorkService;
   readonly takeover: TakeoverService;
   readonly folderHold: FolderHold;
   readonly pendingOpens: Pick<PendingOpens, 'view'>;
@@ -72,6 +76,16 @@ export function createChatApiServices(deps: {
     patchChat: (id, input) => chat.patch(id, input),
     archiveChat: (id) => chat.archive(id),
     unarchiveChat: (id) => chat.unarchive(id),
+    async chooseChatWork(id, choice) {
+      try {
+        return { settled: true, work: await deps.work.choose(id, choice.place) };
+      } catch (error) {
+        // A choice that lost answers with the state that won, which the bar shows.
+        if (error instanceof ChatWorkConflict && error.work !== null)
+          return { settled: false, work: error.work };
+        throw error;
+      }
+    },
     stopChatWaiting(id) {
       chat.stopWaiting(id);
       return chat.get(id);

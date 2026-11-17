@@ -235,7 +235,9 @@ import {
   chatHooks,
   createChatLiveSessions,
   createChatService,
+  applyChatWorkAnswer,
   createChatWorkService,
+  type ChatWorkService,
   doItHere,
   doItInCopy,
   finishSeals,
@@ -867,6 +869,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // The inbox, pauses and runner call into each other, so each reaches the others through these
   // references; they are set before anything can fire a callback.
   let runner: Runner | null = null;
+  let chatWorkRef: ChatWorkService | null = null;
   let scheduler: Scheduler | null = null;
   // A waiting update drains the factory: no lane, session, task gate or ship starts until it installs.
   const updateDrain = createDrain();
@@ -995,7 +998,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         ? () => {
             startFollowUps();
           }
-        : undefined,
+        : chatWorkRef === null
+          ? undefined
+          : applyChatWorkAnswer(chatWorkRef, logger, ctx, item, answer),
     onCheckAnswer: (ctx, item, answer) => {
       const signOffPage = startPageSignOff;
       if (!runner || !signOffPage) throw new RunnerNotStartedError();
@@ -1808,9 +1813,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const chatWork = createChatWorkService({
     state,
     engine: exploreEngine,
+    folderHold,
+    carryOn: (chatId, text) => {
+      chat.carryOn(chatId, text);
+    },
     log: logger.child({ component: 'chat-work' }),
     now: () => clock.now(),
   });
+  chatWorkRef = chatWork;
   exploreEngine.register(
     ConversationOwnerKind.Chat,
     chatHooks({
@@ -2424,6 +2434,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     chat: createChatApiServices({
       state,
       chat,
+      work: chatWork,
       takeover,
       folderHold,
       pendingOpens,

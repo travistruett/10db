@@ -5,6 +5,8 @@ import type {
   CapacitySettingsDto,
   ChatCreateInput,
   ChatDto,
+  ChatWork,
+  ChatWorkChoice,
   ChatId,
   ChatModelsDto,
   BriefRequest,
@@ -677,6 +679,11 @@ export interface ApiServices extends PlanRecordServices {
   /** Ends the chat's session in whatever state it is in, then archives it and removes its folder. */
   archiveChat(id: ChatId): Promise<ChatDto>;
   unarchiveChat(id: ChatId): ChatDto;
+  /** The builder's choice of where a session's work happens; `settled` is false when another choice had won. */
+  chooseChatWork(
+    id: ChatId,
+    choice: ChatWorkChoice,
+  ): Promise<{ readonly settled: boolean; readonly work: ChatWork }>;
   /** Stops a chat's wait for Your folder: what it queued runs reading only. */
   stopChatWaiting(id: ChatId): ChatDto;
   /** Asks the chat's agent for a task's brief (between turns only) and answers the brief the sheet shows now. */

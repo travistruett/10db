@@ -18,6 +18,7 @@ import {
   createChatLiveSessions,
   type Briefs,
   createChatService,
+  applyChatWorkAnswer,
   createChatWorkService,
   type ChatWorkService,
   type ChatHooksDeps,
@@ -117,7 +118,13 @@ export function chatWorld(
     opts.over === undefined
       ? tempDir('chat')
       : { path: opts.over.dataDir, cleanup: () => undefined };
-  const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
+  let workRef: ChatWorkService | null = null;
+  const inbox = createInboxService({
+    state,
+    onParkedAnswer: () => undefined,
+    onFlagAnswerInWrite: (ctx, item, answer) =>
+      workRef === null ? undefined : applyChatWorkAnswer(workRef, silentLogger, ctx, item, answer),
+  });
   const launched = { kind: AccountKind.ClaudeSubscription as AgentAccountKind };
   const engine = createExploreEngine({
     state,
@@ -172,12 +179,19 @@ export function chatWorld(
           }),
     },
   });
+  // The chat service is made after the hooks, so the work service reaches it through this.
+  let chatService: ChatService | null = null;
   const work = createChatWorkService({
     state,
     engine,
+    folderHold,
+    carryOn: (chatId, text) => {
+      chatService?.carryOn(chatId, text);
+    },
     log: silentLogger,
     now: () => clock.now(),
   });
+  workRef = work;
   engine.register(
     'chat',
     chatHooks({
@@ -222,6 +236,7 @@ export function chatWorld(
     webSearchOf: () => adapter.capabilities({ kind: launched.kind }, null).webSearch,
     takeover: () => takeoverService,
   });
+  chatService = chat;
   const terminal: ChatWorld['terminal'] = {
     app: 'copy',
     openerFails: null,

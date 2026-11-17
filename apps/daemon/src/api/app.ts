@@ -136,6 +136,7 @@ import {
   type FolderWhileHeld,
   ChatCreateInput,
   ChatId,
+  ChatWorkChoice,
   BriefRequest,
   DoItRequest,
   ChatPatchInput,
@@ -809,6 +810,17 @@ export function createApp(deps: ApiDeps) {
     )
     .post('/chats/:chatId/archive', async (c) =>
       c.json(await deps.services.archiveChat(ChatId.parse(c.req.param('chatId')))),
+    )
+    .post(
+      '/chats/:chatId/work',
+      validator('json', (value): ChatWorkChoice => ChatWorkChoice.parse(value)),
+      async (c) => {
+        const answer = await deps.services.chooseChatWork(
+          ChatId.parse(c.req.param('chatId')),
+          c.req.valid('json'),
+        );
+        return c.json(answer.work, answer.settled ? 200 : 409);
+      },
     )
     .post('/chats/:chatId/unarchive', (c) =>
       c.json(deps.services.unarchiveChat(ChatId.parse(c.req.param('chatId')))),

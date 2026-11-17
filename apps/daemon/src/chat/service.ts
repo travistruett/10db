@@ -147,6 +147,11 @@ export interface ChatService {
     input: ChatMessageInput,
     folder?: FolderWhileHeld,
   ): Promise<ConversationItemRow>;
+  /**
+   * The line that resumes a session after the builder chose where it works, as a system line in the thread, and
+   * the turn it asks for: held behind the checkout when this session works there and a Board task has it.
+   */
+  carryOn(chatId: ChatId, text: string): void;
   /** The message stored queued and the chat touched, with no turn asked for: what a Redo posts. */
   post(conversationId: ConversationId, input: ChatMessageInput): ConversationItemRow;
   /**
@@ -408,6 +413,12 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
     post: (conversationId, input) => post(conversationId, input),
 
+    carryOn(chatId, text) {
+      const chat = getChat(state.db, chatId);
+      post(chat.conversationId, { text, mentions: [], pictures: [] }, 'carry_on');
+      dispatch(getChat(state.db, chatId), chat.conversationId, FolderWhileHeld.Wait);
+    },
+
     async seal(chatId) {
       const chat = getChat(state.db, chatId);
       await engine.seal(chat.conversationId);
@@ -623,7 +634,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
   function post(
     conversationId: ConversationId,
     input: ChatMessageInput,
-    purpose?: 'brief',
+    purpose?: 'brief' | 'carry_on',
   ): ConversationItemRow {
     const chat = chatOfConversation(state.db, conversationId);
     if (chat === null) throw new ConflictError('This conversation is no chat’s');

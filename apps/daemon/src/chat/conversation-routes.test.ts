@@ -54,6 +54,7 @@ function appOf(world: ChatWorld) {
       ...createChatApiServices({
         state: world.state,
         chat: world.chat,
+        work: world.work,
         takeover: world.takeover,
         folderHold: world.folderHold,
         pendingOpens: createPendingOpens({ state: world.state }),
