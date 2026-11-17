@@ -1,7 +1,22 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { BatchId, Delivery, NotFoundError, type BatchDto, type ProjectDto } from '@10db/contracts';
-import { deleteAppSetting, getBatch, listProjects } from '@10db/db';
+import {
+  BatchId,
+  ChatId,
+  Delivery,
+  NotFoundError,
+  WorkPlace,
+  type BatchDto,
+  type ProjectDto,
+} from '@10db/contracts';
+import {
+  deleteAppSetting,
+  getBatch,
+  getChat,
+  listProjects,
+  setChatWork,
+  type ChatRow,
+} from '@10db/db';
 import type { StateStore } from '../events';
 import {
   comparablePath,
@@ -10,6 +25,7 @@ import {
   lockedOwner,
   samePath,
   surelyInside,
+  chatWorktreePinKey,
   type Git,
   type WorktreeEntry,
   worktreePinKey,
@@ -19,6 +35,7 @@ import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { looseWork } from './build-output';
 import { keptWorktreeKey, worktreeCards } from './cards';
+import type { ChatMergedCheck } from './chat-worktree-merged';
 import { raise, withdraw } from './context';
 import { dropOrphanStarts } from './start-refs';
 import { unseededIgnoredFiles } from './worktree-cleanup';
@@ -30,6 +47,8 @@ export interface SweepDeps {
   /** This daemon's hashed level of the worktree root: the sweep never looks outside it. */
   readonly root: string;
   readonly logger: Logger;
+  /** Whether a closed chat's branch has landed; absent, a closed chat's worktree is never removed as merged. */
+  readonly merged?: ChatMergedCheck;
 }
 
 /** A worktree the sweep may remove, and whether the pin stored under its batch id is its own. */
@@ -138,11 +157,125 @@ export async function removeOrphanedWorktree(
   return { removed: true };
 }
 
+/** The chat with `id`, or undefined when no row has it. */
+function findChat(state: StateStore, id: ChatId): ChatRow | undefined {
+  try {
+    return getChat(state.db, id);
+  } catch (error) {
+    if (error instanceof NotFoundError) return undefined;
+    throw error;
+  }
+}
+
+/**
+ * Whether a chat's worktree is finished: its chat is gone, archived, or no longer names it; or the chat is
+ * closed and its branch needs checking for commits of its own that have landed. A chat that is moving, or open,
+ * keeps its worktree.
+ */
+type ChatVerdict =
+  | { readonly remove: true; readonly id: ChatId; readonly chat: ChatRow | undefined }
+  | { readonly check: true; readonly id: ChatId; readonly chat: ChatRow }
+  | { readonly keep: string };
+
+function chatOrphanVerdict(state: StateStore, entry: WorktreeEntry, root: string): ChatVerdict {
+  if (entry.bare) return { keep: 'it is a bare repository entry' };
+  const owner = lockedOwner(entry);
+  const id = ChatId.safeParse(owner?.kind === 'chat' ? owner.id : null);
+  if (!id.success) return { keep: 'its lock reason does not name a chat' };
+  if (!underRoot(entry.path, root)) return { keep: "it is outside 10db's worktree root" };
+  const chat = findChat(state, id.data);
+  if (chat === undefined) return { remove: true, id: id.data, chat };
+  if (chat.workPlace === WorkPlace.Moving) return { keep: 'its session is moving' };
+  if (
+    chat.worktreePath === null ||
+    !samePath(comparablePath(chat.worktreePath), comparablePath(entry.path))
+  )
+    return { remove: true, id: id.data, chat };
+  if (chat.archivedAt !== null) return { remove: true, id: id.data, chat };
+  if (chat.tabPosition !== null) return { keep: 'its session is open' };
+  return { check: true, id: id.data, chat };
+}
+
+/** A closed chat's worktree is finished when its tip holds commits of its own and its branch has landed. */
+async function chatFinished(
+  deps: SweepDeps,
+  project: ProjectDto,
+  entry: WorktreeEntry,
+  chat: ChatRow,
+): Promise<boolean> {
+  if (deps.merged === undefined || chat.branch === null) return false;
+  if (entry.head === null || entry.head === chat.baseHead) return false;
+  try {
+    return await deps.merged(project, chat.branch, entry.head);
+  } catch (error) {
+    // GitHub or git could not say, so nothing is assumed merged.
+    deps.logger.warn({ path: entry.path, err: message(error) }, 'chat worktree merge unknown');
+    return false;
+  }
+}
+
+/** Sweeps one chat's worktree entry; true when it was removed. */
+async function sweepChatEntry(
+  deps: SweepDeps,
+  project: ProjectDto,
+  entry: WorktreeEntry,
+): Promise<boolean> {
+  const main = project.repoPath;
+  const verdict = chatOrphanVerdict(deps.state, entry, deps.root);
+  if ('keep' in verdict) return false;
+  if ('check' in verdict && !(await chatFinished(deps, project, entry, verdict.chat))) return false;
+  const changed = await changesIn(deps, main, entry.path);
+  if (changed === null) {
+    raise(deps.inbox, project.id, worktreeCards.orphanKept(main, entry.path, null, []));
+    return false;
+  }
+  const ignored = await unseededIgnoredFiles(deps.git, main, entry.path, project.worktreeSeed);
+  if (changed.length > 0 || ignored === null) {
+    raise(
+      deps.inbox,
+      project.id,
+      worktreeCards.orphanKept(main, entry.path, ignored === null ? null : changed, ignored ?? []),
+    );
+    return false;
+  }
+  const loose = looseWork(ignored);
+  if (loose.length > 0) {
+    raise(deps.inbox, project.id, worktreeCards.orphanIgnored(main, entry.path, loose));
+    return false;
+  }
+  const outcome = await deps.git.removeWorktree(main, entry.path);
+  withdraw(deps.state, deps.inbox, project.id, [
+    keptWorktreeKey.orphanChanges(entry.path),
+    keptWorktreeKey.orphanIgnored(entry.path),
+  ]);
+  // The pin and the row's path go together, so a restart never finds one without the other.
+  deps.state.write((w) => {
+    deleteAppSetting(w, chatWorktreePinKey(verdict.id));
+    const row = verdict.chat;
+    if (row !== undefined && row.workPlace !== null)
+      setChatWork(w, verdict.id, row.workPlace, { place: row.workPlace, worktreePath: null });
+  });
+  if (outcome !== 'removed') return false;
+  deps.logger.info({ chatId: verdict.id, path: entry.path }, 'chat worktree removed');
+  return true;
+}
+
 /** Sweeps one project's main checkout; resolves with the paths removed. */
 async function sweepProject(deps: SweepDeps, project: ProjectDto): Promise<string[]> {
   const main = project.repoPath;
   const swept: string[] = [];
+  // A local project has no batch worktrees, only a chat's.
+  const batches = project.delivery === Delivery.PullRequest;
   for (const entry of await deps.git.listWorktrees(main)) {
+    if (lockedOwner(entry)?.kind === 'chat') {
+      try {
+        if (await sweepChatEntry(deps, project, entry)) swept.push(entry.path);
+      } catch (error) {
+        deps.logger.warn({ path: entry.path, err: message(error) }, 'chat worktree kept');
+      }
+      continue;
+    }
+    if (!batches) continue;
     const orphan = orphanOf(deps.state, entry, deps.root);
     if (orphan === null) continue;
     try {
@@ -190,19 +323,20 @@ async function sweepProject(deps: SweepDeps, project: ProjectDto): Promise<strin
       deps.logger.warn({ path: entry.path, err: message(error) }, 'orphaned worktree kept');
     }
   }
-  await dropOrphanStarts(
-    { db: deps.state.db, git: deps.git, logger: deps.logger, worktreeRoot: deps.root },
-    main,
-  ).catch((error: unknown) => {
-    deps.logger.warn({ projectId: project.id, err: message(error) }, 'task starts not swept');
-  });
+  if (batches)
+    await dropOrphanStarts(
+      { db: deps.state.db, git: deps.git, logger: deps.logger, worktreeRoot: deps.root },
+      main,
+    ).catch((error: unknown) => {
+      deps.logger.warn({ projectId: project.id, err: message(error) }, 'task starts not swept');
+    });
   await deps.git.pruneWorktrees(main);
   return swept;
 }
 
 /**
  * At startup, so no crash leaves a worktree behind for good: in each pull_request project's main
- * checkout, remove every worktree under `root` locked `10db <batch id>` whose batch is gone or
+ * checkout (a local project's too, for a chat's worktree only), remove every worktree under `root` locked `10db <batch id>` whose batch is gone or
  * whose `worktree_path` is cleared or different, then prune. An orphan with uncommitted changes,
  * one git can't read, or one holding git-ignored files 10db didn't seed that are not build output
  * is kept and named on a card, which a later removal withdraws. It then drops the kept task starts no
@@ -213,7 +347,7 @@ async function sweepProject(deps: SweepDeps, project: ProjectDto): Promise<strin
 export async function sweepWorktrees(deps: SweepDeps): Promise<string[]> {
   const swept: string[] = [];
   for (const project of listProjects(deps.state.db)) {
-    if (project.delivery !== Delivery.PullRequest || !existsSync(project.repoPath)) continue;
+    if (!existsSync(project.repoPath)) continue;
     try {
       swept.push(...(await sweepProject(deps, project)));
     } catch (error) {
