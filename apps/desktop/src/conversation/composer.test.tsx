@@ -97,6 +97,54 @@ describe('Composer', () => {
     expect((input() as HTMLTextAreaElement).value).toBe('first\n\nsecond thought');
   });
 
+  it('puts a failed send back into the draft as it stands, after its composer was drawn again', async () => {
+    let refuse = (): void => undefined;
+    const onSend = vi.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          refuse = () => {
+            reject(new Error('The database is locked'));
+          };
+        }),
+    );
+    // The screen keeps the draft; another page or tab shown and back draws a new composer over it.
+    function Remounting() {
+      const [draft, setDraft] = useState<Draft>({ ...EMPTY_DRAFT, text: 'first' });
+      const [drawn, setDrawn] = useState(0);
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              setDrawn((n) => n + 1);
+            }}
+          >
+            Draw Again
+          </button>
+          <Composer
+            key={drawn}
+            draft={draft}
+            onDraft={setDraft}
+            capabilities={CLAUDE_CAPABILITIES}
+            phase={IDLE}
+            disabledReason={null}
+            onSend={onSend}
+            onStop={vi.fn()}
+            onRedo={vi.fn()}
+          />
+        </>
+      );
+    }
+    renderWithTheme(<Remounting />);
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Draw Again' }));
+    fireEvent.change(input(), { target: { value: 'second thought' } });
+    refuse();
+    await waitFor(() => {
+      expect((input() as HTMLTextAreaElement).value).toBe('first\n\nsecond thought');
+    });
+  });
+
   it('refuses a picture type outside the capabilities, in words, and holds a png', () => {
     renderWithTheme(<Held />);
     const gif = new File(['x'], 'pasted.gif', { type: 'image/gif' });

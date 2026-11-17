@@ -25,6 +25,15 @@ describe('what a composer holds once its send fails', () => {
     expect(afterFailedSend({ ...EMPTY_DRAFT, text: typed }, sent).text).toBe(want);
   });
 
+  it('holds only what was typed since when the send was a picture alone', () => {
+    const picture = new File(['a'], 'a.png');
+    const failed = afterFailedSend(
+      { ...EMPTY_DRAFT, text: 'more' },
+      { ...EMPTY_DRAFT, pictures: [picture] },
+    );
+    expect(failed).toEqual({ text: 'more', mentions: [], pictures: [picture] });
+  });
+
   it('puts the sent pictures back ahead of those added since, each once', () => {
     const a = new File(['a'], 'a.png');
     const b = new File(['b'], 'b.png');

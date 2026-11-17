@@ -4,6 +4,7 @@ import {
   PASS_FOLDER_WAIT_LINE,
   PASS_FOLDER_WAIT_NOTICE_KEY,
   TaskPatch,
+  TaskScreensDto,
   type BatchDto,
   type TaskDto,
   type WorkstreamDto,
@@ -16,6 +17,7 @@ import { DEFAULT_ACCOUNT } from '../../test/account-fixtures';
 import { batchDto, projectViewDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
 import { kindDto } from '../../test/playbook-fixtures';
 import { modelRowDto } from '../../test/model-fixtures';
+import { taskScreenDto } from '../../test/pass-fixtures';
 import { TaskDrawer } from './task-drawer';
 import { failureLine } from './task-state';
 
@@ -796,6 +798,37 @@ describe('TaskDrawer', () => {
       await screen.findByText('Discard your changes to this task?');
       fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
       expect(closed()).toBe(1);
+    });
+
+    it('Escape on an enlarged picture closes the picture and leaves the drawer open', async () => {
+      const taskId = mintId('Task');
+      serve(
+        http.get(daemonUrl('/tasks/:taskId/screens'), () =>
+          HttpResponse.json(
+            TaskScreensDto.parse({
+              taskId,
+              screens: [taskScreenDto({ taskId, route: '/people', kind: 'before' })],
+              fromGoal: [],
+            }),
+          ),
+        ),
+        http.get(
+          daemonUrl('/screens/:screenId'),
+          () =>
+            new HttpResponse(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), {
+              headers: { 'content-type': 'image/png' },
+            }),
+        ),
+      );
+      const { closed } = open({ task: { id: taskId } });
+      const enlarge = await within(await dialog()).findByRole('button', { name: /^Enlarge / });
+      fireEvent.click(enlarge);
+      const picture = await screen.findByRole('dialog', { name: /before/ });
+      fireEvent.keyDown(picture, { key: 'Escape' });
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: /before/ })).toBeNull();
+      });
+      expect(closed()).toBe(0);
     });
 
     it('Escape with edits asks too', async () => {

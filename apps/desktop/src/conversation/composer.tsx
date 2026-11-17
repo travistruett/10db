@@ -23,7 +23,7 @@ import {
 import { ComposerInput, type ComposerMentions } from './composer-mentions';
 import { DictationButton } from './dictation-button';
 import type { ComposerPhase } from './composer-phase';
-import { afterFailedSend, afterSend, hasContent, type Draft } from './drafts';
+import { afterFailedSend, afterSend, hasContent, type Draft, type DraftChange } from './drafts';
 import { isComposing, isSendKey, OWNS_ESCAPE_ATTRIBUTE } from './escape';
 import { mentionText } from './mention-text';
 import { pickerAccept, withPictures } from './pictures';
@@ -39,7 +39,7 @@ import { pickerAccept, withPictures } from './pictures';
 export interface ComposerHeld {
   /** The holders, as a sentence part: "the task ‘Bump vite’". */
   readonly holders: string;
-  /** Sends the draft as the builder chose; rejects with the daemon's words, and the draft stays. */
+  /** Sends the draft as the builder chose; rejects with the daemon's words, and the draft comes back. */
   readonly onChoose: (
     draft: Draft,
     choice: FolderWhileHeld,
@@ -69,7 +69,7 @@ export interface ComposerUploads {
 
 export interface ComposerProps {
   readonly draft: Draft;
-  readonly onDraft: (draft: Draft) => void;
+  readonly onDraft: (change: DraftChange) => void;
   /** What the agent takes: Attach shows only with a picture format, `/` only with slash commands. */
   readonly capabilities: Pick<AgentCapabilitiesDto, 'images'> &
     Partial<Pick<AgentCapabilitiesDto, 'slashCommands'>>;
@@ -82,12 +82,15 @@ export interface ComposerProps {
   readonly error?: string | null;
   /**
    * The screen shows a failed send or Stop itself (Plan's alert): the composer hands the daemon's words
-   * over instead of showing them beside Send, and keeps the draft.
+   * over instead of showing them beside Send, and puts the draft back.
    */
   readonly onFailure?: (message: string) => void;
   /** Nothing can be typed either: the account has no chat to offer. */
   readonly locked?: boolean;
-  /** Sends the draft; rejects with the daemon's words, and the draft stays. */
+  /**
+   * Sends the draft, which left the input as Send was pressed; rejects with the daemon's words, and the
+   * draft comes back ahead of what was typed since.
+   */
   readonly onSend: (draft: Draft) => Promise<void> | void;
   /** A plain Stop: the turn ends and nothing is sent; a rejection's words show beside Send. */
   readonly onStop: () => Promise<void> | void;
@@ -242,7 +245,9 @@ export function Composer({
     try {
       await action();
     } catch (error) {
-      if (sent !== null) onDraft(afterFailedSend(current.current, sent));
+      // Against the draft as it stands when the failure lands: this composer may have been drawn again
+      // since, with words typed into the new one.
+      if (sent !== null) onDraft((now) => afterFailedSend(now, sent));
       const message = error instanceof Error ? error.message : String(error);
       if (onFailure === undefined) setFailure(message);
       else onFailure(message);
@@ -564,7 +569,8 @@ export function Composer({
               </ActionIcon>
             )}
             {actions}
-            {phase.send === 'hidden' || asking ? null : (
+            {/* A send on its way keeps its button and spinner though the input emptied at once. */}
+            {(phase.send === 'hidden' && !sending) || asking ? null : (
               <ActionIcon
                 variant={phase.send === 'filled' ? 'filled' : 'default'}
                 size="lg"

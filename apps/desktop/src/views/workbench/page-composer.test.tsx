@@ -57,6 +57,28 @@ describe('PageComposer buttons', () => {
     expect(acts.signOff).toHaveBeenCalledOnce();
   });
 
+  it('on a Ready page, keeps Send primary and busy, and Sign Off held, while a send is on its way', async () => {
+    const { acts, input } = await renderComposer(PageStatus.Ready);
+    let settle = (): void => undefined;
+    const held = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    acts.send.mockReturnValue(held);
+    fireEvent.change(input, { target: { value: 'padding too tight' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    // The input is empty at once, but the message has not reached the page yet.
+    expect((input as HTMLTextAreaElement).value).toBe('');
+    expect(variant('Send')).toBe('filled');
+    expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('data-loading')).toBe(true);
+    expect(variant('Sign Off')).toBe('default');
+    expect(screen.getByRole('button', { name: 'Sign Off' })).toHaveProperty('disabled', true);
+    await act(async () => {
+      settle();
+      await Promise.resolve();
+    });
+    expect(variant('Sign Off')).toBe('filled');
+  });
+
   it('⌘↩ sends the draft and empties the input', async () => {
     const { acts, input } = await renderComposer(PageStatus.Ready);
     fireEvent.change(input, { target: { value: 'padding too tight' } });

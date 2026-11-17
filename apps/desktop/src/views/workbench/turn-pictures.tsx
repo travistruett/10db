@@ -13,12 +13,15 @@ export function ScreenPicture({
   name,
   width = 320,
   fromGoal = false,
+  onOpenChange,
 }: {
   readonly screen: TaskScreenDto;
   readonly name: string;
   readonly width?: number;
   /** Taken for another task of the goal this page's task is in. */
   readonly fromGoal?: boolean;
+  /** Told when the enlarged picture opens and closes. */
+  readonly onOpenChange?: (open: boolean) => void;
 }) {
   const image = useScreenPicture(screen.id);
   const alt = screenAlt(name, screen, fromGoal);
@@ -38,6 +41,7 @@ export function ScreenPicture({
     <ZoomablePicture
       src={image.data}
       alt={alt}
+      {...(onOpenChange === undefined ? {} : { onOpenChange })}
       style={{
         display: 'block',
         width,

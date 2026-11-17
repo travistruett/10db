@@ -12,6 +12,12 @@
   opacity: 1;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .copy {
+    transition: none;
+  }
+}
+
 .copy button {
   color: var(--mantine-color-dimmed);
 }

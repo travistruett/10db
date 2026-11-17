@@ -131,10 +131,13 @@ describe('PassWorkspace queue', () => {
 
   it("offers Add Page at the queue's foot, outside the rows J and K step through", async () => {
     const { onAddPage } = await renderWorkspace();
-    const rows = queueRows().length;
     fireEvent.click(screen.getByRole('button', { name: 'Add Page' }));
     expect(onAddPage).toHaveBeenCalledTimes(1);
-    expect(queueRows()).toHaveLength(rows);
+    // J on the last row stays there: Add Page, right under it, is not a row.
+    const last = queueRows().at(-1);
+    last?.focus();
+    fireEvent.keyDown(last ?? document.body, { key: 'j' });
+    expect(document.activeElement).toBe(last);
   });
 
   it('marks the selected page current and selects another on a click', async () => {

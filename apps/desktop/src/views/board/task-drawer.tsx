@@ -208,6 +208,8 @@ export function TaskDrawer({
     (areas.length !== task.areas.length || areas.some((a) => !task.areas.includes(a)));
   const [error, setError] = useState<string | null>(null);
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  // An enlarged picture keeps Esc for itself, as Mantine would close the drawer on the same key.
+  const [pictureOpen, setPictureOpen] = useState(false);
   const waitsOn = task.dependsOn.flatMap((id) => {
     const peer = peers.get(id);
     return peer ? [peer.title] : [];
@@ -298,7 +300,7 @@ export function TaskDrawer({
     <Drawer
       opened
       onClose={requestClose}
-      closeOnEscape={!confirmingDiscard}
+      closeOnEscape={!confirmingDiscard && !pictureOpen}
       position="right"
       // A side panel: the Board stays visible beside it, so it is never wider than half the window.
       size="min(640px, 50vw)"
@@ -445,7 +447,7 @@ export function TaskDrawer({
                   </Anchor>
                 </Group>
               ) : null}
-              <TaskPictures taskId={task.id} />
+              <TaskPictures taskId={task.id} onZoom={setPictureOpen} />
               <TaskSkips workstreamId={workstream?.id} />
               <TaskSizeLine taskId={task.id} />
               <PlanContextDisclosure taskId={task.id} />

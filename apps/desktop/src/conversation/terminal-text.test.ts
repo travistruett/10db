@@ -15,6 +15,7 @@ describe('withoutTerminalCodes', () => {
     ['a link ended by BEL', `${ESC}]8;;https://x.test${BEL}x${ESC}]8;;${BEL}`, 'x'],
     ['a title ended by ESC \\', `${ESC}]0;title${ESC}\\after`, 'after'],
     ['a two-byte escape', `${ESC}(Bplain`, 'plain'],
+    ['a link cut off before its end', `before${ESC}]8;;https://x.test`, 'before'],
     ['newlines and tabs stay', `a\n\tb${ESC}[0m\n`, 'a\n\tb\n'],
   ])('%s', (_name, input, expected) => {
     expect(withoutTerminalCodes(input)).toBe(expected);

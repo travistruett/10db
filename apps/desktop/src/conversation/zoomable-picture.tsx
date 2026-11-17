@@ -9,14 +9,22 @@ export interface ZoomablePictureProps {
   readonly alt: string;
   /** How the picture is drawn in the thread: a thumbnail or a fixed width. */
   readonly style: CSSProperties;
+  /**
+   * Told when the dialog opens and closes. A drawer or modal around the picture turns its own Esc off
+   * while it is open, since Mantine closes every open layer on one Esc.
+   */
+  readonly onOpenChange?: (open: boolean) => void;
 }
 
 /**
  * A picture in a conversation, drawn small in the thread; a click opens it in a dialog at the size the
  * window allows, and Esc or a click outside closes it.
  */
-export function ZoomablePicture({ src, alt, style }: ZoomablePictureProps) {
-  const [opened, { open, close }] = useDisclosure(false);
+export function ZoomablePicture({ src, alt, style, onOpenChange }: ZoomablePictureProps) {
+  const [opened, { open, close }] = useDisclosure(false, {
+    onOpen: () => onOpenChange?.(true),
+    onClose: () => onOpenChange?.(false),
+  });
   return (
     <>
       <UnstyledButton

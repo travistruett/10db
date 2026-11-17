@@ -148,13 +148,13 @@ describe('HeaderNotices', () => {
     },
   );
 
-  it('shows a long notice by its first line, and the rest, lines kept, behind Show More', async () => {
+  it('shows a long notice by its first line, and the rest, lines kept and without colour codes, behind Show More', async () => {
     record();
     const tail = 'FAIL src/form.test.ts\n  expected 2 to be 3\n    at form.test.ts:12';
     const notice = passNotice({
       id: 'gate',
       kind: 'gate_failed',
-      text: `The gate on 1a2b3c4 failed.\n${tail}`,
+      text: `The gate on 1a2b3c4 failed.\n${tail.replace('FAIL', '\u001b[31mFAIL\u001b[39m')}`,
     });
     renderWithDaemon(
       <HeaderNotices view={passViewDto({ rest: { notices: [notice] } })} inbox={[]} />,

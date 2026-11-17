@@ -8,7 +8,7 @@ import { Anchor, Group, Text, Title } from '@mantine/core';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { toolDoing, WorkingLine } from '../../conversation';
 import { ConversationLayout } from '../../conversation/conversation-layout';
-import type { Draft } from '../../conversation/drafts';
+import type { Draft, DraftChange } from '../../conversation/drafts';
 import { streamingOf } from '../../conversation/live-items';
 import { useConversationItems, useConversationLive } from '../../daemon/conversation-queries';
 import { useMarkOpened, useTurns } from '../../daemon/pass-queries';
@@ -40,7 +40,7 @@ export interface PagePaneProps {
   /** Counts the window gaining focus: each time, the composer takes the cursor. */
   readonly composerFocus: number;
   readonly draft: Draft;
-  readonly onDraft: (draft: Draft) => void;
+  readonly onDraft: (change: DraftChange) => void;
   /** The pass's pull request control, shown under a signed-off page as its next step. */
   readonly pullRequest?: ReactNode;
   /** The pane's own header, in place of the page's label. */

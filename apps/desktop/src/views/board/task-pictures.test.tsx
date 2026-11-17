@@ -38,7 +38,7 @@ describe('TaskPictures', () => {
         sha256: 'd'.repeat(64),
       }),
     ]);
-    renderWithDaemon(<TaskPictures taskId={taskId} />);
+    renderWithDaemon(<TaskPictures taskId={taskId} onZoom={() => undefined} />);
     const people = await screen.findByRole('group', { name: '/people, 1440 by 900' });
     await waitFor(() => {
       expect(
