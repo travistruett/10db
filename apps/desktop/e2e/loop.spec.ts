@@ -12,7 +12,7 @@ const OTHER = 'Tidy the readme';
 const QUESTION = 'Which greeting?';
 const VIEWS = ['Board', 'Factory', 'Inbox', 'Knowledge', 'Settings'] as const;
 
-/** The Board has no page heading, so its link in the rail marks it as the open view. */
+/** The Board draws no title, so its link in the rail marks it as the open view. */
 async function expectView(page: Page, view: (typeof VIEWS)[number]): Promise<void> {
   if (view === 'Board') {
     await expect(page.getByRole('link', { name: 'Board', exact: true })).toHaveAttribute(

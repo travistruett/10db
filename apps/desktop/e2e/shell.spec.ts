@@ -62,3 +62,15 @@ test('at 600 px the button opens the panel over the content and Esc closes it; a
   await page.keyboard.press('Escape');
   await expect(rail).toBeHidden();
 });
+
+test('at 800 px the open panel sheet sits flush against the rail, below the title row', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 800, height: 800 });
+  await page.goto('/settings/overview');
+  await page.getByRole('button', { name: 'Show the panel' }).click();
+  const box = await panelOf(page).boundingBox();
+  expect(box).not.toBeNull();
+  expect(box?.x).toBeCloseTo(52, 0);
+  expect(box?.y).toBeCloseTo(44, 0);
+});
