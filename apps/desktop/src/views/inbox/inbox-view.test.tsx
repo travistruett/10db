@@ -14,6 +14,9 @@ import { describe, expect, it } from 'vitest';
 import { queryKeys } from '../../daemon/queries';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
 import { batchDto, inboxItemDto, projectViewDto } from '../../test/fixtures';
+import { pickOption } from '../../test/combobox';
+import { openEveryRow, serveInboxPage, tableRows } from '../../test/inbox-page-fixtures';
+import { sendDto } from '../../test/people-fixtures';
 import { knowledgeList, proposalDto, provenanceDto } from '../../test/knowledge-fixtures';
 
 function serve(...overrides: (RequestHandler | WebSocketHandler)[]): void {
@@ -1153,19 +1156,22 @@ describe('the resolved view', () => {
     updatedAt: '2026-10-30T11:00:00.000Z',
   });
 
-  /** Serves the open and resolved lists; returns the `recent` count each resolved request asked for. */
-  function serveBoth(open: InboxItemDto[], resolved: InboxItemDto[]): (string | null)[] {
-    const recent: (string | null)[] = [];
-    serve(
-      http.get(daemonUrl('/inbox'), ({ request }) => {
-        const params = new URL(request.url).searchParams;
-        if (params.get('state') !== 'RESOLVED') return HttpResponse.json(open);
-        recent.push(params.get('recent'));
-        return HttpResponse.json(resolved);
-      }),
-    );
-    return recent;
+  /**
+   * Serves the open list and the resolved page; returns every query the resolved page was asked with.
+   * Every GET /inbox answers the open cards, so a view that asked it for resolved ones would show them.
+   */
+  function serveBoth(
+    open: InboxItemDto[],
+    resolved: InboxItemDto[],
+    total?: number,
+  ): Record<string, string>[] {
+    serve(http.get(daemonUrl('/inbox'), () => HttpResponse.json(open)));
+    return serveInboxPage({ resolved }, total === undefined ? {} : { resolved: total });
   }
+
+  const RESOLVED = 'Resolved cards';
+  const lastAsked = (asked: Record<string, string>[]): Record<string, string> | undefined =>
+    asked.at(-1);
 
   it('draws the same header on Open and Resolved: title, Open n / Resolved switch, a ? button', async () => {
     serveBoth([color], [answered]);
@@ -1181,7 +1187,7 @@ describe('the resolved view', () => {
     expect(help.getAttribute('data-variant')).toBe('subtle');
 
     fireEvent.click(screen.getByRole('tab', { name: 'Resolved' }));
-    await screen.findAllByTestId('resolved-card');
+    await tableRows(RESOLVED);
 
     // The same elements stay mounted, so nothing in the header moves or resizes.
     expect(screen.getByRole('heading', { name: 'Inbox' })).toBe(title);
@@ -1198,28 +1204,145 @@ describe('the resolved view', () => {
     renderApp('/inbox');
     await screen.findByText('Which badge color?');
     fireEvent.click(screen.getByRole('tab', { name: 'Resolved' }));
-    await screen.findAllByTestId('resolved-card');
+    await tableRows(RESOLVED);
     key('?', { shiftKey: true });
     expect(screen.queryByRole('dialog', { name: 'Keyboard Shortcuts' })).toBeNull();
   });
 
-  it('lists resolved cards, newest first, saying who closed each and why', async () => {
-    const recent = serveBoth([color], [closedBy10db, answered]);
+  it('asks the daemon for one page, newest first, and draws the rows in its order', async () => {
+    const asked = serveBoth([color], [answered, closedBy10db]);
     renderApp('/inbox');
     await screen.findByText('Which badge color?');
     fireEvent.click(screen.getByRole('tab', { name: /^Resolved/ }));
 
-    const rows = await screen.findAllByTestId('resolved-card');
-    // Only the most recent ones are fetched: the resolved list only grows.
-    expect(recent).toEqual(['100']);
+    const rows = await tableRows(RESOLVED, 2);
+    // One page, never a fixed count of the latest cards.
+    expect(asked[0]).toEqual({
+      state: 'resolved',
+      sort: 'updatedAt',
+      dir: 'desc',
+      page: '1',
+      pageSize: '25',
+    });
     expect(rows.map((row) => row.textContent)).toEqual([
       expect.stringContaining('Which badge color?'),
       expect.stringContaining('Batch not started: 10db will not run git in /repo'),
     ]);
-    expect(rows[0]?.textContent).toContain('Answered: Teal');
-    expect(rows[1]?.textContent).toContain('Resolved by 10db: Alpha started');
+    expect(rows[0]?.textContent).toContain('Answered');
+    expect(rows[1]?.textContent).toContain('Closed by 10db');
     // The open cards and their keys are not there.
     expect(screen.queryByRole('button', { name: 'Send Answer' })).toBeNull();
+  });
+
+  it('opens a row with Enter or → for who closed it and why, and closes it with ←', async () => {
+    serveBoth([], [answered, closedBy10db]);
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('tab', { name: /^Resolved/ }));
+    const [first, second] = await tableRows(RESOLVED, 2);
+    if (first === undefined || second === undefined) throw new Error('two rows');
+    expect(screen.queryByText('Answered: Teal')).toBeNull();
+    first.focus();
+    fireEvent.keyDown(first, { key: 'Enter' });
+    expect(await screen.findByText('Answered: Teal')).toBeTruthy();
+    expect(first.getAttribute('aria-expanded')).toBe('true');
+    // ↓ moves to the next row, and → opens it.
+    fireEvent.keyDown(first, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(second);
+    fireEvent.keyDown(second, { key: 'ArrowRight' });
+    expect(await screen.findByText('Resolved by 10db: Alpha started')).toBeTruthy();
+    fireEvent.keyDown(second, { key: 'ArrowUp' });
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(first, { key: 'ArrowLeft' });
+    await waitFor(() => {
+      expect(first.getAttribute('aria-expanded')).toBe('false');
+    });
+    expect(second.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it.each([
+    ['Kind', 'Flag', { kind: 'flag' }],
+    ['Outcome', 'Slack Answer', { outcome: 'slack' }],
+    ['Outcome', 'Closed by 10db', { outcome: '10db' }],
+  ])('sends the %s filter %s to the daemon', async (column, choice, filter) => {
+    const asked = serveBoth([], [answered]);
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('tab', { name: /^Resolved/ }));
+    await tableRows(RESOLVED);
+    fireEvent.click(screen.getByRole('button', { name: `Filter ${column}` }));
+    await pickOption(await screen.findByRole('combobox', { name: column }), choice);
+    await waitFor(() => {
+      expect(lastAsked(asked)).toEqual({
+        state: 'resolved',
+        sort: 'updatedAt',
+        dir: 'desc',
+        page: '1',
+        pageSize: '25',
+        ...filter,
+      });
+    });
+  });
+
+  it('sorts by a column on the daemon', async () => {
+    const asked = serveBoth([], [answered]);
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('tab', { name: /^Resolved/ }));
+    await tableRows(RESOLVED);
+    fireEvent.click(screen.getByRole('button', { name: 'Sort by Title' }));
+    await waitFor(() => {
+      expect(lastAsked(asked)).toMatchObject({ sort: 'title', dir: 'desc' });
+    });
+  });
+
+  it('asks for the next page from the pager', async () => {
+    const asked = serveBoth([], [answered], 60);
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('tab', { name: /^Resolved/ }));
+    await tableRows(RESOLVED);
+    expect(await screen.findByText('1–25 of 60')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Page 2' }));
+    await waitFor(() => {
+      expect(lastAsked(asked)).toMatchObject({ page: '2', pageSize: '25' });
+    });
+  });
+
+  it('sends the Project filter in the URL to the daemon', async () => {
+    const only = mintId('Project');
+    const asked = serveBoth([], [answered]);
+    renderApp(`/inbox?project=${only}`);
+    fireEvent.click(await screen.findByRole('tab', { name: /^Resolved/ }));
+    await tableRows(RESOLVED);
+    expect(asked.length).toBeGreaterThan(0);
+    // Every ask names the project: no page of every project's cards reaches the view.
+    for (const query of asked)
+      expect(query).toEqual({
+        state: 'resolved',
+        project: only,
+        sort: 'updatedAt',
+        dir: 'desc',
+        page: '1',
+        pageSize: '25',
+      });
+  });
+
+  it('says why a send failed when its row opens', async () => {
+    const failed = inboxItemDto({
+      ...answered,
+      send: sendDto({
+        inboxItemId: answered.id,
+        state: 'failed',
+        error: 'channel_not_found',
+        people: [{ personId: null, userId: 'U1', name: 'Mark Ellis', recipient: true }],
+      }),
+    });
+    serveBoth([], [failed]);
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('tab', { name: /^Resolved/ }));
+    await openEveryRow(RESOLVED);
+    expect(
+      await screen.findByText(
+        'Slack refused: channel_not_found. Mark Ellis may have left the workspace.',
+      ),
+    ).toBeTruthy();
   });
 
   it('says an answer in the words the card offered it', async () => {
@@ -1264,7 +1387,7 @@ describe('the resolved view', () => {
     );
     renderApp('/inbox');
     fireEvent.click(await screen.findByRole('tab', { name: /^Resolved/ }));
-    await screen.findAllByTestId('resolved-card');
+    await openEveryRow(RESOLVED, 6);
     for (const words of [
       'Answered: This Project',
       'Answered: All Projects',
@@ -1547,13 +1670,16 @@ describe('a resolved answer that proposed a principle', () => {
   });
 
   function serveResolved(resolved: InboxItemDto[]): void {
-    serve(
-      http.get(daemonUrl('/inbox'), ({ request }) =>
-        HttpResponse.json(
-          new URL(request.url).searchParams.get('state') === 'RESOLVED' ? resolved : [],
-        ),
-      ),
-    );
+    serve(http.get(daemonUrl('/inbox'), () => HttpResponse.json([])));
+    serveInboxPage({ resolved });
+  }
+
+  const RESOLVED = 'Resolved cards';
+  /** Opens the Resolved tab and every row in it; returns the rows' details, in order. */
+  async function openResolved(count = 1): Promise<HTMLElement[]> {
+    fireEvent.click(await screen.findByRole('tab', { name: 'Resolved' }));
+    await openEveryRow(RESOLVED, count);
+    return screen.findAllByTestId('resolved-detail');
   }
 
   /** The principle as the daemon reports it, whatever became of its proposal. */
@@ -1578,18 +1704,16 @@ describe('a resolved answer that proposed a principle', () => {
 
   async function clickOpenInKnowledge(): Promise<void> {
     renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('tab', { name: 'Resolved' }));
-    await screen.findAllByTestId('resolved-card');
-    fireEvent.click(screen.getByRole('link', { name: 'Open in Knowledge' }));
+    await openResolved();
+    fireEvent.click(await screen.findByRole('link', { name: 'Open in Knowledge' }));
   }
 
   it('says a principle was proposed, on the card that proposed it only', async () => {
     serveResolved([answered, plain]);
     renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('tab', { name: 'Resolved' }));
-    const rows = await screen.findAllByTestId('resolved-card');
-    expect(rows[0]?.textContent).toContain('A principle was proposed');
-    expect(rows[1]?.textContent).not.toContain('principle');
+    const details = await openResolved(2);
+    expect(details[0]?.textContent).toContain('A principle was proposed');
+    expect(details[1]?.textContent).not.toContain('principle');
   });
 
   it('opens a principle still waiting for a verdict, under Pending', async () => {
@@ -1662,7 +1786,7 @@ describe('a resolved answer that proposed a principle', () => {
     serveResolved([answered]);
     serveProvenance(provenanceDto({ id: principleId, state: 'proposed' }));
     const { router } = renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('tab', { name: 'Resolved' }));
+    await openResolved();
     fireEvent.click(await screen.findByRole('link', { name: 'Open in Knowledge' }));
     const drawer = await openDrawer();
     await waitFor(() => {
@@ -1689,10 +1813,9 @@ describe('a resolved answer that proposed a principle', () => {
       provenanceDto({ id: second, text: 'Always keep queues in Postgres.' }),
     );
     renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('tab', { name: 'Resolved' }));
-    const [row] = await screen.findAllByTestId('resolved-card');
+    const [row] = await openResolved();
     expect(row?.textContent).toContain('2 principles were proposed');
-    expect(screen.getByRole('link', { name: 'Open principle 1' })).toBeTruthy();
+    expect(await screen.findByRole('link', { name: 'Open principle 1' })).toBeTruthy();
     fireEvent.click(screen.getByRole('link', { name: 'Open principle 2' }));
     const drawer = await openDrawer();
     expect(await within(drawer).findByText('Always keep queues in Postgres.')).toBeTruthy();
@@ -1701,8 +1824,7 @@ describe('a resolved answer that proposed a principle', () => {
   it('ignores a detail that is not a list of proposals', async () => {
     serveResolved([inboxItemDto({ ...answered, detail: { proposedPrinciples: 'nope' } })]);
     renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('tab', { name: 'Resolved' }));
-    const [row] = await screen.findAllByTestId('resolved-card');
+    const [row] = await openResolved();
     expect(row?.textContent).not.toContain('principle');
   });
 });

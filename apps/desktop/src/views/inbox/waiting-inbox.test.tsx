@@ -4,6 +4,8 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { inboxItemDto } from '../../test/fixtures';
+import { pickOption } from '../../test/combobox';
+import { openEveryRow, serveInboxPage, tableRows } from '../../test/inbox-page-fixtures';
 import {
   BUILDER_PERSON,
   personDto,
@@ -42,6 +44,14 @@ function card(send: Record<string, unknown>, over: Partial<InboxItemDto> = {}): 
   });
 }
 
+/** Out with someone: sent and not brought back, as the daemon's Waiting page holds it. */
+const isOut = (item: InboxItemDto): boolean =>
+  item.send?.state === 'sent' && item.send.returnedAt === null;
+
+/** Every query the Waiting page was asked with, since the last `serve`. */
+let asked: Record<string, string>[] = [];
+
+/** Serves `items` as the open cards and the ones out with someone as the Waiting page; returns the actions posted. */
 function serve(
   items: InboxItemDto[],
   connection: Record<string, unknown> = { state: 'connected' },
@@ -72,8 +82,12 @@ function serve(
     }),
     ...baseHandlers(),
   );
+  // After the base handlers, whose empty page it replaces.
+  asked = serveInboxPage({ waiting: items.filter(isOut) });
   return calls;
 }
+
+const WAITING = 'Waiting questions';
 
 const tabs = () => within(screen.getByRole('tablist', { name: 'Inbox view' }));
 
@@ -90,7 +104,63 @@ describe('the Waiting tab', () => {
     fireEvent.click(tabs().getByRole('tab', { name: /Waiting/ }));
     expect(await screen.findByText('How long should access last?')).toBeTruthy();
     expect(screen.getByText('Mark Ellis')).toBeTruthy();
-    expect(screen.getByText('· sent 3h ago')).toBeTruthy();
+    expect(screen.getByText('sent 3h ago')).toBeTruthy();
+    // One page from the daemon, the longest out first; never every sent card.
+    expect(asked[0]).toEqual({
+      state: 'waiting',
+      sort: 'sentAt',
+      dir: 'asc',
+      page: '1',
+      pageSize: '25',
+    });
+  });
+
+  it('sends the Project filter in the URL and the With filter to the daemon', async () => {
+    const only = mintId('Project');
+    serve([card({})]);
+    renderApp(`/inbox?project=${only}`);
+    fireEvent.click(await screen.findByRole('tab', { name: /Waiting/ }));
+    await tableRows(WAITING);
+    for (const query of asked) expect(query['project']).toBe(only);
+    fireEvent.click(screen.getByRole('button', { name: 'Filter With' }));
+    await pickOption(await screen.findByRole('combobox', { name: 'With' }), 'Ana Ortiz');
+    await waitFor(() => {
+      expect(asked.at(-1)).toEqual({
+        state: 'waiting',
+        project: only,
+        person: ana.id,
+        sort: 'sentAt',
+        dir: 'asc',
+        page: '1',
+        pageSize: '25',
+      });
+    });
+  });
+
+  it('opens a row with Enter for the message and its answers, and closes it with ←', async () => {
+    serve([card({ text: 'Hi Mark, how long should access last?' })]);
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('tab', { name: /Waiting/ }));
+    const [row] = await openEveryRow(WAITING);
+    expect(await screen.findByText('Hi Mark, how long should access last?')).toBeTruthy();
+    expect(
+      await screen.findByRole('button', { name: 'Answer Myself: Cut access at once' }),
+    ).toBeTruthy();
+    if (row === undefined) throw new Error('no row');
+    fireEvent.keyDown(row, { key: 'ArrowLeft' });
+    await waitFor(() => {
+      expect(row.getAttribute('aria-expanded')).toBe('false');
+    });
+  });
+
+  it('says Slack is not connected, and asks for no page, while it is not', async () => {
+    serve([card({})], { state: 'off' });
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('tab', { name: /Waiting/ }));
+    expect(
+      await screen.findByText("Slack isn't connected, so questions sent there wait in Open."),
+    ).toBeTruthy();
+    expect(asked).toEqual([]);
   });
 
   it('keeps the Waiting count in the neutral badge, not the filled one', async () => {
@@ -129,7 +199,7 @@ describe('the Waiting tab', () => {
     fireEvent.click(await screen.findByRole('tab', { name: /Waiting/ }));
     expect(await screen.findByText('Mark Ellis + Ana Ortiz')).toBeTruthy();
     expect(screen.getByText('with Priya')).toBeTruthy();
-    expect(screen.getByText('· reminded 1h ago')).toBeTruthy();
+    expect(screen.getByText('reminded 1h ago')).toBeTruthy();
   });
 
   it('expanding a row shows the conversation and an open proposal', async () => {
@@ -333,15 +403,13 @@ describe('Resolved cards answered in Slack', () => {
   ])('%s', async (_name, send, answer, texts) => {
     const item = answered(send, answer);
     serve([]);
-    server.use(
-      http.get(daemonUrl('/inbox'), ({ request }) => {
-        return new URL(request.url).searchParams.get('state') === 'OPEN'
-          ? HttpResponse.json([])
-          : HttpResponse.json([item]);
-      }),
-    );
+    serveInboxPage({ resolved: [{ ...item, state: 'RESOLVED' }] });
     renderApp('/inbox');
     fireEvent.click(await screen.findByRole('tab', { name: 'Resolved' }));
+    const [row] = await tableRows('Resolved cards');
+    expect(row?.textContent).toContain('Slack Answer');
+    expect(screen.queryByText(new RegExp(texts[0] ?? ''))).toBeNull();
+    await openEveryRow('Resolved cards');
     for (const text of texts) expect(await screen.findByText(new RegExp(text))).toBeTruthy();
     // The thread it was answered in.
     const thread = await screen.findByRole('link', { name: 'Open in Slack' });

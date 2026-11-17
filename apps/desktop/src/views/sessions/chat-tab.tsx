@@ -4,6 +4,8 @@ import {
   DoItPlace,
   FolderHolderKind,
   FolderWhileHeld,
+  INBOX_PAGE_SIZE_MAX,
+  InboxListState,
   type ChatDto,
   type DoItResult,
   type Effort,
@@ -42,7 +44,7 @@ import {
 import { useModels } from '../../daemon/model-queries';
 import { useProjectFolder, useStopWaiting } from '../../daemon/project-folder-queries';
 import { useDaemon, useDaemonStatus } from '../../daemon/provider';
-import { useResolvedInbox } from '../../daemon/queries';
+import { useInboxPage } from '../../daemon/queries';
 import { useHandBack, useTakeover, useTakeoverCommand } from '../../daemon/takeover-queries';
 import dayjs from 'dayjs';
 import { chatEntries } from './chat-entries';
@@ -175,7 +177,13 @@ export function ChatTab({
   const redo = useRedoConversation();
   const sendNow = useSendNow();
   const patch = usePatchChat();
-  const resolved = useResolvedInbox();
+  // The chat's project's latest resolved cards, so a card answered in the transcript still shows its answer.
+  const resolved = useInboxPage({
+    state: InboxListState.Resolved,
+    project: chat.projectId,
+    page: 1,
+    pageSize: INBOX_PAGE_SIZE_MAX,
+  });
   const openTask = useOpenTask();
   const open = useConversationCards(chat.conversationId);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -340,7 +348,7 @@ export function ChatTab({
       receipts: caps.receipts,
       working,
       inTerminal,
-      cards: [...(resolved.data ?? []), ...open],
+      cards: [...(resolved.data?.items ?? []), ...open],
       openTask: (task) => {
         void openTask({
           taskId: task.taskId,

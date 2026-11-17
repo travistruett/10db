@@ -211,6 +211,15 @@ export function baseHandlers(
     ),
     http.get(daemonUrl('/workstreams', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/inbox', base), () => HttpResponse.json([])),
+    http.get(daemonUrl('/inbox/page', base), ({ request }) => {
+      const params = new URL(request.url).searchParams;
+      return HttpResponse.json({
+        items: [],
+        total: 0,
+        page: 1,
+        pageSize: Number(params.get('pageSize') ?? '25'),
+      });
+    }),
     // The sidebar and the Workbench read every project's live pass; none is open.
     http.get(daemonUrl('/passes', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/settings/self-update', base), () =>

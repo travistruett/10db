@@ -1,88 +1,193 @@
 import {
-  CARD_PROPOSED_PRINCIPLES,
-  CARD_RESOLUTION,
-  CardResolution,
-  ProposedPrinciples,
+  INBOX_PAGE_SIZE,
+  InboxKind,
+  InboxListState,
+  InboxOutcome,
+  InboxSort,
+  inboxOutcome,
+  SortDirection,
   type InboxItemDto,
-  type PersonDto,
   type ProjectId,
 } from '@10db/contracts';
-import { Alert, Anchor, Badge, Group, Paper, Stack, Text } from '@mantine/core';
-import { Link } from '@tanstack/react-router';
-import { usePeople } from '../../daemon/people';
-import { useResolvedInbox } from '../../daemon/queries';
+import { Alert, Badge, Select, Stack, Text } from '@mantine/core';
+import type { DataTableColumn, DataTableSortStatus } from 'mantine-datatable';
+import { useState } from 'react';
+import { useInboxPage } from '../../daemon/queries';
 import { ProjectLabel } from '../../shell/project-label';
-import { useSelectedProject } from '../../shell/selected-project';
-import { inProject } from './in-project';
-import { elapsedWords } from '../board/task-state';
-import { ThreadLink } from './thread-link';
-import { KIND_LABELS, optionLabel } from './permission-labels';
+import { absoluteTime, fromNow, useNow } from '../../shell/relative';
+import { usePaging } from '../../shell/table-pager';
+import { InboxTable } from './inbox-table';
+import { KIND_LABELS } from './permission-labels';
+import { ResolvedDetail } from './resolved-detail';
 
-/** The builder's answer as the card offered it; a choice no option matches reads as it was stored. */
-function answerWords(item: InboxItemDto, choice: string): string {
-  const option = item.options.find((o) => o.label === choice);
-  return option ? optionLabel(item, option) : choice;
+/** The words for how a resolved card closed, in the column and its filter. */
+const OUTCOME_LABELS: Readonly<Record<InboxOutcome, string>> = {
+  [InboxOutcome.Answered]: 'Answered',
+  [InboxOutcome.TenDb]: 'Closed by 10db',
+  [InboxOutcome.Slack]: 'Slack Answer',
+};
+
+/** The filters' "any" choice: no filter. */
+const ANY = 'any';
+
+const KIND_CHOICES = [
+  { value: ANY, label: 'Any Kind' },
+  ...Object.values(InboxKind).map((kind) => ({ value: kind, label: KIND_LABELS[kind] })),
+];
+const OUTCOME_CHOICES = [
+  { value: ANY, label: 'Any Outcome' },
+  ...Object.values(InboxOutcome).map((outcome) => ({
+    value: outcome,
+    label: OUTCOME_LABELS[outcome],
+  })),
+];
+
+function isKind(value: string | null): value is InboxKind {
+  return Object.values<string | null>(InboxKind).includes(value);
+}
+function isOutcome(value: string | null): value is InboxOutcome {
+  return Object.values<string | null>(InboxOutcome).includes(value);
 }
 
-/** The letter an option has in the message a stakeholder read. */
-function letterOf(item: InboxItemDto, choice: string): string {
-  const index = item.options.findIndex((o) => o.label === choice);
-  return index < 0 ? choice : String.fromCharCode(65 + index);
-}
+/** The columns that sort, by the daemon's name for each. */
+const SORTS: Readonly<Record<string, InboxSort>> = {
+  kind: InboxSort.Kind,
+  title: InboxSort.Title,
+  updatedAt: InboxSort.UpdatedAt,
+};
 
-/** An answer a stakeholder gave in Slack: who, how it was read, and their words. */
-function slackAnswer(item: InboxItemDto, people: readonly PersonDto[]): string[] | null {
-  const answer = item.answer;
-  if (answer?.via !== 'slack') return null;
-  const who =
-    people.find((p) => p.handle === answer.answeredBy)?.name ?? answer.answeredBy ?? 'Someone';
-  const send = item.send;
-  // How long the answer took, from the question going out to the reply.
-  const gap =
-    send?.sentAt != null && send.answeredAt != null
-      ? ` · ${elapsedWords(send.sentAt, new Date(send.answeredAt).getTime())} after asking`
-      : '';
-  const lines = [`Answered by ${who} in Slack${gap}`];
-  const letter = letterOf(item, answer.choice);
-  const readAs = item.send?.readAs;
-  if (readAs === 'option') lines.push(`Read as ${letter}`);
-  else if (readAs === 'own_words') lines.push('In their own words');
-  else if (readAs === 'approved') {
-    const others = answer.with ?? [];
-    // Handles are stored; the line names the people.
-    const names = others.map((handle) => people.find((p) => p.handle === handle)?.name ?? handle);
-    lines.push(`Approved ${letter}${names.length > 0 ? ` · with ${names.join(', ')}` : ''}`);
-  }
-  if (answer.words !== undefined) lines.push(answer.words);
-  return lines;
-}
+const NEWEST_FIRST: DataTableSortStatus<InboxItemDto> = {
+  columnAccessor: 'updatedAt',
+  direction: SortDirection.Desc,
+};
 
-/** How the card was closed, in words: 10db's reason, the builder's answer, or just that it is done. */
-function resolvedHow(item: InboxItemDto): string {
-  // The detail is JSON read back from the daemon: a boundary, so parse it.
-  const resolution = CardResolution.safeParse(item.detail?.[CARD_RESOLUTION]);
-  if (resolution.success) return `Resolved by 10db: ${resolution.data.reason}`;
-  if (item.answer) return `Answered: ${answerWords(item, item.answer.choice)}`;
-  return 'Resolved';
-}
-
-/** The principles the answer to this card proposed (its note said "always" or "never"); empty for none. */
-function proposedBy(item: InboxItemDto): ProposedPrinciples | [] {
-  // The detail is JSON read back from the daemon: a boundary, so parse it.
-  const proposed = ProposedPrinciples.safeParse(item.detail?.[CARD_PROPOSED_PRINCIPLES]);
-  return proposed.success ? proposed.data : [];
-}
-
-/** The inbox's resolved view: cards that were answered, dismissed, or closed by 10db, newest first. */
-export function ResolvedInbox({ project }: { readonly project: ProjectId | undefined }) {
-  const resolved = useResolvedInbox();
-  const { select } = useSelectedProject();
-  const people = usePeople().data ?? [];
-  // The daemon sends the most recent ones (RESOLVED_SHOWN); sorted here too, so the order never
-  // depends on the response's.
-  const items = inProject(resolved.data ?? [], project).sort((a, b) =>
-    b.updatedAt.localeCompare(a.updatedAt),
+/** A filter's select inside its column's popover. */
+function FilterSelect({
+  label,
+  data,
+  value,
+  onChange,
+}: {
+  readonly label: string;
+  readonly data: { value: string; label: string }[];
+  readonly value: string;
+  readonly onChange: (value: string | null) => void;
+}) {
+  return (
+    <Select
+      aria-label={label}
+      size="xs"
+      w={200}
+      allowDeselect={false}
+      checkIconPosition="right"
+      // Inside the filter's popover: a dropdown in a portal would count as a click outside and close it.
+      comboboxProps={{ withinPortal: false }}
+      data={data}
+      value={value}
+      onChange={onChange}
+    />
   );
+}
+
+/**
+ * The inbox's resolved view: cards that were answered, dismissed, or closed by 10db, newest first, as a
+ * table the daemon filters, sorts and pages. A row opens for how the card closed.
+ */
+export function ResolvedInbox({ project }: { readonly project: ProjectId | undefined }) {
+  const now = useNow();
+  const [kind, setKind] = useState<InboxKind | null>(null);
+  const [outcome, setOutcome] = useState<InboxOutcome | null>(null);
+  const [sort, setSort] = useState(NEWEST_FIRST);
+  const [expanded, setExpanded] = useState<string[]>([]);
+  const order = SORTS[String(sort.columnAccessor)] ?? InboxSort.UpdatedAt;
+  const paging = usePaging(
+    JSON.stringify([project, kind, outcome, order, sort.direction]),
+    INBOX_PAGE_SIZE,
+  );
+  const resolved = useInboxPage({
+    state: InboxListState.Resolved,
+    ...(project === undefined ? {} : { project }),
+    ...(kind === null ? {} : { kind }),
+    ...(outcome === null ? {} : { outcome }),
+    sort: order,
+    dir: sort.direction,
+    page: paging.page,
+    pageSize: paging.pageSize,
+  });
+  const answer = resolved.data;
+  const columns: DataTableColumn<InboxItemDto>[] = [
+    {
+      accessor: 'kind',
+      title: 'Kind',
+      width: 130,
+      sortable: true,
+      filtering: kind !== null,
+      filter: (
+        <FilterSelect
+          label="Kind"
+          data={KIND_CHOICES}
+          value={kind ?? ANY}
+          onChange={(next) => {
+            setKind(isKind(next) ? next : null);
+          }}
+        />
+      ),
+      render: (item) => (
+        <Badge size="sm" variant="light" color="gray">
+          {KIND_LABELS[item.kind]}
+        </Badge>
+      ),
+    },
+    {
+      accessor: 'projectId',
+      title: 'Project',
+      width: 150,
+      render: (item) => <ProjectLabel projectId={item.projectId} />,
+    },
+    {
+      accessor: 'title',
+      title: 'Title',
+      sortable: true,
+      render: (item) => (
+        <Text size="sm" lineClamp={2} title={item.title}>
+          {item.title}
+        </Text>
+      ),
+    },
+    {
+      accessor: 'outcome',
+      title: 'Outcome',
+      width: 160,
+      filtering: outcome !== null,
+      filter: (
+        <FilterSelect
+          label="Outcome"
+          data={OUTCOME_CHOICES}
+          value={outcome ?? ANY}
+          onChange={(next) => {
+            setOutcome(isOutcome(next) ? next : null);
+          }}
+        />
+      ),
+      render: (item) => (
+        <Text size="sm" c="dimmed">
+          {OUTCOME_LABELS[inboxOutcome(item)]}
+        </Text>
+      ),
+    },
+    {
+      accessor: 'updatedAt',
+      title: 'When',
+      width: 130,
+      noWrap: true,
+      sortable: true,
+      render: (item) => (
+        <Text size="sm" c="dimmed" title={absoluteTime(item.updatedAt)}>
+          {fromNow(item.updatedAt, now)}
+        </Text>
+      ),
+    },
+  ];
   return (
     <Stack gap="xs">
       {resolved.isError ? (
@@ -90,68 +195,25 @@ export function ResolvedInbox({ project }: { readonly project: ProjectId | undef
           {resolved.error.message}
         </Alert>
       ) : null}
-      {resolved.isSuccess && items.length === 0 ? (
-        <Text c="dimmed">Nothing has been resolved yet.</Text>
-      ) : null}
-      {items.map((item) => {
-        const proposed = proposedBy(item);
-        return (
-          <Paper key={item.id} withBorder p="sm" data-testid="resolved-card">
-            <Group gap="sm" wrap="nowrap" align="flex-start">
-              <Badge size="sm" variant="light" color="gray" style={{ flexShrink: 0 }}>
-                {KIND_LABELS[item.kind]}
-              </Badge>
-              <ProjectLabel projectId={item.projectId} />
-              <Stack gap={2} style={{ minWidth: 0 }}>
-                <Text size="sm" lineClamp={2} title={item.title}>
-                  {item.title}
-                </Text>
-                {(slackAnswer(item, people) ?? [resolvedHow(item)]).map((line, index) => (
-                  <Text key={line} size="xs" c="dimmed" style={{ whiteSpace: 'pre-wrap' }}>
-                    {index === 0 || line.length > 0 ? line : ''}
-                  </Text>
-                ))}
-                {item.send?.permalink != null && item.answer?.via === 'slack' ? (
-                  <ThreadLink permalink={item.send.permalink} />
-                ) : null}
-                {proposed.length === 0 ? null : (
-                  <Group gap="xs">
-                    <Text size="xs" c="dimmed">
-                      {proposed.length === 1
-                        ? 'A principle was proposed from your note.'
-                        : `${String(proposed.length)} principles were proposed from your note.`}
-                    </Text>
-                    {/* By id: a proposal decided since has left the Proposals tab, and the link still
-                        has to reach its principle. */}
-                    {proposed.map(({ principleId }, index) => (
-                      <Anchor
-                        key={principleId}
-                        size="xs"
-                        // `Anchor component={Link}` loses the route's typed search, so the link is rendered here.
-                        renderRoot={(props) => (
-                          <Link
-                            {...props}
-                            to="/knowledge"
-                            search={{ principle: principleId }}
-                            onClick={() => {
-                              // Knowledge shows the selected project's records, so land on the card's own.
-                              select(item.projectId);
-                            }}
-                          />
-                        )}
-                      >
-                        {proposed.length === 1
-                          ? 'Open in Knowledge'
-                          : `Open principle ${String(index + 1)}`}
-                      </Anchor>
-                    ))}
-                  </Group>
-                )}
-              </Stack>
-            </Group>
-          </Paper>
-        );
-      })}
+      <InboxTable<InboxItemDto>
+        label="Resolved cards"
+        records={answer?.items ?? []}
+        columns={columns}
+        sort={sort}
+        onSort={setSort}
+        paging={
+          answer === undefined ? undefined : { ...paging, page: answer.page, total: answer.total }
+        }
+        fetching={resolved.isFetching && answer === undefined}
+        empty={
+          kind === null && outcome === null
+            ? 'Nothing has been resolved yet.'
+            : 'No resolved card matches these filters.'
+        }
+        expanded={expanded}
+        onExpanded={setExpanded}
+        detail={(item) => <ResolvedDetail item={item} />}
+      />
     </Stack>
   );
 }

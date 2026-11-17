@@ -20,6 +20,7 @@ describe('what a render token may do', () => {
       '/shapes/shp_1',
       '/workstreams',
       '/inbox',
+      '/inbox/page',
     ])
       expect(renderMayRead('GET', path), path).toBe(true);
   });

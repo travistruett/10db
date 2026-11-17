@@ -4,6 +4,7 @@ import {
   AgentSkillStatus,
   BoardColumnDto,
   InboxItemDto,
+  InboxPageDto,
   KeepAwakeStatus,
   LanePermissionsDto,
   PickerProposalDto,
@@ -24,6 +25,7 @@ import {
   type GoalId,
   type InboxAnswer,
   type InboxItemId,
+  type InboxPageQuery,
   type KeepAwakeMode,
   type ProjectId,
   type ProjectInput,
@@ -34,6 +36,7 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
+  keepPreviousData,
   queryOptions,
   skipToken,
   useMutation,
@@ -57,8 +60,8 @@ export const queryKeys = {
   boardColumns: (projectId: ProjectId) => ['board-columns', projectId] as const,
   workstreams: (active: boolean) => ['workstreams', { active }] as const,
   inbox: ['inbox'],
-  // Under `inbox`, so the events that refresh the open cards refresh these too.
-  inboxResolved: ['inbox', 'resolved'],
+  // Under `inbox`, so the events that refresh the open cards refresh the pages too.
+  inboxPage: (query: InboxPageQuery) => ['inbox', 'page', query] as const,
   workstreamChanges: (id: WorkstreamId | undefined, head: string | null, scope: ChangesScope) =>
     ['workstream-changes', id, head, scope] as const,
   keepAwake: ['keep-awake'],
@@ -202,24 +205,35 @@ export function useInbox() {
   });
 }
 
-/** How many resolved cards the Inbox fetches and shows, the most recent: the list only grows. */
-export const RESOLVED_SHOWN = 100;
-
 /**
- * The most recent resolved cards, newest first: the ones the builder answered and the ones 10db
- * closed because their cause was gone.
+ * One page of open, waiting or resolved cards, filtered, sorted and counted by the daemon. A frame drawn
+ * for a session asks for that session's project only (§5.5), whatever project the query names.
  */
-export function useResolvedInbox() {
+export function useInboxPage(query: InboxPageQuery) {
   const { client } = useDaemon();
+  const renderProject = useRenderMode()?.projectId;
+  const asked: InboxPageQuery =
+    renderProject === undefined ? query : { ...query, project: renderProject };
   return useQuery({
-    queryKey: queryKeys.inboxResolved,
+    queryKey: queryKeys.inboxPage(asked),
     queryFn: async () =>
       readJson(
-        await client.inbox.$get({
-          query: { state: 'RESOLVED', recent: String(RESOLVED_SHOWN) },
+        await client.inbox.page.$get({
+          query: {
+            state: asked.state,
+            page: String(asked.page),
+            pageSize: String(asked.pageSize),
+            ...(asked.project === undefined ? {} : { project: asked.project }),
+            ...(asked.kind === undefined ? {} : { kind: asked.kind }),
+            ...(asked.outcome === undefined ? {} : { outcome: asked.outcome }),
+            ...(asked.person === undefined ? {} : { person: asked.person }),
+            ...(asked.sort === undefined ? {} : { sort: asked.sort }),
+            ...(asked.dir === undefined ? {} : { dir: asked.dir }),
+          },
         }),
-        InboxList,
+        InboxPageDto,
       ),
+    placeholderData: keepPreviousData,
   });
 }
 
