@@ -133,7 +133,7 @@ export function InboxView() {
           }
         />
         <Tabs.Panel value={InboxTab.Waiting}>
-          <WaitingInbox items={waitingItems} />
+          <WaitingInbox project={project} />
         </Tabs.Panel>
         <Tabs.Panel value={InboxTab.Open}>
           <OpenInbox

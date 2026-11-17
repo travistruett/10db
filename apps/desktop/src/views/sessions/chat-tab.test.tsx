@@ -310,6 +310,28 @@ describe('ChatTab: cards, held-back calls and states', () => {
     });
   });
 
+  it('draws a resolved card of its project from the resolved page as the answer it got', async () => {
+    const asked: Record<string, string>[] = [];
+    let card = inboxItemDto({ kind: 'permission', state: 'RESOLVED', answer: { choice: 'deny' } });
+    const { chat } = openChat({}, (c) => {
+      card = { ...card, projectId: c.projectId, detail: { conversationId: c.conversationId } };
+      return [systemItem(c.conversationId, { kind: 'card', inboxItemId: card.id })];
+    });
+    server.use(
+      http.get(daemonUrl('/inbox/page'), ({ request }) => {
+        asked.push(Object.fromEntries(new URL(request.url).searchParams));
+        return HttpResponse.json({ items: [card], total: 1, page: 1, pageSize: 100 });
+      }),
+    );
+    expect(await screen.findByText('You denied this')).toBeTruthy();
+    expect(asked).toContainEqual({
+      state: 'resolved',
+      project: chat.projectId,
+      page: '1',
+      pageSize: '100',
+    });
+  });
+
   it('a call the judge held back shows its limit and Allow This, which sends "Go ahead"', async () => {
     const { served } = openChat({}, (chat) => [
       builderItem(chat.conversationId, 'Fetch it'),
