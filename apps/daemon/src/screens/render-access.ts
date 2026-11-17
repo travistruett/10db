@@ -42,6 +42,7 @@ export const RENDER_READS: readonly { readonly route: string }[] = [
 /** A GET a screen may not read, with why. A route nothing draws is refused as well: less to reach. */
 export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/chats/:chatId/do-it': "The Do It preview reads Your folder's changes with git.",
+  '/chats/:chatId/archive-preview': "Archive's preview reads a worktree's changes with git.",
   '/tasks/:taskId/session': "A task's session is read only by its tab; no screen draws it.",
   '/conversations/:conversationId/takeover':
     "A chat's takeover is read from its folder of files, which the builder's terminal agent can write.",

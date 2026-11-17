@@ -18,4 +18,5 @@ export {
 export { WorktreeRootError } from './worktree-root';
 export { createChatApiServices } from './chat-services';
 export { createChatMove } from './chat-move';
+export { createChatWorktrees } from './chat-worktrees';
 export { createConversationServices } from './conversation-services';

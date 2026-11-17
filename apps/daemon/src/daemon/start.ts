@@ -309,6 +309,7 @@ import { createShapeServices } from './shape-services';
 import { createConversationServices } from './conversation-services';
 import { createChatApiServices } from './chat-services';
 import { createChatMove } from './chat-move';
+import { createChatWorktrees } from './chat-worktrees';
 import { createShapePreparer, createTakeoverPreparer } from './shape-session-tools';
 import {
   applyCheckAnswer,
@@ -1697,6 +1698,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     engine: exploreEngine,
     folderHold,
+    worktrees: createChatWorktrees({ state, git }),
     pendingOpens,
     briefs: chatBriefs,
     clock,

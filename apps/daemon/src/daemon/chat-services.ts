@@ -14,6 +14,7 @@ import {
   sessionStarts,
   setSessionsSettings,
   startFacts,
+  ChatArchiveWarning,
   ChatWorkConflict,
   type ChatService,
   type ChatWorkService,
@@ -33,6 +34,7 @@ export type ChatApiServices = Pick<
   | 'createChat'
   | 'patchChat'
   | 'archiveChat'
+  | 'archivePreview'
   | 'unarchiveChat'
   | 'chooseChatWork'
   | 'stopChatWaiting'
@@ -74,7 +76,16 @@ export function createChatApiServices(deps: {
     recentChats: (projectId, limit) => chat.recent(projectId, limit),
     createChat: (input) => chat.create(input),
     patchChat: (id, input) => chat.patch(id, input),
-    archiveChat: (id) => chat.archive(id),
+    async archiveChat(id, request) {
+      try {
+        return { archived: true, chat: await chat.archive(id, request) };
+      } catch (error) {
+        // More at risk than the builder was told: the fresh list is the answer, and nothing changed.
+        if (error instanceof ChatArchiveWarning) return { archived: false, preview: error.preview };
+        throw error;
+      }
+    },
+    archivePreview: (id) => chat.archivePreview(id),
     unarchiveChat: (id) => chat.unarchive(id),
     async chooseChatWork(id, choice) {
       try {

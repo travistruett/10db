@@ -136,6 +136,7 @@ import {
   type FolderWhileHeld,
   ChatCreateInput,
   ChatId,
+  ArchiveRequest,
   ChatWorkChoice,
   BriefRequest,
   DoItRequest,
@@ -808,9 +809,16 @@ export function createApp(deps: ApiDeps) {
     .get('/projects/:projectId/folder', async (c) =>
       c.json(await deps.services.projectFolder(ProjectId.parse(c.req.param('projectId')))),
     )
-    .post('/chats/:chatId/archive', async (c) =>
-      c.json(await deps.services.archiveChat(ChatId.parse(c.req.param('chatId')))),
+    .get('/chats/:chatId/archive-preview', async (c) =>
+      c.json(await deps.services.archivePreview(ChatId.parse(c.req.param('chatId')))),
     )
+    .post('/chats/:chatId/archive', async (c) => {
+      // The body is optional: a session with no worktree has nothing to be warned about.
+      const text = await c.req.text();
+      const request = ArchiveRequest.parse(text === '' ? {} : (JSON.parse(text) as unknown));
+      const answer = await deps.services.archiveChat(ChatId.parse(c.req.param('chatId')), request);
+      return answer.archived ? c.json(answer.chat, 200) : c.json(answer.preview, 409);
+    })
     .post(
       '/chats/:chatId/work',
       validator('json', (value): ChatWorkChoice => ChatWorkChoice.parse(value)),

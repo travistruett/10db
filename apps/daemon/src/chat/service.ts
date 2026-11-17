@@ -26,6 +26,8 @@ import {
   type ChatDto,
   type ChatId,
   type ChatModelsDto,
+  type ArchivePreviewDto,
+  type ArchiveRequest,
   type ChatPatchInput,
   type ConversationId,
   type DoItBriefDto,
@@ -36,6 +38,8 @@ import {
 import {
   archiveChat,
   chatOfConversation,
+  deleteAppSetting,
+  findOpenByFoldKey,
   chatView,
   getChat,
   getTask,
@@ -54,6 +58,7 @@ import {
   patchConversation,
   recentChats,
   setChatTitle,
+  setChatWork,
   touchChat,
   unarchiveChat,
   type ChatRow,
@@ -62,12 +67,15 @@ import {
 import type { Clock } from '../clock';
 import { keepBuilderMessage, type ExploreEngine, type PastedFile } from '../conversation';
 import type { StateStore } from '../events';
+import { chatWorktreePinKey } from '../git';
+import { withdrawCard } from '../inbox';
 import type { FolderHold, ServeResult } from '../folder-hold';
 import type { Logger } from '../log';
 import type { PendingOpens } from '../pass';
 import { briefFromChat, briefRequestText, briefTitle } from './brief';
 import type { Briefs } from './briefs';
 import { chatFolder } from './hooks';
+import { chatWorkCardKey } from './work-card';
 
 // Sessions spec §7.1, §10: a chat's life on the daemon. It is made with its conversation on the
 // project's account, named from its first message, moved in the strip, and given a model between
@@ -75,6 +83,23 @@ import { chatFolder } from './hooks';
 
 /** Most characters of the title a chat's first message gives it. */
 const FIRST_LINE_TITLE_MAX = 40;
+
+/** What Archive reads and removes of a session's worktree: git's side, which the daemon supplies. */
+export interface ChatWorktrees {
+  /** The files removing the worktree at `path` would lose: uncommitted changes, and ignored files 10db did not seed. */
+  losses(chat: ChatRow): Promise<{ readonly uncommitted: string[]; readonly ignored: string[] }>;
+  /** Removes the worktree and its git entry; one already gone is fine. */
+  remove(chat: ChatRow): Promise<void>;
+}
+
+/** Archive found more files at risk than the builder was warned about; `preview` is the fresh list. */
+export class ChatArchiveWarning extends ConflictError {
+  readonly preview: ArchivePreviewDto;
+  constructor(preview: ArchivePreviewDto) {
+    super('More files changed since Archive warned you. Check the list and archive again.');
+    this.preview = preview;
+  }
+}
 
 /** What a message to an archived chat is refused with. */
 export const CHAT_ARCHIVED = 'This session is archived.';
@@ -121,7 +146,13 @@ export interface ChatService {
   recent(projectId: ProjectId, limit?: number): ChatDto[];
   patch(id: ChatId, input: ChatPatchInput): Promise<ChatDto>;
   models(projectId: ProjectId): ChatModelsDto;
-  archive(id: ChatId): Promise<ChatDto>;
+  /**
+   * Archives the chat. On a branch with a worktree the request carries the files the builder was warned Archive
+   * would lose; a later list that holds more is a `ChatArchiveWarning` with the fresh preview, and nothing changes.
+   */
+  archive(id: ChatId, request?: ArchiveRequest): Promise<ChatDto>;
+  /** What archiving would delete with the session's worktree: none for a session with no worktree. */
+  archivePreview(id: ChatId): Promise<ArchivePreviewDto>;
   unarchive(id: ChatId): ChatDto;
   /**
    * The chat branch of the message route: the message stored queued, the chat touched, a turn asked for.
@@ -205,6 +236,8 @@ export interface ChatServiceDeps {
   webSearchOf(projectId: ProjectId): boolean;
   /** The takeover service, read when a chat is archived (it is made after this service). */
   readonly takeover?: () => ArchiveTakeover | null;
+  /** The worktrees of sessions on their own branch; absent where nothing makes one. */
+  readonly worktrees?: ChatWorktrees;
 }
 
 export function createChatService(deps: ChatServiceDeps): ChatService {
@@ -225,6 +258,33 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
   const briefTurns = new Set<ChatId>();
   // The words a refused action gives while a session is moving to its branch.
   const MOVING_WORDS = 'Wait for the move to finish.';
+  // Whether the chat has a worktree of its own that Archive removes: a branch session that still has one.
+  const ownsWorktree = (chat: ChatRow): boolean =>
+    chat.workPlace === WorkPlace.Branch &&
+    chat.worktreePath !== null &&
+    deps.worktrees !== undefined;
+  const previewOf = async (chat: ChatRow): Promise<ArchivePreviewDto> => {
+    if (!ownsWorktree(chat) || deps.worktrees === undefined)
+      return { worktree: null, branch: chat.branch, uncommitted: [], ignored: [] };
+    const losses = await deps.worktrees.losses(chat);
+    return { worktree: chat.worktreePath, branch: chat.branch, ...losses };
+  };
+  const refuseUnwarned = async (
+    chat: ChatRow,
+    request: ArchiveRequest | undefined,
+  ): Promise<void> => {
+    if (!ownsWorktree(chat)) return;
+    const preview = await previewOf(chat);
+    const told = {
+      uncommitted: new Set(request?.uncommitted ?? []),
+      ignored: new Set(request?.ignored ?? []),
+    };
+    if (
+      preview.uncommitted.some((path) => !told.uncommitted.has(path)) ||
+      preview.ignored.some((path) => !told.ignored.has(path))
+    )
+      throw new ChatArchiveWarning(preview);
+  };
   const refuseWhileDoing = (chatId: ChatId): void => {
     const place = stoppedForOpen.get(chatId);
     if (place === undefined) return;
@@ -317,20 +377,47 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       };
     },
 
-    async archive(id) {
+    async archivePreview(id) {
+      return await previewOf(getChat(state.db, id));
+    },
+
+    async archive(id, request) {
       const takeover = deps.takeover?.() ?? null;
       const archive = async (): Promise<ChatDto> => {
         const chat = getChat(state.db, id);
         if (chat.archivedAt !== null) return dtoOf(id);
         refuseWhileDoing(id);
+        if (chat.workPlace === WorkPlace.Moving) throw new ConflictError(MOVING_WORDS);
         refuseWhileHandedTaskRuns(chat);
         if (deps.pendingOpens.get(chat.projectId)?.chatId === id)
           throw new ConflictError(PENDING_OPEN_FOR_CHAT);
+        // Refused before anything is stopped when more is at risk than the builder was told.
+        await refuseUnwarned(chat, request);
         // The session ends first (a start cancelled, a turn stopped, a card withdrawn), so nothing it
         // does lands after the chat is archived; then the folder made only from its id goes.
         deps.folderHold.cancelWait(id);
         await engine.retire(chat.conversationId);
+        const worktree = ownsWorktree(chat);
+        if (worktree) {
+          // The turn has ended: this is the final list, and a file written since the first check refuses too.
+          try {
+            await refuseUnwarned(chat, request);
+          } catch (error) {
+            engine.unretire(chat.conversationId);
+            throw error;
+          }
+          await deps.worktrees?.remove(chat);
+        }
         state.write((ctx) => {
+          if (chat.workPlace === WorkPlace.Choosing) {
+            const card = findOpenByFoldKey(ctx.tx, chat.projectId, chatWorkCardKey(id));
+            if (card !== undefined) withdrawCard(ctx, card.id);
+          }
+          // The pin and the row's path go with the worktree, together; the branch stays.
+          if (worktree) {
+            deleteAppSetting(ctx, chatWorktreePinKey(id));
+            setChatWork(ctx, id, chat.workPlace, { place: chat.workPlace, worktreePath: null });
+          }
           archiveChat(ctx, id, ctx.now);
         });
         // A chat in the builder's terminal gives the folder back and its files go.

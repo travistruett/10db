@@ -6,6 +6,8 @@ import type {
   ChatCreateInput,
   ChatDto,
   ChatWork,
+  ArchivePreviewDto,
+  ArchiveRequest,
   ChatWorkChoice,
   ChatId,
   ChatModelsDto,
@@ -677,7 +679,15 @@ export interface ApiServices extends PlanRecordServices {
   /** Renames, moves or closes a tab, or picks a model between turns. */
   patchChat(id: ChatId, input: ChatPatchInput): Promise<ChatDto>;
   /** Ends the chat's session in whatever state it is in, then archives it and removes its folder. */
-  archiveChat(id: ChatId): Promise<ChatDto>;
+  /** Archives; a list of files at risk longer than the request's answers `{ archived: false }` with the fresh preview. */
+  archiveChat(
+    id: ChatId,
+    request: ArchiveRequest,
+  ): Promise<
+    | { readonly archived: true; readonly chat: ChatDto }
+    | { readonly archived: false; readonly preview: ArchivePreviewDto }
+  >;
+  archivePreview(id: ChatId): Promise<ArchivePreviewDto>;
   unarchiveChat(id: ChatId): ChatDto;
   /** The builder's choice of where a session's work happens; `settled` is false when another choice had won. */
   chooseChatWork(

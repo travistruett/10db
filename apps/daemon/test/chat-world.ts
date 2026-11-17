@@ -22,6 +22,7 @@ import {
   applyChatWorkAnswer,
   createChatWorkService,
   type ChatMoveDeps,
+  type ChatWorktrees,
   type ChatWorkService,
   type ChatHooksDeps,
   type ChatService,
@@ -113,6 +114,8 @@ export function chatWorld(
     readonly project?: Partial<ProjectInput>;
     /** What the move to a new branch uses of git; a world with none refuses it. */
     readonly move?: (world: { readonly state: StateStore }) => ChatMoveDeps;
+    /** Git's side of Archive for a session on its own branch. */
+    readonly worktrees?: (world: { readonly state: StateStore }) => ChatWorktrees;
   } = {},
 ): ChatWorld {
   const { store, close } =
@@ -252,6 +255,7 @@ export function chatWorld(
     }),
     webSearchOf: () => adapter.capabilities({ kind: launched.kind }, null).webSearch,
     takeover: () => takeoverService,
+    ...(opts.worktrees === undefined ? {} : { worktrees: opts.worktrees({ state }) }),
   });
   chatService = chat;
   const terminal: ChatWorld['terminal'] = {

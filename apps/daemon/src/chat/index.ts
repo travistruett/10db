@@ -7,7 +7,12 @@ export { createConversationFiles } from './conversation-files';
 export { chatFolder, chatHooks, type ChatHooksDeps } from './hooks';
 export { createBriefs, type Briefs } from './briefs';
 export { createChatLiveSessions } from './live-sessions';
-export { createChatService, type ChatService } from './service';
+export {
+  ChatArchiveWarning,
+  createChatService,
+  type ChatService,
+  type ChatWorktrees,
+} from './service';
 export { branchFor, type TakenNames } from './chat-worktree';
 export {
   applyChatWorkAnswer,
