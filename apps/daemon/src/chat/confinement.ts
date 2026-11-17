@@ -1,4 +1,4 @@
-import { resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { ChatToolName, JudgeKind, type WorkPlace } from '@10db/contracts';
 import { isWithinOnEveryReading, stringField } from '../guard';
 import type { ShapeVerdict } from '../sessions';
@@ -90,7 +90,20 @@ function judgeEdit(
   if (judge === undefined || path === null) return deny(`${call.toolName} could not be judged.`);
   try {
     // Every reading must land inside: a link, even a dangling one, is followed through its target.
-    if (!isWithinOnEveryReading(folder.root, path)) return deny(`${path} is outside Your folder.`);
+    if (!isWithinOnEveryReading(folder.root, path)) {
+      // A session that moved to its worktree is pointed at the same file there.
+      const inCheckout = relative(folder.checkout, path);
+      if (
+        folder.root !== folder.checkout &&
+        inCheckout !== '' &&
+        !inCheckout.startsWith('..') &&
+        !isAbsolute(inCheckout)
+      )
+        return deny(
+          `This session works in ${folder.root} now. The same file is at ${join(folder.root, inCheckout)}.`,
+        );
+      return deny(`${path} is outside Your folder.`);
+    }
     const verdict = judge.write(path);
     if (verdict !== 'ok') return deny(verdict.refuse);
     // A chat has no card for an edit the lane's guard would ask about (a Claude Code configuration path).

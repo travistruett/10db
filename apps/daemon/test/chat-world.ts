@@ -3,6 +3,7 @@ import {
   JudgeKind,
   type AgentAccountKind,
   type ChatDto,
+  type ChatId,
   type DaemonEvent,
   type Effort,
   type ProjectDto,
@@ -20,6 +21,7 @@ import {
   createChatService,
   applyChatWorkAnswer,
   createChatWorkService,
+  type ChatMoveDeps,
   type ChatWorkService,
   type ChatHooksDeps,
   type ChatService,
@@ -42,6 +44,13 @@ import { tempDir } from './fixtures';
 // A project's chats on a real store, the explore engine and the fake adapter: the chat service and
 // its hooks as the daemon wires them, with a launch that needs no account on disk.
 
+/** A world made with no git for the move: choosing a new branch there fails like a worktree that can't be made. */
+const NO_MOVE: ChatMoveDeps = {
+  signal: new AbortController().signal,
+  pick: () => Promise.reject(new Error('This world has no git for a move.')),
+  cut: () => Promise.reject(new Error('This world has no git for a move.')),
+};
+
 export interface ChatWorld {
   readonly store: Store;
   readonly state: StateStore;
@@ -52,6 +61,8 @@ export interface ChatWorld {
   readonly work: ChatWorkService;
   readonly briefs: Briefs;
   readonly folderHold: FolderHold;
+  /** The sessions whose next start says they moved; the move adds one, the start takes it. */
+  readonly firstStartAfterMove: Set<ChatId>;
   readonly inbox: InboxService;
   readonly project: ProjectDto;
   readonly dataDir: string;
@@ -100,6 +111,8 @@ export function chatWorld(
     readonly checkout?: string;
     /** The project's own fields, such as the real `repoPath` a git-reading test needs. */
     readonly project?: Partial<ProjectInput>;
+    /** What the move to a new branch uses of git; a world with none refuses it. */
+    readonly move?: (world: { readonly state: StateStore }) => ChatMoveDeps;
   } = {},
 ): ChatWorld {
   const { store, close } =
@@ -112,6 +125,7 @@ export function chatWorld(
   bus.subscribe((e) => events.push(e));
   const state = createStateStore(store, bus);
   const folderHold = createFolderHold({ state, bus });
+  const firstStartAfterMove = new Set<ChatId>();
   const adapter = new FakeAdapter(opts.book ?? {});
   const clock = new ManualClock();
   const dir =
@@ -185,6 +199,8 @@ export function chatWorld(
     state,
     engine,
     folderHold,
+    firstStartAfterMove,
+    move: opts.move === undefined ? NO_MOVE : opts.move({ state }),
     carryOn: (chatId, text) => {
       chatService?.carryOn(chatId, text);
     },
@@ -198,6 +214,7 @@ export function chatWorld(
       live: createChatLiveSessions(),
       state,
       folderHold,
+      firstStartAfterMove,
       log: silentLogger,
       dataDir: dir.path,
       now: () => clock.now(),
@@ -332,6 +349,7 @@ export function chatWorld(
     work,
     briefs,
     folderHold,
+    firstStartAfterMove,
     inbox,
     project,
     dataDir: dir.path,

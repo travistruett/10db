@@ -31,6 +31,12 @@ describe("a chat's prompt", () => {
     expect(text).toContain('10db/');
   });
 
+  it('tells the session to make its first change with an edit, not a shell write', () => {
+    expect(chatSystemPrompt(true)).toContain(
+      'make your first change with an edit tool, not a shell write',
+    );
+  });
+
   it('turns file checkpointing on for a chat that can edit, and off for one with no sandbox', () => {
     expect(chatProfile(true).fileCheckpointing).toBe(true);
     expect(chatProfile(false).fileCheckpointing).toBe(false);

@@ -15,6 +15,7 @@ export {
 export { uncarriedSaid } from './notices';
 export { createDependencyChanges, type DependencyChanges } from './dependency-change';
 export { retireWorktree } from './worktree-cleanup';
+export { madeWorktreeRoot, worktreePathFor } from './worktree-path';
 export { chatWorktreeLockReason, ChatWorktreeError, cutChatWorktree } from './chat-worktree-cut';
 export { ensureWorktreeWhole } from './worktree-repair';
 export { reserveGitNaming } from './folder-wait';

@@ -8,10 +8,12 @@ export { chatFolder, chatHooks, type ChatHooksDeps } from './hooks';
 export { createBriefs, type Briefs } from './briefs';
 export { createChatLiveSessions } from './live-sessions';
 export { createChatService, type ChatService } from './service';
+export { branchFor, type TakenNames } from './chat-worktree';
 export {
   applyChatWorkAnswer,
   ChatWorkConflict,
   createChatWorkService,
+  type ChatMoveDeps,
   type ChatWorkService,
 } from './work-service';
 export { sessionStarts } from './session-starts';

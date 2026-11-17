@@ -413,3 +413,57 @@ describe('a session that has not chosen where to work', () => {
     expect(questions).toEqual([]);
   });
 });
+
+describe('a session on its own branch', () => {
+  let worktree: string;
+  let onBranch: ChatPlace;
+  let branchAccess: ShapeAccess;
+
+  beforeAll(() => {
+    worktree = join(dir.path, 'worktree');
+    mkdirSync(join(worktree, 'src'), { recursive: true });
+    writeFileSync(join(worktree, 'src', 'a.ts'), 'a\n');
+    onBranch = {
+      ...placeOf({ place: 'branch', holds: () => true, writable: true }),
+      root: worktree,
+      checkout,
+    };
+    // The session's sandbox is rooted in the worktree, as `forSession(projectAtCheckout(project, worktree))` makes it.
+    branchAccess = {
+      ...access,
+      checkout: worktree,
+      commands: {
+        protectedPaths: [],
+        fileAccess: fileAccessJudge({
+          checkout: worktree,
+          home: join(dir.path, 'home'),
+          protectedReads: [],
+          readList: [],
+          systemDocRoots: [],
+          configDir: join(dir.path, 'no-claude-config'),
+          providerSessionId: null,
+          sandboxTemp: { roots: [join(dir.path, 'tmp')], own: join(dir.path, 'tmp', '10db-own') },
+        }),
+      },
+    };
+  });
+
+  it('edits its worktree, and an edit aimed at the checkout names the same file there (row 29)', () => {
+    expect(judgeChatCall(edit('Edit', join(worktree, 'src/a.ts')), branchAccess, onBranch)).toEqual(
+      { decision: 'allow' },
+    );
+    expect(judgeChatCall(edit('Edit', join(checkout, 'src/a.ts')), branchAccess, onBranch)).toEqual(
+      {
+        decision: 'deny',
+        reason: `This session works in ${worktree} now. The same file is at ${join(worktree, 'src/a.ts')}.`,
+      },
+    );
+  });
+
+  it('never writes the checkout, even when the guard is handed the checkout as its own', () => {
+    // A branch's write root is its worktree, and the checkout's `.git` stays out of reach in either.
+    expect(
+      judgeChatCall(edit('Write', join(checkout, 'brand-new.ts')), branchAccess, onBranch),
+    ).toMatchObject({ decision: 'deny' });
+  });
+});

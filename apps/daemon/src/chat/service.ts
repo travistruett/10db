@@ -223,6 +223,8 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
   const stoppedForOpen = new Map<ChatId, DoItPlace>();
   // Chats whose last request for a brief was sent as a turn of its own, until that turn ends.
   const briefTurns = new Set<ChatId>();
+  // The words a refused action gives while a session is moving to its branch.
+  const MOVING_WORDS = 'Wait for the move to finish.';
   const refuseWhileDoing = (chatId: ChatId): void => {
     const place = stoppedForOpen.get(chatId);
     if (place === undefined) return;
@@ -369,8 +371,9 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
     async stop(conversationId) {
       const chat = requireChat(conversationId);
-      // The turn is already stopping, and the open's hold on its starts is not Stop's to undo.
-      if (stoppedForOpen.has(chat.id)) return;
+      // The turn is already stopping, and the open's hold on its starts is not Stop's to undo; a move holds
+      // them too, and finishes on its own.
+      if (stoppedForOpen.has(chat.id) || chat.workPlace === WorkPlace.Moving) return;
       briefTurns.delete(chat.id);
       // The parked start is dropped by the stop; the hold on new starts goes with the wait.
       deps.folderHold.cancelWait(chat.id);
@@ -399,6 +402,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     async redo(conversationId, input, folder) {
       const chat = requireChat(conversationId);
       refuseWhileDoing(chat.id);
+      if (chat.workPlace === WorkPlace.Moving) throw new ConflictError(MOVING_WORDS);
       briefTurns.delete(chat.id);
       deps.folderHold.cancelWait(chat.id);
       await engine.stop(conversationId);

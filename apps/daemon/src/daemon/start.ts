@@ -7,6 +7,7 @@ import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-se
 import {
   AccountKind,
   ConversationOwnerKind,
+  type ChatId,
   DoItPlace,
   EventType,
   ConflictError,
@@ -307,6 +308,7 @@ import { createPlanRecordServices } from './plan-record-services';
 import { createShapeServices } from './shape-services';
 import { createConversationServices } from './conversation-services';
 import { createChatApiServices } from './chat-services';
+import { createChatMove } from './chat-move';
 import { createShapePreparer, createTakeoverPreparer } from './shape-session-tools';
 import {
   applyCheckAnswer,
@@ -1810,10 +1812,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   takeoverService = takeover;
   const chatLive = createChatLiveSessions();
+  const firstStartAfterMove = new Set<ChatId>();
+  const chatMovesAbort = new AbortController();
   const chatWork = createChatWorkService({
     state,
     engine: exploreEngine,
     folderHold,
+    firstStartAfterMove,
+    move: createChatMove({ state, delivery, signal: chatMovesAbort.signal }),
     carryOn: (chatId, text) => {
       chat.carryOn(chatId, text);
     },
@@ -1827,6 +1833,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       live: chatLive,
       state,
       folderHold,
+      firstStartAfterMove,
       log: logger.child({ component: 'chat' }),
       dataDir: opts.dataDir,
       now: () => clock.now(),
@@ -2807,6 +2814,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     }),
   });
   // What a restart found of each explore conversation is settled before the API serves it.
+  // A move the daemon lost keeps its session's starts held until `finishMoves` has made its worktree.
+  chatWork.holdMoving();
   await exploreEngine.recover();
   // A takeover the daemon lost while it was opening left files for a chat that is not in the terminal.
   takeover.recover();
@@ -2834,6 +2843,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const port = (server.address() as AddressInfo).port;
   listenPort = port;
   listening.resolve(port);
+  // A move the restart interrupted finishes now that the server answers; its starts were held meanwhile.
+  void chatWork.finishMoves();
   const url = `http://127.0.0.1:${String(port)}`;
   mcpUrl = `${url}/mcp`;
   writeRuntimeFiles(
@@ -2900,6 +2911,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         },
       );
       createdScheduler.stop();
+      // A move under way leaves its worktree and its row for the next start to finish.
+      chatMovesAbort.abort();
       // A sign-in's agent is a child of ours: it is told to end now, in step with the lanes, and awaited
       // before the database closes, so a slow stop does not eat the window the lanes need.
       github.stop();
