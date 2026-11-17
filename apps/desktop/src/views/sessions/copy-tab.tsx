@@ -17,13 +17,14 @@ import { ExternalLink } from '../board/pull-request-link';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { useOpenSession } from './open-session';
 import { draftKey, useSessionDraft } from './session-drafts';
+import { BriefCard } from './brief-card';
 import { withQuote } from './changes-files';
 import type { Quote } from './quote';
 import { TASK_BAR_BUTTON, TaskBar } from './task-bar';
 import { copyFooter } from './task-tab-words';
 
-// Sessions UI §8.2, §8.4, §8.5: a separate copy's tab. The chat it came from, the brief as the builder's first
-// message, then the task's thread, and one line for where the run stands. It lands by the project's delivery,
+// Sessions UI §8.2, §8.4, §8.5: a separate copy's tab. The chat it came from, the brief in a card of its
+// own, then the task's thread, and one line for where the run stands. It lands by the project's delivery,
 // so it has no Sign Off.
 
 export interface CopyTabProps {
@@ -74,7 +75,13 @@ export function CopyTab({ session, project, changes, quote = null }: CopyTabProp
         ]),
     ...(task === undefined || task.description === ''
       ? []
-      : [{ kind: 'builder' as const, id: 'brief', text: task.description, extra: null }]),
+      : [
+          {
+            kind: 'custom' as const,
+            id: 'brief',
+            render: () => <BriefCard text={task.description} />,
+          },
+        ]),
     ...itemEntries(items, live, {
       sendNow: () => undefined,
       label: 'The task',
