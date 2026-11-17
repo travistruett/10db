@@ -7,6 +7,7 @@ import { TASK_MESSAGE_MAX_CHARS } from './task-thread';
 import { Title } from './entities';
 import { ShapeModelOption } from './shape-view';
 import { Effort } from './states';
+import { ChatWork } from './chat-work';
 import { TerminalApp, TerminalAppSchema } from './takeover';
 
 // Sessions spec §7.1, §10, §11: a chat (a tab of its own over an attended conversation), what the
@@ -52,6 +53,8 @@ export const ChatDto = z.object({
   lastReplyAt: Timestamp.nullable(),
   /** The tasks this chat filed that are not cancelled. */
   tasksFiled: z.int().nonnegative(),
+  /** Where the session works; null while it is only reading. */
+  work: ChatWork.nullable(),
 });
 export type ChatDto = z.infer<typeof ChatDto>;
 

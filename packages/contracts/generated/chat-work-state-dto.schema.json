@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "place": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "choosing",
+            "here",
+            "moving",
+            "branch"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "branch": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "base": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "baseBranch": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "dirtyFiles": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "ahead": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "uncommittedInCheckout": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "touched": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "pullRequest": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "number": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "url": {
+              "type": "string"
+            },
+            "checks": {
+              "type": "object",
+              "properties": {
+                "passed": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "total": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "failing": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "passed",
+                "total",
+                "failing"
+              ]
+            },
+            "mergeable": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "merged": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "number",
+            "url",
+            "checks",
+            "mergeable",
+            "merged"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "next": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "commit",
+            "open_pull_request",
+            "merge",
+            "merge_local"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "refusal": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "holder": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "place",
+    "branch",
+    "base",
+    "baseBranch",
+    "dirtyFiles",
+    "ahead",
+    "uncommittedInCheckout",
+    "touched",
+    "pullRequest",
+    "next",
+    "refusal",
+    "holder"
+  ]
+}

@@ -70,6 +70,7 @@ const chat = {
   archivedAt: null,
   lastReplyAt: null,
   tasksFiled: 0,
+  work: null,
 };
 const taskId = mintId('Task');
 

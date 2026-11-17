@@ -49,6 +49,7 @@ export function chatDto(
     archivedAt: null,
     lastReplyAt: null,
     tasksFiled: 0,
+    work: null,
     ...rest,
   });
 }

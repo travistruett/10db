@@ -107,6 +107,7 @@ describe('Sessions: a fresh tab', () => {
       title: 'Invoice export',
       tabPosition: null,
       tasksFiled: 2,
+      work: null,
     });
     const { router } = open('/sessions', { recent: [earlier], chats: [earlier] });
     const region = await screen.findByRole('region', { name: 'Recent' });

@@ -25,6 +25,15 @@ import {
 } from './chat';
 import { TakeoverCommandDto, TakeoverDto, TakeoverPreviewDto } from './takeover';
 import { ChatToolResult } from './chat-tools';
+import { ChatSearchPage, ChatSearchQuery } from './chat-search';
+import {
+  ArchivePreviewDto,
+  ArchiveRequest,
+  ChatCommitRequest,
+  ChatWork,
+  ChatWorkChoice,
+  ChatWorkStateDto,
+} from './chat-work';
 import { FolderDto } from './folder-hold';
 import {
   AgentCommandDto,
@@ -343,6 +352,14 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'chat-models-dto': ChatModelsDto,
   'chat-patch-input': ChatPatchInput,
   'chat-tool-result': ChatToolResult,
+  'chat-work': ChatWork,
+  'chat-work-choice': ChatWorkChoice,
+  'chat-work-state-dto': ChatWorkStateDto,
+  'chat-commit-request': ChatCommitRequest,
+  'archive-preview-dto': ArchivePreviewDto,
+  'archive-request': ArchiveRequest,
+  'chat-search-query': ChatSearchQuery,
+  'chat-search-page': ChatSearchPage,
   'conversation-files-query': ConversationFilesQuery,
   'project-file-match-dto': ProjectFileMatchDto,
   'session-start-dto': SessionStartDto,

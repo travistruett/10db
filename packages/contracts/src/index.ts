@@ -9,6 +9,8 @@ export * from './card-resolution';
 export * from './catalogue';
 export * from './command-runners';
 export * from './chat';
+export * from './chat-search';
+export * from './chat-work';
 export * from './chat-tools';
 export * from './takeover';
 export * from './conversation';
