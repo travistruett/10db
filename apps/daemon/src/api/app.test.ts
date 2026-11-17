@@ -671,6 +671,47 @@ describe('API', () => {
       expect((await app(services).request(`/inbox?recent=${bad}`, auth)).status).toBe(400);
   });
 
+  it('reads the inbox page query and hands it to the page service', async () => {
+    const seen: unknown[] = [];
+    const project = mintId('Project');
+    const services = stubServices({
+      pageInbox: (q) => {
+        seen.push(q);
+        return { items: [], total: 0, page: q.page, pageSize: q.pageSize };
+      },
+    });
+    const res = await app(services).request(
+      `/inbox/page?state=resolved&project=${project}&kind=question&outcome=slack&sort=title&dir=desc&page=2&pageSize=50`,
+      auth,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ items: [], total: 0, page: 2, pageSize: 50 });
+    expect(seen).toEqual([
+      {
+        state: 'resolved',
+        project,
+        kind: 'question',
+        outcome: 'slack',
+        sort: 'title',
+        dir: 'desc',
+        page: 2,
+        pageSize: 50,
+      },
+    ]);
+  });
+
+  it.each([
+    ['no state', '/inbox/page'],
+    ['an unknown state', '/inbox/page?state=RESOLVED'],
+    ['an unknown kind', '/inbox/page?state=open&kind=nope'],
+    ['a page size of 101', '/inbox/page?state=resolved&pageSize=101'],
+    ['an unknown key', '/inbox/page?state=resolved&recent=100'],
+  ])('answers 400 for the inbox page with %s without reaching a service', async (_name, path) => {
+    const services = stubServices({ pageInbox: track('pageInbox') });
+    expect((await app(services).request(path, auth)).status).toBe(400);
+    expect(reached).toEqual([]);
+  });
+
   it('keeps the CORS allow-list', async () => {
     const ok = await app().request('/health', { headers: { Origin: 'http://localhost:1420' } });
     expect(ok.headers.get('access-control-allow-origin')).toBe('http://localhost:1420');

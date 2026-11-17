@@ -99,6 +99,8 @@ import type {
   ComposePreviewDto,
   InboxItemDto,
   InboxItemId,
+  InboxPageDto,
+  InboxPageQuery,
   InboxState,
   DecisionModelListDto,
   DecisionStatsListDto,
@@ -631,6 +633,8 @@ export interface ApiServices extends PlanRecordServices {
     readonly states: readonly InboxState[] | null;
     readonly recent: number | null;
   }): InboxItemDto[];
+  /** One page of open, waiting or resolved cards, filtered and sorted; `total` counts every match. */
+  pageInbox(query: InboxPageQuery): InboxPageDto;
   answerInbox(id: InboxItemId, answer: InboxAnswer): InboxItemDto;
   eventsAfter(afterSeq: number, limit: number): DaemonEvent[];
   subscribe(listener: (event: DaemonEvent) => void): () => void;
