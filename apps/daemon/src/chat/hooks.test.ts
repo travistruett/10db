@@ -6,7 +6,7 @@ import {
   JudgeKind,
   parseItemBody,
 } from '@10db/contracts';
-import { getChat, listInbox, listItems } from '@10db/db';
+import { getChat, listInbox, listItems, setChatWork } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { chatWorld, type ChatWorld } from '../../test/chat-world';
 import { waitFor } from '../../test/fixtures';
@@ -411,6 +411,58 @@ describe("a chat's older session", () => {
       expect(w.adapter.shapeSessions[2]?.spec.preToolUse(edit)).toEqual({ decision: 'allow' });
       expect(first?.preToolUse(edit).decision).toBe('deny');
     });
+  });
+});
+
+describe("a chat's writes outside the checkout hold", () => {
+  const inCheckout = { toolName: 'Write', input: { file_path: '/repo/a.ts', content: 'x' } };
+  const inWorktree = { toolName: 'Write', input: { file_path: '/wt/a.ts', content: 'x' } };
+
+  /** One turn, in which the agent makes `call`; what the hook answered. */
+  function oneTurn(call: typeof inCheckout) {
+    const chat = w.open();
+    return { chat, run: () => runTurn(chat, call) };
+  }
+  async function runTurn(chat: ReturnType<ChatWorld['open']>, call: typeof inCheckout) {
+    let answer: unknown;
+    w.adapter.shapeBehaviour = (turn) => {
+      answer = turn.spec.preToolUse(call);
+      return Promise.resolve({ text: 'Done.' });
+    };
+    w.chat.send(chat.conversationId, { text: 'go', mentions: [], pictures: [] });
+    await w.engine.settled(chat.conversationId);
+    return { answer };
+  }
+
+  it('lets a branch session with no worktree write nothing, in the checkout least of all', async () => {
+    w = chatWorld({ prepare: prepared, judge: JudgeKind.Native });
+    const { chat, run } = oneTurn(inCheckout);
+    w.store.write((ctx) => setChatWork(ctx, chat.id, null, { place: 'branch', branch: 'x' }));
+    const out = await run();
+    expect(out.answer).toMatchObject({ decision: 'deny' });
+    expect(w.folderHold.holdsTurn(chat.id)).toBe(false);
+  });
+
+  it("judges a branch session's edits inside its worktree, never the checkout", async () => {
+    w = chatWorld({ prepare: prepared, judge: JudgeKind.Native });
+    const { chat } = oneTurn(inCheckout);
+    w.store.write((ctx) =>
+      setChatWork(ctx, chat.id, null, { place: 'branch', branch: 'x', worktreePath: '/wt' }),
+    );
+    const inRepo = await runTurn(chat, inCheckout);
+    expect(inRepo.answer).toMatchObject({ decision: 'deny' });
+    const inTree = await runTurn(chat, inWorktree);
+    expect(inTree.answer).toEqual({ decision: 'allow' });
+  });
+
+  it('reads for the turn of a Here session whose builder chose reading only', async () => {
+    w = chatWorld({ prepare: prepared, judge: JudgeKind.Native });
+    const { chat, run } = oneTurn(inCheckout);
+    w.here(chat.id);
+    w.folderHold.chooseReadOnly(chat.id);
+    const out = await run();
+    expect(out.answer).toMatchObject({ decision: 'deny' });
+    expect(w.folderHold.holdsTurn(chat.id)).toBe(false);
   });
 });
 

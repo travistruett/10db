@@ -264,9 +264,14 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
     });
   };
 
-  // Whether the chat's session can write now: Here, while its turn holds the checkout; a branch, always.
+  // A branch session writes only its own worktree: with none recorded it has nowhere to write, and it never
+  // falls back to the checkout.
+  const branchWorktree = (chat: ChatRow): string | null =>
+    chat.workPlace === WorkPlace.Branch ? chat.worktreePath : null;
+
+  // Whether the chat's session can write now: Here, while its turn holds the checkout; a branch, in its worktree.
   const writesNow = (chat: ChatRow): boolean =>
-    chat.workPlace === WorkPlace.Branch ||
+    branchWorktree(chat) !== null ||
     (chat.workPlace === WorkPlace.Here && deps.folderHold.holdsTurn(chat.id));
 
   return {
@@ -283,7 +288,16 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       // nothing, and one on its own branch writes its own worktree.
       if (chat.workPlace !== WorkPlace.Here) {
         notices.set(chat.id, []);
-        return { writes: chat.workPlace === WorkPlace.Branch };
+        return { writes: branchWorktree(chat) !== null };
+      }
+      if (deps.folderHold.takeReadOnlyChoice(chat.id)) {
+        // The builder chose reading only: the turn reads even when the checkout has freed, and says who held it.
+        const blockers = deps.folderHold.blockers(conv.projectId, {
+          kind: FolderAsker.ChatTurn,
+          chatId: chat.id,
+        });
+        notices.set(chat.id, blockers.length === 0 ? [] : [readOnlyNotice(blockers)]);
+        return { writes: false };
       }
       const taken = deps.folderHold.takeTurn(conv.projectId, chat.id);
       if (!taken.taken) {
@@ -387,7 +401,10 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           const place = getChat(state.db, chat.id).workPlace;
           const current = holdingSession.get(chat.id) === start.sessionId;
           if (place === WorkPlace.Here) return current && deps.folderHold.holdsTurn(chat.id);
-          if (place === WorkPlace.Branch) return current && running.has(chat.id);
+          if (place === WorkPlace.Branch)
+            return (
+              current && running.has(chat.id) && getChat(state.db, chat.id).worktreePath !== null
+            );
           return false;
         },
         current: () => holdingSession.get(chat.id) === start.sessionId,
@@ -397,7 +414,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
             .blockers(conv.projectId, { kind: FolderAsker.ChatTurn, chatId: chat.id })
             .map((b) => holderWords(b.holder))
             .join(' and ') || 'something else',
-        root: launch.cwd,
+        root: branchWorktree(chat) ?? launch.cwd,
         checkout: launch.cwd,
         firstChange: () => deps.firstChange?.(chat.id),
       };
