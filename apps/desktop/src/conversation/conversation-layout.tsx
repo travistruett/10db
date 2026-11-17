@@ -24,7 +24,7 @@ export interface ConversationLayoutProps {
 /**
  * Every conversation's frame (Sessions, Plan, the Workbench): the screen's bar on top, then one centred
  * column at most `CONVERSATION_WIDTH` wide, whose list takes the height left over and scrolls inside
- * itself, with what the footer holds pinned at its foot. The bar casts a shadow while the list is
+ * itself, with what the footer holds pinned at its foot. The bar takes a hairline while the list is
  * scrolled under it.
  */
 export function ConversationLayout({

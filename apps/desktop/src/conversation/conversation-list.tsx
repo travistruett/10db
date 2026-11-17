@@ -13,7 +13,6 @@ import {
   type ConversationRow,
 } from './conversation-rows';
 import { useHiddenEdges } from '../shell/use-hidden-edges';
-import classes from './conversation-list.module.css';
 import type { ConversationEntry } from './entry';
 import { ConversationEntryView } from './entry-view';
 import { RowStateProvider } from './row-state';
@@ -208,8 +207,7 @@ function WindowedArticles({
     setAboveTail(above);
   }, []);
 
-  // Which ends hide messages: the bar above casts a shadow while the start is scrolled away, and the
-  // footer below while the end is.
+  // Whether the start is scrolled away, which draws a hairline under the bar above.
   const hidden = useHiddenEdges();
   const viewportRef = useMergedRef(viewport, hidden.ref);
   const reportScrolled = useListScrolled();
@@ -284,11 +282,6 @@ function WindowedArticles({
           </Box>
         </div>
       </ScrollArea>
-      <div
-        aria-hidden="true"
-        className={classes['below']}
-        data-shown={hidden.edges.bottom || undefined}
-      />
       {aboveTail && (
         <Button
           size="compact-sm"
