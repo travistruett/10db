@@ -204,6 +204,14 @@ const b = createRoute({ path: '/inbox', component: InboxView });`,
       unrouted: ['ui/src/views/review', 'ui/src/views/settings'],
     },
     {
+      name: 'a nav that names its path `route` gives the label too',
+      router: `import { BoardView } from './views/board/board-view';
+const a = createRoute({ path: '/board', component: BoardView });`,
+      nav: `const ITEMS = { board: { section: 'board', label: 'Work', route: '/board' } };`,
+      pages: [{ name: 'board', folder: 'ui/src/views/board', route: '/board', label: 'Work' }],
+      unrouted: ['ui/src/views/inbox', 'ui/src/views/review', 'ui/src/views/settings'],
+    },
+    {
       name: 'a label that is not a plain string of 1-40 characters, or sits in another object, is no guess',
       router: `import { BoardView } from './views/board/board-view';
 import { InboxView } from './views/inbox/inbox-view';
@@ -406,13 +414,14 @@ describe('codeRoutes over a hostile router file', () => {
 });
 
 describe('navFiles', () => {
-  it('finds source files named like a layout, nav, sidebar, menu or shell, besides the routers', () => {
+  it('finds source files named like a layout, nav, rail, sidebar, menu or shell, besides the routers', () => {
     expect(
       navFiles(
         [
           'ui/src/shell/app-layout.tsx',
           'ui/src/components/Sidebar.tsx',
           'ui/src/menu.ts',
+          'ui/src/shell/rail-items.ts',
           'ui/src/navigate.ts',
           'ui/src/MainNavigation.tsx',
           'ui/src/nav.test.tsx',
@@ -432,6 +441,7 @@ describe('navFiles', () => {
       'ui/src/MainNavigation.tsx',
       'ui/src/shell/app-layout.tsx',
       'ui/src/components/Sidebar.tsx',
+      'ui/src/shell/rail-items.ts',
     ]);
   });
 
