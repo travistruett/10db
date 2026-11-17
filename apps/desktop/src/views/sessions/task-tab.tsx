@@ -56,7 +56,7 @@ function LoadedTaskTab({
   // The diff is keyed by the run's last change, so a turn that ends shows its changes.
   const stamp = workstreams.data?.find((w) => w.id === workstreamId)?.updatedAt ?? null;
   const [scope, setScope] = useState<ChangesScope>(ChangesScope.All);
-  const changes = useWorkstreamChanges(workstreamId, stamp, scope);
+  const changes = useWorkstreamChanges(workstreamId, stamp, scope, true);
   // The tab's own width, not the window's: the rail and panel take some of the window.
   const { ref: sizeRef, width } = useElementSize();
   const wide = width >= AUTO_OPEN_PX;
@@ -71,7 +71,10 @@ function LoadedTaskTab({
   };
   const totals = changes.data === undefined ? null : changesTotals(changes.data.files);
   const hasChanges = totals !== null && totals.files > 0;
-  const open = workstreamId !== undefined && (choice ?? (wide && hasChanges));
+  // Once it has opened by itself, a read under way (another scope, a newer stamp) doesn't close it.
+  const [autoOpened, setAutoOpened] = useState(false);
+  if (choice === null && wide && hasChanges && !autoOpened) setAutoOpened(true);
+  const open = workstreamId !== undefined && (choice ?? (wide && (hasChanges || autoOpened)));
   const [quote, setQuote] = useState<Quote | null>(null);
   const toggle = (): void => {
     setChoice(!open);

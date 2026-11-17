@@ -3,13 +3,15 @@ import {
   WorkstreamChangesDto,
   type PassViewDto,
   type TaskSessionDto,
+  type WorkstreamId,
 } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
+import type { QueryClient } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { baseHandlers, daemonUrl, renderWithDaemonAndRouter, server } from '../../test/daemon';
-import { projectViewDto } from '../../test/fixtures';
+import { projectViewDto, workstreamDto } from '../../test/fixtures';
 import { pagesByStatus, PASS_NOW, passHandlers, passViewDto } from '../../test/pass-fixtures';
 import { taskSessionDto, taskSessionHandlers } from '../../test/task-session-fixtures';
 import { observeWidthsOf, resetObservedWidth } from '../../test/sized-observer';
@@ -64,8 +66,10 @@ interface Served {
 async function renderTask(options: {
   readonly view?: PassViewDto;
   readonly session?: Partial<TaskSessionDto>;
-  readonly changes?: () => Response;
-}): Promise<Served> {
+  readonly changes?: (request: Request) => Response | Promise<Response>;
+  /** When the run last changed, as the workstreams list says; read again on every fetch. */
+  readonly updatedAt?: () => string;
+}): Promise<Served & { readonly queryClient: QueryClient }> {
   const view = options.view ?? passViewDto({ pages: [ready] });
   const page = view.pages[0];
   if (page === undefined) throw new Error('a pass of one has its page');
@@ -83,14 +87,15 @@ async function renderTask(options: {
   server.use(
     http.get(daemonUrl('/workstreams/:id/changes'), ({ request }) => {
       scopes.push(new URL(request.url).searchParams.get('scope') ?? '');
-      return options.changes?.() ?? HttpResponse.json(changesDto());
+      return options.changes?.(request) ?? HttpResponse.json(changesDto());
     }),
+    ...workstreamsHandler(session.workstreamId, options.updatedAt),
     ...passHandlers({ live: [view] }),
     ...taskSessionHandlers([session]),
     ...baseHandlers(),
   );
   const project = projectViewDto({ id: view.pass.projectId });
-  await renderWithDaemonAndRouter(
+  const { queryClient } = await renderWithDaemonAndRouter(
     <AwayAndBack>
       <TaskTab
         tab={{
@@ -104,7 +109,17 @@ async function renderTask(options: {
       />
     </AwayAndBack>,
   );
-  return { scopes };
+  return { scopes, queryClient };
+}
+
+/** The workstreams list naming the task's run, with its last change read at each fetch. */
+function workstreamsHandler(id: WorkstreamId | null, updatedAt: (() => string) | undefined) {
+  if (id === null || updatedAt === undefined) return [];
+  return [
+    http.get(daemonUrl('/workstreams'), () =>
+      HttpResponse.json([workstreamDto({ id, updatedAt: updatedAt() })]),
+    ),
+  ];
 }
 
 /** The strip unmounts a tab when another is selected; this stands in for the other tab. */
@@ -130,6 +145,26 @@ const switchAwayAndBack = async (): Promise<void> => {
   await screen.findByText('Another tab');
   fireEvent.click(screen.getByRole('button', { name: 'Switch tab' }));
 };
+
+/** A changes read that stays on its way until released, so a test can look at the tab meanwhile. */
+function hold() {
+  let asked = false;
+  let release: () => void = () => undefined;
+  return {
+    asked: () => asked,
+    release: () => {
+      release();
+    },
+    response: (): Promise<Response> => {
+      asked = true;
+      return new Promise((resolve) => {
+        release = () => {
+          resolve(HttpResponse.json(changesDto()));
+        };
+      });
+    },
+  };
+}
 
 describe('a task’s Changes', () => {
   it('says how much changed in the bar, and opens the panel on a click', async () => {
@@ -196,6 +231,47 @@ describe('a task’s Changes', () => {
       'value',
       'half a thought',
     );
+  });
+
+  it('keeps the diff and the open panel while a run update reads the changes again', async () => {
+    observeWidthsOf(1200);
+    let updatedAt = '2026-11-17T18:42:00.000Z';
+    let moved = false;
+    const held = hold();
+    const { queryClient } = await renderTask({
+      updatedAt: () => updatedAt,
+      changes: () => (moved ? held.response() : HttpResponse.json(changesDto())),
+    });
+    const panel = await screen.findByRole('complementary', { name: 'Changes' });
+    await within(panel).findByRole('button', { name: 'Quote line 42 of src/api/client.ts' });
+    updatedAt = '2026-11-17T18:43:00.000Z';
+    moved = true;
+    await queryClient.invalidateQueries({ queryKey: ['workstreams'] });
+    await waitFor(() => {
+      expect(held.asked()).toBe(true);
+    });
+    expect(screen.queryByText('Reading the changes…')).toBeNull();
+    expect(screen.getByRole('complementary', { name: 'Changes' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Changes\s*\+41\s*−6/ })).toBeTruthy();
+    held.release();
+  });
+
+  it('keeps a panel that opened by itself open while Last Turn is read', async () => {
+    observeWidthsOf(1200);
+    const held = hold();
+    await renderTask({
+      changes: (request) =>
+        new URL(request.url).searchParams.get('scope') === 'last'
+          ? held.response()
+          : HttpResponse.json(changesDto()),
+    });
+    const panel = await screen.findByRole('complementary', { name: 'Changes' });
+    fireEvent.click(await within(panel).findByRole('radio', { name: 'Last Turn' }));
+    await waitFor(() => {
+      expect(held.asked()).toBe(true);
+    });
+    expect(screen.getByRole('complementary', { name: 'Changes' })).toBeTruthy();
+    held.release();
   });
 
   it('asks for the last turn when Last Turn is picked, and ⌘⇧D toggles the panel', async () => {
