@@ -11,10 +11,6 @@ export const RailSection = {
 } as const;
 export type RailSection = (typeof RailSection)[keyof typeof RailSection];
 
-/** What a rail entry is: scope follows the question, so global sections sit above the project's. */
-export const RailGroup = { Global: 'global', Project: 'project', Foot: 'foot' } as const;
-export type RailGroup = (typeof RailGroup)[keyof typeof RailGroup];
-
 /** The status controls at the rail's foot, which are not sections. */
 export const RailControl = {
   Download: 'download',
@@ -30,28 +26,25 @@ export interface RailItem {
   readonly label: string;
   /** The route's path as the router registers it. */
   readonly route: string;
-  readonly group: RailGroup;
 }
 
 export const RAIL_ITEMS: Readonly<Record<RailSection, RailItem>> = {
-  inbox: { section: 'inbox', label: 'Inbox', route: '/inbox', group: RailGroup.Global },
-  factory: { section: 'factory', label: 'Factory', route: '/factory', group: RailGroup.Global },
-  sessions: { section: 'sessions', label: 'Sessions', route: '/sessions', group: RailGroup.Global },
-  board: { section: 'board', label: 'Board', route: '/board', group: RailGroup.Project },
-  plan: { section: 'plan', label: 'Plan', route: '/shape', group: RailGroup.Project },
+  inbox: { section: 'inbox', label: 'Inbox', route: '/inbox' },
+  factory: { section: 'factory', label: 'Factory', route: '/factory' },
+  sessions: { section: 'sessions', label: 'Sessions', route: '/sessions' },
+  board: { section: 'board', label: 'Board', route: '/board' },
+  plan: { section: 'plan', label: 'Plan', route: '/shape' },
   workbench: {
     section: 'workbench',
     label: 'UI Workbench',
     route: '/workbench',
-    group: RailGroup.Project,
   },
   knowledge: {
     section: 'knowledge',
     label: 'Knowledge',
     route: '/knowledge',
-    group: RailGroup.Project,
   },
-  settings: { section: 'settings', label: 'Settings', route: '/settings', group: RailGroup.Foot },
+  settings: { section: 'settings', label: 'Settings', route: '/settings' },
 };
 
 /** One slot in the rail, top to bottom. */

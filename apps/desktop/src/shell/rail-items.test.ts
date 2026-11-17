@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  RAIL_ITEMS,
-  RAIL_ORDER,
-  RailGroup,
-  railSectionForPath,
-  type RailEntry,
-} from './rail-items';
+import { RAIL_ITEMS, RAIL_ORDER, railSectionForPath, type RailEntry } from './rail-items';
 
 function describeEntry(entry: RailEntry): string {
   switch (entry.kind) {
@@ -38,20 +32,6 @@ describe('the rail', () => {
       'control:keep-awake',
       'control:color-scheme',
       'Settings',
-    ]);
-  });
-
-  it('groups sections by scope', () => {
-    const groups = Object.values(RAIL_ITEMS).map((entry) => [entry.label, entry.group]);
-    expect(groups).toEqual([
-      ['Inbox', RailGroup.Global],
-      ['Factory', RailGroup.Global],
-      ['Sessions', RailGroup.Global],
-      ['Board', RailGroup.Project],
-      ['Plan', RailGroup.Project],
-      ['UI Workbench', RailGroup.Project],
-      ['Knowledge', RailGroup.Project],
-      ['Settings', RailGroup.Foot],
     ]);
   });
 

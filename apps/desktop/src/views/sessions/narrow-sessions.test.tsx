@@ -27,7 +27,7 @@ function open(path: string, chats: ReturnType<typeof chatDto>[], inbox: unknown[
 }
 
 describe('Sessions at narrow widths', () => {
-  it('at 600 px shows one switcher with the selected title and the count of other tabs that need you, ', async () => {
+  it('at 600 px shows one switcher with the selected title and the count of other tabs that need you', async () => {
     windowWidth(600);
     const a = chatDto({ projectId: ampsio.id, title: 'Login fails', tabPosition: 0 });
     const b = chatDto({

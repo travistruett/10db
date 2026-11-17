@@ -13,12 +13,16 @@ export function CountBadge({
   count,
   tone = CountTone.Neutral,
   phrase,
+  cap,
 }: {
   readonly count: number;
   readonly tone?: CountTone;
   readonly phrase?: string;
+  /** The largest count shown whole; above it the badge reads "99+" style. */
+  readonly cap?: number;
 }) {
   const attention = tone === CountTone.Attention;
+  const shown = cap !== undefined && count > cap ? `${String(cap)}+` : count;
   return (
     <Badge
       size="xs"
@@ -30,12 +34,12 @@ export function CountBadge({
       {...(attention ? {} : { color: 'gray' })}
     >
       {phrase === undefined ? (
-        count
+        shown
       ) : (
         <>
           {/* The name computation drops a leading space inside VisuallyHidden, so the number is hidden
               from assistive tech and the hidden text carries the whole phrase. */}
-          <span aria-hidden="true">{count}</span>
+          <span aria-hidden="true">{shown}</span>
           <VisuallyHidden>{phrase}</VisuallyHidden>
         </>
       )}

@@ -6,7 +6,7 @@ import {
   type ShapeViewDto,
   type ToolCallView,
 } from '@10db/contracts';
-import { ActionIcon, Button, Flex, Group, Loader, Text, Tooltip } from '@mantine/core';
+import { ActionIcon, Box, Button, Flex, Group, Loader, Text, Tooltip } from '@mantine/core';
 import { IconBooks, IconPlus } from '@tabler/icons-react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import dayjs from 'dayjs';
@@ -281,6 +281,16 @@ export function ConversationPane({
       <ConversationLayout
         label="Conversation"
         h="100%"
+        // A bar with no height: the title row is the frame's, and this keeps the hairline that the list
+        // scrolling under it draws, across the surface's whole width.
+        header={
+          <Box
+            aria-hidden="true"
+            mx="calc(var(--shell-content-padding-inline) * -1)"
+            mt="calc(var(--shell-content-padding-block) * -1)"
+            mb="var(--shell-content-padding-block)"
+          />
+        }
         footer={
           <>
             {conversation === undefined ? null : (

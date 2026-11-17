@@ -136,6 +136,9 @@ describe('the panel and ⌘\\', () => {
       expect(panel.dataset['panel']).toBe('overlay');
     });
     expect(panel.hasAttribute('inert')).toBe(false);
+    // A sheet stands against the whole frame, flush with the rail: it is placed at the rail's edge.
+    expect(panel.hasAttribute('data-sheet')).toBe(true);
+    expect(panel.style.left).toBe('52px');
     fireEvent.keyDown(document, { key: 'Escape' });
     await waitFor(() => {
       expect(panel.dataset['panel']).toBe('hidden');
@@ -171,6 +174,9 @@ describe('the panel and ⌘\\', () => {
       expect(panel.dataset['panel']).toBe('overlay');
     });
     expect(railBox?.hasAttribute('inert')).toBe(false);
+    // Rail and panel are one 312 px sheet: the rail is its left part, the panel sits at 52 px.
+    expect(railBox?.getAttribute('data-sheet')).toBe('joined');
+    expect(panel.style.left).toBe('52px');
   });
 
   it('has nothing to open where a section has no panel at 800 px', async () => {
@@ -193,6 +199,12 @@ describe('the frame', () => {
       element.matches('a, button, input, select, textarea, [role="button"], [role="link"]'),
     );
     expect(controls).toEqual([]);
+    // The box above the panel drags too, with the sidebar button on it as the only control.
+    expect(
+      document
+        .querySelector('[data-panel]')
+        ?.nextElementSibling?.hasAttribute('data-tauri-drag-region'),
+    ).toBe(true);
     const row = document.querySelector('[data-title-row]');
     expect(row?.hasAttribute('data-tauri-drag-region')).toBe(true);
   });

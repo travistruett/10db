@@ -5,6 +5,7 @@ import {
   NavLink,
   Select,
   Switch,
+  Tooltip,
   type CSSVariablesResolver,
   type MantineColorsTuple,
   type VariantColorsResolver,
@@ -116,6 +117,18 @@ export const theme = createTheme({
     Select: Select.extend({ defaultProps: { checkIconPosition: 'right' } }),
     MultiSelect: MultiSelect.extend({ defaultProps: { checkIconPosition: 'right' } }),
     Switch: Switch.extend({ defaultProps: { withThumbIndicator: false } }),
+    // A tooltip is the bright ink on the base tone in both schemes, small and tight.
+    Tooltip: Tooltip.extend({
+      styles: {
+        tooltip: {
+          background: 'var(--mantine-color-bright)',
+          color: 'var(--mantine-color-body)',
+          fontSize: 12,
+          padding: '3px 8px',
+          borderRadius: 6,
+        },
+      },
+    }),
     NavLink: NavLink.extend({
       styles: (_theme, props) => ({
         // Dense rows, as a sidebar of a dozen links reads at a glance.

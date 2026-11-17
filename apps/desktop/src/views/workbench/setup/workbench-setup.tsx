@@ -67,8 +67,7 @@ export function WorkbenchSetup({ project, onBack, onApplied }: WorkbenchSetupPro
     );
   const heading = (
     <>
-      <TitleRow title="UI Workbench" />
-      <Title order={2}>{`Set up ${project.name} for the UI Workbench`}</Title>
+      <TitleRow title={`Set up ${project.name} for the UI Workbench`} />
       <Text>
         Work through pages with the agents, live. 10db read the repository and suggests what
         follows; untick anything you don&apos;t want.

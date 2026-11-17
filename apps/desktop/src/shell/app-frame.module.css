@@ -18,6 +18,10 @@
   background: var(--mantine-color-body);
 }
 
+.rail[data-sheet] .railDrag {
+  display: none;
+}
+
 .railDrag {
   flex: none;
   height: 44px;
@@ -38,6 +42,11 @@
   pointer-events: none;
 }
 
+.panelDrag {
+  grid-column: 2;
+  grid-row: 1;
+}
+
 .sidebarButton {
   position: absolute;
   top: 8px;
@@ -52,6 +61,11 @@
   overflow-y: auto;
   padding: 0 8px 10px 4px;
   background: var(--mantine-color-default);
+  /* A selected row on the panel's own tone takes the next tone up, and hover shows in dark. */
+  --mantine-primary-color-light: var(--mantine-color-default-hover);
+  --mantine-primary-color-light-color: var(--mantine-color-bright);
+  --mantine-color-dark-6: var(--mantine-color-default-hover);
+  --mantine-color-gray-0: var(--mantine-color-default-hover);
 }
 
 .titleRow {
@@ -65,11 +79,29 @@
   padding-right: 12px;
 }
 
+/* Controls in the title row are 28 px tall, as the spec has them. Mantine declares each control's size
+   variables on the control itself, so the box is set directly. */
+.titleRow :global(.mantine-Button-root),
+.titleRow :global(.mantine-Input-input),
+.titleRow :global(.mantine-ActionIcon-root) {
+  height: 28px;
+  min-height: 28px;
+}
+
+.titleRow :global(.mantine-ActionIcon-root) {
+  width: 28px;
+  min-width: 28px;
+}
+
+.titleRow :global(.mantine-Button-root) {
+  font-size: var(--mantine-font-size-sm);
+}
+
 /* The pipe: the panel's edge, carried up through the title row. */
 .titleRow[data-pipe]::before {
   content: '';
   position: absolute;
-  left: 0;
+  left: -1px;
   top: 10px;
   bottom: 0;
   width: 1px;
@@ -99,8 +131,9 @@
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  --shell-content-padding-block: 16px;
-  padding: var(--shell-content-padding-block) 24px;
+  --shell-content-padding-block: 20px;
+  --shell-content-padding-inline: 24px;
+  padding: var(--shell-content-padding-block) var(--shell-content-padding-inline);
 }
 
 .drawerLayer {
@@ -114,17 +147,28 @@
 .rail[data-sheet],
 .panel[data-sheet] {
   position: absolute;
-  border-radius: 10px;
+  /* Placed against the whole frame, not the grid area the element would otherwise belong to. */
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+  border-radius: 0 10px 10px 0;
   top: 44px;
   bottom: 8px;
   z-index: 20;
   box-shadow:
-    0 0 0 1px var(--mantine-color-default-border),
-    0 1px 2px light-dark(rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0.35));
+    8px 0 24px light-dark(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.25)),
+    0 0 0 1px var(--mantine-color-default-border);
 }
 
+/* With the panel beside it, the rail sheet is the left 52 px of one sheet: it takes no edge of its own. */
+.rail[data-sheet='joined'] {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+/* The content behind a folded sheet is dimmed, so the sheet reads as above it. */
 .backdrop {
   position: absolute;
   inset: 44px 0 0 0;
   z-index: 19;
+  background: light-dark(rgba(251, 243, 219, 0.45), rgba(16, 60, 72, 0.45));
 }

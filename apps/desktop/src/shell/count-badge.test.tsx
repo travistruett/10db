@@ -21,6 +21,19 @@ describe('CountBadge', () => {
     expect(badge?.getAttribute('data-variant')).toBe(variant);
   });
 
+  it.each([
+    { count: 99, cap: 99, shown: '99' },
+    { count: 100, cap: 99, shown: '99+' },
+    { count: 1234, cap: undefined, shown: '1234' },
+  ])('shows $count as $shown with a cap of $cap', ({ count, cap, shown }) => {
+    render(
+      <MantineProvider>
+        {cap === undefined ? <CountBadge count={count} /> : <CountBadge count={count} cap={cap} />}
+      </MantineProvider>,
+    );
+    expect(screen.getByText(shown)).toBeTruthy();
+  });
+
   it('reads the phrase, not the bare number, to assistive tech', () => {
     render(
       <MantineProvider>

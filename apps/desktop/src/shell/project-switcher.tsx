@@ -64,26 +64,27 @@ export function ProjectSwitcher() {
           combobox.closeDropdown();
         }}
       >
-        <Tooltip
-          label={project?.name ?? 'Choose a project'}
-          position="right"
-          openDelay={300}
-          disabled={combobox.dropdownOpened}
-        >
-          <Combobox.Target targetType="button">
-            <UnstyledButton
-              className={classes['tile']}
-              aria-label={`Project: ${project?.name ?? 'none'}. Switch project`}
-              onClick={() => {
-                combobox.toggleDropdown();
-              }}
-            >
-              <span className={classes['tileRing']}>
-                <ProjectTile name={project?.name ?? '?'} size={26} />
-              </span>
-            </UnstyledButton>
-          </Combobox.Target>
-        </Tooltip>
+        <div className={classes['tileHost']}>
+          <Tooltip
+            label={project?.name ?? 'Choose a project'}
+            position="right"
+            openDelay={300}
+            disabled={combobox.dropdownOpened}
+          >
+            <Combobox.Target targetType="button">
+              <UnstyledButton
+                aria-label={`Project: ${project?.name ?? 'none'}. Switch project`}
+                onClick={() => {
+                  combobox.toggleDropdown();
+                }}
+              >
+                <span className={classes['tileRing']}>
+                  <ProjectTile name={project?.name ?? '?'} size={26} />
+                </span>
+              </UnstyledButton>
+            </Combobox.Target>
+          </Tooltip>
+        </div>
         <Combobox.Dropdown>
           <Combobox.Search
             value={search}

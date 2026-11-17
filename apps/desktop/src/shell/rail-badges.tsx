@@ -7,6 +7,9 @@ import { useWorkbenchWaitingCount } from '../views/workbench/workbench-count';
 import { CountBadge, CountTone } from './count-badge';
 import { useSelectedProject } from './selected-project';
 
+/** A rail badge is small, so a count past this reads "99+". */
+const BADGE_CAP = 99;
+
 /** The open Inbox cards, across every project; nothing when none is open. */
 export function InboxBadge() {
   const count = useOpenInboxCount();
@@ -15,6 +18,7 @@ export function InboxBadge() {
     <CountBadge
       count={count}
       tone={CountTone.Attention}
+      cap={BADGE_CAP}
       phrase={`${String(count)} open card${count === 1 ? '' : 's'}`}
     />
   );
@@ -62,6 +66,7 @@ export function SessionsBadge() {
       <CountBadge
         count={count}
         tone={CountTone.Attention}
+        cap={BADGE_CAP}
         phrase={`${String(count)} session${count === 1 ? '' : 's'} need${count === 1 ? 's' : ''} you`}
       />
     </span>
@@ -76,6 +81,7 @@ export function WorkbenchBadge({ projectId }: { readonly projectId: ProjectId })
     <CountBadge
       count={count}
       tone={CountTone.Attention}
+      cap={BADGE_CAP}
       phrase={`${String(count)} page${count === 1 ? '' : 's'} waiting`}
     />
   );

@@ -1,7 +1,14 @@
 import { Box, Tooltip, ActionIcon } from '@mantine/core';
 import { IconLayoutSidebar } from '@tabler/icons-react';
 import { useRouterState } from '@tanstack/react-router';
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { FrameSlotsContext, type FrameSlots } from './frame-slots';
 import { usePanelHidden } from './panel-hidden';
 import { Rail } from './rail';
@@ -50,17 +57,16 @@ export function AppFrame({
   const hasPanel = panelSection !== null && panelSection === section;
   const layout = shellLayout({ band, hasPanel, panelHidden, overlayOpen });
 
-  const slots: FrameSlots = {
-    titleHost,
-    panelHost,
-    drawerHost,
-    registerPanel: (registered) => {
-      setPanelSection(registered);
-      return () => {
-        setPanelSection((now) => (now === registered ? null : now));
-      };
-    },
-  };
+  const registerPanel = useCallback((registered: RailSection) => {
+    setPanelSection(registered);
+    return () => {
+      setPanelSection((now) => (now === registered ? null : now));
+    };
+  }, []);
+  const slots = useMemo<FrameSlots>(
+    () => ({ titleHost, panelHost, drawerHost, registerPanel }),
+    [titleHost, panelHost, drawerHost, registerPanel],
+  );
 
   const toggleSidebar = (): void => {
     if (band === ShellBand.Wide) togglePanelHidden();
@@ -103,12 +109,8 @@ export function AppFrame({
       ? {}
       : layout.rail === 'overlay'
         ? {
-            position: 'absolute',
-            top: TITLE_ROW_HEIGHT,
-            bottom: 8,
             left: 0,
             width: RAIL_WIDTH,
-            zIndex: 20,
           }
         : { display: 'none' };
   const panelStyle: CSSProperties =
@@ -130,7 +132,9 @@ export function AppFrame({
         >
           <div
             className={classes['rail']}
-            data-sheet={layout.rail === 'overlay' ? '' : undefined}
+            data-sheet={
+              layout.rail === 'overlay' ? (layout.panel === 'overlay' ? 'joined' : '') : undefined
+            }
             style={railStyle}
             inert={layout.rail === 'hidden'}
           >
@@ -147,6 +151,8 @@ export function AppFrame({
             inert={layout.panel === 'hidden'}
             data-panel={layout.panel}
           />
+          {/* The panel's top, which the sidebar button sits on, drags the window like the rest of the row. */}
+          <div className={classes['panelDrag']} data-tauri-drag-region />
           {buttonShown ? (
             <div className={classes['topLeft']}>
               <Tooltip label={`${label} ${noun}`} position="bottom" openDelay={300}>

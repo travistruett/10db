@@ -23,6 +23,7 @@ import {
 } from '@tabler/icons-react';
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useId } from 'react';
+import classes from './settings-nav.module.css';
 import {
   isSettingsSectionKey,
   sectionByKey,
@@ -94,8 +95,10 @@ function SectionLinks({
         key={s.key}
         label={s.label}
         active={s.key === current}
-        py={5}
-        leftSection={<Icon size={16} stroke={1.5} />}
+        h={30}
+        py={0}
+        styles={{ label: { fontSize: 13, lineHeight: '30px' } }}
+        leftSection={<Icon size={14} stroke={1.7} />}
         renderRoot={(props) => (
           <Link {...props} to="/settings/$section" params={{ section: s.key }} />
         )}
@@ -143,6 +146,11 @@ export function SettingsNav() {
         fullWidth
         size="xs"
         mb="sm"
+        classNames={{
+          root: classes['root'],
+          indicator: classes['indicator'],
+          label: classes['label'],
+        }}
         value={scope}
         data={SCOPE_OPTIONS}
         onChange={(value) => {

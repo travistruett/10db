@@ -7,8 +7,9 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router';
-import { render, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { TitleRow } from '../shell/title-row';
 import { ViewBoundary } from '../shell/view-boundary';
 import { RenderLayout } from './render-layout';
 import { RenderModeContext } from './render-context';
@@ -79,5 +80,18 @@ describe('the frame’s verdict on a crash', () => {
     } finally {
       quiet.mockRestore();
     }
+  });
+});
+
+describe('a view drawn for a frame', () => {
+  it('keeps its title and actions, which the shell would put in its title row', async () => {
+    draw(() => (
+      <>
+        <TitleRow title="Board" actions={<button type="button">New Task</button>} />
+        <p>the screen</p>
+      </>
+    ));
+    expect(await screen.findByRole('heading', { level: 1, name: 'Board' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'New Task' })).toBeTruthy();
   });
 });

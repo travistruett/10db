@@ -99,6 +99,7 @@ export function PassHeader(props: PassHeaderProps) {
   return (
     <Stack gap={4}>
       <TitleRow
+        lines={2}
         title={headerLine(project.name, view.pass.name, statuses)}
         actions={
           <>

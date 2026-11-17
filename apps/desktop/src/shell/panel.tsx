@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react';
+import { useLayoutEffect, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { useFrameSlots } from './frame-slots';
 import type { RailSection } from './rail-items';
@@ -16,6 +16,7 @@ export function Panel({
   readonly children: ReactNode;
 }): ReactNode {
   const { panelHost, registerPanel } = useFrameSlots();
-  useEffect(() => registerPanel(section), [registerPanel, section]);
+  // Before paint, so the column is there in the first frame and the content does not jump across.
+  useLayoutEffect(() => registerPanel(section), [registerPanel, section]);
   return panelHost === null ? null : createPortal(children, panelHost);
 }

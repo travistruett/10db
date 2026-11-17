@@ -8,7 +8,10 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-/** The window's width band. The window, not a container, because the frame decides what its content gets. */
+/**
+ * The window's width band. The window, not a container, because the frame decides what its content gets.
+ * The band is the snapshot, so a resize within one band draws nothing again.
+ */
 export function useShellBand(): ShellBand {
-  return shellBand(useSyncExternalStore(subscribe, () => window.innerWidth));
+  return useSyncExternalStore(subscribe, () => shellBand(window.innerWidth));
 }

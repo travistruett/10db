@@ -13,12 +13,15 @@ export function TitleRow({
   meta,
   switcher,
   actions,
+  lines = 1,
 }: {
   readonly title: ReactNode;
   readonly meta?: ReactNode;
   /** A control beside the title that switches what the view shows. */
   readonly switcher?: ReactNode;
   readonly actions?: ReactNode;
+  /** How many lines a long title takes before it is cut: two reads whole at a narrow width. */
+  readonly lines?: 1 | 2;
 }): ReactNode {
   const { titleHost } = useFrameSlots();
   if (titleHost === null) return null;
@@ -31,7 +34,7 @@ export function TitleRow({
           fw={600}
           lh="20px"
           c="var(--mantine-color-bright)"
-          lineClamp={1}
+          lineClamp={lines}
           {...(typeof title === 'string' ? { title } : {})}
           style={{ minWidth: 0, flex: '0 1 auto' }}
           data-tauri-drag-region

@@ -1,8 +1,8 @@
 import { PassState, type TaskId } from '@10db/contracts';
 import { Box, Button, Flex } from '@mantine/core';
 import { IconPlus } from '@tabler/icons-react';
-import { useElementSize } from '@mantine/hooks';
-import { useEffect, useRef, useState } from 'react';
+import { useElementSize, useMergedRef } from '@mantine/hooks';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { markPassNotificationsActed, shownPassNotifications } from '../../desktop/notify-pass';
 import { useNow } from '../../shell/relative';
 import { Announcer } from './announcer';
@@ -35,8 +35,16 @@ export function PassWorkspace(props: PassWorkspaceProps) {
   const { view, inbox, project, selected, onSelect, onAddPage } = props;
   const now = useNow(CLOCK_TICK_MS);
   // The Workbench's own width, not the window's: the rail and panel take some of the window.
-  const { ref: rootRef, width } = useElementSize();
-  const layout = workbenchLayout(width);
+  const { ref: observedRef, width: observedWidth } = useElementSize();
+  const [firstWidth, setFirstWidth] = useState(0);
+  const root = useRef<HTMLDivElement | null>(null);
+  const rootRef = useMergedRef(observedRef, root);
+  // The observer reports after the first paint, so the width is read once before it: the wide layout
+  // is not preceded by a frame of the narrow one.
+  useLayoutEffect(() => {
+    setFirstWidth(root.current?.getBoundingClientRect().width ?? 0);
+  }, []);
+  const layout = workbenchLayout(observedWidth || firstWidth);
   const rows = queueRows(view, inbox, now);
   const shown = shownRow(rows, selected);
   const wide = layout === WorkbenchLayout.Wide;

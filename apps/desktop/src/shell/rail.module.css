@@ -2,8 +2,9 @@
   display: flex;
   flex-direction: column;
   align-items: center;
+  flex: 1;
   gap: 4px;
-  padding: 0 0 10px;
+  padding: 4px 0 10px;
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: none;
@@ -24,8 +25,9 @@
   text-decoration: none;
 }
 
+/* Hover reads lighter than the active item's fill. */
 .item:hover {
-  background: var(--mantine-color-default);
+  background: color-mix(in srgb, var(--mantine-color-default) 50%, transparent);
   color: var(--mantine-color-bright);
 }
 
@@ -59,8 +61,13 @@
   min-height: 8px;
 }
 
-.tile {
+.tileHost {
   flex: none;
+  display: grid;
+}
+
+/* The button is styled from its wrapper: the tooltip and combobox around it replace its own class. */
+.tileHost > button {
   display: grid;
   place-items: center;
   width: 36px;
@@ -72,7 +79,8 @@
 }
 
 .tileRing {
-  border-radius: 7px;
+  display: block;
+  border-radius: 6px;
   box-shadow:
     0 0 0 2px var(--mantine-color-body),
     0 0 0 3px var(--mantine-color-default-border);
