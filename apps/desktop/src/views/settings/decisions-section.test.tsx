@@ -23,7 +23,7 @@ describe('Settings › Decisions', () => {
   it('says these are 10db’s own judgement calls and points to Knowledge for recorded decisions', async () => {
     open();
     expect(await screen.findByText(/routine calls 10db makes with a fast model/)).toBeTruthy();
-    const link = screen.getByRole('link', { name: 'Knowledge' });
+    const link = within(screen.getByRole('main')).getByRole('link', { name: 'Knowledge' });
     expect(link.getAttribute('href')).toBe('/knowledge');
   });
 
