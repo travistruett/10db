@@ -9,7 +9,7 @@ import {
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
-import { mintId, type BatchDto, type ProjectDto } from '@10db/contracts';
+import { mintId, type ProjectDto } from '@10db/contracts';
 import { createTestStore, deleteAppSetting, listInbox, seedProject } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -46,7 +46,7 @@ let bin: string;
 let calls: string;
 let requests: GateRequest[];
 const signal = new AbortController().signal;
-const batch = { id: mintId('Batch') } as BatchDto;
+const owner = { kind: 'batch', id: mintId('Batch') } as const;
 // Only what the step reads.
 const project = { id: mintId('Project'), sandboxLoopback: true } as ProjectDto;
 
@@ -117,7 +117,7 @@ function installedCopy(modulesYaml: string): void {
 }
 
 function refresh(deps: ReturnType<typeof dependencies>) {
-  return deps.refresh({ batch, project, path: worktree, signal });
+  return deps.refresh({ owner, project, path: worktree, signal });
 }
 
 function withLockfileAndModules(): void {
@@ -151,7 +151,7 @@ describe('refreshing a worktree’s dependencies', () => {
     fakePnpm();
     writeFileSync(join(worktree, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
     const result = await dependencies().refresh({
-      batch,
+      owner,
       project,
       path: worktree,
       signal,
@@ -164,7 +164,7 @@ describe('refreshing a worktree’s dependencies', () => {
   it('still runs nothing without a lockfile when the cut skipped the seed', async () => {
     fakePnpm();
     expect(
-      await dependencies().refresh({ batch, project, path: worktree, signal, seeded: false }),
+      await dependencies().refresh({ owner, project, path: worktree, signal, seeded: false }),
     ).toEqual({ kind: 'skipped' });
     expect(existsSync(calls)).toBe(false);
   });
@@ -173,7 +173,7 @@ describe('refreshing a worktree’s dependencies', () => {
     fakePnpm();
     withLockfileAndModules();
     const result = await dependencies().refresh({
-      batch,
+      owner,
       project,
       path: worktree,
       signal,
@@ -301,7 +301,7 @@ describe('refreshing a worktree’s dependencies', () => {
     // The cut skipped the seed: nothing was there to lose, though the lockfile's package is missing.
     writeFileSync(join(worktree, 'pnpm-lock.yaml'), LEFT_PAD_LOCKFILE);
     const result = await dependencies().refresh({
-      batch,
+      owner,
       project,
       path: worktree,
       signal,
@@ -398,7 +398,7 @@ describe('refreshing a worktree’s dependencies', () => {
       );
       chmodSync(join(bin, 'pnpm'), 0o755);
       const result = await dependencies().refresh({
-        batch,
+        owner,
         project,
         path: worktree,
         signal,
@@ -433,7 +433,7 @@ describe('refreshing a worktree’s dependencies', () => {
       installedCopy('packageManager: pnpm@12.9.1\n');
       writeFileSync(join(bin, 'pnpm'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\nexit 1\n`);
       const result = await dependencies().refresh({
-        batch,
+        owner,
         project,
         path: worktree,
         signal,
@@ -544,7 +544,7 @@ describe('refreshing a worktree’s dependencies', () => {
     const deps = dependencies({}, 20_000, () => {
       stop.abort();
     });
-    const result = await deps.refresh({ batch, project, path: worktree, signal: stop.signal });
+    const result = await deps.refresh({ owner, project, path: worktree, signal: stop.signal });
     expect(result).toEqual({ kind: 'aborted' });
   });
 
@@ -655,7 +655,7 @@ describe('refreshing a worktree’s dependencies', () => {
       writeFileSync(join(bin, 'pnpm'), `#!/bin/sh\nexit 1\n`);
       chmodSync(join(bin, 'pnpm'), 0o755);
       const result = await dependencies().refresh({
-        batch,
+        owner,
         project,
         path: worktree,
         signal,
@@ -672,7 +672,7 @@ describe('refreshing a worktree’s dependencies', () => {
       writeFileSync(join(bin, 'pnpm'), `#!/bin/sh\nexit 1\n`);
       chmodSync(join(bin, 'pnpm'), 0o755);
       const result = await dependencies().refresh({
-        batch,
+        owner,
         project,
         path: worktree,
         signal,

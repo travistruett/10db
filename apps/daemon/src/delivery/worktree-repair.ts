@@ -126,7 +126,7 @@ async function makeWhole(
     });
   };
   const installed = await ctx.dependencies
-    .refresh({ batch, project, path, signal })
+    .refresh({ owner: { kind: 'batch', id: batch.id }, project, path, signal })
     .catch(async (error: unknown) => {
       // A worktree without current packages must not look whole to the next Retry.
       await dropUninstalled();
