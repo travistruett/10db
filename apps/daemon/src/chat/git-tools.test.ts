@@ -33,12 +33,13 @@ import {
   type TempDir,
 } from '../../test/fixtures';
 import { FakeGh } from '../../test/fake-gh';
-import { createEventBus, createStateStore } from '../events';
+import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createFolderHold, type FolderHold } from '../folder-hold';
 import { createGit } from '../git';
 import { secretFilesIn } from '../sandbox';
 import { createChatLiveSessions } from './live-sessions';
 import { chatGitTools } from './git-tools';
+import { takeHereForGitTool } from './work-takes-checkout';
 
 // Sessions spec §7.3: the git tools run only while the turn holds Your folder, never on 10db's branches or
 // while a closed pass waits, and the daemon's git does the work in a real repository.
@@ -47,6 +48,7 @@ let store: Store;
 let closeStore: () => void;
 let project: ProjectDto;
 let hold: FolderHold;
+let state: StateStore;
 let pair: ReturnType<typeof createTempRepoWithOrigin>;
 let repo: TempDir;
 let network: ReturnType<typeof githubOrigin>;
@@ -56,7 +58,8 @@ let gh: FakeGh;
 beforeEach(() => {
   ({ store, close: closeStore } = createTestStore());
   const bus = createEventBus();
-  hold = createFolderHold({ state: createStateStore(store, bus), bus });
+  state = createStateStore(store, bus);
+  hold = createFolderHold({ state, bus });
   project = seedProject(store);
   pair = createTempRepoWithOrigin();
   repo = pair.repo;
@@ -165,6 +168,9 @@ function tools(chat: ReturnType<typeof newChat>, open = true, afterCheck?: () =>
         env: { ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global },
         timeoutMs: 20_000,
       }),
+      takeHere: (chatId) => {
+        takeHereForGitTool({ state, folderHold: hold }, chatId);
+      },
     },
     { sessionId, conversationId: chat.conversationId, chatId: chat.id, projectId: project.id },
   );

@@ -46,6 +46,11 @@ export interface ChatGitToolsDeps {
   readonly secretFilesOf: (repo: string) => Promise<readonly string[]>;
   /** How a fetch is made: in the login environment, bounded in time. */
   readonly net: () => NetworkCall;
+  /**
+   * A session that has not chosen where to work goes Here and takes the checkout before a push, a pull request
+   * or a merge, which the judge has already let through; throws the holder's words when it can't.
+   */
+  readonly takeHere: (chatId: ChatId) => void;
 }
 
 export interface ChatGitSession {
@@ -76,9 +81,10 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
   const asker = { kind: FolderAsker.ChatTurn, chatId } as const;
 
   /** Runs in Your folder only while this session's turn holds it; answers the checkout and who shares it. */
-  async function holding(): Promise<{ repo: string; sharedWith: string[] }> {
+  async function holding(takesHere = false): Promise<{ repo: string; sharedWith: string[] }> {
     if (deps.live.get(session.conversationId, session.sessionId) === null)
       throw new ConflictError('This session has ended, so it changes nothing in Your folder.');
+    if (takesHere) deps.takeHere(chatId);
     if (!deps.folderHold.holdsTurn(chatId)) {
       const holder =
         deps.folderHold
@@ -116,8 +122,8 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
   };
 
   /** The checkout, on a branch of the builder's own: not detached, not under 10db/. */
-  async function onBranch(): Promise<{ repo: string; branch: string }> {
-    const { repo } = await holding();
+  async function onBranch(takesHere = false): Promise<{ repo: string; branch: string }> {
+    const { repo } = await holding(takesHere);
     const branch = await deps.git.currentBranch(repo);
     if (branch === null) throw new ConflictError('Your folder is on no branch (a detached HEAD).');
     return { repo, branch };
@@ -156,7 +162,7 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
     },
     [ChatToolName.PushBranch]: async (args: unknown) => {
       ChatToolInputs.push_branch.parse(args);
-      const { repo, branch } = await onBranch();
+      const { repo, branch } = await onBranch(true);
       // Never forced: the daemon's push names one fully qualified ref and no option.
       const run = await deps.git.push(repo, branch, deps.net());
       return { done: true, branch, note: run.output.trim().slice(-500) };
@@ -165,7 +171,7 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
       const input = ChatToolInputs.open_pull_request.parse(args);
       if (input.base !== undefined && isTenDbBranch(input.base))
         throw new InvalidError("A pull request's base is never one of 10db's own branches");
-      const { repo, branch } = await onBranch();
+      const { repo, branch } = await onBranch(true);
       const head = await deps.git.head(repo);
       if ((await deps.git.remoteTrackingCommit(repo, branch)) !== head)
         throw new ConflictError(
@@ -188,7 +194,7 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
     },
     [ChatToolName.MergePullRequest]: async (args: unknown) => {
       const { number } = ChatToolInputs.merge_pull_request.parse(args);
-      const { repo } = await holding();
+      const { repo } = await holding(true);
       const slug = await pinnedRepo(repo);
       // The address comes from the pinned repository and the number alone, so another repository's pull
       // request cannot be named.

@@ -2799,6 +2799,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
             env: delivery.networkEnv(),
             timeoutMs: delivery.limits.networkTimeoutMs,
           }),
+          takeHere: (chatId) => {
+            chatWork.takeHereForGitTool(chatId);
+          },
         },
       }),
     }),

@@ -23,6 +23,7 @@ import type { FolderHold } from '../folder-hold';
 import { flagCard, withdrawCard } from '../inbox';
 import type { Logger } from '../log';
 import { chatWorkCardKey, CHAT_WORK_CARD_DETAIL } from './work-card';
+import { takeHereForGitTool } from './work-takes-checkout';
 import { checkoutBranchNow } from './checkout-branch';
 
 // Where a session's work happens (the place table in the sessions plan): the question a first change asks, and the
@@ -46,6 +47,8 @@ export interface ChatWorkService {
    * choice is a `ChatWorkConflict` carrying the settled state.
    */
   choose(chatId: ChatId, place: 'here' | 'branch'): Promise<ChatWork>;
+  /** A push, pull request or merge the judge allowed: Here, and the turn takes the checkout. */
+  takeHereForGitTool(chatId: ChatId): void;
 }
 
 /** A choice that arrived after another one won, or that the session's place does not take. */
@@ -139,6 +142,10 @@ export function createChatWorkService(deps: ChatWorkServiceDeps): ChatWorkServic
   }
 
   return {
+    takeHereForGitTool: (chatId) => {
+      takeHereForGitTool({ state, folderHold: deps.folderHold }, chatId);
+    },
+
     async choose(chatId, place) {
       const chat = getChat(state.db, chatId);
       const current = workOf(chatId);
