@@ -181,6 +181,9 @@ The main plan's Task 14 runs after this.
 
 ## Task R: remove the old contracts (after Task 13 and B4 have merged, and B5 for the last item)
 
+**Track A's implementer runs this task.** It edits daemon files (`chat/task-session.ts` and the daemon's reading of
+`ReadOnly`) as well as the contracts.
+
 - From `packages/contracts/src/chat.ts`: `DoItPlace`, `DoItRequest`, `DoItResult`, `BriefRequest`, `BriefSource`,
   `BriefReason`, `DoItBriefDto`, `DoItRefusalDto`, `DoItOfferDto` and `DoItPreviewDto`.
 - `FolderWhileHeld.ReadOnly`, and the daemon's reading of it as `wait`.
