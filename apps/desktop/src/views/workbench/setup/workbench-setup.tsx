@@ -5,6 +5,7 @@ import {
   type ProjectViewDto,
   type SettingField,
 } from '@10db/contracts';
+import { TitleRow } from '../../../shell/title-row';
 import { Anchor, Button, Checkbox, Group, Loader, Stack, Text, Title } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
@@ -66,6 +67,7 @@ export function WorkbenchSetup({ project, onBack, onApplied }: WorkbenchSetupPro
     );
   const heading = (
     <>
+      <TitleRow title="UI Workbench" />
       <Title order={2}>{`Set up ${project.name} for the UI Workbench`}</Title>
       <Text>
         Work through pages with the agents, live. 10db read the repository and suggests what

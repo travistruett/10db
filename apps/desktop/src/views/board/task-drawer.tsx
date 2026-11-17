@@ -589,7 +589,6 @@ export function TaskDrawer({
               justify="space-between"
               wrap="nowrap"
               pos="sticky"
-              bottom={0}
               mt="xl"
               mx="calc(var(--mantine-spacing-lg) * -1)"
               mb="calc(var(--mantine-spacing-lg) * -1)"
@@ -597,6 +596,8 @@ export function TaskDrawer({
               py="md"
               bg="var(--mantine-color-body)"
               style={{
+                // The drawer's body pads its content, and a sticky edge is measured inside that padding.
+                bottom: 'calc(var(--mantine-spacing-lg) * -1)',
                 borderTop: '1px solid var(--mantine-color-default-border)',
                 zIndex: 'var(--mantine-z-index-app)',
               }}

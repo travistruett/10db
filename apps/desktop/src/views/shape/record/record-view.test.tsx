@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { useState } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderWithDaemonAndRouter, server } from '../../../test/daemon';
+import { FrameSlots } from '../../../test/frame';
 import { planRecordHandlers, RECORD_SHAPE_ID } from '../../../test/plan-record-fixtures';
 import type { RecordSearch } from './record-tabs';
 import { RecordView } from './record-view';
@@ -21,7 +22,11 @@ function Holder({ initial = {} }: { readonly initial?: RecordSearch }) {
 describe('RecordView', () => {
   it('the record opens on Documents with the latest revision rendered', async () => {
     server.use(...planRecordHandlers(), ...baseHandlers());
-    await renderWithDaemonAndRouter(<Holder />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <Holder />
+      </FrameSlots>,
+    );
     expect(await screen.findByText('Revoke it over the tailnet.')).toBeTruthy();
     expect(screen.getByRole('tab', { name: /Documents/ }).getAttribute('aria-selected')).toBe(
       'true',
@@ -44,7 +49,11 @@ describe('RecordView', () => {
       }),
       ...baseHandlers(),
     );
-    await renderWithDaemonAndRouter(<Holder />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <Holder />
+      </FrameSlots>,
+    );
     fireEvent.click(await screen.findByRole('button', { name: 'Export as Markdown…' }));
     expect((await screen.findByRole('alert')).textContent).toBe(
       '/Users/me/demo is the checkout of demo',
@@ -66,7 +75,11 @@ describe('RecordView', () => {
       }),
       ...baseHandlers(),
     );
-    await renderWithDaemonAndRouter(<Holder />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <Holder />
+      </FrameSlots>,
+    );
     fireEvent.click(await screen.findByRole('button', { name: 'Export as Markdown…' }));
     expect((await screen.findByRole('alert')).textContent).toContain('the panel is unavailable');
     expect(asked).toEqual([]);
@@ -81,7 +94,11 @@ describe('RecordView', () => {
       ),
       ...baseHandlers(),
     );
-    await renderWithDaemonAndRouter(<Holder />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <Holder />
+      </FrameSlots>,
+    );
     fireEvent.click(await screen.findByRole('button', { name: 'Export as Markdown…' }));
     await waitFor(() => {
       expect(screen.getByRole('status').textContent).toBe('Exported 2 files to /Users/me/exports');

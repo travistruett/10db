@@ -119,6 +119,7 @@ export function ProjectSwitcher() {
               )}
               variant="subtle"
               color="gray"
+              c="var(--mantine-color-text)"
               size="sm"
               fullWidth
               justify="flex-start"

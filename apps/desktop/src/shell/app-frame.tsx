@@ -179,7 +179,7 @@ export function AppFrame({
           style={narrow ? { gridColumn: '1 / -1', margin: '0 6px 6px' } : { margin: '0 8px 8px 0' }}
         >
           {banner}
-          <div className={classes['content']}>{children}</div>
+          <main className={classes['content']}>{children}</main>
           <div ref={setDrawerHost} className={classes['drawerLayer']} />
         </div>
         {layout.rail === 'overlay' || layout.panel === 'overlay' ? (

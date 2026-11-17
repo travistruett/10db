@@ -32,6 +32,7 @@ export function TitleRow({
           lh="20px"
           c="var(--mantine-color-bright)"
           lineClamp={1}
+          {...(typeof title === 'string' ? { title } : {})}
           style={{ minWidth: 0, flex: '0 1 auto' }}
           data-tauri-drag-region
         >

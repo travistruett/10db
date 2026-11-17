@@ -99,7 +99,8 @@
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  padding: 16px 24px;
+  --shell-content-padding-block: 16px;
+  padding: var(--shell-content-padding-block) 24px;
 }
 
 .drawerLayer {
