@@ -1,0 +1,702 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^inb_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "projectId": {
+            "type": "string",
+            "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "question",
+              "permission",
+              "proposal",
+              "review",
+              "flag",
+              "check",
+              "plan",
+              "playbook_move_report"
+            ]
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "OPEN",
+              "ANSWERED",
+              "DELIVERING",
+              "RESOLVED",
+              "CANCELLED",
+              "EXPIRED"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 80
+                },
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "label",
+                "description"
+              ]
+            }
+          },
+          "recommendation": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "product",
+              "design",
+              "engineering",
+              "business",
+              "access",
+              "other"
+            ]
+          },
+          "urgency": {
+            "type": "string",
+            "enum": [
+              "low",
+              "normal",
+              "high"
+            ]
+          },
+          "assignee": {
+            "type": "string"
+          },
+          "assignees": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "routedBy": {
+            "default": "rule",
+            "type": "string",
+            "enum": [
+              "rule",
+              "triage_pending",
+              "judge",
+              "builder"
+            ]
+          },
+          "routeSuggestion": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "personIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^psn_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    }
+                  },
+                  "confidence": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "personIds",
+                  "confidence"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "copyFor": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "send": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^snd_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "inboxItemId": {
+                    "type": "string",
+                    "pattern": "^inb_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "draft",
+                      "sending",
+                      "sent",
+                      "answered",
+                      "closed",
+                      "failed"
+                    ]
+                  },
+                  "people": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "personId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "pattern": "^psn_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "userId": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "recipient": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "personId",
+                        "userId",
+                        "name",
+                        "recipient"
+                      ]
+                    }
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "hits": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "pattern": {
+                          "type": "string"
+                        },
+                        "line": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "severity": {
+                          "type": "string",
+                          "enum": [
+                            "hold",
+                            "warn"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "pattern",
+                        "line",
+                        "severity"
+                      ]
+                    }
+                  },
+                  "permalink": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "sentAt": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "remindedAt": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "answeredAt": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "returnedAt": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "returnedReason": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "timer",
+                          "disagreed"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "heldBy": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "review",
+                          "first_send",
+                          "limit",
+                          "scan"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "proposal": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "choice": {
+                            "type": "string"
+                          },
+                          "confidence": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "choice",
+                          "confidence"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "askedWhichWay": {
+                    "type": "boolean"
+                  },
+                  "conversation": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "userId": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "text": {
+                          "type": "string"
+                        },
+                        "ts": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "userId",
+                        "name",
+                        "text",
+                        "ts"
+                      ]
+                    }
+                  },
+                  "reply": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "text": {
+                            "type": "string"
+                          },
+                          "userId": {
+                            "type": "string"
+                          },
+                          "ts": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "text",
+                          "userId",
+                          "ts"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "replyVia": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "thread",
+                          "top_level"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "readAs": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "option",
+                          "own_words",
+                          "approved"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "answeredBy": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^psn_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "error": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "inboxItemId",
+                  "state",
+                  "people",
+                  "text",
+                  "hits",
+                  "permalink",
+                  "sentAt",
+                  "remindedAt",
+                  "answeredAt",
+                  "returnedAt",
+                  "returnedReason",
+                  "heldBy",
+                  "proposal",
+                  "askedWhichWay",
+                  "conversation",
+                  "reply",
+                  "replyVia",
+                  "readAs",
+                  "answeredBy",
+                  "error"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "$ref": "#/$defs/__schema0"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "answer": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "choice": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "note": {
+                    "type": "string",
+                    "maxLength": 4000
+                  },
+                  "record": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "scope": {
+                            "type": "string",
+                            "enum": [
+                              "you",
+                              "project",
+                              "area"
+                            ]
+                          },
+                          "area": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[a-z][a-z0-9-]*$"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "scope",
+                          "area"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "answeredBy": {
+                    "type": "string"
+                  },
+                  "via": {
+                    "type": "string",
+                    "enum": [
+                      "inbox",
+                      "slack"
+                    ]
+                  },
+                  "words": {
+                    "type": "string",
+                    "maxLength": 20000
+                  },
+                  "with": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "conversation": {
+                    "maxItems": 100,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "maxLength": 200
+                        },
+                        "text": {
+                          "type": "string",
+                          "maxLength": 4000
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "text"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "choice"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "workstreamId": {
+                  "type": "string",
+                  "pattern": "^ws_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "sessionId": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^ses_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "workstreamId",
+                "sessionId"
+              ]
+            }
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "kind",
+          "state",
+          "title",
+          "body",
+          "options",
+          "recommendation",
+          "category",
+          "urgency",
+          "assignee",
+          "detail",
+          "answer",
+          "targets",
+          "createdAt",
+          "updatedAt"
+        ]
+      }
+    },
+    "total": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "page": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "pageSize": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "items",
+    "total",
+    "page",
+    "pageSize"
+  ],
+  "$defs": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      ]
+    }
+  }
+}
