@@ -10,7 +10,7 @@ import {
 } from '@10db/contracts';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
-import { createTestStore, seedProject, type Store } from '@10db/db';
+import { createTestStore, seedProject, setChatWork, type Store } from '@10db/db';
 import { ManualClock } from '../src/clock';
 import {
   chatHooks,
@@ -18,6 +18,8 @@ import {
   createChatLiveSessions,
   type Briefs,
   createChatService,
+  createChatWorkService,
+  type ChatWorkService,
   type ChatHooksDeps,
   type ChatService,
 } from '../src/chat';
@@ -46,6 +48,7 @@ export interface ChatWorld {
   readonly adapter: FakeAdapter;
   readonly clock: ManualClock;
   readonly chat: ChatService;
+  readonly work: ChatWorkService;
   readonly briefs: Briefs;
   readonly folderHold: FolderHold;
   readonly inbox: InboxService;
@@ -75,6 +78,8 @@ export interface ChatWorld {
   };
   /** Moves the project to an account of this kind: the next launch and the next `models` see it. */
   launchOn(kind: AgentAccountKind): void;
+  /** Puts a chat where it works in the builder's checkout, as a choice of Here does. */
+  here(chatId: ChatDto['id']): void;
   /** A chat in its tab at `tabPosition`. */
   open(tabPosition?: number): ChatDto;
   close(): Promise<void>;
@@ -167,6 +172,12 @@ export function chatWorld(
           }),
     },
   });
+  const work = createChatWorkService({
+    state,
+    engine,
+    log: silentLogger,
+    now: () => clock.now(),
+  });
   engine.register(
     'chat',
     chatHooks({
@@ -183,6 +194,9 @@ export function chatWorld(
       judgeOf: () => opts.judge ?? JudgeKind.Native,
       webSearchOf: (kind, model) => adapter.capabilities({ kind }, model).webSearch,
       clock,
+      firstChange: (chatId) => {
+        work.firstChange(chatId);
+      },
       ...(opts.tendb === undefined ? {} : { judge: opts.tendb({ store }) }),
     }),
   );
@@ -300,6 +314,7 @@ export function chatWorld(
     adapter,
     clock,
     chat,
+    work,
     briefs,
     folderHold,
     inbox,
@@ -311,6 +326,9 @@ export function chatWorld(
     terminal,
     launchOn(kind) {
       launched.kind = kind;
+    },
+    here(chatId) {
+      store.write((ctx) => setChatWork(ctx, chatId, null, { place: 'here' }));
     },
     open: (tabPosition = 0) => chat.create({ projectId: project.id, model: null, tabPosition }),
     async close() {

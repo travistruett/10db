@@ -16,7 +16,14 @@ import {
   TaskDto,
   TaskId,
 } from '@10db/contracts';
-import { chatMadeTask, getDecisionDto, getPrinciple, listInbox, patchConversation } from '@10db/db';
+import {
+  chatMadeTask,
+  getDecisionDto,
+  getPrinciple,
+  listInbox,
+  patchConversation,
+  setChatWork,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { apiClient } from '../../test/api-client';
@@ -419,6 +426,8 @@ describe("a chat's git tools through the daemon", () => {
 
   it('branches and commits what the turn edited with the builder’s identity, then refuses once the turn is over', async () => {
     const chat = await newChat();
+    // The git tools change the checkout, so the session works there.
+    running().state.write((ctx) => setChatWork(ctx, chat.id, null, { place: 'here' }));
     let token = '';
     let url = '';
     await agentTurn(chat, async (call, turn) => {

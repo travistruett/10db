@@ -235,6 +235,7 @@ import {
   chatHooks,
   createChatLiveSessions,
   createChatService,
+  createChatWorkService,
   doItHere,
   doItInCopy,
   finishSeals,
@@ -1804,6 +1805,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   takeoverService = takeover;
   const chatLive = createChatLiveSessions();
+  const chatWork = createChatWorkService({
+    state,
+    engine: exploreEngine,
+    log: logger.child({ component: 'chat-work' }),
+    now: () => clock.now(),
+  });
   exploreEngine.register(
     ConversationOwnerKind.Chat,
     chatHooks({
@@ -1825,6 +1832,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       webSearchOf: (kind, model) => adapter.capabilities({ kind }, model).webSearch,
       clock,
       judge,
+      firstChange: (chatId) => {
+        chatWork.firstChange(chatId);
+      },
     }),
   );
   const conversationFiles = createConversationFiles({

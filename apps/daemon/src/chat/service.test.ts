@@ -300,33 +300,6 @@ describe('the brief for Do It', () => {
     );
     await w.engine.settled(chat.conversationId);
   });
-  it("runs a send during the brief turn as the builder's own turn, with the folder, after the agent wrote", async () => {
-    w = chatWorld();
-    const chat = w.open();
-    const brief = gate();
-    w.adapter.shapeBehaviour = async () => {
-      await brief.promise;
-      return { text: 'Done.' };
-    };
-    w.chat.askBrief(chat.id);
-    await waitFor(() => w.engine.view(chat.conversationId).state === 'running');
-    // The agent's write ends the request while its read-only turn goes on.
-    w.briefs.write(chat.id, { title: 'T', brief: 'B' }, mintId('Session'));
-    const mine = gate();
-    w.adapter.shapeBehaviour = async () => {
-      await mine.promise;
-      return { text: 'Done.' };
-    };
-
-    say(chat.id, 'Just the logout');
-
-    await waitFor(() => w.folderHold.holdsTurn(chat.id));
-    expect(w.engine.view(chat.conversationId).state).toBe('running');
-    brief.release();
-    mine.release();
-    await w.engine.settled(chat.conversationId);
-  });
-
   it("Cancel stops only the brief's turn, never the builder's own", async () => {
     w = chatWorld();
     const chat = w.open();

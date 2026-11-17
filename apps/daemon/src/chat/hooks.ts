@@ -20,6 +20,7 @@ import {
   type AgentAccountKind,
   type ProjectId,
   type ChatId,
+  WorkPlace,
 } from '@10db/contracts';
 import {
   chatOfConversation,
@@ -32,6 +33,7 @@ import {
   listItems,
   touchChat,
   type ConversationItemRow,
+  type ChatRow,
   type ConversationRow,
 } from '@10db/db';
 import {
@@ -63,7 +65,7 @@ import {
   startingJudge,
 } from '../trust';
 import { digestText } from './brief';
-import { judgeChatCall, type ChatFolder } from './confinement';
+import { judgeChatCall, type ChatPlace } from './confinement';
 import { JUDGED_CHAT_TOOLS } from './git-rule';
 import type { ChatLiveSessions } from './live-sessions';
 import { chatSystemPrompt } from './prompt';
@@ -173,6 +175,8 @@ export interface ChatHooksDeps {
   readonly clock: Clock;
   /** Where the chat's tools find the session that calls them. */
   readonly live: ChatLiveSessions;
+  /** A reading session's first change: asks the builder where the work happens. */
+  readonly firstChange?: (chatId: ChatId) => void;
 }
 
 /** A builder message's words for the session: under its id, with each picture not sent as a block named by path. */
@@ -260,6 +264,11 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
     });
   };
 
+  // Whether the chat's session can write now: Here, while its turn holds the checkout; a branch, always.
+  const writesNow = (chat: ChatRow): boolean =>
+    chat.workPlace === WorkPlace.Branch ||
+    (chat.workPlace === WorkPlace.Here && deps.folderHold.holdsTurn(chat.id));
+
   return {
     freshAtContextPct: CHAT_FRESH_AT_CONTEXT_PCT,
 
@@ -270,14 +279,11 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         waiting.cancelled = true;
         pendingReleases.delete(chat.id);
       }
-      if (deps.folderHold.takeReadOnlyChoice(chat.id)) {
-        // The builder chose reading only: the turn reads even when the folder has freed, and says who held it.
-        const blockers = deps.folderHold.blockers(conv.projectId, {
-          kind: FolderAsker.ChatTurn,
-          chatId: chat.id,
-        });
-        notices.set(chat.id, blockers.length === 0 ? [] : [readOnlyNotice(blockers)]);
-        return { writes: false };
+      // Only a session working in the builder's checkout takes the hold. One that reads or is being asked holds
+      // nothing, and one on its own branch writes its own worktree.
+      if (chat.workPlace !== WorkPlace.Here) {
+        notices.set(chat.id, []);
+        return { writes: chat.workPlace === WorkPlace.Branch };
       }
       const taken = deps.folderHold.takeTurn(conv.projectId, chat.id);
       if (!taken.taken) {
@@ -372,16 +378,28 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         true,
         tendbReady,
       );
-      const writable = deps.folderHold.holdsTurn(chat.id);
-      const folder: ChatFolder = {
-        holds: () =>
-          deps.folderHold.holdsTurn(chat.id) && holdingSession.get(chat.id) === start.sessionId,
+      const writable = writesNow(chat);
+      const folder: ChatPlace = {
+        get place() {
+          return getChat(state.db, chat.id).workPlace;
+        },
+        holds: () => {
+          const place = getChat(state.db, chat.id).workPlace;
+          const current = holdingSession.get(chat.id) === start.sessionId;
+          if (place === WorkPlace.Here) return current && deps.folderHold.holdsTurn(chat.id);
+          if (place === WorkPlace.Branch) return current && running.has(chat.id);
+          return false;
+        },
+        current: () => holdingSession.get(chat.id) === start.sessionId,
         writable,
         heldBy: () =>
           deps.folderHold
             .blockers(conv.projectId, { kind: FolderAsker.ChatTurn, chatId: chat.id })
             .map((b) => holderWords(b.holder))
             .join(' and ') || 'something else',
+        root: launch.cwd,
+        checkout: launch.cwd,
+        firstChange: () => deps.firstChange?.(chat.id),
       };
       const limitNotes = createLimitNotes();
       const project = getProject(state.db, conv.projectId);
@@ -586,7 +604,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               }),
         },
         limits,
-        writes: deps.folderHold.holdsTurn(chat.id),
+        writes: writable,
         expiresAt: ready?.credentialsExpireAt ?? null,
         accountId: launch.account.accountId,
         model: launch.modelId,

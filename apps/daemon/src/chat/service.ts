@@ -31,6 +31,7 @@ import {
   type DoItBriefDto,
   type ProjectId,
   type ShapeModelOption,
+  WorkPlace,
 } from '@10db/contracts';
 import {
   archiveChat,
@@ -589,6 +590,8 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
   /** Whether a turn of this chat can't take Your folder now: something other than an attended chat holds it. */
   function mustWait(chat: ChatRow): boolean {
+    // Only a session working in the checkout takes the hold; one that reads, or has its own branch, never waits.
+    if (getChat(state.db, chat.id).workPlace !== WorkPlace.Here) return false;
     return (
       !deps.folderHold.holdsTurn(chat.id) &&
       deps.folderHold.blockers(chat.projectId, { kind: FolderAsker.ChatTurn, chatId: chat.id })
