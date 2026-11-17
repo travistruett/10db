@@ -165,6 +165,48 @@ describe('choosing Here', () => {
     expect((await next.done()).held).toBe(true);
   });
 
+  it('waits out a stop that has not settled, then carries on holding the checkout (row 10)', async () => {
+    world();
+    const { chat } = await choosing();
+    // The provider has not ended the interrupted turn: it ignores the abort until the test lets it.
+    let running: () => void = () => undefined;
+    const started = new Promise<void>((resolve) => {
+      running = resolve;
+    });
+    let endTurn: () => void = () => undefined;
+    w.adapter.shapeBehaviour = async () => {
+      running();
+      await new Promise<void>((resolve) => {
+        endTurn = resolve;
+      });
+      return { text: 'Stopped.' };
+    };
+    // Nor has it answered the interrupt.
+    let answer: () => void = () => undefined;
+    w.adapter.shapeInterruptReceipt = () =>
+      new Promise((resolve) => {
+        answer = () => {
+          resolve({ stillQueued: [] });
+        };
+      });
+    w.chat.send(chat.conversationId, { text: 'and the tests?', mentions: [], pictures: [] });
+    await started;
+    const next = carryOnTurn(chat);
+    const answered = choose('here', chat.id);
+    await waitFor(() => w.engine.view(chat.conversationId).state === 'stopping');
+    // Mid-stop: nothing has been chosen or posted, and the checkout is not held.
+    expect(getChat(w.state.db, chat.id).workPlace).toBe('choosing');
+    expect(carryOns(chat.conversationId)).toHaveLength(0);
+    expect(w.folderHold.holdsTurn(chat.id)).toBe(false);
+    answer();
+    endTurn();
+    expect((await answered).status).toBe(200);
+    const turn = await next.done();
+    expect(turn.answer).toEqual({ decision: 'allow' });
+    expect(turn.held).toBe(true);
+    expect(carryOns(chat.conversationId)).toHaveLength(1);
+  });
+
   it('keeps a message sent while choosing reading, with the bar still up (row 13)', async () => {
     world();
     const { chat } = await choosing();
