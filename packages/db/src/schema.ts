@@ -127,6 +127,7 @@ import type {
   Urgency,
   WorkspaceMode,
   WorkstreamId,
+  WorkPlace,
   WorkstreamState,
   WorkstreamStep,
   AnchorResult,
@@ -1675,10 +1676,23 @@ export const chats = sqliteTable(
     /** When the builder last sent or the agent last ended a turn; null until the first message. */
     lastActivityAt: text('last_activity_at'),
     archivedAt: text('archived_at'),
+    /** Null while the session only reads; otherwise where its work happens (`WorkPlace`). */
+    workPlace: text('work_place').$type<WorkPlace>(),
+    /** The worktree a branch session works in, named before the worktree exists. */
+    worktreePath: text('worktree_path'),
+    /** The branch the session works on. */
+    branch: text('branch'),
+    /** The commit the branch was cut from; the base of the session's changes. */
+    baseHead: text('base_head'),
+    /** When a refused first change last asked the builder where to work. */
+    workAskedAt: text('work_asked_at'),
   },
   (t) => [
     index('chats_project_idx').on(t.projectId),
     uniqueIndex('chats_conversation_unique').on(t.conversationId),
+    uniqueIndex('chats_worktree_path_unique')
+      .on(t.worktreePath)
+      .where(sql`worktree_path IS NOT NULL`),
   ],
 );
 

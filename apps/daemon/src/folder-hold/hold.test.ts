@@ -22,6 +22,7 @@ import {
   insertWorkstream,
   schema,
   seedProject,
+  setChatWork,
   type Store,
 } from '@10db/db';
 import { getEventListeners } from 'node:events';
@@ -243,6 +244,20 @@ describe('a turn', () => {
     expect(events.map((e) => [e.type, e.entityId])).toEqual([
       [EventType.FolderHoldChanged, project.id],
       [EventType.FolderHoldChanged, project.id],
+    ]);
+  });
+});
+
+describe('a branch session in the terminal', () => {
+  it('holds nothing when it has a worktree, and holds the checkout when it has none', () => {
+    const withTree = chat('Branch', ConversationState.TakenOver);
+    const noTree = chat('Gone', ConversationState.TakenOver);
+    store.write((ctx) => {
+      setChatWork(ctx, withTree, null, { place: 'branch', worktreePath: '/w/x', branch: 'x' });
+      setChatWork(ctx, noTree, null, { place: 'branch', branch: 'y' });
+    });
+    expect(newHold().holders(project.id).map(holderWords)).toEqual([
+      'the chat ‘Gone’ in your terminal',
     ]);
   });
 });
