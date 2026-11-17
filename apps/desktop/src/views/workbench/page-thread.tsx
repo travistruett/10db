@@ -9,7 +9,7 @@ import {
   type ToolCallView,
 } from '@10db/contracts';
 import { Button, Code, Group, Stack, Text } from '@mantine/core';
-import { ConversationList } from '../../conversation';
+import { ConversationList, ZoomablePicture } from '../../conversation';
 import type { LiveItems } from '../../conversation/live-items';
 import { useAllowed } from '../../conversation/row-state';
 import {
@@ -64,10 +64,9 @@ function MessagePicture({
       </Text>
     );
   return (
-    <img
+    <ZoomablePicture
       src={image.data}
       alt={file.name}
-      height={THUMBNAIL_HEIGHT}
       style={{
         display: 'block',
         height: THUMBNAIL_HEIGHT,

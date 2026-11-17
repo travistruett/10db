@@ -1,5 +1,6 @@
 import type { ToolCallView } from '@10db/contracts';
 import { Box, Button, ScrollArea, VisuallyHidden } from '@mantine/core';
+import { useMergedRef } from '@mantine/hooks';
 import { IconArrowDown } from '@tabler/icons-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
@@ -11,9 +12,12 @@ import {
   type ConversationArticle,
   type ConversationRow,
 } from './conversation-rows';
+import { useHiddenEdges } from '../shell/use-hidden-edges';
+import classes from './conversation-list.module.css';
 import type { ConversationEntry } from './entry';
 import { ConversationEntryView } from './entry-view';
 import { RowStateProvider } from './row-state';
+import { useListScrolled } from './list-scrolled';
 import { EditGroupRow, ToolCallCard, ToolGroupRow } from './tool-call-card';
 import { WorkRow } from './work-row';
 
@@ -204,6 +208,21 @@ function WindowedArticles({
     setAboveTail(above);
   }, []);
 
+  // Which ends hide messages: the bar above casts a shadow while the start is scrolled away, and the
+  // footer below while the end is.
+  const hidden = useHiddenEdges();
+  const viewportRef = useMergedRef(viewport, hidden.ref);
+  const reportScrolled = useListScrolled();
+  useEffect(() => {
+    reportScrolled?.(hidden.edges.top);
+  }, [reportScrolled, hidden.edges.top]);
+  useEffect(
+    () => () => {
+      reportScrolled?.(false);
+    },
+    [reportScrolled],
+  );
+
   const items = virtualizer.getVirtualItems();
   return (
     <Box
@@ -217,13 +236,16 @@ function WindowedArticles({
     >
       <ScrollArea
         style={{ flex: 1, minHeight: 0 }}
-        viewportRef={viewport}
+        viewportRef={viewportRef}
         viewportProps={{
           tabIndex: 0,
           role: 'group',
           'aria-label': 'Messages',
           'aria-busy': busy,
-          onScroll,
+          onScroll: () => {
+            onScroll();
+            hidden.onScroll();
+          },
         }}
       >
         <div style={{ position: 'relative', height: virtualizer.getTotalSize() }}>
@@ -262,6 +284,11 @@ function WindowedArticles({
           </Box>
         </div>
       </ScrollArea>
+      <div
+        aria-hidden="true"
+        className={classes['below']}
+        data-shown={hidden.edges.bottom || undefined}
+      />
       {aboveTail && (
         <Button
           size="compact-sm"

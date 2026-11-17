@@ -12,4 +12,6 @@ export interface PassWorkspaceProps {
   /** The selected page's task; null when none is. */
   readonly selected: TaskId | null;
   readonly onSelect: (taskId: TaskId) => void;
+  /** Add Page at the foot of the queue, where the pages are. */
+  readonly onAddPage: () => void;
 }

@@ -1,7 +1,12 @@
 import { useSyncExternalStore } from 'react';
 import type { FolderWhileHeld } from '@10db/contracts';
 import { z } from 'zod';
-import { EMPTY_DRAFT, type Draft } from '../../conversation/drafts';
+import {
+  applyDraftChange,
+  EMPTY_DRAFT,
+  type Draft,
+  type DraftChange,
+} from '../../conversation/drafts';
 
 // What the builder has typed in each tab and not sent: kept for the window, so a tab switch, a closed tab
 // that comes back, and a visit to another screen all find the words where they were left. A fresh tab's
@@ -11,8 +16,12 @@ import { EMPTY_DRAFT, type Draft } from '../../conversation/drafts';
 
 export const DRAFTS_KEY = 'tendb.sessions.drafts';
 
-/** A send a fresh tab asked its chat to make: how it runs when Your folder is held, when it was asked. */
+/**
+ * A send a fresh tab asked its chat to make: what it sends, since the fresh tab's input emptied as Send
+ * was pressed, and how it runs when Your folder is held, when it was asked.
+ */
 export interface SendRequest {
+  readonly draft: Draft;
   readonly folder?: FolderWhileHeld;
 }
 
@@ -60,7 +69,7 @@ class SessionDrafts {
   }
 
   /** The tab `key` should send its draft as soon as it is drawn. */
-  requestSend(key: string, request: SendRequest = {}): void {
+  requestSend(key: string, request: SendRequest): void {
     this.sends.set(key, request);
   }
 
@@ -100,12 +109,12 @@ export const draftKey = {
 } as const;
 
 /** The draft of the tab `key`, and a way to change it. */
-export function useSessionDraft(key: string): [Draft, (draft: Draft) => void] {
+export function useSessionDraft(key: string): [Draft, (change: DraftChange) => void] {
   const draft = useSyncExternalStore(store.subscribe, () => store.get(key));
   return [
     draft,
-    (next) => {
-      store.set(key, next);
+    (change) => {
+      store.set(key, applyDraftChange(store.get(key), change));
     },
   ];
 }
@@ -118,7 +127,7 @@ export const sessionDrafts = {
   move: (from: string, to: string): void => {
     store.move(from, to);
   },
-  requestSend: (key: string, request?: SendRequest): void => {
+  requestSend: (key: string, request: SendRequest): void => {
     store.requestSend(key, request);
   },
   takeSendRequest: (key: string): SendRequest | null => store.takeSendRequest(key),

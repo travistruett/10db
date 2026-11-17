@@ -90,8 +90,9 @@ describe('the composer’s input and a late failed text', () => {
     const { arrive, settle } = mount();
     fireEvent.change(input(), { target: { value: 'new message' } });
     fireEvent.keyDown(input(), { key: 'Enter', metaKey: true });
+    // The sent text left the input as Send was pressed, so only the failed one comes back.
     arrive('first message');
-    expect(input().value).toBe('first message\n\nnew message');
+    expect(input().value).toBe('first message');
 
     settle();
 

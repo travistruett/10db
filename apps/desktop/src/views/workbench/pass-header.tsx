@@ -9,7 +9,7 @@ import {
   type PassViewDto,
   type ProjectViewDto,
 } from '@10db/contracts';
-import { ActionIcon, Button, Group, Menu, Stack, Text, Title } from '@mantine/core';
+import { ActionIcon, Group, Menu, Stack, Text, Title } from '@mantine/core';
 import { IconDots } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { CloseProgress } from './close-progress';
@@ -46,7 +46,6 @@ export interface PassHeaderProps {
   readonly inbox: readonly InboxItemDto[];
   /** Now, in epoch milliseconds. */
   readonly now: number;
-  readonly onAddPage: () => void;
   /** Open Pull Request, shown once a page is signed off; without it there is none. */
   readonly pullRequest?: ReactNode;
   /** Why Open Pull Request is disabled, a line of its own under the header's row. */
@@ -71,12 +70,11 @@ function askingSince(view: PassViewDto, inbox: readonly InboxItemDto[]): string[
 }
 
 /**
- * One line with the project, the pass and its counts; Add Page, Open Pull Request once a page is
- * signed off, and a menu with Close Pass, Rename and Abandon Pass; the timing hint, dimmed, when it
+ * One line with the project, the pass and its counts; Open Pull Request once a page is signed off, and a menu with Close Pass, Rename and Abandon Pass; the timing hint, dimmed, when it
  * has something to say. While the pass closes its page actions wait and Abandon stays.
  */
 export function PassHeader(props: PassHeaderProps) {
-  const { project, view, inbox, now, onAddPage, pullRequest, pullRequestReason } = props;
+  const { project, view, inbox, now, pullRequest, pullRequestReason } = props;
   const { onClose, onRename, onAbandon } = props;
   const clock = { now, medianTurnMinutes: medianTurnMinutes(view.turns) };
   const statuses = view.pages.map((page) => pageStatus(page, inbox, clock, view).status);
@@ -109,9 +107,6 @@ export function PassHeader(props: PassHeaderProps) {
           {headerLine(project.name, view.pass.name, statuses)}
         </Title>
         <Group gap="xs" wrap="nowrap" style={{ flex: 'none', marginLeft: 'auto' }}>
-          <Button variant="default" size="xs" disabled={!open} onClick={onAddPage}>
-            Add Page
-          </Button>
           {signedOff ? pullRequest : null}
           <Menu position="bottom-end" withinPortal>
             <Menu.Target>

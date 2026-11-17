@@ -16,6 +16,7 @@ import {
   useContinueClose,
   useSendToAgent,
 } from '../../daemon/pass-close-queries';
+import { withoutTerminalCodes } from '../../conversation';
 import { useRestartPreview } from '../../daemon/preview-queries';
 import { CodeSpans } from '../../shell/code-spans';
 
@@ -220,7 +221,7 @@ function NoticeRow(props: NoticeRowProps) {
             overflowY: 'auto',
           }}
         >
-          {rest}
+          {withoutTerminalCodes(rest)}
         </Text>
       ) : null}
     </Stack>

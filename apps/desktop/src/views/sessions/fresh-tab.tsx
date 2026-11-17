@@ -5,7 +5,12 @@ import { useEffect, useRef, useState } from 'react';
 import { Composer } from '../../conversation/composer';
 import { CONVERSATION_WIDTH } from '../../conversation/conversation-layout';
 import { composerPhase } from '../../conversation/composer-phase';
-import { hasContent, type Draft } from '../../conversation/drafts';
+import {
+  applyDraftChange,
+  hasContent,
+  type Draft,
+  type DraftChange,
+} from '../../conversation/drafts';
 import { ModelMenu } from '../../conversation/model-menu';
 import { useProjectFolder } from '../../daemon/project-folder-queries';
 import {
@@ -17,7 +22,7 @@ import {
 import type { FreshTab as FreshTabState } from './fresh-tabs';
 import { keepingWords } from './kind-line';
 import { RecentSessions } from './recent-sessions';
-import { draftKey, useSessionDraft, type SendRequest } from './session-drafts';
+import { draftKey, sessionDrafts, useSessionDraft, type SendRequest } from './session-drafts';
 import { StartFrom } from './start-from';
 
 // Sessions UI spec §6.2: a tab that is not yet a chat. The chat is made at the first `@` or
@@ -95,7 +100,8 @@ export function FreshTab({
     return promise;
   };
 
-  const changeDraft = (next: Draft): void => {
+  const changeDraft = (change: DraftChange): void => {
+    const next = applyDraftChange(sessionDrafts.get(draftKey.fresh(tab.id)), change);
     setDraft(next);
     setCreateError(null);
     if (!OPEN_MENTION.test(next.text)) return;
@@ -171,13 +177,13 @@ export function FreshTab({
               : {
                   held: {
                     holders: keeping,
-                    onChoose: async (_draft: Draft, choice: FolderWhileHeld) => {
-                      await ensureChat({ folder: choice });
+                    onChoose: async (sent: Draft, choice: FolderWhileHeld) => {
+                      await ensureChat({ draft: sent, folder: choice });
                     },
                   },
                 })}
-            onSend={async () => {
-              await ensureChat({});
+            onSend={async (sent) => {
+              await ensureChat({ draft: sent });
             }}
             onStop={() => undefined}
             onRedo={() => undefined}

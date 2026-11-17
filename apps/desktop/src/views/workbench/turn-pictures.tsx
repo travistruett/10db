@@ -1,23 +1,27 @@
 import type { TaskScreenDto } from '@10db/contracts';
 import { Group, Stack, Text } from '@mantine/core';
+import { ZoomablePicture } from '../../conversation';
 import { useScreenPicture } from '../../daemon/screen-queries';
 import { screenAlt } from './screen-alt';
 
 // Workbench spec §4.2, §4.3, §10: pictures of the builder's app in a page's thread: the goal's earlier
 // pictures of the page and the before at the top, and each turn's under its reply. They stay on the Mac; the UI reads them by id with its token.
 
-/** One picture, read with the UI token; its alt text says the page, when, and the window. */
+/** One picture, read with the UI token, which a click enlarges; its alt text says the page, when, and the window. */
 export function ScreenPicture({
   screen,
   name,
   width = 320,
   fromGoal = false,
+  onOpenChange,
 }: {
   readonly screen: TaskScreenDto;
   readonly name: string;
   readonly width?: number;
   /** Taken for another task of the goal this page's task is in. */
   readonly fromGoal?: boolean;
+  /** Told when the enlarged picture opens and closes. */
+  readonly onOpenChange?: (open: boolean) => void;
 }) {
   const image = useScreenPicture(screen.id);
   const alt = screenAlt(name, screen, fromGoal);
@@ -34,10 +38,10 @@ export function ScreenPicture({
       </Text>
     );
   return (
-    <img
+    <ZoomablePicture
       src={image.data}
       alt={alt}
-      title={alt}
+      {...(onOpenChange === undefined ? {} : { onOpenChange })}
       style={{
         display: 'block',
         width,

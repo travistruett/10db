@@ -2,7 +2,7 @@ import type { ImageFormat } from '@10db/contracts';
 import { Button } from '@mantine/core';
 import { useState, type ReactNode, type RefObject } from 'react';
 import { Composer } from '../../conversation/composer';
-import { hasContent, type Draft } from '../../conversation/drafts';
+import { hasContent, type Draft, type DraftChange } from '../../conversation/drafts';
 import { pageComposerPhase, pagePhase } from './page-composer-phase';
 import type { PageStatus } from './page-status';
 
@@ -28,7 +28,7 @@ export interface PageComposerProps {
   readonly firstMessage: boolean;
   /** The page's draft, kept by the workspace per page. */
   readonly draft: Draft;
-  readonly onDraft: (draft: Draft) => void;
+  readonly onDraft: (change: DraftChange) => void;
   readonly actions: PageActions;
   /** Open Page, always on the left. */
   readonly openPage: ReactNode;
@@ -55,8 +55,11 @@ export function PageComposer({
 }: PageComposerProps) {
   const [signing, setSigning] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  // The input empties as Send is pressed; until the message reaches the page the composer is drawn as
+  // holding it, so Send stays the primary and Sign Off waits.
+  const [sending, setSending] = useState(0);
   const { phase, signOff } = pageComposerPhase(pagePhase(status), {
-    hasContent: hasContent(draft),
+    hasContent: hasContent(draft) || sending > 0,
     label,
     firstMessage,
   });
@@ -80,7 +83,14 @@ export function PageComposer({
       disabledReason={null}
       error={failure}
       locked={disabled}
-      onSend={actions.send}
+      onSend={async (sent) => {
+        setSending((n) => n + 1);
+        try {
+          await actions.send(sent);
+        } finally {
+          setSending((n) => n - 1);
+        }
+      }}
       onStop={actions.stop}
       onRedo={actions.redo}
       label={`Message to ${label}`}
@@ -91,7 +101,7 @@ export function PageComposer({
           <Button
             variant={signOff}
             loading={signing}
-            disabled={disabled}
+            disabled={disabled || sending > 0}
             onClick={() => {
               void signOffNow();
             }}

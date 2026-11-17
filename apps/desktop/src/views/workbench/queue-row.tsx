@@ -14,7 +14,7 @@ export interface QueueRowProps {
 
 /**
  * One page of the queue, drawn as a row of Factory's list (design review D13): a status dot, the page's
- * name, heavier when it waits on the builder, and one short state line. No border; a hairline under
+ * name, heavier when it waits on the builder, and its state line under the name. No border; a hairline under
  * the row; the selected row on the control fill; a row that needs nothing in dimmed text.
  */
 export function QueueRow({ row, current, onSelect, menu }: QueueRowProps) {
@@ -29,7 +29,7 @@ export function QueueRow({ row, current, onSelect, menu }: QueueRowProps) {
     >
       <UnstyledButton
         px="sm"
-        py={6}
+        py={8}
         aria-current={current ? 'true' : undefined}
         {...(row.dimmed ? { c: 'dimmed' } : {})}
         onClick={(event) => {
@@ -40,21 +40,23 @@ export function QueueRow({ row, current, onSelect, menu }: QueueRowProps) {
         }}
         style={{ display: 'block', flex: 1, minWidth: 0 }}
       >
-        <Group gap="sm" wrap="nowrap" align="baseline">
+        <Group gap="sm" wrap="nowrap" align="center">
           <StatusDot color={row.state.color} />
           <Text
             component="span"
             size="sm"
             fw={row.state.needsYou ? 500 : 400}
-            style={{ flex: 'none' }}
+            truncate="end"
+            style={{ minWidth: 0 }}
           >
             {row.page.label}
           </Text>
-          {/* The line wraps rather than cut: "Working · 4 min · median 6" outgrows the wide queue. */}
-          <Text component="span" size="xs" style={{ minWidth: 0 }}>
-            <CodeSpans text={row.state.line} />
-          </Text>
         </Group>
+        {/* The state goes under the name, beside the dot's column, so it has the row's width and wraps
+            there: "Working · 4 min · median 6" outgrows the queue beside a name. */}
+        <Text component="span" size="xs" display="block" pl={20} mt={2}>
+          <CodeSpans text={row.state.line} />
+        </Text>
       </UnstyledButton>
       {menu}
     </Group>

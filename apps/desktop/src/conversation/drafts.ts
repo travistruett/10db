@@ -10,6 +10,17 @@ export interface Draft {
 
 export const EMPTY_DRAFT: Draft = { text: '', mentions: [], pictures: [] };
 
+/**
+ * A change to a draft: the new draft, or how to make it from the draft as it stands when the change
+ * lands, for a change that finishes after the screen may have moved on (a send that fails late).
+ */
+export type DraftChange = Draft | ((now: Draft) => Draft);
+
+/** The draft `change` makes of `now`. */
+export function applyDraftChange(now: Draft, change: DraftChange): Draft {
+  return typeof change === 'function' ? change(now) : change;
+}
+
 /** Whether the draft holds anything to send: words or a picture. */
 export function hasContent(draft: Draft): boolean {
   return draft.text.trim() !== '' || draft.pictures.length > 0;
@@ -27,10 +38,31 @@ export function withoutSent(typed: string, sent: string): string {
   return text.endsWith(tail) ? text.slice(0, -tail.length) : typed;
 }
 
-/** What the composer holds once `sent` has gone: whatever was added to it while the send was on its way. */
+/** What the composer holds once `sent` has gone: whatever was added to it since. */
 export function afterSend(now: Draft, sent: Draft): Draft {
   const text = withoutSent(now.text, sent.text.trim());
   const pictures = now.pictures.filter((picture) => !sent.pictures.includes(picture));
   if (text.trim() === '' && pictures.length === 0) return EMPTY_DRAFT;
+  return { text, mentions: mentionText(text).mentions, pictures };
+}
+
+/**
+ * What the composer holds once the send of `sent` fails: its words and pictures back where they were,
+ * ahead of whatever was typed or added while the send was on its way, since the input emptied as Send
+ * was pressed.
+ */
+export function afterFailedSend(now: Draft, sent: Draft): Draft {
+  const typed = now.text.trim();
+  const words = sent.text.trim();
+  const text =
+    words === ''
+      ? now.text
+      : typed === '' || typed === words
+        ? sent.text
+        : `${sent.text.trimEnd()}\n\n${now.text}`;
+  const pictures = [
+    ...sent.pictures,
+    ...now.pictures.filter((picture) => !sent.pictures.includes(picture)),
+  ];
   return { text, mentions: mentionText(text).mentions, pictures };
 }

@@ -21,7 +21,7 @@ const pageAreas: AreaDef[] = [
 const withPages = projectViewDto({ name: 'ampsio', areas: pageAreas });
 
 /** Stands in for the pass's workspace: says what it was handed and selects the first page. */
-function Workspace({ view, selected, onSelect }: PassWorkspaceProps) {
+function Workspace({ view, selected, onSelect, onAddPage }: PassWorkspaceProps) {
   const first = view.pages[0];
   return (
     <div data-testid="workspace">
@@ -36,6 +36,9 @@ function Workspace({ view, selected, onSelect }: PassWorkspaceProps) {
           Select first
         </button>
       ) : null}
+      <button type="button" onClick={onAddPage}>
+        Add Page
+      </button>
     </div>
   );
 }
@@ -186,7 +189,7 @@ describe('WorkbenchScreen', () => {
     expect((settings as HTMLInputElement).checked).toBe(true);
   });
 
-  it('with a pass open, draws its header over its workspace, handing it the selection', async () => {
+  it('with a pass open, draws its header over its workspace, handing it the selection and Add Page', async () => {
     const { ready, working } = pagesByStatus();
     const live: PassViewDto = passViewDto({ pages: [ready, working] });
     const { onSelect } = await draw({ live, search: { task: working.taskId } });
