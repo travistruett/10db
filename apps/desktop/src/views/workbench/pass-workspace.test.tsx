@@ -50,17 +50,19 @@ afterEach(() => {
 async function renderWorkspace(selected: (pages: Pages) => TaskId | null = () => null) {
   const pages = pagesByStatus();
   const onSelect = vi.fn();
+  const onAddPage = vi.fn();
   renderWithDaemon(
     <PassWorkspace
       view={passViewDto({ pages: Object.values(pages) })}
       inbox={[askItem(pages.asks)]}
       project={projectViewDto()}
       selected={selected(pages)}
+      onAddPage={onAddPage}
       onSelect={onSelect}
     />,
   );
   await screen.findByRole('list', { name: 'Open pages' });
-  return { pages, onSelect };
+  return { pages, onSelect, onAddPage };
 }
 
 type Pages = ReturnType<typeof pagesByStatus>;
@@ -105,6 +107,7 @@ describe('PassWorkspace queue', () => {
         inbox={[askItem(pages.asks)]}
         project={projectViewDto()}
         selected={null}
+        onAddPage={vi.fn()}
         onSelect={vi.fn()}
       />,
     );
@@ -124,6 +127,14 @@ describe('PassWorkspace queue', () => {
     expect(screen.getByRole('button', { name: /^Billing/ }).textContent).toMatch(
       /^BillingWorking · changing · 4 min/,
     );
+  });
+
+  it("offers Add Page at the queue's foot, outside the rows J and K step through", async () => {
+    const { onAddPage } = await renderWorkspace();
+    const rows = queueRows().length;
+    fireEvent.click(screen.getByRole('button', { name: 'Add Page' }));
+    expect(onAddPage).toHaveBeenCalledTimes(1);
+    expect(queueRows()).toHaveLength(rows);
   });
 
   it('marks the selected page current and selects another on a click', async () => {
@@ -216,6 +227,7 @@ describe('PassWorkspace working line', () => {
         inbox={[]}
         project={projectViewDto()}
         selected={working.taskId}
+        onAddPage={vi.fn()}
         onSelect={() => undefined}
       />
     );
@@ -241,6 +253,7 @@ describe('PassWorkspace working line', () => {
         inbox={[]}
         project={projectViewDto()}
         selected={selected}
+        onAddPage={vi.fn()}
         onSelect={() => undefined}
       />
     );
@@ -291,6 +304,7 @@ describe('PassWorkspace sign-off', () => {
         inbox={[]}
         project={projectViewDto()}
         selected={signed.taskId}
+        onAddPage={vi.fn()}
         onSelect={vi.fn()}
       />,
     );
@@ -363,6 +377,7 @@ describe('PassWorkspace composer', () => {
           inbox={[]}
           project={projectViewDto()}
           selected={selected}
+          onAddPage={vi.fn()}
           onSelect={setSelected}
         />
       );
@@ -410,6 +425,7 @@ describe('PassWorkspace composer', () => {
           inbox={[]}
           project={projectViewDto()}
           selected={selected}
+          onAddPage={vi.fn()}
           onSelect={setSelected}
         />
       );
@@ -524,6 +540,7 @@ describe('PassWorkspace page actions', () => {
         inbox={[]}
         project={projectViewDto()}
         selected={ready.taskId}
+        onAddPage={vi.fn()}
         onSelect={vi.fn()}
       />,
     );
@@ -566,6 +583,7 @@ describe('PassWorkspace page actions', () => {
         inbox={[]}
         project={projectViewDto()}
         selected={pages.ready.taskId}
+        onAddPage={vi.fn()}
         onSelect={vi.fn()}
       />,
     );
@@ -601,6 +619,7 @@ describe('PassWorkspace page actions', () => {
           inbox={[]}
           project={projectViewDto()}
           selected={signing.taskId}
+          onAddPage={vi.fn()}
           onSelect={vi.fn()}
         />,
       );
@@ -647,6 +666,7 @@ describe('PassWorkspace page actions', () => {
         inbox={[]}
         project={projectViewDto()}
         selected={ready.taskId}
+        onAddPage={vi.fn()}
         onSelect={vi.fn()}
       />,
     );
@@ -706,6 +726,7 @@ describe('PassWorkspace window focus', () => {
           inbox={[askItem(pages.asks)]}
           project={projectViewDto()}
           selected={selected}
+          onAddPage={vi.fn()}
           onSelect={setSelected}
         />
       );
@@ -743,7 +764,7 @@ describe('PassWorkspace window focus', () => {
 
 describe('PassWorkspace while the pass is not open', () => {
   it.each(['ABANDONING', 'CLOSING'] as const)(
-    'while %s, holds every page action: no message, no Retry Turn, no row menu',
+    'while %s, holds every page action: no message, no Retry Turn, no row menu, no Add Page',
     async (state) => {
       const pages = pagesByStatus();
       renderWithDaemon(
@@ -752,6 +773,7 @@ describe('PassWorkspace while the pass is not open', () => {
           inbox={[]}
           project={projectViewDto()}
           selected={pages.failed.taskId}
+          onAddPage={vi.fn()}
           onSelect={vi.fn()}
         />,
       );
@@ -759,6 +781,7 @@ describe('PassWorkspace while the pass is not open', () => {
       expect(input).toHaveProperty('disabled', true);
       expect(screen.queryByRole('button', { name: 'Retry Turn' })).toBeNull();
       expect(screen.queryByRole('button', { name: /^More actions for/ })).toBeNull();
+      expect(screen.getByRole('button', { name: 'Add Page' })).toHaveProperty('disabled', true);
     },
   );
 });
@@ -825,6 +848,7 @@ describe('PassWorkspace Take Out', () => {
         inbox={[]}
         project={projectViewDto()}
         selected={pages.ready.taskId}
+        onAddPage={vi.fn()}
         onSelect={vi.fn()}
       />,
     );
@@ -858,6 +882,7 @@ describe('PassWorkspace Take Out', () => {
         inbox={[]}
         project={projectViewDto()}
         selected={pages.ready.taskId}
+        onAddPage={vi.fn()}
         onSelect={vi.fn()}
       />,
     );
@@ -919,6 +944,7 @@ describe('PassWorkspace Take Out', () => {
         inbox={[]}
         project={projectViewDto()}
         selected={pages.ready.taskId}
+        onAddPage={vi.fn()}
         onSelect={vi.fn()}
       />
     );
@@ -1010,6 +1036,7 @@ describe('PassWorkspace Open Page', () => {
         inbox={[]}
         project={projectViewDto({ appUrl: 'http://localhost:8800' })}
         selected={pages.working.taskId}
+        onAddPage={vi.fn()}
         onSelect={vi.fn()}
       />,
     );
@@ -1041,6 +1068,7 @@ describe('PassWorkspace labels', () => {
         inbox={[]}
         project={projectViewDto()}
         selected={plan.taskId}
+        onAddPage={vi.fn()}
         onSelect={vi.fn()}
       />,
     );
@@ -1098,6 +1126,7 @@ describe('PassWorkspace keys', () => {
           inbox={[]}
           project={projectViewDto()}
           selected={selected}
+          onAddPage={vi.fn()}
           onSelect={setSelected}
         />
       );
@@ -1122,6 +1151,7 @@ describe('PassWorkspace keys', () => {
           inbox={[]}
           project={projectViewDto()}
           selected={selected}
+          onAddPage={vi.fn()}
           onSelect={setSelected}
         />
       );
@@ -1155,6 +1185,7 @@ describe('PassWorkspace keys', () => {
           inbox={[]}
           project={projectViewDto()}
           selected={selected}
+          onAddPage={vi.fn()}
           onSelect={setSelected}
         />
       );
@@ -1177,6 +1208,7 @@ describe('PassWorkspace keys', () => {
         inbox={[]}
         project={projectViewDto({ appUrl: 'http://localhost:8800' })}
         selected={pages.ready.taskId}
+        onAddPage={vi.fn()}
         onSelect={vi.fn()}
       />,
     );
@@ -1205,6 +1237,7 @@ describe('PassWorkspace announcer', () => {
         inbox={[askItem(pages.asks)]}
         project={projectViewDto()}
         selected={pages.working.taskId}
+        onAddPage={vi.fn()}
         onSelect={vi.fn()}
       />
     );
@@ -1287,6 +1320,7 @@ describe('PassWorkspace question in place', () => {
         inbox={[ask]}
         project={projectViewDto()}
         selected={pages.asks.taskId}
+        onAddPage={vi.fn()}
         onSelect={vi.fn()}
       />,
     );
@@ -1320,6 +1354,7 @@ describe('PassWorkspace question in place', () => {
         inbox={inbox}
         project={projectViewDto()}
         selected={asks.taskId}
+        onAddPage={vi.fn()}
         onSelect={vi.fn()}
       />
     );

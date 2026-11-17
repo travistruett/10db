@@ -1,5 +1,6 @@
 import { PassState, type TaskId } from '@10db/contracts';
-import { Box, Flex } from '@mantine/core';
+import { Box, Button, Flex } from '@mantine/core';
+import { IconPlus } from '@tabler/icons-react';
 import { useViewportSize } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
 import { markPassNotificationsActed, shownPassNotifications } from '../../desktop/notify-pass';
@@ -11,7 +12,7 @@ import { focusTarget } from './focus-target';
 import { PagePane } from './page-pane';
 import { PrButton } from './pr-button';
 import type { PassWorkspaceProps } from './pass-workspace-props';
-import { QueueList } from './queue-list';
+import { QUEUE_ATTRIBUTE, QueueList } from './queue-list';
 import { queueRows, shownRow } from './queue-rows';
 import { TakeOutModal } from './take-out-modal';
 import { useWorkbenchKeys } from './use-workbench-keys';
@@ -30,7 +31,8 @@ const CLOCK_TICK_MS = 30_000;
  * it. With no page selected the thread shows the queue's first page. Each page keeps its own draft,
  * after the Workbench is left too.
  */
-export function PassWorkspace({ view, inbox, project, selected, onSelect }: PassWorkspaceProps) {
+export function PassWorkspace(props: PassWorkspaceProps) {
+  const { view, inbox, project, selected, onSelect, onAddPage } = props;
   const now = useNow(CLOCK_TICK_MS);
   const layout = workbenchLayout(useViewportSize().width);
   const rows = queueRows(view, inbox, now);
@@ -84,7 +86,9 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
   const move = (delta: 1 | -1): void => {
     // The rows' own buttons, not their menus.
     const buttons = [
-      ...(queue.current?.querySelectorAll<HTMLButtonElement>('button:not([aria-haspopup])') ?? []),
+      ...(queue.current?.querySelectorAll<HTMLButtonElement>(
+        `[${QUEUE_ATTRIBUTE}] button:not([aria-haspopup])`,
+      ) ?? []),
     ];
     const focused = buttons.findIndex((button) => button === document.activeElement);
     const from = focused >= 0 ? focused : rows.findIndex((row) => row === shown);
@@ -101,7 +105,9 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
     // Escape in a field goes back to the shown page's row, where J and K go on.
     [WorkbenchKey.LeaveField]: () => {
       const current = queue.current?.querySelector<HTMLButtonElement>('button[aria-current]');
-      const first = queue.current?.querySelector<HTMLButtonElement>('button:not([aria-haspopup])');
+      const first = queue.current?.querySelector<HTMLButtonElement>(
+        `[${QUEUE_ATTRIBUTE}] button:not([aria-haspopup])`,
+      );
       (current ?? first)?.focus();
     },
     [WorkbenchKey.NextWaiting]: () => {
@@ -130,6 +136,21 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
           onSelect={onSelect}
           onTakeOut={view.pass.state === PassState.Open ? setTakingOut : null}
         />
+        {/* A page is added where the pages are: an outline at the list's foot, quieter than a row. */}
+        <Box p="xs">
+          <Button
+            variant="default"
+            size="xs"
+            fullWidth
+            justify="flex-start"
+            leftSection={<IconPlus size={14} stroke={1.5} />}
+            disabled={view.pass.state !== PassState.Open}
+            onClick={onAddPage}
+            style={{ borderStyle: 'dashed', background: 'transparent', fontWeight: 400 }}
+          >
+            Add Page
+          </Button>
+        </Box>
         <Announcer rows={rows} />
       </Box>
       {shown === null ? null : (

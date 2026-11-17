@@ -230,9 +230,6 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
         view={live}
         inbox={inbox}
         now={now}
-        onAddPage={() => {
-          setDialog('add-page');
-        }}
         pullRequest={<PrButton view={live} />}
         pullRequestReason={<PrReason view={live} />}
         onClose={() => {
@@ -246,7 +243,16 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
         }}
       />
       <HeaderNotices view={live} inbox={inbox} />
-      {renderWorkspace({ view: live, inbox, project, selected: search.task ?? null, onSelect })}
+      {renderWorkspace({
+        view: live,
+        inbox,
+        project,
+        selected: search.task ?? null,
+        onSelect,
+        onAddPage: () => {
+          setDialog('add-page');
+        },
+      })}
       {dialog === 'add-page' ? (
         <AddPageModal
           project={project}

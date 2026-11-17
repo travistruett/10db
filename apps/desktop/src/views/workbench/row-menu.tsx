@@ -27,7 +27,7 @@ export function RowMenu({ label, onTakeOut }: RowMenuProps) {
       <Menu.Dropdown>
         <MenuAction
           label="Remove"
-          byline="Stop working on this page. Its changes leave your folder and wait on its Board task."
+          byline="Take it out of this pass. Its changes move to its Board task."
           onClick={onTakeOut}
         />
       </Menu.Dropdown>

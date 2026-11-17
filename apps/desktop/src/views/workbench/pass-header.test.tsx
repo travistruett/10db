@@ -51,7 +51,6 @@ function draw(view: PassViewDto, overrides: Partial<PassHeaderProps> = {}) {
     view,
     inbox: [],
     now,
-    onAddPage: vi.fn(),
     pullRequest: <button type="button">Open Pull Request</button>,
     pullRequestReason: <p>ampsio has no origin</p>,
     onClose: vi.fn(),
@@ -70,8 +69,6 @@ describe('PassHeader', () => {
     const { ready, working } = pagesByStatus();
     const props = draw(passViewDto({ pages: [ready, working] }));
     expect(screen.getByText('ampsio · Settings pass · 1 ready · 1 working')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Add Page' }));
-    expect(props.onAddPage).toHaveBeenCalledTimes(1);
     // No page is signed off, so there is nothing to open a pull request for.
     expect(screen.queryByRole('button', { name: 'Open Pull Request' })).toBeNull();
     expect(screen.queryByText('ampsio has no origin')).toBeNull();
@@ -120,7 +117,6 @@ describe('PassHeader', () => {
     expect(
       within(screen.getByRole('status')).getByText('Running the gate in your folder…'),
     ).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Add Page' })).toHaveProperty('disabled', true);
     fireEvent.click(menu());
     const close = await screen.findByRole('menuitem', { name: 'Finish', hidden: true });
     expect(close.hasAttribute('disabled')).toBe(true);
