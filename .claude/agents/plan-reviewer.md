@@ -22,5 +22,9 @@ vertical slice, or the plan says where the two first run together against the re
 any review of either; and every flow with asynchronous steps that other events can interrupt (a
 message, a stop, a restart, another flow taking over) has a table of its states against those
 events with the outcome of each, so races are designed once instead of found one per review round.
+In a plan of an index and task cards (`AGENTS.md`), each card stands alone: it names its files, quotes
+the Interfaces signatures it implements or calls exactly as the index has them, lists the state-table rows
+it covers and its tests, and names the spec sections it implements by heading; every spec requirement in
+scope and every state-table row lands on a card.
 Report findings ranked by the damage they would do if executed as written, each with the
 section and a concrete consequence.

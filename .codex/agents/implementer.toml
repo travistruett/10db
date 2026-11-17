@@ -1,7 +1,7 @@
 # Codex binding of the `implementer` role. The body lives in .claude/agents/implementer.md, the
 # one source of truth for both tools; this file only pins the model.
 name = "implementer"
-description = "Executes one task from a plan in docs/superpowers/plans/, test first, and commits it. Dispatch with the plan path and the task number."
+description = "Executes one task from a plan in docs/superpowers/plans/, test first, and commits it. Dispatch with the plan index path and the task's card."
 model = "gpt-5.6-sol"
 model_reasoning_effort = "medium"
 developer_instructions = """
