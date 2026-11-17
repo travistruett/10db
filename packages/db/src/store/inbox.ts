@@ -68,7 +68,10 @@ function copyForOf(row: typeof schema.inboxItems.$inferSelect): string[] {
 }
 
 /** Every column except `foldKey` and `ruleAssignees`, which stay internal to routing and folding. */
-function toDto(db: DbReader, row: typeof schema.inboxItems.$inferSelect): InboxItemDto {
+export function toInboxItemDto(
+  db: DbReader,
+  row: typeof schema.inboxItems.$inferSelect,
+): InboxItemDto {
   return {
     id: row.id,
     projectId: row.projectId,
@@ -161,16 +164,17 @@ export function insertInboxItem(ctx: WriteContext, newItem: NewInboxItem): Inbox
     entityId: row.id,
     data: { kind: item.kind, projectId: item.projectId },
   });
-  return toDto(ctx.tx, row);
+  return toInboxItemDto(ctx.tx, row);
 }
 
 export function getInboxItem(db: DbReader, id: InboxItemId): InboxItemDto {
   const row = db.select().from(schema.inboxItems).where(eq(schema.inboxItems.id, id)).get();
   if (!row) throw new NotFoundError('inbox item', id);
-  return toDto(db, row);
+  return toInboxItemDto(db, row);
 }
 
-const URGENCY_ORDER = sql`CASE ${schema.inboxItems.urgency} WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END`;
+/** Most urgent first, as the Open list is ordered. */
+export const INBOX_URGENCY_ORDER = sql`CASE ${schema.inboxItems.urgency} WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END`;
 
 /**
  * The inbox, most urgent and then oldest first. With `recent`, only that many items instead, the most
@@ -190,13 +194,13 @@ export function listInbox(
   const rows =
     filter.recent === undefined
       ? query
-          .orderBy(URGENCY_ORDER, asc(schema.inboxItems.createdAt), asc(schema.inboxItems.id))
+          .orderBy(INBOX_URGENCY_ORDER, asc(schema.inboxItems.createdAt), asc(schema.inboxItems.id))
           .all()
       : query
           .orderBy(desc(schema.inboxItems.updatedAt), desc(schema.inboxItems.id))
           .limit(filter.recent)
           .all();
-  return rows.map((row) => toDto(db, row));
+  return rows.map((row) => toInboxItemDto(db, row));
 }
 
 /** Every card still marked as waiting for triage, in any state: the start sweep settles them. */
@@ -207,7 +211,7 @@ export function listPendingTriage(db: DbReader): InboxItemDto[] {
     .where(eq(schema.inboxItems.routedBy, RoutedBy.TriagePending))
     .orderBy(asc(schema.inboxItems.createdAt), asc(schema.inboxItems.id))
     .all()
-    .map((row) => toDto(db, row));
+    .map((row) => toInboxItemDto(db, row));
 }
 
 export function findOpenByFoldKey(
@@ -226,7 +230,7 @@ export function findOpenByFoldKey(
       ),
     )
     .get();
-  return row ? toDto(db, row) : undefined;
+  return row ? toInboxItemDto(db, row) : undefined;
 }
 
 /** The open card that asks the builder about a proposal, if it is still open. */
@@ -245,7 +249,7 @@ export function findOpenProposalCard(
       ),
     )
     .get();
-  return row ? toDto(db, row) : undefined;
+  return row ? toInboxItemDto(db, row) : undefined;
 }
 
 /** The states of a card the builder answered, whether or not the answer has been delivered. */
@@ -386,7 +390,7 @@ export function openItemsForWorkstream(db: DbReader, workstreamId: WorkstreamId)
     )
     .orderBy(asc(schema.inboxItems.createdAt), asc(schema.inboxItems.id))
     .all()
-    .map((row) => toDto(db, row));
+    .map((row) => toInboxItemDto(db, row));
 }
 
 /** A card the builder answered, as a reviewer of its task is shown it. */

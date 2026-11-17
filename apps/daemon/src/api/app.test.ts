@@ -654,21 +654,45 @@ describe('API', () => {
     expect((await app(services).request('/inbox?state=NOPE', auth)).status).toBe(400);
   });
 
-  it('passes a recent count to the inbox list, and rejects one out of range', async () => {
-    const seen: (number | null)[] = [];
+  it('reads the inbox page query and hands it to the page service', async () => {
+    const seen: unknown[] = [];
+    const project = mintId('Project');
     const services = stubServices({
-      listInbox: ({ recent }) => {
-        seen.push(recent);
-        return [];
+      pageInbox: (q) => {
+        seen.push(q);
+        return { items: [], total: 0, page: q.page, pageSize: q.pageSize };
       },
     });
-    expect((await app(services).request('/inbox?state=RESOLVED&recent=100', auth)).status).toBe(
-      200,
+    const res = await app(services).request(
+      `/inbox/page?state=resolved&project=${project}&kind=question&outcome=slack&sort=title&dir=desc&page=2&pageSize=50`,
+      auth,
     );
-    expect((await app(services).request('/inbox', auth)).status).toBe(200);
-    expect(seen).toEqual([100, null]);
-    for (const bad of ['0', '1001', 'x', '2.5'])
-      expect((await app(services).request(`/inbox?recent=${bad}`, auth)).status).toBe(400);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ items: [], total: 0, page: 2, pageSize: 50 });
+    expect(seen).toEqual([
+      {
+        state: 'resolved',
+        project,
+        kind: 'question',
+        outcome: 'slack',
+        sort: 'title',
+        dir: 'desc',
+        page: 2,
+        pageSize: 50,
+      },
+    ]);
+  });
+
+  it.each([
+    ['no state', '/inbox/page'],
+    ['an unknown state', '/inbox/page?state=RESOLVED'],
+    ['an unknown kind', '/inbox/page?state=open&kind=nope'],
+    ['a page size of 101', '/inbox/page?state=resolved&pageSize=101'],
+    ['an unknown key', '/inbox/page?state=resolved&recent=100'],
+  ])('answers 400 for the inbox page with %s without reaching a service', async (_name, path) => {
+    const services = stubServices({ pageInbox: track('pageInbox') });
+    expect((await app(services).request(path, auth)).status).toBe(400);
+    expect(reached).toEqual([]);
   });
 
   it('keeps the CORS allow-list', async () => {

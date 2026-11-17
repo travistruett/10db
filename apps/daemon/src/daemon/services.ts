@@ -82,6 +82,7 @@ import {
   listEventsAfter,
   listGoalSummaries,
   listInbox,
+  pageInbox,
   listModelProfiles,
   listPeople,
   listPersonas,
@@ -738,11 +739,8 @@ export function createServices(deps: {
       deps.scheduler.requestTick();
       return ws;
     },
-    listInbox: ({ states, recent }) =>
-      listInbox(db, {
-        ...(states ? { states } : {}),
-        ...(recent !== null ? { recent } : {}),
-      }),
+    listInbox: ({ states }) => listInbox(db, states ? { states } : {}),
+    pageInbox: (query) => pageInbox(db, query),
     answerInbox(id, answer) {
       const item = deps.inbox.answer(id, answer);
       deps.scheduler.requestTick();

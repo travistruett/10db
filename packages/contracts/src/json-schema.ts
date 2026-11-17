@@ -125,6 +125,7 @@ import {
 import { GithubSigninDto, GithubStatusDto } from './github';
 import { DecisionModelListDto } from './decision-models';
 import { DecisionStatsListDto } from './decision-stats';
+import { InboxPageDto, InboxPageQuery } from './inbox-page';
 import {
   JudgeCallDto,
   JudgeCallsPageDto,
@@ -419,6 +420,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'judge-call-dto': JudgeCallDto,
   'judge-calls-page-dto': JudgeCallsPageDto,
   'judge-calls-page-query': JudgeCallsPageQuery,
+  'inbox-page-dto': InboxPageDto,
+  'inbox-page-query': InboxPageQuery,
   'openrouter-sync-status-dto': OpenRouterSyncStatusDto,
   'judge-config-patch': JudgeConfigPatch,
   'judge-status-dto': JudgeStatusDto,

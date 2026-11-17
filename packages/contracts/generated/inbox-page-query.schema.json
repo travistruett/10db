@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "state": {
+      "type": "string",
+      "enum": [
+        "open",
+        "waiting",
+        "resolved"
+      ]
+    },
+    "project": {
+      "type": "string",
+      "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "question",
+        "permission",
+        "proposal",
+        "review",
+        "flag",
+        "check",
+        "plan",
+        "playbook_move_report"
+      ]
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "slack",
+        "10db",
+        "answered"
+      ]
+    },
+    "person": {
+      "type": "string",
+      "pattern": "^psn_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "sort": {
+      "type": "string",
+      "enum": [
+        "updatedAt",
+        "createdAt",
+        "kind",
+        "title",
+        "sentAt"
+      ]
+    },
+    "dir": {
+      "type": "string",
+      "enum": [
+        "asc",
+        "desc"
+      ]
+    },
+    "page": {
+      "default": 1,
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "pageSize": {
+      "default": 25,
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100
+    }
+  },
+  "required": [
+    "state"
+  ],
+  "additionalProperties": false
+}

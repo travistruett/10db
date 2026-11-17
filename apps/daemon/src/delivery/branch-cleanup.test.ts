@@ -11,10 +11,13 @@ import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
 import { systemProcesses } from '../recovery';
 import {
+  batchBranchName,
+  createBatchStarter,
   createBranchCardAnswers,
   createPrWatch,
   recoverBatches,
   removeMergedBranches,
+  type DeliveryJobs,
   type PrWatch,
 } from './index';
 import { removeBranch } from './branch-cleanup';
@@ -544,6 +547,21 @@ describe('the sweep at startup', () => {
     expect(card.body).not.toContain(batch.branch ?? '?');
     expect(exists('10db/stray-one')).toBe(true);
     expect(exists('10db/stray-two')).toBe(true);
+  });
+
+  it('does not list the branch a batch still being cut has made but not yet recorded', async () => {
+    const noJobs: DeliveryJobs = {
+      run: () => undefined,
+      idle: () => Promise.resolve(),
+      pending: () => 0,
+      stop: () => Promise.resolve(),
+    };
+    const started = createBatchStarter({ ...h.ctx, jobs: noJobs }).startTask(h.addTask('Alpha').id);
+    const cutting = getBatch(h.store.db, started.id);
+    expect(cutting).toMatchObject({ state: 'CUTTING', branch: null });
+    h.git$('branch', batchBranchName(cutting.title, cutting.id));
+    await listStrayBranches(h.ctx);
+    expect(h.cards()).toEqual([]);
   });
 
   /**
