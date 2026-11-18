@@ -1,6 +1,7 @@
 import {
   CHAT_DEFAULT_TITLE,
   ConflictError,
+  ChatGitStep,
   Delivery,
   WorkPlace,
   type ChatCommitRequest,
@@ -29,7 +30,12 @@ export interface TitleRowGitDeps extends GitStepsDeps {
   readonly git: GitStepsDeps['git'] &
     Pick<
       Git,
-      'currentBranch' | 'changedPaths' | 'trackingTip' | 'localBranches' | 'moveCommitsToBranch'
+      | 'currentBranch'
+      | 'changedPaths'
+      | 'trackingTip'
+      | 'localBranches'
+      | 'moveCommitsToBranch'
+      | 'mergeIntoBranch'
     >;
 }
 
@@ -45,6 +51,11 @@ export interface TitleRowGit {
    * branch of their own and the base goes back to its origin.
    */
   openPullRequest(chatId: ChatId, signal: AbortSignal): Promise<ChatWorkStateDto>;
+  /**
+   * Merges the session's pull request, or on a local project its branch into the base branch of the builder's
+   * checkout, which must be clean and on the base. A conflict writes nothing.
+   */
+  merge(chatId: ChatId, signal: AbortSignal): Promise<ChatWorkStateDto>;
 }
 
 const MOVING_WORDS = 'Wait for the move to finish.';
@@ -168,7 +179,71 @@ export function createTitleRowGit(deps: TitleRowGitDeps): TitleRowGit {
     return name;
   }
 
+  /** A local merge into the builder's checkout: reserved for the step, whoever the session is. */
+  async function mergeLocally(chatId: ChatId, signal: AbortSignal): Promise<void> {
+    const chat = getChat(state.db, chatId);
+    const project = getProject(state.db, chat.projectId);
+    const repo = project.repoPath;
+    const base = project.baseBranch;
+    if (chat.branch === null) throw new ConflictError('This session has no branch to merge.');
+    const blocking = blockingHolder(folderHold.holders(chat.projectId, chatId));
+    if (blocking !== undefined)
+      throw new ConflictError(checkoutHolderWords(blocking, await deps.git.currentBranch(repo)));
+    const title = chat.title ?? CHAT_DEFAULT_TITLE;
+    const token = await folderHold.reserveGitWhenFree(
+      chat.projectId,
+      `merging ‘${title}’ into ${base}`,
+      { signal },
+    );
+    try {
+      // Read again under the reservation: the checkout may have changed while the step waited.
+      const on = await deps.git.currentBranch(repo);
+      if (on !== base)
+        throw new ConflictError(
+          `Your checkout is on ${on === null ? 'no branch' : `\`${on}\``}; it must be on \`${base}\` to take the merge.`,
+        );
+      if ((await deps.git.changedPaths(repo)).length > 0)
+        throw new ConflictError('Your checkout has uncommitted changes, so it can’t take a merge.');
+      const merged = await deps.git.mergeIntoBranch({
+        repo,
+        branch: base,
+        from: `refs/heads/${chat.branch}`,
+        message: `Merge ${chat.branch} into ${base}`,
+      });
+      if (merged.kind === 'conflict')
+        throw new ConflictError(
+          `Merging ${chat.branch} into ${base} conflicts in ${merged.paths.join(', ')}, so nothing was merged.`,
+        );
+    } finally {
+      folderHold.releaseGit(token);
+    }
+  }
+
   return {
+    merge(chatId, signal) {
+      return step(chatId, 'merge', async () => {
+        const chat = getChat(state.db, chatId);
+        const project = getProject(state.db, chat.projectId);
+        const now = await deps.work.state(chatId, signal);
+        const title = chat.title ?? CHAT_DEFAULT_TITLE;
+        if (project.delivery === Delivery.Local) {
+          if (now.next !== ChatGitStep.MergeLocal)
+            throw new ConflictError(now.refusal ?? 'This session has nothing to merge.');
+          await mergeLocally(chatId, signal);
+        } else {
+          const pull = now.pullRequest;
+          if (now.next !== ChatGitStep.Merge || pull === null)
+            throw new ConflictError(now.refusal ?? 'This session has no pull request to merge.');
+          if (now.refusal !== null) throw new ConflictError(now.refusal);
+          await inFolder(chatId, `merging the pull request of ‘${title}’`, signal, (site) =>
+            steps.mergePullRequest(site, pull.number),
+          );
+          deps.work.forgetPullRequest(chatId, now.branch ?? undefined);
+        }
+        return deps.work.state(chatId, signal);
+      });
+    },
+
     openPullRequest(chatId, signal) {
       return step(chatId, 'pull-request', async () => {
         const chat = getChat(state.db, chatId);

@@ -49,6 +49,7 @@ function appOf(world: ChatWorld) {
         titleRow: {
           commit: () => Promise.reject(new Error('not done here')),
           openPullRequest: () => Promise.reject(new Error('not done here')),
+          merge: () => Promise.reject(new Error('not done here')),
         },
         git: () => Promise.reject(new Error('not a repository')),
         now: () => new Date(),
