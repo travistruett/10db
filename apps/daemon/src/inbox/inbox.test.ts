@@ -100,6 +100,7 @@ import type { ToolDecision } from '../sessions';
 import { projectGrantLines } from '../trust';
 import {
   createInboxService,
+  CardClosesItselfError,
   cardsResolvedByEvent,
   createLimitNotes,
   createPermissionBroker,
@@ -4520,14 +4521,14 @@ describe('a flag with a fold key', () => {
     };
     const input = { ...refusal(), refresh: true, closesWhen, detail: { n: 1 } };
     const first = inbox.flag(input);
-    expect(first.detail).toEqual({ n: 1, resolvesWhen: closesWhen.when });
+    expect(first.detail).toEqual({ n: 1, resolvesWhen: closesWhen.when, closesItself: true });
     const refreshed = inbox.flag({ ...input, body: 'Still stopped.', detail: { n: 2 } });
     expect(refreshed.id).toBe(first.id);
-    expect(refreshed.detail).toEqual({ n: 2, resolvesWhen: closesWhen.when });
+    expect(refreshed.detail).toEqual({ n: 2, resolvesWhen: closesWhen.when, closesItself: true });
     expect(cardsResolvedByEvent(state.db, null).map((c) => c.item.id)).toEqual([first.id]);
   });
 
-  it('stores no closer in the detail for a card the builder answers or 10db withdraws', () => {
+  it('stores no closer in the detail for a card the builder answers, and only the marker for one 10db withdraws', () => {
     const answered = inbox.flag({ ...refusal(), foldKey: 'ans-one' });
     expect(answered.detail).toBeNull();
     const withdrawn = inbox.flag({
@@ -4535,7 +4536,7 @@ describe('a flag with a fold key', () => {
       foldKey: 'wd-one',
       closesWhen: { by: 'withdrawn', when: 'the cause is gone (test)' },
     });
-    expect(withdrawn.detail).toBeNull();
+    expect(withdrawn.detail).toEqual({ closesItself: true });
   });
 });
 
@@ -4570,6 +4571,36 @@ describe('a card 10db closes because its cause is gone', () => {
     inbox.answer(card.id, { choice: 'dismiss' });
     const again = inbox.resolve(card.id, 'Alpha started');
     expect(again.detail).toEqual({});
+  });
+});
+
+describe('a card that closes itself', () => {
+  let project: ReturnType<typeof seedWorkstream> | undefined;
+  beforeEach(() => {
+    project = undefined;
+  });
+  function condition(body: string) {
+    const ws = (project ??= seedWorkstream(base));
+    return inbox.flag({
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'withdrawn', when: 'the hold lifts' },
+      projectId: ws.project.id,
+      workstreamId: null,
+      title: 'Free disk is low',
+      body,
+      foldKey: 'disk-low',
+    });
+  }
+
+  it('is one card raised twice, says what the second raise says, and refuses a dismiss', () => {
+    const first = condition('9 GB free.');
+    const second = condition('7 GB free.');
+    expect(second.id).toBe(first.id);
+    expect(second.body).toBe('7 GB free.');
+    expect(listInbox(state.db, { states: ['OPEN'] })).toHaveLength(1);
+    expect(() => inbox.answer(first.id, { choice: 'dismissed' })).toThrow(CardClosesItselfError);
+    expect(getInboxItem(state.db, first.id).state).toBe('OPEN');
   });
 });
 

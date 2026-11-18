@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { InboxItemDto } from './entities';
+import { CARD_CLOSES_ITSELF } from './card-resolution';
 import { InboxItemId, PassId } from './ids';
 // A type only: inbox-page.ts imports this module's schemas, so a value import would be a cycle.
 import type { InboxListState } from './inbox-page';
@@ -14,11 +15,15 @@ export type InboxRowCard = Pick<
   'id' | 'kind' | 'projectId' | 'title' | 'body' | 'options' | 'detail'
 >;
 
-/** A flag or a move report with no options closes on any answer, so it can be dismissed without opening it. */
-export function isDismissable(card: Pick<InboxItemDto, 'kind' | 'options'>): boolean {
+/**
+ * A flag or a move report with no options closes on any answer, so it can be dismissed without opening it.
+ * A condition card, which closes when its cause clears (`detail.closesItself`), is never dismissed.
+ */
+export function isDismissable(card: Pick<InboxItemDto, 'kind' | 'options' | 'detail'>): boolean {
   return (
     (card.kind === InboxKind.Flag || card.kind === InboxKind.PlaybookMoveReport) &&
-    card.options.length === 0
+    card.options.length === 0 &&
+    card.detail?.[CARD_CLOSES_ITSELF] !== true
   );
 }
 

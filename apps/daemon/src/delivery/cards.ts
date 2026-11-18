@@ -1,6 +1,7 @@
 import {
   BatchFailure,
   BatchState,
+  CARD_OPENS,
   OPEN_INTEGRATIONS_DETAIL,
   type BatchDto,
   type BatchId,
@@ -133,6 +134,8 @@ export type WorktreeOffer =
   | { readonly kind: 'merged-hand-made' }
   /** The project's hand-made worktree folder, which Spotlight indexes. */
   | { readonly kind: 'spotlight'; readonly path: string }
+  /** A checkout that is off the branch of an open or failed batch: switch it to the batch's branch. */
+  | { readonly kind: 'branch'; readonly batchId: BatchId }
   /** A checkout left on a finished batch's branch; `place` is where it goes back to. */
   | {
       readonly kind: 'checkout';
@@ -200,6 +203,13 @@ export function worktreeOffer(
             description: `Create an empty ${SPOTLIGHT_MARKER} file in ${offer.path}`,
           },
           keep('Spotlight indexing the folder'),
+        ];
+      case 'branch':
+        return [
+          {
+            label: CheckoutChoice.SwitchBack,
+            description: "Switch the checkout to the batch's branch, once nothing is in the way",
+          },
         ];
       case 'checkout':
         return [
@@ -691,33 +701,39 @@ export function wrongBranchCard(
   current: string | null,
   repoPath: string,
   outcome: WrongBranchOutcome,
+  /** Why the last Switch Back left the checkout where it was, when one did. */
+  why?: string,
 ): Card {
   const on = current ?? 'a detached HEAD';
   const branch = batch.branch ?? '(not cut)';
   const where = `checkout is on ${on}, the batch branch is ${branch}`;
   const detail = { batchId: batch.id };
+  const ready: CardClosesWhen = {
+    by: 'event',
+    when: { event: 'branch_ready', batchId: batch.id },
+  };
+  const reason = why === undefined ? '' : `\n\nSwitch Back did not switch it: ${why}`;
   switch (outcome) {
     case 'waits':
       // The scheduler raises this every time the work waits; one open card per branch is enough.
       return {
         tier: CardTier.Ask,
         urgency: Urgency.High,
-        // S2: branch_ready; Switch Back
-        closesWhen: BY_ANSWER,
+        closesWhen: ready,
         title: `Batch "${batch.title}" waits: ${where}`,
-        body: `Nothing in the batch starts until the checkout is back on its branch. Run git switch ${shellWord(branch)} in ${repoPath}, or abandon the batch in a task's drawer on the Board.`,
+        body: `Nothing in the batch starts until the checkout is back on its branch. Answer Switch Back, or run git switch ${shellWord(branch)} in ${repoPath}, or abandon the batch in a task's drawer on the Board.${reason}`,
         foldKey: `batch-branch:${batch.id}:${on}`,
-        detail,
+        ...worktreeOffer({ kind: 'branch', batchId: batch.id }, detail),
       };
     case 'failed':
       return {
         tier: CardTier.Ask,
         urgency: Urgency.High,
-        // S2: branch_ready; Switch Back
-        closesWhen: BY_ANSWER,
+        closesWhen: ready,
         title: `Batch "${batch.title}" failed: ${where}`,
-        body: `10db restarted with the checkout off the batch branch, so nothing in the batch runs. Run git switch ${shellWord(branch)} in ${repoPath}, then press Retry in a task's drawer on the Board; or abandon the batch there.`,
-        detail,
+        body: `10db restarted with the checkout off the batch branch, so nothing in the batch runs. Answer Switch Back, or run git switch ${shellWord(branch)} in ${repoPath}, then press Retry in a task's drawer on the Board; or abandon the batch there.${reason}`,
+        foldKey: `batch-branch-failed:${batch.id}:${on}`,
+        ...worktreeOffer({ kind: 'branch', batchId: batch.id }, detail),
       };
     case 'not_shipped':
       return {
@@ -1435,6 +1451,13 @@ export const prCards = {
   },
 };
 
+/** The answers of the card that lists the `10db/` branches no task names. */
+export const StrayBranchChoice = { Delete: 'Delete Them', Keep: 'Keep' } as const;
+export type StrayBranchChoice = (typeof StrayBranchChoice)[keyof typeof StrayBranchChoice];
+
+/** The `detail` key of that card: the branches it lists, which are the only ones Delete Them removes. */
+export const STRAY_BRANCHES_DETAIL = 'strayBranches';
+
 /** The fold keys of the cards about a task's local branch. */
 export const branchCardKey = {
   offer: (batchId: BatchId): string => `branch-offer:${batchId}`,
@@ -1477,16 +1500,34 @@ export const branchCards = {
     foldKey: branchCardKey.offer(batch.id),
     ...branchOffer(batch),
   }),
-  /** `branches` is never empty. 10db never deletes these: nothing records that it made them. */
-  withoutBatch: (branches: readonly string[]): Card => ({
+  /**
+   * `branches` is never empty. 10db never deletes these by itself: nothing records that it made them.
+   * Delete Them deletes exactly the listed ones, after the builder's answer; `checkedOut` names listed
+   * branches an earlier answer could not delete because git has them checked out.
+   */
+  withoutBatch: (
+    branches: readonly string[],
+    checkedOut: readonly { readonly branch: string; readonly path: string }[] = [],
+  ): Card => ({
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
-    // S2: Delete Them / Keep
     closesWhen: { by: 'withdrawn', when: 'no branch under 10db/ lacks a task (branch-sweep)' },
     title: `${String(branches.length)} local branch${branches.length === 1 ? '' : 'es'} under 10db/ without a task`,
-    body: `10db has no task for these local branches, so it can't tell whether they are yours and leaves them alone:\n${listPaths(branches)}\n\nDelete the ones you don't need with git branch -D <name>.`,
+    body: `10db has no task for these local branches, so it can't tell whether they are yours and leaves them alone:\n${listPaths(branches)}\n\nDelete Them removes exactly these branches from your repository, so any work only on them is gone. Keep leaves them.${
+      checkedOut.length === 0
+        ? ''
+        : `\n\nThese were not deleted, because git has them checked out:\n${checkedOut.map((c) => `- ${c.branch} (in ${c.path})`).join('\n')}`
+    }`,
     foldKey: branchCardKey.withoutBatch,
     refresh: true,
+    options: [
+      {
+        label: StrayBranchChoice.Delete,
+        description: `Delete the ${String(branches.length)} listed branch${branches.length === 1 ? '' : 'es'}`,
+      },
+      { label: StrayBranchChoice.Keep, description: 'Leave them where they are' },
+    ],
+    detail: { [STRAY_BRANCHES_DETAIL]: [...branches] },
   }),
 };
 
@@ -1495,17 +1536,20 @@ export const passCardKey = {
   unopened: (branch: string): string => `pass-unopened:${branch}`,
 } as const;
 
+/** The `detail` key of a pass-unopened card: the branch it is about, which closes it once it is gone. */
+export const PASS_UNOPENED_DETAIL = 'passUnopened';
+
 /** What 10db tells the builder about a Workbench pass's branches. */
 export const passCards = {
   /**
    * The daemon stopped opening a pass after it made the pass's branch and before the pass was
-   * written, and something has moved since, so start-up could not take it back.
+   * written, and something has moved since, so start-up could not take it back. `folder` is Your
+   * folder, where the branch is dealt with; the card closes once the branch is gone.
    */
-  unopened: (record: PassDirtRecord): Card => ({
+  unopened: (record: PassDirtRecord, folder: string): Card => ({
     tier: CardTier.Ask,
     urgency: Urgency.High,
-    // S2: Open the Folder; closes when the branch is gone
-    closesWhen: BY_ANSWER,
+    closesWhen: { by: 'withdrawn', when: 'the branch is gone (pass-recover, at start)' },
     title: `${record.branch} is left from a UI Workbench pass that did not open`,
     body:
       `10db stopped while opening a UI Workbench pass, after it made ${record.branch} at the commit ${record.returnBranch} was on and before the pass was recorded. ` +
@@ -1513,6 +1557,10 @@ export const passCards = {
       `If Your folder is on it, switch back with git switch ${shellWord(record.returnBranch)}; a commit made on ${record.branch} is only there, so merge it into ${record.returnBranch} first if you want it. ` +
       `Then delete the branch with git branch -D ${record.branch}, and the pass's copy of your uncommitted files with git update-ref -d ${record.ref}.`,
     foldKey: passCardKey.unopened(record.branch),
+    detail: {
+      [PASS_UNOPENED_DETAIL]: record.branch,
+      [CARD_OPENS]: { to: 'path', path: folder, label: 'Open the Folder' },
+    },
   }),
 };
 
@@ -1620,8 +1668,8 @@ export const leftOutCards = {
           refresh: true,
           tier: CardTier.Ask,
           urgency: Urgency.Normal,
-          // Dismiss-only with no closer: S2 decides.
-          closesWhen: BY_ANSWER,
+          // The batch may still ship another way, and abandoning it withdraws the card.
+          closesWhen: { by: 'event', when: { event: 'batch_shipped', batchId: batch.id } },
         };
   },
   /**
@@ -1650,7 +1698,8 @@ export const leftOutCards = {
     const names = leftOutNames(attempt);
     const answerable = state === null || state === BatchState.Open || state === BatchState.Failed;
     const lead = `Ship without it reverted the commits of ${names} on the batch's branch (revert commit ${revert.slice(0, 9)}), and then could not finish:\n\n${why.slice(0, 1500)}\n\n`;
-    // Dismiss-only with no closer: S2 decides.
+    // The batch is over (abandoned, shipped or closed) when this is raised, so no later event closes the
+    // card: the builder does.
     const dismissOnly = {
       foldKey: leftOutFoldKey(batch.id),
       refresh: true,

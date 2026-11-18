@@ -152,6 +152,7 @@ import {
   DEFAULT_DELIVERY_LIMITS,
   flagWorktreeMissing,
   flagWrongBranch,
+  resolveBranchReadyCards,
   moveRetiredLandings,
   checkPassOpen,
   openPass,
@@ -351,6 +352,7 @@ import {
   createDrain,
   createScriptInstaller,
   createSelfUpdate,
+  createSelfUpdateCardAnswers,
   githubHeadOfMain,
   githubMainIsAhead,
   holdBoth,
@@ -900,6 +902,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerBatchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let answerSelfUpdateCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   // Started once recovery is through; a launch before then waits for no before picture.
   let pictures: Pictures | null = null;
   let preview: Preview | null = null;
@@ -1022,6 +1025,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerBatchCard?.(item, answer);
       answerAccountCard?.(item, answer);
       answerGitCard?.(item, answer);
+      answerSelfUpdateCard?.(item, answer);
       answerBranchCard?.(item, answer);
       answerCiStopCard?.(item, answer);
       answerGhCard?.(item, answer);
@@ -2005,6 +2009,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onWrongBranch: (batch, current, checkout) => {
       flagWrongBranch(inbox, batch, current, checkout);
     },
+    onBranchReady: (batch) => {
+      resolveBranchReadyCards({ db, git, inbox }, batch).catch((error: unknown) => {
+        logger.warn({ err: error, batchId: batch.id }, 'could not close a wrong-branch card');
+      });
+    },
     onWorktreeMissing: (batch, path) => {
       flagWorktreeMissing(inbox, batch, path);
     },
@@ -2724,6 +2733,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           createdScheduler.requestTick();
         },
       });
+      answerSelfUpdateCard = createSelfUpdateCardAnswers(selfUpdate, updateLogger);
     }
   }
   // What this install can never do, known now; a test's own installer needs no gh.
@@ -2917,6 +2927,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   );
   // How an install that was under way ended is reported before the scheduler can start anything.
   selfUpdate?.settle();
+  selfUpdate?.closeInstalled().catch((error: unknown) => {
+    logger.error({ err: error }, 'could not close the failed-update cards of an update that took');
+  });
   createdScheduler.start();
   createdScheduler.requestTick();
   loadGuard.start();

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import {
   type ConversationId,
+  CARD_CLOSES_ITSELF,
   CARD_PROPOSED_PRINCIPLES,
   CARD_RESOLVES_WHEN,
   CARD_RELEASED_WORKSTREAMS,
@@ -9,6 +10,7 @@ import {
   CheckChoice,
   PlanChoice,
   ConflictError,
+  DomainError,
   InboxAnswer,
   InboxAnswerRefused,
   InboxKind,
@@ -95,6 +97,17 @@ export class ParkedError extends Error {
   override readonly name = 'ParkedError';
   constructor() {
     super('The session stopped waiting for this answer');
+  }
+}
+
+/**
+ * A dismiss of a card that closes when its cause clears. The API answers 409: the card leaves by its
+ * closer, so a dismissal never hides a later real ask.
+ */
+export class CardClosesItselfError extends DomainError {
+  override readonly name = 'CardClosesItselfError';
+  constructor() {
+    super('conflict', 'This card closes itself when its cause is gone, so it cannot be dismissed');
   }
 }
 
@@ -244,13 +257,21 @@ export interface InboxService {
  * change it records commits both together, or neither.
  */
 export function flagCard(ctx: WriteContext, input: FlagInput): InboxItemDto {
-  const detail =
-    input.closesWhen.by === 'event'
-      ? { ...input.detail, [CARD_RESOLVES_WHEN]: input.closesWhen.when }
-      : (input.detail ?? null);
+  const closesItself = input.closesWhen.by !== 'answer';
+  const stored: Record<string, Json> | null = closesItself
+    ? {
+        ...input.detail,
+        ...(input.closesWhen.by === 'event' ? { [CARD_RESOLVES_WHEN]: input.closesWhen.when } : {}),
+        [CARD_CLOSES_ITSELF]: true,
+      }
+    : (input.detail ?? null);
   if (input.foldKey) {
     const existing = findOpenByFoldKey(ctx.tx, input.projectId, input.foldKey);
-    if (existing && !input.refresh) return existing;
+    // A condition card is never dismissed, so a repeat is its only way to say something new: it updates
+    // in place, and one that says what the card already says changes nothing.
+    if (existing && closesItself && !input.refresh && sameCard(existing, input, stored))
+      return existing;
+    if (existing && !input.refresh && !closesItself) return existing;
     // The repeat says what is in the way now, and a board that watches the card learns the
     // cause came back. It replaces the whole card: one that folds into another with a different
     // cause must not keep the old title or options, or the old detail its answers act on, which a
@@ -260,7 +281,7 @@ export function flagCard(ctx: WriteContext, input: FlagInput): InboxItemDto {
         title: input.title,
         body: input.body,
         options: input.options ?? [],
-        detail,
+        detail: stored,
       });
   }
   return insertInboxItem(ctx, {
@@ -272,10 +293,24 @@ export function flagCard(ctx: WriteContext, input: FlagInput): InboxItemDto {
     recommendation: input.recommendation ?? null,
     category: QuestionCategory.Other,
     urgency: input.urgency,
-    detail,
+    detail: stored,
     foldKey: input.foldKey ?? null,
     targets: input.workstreamId ? [{ workstreamId: input.workstreamId, sessionId: null }] : [],
   });
+}
+
+/** Whether the open card already says what a repeat of `input` would write. */
+function sameCard(
+  existing: InboxItemDto,
+  input: FlagInput,
+  detail: Record<string, Json> | null,
+): boolean {
+  return (
+    existing.title === input.title &&
+    existing.body === input.body &&
+    JSON.stringify(existing.options) === JSON.stringify(input.options ?? []) &&
+    JSON.stringify(existing.detail) === JSON.stringify(detail)
+  );
 }
 
 /** `InboxService.reword`'s write, inside the caller's transaction. */
@@ -822,6 +857,11 @@ export function createInboxService(deps: {
       const answer = InboxAnswer.parse(raw);
       const current = getInboxItem(deps.state.db, id);
       if (current.kind === InboxKind.Flag && current.state === InboxState.Open) {
+        if (
+          current.detail?.[CARD_CLOSES_ITSELF] === true &&
+          !current.options.some((option) => option.label === answer.choice)
+        )
+          throw new CardClosesItselfError();
         // Throwing keeps the flag open, as it does for any flag whose answer cannot be acted on.
         const stuck = current.detail?.[REDELIVER_KEY];
         if (typeof stuck === 'string') service.redeliver(stuck as InboxItemId);

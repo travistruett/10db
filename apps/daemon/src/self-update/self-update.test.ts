@@ -92,6 +92,8 @@ function make(
     enabled?: boolean;
     cardProject?: ProjectId | null;
     headOf?: () => Promise<string>;
+    /** Whether `head` is ahead of `base`; the default answers from `world`. */
+    isAhead?: (repo: string, base: string, head: string) => Promise<boolean>;
     logger?: Logger;
     inbox?: InboxService;
   } = {},
@@ -111,16 +113,18 @@ function make(
       overrides.headOf ??
       (() =>
         world.head instanceof Error ? Promise.reject(world.head) : Promise.resolve(world.head)),
-    isAhead: (_repo, _base, head) => {
-      if (head === world.head) {
-        return world.ahead instanceof Error
-          ? Promise.reject(world.ahead)
-          : Promise.resolve(world.ahead);
-      }
-      return world.stagedAhead instanceof Error
-        ? Promise.reject(world.stagedAhead)
-        : Promise.resolve(world.stagedAhead);
-    },
+    isAhead:
+      overrides.isAhead ??
+      ((_repo, _base, head) => {
+        if (head === world.head) {
+          return world.ahead instanceof Error
+            ? Promise.reject(world.ahead)
+            : Promise.resolve(world.ahead);
+        }
+        return world.stagedAhead instanceof Error
+          ? Promise.reject(world.stagedAhead)
+          : Promise.resolve(world.stagedAhead);
+      }),
     stage: (target, running, skip, keep) => {
       world.calls.push('stage');
       world.stagedFrom.push(target.repo);
@@ -2330,5 +2334,49 @@ describe('why an available update is not installing', () => {
     expect(update.status().notInstalling).toBe('unbuilt');
     finishStage({ ok: true, current: true, commit: RUNNING });
     await tick;
+  });
+});
+
+// Real SQLite: the failed-update card's closer is stored on the row and read back at the next start.
+describe('closeInstalled', () => {
+  const openCards = () => cards().filter((item) => item.state === InboxState.Open);
+
+  /** A failed update of `NEW`, then a start that runs `running`, where GitHub says `ahead` of the card's commit. */
+  async function startAfterFailure(running: string, ahead: boolean | Error): Promise<void> {
+    world.stage = () => Promise.resolve({ ok: false, step: 'download', message: 'offline' });
+    await make().tick();
+    expect(openCards()).toHaveLength(1);
+    await make({
+      runningCommit: running,
+      isAhead: (_repo, base, head) => {
+        expect([base, head]).toEqual([NEW, running]);
+        return ahead instanceof Error ? Promise.reject(ahead) : Promise.resolve(ahead);
+      },
+    }).closeInstalled();
+  }
+
+  it.each([
+    { name: 'the running commit is the failed one', running: NEW, ahead: false, closes: true },
+    {
+      name: 'the running commit is ahead of the failed one',
+      running: NEWER,
+      ahead: true,
+      closes: true,
+    },
+    {
+      name: 'the running commit is behind it, as after a rollback',
+      running: OLD_BUILD,
+      ahead: false,
+      closes: false,
+    },
+    {
+      name: 'GitHub cannot compare them',
+      running: NEWER,
+      ahead: new Error('offline'),
+      closes: false,
+    },
+  ])('$name: closes $closes', async ({ running, ahead, closes }) => {
+    await startAfterFailure(running, ahead);
+    expect(openCards()).toHaveLength(closes ? 0 : 1);
   });
 });

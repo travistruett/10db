@@ -1,4 +1,6 @@
 import {
+  type InboxAnswer,
+  type InboxItemDto,
   SELF_UPDATE_SWITCH,
   SHAPE_HOLD_WAY_OUT,
   type ProjectId,
@@ -18,10 +20,10 @@ import {
 import type { Clock, Timer } from '../clock';
 import type { StateStore } from '../events';
 import { GhError, GhFailure, SIGN_IN_IN_SETTINGS } from '../github';
-import type { InboxService } from '../inbox';
+import { cardsResolvedByEvent, resolveStaleCards, type InboxService } from '../inbox';
 import type { Logger } from '../log';
 import type { StatusService } from '../status';
-import { BY_ANSWER, CardTier } from '../inbox';
+import { CardTier } from '../inbox';
 
 /**
  * How long a drain may be held by shaping conversations alone before the builder is told. A turn
@@ -32,6 +34,11 @@ export const SHAPE_HOLD_ALERT_MS = 5 * 60_000;
 /** The card an earlier version raised for the shaping hold; one left open is withdrawn at start. */
 export const SHAPE_HOLD_FOLD_KEY = 'self-update-shape-turn';
 const SHAPE_HOLD_STATUS_KEY = 'update-shape-turn';
+
+/** The answer of a failed update's card that runs the install again. */
+export const TRY_AGAIN = 'Try Again';
+/** The `detail` key that marks a failed update's card, so its answer is acted on. */
+export const SELF_UPDATE_CARD_DETAIL = 'selfUpdateCard';
 
 /** The commit an install that is under way was fetched for, and the head of main it was chosen for. */
 export const SELF_UPDATE_APPLYING_KEY = 'self_update.applying';
@@ -200,6 +207,12 @@ export interface SelfUpdate {
   tick(): Promise<TickResult>;
   /** At startup: closes the card an earlier run left, and reports how an install under way ended. */
   settle(): void;
+  /**
+   * At startup: closes every open failed-update card whose commit is the running one or behind it, since
+   * the update it reports did take. A card ahead of the running commit stays, and so does one GitHub
+   * cannot compare, until a later start.
+   */
+  closeInstalled(): Promise<void>;
   /** Looks again every interval until `stop`. */
   start(): void;
   /**
@@ -345,11 +358,19 @@ function failureCard(input: {
     body: [
       `10db tried to install the newest finished build of main (${short(input.commit)}) and failed while ${label}. The app is still running ${short(input.running)}; if it was replaced, make rollback-app puts the previous one back.`,
       input.message,
-      `It will not try again by itself until main has a newer commit. To try now, turn ${SELF_UPDATE_SWITCH} off and on in Settings, or run make install-app.`,
+      `It will not try again by itself until main has a newer commit. To try now, answer Try Again, or turn ${SELF_UPDATE_SWITCH} off and on in Settings, or run make install-app.`,
     ].join('\n\n'),
     foldKey: `self-update:${input.commit}`,
     refresh: true,
-  };
+    options: [
+      {
+        label: TRY_AGAIN,
+        description: "Install main's newest finished build now, as the updater does",
+      },
+    ],
+    detail: { [SELF_UPDATE_CARD_DETAIL]: true },
+    closesWhen: { by: 'event', when: { event: 'update_installed', commit: input.commit } },
+  } as const;
 }
 
 function isApplying(value: unknown): value is Attempt {
@@ -546,8 +567,6 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       workstreamId: null,
       tier: CardTier.Ask,
       urgency: Urgency.Normal,
-      // S2: update_installed; Try Again
-      closesWhen: BY_ANSWER,
       ...card,
     });
   }
@@ -972,6 +991,28 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       // A stage can be waiting on GitHub's build for many minutes, with gh and the builder's token.
       await deps.stopStage();
     },
+    async closeInstalled() {
+      const running = deps.runningCommit;
+      if (running === null) return;
+      const open = cardsResolvedByEvent(state.db, null).flatMap(({ when }) =>
+        when.event === 'update_installed' ? [when.commit] : [],
+      );
+      const installed = new Set<string>();
+      for (const commit of new Set(open)) {
+        try {
+          if (commit === running || (await deps.isAhead(deps.repository, commit, running)))
+            installed.add(commit);
+        } catch (error) {
+          logger.warn({ err: error, commit }, 'could not tell whether a failed update took');
+        }
+      }
+      if (isStopped()) return;
+      resolveStaleCards(state.db, inbox, null, (when) =>
+        when.event === 'update_installed' && installed.has(when.commit)
+          ? `10db ${short(running)} is installed`
+          : null,
+      );
+    },
     retry() {
       failure = null;
       notInstalling = null;
@@ -1018,5 +1059,23 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
                   ? 'unreachable'
                   : null)),
     }),
+  };
+}
+
+/**
+ * Acts on Try Again on a failed update's card before the inbox records it: the same retry the Settings
+ * switch makes, then a check at once. An install already running decides the card by how it ends, a
+ * shaping hold keeps the install waiting as for an automatic one, and a failure words the card again.
+ */
+export function createSelfUpdateCardAnswers(
+  update: Pick<SelfUpdate, 'retry' | 'tick'>,
+  logger: Logger,
+): (item: InboxItemDto, answer: InboxAnswer) => void {
+  return (item, answer) => {
+    if (item.detail?.[SELF_UPDATE_CARD_DETAIL] !== true || answer.choice !== TRY_AGAIN) return;
+    update.retry();
+    update.tick().catch((error: unknown) => {
+      logger.error({ err: error }, 'the self-update check after Try Again failed');
+    });
   };
 }

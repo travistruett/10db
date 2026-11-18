@@ -59,3 +59,14 @@
   now, one write each, with the reason `NOTICE_SWEEP_REASON`. A kind is matched by its raiser's fold key, and by title,
   body or option count where an ask shares the prefix. A new notice kind that replaces a card adds a row and a
   near-miss row to its table.
+- A card whose `closesWhen` is not `by: 'answer'` is a condition card: `flagCard` writes `detail.closesItself`
+  (`CARD_CLOSES_ITSELF`), a repeat of it with the same fold key updates it in place (one that says what the card
+  already says writes nothing), and `InboxService.answer` refuses a dismiss of it with `CardClosesItselfError`
+  (409), since an option-less condition card is answered only by its closer. The Inbox offers it no Dismiss
+  (`isDismissable` in contracts). A condition card with options still takes those answers.
+- The three event closers are `update_installed` (`SelfUpdate.closeInstalled`, at start: a card whose commit is the
+  running one or behind it), `branch_ready` (`resolveBranchReadyCards`, from the scheduler's `onBranchReady` and
+  after Switch Back) and `mcp_config_changed` (`resolveMcpConfigCards`, on every repo MCP config read; a card
+  carries `repoMcpHash` of `.mcp.json` and the hosts file). Each goes through `resolveStaleCards`.
+- A card that says where its fix is made carries `detail.opens` (`CARD_OPENS`, a `CardOpens`: a Settings section or a
+  path on this Mac); the desktop draws it as a link beside the answers (`views/inbox/card-opens-link.tsx`).
