@@ -54,7 +54,7 @@ import { useTaskSession } from '../../daemon/task-session-queries';
 import { sessionAnnouncement, type SessionEvent } from './session-announcements';
 import { JudgeLine } from '../../conversation';
 import { SessionTitle } from './session-title';
-import { WorkBar } from './work-bar';
+import { settledWords, WorkBar } from './work-bar';
 import { ChangesDrawer, BESIDE_PX, DRAWER_WIDTH } from './changes-drawer';
 import { barHidden } from './bar-hidden';
 import { changesChoice } from './changes-choice';
@@ -213,10 +213,18 @@ export function ChatTab({
   const [hiddenFor, setHiddenFor] = useState<string | null | undefined>(() =>
     barHidden.get(chat.id),
   );
-  const [settled, setSettled] = useState<ChoseWork['work'] | null>(null);
+  const [settled, setSettled] = useState<{
+    readonly work: ChoseWork['work'];
+    readonly askedAt: string | null;
+  } | null>(null);
   const place = chat.work?.place ?? null;
   const askedAt = chat.work?.askedAt ?? null;
   const asking = place === WorkPlace.Choosing && hiddenFor !== askedAt;
+  // The branch the checkout is on, as the work state read it; Your folder's read stands in until it arrives.
+  const checkoutBranch = work.data?.branch ?? folder?.branch ?? null;
+  // What a lost choice said is kept until the next question is asked, which the bar's own line cannot do.
+  const shownSettled =
+    settled !== null && (askedAt === null || settled.askedAt === askedAt) ? settled.work : null;
   const movingTo = place === WorkPlace.Moving ? (chat.work?.branch ?? null) : null;
   // Holders that keep this chat's turn from writing: Send asks before a message runs.
   const keeping = keepingWords(chat, folder);
@@ -565,20 +573,16 @@ export function ChatTab({
                 />
               ) : null}
               {waiting ? (
-                <FolderWait
-                  holders={keeping}
-                  branch={folder?.branch ?? work.data?.baseBranch ?? null}
-                  onStop={stopNow}
-                />
+                <FolderWait holders={keeping} branch={checkoutBranch} onStop={stopNow} />
               ) : null}
               {asking && !removed && conversation.state !== 'sealed' ? (
                 <WorkBar
                   key={askedAt ?? 'asked'}
                   agentLabel={caps.label}
-                  branch={folder?.branch ?? work.data?.baseBranch ?? 'main'}
+                  branch={checkoutBranch}
                   state={work.data}
                   pending={choose.isPending}
-                  settled={settled}
+                  settled={shownSettled}
                   error={choose.error?.message ?? null}
                   onHide={() => {
                     barHidden.set(chat.id, askedAt);
@@ -590,12 +594,19 @@ export function ChatTab({
                       { chatId: chat.id, place: next },
                       {
                         onSuccess: (answer) => {
-                          setSettled(answer.chosen ? null : answer.work);
+                          setSettled(answer.chosen ? null : { work: answer.work, askedAt });
+                          // The bar goes with the answer, and the focus it held goes to the composer.
+                          input.current?.focus();
                         },
                       },
                     );
                   }}
                 />
+              ) : null}
+              {!asking && shownSettled !== null ? (
+                <Text size="xs" c="dimmed" px="md" role="status">
+                  {settledWords(shownSettled)}
+                </Text>
               ) : null}
               {conversation.state === 'sealed' ? (
                 <HandedOffLine chat={chat} />
