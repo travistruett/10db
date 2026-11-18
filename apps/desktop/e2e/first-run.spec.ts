@@ -1,49 +1,52 @@
-import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { claudeIsInstalled } from './claude-is-installed';
+import { expectAccessible } from './expect-accessible';
 import { E2E_REPO } from './paths';
 
-// Runs before loop.spec.ts (files run in name order with one worker), which creates the project this
-// spec must not: the first run shows only while the daemon has none.
+// Core flow 1: the first run through to a project on the Board. It runs before every other spec in its
+// shard (files run in name order with one worker), because the first run shows only while the daemon
+// has no project. The Board shows the first project by name, so this one sorts after the `e2e` project
+// that loop.spec.ts and the specs after it use.
+const PROJECT = 'e2e-first-run';
 
-async function expectAccessible(page: Page, label: string): Promise<void> {
-  // The palette is Selenized exactly, so its contrast is Selenized's, not a WCAG ratio
-  // (docs/architecture/decisions/2026-10-28-selenized-exactly.md). Every other rule still runs.
-  const results = await new AxeBuilder({ page })
-    .withTags(['wcag2a', 'wcag2aa'])
-    .disableRules(['color-contrast'])
-    .analyze();
-  const found = results.violations.map(
-    (v) => `${label}: ${v.id} (${v.help}) on ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`,
+test('a fresh install walks Welcome, the setup check and Add a project, and lands on the Board with the project', async ({
+  page,
+}) => {
+  await claudeIsInstalled(page);
+  await page.goto('/');
+
+  await expect(page.getByRole('heading', { name: 'Welcome to 10db' })).toBeVisible();
+  await expectAccessible(page, 'welcome');
+
+  await page.getByRole('button', { name: 'Get Started' }).click();
+  await expect(page.getByRole('heading', { name: 'Check your setup' })).toBeVisible();
+  await expect(page.getByText(/^Tasks will run as /)).toBeVisible();
+  await expectAccessible(page, 'check your setup');
+
+  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByRole('textbox', { name: 'Folder path' }).fill(E2E_REPO);
+  await page.getByRole('textbox', { name: 'Folder path' }).press('Enter');
+  // The areas are proposed from the repository's files and history before the form is complete.
+  await expect(page.getByRole('group', { name: 'Area 1' })).toBeVisible();
+  const name = page.getByRole('textbox', { name: 'Name', exact: true });
+  await expect(name).toBeVisible();
+  await expectAccessible(page, 'add a project');
+
+  await name.fill(PROJECT);
+  const create = page.getByRole('button', { name: 'Create Project' });
+  await expect(create).toBeEnabled();
+  await create.click();
+
+  // The first run gives way to the app: the Board opens on the new project, and a reload keeps it.
+  await expect(page.getByRole('heading', { name: 'Welcome to 10db' })).toBeHidden();
+  await expect(page.getByRole('link', { name: 'Board', exact: true })).toHaveAttribute(
+    'aria-current',
+    'page',
   );
-  expect(found).toEqual([]);
-}
-
-for (const scheme of ['dark', 'light'] as const) {
-  test(`the first run's three steps have no accessibility violations in ${scheme}`, async ({
-    page,
-  }) => {
-    await page.addInitScript((value) => {
-      window.localStorage.setItem('mantine-color-scheme-value', value);
-    }, scheme);
-    await claudeIsInstalled(page);
-    await page.goto('/');
-    await expect(page.locator('html')).toHaveAttribute('data-mantine-color-scheme', scheme);
-
-    await expect(page.getByRole('heading', { name: 'Welcome to 10db' })).toBeVisible();
-    await expectAccessible(page, `welcome, ${scheme}`);
-
-    await page.getByRole('button', { name: 'Get Started' }).click();
-    await expect(page.getByRole('heading', { name: 'Check your setup' })).toBeVisible();
-    await expect(page.getByText(/^Tasks will run as /)).toBeVisible();
-    await expectAccessible(page, `check your setup, ${scheme}`);
-
-    await page.getByRole('button', { name: 'Continue' }).click();
-    await page.getByRole('textbox', { name: 'Folder path' }).fill(E2E_REPO);
-    await page.getByRole('textbox', { name: 'Folder path' }).press('Enter');
-    // The areas are proposed from the repository's files and history before the form is complete.
-    await expect(page.getByRole('group', { name: 'Area 1' })).toBeVisible();
-    await expect(page.getByRole('textbox', { name: 'Name', exact: true })).toBeVisible();
-    await expectAccessible(page, `add a project, ${scheme}`);
-  });
-}
+  await page.reload();
+  await expect(page.getByRole('link', { name: 'Board', exact: true })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
+  await expect(page.getByRole('heading', { name: 'Welcome to 10db' })).toBeHidden();
+});

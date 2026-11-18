@@ -1,0 +1,49 @@
+# End-to-end flows
+
+The e2e suite is the main check that the app works. Each spec drives the real daemon (fake Claude adapter,
+`script-book.json`) and the real app in WebKit from a builder's first action to a visible result. Unit and view
+tests are few; this suite is where a broken journey shows
+(decision `dec_01a1efc1-5ec6-71dd-b6c0-63324b724c28`: few unit tests, core e2e flows, tests follow bugs).
+
+## The core flows
+
+At most about twelve, each a whole journey. A new spec is a new flow only when a builder's journey is missing
+here; otherwise it extends one of these. A page that only draws something, a layout at some width, a scheme, or
+a count at scale is not a flow, and gets no spec: when a real bug escapes, the regression test goes on the
+cheapest rung that catches it, or into the flow it broke.
+
+| #   | Flow                                          | What it proves                                                                                                                                                            | Spec                                                                  |
+| --- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| 1   | First run and adding a project                | A fresh install walks Welcome, the setup check and Add a project, creates the project from a folder and lands on its Board, and a reload keeps it.                        | `first-run.spec.ts`                                                   |
+| 2   | A task from the UI to done                    | A created task is ordered, started in a batch, run by a lane on the fake adapter, committed, passes the gate and lands in Done; a reload loses nothing.                   | `loop.spec.ts` (first test)                                           |
+| 3   | An Inbox card answered                        | A question card is answered from the keyboard, the next row is selected and the badge drops; a session's question survives a reload and its card answers it.              | `inbox.spec.ts`, `sessions.spec.ts` (the question survives a reload)  |
+| 4   | A chat turn                                   | A first line with a file mention starts a chat, the agent replies and files tasks, a judge's card reaches the panel and the Inbox, and the keys, reload and Archive work. | `sessions.spec.ts` (the chat end to end, the terminal hand-off)       |
+| 5   | A session's work on its own branch            | The first change asks where to work, a worktree is cut, the edit stays out of the checkout, Commit and Merge into main land it, and Archive and Reopen keep the work.     | `sessions.spec.ts` (new branch; Archive on a dirty worktree)          |
+| 6   | Shaping a goal                                | A builder talks, proposes and converts from the keyboard; the tasks reach the Board and a draft goal can be taken back.                                                   | `shape.spec.ts`                                                       |
+| 7   | A Critical task's plan, approved or sent back | A Critical task waits on a `plan` card until Approve, then builds and finishes; Send Back needs a note and plans again.                                                   | `process-per-rigor.spec.ts` (the two Critical tasks)                  |
+| 8   | A Workbench pass                              | A pass opens on two pages, a question is answered in place, a picture is sent to the other page and the pass is signed off.                                               | `workbench.spec.ts`                                                   |
+| 9   | Knowledge recorded and read                   | A principle and a decision are recorded, edited, superseded, retired and withdrawn, each with where it came from, and a reload keeps every record and its history.        | `loop.spec.ts` (second test)                                          |
+| 10  | A setting that changes behavior               | A rigor's process edited in Settings changes the row and resets; the hosts a project's sandbox may reach are added, refused for localhost and removed.                    | `process-per-rigor.spec.ts` (the first test), `network-hosts.spec.ts` |
+| 11  | A question routed to someone outside Slack    | A question card is routed from its card, the table shows the route and the Board says the task waits on that person.                                                      | `stakeholder-questions.spec.ts`                                       |
+
+Two specs are not flows. They stay because only a real WebKit can fail them and no cheaper test can:
+`window-csp.spec.ts` (the window's content policy stops an outside image, and a script policy with no eval still
+highlights code) and `see-screen.spec.ts` (the screen a session draws is a real picture, not an empty canvas).
+
+## Rules for the specs
+
+- **No skipped flows.** A flow that is slow or flaky in WebKit on Linux is fixed, not skipped or retried.
+- **A flow runs the real thing.** The daemon and app are real; only the Claude adapter is the fake, and only the
+  network and the platform's own windows (Keychain, Terminal) are cut off. A spec seeds a database row or calls the
+  API only to reach a state a lane would reach, never to stand in for the step under test.
+- **Axe is checked inside a flow** at its main states, in dark, with `expectAccessible`; light and other widths
+  are not repeated.
+- **Run time stays about where it was.** CI runs two shards (`GATE_E2E_ARGS: --shard=n/2`); files run in name
+  order with one worker. A flow that adds minutes folds into one that exists.
+- **Specs share one daemon per shard.** `first-run.spec.ts` runs first in shard 1 because the first run shows only
+  while the daemon has no project. The Board shows the first project by name, so the project it makes,
+  `e2e-first-run`, sorts after `e2e`, which `loop.spec.ts` and the specs after it open. Every spec adds its own
+  project, and ends with nothing open that a later spec would read: Factory lists every project.
+- **Seeding scripts** in `apps/daemon/scripts/seed-*.ts` write to the idle daemon's database for a state a lane
+  would raise (a question card, a waiting question); they are the one place another process writes it.
+- `E2E_DAEMON_PORT` and `E2E_UI_PORT` fix the ports while debugging; `E2E_BOOK` points the daemon at another script book.

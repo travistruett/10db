@@ -414,22 +414,6 @@ test('a session on a new branch: the first change asks, the move cuts a worktree
   await expect(page.getByRole('button', { name: /Merge into main/ })).toHaveCount(0);
 });
 
-test('a session working here: the first change asks, and Here carries on in the checkout', async ({
-  page,
-  request,
-}) => {
-  test.setTimeout(300_000);
-  await openProject(page, request, 'sessions-here');
-  await startSession(page, 'Edit here');
-  await expect(page.getByText('Reading the todo list first.')).toBeVisible();
-  await expect(workBar(page)).toBeVisible();
-  await workBar(page).getByRole('button', { name: 'Here, on main' }).click();
-  await expect(page.getByText('Wrote the todo list.')).toBeVisible();
-  await expect(page.getByText(/^on main · /)).toBeVisible();
-  await expect(sessionRow(page, /Edit here/)).toHaveAttribute('data-place', 'here');
-  await scan(page, [1280, 900], 'a session working here');
-});
-
 test('the question survives a reload: the bar and the Inbox card are there again, and 2 answers it', async ({
   page,
   request,

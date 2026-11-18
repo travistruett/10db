@@ -10,10 +10,10 @@ const Changes = z.object({ commits: z.array(z.string()) });
 const TASK = 'Write the greeting';
 const OTHER = 'Tidy the readme';
 const QUESTION = 'Which greeting?';
-const VIEWS = ['Board', 'Factory', 'Inbox', 'Knowledge', 'Settings'] as const;
+type View = 'Board' | 'Factory' | 'Inbox' | 'Knowledge' | 'Settings';
 
 /** The Board draws no title, so its link in the rail marks it as the open view. */
-async function expectView(page: Page, view: (typeof VIEWS)[number]): Promise<void> {
+async function expectView(page: Page, view: View): Promise<void> {
   if (view === 'Board') {
     await expect(page.getByRole('link', { name: 'Board', exact: true })).toHaveAttribute(
       'aria-current',
@@ -36,7 +36,7 @@ async function chooseScope(page: Page, scope: 'This project' | 'All projects'): 
   await page.getByRole('radiogroup', { name: 'Settings scope' }).getByText(scope).click();
 }
 
-async function open(page: Page, view: (typeof VIEWS)[number]): Promise<void> {
+async function open(page: Page, view: View): Promise<void> {
   await page
     .getByRole('navigation', { name: 'Sections' })
     .getByRole('link', { name: new RegExp(`^${view}\\s*(\\d+ open cards?)?$`) })
@@ -340,40 +340,6 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await open(page, 'Board');
   // The new column is empty, so the Board folds it to a rail.
   await expect(page.getByRole('group', { name: 'Exploring, collapsed' })).toBeVisible();
-
-  // Light mode must be just as usable.
-  await page.getByRole('button', { name: 'Switch to light mode' }).click();
-  await expect(page.locator('html')).toHaveAttribute('data-mantine-color-scheme', 'light');
-  for (const view of VIEWS) {
-    await open(page, view);
-    await expectAccessible(page, `${view.toLowerCase()}, light`);
-  }
-  // The other task is still ready, so the sheet proposes it; close it without starting anything.
-  await open(page, 'Board');
-  await page.getByRole('button', { name: 'More board actions' }).click();
-  await page.getByRole('menuitem', { name: /Start Ready Tasks/ }).click();
-  const lightSheet = page.getByRole('dialog', { name: 'Start a batch' });
-  await expect(lightSheet.getByRole('checkbox', { name: OTHER })).toBeChecked();
-  await expect(lightSheet).toHaveCSS('opacity', '1');
-  await expectAccessible(page, 'batch sheet, light');
-  await page.keyboard.press('Escape');
-  await expect(lightSheet).toBeHidden();
-  await open(page, 'Settings');
-  await chooseScope(page, 'This project');
-  await page.getByRole('link', { name: /Board columns/ }).click();
-  await expect(page.getByRole('table', { name: 'Board columns' })).toBeVisible();
-  await expectAccessible(page, 'settings, board columns, light');
-  await chooseScope(page, 'All projects');
-  await page.getByRole('link', { name: /Accounts/ }).click();
-  await expect(page.getByRole('table', { name: 'Accounts' })).toBeVisible();
-  // Axe must not scan rows that are still loading.
-  await expect(
-    page
-      .getByRole('table', { name: 'Accounts' })
-      .getByRole('row', { name: /Client B/ })
-      .getByText('Needs a secret'),
-  ).toBeVisible();
-  await expectAccessible(page, 'settings, accounts, light');
 });
 
 /** Shows a Knowledge list's shelf, chosen in its first column's filter. */
