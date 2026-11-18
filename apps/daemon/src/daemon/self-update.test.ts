@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
-import type { ShapeMessageDto } from '@10db/contracts';
+import { ActivityPageDto, type ShapeMessageDto } from '@10db/contracts';
 import {
   BatchDto,
   ChatDto,
@@ -920,7 +920,16 @@ describe('self-update in the daemon', () => {
       (await api.get('/inbox', z.array(inboxCard))).some((card) =>
         card.title.includes('cancelled for 10db’s update'),
       ),
-    ).toBe(true);
+    ).toBe(false);
+    const { rows } = await api.get(`/activity/page?project=${project.id}`, ActivityPageDto);
+    expect(rows).toMatchObject([
+      {
+        key: 'pass-open-cancelled',
+        tone: 'info',
+        taskId: null,
+        line: expect.stringContaining('cancelled for 10db’s update') as string,
+      },
+    ]);
     const during = await fetch(`${daemon?.url ?? ''}/projects/${project.id}/passes`, {
       method: 'POST',
       headers: {

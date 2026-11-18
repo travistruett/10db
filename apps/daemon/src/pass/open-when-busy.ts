@@ -24,7 +24,7 @@ export interface OpenWhenBusyDeps {
   readonly logger: Logger;
   /** Whether 10db is draining for an update: nothing then waits to open, as the drain would cancel it. */
   readonly draining: () => boolean;
-  /** Leaves the builder a visible note that a pass they were waiting for did not open. */
+  /** Tells the builder, in Activity, that a pass they were waiting for did not open. */
   readonly notify: (projectId: ProjectId, title: string, body: string) => void;
 }
 

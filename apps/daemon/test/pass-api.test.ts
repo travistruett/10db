@@ -7,6 +7,7 @@ import {
   ConversationItemDto,
   FolderDto,
   PassOpenResponse,
+  ActivityPageDto,
   mintId,
   PASS_SIGN_OFF_CHOICE,
   PassAbandonedDto,
@@ -1124,7 +1125,7 @@ describe('POST /projects/:projectId/passes while chats hold the folder', () => {
     expect((await folderOf(project)).pendingOpen).toBeNull();
   });
 
-  it('raises a card when a waiting open is refused once the turn ends', async () => {
+  it('posts a notice, and raises no card, when a waiting open is refused once the turn ends', async () => {
     const project = await projectWith(PAGES);
     const task = await taskOn(project, 'Settings: tidy', ['settings']);
     const { release } = await chatHolding(project);
@@ -1133,9 +1134,15 @@ describe('POST /projects/:projectId/passes while chats hold the folder', () => {
 
     release();
 
-    await waitFor(
-      () =>
-        listInbox(daemon.state.db, {}).find((i) => i.title.includes('did not open')) ?? undefined,
+    const notice = await waitForAsync(
+      async () =>
+        (await api().get(`/activity/page?project=${project.id}`, ActivityPageDto)).rows.find((r) =>
+          r.line.includes('did not open'),
+        ) ?? undefined,
+    );
+    expect(notice).toMatchObject({ key: 'pass-open-failed', tone: 'warning', taskId: null });
+    expect(listInbox(daemon.state.db, {}).filter((i) => i.title.includes('did not open'))).toEqual(
+      [],
     );
     expect(daemon.state.db.select().from(schema.passes).all()).toEqual([]);
   });

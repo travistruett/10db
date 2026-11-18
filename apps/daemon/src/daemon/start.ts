@@ -207,7 +207,7 @@ import {
   type GhTools,
 } from '../github';
 import { createGithubServices } from './github-services';
-import { createInboxService, createParkAnswers, leftWithBuilder } from '../inbox';
+import { CardTier, createInboxService, createParkAnswers, leftWithBuilder } from '../inbox';
 import { repairKnowledgeIndex } from '../knowledge';
 import { backfillAttachmentRevisions } from '../plan-record';
 import { guessPendingPageLabels, seedPendingPageLabels } from './page-label-guess';
@@ -2312,7 +2312,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'pass-open' }),
     draining: () => updateDrain.draining,
     notify: (projectId, title, body) => {
-      inbox.flag({ projectId, workstreamId: null, title, body });
+      inbox.notice({
+        tier: CardTier.Notice,
+        projectId,
+        taskId: null,
+        key: 'pass-open-failed',
+        tone: 'warning',
+        line: title,
+        body,
+      });
     },
   };
   const doItDeps: DoItDeps = {
@@ -2637,10 +2645,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
             updateDrain.begin(since);
             // An open that waits for chats' turns would hold the update's wait on 10db's jobs for good.
             for (const { projectId, name } of pendingOpens.cancelAll())
-              inbox.flag({
+              inbox.notice({
+                tier: CardTier.Notice,
                 projectId,
-                workstreamId: null,
-                title: `Pass ‘${name}’ was cancelled for 10db’s update`,
+                taskId: null,
+                key: 'pass-open-cancelled',
+                tone: 'info',
+                line: `Pass ‘${name}’ was cancelled for 10db’s update`,
                 body: 'It was waiting for chats’ turns to end. Open it again once the update is done.',
               });
           },
