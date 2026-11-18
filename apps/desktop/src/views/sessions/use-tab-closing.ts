@@ -99,15 +99,22 @@ export function useTabClosing({
   const archiveTab = (tab: StripTab): void => {
     if (tab.kind !== 'chat') return;
     setNotice(null);
-    archive.mutate(tab.chat.id, {
-      onSuccess: () => {
-        remember(tab, true);
-        moveFrom(tab);
+    archive.mutate(
+      { chatId: tab.chat.id },
+      {
+        onSuccess: (answer) => {
+          if (!answer.archived) {
+            setNotice('Archiving would delete files that are not saved anywhere else.');
+            return;
+          }
+          remember(tab, true);
+          moveFrom(tab);
+        },
+        onError: (error) => {
+          setNotice(error.message);
+        },
       },
-      onError: (error) => {
-        setNotice(error.message);
-      },
-    });
+    );
   };
 
   /** Puts a closed tab back at the place it held, clamped to the strip; an archived one comes back first. */
