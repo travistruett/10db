@@ -151,6 +151,8 @@ export interface QueryDeps {
   readonly isRefused: () => boolean;
   /** The mode a sandboxed session runs in, over its spec's; `LANE_PERMISSION_MODE` when neither names one. */
   readonly lanePermissionMode?: LanePermissionMode;
+  /** Days Claude Code keeps the lane's transcript (`TENDB_LANE_TRANSCRIPT_DAYS`); absent leaves the builder's setting. */
+  readonly transcriptDays?: number;
   /** The tool names the session has now, asked for a call to an MCP tool and handed to `canUseTool` with it. */
   readonly listedTools?: () => Promise<readonly string[]>;
   /** Where the PreToolUse hook keeps each call it judged, for the session to show it if auto mode denies it. */
@@ -259,6 +261,7 @@ export function buildQueryOptions(spec: LaneSessionSpec, deps: QueryDeps): Optio
       pluginDir: deps.pluginDir,
       autoMode: renderClaudeAutoMode(spec.policy),
       setup: { instructions: spec.instructions ?? null, plugins: spec.setup?.plugins ?? [] },
+      ...(deps.transcriptDays === undefined ? {} : { transcriptDays: deps.transcriptDays }),
     },
     spec.sandbox ?? null,
   );
@@ -460,6 +463,8 @@ export type ClaudeSession =
       readonly pluginDir: string;
       /** The mode a sandboxed session runs in, over its spec's. */
       readonly lanePermissionMode?: LanePermissionMode;
+      /** Days Claude Code keeps the transcript, over the builder's own setting. */
+      readonly transcriptDays?: number;
       /** Asks whether the account is signed in, when a start gets no account. */
       readonly signInCheck: SignInCheck;
     }
@@ -851,6 +856,9 @@ function startSession(
             ...(session.lanePermissionMode === undefined
               ? {}
               : { lanePermissionMode: session.lanePermissionMode }),
+            ...(session.transcriptDays === undefined
+              ? {}
+              : { transcriptDays: session.transcriptDays }),
             onSpawn,
             isRefused: () => failure !== null,
             recheckSettings,

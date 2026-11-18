@@ -1,0 +1,14 @@
+{
+  "id": "pnpm12-lockfile-install-check",
+  "title": "The install check reads a pnpm 12 lockfile, whose env document comes first",
+  "description": "The install check parses `pnpm-lock.yaml` with `parse()`, which throws when a file holds more than one YAML document. pnpm 12 writes its env lockfile (the pnpm version it runs as) as a document before the project's. So every copy of a pnpm 12 project, 10db included, reads as having an unreadable lockfile, and each new task fails as a broken install before its first step (\"1 of 0 dependencies … (pnpm-lock.yaml (unreadable))\"). The check is `checkInstall` in apps/daemon/src/delivery/install-health.ts.",
+  "acceptanceCriteria": [
+    "A pnpm 12 lockfile whose first document is the env lockfile reads as whole when the project's packages resolve",
+    "If any document fails to parse, the lockfile still counts as unreadable and the install as broken",
+    "A test fails with the report the lanes got before the change and passes after it"
+  ],
+  "areas": ["daemon"],
+  "baseCommit": "5b18b6ea691dcb9a3476e2fdf939a2cc52fee263",
+  "mergedCommit": "4845349b3132605be809a4be83ec9984eef91b14",
+  "tags": []
+}

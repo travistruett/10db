@@ -37,6 +37,9 @@ const DaemonEnv = z.object({
   // How many gates (a lane's verify gate, a batch's ship gate) run at once on this machine; the rest
   // wait their turn. Each gate is a whole test suite, so more than one at a time overloads a Mac.
   TENDB_GATE_SLOTS: z.coerce.number().int().min(1).max(64).optional(),
+  // Set by the lane-pipeline eval runner: the days Claude Code keeps each lane's transcript, set inline
+  // over the builder's own cleanupPeriodDays so a run's transcripts are still there for its report.
+  TENDB_LANE_TRANSCRIPT_DAYS: z.coerce.number().int().min(1).max(3650).optional(),
   // Set by the desktop shell: the daemon runs its normal shutdown when stdin reaches EOF, which is how
   // it learns the shell died without a clean Quit.
   TENDB_PARENT_STDIN: z.enum(['0', '1']).optional(),

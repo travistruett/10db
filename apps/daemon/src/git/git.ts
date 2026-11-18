@@ -50,7 +50,8 @@ import { embeddedRepository, GitMode, isGitComponent } from './worktree-files';
 import { handMadeWorktreeFolder } from './hand-made-folder';
 import { lockedBatchId, parseWorktreeList, type WorktreeEntry } from './worktree-list';
 
-const OP_TRAILER = '10db-Op';
+/** The trailer the commit tool writes on every commit it makes, naming the call's opId. */
+export const OP_TRAILER = '10db-Op';
 const OP_TRAILER_LINE = new RegExp(`^${OP_TRAILER}:`, 'm');
 const OP_SEARCH_DEPTH = 200;
 const OBJECT_ID = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
