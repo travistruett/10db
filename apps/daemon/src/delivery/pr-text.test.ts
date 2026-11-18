@@ -5,7 +5,7 @@ import { mintId } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { prBody, prSubject, prTitle, titlePrefix } from './index';
 import { parsePrScopes, scopeOf } from './pr-scopes';
-import { passPrBody, type PassPrCheck } from './pr-text';
+import { passPrBody, testBudgetLines, type PassPrCheck } from './pr-text';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 
@@ -245,6 +245,11 @@ describe('prBody', () => {
       gate: { command: 'make gate' },
       ci: { repo: 'acme/widgets', sha: SHA },
       template: null,
+      // A lane's reason for adding more unit tests than CI's budget, from its commit message.
+      testBudget: testBudgetLines([
+        'feat: x\n\nTest-budget: splits a table\nValue: protects=x',
+        'fix: y\n\n  Test-budget: splits a table\nTest-budget:\n',
+      ]),
     });
     expect(body).toBe(
       [
@@ -289,6 +294,8 @@ describe('prBody', () => {
         'Checked on the Mac: make gate (gate).',
         '',
         `CI run for the pushed head: [0123456](https://github.com/acme/widgets/commit/${SHA}/checks)`,
+        '',
+        'Test-budget: splits a table',
         '',
         '---',
         '',
