@@ -40,24 +40,26 @@ with it.
   bare `origin` whose `main` sits there. A snapshot carries no later history, so a lane can't read
   the merged answer, and the builder's checkout is never written. A real run installs dependencies
   in the snapshot and gates with `make precheck`; the fake gates with `git diff --quiet HEAD`.
+  The install is `mise exec -- pnpm install --frozen-lockfile --prefer-offline` run in the snapshot
+  (`snapshot-install.ts`), so the snapshot's own node and pnpm run, not the runner's checkout's, and
+  that snapshot's `mise.toml` is trusted for the command alone. A failed install stops the run with
+  its own output in the error.
 - `make precheck` is the check 10db's own project runs on a lane's work, as its pull-request
   delivery's `precheckCommand`; CI runs the tests. Eval projects are local delivery, which ignores
   `precheckCommand`, so the eval names it as the project's `gateCommand` (`GATE` in `run.ts`). It
   once gated with `make check-changed`, which widened a daemon change to seven packages' full Vitest
   suites: in the 2026-11-18 `task-why-always` run at load ~5, format (3 s), lint (74 s) and
   typecheck (12 s) passed, then the test step printed nothing for 30 minutes and the gate exited 124.
-- **Gate time:** a real case-run's gate is expected to take about 1-2 minutes. No real case-run has
-  been timed with the pre-check yet; this is recorded evidence, not a measurement: the format, lint
-  and typecheck steps above took 89 s together, a one-package pre-check takes about 17 s, and the
-  CI-decides spec measured the pre-check under 2 minutes. The gate log's `durationMs` gives a run's
-  own time.
+- **Gate time:** a real case-run's gate is expected to take about 1-2 minutes. Measured on
+  2026-11-18: `make precheck` over `task-why-always`'s changed files took 35 s in a 10db lane's
+  sandbox (format 4 s, lint 31 s, typecheck 28 s and knip 24 s together, then the docs rule tests
+  1 s and drift 3 s). That ran on a later tree than the case's base, outside the eval's gate
+  sandbox, and the 2026-11-18 run above took 89 s for format, lint and typecheck alone at load ~5,
+  hence the range. No full case-run has been timed with the pre-check yet; the gate log's
+  `durationMs` gives a run's own time.
 - A gate step that runs tests streams its output, and a line as each test file starts
   (`scripts/vitest-progress.mjs`), to the gate log, so a gate that times out names the file it was
   running.
-  The install is `mise exec -- pnpm install --frozen-lockfile --prefer-offline` run in the snapshot
-  (`snapshot-install.ts`), so the snapshot's own node and pnpm run, not the runner's checkout's, and
-  that snapshot's `mise.toml` is trusted for the command alone. A failed install stops the run with
-  its own output in the error.
 - The install runs outside any sandbox and uses the builder's own pnpm store, so the snapshot's
   `node_modules/.modules.yaml` names that store. This matches production's shared mode, where the
   checkout is the builder's own install. A worktree-mode copy is installed differently: under the
