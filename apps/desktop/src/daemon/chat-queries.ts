@@ -14,7 +14,6 @@ import {
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { readJson, type DaemonClient } from './client';
-import { chatRoutes } from './chat-routes';
 import { conversationKeys } from './conversation-queries';
 import { useDaemon } from './provider';
 
@@ -56,12 +55,15 @@ export function useOpenChats() {
  * one is read, so the panel does not flash empty between keystrokes.
  */
 export function useSearchChats(q: string) {
-  const { connection } = useDaemon();
+  const { client } = useDaemon();
   const text = q.trim();
   const query = useQuery({
     queryKey: chatKeys.search(text),
     queryFn: async ({ signal }) =>
-      readJson(await chatRoutes.search(connection, text, null, signal), ChatSearchPage),
+      readJson(
+        await client.chats.search.$get({ query: { q: text } }, { init: { signal } }),
+        ChatSearchPage,
+      ),
     enabled: text !== '',
     placeholderData: keepPreviousData,
   });
