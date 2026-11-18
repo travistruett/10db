@@ -241,6 +241,7 @@ import {
   applyChatWorkAnswer,
   chatRoot,
   createChatWorkService,
+  createChatWorkStateReader,
   type ChatWorkService,
   doItHere,
   doItInCopy,
@@ -1833,6 +1834,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     folderHold,
     firstStartAfterMove,
     move: createChatMove({ state, delivery, signal: chatMovesAbort.signal }),
+    facts: createChatWorkStateReader({
+      state,
+      git,
+      gh: delivery.gh,
+      net: () => ({
+        env: delivery.networkEnv(),
+        timeoutMs: delivery.limits.networkTimeoutMs,
+      }),
+      folderHold,
+      clock,
+    }),
     carryOn: (chatId, text) => {
       chat.carryOn(chatId, text);
     },

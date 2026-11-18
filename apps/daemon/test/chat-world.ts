@@ -32,6 +32,7 @@ import {
   type ChatMoveDeps,
   type ChatWorktrees,
   type ChatWorkService,
+  type ChatWorkStateReader,
   type ChatHooksDeps,
   type ChatService,
 } from '../src/chat';
@@ -59,6 +60,12 @@ const NO_MOVE: ChatMoveDeps = {
   pick: () => Promise.reject(new Error('This world has no git for a move.')),
   pathFor: () => Promise.reject(new Error('This world has no git for a move.')),
   cut: () => Promise.reject(new Error('This world has no git for a move.')),
+};
+
+/** A world made with no git or GitHub for the title row's facts. */
+const NO_FACTS: ChatWorkStateReader = {
+  read: () => Promise.reject(new Error('This world reads no git state.')),
+  forgetPullRequest: () => undefined,
 };
 
 export interface ChatWorld {
@@ -123,6 +130,12 @@ export function chatWorld(
     readonly project?: Partial<ProjectInput>;
     /** What the move to a new branch uses of git; a world with none refuses it. */
     readonly move?: (world: { readonly state: StateStore }) => ChatMoveDeps;
+    /** What the title row's facts read of git and GitHub; a world with none refuses them. */
+    readonly facts?: (world: {
+      readonly state: StateStore;
+      readonly folderHold: FolderHold;
+      readonly clock: ManualClock;
+    }) => ChatWorkStateReader;
     /** Git's side of Archive for a session on its own branch. */
     readonly worktrees?: (world: { readonly state: StateStore }) => ChatWorktrees;
   } = {},
@@ -213,6 +226,7 @@ export function chatWorld(
     folderHold,
     firstStartAfterMove,
     move: opts.move === undefined ? NO_MOVE : opts.move({ state }),
+    facts: opts.facts === undefined ? NO_FACTS : opts.facts({ state, folderHold, clock }),
     carryOn: (chatId, text) => {
       chatService?.carryOn(chatId, text);
     },

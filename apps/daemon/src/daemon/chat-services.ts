@@ -37,6 +37,7 @@ export type ChatApiServices = Pick<
   | 'archivePreview'
   | 'unarchiveChat'
   | 'chooseChatWork'
+  | 'chatWorkState'
   | 'stopChatWaiting'
   | 'askChatBrief'
   | 'cancelChatBrief'
@@ -97,6 +98,7 @@ export function createChatApiServices(deps: {
         throw error;
       }
     },
+    chatWorkState: (id, signal) => deps.work.state(id, signal),
     stopChatWaiting(id) {
       chat.stopWaiting(id);
       return chat.get(id);
