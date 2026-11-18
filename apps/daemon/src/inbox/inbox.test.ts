@@ -4521,14 +4521,14 @@ describe('a flag with a fold key', () => {
     };
     const input = { ...refusal(), refresh: true, closesWhen, detail: { n: 1 } };
     const first = inbox.flag(input);
-    expect(first.detail).toEqual({ n: 1, resolvesWhen: closesWhen.when });
+    expect(first.detail).toEqual({ n: 1, resolvesWhen: closesWhen.when, closesItself: true });
     const refreshed = inbox.flag({ ...input, body: 'Still stopped.', detail: { n: 2 } });
     expect(refreshed.id).toBe(first.id);
-    expect(refreshed.detail).toEqual({ n: 2, resolvesWhen: closesWhen.when });
+    expect(refreshed.detail).toEqual({ n: 2, resolvesWhen: closesWhen.when, closesItself: true });
     expect(cardsResolvedByEvent(state.db, null).map((c) => c.item.id)).toEqual([first.id]);
   });
 
-  it('stores no closer in the detail for a card the builder answers or 10db withdraws', () => {
+  it('stores no closer in the detail for a card the builder answers, and only the marker for one 10db withdraws', () => {
     const answered = inbox.flag({ ...refusal(), foldKey: 'ans-one' });
     expect(answered.detail).toBeNull();
     const withdrawn = inbox.flag({
@@ -4536,7 +4536,7 @@ describe('a flag with a fold key', () => {
       foldKey: 'wd-one',
       closesWhen: { by: 'withdrawn', when: 'the cause is gone (test)' },
     });
-    expect(withdrawn.detail).toBeNull();
+    expect(withdrawn.detail).toEqual({ closesItself: true });
   });
 });
 
