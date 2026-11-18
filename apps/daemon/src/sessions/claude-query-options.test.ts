@@ -56,13 +56,18 @@ const rendered = renderClaudeAutoMode(
 
 const noSetup: ClaudeProfileSetup = { instructions: null, plugins: [] };
 const withSetup: ClaudeProfileSetup = { instructions: 'Use pnpm.', plugins: ['/setup/yours'] };
-const lane = (permissionMode: LanePermissionMode, setup = noSetup): ClaudeProfile => ({
+const lane = (
+  permissionMode: LanePermissionMode,
+  setup = noSetup,
+  transcriptDays?: number,
+): ClaudeProfile => ({
   kind: 'lane',
   allowedTools: ['Read', 'mcp__10db__*'],
   permissionMode,
   pluginDir: '/harness',
   autoMode: rendered,
   setup,
+  ...(transcriptDays === undefined ? {} : { transcriptDays }),
 });
 const explore = (
   setup = noSetup,
@@ -254,6 +259,16 @@ describe('claudeQueryOptions', () => {
   ] as const)('turns file checkpointing on for %s only when it edits: %s', (_who, profile, on) => {
     const options = claudeQueryOptions(profile, sandbox);
     expect('enableFileCheckpointing' in options && options.enableFileCheckpointing).toBe(on);
+  });
+
+  // An eval run keeps its lanes' transcripts whatever the builder's own cleanupPeriodDays says.
+  it.each([
+    ['sandboxed', sandbox],
+    ['unsandboxed', null],
+  ])('pins a lane transcript retention inline only when one is given (%s)', (_name, s) => {
+    const kept = claudeQueryOptions(lane('auto', noSetup, 30), s);
+    expect(kept.settings).toMatchObject({ cleanupPeriodDays: 30 });
+    expect(claudeQueryOptions(lane('auto'), s)).not.toHaveProperty('settings.cleanupPeriodDays');
   });
 
   it('leaves sandbox and disallowedTools out of an unsandboxed lane', () => {

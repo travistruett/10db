@@ -19,6 +19,7 @@ export {
   type CheckoutPlace,
   type FolderAt,
   type Git,
+  OP_TRAILER,
   OVER_BUDGET_REFUSAL,
   type SurveyTexts,
   type KeptCommit,
