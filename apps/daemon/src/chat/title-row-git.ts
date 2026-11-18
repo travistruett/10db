@@ -12,7 +12,7 @@ import type { FolderHold } from '../folder-hold';
 import type { Git } from '../git';
 import { blockingHolder, checkoutHolderWords } from './checkout-words';
 import { gitSteps, type GitStepsDeps, type StepSite } from './git-steps';
-import { isTenDbBranch } from './git-names';
+import { refuseOwnBranch } from './git-names';
 import type { ChatWorkService } from './work-service';
 
 // The git steps the title row runs (sessions spec §4.6): a daemon route each, with no warm session and no turn.
@@ -61,7 +61,6 @@ export function createTitleRowGit(deps: TitleRowGitDeps): TitleRowGit {
     job: (site: StepSite) => Promise<T>,
   ): Promise<T> {
     const chat = getChat(state.db, chatId);
-    const noGuard = (): Promise<void> => Promise.resolve();
     switch (chat.workPlace) {
       case null:
       case WorkPlace.Choosing:
@@ -70,20 +69,26 @@ export function createTitleRowGit(deps: TitleRowGitDeps): TitleRowGit {
         throw new ConflictError(MOVING_WORDS);
       case WorkPlace.Branch:
         if (chat.worktreePath === null) throw new ConflictError(NO_WORKTREE_WORDS);
-        return job({ repo: chat.worktreePath, beforeWrite: noGuard });
+        {
+          const worktree = chat.worktreePath;
+          const recheck = (): Promise<void> =>
+            refuseOwnBranch(deps.git, worktree, "This session's worktree");
+          await recheck();
+          return job({ repo: worktree, beforeWrite: recheck });
+        }
       case WorkPlace.Here: {
         const projectId = chat.projectId;
         const repo = getProject(state.db, projectId).repoPath;
         const branch = await deps.git.currentBranch(repo);
         const blocking = blockingHolder(folderHold.holders(projectId, chatId));
         if (blocking !== undefined) throw new ConflictError(checkoutHolderWords(blocking, branch));
-        if (branch !== null && isTenDbBranch(branch))
-          throw new ConflictError(
-            `Your checkout is on ${branch}, which is 10db's own, so a session changes no git state there.`,
-          );
+        await refuseOwnBranch(deps.git, repo, 'Your checkout');
         const token = await folderHold.reserveGitWhenFree(projectId, what, { signal });
         try {
-          return await job({ repo, beforeWrite: noGuard });
+          return await job({
+            repo,
+            beforeWrite: () => refuseOwnBranch(deps.git, repo, 'Your checkout'),
+          });
         } finally {
           folderHold.releaseGit(token);
         }

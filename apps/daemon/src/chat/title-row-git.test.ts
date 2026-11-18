@@ -30,6 +30,8 @@ let gh: FakeGh;
 let titleRow: TitleRowGit;
 /** Held by a test that needs a step to stay inside its work while something else is tried. */
 let inStep: Promise<void> = Promise.resolve();
+/** How many steps have reached their work, which is where `inStep` holds them. */
+let entered = 0;
 
 afterEach(async () => {
   await w.close();
@@ -37,6 +39,7 @@ afterEach(async () => {
   extra?.cleanup();
   extra = null;
   inStep = Promise.resolve();
+  entered = 0;
 });
 
 const gitIn = (dir: string, ...args: string[]): string =>
@@ -77,6 +80,7 @@ function setup(): ChatDto {
     gh,
     filesDir: () => join(repo.path, '..', 'pr-bodies'),
     secretFilesOf: async (root) => {
+      entered += 1;
       await inStep;
       return secretFilesIn(root);
     },
@@ -284,5 +288,67 @@ describe('a session on its own branch', () => {
     await expect(
       titleRow.commit(reading.id, { message: 'x', paths: ['a.ts'] }, signal),
     ).rejects.toThrow('has not changed any files');
+  });
+});
+
+describe('10db’s own branches', () => {
+  const OWN = /10db's own/;
+  function inWorktree(chatId: Parameters<typeof setChatWork>[1]) {
+    extra = tempDir('title-row-own');
+    const path = join(realpathSync(extra.path), 'wt');
+    gitIn(repo.path, 'worktree', 'add', '-q', '-b', 'fix', path, 'HEAD');
+    gitIn(repo.path, 'branch', '10db/batch-abc123');
+    w.state.write((ctx) =>
+      setChatWork(ctx, chatId, 'here', {
+        place: WorkPlace.Branch,
+        branch: 'fix',
+        worktreePath: path,
+        baseHead: headSha(),
+      }),
+    );
+    return path;
+  }
+  const request = { message: 'x', paths: ['a.ts'] };
+
+  it('refuses a worktree already switched to one, and commits nothing', async () => {
+    const chat = setup();
+    const path = inWorktree(chat.id);
+    gitIn(path, 'switch', '-q', '10db/batch-abc123');
+    write(path, 'a.ts', 'a\n');
+    const before = headSha(path);
+    await expect(titleRow.commit(chat.id, request, signal)).rejects.toThrow(OWN);
+    expect(headSha(path)).toBe(before);
+  });
+
+  it('refuses when the worktree is switched after the first check, under the repo lock', async () => {
+    const chat = setup();
+    const path = inWorktree(chat.id);
+    write(path, 'a.ts', 'a\n');
+    const held = gate();
+    inStep = held.promise;
+    const before = headSha(path);
+    const running = titleRow.commit(chat.id, request, signal);
+    const refused = expect(running).rejects.toThrow(OWN);
+    await waitFor(() => entered > 0);
+    gitIn(path, 'switch', '-q', '10db/batch-abc123');
+    held.release();
+    await refused;
+    expect(headSha(path)).toBe(before);
+  });
+
+  it('refuses when the checkout is switched after the first check, under the repo lock', async () => {
+    const chat = setup();
+    gitIn(repo.path, 'branch', '10db/batch-abc123');
+    write(repo.path, 'a.ts', 'a\n');
+    const held = gate();
+    inStep = held.promise;
+    const before = headSha();
+    const running = titleRow.commit(chat.id, request, signal);
+    const refused = expect(running).rejects.toThrow(OWN);
+    await waitFor(() => entered > 0);
+    gitIn(repo.path, 'switch', '-q', '10db/batch-abc123');
+    held.release();
+    await refused;
+    expect(headSha()).toBe(before);
   });
 });

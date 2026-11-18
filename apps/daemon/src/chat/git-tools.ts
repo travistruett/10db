@@ -15,7 +15,7 @@ import { holderWords, type FolderHold } from '../folder-hold';
 import type { Git, NetworkCall } from '../git';
 import type { Gh } from '../github';
 import type { ChatLiveSessions } from './live-sessions';
-import { chatBranchName, isTenDbBranch } from './git-names';
+import { chatBranchName, isTenDbBranch, refuseOwnBranch } from './git-names';
 import { gitSteps } from './git-steps';
 
 // Sessions spec §7.3: a chat changes git in Your folder through these tools, which run only while its turn
@@ -86,11 +86,7 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
           'This session has no worktree now, so it changes no git state until it is reopened.',
         );
       // The agent can switch its worktree to any branch git lets it, so the branch is read each time.
-      const head = await deps.git.currentBranch(worktree);
-      if (head !== null && isTenDbBranch(head))
-        throw new ConflictError(
-          `This session's worktree is on ${head}, which is 10db's own, so a chat changes no git state there.`,
-        );
+      await refuseOwnBranch(deps.git, worktree, "This session's worktree");
       return { repo: worktree, sharedWith: [] };
     }
     if (!deps.folderHold.holdsTurn(chatId)) {
@@ -108,11 +104,7 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
         `Git in Your folder waits: ${holderWords(closed)}. Its branch is the folder's until then.`,
       );
     const repo = deps.repoOf(projectId);
-    const head = await deps.git.currentBranch(repo);
-    if (head !== null && isTenDbBranch(head))
-      throw new ConflictError(
-        `Your folder is on ${head}, which is 10db's own, so a chat changes no git state there.`,
-      );
+    await refuseOwnBranch(deps.git, repo, 'Your folder');
     return {
       repo,
       sharedWith: others
