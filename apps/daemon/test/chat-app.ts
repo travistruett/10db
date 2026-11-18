@@ -1,6 +1,8 @@
 import { defineWebSocketHelper } from 'hono/ws';
 import { createApp } from '../src/api';
-import { createChatApiServices } from '../src/daemon';
+import { join } from 'node:path';
+import { createChatApiServices, createChatChanges } from '../src/daemon';
+import { createGit } from '../src/git';
 import { silentLogger } from '../src/log';
 import { createPendingOpens } from '../src/pass';
 import { stubServices } from './api-stub';
@@ -27,6 +29,10 @@ export function chatApp(world: ChatWorld) {
         doItPreview: () => Promise.reject(new Error('not read here')),
         doIt: () => Promise.reject(new Error('not done here')),
         git: () => Promise.reject(new Error('not a repository')),
+        changes: createChatChanges({
+          state: world.state,
+          git: createGit({ worktreeRoot: join(world.dataDir, 'worktrees') }),
+        }),
         now: () => new Date(),
         log: silentLogger,
       }),

@@ -819,6 +819,9 @@ export function createApp(deps: ApiDeps) {
       const answer = await deps.services.archiveChat(ChatId.parse(c.req.param('chatId')), request);
       return answer.archived ? c.json(answer.chat, 200) : c.json(answer.preview, 409);
     })
+    .get('/chats/:chatId/changes', async (c) =>
+      c.json(await deps.services.chatChanges(ChatId.parse(c.req.param('chatId')))),
+    )
     .get('/chats/:chatId/work', async (c) =>
       c.json(
         await deps.services.chatWorkState(ChatId.parse(c.req.param('chatId')), c.req.raw.signal),

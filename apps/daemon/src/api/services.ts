@@ -695,6 +695,8 @@ export interface ApiServices extends PlanRecordServices {
     id: ChatId,
     choice: ChatWorkChoice,
   ): Promise<{ readonly settled: boolean; readonly work: ChatWork }>;
+  /** What the session changed, for the drawer's Changes. */
+  chatChanges(id: ChatId): Promise<WorkstreamChangesDto>;
   /** The git and GitHub facts the title row and the bar are drawn from; `signal` ends the GitHub read. */
   chatWorkState(id: ChatId, signal: AbortSignal): Promise<ChatWorkStateDto>;
   /** Stops a chat's wait for Your folder: what it queued runs reading only. */

@@ -45,6 +45,7 @@ function appOf(world: ChatWorld) {
         pendingOpens: createPendingOpens({ state: world.state }),
         doItPreview: () => Promise.reject(new Error('not read here')),
         doIt: () => Promise.reject(new Error('not done here')),
+        changes: () => Promise.reject(new Error('not read here')),
         git: () => Promise.reject(new Error('not a repository')),
         now: () => new Date(),
         log: silentLogger,

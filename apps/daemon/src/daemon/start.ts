@@ -312,6 +312,7 @@ import { createPlanRecordServices } from './plan-record-services';
 import { createShapeServices } from './shape-services';
 import { createConversationServices } from './conversation-services';
 import { createChatApiServices } from './chat-services';
+import { createChatChanges } from './chat-changes';
 import { createChatMove } from './chat-move';
 import { createChatWorktrees } from './chat-worktrees';
 import { createShapePreparer, createTakeoverPreparer } from './shape-session-tools';
@@ -2470,6 +2471,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       takeover,
       folderHold,
       pendingOpens,
+      changes: createChatChanges({ state, git }),
       doItPreview: (chatId) => previewDoIt(doItDeps, chatId),
       doIt: (chatId, input) =>
         input.place === DoItPlace.Here
