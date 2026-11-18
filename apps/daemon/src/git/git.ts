@@ -661,7 +661,9 @@ export interface Git extends ChatGit {
     repo: string,
     base: string,
     tip?: string,
-  ): Promise<{ readonly sha: string; readonly parents: readonly string[]; readonly message: string }[]>;
+  ): Promise<
+    { readonly sha: string; readonly parents: readonly string[]; readonly message: string }[]
+  >;
   /** How many commits `tip` has that `base` lacks, every parent followed (`rev-list --count`). */
   countCommits(repo: string, base: string, tip: string): Promise<number>;
   /**
