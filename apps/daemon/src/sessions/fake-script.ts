@@ -15,6 +15,11 @@ export const FakeStep = z.discriminatedUnion('do', [
     /** The permission mode the agent reports with the call, as Claude Code's hook does; absent reports none. */
     reportedMode: z.enum(['auto', 'other']).optional(),
   }),
+  /**
+   * The agent writes a file as a Write call: the guard is asked for the path resolved from the
+   * session's cwd, and the file is written there when the call is allowed.
+   */
+  z.object({ do: z.literal('edit'), path: z.string().min(1), text: z.string() }),
   z.object({ do: z.literal('mcp'), tool: z.string(), args: z.record(z.string(), Json) }),
   /** The agent writes a message: two text deltas, the text split at its middle, then the message. */
   z.object({ do: z.literal('say'), text: z.string().min(1) }),
@@ -109,6 +114,7 @@ export type FakeStep = z.infer<typeof FakeStep>;
 export const TURN_STEPS: ReadonlySet<FakeStep['do']> = new Set([
   'consume',
   'tool',
+  'edit',
   'mcp',
   'activity',
   'say',
