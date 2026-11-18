@@ -49,7 +49,7 @@ describe.skipIf(LEFTHOOK_MISSING)('lefthook.yml', () => {
     const names = (hook: string) => (dumped[hook]?.jobs ?? []).map((job) => job.name);
     expect(names('pre-commit')).toEqual(['gitleaks', 'hygiene', 'prettier', 'eslint', 'cargo-fmt']);
     expect(names('commit-msg')).toEqual(['commitlint']);
-    expect(names('pre-push')).toEqual(['no-push-to-main', 'check']);
+    expect(names('pre-push')).toEqual(['no-push-to-main', 'test-budget', 'check']);
   });
 });
 

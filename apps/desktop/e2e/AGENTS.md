@@ -36,10 +36,12 @@ highlights code) and `see-screen.spec.ts` (the screen a session draws is a real 
 - **A flow runs the real thing.** The daemon and app are real; only the Claude adapter is the fake, and only the
   network and the platform's own windows (Keychain, Terminal) are cut off. A spec seeds a database row or calls the
   API only to reach a state a lane would reach, never to stand in for the step under test.
-- **Axe is checked inside a flow** at its main states, in dark, with `expectAccessible`; light and other widths
-  are not repeated.
+- **No new axe checks.** Accessibility isn't work unless the builder asks (`DESIGN.md`); an existing
+  `expectAccessible` call that blocks a change may be removed.
 - **Run time stays about where it was.** CI runs two shards (`GATE_E2E_ARGS: --shard=n/2`); files run in name
   order with one worker. A flow that adds minutes folds into one that exists.
+- **A spec that routes a request imports `test` from `./routed-test`**, whose page drops its routes when the
+  test ends; the app polls `/system`, and a route callback still running then fails the test or the next one.
 - **Specs share one daemon per shard.** `first-run.spec.ts` runs first in shard 1 because the first run shows only
   while the daemon has no project. The Board shows the first project by name, so the project it makes,
   `e2e-first-run`, sorts after `e2e`, which `loop.spec.ts` and the specs after it open. Every spec adds its own

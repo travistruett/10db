@@ -1,6 +1,7 @@
 import { join } from 'node:path';
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
 import { claudeIsInstalled } from './claude-is-installed';
+import { test } from './routed-test';
 import { expectAccessible } from './expect-accessible';
 import { E2E_DIR } from './paths';
 import { createRepository } from './shape-project';

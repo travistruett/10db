@@ -6,7 +6,9 @@ import {
   findForeignClaimWrites,
   findStrays,
   isAlwaysIgnored,
+  isLefthookChecksum,
   isSensitivePath,
+  changedConfigKeys,
   strayFoldKey,
 } from './strays';
 
@@ -49,6 +51,9 @@ describe('isSensitivePath', () => {
     ['.claude/settings.local.json', true],
     ['.codex/config.toml', true],
     ['.git/config', true],
+    ['.git/config.worktree', true],
+    ['.git/worktrees/feat/config.worktree', true],
+    ['.git/worktrees/feat/HEAD', false],
     ['.git/hooks/pre-commit', true],
     ['.git/info/exclude', true],
     ['.git/index', false],
@@ -196,5 +201,95 @@ describe('fold keys', () => {
     const id = mintId('Project');
     expect(strayFoldKey(id, 'docs/a.md')).toBe(`stray-write:${id}:docs/a.md`);
     expect(bulkFoldKey(id)).toBe(`stray-write:${id}:bulk`);
+  });
+});
+
+describe('isLefthookChecksum', () => {
+  const sum = 'a'.repeat(32);
+  it.each([
+    [
+      'the exact path with a hash and a timestamp',
+      '.git/info/lefthook.checksum',
+      `${sum} 1763400000\n`,
+      true,
+    ],
+    ['no trailing newline', '.git/info/lefthook.checksum', `${sum} 1763400000`, true],
+    ['another file in .git/info', '.git/info/exclude', `${sum} 1763400000\n`, false],
+    [
+      'the checksum name deeper down',
+      '.git/info/x/lefthook.checksum',
+      `${sum} 1763400000\n`,
+      false,
+    ],
+    [
+      'content that is a hook script',
+      '.git/info/lefthook.checksum',
+      '#!/bin/sh\nrm -rf ~\n',
+      false,
+    ],
+    ['a 31 character hash', '.git/info/lefthook.checksum', `${'a'.repeat(31)} 1763400000\n`, false],
+    ['an uppercase hash', '.git/info/lefthook.checksum', `${'A'.repeat(32)} 1763400000\n`, false],
+    ['a second line', '.git/info/lefthook.checksum', `${sum} 1763400000\nmore\n`, false],
+  ])('%s', (_name, rel, content, expected) => {
+    expect(isLefthookChecksum(rel, content)).toBe(expected);
+  });
+});
+
+describe('changedConfigKeys', () => {
+  const config = (...pairs: [string, string][]) =>
+    new Map(pairs.map(([k, v]) => [k, [v]] as const));
+  const BASE: [string, string][] = [
+    ['core.bare', 'false'],
+    ['remote.origin.url', 'git@x:y.git'],
+  ];
+  const before = config(...BASE);
+  it.each([
+    [
+      'a branch remote set to a URL',
+      config(...BASE, ['branch.main.remote', 'https://evil/x.git']),
+      ['branch.main.remote'],
+    ],
+    [
+      'a branch remote naming a defined remote',
+      config(...BASE, ['branch.main.remote', 'origin']),
+      [],
+    ],
+    [
+      'a branch pushremote',
+      config(...BASE, ['branch.main.pushremote', 'origin']),
+      ['branch.main.pushremote'],
+    ],
+    ['a branch rebase', config(...BASE, ['branch.main.rebase', 'true']), ['branch.main.rebase']],
+    [
+      'the worktree config extension',
+      config(...BASE, ['extensions.worktreeconfig', 'true']),
+      ['extensions.worktreeconfig'],
+    ],
+    [
+      'a push -u',
+      config(...BASE, ['branch.main.remote', 'origin'], ['branch.main.merge', 'refs/heads/main']),
+      [],
+    ],
+    ['a worktree add', config(...BASE, ['worktree.guessremote', 'true']), []],
+    ['a branch name with dots', config(...BASE, ['branch.feat/a.b.remote', 'origin']), []],
+    ['a hooks path', config(...BASE, ['core.hookspath', 'x']), ['core.hookspath']],
+    [
+      'a changed remote url',
+      config(['core.bare', 'false'], ['remote.origin.url', 'evil']),
+      ['remote.origin.url'],
+    ],
+    ['a removed key', config(['core.bare', 'false']), ['remote.origin.url']],
+    [
+      'a key branch has no name for',
+      config(...BASE, ['branch.autosetupmerge', 'always']),
+      ['branch.autosetupmerge'],
+    ],
+    [
+      'bookkeeping beside a real change',
+      config(...BASE, ['branch.m.remote', 'origin'], ['alias.x', '!sh']),
+      ['alias.x'],
+    ],
+  ])('%s', (_name, after, expected) => {
+    expect(changedConfigKeys(before, after)).toEqual(expected);
   });
 });

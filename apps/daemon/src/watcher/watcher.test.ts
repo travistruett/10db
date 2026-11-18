@@ -16,6 +16,7 @@ import { dirname, join } from 'node:path';
 import {
   AbandonStep,
   ClaimKind,
+  ConflictError,
   EventType,
   mintId,
   WHOLE_PROJECT_PAGE,
@@ -72,7 +73,7 @@ import { createEventBus, createStateStore, type StateStore } from '../events';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
 import { passDirtRef } from '../delivery';
 import { createGit } from '../git';
-import { createInboxService, type InboxService } from '../inbox';
+import { createInboxService, stampFile, trustedWrites, type InboxService } from '../inbox';
 import { silentLogger, type Logger } from '../log';
 import { dropShared, grantSharedHold, keepHold, landSharedChanges } from '../pass';
 import { editResult } from '../permissions';
@@ -179,8 +180,12 @@ function running(title = 'Alpha', areas = ['api']): { task: TaskDto; workstream:
   return seeded;
 }
 
-const flags = (): InboxItemDto[] =>
+const openFlags = (): InboxItemDto[] =>
   listInbox(base.db, { states: ['OPEN'] }).filter((i) => i.kind === 'flag');
+// A stamped card ends its body with the short stamp of the version it shows; most tests are about the rest.
+const VERSION_LINE = /\nVersion [0-9a-f]{12}$/;
+const flags = (): InboxItemDto[] =>
+  openFlags().map((i) => ({ ...i, body: i.body.replace(VERSION_LINE, '') }));
 const emit = (rel: string) => {
   fake.open.get(repo.path)?.onChange(rel);
 };
@@ -361,7 +366,7 @@ describe('watcher', () => {
       emit('.git/index');
       emit('.git/refs/heads/main');
       await watcher.flush();
-      expect(flags().map((f) => f.body)).toEqual([rel]);
+      expect(flags().map((f) => f.body.split('\n')[0])).toEqual([rel]);
     },
   );
 
@@ -422,7 +427,7 @@ describe('watcher', () => {
         commitFile(rel);
         emit(rel);
         await watcher.flush();
-        expect(flags().map((f) => f.body)).toEqual([rel]);
+        expect(flags().map((f) => f.body.split('\n')[0])).toEqual([rel]);
       },
     );
 
@@ -720,7 +725,7 @@ describe('watcher', () => {
       emit(lock);
       emit(rel);
       await watcher.flush();
-      expect(flags().map((f) => f.body)).toEqual([rel]);
+      expect(flags().map((f) => f.body.split('\n')[0])).toEqual([rel]);
       expect(bookkeepingLogs()).toEqual([lock]);
     });
   });
@@ -1354,7 +1359,7 @@ describe("a pass's shared change, kept as its turn ended", () => {
   const strayBodies = (): string[] =>
     listInbox(w.h.store.db, { states: ['OPEN'] })
       .filter((i) => i.kind === 'flag')
-      .map((i) => i.body);
+      .map((i) => i.body.replace(VERSION_LINE, ''));
 
   /**
    * Settings' turn held shared `src`, wrote `src/button.ts` (dirty before the pass), and ended Ready: its end kept the change on
@@ -1483,7 +1488,7 @@ describe('watcher on the real file system', () => {
       // FSEvents can take a moment to start delivering; keep writing until a flag appears.
       await waitFor(() => {
         writeFileSync(join(repo.path, 'docs', 'real.md'), String(Date.now()));
-        return flags().find((f) => f.body === 'docs/real.md');
+        return flags().find((f) => f.body.split('\n')[0] === 'docs/real.md');
       }, 15_000);
     } finally {
       real.stop();
@@ -3716,5 +3721,200 @@ describe('worktree checkouts', () => {
       await write(SENSITIVE_FILE);
       expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
     });
+  });
+});
+
+describe('stray writes in .git', () => {
+  const HOOK = '.git/hooks/pre-commit';
+  const git = (cwd: string, ...args: string[]): string =>
+    execFileSync('git', args, { cwd, env: isolatedGitEnv(), encoding: 'utf8' });
+  const writeHook = (text: string) => {
+    mkdirSync(join(repo.path, '.git/hooks'), { recursive: true });
+    writeFileSync(join(repo.path, HOOK), text);
+    emit(HOOK);
+  };
+  const trust = (id: InboxItemDto['id']) => inbox.answer(id, { choice: 'Trust This Version' });
+
+  it('trusts a hook version once, and raises a card again for any other', async () => {
+    running();
+    watcher.sync();
+    writeHook('#!/bin/sh\necho a\n');
+    await watcher.flush();
+    const [card] = flags();
+    expect(card?.detail?.['sha256']).toBe(stampFile(repo.path, HOOK));
+    expect(openFlags()[0]?.body).toMatch(
+      new RegExp(`\\nVersion ${String(stampFile(repo.path, HOOK)).slice(0, 12)}$`),
+    );
+    expect(card?.options.map((o) => o.label)).toEqual(['Trust This Version', 'Dismiss']);
+
+    trust(card?.id ?? ('' as InboxItemDto['id']));
+    expect(flags()).toEqual([]);
+    expect(trustedWrites(base.db, project.id)).toMatchObject([{ path: HOOK }]);
+
+    writeHook('#!/bin/sh\necho a\n');
+    await watcher.flush();
+    expect(flags()).toEqual([]);
+
+    writeHook('#!/bin/sh\necho b\n');
+    await watcher.flush();
+    expect(flags().map((f) => f.body.split('\n')[0])).toEqual([HOOK]);
+  });
+
+  it('does not trust a hook rewritten while its card was open, and shows the new version', async () => {
+    running();
+    watcher.sync();
+    writeHook('#!/bin/sh\necho a\n');
+    await watcher.flush();
+    const [card] = flags();
+    // Rewritten after the card, before the watcher's next batch: the answer stamps the file itself.
+    writeFileSync(join(repo.path, HOOK), '#!/bin/sh\necho b\n');
+    trust(card?.id ?? ('' as InboxItemDto['id']));
+
+    expect(trustedWrites(base.db, project.id)).toEqual([]);
+    const open = flags();
+    expect(open).toHaveLength(1);
+    expect(open[0]?.id).not.toBe(card?.id);
+    expect(open[0]?.detail?.['sha256']).toBe(stampFile(repo.path, HOOK));
+
+    // A rewrite seen by the watcher replaces the open card with one holding the new stamp.
+    writeHook('#!/bin/sh\necho c\n');
+    await watcher.flush();
+    expect(flags()[0]?.detail?.['sha256']).toBe(stampFile(repo.path, HOOK));
+  });
+
+  it('raises nothing for what a real worktree add and push -u write to the config', async () => {
+    const origin = tempDir('origin');
+    git(origin.path, 'init', '--bare', '-q');
+    git(origin.path, 'config', 'receive.autogc', 'false');
+    git(repo.path, 'remote', 'add', 'origin', origin.path);
+    const branch = git(repo.path, 'branch', '--show-current').trim();
+    running();
+    watcher.sync();
+    const worktrees = tempDir('worktrees');
+    git(repo.path, 'worktree', 'add', '-q', join(worktrees.path, 'w'), '-b', 'feat/x');
+    emit('.git/config');
+    emit('.git/worktrees/w/HEAD');
+    await watcher.flush();
+    git(repo.path, 'push', '-q', '-u', 'origin', branch);
+    emit('.git/config');
+    await watcher.flush();
+    expect(git(repo.path, 'config', `branch.${branch}.remote`).trim()).toBe('origin');
+    expect(flags()).toEqual([]);
+    worktrees.cleanup();
+    origin.cleanup();
+  });
+
+  it('raises a card naming the key a real git config call changed', async () => {
+    running();
+    watcher.sync();
+    git(repo.path, 'config', 'core.hooksPath', 'x');
+    emit('.git/config');
+    await watcher.flush();
+    const [card] = flags();
+    expect(card?.body).toContain('.git/config');
+    expect(card?.body.toLowerCase()).toContain('core.hookspath');
+  });
+
+  it('names the keys of the first config change when a second write refreshes the card', async () => {
+    running();
+    watcher.sync();
+    git(repo.path, 'config', 'core.hooksPath', 'x');
+    emit('.git/config');
+    await watcher.flush();
+    const [first] = flags();
+    git(repo.path, 'config', 'user.name', 'someone');
+    emit('.git/config');
+    await watcher.flush();
+    const open = flags();
+    expect(open).toHaveLength(1);
+    expect(open[0]?.id).not.toBe(first?.id);
+    expect(open[0]?.body.toLowerCase()).toContain('core.hookspath');
+    expect(open[0]?.body.toLowerCase()).toContain('user.name');
+  });
+
+  it('cards a config that is a link, since it can not be read as a file', async () => {
+    running();
+    watcher.sync();
+    const config = join(repo.path, '.git/config');
+    renameSync(config, join(repo.path, '.git/config.real'));
+    symlinkSync(join(repo.path, '.git/config.real'), config);
+    emit('.git/config');
+    await watcher.flush();
+    const [card] = flags();
+    expect(card?.body).toContain('Could not be read');
+    expect(card?.options.map((o) => o.label) ?? []).not.toContain('Trust This Version');
+  });
+
+  it('never closes a card silently when its file became a link before the answer', async () => {
+    running();
+    watcher.sync();
+    writeHook('#!/bin/sh\necho a\n');
+    await watcher.flush();
+    const [card] = flags();
+    rmSync(join(repo.path, HOOK));
+    symlinkSync(join(repo.path, 'README.md'), join(repo.path, HOOK));
+    trust(card?.id ?? ('' as InboxItemDto['id']));
+    expect(trustedWrites(base.db, project.id)).toEqual([]);
+    const open = flags();
+    expect(open).toHaveLength(1);
+    expect(open[0]?.options.map((o) => o.label) ?? []).not.toContain('Trust This Version');
+  });
+
+  it('refuses an answer to a card whose file has since been rewritten and re-carded', async () => {
+    running();
+    watcher.sync();
+    writeHook('#!/bin/sh\necho a\n');
+    await watcher.flush();
+    const [old] = flags();
+    writeHook('#!/bin/sh\necho b\n');
+    await watcher.flush();
+    expect(() => trust(old?.id ?? ('' as InboxItemDto['id']))).toThrow(ConflictError);
+    expect(trustedWrites(base.db, project.id)).toEqual([]);
+  });
+
+  it('leaves a config card open when its lane is cancelled, and still names the key afterwards', async () => {
+    const lane = running();
+    watcher.sync();
+    git(repo.path, 'config', 'core.hooksPath', 'scripts/h');
+    emit('.git/config');
+    await watcher.flush();
+    expect(flags()).toHaveLength(1);
+
+    inbox.cancelForWorkstream(lane.workstream.id);
+    expect(flags()).toHaveLength(1);
+
+    git(repo.path, 'config', 'branch.main.merge', 'refs/heads/main');
+    emit('.git/config');
+    await watcher.flush();
+    expect(flags()[0]?.body.toLowerCase()).toContain('core.hookspath');
+  });
+
+  it('cards a config key again after its card was withdrawn rather than answered', async () => {
+    running();
+    watcher.sync();
+    git(repo.path, 'config', 'core.hooksPath', 'scripts/h');
+    emit('.git/config');
+    await watcher.flush();
+    inbox.withdraw(flags()[0]?.id ?? ('' as InboxItemDto['id']));
+    expect(flags()).toEqual([]);
+
+    git(repo.path, 'config', 'branch.main.merge', 'refs/heads/main');
+    emit('.git/config');
+    await watcher.flush();
+    expect(flags()[0]?.body.toLowerCase()).toContain('core.hookspath');
+  });
+
+  it('accepts a config key once its card was dismissed', async () => {
+    running();
+    watcher.sync();
+    git(repo.path, 'config', 'core.hooksPath', 'scripts/h');
+    emit('.git/config');
+    await watcher.flush();
+    inbox.answer(flags()[0]?.id ?? ('' as InboxItemDto['id']), { choice: 'Dismiss' });
+
+    git(repo.path, 'config', 'branch.main.merge', 'refs/heads/main');
+    emit('.git/config');
+    await watcher.flush();
+    expect(flags()).toEqual([]);
   });
 });
