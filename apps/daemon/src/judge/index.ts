@@ -6,5 +6,6 @@ export {
   type JudgeRequest,
   type JudgeService,
 } from './judge';
+export { fenced } from './fenced-text';
 export { createDecisionModelList, type DecisionModelList } from './decision-model-list';
 export { decisionModelNumbers, typicalDecisionTokens } from './decision-model-numbers';
