@@ -2363,7 +2363,8 @@ export function createRunner(opts: RunnerOptions): Runner {
     const account = getAccountRow(db, ctl.accountId);
     const provider = providerOf(agentKind(account.kind));
     // The persona's craft skills, then those of the task's kinds, so every step of such a task loads them.
-    const skills = stepSkills(persona, kindsOfTask(task.kinds, listKinds(db)));
+    const plansFirst = step.plansFirst === true;
+    const skills = stepSkills(persona, kindsOfTask(task.kinds, listKinds(db)), { plansFirst });
     // A builder message to act on (Workbench spec §6.3): a resumed session is handed it, and a fresh
     // one starts from the handoff, then the thread's digest, then the message. Its pictures go as
     // blocks while they fit the account's limits and what the thread's budget has left.
@@ -2788,9 +2789,11 @@ export function createRunner(opts: RunnerOptions): Runner {
             }
           : {}),
         tools: step.tools,
+        ...(plansFirst ? { plansFirst } : {}),
       },
       priorResults,
-      previousResult: readOnly ? step.result : null,
+      // A build step that plans first has only its plan as a result, which a fix session builds on.
+      previousResult: readOnly || plansFirst ? step.result : null,
       earlierResults: step.earlier,
       revisedBy: reviser
         ? {
