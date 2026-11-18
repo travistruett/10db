@@ -86,6 +86,25 @@ async function refusal(act: Promise<unknown>): Promise<GitTrustError> {
   return error;
 }
 
+/** A new repository and scratch directory, for the next row of a folded table. */
+function fresh(): void {
+  vi.unstubAllEnvs();
+  repo.cleanup();
+  scratch.cleanup();
+  repo = createTempRepo();
+  scratch = tempDir('git-trust');
+}
+
+/** What `act` threw, or 'no refusal' when it resolved, for a soft check that names its row. */
+const outcome = (act: Promise<unknown>): Promise<unknown> =>
+  act.then(
+    () => 'no refusal',
+    (caught: unknown) => caught,
+  );
+/** The refusal's detail, or the error as text when it is not a refusal. */
+const detailOf = (error: unknown): unknown =>
+  error instanceof GitTrustError ? error.detail : String(error);
+
 /** Runs `act`, accepting a refusal: these tests are about what never runs, not whether git agrees. */
 async function tolerate(act: Promise<unknown>): Promise<void> {
   await act.catch((error: unknown) => {
@@ -382,16 +401,17 @@ describe('no program from the checkout runs in a daemon git call', () => {
     }
   });
 
-  it.each([
-    { name: 'GIT_CONFIG_PARAMETERS', value: "'core.hookspath'='.husky'" },
-    {
-      name: 'GIT_CONFIG_COUNT',
-      value: '1',
-      also: { GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: '.husky' },
-    },
-  ])(
-    'runs no hook that $name in the daemon environment points at',
-    async ({ name, value, also }) => {
+  it('runs no hook that GIT_CONFIG_PARAMETERS or GIT_CONFIG_COUNT in the daemon environment points at', async () => {
+    const ROWS: readonly { name: string; value: string; also?: Record<string, string> }[] = [
+      { name: 'GIT_CONFIG_PARAMETERS', value: "'core.hookspath'='.husky'" },
+      {
+        name: 'GIT_CONFIG_COUNT',
+        value: '1',
+        also: { GIT_CONFIG_KEY_0: 'core.hooksPath', GIT_CONFIG_VALUE_0: '.husky' },
+      },
+    ];
+    for (const [i, { name, value, also }] of ROWS.entries()) {
+      if (i > 0) fresh();
       const program = marker('program');
       writeHook(
         join(repo.path, '.husky'),
@@ -401,9 +421,9 @@ describe('no program from the checkout runs in a daemon git call', () => {
       vi.stubEnv(name, value);
       for (const [k, v] of Object.entries(also ?? {})) vi.stubEnv(k, v);
       await commitA(createGit());
-      expect(program.ran()).toBe(false);
-    },
-  );
+      expect.soft(program.ran(), name).toBe(false);
+    }
+  });
 });
 
 describe("a batch's new branch is checked out without git's checkout", () => {
@@ -422,7 +442,7 @@ describe("a batch's new branch is checked out without git's checkout", () => {
     for (const key of ['clean', 'smudge', 'process']) rawGit('config', `filter.x.${key}`, program);
   }
 
-  it('refuses while an attributes file sits in the git dir, running nothing', async () => {
+  it('refuses while an attributes file sits in the git dir; without it writes each file as stored, runs no filter the start point selects, and moves HEAD to the branch', async () => {
     const program = marker('program');
     filteredStartPoint(program.path);
     write('.git/info/attributes', '* filter=x\n');
@@ -433,11 +453,8 @@ describe("a batch's new branch is checked out without git's checkout", () => {
     });
     expect(program.ran()).toBe(false);
     expect(() => rawGit('rev-parse', '--verify', '-q', 'refs/heads/10db/x-0a1b2c3d')).toThrow();
-  });
 
-  it('writes each file as stored, runs no filter the start point selects, and moves HEAD to the branch', async () => {
-    const program = marker('program');
-    filteredStartPoint(program.path);
+    rmSync(join(repo.path, '.git', 'info', 'attributes'));
     const start = rawGit('rev-parse', 'start');
     await createGit().switchNewBranch(repo.path, '10db/x-0a1b2c3d', 'start');
     expect(program.ran()).toBe(false);
@@ -494,14 +511,15 @@ describe("a batch's new branch is checked out without git's checkout", () => {
       .toString()
       .trim();
 
-  it.each([
-    { name: 'a parent directory', entry: '..' },
-    { name: '.git in capitals', entry: '.GIT' },
-    { name: '.git with a character HFS+ ignores', entry: '.git\u200c' },
-    { name: "NTFS's short name for .git", entry: 'git~1' },
-  ])(
-    'writes nothing outside the checkout or into .git for a tree entry naming $name',
-    async ({ entry }) => {
+  it('writes nothing outside the checkout or into .git for a tree entry naming a parent, .git in disguise or an absolute path', async () => {
+    const ROWS = [
+      { name: 'a parent directory', entry: '..' },
+      { name: '.git in capitals', entry: '.GIT' },
+      { name: '.git with a character HFS+ ignores', entry: '.git\u200c' },
+      { name: "NTFS's short name for .git", entry: 'git~1' },
+    ];
+    for (const [i, { name, entry }] of ROWS.entries()) {
+      if (i > 0) fresh();
       const escape = `escape-${String(Math.random()).slice(2)}`;
       const inner = rawTree([
         { mode: '100644', name: 'config', oid: blob('[core]\n\thooksPath = evil\n') },
@@ -513,21 +531,22 @@ describe("a batch's new branch is checked out without git's checkout", () => {
       await createGit()
         .switchNewBranch(repo.path, '10db/x-0a1b2c3d', commit)
         .catch(() => undefined);
-      expect(readFileSync(join(repo.path, '.git', 'config'), 'utf8')).toBe(config);
-      expect(existsSync(join(repo.path, '..', escape))).toBe(false);
-      expect(existsSync(join(repo.path, '.git', escape))).toBe(false);
-      expect(() => rawGit('rev-parse', '--verify', '-q', 'refs/heads/10db/x-0a1b2c3d')).toThrow();
-    },
-  );
+      expect.soft(readFileSync(join(repo.path, '.git', 'config'), 'utf8'), name).toBe(config);
+      expect.soft(existsSync(join(repo.path, '..', escape)), name).toBe(false);
+      expect.soft(existsSync(join(repo.path, '.git', escape)), name).toBe(false);
+      expect
+        .soft(() => rawGit('rev-parse', '--verify', '-q', 'refs/heads/10db/x-0a1b2c3d'), name)
+        .toThrow();
+    }
 
-  it('writes nothing for a tree entry that names an absolute path', async () => {
+    fresh();
     const target = join(scratch.path, `absolute-${String(Math.random()).slice(2)}`);
     const root = rawTree([{ mode: '100644', name: target, oid: blob('escaped\n') }]);
     const commit = rawGit('commit-tree', root, '-m', 'crafted');
     await createGit()
       .switchNewBranch(repo.path, '10db/x-0a1b2c3d', commit)
       .catch(() => undefined);
-    expect(existsSync(target)).toBe(false);
+    expect.soft(existsSync(target), 'an absolute path').toBe(false);
   });
 
   it('writes nothing outside when a lane swaps a parent directory for a link mid-cut', async () => {
@@ -576,7 +595,7 @@ describe("a batch's new branch is checked out without git's checkout", () => {
 });
 
 describe('the daemon never commits a submodule or an embedded repository', () => {
-  it.each([
+  const ROWS: readonly { name: string; arrange: (program: string) => void; paths: string[] }[] = [
     {
       name: 'a staged gitlink',
       arrange: (program: string) => {
@@ -618,22 +637,27 @@ describe('the daemon never commits a submodule or an embedded repository', () =>
       arrange: () => undefined,
       paths: ['.git/config'],
     },
-  ])('refuses $name, committing nothing and running nothing', async ({ arrange, paths }) => {
-    const program = marker('program');
-    arrange(program.path);
-    const tip = rawGit('rev-parse', 'refs/heads/main');
-    const error = await refusal(
-      createGit().commit({
-        repo: repo.path,
-        paths,
-        message: 'x',
-        opId: 'op-embedded',
-        branch: 'main',
-      }),
-    );
-    expect(error.detail.kind).toBe('embedded');
-    expect(rawGit('rev-parse', 'refs/heads/main')).toBe(tip);
-    expect(program.ran()).toBe(false);
+  ];
+
+  it('refuses a gitlink, an embedded repository or a path in .git, committing nothing and running nothing', async () => {
+    for (const [i, { name, arrange, paths }] of ROWS.entries()) {
+      if (i > 0) fresh();
+      const program = marker('program');
+      arrange(program.path);
+      const tip = rawGit('rev-parse', 'refs/heads/main');
+      const error = await outcome(
+        createGit().commit({
+          repo: repo.path,
+          paths,
+          message: 'x',
+          opId: 'op-embedded',
+          branch: 'main',
+        }),
+      );
+      expect.soft(detailOf(error), name).toMatchObject({ kind: 'embedded' });
+      expect.soft(rawGit('rev-parse', 'refs/heads/main'), name).toBe(tip);
+      expect.soft(program.ran(), name).toBe(false);
+    }
   });
 });
 
@@ -752,89 +776,111 @@ describe('a commit lands only on its branch', () => {
     expect(rawGit('log', '-1', '--format=%B', sha)).toBe('a\n\n10db-Op: op-lane-1');
   });
 
-  it.each([
-    { name: 'another branch', move: () => rawGit('switch', '-q', 'main'), found: 'main' },
-    { name: 'a detached HEAD', move: () => rawGit('switch', '-q', '--detach'), found: null },
-  ])('refuses when HEAD is on $name, committing nothing', async ({ move, found }) => {
-    move();
-    const lane = rawGit('rev-parse', 'refs/heads/lane');
-    const main = rawGit('rev-parse', 'refs/heads/main');
-    const onRefused = vi.fn();
-    const error = await refusal(commitA(createGit({ onRefused }), 'op-lane-2', 'lane'));
-    expect(error.detail).toEqual({ kind: 'branch', expected: 'lane', found, committed: false });
-    expect(rawGit('rev-parse', 'refs/heads/lane')).toBe(lane);
-    expect(rawGit('rev-parse', 'refs/heads/main')).toBe(main);
-    expect(onRefused).toHaveBeenCalledExactlyOnceWith(error);
-  });
+  const freshLane = () => {
+    fresh();
+    rawGit('switch', '-q', '-c', 'lane');
+  };
 
-  it('refuses a branch that is a symbolic ref to another, leaving that one alone', async () => {
+  it('refuses when HEAD is on another branch or detached, or the branch is a symbolic ref, committing nothing', async () => {
+    const ROWS = [
+      { name: 'another branch', move: () => rawGit('switch', '-q', 'main'), found: 'main' },
+      { name: 'a detached HEAD', move: () => rawGit('switch', '-q', '--detach'), found: null },
+    ];
+    for (const [i, { name, move, found }] of ROWS.entries()) {
+      if (i > 0) freshLane();
+      move();
+      const lane = rawGit('rev-parse', 'refs/heads/lane');
+      const main = rawGit('rev-parse', 'refs/heads/main');
+      const onRefused = vi.fn();
+      const error = await outcome(commitA(createGit({ onRefused }), 'op-lane-2', 'lane'));
+      expect
+        .soft(detailOf(error), name)
+        .toEqual({ kind: 'branch', expected: 'lane', found, committed: false });
+      expect.soft(rawGit('rev-parse', 'refs/heads/lane'), name).toBe(lane);
+      expect.soft(rawGit('rev-parse', 'refs/heads/main'), name).toBe(main);
+      expect.soft(onRefused.mock.calls, name).toEqual([[error]]);
+    }
+
+    freshLane();
     rawGit('symbolic-ref', 'refs/heads/lane', 'refs/heads/main');
     const main = rawGit('rev-parse', 'refs/heads/main');
-    const error = await refusal(commitA(createGit(), 'op-lane-3', 'lane'));
-    expect(error.detail).toEqual({ kind: 'ref', ref: 'refs/heads/lane', reason: 'symbolic' });
-    expect(rawGit('rev-parse', 'refs/heads/main')).toBe(main);
+    const error = await outcome(commitA(createGit(), 'op-lane-3', 'lane'));
+    expect
+      .soft(detailOf(error), 'a symbolic ref')
+      .toEqual({ kind: 'ref', ref: 'refs/heads/lane', reason: 'symbolic' });
+    expect.soft(rawGit('rev-parse', 'refs/heads/main'), 'a symbolic ref').toBe(main);
   });
 
-  it("commits on the branch when a lane points HEAD at main between the daemon's git calls, and says so", async () => {
-    const main = rawGit('rev-parse', 'refs/heads/main');
-    const head = join(repo.path, '.git', 'HEAD');
-    const wrapper = gitWrapper(
-      `case " $* " in *" commit-tree "*) "$GIT" "$@"; s=$?; printf 'ref: refs/heads/main\\n' > '${head}'; exit $s;; esac\nexec "$GIT" "$@"`,
-    );
-    try {
-      vi.stubEnv('PATH', wrapper.path);
-      const onRefused = vi.fn();
-      const { sha } = await commitA(createGit({ onRefused }), 'op-lane-4', 'lane');
-      vi.unstubAllEnvs();
-      expect(rawGit('rev-parse', 'refs/heads/lane')).toBe(sha);
-      expect(rawGit('rev-parse', 'refs/heads/main')).toBe(main);
-      expect(onRefused).toHaveBeenCalledOnce();
-      const error: unknown = onRefused.mock.calls[0]?.[0];
-      if (!(error instanceof GitTrustError)) throw new Error('expected a refusal');
-      expect(error.detail).toEqual({
-        kind: 'branch',
-        expected: 'lane',
-        found: 'main',
-        committed: true,
-      });
-    } finally {
-      vi.unstubAllEnvs();
-      wrapper.cleanup();
+  it("commits only on the branch, or refuses, when a lane moves HEAD or the branch between the daemon's git calls", async () => {
+    /** A git whose commit-tree runs `after` once it has made the commit. */
+    const afterCommitTree = (after: string) =>
+      gitWrapper(
+        `case " $* " in *" commit-tree "*) "$GIT" "$@"; s=$?; ${after}; exit $s;; esac\nexec "$GIT" "$@"`,
+      );
+
+    // HEAD pointed at main: the commit still lands on the branch, and onRefused says so.
+    {
+      const main = rawGit('rev-parse', 'refs/heads/main');
+      const head = join(repo.path, '.git', 'HEAD');
+      const wrapper = afterCommitTree(`printf 'ref: refs/heads/main\\n' > '${head}'`);
+      try {
+        vi.stubEnv('PATH', wrapper.path);
+        const onRefused = vi.fn();
+        const { sha } = await commitA(createGit({ onRefused }), 'op-lane-4', 'lane');
+        vi.unstubAllEnvs();
+        expect.soft(rawGit('rev-parse', 'refs/heads/lane'), 'HEAD moved').toBe(sha);
+        expect.soft(rawGit('rev-parse', 'refs/heads/main'), 'HEAD moved').toBe(main);
+        expect
+          .soft(
+            onRefused.mock.calls.map(([e]) => detailOf(e)),
+            'HEAD moved',
+          )
+          .toEqual([{ kind: 'branch', expected: 'lane', found: 'main', committed: true }]);
+      } finally {
+        vi.unstubAllEnvs();
+        wrapper.cleanup();
+      }
     }
-  });
 
-  it("refuses when the branch moves between the daemon's git calls, leaving it where it was moved", async () => {
-    rawGit('commit', '-q', '--allow-empty', '-m', 'elsewhere');
-    const moved = rawGit('rev-parse', 'HEAD');
-    rawGit('reset', '-q', '--soft', 'HEAD~1');
-    const wrapper = gitWrapper(
-      `case " $* " in *" commit-tree "*) "$GIT" "$@"; s=$?; "$GIT" -C '${repo.path}' update-ref refs/heads/lane ${moved}; exit $s;; esac\nexec "$GIT" "$@"`,
-    );
-    try {
-      vi.stubEnv('PATH', wrapper.path);
-      const error = await refusal(commitA(createGit(), 'op-lane-5', 'lane'));
-      vi.unstubAllEnvs();
-      expect(error.detail).toEqual({ kind: 'ref', ref: 'refs/heads/lane', reason: 'raced' });
-      expect(rawGit('rev-parse', 'refs/heads/lane')).toBe(moved);
-    } finally {
-      vi.unstubAllEnvs();
-      wrapper.cleanup();
+    // The branch moved: refused, and the branch stays where it was moved.
+    freshLane();
+    {
+      rawGit('commit', '-q', '--allow-empty', '-m', 'elsewhere');
+      const moved = rawGit('rev-parse', 'HEAD');
+      rawGit('reset', '-q', '--soft', 'HEAD~1');
+      const wrapper = afterCommitTree(
+        `"$GIT" -C '${repo.path}' update-ref refs/heads/lane ${moved}`,
+      );
+      try {
+        vi.stubEnv('PATH', wrapper.path);
+        const error = await outcome(commitA(createGit(), 'op-lane-5', 'lane'));
+        vi.unstubAllEnvs();
+        expect
+          .soft(detailOf(error), 'branch moved')
+          .toEqual({ kind: 'ref', ref: 'refs/heads/lane', reason: 'raced' });
+        expect.soft(rawGit('rev-parse', 'refs/heads/lane'), 'branch moved').toBe(moved);
+      } finally {
+        vi.unstubAllEnvs();
+        wrapper.cleanup();
+      }
     }
-  });
 
-  it("never moves another branch when a lane turns the branch into a symbolic ref between the daemon's git calls", async () => {
-    const main = rawGit('rev-parse', 'refs/heads/main');
-    const wrapper = gitWrapper(
-      `case " $* " in *" commit-tree "*) "$GIT" "$@"; s=$?; "$GIT" -C '${repo.path}' symbolic-ref refs/heads/lane refs/heads/main; exit $s;; esac\nexec "$GIT" "$@"`,
-    );
-    try {
-      vi.stubEnv('PATH', wrapper.path);
-      await tolerate(commitA(createGit(), 'op-lane-6', 'lane'));
-      vi.unstubAllEnvs();
-      expect(rawGit('rev-parse', 'refs/heads/main')).toBe(main);
-    } finally {
-      vi.unstubAllEnvs();
-      wrapper.cleanup();
+    // The branch turned into a symbolic ref to main: main never moves.
+    freshLane();
+    {
+      const main = rawGit('rev-parse', 'refs/heads/main');
+      const wrapper = afterCommitTree(
+        `"$GIT" -C '${repo.path}' symbolic-ref refs/heads/lane refs/heads/main`,
+      );
+      try {
+        vi.stubEnv('PATH', wrapper.path);
+        await tolerate(commitA(createGit(), 'op-lane-6', 'lane'));
+        vi.unstubAllEnvs();
+        expect.soft(rawGit('rev-parse', 'refs/heads/main'), 'branch made symbolic').toBe(main);
+      } finally {
+        vi.unstubAllEnvs();
+        wrapper.cleanup();
+      }
     }
   });
 
@@ -919,14 +965,17 @@ describe('the checkout is the one pinned for it', () => {
     },
   ];
 
-  it.each(ACTS)('refuses $name once .git was replaced', async ({ act }) => {
-    const onRefused = vi.fn();
-    const git = createGit({ onRefused });
-    await git.head(repo.path);
-    replaceGitDir();
-    const error = await refusal(act(git, repo.path));
-    expect(error.detail.kind).toBe('moved');
-    expect(onRefused).toHaveBeenCalledExactlyOnceWith(error);
+  it('refuses every act once .git was replaced', async () => {
+    for (const [i, { name, act }] of ACTS.entries()) {
+      if (i > 0) fresh();
+      const onRefused = vi.fn();
+      const git = createGit({ onRefused });
+      await git.head(repo.path);
+      replaceGitDir();
+      const error = await outcome(act(git, repo.path));
+      expect.soft(detailOf(error), name).toMatchObject({ kind: 'moved' });
+      expect.soft(onRefused.mock.calls, name).toEqual([[error]]);
+    }
   });
 
   it('keeps refusing in a new daemon that shares the persisted pins, until the builder re-trusts', async () => {
@@ -945,7 +994,7 @@ describe('the checkout is the one pinned for it', () => {
     return id.replace(/(^|\/)\d+:/g, '$1987654321:');
   }
 
-  it('keeps trusting the checkout after the volume gets a new device number', async () => {
+  it('keeps trusting the checkout after the volume gets a new device number, and still refuses a replaced .git then', async () => {
     const pins = memoryPinStore();
     const onRefused = vi.fn();
     await createGit({ pins }).head(repo.path);
@@ -957,14 +1006,7 @@ describe('the checkout is the one pinned for it', () => {
     const restarted = createGit({ pins, onRefused });
     await expect(restarted.currentBranch(repo.path)).resolves.toBe('main');
     expect(onRefused).not.toHaveBeenCalled();
-  });
-
-  it('still refuses a replaced .git when the device number changed too', async () => {
-    const pins = memoryPinStore();
-    await createGit({ pins }).head(repo.path);
-    const real = realpathSync(repo.path);
-    const pin = pins.get(real);
-    if (!pin) throw new Error('expected a pin');
+    // The renumbered pin again, whatever the restarted daemon wrote back.
     pins.set(real, { ...pin, id: renumbered(pin.id) });
     replaceGitDir();
     const { detail } = await refusal(createGit({ pins }).currentBranch(repo.path));
@@ -986,15 +1028,24 @@ describe('the checkout is the one pinned for it', () => {
     expect(onRefused).not.toHaveBeenCalled();
   });
 
-  it('tells onTrusted which checkout a Trust answer took, and not when it is refused anew', async () => {
+  it('says what differs, re-trusts only the state the refusal found, and tells onTrusted which checkout a Trust answer took', async () => {
     const onTrusted = vi.fn();
     const git = createGit({ onTrusted });
     await git.head(repo.path);
     replaceGitDir();
-    const { detail } = await refusal(git.head(repo.path));
+    const first = await refusal(git.head(repo.path));
+    // A replaced .git at the same path: the message says what differs.
+    const dir = join(realpathSync(repo.path), '.git');
+    expect(first.message).not.toContain(`its git dir is ${dir}, not ${dir}`);
+    expect(first.message).toContain('at the same path but is a different repository now');
+    expect(first.message).toMatch(/inode \d+, was \d+/);
+    const { detail } = first;
     if (detail.kind !== 'moved') throw new Error('expected a moved checkout');
+    // Before the builder answers, the lane swaps .git once more: that answer is refused anew.
     replaceGitDir();
-    await refusal(git.retrust(repo.path, detail.candidate));
+    const again = await refusal(git.retrust(repo.path, detail.candidate));
+    if (again.detail.kind !== 'moved') throw new Error('expected a moved checkout');
+    expect(again.detail.candidate.id).not.toBe(detail.candidate.id);
     expect(onTrusted).not.toHaveBeenCalled();
     const { detail: now } = await refusal(git.head(repo.path));
     if (now.kind !== 'moved') throw new Error('expected a moved checkout');
@@ -1044,33 +1095,6 @@ describe('the checkout is the one pinned for it', () => {
     expect(onTrusted).toHaveBeenCalledExactlyOnceWith(realpathSync(repo.path));
   });
 
-  it('says what differs when a replaced .git sits at the same path', async () => {
-    const git = createGit();
-    await git.head(repo.path);
-    replaceGitDir();
-    const error = await refusal(git.head(repo.path));
-    const dir = join(realpathSync(repo.path), '.git');
-    expect(error.message).not.toContain(`its git dir is ${dir}, not ${dir}`);
-    expect(error.message).toContain('at the same path but is a different repository now');
-    expect(error.message).toMatch(/inode \d+, was \d+/);
-  });
-
-  it('re-trusts only the state the refusal found: a second swap before the answer is refused anew', async () => {
-    const onRefused = vi.fn();
-    const git = createGit({ onRefused });
-    await git.head(repo.path);
-    replaceGitDir();
-    const { detail } = await refusal(git.head(repo.path));
-    if (detail.kind !== 'moved') throw new Error('expected a moved checkout');
-    // Before the builder answers, the lane swaps .git once more.
-    replaceGitDir();
-    const again = await refusal(git.retrust(repo.path, detail.candidate));
-    expect(again.detail.kind).toBe('moved');
-    if (again.detail.kind !== 'moved') throw new Error('expected a moved checkout');
-    expect(again.detail.candidate.id).not.toBe(detail.candidate.id);
-    await expect(git.head(repo.path)).rejects.toBeInstanceOf(GitTrustError);
-  });
-
   /** Where a lane could write a git dir: the checkout, a lane temp root, another project's checkout. */
   const WRITABLE_GIT_DIRS = [
     { name: 'inside the checkout', at: () => join(repo.path, 'vendor', 'git') },
@@ -1087,23 +1111,20 @@ describe('the checkout is the one pinned for it', () => {
       checkouts: () => [repo.path, join(scratch.path, 'other-checkout')],
     });
 
-  it.each(WRITABLE_GIT_DIRS)(
-    'refuses to pin a checkout whose git dir lies $name, which a lane could write',
-    async ({ at }) => {
+  it('pins a checkout at its own .git when other checkouts are registered, and refuses to pin one whose git dir a lane could write', async () => {
+    expect(await gitWithRoots(vi.fn()).currentBranch(repo.path)).toBe('main');
+    for (const { name, at } of WRITABLE_GIT_DIRS) {
+      fresh();
       const onRefused = vi.fn();
       mkdirSync(dirname(at()), { recursive: true });
       renameSync(join(repo.path, '.git'), at());
       writeFileSync(join(repo.path, '.git'), `gitdir: ${at()}\n`);
       const git = gitWithRoots(onRefused);
-      const error = await refusal(git.head(repo.path));
-      expect(error.detail).toEqual({ kind: 'writable', gitDir: realpathSync(at()) });
-      expect(onRefused).toHaveBeenLastCalledWith(error);
-      await expect(git.head(repo.path)).rejects.toBeInstanceOf(GitTrustError);
-    },
-  );
-
-  it('pins a checkout at its own .git when other checkouts are registered', async () => {
-    expect(await gitWithRoots(vi.fn()).currentBranch(repo.path)).toBe('main');
+      const error = await outcome(git.head(repo.path));
+      expect.soft(detailOf(error), name).toEqual({ kind: 'writable', gitDir: realpathSync(at()) });
+      expect.soft(onRefused.mock.lastCall, name).toEqual([error]);
+      expect.soft(await outcome(git.head(repo.path)), name).toBeInstanceOf(GitTrustError);
+    }
   });
 
   it("pins and re-trusts a linked worktree whose common dir is another registered checkout's .git", async () => {
@@ -1133,12 +1154,9 @@ describe('the checkout is the one pinned for it', () => {
     }
   });
 
-  it.each([
-    { name: 'trusts it while the nested project is registered', registered: true },
-    { name: 'refuses it once the nested project is not', registered: false },
-  ])(
-    "for a worktree of a project nested in another's checkout, $name: only then is its .git denied to every lane",
-    async ({ registered }) => {
+  it("trusts a worktree of a project nested in another's checkout only while the nested project is registered: only then is its .git denied to every lane", async () => {
+    for (const registered of [true, false]) {
+      if (!registered) fresh();
       // Project B sits in this checkout, whose lanes can write everything there but a registered
       // checkout's own .git; the worktree's common dir is B/.git.
       const nested = join(repo.path, 'nested');
@@ -1161,8 +1179,10 @@ describe('the checkout is the one pinned for it', () => {
           checkouts: () => [repo.path, ...(registered ? [nested] : []), worktree],
         });
         if (!registered) {
-          expect((await refusal(git.currentBranch(worktree))).detail.kind).toBe('writable');
-          return;
+          expect
+            .soft(detailOf(await outcome(git.currentBranch(worktree))), 'not registered')
+            .toMatchObject({ kind: 'writable' });
+          continue;
         }
         expect(await git.currentBranch(worktree)).toBe('wt');
         const real = realpathSync(worktree);
@@ -1180,8 +1200,8 @@ describe('the checkout is the one pinned for it', () => {
       } finally {
         outside.cleanup();
       }
-    },
-  );
+    }
+  });
 
   it('re-trusts a changed origin when the pinned git dir is where it was pinned, even if a lane can now write there', async () => {
     // Pinned before the project around its git dir was registered: a new origin must not leave it
@@ -1201,9 +1221,9 @@ describe('the checkout is the one pinned for it', () => {
     expect(await git.pinnedPushUrl(repo.path)).toBe('https://github.com/acme/widgets.git');
   });
 
-  it.each(WRITABLE_GIT_DIRS)(
-    'refuses to re-trust a git dir $name, which a lane could write',
-    async ({ at }) => {
+  it('refuses to re-trust a git dir a lane could write', async () => {
+    for (const [i, { name, at }] of WRITABLE_GIT_DIRS.entries()) {
+      if (i > 0) fresh();
       const onRefused = vi.fn();
       const git = gitWithRoots(onRefused);
       await git.head(repo.path);
@@ -1212,13 +1232,13 @@ describe('the checkout is the one pinned for it', () => {
       renameSync(join(repo.path, '.git'), at());
       writeFileSync(join(repo.path, '.git'), `gitdir: ${at()}\n`);
       const { detail } = await refusal(git.head(repo.path));
-      if (detail.kind !== 'moved') throw new Error('expected a moved checkout');
-      const error = await refusal(git.retrust(repo.path, detail.candidate));
-      expect(error.detail).toEqual({ kind: 'writable', gitDir: realpathSync(at()) });
-      expect(onRefused).toHaveBeenLastCalledWith(error);
-      await expect(git.head(repo.path)).rejects.toBeInstanceOf(GitTrustError);
-    },
-  );
+      if (detail.kind !== 'moved') throw new Error(`${name}: expected a moved checkout`);
+      const error = await outcome(git.retrust(repo.path, detail.candidate));
+      expect.soft(detailOf(error), name).toEqual({ kind: 'writable', gitDir: realpathSync(at()) });
+      expect.soft(onRefused.mock.lastCall, name).toEqual([error]);
+      expect.soft(await outcome(git.head(repo.path)), name).toBeInstanceOf(GitTrustError);
+    }
+  });
 
   it('pins a checkout by its real path, whatever path names it', async () => {
     const link = join(scratch.path, 'link');
@@ -1229,19 +1249,18 @@ describe('the checkout is the one pinned for it', () => {
     expect((await refusal(git.head(realpathSync(repo.path)))).detail.kind).toBe('moved');
   });
 
-  it.each(ACTS)(
-    'refuses $name when the object store borrows from another repository',
-    async ({ act }) => {
-      const other = tempDir('alternate');
-      try {
-        writeFileSync(join(repo.path, '.git', 'objects', 'info', 'alternates'), `${other.path}\n`);
-        const error = await refusal(act(createGit(), repo.path));
-        expect(error.detail.kind).toBe('alternates');
-      } finally {
-        other.cleanup();
+  it('refuses every act when the object store borrows from another repository', async () => {
+    const other = tempDir('alternate');
+    try {
+      writeFileSync(join(repo.path, '.git', 'objects', 'info', 'alternates'), `${other.path}\n`);
+      for (const { name, act } of ACTS) {
+        const error = await outcome(act(createGit(), repo.path));
+        expect.soft(detailOf(error), name).toMatchObject({ kind: 'alternates' });
       }
-    },
-  );
+    } finally {
+      other.cleanup();
+    }
+  });
 });
 
 describe('a linked worktree', () => {
@@ -1311,47 +1330,59 @@ describe('fetch and push', () => {
   });
   const net = { env: NETWORK_ENV, timeoutMs: 10_000 };
   const local = (...args: string[]) => gitIn(remote.repo.path, ...args);
+  const freshRemote = () => {
+    fresh();
+    remote.cleanup();
+    remote = createTempRepoWithOrigin();
+  };
   const NETWORK = [
     { name: 'fetch', act: (git: Git) => git.fetch(remote.repo.path, 'main', net) },
     { name: 'push', act: (git: Git) => git.push(remote.repo.path, 'main', net) },
   ];
 
-  it.each(
-    NETWORK.flatMap((n) =>
-      [
-        'core.sshCommand',
-        'url.https://evil.invalid/.insteadOf',
-        'url.https://evil.invalid/.pushInsteadOf',
-        'credential.helper',
-        'include.path',
-        'http.proxy',
-        'remote.origin.receivepack',
-        'remote.origin.uploadpack',
-      ].map((key) => ({ ...n, key })),
-    ),
-  )('refuses a $name with $key in the local config, running nothing', async ({ act, key }) => {
-    const program = marker('program');
-    const git = createGit();
-    await git.head(remote.repo.path);
-    local('config', key, /^include/i.test(key) ? join(scratch.path, 'absent.cfg') : program.path);
-    const error = await refusal(act(git));
-    expect(error.detail.kind).toBe('config');
-    expect(program.ran()).toBe(false);
-  });
+  it('refuses a fetch or push with a program, URL rewrite, proxy or include in the local config, running nothing', async () => {
+    const KEYS = [
+      'core.sshCommand',
+      'url.https://evil.invalid/.insteadOf',
+      'url.https://evil.invalid/.pushInsteadOf',
+      'credential.helper',
+      'include.path',
+      'http.proxy',
+      'remote.origin.receivepack',
+      'remote.origin.uploadpack',
+    ];
+    for (const { name, act } of NETWORK) {
+      for (const [i, key] of KEYS.entries()) {
+        const label = `${name} with ${key}`;
+        const program = marker(`program-${name}-${String(i)}`);
+        const git = createGit();
+        await git.head(remote.repo.path);
+        local(
+          'config',
+          key,
+          /^include/i.test(key) ? join(scratch.path, 'absent.cfg') : program.path,
+        );
+        expect.soft(detailOf(await outcome(act(git))), label).toMatchObject({ kind: 'config' });
+        expect.soft(program.ran(), label).toBe(false);
+        local('config', '--unset-all', key);
+      }
+    }
 
-  it('still sees the local config when GIT_CONFIG in the daemon environment names another file', async () => {
+    // It still sees the local config when GIT_CONFIG in the daemon environment names another file.
     const empty = join(scratch.path, 'empty.cfg');
     writeFileSync(empty, '');
     const git = createGit();
     await git.head(remote.repo.path);
     local('config', 'core.sshCommand', 'evil');
     vi.stubEnv('GIT_CONFIG', empty);
-    expect((await refusal(git.fetch(remote.repo.path, 'main', net))).detail.kind).toBe('config');
+    expect
+      .soft(detailOf(await outcome(git.fetch(remote.repo.path, 'main', net))), 'GIT_CONFIG')
+      .toMatchObject({ kind: 'config' });
   });
 
-  it.each(NETWORK)(
-    'refuses a $name once origin points elsewhere, until the builder re-trusts',
-    async ({ name, act }) => {
+  it('refuses a fetch or push once origin points elsewhere, until the builder re-trusts', async () => {
+    for (const [i, { name, act }] of NETWORK.entries()) {
+      if (i > 0) freshRemote();
       const elsewhere = tempDir('elsewhere');
       try {
         gitIn(elsewhere.path, 'init', '-q', '--bare', '-b', 'main');
@@ -1363,65 +1394,69 @@ describe('fetch and push', () => {
         const git = createGit();
         await git.head(remote.repo.path);
         local('remote', 'set-url', 'origin', elsewhere.path);
-        const { detail } = await refusal(act(git));
-        expect(detail).toMatchObject({ kind: 'origin', direction: name });
-        expect(gitIn(elsewhere.path, 'rev-parse', 'refs/heads/main')).toBe(seeded);
-        if (detail.kind !== 'origin') throw new Error('expected a changed origin');
-        await git.retrust(remote.repo.path, detail.candidate);
+        const error = await outcome(act(git));
+        expect.soft(detailOf(error), name).toMatchObject({ kind: 'origin', direction: name });
+        expect.soft(gitIn(elsewhere.path, 'rev-parse', 'refs/heads/main'), name).toBe(seeded);
+        if (!(error instanceof GitTrustError) || error.detail.kind !== 'origin')
+          throw new Error(`${name}: expected a changed origin`);
+        await git.retrust(remote.repo.path, error.detail.candidate);
         await act(git);
       } finally {
         elsewhere.cleanup();
       }
-    },
-  );
+    }
+  });
 
-  it.each(
-    NETWORK.flatMap((n) =>
-      [
-        ['a token', 'https://x-access-token:tok-s3cret@github.com/acme/widgets.git'],
-        ['several @', 'https://user:p@ss-s3cret@github.com/acme/widgets.git'],
-        ['a ? before an @', 'https://a?@evil.invalid/x@github.com/acme/widgets'],
-        ['a # before an @', 'https://a#@evil.invalid/x@github.com/acme/widgets'],
-        ['a backslash', 'https://github.com\\@evil.invalid/acme/widgets'],
-      ].map(([name, url]) => ({ ...n, what: name ?? '', url: url ?? '' })),
-    ),
-  )(
-    'refuses a $name to an origin URL with $what, and shows the URL nowhere',
-    async ({ act, url }) => {
-      const pins = memoryPinStore();
-      const stored: unknown[] = [];
-      const onRefused = vi.fn();
-      const git = createGit({
-        onRefused,
-        pins: {
-          get: (repo) => pins.get(repo),
-          set: (repo, pin) => {
-            stored.push(pin);
-            pins.set(repo, pin);
+  it('refuses a fetch or push to an origin URL with a secret or a second host in it, and shows the URL nowhere', async () => {
+    const URLS = [
+      ['a token', 'https://x-access-token:tok-s3cret@github.com/acme/widgets.git'],
+      ['several @', 'https://user:p@ss-s3cret@github.com/acme/widgets.git'],
+      ['a ? before an @', 'https://a?@evil.invalid/x@github.com/acme/widgets'],
+      ['a # before an @', 'https://a#@evil.invalid/x@github.com/acme/widgets'],
+      ['a backslash', 'https://github.com\\@evil.invalid/acme/widgets'],
+    ] as const;
+    for (const { name, act } of NETWORK) {
+      for (const [what, url] of URLS) {
+        const label = `${name} to a URL with ${what}`;
+        const pins = memoryPinStore();
+        const stored: unknown[] = [];
+        const onRefused = vi.fn();
+        const git = createGit({
+          onRefused,
+          pins: {
+            get: (repo) => pins.get(repo),
+            set: (repo, pin) => {
+              stored.push(pin);
+              pins.set(repo, pin);
+            },
+            delete: (repo) => {
+              pins.delete(repo);
+            },
           },
-          delete: (repo) => {
-            pins.delete(repo);
-          },
-        },
-      });
-      local('remote', 'set-url', 'origin', url);
-      const error = await refusal(act(git));
-      expect(error.detail.kind).toBe('remote');
-      const card = trustCard(error);
-      expect(card.body).toContain('gh auth');
-      for (const text of [
-        error.message,
-        JSON.stringify(error.detail),
-        card.title,
-        card.body,
-        card.foldKey,
-        JSON.stringify(stored),
-      ]) {
-        expect(text).not.toContain('s3cret');
-        expect(text).not.toContain('evil.invalid');
+        });
+        local('remote', 'set-url', 'origin', url);
+        const error = await outcome(act(git));
+        if (!(error instanceof GitTrustError)) {
+          expect.soft(String(error), label).toBe('a refusal');
+          continue;
+        }
+        expect.soft(error.detail.kind, label).toBe('remote');
+        const card = trustCard(error);
+        expect.soft(card.body, label).toContain('gh auth');
+        for (const text of [
+          error.message,
+          JSON.stringify(error.detail),
+          card.title,
+          card.body,
+          card.foldKey,
+          JSON.stringify(stored),
+        ]) {
+          expect.soft(text, label).not.toContain('s3cret');
+          expect.soft(text, label).not.toContain('evil.invalid');
+        }
       }
-    },
-  );
+    }
+  });
 
   it('keeps a token cut off at the start of what it keeps of git output out of the push error', async () => {
     const wrapper = gitWrapper(
@@ -1480,131 +1515,138 @@ describe('fetch and push', () => {
     return readFileSync(out, 'utf8').split('\n').filter(Boolean);
   }
 
-  it("keeps the builder's URL-scoped credential helpers after resetting the list", async () => {
+  it("keeps the builder's URL-scoped credential helpers and the login environment's own, a URL holding = included, after resetting the list", async () => {
     const global = join(scratch.path, 'gitconfig');
     writeFileSync(
       global,
       '[credential]\n\thelper = osxkeychain\n[credential "https://github.com"]\n\thelper = !gh auth git-credential\n',
     );
-    expect(await fetchCredentials({ GIT_CONFIG_GLOBAL: global })).toEqual([
-      'credential.helper osxkeychain',
-      'credential.https://github.com.helper !gh auth git-credential',
-      'credential.helper ',
-      'credential.helper osxkeychain',
-      'credential.https://github.com.helper !gh auth git-credential',
-    ]);
+    expect
+      .soft(await fetchCredentials({ GIT_CONFIG_GLOBAL: global }), 'global config')
+      .toEqual([
+        'credential.helper osxkeychain',
+        'credential.https://github.com.helper !gh auth git-credential',
+        'credential.helper ',
+        'credential.helper osxkeychain',
+        'credential.https://github.com.helper !gh auth git-credential',
+      ]);
+    expect
+      .soft(
+        await fetchCredentials({
+          GIT_CONFIG_COUNT: '1',
+          GIT_CONFIG_KEY_0: 'credential.https://host.example/a=b.helper',
+          GIT_CONFIG_VALUE_0: 'store',
+          GIT_CONFIG_PARAMETERS: "'credential.https://p.example.helper'='cache'",
+        }),
+        'login environment',
+      )
+      .toEqual([
+        'credential.helper ',
+        'credential.https://host.example/a=b.helper store',
+        'credential.https://p.example.helper cache',
+      ]);
   });
 
-  it("keeps the login environment's own credential helpers, a URL holding = included", async () => {
-    expect(
-      await fetchCredentials({
-        GIT_CONFIG_COUNT: '1',
-        GIT_CONFIG_KEY_0: 'credential.https://host.example/a=b.helper',
-        GIT_CONFIG_VALUE_0: 'store',
-        GIT_CONFIG_PARAMETERS: "'credential.https://p.example.helper'='cache'",
-      }),
-    ).toEqual([
-      'credential.helper ',
-      'credential.https://host.example/a=b.helper store',
-      'credential.https://p.example.helper cache',
-    ]);
-  });
-
-  it.each(
-    (['fetch', 'push'] as const).flatMap((name) =>
-      [
-        { root: "another registered project's checkout", checkouts: true },
-        { root: "a lane's temp root", checkouts: false },
-      ].map((r) => ({ name, ...r })),
-    ),
-  )(
-    'refuses a $name whose global config includes a file in $root, using none of its programs',
-    async ({ name, checkouts }) => {
-      const other = tempDir('other-project');
-      try {
-        const program = marker('program');
-        const included = join(other.path, 'shared.gitconfig');
-        writeFileSync(
-          included,
-          `[core]\n\tsshCommand = ${program.path}\n[credential]\n\thelper = ${program.path}\n`,
-        );
-        const global = join(scratch.path, 'gitconfig');
-        writeFileSync(global, `[include]\n\tpath = ${included}\n`);
-        const git = checkouts
-          ? createGit({ checkouts: () => [remote.repo.path, other.path] })
-          : createGit({ laneRoots: [other.path] });
-        const call = { env: { ...NETWORK_ENV, GIT_CONFIG_GLOBAL: global }, timeoutMs: 10_000 };
-        const error = await refusal(
-          name === 'fetch'
-            ? git.fetch(remote.repo.path, 'main', call)
-            : git.push(remote.repo.path, 'main', call),
-        );
-        expect(error.detail).toEqual({
-          kind: 'config',
-          keys: [
-            { key: 'core.sshcommand', file: included },
-            { key: 'credential.helper', file: included },
-          ],
-        });
-        expect(program.ran()).toBe(false);
-      } finally {
-        other.cleanup();
+  it('refuses a fetch or push whose global config includes a file another project or a lane can write, using none of its programs', async () => {
+    const ROOTS = [
+      { root: "another registered project's checkout", checkouts: true },
+      { root: "a lane's temp root", checkouts: false },
+    ];
+    for (const name of ['fetch', 'push'] as const) {
+      for (const { root, checkouts } of ROOTS) {
+        const label = `${name}, include in ${root}`;
+        const other = tempDir('other-project');
+        try {
+          const program = marker(`program-${name}-${String(checkouts)}`);
+          const included = join(other.path, 'shared.gitconfig');
+          writeFileSync(
+            included,
+            `[core]\n\tsshCommand = ${program.path}\n[credential]\n\thelper = ${program.path}\n`,
+          );
+          const global = join(scratch.path, 'gitconfig');
+          writeFileSync(global, `[include]\n\tpath = ${included}\n`);
+          const git = checkouts
+            ? createGit({ checkouts: () => [remote.repo.path, other.path] })
+            : createGit({ laneRoots: [other.path] });
+          const call = { env: { ...NETWORK_ENV, GIT_CONFIG_GLOBAL: global }, timeoutMs: 10_000 };
+          const error = await outcome(
+            name === 'fetch'
+              ? git.fetch(remote.repo.path, 'main', call)
+              : git.push(remote.repo.path, 'main', call),
+          );
+          expect.soft(detailOf(error), label).toEqual({
+            kind: 'config',
+            keys: [
+              { key: 'core.sshcommand', file: included },
+              { key: 'credential.helper', file: included },
+            ],
+          });
+          expect.soft(program.ran(), label).toBe(false);
+        } finally {
+          other.cleanup();
+        }
       }
-    },
-  );
-
-  it.each(
-    (['fetch', 'push'] as const).flatMap((name) =>
-      ['DEVELOPER_DIR', 'SDKROOT', 'TOOLCHAINS'].map((variable) => ({ name, variable })),
-    ),
-  )('never hands $variable from the login env to a $name', async ({ name, variable }) => {
-    const seen = join(scratch.path, 'xcode-env');
-    const wrapper = gitWrapper(`echo "\${${variable}-unset}" >> '${seen}'\nexec "$GIT" "$@"`);
-    try {
-      const git = createGit({ bin: join(wrapper.path.split(':')[0] ?? '', 'git') });
-      const call = {
-        env: { ...NETWORK_ENV, [variable]: '/nonexistent/Xcode.app' },
-        timeoutMs: 10_000,
-      };
-      await (name === 'fetch'
-        ? git.fetch(remote.repo.path, 'main', call)
-        : git.push(remote.repo.path, 'main', call));
-      const values = readFileSync(seen, 'utf8').split('\n').filter(Boolean);
-      expect(new Set(values)).toEqual(new Set(['unset']));
-    } finally {
-      wrapper.cleanup();
     }
   });
 
-  it('refuses a push to a local origin inside the checkout, where a lane could write its hooks', async () => {
+  it('never hands DEVELOPER_DIR, SDKROOT or TOOLCHAINS from the login env to a fetch or push', async () => {
+    for (const name of ['fetch', 'push'] as const) {
+      for (const variable of ['DEVELOPER_DIR', 'SDKROOT', 'TOOLCHAINS']) {
+        const seen = join(scratch.path, `xcode-env-${name}-${variable}`);
+        const wrapper = gitWrapper(`echo "\${${variable}-unset}" >> '${seen}'\nexec "$GIT" "$@"`);
+        try {
+          const git = createGit({ bin: join(wrapper.path.split(':')[0] ?? '', 'git') });
+          const call = {
+            env: { ...NETWORK_ENV, [variable]: '/nonexistent/Xcode.app' },
+            timeoutMs: 10_000,
+          };
+          await (name === 'fetch'
+            ? git.fetch(remote.repo.path, 'main', call)
+            : git.push(remote.repo.path, 'main', call));
+          const values = readFileSync(seen, 'utf8').split('\n').filter(Boolean);
+          expect.soft(new Set(values), `${variable} to a ${name}`).toEqual(new Set(['unset']));
+        } finally {
+          wrapper.cleanup();
+        }
+      }
+    }
+  });
+
+  it('refuses a push to a local origin inside the checkout, another registered checkout or a lane root, where a lane could write its hooks', async () => {
     const inside = join(remote.repo.path, 'nested-origin.git');
     execFileSync('git', ['init', '-q', '--bare', '-b', 'main', inside], { env: isolatedGitEnv() });
     local('remote', 'set-url', 'origin', inside);
-    const error = await refusal(createGit().push(remote.repo.path, 'main', net));
-    expect(error.detail).toMatchObject({ kind: 'remote', direction: 'push' });
-  });
+    expect
+      .soft(
+        detailOf(await outcome(createGit().push(remote.repo.path, 'main', net))),
+        'the checkout',
+      )
+      .toMatchObject({ kind: 'remote', direction: 'push' });
 
-  it.each([
-    { name: 'another registered checkout', root: 'checkout' },
-    { name: 'a lane root named through a link', root: 'link' },
-  ])('refuses a push to a local origin inside $name', async ({ root }) => {
-    const other = tempDir('other-checkout');
-    try {
-      const inside = join(other.path, 'origin.git');
-      execFileSync('git', ['init', '-q', '--bare', '-b', 'main', inside], {
-        env: isolatedGitEnv(),
-      });
-      local('remote', 'set-url', 'origin', inside);
-      const link = join(scratch.path, 'lane-root');
-      symlinkSync(other.path, link);
-      const git =
-        root === 'checkout'
-          ? createGit({ checkouts: () => [other.path] })
-          : createGit({ laneRoots: [link] });
-      const error = await refusal(git.push(remote.repo.path, 'main', net));
-      expect(error.detail).toMatchObject({ kind: 'remote', direction: 'push' });
-    } finally {
-      other.cleanup();
+    const ROWS = [
+      { name: 'another registered checkout', root: 'checkout' },
+      { name: 'a lane root named through a link', root: 'link' },
+    ];
+    for (const { name, root } of ROWS) {
+      const other = tempDir('other-checkout');
+      try {
+        const origin = join(other.path, 'origin.git');
+        execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin], {
+          env: isolatedGitEnv(),
+        });
+        local('remote', 'set-url', 'origin', origin);
+        const link = join(scratch.path, `lane-root-${root}`);
+        symlinkSync(other.path, link);
+        const git =
+          root === 'checkout'
+            ? createGit({ checkouts: () => [other.path] })
+            : createGit({ laneRoots: [link] });
+        expect
+          .soft(detailOf(await outcome(git.push(remote.repo.path, 'main', net))), name)
+          .toMatchObject({ kind: 'remote', direction: 'push' });
+      } finally {
+        other.cleanup();
+      }
     }
   });
 
@@ -1753,24 +1795,16 @@ describe('survey', () => {
     });
   });
 
-  it('fetches nothing of a partial clone, so no program its config names runs', async () => {
+  it('fetches nothing of a partial clone, so no program its config names runs, and says it reads no page code', async () => {
     const { clone, ssh, uploadPack } = partialClone();
     const read = await createGit().surveyTexts(clone, ['src/a.ts'], {
       maxBytes: 1000,
       maxTotalBytes: 1000,
     });
     expect(read.texts.size).toBe(0);
+    expect(read.refused).toBe('a partial clone: page code is not read');
     expect(ssh.ran()).toBe(false);
     expect(uploadPack.ran()).toBe(false);
-  });
-
-  it('says it reads no page code of a partial clone', async () => {
-    const { clone } = partialClone();
-    const read = await createGit().surveyTexts(clone, ['src/a.ts'], {
-      maxBytes: 1000,
-      maxTotalBytes: 1000,
-    });
-    expect(read.refused).toBe('a partial clone: page code is not read');
   });
 
   it('reads nothing when the files wanted hold more than the budget together', async () => {
@@ -1801,7 +1835,8 @@ describe('resolveGit', () => {
   const oldGit = () => gitWrapper('unset GIT_ATTR_SOURCE\nexec "$GIT" "$@"');
   const binOf = (path: string) => join(path.split(':')[0] ?? '', 'git');
 
-  it('refuses when no candidate reads no attributes when told to, naming the one it found', async () => {
+  it('refuses when no candidate exists, or none reads no attributes when told to, naming the one it found', async () => {
+    await expect(resolveGit([join(scratch.path, 'git')])).rejects.toBeInstanceOf(GitVersionError);
     const old = oldGit();
     try {
       const error: unknown = await resolveGit([binOf(old.path)]).catch((caught: unknown) => caught);
@@ -1845,10 +1880,6 @@ describe('resolveGit', () => {
     symlinkSync(version('2.51'), link);
     rmSync(join(cellar, '2.50'), { recursive: true, force: true });
     expect(await runGit(scratch.path, ['--version'], { bin })).toMatch(/^git version /);
-  });
-
-  it('refuses when no candidate exists', async () => {
-    await expect(resolveGit([join(scratch.path, 'git')])).rejects.toBeInstanceOf(GitVersionError);
   });
 
   it('never runs or takes a git on PATH, only one in a fixed install prefix', async () => {
@@ -1936,10 +1967,9 @@ describe('every git the daemon spawns', () => {
     }
   });
 
-  it.each(['DEVELOPER_DIR', 'SDKROOT', 'TOOLCHAINS'])(
-    "never hands %s to git, so Xcode's shim runs the git that was probed",
-    async (name) => {
-      const seen = join(scratch.path, 'xcode-env');
+  it("never hands DEVELOPER_DIR, SDKROOT or TOOLCHAINS to git, so Xcode's shim runs the git that was probed", async () => {
+    for (const name of ['DEVELOPER_DIR', 'SDKROOT', 'TOOLCHAINS']) {
+      const seen = join(scratch.path, `xcode-env-${name}`);
       const wrapper = gitWrapper(`echo "\${${name}-unset}" >> '${seen}'\nexec "$GIT" "$@"`);
       try {
         const bin = join(wrapper.path.split(':')[0] ?? '', 'git');
@@ -1949,14 +1979,14 @@ describe('every git the daemon spawns', () => {
         await git.head(repo.path);
         vi.unstubAllEnvs();
         const values = readFileSync(seen, 'utf8').split('\n').filter(Boolean);
-        expect(values.length).toBeGreaterThan(0);
-        expect(new Set(values)).toEqual(new Set(['unset']));
+        expect.soft(values.length, name).toBeGreaterThan(0);
+        expect.soft(new Set(values), name).toEqual(new Set(['unset']));
       } finally {
         vi.unstubAllEnvs();
         wrapper.cleanup();
       }
-    },
-  );
+    }
+  });
 
   it('reads the pin once per operation, not on every git call', async () => {
     const store = memoryPinStore();

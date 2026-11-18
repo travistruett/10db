@@ -57,8 +57,8 @@ const chain = (expect: string | null, paths: readonly string[], hold = 'clm_1', 
     trailer: { key: '10db-hold', value: hold },
   });
 
-describe('recordPaths', () => {
-  it('records the folder as it is, a deleted file included, in an unsigned commit no ref names', async () => {
+describe('recordPaths, blobsAt and keepRef', () => {
+  it('records the folder as it is, a deleted file included, in an unsigned commit no ref names; reads blobs at a commit and keeps one at a ref', async () => {
     write('src/shared.ts', 'dirty before the hold\n');
     unlinkSync(join(repo.path, 'src/button.ts'));
     const index = readFileSync(join(repo.path, '.git/index'));
@@ -80,11 +80,20 @@ describe('recordPaths', () => {
     expect(rawGit('for-each-ref', 'refs/10db/')).toBe('');
     expect(readFileSync(join(repo.path, '.git/index')).equals(index)).toBe(true);
     expect(rawGit('rev-parse', 'HEAD')).toBe(start);
+
+    // Several paths' blobs and modes in one commit, whatever the folder holds.
+    expect(await git.blobsAt(repo.path, start, ['src/shared.ts', 'src/gone.ts'])).toEqual([
+      { path: 'src/gone.ts', blob: null, mode: null },
+      { path: 'src/shared.ts', blob: hash('shared\n'), mode: '100644' },
+    ]);
+    const ref = 'refs/10db/passes/pas_1/holds/clm_1';
+    await git.keepRef(repo.path, ref, start);
+    expect(rawGit('rev-parse', ref)).toBe(start);
   });
 });
 
 describe('chainCommit', () => {
-  it('lays the first change on the start and the next on the tip, unsigned, moving no branch', async () => {
+  it('lays the first change on the start and the next on the tip, unsigned, moving no branch, and refuses a tip it did not read', async () => {
     write('src/shared.ts', 'first\n');
     const first = await chain(null, ['src/shared.ts']);
     expect(first).toMatchObject({
@@ -96,6 +105,11 @@ describe('chainCommit', () => {
     expect(rawGit('log', '-1', '--format=%G?%n%(trailers:key=10db-hold,valueonly)', CHAIN)).toBe(
       'N\nclm_1',
     );
+
+    // A tip it did not read is refused, and nothing moves.
+    write('src/shared.ts', 'two\n');
+    await expect(chain(null, ['src/shared.ts'], 'clm_2')).rejects.toThrow(KeptRefMovedError);
+    expect(rawGit('rev-parse', CHAIN)).toBe(first.sha);
 
     write('src/button.ts', 'second\n');
     const second = await chain(first.sha, ['src/button.ts'], 'clm_2');
@@ -130,14 +144,6 @@ describe('chainCommit', () => {
     expect(rawGit('rev-parse', `${CHAIN}^`)).toBe(other.sha);
   });
 
-  it('refuses a tip it did not read, and moves nothing', async () => {
-    write('src/shared.ts', 'one\n');
-    const one = await chain(null, ['src/shared.ts']);
-    write('src/shared.ts', 'two\n');
-    await expect(chain(null, ['src/shared.ts'], 'clm_2')).rejects.toThrow(KeptRefMovedError);
-    expect(rawGit('rev-parse', CHAIN)).toBe(one.sha);
-  });
-
   it('takes the paths from a commit when told to, whatever the folder holds', async () => {
     const record = await git.recordPaths({
       repo: repo.path,
@@ -153,18 +159,6 @@ describe('chainCommit', () => {
   });
 });
 
-describe('blobsAt and keepRef', () => {
-  it("reads several paths' blobs and modes in one commit, and keeps a commit at a ref", async () => {
-    expect(await git.blobsAt(repo.path, start, ['src/shared.ts', 'src/gone.ts'])).toEqual([
-      { path: 'src/gone.ts', blob: null, mode: null },
-      { path: 'src/shared.ts', blob: hash('shared\n'), mode: '100644' },
-    ]);
-    const ref = 'refs/10db/passes/pas_1/holds/clm_1';
-    await git.keepRef(repo.path, ref, start);
-    expect(rawGit('rev-parse', ref)).toBe(start);
-  });
-});
-
 describe('landPaths', () => {
   const land = (from: string, paths: readonly string[], opId = 'shared-pas_1-1') =>
     git.landPaths({
@@ -176,12 +170,18 @@ describe('landPaths', () => {
       opId,
     });
 
-  it('lands the paths as the commit has them, writing no file, and the index follows', async () => {
+  it('is refused off the branch; lands the paths as the commit has them, writing no file, the index following; answers a rerun with its commit and makes none for nothing to land', async () => {
     write('src/shared.ts', 'kept\n');
     const kept = await chain(null, ['src/shared.ts']);
     if (kept.sha === null) throw new Error('nothing kept');
-    write('src/shared.ts', 'kept, then edited again\n');
 
+    // While HEAD is off the branch: refused, and nothing moves.
+    rawGit('switch', '-q', 'main');
+    await expect(land(kept.sha, ['src/shared.ts'])).rejects.toThrow(PassFolderOffBranchError);
+    expect(rawGit('rev-parse', '10db/polish')).toBe(start);
+    rawGit('switch', '-q', '10db/polish');
+
+    write('src/shared.ts', 'kept, then edited again\n');
     const landed = await land(kept.sha, ['src/shared.ts']);
 
     expect(landed).toMatchObject({ alreadyLanded: false, indexStale: false });
@@ -193,13 +193,6 @@ describe('landPaths', () => {
     );
     // The index holds what landed: the later edit is unstaged, nothing is staged.
     expect(rawGit('status', '--porcelain', '--', 'src/shared.ts')).toBe('M src/shared.ts');
-  });
-
-  it('answers a rerun with the commit its opId made, and makes none for nothing to land', async () => {
-    write('src/shared.ts', 'kept\n');
-    const kept = await chain(null, ['src/shared.ts']);
-    if (kept.sha === null) throw new Error('nothing kept');
-    const landed = await land(kept.sha, ['src/shared.ts']);
 
     expect(await land(kept.sha, ['src/shared.ts'])).toEqual({
       sha: landed.sha,
@@ -212,16 +205,6 @@ describe('landPaths', () => {
       indexStale: false,
     });
     expect(rawGit('rev-parse', '10db/polish')).toBe(landed.sha);
-  });
-
-  it('is refused while HEAD is off the branch, and moves nothing', async () => {
-    write('src/shared.ts', 'kept\n');
-    const kept = await chain(null, ['src/shared.ts']);
-    if (kept.sha === null) throw new Error('nothing kept');
-    rawGit('switch', '-q', 'main');
-
-    await expect(land(kept.sha, ['src/shared.ts'])).rejects.toThrow(PassFolderOffBranchError);
-    expect(rawGit('rev-parse', '10db/polish')).toBe(start);
   });
 
   it("says the folder's index is stale when another git holds it, and its rerun refreshes it", async () => {

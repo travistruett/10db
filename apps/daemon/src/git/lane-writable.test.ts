@@ -26,7 +26,13 @@ const nfd = 'café';
 const nfc = 'café';
 
 describe('insideAny', () => {
-  it.each([
+  const ROWS: readonly {
+    name: string;
+    path: () => string;
+    roots: () => string[];
+    inside: boolean;
+    setup?: () => void;
+  }[] = [
     { name: 'the root itself', path: () => at('root'), roots: () => [at('root')], inside: true },
     {
       name: 'a file under the root',
@@ -104,14 +110,18 @@ describe('insideAny', () => {
       roots: () => [at('gone')],
       inside: false,
     },
-  ])('$name', ({ path, roots, inside, setup }) => {
-    setup?.();
-    expect(insideAny(path(), roots())).toBe(inside);
+  ];
+
+  it('answers whether a path lies inside any root, as written or as the kernel opens it', () => {
+    for (const { name, path, roots, inside, setup } of ROWS) {
+      setup?.();
+      expect.soft(insideAny(path(), roots()), name).toBe(inside);
+    }
   });
 });
 
 describe('surelyInside', () => {
-  it.each([
+  const ROWS: readonly { name: string; path: () => string; inside: boolean }[] = [
     { name: 'the root itself', path: () => at('root'), inside: true },
     { name: 'a file under the root', path: () => at('root', 'sub', 'f'), inside: true },
     { name: 'a file elsewhere', path: () => at('elsewhere', 'f'), inside: false },
@@ -126,7 +136,10 @@ describe('surelyInside', () => {
       path: () => `${at('root', 'missing')}/../../x`,
       inside: false,
     },
-  ])('$name', ({ path, inside }) => {
-    expect(surelyInside(path(), at('root'))).toBe(inside);
+  ];
+
+  it('answers inside only for a path that resolves inside the root', () => {
+    for (const { name, path, inside } of ROWS)
+      expect.soft(surelyInside(path(), at('root')), name).toBe(inside);
   });
 });

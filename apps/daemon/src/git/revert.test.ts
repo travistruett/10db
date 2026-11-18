@@ -8,10 +8,12 @@ import { createGit } from './index';
 
 const git = createGit();
 let repo: TempDir;
-beforeEach(() => {
+/** A new repository on branch `work`, in place of the one before. */
+function freshRepo(): void {
   repo = createTempRepo();
   rawGit('switch', '-q', '-c', 'work');
-});
+}
+beforeEach(freshRepo);
 afterEach(() => {
   repo.cleanup();
 });
@@ -67,72 +69,109 @@ describe('revertCommits', () => {
     expect(existsSync(join(repo.path, 'src/alpha-2.txt'))).toBe(false);
     expect(readFileSync(join(repo.path, 'src/beta.txt'), 'utf8')).toBe('beta\n');
     expect(rawGit('status', '--porcelain', '--untracked-files=all')).toBe('');
-  });
 
-  it('writes nothing and names the files when a later commit built on what it reverts', async () => {
-    const alpha = commitFiles({ 'src/shared.txt': 'alpha\n' }, 'alpha');
-    commitFiles({ 'src/shared.txt': 'alpha\nbeta\n' }, 'beta builds on alpha');
-    const before = rawGit('rev-parse', 'HEAD');
-
-    expect(await revert([alpha])).toEqual({ kind: 'conflict', paths: ['src/shared.txt'] });
-    expect(rawGit('rev-parse', 'HEAD')).toBe(before);
-    expect(rawGit('rev-parse', 'refs/heads/work')).toBe(before);
-    expect(readFileSync(join(repo.path, 'src/shared.txt'), 'utf8')).toBe('alpha\nbeta\n');
-    expect(rawGit('status', '--porcelain', '--untracked-files=all')).toBe('');
-  });
-
-  it('writes nothing when an uncommitted change is in a file the revert writes', async () => {
-    const alpha = commitFiles({ 'src/alpha.txt': 'alpha\n' }, 'alpha');
-    const before = rawGit('rev-parse', 'HEAD');
-    writeFileSync(join(repo.path, 'src/alpha.txt'), 'edited\n');
-
-    expect(await revert([alpha])).toEqual({
-      kind: 'blocked',
-      changed: ['src/alpha.txt'],
-    });
-    expect(rawGit('rev-parse', 'HEAD')).toBe(before);
-    expect(readFileSync(join(repo.path, 'src/alpha.txt'), 'utf8')).toBe('edited\n');
-  });
-
-  it('reports nothing to revert when the commits changed nothing the branch still has', async () => {
-    const alpha = commitFiles({ 'src/alpha.txt': 'alpha\n' }, 'alpha');
-    rawGit('rm', '-q', 'src/alpha.txt');
-    rawGit('commit', '-q', '-m', 'remove alpha');
-    const before = rawGit('rev-parse', 'HEAD');
-
-    expect(await revert([alpha])).toEqual({ kind: 'nothing' });
-    expect(rawGit('rev-parse', 'HEAD')).toBe(before);
-  });
-
-  it('conflicts on a second revert of two commits on one file, so its caller must not ask twice', async () => {
-    const add = commitFiles({ 'src/alpha.txt': 'one\n' }, 'alpha adds it');
-    const edit = commitFiles({ 'src/alpha.txt': 'two\n' }, 'alpha edits it');
-    expect((await revert([add, edit])).kind).toBe('reverted');
-    const before = rawGit('rev-parse', 'HEAD');
-
-    // Undoing the edit merges the older commit's file with a tip that no longer has it.
-    expect(await revert([add, edit])).toEqual({ kind: 'conflict', paths: ['src/alpha.txt'] });
-    expect(rawGit('rev-parse', 'HEAD')).toBe(before);
-  });
-
-  it('writes nothing and names the files when undoing a commit would bring conflict markers back', async () => {
-    const marked = '<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\n';
-    commitFiles({ 'src/merged.txt': marked }, 'the base merge left markers');
-    const resolved = commitFiles({ 'src/merged.txt': 'a\nb\n' }, 'resolve the markers');
-    const before = rawGit('rev-parse', 'HEAD');
-
-    expect(await revert([resolved])).toEqual({ kind: 'markers', paths: ['src/merged.txt'] });
-    expect(rawGit('rev-parse', 'HEAD')).toBe(before);
-    expect(readFileSync(join(repo.path, 'src/merged.txt'), 'utf8')).toBe('a\nb\n');
-  });
-
-  it('reverts a commit in a file that held markers before it and still does', async () => {
+    // A commit in a file that held markers before it, and still does, is reverted all the same.
     const marked = '<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\n';
     commitFiles({ 'src/fixture.txt': marked }, 'a fixture that shows a conflict');
     const edit = commitFiles({ 'src/fixture.txt': `${marked}more\n` }, 'alpha edits it');
-
     expect(await revert([edit])).toMatchObject({ kind: 'reverted', paths: ['src/fixture.txt'] });
     expect(readFileSync(join(repo.path, 'src/fixture.txt'), 'utf8')).toBe(marked);
+  });
+
+  interface Row {
+    name: string;
+    /** Makes the history; returns the commits to revert. */
+    arrange: () => Promise<string[]>;
+    result: unknown;
+    /** Files the revert must leave as they are. */
+    files: Record<string, string>;
+    clean: boolean;
+  }
+  /** Reverts each row's commits in a repository of its own, checking it writes nothing. */
+  async function revertsNothing(rows: readonly Row[]): Promise<void> {
+    for (const row of rows) {
+      repo.cleanup();
+      freshRepo();
+      const shas = await row.arrange();
+      const before = rawGit('rev-parse', 'HEAD');
+      expect.soft(await revert(shas), row.name).toEqual(row.result);
+      expect.soft(rawGit('rev-parse', 'HEAD'), row.name).toBe(before);
+      expect.soft(rawGit('rev-parse', 'refs/heads/work'), row.name).toBe(before);
+      for (const [rel, text] of Object.entries(row.files))
+        expect.soft(readFileSync(join(repo.path, rel), 'utf8'), `${row.name}: ${rel}`).toBe(text);
+      if (row.clean)
+        expect.soft(rawGit('status', '--porcelain', '--untracked-files=all'), row.name).toBe('');
+    }
+  }
+
+  it('writes nothing and names the files when the revert conflicts or would bring conflict markers back', async () => {
+    const marked = '<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\n';
+    await revertsNothing([
+      {
+        name: 'a later commit built on what it reverts',
+        arrange: () => {
+          const alpha = commitFiles({ 'src/shared.txt': 'alpha\n' }, 'alpha');
+          commitFiles({ 'src/shared.txt': 'alpha\nbeta\n' }, 'beta builds on alpha');
+          return Promise.resolve([alpha]);
+        },
+        result: { kind: 'conflict', paths: ['src/shared.txt'] },
+        files: { 'src/shared.txt': 'alpha\nbeta\n' },
+        clean: true,
+      },
+      {
+        // So its caller must not ask twice: undoing the edit merges the older commit's file with a
+        // tip that no longer has it.
+        name: 'a second revert of two commits on one file',
+        arrange: async () => {
+          const add = commitFiles({ 'src/alpha.txt': 'one\n' }, 'alpha adds it');
+          const edit = commitFiles({ 'src/alpha.txt': 'two\n' }, 'alpha edits it');
+          expect.soft((await revert([add, edit])).kind, 'the first revert').toBe('reverted');
+          return [add, edit];
+        },
+        result: { kind: 'conflict', paths: ['src/alpha.txt'] },
+        files: {},
+        clean: false,
+      },
+      {
+        name: 'undoing a commit that would bring conflict markers back',
+        arrange: () => {
+          commitFiles({ 'src/merged.txt': marked }, 'the base merge left markers');
+          const resolved = commitFiles({ 'src/merged.txt': 'a\nb\n' }, 'resolve the markers');
+          return Promise.resolve([resolved]);
+        },
+        result: { kind: 'markers', paths: ['src/merged.txt'] },
+        files: { 'src/merged.txt': 'a\nb\n' },
+        clean: false,
+      },
+    ]);
+  });
+
+  it('writes nothing when an uncommitted change is in the way, or the commits changed nothing the branch still has', async () => {
+    await revertsNothing([
+      {
+        name: 'an uncommitted change in a file the revert writes',
+        arrange: () => {
+          const alpha = commitFiles({ 'src/alpha.txt': 'alpha\n' }, 'alpha');
+          writeFileSync(join(repo.path, 'src/alpha.txt'), 'edited\n');
+          return Promise.resolve([alpha]);
+        },
+        result: { kind: 'blocked', changed: ['src/alpha.txt'] },
+        files: { 'src/alpha.txt': 'edited\n' },
+        clean: false,
+      },
+      {
+        name: 'commits that changed nothing the branch still has',
+        arrange: () => {
+          const alpha = commitFiles({ 'src/alpha.txt': 'alpha\n' }, 'alpha');
+          rawGit('rm', '-q', 'src/alpha.txt');
+          rawGit('commit', '-q', '-m', 'remove alpha');
+          return Promise.resolve([alpha]);
+        },
+        result: { kind: 'nothing' },
+        files: {},
+        clean: false,
+      },
+    ]);
   });
 
   it('refuses a branch the checkout is not on, and a commit that is not on the branch', async () => {
@@ -151,20 +190,16 @@ describe('ownCommitsWithSubject', () => {
     return git.commit({ repo: repo.path, paths: [rel], message, opId, branch: 'work' });
   }
 
-  it('never lists a commit a session made, whatever its message says', async () => {
+  it('finds no commit without the prefix, nor one a session made, whatever its message says', async () => {
     const alpha = commitFiles({ 'alpha.txt': 'alpha\n' }, 'alpha');
+    expect(await git.ownCommitsWithSubject(repo.path, 'work', 'revert: leave out')).toEqual([]);
 
     await laneCommit('lane.txt', `revert: leave out "Alpha"\n\n- ${alpha} (Alpha)`, 'op-forged-1');
-
     expect(await git.ownCommitsWithSubject(repo.path, 'work', 'revert: leave out')).toEqual([]);
-  });
 
-  it('is not fooled by a session whose message holds the separators of another format', async () => {
-    const alpha = commitFiles({ 'alpha.txt': 'alpha\n' }, 'alpha');
+    // Nor one whose message holds the separators of another format.
     const record = `${alpha}\x1frevert: leave out "Alpha"\n\n- ${alpha} (Alpha)`;
-
-    await laneCommit('lane.txt', `lane work\x1e${record}\x1e`, 'op-forged-2');
-
+    await laneCommit('lane-2.txt', `lane work\x1e${record}\x1e`, 'op-forged-2');
     expect(await git.ownCommitsWithSubject(repo.path, 'work', 'revert: leave out')).toEqual([]);
   });
 
@@ -180,10 +215,5 @@ describe('ownCommitsWithSubject', () => {
 
     expect(found.map((c) => c.sha)).toEqual([first.head, second.head]);
     expect(found[0]?.message).toContain('revert: leave out "Alpha"');
-  });
-
-  it('finds nothing when no commit opens with the prefix', async () => {
-    commitFiles({ 'src/alpha.txt': 'alpha\n' }, 'alpha');
-    expect(await git.ownCommitsWithSubject(repo.path, 'work', 'revert: leave out')).toEqual([]);
   });
 });

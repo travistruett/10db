@@ -59,7 +59,11 @@ describe('handMadeWorktreeFolder', () => {
 });
 
 describe('a worktree the builder made by hand', () => {
-  it('is read and removed with its ignored node_modules, and its branch stays', async () => {
+  it('shows what it holds that is not committed, and is read and removed with its ignored node_modules, its branch staying', async () => {
+    const dirty = handMade('dirty');
+    writeFileSync(join(dirty, 'wip.txt'), 'unsaved');
+    await expect(git.handMadeWorktreeChanges(main(), dirty)).resolves.toEqual(['wip.txt']);
+
     writeFileSync(join(main(), '.git', 'info', 'exclude'), 'node_modules/\n', { flag: 'a' });
     const path = handMade('feature');
     mkdirSync(join(path, 'node_modules'));
@@ -72,12 +76,6 @@ describe('a worktree the builder made by hand', () => {
     expect(existsSync(path)).toBe(false);
     expect(raw(main(), 'branch', '--list', 'hand/feature')).toContain('hand/feature');
     await expect(git.removeHandMadeWorktree(main(), path)).resolves.toBe('absent');
-  });
-
-  it('shows what it holds that is not committed', async () => {
-    const path = handMade('dirty');
-    writeFileSync(join(path, 'wip.txt'), 'unsaved');
-    await expect(git.handMadeWorktreeChanges(main(), path)).resolves.toEqual(['wip.txt']);
   });
 
   const refusals: readonly {
@@ -102,15 +100,21 @@ describe('a worktree the builder made by hand', () => {
       },
     },
   ];
-  for (const { name, make } of refusals)
-    it(`is never removed or read when ${name}`, async () => {
+  it('is never removed or read when locked, outside the folder, the folder itself or not a worktree', async () => {
+    const caught = (act: Promise<unknown>) =>
+      act.then(
+        () => 'no refusal',
+        (error: unknown) => error,
+      );
+    for (const { name, make } of refusals) {
       const path = make();
-      await expect(git.removeHandMadeWorktree(main(), path)).rejects.toBeInstanceOf(
-        WorktreeNotOursError,
-      );
-      await expect(git.handMadeWorktreeChanges(main(), path)).rejects.toBeInstanceOf(
-        WorktreeNotOursError,
-      );
-      expect(existsSync(path)).toBe(true);
-    });
+      expect
+        .soft(await caught(git.removeHandMadeWorktree(main(), path)), `remove: ${name}`)
+        .toBeInstanceOf(WorktreeNotOursError);
+      expect
+        .soft(await caught(git.handMadeWorktreeChanges(main(), path)), `read: ${name}`)
+        .toBeInstanceOf(WorktreeNotOursError);
+      expect.soft(existsSync(path), `kept: ${name}`).toBe(true);
+    }
+  });
 });

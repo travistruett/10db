@@ -102,61 +102,44 @@ describe('keepWork', () => {
     expect(rawGit('status', '--porcelain')).toBe(status);
   });
 
-  it('makes no commit when nothing changed: none at all before the first, the parent after it', async () => {
-    expect(await keep(['src/settings/page.tsx'], null)).toEqual({
-      sha: null,
+  it('makes no commit when nothing changed, none before the first and the parent after it, and a rerun of the same turn finds its own', async () => {
+    const page = ['src/settings/page.tsx'];
+    // Nothing changed before the first: no commit, no ref.
+    expect(await keep(page, null)).toEqual({ sha: null, base: tip, made: false });
+    expect(rawGit('for-each-ref', 'refs/10db/')).toBe('');
+
+    write('src/settings/page.tsx', 'turn one\n');
+    const first = await keep(page, null);
+    // Nothing changed since the parent: that parent.
+    expect(await keep(page, first.sha, 'ptn_2')).toEqual({
+      sha: first.sha,
       base: tip,
       made: false,
     });
-    expect(rawGit('for-each-ref', 'refs/10db/')).toBe('');
+    expect(rawGit('rev-parse', REF)).toBe(first.sha);
 
-    write('src/settings/page.tsx', 'edited\n');
-    const first = await keep(['src/settings/page.tsx'], null);
-    const again = await keep(['src/settings/page.tsx'], first.sha, 'ptn_2');
-    expect(again).toEqual({ sha: first.sha, base: tip, made: false });
+    // A rerun of the same turn finds the commit it made, whatever the folder holds now.
+    write('src/settings/page.tsx', 'edited after\n');
+    expect(await keep(page, null)).toEqual({ sha: first.sha, base: tip, made: true });
     expect(rawGit('rev-parse', REF)).toBe(first.sha);
   });
 
-  it('chains each kept commit on the one before', async () => {
+  it('chains each change on the one before, moving the ref only from the parent given, and never answers an older commit as a rerun’s own', async () => {
+    const page = ['src/settings/page.tsx'];
     write('src/settings/page.tsx', 'turn one\n');
-    const first = await keep(['src/settings/page.tsx'], null);
+    const first = await keep(page, null);
+    // Another turn moves the ref only from the parent it was given.
     write('src/settings/page.tsx', 'turn two\n');
-    const second = await keep(['src/settings/page.tsx'], first.sha, 'ptn_2');
+    await expect(keep(page, null, 'ptn_2')).rejects.toThrow(KeptRefMovedError);
+    expect(rawGit('rev-parse', REF)).toBe(first.sha);
+
+    const second = await keep(page, first.sha, 'ptn_2');
     expect(second.made).toBe(true);
     expect(rawGit('rev-parse', `${REF}^`)).toBe(first.sha);
     expect(rawGit('show', `${REF}:src/settings/page.tsx`)).toBe('turn two');
-  });
 
-  it('finds the commit it made on a rerun of the same turn, whatever the folder holds now', async () => {
-    write('src/settings/page.tsx', 'turn one\n');
-    const first = await keep(['src/settings/page.tsx'], null);
-    write('src/settings/page.tsx', 'edited after\n');
-    expect(await keep(['src/settings/page.tsx'], null)).toEqual({
-      sha: first.sha,
-      base: tip,
-      made: true,
-    });
-    expect(rawGit('rev-parse', REF)).toBe(first.sha);
-  });
-
-  it("never answers an older commit of the chain as a rerun's own while the ref holds a newer one", async () => {
-    write('src/settings/page.tsx', 'turn one\n');
-    const first = await keep(['src/settings/page.tsx'], null);
-    write('src/settings/page.tsx', 'turn two\n');
-    const second = await keep(['src/settings/page.tsx'], first.sha, 'ptn_2');
-    expect(await keep(['src/settings/page.tsx'], second.sha)).toEqual({
-      sha: second.sha,
-      base: tip,
-      made: false,
-    });
-  });
-
-  it('moves the ref only from the parent it was given', async () => {
-    write('src/settings/page.tsx', 'turn one\n');
-    const first = await keep(['src/settings/page.tsx'], null);
-    write('src/settings/page.tsx', 'turn two\n');
-    await expect(keep(['src/settings/page.tsx'], null, 'ptn_2')).rejects.toThrow(KeptRefMovedError);
-    expect(rawGit('rev-parse', REF)).toBe(first.sha);
+    // A rerun of the first turn never answers its older commit while the ref holds a newer one.
+    expect(await keep(page, second.sha)).toEqual({ sha: second.sha, base: tip, made: false });
   });
 
   it('is refused while HEAD is not the pass branch, and writes nothing', async () => {
@@ -167,12 +150,13 @@ describe('keepWork', () => {
   });
 });
 
-describe('pageChanges', () => {
-  it('counts lines added and removed against the tip for each changed file, untracked and deleted included', async () => {
+describe('pageChanges and hashOnDisk', () => {
+  it("count lines added and removed against the tip, and name each file's blob and mode as the folder holds it", async () => {
     write('src/settings/page.tsx', 'settings\nline two\nline three\n');
     write('src/settings/new.tsx', 'one\ntwo\n');
     unlinkSync(join(repo.path, 'src/settings/old.tsx'));
     write('src/people/page.tsx', 'not asked about\n');
+    chmodSync(join(repo.path, 'src/people/page.tsx'), 0o755);
 
     expect(
       await git.pageChanges(repo.path, tip, [
@@ -186,18 +170,10 @@ describe('pageChanges', () => {
       { path: 'src/settings/old.tsx', added: 0, removed: 1 },
       { path: 'src/settings/page.tsx', added: 2, removed: 0 },
     ]);
-  });
-});
 
-describe('hashOnDisk', () => {
-  it("names each file's blob and mode as the folder holds it, null for one that is not there", async () => {
-    write('src/settings/page.tsx', 'edited\n');
-    chmodSync(join(repo.path, 'src/people/page.tsx'), 0o755);
-    write('src/settings/new.tsx', 'untracked\n');
-    unlinkSync(join(repo.path, 'src/settings/old.tsx'));
+    // Null for a file that is not there; reading writes nothing the builder's git would see.
     const status = rawGit('status', '--porcelain');
     const index = readFileSync(join(repo.path, '.git/index'));
-
     expect(
       await git.hashOnDisk(repo.path, [
         'src/settings/page.tsx',
@@ -223,7 +199,6 @@ describe('hashOnDisk', () => {
         mode: '100644',
       },
     ]);
-    // Reading writes nothing the builder's git would see.
     expect(rawGit('status', '--porcelain')).toBe(status);
     expect(readFileSync(join(repo.path, '.git/index')).equals(index)).toBe(true);
   });
