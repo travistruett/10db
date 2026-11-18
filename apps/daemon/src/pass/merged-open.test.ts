@@ -1,6 +1,5 @@
 import {
   PassClosePageChoice,
-  PassFollowOnDetail,
   PassState,
   PullRequestChecks,
   PullRequestState,
@@ -14,6 +13,7 @@ import {
   getProject,
   getTask,
   listInbox,
+  hasNoticeKey,
   recordPullRequestStatus,
   setClosePlan,
 } from '@10db/db';
@@ -34,7 +34,7 @@ import { createGateRunner } from '../verify';
 import { closeSteps, createPassCloses, type CloseDeps, type PassCloses } from './close';
 import { closeGateOf } from './close-lists';
 import { keepTurnWork, putBackKeptWork, subscribeMergedPasses } from './index';
-import { followOnPush, mergedClosePlan } from './merged-open';
+import { carryOverDue, followOnPush, mergedClosePlan } from './merged-open';
 
 // Workbench spec §5.4, call 6: a pull request that merges while its pass is open closes the pass,
 // with no gate and no push: its unfinished pages are taken out and carry over to a follow-on pass
@@ -122,8 +122,15 @@ function merged(url: string): void {
   });
 }
 
-const followOnCard = () =>
-  listInbox(w.h.store.db, {}).find((i) => PassFollowOnDetail.safeParse(i.detail).success);
+/** The notice a merged pass posts for its follow-on; it marks the carry-over done. */
+const followOnNotice = () =>
+  w.h.notices().find((n) => n.key === `pass-follow-on:${w.opened.pass.id}`);
+
+/** No card is stored for it: the follow-on is a notice. */
+const followOnCards = () =>
+  listInbox(w.h.store.db, {}).filter((i) =>
+    i.title.includes('closed when its pull request merged'),
+  );
 
 describe('a pull request that merges while its pass is open', () => {
   // A close, a follow-on pass's opening and a settle: room for a full run's load.
@@ -147,7 +154,7 @@ describe('a pull request that merges while its pass is open', () => {
       const settles = subscribePassSettles(w.h.bus, w.h.ctx);
 
       merged(url);
-      await waitFor(() => followOnCard() !== undefined, 60_000);
+      await waitFor(() => followOnNotice() !== undefined, 60_000);
       await w.h.jobs.idle();
       await waitFor(
         () => getPass(w.h.store.db, w.opened.pass.id).state === PassState.Settled,
@@ -164,10 +171,12 @@ describe('a pull request that merges while its pass is open', () => {
       expect(w.h.gh.prCreates()).toHaveLength(1);
       // D8: the branch the folder came from holds every signed-off page.
       expect(w.h.git$('rev-parse', 'main')).toBe(tip);
-      const detail = PassFollowOnDetail.parse(followOnCard()?.detail);
-      expect(detail).toMatchObject({ passId: a.id, prUrl: null, carried: [w.people.id] });
-      if (detail.followOnPassId === null) throw new Error('no follow-on pass');
-      const b = getPass(db, detail.followOnPassId);
+      expect(followOnCards()).toEqual([]);
+      expect(followOnNotice()).toMatchObject({ tone: 'info', taskId: null });
+      const followOnPassId = getTask(db, w.people.id).passId;
+      if (!followOnPassId) throw new Error('no follow-on pass');
+      const b = getPass(db, followOnPassId);
+      expect(followOnNotice()?.body).toContain(`carried over to pass "${b.name}"`);
       expect(b.state).toBe(PassState.Open);
       expect(b.startSha).toBe(tip);
       expect(getPassProgress(db, b.id).stackedOn).toBe(a.id);
@@ -185,17 +194,19 @@ describe('a pull request that merges while its pass is open', () => {
     },
   );
 
-  it('names the branch and the commits not pushed on its card when the follow-on pass does not open', async () => {
+  it('names the branch and the commits not pushed in its notice, as a warning, when the follow-on pass does not open', async () => {
     await world(undefined, { followOnRefused: 'the folder is busy' });
     settingsSignedOff();
     const { url } = await opened();
     const later = w.h.commit('src/settings/old.tsx', 'signed off later\n');
 
     merged(url);
-    await waitFor(() => followOnCard() !== undefined);
+    await waitFor(() => followOnNotice() !== undefined);
     await w.h.jobs.idle();
 
-    const card = followOnCard();
+    const card = followOnNotice();
+    expect(followOnCards()).toEqual([]);
+    expect(card?.tone).toBe('warning');
     expect(card?.body).toContain(
       'went back to the Board with their work kept: the folder is busy.',
     );
@@ -217,7 +228,7 @@ describe('a pull request that merges while its pass is open', () => {
     w.h.origin$('update-ref', 'refs/heads/main', squash);
 
     merged(url);
-    await waitFor(() => followOnCard() !== undefined);
+    await waitFor(() => followOnNotice() !== undefined);
     await w.h.jobs.idle();
 
     const db = w.h.store.db;
@@ -236,13 +247,9 @@ describe('a pull request that merges while its pass is open', () => {
     );
     const followOn = getPassPullRequest(db, a.id);
     expect(followOn?.url).not.toBe(url);
-    expect(PassFollowOnDetail.parse(followOnCard()?.detail)).toEqual({
-      kind: 'pass_follow_on',
-      passId: a.id,
-      followOnPassId: null,
-      prUrl: followOn?.url,
-      carried: [],
-    });
+    expect(followOnNotice()?.body).toContain(
+      `The pages signed off after the last push are in ${followOn?.url ?? ''}.`,
+    );
   });
 
   it("closes by itself when the watch reads the merge while Close Pass's gate runs and fails", async () => {
@@ -274,7 +281,7 @@ describe('a pull request that merges while its pass is open', () => {
     await w.h.jobs.idle();
 
     expect(getPass(w.h.store.db, w.opened.pass.id).state).toBe(PassState.Closed);
-    expect(followOnCard()).toBeDefined();
+    expect(followOnNotice()).toBeDefined();
   });
 
   it('opens the follow-on pull request after a restart cut its push short', async () => {
@@ -351,7 +358,10 @@ describe('a pull request that merges while its pass is open', () => {
         });
         await closeSteps(deps, w.opened.pass.id, new AbortController().signal);
         expect(getPass(w.h.store.db, w.opened.pass.id).state).toBe(PassState.Closed);
-        expect(followOnCard()).toBeUndefined();
+        // A stop cut it short: no notice and no card say the pages were carried over.
+        expect(followOnNotice()).toBeUndefined();
+        expect(followOnCards()).toEqual([]);
+        expect(carryOverDue(w.h.store.db, w.opened.pass.id)).toBe(true);
       },
     },
   ])('at start-up, $name', async ({ before }) => {
@@ -363,15 +373,38 @@ describe('a pull request that merges while its pass is open', () => {
     await before(deps);
 
     createPassCloses({ ...deps, ...w.restart() }).resume();
-    await waitFor(() => followOnCard() !== undefined);
+    await waitFor(() => followOnNotice() !== undefined);
     await w.h.jobs.idle();
 
     const db = w.h.store.db;
     expect(getPass(db, w.opened.pass.id).state).toBe(PassState.Closed);
-    const detail = PassFollowOnDetail.parse(followOnCard()?.detail);
-    expect(detail.carried).toEqual([w.people.id]);
-    if (detail.followOnPassId === null) throw new Error('no follow-on pass');
-    expect(getTask(db, w.people.id).passId).toBe(detail.followOnPassId);
+    expect(followOnCards()).toEqual([]);
+    expect(getTask(db, w.people.id).passId).toBeTruthy();
+  });
+
+  it('carries nothing over twice: with its notice posted, a restart finds the carry-over done', async () => {
+    const { deps } = await world();
+    unsubscribe();
+    settingsSignedOff();
+    const { url } = await opened();
+    merged(url);
+    createPassCloses(deps).resume();
+    await waitFor(() => followOnNotice() !== undefined);
+    await w.h.jobs.idle();
+    const db = w.h.store.db;
+    const placed = getTask(db, w.people.id).passId;
+    expect(carryOverDue(db, w.opened.pass.id)).toBe(false);
+    expect(hasNoticeKey(db, w.opened.pass.projectId, `pass-follow-on:${w.opened.pass.id}`)).toBe(
+      true,
+    );
+
+    createPassCloses({ ...deps, ...w.restart() }).resume();
+    await w.h.jobs.idle();
+
+    expect(
+      w.h.notices().filter((n) => n.key === `pass-follow-on:${w.opened.pass.id}`),
+    ).toHaveLength(1);
+    expect(getTask(db, w.people.id).passId).toBe(placed);
   });
 
   it('refuses a Close Pass once merged, and closes it by itself', async () => {
@@ -395,7 +428,7 @@ describe('a pull request that merges while its pass is open', () => {
     await expect(
       closes.close(w.opened.pass.id, { token: shown.token, pages: [], files: [], shared: [] }),
     ).rejects.toThrow(/merged/);
-    await waitFor(() => followOnCard() !== undefined);
+    await waitFor(() => followOnNotice() !== undefined);
     expect(getPass(w.h.store.db, w.opened.pass.id).state).toBe(PassState.Closed);
   });
 });

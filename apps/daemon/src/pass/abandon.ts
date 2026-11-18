@@ -10,6 +10,7 @@ import {
   type PassId,
   type PassSharedChangeDto,
   type TaskDto,
+  Urgency,
 } from '@10db/contracts';
 import {
   abandonPassAndBatch,
@@ -34,7 +35,7 @@ import {
 } from '@10db/db';
 import { jobKey, JobQueue } from '../delivery';
 import { shellWord } from '../git';
-import { flagCard, withdrawCard } from '../inbox';
+import { CardTier, flagCard, postNotice, withdrawCard } from '../inbox';
 import { PASS_CARD_DETAIL, PASS_CARD_KIND, PassCardKind, withdrawFolderCard } from './folder';
 import { passBranch, readKeptRef, type PassWorkDeps } from './kept-work';
 import { keepOrLetGo } from './shared-chain';
@@ -155,10 +156,11 @@ function pagesLine(db: DbReader, pass: PassDto): string {
 }
 
 /**
- * Raises, or raises again, the one card an Abandon leaves: where the folder is, the pages whose
- * changes it deleted and those that stay, each file left as it was with its page, and a pull request
- * no longer watched. While the folder stays on the pass's branch it offers the move back to the
- * branch the pass came from.
+ * Says, or says again, what an Abandon leaves: where the folder is, the pages whose changes it
+ * deleted and those that stay, each file left as it was with its page, and a pull request no longer
+ * watched. While the folder stays on the pass's branch it is a card that offers the move back to the
+ * branch the pass came from. With no move to offer it asks nothing, so it is a notice, and a card
+ * still open for the pass (the folder was moved off its branch since) is withdrawn in the same write.
  */
 export function raiseAbandonCard(
   deps: PassWorkDeps,
@@ -189,25 +191,42 @@ export function raiseAbandonCard(
       `Its pull request stays open and is no longer watched: ${input.pullRequest}. Close it on GitHub if it is not wanted.`,
     );
   if (input.why !== undefined) parts.push(`10db could not move it: ${input.why}`);
-  deps.state.write((ctx) =>
+  const title = `UI Workbench pass "${pass.name}" was abandoned`;
+  const body = parts.join('\n\n');
+  deps.state.write((ctx) => {
+    if (!stays) {
+      const open = findOpenByFoldKey(ctx.tx, pass.projectId, passAbandonCardKey(pass.id));
+      if (open) withdrawCard(ctx, open.id);
+      postNotice(ctx, {
+        tier: CardTier.Notice,
+        projectId: pass.projectId,
+        taskId: null,
+        key: passAbandonCardKey(pass.id),
+        tone: 'info',
+        line: title,
+        body,
+      });
+      return;
+    }
     flagCard(ctx, {
       projectId: pass.projectId,
       workstreamId: null,
-      title: `UI Workbench pass "${pass.name}" was abandoned`,
-      body: parts.join('\n\n'),
+      tier: CardTier.Ask,
+      urgency: Urgency.Normal,
+      closesWhen: { by: 'withdrawn', when: 'the folder moves to the return branch (abandon)' },
+      title,
+      body,
       foldKey: passAbandonCardKey(pass.id),
       ...(input.why === undefined ? {} : { refresh: true }),
       detail: { [PASS_CARD_DETAIL]: pass.id, [PASS_CARD_KIND]: PassCardKind.Abandon },
-      options: stays
-        ? [
-            {
-              label: moveToLabel(pass.returnBranch),
-              description: `Checks out ${pass.returnBranch} in Your folder, keeping uncommitted changes; refused while one lies where the switch writes`,
-            },
-          ]
-        : [],
-    }),
-  );
+      options: [
+        {
+          label: moveToLabel(pass.returnBranch),
+          description: `Checks out ${pass.returnBranch} in Your folder, keeping uncommitted changes; refused while one lies where the switch writes`,
+        },
+      ],
+    });
+  });
 }
 
 /** Withdraws the card an Abandon left, if it is open. */

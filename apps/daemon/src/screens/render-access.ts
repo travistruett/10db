@@ -32,6 +32,8 @@ export const RENDER_READS: readonly { readonly route: string }[] = [
   { route: '/inbox' },
   // The Inbox panel's rows and counts for Open, Waiting and Resolved: one page of rows. A database read.
   { route: '/inbox/page' },
+  // The Inbox's Activity list and a task's notices: one page of notice events. A database read.
+  { route: '/activity/page' },
   // A selected question's last messages. A database read.
   { route: '/inbox/:id/context' },
   { route: '/projects/:projectId/proposals' },

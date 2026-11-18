@@ -240,6 +240,9 @@ describe('the overload card', () => {
     await sampleFor(5 * MINUTE);
     // An older stale card on another project, and an unrelated flag that must stay.
     inbox.flag({
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'answer' },
       projectId: second.id,
       workstreamId: null,
       title: 'The Mac is overloaded: 10db is holding new lanes and gates',
@@ -247,6 +250,9 @@ describe('the overload card', () => {
       foldKey: 'machine-overloaded',
     });
     inbox.flag({
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'answer' },
       projectId: first.id,
       workstreamId: null,
       title: 'Something else',

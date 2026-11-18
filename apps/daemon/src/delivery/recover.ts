@@ -164,7 +164,13 @@ export async function recoverBatches(deps: {
     const taskIds = cuttingTasks(db, batch.id);
     const reason = 'the daemon restarted while cutting the branch';
     const card =
-      left === null ? startCards.cutInterrupted(batch) : worktreeCards.leftBehind(batch, left);
+      left === null
+        ? forTasks(
+            startCards.cutInterrupted(batch),
+            taskIds,
+            batch.ciFixOf === null ? { title: batch.title } : null,
+          )
+        : worktreeCards.leftBehind(batch, left);
     deps.state.write((w) => {
       deleteCuttingBatch(w, batch.id, reason);
       deleteAppSetting(w, worktreePinKey(batch.id));
@@ -177,13 +183,7 @@ export async function recoverBatches(deps: {
     // The API answered 202 for its tasks; say they didn't start (a later start of them closes the
     // card), or what was left at the path, which only moving it settles. A fix batch's start can't
     // be repeated: a plain start would make a second fix for the pull request.
-    raise(
-      deps.inbox,
-      batch.projectId,
-      left === null
-        ? forTasks(card, taskIds, batch.ciFixOf === null ? { title: batch.title } : null)
-        : card,
-    );
+    raise(deps.inbox, batch.projectId, card);
     report.deleted.push(batch.id);
   }
 

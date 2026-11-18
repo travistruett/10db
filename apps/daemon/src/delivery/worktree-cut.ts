@@ -18,7 +18,7 @@ import {
 import { existsAsEntry, WORKTREE_LOCK_PREFIX } from '../git';
 import { githubRepoOf } from '../github';
 import { batchBranchName } from './branch-name';
-import { forTasks, startCards, worktreeCards, type Card } from './cards';
+import { forTasks, startCards, worktreeCards, type CardText } from './cards';
 import { stopCiFixing } from './ci-stop';
 import { ghCall, networkCall, raise, showNotice, type DeliveryContext } from './context';
 import { unmergedDependencies } from './deps';
@@ -80,7 +80,7 @@ export async function cutWorktree(
   };
   // An object, so the catch-all reads what the steps set, not a narrowed `false`.
   const progress = { refused: false, opened: false };
-  const refuse = async (card: Card): Promise<void> => {
+  const refuse = async (card: CardText): Promise<void> => {
     progress.refused = true;
     if (made.worktree) await ctx.git.removeWorktree(main, path).catch(log);
     if (made.branch && made.base)

@@ -11,6 +11,7 @@ import {
   type InboxAnswer,
   type InboxItemDto,
   type PassDto,
+  Urgency,
 } from '@10db/contracts';
 import {
   findOpenByFoldKey,
@@ -41,6 +42,7 @@ import {
 import { networkCall, raise, withdraw, type DeliveryContext } from './context';
 import { jobKey, JobQueue } from './jobs';
 import { setReviewLeft } from './review-left';
+import { CardTier } from '../inbox';
 
 // Workbench spec §5.3, §5.4, D22, call 29: a pass closed on a pull request project is CLOSED but not
 // SETTLED until its work is in the base. When its pull request merges and the base's tree is the
@@ -83,6 +85,12 @@ export function moveCard(
     .replaceAll('{B}', input.base);
   const named = input.prUrl === null ? '' : ` (${input.prUrl})`;
   return {
+    tier: CardTier.Ask,
+    urgency: Urgency.Normal,
+    closesWhen: {
+      by: 'withdrawn',
+      when: 'the pass settles or the pull request is already on its base',
+    },
     title: `Move ${pass.returnBranch} to origin/${input.base}`,
     body: [
       ...(input.why === null ? [] : [`10db moved nothing: ${input.why}.`, '']),

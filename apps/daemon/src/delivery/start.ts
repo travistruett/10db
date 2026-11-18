@@ -56,7 +56,7 @@ import {
   retryWorkstream,
 } from '../team';
 import { batchBranchName } from './branch-name';
-import { forTasks, startCards, wrongBranchCard, type Card, type StartRequest } from './cards';
+import { forTasks, startCards, wrongBranchCard, type CardText, type StartRequest } from './cards';
 import { batchCheckout, lanesInProjectCheckout } from './checkout';
 import { ghCall, networkCall, raise, showNotice, type DeliveryContext } from './context';
 import { unfinishedDependencies, unmergedDependencies, type BlockedTask } from './deps';
@@ -717,7 +717,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
   ): Promise<void> {
     const batch = getBatch(db, batchId);
     const project = getProject(db, batch.projectId);
-    const refuse = (card: Card): void => {
+    const refuse = (card: CardText): void => {
       // Cancels the workstreams the start inserted with the row, so its tasks can start again.
       ctx.state.write((w) => {
         deleteCuttingBatch(w, batchId, card.title);
@@ -844,7 +844,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     // A FAILED worktree batch reopens once its worktree is whole, which replaces the branch check.
     const reopening = batch.state === BatchState.Failed && batch.worktreePath !== null;
     // Every refusal names the tasks it refused; the API already answered 202 for them.
-    const refuse = (card: Card): void => {
+    const refuse = (card: CardText): void => {
       raise(ctx.inbox, project.id, forTasks(card, plans.keys(), { title: batch.title, batchId }));
     };
     // A function, so the checks after an await are not narrowed away by the one before it.

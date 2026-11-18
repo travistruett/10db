@@ -44,3 +44,9 @@ only process that writes the database.
 - `board_columns` holds the builder's human columns; `tasks.board_column_id` set means parked (never started: `insertWorkstream` refuses it), null means planned. `moveTask` refuses to park a task that a started dependent waits on.
 - `cancelTask` removes a task that never started (status `cancelled`, row kept, decision `2026-10-28-remove-unstarted-task.md`); `listTasks` leaves cancelled tasks out, so a reader of the project's tasks never sees one. A task whose only run is `HELD` is removed too, and `cancelTask` cancels that run in the same write.
 - `retireTaskUnconditionally` retires a task and never refuses, for an Abandon, which must finish: status `cancelled`, parked column cleared, Shape questions detached as every retire does, and its `task_deps` edges deleted both ways. An Abandon calls it for each task the pass made (`tasks.made_by_pass_id`, read by `madeByPass`). `removeTaskFromBoard` (the Board's Remove and the builder's `remove_task`) is `cancelTask` that also takes a task with nothing left in it (every run `CANCELLED`, no pass, no saved work), keeping every other refusal: a task not open, an open dependent, a batch being cut.
+- `pageActivity` (`src/store/activity.ts`, `decisions/2026-11-17-every-card-has-a-tier.md`) reads `notice.posted`
+  rows of `events` newest first by keyset on `seq`, in chunks, and `groupNotices` folds repeats. A task's notice is
+  read by `events_entity_idx`; a project's adds its tasks' through `tasks.project_id`. `hasNoticeKey` reads one
+  project's notices for a key. No index was added: medians of 20 on 250,000 events, in ms, dense (10,000 notices) and
+  sparse (20): first page 2.21 and 24.76, middle page 1.13 and 4.16, one project 4.01 and 0.17, one task 0.19 and
+  0.07. A read past 50 ms would need an index, which is a migration.

@@ -6,6 +6,7 @@ import {
   type SelfUpdateBlockerDto,
   type SelfUpdateNotInstalling,
   type ShapeId,
+  Urgency,
 } from '@10db/contracts';
 import {
   deleteAppSetting,
@@ -19,6 +20,7 @@ import type { StateStore } from '../events';
 import { GhError, GhFailure, SIGN_IN_IN_SETTINGS } from '../github';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
+import { BY_ANSWER, CardTier } from '../inbox';
 
 /**
  * How long a drain may be held by shaping conversations alone before the builder is told. A turn
@@ -451,6 +453,10 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     shapeHold.cardId = inbox.flag({
       projectId,
       workstreamId: null,
+      tier: CardTier.Status,
+      urgency: Urgency.Low,
+      // S2: status line
+      closesWhen: { by: 'withdrawn', when: 'the shaping hold is released' },
       title: 'A shaping conversation is holding the update, and lanes are paused',
       body: shapeHoldBody(names, drainingSince),
       foldKey: SHAPE_HOLD_FOLD_KEY,
@@ -544,7 +550,15 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     // A card needs a project to sit under; with none registered the log is all there is to say.
     if (projectId === null) return;
     const card = failureCard({ commit: attempt.commit, running: runningCommit, step, message });
-    inbox.flag({ projectId, workstreamId: null, ...card });
+    inbox.flag({
+      projectId,
+      workstreamId: null,
+      tier: CardTier.Ask,
+      urgency: Urgency.Normal,
+      // S2: update_installed; Try Again
+      closesWhen: BY_ANSWER,
+      ...card,
+    });
   }
 
   async function check(runningCommit: string): Promise<TickResult> {

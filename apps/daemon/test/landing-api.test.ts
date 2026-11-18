@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { InboxItemDto, ProjectDto, TaskDto } from '@10db/contracts';
+import { ActivityPageDto, InboxItemDto, ProjectDto, TaskDto } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
@@ -185,12 +185,19 @@ describe('where a task lands, through the API', () => {
       return tasks.find((t) => t.id === task.id && t.landing.kind === 'base');
     });
     expect(moved.landing).toEqual({ kind: 'base' });
+    const notice = await waitForAsync(
+      async () =>
+        (await api.get(`/activity/page?project=${first.project.id}`, ActivityPageDto)).rows.find(
+          (r) => r.line.includes('no longer exists'),
+        ) ?? undefined,
+    );
+    expect(notice.key).toBe('retired-landings:next');
+    expect(notice.body).toContain(`Alpha (${task.id})`);
+    expect(notice.body).toContain('next');
     const cards = (await api.get('/inbox?state=OPEN', z.array(InboxItemDto))).filter((item) =>
       item.title.includes('no longer exists'),
     );
-    expect(cards).toHaveLength(1);
-    expect(cards[0]?.body).toContain(`Alpha (${task.id})`);
-    expect(cards[0]?.body).toContain('next');
+    expect(cards).toEqual([]);
   });
 
   it('does not ask origin about the project base branch', async () => {

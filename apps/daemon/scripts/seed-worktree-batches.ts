@@ -30,19 +30,31 @@ const Seed = z.object({
     z.object({
       taskId: TaskId,
       title: z.string().min(1),
-      state: z.enum([WorkstreamState.Queued, WorkstreamState.Running, WorkstreamState.Verifying]),
+      state: z.enum([
+        WorkstreamState.Queued,
+        WorkstreamState.Held,
+        WorkstreamState.Running,
+        WorkstreamState.Verifying,
+      ]),
+      /** False for a shared-mode project's batch, which has no worktree of its own. */
+      worktree: z.boolean().default(true),
+      /** A real branch and the commit it was cut from, in place of the title's slug and the zero sha. */
+      branch: z.string().min(1).optional(),
+      baseSha: z.string().length(40).optional(),
     }),
   ),
   shipped: z.array(z.object({ title: z.string().min(1), prUrl: z.string().min(1) })),
 });
 
 /** The states a workstream passes through on its way from QUEUED. */
-const PATH: Readonly<Record<'QUEUED' | 'RUNNING' | 'VERIFYING', readonly WorkstreamStateValue[]>> =
-  {
-    QUEUED: [],
-    RUNNING: [WorkstreamState.Starting, WorkstreamState.Running],
-    VERIFYING: [WorkstreamState.Starting, WorkstreamState.Running, WorkstreamState.Verifying],
-  };
+const PATH: Readonly<
+  Record<'QUEUED' | 'HELD' | 'RUNNING' | 'VERIFYING', readonly WorkstreamStateValue[]>
+> = {
+  QUEUED: [],
+  HELD: [WorkstreamState.Held],
+  RUNNING: [WorkstreamState.Starting, WorkstreamState.Running],
+  VERIFYING: [WorkstreamState.Starting, WorkstreamState.Running, WorkstreamState.Verifying],
+};
 
 const [databasePath, json] = process.argv.slice(2);
 if (!databasePath || !json) throw new Error('usage: seed-worktree-batches.ts <database> <json>');
@@ -51,21 +63,34 @@ const store = createStore(openDatabase(databasePath));
 
 const slug = (title: string): string => title.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-');
 
-function cut(title: string, index: number): ReturnType<typeof insertBatch> {
+function cut(
+  title: string,
+  index: number,
+  git: { readonly branch?: string; readonly baseSha?: string; readonly worktree?: boolean } = {},
+): ReturnType<typeof insertBatch> {
   return store.write((ctx) => {
     const batch = insertBatch(ctx, {
       projectId: seed.projectId,
       title,
       baseBranch: 'main',
-      worktreePath: `${seed.worktreeRoot}/${slug(title)}-${String(index)}`,
+      ...(git.worktree === false
+        ? {}
+        : { worktreePath: `${seed.worktreeRoot}/${slug(title)}-${String(index)}` }),
     });
-    patchBatch(ctx, batch.id, { branch: `10db/${slug(title)}`, baseSha: '0'.repeat(40) });
+    patchBatch(ctx, batch.id, {
+      branch: git.branch ?? `10db/${slug(title)}`,
+      baseSha: git.baseSha ?? '0'.repeat(40),
+    });
     return transitionBatch(ctx, batch.id, { to: BatchState.Open, reason: 'seeded' });
   }).value;
 }
 
 seed.open.forEach((entry, index) => {
-  const batch = cut(entry.title, index);
+  const batch = cut(entry.title, index, {
+    worktree: entry.worktree,
+    ...(entry.branch === undefined ? {} : { branch: entry.branch }),
+    ...(entry.baseSha === undefined ? {} : { baseSha: entry.baseSha }),
+  });
   store.write((ctx) => {
     const workstream = insertWorkstream(ctx, entry.taskId, {
       first: { model: 'seeded-model', effort: 'medium' },

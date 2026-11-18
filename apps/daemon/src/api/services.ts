@@ -105,6 +105,8 @@ import type {
   InboxItemId,
   InboxCardContextDto,
   InboxPageDto,
+  ActivityPageDto,
+  ActivityPageQuery,
   InboxPageQuery,
   InboxState,
   DecisionModelListDto,
@@ -642,6 +644,8 @@ export interface ApiServices extends PlanRecordServices {
   listInbox(filter: { readonly states: readonly InboxState[] | null }): InboxItemDto[];
   /** One page of open, waiting or resolved cards, filtered and sorted; `total` counts every match. */
   pageInbox(query: InboxPageQuery): InboxPageDto;
+  /** One page of notices, newest first, repeats grouped; `next` is null on the last page. */
+  pageActivity(query: ActivityPageQuery): ActivityPageDto;
   /** The card's conversation's last messages; a `NotFoundError` for an unknown card. */
   inboxCardContext(id: InboxItemId): InboxCardContextDto;
   answerInbox(id: InboxItemId, answer: InboxAnswer): InboxItemDto;

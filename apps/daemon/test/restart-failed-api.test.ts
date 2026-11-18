@@ -166,6 +166,9 @@ describe('POST /tasks/:id/start on a task whose run failed in an open batch', ()
   const failedCard = (project: ProjectId, workstream: WorkstreamId): InboxItemId =>
     daemon.state.write((ctx) =>
       flagCard(ctx, {
+        tier: 'ask',
+        urgency: 'high',
+        closesWhen: { by: 'answer' },
         projectId: project,
         workstreamId: workstream,
         title: 'Workstream failed: Alpha',
@@ -207,6 +210,9 @@ describe('POST /tasks/:id/start on a task whose run failed in an open batch', ()
       if (!fields) throw new Error('a batch member gets card actions');
       const card = daemon.state.write((ctx) =>
         flagCard(ctx, {
+          tier: 'ask',
+          urgency: 'high',
+          closesWhen: { by: 'answer' },
           projectId: project.id,
           workstreamId,
           title: 'Workstream failed: Alpha',

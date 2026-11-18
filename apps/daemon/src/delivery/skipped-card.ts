@@ -10,6 +10,7 @@ import {
   type InboxItemDto,
   type InboxOption,
   type SkippedActionDto,
+  Urgency,
 } from '@10db/contracts';
 import {
   approveSkips,
@@ -29,7 +30,7 @@ import {
 import { z } from 'zod';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
-import { flagCard } from '../inbox';
+import { flagCard, BY_ANSWER, CardTier } from '../inbox';
 import type { Logger } from '../log';
 import { LIMITS, writtenConfig } from '../trust';
 import { checkoutOf } from './checkout';
@@ -210,6 +211,9 @@ export async function raiseSkippedCard(
     const item = flagCard(ctx, {
       projectId: row.projectId,
       workstreamId: null,
+      tier: CardTier.Ask,
+      urgency: Urgency.Normal,
+      closesWhen: BY_ANSWER,
       title: `Skipped while you were away: ${task.title}`,
       body: bodyOf(skips, written),
       options:

@@ -100,6 +100,7 @@ import type { ToolDecision } from '../sessions';
 import { projectGrantLines } from '../trust';
 import {
   createInboxService,
+  cardsResolvedByEvent,
   createLimitNotes,
   createPermissionBroker,
   fileProposalByItself,
@@ -337,6 +338,9 @@ describe('inbox questions', () => {
     now = Date.parse('2026-11-03T01:00:00.000Z');
     move(WorkstreamState.Failed);
     const card = service.flag({
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'answer' },
       projectId: ws.project.id,
       workstreamId: ws.workstream.id,
       title: `${WORKSTREAM_FAILED_TITLE_PREFIX}Alpha`,
@@ -4419,6 +4423,9 @@ describe('a flag with a fold key', () => {
       title: 'Batch not started: the checkout has uncommitted changes',
       body: 'Nothing was pushed.',
       foldKey: 'start-refused:one',
+      tier: 'ask' as const,
+      urgency: 'high' as const,
+      closesWhen: { by: 'answer' as const },
     };
   }
   const inboxEvents = (id: string) =>
@@ -4430,7 +4437,10 @@ describe('a flag with a fold key', () => {
     const input = refusal();
     const first = inbox.flag(input);
     const before = inboxEvents(first.id).length;
-    const second = inbox.flag({ ...input, body: 'Something else.' });
+    const second = inbox.flag({
+      ...input,
+      body: 'Something else.',
+    });
     expect(second.id).toBe(first.id);
     expect(second.body).toBe('Nothing was pushed.');
     expect(listInbox(state.db, { states: ['OPEN'] })).toHaveLength(1);
@@ -4441,7 +4451,11 @@ describe('a flag with a fold key', () => {
     const input = { ...refusal(), refresh: true };
     const first = inbox.flag(input);
     const before = inboxEvents(first.id).length;
-    const second = inbox.flag({ ...input, body: 'b.txt is in the way.', detail: { n: 2 } });
+    const second = inbox.flag({
+      ...input,
+      body: 'b.txt is in the way.',
+      detail: { n: 2 },
+    });
     expect(second.id).toBe(first.id);
     expect(second.body).toBe('b.txt is in the way.');
     expect(second.detail).toEqual({ n: 2 });
@@ -4457,7 +4471,11 @@ describe('a flag with a fold key', () => {
       detail: { n: 1 },
     });
     expect(first.options).toHaveLength(1);
-    const second = inbox.flag({ ...input, title: 'Another cause', body: 'Different now.' });
+    const second = inbox.flag({
+      ...input,
+      title: 'Another cause',
+      body: 'Different now.',
+    });
     expect(second.id).toBe(first.id);
     expect(second.title).toBe('Another cause');
     expect(second.options).toEqual([]);
@@ -4488,12 +4506,46 @@ describe('a flag with a fold key', () => {
       body: 'b.txt is in the way.',
     });
   });
+
+  it('stores the urgency the raiser gives, not a default', () => {
+    const card = inbox.flag({ ...refusal(), foldKey: 'low-one', urgency: 'low' });
+    expect(getInboxItem(state.db, card.id).urgency).toBe('low');
+  });
+
+  it('stores an event closer in the detail, keeps it on a refresh, and finds it again', () => {
+    const batchId = mintId('Batch');
+    const closesWhen = {
+      by: 'event' as const,
+      when: { event: 'batch_shipped' as const, batchId },
+    };
+    const input = { ...refusal(), refresh: true, closesWhen, detail: { n: 1 } };
+    const first = inbox.flag(input);
+    expect(first.detail).toEqual({ n: 1, resolvesWhen: closesWhen.when });
+    const refreshed = inbox.flag({ ...input, body: 'Still stopped.', detail: { n: 2 } });
+    expect(refreshed.id).toBe(first.id);
+    expect(refreshed.detail).toEqual({ n: 2, resolvesWhen: closesWhen.when });
+    expect(cardsResolvedByEvent(state.db, null).map((c) => c.item.id)).toEqual([first.id]);
+  });
+
+  it('stores no closer in the detail for a card the builder answers or 10db withdraws', () => {
+    const answered = inbox.flag({ ...refusal(), foldKey: 'ans-one' });
+    expect(answered.detail).toBeNull();
+    const withdrawn = inbox.flag({
+      ...refusal(),
+      foldKey: 'wd-one',
+      closesWhen: { by: 'withdrawn', when: 'the cause is gone (test)' },
+    });
+    expect(withdrawn.detail).toBeNull();
+  });
 });
 
 describe('a card 10db closes because its cause is gone', () => {
   function flag(detail: Record<string, string>) {
     const ws = seedWorkstream(base);
     return inbox.flag({
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'answer' },
       projectId: ws.project.id,
       workstreamId: null,
       title: 'Batch not started: 10db will not run git',
