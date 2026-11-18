@@ -92,3 +92,7 @@ export function workflowCheckNames(path: string): string[] {
     return shards.map((shard) => name.replace('${{ matrix.shard }}', String(shard)));
   });
 }
+
+export function stepsOf(job: WorkflowJob | undefined): readonly WorkflowStep[] {
+  return job?.steps ?? [];
+}
