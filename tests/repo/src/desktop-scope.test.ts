@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runWithFakeGh, type GhReply } from './fake-gh';
+import { readWorkflow, stepsOf } from './workflows';
 import { repoRoot } from './workspace';
 
 const script = join(repoRoot, 'scripts/desktop-scope.mjs');
@@ -53,6 +54,22 @@ describe('scripts/desktop-scope.mjs', () => {
     ],
     ['agent configuration', ['.claude/rules/testing.md', '.codex/rules/default.rules']],
     ['a single doc', ['docs/superpowers/specs/spec.md']],
+    [
+      'desktop UI and other daemon code',
+      [
+        'apps/desktop/src/main.tsx',
+        'apps/desktop/src/screens/x.tsx',
+        'apps/desktop/AGENTS.md',
+        'apps/desktop/e2e/a.spec.ts',
+        'apps/daemon/src/delivery/ship.ts',
+        'apps/daemon/src/git/git.ts',
+        'apps/daemon/test/acceptance.test.ts',
+        'packages/contracts/src/index.ts',
+        'packages/db/drizzle/0000_init.sql',
+        'tsconfig.base.json',
+        'some-new-top-level-file.txt',
+      ],
+    ],
   ])('skips the desktop job for %s only', (_name, names) => {
     const result = decide(pullRequest, files(...names));
     expect(result.output).toBe('desktop=false\n');
@@ -60,14 +77,18 @@ describe('scripts/desktop-scope.mjs', () => {
   });
 
   it.each([
-    'apps/desktop/src/main.tsx',
     'apps/desktop/src-tauri/Cargo.toml',
-    'apps/desktop/AGENTS.md',
+    'apps/desktop/src-tauri/src/main.rs',
+    'apps/desktop/src-tauri/tauri.conf.json',
+    'apps/desktop/package.json',
+    'apps/desktop/vite.config.ts',
     'apps/daemon/src/sandbox/seatbelt.ts',
+    'apps/daemon/src/guard/judge.ts',
+    'apps/daemon/src/keep-awake/index.ts',
+    'apps/daemon/src/git/lane-writable.ts',
+    'apps/daemon/src/sessions/open-in-root.ts',
     'apps/daemon/test/gate-sandbox.seatbelt.test.ts',
-    'packages/contracts/src/index.ts',
-    'packages/db/drizzle/0000_init.sql',
-    'packages/harness/package.json',
+    'apps/daemon/test/your-mcp.seatbelt.test.ts',
     'pnpm-lock.yaml',
     'pnpm-workspace.yaml',
     'package.json',
@@ -75,7 +96,6 @@ describe('scripts/desktop-scope.mjs', () => {
     'mise.toml',
     'mise.lock',
     'Makefile',
-    'tsconfig.base.json',
     'vitest.config.ts',
     '.github/workflows/ci.yml',
     'scripts/desktop-scope.mjs',
@@ -86,23 +106,48 @@ describe('scripts/desktop-scope.mjs', () => {
     'tests/repo/src/workspace.ts',
     'tests/repo/vitest.config.ts',
     'tests/git-isolation.setup.ts',
-    'some-new-top-level-file.txt',
   ])('runs the desktop job when %s changes', (name) => {
     // Mixed with paths that alone would skip it.
-    const result = decide(pullRequest, files('docs/a.md', name, 'scripts/gate.sh'));
+    const result = decide(pullRequest, files('docs/a.md', name, 'apps/desktop/src/main.tsx'));
     expect(result.output).toBe('desktop=true\n');
+  });
+
+  it('covers every path the macOS job’s test steps name', () => {
+    const steps = stepsOf(readWorkflow('.github/workflows/ci.yml').jobs['desktop']);
+    const daemonPrefix = 'pnpm --filter @10db/daemon exec vitest run ';
+    const daemonRun = steps.find((step) => step.run?.startsWith(daemonPrefix))?.run;
+    const repoRun = steps.find((step) => step.run?.includes('vitest run --project repo '))?.run;
+    if (daemonRun === undefined || repoRun === undefined) {
+      throw new Error('the desktop job has no daemon or repo vitest step');
+    }
+    // A directory argument stands for every file under it.
+    const daemonPaths = daemonRun
+      .slice(daemonPrefix.length)
+      .trim()
+      .split(/\s+/)
+      .map((arg) => `apps/daemon/${arg.endsWith('.ts') ? arg : `${arg}/probe.ts`}`);
+    const repoPaths = repoRun.split(/\s+/).filter((arg) => arg.startsWith('tests/'));
+    const paths = [...daemonPaths, ...repoPaths];
+    expect(repoPaths).toHaveLength(1);
+    const missed = paths.filter(
+      (path) => decide(pullRequest, files(path)).output !== 'desktop=true\n',
+    );
+    expect(missed).toEqual([]);
   });
 
   it('runs the desktop job for a file renamed out of a desktop path', () => {
     // The files API lists the old name of a rename as previous_filename; the script asks for it.
-    const result = decide(pullRequest, files('docs/moved.md', 'apps/desktop/old.md'));
+    const result = decide(pullRequest, files('docs/moved.md', 'apps/desktop/src-tauri/old.rs'));
     expect(result.output).toBe('desktop=true\n');
     expect(result.calls[0]?.args).toContain('previous_filename');
   });
 
-  it('does not match a look-alike of a skipped path', () => {
-    const result = decide(pullRequest, files('docsx/a.md', 'scripts-extra/a.sh'));
-    expect(result.output).toBe('desktop=true\n');
+  it('does not match a look-alike of a desktop path', () => {
+    const result = decide(
+      pullRequest,
+      files('apps/desktop/src-tauri-x/a.rs', 'apps/daemon/src/sandboxes/a.ts'),
+    );
+    expect(result.output).toBe('desktop=false\n');
   });
 
   it.each(['push', 'merge_group', 'workflow_dispatch', ''])(
@@ -119,7 +164,10 @@ describe('scripts/desktop-scope.mjs', () => {
     // have to decide by.
     for (const action of ['opened', 'synchronize', 'edited']) {
       const skipped = decide({ ...pullRequest, EVENT_ACTION: action }, files('docs/a.md'));
-      const kept = decide({ ...pullRequest, EVENT_ACTION: action }, files('apps/desktop/a.ts'));
+      const kept = decide(
+        { ...pullRequest, EVENT_ACTION: action },
+        files('apps/desktop/src-tauri/a.rs'),
+      );
       expect([skipped.output, kept.output]).toEqual(['desktop=false\n', 'desktop=true\n']);
     }
   });
