@@ -100,7 +100,10 @@ describe('the Waiting tab', () => {
     expect(tabs().getByText('Open')).toBeTruthy();
     // Open counts the card that needs the builder; Waiting shows its number in the neutral tone.
     expect(tabs().getByText('Open').parentElement?.textContent).toBe('Open1');
-    expect(tabs().getByText('Waiting').parentElement?.textContent).toBe('Waiting1');
+    // The Slack connection, which says what is waiting, may land after the cards.
+    await waitFor(() => {
+      expect(tabs().getByText('Waiting').parentElement?.textContent).toBe('Waiting1');
+    });
     fireEvent.click(tabs().getByRole('tab', { name: /Waiting/ }));
     expect(await screen.findByText('How long should access last?')).toBeTruthy();
     expect(screen.getByText('Mark Ellis')).toBeTruthy();

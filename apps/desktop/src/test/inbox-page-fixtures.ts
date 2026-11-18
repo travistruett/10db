@@ -14,7 +14,7 @@ import { daemonUrl, server } from './daemon';
 
 /**
  * Serves `GET /inbox/page`: each state's cards as one page, whatever the filters (the daemon's own test
- * proves those). Returns every query the app asked with, in order, so a test can check what reached it.
+ * proves those). Returns every query the view asked with, in order (not the rail's count read), so a test can check what reached it.
  */
 export function serveInboxPage(
   byState: Partial<Record<string, readonly InboxItemDto[]>>,
@@ -26,7 +26,8 @@ export function serveInboxPage(
     http.get(daemonUrl('/inbox/page'), ({ request }) => {
       const params = new URL(request.url).searchParams;
       const query = Object.fromEntries(params);
-      asked.push(query);
+      // The rail's badge counts Open with a page of one row; that read is not the view's.
+      if (!(query['state'] === 'open' && query['pageSize'] === '1')) asked.push(query);
       const state = query['state'] ?? '';
       const items = byState[state] ?? [];
       return HttpResponse.json({
