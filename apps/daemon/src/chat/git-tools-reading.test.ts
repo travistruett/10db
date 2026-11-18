@@ -62,6 +62,7 @@ function world() {
       gh: new FakeGh(),
       filesDir: () => join(scratch.path, 'files'),
       repoOf: () => pair.repo.path,
+      placeOf: () => ({ place: null, worktree: null }),
       secretFilesOf: secretFilesIn,
       net: () => ({
         env: { ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global },

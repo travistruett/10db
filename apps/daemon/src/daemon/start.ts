@@ -8,6 +8,7 @@ import {
   AccountKind,
   ConversationOwnerKind,
   type ChatId,
+  type ConversationId,
   DoItPlace,
   EventType,
   ConflictError,
@@ -33,6 +34,8 @@ import {
 } from '@10db/contracts';
 import {
   addStockHazardCommands,
+  chatOfConversation,
+  getChat,
   countBatchesInFlight,
   countWaitingOnCard,
   isLaneWaitingOnCard,
@@ -237,7 +240,10 @@ import {
   createChatLiveSessions,
   createChatService,
   applyChatWorkAnswer,
+  chatRoot,
   createChatWorkService,
+  createChatWorkStateReader,
+  createTitleRowGit,
   type ChatWorkService,
   doItHere,
   doItInCopy,
@@ -308,6 +314,7 @@ import { createPlanRecordServices } from './plan-record-services';
 import { createShapeServices } from './shape-services';
 import { createConversationServices } from './conversation-services';
 import { createChatApiServices } from './chat-services';
+import { createChatChanges } from './chat-changes';
 import { createChatMove } from './chat-move';
 import { createChatWorktrees } from './chat-worktrees';
 import { createShapePreparer, createTakeoverPreparer } from './shape-session-tools';
@@ -1716,7 +1723,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // What the chat's session ran with, for the builder's terminal: a launch that names no secret.
   const takeoverSource = (
-    conv: { readonly model: string | null; readonly effort: Effort | null },
+    conv: {
+      readonly id: ConversationId;
+      readonly model: string | null;
+      readonly effort: Effort | null;
+    },
     project: ProjectDto,
   ): TakeoverSource => {
     const row = getAccountRow(db, project.accountId);
@@ -1725,8 +1736,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     const kind = agentKind(row.kind);
     try {
       const launch = launcher.takeover(row, run.model, listAccountModels(db, row.id));
+      const chatRow = chatOfConversation(db, conv.id);
       return {
-        cwd: project.repoPath,
+        // Where the session works: its worktree on a branch, the checkout otherwise.
+        cwd: chatRow === null ? project.repoPath : chatRoot(chatRow, project).root,
         kind,
         model: launch.model,
         effort: run.effort,
@@ -1774,6 +1787,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     engine: exploreEngine,
     folderHold,
     chats: () => chat,
+    work: () => chatWork,
     dataDir: opts.dataDir,
     now: () => clock.now(),
     log: logger.child({ component: 'takeover' }),
@@ -1823,6 +1837,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     folderHold,
     firstStartAfterMove,
     move: createChatMove({ state, delivery, signal: chatMovesAbort.signal }),
+    facts: createChatWorkStateReader({
+      state,
+      git,
+      gh: delivery.gh,
+      net: () => ({
+        env: delivery.networkEnv(),
+        timeoutMs: delivery.limits.networkTimeoutMs,
+      }),
+      folderHold,
+      clock,
+    }),
     carryOn: (chatId, text) => {
       chat.carryOn(chatId, text);
     },
@@ -2448,6 +2473,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       takeover,
       folderHold,
       pendingOpens,
+      changes: createChatChanges({ state, git }),
+      titleRow: createTitleRowGit({
+        state,
+        folderHold,
+        work: chatWork,
+        git,
+        gh: delivery.gh,
+        filesDir: (conversationId) => chatFolder(opts.dataDir, conversationId),
+        secretFilesOf: secretFilesIn,
+        net: () => ({
+          env: delivery.networkEnv(),
+          timeoutMs: delivery.limits.networkTimeoutMs,
+        }),
+      }),
       doItPreview: (chatId) => previewDoIt(doItDeps, chatId),
       doIt: (chatId, input) =>
         input.place === DoItPlace.Here
@@ -2804,6 +2843,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           gh: delivery.gh,
           filesDir: (conversationId) => chatFolder(opts.dataDir, conversationId),
           repoOf: (projectId) => getProject(state.db, projectId).repoPath,
+          placeOf: (chatId) => {
+            const row = getChat(state.db, chatId);
+            return { place: row.workPlace, worktree: row.worktreePath };
+          },
           secretFilesOf: secretFilesIn,
           net: () => ({
             env: delivery.networkEnv(),

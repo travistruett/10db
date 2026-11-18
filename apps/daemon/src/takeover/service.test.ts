@@ -19,12 +19,15 @@ import {
   type ChatDto,
 } from '@10db/contracts';
 import {
+  findOpenByFoldKey,
+  getChat,
   getConversation,
   insertPass,
   insertTask,
   insertWorkstream,
   listItems,
   schema,
+  setChatWork,
 } from '@10db/db';
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
@@ -520,3 +523,100 @@ function addLane(title: string): void {
       .run();
   });
 }
+
+describe('Open in Terminal, by where the session works', () => {
+  const WORKTREE = '/worktrees/a-branch';
+  const cardOf = (chat: ChatDto) =>
+    findOpenByFoldKey(w.state.db, w.project.id, `chat-work:${chat.id}`);
+  const scriptOf = (chat: ChatDto): string => {
+    const name = readdirSync(folderOf(chat)).find((f) => f.endsWith('.command')) ?? '';
+    return readFileSync(join(folderOf(chat), name), 'utf8');
+  };
+  const takeoverHolders = () =>
+    w.folderHold.holders(w.project.id).filter((h) => h.kind === 'takeover');
+  const placeNow = (chat: ChatDto, place: 'moving' | 'branch', worktree: string | null): void => {
+    w.store.write((ctx) =>
+      setChatWork(ctx, chat.id, getChat(w.state.db, chat.id).workPlace, {
+        place,
+        worktreePath: worktree,
+        branch: 'a-branch',
+        ...(place === 'branch' ? { baseHead: 'abc1234' } : {}),
+      }),
+    );
+  };
+
+  it('takes the checkout for a choosing session and makes it Here, withdrawing the card (row 16)', async () => {
+    w = chatWorld();
+    const chat = await talked();
+    w.work.firstChange(chat.id);
+    expect(getChat(w.state.db, chat.id).workPlace).toBe('choosing');
+    expect(cardOf(chat)).toBeDefined();
+    await w.takeover.open(chat.conversationId);
+    expect(getChat(w.state.db, chat.id).workPlace).toBe('here');
+    expect(cardOf(chat)).toBeUndefined();
+    expect(takeoverHolders()).toHaveLength(1);
+  });
+
+  it('takes the checkout for a reading session and makes it Here (row 47)', async () => {
+    w = chatWorld();
+    const chat = await talked();
+    expect(getChat(w.state.db, chat.id).workPlace).toBeNull();
+    await w.takeover.open(chat.conversationId);
+    expect(getChat(w.state.db, chat.id).workPlace).toBe('here');
+    expect(takeoverHolders()).toHaveLength(1);
+  });
+
+  it('leaves a choosing session choosing, card and all, when the takeover is refused (row 16)', async () => {
+    w = chatWorld();
+    const chat = await talked();
+    w.work.firstChange(chat.id);
+    expect(w.folderHold.reserveGit(w.project.id, 'a switch back').reserved).toBe(true);
+    await expect(w.takeover.open(chat.conversationId)).rejects.toThrow(/Your folder is in use by/);
+    expect(getChat(w.state.db, chat.id).workPlace).toBe('choosing');
+    expect(cardOf(chat)).toBeDefined();
+    expect(stateOf(chat)).toBe('idle_warm');
+  });
+
+  it('is refused while the session moves, changing nothing (row 21)', async () => {
+    w = chatWorld();
+    const chat = await talked();
+    w.work.firstChange(chat.id);
+    placeNow(chat, 'moving', WORKTREE);
+    await expect(w.takeover.open(chat.conversationId)).rejects.toThrow(
+      'Wait for the move to finish.',
+    );
+    expect(getChat(w.state.db, chat.id).workPlace).toBe('moving');
+    expect(stateOf(chat)).toBe('idle_warm');
+    expect(existsSync(folderOf(chat))).toBe(false);
+  });
+
+  it('opens a branch session in its worktree and holds nothing, so lanes and git work go on (row 31)', async () => {
+    w = chatWorld();
+    const chat = await talked();
+    placeNow(chat, 'branch', WORKTREE);
+    // The checkout is busy with 10db's git work, which would refuse a takeover that held it.
+    const git = w.folderHold.reserveGit(w.project.id, 'a switch back');
+    expect(git.reserved).toBe(true);
+    await w.takeover.open(chat.conversationId);
+    expect(stateOf(chat)).toBe('taken_over');
+    expect(scriptOf(chat)).toContain(`cd -- '${WORKTREE}'`);
+    expect(takeoverHolders()).toEqual([]);
+    await w.takeover.handBack(chat.conversationId);
+    expect(stateOf(chat)).toBe('idle_cold');
+    expect(getChat(w.state.db, chat.id)).toMatchObject({
+      workPlace: 'branch',
+      worktreePath: WORKTREE,
+    });
+  });
+
+  it('opens a branch session with no worktree in the checkout and holds it, listed as a holder (row 48)', async () => {
+    w = chatWorld();
+    const chat = await talked();
+    placeNow(chat, 'branch', null);
+    await w.takeover.open(chat.conversationId);
+    expect(scriptOf(chat)).toContain("cd -- '/repo'");
+    expect(takeoverHolders().map((h) => h.chatId)).toEqual([chat.id]);
+    expect(w.folderHold.reserveGit(w.project.id, 'blocked').reserved).toBe(false);
+    expect(getChat(w.state.db, chat.id).workPlace).toBe('branch');
+  });
+});

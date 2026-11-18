@@ -74,7 +74,7 @@ export {
 } from './launch-rule';
 export { recoverBatches } from './recover';
 export { moveRetiredLandings } from './retired-landings';
-export { workstreamChanges } from './workstream-changes';
+export { checkoutChanges, workstreamChanges } from './workstream-changes';
 export {
   allCheckouts,
   checkoutOf,

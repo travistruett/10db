@@ -128,7 +128,38 @@ export async function workstreamChanges(
   return readChanges(deps.git, checkout, id, baseHead, head, true);
 }
 
-/** The changes from `baseHead` to `head` in the checkout, with the commits between when asked. */
+/**
+ * What changed in a checkout from commit `base` to `head`, with the commits between when asked. With `uncommitted`,
+ * what the folder holds beyond `head` is part of it: read as a commit made at `head` that no ref names, so
+ * nothing in the checkout, its index or its branches is written. A git failure is thrown as a `GitError`.
+ */
+export async function checkoutChanges(input: {
+  readonly git: Pick<Git, 'changedPaths' | 'recordPaths' | 'commitsSince' | 'diffSince'>;
+  readonly checkout: string;
+  readonly base: string;
+  readonly head: string;
+  readonly uncommitted: boolean;
+  readonly withCommits?: boolean;
+}): Promise<WorkstreamChangesDto> {
+  const { git, checkout, base, head } = input;
+  const paths = input.uncommitted ? await git.changedPaths(checkout) : [];
+  const shown =
+    paths.length === 0 ? head : (await git.recordPaths({ repo: checkout, base: head, paths })).sha;
+  const [commits, changes] = await Promise.all([
+    input.withCommits === false ? Promise.resolve([]) : git.commitsSince(checkout, base, head),
+    git.diffSince(checkout, base, shown, MAX_CHANGES_DIFF_BYTES),
+  ]);
+  return {
+    baseHead: base,
+    head,
+    commits,
+    diff: changes.diff,
+    truncated: changes.truncated,
+    files: [...changes.files],
+  };
+}
+
+/** The changes from `baseHead` to `head` in a workstream's checkout, with the commits between when asked. */
 async function readChanges(
   git: Git,
   checkout: string,
@@ -139,18 +170,14 @@ async function readChanges(
 ): Promise<WorkstreamChangesDto> {
   if (!existsSync(checkout)) throw new NotFoundError('checkout of workstream', id);
   try {
-    const [commits, changes] = await Promise.all([
-      withCommits ? git.commitsSince(checkout, baseHead, head) : Promise.resolve([]),
-      git.diffSince(checkout, baseHead, head, MAX_CHANGES_DIFF_BYTES),
-    ]);
-    return {
-      baseHead,
+    return await checkoutChanges({
+      git,
+      checkout,
+      base: baseHead,
       head,
-      commits,
-      diff: changes.diff,
-      truncated: changes.truncated,
-      files: [...changes.files],
-    };
+      uncommitted: false,
+      withCommits,
+    });
   } catch (error) {
     // A base the checkout no longer holds, or a checkout with no commit yet, cannot be shown.
     if (error instanceof GitError)
