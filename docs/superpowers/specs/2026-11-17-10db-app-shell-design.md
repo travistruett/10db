@@ -1,6 +1,7 @@
-# 10db app shell: a rail, a panel and one content surface
+# 10db app shell: a sidebar and the content
 
-**Status:** designed on 2026-11-17, not built.
+**Status:** the frame is built (M1, then the two-column frame below). The panels of Sessions, Inbox and the
+Workbench are designed, not built.
 
 **Mockups:** `2026-11-17-10db-app-shell-mockups.html`, in this folder: six framed screens in Selenized dark and
 light (the buttons at the top switch), at 1280, 900 and 480 px.
@@ -18,7 +19,11 @@ narrow table) and DESIGN.md's "Navigation" and "Page header" paragraphs. Everyth
 
 **What changes for you.**
 
-- The labelled sidebar becomes a slim **icon rail**. Each icon's name shows in a tooltip to its right. Inbox,
+- The window is **two columns**, a sidebar and the content, divided by one hairline. The sidebar is one tone (bg1)
+  from the window's top to its bottom and holds the traffic lights and a Toggle sidebar button (⇧⌘S). The
+  content has its own tone (bg0) and its own title row. There is no header band and no rounded inset card.
+- The sidebar's **rail** is labelled (200 px) and ⇧⌘S switches it to **icons only** (76 px; each icon's name in a
+  tooltip to its right) on wide windows. Under 1000 px it opens the labelled sidebar over the content. Inbox,
   Factory and Sessions come first, then a divider and the project's tile with Board, Plan, UI Workbench and
   Knowledge. The status icons (keep-awake, light/dark) and Settings sit at the foot.
 - Beside the rail, a section can have a **panel**: the list you pick from. The content shows what you picked.
@@ -27,12 +32,12 @@ narrow table) and DESIGN.md's "Navigation" and "Page header" paragraphs. Everyth
   width.
 - **Session tabs go away.** The panel and a ⌄ beside the session's title switch between sessions. ⌘1–9, ⌘W, ⌘J,
   ⌘⇧T and ⌘⇧[ ] keep working on the panel's order.
-- **Every section is titled in the same place:** a title row level with the traffic lights. It starts on the
-  content's left edge and holds the view's actions. A hairline continues the panel's edge up through it.
-- The content sits on **one rounded surface**, inset from the frame, like Codex. #645's heavy scroll shadows give
-  way to a hairline.
-- **Narrower windows:** under 1000 px the panel folds behind a sidebar button (⌘\). Under 640 px the rail folds
-  too, and the button opens both over the content.
+- **Every page has one header:** the title row, level with the traffic lights, at the top of the content. It
+  starts on the content's left edge and holds the view's actions. Nothing in the content repeats it.
+  #645's heavy scroll shadows give way to a hairline.
+- **Narrower windows:** under 1000 px the panel folds and the rail is icons only; ⇧⌘S opens the labelled sidebar
+  (with the panel) over the content and ⌘\ opens the panel beside the icons. Under 640 px the sidebar folds
+  too, and the toggle beside the traffic lights opens it.
 
 **What it buys.** One frame for every screen, with nothing floating: lists on the left, the work on the right,
 titles where your eye expects them. Sessions stops filling the title bar with tabs. The Inbox reads like mail.
@@ -56,13 +61,14 @@ titles where your eye expects them. Sessions stops filling the title bar with ta
 1. **The project tile sits in the rail, above the project's icons.** A click opens today's project switcher, which
    gains a Project Settings item. Global sections stay above the divider, as "scope follows the question" asks.
 2. **The panel is 260 px and fixed.** Dragging its edge is a follow-up.
-3. **The panel opens over the content (an overlay) when the window is narrow**, rather than squeezing it.
+3. **The panel opens over the content (a sheet) when the window is narrow**, rather than squeezing it.
 4. **All three Inbox states use the panel** (the builder's pick). `Open · Waiting · Resolved` sits in the
    panel's head, and the list below pages as you scroll. #647's tables give way to the list and a filter menu. Their
    paged routes and filters are reused.
 5. **A running session shows a small spinner in its panel row.** This reverses the Sessions UI rule "no spinner".
    With reduced motion it's a static dot.
-6. **The sidebar shortcut is ⌘\.** ⌘B is left free for the composer.
+6. **⇧⌘S is the sidebar and ⌘\ is the panel.** ⌘B is left free for the composer. ⌘\ also answers a click on
+   the open section's own rail item.
 7. **Plan and Knowledge get no panel yet.** Plan keeps its History button; Knowledge keeps its tabs.
 
 **Needed from you:** nothing to start. Reply to approve. The first build PR is the shell alone, with every view
@@ -75,41 +81,37 @@ The rest is for the agents building it.
 ## 1. Layout
 
 ```
-┌──────┬────────────────────┬─────────────────────────────────────────────┐
-│ ●●●  │              [▣]   │ Title ⌄   meta line            actions  ⋯  │  44 px title row (frame)
-├──────┼────────────────────┤ ┌─────────────────────────────────────────┐ │
-│ rail │ panel              │ │ content surface (rounded 10 px)         │ │
-│ 52px │ 260 px             │ │                                         │ │
-│      │                    │ │                                         │ │
-│      │                    │ └─────────────────────────────────────────┘ │  8 px inset right and bottom
-└──────┴────────────────────┴─────────────────────────────────────────────┘
+┌────────────────────┬──────────────────┬──────────────────────────────────┐
+│ ●●●  [▣]           │ Settings      [◧]│ Title ⌄   meta line   actions  ⋯ │  44 px: lights row, panel head,
+├────────────────────┤                  │                                  │  the content's title row
+│ rail (200 | 76)    │ panel (260)      │ content (bg0)                    │
+│ sidebar, bg1       │ sidebar, bg1     │                                  │
+└────────────────────┴──────────────────┴──────────────────────────────────┘
 ```
 
-- **Frame (the builder's pick, tone C in the mockups).** The panel and the title row share one flat surface:
-  `--mantine-color-default` (bg1), today's sidebar tone. The rail sits one step darker, on
-  `--mantine-color-body` (bg0), so it reads as the window's edge. Its active item fills with bg1, the panel's
-  tone. Nothing on the frame has a border or a shadow, except the hairline described under §1.3.
-- **Content surface.** The content sits on `--mantine-color-body` (bg0), with a 10 px radius on all four corners.
-  It's inset 8 px from the window's right and bottom edges and from the title row. It sits flush against the panel
-  (or the rail, when there's no panel). Its edge is a 1 px `bg2` ring in both schemes, Selenized only
-  (`2026-10-28-selenized-exactly.md`). Its shadow is one tight layer: `0 1px 2px` at `.35` in dark and `.06` in
-  light. That is a shadow's black, not a colour. Under 640 px the inset is 6 px on every side.
+- **Two columns.** The sidebar (the rail and, where the section has one, the panel) is `--mantine-color-default`
+  (bg1) from the window's top to its bottom. The content column is `--mantine-color-body` (bg0), also top to
+  bottom, with its own title row. A 1 px `bg2` hairline runs the full height between the rail and the panel and
+  between the sidebar and the content. There is no inset, radius, ring or shadow on the frame: only sheets and
+  drawers cast one.
 - **Columns.** A CSS grid with `rail | panel | content` columns and `44px | 1fr` rows. Mantine's `AppShell` has no
   slot for a second left column, so the shell becomes `AppFrame`, our own layout component, in
   `apps/desktop/src/shell/app-frame.tsx`. It keeps what `AppShell.Main` guarantees today: the window never scrolls,
-  and the content is exactly the window's height and scrolls inside itself. It keeps every mount `AppLayout` has
-  today (`app-layout.tsx:146-177`, `320-325`): `RenderLayout` for render mode, `ScreenRenderHost`, the
-  `ReconnectingBanner` (at the top of the content surface), `useDesktopSync`, `useNewSessionKey`, and the
-  first-run swap. The 48 px drag strips in `app-error.tsx` and `first-run.tsx` become 44 px, to match the title
-  row.
+  and the content is exactly the window's height and scrolls inside itself. The content column is its own
+  stacking context (`isolation: isolate`), so nothing inside it can rise over a sheet. It keeps every mount
+  `AppLayout` has today (`app-layout.tsx:146-177`, `320-325`): `RenderLayout` for render mode,
+  `ScreenRenderHost`, the `ReconnectingBanner` (at the top of the content), `useDesktopSync`, `useNewSessionKey`,
+  and the first-run swap. The 48 px drag strips in `app-error.tsx` and `first-run.tsx` become 44 px, to match the
+  title row.
 
 ### 1.1 The title row
 
-- It's 44 px, on the frame, and spans the content column. The traffic lights (Tauri `trafficLightPosition` 16, 22)
-  sit on the same row, over the rail and panel. The row's empty space keeps `data-tauri-drag-region`, so a
+- It's 44 px, at the top of the content column, on the content's own tone. The traffic lights (Tauri
+  `trafficLightPosition` 16, 22) sit on the same row, over the sidebar (or, under 640 px, over the content). The row's empty space keeps `data-tauri-drag-region`, so a
   double-click zooms the window. Its controls never carry the drag attribute.
-- Its text starts on the content surface's inner left edge (the surface's 24 px padding). The title lines up with
-  the first line of content below it.
+- Its text starts at the content's left edge plus 24 px. Under 640 px, where the traffic lights and the toggle sit
+  on the content's tone, it starts at 116 px. It has no lower edge until the content scrolls under it, then a 1 px
+  `bg2` line.
 - Left to right: the **title** (14 px, weight 600, fg1, one line, ellipsis), an optional **⌄ switcher**, the
   **meta line** (12 px, dim, one line), then the view's **actions**, right-aligned (buttons 28 px high, `default`
   or `primary`) and ⋯.
@@ -117,40 +119,54 @@ The rest is for the agents building it.
   and `actions`. `HeaderSlot` is removed: its only caller was the Sessions tab strip.
 - A view's `PageHeader` loses its title and actions to the title row. Its byline and toolbar rows stay at the top of
   the content. `PageHeader` keeps rendering those two rows and is renamed `PageIntro`.
+- **One header per page.** A page has exactly one header, the title row. Title: what you are looking at, one line,
+  14 px / 600. Meta: dim 12 px. Actions: right, 28 px, `default` or one `primary`, then ⋯. In the content, `PageIntro`
+  allows at most one dim intro line (13 px, a sentence) and one toolbar of underlined tabs on the left and filters
+  on the right. A second title or byline that names the same thing, and any heading larger than the title, is not
+  allowed. A split view's pane may have a 13 px / 600 label row with its own actions. The type scale under the
+  title: in-content section heads 14 / 600, card and row titles 14 / 500, a drawer's title 16 / 600, body 14,
+  meta 12.
 
 ### 1.2 The rail
 
-- It's 52 px wide. Its items are 36 × 34 px with an 18 px Tabler icon at stroke 1.6, in this order:
+- Labelled it is 200 px wide and icons only 76 px, which holds the traffic lights (x 16 to 68). Labelled rows are
+  30 px tall with an 18 px Tabler icon at stroke 1.6 and a 13 px / 500 label; icons-only rows are 40 × 34 px. Order:
   - Inbox, Factory, Sessions
-  - a divider (24 px, `bg2`)
-  - the project tile (26 px `ProjectTile` with a 1 px ring), then Board, Plan, UI Workbench, Knowledge
+  - a divider
+  - the project (labelled: a 32 px row of a 20 px tile, the name and ⌄, which opens `ProjectSwitcher` below it;
+    icons only: the 26 px tile with its ring, which opens it to the right), then Board, Plan, UI Workbench, Knowledge
   - a spacer
-  - the download status (only while downloading), daemon status (only when not connected), keep-awake, light/dark,
-    and Settings.
-- **Active item:** a `bg2` fill, radius `md`, icon in fg1. No outline.
-- **Tooltip:** Mantine `Tooltip`, `position="right"`, `openDelay={300}`, with the section's name. The accessible name
-  is the section's name, and its count phrase is separate, as `CountBadge` does today
+  - the foot: labelled, the Settings row with keep-awake and light/dark as 28 px icon buttons on its line (the
+    download status only while downloading, the daemon status only when not connected); icons only, those icons
+    stacked above Settings.
+- **Active item:** a `bg2` fill, radius `md`, text in fg1. Hover is half `bg2`. No outline.
+- **Tooltip** (icons only): Mantine `Tooltip`, `position="right"`, inside a `Tooltip.Group` that shares one 300 ms
+  delay. The accessible name is the section's name, and its count phrase is separate, as `CountBadge` does today
   (`2026-11-11-a-label-never-carries-its-count.md`).
-- **Badges:** the Inbox's open count and the Sessions and Workbench needs-you counts. A compact `CountBadge` pinned
-  to the icon's top-right corner, in attention blue, never more than three characters ("99+").
-- **The project tile:** a click opens `ProjectSwitcher`'s dropdown to the tile's right. The dropdown keeps its
-  search and New Project, and gains **Project Settings**. The tile's tooltip names the project.
+- **Badges:** the Inbox's open count and the Sessions and Workbench needs-you counts. Labelled, a `CountBadge` ends
+  the row; icons only, it is pinned to the icon's top-right corner, never more than three characters ("99+").
+- **The toggle:** a 28 px `IconLayoutSidebar` button, "Toggle sidebar ⇧⌘S", beside the traffic lights (x 80, y 8)
+  when the sidebar is labelled or folded away, and under them (x 24, y 48) in the icons-only rail. Its tooltip
+  does not open on focus, so a click never leaves it over what the click changed. A click on the open section's own
+  rail item does what ⌘\ does.
+- **The project switcher:** the dropdown keeps its search and New Project, and gains **Project Settings**.
 - **Keyboard:** the rail is a `nav` landmark named "Sections". Tab enters it, ↑/↓ move between items, and Enter
   opens one.
 
 ### 1.3 The panel
 
-- It's 260 px wide, on the frame (bg1), with no border of its own. Its right edge is where the content surface
-  begins. **The hairline "pipe"** is a 1 px `bg2` line in the title row at that same x, from 10 px below the
-  window's top down to the surface. The panel's edge reads as one line from the top of the window to the bottom.
-- **Head:** a 34 px row with the section's name (14 px, weight 600) and its own controls, and, where a section
-  needs one, a second row. Sessions has search and New Session in the first row. The Inbox has search and its
+- It's 260 px wide, on the sidebar's tone (bg1). A full-height 1 px `bg2` hairline is its right edge (the content's
+  edge) and another separates it from the rail.
+- **Head:** the sidebar's top row, 44 px, level with the traffic lights and the content's title, with the section's
+  name (14 px, weight 600), its own controls and, while the panel is a column, a button that hides it. Where a
+  section needs one, a second row follows. Sessions has search and New Session in the first row. The Inbox has search and its
   filter menu in the first row, and the `Open · Waiting · Resolved` switch in a second (§4.1).
 - **Rows:** radius `md` and 8 px side padding, at the section's height: one-line rows are 30 px (Sessions, Settings,
   the Workbench), and the Inbox's two-line rows are 52 px. The selected row takes the `bg2` fill.
 - **Group labels:** 11.5 px, weight 600, dim, with an optional 14 px project tile.
 - **Narrow layouts:** the panel's list is the content's own state, not the shell's. The shell asks each view for a
-  `panel` element and draws it, in the column or in the overlay (§2).
+  `panel` element and draws it, in the column or in a sheet (§2). Hiding it at 1000 px and over works three ways:
+  ⌘\, a click on the open section's rail item, or the head's button.
 - **Who has a panel:**
 
 | Section | Panel | Content |
@@ -181,11 +197,11 @@ A panel list that can grow without limit pages and virtualises. A bounded one re
 ### 1.5 Drawers
 
 Changes (⌘⇧D), an Inbox item opened from elsewhere, and a Board task's details all open as one kind of slide-out
-drawer, from the content surface's right edge.
+drawer, from the content column's right edge, flush to the window.
 
-- **Size:** 50% of the surface, at least 480 px and at most 760 px. Under 640 px it takes the whole surface.
-- **Look:** the surface's own tone (bg0), with a 1 px `bg2` left edge and the surface's tight shadow, never a heavy
-  one. It slides in over 150 ms, or appears at once with reduced motion.
+- **Size:** 50% of the content column, at least 480 px and at most 760 px. Under 640 px it takes the whole column.
+- **Look:** the content's own tone (bg0), with a 1 px `bg2` left edge and a tight shadow, never a heavy one. Its
+  insets are 24 px and it has no eyebrow: its title is 16 px / 600. It slides in over 150 ms, or appears at once with reduced motion.
 - **Not modal.** The conversation stays usable beside it, so a line quoted from Changes lands in the composer:
   - when the surface is at least 1200 px wide, the conversation's column moves left to stay in view;
   - narrower, the drawer covers it until closed.
@@ -199,10 +215,10 @@ drawer, from the content surface's right edge.
 ### 1.6 Spacing that makes it read as one
 
 - **The content column:** conversations keep their 720 px column. Its left edge is where the title row's text
-  starts when the content fills the surface (Board, Factory, Inbox detail). In a centred conversation, the title row
-  keeps the surface's left padding. The mockups show both.
-- **Panel rows** start 8 px in from the panel's left edge. The rail's icons are centred in their 52 px. Nothing
-  else is inset.
+  starts when the content fills the column (Board, Factory, Inbox detail). In a centred conversation, the title row
+  keeps the content's left padding.
+- **Panel rows** start 8 px in from the panel's left edge. The icons-only rail's icons are centred in their 76 px.
+  Nothing else is inset: there are no 8 px or 6 px insets on the content.
 - **Shadows:** the scroll shadow over a conversation's header (#645, `conversation-layout.module.css`) and the
   gradient above its composer (`conversation-list.module.css`) are replaced. While the list is scrolled under it,
   the header gets a 1 px `bg2` line only. The composer gets nothing: it sits on bg1, which already sets it apart.
@@ -211,15 +227,18 @@ drawer, from the content surface's right edge.
 
 These are measured on the window, because the shell decides them:
 
-| Window | Rail | Panel | Sidebar button |
-|---|---|---|---|
-| ≥ 1000 px | shown | shown, where the section has one | after the traffic lights, at the panel's right end; hides the panel |
-| 640–999 px | shown | folded; the button (or ⌘\) opens it **over** the content, and Esc or a click outside closes it | after the traffic lights |
-| < 640 px | folded | folded; the button opens rail and panel together over the content | after the traffic lights; the title row starts after it |
+| Window | Rail (labels on, the default) | Rail (labels off) | Panel | ⇧⌘S does | ⌘\ does |
+|---|---|---|---|---|---|
+| ≥ 1000 px | labelled, 200 | icons, 76 | a column beside the rail, 260, where the section has one | switches labels and icons, remembered in `tendb.shell.labels` | hides or shows the panel (per section) |
+| 640–999 px | icons, 76 (the preference is kept, not applied) | icons, 76 | folded | opens the labelled rail as a sheet over the content, with the panel beside it where the section has one (460 px); Esc, a click outside or picking a row closes it | opens the panel alone as a sheet beside the icons rail |
+| < 640 px | none | none | folded | opens a sheet: the labelled rail (200) for a section with no panel, or the icons rail and its panel (336) for one with a panel | opens the panel sheet, with the icons rail |
 
+- A sheet is the sidebar over the content from the window's top to its bottom (the traffic lights and the toggle sit
+  on it), bg1 with an `8px 0 24px` shadow and a 1 px right edge; the content dims behind it. Content widths: 1440
+  labelled with no panel 1239, with the panel 979; 1000 labelled with the panel 539; 900 is 823; 480 is 480.
 - A panel you hide at ≥ 1000 px stays hidden for that section until you show it again, kept in `localStorage`
   under `tendb.shell.panel.<section>`. A cleared store shows it.
-- An open overlay is `inert` while folded (as the navbar is today). Picking a row in it closes it.
+- An open sheet is `inert` while folded (as the navbar is today). Picking a row in it closes it.
 - **Views measure their container, not the window.** Plan already does (`split-pane.tsx:49`). These switch from the
   window to their own root's width:
   - the Workbench's `useViewportSize` (`pass-workspace.tsx:37`);
@@ -229,13 +248,15 @@ These are measured on the window, because the shell decides them:
   Sessions' narrow rules (`strip-layout.ts`) go with the tab strip.
 - **The Workbench's queue strip** shows exactly when the panel isn't shown: folded, or hidden with ⌘\. It never
   depends on a width. The queue is never drawn twice.
-- **Between 640 and 999 px** the title row starts after the sidebar button, at 112 px from the window's edge, clear
-  of the traffic lights (which reach about 70 px).
+- **The title row** starts at the content's left edge plus 24 px at every width but one: under 640 px the traffic
+  lights and the toggle sit on the content's tone, so it starts at 116 px.
 - The window's minimum stays 420 × 600 (`2026-11-09-the-window-narrows-to-the-workbench.md`).
 
 ## 3. Keyboard
 
-- **⌘\**: show or hide the panel (or the overlay, when folded). Bound in the shell, on every view.
+- **⇧⌘S**: the sidebar: the rail's labels on a wide window, the whole sidebar as a sheet otherwise.
+- **⌘\**: show or hide the section's panel only (a sheet when folded); nothing on a section with no panel. Bound in
+  the shell, on every view.
 - **⌘T** opens a new session from any view, as now.
 - Sessions' keys (⌘W, ⌘J, ⌘1–9, ⌘⇧T, ⌘⇧[ ], ⌃Tab) keep their meaning on the panel's order. The Sessions spec owns
   them.
@@ -344,6 +365,8 @@ and a title row with a switcher, like any section.
 
 - Mantine `AppShell`, its navbar and header, the burger ("Show navigation"), `HeaderSlot` and `HeaderSlotTarget`,
   and `TRAFFIC_LIGHTS_WIDTH` / `SESSIONS_STRIP_START`.
+- The rounded content surface, the pipe, the panel's own sidebar button before the title,
+  `TITLE_START_CLEAR_OF_BUTTON`, and (by the Sessions spec) the session bar.
 - The fold queries at 899 and 767 px (replaced by §2).
 - `PageHeader`'s title and actions rows (renamed `PageIntro`).
 - #645's scroll shadow and composer gradient (§1.6).
@@ -359,7 +382,8 @@ Sessions spec says, and read the same on a Claude plan, Bedrock, an API key and 
 Each step is one pull request, a vertical slice tested through the real daemon, as `.claude/rules/testing.md` asks
 for views.
 
-1. **The frame.** `AppFrame`, the rail, the title row, the panel column and overlay, widths, ⌘\, and the shadow
+1. **The frame** (then the two-column frame: sidebar tone, labelled rail, ⇧⌘S, the content column's own title).
+   `AppFrame`, the rail, the title row, the panel column and sheet, widths, ⌘\, and the shadow
    change. Every view moves onto it with no panel yet. `PageHeader` becomes `PageIntro`, and its title and actions
    go to `TitleRow`. The Workbench and the session views measure their containers. `SurfaceDrawer` is built, and the Board's task
    drawer uses it. Settings' nav becomes its panel. The
@@ -371,30 +395,32 @@ for views.
 
 ## 8. Tests
 
-- **Pure:** the width table (§2) as a function of window width and section, one row per band. The rail's order and
+- **Pure:** the width table (§2) as a function of window width, labels and section, one row per band. The rail's order and
   scope grouping as a table.
 - **Rendered (`renderWithDaemon`):**
   - The rail: names, the active item, badges and their phrases, the project tile's switcher with Project Settings.
   - The title row: a view's title and actions land there, and the drag region excludes the controls.
-  - The panel: hidden and remembered per section; the overlay opens and closes; Esc closes it.
+  - The panel: hidden and remembered per section; the sheet opens and closes; Esc closes it. The rail's labelled
+    render, and ⇧⌘S switching labels and icons.
   - The Workbench switches layout on its container's width.
   - The Inbox: j/k move the panel's selection, and answering selects the next row. Scrolling near the end loads the
     next page. The DOM holds under 100 rows with 10,000 loaded. A filter change keeps the old rows until the new
     page arrives.
 - **e2e (WebKit, real daemon):**
   - Extend `workbench.spec.ts`'s width sweep to 420, 520, 900 and 1280 with the new frame.
-  - One new `shell.spec.ts`: every rail item opens its section, ⌘\ toggles the panel, and at 600 px the button
-    opens rail and panel over the content.
+  - One new `shell.spec.ts`: every rail item opens its section, ⌘\ toggles the panel, ⇧⌘S switches the rail at
+    1280 and opens the sidebar over the content at 900 and 600 px.
   - Update the specs that select the old navbar (`loop`, `settings`, `shape`, `process-per-rigor`, `sessions`).
 - **What breaks:** `app.test.tsx` (13 tests), `settings-nav.test`, `project-switcher.test`, `narrow-sessions.test`,
   and the 5 e2e specs above. Each is edited in the PR that changes what it selects.
 
 ## 9. Docs
 
-- DESIGN.md: rewrite "Navigation" and "Page header" for the rail, panel and title row. Add "Surfaces: one rounded
-  content surface on the frame", and the shadow rule (a hairline when scrolled, nothing else).
+- DESIGN.md: rewrite "Navigation", "Page header" and "Surfaces": the sidebar bg1 and the content bg0, divided by
+  hairlines, no inset card, and the shadow rule (a hairline when scrolled; sheets and drawers only).
 - Decisions (one file each in `docs/architecture/decisions/`):
-  - "The shell is a rail, a panel and one content surface"
+  - "The shell is a rail, a panel and one content surface" (superseded by "The window is two columns, a sidebar
+    and the content")
   - "Views lay out by their container's width"
   - "A running session's row may show a spinner"
 - `apps/desktop/src/shell/AGENTS.md` (new): the frame's slots and the rules for drawing into the title row.

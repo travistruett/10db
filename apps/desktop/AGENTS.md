@@ -35,7 +35,7 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
 - The menu-bar icon is `tray-icon.svg`, the same wordmark in black with no tile. It ships as a template
   image, which macOS tints to match the menu bar. `src-tauri/tray-icon.png` is generated from it with
   `pnpm --filter @10db/desktop exec tsx scripts/render-tray-icon.ts`; never edit the PNG by hand.
-- The window has no title bar (`titleBarStyle: Overlay`): the traffic lights sit over the rail's top, on the
+- The window has no title bar (`titleBarStyle: Overlay`): the traffic lights sit on the sidebar's top row, on the
   title row's 44 px height (`trafficLightPosition`), and elements marked
   `data-tauri-drag-region` move the window. The native window's theme follows the app's color scheme
   (`setWindowTheme`), not the system's.
@@ -70,8 +70,8 @@ Read the ones for what you touch, and write a view's notes there, not here. This
 
 ### Across views
 
-- The window's frame is `src/shell/app-frame.tsx` (`src/shell/AGENTS.md`): a 52 px rail, an optional 260 px panel,
-  a 44 px title row beside the traffic lights and one rounded content surface. A view draws its title and actions
+- The window's frame is `src/shell/app-frame.tsx` (`src/shell/AGENTS.md`): a sidebar (a 200 px labelled rail, or 76 px icons only, and an
+  optional 260 px panel, all bg1) beside a content column (bg0) with its own 44 px title row. A view draws its title and actions
   into the title row with `TitleRow`, and what sits under it at the top of its content with `PageIntro` (an
   optional one-line byline cut to one line with its text as a tooltip, an optional toolbar of tabs and filters);
   workspaces keep compact headers.
