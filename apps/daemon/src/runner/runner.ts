@@ -100,6 +100,7 @@ import {
   BUILDER_HANDLE,
   getInboxItem,
   getPersona,
+  getJudgeConfig,
   getProject,
   getSessionByProviderId,
   listProjects,
@@ -310,6 +311,12 @@ import {
   sendBackTarget,
   type StepEntry,
 } from '../team';
+import {
+  fileTestValueFollowUps,
+  judgeNewTests,
+  testValueBrief,
+  type TestValueFlag,
+} from '../test-value';
 import {
   BlockedRun,
   type GateRequest,
@@ -1400,6 +1407,69 @@ export function createRunner(opts: RunnerOptions): Runner {
       );
       return 'the changes could not be read';
     }
+  }
+
+  /**
+   * What the test-value judge makes of the tests the run's commits added, other than keep. Nothing when the
+   * decision is off, the base is unknown or git can't be read: it never fails or delays a step past the
+   * judge's own timeouts.
+   */
+  async function testValueFlags(
+    row: WorkstreamRow,
+    checkout: string,
+    signal?: AbortSignal,
+  ): Promise<TestValueFlag[]> {
+    if (row.baseHead === null) return [];
+    try {
+      return await judgeNewTests(
+        {
+          git: opts.git,
+          judge: opts.judge,
+          floor: getJudgeConfig(db).decisions[JudgeDecision.TestValue].floor,
+          logger: opts.logger,
+        },
+        {
+          checkout,
+          base: row.baseHead,
+          head: await opts.git.head(checkout),
+          taskId: row.taskId,
+          ...(signal === undefined ? {} : { signal }),
+        },
+      );
+    } catch (error) {
+      opts.logger.warn(
+        { workstreamId: row.id, err: error instanceof Error ? error.message : String(error) },
+        'the test-value judge could not read the run',
+      );
+      return [];
+    }
+  }
+
+  /**
+   * The judge's flags to file as follow-up tasks after the implement step that just passed: only on a task
+   * whose plan has no Review after this step and none forced, since a Review gets them in its brief instead.
+   * Read before the write that moves the workstream on, like the safety net.
+   */
+  async function testValueFollowUpsAfter(
+    id: WorkstreamId,
+    ctl: Control,
+    row: WorkstreamRow,
+    checkout: string,
+    forced: string | null,
+  ): Promise<TestValueFlag[]> {
+    if (forced !== null) return [];
+    const now = withCurrentPlan(db, id, ctl.accountId);
+    if (
+      now.steps[now.stepIndex]?.role !== StepRole.Implement ||
+      now.steps.some((s) => s.fixedPlan === true) ||
+      reviewFollows(now.steps, now.stepIndex)
+    )
+      return [];
+    return testValueFlags(row, checkout);
+  }
+
+  function reviewFollows(steps: readonly WorkstreamStep[], at: number): boolean {
+    return steps.slice(at + 1).some((s) => s.role === StepRole.Review);
   }
 
   /**
@@ -2737,6 +2807,13 @@ export function createRunner(opts: RunnerOptions): Runner {
                 : null,
             before: feedback.id,
           });
+    // A review's first round is told what the test-value judge made of the new tests, as input to its own read.
+    const testValue =
+      step.role === StepRole.Review &&
+      action.kind === 'start' &&
+      !step.earlier.some((r) => r.verdict === Verdict.Reject)
+        ? testValueBrief(await testValueFlags(row, checkout))
+        : null;
     const prompt = buildSessionPrompt({
       provider,
       brief: opts.laneBrief ?? LaneBrief.Full,
@@ -2799,6 +2876,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       // A build step that plans first has only its plan as a result, which a fix session builds on.
       previousResult: readOnly || plansFirst ? step.result : null,
       earlierResults: step.earlier,
+      testValue,
       revisedBy: reviser
         ? {
             role: reviser.role,
@@ -4154,6 +4232,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     }
     const step = currentStep(row);
     const forced = await reviewForcedAfter(id, ctl, row, checkout);
+    const testValue = await testValueFollowUpsAfter(id, ctl, row, checkout, forced);
     if (stopRequested(ctl) === 'cancelled') {
       cancelNow(id, ctl.fence);
       return;
@@ -4163,6 +4242,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       // Planned again first: a rigor changed while the session ran decides whether a step follows.
       const current = withCurrentPlan(ctx.tx, id, ctl.accountId);
       const net = withSafetyNet(ctx.tx, ctl.accountId, current, forced);
+      if (!reviewFollows(net.steps, current.stepIndex))
+        fileTestValueFollowUps(ctx, row.taskId, testValue);
       const move = moveAfter(net.steps, current.stepIndex);
       const next = move.kind === 'advance' ? net.steps[move.to] : undefined;
       if (move.kind === 'advance' && next) {
@@ -4453,6 +4534,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       const step = currentStep(row);
       // The diff is read before the write, which then adds the review it forces.
       const forced = await reviewForcedAfter(id, ctl, row, checkout);
+      // With no Review after this step, the judge's flags on the new tests become follow-up tasks.
+      const testValue = await testValueFollowUpsAfter(id, ctl, row, checkout, forced);
       // The read took time; a cancel that landed meanwhile must not be overwritten.
       if (stopRequested(ctl) === 'cancelled') {
         cancelNow(id, ctl.fence);
@@ -4467,6 +4550,8 @@ export function createRunner(opts: RunnerOptions): Runner {
         // decides whether a Review follows or the work is done.
         const current = withCurrentPlan(ctx.tx, id, ctl.accountId);
         const net = withSafetyNet(ctx.tx, ctl.accountId, current, forced);
+        if (!reviewFollows(net.steps, current.stepIndex))
+          fileTestValueFollowUps(ctx, row.taskId, testValue);
         const steps = net.steps;
         const after = moveAfter(steps, current.stepIndex);
         const next = after.kind === 'advance' ? steps[after.to] : undefined;

@@ -25,7 +25,8 @@
               "approval_read",
               "task_rigor",
               "task_kinds",
-              "crosses_limit"
+              "crosses_limit",
+              "test_value"
             ]
           },
           "calls": {

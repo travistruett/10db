@@ -77,6 +77,11 @@ export interface PromptInput {
   readonly previousResult: StepResult | null;
   /** The results this step gave on earlier rounds (a review's rejections), oldest first. */
   readonly earlierResults: readonly StepResult[];
+  /**
+   * What the test-value judge said of the tests the work added, for a review's first round: input to the
+   * reviewer, not a finding. Absent or null when there is nothing to say.
+   */
+  readonly testValue?: string | null;
   readonly revisedBy: {
     readonly role: StepRole;
     readonly personaName: string;
@@ -944,6 +949,9 @@ function stepSection(input: PromptInput): string[] {
     lines.push('', `Your previous result${verdict}:`, input.previousResult.summary);
   }
   lines.push(...roundSection(step, input.earlierResults));
+  const firstRound = !input.earlierResults.some((r) => r.verdict === Verdict.Reject);
+  if (step.role === StepRole.Review && firstRound && input.testValue)
+    lines.push('', input.testValue);
   return lines;
 }
 

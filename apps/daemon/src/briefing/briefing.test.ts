@@ -1738,6 +1738,41 @@ describe('review rounds in a brief', () => {
     expect(prompt).not.toContain('This is round');
     expect(prompt).not.toContain('followUps');
   });
+
+  describe('the test-value judge’s answers', () => {
+    const withTests = (
+      step: Parameters<typeof buildSessionPrompt>[0]['step'],
+      earlier: StepResult[],
+      testValue?: string | null,
+    ) =>
+      buildSessionPrompt({
+        ...base,
+        step,
+        earlierResults: earlier,
+        action: { kind: 'start' },
+        ...(testValue === undefined ? {} : { testValue }),
+      });
+    const NOTE = 'A judge read the tests.\n- src/a.test.ts:4 "x": Duplicate of src/a.test.ts:1 "y"';
+
+    it('goes to a review step on its first round, as input', () => {
+      expect(withTests(reviewStep, [], NOTE)).toContain(NOTE);
+    });
+
+    it.each([
+      ['an implement step', implementStep, [], NOTE],
+      ['a qa step', { ...reviewStep, role: 'qa' as const }, [], NOTE],
+      ['a review step with none', reviewStep, [], null],
+      ['a review step with the field absent', reviewStep, [], undefined],
+      [
+        'a later round',
+        reviewStep,
+        [rejection('1. BLOCKING a.ts:1 stale cache.', '2026-10-13T10:00:00.000Z')],
+        NOTE,
+      ],
+    ])('is not in the prompt of %s', (_name, step, earlier, testValue) => {
+      expect(withTests(step, earlier, testValue)).not.toContain('A judge read the tests');
+    });
+  });
 });
 
 describe('a fix that resumes the session that wrote the code', () => {

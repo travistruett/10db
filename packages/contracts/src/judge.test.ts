@@ -41,6 +41,7 @@ describe('judge config', () => {
         task_rigor: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
         task_kinds: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
         crosses_limit: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
+        test_value: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
       },
     });
     expect(JudgeConfig.parse(DEFAULT_JUDGE_CONFIG)).toEqual(DEFAULT_JUDGE_CONFIG);
@@ -68,6 +69,7 @@ describe('judge config', () => {
     'approval_read',
     'task_rigor',
     'task_kinds',
+    'test_value',
   ] as const)('reads a config stored before %s with its default', (decision) => {
     const config = JudgeConfig.parse({
       enabled: true,

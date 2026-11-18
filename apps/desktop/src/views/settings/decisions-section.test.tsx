@@ -56,8 +56,8 @@ describe('Settings › Decisions', () => {
       open();
       await screen.findByRole('table', { name: 'Decisions' });
       const groups = screen.getAllByRole('rowheader').map((h) => h.textContent);
-      // The retired review-size decision is no longer configured, so it has no Delivery group.
-      expect(groups).toEqual(['Trust', 'Sizing', 'Plan', 'Stakeholder questions']);
+      // The retired review-size decision is no longer configured; the test-value decision is Delivery's only row.
+      expect(groups).toEqual(['Delivery', 'Trust', 'Sizing', 'Plan', 'Stakeholder questions']);
       await rowOf('How much process a task needs');
       await rowOf('What a task touches');
     });

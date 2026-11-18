@@ -654,6 +654,17 @@ export interface Git extends ChatGit {
    * that brought another branch in is listed, the commits it brought are not.
    */
   commitsSince(repo: string, base: string, tip?: string): Promise<string[]>;
+  /**
+   * The commits `commitsSince` lists, each with its parents (more than one marks a merge) and its whole
+   * message, oldest first.
+   */
+  commitMessagesSince(
+    repo: string,
+    base: string,
+    tip?: string,
+  ): Promise<
+    { readonly sha: string; readonly parents: readonly string[]; readonly message: string }[]
+  >;
   /** How many commits `tip` has that `base` lacks, every parent followed (`rev-list --count`). */
   countCommits(repo: string, base: string, tip: string): Promise<number>;
   /**
@@ -4457,6 +4468,30 @@ export function createGit(opts: GitOptions = {}): Git {
       )
         .split('\n')
         .filter(Boolean);
+    },
+    async commitMessagesSince(repo, base, tip = 'HEAD') {
+      // NUL between every field: a message is a session's to write, and it can hold any other byte.
+      const out = await git(await pinned(repo), [
+        'log',
+        '-z',
+        '--no-show-signature',
+        '--no-mailmap',
+        '--reverse',
+        '--first-parent',
+        '--format=%H%x00%P%x00%B',
+        `${base}..${tip}`,
+        '--',
+      ]);
+      const fields = out.split('\0');
+      const found: { sha: string; parents: string[]; message: string }[] = [];
+      for (let at = 0; at + 2 < fields.length; at += 3) {
+        const sha = fields[at]?.trim();
+        const parents = fields[at + 1]?.trim().split(' ').filter(Boolean);
+        const message = fields[at + 2];
+        if (sha && OBJECT_ID.test(sha) && parents && message !== undefined)
+          found.push({ sha, parents, message });
+      }
+      return found;
     },
     async remoteTrackingCommit(repo, branch) {
       const ref = `refs/remotes/origin/${branch}`;
