@@ -21,6 +21,7 @@ export {
   type ChatMoveDeps,
   type ChatWorkService,
 } from './work-service';
+export { chatRoot } from './work-root';
 export { sessionStarts } from './session-starts';
 export { patchSessionsSettings, sessionsSettings, setSessionsSettings } from './settings';
 export { startFacts, type StartGit } from './start-facts';

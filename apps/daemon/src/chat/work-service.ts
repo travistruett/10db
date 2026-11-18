@@ -31,7 +31,7 @@ import { flagCard, withdrawCard } from '../inbox';
 import type { Logger } from '../log';
 
 import { chatWorkCardKey, CHAT_WORK_CARD_DETAIL } from './work-card';
-import { takeHereForGitTool } from './work-takes-checkout';
+import { enterHere, takeHereForGitTool } from './work-takes-checkout';
 import { checkoutBranchNow } from './checkout-branch';
 
 // Where a session's work happens (the place table in the sessions plan): the question a first change asks, and the
@@ -79,6 +79,8 @@ export interface ChatWorkService {
   choose(chatId: ChatId, place: 'here' | 'branch'): Promise<ChatWork>;
   /** A push, pull request or merge the judge allowed: Here, and the turn takes the checkout. */
   takeHereForGitTool(chatId: ChatId): void;
+  /** A reading or choosing session works Here from now on, its card withdrawn; any other place is untouched. */
+  enterHere(chatId: ChatId): void;
   /** Why the last move of this session failed, in the bar's words; null once it works or before any move. */
   moveFailure(chatId: ChatId): string | null;
   /** Resolves once the session's move, if one runs, has ended; for a caller that must not act mid-move. */
@@ -384,6 +386,10 @@ export function createChatWorkService(deps: ChatWorkServiceDeps): ChatWorkServic
     moveFailure: (chatId) => failures.get(chatId) ?? null,
     moveSettled: async (chatId) => {
       await moves.get(chatId);
+    },
+
+    enterHere: (chatId) => {
+      enterHere(state, chatId);
     },
 
     takeHereForGitTool: (chatId) => {

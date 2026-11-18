@@ -8,6 +8,7 @@ import {
   AccountKind,
   ConversationOwnerKind,
   type ChatId,
+  type ConversationId,
   DoItPlace,
   EventType,
   ConflictError,
@@ -33,6 +34,7 @@ import {
 } from '@10db/contracts';
 import {
   addStockHazardCommands,
+  chatOfConversation,
   countBatchesInFlight,
   countWaitingOnCard,
   isLaneWaitingOnCard,
@@ -237,6 +239,7 @@ import {
   createChatLiveSessions,
   createChatService,
   applyChatWorkAnswer,
+  chatRoot,
   createChatWorkService,
   type ChatWorkService,
   doItHere,
@@ -1716,7 +1719,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // What the chat's session ran with, for the builder's terminal: a launch that names no secret.
   const takeoverSource = (
-    conv: { readonly model: string | null; readonly effort: Effort | null },
+    conv: {
+      readonly id: ConversationId;
+      readonly model: string | null;
+      readonly effort: Effort | null;
+    },
     project: ProjectDto,
   ): TakeoverSource => {
     const row = getAccountRow(db, project.accountId);
@@ -1725,8 +1732,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     const kind = agentKind(row.kind);
     try {
       const launch = launcher.takeover(row, run.model, listAccountModels(db, row.id));
+      const chatRow = chatOfConversation(db, conv.id);
       return {
-        cwd: project.repoPath,
+        // Where the session works: its worktree on a branch, the checkout otherwise.
+        cwd: chatRow === null ? project.repoPath : chatRoot(chatRow, project).root,
         kind,
         model: launch.model,
         effort: run.effort,
@@ -1774,6 +1783,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     engine: exploreEngine,
     folderHold,
     chats: () => chat,
+    work: () => chatWork,
     dataDir: opts.dataDir,
     now: () => clock.now(),
     log: logger.child({ component: 'takeover' }),
