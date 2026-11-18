@@ -1038,7 +1038,7 @@ describe('InboxView', () => {
 
     it('keeps a group selected while its flags are dismissed, and shows a failure on it', async () => {
       const copies = [1, 2, 3].map(() => flag('MCP server failed', 'mantine exited'));
-      const { answers } = inbox([color, ...copies]);
+      const { answers, served } = inbox([color, ...copies]);
       server.use(
         http.post(daemonUrl('/inbox/:id/answer'), ({ params }) => {
           const id = String(params['id']);
@@ -1048,6 +1048,8 @@ describe('InboxView', () => {
               { status: 500 },
             );
           answers.push({ id, body: { choice: 'dismissed' } });
+          // A dismissed flag has left the daemon's list, as in the daemon.
+          served.open = served.open.filter((c) => c.id !== id);
           return HttpResponse.json({ ...copies.find((c) => c.id === id), state: 'RESOLVED' });
         }),
       );
