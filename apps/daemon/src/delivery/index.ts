@@ -63,6 +63,7 @@ export { createWorktreeCardAnswers } from './worktree-card';
 export { createStartCardAnswers } from './start-card';
 export { createLostMigrationsAnswers } from './lost-migrations';
 export { removeMergedBranches } from './branch-sweep';
+export { createHandMadeFolderLook } from './hand-made-worktrees';
 export {
   batchLaunchVerdict,
   flagWorktreeMissing,

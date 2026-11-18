@@ -1,0 +1,45 @@
+name: pr-title
+
+# Squash merge makes a pull request's title the commit on main, so the title must be a Conventional
+# Commit. The lint lives apart from ci.yml so that a title edit starts this one job and nothing else:
+# a gate job rerun or skipped on edited would report again on the head commit, and a skipped
+# required check counts as passing, so an earlier red result would turn green. Retargeting a pull
+# request's base to main fires only edited, so ci.yml runs again on the next push
+# (decisions/2026-11-17-pr-title-lint-runs-in-its-own-workflow.md).
+on:
+  pull_request:
+    branches: [main]
+    # synchronize gives every new head the required check; edited lints a changed title.
+    types: [opened, synchronize, reopened, edited]
+  # Inert while main has no merge queue (decisions/2026-11-02-main-has-no-merge-queue.md). A queue
+  # entry has no title to lint, so the job is skipped by its `if`, which counts as passing.
+  merge_group:
+    types: [checks_requested]
+
+permissions: {}
+
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pr-title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+        with:
+          version: 2026.10.25
+          install_args: node pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: PR title is a Conventional Commit
+        # The title reaches the shell through env, never spliced into the script.
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: printf '%s\n' "$PR_TITLE" | pnpm exec commitlint

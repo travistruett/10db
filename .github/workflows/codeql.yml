@@ -1,9 +1,11 @@
 name: codeql
 
+# Not on pull requests: CodeQL is advisory, not a required check, and a run takes about nine
+# minutes. Each push to main and the weekly run cover what merges
+# (decisions/2026-11-17-pr-title-lint-runs-in-its-own-workflow.md).
 on:
   push:
     branches: [main]
-  pull_request:
   schedule:
     - cron: '17 6 * * 1'
 
