@@ -4,18 +4,19 @@ import {
   InboxOutcome,
   InboxSort,
   inboxRowSort,
+  type InboxRowSort,
   InboxState,
   SortDirection,
   type InboxPageDto,
   type InboxPageQuery,
   type InboxRowRef,
 } from '@10db/contracts';
-import { and, asc, count, desc, eq, exists, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, exists, gte, sql, type SQL } from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import * as schema from '../schema';
-import { INBOX_URGENCY_ORDER, toInboxItemDto } from './inbox';
+import { toInboxItemDto } from './inbox';
 import { openRowsPage, type InboxPlacement } from './inbox-open-rows';
-import { SENT_AT, sendIsOut } from './inbox-sql';
+import { SENT_AT, sendIsOut, textMatches } from './inbox-sql';
 import type { DbReader } from './store';
 
 const items = schema.inboxItems;
@@ -38,11 +39,18 @@ const OUTCOME = sql`CASE
   ELSE ${InboxOutcome.Answered}
 END`;
 
-function whereOf(db: DbReader, q: InboxPageQuery): SQL | undefined {
+/** The lists this module pages; Open's rows are folded by `openRowsPage`. */
+type ListedState = typeof InboxListState.Waiting | typeof InboxListState.Resolved;
+
+/** Every filter of the query, which also counts the list: nothing here depends on where the page starts. */
+function whereOf(db: DbReader, q: InboxPageQuery, state: ListedState): SQL | undefined {
   const where: (SQL | undefined)[] = [
-    eq(items.state, q.state === InboxListState.Resolved ? InboxState.Resolved : InboxState.Open),
+    eq(items.state, state === InboxListState.Resolved ? InboxState.Resolved : InboxState.Open),
   ];
-  const waiting = q.state === InboxListState.Waiting;
+  const waiting = state === InboxListState.Waiting;
+  if (q.q !== undefined) where.push(textMatches(q.q));
+  if (q.since !== undefined) where.push(gte(items.updatedAt, q.since));
+  if (q.card !== undefined) where.push(eq(items.id, q.card));
   if (waiting)
     where.push(
       exists(
@@ -76,19 +84,27 @@ function whereOf(db: DbReader, q: InboxPageQuery): SQL | undefined {
   return and(...where);
 }
 
-function orderOf(q: InboxPageQuery): SQL[] {
+/** The rows after `after` in the default order, as a row-value comparison. */
+function afterOf(state: ListedState, after: InboxRowSort): SQL {
+  switch (state) {
+    case InboxListState.Waiting:
+      return sql`(${SENT_AT} IS NULL, coalesce(${SENT_AT}, ''), ${items.id}) > (${after[0]}, ${after[1]}, ${after[2]})`;
+    case InboxListState.Resolved:
+      return sql`(${items.updatedAt}, ${items.id}) < (${after[1]}, ${after[2]})`;
+  }
+}
+
+function orderOf(q: InboxPageQuery, state: ListedState): SQL[] {
   const by = (column: SQL | SQLiteColumn, dir: SortDirection): SQL[] =>
     dir === SortDirection.Desc ? [desc(column), desc(items.id)] : [asc(column), asc(items.id)];
   const dir = q.dir ?? SortDirection.Asc;
   switch (q.sort) {
     case undefined:
-      switch (q.state) {
+      switch (state) {
         case InboxListState.Resolved:
           return by(items.updatedAt, q.dir ?? SortDirection.Desc);
         case InboxListState.Waiting:
           return [sql`${SENT_AT} IS NULL`, ...by(SENT_AT, q.dir ?? SortDirection.Asc)];
-        case InboxListState.Open:
-          return [INBOX_URGENCY_ORDER, ...by(items.createdAt, q.dir ?? SortDirection.Asc)];
       }
       break;
     case InboxSort.UpdatedAt:
@@ -108,31 +124,38 @@ function orderOf(q: InboxPageQuery): SQL[] {
 
 /**
  * One page of the inbox's cards and how many match in all, filtered, sorted and counted in the query.
- * A page past the last answers the last.
+ * A page past the last answers the last. In the default order a page can also start after a row (`after`)
+ * or hold one card (`card`), and `next` is where the page after this one starts.
  */
 export function pageInbox(
   db: DbReader,
   q: InboxPageQuery,
   placement: InboxPlacement,
 ): InboxPageDto {
-  if (q.state === InboxListState.Open) return openRowsPage(db, q, placement);
-  const where = whereOf(db, q);
+  const state = q.state;
+  if (state === InboxListState.Open) return openRowsPage(db, q, placement);
+  const where = whereOf(db, q, state);
   const total = db.select({ n: count() }).from(items).where(where).get()?.n ?? 0;
-  const page = Math.min(q.page ?? 1, Math.max(1, Math.ceil(total / q.pageSize)));
-  const found = db
+  const keyset = q.after !== undefined || q.card !== undefined;
+  const page = keyset ? 1 : Math.min(q.page ?? 1, Math.max(1, Math.ceil(total / q.pageSize)));
+  const read = db
     .select()
     .from(items)
-    .where(where)
-    .orderBy(...orderOf(q))
-    .limit(q.pageSize)
-    .offset((page - 1) * q.pageSize)
-    .all()
-    .map((row) => toInboxItemDto(db, row));
+    .where(q.after === undefined ? where : and(where, afterOf(state, q.after)))
+    .orderBy(...orderOf(q, state))
+    .limit(q.pageSize + 1)
+    .offset(keyset ? 0 : (page - 1) * q.pageSize)
+    .all();
+  const found = read.slice(0, q.pageSize).map((row) => toInboxItemDto(db, row));
   const rows = found.map((item): InboxRowRef => ({
     key: item.id,
-    sort: inboxRowSort(q.state, { ...item, sentAt: item.send?.sentAt ?? null }),
+    sort: inboxRowSort(state, { ...item, sentAt: item.send?.sentAt ?? null }),
     passId: null,
     ids: [item.id],
   }));
-  return { items: found, total, page, pageSize: q.pageSize, rows, next: null };
+  // Only the default order is one a cursor can resume.
+  const resumable = q.sort === undefined && q.dir === undefined && q.card === undefined;
+  const last = rows.at(-1);
+  const next = resumable && last !== undefined && read.length > q.pageSize ? last.sort : null;
+  return { items: found, total, page, pageSize: q.pageSize, rows, next };
 }
