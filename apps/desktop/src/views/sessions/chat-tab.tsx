@@ -10,7 +10,7 @@ import {
   type ProjectViewDto,
   type ToolCallView,
 } from '@10db/contracts';
-import { Box, Button, Group, Text } from '@mantine/core';
+import { Alert, Box, Button, Group, Text } from '@mantine/core';
 import { useClipboard, useElementSize } from '@mantine/hooks';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
@@ -55,6 +55,8 @@ import { sessionAnnouncement, type SessionEvent } from './session-announcements'
 import { JudgeLine } from '../../conversation';
 import { SessionTitle } from './session-title';
 import { WorkBar } from './work-bar';
+import { GitStepButton } from './git-step-button';
+import { sessionMeta } from './session-meta';
 import type { SessionActions } from './session-menu';
 import { TerminalBanner } from './terminal-banner';
 import { draftKey, sessionDrafts, useSessionDraft } from './session-drafts';
@@ -182,6 +184,8 @@ export function ChatTab({
   const [uncopied, setUncopied] = useState<string | null>(null);
   const [lastCommand, setLastCommand] = useState<string | null>(null);
   const [modelRefusal, setModelRefusal] = useState<string | null>(null);
+  // A git step the daemon refused or that failed, until the builder dismisses it.
+  const [gitError, setGitError] = useState<string | null>(null);
   const models = useChatModels(chat.projectId);
   const folder = useProjectFolder(chat.projectId);
   const work = useChatWork(chat.id);
@@ -397,7 +401,26 @@ export function ChatTab({
       <SessionTitle
         chat={chat}
         conversation={conversation}
-        meta={project?.name ?? null}
+        meta={sessionMeta({
+          projectName: project?.name ?? '',
+          place,
+          movingTo,
+          state: work.data,
+          terminalSince:
+            takeover.data === undefined ? null : dayjs(takeover.data.since).format('HH:mm'),
+          inTerminal,
+        })}
+        steps={
+          work.data === undefined || removed ? null : (
+            <GitStepButton
+              chatId={chat.id}
+              state={work.data}
+              title={chat.title}
+              turnRunning={working}
+              onError={setGitError}
+            />
+          )
+        }
         switcher={switcher}
         projectPath={project?.repoPath ?? null}
         actions={{
@@ -420,6 +443,22 @@ export function ChatTab({
         {...(onTerminalAsked === undefined ? {} : { onTerminalAsked })}
         onTerminalUncopied={setUncopied}
       />
+      {gitError === null ? null : (
+        <Alert
+          role="alert"
+          color="red"
+          mx="md"
+          mt="xs"
+          py={6}
+          withCloseButton
+          closeButtonLabel="Dismiss"
+          onClose={() => {
+            setGitError(null);
+          }}
+        >
+          {gitError}
+        </Alert>
+      )}
       <ConversationLayout
         label="Conversation"
         header={<JudgeLine judge={caps.judge} />}

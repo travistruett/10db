@@ -2,6 +2,7 @@ import { ConversationState, type ChatDto, type ProjectId } from '@10db/contracts
 import { useNavigate } from '@tanstack/react-router';
 import { Box, Button, Group, Modal, Paper, Text } from '@mantine/core';
 import { useEffect, useRef, useState } from 'react';
+import { ArchiveConfirm } from './archive-confirm';
 import { useOpenChats, usePatchChat, useUnarchiveChat } from '../../daemon/chat-queries';
 import { useChatWork } from '../../daemon/chat-work-queries';
 import { useInbox } from '../../daemon/queries';
@@ -366,6 +367,18 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
           </Button>
         </Group>
       </Modal>
+      <ArchiveConfirm
+        preview={closing.confirming?.preview ?? null}
+        pending={closing.archiving}
+        onCancel={closing.cancelArchive}
+        onConfirm={(preview) => {
+          if (closing.confirming === null) return;
+          closing.archiveRow(closing.confirming.row, {
+            uncommitted: preview.uncommitted,
+            ignored: preview.ignored,
+          });
+        }}
+      />
       {selected?.kind === 'fresh' ? <TitleRow title="New session" switcher={switcher} /> : null}
       {taskTab === undefined ? null : <TitleRow title={taskTab.title} />}
       {closing.notice === null ? null : (

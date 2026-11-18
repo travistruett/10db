@@ -1,4 +1,4 @@
-import type { ChatId, ProjectId } from '@10db/contracts';
+import type { ArchivePreviewDto, ArchiveRequest, ChatId, ProjectId } from '@10db/contracts';
 import { useState } from 'react';
 import { useArchiveChat, usePatchChat, useUnarchiveChat } from '../../daemon/chat-queries';
 import { closedTabs, type ClosedChat } from './closed-tabs';
@@ -32,6 +32,11 @@ export function useSessionClosing({
   const archive = useArchiveChat();
   const unarchive = useUnarchiveChat();
   const [notice, setNotice] = useState<string | null>(null);
+  // What archiving would delete, which the daemon named and the builder has yet to confirm.
+  const [confirming, setConfirming] = useState<{
+    readonly row: PanelRow & { readonly kind: 'chat' };
+    readonly preview: ArchivePreviewDto;
+  } | null>(null);
 
   /** Focus moves to the row below, or the one above when the closed row was last. */
   const moveFrom = (row: PanelRow): void => {
@@ -60,21 +65,28 @@ export function useSessionClosing({
     moveFrom(row);
   };
 
-  const archiveRow = (row: PanelRow): void => {
+  /**
+   * Archives a session. Files the worktree holds that are saved nowhere else make the daemon answer with
+   * them first; the builder confirms, and the lists sent back are the ones that were shown, so files that
+   * appeared since ask again.
+   */
+  const archiveRow = (row: PanelRow, request?: ArchiveRequest): void => {
     if (row.kind !== 'chat') return;
     setNotice(null);
     archive.mutate(
-      { chatId: row.chat.id },
+      { chatId: row.chat.id, ...(request === undefined ? {} : { request }) },
       {
         onSuccess: (answer) => {
           if (!answer.archived) {
-            setNotice('Archiving would delete files that are not saved anywhere else.');
+            setConfirming({ row, preview: answer.preview });
             return;
           }
+          setConfirming(null);
           remember(row, true);
           moveFrom(row);
         },
         onError: (error) => {
+          setConfirming(null);
           setNotice(error.message);
         },
       },
@@ -105,5 +117,17 @@ export function useSessionClosing({
     return true;
   };
 
-  return { close, archiveRow, reopen, reopenLast, notice, setNotice };
+  return {
+    close,
+    archiveRow,
+    confirming,
+    cancelArchive: () => {
+      setConfirming(null);
+    },
+    archiving: archive.isPending,
+    reopen,
+    reopenLast,
+    notice,
+    setNotice,
+  };
 }

@@ -1,14 +1,7 @@
-import {
-  ArchivePreviewDto,
-  ChatWork,
-  ChatWorkStateDto,
-  type ChatId,
-  type WorkPlace,
-} from '@10db/contracts';
+import { ChatWork, ChatWorkStateDto, type ChatId, type WorkPlace } from '@10db/contracts';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { readJson } from './client';
 import { chatKeys } from './chat-queries';
-import { chatRoutes } from './chat-routes';
 import { useDaemon } from './provider';
 
 // Where a session works and what its title row and bar read about it (sessions spec §3, §4.6). The state is
@@ -21,18 +14,20 @@ export const PULL_REQUEST_REFRESH_MS = 120_000;
 export const chatWorkKeys = {
   all: ['chat-work'],
   of: (chatId: ChatId) => ['chat-work', chatId] as const,
-  archive: (chatId: ChatId) => ['chat-work', chatId, 'archive'] as const,
 } as const;
 
 /** The session's place, git state and next step; null until read, or without a session. */
 export function useChatWork(chatId: ChatId | null) {
-  const { connection } = useDaemon();
+  const { client } = useDaemon();
   return useQuery({
     queryKey: chatId === null ? ['chat-work', 'none'] : chatWorkKeys.of(chatId),
     queryFn: async () =>
       chatId === null
         ? Promise.reject(new Error('No session'))
-        : readJson(await chatRoutes.work(connection, chatId), ChatWorkStateDto),
+        : readJson(
+            await client.chats[':chatId'].work.$get({ param: { chatId } }),
+            ChatWorkStateDto,
+          ),
     enabled: chatId !== null,
     refetchInterval: (query) => {
       const pr = query.state.data?.pullRequest;
@@ -71,22 +66,5 @@ export function useChooseWork() {
       void queryClient.invalidateQueries({ queryKey: chatWorkKeys.all });
       void queryClient.invalidateQueries({ queryKey: chatKeys.all });
     },
-  });
-}
-
-/** What Archive would delete with the session's worktree, read when the builder asks to archive. */
-export function useArchivePreview(chatId: ChatId | null, enabled: boolean) {
-  const { client } = useDaemon();
-  return useQuery({
-    queryKey: chatId === null ? ['chat-work', 'none', 'archive'] : chatWorkKeys.archive(chatId),
-    queryFn: async () =>
-      chatId === null
-        ? Promise.reject(new Error('No session'))
-        : readJson(
-            await client.chats[':chatId']['archive-preview'].$get({ param: { chatId } }),
-            ArchivePreviewDto,
-          ),
-    enabled: chatId !== null && enabled,
-    gcTime: 0,
   });
 }

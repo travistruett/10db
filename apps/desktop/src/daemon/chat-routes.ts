@@ -1,8 +1,7 @@
-import type { ChatCommitRequest, ChatId } from '@10db/contracts';
+import type { ChatId } from '@10db/contracts';
 import type { DaemonConnection } from './connection';
 
-// The chat routes the typed client does not carry yet: search, the work read, Changes and the title row's
-// git steps. Each returns the raw response, which its caller parses with the route's contract through
+// The chat routes the typed client does not carry yet: search and the title row's pull request and merge steps. Each returns the raw response, which its caller parses with the route's contract through
 // `readJson`. When `AppType` has them, a caller moves to `client.chats[...]` and this file goes.
 
 function request(
@@ -35,11 +34,6 @@ export const chatRoutes = {
       { query: { q, ...(after === null ? {} : { after }) } },
       signal,
     ),
-  work: (conn: DaemonConnection, chatId: ChatId) => request(conn, 'GET', `/chats/${chatId}/work`),
-  changes: (conn: DaemonConnection, chatId: ChatId) =>
-    request(conn, 'GET', `/chats/${chatId}/changes`),
-  commit: (conn: DaemonConnection, chatId: ChatId, body: ChatCommitRequest) =>
-    request(conn, 'POST', `/chats/${chatId}/commit`, { json: body }),
   pullRequest: (conn: DaemonConnection, chatId: ChatId) =>
     request(conn, 'POST', `/chats/${chatId}/pull-request`),
   merge: (conn: DaemonConnection, chatId: ChatId) =>

@@ -1,7 +1,12 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { chatDto, chatServer } from '../../test/chat-fixtures';
+import {
+  archivePreviewDto,
+  chatDto,
+  chatServer,
+  type ChatServerOptions,
+} from '../../test/chat-fixtures';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { projectViewDto } from '../../test/fixtures';
 import { closedTabs } from './closed-tabs';
@@ -19,11 +24,11 @@ afterEach(() => {
   closedTabs.reset();
 });
 
-function open(count = 3) {
+function open(count = 3, chatOptions: Omit<ChatServerOptions, 'chats'> = {}) {
   const chats = ['First', 'Second', 'Third']
     .slice(0, count)
     .map((title, i) => chatDto({ projectId: ampsio.id, title, tabPosition: i }));
-  const chat = chatServer({ chats });
+  const chat = chatServer({ chats, ...chatOptions });
   server.use(
     http.get(daemonUrl('/projects'), () => HttpResponse.json([ampsio])),
     ...chat.handlers,
@@ -97,5 +102,86 @@ describe('Sessions: close, archive and reopen', () => {
       expect(rowNames()).toHaveLength(3);
     });
     expect(chat.patches.at(-1)?.chatId).toBe(chats[1]?.id);
+  });
+
+  describe('Archive asks before it deletes files that are saved nowhere else', () => {
+    const lost = archivePreviewDto({
+      uncommitted: ['src/a.ts', 'src/b.ts'],
+      ignored: ['.env.local'],
+    });
+    const archiveFromMenu = async () => {
+      await screen.findAllByRole('option');
+      fireEvent.click(await screen.findByRole('button', { name: 'More session actions' }));
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Archive' }));
+    };
+
+    it('archives at once when nothing would be lost', async () => {
+      const { chat, chats } = open();
+      await archiveFromMenu();
+      await waitFor(() => {
+        expect(chat.archived).toEqual([chats[1]?.id]);
+      });
+      expect(chat.archiveBodies).toEqual([null]);
+      expect(screen.queryByRole('dialog', { name: 'Archive this session?' })).toBeNull();
+    });
+
+    it('names the files, keeps the session until confirmed, and sends the lists it showed', async () => {
+      const { chat, chats } = open(3, { archiveAsks: [lost] });
+      await archiveFromMenu();
+      const dialog = await screen.findByRole('dialog', { name: 'Archive this session?' });
+      for (const path of [...lost.uncommitted, ...lost.ignored])
+        expect(within(dialog).getByText(path)).toBeTruthy();
+      expect(dialog.textContent).toContain('Your commits stay on the branch.');
+      expect(chat.archived).toEqual([]);
+      expect(rowNames()).toHaveLength(3);
+      fireEvent.click(
+        within(dialog).getByRole('button', { name: 'Archive and Delete These Files' }),
+      );
+      await waitFor(() => {
+        expect(chat.archived).toEqual([chats[1]?.id]);
+      });
+      expect(chat.archiveBodies.at(-1)).toEqual({
+        uncommitted: lost.uncommitted,
+        ignored: lost.ignored,
+      });
+      await waitFor(() => {
+        expect(rowNames()).toEqual(['First, ampsio', 'Third, ampsio']);
+      });
+    });
+
+    it('Cancel archives nothing', async () => {
+      const { chat } = open(3, { archiveAsks: [lost] });
+      await archiveFromMenu();
+      const dialog = await screen.findByRole('dialog', { name: 'Archive this session?' });
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog', { name: 'Archive this session?' })).toBeNull();
+      });
+      expect(chat.archived).toEqual([]);
+      expect(rowNames()).toHaveLength(3);
+    });
+
+    it('asks again with the new lists when files appeared after the first answer', async () => {
+      const later = archivePreviewDto({ uncommitted: ['src/a.ts', 'src/c.ts'], ignored: [] });
+      const { chat } = open(3, { archiveAsks: [lost, later] });
+      await archiveFromMenu();
+      let dialog = await screen.findByRole('dialog', { name: 'Archive this session?' });
+      fireEvent.click(
+        within(dialog).getByRole('button', { name: 'Archive and Delete These Files' }),
+      );
+      await waitFor(() => {
+        expect(screen.getByText('src/c.ts')).toBeTruthy();
+      });
+      expect(chat.archived).toEqual([]);
+      dialog = screen.getByRole('dialog', { name: 'Archive this session?' });
+      expect(within(dialog).queryByText('.env.local')).toBeNull();
+      fireEvent.click(
+        within(dialog).getByRole('button', { name: 'Archive and Delete These Files' }),
+      );
+      await waitFor(() => {
+        expect(chat.archived).toHaveLength(1);
+      });
+      expect(chat.archiveBodies.at(-1)).toEqual({ uncommitted: later.uncommitted, ignored: [] });
+    });
   });
 });

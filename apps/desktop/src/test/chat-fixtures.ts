@@ -1,9 +1,13 @@
 import {
+  ArchivePreviewDto,
   ChatDto,
   ChatModelsDto,
   type ChatWork,
   type ChatWorkStateDto,
+  ArchiveRequest,
+  ChatCommitRequest,
   ChatPatchInput,
+  WorkstreamChangesDto,
   ConversationItemDto,
   mintId,
   ProjectId,
@@ -70,6 +74,32 @@ export function chatModelsDto(overrides: Partial<ChatModelsDto> = {}): ChatModel
   });
 }
 
+/** What a session changed: one file with a short diff, unless told otherwise. */
+export function chatChangesDto(
+  overrides: Partial<WorkstreamChangesDto> = {},
+): WorkstreamChangesDto {
+  return WorkstreamChangesDto.parse({
+    baseHead: 'a'.repeat(40),
+    head: 'b'.repeat(40),
+    commits: [],
+    diff: '',
+    truncated: false,
+    files: [],
+    ...overrides,
+  });
+}
+
+/** What Archive would delete with a worktree. */
+export function archivePreviewDto(overrides: Partial<ArchivePreviewDto> = {}): ArchivePreviewDto {
+  return ArchivePreviewDto.parse({
+    worktree: '/work/chat-add-the-qa-notes',
+    branch: 'chat-add-the-qa-notes',
+    uncommitted: [],
+    ignored: [],
+    ...overrides,
+  });
+}
+
 export interface ChatServerOptions {
   /** The open tabs. */
   readonly chats?: readonly ChatDto[];
@@ -94,6 +124,15 @@ export interface ChatServerOptions {
   readonly settled?: ChatWork;
   /** What the panel's search can find; the open chats by default. */
   readonly searchable?: readonly ChatDto[];
+  /** What `GET /chats/:id/changes` answers; no changed files by default. */
+  readonly changes?: WorkstreamChangesDto;
+  /**
+   * The nth archive the server takes answers 409 with the nth of these unless it carries that one's lists;
+   * past the last, an archive goes through.
+   */
+  readonly archiveAsks?: readonly ArchivePreviewDto[];
+  /** `POST /chats/:id/commit` answers 409 with these words instead of committing. */
+  readonly commitRefusal?: string;
 }
 
 export interface ChatServer {
@@ -113,6 +152,13 @@ export interface ChatServer {
   readonly searches: string[];
   /** Each choice the bar sent. */
   readonly chosen: { readonly chatId: string; readonly place: string }[];
+  /** Each commit the title row's Commit sent. */
+  readonly commits: { readonly chatId: string; readonly body: ChatCommitRequest }[];
+  /** The chats a pull request was opened for, and the ones that were merged. */
+  readonly pullRequests: string[];
+  readonly merges: string[];
+  /** The body each archive carried; `null` for none. */
+  readonly archiveBodies: unknown[];
 }
 
 /** The routes of Sessions, over chats held in memory. */
@@ -130,6 +176,10 @@ export function chatServer(opts: ChatServerOptions = {}): ChatServer {
     chats,
     searches: [],
     chosen: [],
+    commits: [],
+    pullRequests: [],
+    merges: [],
+    archiveBodies: [],
   };
   const byId = (id: string): ChatDto | undefined => chats.find((c) => c.id === id);
   const byConversation = (id: string): ChatDto | undefined =>
@@ -211,9 +261,47 @@ export function chatServer(opts: ChatServerOptions = {}): ChatServer {
       chats.splice(chats.indexOf(chat), 1, changed);
       return HttpResponse.json(changed);
     }),
-    http.post(daemonUrl('/chats/:chatId/archive'), ({ params }) => {
+    http.get(daemonUrl('/chats/:chatId/changes'), () =>
+      HttpResponse.json(opts.changes ?? chatChangesDto()),
+    ),
+    http.post(daemonUrl('/chats/:chatId/commit'), async ({ params, request }) => {
+      if (opts.commitRefusal !== undefined)
+        return HttpResponse.json(
+          { error: 'refused', message: opts.commitRefusal },
+          { status: 409 },
+        );
+      server.commits.push({
+        chatId: String(params['chatId']),
+        body: ChatCommitRequest.parse(await request.json()),
+      });
+      return HttpResponse.json({ committed: true });
+    }),
+    http.post(daemonUrl('/chats/:chatId/pull-request'), ({ params }) => {
+      server.pullRequests.push(String(params['chatId']));
+      return HttpResponse.json({ opened: true });
+    }),
+    http.post(daemonUrl('/chats/:chatId/merge'), ({ params }) => {
+      server.merges.push(String(params['chatId']));
+      return HttpResponse.json({ merged: true });
+    }),
+    http.get(daemonUrl('/chats/:chatId/archive-preview'), () =>
+      HttpResponse.json(archivePreviewDto()),
+    ),
+    http.post(daemonUrl('/chats/:chatId/archive'), async ({ params, request }) => {
       const chat = byId(String(params['chatId']));
       if (chat === undefined) return HttpResponse.json({ error: 'gone' }, { status: 404 });
+      const text = await request.text();
+      const body: unknown = text === '' ? null : JSON.parse(text);
+      server.archiveBodies.push(body);
+      const ask = opts.archiveAsks?.[server.archiveBodies.length - 1];
+      if (ask !== undefined) {
+        const sent = ArchiveRequest.safeParse(body);
+        const confirmed =
+          sent.success &&
+          JSON.stringify(sent.data.uncommitted ?? []) === JSON.stringify(ask.uncommitted) &&
+          JSON.stringify(sent.data.ignored ?? []) === JSON.stringify(ask.ignored);
+        if (!confirmed) return HttpResponse.json(ask, { status: 409 });
+      }
       server.archived.push(chat.id);
       const changed = chatDto({ ...chat, tabPosition: null, archivedAt: AT });
       chats.splice(chats.indexOf(chat), 1, changed);

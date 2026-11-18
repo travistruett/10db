@@ -1,5 +1,6 @@
 import type { ChatDto, ConversationItemDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import dayjs from 'dayjs';
 import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { chatDto, chatServer } from '../../test/chat-fixtures';
@@ -86,6 +87,12 @@ describe('Open in Terminal', () => {
       );
     },
   );
+
+  it('a chat already in the terminal says since when in the title row’s meta line', async () => {
+    openChat({ conversation: { state: 'taken_over' } });
+    const since = dayjs('2026-11-16T12:04:00.000Z').format('HH:mm');
+    expect(await screen.findByText(`in your terminal since ${since}`)).toBeTruthy();
+  });
 
   it('a refusal disables the button and says why', async () => {
     openChat({}, { preview: { refusal: 'Stop first', notes: [] } });
