@@ -30,7 +30,17 @@
 //                                                    print the plan as JSON and run nothing; the
 //                                                    files replace the git diff
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { globSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  globSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+  writeSync,
+} from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
@@ -326,21 +336,38 @@ function readableFiles(files) {
  */
 
 /**
- * Runs a step with its output held, so steps that run together print one after another.
+ * Runs a step. Steps that run together hold their output, so they print one after another. A step
+ * that runs alone is live: its output goes to stdout and its log as it comes, so a step that hangs
+ * or is killed by a timeout still shows how far it got.
  * @param {Step} s
+ * @param {boolean} live
  * @returns {Promise<StepResult>}
  */
-function run(s) {
+function run(s, live) {
   const began = Date.now();
+  if (live) printHeader(s);
+  const log = live ? openSync(logPath(s.name), 'w') : null;
   return new Promise((done) => {
     const child = spawn(s.command, s.args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '';
-    child.stdout.on('data', (chunk) => (output += String(chunk)));
-    child.stderr.on('data', (chunk) => (output += String(chunk)));
-    const finish = (/** @type {boolean} */ ok) =>
+    const take = (/** @type {Buffer | string} */ chunk) => {
+      const text = String(chunk);
+      output += text;
+      if (log === null) return;
+      process.stdout.write(text);
+      writeSync(log, text);
+    };
+    child.stdout.on('data', take);
+    child.stderr.on('data', take);
+    let finished = false;
+    const finish = (/** @type {boolean} */ ok) => {
+      if (finished) return;
+      finished = true;
+      if (log !== null) closeSync(log);
       done({ name: s.name, ok, seconds: Math.round((Date.now() - began) / 1000), output });
+    };
     child.on('error', (error) => {
-      output += String(error);
+      take(String(error));
       finish(false);
     });
     child.on('close', (code) => {
@@ -365,24 +392,44 @@ function logName(name) {
   return name.replace(/[^\w.-]+/g, '-');
 }
 
-/** @param {StepResult} r @param {Step} s */
-function report(r, s) {
-  writeFileSync(join(root, LOG_DIR, `${logName(r.name)}.log`), r.output);
-  console.log(`\n▶ ${r.name}: ${[s.command, ...s.args].join(' ')}`);
-  process.stdout.write(r.output === '' || r.output.endsWith('\n') ? r.output : `${r.output}\n`);
+/** @param {string} name */
+function logPath(name) {
+  return join(root, LOG_DIR, `${logName(name)}.log`);
+}
+
+/** @param {Step} s */
+function printHeader(s) {
+  console.log(`\n▶ ${s.name}: ${[s.command, ...s.args].join(' ')}`);
+}
+
+/**
+ * Prints a step's result. A held step's output and log are written here; a live step wrote both as
+ * it ran, and prints a line break first if its output did not end with one.
+ * @param {StepResult} r @param {Step} s @param {boolean} live
+ */
+function report(r, s, live) {
+  if (live) {
+    if (r.output !== '' && !r.output.endsWith('\n')) process.stdout.write('\n');
+  } else {
+    writeFileSync(logPath(r.name), r.output);
+    printHeader(s);
+    process.stdout.write(r.output === '' || r.output.endsWith('\n') ? r.output : `${r.output}\n`);
+  }
   console.log(`${r.ok ? '✔' : '✘'} ${r.name} (${String(r.seconds)}s)`);
 }
 
 /**
- * Runs the steps together and reports each in order; returns those that failed.
+ * Runs the steps together and reports each in order; returns those that failed. One step alone
+ * runs live; several hold their output, so theirs do not interleave.
  * @param {Step[]} steps
  * @returns {Promise<Step[]>}
  */
 async function runTogether(steps) {
-  const results = await Promise.all(steps.map(run));
+  const live = steps.length === 1;
+  const results = await Promise.all(steps.map((s) => run(s, live)));
   steps.forEach((s, i) => {
     const r = results[i];
-    if (r) report(r, s);
+    if (r) report(r, s, live);
   });
   return steps.filter((_, i) => results[i]?.ok === false);
 }
@@ -393,6 +440,12 @@ function knipStep() {
 }
 
 /**
+ * Vitest's default reporter, plus a line as each test file starts, so a test step that hangs names
+ * the file it was running. The path is from the repository root, where every step runs.
+ */
+const VITEST_REPORTERS = ['--reporter=default', '--reporter=./scripts/vitest-progress.mjs'];
+
+/**
  * @param {string[]} tests repo-relative test files in tests/repo
  * @returns {Step}
  */
@@ -400,7 +453,7 @@ function repoDocTestsStep(tests) {
   return {
     name: 'repo rules',
     command: 'pnpm',
-    args: ['exec', 'vitest', 'run', ...tests],
+    args: ['exec', 'vitest', 'run', ...VITEST_REPORTERS, ...tests],
   };
 }
 
@@ -418,14 +471,15 @@ async function runPrecheckEverywhere(reason) {
     command: 'pnpm',
     args: ['run', name === 'format' ? 'format:check' : name],
   });
-  // Drift regenerates files in the tree, so it runs after the reads of the tree.
+  // The docs rule tests run alone, so their output streams to the log as they run. Drift
+  // regenerates files in the tree, so it runs after the reads of the tree.
   const failed = await runTogether([
     pnpmRun('format'),
     pnpmRun('lint'),
     pnpmRun('typecheck'),
     knipStep(),
-    repoDocTestsStep(ALL_REPO_DOC_TESTS),
   ]);
+  failed.push(...(await runTogether([repoDocTestsStep(ALL_REPO_DOC_TESTS)])));
   failed.push(...(await runTogether([pnpmRun('drift')])));
   finish(failed, began);
 }
@@ -541,14 +595,14 @@ async function main() {
       args: ['--parallel', ...plan.typecheck.flatMap((n) => ['--filter', n]), 'run', 'typecheck'],
     });
   if (plan.knip) together.push(knipStep());
-  if (plan.repoTests?.length) together.push(repoDocTestsStep(plan.repoTests));
-  // Format, lint, typecheck, knip and the docs rule tests are independent reads of the tree, so
-  // they share the machine.
+  // Format, lint, typecheck and knip are independent reads of the tree, so they share the machine.
   const failed = await runTogether(together);
-  // The tests run alone: the UI's wait timeouts are tuned for a machine doing nothing else, and
-  // lint beside them made them flake. Drift regenerates files in the tree, and the Rust checks build.
+  // The tests run alone, so their output streams to the log as they run; and the UI's wait timeouts
+  // are tuned for a machine doing nothing else, and lint beside them made them flake. Drift
+  // regenerates files in the tree, and the Rust checks build.
   /** @type {Step[]} */
   const alone = [
+    ...(plan.repoTests?.length ? [repoDocTestsStep(plan.repoTests)] : []),
     ...(precheck
       ? []
       : [
@@ -559,6 +613,7 @@ async function main() {
               'exec',
               'vitest',
               'run',
+              ...VITEST_REPORTERS,
               '--passWithNoTests',
               ...plan.affected.map((d) => `${d}/`),
             ],
