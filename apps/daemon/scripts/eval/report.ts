@@ -68,14 +68,22 @@ const dash = (v: number | null, text: (n: number) => string = String): string =>
 const dollars = (n: number) => `$${n.toFixed(2)}`;
 const seconds = (n: number) => `${String(Math.round(n))} s`;
 
-function row(label: string, runs: readonly CaseRun[]): string {
+/** A case's row lists each run's value in run order; the total counts them instead. */
+const listed = (values: readonly string[]): string => values.join(', ');
+const counted = (values: readonly string[]): string =>
+  [...new Set(values)]
+    .sort()
+    .map((v) => `${String(values.filter((x) => x === v).length)} ${v}`)
+    .join(', ');
+
+function row(label: string, runs: readonly CaseRun[], show = listed): string {
   const met = runs.filter((r) => r.outcome === Outcome.Met).length;
   const cells = [
     label,
     `${String(met)}/${String(runs.length)} met`,
-    runs.map((r) => r.outcome).join(', '),
-    runs.map((r) => r.gate).join(', '),
-    runs.map((r) => r.reviewVerdict ?? '—').join(', '),
+    show(runs.map((r) => r.outcome)),
+    show(runs.map((r) => r.gate)),
+    show(runs.map((r) => r.reviewVerdict ?? '—')),
     dash(sum(runs, (r) => r.reviewRounds)),
     dash(sum(runs, (r) => r.sessions)),
     dash(sum(runs, (r) => r.handoffs)),
@@ -123,7 +131,7 @@ export function renderReport(report: EvalReport, baseline: EvalReport | null): s
     '| Case | Criteria | Outcomes | Gate | Review | Rounds | Sessions | Hand-offs | Spawns | Tokens | Cost | Wall |',
     '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |',
     ...report.cases.map((c) => row(c.id, c.runs)),
-    row('**Total**', allRuns),
+    row('**Total**', allRuns, counted),
     '',
     '## Flips between runs',
     '',
