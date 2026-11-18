@@ -87,7 +87,8 @@ A local macOS control plane that runs Claude Code sessions as a software factory
   run `make check-changed` before a push: it diffs against `origin/main`, so on that branch it widens to every
   package's whole suite (18-49 minutes on the Mac against 7-13 in CI's shards) and finds nothing CI would not.
   While working it runs the tests that relate to its change, typecheck and lint; before a push it runs
-  `make precheck` (format, lint, typecheck and drift, no tests); then it pushes a draft PR and relies on CI for
+  `make precheck` (format, lint, typecheck, drift, and tests/repo when the change touches a file they read; no
+  other tests); then it pushes a draft PR and relies on CI for
   the suite.
 
 ## Git

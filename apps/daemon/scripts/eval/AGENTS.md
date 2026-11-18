@@ -101,7 +101,7 @@ approved where the rigor has one, and all four lane rules held (`grade.ts`):
 - deps: a manifest or lockfile change comes with an `install_dependencies` op.
 
 The gate is the pre-check, so "met" proves what a production lane proves before CI: format, lint,
-typecheck, drift, knip and the docs rule tests pass. It does not show the tests pass; an eval has
+typecheck, drift, knip and, for a change to a file they read, tests/repo pass. It does not show the tests pass; an eval has
 no CI (dec_01a1eef8).
 
 Otherwise the outcome is `not_met`, `failed` (not DONE) or `timed_out`. There is no model-graded
