@@ -123,6 +123,10 @@ export function RenderLayout() {
             style={{
               width: PANEL_WIDTH,
               flexShrink: 0,
+              // The panel is as tall as the picture's window and its list scrolls inside it, as in the app; stretched
+              // to its content, a windowed list would mount every row it loads and load them all.
+              height: '100vh',
+              alignSelf: 'flex-start',
               display: 'flex',
               flexDirection: 'column',
               borderRight: '1px solid var(--mantine-color-default-border)',
