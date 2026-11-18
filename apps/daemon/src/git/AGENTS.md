@@ -59,3 +59,7 @@
   worktree's pin is made at creation, copies the main pin's URLs and is keyed by batch (`checkout_pin.<batch id>`);
   `createGit({ worktreeRoot })` refuses a path at or under the root with no pin as `GitTrustFailure.Unpinned`, and
   `projectAt` resolves a worktree path to its project so refusals raise the project's cards.
+- `handMadeWorktreeChanges`, `handMadeWorktreeIgnoredFiles` and `removeHandMadeWorktree` run the 10db-worktree checks of
+  `lockedWorktree` and `removeWorktree` through a `WorktreeScope`: the folder `handMadeWorktreeFolder(repo)` for 10db's
+  root, an unlocked entry for a 10db lock, and a single `--force`. A scope is chosen inside `git.ts` and never passed
+  in, so no caller can widen what the 10db calls touch.

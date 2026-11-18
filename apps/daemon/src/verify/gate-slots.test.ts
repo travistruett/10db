@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { silentLogger } from '../log';
-import { createGateSlots, GateSlotLimitError, limitGates } from './gate-slots';
+import { createGateSlots, GatePriority, GateSlotLimitError, limitGates } from './gate-slots';
 import {
   createGateRunner,
   type GateRequest,
@@ -299,6 +299,82 @@ describe('gate slots', () => {
     expect(started.map((r) => r.command)).toEqual(['verify', 'ship']);
     finish[1]?.(result());
     await ship;
+  });
+
+  describe('a gate that is only advice', () => {
+    /** Two views of one slot pool, as the daemon makes them: ship gates and the turn check's. */
+    function sharedSlot(runner: GateRunner) {
+      const slots = createGateSlots(1);
+      const options = { slots, clock: new ManualClock(), logger: silentLogger };
+      return {
+        slots,
+        ship: limitGates(runner, options),
+        advice: limitGates(runner, { ...options, priority: GatePriority.Advice }),
+      };
+    }
+
+    it('lets a ship gate that asked later take the freed slot first, and still runs the check after', async () => {
+      const { runner, started, finish } = controlledRunner();
+      const { ship, advice } = sharedSlot(runner);
+      const running = ship.run(request({ command: 'running' }));
+      const check = advice.run(request({ command: 'turn check' }));
+      const shipping = ship.run(request({ command: 'ship gate' }));
+      await settle();
+      expect(started.map((r) => r.command)).toEqual(['running']);
+      finish[0]?.(result());
+      await running;
+      await settle();
+      expect(started.map((r) => r.command)).toEqual(['running', 'ship gate']);
+      finish[1]?.(result());
+      await shipping;
+      await settle();
+      expect(started.map((r) => r.command)).toEqual(['running', 'ship gate', 'turn check']);
+      finish[2]?.(result({ exitCode: 3 }));
+      expect((await check).exitCode).toBe(3);
+    });
+
+    it('keeps the order within each kind, and serves checks in the order they asked', async () => {
+      const { runner, started, finish } = controlledRunner();
+      const { ship, advice } = sharedSlot(runner);
+      const runs = [
+        ship.run(request({ command: 'running' })),
+        advice.run(request({ command: 'check 1' })),
+        ship.run(request({ command: 'ship 1' })),
+        advice.run(request({ command: 'check 2' })),
+        ship.run(request({ command: 'ship 2' })),
+      ];
+      for (let i = 0; i < 5; i++) {
+        await settle();
+        finish[i]?.(result());
+      }
+      await Promise.all(runs);
+      expect(started.map((r) => r.command)).toEqual([
+        'running',
+        'ship 1',
+        'ship 2',
+        'check 1',
+        'check 2',
+      ]);
+    });
+
+    it('counts a check as ahead of a gate that arrives while it waits, but never the other way', async () => {
+      const { runner, finish } = controlledRunner();
+      const { ship, advice } = sharedSlot(runner);
+      const calls: [string, number][] = [];
+      const ask = (gate: GateRunner, command: string) =>
+        gate.run(request({ command, onWaiting: (ahead) => calls.push([command, ahead]) }));
+      const runs = [ask(ship, 'running'), ask(advice, 'check'), ask(ship, 'ship')];
+      await settle();
+      expect(calls).toEqual([
+        ['check', 1],
+        ['ship', 1],
+      ]);
+      for (let i = 0; i < 3; i++) {
+        await settle();
+        finish[i]?.(result());
+      }
+      await Promise.all(runs);
+    });
   });
 
   it('answers every waiter and later caller with an abort once closed', async () => {
