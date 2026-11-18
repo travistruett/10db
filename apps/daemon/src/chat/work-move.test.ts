@@ -92,7 +92,7 @@ describe('a session on its own branch', () => {
       asked('Read', { file_path: join(worktree, 'a.ts') });
       asked('Grep', { pattern: 'x', path: worktree });
       asked('Read', { file_path: join(repo.path, 'checkout', 'a.ts') });
-      return Promise.resolve();
+      return Promise.resolve({ text: 'Done.' });
     };
     w.chat.send(chat.conversationId, { text: 'one', mentions: [], pictures: [] });
     await waitFor(() => verdicts.length === 3);
