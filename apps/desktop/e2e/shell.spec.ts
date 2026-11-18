@@ -41,14 +41,15 @@ test('⌘\\ folds and shows the Settings panel at 1280, and the choice survives 
   await expect(panelOf(page)).toHaveAttribute('data-panel', 'column');
 });
 
-test('at 600 px the button opens the panel over the content and Esc closes it; at 480 px it opens the rail too', async ({
+test('at 600 px ⌘\\ opens the panel beside the icons rail and Esc closes it; at 480 px the toggle opens the rail too', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 600, height: 800 });
   await page.goto('/settings/overview');
   const nav = page.getByRole('navigation', { name: 'Settings sections' });
+  await expect(panelOf(page)).toHaveAttribute('data-panel', 'hidden');
   await expect(nav).toBeHidden();
-  await page.getByRole('button', { name: 'Show the panel' }).click();
+  await page.keyboard.press('Meta+Backslash');
   await expect(nav).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(nav).toBeHidden();
@@ -56,21 +57,44 @@ test('at 600 px the button opens the panel over the content and Esc closes it; a
   await page.setViewportSize({ width: 480, height: 800 });
   const rail = page.getByRole('navigation', { name: 'Sections', exact: true });
   await expect(rail).toBeHidden();
-  await page.getByRole('button', { name: 'Show the panel' }).click();
+  await page.getByRole('button', { name: 'Toggle sidebar' }).click();
   await expect(rail).toBeVisible();
   await expect(nav).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(rail).toBeHidden();
 });
 
-test('at 800 px the open panel sheet sits flush against the rail, below the title row', async ({
+test('⇧⌘S switches the rail between labelled and icons only at 1280, and opens it over the content at 900', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/board');
+  const rail = page.getByRole('navigation', { name: 'Sections', exact: true });
+  const board = rail.getByRole('link', { name: 'Board' });
+  expect((await board.boundingBox())?.width).toBeGreaterThan(150);
+  await page.keyboard.press('Meta+Shift+S');
+  await expect.poll(async () => (await board.boundingBox())?.width).toBeLessThan(60);
+  await page.keyboard.press('Meta+Shift+S');
+  await expect.poll(async () => (await board.boundingBox())?.width).toBeGreaterThan(150);
+
+  await page.setViewportSize({ width: 900, height: 800 });
+  await expect.poll(async () => (await board.boundingBox())?.width).toBeLessThan(60);
+  await page.keyboard.press('Meta+Shift+S');
+  await expect.poll(async () => (await board.boundingBox())?.width).toBeGreaterThan(150);
+  await page.keyboard.press('Escape');
+  await expect.poll(async () => (await board.boundingBox())?.width).toBeLessThan(60);
+});
+
+test('at 800 px the open panel sheet sits flush against the icons rail, from the window top', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 800, height: 800 });
   await page.goto('/settings/overview');
-  await page.getByRole('button', { name: 'Show the panel' }).click();
+  await expect(panelOf(page)).toHaveAttribute('data-panel', 'hidden');
+  await page.keyboard.press('Meta+Backslash');
+  await expect(panelOf(page)).toHaveAttribute('data-panel', 'sheet');
   const box = await panelOf(page).boundingBox();
   expect(box).not.toBeNull();
-  expect(box?.x).toBeCloseTo(52, 0);
-  expect(box?.y).toBeCloseTo(44, 0);
+  expect(box?.x).toBeCloseTo(77, 0);
+  expect(box?.y).toBeCloseTo(0, 0);
 });
