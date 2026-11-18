@@ -285,6 +285,9 @@ export function chatServer(opts: ChatServerOptions = {}): ChatServer {
       return HttpResponse.json(chatWorkStateDto());
     }),
     http.post(daemonUrl('/chats/:chatId/archive'), async ({ params, request }) => {
+      // The daemon refuses a call with no token: a request that sets its own headers drops the client's.
+      if (request.headers.get('authorization') !== 'Bearer test-token')
+        return HttpResponse.json({ error: 'unauthorized' }, { status: 401 });
       const chat = byId(String(params['chatId']));
       if (chat === undefined) return HttpResponse.json({ error: 'gone' }, { status: 404 });
       const text = await request.text();

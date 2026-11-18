@@ -198,12 +198,9 @@ export function useArchiveChat() {
         { param: { chatId } },
         request === undefined
           ? undefined
-          : {
-              init: {
-                body: JSON.stringify(request),
-                headers: { 'content-type': 'application/json' },
-              },
-            },
+          : // `init.headers` would replace the client's, token included, so only the body is set; the
+            // daemon reads the archive's body as text.
+            { init: { body: JSON.stringify(request) } },
       );
       if (res.status === 409) {
         // A 409 is an answer, not a failure: the files archiving would delete, for the builder to see first.
