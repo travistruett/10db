@@ -88,13 +88,34 @@ describe('shipping', () => {
     ]);
   });
 
-  it('logs the cut, each gate run, the push, the pull request and the ship result, in order', async () => {
+  it('pushes the branch, opens one PR titled with the prefix and records its URL, logging the cut, each gate run, the push, the pull request and the ship result, in order', async () => {
     h = createDeliveryHarness();
     const base = h.git$('rev-parse', 'HEAD');
     const { batch } = await openBatch('Add greetings', 'Alpha', 'Beta');
     h.commit('src/api/alpha.txt');
     h.commit('src/ui/beta.txt');
     const shipped = await finishAll(batch);
+    expect(shipped).toMatchObject({
+      state: 'SHIPPED',
+      prUrl: 'https://github.com/acme/widgets/pull/1',
+      gateExitCode: 0,
+      failure: null,
+    });
+    const tip = h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`);
+    expect(onOrigin(h, batch.branch)).toBe(tip);
+    expect(h.git$('rev-parse', '--abbrev-ref', `${batch.branch ?? ''}@{u}`)).toBe(
+      `origin/${batch.branch ?? ''}`,
+    );
+    expect(h.gh.prCreates()).toEqual([
+      { repo: 'acme/widgets', base: 'main', head: batch.branch, title: 'feat(app): add greetings' },
+    ]);
+    const body = h.gh.body(shipped.prUrl ?? '');
+    expect(body).toContain('### Alpha');
+    expect(body).toContain('### Beta');
+    expect(body).toContain(`Shipped by 10db, batch ${batch.id}`);
+    // With no pre-check set, the gate is what ran.
+    expect(body).toContain('Checked on the Mac: true (gate).');
+    expect(getBatchRow(h.store.db, batch.id)).toMatchObject({ gatePid: null, gatePidStart: null });
     const lines = batchLines(batch.id);
     expect(lines.map((line) => line['msg'])).toEqual([
       'batch branch cut',
@@ -119,6 +140,7 @@ describe('shipping', () => {
     expect(typeof finished?.['durationMs']).toBe('number');
     expect(push).toMatchObject({ branch: batch.branch });
     expect(typeof push?.['durationMs']).toBe('number');
+    expect(String(push?.['output'])).toContain('[new branch]');
     expect(pr).toMatchObject({
       repo: 'acme/widgets',
       baseBranch: 'main',
@@ -126,16 +148,6 @@ describe('shipping', () => {
       prUrl: 'https://github.com/acme/widgets/pull/1',
     });
     expect(done).toMatchObject({ prUrl: shipped.prUrl });
-  });
-
-  it("logs the push's output with its duration", async () => {
-    h = createDeliveryHarness();
-    const { batch } = await openBatch('Greetings', 'Alpha');
-    h.commit('src/api/alpha.txt');
-    await finishAll(batch);
-    const push = batchLines(batch.id).find((line) => line['msg'] === 'git push finished');
-    expect(typeof push?.['durationMs']).toBe('number');
-    expect(String(push?.['output'])).toContain('[new branch]');
   });
 
   it('logs a failed push with its duration, kind and output, then the batch as not shipped', async () => {
@@ -160,33 +172,6 @@ describe('shipping', () => {
     expect(notShipped).toMatchObject({ failure: 'push_rejected' });
   });
 
-  it('pushes the branch, opens one PR titled with the prefix and records its URL', async () => {
-    h = createDeliveryHarness();
-    const { batch } = await openBatch('Add greetings', 'Alpha', 'Beta');
-    h.commit('src/api/alpha.txt');
-    h.commit('src/ui/beta.txt');
-    const shipped = await finishAll(batch);
-    expect(shipped).toMatchObject({
-      state: 'SHIPPED',
-      prUrl: 'https://github.com/acme/widgets/pull/1',
-      gateExitCode: 0,
-      failure: null,
-    });
-    const tip = h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`);
-    expect(onOrigin(h, batch.branch)).toBe(tip);
-    expect(h.git$('rev-parse', '--abbrev-ref', `${batch.branch ?? ''}@{u}`)).toBe(
-      `origin/${batch.branch ?? ''}`,
-    );
-    expect(h.gh.prCreates()).toEqual([
-      { repo: 'acme/widgets', base: 'main', head: batch.branch, title: 'feat(app): add greetings' },
-    ]);
-    const body = h.gh.body(shipped.prUrl ?? '');
-    expect(body).toContain('### Alpha');
-    expect(body).toContain('### Beta');
-    expect(body).toContain(`Shipped by 10db, batch ${batch.id}`);
-    expect(getBatchRow(h.store.db, batch.id)).toMatchObject({ gatePid: null, gatePidStart: null });
-  });
-
   it("never merges the base into the builder's own checkout: the branch ships as it is", async () => {
     h = createDeliveryHarness();
     const { batch } = await openBatch('Add greetings', 'Alpha');
@@ -199,13 +184,17 @@ describe('shipping', () => {
     expect(h.git$('status', '--porcelain', '--untracked-files=all')).toBe('');
   });
 
-  it("says in a failed gate's card how far the builder's own checkout is behind the base", async () => {
-    h = createDeliveryHarness({ gateCommand: 'false' });
+  it("runs the project's full gate before the push, never its changed-packages check, and says in a failed gate's card how far the builder's own checkout is behind the base", async () => {
+    h = createDeliveryHarness({ gateCommand: 'false', changedCheckCommand: 'true' });
     const { batch } = await openBatch('Add greetings', 'Alpha');
     h.commit('src/api/alpha.txt');
     h.teammatePush('main', 'src/ui/teammate.txt');
     const failed = await finishAll(batch);
     expect(failed.state).toBe('FAILED');
+    expect(onOrigin(h, batch.branch)).toBeNull();
+    expect(batchLines(batch.id).find((line) => line['msg'] === 'gate started')).toMatchObject({
+      command: 'false',
+    });
     const card = h.only(h.cards().filter((c) => c.title.includes('the gate failed')));
     expect(card.body).toMatch(/^origin\/main has 1 commit this branch doesn't\./);
   });
@@ -371,18 +360,6 @@ describe('shipping', () => {
     expect(listNetworkHosts(h.state.db, h.project.id)).toEqual([]);
   });
 
-  it("runs the project's full gate before the push, never its changed-packages check", async () => {
-    h = createDeliveryHarness({ gateCommand: 'false', changedCheckCommand: 'true' });
-    const { batch } = await openBatch('Add greetings', 'Alpha');
-    h.commit('src/api/alpha.txt');
-    const failed = await finishAll(batch);
-    expect(failed.state).toBe('FAILED');
-    expect(onOrigin(h, batch.branch)).toBeNull();
-    expect(batchLines(batch.id).find((line) => line['msg'] === 'gate started')).toMatchObject({
-      command: 'false',
-    });
-  });
-
   it('runs the pre-check in place of the gate when the project sets one, and says so in the pull request', async () => {
     h = createDeliveryHarness({
       gateCommand: 'echo FULL-GATE-RAN; exit 1',
@@ -427,14 +404,6 @@ describe('shipping', () => {
     expect(failed.state).toBe('FAILED');
     expect(h.only(h.cards()).title).toContain('the pre-check timed out');
     expect(onOrigin(h, batch.branch)).toBeNull();
-  });
-
-  it('says the gate ran in the pull request when no pre-check is set', async () => {
-    h = createDeliveryHarness({ gateCommand: 'true' });
-    const { batch } = await openBatch('Add greetings', 'Alpha');
-    h.commit('src/api/alpha.txt');
-    const shipped = await finishAll(batch);
-    expect(h.gh.body(shipped.prUrl ?? '')).toContain('Checked on the Mac: true (gate).');
   });
 
   it('ships a batch without a gate step when the project has none', async () => {
