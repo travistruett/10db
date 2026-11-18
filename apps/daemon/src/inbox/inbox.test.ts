@@ -100,6 +100,7 @@ import type { ToolDecision } from '../sessions';
 import { projectGrantLines } from '../trust';
 import {
   createInboxService,
+  CardClosesItselfError,
   cardsResolvedByEvent,
   createLimitNotes,
   createPermissionBroker,
@@ -4570,6 +4571,36 @@ describe('a card 10db closes because its cause is gone', () => {
     inbox.answer(card.id, { choice: 'dismiss' });
     const again = inbox.resolve(card.id, 'Alpha started');
     expect(again.detail).toEqual({});
+  });
+});
+
+describe('a card that closes itself', () => {
+  let project: ReturnType<typeof seedWorkstream> | undefined;
+  beforeEach(() => {
+    project = undefined;
+  });
+  function condition(body: string) {
+    const ws = (project ??= seedWorkstream(base));
+    return inbox.flag({
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'withdrawn', when: 'the hold lifts' },
+      projectId: ws.project.id,
+      workstreamId: null,
+      title: 'Free disk is low',
+      body,
+      foldKey: 'disk-low',
+    });
+  }
+
+  it('is one card raised twice, says what the second raise says, and refuses a dismiss', () => {
+    const first = condition('9 GB free.');
+    const second = condition('7 GB free.');
+    expect(second.id).toBe(first.id);
+    expect(second.body).toBe('7 GB free.');
+    expect(listInbox(state.db, { states: ['OPEN'] })).toHaveLength(1);
+    expect(() => inbox.answer(first.id, { choice: 'dismissed' })).toThrow(CardClosesItselfError);
+    expect(getInboxItem(state.db, first.id).state).toBe('OPEN');
   });
 });
 

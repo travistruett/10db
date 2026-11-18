@@ -14,7 +14,11 @@ export {
   pendingHazardRemovals,
 } from './hazard-card';
 export { earlierMcpApproval, requestMcpApproval } from './mcp-approval';
-export { createProjectMcpReader, flagMcpFailure } from './project-mcp-reader';
+export {
+  createProjectMcpReader,
+  flagMcpFailure,
+  resolveMcpConfigCards,
+} from './project-mcp-reader';
 export {
   carriesKinds,
   fileProposalByItself,
@@ -29,6 +33,7 @@ export {
   createInboxService,
   flagCard,
   AnsweredAwayError,
+  CardClosesItselfError,
   ParkedError,
   rewordCard,
   withdrawCard,

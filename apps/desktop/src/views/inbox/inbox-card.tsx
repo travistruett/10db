@@ -1,5 +1,6 @@
 import {
   ACCOUNT_CARD_DETAIL,
+  CARD_CLOSES_ITSELF,
   OPEN_INTEGRATIONS_DETAIL,
   AccountCardDetail,
   AccountProblem,
@@ -28,6 +29,7 @@ import { CodeSpans } from '../../shell/code-spans';
 import { ProjectLabel } from '../../shell/project-label';
 import { ExternalLink } from '../board/pull-request-link';
 import { BatchCardActions } from './batch-card-actions';
+import { CardOpensLink, cardOpens } from './card-opens-link';
 import { CheckCard } from './check-card';
 import { PlanCard } from './plan-card';
 import { ReviewRejection, reviewRejection } from '../review/review-rejection';
@@ -263,6 +265,9 @@ export function InboxCard({
   };
   const hasOptions = item.options.length > 0;
   const link = cardLink(item);
+  const opens = cardOpens(item);
+  // A card that closes itself when its cause clears is never dismissed, so with no answer to send it has no button.
+  const closesItself = item.detail?.[CARD_CLOSES_ITSELF] === true;
   // Parking the task stops the run and records nothing, so the control goes while that is chosen.
   const recordable =
     item.kind === InboxKind.Question && hasOptions && !(choice !== null && isParkChoice(choice));
@@ -331,6 +336,7 @@ export function InboxCard({
             Open Integrations
           </Anchor>
         )}
+        {opens === null ? null : <CardOpensLink opens={opens} />}
         <RouteLineRow item={item} people={people} mode={mode} />
         <SentNotice item={item} />
         {mode === StakeholderMode.Copy ? (
@@ -400,20 +406,22 @@ export function InboxCard({
           {(mode === StakeholderMode.Unrouted || mode === StakeholderMode.Pending) && hasOptions ? (
             <AskSomeoneFooter item={item} people={people} />
           ) : null}
-          <Button
-            size="sm"
-            loading={pending}
-            onClick={onSubmit}
-            rightSection={
-              shortcuts ? (
-                <Kbd size="xs" aria-hidden>
-                  ↵
-                </Kbd>
-              ) : null
-            }
-          >
-            {hasOptions ? 'Send answer' : count > 1 ? 'Dismiss All' : 'Dismiss'}
-          </Button>
+          {hasOptions || !closesItself ? (
+            <Button
+              size="sm"
+              loading={pending}
+              onClick={onSubmit}
+              rightSection={
+                shortcuts ? (
+                  <Kbd size="xs" aria-hidden>
+                    ↵
+                  </Kbd>
+                ) : null
+              }
+            >
+              {hasOptions ? 'Send answer' : count > 1 ? 'Dismiss All' : 'Dismiss'}
+            </Button>
+          ) : null}
         </Group>
       </Stack>
     </CardSurface>

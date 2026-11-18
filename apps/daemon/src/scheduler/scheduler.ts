@@ -101,6 +101,11 @@ export interface SchedulerOptions {
   readonly branches: { currentBranch(repo: string): Promise<string | null> };
   /** An open batch's work waits because its checkout (its worktree, when it has one) is on another branch. */
   readonly onWrongBranch: (batch: BatchDto, current: string | null, checkout: string) => void;
+  /**
+   * An open batch's checkout is on its branch: once for each batch after start, and again each time it
+   * returns from a wrong branch. The cards that waited for it close.
+   */
+  readonly onBranchReady?: (batch: BatchDto) => void;
   /** An open batch's work waits because its worktree is gone. */
   readonly onWorktreeMissing: (batch: BatchDto, path: string) => void;
   /**
@@ -153,6 +158,8 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
   let halted = false;
   // Batches whose work is waiting for its branch and already reported, so a tick doesn't repeat the card.
   const warned = new Set<BatchId>();
+  /** The batches whose checkout was seen on its branch since it was last seen off it. */
+  const branchReady = new Set<BatchId>();
   // Batches whose work is waiting for a missing worktree and already reported.
   const warnedMissing = new Set<BatchId>();
 
@@ -513,8 +520,15 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
           warned.add(batch.id);
           opts.onWrongBranch(batch, current, checkout);
         }
+        if (verdict === LaunchVerdict.WrongBranch && batch) branchReady.delete(batch.id);
         if (verdict !== LaunchVerdict.Launch) continue;
-        if (batch) warned.delete(batch.id);
+        if (batch) {
+          warned.delete(batch.id);
+          if (!branchReady.has(batch.id)) {
+            branchReady.add(batch.id);
+            opts.onBranchReady?.(batch);
+          }
+        }
       }
       if (!dependenciesDone(db, ws.taskId)) continue;
       // A parked task never launches, whatever its queue holds.

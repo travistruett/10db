@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { BatchId, PrincipleId, ProposalId, TaskId, WorkstreamId } from './ids';
+import { BatchId, PrincipleId, ProjectId, ProposalId, TaskId, WorkstreamId } from './ids';
 
 /**
  * The `detail` key of a flag that reports a failed action. It says what makes the card stale, so 10db
@@ -14,8 +14,45 @@ export const CardResolvesWhen = z.discriminatedUnion('event', [
   z.object({ event: z.literal('batch_shipped'), batchId: BatchId }),
   /** A refusal that offers to trust a checkout: stale once the checkout is trusted. */
   z.object({ event: z.literal('checkout_trusted'), repo: z.string().startsWith('/') }),
+  /**
+   * A failed self-update: stale once an app at or past `commit` runs. `commit` is the build the failed
+   * install was for, so a start can compare it with the commit it runs.
+   */
+  z.object({ event: z.literal('update_installed'), commit: z.string().min(1) }),
+  /** A batch that waits on, or failed over, the wrong checkout branch: stale once the checkout is on the batch's branch. */
+  z.object({ event: z.literal('branch_ready'), batchId: BatchId }),
+  /**
+   * A repo MCP config card: stale once the config's content hash differs from `hash`, the one the card
+   * was raised on.
+   */
+  z.object({
+    event: z.literal('mcp_config_changed'),
+    projectId: ProjectId,
+    hash: z.string().min(1),
+  }),
 ]);
 export type CardResolvesWhen = z.infer<typeof CardResolvesWhen>;
+
+/**
+ * The `detail` key of a card that closes when its condition clears and not when the builder answers it
+ * (`closesWhen` is not `by: 'answer'`). Such a card is never dismissed: the Inbox offers no Dismiss and the
+ * daemon refuses one, so nothing can be dismissed and come back.
+ */
+export const CARD_CLOSES_ITSELF = 'closesItself';
+
+/**
+ * The `detail` key of a card that names a place in the app or on disk where its fix is made: the
+ * Inbox draws a link to it beside the card's answers.
+ */
+export const CARD_OPENS = 'opens';
+
+export const CardOpens = z.discriminatedUnion('to', [
+  /** A Settings section, by its key. */
+  z.object({ to: z.literal('settings'), section: z.string().min(1), label: z.string().min(1) }),
+  /** A file or folder on this Mac. */
+  z.object({ to: z.literal('path'), path: z.string().startsWith('/'), label: z.string().min(1) }),
+]);
+export type CardOpens = z.infer<typeof CardOpens>;
 
 /**
  * The `detail` key of a card that lost a lane's target when that lane was cancelled while other lanes
