@@ -137,6 +137,9 @@ function fakePnpm(root: string): FakePnpm {
         writeFileSync(join(made, relative), content);
       }
     },
+    makesNothing() {
+      rmSync(made, { recursive: true, force: true });
+    },
     makesOnCall(call, files) {
       for (const [relative, content] of Object.entries(files)) {
         mkdirSync(dirname(join(`${made}.${String(call)}`, relative)), { recursive: true });
@@ -207,6 +210,8 @@ export interface FakePnpm {
   blockedFrom(host: string): void;
   /** Makes every later call write these files (path relative to its directory, content) first, as an install writes `node_modules`. */
   makes(files: Readonly<Record<string, string>>): void;
+  /** Undoes `makes`: later calls write nothing of their own. */
+  makesNothing(): void;
   /** Makes only the `call`th call overall (1 is the first the harness ever saw) write these files, as `makes` does. */
   makesOnCall(call: number, files: Readonly<Record<string, string>>): void;
   /** Makes every later call succeed again. */
