@@ -117,6 +117,20 @@ describe('a session’s Changes', () => {
     expect(stops).toEqual([]);
   });
 
+  it('Esc leaves the drawer open while a popup list owns the key', async () => {
+    open({ changes: changed });
+    await screen.findByRole('button', { name: /^Changes/ });
+    toggle();
+    await screen.findByRole('dialog', { name: 'Changes' });
+    const box = await screen.findByRole('textbox', { name: 'Message' });
+    // The composer's @ list is an open popup: its trigger reads aria-expanded and aria-haspopup.
+    box.setAttribute('aria-haspopup', 'listbox');
+    box.setAttribute('aria-expanded', 'true');
+    box.focus();
+    fireEvent.keyDown(box, { key: 'Escape' });
+    expect(drawer()).not.toBeNull();
+  });
+
   it('does not read the changes of a session that has no place to work yet', async () => {
     let reads = 0;
     const { chats } = open({ changes: changed }, 1, undefined, undefined, null);

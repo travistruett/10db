@@ -304,7 +304,10 @@ export function ChatTab({
         const others = [...document.querySelectorAll('[role="dialog"]')].some(
           (d) => d.getAttribute('aria-modal') !== 'false',
         );
-        if (!others && document.querySelector('[role="menu"]') === null) {
+        const popup = document.querySelector(
+          '[role="menu"], [aria-expanded="true"][aria-haspopup]',
+        );
+        if (!others && popup === null) {
           event.preventDefault();
           latest.current.closeChanges();
           return;
