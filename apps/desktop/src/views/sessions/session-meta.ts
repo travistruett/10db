@@ -1,4 +1,4 @@
-import { WorkPlace, type ChatWorkStateDto } from '@10db/contracts';
+import { ChatGitStep, WorkPlace, type ChatWorkStateDto } from '@10db/contracts';
 
 export interface SessionMetaInput {
   readonly projectName: string;
@@ -53,7 +53,13 @@ export function sessionMeta(input: SessionMetaInput): string {
   }
   if (pr !== null) parts.push(`pull request #${String(pr.number)}, ${checksWords(pr.checks)}`);
   else if (state.ahead > 0)
-    parts.push(plural(state.ahead, 'commit', 'commits') + ' not in a pull request');
+    // A project that merges locally has no pull request for the commits to be missing from.
+    parts.push(
+      plural(state.ahead, 'commit', 'commits') +
+        (state.next === ChatGitStep.MergeLocal
+          ? ` not merged into ${state.baseBranch ?? 'the base branch'}`
+          : ' not in a pull request'),
+    );
   else if (dirty === 0) parts.push('no changes yet');
   return parts.join(' · ');
 }
