@@ -62,12 +62,7 @@ describe('load tolerance', () => {
   // This guard can't measure those margins from the source, so each file that uses the option is
   // listed here once a reviewer has checked that it keeps seconds of slack around every timer.
   // Add a file only after making that check. Prefer driving the clock by hand where you can.
-  const REVIEWED_SHOULD_ADVANCE_TIME = new Set([
-    // 2 s of slack before the second save and 1.5 s after it, around the 4 s "Saved" timer.
-    'views/settings/project-general-form.test.tsx',
-    // The 60 s "just now" timer is advanced by hand past its end; real time adds seconds at most.
-    'views/settings/integrations/github-card.test.tsx',
-  ]);
+  const REVIEWED_SHOULD_ADVANCE_TIME = new Set<string>([]);
 
   it('every test that lets real time move fake timers is reviewed for slack', () => {
     const root = join(import.meta.dirname, '..');
