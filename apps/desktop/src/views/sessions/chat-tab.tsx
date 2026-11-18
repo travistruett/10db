@@ -56,6 +56,7 @@ import { JudgeLine } from '../../conversation';
 import { SessionTitle } from './session-title';
 import { WorkBar } from './work-bar';
 import { ChangesDrawer, BESIDE_PX, DRAWER_WIDTH } from './changes-drawer';
+import { barHidden } from './bar-hidden';
 import { changesChoice } from './changes-choice';
 import { changesTotals, withQuote } from './changes-files';
 import { GitStepButton } from './git-step-button';
@@ -207,7 +208,9 @@ export function ChatTab({
     return true;
   });
   // Esc hides the bar until a refused change asks again, which changes `askedAt`.
-  const [hiddenFor, setHiddenFor] = useState<string | null | undefined>(undefined);
+  const [hiddenFor, setHiddenFor] = useState<string | null | undefined>(() =>
+    barHidden.get(chat.id),
+  );
   const [settled, setSettled] = useState<ChoseWork['work'] | null>(null);
   const place = chat.work?.place ?? null;
   const askedAt = chat.work?.askedAt ?? null;
@@ -576,6 +579,7 @@ export function ChatTab({
                   settled={settled}
                   error={choose.error?.message ?? null}
                   onHide={() => {
+                    barHidden.set(chat.id, askedAt);
                     setHiddenFor(askedAt);
                     input.current?.focus();
                   }}

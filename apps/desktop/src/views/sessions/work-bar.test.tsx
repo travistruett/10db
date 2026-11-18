@@ -123,6 +123,25 @@ describe('the bar that asks where the work happens', () => {
     });
   });
 
+  it('Esc on the bar keeps it hidden after switching to another session and back', async () => {
+    const { served, chat, queryClient } = openChoosing();
+    served.chats.push(chatDto({ projectId: project.id, title: 'Other one', tabPosition: 1 }));
+    await queryClient.invalidateQueries({ queryKey: chatKeys.all });
+    fireEvent.keyDown(await bar(), { key: 'Escape' });
+    await waitFor(() => {
+      expect(screen.queryByRole('group', { name: 'Where this work happens' })).toBeNull();
+    });
+    fireEvent.click(await screen.findByRole('option', { name: /Other one/ }));
+    await screen.findByRole('textbox', { name: 'Message' });
+    fireEvent.click(screen.getByRole('option', { name: new RegExp(chat.title) }));
+    await waitFor(() => {
+      expect(
+        screen.getByRole('option', { name: new RegExp(chat.title) }).getAttribute('aria-selected'),
+      ).toBe('true');
+    });
+    expect(screen.queryByRole('group', { name: 'Where this work happens' })).toBeNull();
+  });
+
   it('a button sends its choice, and the bar goes once the session has moved', async () => {
     const { served, chat } = openChoosing();
     fireEvent.click(await screen.findByRole('button', { name: 'On a New Branch' }));
