@@ -81,9 +81,9 @@ jobs:
       - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
         with:
           version: 2026.10.25
-          # tests/repo runs here: the hook and policy tests spawn gitleaks, actionlint and zizmor, and
-          # mise-action creates shims only for installed tools.
-          install_args: node pnpm gitleaks actionlint zizmor
+          # tests/repo runs here: the hook and policy tests spawn gitleaks, actionlint, zizmor and
+          # lefthook, and mise-action creates shims only for installed tools.
+          install_args: node pnpm gitleaks actionlint zizmor lefthook
       - run: pnpm install --frozen-lockfile
       - run: bash scripts/gate.sh
       - if: failure()
