@@ -43,6 +43,7 @@ export {
   removeLaneTempDirAsync,
   sandboxFilesRoot,
   SandboxTempDirError,
+  SPOTLIGHT_MARKER,
   SYSTEM_TEMP_ROOTS,
   tmutilExclusion,
   type BackupExclusion,

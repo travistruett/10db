@@ -5,6 +5,7 @@ import { useSessionsNeedingYou } from '../views/sessions/needing-you-count';
 import { nextNeeding } from '../views/sessions/session-keys';
 import { useWorkbenchWaitingCount } from '../views/workbench/workbench-count';
 import { CountBadge, CountTone } from './count-badge';
+import { useRailMode } from './rail-mode';
 import { useSelectedProject } from './selected-project';
 
 /** A rail badge is small, so a count past this reads "99+". */
@@ -13,12 +14,14 @@ const BADGE_CAP = 99;
 /** The open Inbox cards, across every project; nothing when none is open. */
 export function InboxBadge() {
   const count = useOpenInboxCount();
+  const compact = !useRailMode().labels;
   if (count === 0) return null;
   return (
     <CountBadge
       count={count}
       tone={CountTone.Attention}
       cap={BADGE_CAP}
+      compact={compact}
       phrase={`${String(count)} open card${count === 1 ? '' : 's'}`}
     />
   );
@@ -30,6 +33,7 @@ export function InboxBadge() {
  */
 export function SessionsBadge() {
   const needing = useSessionsNeedingYou();
+  const compact = !useRailMode().labels;
   const navigate = useNavigate();
   const { select } = useSelectedProject();
   const current = useRouterState({
@@ -67,6 +71,7 @@ export function SessionsBadge() {
         count={count}
         tone={CountTone.Attention}
         cap={BADGE_CAP}
+        compact={compact}
         phrase={`${String(count)} session${count === 1 ? '' : 's'} need${count === 1 ? 's' : ''} you`}
       />
     </span>
@@ -76,12 +81,14 @@ export function SessionsBadge() {
 /** The pages of the project's pass that wait on the builder; nothing when none does. */
 export function WorkbenchBadge({ projectId }: { readonly projectId: ProjectId }) {
   const count = useWorkbenchWaitingCount(projectId);
+  const compact = !useRailMode().labels;
   if (count === 0) return null;
   return (
     <CountBadge
       count={count}
       tone={CountTone.Attention}
       cap={BADGE_CAP}
+      compact={compact}
       phrase={`${String(count)} page${count === 1 ? '' : 's'} waiting`}
     />
   );

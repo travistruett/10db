@@ -13,6 +13,9 @@ const DEFAULT_ROWS: Readonly<Record<PageLoadingShape, number>> = {
   lines: 3,
 };
 
+/** Placeholder rows stop here on a wide window, so they read as rows and not as progress bars. */
+const MAX_ROW_WIDTH = 720;
+
 /** The widths of a transcript's placeholder lines. */
 const LINE_WIDTHS = ['90%', '70%', '80%'] as const;
 
@@ -67,7 +70,7 @@ export function PageLoading({
   if (!late) return null;
   const placeholders = Array.from({ length: rows ?? DEFAULT_ROWS[shape] }, (_, i) => i);
   return (
-    <Stack gap="md" role="status" aria-label={label}>
+    <Stack gap="md" maw={MAX_ROW_WIDTH} role="status" aria-label={label}>
       {placeholders.map((i) => {
         switch (shape) {
           case PageLoadingShape.List:

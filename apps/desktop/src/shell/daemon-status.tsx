@@ -13,9 +13,9 @@ function StatusIcon({
   readonly icon: Icon;
 }) {
   return (
-    <Tooltip label={label} position="right" openDelay={300}>
+    <Tooltip label={label} position="right">
       <span
-        className={classes['item']}
+        className={classes['status']}
         role="img"
         aria-label={label}
         style={{ color: `var(--mantine-color-${color}-text)`, cursor: 'default' }}

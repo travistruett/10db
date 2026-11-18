@@ -88,8 +88,6 @@ export function PlanMeasures() {
       component="section"
       aria-label="How Plan is doing"
       gap="sm"
-      px="md"
-      pb="md"
       style={{ flex: '0 1 280px' }}
     >
       <Group gap="xs" align="baseline">

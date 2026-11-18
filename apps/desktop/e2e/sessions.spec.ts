@@ -30,12 +30,13 @@ async function setScheme(page: Page, scheme: 'dark' | 'light'): Promise<void> {
   const html = page.locator('html');
   if ((await html.getAttribute('data-mantine-color-scheme')) === scheme) return;
   const toggle = page.getByRole('button', { name: `Switch to ${scheme} mode` });
-  // Under 640 px the rail, which holds the toggle, is folded behind the sidebar button.
+  // Under 640 px the rail, which holds the toggle, is folded behind the sidebar toggle.
   const folded = (await toggle.count()) === 0 || !(await toggle.isVisible());
-  if (folded) await page.getByRole('button', { name: /^Show the (sections|panel)$/ }).click();
+  const sidebar = page.getByRole('button', { name: 'Toggle sidebar' });
+  if (folded) await sidebar.click();
   await toggle.click();
   // Not Esc: on Sessions it answers a waiting card.
-  if (folded) await page.getByRole('button', { name: /^Hide the (sections|panel)$/ }).click();
+  if (folded) await sidebar.click();
   await expect(html).toHaveAttribute('data-mantine-color-scheme', scheme);
 }
 

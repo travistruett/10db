@@ -112,6 +112,16 @@ export const theme = createTheme({
   primaryShade: { light: 7, dark: 5 },
   variantColorResolver,
   defaultRadius: 'md',
+  // One type scale under the page's title (14 / 600): a section's head, a group's head and a card's head
+  // are all 14 / 600, and a drawer's title sets 16 itself. Sizes above h3 belong to the first run.
+  headings: {
+    sizes: {
+      h3: { fontSize: '0.875rem', fontWeight: '600', lineHeight: '1.4' },
+      h4: { fontSize: '0.875rem', fontWeight: '600', lineHeight: '1.4' },
+      h5: { fontSize: '0.875rem', fontWeight: '600', lineHeight: '1.4' },
+      h6: { fontSize: '0.8125rem', fontWeight: '600', lineHeight: '1.4' },
+    },
+  },
   fontFamilyMonospace: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   components: {
     Select: Select.extend({ defaultProps: { checkIconPosition: 'right' } }),

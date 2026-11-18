@@ -102,7 +102,7 @@ async function sweepOne(
 }
 
 /** Whether `repoPath` holds commit `sha`, fetching it from origin once if it does not. */
-async function haveCommit(
+export async function haveCommit(
   ctx: DeliveryContext,
   repoPath: string,
   sha: string,

@@ -10,11 +10,12 @@ import {
   useCombobox,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { IconAdjustments, IconCheck, IconPlus } from '@tabler/icons-react';
+import { IconAdjustments, IconCheck, IconChevronDown, IconPlus } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import { NewProjectModal } from './new-project-modal';
 import { ProjectTile } from './project-tile';
+import { useRailMode } from './rail-mode';
 import { useSelectedProject } from './selected-project';
 import { useUnsavedGuard } from './unsaved-guard';
 import { SettingsSectionKey } from '../views/settings/sections';
@@ -24,12 +25,14 @@ import classes from './rail.module.css';
 const tildePath = (path: string) => path.replace(/^\/Users\/[^/]+/u, '~');
 
 /**
- * The current project, switched from its tile in the rail: the dropdown opens to the tile's right, lists
- * the projects, and leads to Project Settings and "New Project".
+ * The current project, switched from the rail: a row with its tile and name below the rail's labels, or just the
+ * tile when the rail is icons only. The dropdown lists the projects and leads to Project Settings and
+ * "New Project"; it opens below the row, or to the tile's right.
  */
 export function ProjectSwitcher() {
   const { projects, project, select } = useSelectedProject();
   const guard = useUnsavedGuard();
+  const { labels } = useRailMode();
   const [search, setSearch] = useState('');
   const [creating, creator] = useDisclosure(false);
   const combobox = useCombobox({
@@ -53,7 +56,7 @@ export function ProjectSwitcher() {
       <Combobox
         store={combobox}
         width={300}
-        position="right-start"
+        position={labels ? 'bottom-start' : 'right-start'}
         onOptionSubmit={(value) => {
           const chosen = ProjectId.parse(value);
           if (chosen !== project?.id) {
@@ -68,19 +71,29 @@ export function ProjectSwitcher() {
           <Tooltip
             label={project?.name ?? 'Choose a project'}
             position="right"
-            openDelay={300}
-            disabled={combobox.dropdownOpened}
+            disabled={combobox.dropdownOpened || labels}
           >
             <Combobox.Target targetType="button">
               <UnstyledButton
                 aria-label={`Project: ${project?.name ?? 'none'}. Switch project`}
+                data-labelled={labels ? '' : undefined}
                 onClick={() => {
                   combobox.toggleDropdown();
                 }}
               >
-                <span className={classes['tileRing']}>
-                  <ProjectTile name={project?.name ?? '?'} size={26} />
-                </span>
+                {labels ? (
+                  <>
+                    <ProjectTile name={project?.name ?? '?'} size={20} />
+                    <span className={classes['projectName']}>
+                      {project?.name ?? 'Choose a project'}
+                    </span>
+                    <IconChevronDown size={12} stroke={1.8} aria-hidden />
+                  </>
+                ) : (
+                  <span className={classes['tileRing']}>
+                    <ProjectTile name={project?.name ?? '?'} size={26} />
+                  </span>
+                )}
               </UnstyledButton>
             </Combobox.Target>
           </Tooltip>
