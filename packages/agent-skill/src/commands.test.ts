@@ -495,18 +495,6 @@ describe('every other command sends what it should', () => {
       out: 'inb_1\tship\tCard\tMerge | Hold',
     },
     {
-      name: 'principle',
-      argv: ['principle', 'prj_1', '/p.json', '--dry-run'],
-      routes: { 'POST /projects/prj_1/principles': { ok: true } },
-      files: { '/p.json': '{"text":"x"}' },
-      sent: {
-        method: 'POST',
-        path: '/projects/prj_1/principles',
-        body: { text: 'x', dryRun: true },
-      },
-      out: '{\n  "ok": true\n}',
-    },
-    {
       name: 'goal',
       argv: ['goal', 'prj_1', '/g.md'],
       routes: { 'POST /projects/prj_1/goals/adopt': { id: 'gol_1', title: 'G' } },
@@ -568,6 +556,241 @@ describe('every other command sends what it should', () => {
       'Only modelMap, awsProfile, region can change here, not apiKey.',
     );
     expect(h.posted()).toEqual([]);
+  });
+});
+
+describe('knowledge', () => {
+  const uid = (prefix: string, n: number): string =>
+    `${prefix}_${String(n).padStart(8, '0')}-0000-7000-8000-000000000000`;
+  const principleId = uid('pri', 1);
+  const newPrincipleId = uid('pri', 2);
+  const decisionId = uid('dec', 1);
+  const AGENT_SOURCE = { via: '10db-task', cwd: '/repo' };
+  const principleItem = {
+    kind: 'principle',
+    id: principleId,
+    scope: 'you',
+    area: null,
+    state: 'current',
+    principleKind: 'heuristic',
+    topicKey: 'context.soft-ceiling',
+    statement: 'Context has a soft ceiling.',
+    supersedesId: null,
+  };
+  const decisionItem = {
+    kind: 'decision',
+    id: decisionId,
+    scope: 'project',
+    area: null,
+    state: 'current',
+    question: 'Who gets prefix search?',
+    choice: 'The list route.',
+    rationale: 'Typing narrows.',
+    supersedesId: null,
+  };
+  const listPath = '/projects/prj_1/knowledge';
+
+  it('lists a project’s records, All Projects ones included, one line each with a count', async () => {
+    const h = harness({
+      [`GET ${listPath}?q=context&kind=policy&kind=belief&shelf=all&page=2`]: {
+        items: [principleItem, decisionItem],
+        total: 27,
+        page: 2,
+        pageSize: 25,
+        search: { available: true, message: null },
+      },
+    });
+    await h.run(
+      'knowledge',
+      'prj_1',
+      '--q',
+      'context',
+      '--kind',
+      'policy',
+      '--kind',
+      'belief',
+      '--shelf',
+      'all',
+      '--page',
+      '2',
+    );
+    expect(h.posted()).toEqual([]);
+    expect(h.lines).toEqual([
+      `${principleId}\tyou\tcurrent\theuristic\tcontext.soft-ceiling\tContext has a soft ceiling.`,
+      `${decisionId}\tproject\tcurrent\tdecision\t\tWho gets prefix search? -> The list route.`,
+      'Showing 2 of 27 (page 2, 25 a page).',
+    ]);
+  });
+
+  it('says so when the search index is unavailable instead of reporting nothing found', async () => {
+    const h = harness({
+      [`GET ${listPath}?q=x`]: {
+        items: [],
+        total: 0,
+        page: 1,
+        pageSize: 25,
+        search: { available: false, message: 'Search is unavailable: index damaged' },
+      },
+    });
+    await h.run('knowledge', 'prj_1', '--q', 'x');
+    expect(h.lines).toEqual([
+      'Search is unavailable: index damaged',
+      'Showing 0 of 0 (page 1, 25 a page).',
+    ]);
+  });
+
+  it('lists with no filters as the daemon’s own default', async () => {
+    const h = harness({
+      [`GET ${listPath}`]: {
+        items: [],
+        total: 0,
+        page: 1,
+        pageSize: 25,
+        search: { available: true, message: null },
+      },
+    });
+    await h.run('knowledge', 'prj_1');
+    expect(h.calls.map((c) => `${c.method} ${c.path}`)).toContain(`GET ${listPath}`);
+  });
+
+  const recordRows: {
+    name: string;
+    argv: string[];
+    file: string;
+    route: string;
+    answer: unknown;
+    sent: unknown;
+    out: string;
+  }[] = [
+    {
+      name: 'a decision, dry run: adds the skill’s source and shows what the daemon would write',
+      argv: ['decision', 'prj_1', '/d.json', '--dry-run'],
+      file: '{"question":"Q","choice":"C","rationale":"R"}',
+      route: 'POST /projects/prj_1/decisions',
+      answer: { dryRun: true, wouldWrite: { kind: 'decision' }, replaces: null },
+      sent: {
+        question: 'Q',
+        choice: 'C',
+        rationale: 'R',
+        source: AGENT_SOURCE,
+        dryRun: true,
+      },
+      out: 'DRY RUN: valid for Acme; would POST /projects/prj_1/decisions, which answers:\n{\n  "dryRun": true,\n  "wouldWrite": {\n    "kind": "decision"\n  },\n  "replaces": null\n}',
+    },
+    {
+      name: 'a decision at All Projects scope',
+      argv: ['decision', 'prj_1', '/d.json'],
+      file: '{"scope":"you","question":"Q","choice":"C","rationale":"R"}',
+      route: 'POST /projects/prj_1/decisions',
+      answer: { ...decisionItem, scope: 'you', question: 'Q' },
+      sent: { scope: 'you', question: 'Q', choice: 'C', rationale: 'R', source: AGENT_SOURCE },
+      out: `Recorded decision ${decisionId} (All Projects): Q`,
+    },
+    {
+      name: 'a principle that replaces the current one with its topic key',
+      argv: ['principle', 'prj_1', '/p.json'],
+      file: '{"statement":"S","kind":"policy","topicKey":"context.soft-ceiling","source":{"via":"mine"}}',
+      route: 'POST /projects/prj_1/principles',
+      answer: { ...principleItem, id: newPrincipleId, supersedesId: principleId, statement: 'S' },
+      sent: {
+        statement: 'S',
+        kind: 'policy',
+        topicKey: 'context.soft-ceiling',
+        source: { via: 'mine' },
+      },
+      out: `Recorded principle ${newPrincipleId} (All Projects): S\nIt replaced ${principleId}, now superseded.`,
+    },
+  ];
+  it.each(recordRows)('records $name', async ({ argv, file, route, answer, sent, out }) => {
+    const h = harness({ [route]: answer }, { [argv[2] ?? '']: file });
+    await h.run(...argv);
+    expect(h.posted()).toEqual([{ method: 'POST', path: route.slice('POST '.length), body: sent }]);
+    expect(h.lines.join('\n')).toBe(out);
+  });
+
+  const refusals: { name: string; argv: string[]; file: string; contains: string }[] = [
+    {
+      name: 'a principle without a statement',
+      argv: ['principle', 'prj_1', '/x.json'],
+      file: '{"text":"x"}',
+      contains: 'statement',
+    },
+    {
+      name: 'a decision without a rationale',
+      argv: ['decision', 'prj_1', '/x.json'],
+      file: '{"question":"Q","choice":"C"}',
+      contains: 'rationale',
+    },
+    {
+      name: 'a supersede that changes nothing',
+      argv: ['supersede', principleId, '/x.json'],
+      file: '{}',
+      contains: 'name at least one field to change',
+    },
+    {
+      name: 'a decision field on a principle',
+      argv: ['supersede', principleId, '/x.json'],
+      file: '{"question":"Q"}',
+      contains: 'question',
+    },
+  ];
+  it.each(refusals)('refuses $name before calling the daemon', async ({ argv, file, contains }) => {
+    const h = harness({}, { '/x.json': file });
+    const message = await messageOf(h.run(...argv));
+    expect(message).toContain("doesn't fit 10db's Knowledge rules");
+    expect(message).toContain(contains);
+    expect(h.posted()).toEqual([]);
+  });
+
+  const supersedeRows: {
+    name: string;
+    argv: string[];
+    file: string;
+    route: string;
+    answer: unknown;
+    sent: unknown;
+    out: string;
+  }[] = [
+    {
+      name: 'a principle',
+      argv: ['supersede', principleId, '/s.json'],
+      file: '{"statement":"New text.","rationale":"Measured."}',
+      route: `POST /principles/${principleId}/supersede`,
+      answer: { ...principleItem, id: newPrincipleId, supersedesId: principleId },
+      sent: { statement: 'New text.', rationale: 'Measured.', source: AGENT_SOURCE },
+      out: `Superseded ${principleId} with ${newPrincipleId} (All Projects, principle).`,
+    },
+    {
+      name: 'a decision, dry run',
+      argv: ['supersede', decisionId, '/s.json', '--dry-run'],
+      file: '{"choice":"Changed."}',
+      route: `POST /decisions/${decisionId}/supersede`,
+      answer: { dryRun: true, wouldWrite: { kind: 'decision' }, replaces: decisionItem },
+      sent: { choice: 'Changed.', source: AGENT_SOURCE, dryRun: true },
+      out: `DRY RUN: valid; would POST /decisions/${decisionId}/supersede, which answers:\n{\n  "dryRun": true,\n  "wouldWrite": {\n    "kind": "decision"\n  },\n  "replaces": ${JSON.stringify(decisionItem, null, 2).replaceAll('\n', '\n  ')}\n}`,
+    },
+  ];
+  it.each(supersedeRows)('supersedes $name', async ({ argv, file, route, answer, sent, out }) => {
+    const h = harness({ [route]: answer }, { '/s.json': file });
+    await h.run(...argv);
+    expect(h.posted()).toEqual([{ method: 'POST', path: route.slice('POST '.length), body: sent }]);
+    expect(h.lines.join('\n')).toBe(out);
+  });
+
+  it('supersede refuses an id that is neither a decision nor a principle', async () => {
+    const h = harness({}, { '/s.json': '{"choice":"x"}' });
+    expect(await messageOf(h.run('supersede', tid(1), '/s.json'))).toMatch(
+      /isn't a decision or principle id/,
+    );
+    expect(h.posted()).toEqual([]);
+  });
+
+  it('passes the daemon’s refusal on', async () => {
+    const h = harness(
+      { [`POST /decisions/${decisionId}/supersede`]: new Fails(409) },
+      { '/s.json': '{"choice":"x"}' },
+    );
+    expect(await messageOf(h.run('supersede', decisionId, '/s.json'))).toBe('gone');
   });
 });
 

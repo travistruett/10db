@@ -1,6 +1,6 @@
 ---
 name: 10db-task
-description: Use when the user asks to create, add, file or queue a task, card or ticket in 10db (the local Claude Code factory app), or to edit, remove or start one, e.g. "create a task for this in 10db", "put this on the 10db board", "file that as a bug", from any Claude Code session. Also use to assess or fix a 10db project's hazards (lockfiles, migrations, the commands that write them), e.g. after a project is added or when its hazards look wrong, and to read or verify a project's settings (gate, delivery, base branch, account, rigor, areas) or what a task depends on.
+description: Use when the user asks to create, add, file or queue a task, card or ticket in 10db (the local Claude Code factory app), or to edit, remove or start one, e.g. "create a task for this in 10db", "put this on the 10db board", "file that as a bug", from any Claude Code session. Also use to list, record or supersede 10db Knowledge (principles and decisions) when you learn a rule or make a choice worth keeping, and to assess or fix a 10db project's hazards (lockfiles, migrations, the commands that write them), e.g. after a project is added or when its hazards look wrong, and to read or verify a project's settings (gate, delivery, base branch, account, rigor, areas) or what a task depends on.
 ---
 
 # Create and manage 10db tasks
@@ -23,6 +23,10 @@ node $T join <taskId> <batchId>          # start a task inside an open batch: on
 node $T goal <projectId> <brief.md> [--dry-run]  # adopt a goal brief (goals spec §11)
 node $T plan-import <projectId> <bundle.json> [--dry-run]  # import a planning effort's bundle into one Plan
 node $T hazards <projectId> [additions.json] [--dry-run]  # print hazards, or add to them (never removes)
+node $T knowledge <projectId> [--q <text>] [--kind ...] [--scope ...] [--shelf current|past|all] [--page <n>]
+node $T decision <projectId> <decision.json> [--dry-run]   # record a decision
+node $T principle <projectId> <principle.json> [--dry-run] # record a principle
+node $T supersede <dec_…|pri_…> <changes.json> [--dry-run] # replace a current decision or principle
 ```
 
 **Landing:** related tasks go in one batch by default (start the first, `join` the rest), not one PR
@@ -90,6 +94,45 @@ is a `PlanBundle` JSON file; its document bodies may be `bodyPath` files beside 
 so pass the path, never the text. Always run `--dry-run` first and show what it would write. The bundle must not sit
 under `/tmp`, the data dir or a worktree root, and no file may have a second hard link. Importing the same bundle id
 again adds only new revisions and versions. The builder Converts the Plan in the app; importing starts nothing.
+
+## Record what you learned: principles and decisions
+
+Knowledge is the Knowledge view's decisions and principles. Recording what was learned is something you just do,
+not a request for permission: the builder edits or withdraws a record in the view, and a wrong one costs them a
+click. Read first, write second, report after.
+
+**Record** when you learned something the next agent or session would otherwise relearn, and you can say why:
+
+- a **principle** is a rule for how work is done ("Tests wait on a condition, never sleep"), as one instruction
+  of at most 500 characters. Give `kind` (`policy` must, `heuristic` prefer, `belief` context), a `topicKey`
+  such as `context.soft-ceiling`, and a `rationale` with the evidence (what you measured or saw, with numbers).
+- a **decision** is a choice made among options, with `question`, `choice` and `rationale` (why this and not the
+  alternatives, and the evidence).
+- the **builder's own words** go in `quote` (principle) or `source.quote`. Never put words in their mouth.
+
+**Leave it to the builder** (say what you would record and let them decide) when:
+
+- it is a preference or policy about the builder's own work, money, people or product that they have not stated;
+- it would contradict a current record you did not write, other than by superseding it with new evidence;
+- you are guessing, or it holds for this one task only: that belongs in the task, plan or commit, not Knowledge.
+
+**Steps**
+
+1. `knowledge <projectId> --q <words>` (add `--shelf all` to see superseded ones). It lists the project's records
+   and the builder's own; a `you` place is All Projects, which applies in every project.
+2. Same topic already there? `supersede` it by id rather than adding a second record. A principle that reuses
+   a current `topicKey` at the same place replaces that one by itself.
+3. Write the JSON file and run with `--dry-run`: it shows what would be written and what it would replace.
+   `scope` is `project` by default; use `you` (All Projects) for a rule about how agents work in general, and
+   `area` plus `area` (an area name) for one part of the code. Only the fields the daemon's schema names are
+   accepted; it answers a mistake word for word.
+4. Run it without `--dry-run`, then report the id and what it replaced in a line. The record's source says
+   it came from this skill.
+
+`supersede` takes only the fields to change (`statement`, `kind`, `topicKey`, `rationale`, `scope`, `area` for
+a principle; `question`, `choice`, `rationale`, `scope`, `area` for a decision) and keeps the rest. Moving a
+`you` record into a project needs `projectId` too. It only works on the current record; a 409 names the one that
+is current. There is no command to withdraw or retire: that is the builder's, in the Knowledge view.
 
 ## Verify a project's setup
 
@@ -160,6 +203,7 @@ The builder never edits hazards by hand; you assess and fix them.
 | doesn't fit 10db's New Task rules                | Fix the listed fields; don't bypass the check                                                 |
 | failed with 400                                  | The daemon's own validation; fix the draft from its message                                   |
 | failed with 409                                  | The task has started, is done, or has dependents; the message says which                      |
+| doesn't fit 10db's Knowledge rules               | Fix the listed fields from the daemon's own schema; the file names a field it doesn't have    |
 | isn't the one this 10db ships                    | The app updated. Restart 10db; if it persists, Settings › Agent skill shows the install error |
 | answered something this skill doesn't understand | The action may have happened: run `context` to check before retrying                          |
 | In Codex, the sandbox may block localhost        | Allow network access for the Codex session, then rerun                                        |
