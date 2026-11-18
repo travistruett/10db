@@ -123,7 +123,9 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // and so do the Models page's picks.
   persona: [CANDIDATES, modelKeys.all, PERSONAS_KEY],
   person: [PEOPLE_KEY, ROUTING_RULES_KEY, QUESTION_ROUTES_KEY],
-  slack: [SLACK_KEY],
+  // Placement follows the live connection: a sent card is Waiting's while Slack is connected, so every list
+  // and every count is read again.
+  slack: [SLACK_KEY, queryKeys.inbox, ['inbox-rows']],
   stakeholder_timers: [TIMERS_KEY],
   stakeholder_send: [queryKeys.inbox, ['workstreams'], goalKeys.all],
   // The Models page lists profiles and what each account offers.

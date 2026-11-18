@@ -1,5 +1,5 @@
 import { EventsHead, mintId, type InboxItemDto, type InboxListState } from '@10db/contracts';
-import { useEffect } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { act, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -8,7 +8,8 @@ import { daemonEvent, inboxItemDto } from '../test/fixtures';
 import { serveInboxRows } from '../test/inbox-page-fixtures';
 import { useEventStream } from './events';
 import { dropCard } from './inbox-live';
-import { useInboxRows, type InboxList } from './inbox-queries';
+import { RenderModeContext } from '../screens/render-context';
+import { useInboxCount, useInboxRows, type InboxList } from './inbox-queries';
 
 type Rows = ReturnType<typeof useInboxRows>;
 
@@ -82,13 +83,15 @@ async function mount(
   hold?: (query: Record<string, string>) => Promise<void> | undefined,
   list: InboxList = { state: 'open' },
   showRows = true,
+  /** More lists and counts on screen beside the open list, and how many reads the whole screen makes at first. */
+  beside: { readonly nodes: ReactNode; readonly reads: number } = { nodes: null, reads: 2 },
 ) {
   const seen: { rows: Rows | null } = { rows: null };
   let released: () => void = () => undefined;
   const firstPage = new Promise<void>((resolve) => {
     released = resolve;
   });
-  const sockets: { send(data: string): void }[] = [];
+  const sockets: { send(data: string): void; close(): void }[] = [];
   server.use(
     http.get(daemonUrl('/events/head'), async () => {
       await firstPage;
@@ -116,6 +119,7 @@ async function mount(
       <>
         <Stream />
         <Probe />
+        {beside.nodes}
       </>
     ) : (
       <Stream />
@@ -125,7 +129,7 @@ async function mount(
   await waitFor(() => {
     expect(sockets).toHaveLength(1);
     if (!showRows) return;
-    expect(asked.length).toBeGreaterThanOrEqual(2);
+    expect(asked.length).toBeGreaterThanOrEqual(beside.reads);
     expect(queryClient.isFetching()).toBe(0);
   });
   let seq = 0;
@@ -136,6 +140,20 @@ async function mount(
     rerender,
     Probe,
     Stream,
+    sockets,
+    sendSlack: () => {
+      seq += 1;
+      sockets[0]?.send(
+        JSON.stringify(
+          daemonEvent({
+            seq,
+            type: 'slack.connection.changed',
+            entityType: 'slack',
+            entityId: 'slack',
+          }),
+        ),
+      );
+    },
     loadMore: () => {
       act(() => {
         seen.rows?.loadMore();
@@ -427,5 +445,93 @@ describe('a failed lookup', () => {
       reads.every((query) => query['card'] === undefined && query['after'] === undefined),
     ).toBe(true);
     expect(reads.length).toBeGreaterThan(0);
+  });
+});
+
+function WaitingRows() {
+  useInboxRows({ state: 'waiting' });
+  return null;
+}
+
+function OpenCount() {
+  useInboxCount('open');
+  return null;
+}
+
+describe('Slack and the socket', () => {
+  it('reads Open and Waiting rows and the counts again when Slack changes (row 10)', async () => {
+    const view = await mount({ open: cards(2), waiting: [] }, undefined, { state: 'open' }, true, {
+      nodes: (
+        <>
+          <WaitingRows />
+          <OpenCount />
+        </>
+      ),
+      reads: 6,
+    });
+    view.sendSlack();
+    await waitFor(() => {
+      const reads = view.asked.slice(view.baseline);
+      expect(reads.some((q) => q['state'] === 'open' && q['pageSize'] === '50')).toBe(true);
+      expect(reads.some((q) => q['state'] === 'waiting' && q['pageSize'] === '50')).toBe(true);
+      expect(reads.some((q) => q['state'] === 'open' && q['pageSize'] === '1')).toBe(true);
+    });
+  });
+
+  it('reads every loaded page again when the socket reopens, keeping the old rows meanwhile (row 19)', async () => {
+    const all = cards(52);
+    let holding = false;
+    let release: () => void = () => undefined;
+    const view = await mount({ open: all }, () => {
+      if (!holding) return undefined;
+      holding = false;
+      return new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    });
+    view.loadMore();
+    await waitFor(() => {
+      expect(view.ids()).toHaveLength(52);
+    });
+    const before = view.asked.length;
+    holding = true;
+    view.sockets[0]?.close();
+    await waitFor(
+      () => {
+        expect(view.asked.length).toBeGreaterThan(before);
+      },
+      { timeout: 4000 },
+    );
+    expect(view.ids()).toHaveLength(52);
+    release();
+    await waitFor(() => {
+      const reads = view.asked.slice(before);
+      expect(reads.some((q) => q['after'] === undefined)).toBe(true);
+      expect(reads.some((q) => q['after'] !== undefined)).toBe(true);
+    });
+  });
+
+  it("asks for a screen frame's project in every row and count read (row 25)", async () => {
+    const project = mintId('Project');
+    server.use(...baseHandlers());
+    const asked = serveInboxRows({ open: [] });
+    renderWithDaemon(
+      <RenderModeContext
+        value={{
+          token: 't',
+          daemon: 'http://127.0.0.1:4999',
+          projectId: project,
+          screen: 'inbox',
+          path: '/inbox',
+        }}
+      >
+        <OpenCount />
+        <WaitingRows />
+      </RenderModeContext>,
+    );
+    await waitFor(() => {
+      expect(asked.length).toBeGreaterThanOrEqual(2);
+    });
+    expect(asked.every((query) => query['project'] === project)).toBe(true);
   });
 });
