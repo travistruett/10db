@@ -105,6 +105,7 @@ import type {
   ComposePreviewDto,
   InboxItemDto,
   InboxItemId,
+  InboxCardContextDto,
   InboxPageDto,
   InboxPageQuery,
   InboxState,
@@ -638,6 +639,8 @@ export interface ApiServices extends PlanRecordServices {
   listInbox(filter: { readonly states: readonly InboxState[] | null }): InboxItemDto[];
   /** One page of open, waiting or resolved cards, filtered and sorted; `total` counts every match. */
   pageInbox(query: InboxPageQuery): InboxPageDto;
+  /** The card's conversation's last messages; a `NotFoundError` for an unknown card. */
+  inboxCardContext(id: InboxItemId): InboxCardContextDto;
   answerInbox(id: InboxItemId, answer: InboxAnswer): InboxItemDto;
   eventsAfter(afterSeq: number, limit: number): DaemonEvent[];
   subscribe(listener: (event: DaemonEvent) => void): () => void;

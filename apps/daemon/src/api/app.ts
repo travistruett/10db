@@ -1892,6 +1892,9 @@ export function createApp(deps: ApiDeps) {
       validator('query', (query) => InboxPageQuery.parse(query)),
       (c) => c.json(deps.services.pageInbox(c.req.valid('query'))),
     )
+    .get('/inbox/:id/context', (c) =>
+      c.json(deps.services.inboxCardContext(InboxItemId.parse(c.req.param('id')))),
+    )
     .post(
       '/inbox/:id/answer',
       validator('json', (value): InboxAnswer => InboxAnswer.parse(value)),

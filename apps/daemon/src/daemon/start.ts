@@ -2383,6 +2383,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   };
   const services = createServices({
     state,
+    slackConnection,
     github: {
       githubStatus: github.githubStatus,
       startGithubSignin: github.startGithubSignin,

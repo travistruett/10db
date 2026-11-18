@@ -32,6 +32,8 @@ export const RENDER_READS: readonly { readonly route: string }[] = [
   { route: '/inbox' },
   // The Inbox's Waiting and Resolved tables: one page of cards. A database read.
   { route: '/inbox/page' },
+  // A selected question's last messages. A database read.
+  { route: '/inbox/:id/context' },
   { route: '/projects/:projectId/proposals' },
   // Factory draws it: cards per task and minutes work waited on a person, per day. Database reads only.
   { route: '/projects/:projectId/human-touch' },

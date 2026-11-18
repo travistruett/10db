@@ -21,6 +21,7 @@ describe('what a render token may do', () => {
       '/workstreams',
       '/inbox',
       '/inbox/page',
+      '/inbox/inbox_1/context',
     ])
       expect(renderMayRead('GET', path), path).toBe(true);
   });

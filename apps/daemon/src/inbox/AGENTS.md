@@ -8,10 +8,18 @@
   and Resolved tables and the chat tab's resolved cards read it. A list that can grow without limit is read through the page route.
 - `InboxPageQuery` is a strict object (an unknown key is a 400): `state` (`open`, `waiting` or `resolved`),
   `project`, `kind`, `outcome`, `person`, `sort` (`updatedAt`, `createdAt`, `kind`, `title`, `sentAt`), `dir`,
-  `page` (from 1) and `pageSize` (1 to 100, 25 by default).
-  - `open` is an `OPEN` card; `waiting` is an `OPEN` card whose live send is `sent` with no `returnedAt`
-    (whatever the Slack connection; the app shows Waiting only while Slack is connected); `resolved` is a
-    `RESOLVED` card.
+  `page` (from 1), `pageSize` (1 to 100, 25 by default), `after` (the last row's sort as JSON: the page
+  after it), `q` (title or body contains it, ASCII case folded), `since` (Resolved only) and `card` (the
+  page holds only that card's row). `after` refuses `page`, `sort` and `dir`; `card` refuses `after` and
+  `page`; `since` refuses a state but Resolved. Each refusal is a 400.
+  - `open` is an `OPEN` card, answered grouped into rows (a pass's cards are one row): `total` counts rows,
+    `rows` lists each row's key, sort and card ids, `items` holds the cards of the rows on the page, and
+    `next` is the last row's sort for `after`. `waiting` is an `OPEN` card whose live send is `sent` with no
+    `returnedAt`, under every connection; `resolved` is a `RESOLVED` card.
+  - Placement follows the live Slack connection, read at each request (`services.ts` passes
+    `waitingOut: slackConnection.get().state === 'connected'`): while connected, Open leaves out the sent,
+    unreturned cards Waiting holds; in any other state (`refused`, `none`, `off`, `unreachable`) they stay
+    in Open.
   - `outcome` follows `inboxOutcome` in contracts, in its order: a Slack answer (`answer.via` is `slack`), then
     10db's close (a `detail.resolution` that `CardResolution` accepts), then `answered` for the rest. The SQL
     is one `CASE` built from `CARD_RESOLUTION`; `inbox-page.test.ts` checks it against `inboxOutcome` row by
@@ -20,7 +28,12 @@
   - With no `sort`, Resolved is newest updated first, Waiting the longest out first (a card with no send
     last), and Open most urgent then oldest. Ties go by id. A page past the last answers the last, with its
     own number in `page`.
-- No index was added for the page: every page filters on `state` (`inbox_state_idx`) and the send subqueries
+- `GET /inbox/:id/context` answers an `InboxCardContextDto`: the last three `message` and `agent_message`
+  items, oldest first, of the card's conversation (`inboxCardContext` in
+  `packages/db/src/store/inbox-context.ts`). That is the conversation named by `detail.conversationId` when
+  it exists, else the task's conversation of the first target's workstream, else none (`{ messages: [] }`).
+  Tool calls and reasoning are left out. An unknown card is a 404.
+- No index was added for the page, and search is `LIKE`: every page filters on `state` (`inbox_state_idx`) and the send subqueries
   use `stakeholder_sends_card_idx`. A `(state, updated_at)` index is for when resolved cards reach six figures.
-- A screen's render token may read `/inbox/page` (`screens/render-access.ts`), as it reads `/inbox`; the app
+- A screen's render token may read `/inbox/page` and `/inbox/:id/context` (`screens/render-access.ts`), as it reads `/inbox`; the app
   names the frame's project in the query.
