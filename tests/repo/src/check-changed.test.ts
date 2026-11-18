@@ -437,6 +437,58 @@ describe('scripts/check-changed.mjs --precheck, run', () => {
     }
   });
 
+  it('places changed files whose names git would quote, from a real git diff', () => {
+    const repo = createThrowawayRepo('check-changed-names');
+    try {
+      const write = (path: string, content: string) => {
+        mkdirSync(join(repo.dir, path, '..'), { recursive: true });
+        writeFileSync(join(repo.dir, path), content);
+      };
+      write('scripts/check-changed.mjs', readRepoFile('scripts/check-changed.mjs'));
+      write('apps/x/package.json', JSON.stringify({ name: 'x' }));
+      write('apps/x/src/my file.ts', 'export {};\n');
+      write('docs/a.md', 'a\n');
+      repo.git('add', '.');
+      repo.commit('base');
+      repo.git('branch', 'main');
+      // Committed, changed but not staged, and untracked.
+      write('docs/qa/café-notes.md', 'notes\n');
+      repo.git('add', 'docs/qa/café-notes.md');
+      repo.commit('notes');
+      write('apps/x/src/my file.ts', 'export const x = 1;\n');
+      write('apps/x/src/naïve.ts', 'export {};\n');
+      const plan = (flags: string[]) => {
+        const result = spawnSync(
+          process.execPath,
+          ['scripts/check-changed.mjs', '--plan', ...flags],
+          { cwd: repo.dir, encoding: 'utf8', env: repo.env },
+        );
+        expect(result.status, result.stderr).toBe(0);
+        return JSON.parse(result.stdout) as Plan & { files: string[] };
+      };
+      for (const flags of [[], ['--precheck']]) {
+        const placed = plan(flags);
+        expect(placed.full, flags.join(' ')).toBe(false);
+        expect(placed.files).toEqual([
+          'apps/x/src/my file.ts',
+          'apps/x/src/naïve.ts',
+          'docs/qa/café-notes.md',
+        ]);
+        expect(placed.changed).toEqual(['apps/x']);
+        expect(placed.outside).toEqual(['docs/qa/café-notes.md']);
+      }
+      // A file outside every package still widens the check, and is named as git stored it.
+      write('überall.txt', 'x\n');
+      for (const flags of [[], ['--precheck']]) {
+        const widened = plan(flags);
+        expect(widened.full, flags.join(' ')).toBe(true);
+        expect(widened.reason).toBe('not in a package: überall.txt');
+      }
+    } finally {
+      repo.remove();
+    }
+  });
+
   it('runs the four steps over every package, not the gate, for a file it cannot place', () => {
     const run = runWithStubs(['--precheck', '--', 'pnpm-lock.yaml']);
     expect(run.stdout).toContain('pre-check over every package');

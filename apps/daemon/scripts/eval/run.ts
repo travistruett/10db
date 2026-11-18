@@ -49,6 +49,8 @@ const GATE = {
 
 const POLL_MS = 1_000;
 const DAEMON_START_MS = 60_000;
+/** How long a cancelled workstream may take to reach an ended state. */
+const CANCEL_SETTLE_MS = 120_000;
 
 export interface EvalOptions {
   readonly rigor: Rigor;
@@ -102,8 +104,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** The case's reference diff names a file in its areas; the fake build writes a new file beside it. */
 function fakeEditPath(c: EvalCase, opts: EvalOptions): string {
-  const changed = git(opts.source, ['diff', '--name-only', c.baseCommit, c.mergedCommit])
-    .split('\n')
+  const changed = git(opts.source, ['diff', '--name-only', '-z', c.baseCommit, c.mergedCommit])
+    .split('\0')
     .filter((p) => p !== '');
   const inArea = changed.find((p) =>
     classifyPath(p, opts.project.areas, []).areas.some((a) => c.areas.includes(a)),
@@ -253,6 +255,32 @@ async function approvePlans(d: Daemon, workstreamId: string): Promise<void> {
     await api(d, z.unknown(), `/inbox/${card.id}/answer`, { choice: PlanChoice.Approve });
 }
 
+/**
+ * Cancels a timed-out case-run's workstream through the daemon and waits until it has ended, so its
+ * lane stops spending usage, no later case runs beside it, and the repo and transcripts the runner
+ * reads next are no longer being written. A workstream that ended on its own in the meantime is fine.
+ * The cancel call waits for the lane to stop and a slow stop can drop the connection, so a failed call
+ * is asked again while the database says the workstream has not ended.
+ */
+async function cancelAndSettle(
+  d: Daemon,
+  workstreamId: string,
+  read: () => z.infer<typeof WorkstreamRow>,
+): Promise<z.infer<typeof WorkstreamRow>> {
+  const deadline = Date.now() + CANCEL_SETTLE_MS;
+  let row = read();
+  while (!ENDED.has(row.state)) {
+    if (Date.now() > deadline)
+      throw new EvalRunError(
+        `${workstreamId} is still ${row.state} ${String(CANCEL_SETTLE_MS / 1000)} s after it was cancelled`,
+      );
+    await api(d, z.unknown(), `/workstreams/${workstreamId}/cancel`, {}).catch(() => null);
+    row = read();
+    if (!ENDED.has(row.state)) await sleep(POLL_MS);
+  }
+  return row;
+}
+
 /** The commits above the base, each with its op trailer's value or null. */
 function commitsOf(repo: string): { sha: string; opTrailer: string | null }[] {
   const log = git(repo, [
@@ -274,11 +302,12 @@ function commitsOf(repo: string): { sha: string; opTrailer: string | null }[] {
 
 /** Paths changed from the base, committed or not, and those whose change alters what is installed. */
 function changesOf(repo: string): { changed: string[]; dependency: string[] } {
-  const lines = (text: string) => text.split('\n').filter((p) => p !== '');
+  // -z lists names NUL-separated, so git neither quotes nor escapes a non-ASCII name.
+  const paths = (text: string) => text.split('\0').filter((p) => p !== '');
   const changed = [
     ...new Set([
-      ...lines(git(repo, ['diff', '--name-only', 'origin/main'])),
-      ...lines(git(repo, ['ls-files', '--others', '--exclude-standard'])),
+      ...paths(git(repo, ['diff', '--name-only', '-z', 'origin/main'])),
+      ...paths(git(repo, ['ls-files', '-z', '--others', '--exclude-standard'])),
     ]),
   ].sort();
   const show = (ref: string, path: string): string => {
@@ -348,7 +377,7 @@ async function runCase(d: Daemon, c: EvalCase, run: number, opts: EvalOptions): 
   opts.log(
     `${slot}: ${timedOut ? 'timed out' : row.state} after ${String(Math.round(wallSeconds))} s`,
   );
-
+  if (timedOut) row = await cancelAndSettle(d, workstream.id, read);
   const sessions = z.array(SessionRow).parse(
     d.db
       .prepare(

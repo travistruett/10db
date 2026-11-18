@@ -18,10 +18,11 @@ for ref in '@{upstream}' origin/main main; do
 done
 
 pnpm -s typecheck
+# core.quotePath=false keeps a name with a non-ASCII character unquoted, so the filter matches it.
 changed=()
 while IFS= read -r file; do
   changed+=("$file")
-done < <({ git diff --name-only --diff-filter=d "$base"; git ls-files --others --exclude-standard; } | grep -E '\.(ts|tsx|js|mjs|cjs)$' | sort -u || true)
+done < <({ git -c core.quotePath=false diff --name-only --diff-filter=d "$base"; git -c core.quotePath=false ls-files --others --exclude-standard; } | grep -E '\.(ts|tsx|js|mjs|cjs)$' | sort -u || true)
 if ((${#changed[@]} > 0)); then
   # Changed files can match an ESLint ignore (fixtures, spikes); skip them instead of warning.
   pnpm -s exec eslint --cache --max-warnings=0 --no-warn-ignored "${changed[@]}"

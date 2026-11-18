@@ -246,6 +246,22 @@ function git(args, allowFail = false) {
 }
 
 /**
+ * The paths a git command given -z lists, split on NUL and not trimmed, so a name keeps a leading
+ * or trailing space.
+ * @param {string[]} args
+ */
+function gitPaths(args) {
+  return execFileSync('git', args, {
+    cwd: root,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    maxBuffer: 64 * 1024 * 1024,
+  })
+    .split('\0')
+    .filter(Boolean);
+}
+
+/**
  * The merge-base with the first of origin/main, upstream and main that exists; null when none.
  * origin/main comes first because a pushed branch's upstream is often the branch itself, whose
  * merge-base is the pushed tip, not where the branch left its base.
@@ -289,22 +305,23 @@ function reportSkipped(unreadable, toStderr = false) {
  * compare a file it cannot lstat with the index, so the worktree diff lists every such file as
  * changed. Such a file stays only when a commit since base or the index changes it, which the
  * tree-to-tree and index diffs show without reading the worktree; a worktree edit to it could not
- * be checked here anyway. The ones dropped are returned so the caller can name them.
+ * be checked here anyway. The ones dropped are returned so the caller can name them. git lists
+ * the names NUL-separated, so it neither quotes nor escapes a name with a space or a non-ASCII
+ * character.
  * @param {string} base
  */
 function changedFiles(base) {
-  const lines = (/** @type {string[]} */ args) => (git(args) ?? '').split('\n').filter(Boolean);
   const all = new Set([
-    ...lines(['diff', '--name-only', base]),
-    ...lines(['ls-files', '--others', '--exclude-standard']),
+    ...gitPaths(['diff', '--name-only', '-z', base]),
+    ...gitPaths(['ls-files', '-z', '--others', '--exclude-standard']),
   ]);
   const unreadable = [...all].filter((f) => statOf(f) === 'unreadable');
   /** @type {string[]} */
   const dropped = [];
   if (unreadable.length > 0) {
     const committed = new Set([
-      ...lines(['diff', '--name-only', base, 'HEAD']),
-      ...lines(['diff', '--name-only', '--cached', base]),
+      ...gitPaths(['diff', '--name-only', '-z', base, 'HEAD']),
+      ...gitPaths(['diff', '--name-only', '-z', '--cached', base]),
     ]);
     for (const file of unreadable) {
       if (committed.has(file)) continue;
