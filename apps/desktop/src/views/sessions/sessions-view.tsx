@@ -10,8 +10,6 @@ import { Announcer } from '../../conversation/announcer';
 import { TitleRow } from '../../shell/title-row';
 import { useSelectedProject } from '../../shell/selected-project';
 import { ChatTab } from './chat-tab';
-import { TaskTab as TaskTabView } from './task-tab';
-import { useTaskTabs } from './task-tabs';
 import { FreshTab } from './fresh-tab';
 import {
   openFreshTab,
@@ -24,7 +22,7 @@ import {
 } from './fresh-tabs';
 import { draftKey, sessionDrafts, type SendRequest } from './session-drafts';
 import type { SessionsSearch } from './sessions-search';
-import { useClosedTabs, type ClosedChat } from './closed-tabs';
+import { useClosedTabs } from './closed-tabs';
 import { useSessionClosing } from './use-session-closing';
 import { openCardsByConversation } from './needs-you';
 import { panelGroups, panelOrder, topPosition, type PanelRow } from './panel-order';
@@ -79,15 +77,12 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
 
   const list = projects.data ?? [];
   const chats = open.data ?? [];
-  const taskList = useTaskTabs();
   const groups = panelGroups(list, chats, fresh);
   const rows = panelOrder(groups);
   const loaded = open.isSuccess && projects.isSuccess;
-  const taskTab =
-    search.task === undefined ? undefined : taskList.find((t) => t.taskId === search.task);
 
   // The screen is never blank: with nothing open, a fresh tab opens.
-  if (loaded && rows.length === 0 && taskTab === undefined) {
+  if (loaded && rows.length === 0) {
     const made = openFreshTab(fresh, list, selectedProject?.id ?? null, -1);
     if (made !== null) setFresh(made.tabs);
   }
@@ -98,8 +93,7 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
       : search.fresh !== undefined
         ? draftKey.fresh(search.fresh)
         : null;
-  const selected =
-    taskTab !== undefined ? null : (rows.find((r) => r.key === wanted) ?? rows[0] ?? null);
+  const selected = rows.find((r) => r.key === wanted) ?? rows[0] ?? null;
 
   // A session is seen while it is selected and the window has focus.
   const selectedChat = selected?.kind === 'chat' ? selected.chat : null;
@@ -178,7 +172,7 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
       setEndingTakeover(row);
     else closing.archiveRow(row);
   };
-  const closed = useClosedTabs().filter((entry): entry is ClosedChat => 'chatId' in entry);
+  const closed = useClosedTabs();
 
   const newTab = (): void => {
     const made = openFreshTab(fresh, list, selectedProject?.id ?? null, -1);
@@ -380,7 +374,6 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
         }}
       />
       {selected?.kind === 'fresh' ? <TitleRow title="New session" switcher={switcher} /> : null}
-      {taskTab === undefined ? null : <TitleRow title={taskTab.title} />}
       {closing.notice === null ? null : (
         <Paper role="status" withBorder px="sm" py={6} mx="md" mt="xs">
           <Group justify="space-between" wrap="nowrap">
@@ -396,13 +389,6 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
             </Button>
           </Group>
         </Paper>
-      )}
-      {taskTab === undefined ? null : (
-        <TaskTabView
-          key={taskTab.taskId}
-          tab={taskTab}
-          project={list.find((p) => p.id === taskTab.projectId)}
-        />
       )}
       {selected === null ? null : (
         <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>

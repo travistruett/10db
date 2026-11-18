@@ -199,6 +199,12 @@ const sessionsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/sessions',
   validateSearch: sessionsSearch,
+  // A task's tab is gone: an old link to one lands on the task in the Board.
+  beforeLoad: ({ search }) => {
+    // TanStack Router's redirect is thrown by design.
+    // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router redirects by throwing.
+    if (search.task !== undefined) throw redirect({ to: '/board', search: { task: search.task } });
+  },
   component: SessionsPage,
 });
 const knowledgeRoute = createRoute({

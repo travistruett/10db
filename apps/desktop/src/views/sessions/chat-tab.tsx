@@ -28,6 +28,7 @@ import { latestTodos, TodoList } from '../../conversation/todo-list';
 import { PermissionRequest, useConversationCards } from '../../conversation/permission-request';
 import type { Streaming } from '../../conversation/working-line';
 import { fetchConversationFiles, useChatModels, usePatchChat } from '../../daemon/chat-queries';
+import { useChatChanges } from '../../daemon/chat-changes-queries';
 import { useChatWork, useChooseWork, type ChoseWork } from '../../daemon/chat-work-queries';
 import {
   useConversation,
@@ -49,13 +50,16 @@ import { chatEntries } from './chat-entries';
 import { FolderWait } from './folder-wait';
 import { keepingWords } from './folder-holders';
 import { useOpenTask } from './open-session';
-import { TaskTabPlace } from './task-tabs';
 import { useTaskSession } from '../../daemon/task-session-queries';
 import { sessionAnnouncement, type SessionEvent } from './session-announcements';
 import { JudgeLine } from '../../conversation';
 import { SessionTitle } from './session-title';
 import { WorkBar } from './work-bar';
+import { ChangesDrawer, BESIDE_PX, DRAWER_WIDTH } from './changes-drawer';
+import { changesChoice } from './changes-choice';
+import { changesTotals, withQuote } from './changes-files';
 import { GitStepButton } from './git-step-button';
+import { useSessionKeys } from './use-session-keys';
 import { sessionMeta } from './session-meta';
 import type { SessionActions } from './session-menu';
 import { TerminalBanner } from './terminal-banner';
@@ -118,12 +122,7 @@ function HandedOffLine({ chat }: { readonly chat: ChatDto }) {
           size="xs"
           variant="default"
           onClick={() => {
-            void openTask({
-              taskId: session.taskId,
-              projectId: chat.projectId,
-              title: session.title,
-              place: session.place === 'pass' ? TaskTabPlace.Pass : TaskTabPlace.Copy,
-            });
+            void openTask({ taskId: session.taskId, projectId: chat.projectId });
           }}
         >
           Open Task
@@ -190,6 +189,23 @@ export function ChatTab({
   const folder = useProjectFolder(chat.projectId);
   const work = useChatWork(chat.id);
   const choose = useChooseWork();
+  // Changes: the button shows once anything changed; the builder's choice to open or close it holds for the session.
+  const changes = useChatChanges(chat.id, true);
+  const totals = changes.data === undefined ? null : changesTotals(changes.data.files);
+  const hasChanges = totals !== null && totals.files > 0;
+  // A session whose worktree is gone has no diff to read; its pull request has the changes, which the drawer links.
+  const offersChanges =
+    hasChanges || (changes.isError && (work.data?.pullRequest ?? null) !== null);
+  const [changesOpen, setChangesOpen] = useState(() => changesChoice.get(chat.id) === true);
+  const toggleChanges = (): void => {
+    changesChoice.set(chat.id, !changesOpen);
+    setChangesOpen(!changesOpen);
+  };
+  useSessionKeys((key) => {
+    if (key.kind !== 'changes' || (!offersChanges && !changesOpen)) return false;
+    toggleChanges();
+    return true;
+  });
   // Esc hides the bar until a refused change asks again, which changes `askedAt`.
   const [hiddenFor, setHiddenFor] = useState<string | null | undefined>(undefined);
   const [settled, setSettled] = useState<ChoseWork['work'] | null>(null);
@@ -333,12 +349,7 @@ export function ChatTab({
       inTerminal,
       cards: [...(resolved.data?.items ?? []), ...open],
       openTask: (task) => {
-        void openTask({
-          taskId: task.taskId,
-          projectId: chat.projectId,
-          title: task.title,
-          place: task.place === 'here' ? TaskTabPlace.Pass : TaskTabPlace.Copy,
-        });
+        void openTask({ taskId: task.taskId, projectId: chat.projectId });
       },
     }),
     { chatId: chat.id, projectId: chat.projectId },
@@ -398,215 +409,256 @@ export function ChatTab({
       ref={sizeRef}
       style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}
     >
-      <SessionTitle
-        chat={chat}
-        conversation={conversation}
-        meta={sessionMeta({
-          projectName: project?.name ?? '',
-          place,
-          movingTo,
-          state: work.data,
-          terminalSince:
-            takeover.data === undefined ? null : dayjs(takeover.data.since).format('HH:mm'),
-          inTerminal,
-        })}
-        steps={
-          work.data === undefined || removed ? null : (
-            <GitStepButton
-              chatId={chat.id}
-              state={work.data}
-              title={chat.title}
-              turnRunning={working}
-              onError={setGitError}
-            />
-          )
-        }
-        switcher={switcher}
-        projectPath={project?.repoPath ?? null}
-        actions={{
-          ...actions,
-          ...(removed || reconnecting
-            ? {}
-            : {
-                onFileAsTasks: () => {
-                  void post({ ...EMPTY_DRAFT, text: FILE_AS_TASKS_MESSAGE }).catch(
-                    (error: unknown) => {
-                      setSendError(error instanceof Error ? error.message : String(error));
-                    },
-                  );
-                },
-              }),
+      {/* The measured box keeps its width; this one gives the drawer's share of the surface up. */}
+      <Box
+        style={{
+          flex: 1,
+          minWidth: 0,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          paddingRight: changesOpen && width >= BESIDE_PX ? DRAWER_WIDTH : 0,
         }}
-        {...(renaming === undefined ? {} : { renaming })}
-        {...(onRenamed === undefined ? {} : { onRenamed })}
-        {...(openingTerminal === undefined ? {} : { openingTerminal })}
-        {...(onTerminalAsked === undefined ? {} : { onTerminalAsked })}
-        onTerminalUncopied={setUncopied}
-      />
-      {gitError === null ? null : (
-        <Alert
-          role="alert"
-          color="red"
-          mx="md"
-          mt="xs"
-          py={6}
-          withCloseButton
-          closeButtonLabel="Dismiss"
-          onClose={() => {
-            setGitError(null);
+      >
+        <SessionTitle
+          chat={chat}
+          conversation={conversation}
+          meta={sessionMeta({
+            projectName: project?.name ?? '',
+            place,
+            movingTo,
+            state: work.data,
+            terminalSince:
+              takeover.data === undefined ? null : dayjs(takeover.data.since).format('HH:mm'),
+            inTerminal,
+          })}
+          steps={
+            <>
+              {offersChanges || changesOpen ? (
+                <Button
+                  size="compact-sm"
+                  variant="default"
+                  aria-pressed={changesOpen}
+                  onClick={toggleChanges}
+                >
+                  {totals === null || !hasChanges
+                    ? 'Changes'
+                    : `Changes +${String(totals.added)} −${String(totals.removed)}`}
+                </Button>
+              ) : null}
+              {work.data === undefined || removed ? null : (
+                <GitStepButton
+                  chatId={chat.id}
+                  state={work.data}
+                  title={chat.title}
+                  turnRunning={working}
+                  onError={setGitError}
+                />
+              )}
+            </>
+          }
+          switcher={switcher}
+          projectPath={project?.repoPath ?? null}
+          actions={{
+            ...actions,
+            ...(removed || reconnecting
+              ? {}
+              : {
+                  onFileAsTasks: () => {
+                    void post({ ...EMPTY_DRAFT, text: FILE_AS_TASKS_MESSAGE }).catch(
+                      (error: unknown) => {
+                        setSendError(error instanceof Error ? error.message : String(error));
+                      },
+                    );
+                  },
+                }),
           }}
-        >
-          {gitError}
-        </Alert>
-      )}
-      <ConversationLayout
-        label="Conversation"
-        header={<JudgeLine judge={caps.judge} />}
-        footer={
-          <>
-            {caps.plan ? (
-              <TodoList
-                steps={latestTodos(items)}
-                working={working}
+          {...(renaming === undefined ? {} : { renaming })}
+          {...(onRenamed === undefined ? {} : { onRenamed })}
+          {...(openingTerminal === undefined ? {} : { openingTerminal })}
+          {...(onTerminalAsked === undefined ? {} : { onTerminalAsked })}
+          onTerminalUncopied={setUncopied}
+        />
+        {gitError === null ? null : (
+          <Alert
+            role="alert"
+            color="red"
+            mx="md"
+            mt="xs"
+            py={6}
+            withCloseButton
+            closeButtonLabel="Dismiss"
+            onClose={() => {
+              setGitError(null);
+            }}
+          >
+            {gitError}
+          </Alert>
+        )}
+        <ConversationLayout
+          label="Conversation"
+          header={<JudgeLine judge={caps.judge} />}
+          footer={
+            <>
+              {caps.plan ? (
+                <TodoList
+                  steps={latestTodos(items)}
+                  working={working}
+                  cardWaiting={open.length > 0}
+                />
+              ) : null}
+              <WorkingLine
+                conversation={conversation}
+                streaming={streaming}
+                {...(tool === undefined ? {} : { tool })}
+              />
+              <PermissionRequest items={open} />
+              <BackgroundTasks
+                capabilities={caps}
+                tasks={conversation.backgroundTasks}
                 cardWaiting={open.length > 0}
               />
-            ) : null}
-            <WorkingLine
-              conversation={conversation}
-              streaming={streaming}
-              {...(tool === undefined ? {} : { tool })}
-            />
-            <PermissionRequest items={open} />
-            <BackgroundTasks
-              capabilities={caps}
-              tasks={conversation.backgroundTasks}
-              cardWaiting={open.length > 0}
-            />
-            {inTerminal ? (
-              <TerminalBanner
-                label={caps.label}
-                since={takeover.data?.since ?? null}
-                notes={takeover.data?.notes ?? []}
-                onHandBack={() => {
-                  setUncopied(null);
-                  setLastCommand(null);
-                  handBack.mutate(chat.conversationId);
-                }}
-                handingBack={handBack.isPending}
-                onCopyCommand={() => {
-                  takeoverCommand.mutate(chat.conversationId, {
-                    onSuccess: ({ line }) => {
-                      setLastCommand(line);
-                      clipboard.copy(line);
-                    },
-                  });
-                }}
-                copied={clipboard.copied}
-                line={uncopied ?? (clipboard.error === null ? null : lastCommand)}
-                error={handBack.error?.message ?? takeoverCommand.error?.message ?? null}
-              />
-            ) : null}
-            {waiting ? (
-              <FolderWait
-                holders={keeping}
-                branch={folder?.branch ?? work.data?.baseBranch ?? null}
-                onStop={stopNow}
-              />
-            ) : null}
-            {asking && !removed && conversation.state !== 'sealed' ? (
-              <WorkBar
-                key={askedAt ?? 'asked'}
-                agentLabel={caps.label}
-                branch={folder?.branch ?? work.data?.baseBranch ?? 'main'}
-                state={work.data}
-                pending={choose.isPending}
-                settled={settled}
-                error={choose.error?.message ?? null}
-                onHide={() => {
-                  setHiddenFor(askedAt);
-                  input.current?.focus();
-                }}
-                onChoose={(next) => {
-                  choose.mutate(
-                    { chatId: chat.id, place: next },
-                    {
-                      onSuccess: (answer) => {
-                        setSettled(answer.chosen ? null : answer.work);
+              {inTerminal ? (
+                <TerminalBanner
+                  label={caps.label}
+                  since={takeover.data?.since ?? null}
+                  notes={takeover.data?.notes ?? []}
+                  onHandBack={() => {
+                    setUncopied(null);
+                    setLastCommand(null);
+                    handBack.mutate(chat.conversationId);
+                  }}
+                  handingBack={handBack.isPending}
+                  onCopyCommand={() => {
+                    takeoverCommand.mutate(chat.conversationId, {
+                      onSuccess: ({ line }) => {
+                        setLastCommand(line);
+                        clipboard.copy(line);
                       },
-                    },
-                  );
-                }}
-              />
-            ) : null}
-            {conversation.state === 'sealed' ? (
-              <HandedOffLine chat={chat} />
-            ) : removed ? (
-              <Text size="sm" c="dimmed" px="md" py="md">
-                This project was removed from 10db.
-              </Text>
-            ) : (
-              <Composer
-                draft={draft}
-                onDraft={(next) => {
-                  setSendError(null);
-                  setDraft(next);
-                }}
-                capabilities={caps}
-                mentions={{
-                  files: (q, signal) =>
-                    fetchConversationFiles(client, chat.conversationId, q, signal),
-                  commands: conversation.commands,
-                }}
-                phase={phase}
-                disabledReason={disabledReason}
-                error={sendError}
-                inputRef={input}
-                modelControl={
-                  <Group gap={4} wrap="nowrap">
-                    {caps.modelSwitch === 'none' || offered.length === 0 ? (
-                      named === null ? null : (
-                        <Text size="xs" c="dimmed">
-                          {nameOf(named, new Map((modelRows.data ?? []).map((r) => [r.model, r])))}
-                        </Text>
-                      )
-                    ) : (
-                      <ModelMenu
-                        offered={offered}
-                        default={models.data?.default ?? null}
-                        picked={conversation.model}
-                        effort={conversation.effort}
-                        busy={working}
-                        pending={patch.isPending}
-                        error={modelRefusal}
-                        onPick={changeModel}
-                      />
-                    )}
-                  </Group>
-                }
-                onSend={post}
-                onStop={stopNow}
-                onRedo={async (d) => {
-                  await redo.mutateAsync({ conversationId: chat.conversationId, text: d.text });
-                }}
-              />
-            )}
-          </>
-        }
-      >
-        {loading ? (
-          <Box px="md" pt="md">
-            <PageLoading shape={PageLoadingShape.Lines} label="Loading the conversation" />
-          </Box>
-        ) : null}
-        <ConversationList
-          entries={shown}
-          highlight={null}
-          loadFull={loadFull}
-          onAllow={allow}
-          agentLabel={caps.label}
-          busy={streaming !== null}
-        />
-      </ConversationLayout>
+                    });
+                  }}
+                  copied={clipboard.copied}
+                  line={uncopied ?? (clipboard.error === null ? null : lastCommand)}
+                  error={handBack.error?.message ?? takeoverCommand.error?.message ?? null}
+                />
+              ) : null}
+              {waiting ? (
+                <FolderWait
+                  holders={keeping}
+                  branch={folder?.branch ?? work.data?.baseBranch ?? null}
+                  onStop={stopNow}
+                />
+              ) : null}
+              {asking && !removed && conversation.state !== 'sealed' ? (
+                <WorkBar
+                  key={askedAt ?? 'asked'}
+                  agentLabel={caps.label}
+                  branch={folder?.branch ?? work.data?.baseBranch ?? 'main'}
+                  state={work.data}
+                  pending={choose.isPending}
+                  settled={settled}
+                  error={choose.error?.message ?? null}
+                  onHide={() => {
+                    setHiddenFor(askedAt);
+                    input.current?.focus();
+                  }}
+                  onChoose={(next) => {
+                    choose.mutate(
+                      { chatId: chat.id, place: next },
+                      {
+                        onSuccess: (answer) => {
+                          setSettled(answer.chosen ? null : answer.work);
+                        },
+                      },
+                    );
+                  }}
+                />
+              ) : null}
+              {conversation.state === 'sealed' ? (
+                <HandedOffLine chat={chat} />
+              ) : removed ? (
+                <Text size="sm" c="dimmed" px="md" py="md">
+                  This project was removed from 10db.
+                </Text>
+              ) : (
+                <Composer
+                  draft={draft}
+                  onDraft={(next) => {
+                    setSendError(null);
+                    setDraft(next);
+                  }}
+                  capabilities={caps}
+                  mentions={{
+                    files: (q, signal) =>
+                      fetchConversationFiles(client, chat.conversationId, q, signal),
+                    commands: conversation.commands,
+                  }}
+                  phase={phase}
+                  disabledReason={disabledReason}
+                  error={sendError}
+                  inputRef={input}
+                  modelControl={
+                    <Group gap={4} wrap="nowrap">
+                      {caps.modelSwitch === 'none' || offered.length === 0 ? (
+                        named === null ? null : (
+                          <Text size="xs" c="dimmed">
+                            {nameOf(
+                              named,
+                              new Map((modelRows.data ?? []).map((r) => [r.model, r])),
+                            )}
+                          </Text>
+                        )
+                      ) : (
+                        <ModelMenu
+                          offered={offered}
+                          default={models.data?.default ?? null}
+                          picked={conversation.model}
+                          effort={conversation.effort}
+                          busy={working}
+                          pending={patch.isPending}
+                          error={modelRefusal}
+                          onPick={changeModel}
+                        />
+                      )}
+                    </Group>
+                  }
+                  onSend={post}
+                  onStop={stopNow}
+                  onRedo={async (d) => {
+                    await redo.mutateAsync({ conversationId: chat.conversationId, text: d.text });
+                  }}
+                />
+              )}
+            </>
+          }
+        >
+          {loading ? (
+            <Box px="md" pt="md">
+              <PageLoading shape={PageLoadingShape.Lines} label="Loading the conversation" />
+            </Box>
+          ) : null}
+          <ConversationList
+            entries={shown}
+            highlight={null}
+            loadFull={loadFull}
+            onAllow={allow}
+            agentLabel={caps.label}
+            busy={streaming !== null}
+          />
+        </ConversationLayout>
+      </Box>
+      <ChangesDrawer
+        opened={changesOpen}
+        onClose={() => {
+          changesChoice.set(chat.id, false);
+          setChangesOpen(false);
+        }}
+        changes={changes}
+        pullRequest={work.data?.pullRequest?.url ?? null}
+        onQuote={(text) => {
+          setDraft({ ...draft, text: withQuote(draft.text, text) });
+        }}
+      />
     </Box>
   );
 }

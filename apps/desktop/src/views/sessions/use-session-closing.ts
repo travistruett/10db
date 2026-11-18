@@ -111,7 +111,7 @@ export function useSessionClosing({
 
   /** ⌘⇧T: the last closed session; false when none is left. */
   const reopenLast = (): boolean => {
-    const entry = closedTabs.list().find((e): e is ClosedChat => 'chatId' in e);
+    const entry = closedTabs.list()[0];
     if (entry === undefined) return false;
     void reopen(entry);
     return true;
