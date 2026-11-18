@@ -1,0 +1,19 @@
+/* The scope switch on the panel's tone: a track in the window's base tone and an indicator one tone up,
+   in both schemes. Doubled selectors beat Mantine's own single-class rules. */
+.root.root {
+  background: var(--mantine-color-body);
+}
+
+.indicator.indicator {
+  background: var(--mantine-color-default-border);
+  box-shadow: none;
+}
+
+.label.label {
+  color: var(--mantine-color-dimmed);
+}
+
+.label.label[data-active] {
+  color: var(--mantine-color-bright);
+  font-weight: 600;
+}

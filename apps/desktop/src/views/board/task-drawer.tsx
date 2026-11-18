@@ -25,7 +25,6 @@ import {
   Anchor,
   Badge,
   Button,
-  Drawer,
   Group,
   List,
   Modal,
@@ -39,6 +38,8 @@ import {
   Tooltip,
 } from '@mantine/core';
 import { useState } from 'react';
+import { SurfaceDrawer } from '../../shell/surface-drawer';
+import { useReportUnsaved } from '../../shell/unsaved-guard';
 import { OpenConversation } from '../shape/open-conversation';
 import { OpenTaskLink } from '../sessions/open-task-link';
 import { PlanContextDisclosure } from './plan-context-disclosure';
@@ -210,8 +211,6 @@ export function TaskDrawer({
     (areas.length !== task.areas.length || areas.some((a) => !task.areas.includes(a)));
   const [error, setError] = useState<string | null>(null);
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
-  // An enlarged picture keeps Esc for itself, as Mantine would close the drawer on the same key.
-  const [pictureOpen, setPictureOpen] = useState(false);
   const waitsOn = task.dependsOn.flatMap((id) => {
     const peer = peers.get(id);
     return peer ? [peer.title] : [];
@@ -238,6 +237,8 @@ export function TaskDrawer({
     modelSettingChanged ||
     areasChanged ||
     (pullRequestBase !== undefined && landingEditable && landingChanged(task.landing, landing));
+
+  useReportUnsaved(dirty);
 
   // Every way out (close button, Escape, outside click, Cancel) comes through here.
   const requestClose = () => {
@@ -299,17 +300,7 @@ export function TaskDrawer({
         : null);
 
   return (
-    <Drawer
-      opened
-      onClose={requestClose}
-      closeOnEscape={!confirmingDiscard && !pictureOpen}
-      position="right"
-      // A side panel: the Board stays visible beside it, so it is never wider than half the window.
-      size="min(640px, 50vw)"
-      title="Task"
-      padding="lg"
-      closeButtonProps={{ 'aria-label': 'Close' }}
-    >
+    <SurfaceDrawer opened onClose={requestClose} label="Task">
       <Stack gap="md">
         <Stack gap={4}>
           <Title order={3} size="h4" fw={600}>
@@ -449,7 +440,7 @@ export function TaskDrawer({
                   </Anchor>
                 </Group>
               ) : null}
-              <TaskPictures taskId={task.id} onZoom={setPictureOpen} />
+              <TaskPictures taskId={task.id} />
               <TaskSkips workstreamId={workstream?.id} />
               <TaskSizeLine taskId={task.id} />
               <PlanContextDisclosure taskId={task.id} />
@@ -601,7 +592,6 @@ export function TaskDrawer({
               justify="space-between"
               wrap="nowrap"
               pos="sticky"
-              bottom={0}
               mt="xl"
               mx="calc(var(--mantine-spacing-lg) * -1)"
               mb="calc(var(--mantine-spacing-lg) * -1)"
@@ -609,6 +599,8 @@ export function TaskDrawer({
               py="md"
               bg="var(--mantine-color-body)"
               style={{
+                // The drawer's body pads its content, and a sticky edge is measured inside that padding.
+                bottom: 'calc(var(--mantine-spacing-lg) * -1)',
                 borderTop: '1px solid var(--mantine-color-default-border)',
                 zIndex: 'var(--mantine-z-index-app)',
               }}
@@ -656,7 +648,7 @@ export function TaskDrawer({
           </Button>
         </Group>
       </Modal>
-    </Drawer>
+    </SurfaceDrawer>
   );
 }
 

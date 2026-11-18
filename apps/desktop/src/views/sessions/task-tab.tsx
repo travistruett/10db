@@ -1,6 +1,6 @@
 import { ChangesScope, type ProjectViewDto, type TaskSessionDto } from '@10db/contracts';
 import { Box, Button, Flex, Text } from '@mantine/core';
-import { useMediaQuery } from '@mantine/hooks';
+import { useElementSize } from '@mantine/hooks';
 import { useState } from 'react';
 import { useWorkstreamChanges, useWorkstreams } from '../../daemon/queries';
 import { useTaskSession } from '../../daemon/task-session-queries';
@@ -57,7 +57,9 @@ function LoadedTaskTab({
   const stamp = workstreams.data?.find((w) => w.id === workstreamId)?.updatedAt ?? null;
   const [scope, setScope] = useState<ChangesScope>(ChangesScope.All);
   const changes = useWorkstreamChanges(workstreamId, stamp, scope, true);
-  const wide = useMediaQuery(`(min-width: ${String(AUTO_OPEN_PX)}px)`);
+  // The tab's own width, not the window's: the rail and panel take some of the window.
+  const { ref: sizeRef, width } = useElementSize();
+  const wide = width >= AUTO_OPEN_PX;
   // Until the builder chooses, it opens by itself once there are changes and room; after that their
   // choice holds for the tab.
   const [choice, setChoiceState] = useState<boolean | null>(() =>
@@ -92,7 +94,7 @@ function LoadedTaskTab({
     );
   const tabProps = { session, project, changes: control, quote };
   return (
-    <Flex style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
+    <Flex ref={sizeRef} style={{ flex: 1, minHeight: 0, minWidth: 0 }}>
       <Flex direction="column" style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
         {session.place === 'pass' ? <PassTab {...tabProps} /> : <CopyTab {...tabProps} />}
       </Flex>

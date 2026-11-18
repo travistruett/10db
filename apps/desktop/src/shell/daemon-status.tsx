@@ -1,6 +1,7 @@
-import { ThemeIcon, Tooltip } from '@mantine/core';
+import { Tooltip } from '@mantine/core';
 import { IconPlugConnectedX, IconPlugX, type Icon } from '@tabler/icons-react';
 import { useDaemonStatus } from '../daemon/provider';
+import classes from './rail.module.css';
 
 function StatusIcon({
   label,
@@ -12,10 +13,15 @@ function StatusIcon({
   readonly icon: Icon;
 }) {
   return (
-    <Tooltip label={label}>
-      <ThemeIcon variant="transparent" color={color} role="img" aria-label={label}>
+    <Tooltip label={label} position="right" openDelay={300}>
+      <span
+        className={classes['item']}
+        role="img"
+        aria-label={label}
+        style={{ color: `var(--mantine-color-${color}-text)`, cursor: 'default' }}
+      >
         <StatusGlyph size={18} stroke={1.5} />
-      </ThemeIcon>
+      </span>
     </Tooltip>
   );
 }

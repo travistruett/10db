@@ -9,11 +9,12 @@ import {
   type PassViewDto,
   type ProjectViewDto,
 } from '@10db/contracts';
-import { ActionIcon, Group, Menu, Stack, Text, Title } from '@mantine/core';
+import { ActionIcon, Menu, Stack, Text } from '@mantine/core';
 import { IconDots } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { CloseProgress } from './close-progress';
 import { PageStatus, pageStatus } from './page-status';
+import { TitleRow } from '../../shell/title-row';
 import { medianTurnMinutes, timingLine } from './timing';
 
 // Workbench spec §4.3: the pass header holds the pass's own actions; a page's actions stay at its
@@ -70,8 +71,10 @@ function askingSince(view: PassViewDto, inbox: readonly InboxItemDto[]): string[
 }
 
 /**
- * One line with the project, the pass and its counts; Open Pull Request once a page is signed off, and a menu with Close Pass, Rename and Abandon Pass; the timing hint, dimmed, when it
- * has something to say. While the pass closes its page actions wait and Abandon stays.
+ * The pass's line in the title row (the project, the pass and its counts) with its actions: Open Pull
+ * Request once a page is signed off, and a menu with Finish, Rename and Abandon. Under the row, at the top
+ * of the content: why Open Pull Request is missing, the close's progress, and the timing hint, dimmed,
+ * when it has something to say. While the pass closes its page actions wait and Abandon stays.
  */
 export function PassHeader(props: PassHeaderProps) {
   const { project, view, inbox, now, pullRequest, pullRequestReason } = props;
@@ -93,53 +96,47 @@ export function PassHeader(props: PassHeaderProps) {
     now,
   });
   const signedOff = statuses.includes(PageStatus.SignedOff);
-  // The line takes the room it needs, wrapping onto a second row; the actions go under it, kept to the
-  // right, when the window is too narrow for both, so the ⋯ menu is always in reach.
   return (
     <Stack gap={4}>
-      <Group justify="space-between" wrap="wrap" gap="sm" style={{ rowGap: 4 }}>
-        <Title
-          order={2}
-          size="h5"
-          fw={500}
-          style={{ flex: '1 1 16rem', minWidth: 0, overflowWrap: 'anywhere' }}
-        >
-          {headerLine(project.name, view.pass.name, statuses)}
-        </Title>
-        <Group gap="xs" wrap="nowrap" style={{ flex: 'none', marginLeft: 'auto' }}>
-          {signedOff ? pullRequest : null}
-          <Menu position="bottom-end" withinPortal>
-            <Menu.Target>
-              <ActionIcon variant="subtle" color="gray" aria-label="More actions">
-                <IconDots size={16} stroke={1.5} />
-              </ActionIcon>
-            </Menu.Target>
-            <Menu.Dropdown>
-              {onClose ? (
+      <TitleRow
+        lines={2}
+        title={headerLine(project.name, view.pass.name, statuses)}
+        actions={
+          <>
+            {signedOff ? pullRequest : null}
+            <Menu position="bottom-end" withinPortal>
+              <Menu.Target>
+                <ActionIcon variant="subtle" color="gray" aria-label="More actions">
+                  <IconDots size={16} stroke={1.5} />
+                </ActionIcon>
+              </Menu.Target>
+              <Menu.Dropdown>
+                {onClose ? (
+                  <MenuAction
+                    label="Finish"
+                    byline="Ship the signed-off pages as one pull request."
+                    disabled={!open}
+                    onClick={onClose}
+                  />
+                ) : null}
                 <MenuAction
-                  label="Finish"
-                  byline="Ship the signed-off pages as one pull request."
+                  label="Rename"
+                  byline="Change the name at the top."
                   disabled={!open}
-                  onClick={onClose}
+                  onClick={onRename}
                 />
-              ) : null}
-              <MenuAction
-                label="Rename"
-                byline="Change the name at the top."
-                disabled={!open}
-                onClick={onRename}
-              />
-              <MenuAction
-                label="Abandon"
-                byline="Stop here. Unfinished changes leave your folder and wait on their Board tasks."
-                color="red"
-                disabled={!abandonable}
-                onClick={onAbandon}
-              />
-            </Menu.Dropdown>
-          </Menu>
-        </Group>
-      </Group>
+                <MenuAction
+                  label="Abandon"
+                  byline="Stop here. Unfinished changes leave your folder and wait on their Board tasks."
+                  color="red"
+                  disabled={!abandonable}
+                  onClick={onAbandon}
+                />
+              </Menu.Dropdown>
+            </Menu>
+          </>
+        }
+      />
       {signedOff ? pullRequestReason : null}
       <CloseProgress
         state={view.pass.state}

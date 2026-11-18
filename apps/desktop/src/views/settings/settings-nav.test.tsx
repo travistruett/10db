@@ -31,8 +31,7 @@ const APP_LINKS = [
 function linkNames(nav: HTMLElement): string[] {
   return within(nav)
     .getAllByRole('link')
-    .map((l) => l.textContent)
-    .filter((name) => name !== 'Back to Board');
+    .map((l) => l.textContent);
 }
 
 describe('SettingsNav', () => {
@@ -63,17 +62,6 @@ describe('SettingsNav', () => {
         expect(within(nav).getByRole('group', { name: group })).toBeTruthy();
     },
   );
-
-  it('has a project switcher at project scope only', async () => {
-    server.use(...baseHandlers());
-    renderApp('/settings/billing');
-    const nav = await screen.findByRole('navigation', { name: 'Settings sections' });
-    expect(within(nav).getByRole('button', { name: /Switch project/ })).toBeTruthy();
-    fireEvent.click(within(nav).getByRole('radio', { name: 'All projects' }));
-    await waitFor(() => {
-      expect(within(nav).queryByRole('button', { name: /Switch project/ })).toBeNull();
-    });
-  });
 
   it.each([
     { path: '/settings/billing', choose: 'All projects', lands: '/settings/overview' },

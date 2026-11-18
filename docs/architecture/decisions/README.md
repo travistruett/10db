@@ -1,7 +1,7 @@
 # Decisions
 
-One file per decision about 10db's own design, named `YYYY-MM-DD-<slug>.md`: the date it was decided, then a
-slug of a few words naming the choice. The numbered log in [`../decisions.md`](../decisions.md) is closed at 133; its rows
+One file per decision about 10db's own design, named `YYYY-MM-DD-<slug>.md`: the date it was decided and a
+few words saying what. The numbered log in [`../decisions.md`](../decisions.md) is closed at 133; its rows
 stay as they are and are still cited by number ("decision 129").
 
 A decision file reads:
@@ -42,5 +42,5 @@ One record was edited past this rule before the rule was written down:
 `decisions/2026-11-03-a-lane-runs-read-only-commands-without-a-card.md` and says which of its later text is a
 changed choice and which a correction. Do not take that record's history as a precedent.
 
-The decisions an agent records with `record_decision` while
+These are the design records of this repository. The decisions an agent records with `record_decision` while
 10db runs a project live in that project's database (decision 6) and never come here.

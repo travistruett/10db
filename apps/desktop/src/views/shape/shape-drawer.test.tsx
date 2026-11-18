@@ -16,63 +16,26 @@ import {
   shapeViewDto,
 } from '../../test/shape-fixtures';
 import { conversationDto } from '../../test/conversation-fixtures';
+import {
+  observedWidth,
+  observeWidthsOf,
+  resetObservedWidth,
+  resizeObservedTo,
+} from '../../test/sized-observer';
 
 // Shape spec §4 D1: under 1100 px the Proposed sidebar is a drawer, and each count in the bar's
 // summary line opens it at that count's section.
 
 const project = projectViewDto();
-const realObserver = window.ResizeObserver;
 
-/** The width every observed element has. Under 1100 px the split pane chooses the drawer layout. */
-let contentWidth = 900;
-const watching = new Set<SizedObserver>();
-
-/** Reports `contentWidth` on observing, and again when `resizeTo` changes it. */
-class SizedObserver implements ResizeObserver {
-  private readonly callback: ResizeObserverCallback;
-  private readonly targets = new Set<Element>();
-  constructor(callback: ResizeObserverCallback) {
-    this.callback = callback;
-  }
-  observe(target: Element): void {
-    this.targets.add(target);
-    watching.add(this);
-    this.report();
-  }
-  report(): void {
-    const width = contentWidth;
-    const rect = { x: 0, y: 0, top: 0, left: 0, bottom: 600, right: width, width, height: 600 };
-    const box = [{ inlineSize: width, blockSize: 600 }];
-    const entries = [...this.targets].map((target) => ({
-      target,
-      contentRect: { ...rect, toJSON: () => rect },
-      borderBoxSize: box,
-      contentBoxSize: box,
-      devicePixelContentBoxSize: box,
-    }));
-    this.callback(entries, this);
-  }
-  unobserve(target: Element): void {
-    this.targets.delete(target);
-  }
-  disconnect(): void {
-    this.targets.clear();
-    watching.delete(this);
-  }
-}
-
-function resizeTo(width: number): void {
-  contentWidth = width;
-  for (const observer of watching) observer.report();
-}
+/** Under 1100 px the split pane chooses the drawer layout. */
+const SPLIT_WIDTH = 900;
 
 beforeEach(() => {
-  contentWidth = 900;
-  watching.clear();
-  window.ResizeObserver = SizedObserver;
+  observeWidthsOf(SPLIT_WIDTH);
 });
 afterEach(() => {
-  window.ResizeObserver = realObserver;
+  resetObservedWidth();
 });
 
 function openNarrow(view: ShapeViewDto): ReturnType<typeof renderApp> {
@@ -366,7 +329,7 @@ describe('Shape: the conversation across a layout change', () => {
   /** The new-conversation screen once it has its project and has measured itself. */
   const onNewConversation = async (): Promise<HTMLElement> => {
     await screen.findByRole('list', { name: 'Recent conversations' });
-    if (contentWidth < 1100) await screen.findByRole('button', { name: 'Proposed' });
+    if (observedWidth() < 1100) await screen.findByRole('button', { name: 'Proposed' });
     return screen.getByRole('textbox', { name: 'Message' });
   };
   const send = (input: HTMLElement): void => {
@@ -466,7 +429,7 @@ describe('Shape: the conversation across a layout change', () => {
   });
 
   it('opens the conversation of a send the window was resized across', async () => {
-    contentWidth = 1200;
+    observeWidthsOf(1200);
     const message = waiting();
     serve(
       http.post(daemonUrl('/conversations/:conversationId/messages'), async () => {
@@ -480,7 +443,7 @@ describe('Shape: the conversation across a layout change', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('data-loading')).toBe(true);
     });
-    resizeTo(900);
+    resizeObservedTo(900);
     await screen.findByRole('button', { name: 'Proposed' });
     message.release();
     await waitFor(() => {
@@ -489,15 +452,15 @@ describe('Shape: the conversation across a layout change', () => {
   });
 
   it('keeps the input, and what is typed in it, when the window crosses the drawer width', async () => {
-    contentWidth = 1200;
+    observeWidthsOf(1200);
     serve();
     renderApp('/shape');
     const input = await onNewConversation();
     fireEvent.change(input, { target: { value: text } });
-    resizeTo(900);
+    resizeObservedTo(900);
     await screen.findByRole('button', { name: 'Proposed' });
     expect(screen.getByRole('textbox', { name: 'Message' })).toBe(input);
-    resizeTo(1200);
+    resizeObservedTo(1200);
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Proposed' })).toBeNull();
     });

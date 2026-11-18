@@ -8,9 +8,9 @@ import {
   Select,
   Stack,
   Text,
-  Title,
   Tooltip,
 } from '@mantine/core';
+import { TitleRow } from '../../shell/title-row';
 import { Link } from '@tanstack/react-router';
 import { IconRefresh } from '@tabler/icons-react';
 import { useState } from 'react';
@@ -120,35 +120,37 @@ export function ModelsSection() {
 
   const header = (
     <Stack gap={4}>
-      <Group justify="space-between" align="center" wrap="nowrap">
-        <Title order={3}>Models</Title>
-        <Group gap="xs" wrap="nowrap">
-          {agents && refresh.isError ? (
-            <Text size="xs" c="red" role="alert">
-              {refresh.error.message}
-            </Text>
-          ) : null}
-          {accountSelect}
-          {agents ? (
-            <Tooltip
-              label="Fetch prices from models.dev and re-read every account's model list"
-              position="left"
-            >
-              <ActionIcon
-                variant="default"
-                size="input-xs"
-                aria-label="Refresh Models"
-                loading={refresh.isPending}
-                onClick={() => {
-                  refresh.mutate();
-                }}
+      <TitleRow
+        title="Models"
+        actions={
+          <>
+            {agents && refresh.isError ? (
+              <Text size="xs" c="red" role="alert">
+                {refresh.error.message}
+              </Text>
+            ) : null}
+            {accountSelect}
+            {agents ? (
+              <Tooltip
+                label="Fetch prices from models.dev and re-read every account's model list"
+                position="left"
               >
-                <IconRefresh size={16} stroke={1.5} />
-              </ActionIcon>
-            </Tooltip>
-          ) : null}
-        </Group>
-      </Group>
+                <ActionIcon
+                  variant="default"
+                  size="input-xs"
+                  aria-label="Refresh Models"
+                  loading={refresh.isPending}
+                  onClick={() => {
+                    refresh.mutate();
+                  }}
+                >
+                  <IconRefresh size={16} stroke={1.5} />
+                </ActionIcon>
+              </Tooltip>
+            ) : null}
+          </>
+        }
+      />
       <SegmentedControl
         size="xs"
         w="fit-content"

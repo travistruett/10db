@@ -1,6 +1,6 @@
 import type { ChatDto, Effort, FolderWhileHeld, ProjectId, ProjectViewDto } from '@10db/contracts';
 import { Box, Group, Select, Text } from '@mantine/core';
-import { useMediaQuery } from '@mantine/hooks';
+import { useElementSize } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
 import { Composer } from '../../conversation/composer';
 import { CONVERSATION_WIDTH } from '../../conversation/conversation-layout';
@@ -33,7 +33,8 @@ import { StartFrom } from './start-from';
 const OPEN_MENTION = /(^|\s)@\S*$/u;
 
 /** Under 640 px the composer's hint goes (sessions UI spec §7.11). */
-const NARROW_QUERY = '(max-width: 639px)';
+/** Under this width of the tab itself the composer drops its long labels. */
+const NARROW_PX = 640;
 
 export interface FreshTabProps {
   readonly tab: FreshTabState;
@@ -55,7 +56,9 @@ export function FreshTab({
 }: FreshTabProps) {
   const project = projects.find((p) => p.id === tab.projectId);
   const name = project?.name ?? 'this project';
-  const narrow = useMediaQuery(NARROW_QUERY);
+  // The tab's own width, not the window's; an unmeasured tab reads 0 and is not narrow.
+  const { ref: sizeRef, width } = useElementSize();
+  const narrow = width > 0 && width < NARROW_PX;
   const [draft, setDraft] = useSessionDraft(draftKey.fresh(tab.id));
   const models = useChatModels(tab.projectId);
   // An agent that can't search the web (`capabilities.webSearch`) is never said to.
@@ -121,7 +124,7 @@ export function FreshTab({
   const chosen = create.isPending;
 
   return (
-    <Box style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+    <Box ref={sizeRef} style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
       <Box maw={CONVERSATION_WIDTH} mx="auto" px="md" pt="12vh" pb="xl">
         <Text size="sm" c="dimmed" mb="md">
           {web

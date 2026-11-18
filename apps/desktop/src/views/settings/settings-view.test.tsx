@@ -29,24 +29,27 @@ describe('SettingsView', () => {
     await waitFor(() => {
       expect(router.state.location.pathname).toBe('/settings/general');
     });
-    expect(await screen.findByRole('heading', { name: 'General', level: 3 })).toBeTruthy();
+    expect(
+      (await screen.findByRole('heading', { name: 'General', level: 1 })).closest(
+        '[data-title-row]',
+      ),
+    ).not.toBeNull();
     expect(screen.queryByRole('heading', { name: 'Settings', level: 2 })).toBeNull();
-    // The one project switcher lives in the sidebar.
+    // The one project switcher is the rail's tile.
     expect(screen.getAllByRole('button', { name: /Switch project/ })).toHaveLength(1);
   });
 
-  it("the sidebar shows Back to Board, the scope switch and the project's sections with the switcher", async () => {
+  it("the panel shows the scope switch and the project's sections, and no way back", async () => {
     server.use(...baseHandlers());
     renderApp('/settings/general');
     const nav = await screen.findByRole('navigation', { name: 'Settings sections' });
-    expect(within(nav).getByRole('link', { name: 'Back to Board' })).toBeTruthy();
+    expect(within(nav).queryByRole('link', { name: 'Back to Board' })).toBeNull();
     expect(within(nav).getByText('Project')).toBeTruthy();
     expect(within(nav).getByRole('radio', { name: 'All projects' })).toBeTruthy();
-    expect(within(nav).getByRole('button', { name: /Switch project/ })).toBeTruthy();
     for (const label of ['General', 'Board columns', 'Areas and hazards', 'Billing'])
       expect(within(nav).getByRole('link', { name: label })).toBeTruthy();
-    // The app nav gives way to Settings' own.
-    expect(screen.queryByRole('link', { name: 'Factory' })).toBeNull();
+    // The rail stays beside it.
+    expect(screen.getByRole('link', { name: 'Factory' })).toBeTruthy();
   });
 
   it('lists Who Answers and Models by role at project scope, and People and Models at app scope', async () => {
@@ -99,10 +102,10 @@ describe('SettingsView', () => {
     expect(await screen.findByText(line)).toBeTruthy();
   });
 
-  it('Back to Board returns to /board', async () => {
+  it('the rail leaves Settings for the Board', async () => {
     server.use(...baseHandlers());
     const { router } = renderApp('/settings/general');
-    fireEvent.click(await screen.findByRole('link', { name: 'Back to Board' }));
+    fireEvent.click(await screen.findByRole('link', { name: 'Board' }));
     await waitFor(() => {
       expect(router.state.location.pathname).toBe('/board');
     });

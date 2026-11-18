@@ -9,15 +9,19 @@ const COLUMN_MAX = 720;
  */
 export async function inConversationColumn(space: Locator, input: Locator, what: string) {
   const frame = input.locator('xpath=ancestor::*[@data-composer-frame][1]');
-  const outer = await space.boundingBox();
-  const box = await frame.boundingBox();
-  expect(outer, `${what}: its space is drawn`).not.toBeNull();
-  expect(box, `${what}: its composer is drawn`).not.toBeNull();
-  if (outer === null || box === null) return;
-  expect(box.width, `${what}: the composer is no wider than the column`).toBeLessThanOrEqual(
-    COLUMN_MAX,
-  );
-  const left = box.x - outer.x;
-  const right = outer.x + outer.width - (box.x + box.width);
-  expect(Math.abs(left - right), `${what}: the column is centred`).toBeLessThanOrEqual(2);
+  // The frame re-measures its container after a resize, so the column settles a moment later.
+  await expect
+    .poll(
+      async () => {
+        const outer = await space.boundingBox();
+        const box = await frame.boundingBox();
+        if (outer === null || box === null) return Number.POSITIVE_INFINITY;
+        if (box.width > COLUMN_MAX) return Number.POSITIVE_INFINITY;
+        const left = box.x - outer.x;
+        const right = outer.x + outer.width - (box.x + box.width);
+        return Math.abs(left - right);
+      },
+      { message: `${what}: the column is centred and no wider than ${String(COLUMN_MAX)} px` },
+    )
+    .toBeLessThanOrEqual(2);
 }

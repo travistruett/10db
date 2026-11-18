@@ -40,8 +40,8 @@ describe('AppError', () => {
     const { container } = renderError();
     const strip = container.querySelector<HTMLElement>('[data-tauri-drag-region]');
     expect(strip).not.toBeNull();
-    // Mantine's h={48} renders as 3rem (48 px at the default root size).
-    expect(strip?.style.height).toContain('3rem');
+    // Mantine's h={44} renders as 2.75rem (44 px at the default root size).
+    expect(strip?.style.height).toContain('2.75rem');
   });
 
   it('a crash outside every view renders it', async () => {

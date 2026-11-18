@@ -22,7 +22,8 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
 - MSW 3 intercepts jsdom's `WebSocket` as is; no extra environment option is needed.
 - Hooks, query keys and fixtures are scoped per backend entity (`daemon/<entity>-queries.ts`, `test/<entity>-fixtures.ts`), accounts first. An account secret is sent by `daemon/account-secret.ts`, never through TanStack Query, and never kept in UI state.
 - Server state lives in TanStack Query; routes are code-based TanStack Router in `src/router.tsx`.
-- Mantine components and theme tokens only; see `DESIGN.md`. Use the Mantine MCP server for
+- Mantine components and theme tokens only; see `DESIGN.md`. A side panel that slides over the content is
+  `SurfaceDrawer` (`src/shell/surface-drawer.tsx`), never Mantine's `Drawer`. Use the Mantine MCP server for
   component docs (pinned to our Mantine version).
 - Dark by default; every view must work in light mode too.
 - The React Compiler is on; don't hand-write `useMemo`/`useCallback` for render performance.
@@ -34,8 +35,8 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
 - The menu-bar icon is `tray-icon.svg`, the same wordmark in black with no tile. It ships as a template
   image, which macOS tints to match the menu bar. `src-tauri/tray-icon.png` is generated from it with
   `pnpm --filter @10db/desktop exec tsx scripts/render-tray-icon.ts`; never edit the PNG by hand.
-- The window has no title bar (`titleBarStyle: Overlay`): the traffic lights sit over the header's left
-  end, `trafficLightPosition` centres them on its 48 px height, and elements marked
+- The window has no title bar (`titleBarStyle: Overlay`): the traffic lights sit over the rail's top, on the
+  title row's 44 px height (`trafficLightPosition`), and elements marked
   `data-tauri-drag-region` move the window. The native window's theme follows the app's color scheme
   (`setWindowTheme`), not the system's.
 - `pnpm --filter @10db/desktop dev:shell` runs the Tauri shell against the daemon and Vite server that
@@ -55,6 +56,7 @@ Read the ones for what you touch, and write a view's notes there, not here. This
 
 - `conversation/`: the conversation kit: markdown, the windowed list, tool call cards (`src/conversation/AGENTS.md`)
 - `screens/`: screens for Plan's `see_screen` (`src/screens/AGENTS.md`)
+- `shell/`: the frame: rail, panel, title row, content surface, drawers (`src/shell/AGENTS.md`)
 - `views/board/`: the Board: columns, cards, task state, holds and batches (`src/views/board/AGENTS.md`)
 - `views/factory/`: Factory: a project's goals (`src/views/factory/AGENTS.md`)
 - `views/first-run/`: the first run (`src/views/first-run/AGENTS.md`)
@@ -68,9 +70,11 @@ Read the ones for what you touch, and write a view's notes there, not here. This
 
 ### Across views
 
-- `src/shell/page-header.tsx` is the header Inbox, Factory, Knowledge, Board and the Workbench start page share (title
-  and actions, an optional byline cut to one line with its text as a tooltip, an optional toolbar of tabs and
-  filters); workspaces keep compact headers.
+- The window's frame is `src/shell/app-frame.tsx` (`src/shell/AGENTS.md`): a 52 px rail, an optional 260 px panel,
+  a 44 px title row beside the traffic lights and one rounded content surface. A view draws its title and actions
+  into the title row with `TitleRow`, and what sits under it at the top of its content with `PageIntro` (an
+  optional one-line byline cut to one line with its text as a tooltip, an optional toolbar of tabs and filters);
+  workspaces keep compact headers.
   `src/shell/page-loading.tsx` is what a page shows while it loads (after 300 ms, placeholder rows; never a lone spinner).
   `src/shell/count-badge.tsx` is every count: muted, or `tone` attention, in the theme's primary colour, when it
   needs the builder.
