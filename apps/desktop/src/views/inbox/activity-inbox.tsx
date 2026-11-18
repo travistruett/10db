@@ -12,6 +12,7 @@ import {
   activityList,
   inboxStateMemory,
   narrowed,
+  PanelOnlyState,
   rememberScroll,
   rememberSelected,
   type InboxSearch,
@@ -19,7 +20,7 @@ import {
 import { nextSelection } from './inbox-selection';
 import { useInboxKeys } from './use-inbox-keys';
 
-const STATE = 'activity';
+const STATE = PanelOnlyState.Activity;
 
 /**
  * Activity: the notices that tell the builder something and ask nothing, in the panel's list, and the

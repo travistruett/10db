@@ -7,7 +7,13 @@ import { useOpenInboxCount } from './inbox-count';
 import { ActivityInbox } from './activity-inbox';
 import { InboxPanel } from './inbox-panel';
 import { ListedInbox } from './listed-inbox';
-import { lastInboxSearch, withoutFilters, withoutQuery, withState } from './inbox-search';
+import {
+  lastInboxSearch,
+  PanelOnlyState,
+  withoutFilters,
+  withoutQuery,
+  withState,
+} from './inbox-search';
 import { InboxShortcuts } from './inbox-shortcuts';
 import { OpenInbox } from './open-inbox';
 
@@ -44,7 +50,7 @@ export function InboxView() {
             }}
           />
         );
-      case 'activity':
+      case PanelOnlyState.Activity:
         return <ActivityInbox search={search} listHost={listHost} onClearFilters={clearFilters} />;
       case InboxListState.Waiting:
       case InboxListState.Resolved:

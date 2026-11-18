@@ -7,10 +7,13 @@ import { CountBadge, CountTone } from '../../shell/count-badge';
 import { Panel } from '../../shell/panel';
 import { useOpenInboxCount } from './inbox-count';
 import { InboxFilterMenu } from './inbox-filter-menu';
-import { withFilter, type InboxPanelState, type InboxSearch } from './inbox-search';
+import { PanelOnlyState, withFilter, type InboxPanelState, type InboxSearch } from './inbox-search';
 import { InboxSearchField } from './inbox-search-field';
 
-const STATES: readonly InboxPanelState[] = [...Object.values(InboxListState), 'activity'];
+const STATES: readonly InboxPanelState[] = [
+  ...Object.values(InboxListState),
+  ...Object.values(PanelOnlyState),
+];
 
 function stateOf(value: string): InboxPanelState | null {
   return STATES.find((state) => state === value) ?? null;
@@ -92,7 +95,7 @@ export function InboxPanel({
               },
               { value: InboxListState.Resolved, label: 'Resolved' },
               // Notices are kept, not counted: Activity never carries a badge.
-              { value: 'activity', label: 'Activity' },
+              { value: PanelOnlyState.Activity, label: 'Activity' },
             ]}
           />
         </Box>

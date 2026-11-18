@@ -10,8 +10,15 @@ export interface ActivityListRow {
   readonly row: ActivityRow;
 }
 
+/**
+ * A group is keyed by what joins it and its oldest notice's time, which a repeat never changes: the
+ * newest notice's seq would re-key the selected row and send the selection elsewhere.
+ */
 export function activityRowOf(row: ActivityRow): ActivityListRow {
-  return { key: `notice:${String(row.seq)}`, row };
+  return {
+    key: `notice:${row.key}|${row.projectId ?? ''}|${row.taskId ?? ''}|${row.firstAt}`,
+    row,
+  };
 }
 
 const firstLine = (text: string): string => text.split('\n')[0] ?? '';

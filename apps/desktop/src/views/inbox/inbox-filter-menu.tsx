@@ -8,6 +8,7 @@ import { OUTCOME_LABELS } from './inbox-row-item';
 import {
   filtersSet,
   InboxSince,
+  PanelOnlyState,
   withFilter,
   withoutFilters,
   type InboxPanelState,
@@ -101,7 +102,7 @@ export function InboxFilterMenu({
             />
           ))}
         </FilterGroup>
-        {state === 'activity' ? null : (
+        {state === PanelOnlyState.Activity ? null : (
           <>
             <Menu.Divider />
             <FilterGroup label="Kind">

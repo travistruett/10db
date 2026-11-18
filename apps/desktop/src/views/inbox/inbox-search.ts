@@ -16,10 +16,12 @@ export type InboxSince = (typeof InboxSince)[keyof typeof InboxSince];
 
 const DAYS_BACK: Record<InboxSince, number> = { day: 0, week: 6, month: 29 };
 
-/** The panel's switch: the three states of cards, and Activity, the list of notices. */
-export type InboxPanelState = InboxListState | 'activity';
+/** The panel states that are not lists of cards: Activity is the list of notices. */
+export const PanelOnlyState = { Activity: 'activity' } as const;
+export type PanelOnlyState = (typeof PanelOnlyState)[keyof typeof PanelOnlyState];
 
-const ACTIVITY_STATE = 'activity';
+/** The panel's switch: the three states of cards, and Activity, the list of notices. */
+export type InboxPanelState = InboxListState | PanelOnlyState;
 
 export interface InboxSearch {
   readonly state?: InboxPanelState;
@@ -34,7 +36,7 @@ export interface InboxSearch {
 /** Each key on its own, so one that does not parse is dropped and the rest stay. */
 const InboxSearchKeys = z.object({
   state: z
-    .enum([...Object.values(InboxListState), ACTIVITY_STATE])
+    .enum([...Object.values(InboxListState), ...Object.values(PanelOnlyState)])
     .optional()
     .catch(undefined),
   // Whatever the daemon would refuse is dropped here, so the URL never makes the list fail to load.
@@ -70,7 +72,9 @@ export function activityList(search: InboxSearch): ActivityList {
  */
 export function inboxList(search: InboxSearch, now: Date): InboxList {
   const state =
-    search.state === ACTIVITY_STATE ? InboxListState.Open : (search.state ?? InboxListState.Open);
+    search.state === PanelOnlyState.Activity
+      ? InboxListState.Open
+      : (search.state ?? InboxListState.Open);
   const list: {
     -readonly [K in keyof InboxList]: InboxList[K];
   } = { state };
@@ -113,13 +117,13 @@ export function withFilter<K extends 'q' | 'project' | 'kind' | 'outcome' | 'per
 
 /** Whether a filter the search's state uses is set; the search text is not a filter. */
 export function filtersSet(search: InboxSearch): boolean {
-  if (search.state === ACTIVITY_STATE) return search.project !== undefined;
+  if (search.state === PanelOnlyState.Activity) return search.project !== undefined;
   return Object.keys(inboxList(search, new Date())).some((key) => key !== 'state' && key !== 'q');
 }
 
 /** Whether the list is narrowed by the search text or a filter its state uses. */
 export function narrowed(search: InboxSearch): boolean {
-  if (search.state === ACTIVITY_STATE) return Object.keys(activityList(search)).length > 0;
+  if (search.state === PanelOnlyState.Activity) return Object.keys(activityList(search)).length > 0;
   return Object.keys(inboxList(search, new Date())).some((key) => key !== 'state');
 }
 

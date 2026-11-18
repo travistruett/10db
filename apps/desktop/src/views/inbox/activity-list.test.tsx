@@ -126,6 +126,41 @@ describe('Activity in the Inbox', () => {
     expect(rows()).toHaveLength(2);
   });
 
+  it('keeps the selection on a group when a repeat joins it', async () => {
+    const projectId = mintId('Project');
+    const group = activityRowDto({ projectId, line: 'Task was resized', count: 1 });
+    const other = activityRowDto({ line: 'Another notice', projectId: null, seq: 300 });
+    serve([group, other]);
+    renderApp('/inbox?state=activity');
+    fireEvent.click(await findRow('Task was resized'));
+    await waitFor(() => {
+      expect(
+        rows()
+          .find((r) => r.textContent.includes('Task was resized'))
+          ?.getAttribute('aria-selected'),
+      ).toBe('true');
+    });
+    // A repeat within the window: the group's newest notice moves on, its oldest stays.
+    Object.assign(group, {
+      seq: 500,
+      count: 2,
+      at: new Date(Date.parse(group.at) + 1000).toISOString(),
+    });
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    act(() => {
+      sockets[0]?.send(
+        JSON.stringify(
+          daemonEvent({ seq: 1, type: 'notice.posted', entityType: 'app', entityId: 'app' }),
+        ),
+      );
+    });
+    const repeated = await findRow('×2');
+    expect(repeated.textContent).toContain('Task was resized');
+    expect(repeated.getAttribute('aria-selected')).toBe('true');
+  });
+
   it('sends no request for e on a row', async () => {
     serve([activityRowDto({ line: 'Only notice' })]);
     const posts: string[] = [];
