@@ -63,6 +63,21 @@ export function prSubject(
   return (kept.find((t) => t.state === WorkstreamState.Done) ?? kept[0])?.title ?? batchTitle;
 }
 
+/** A commit message line that explains a pull request's unit tests over CI's budget. */
+const TEST_BUDGET_LINE = /^Test-budget:[ \t]*\S/;
+
+/**
+ * The `Test-budget: <reason>` lines of a lane's commit messages, trimmed, each once and in order.
+ * CI fails a pull request that adds more unit tests than its budget unless the body has one.
+ */
+export function testBudgetLines(messages: readonly string[]): string[] {
+  const lines = messages
+    .flatMap((message) => message.split(/\r?\n/))
+    .map((line) => line.trim())
+    .filter((line) => TEST_BUDGET_LINE.test(line));
+  return [...new Set(lines)];
+}
+
 /** One task of the batch, as the PR body shows it. */
 export interface PrBodyTask {
   readonly title: string;
@@ -89,12 +104,16 @@ export function prBody(input: {
   readonly ci: { readonly repo: string; readonly sha: string };
   /** The repo's pull request template, or null when it has none. */
   readonly template: string | null;
+  /** `testBudgetLines` of the batch's commits; each starts a line, which is what CI looks for. */
+  readonly testBudget?: readonly string[];
 }): string {
   const body = fillTemplate(input.template, [
     { heading: 'What and why', text: whatAndWhy(input.tasks) },
     { heading: 'How it was checked', text: howChecked(input.gate, input.ci, input.tasks) },
   ]);
-  return `${body}\n\n---\n\nShipped by 10db, batch ${input.batch.id}\n`;
+  const budget = input.testBudget ?? [];
+  const reasons = budget.length > 0 ? `\n\n${budget.join('\n')}` : '';
+  return `${body}${reasons}\n\n---\n\nShipped by 10db, batch ${input.batch.id}\n`;
 }
 
 const word = (state: WorkstreamState): string => state.toLowerCase();

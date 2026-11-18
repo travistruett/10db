@@ -1,7 +1,9 @@
 import { configDefaults, defineProject } from 'vitest/config';
+import { localWorkerCap } from '../../tests/max-workers';
 
 export default defineProject({
   test: {
+    ...localWorkerCap,
     name: 'daemon',
     environment: 'node',
     // The delivery tests are their own project (vitest.delivery.config.ts): capped in workers and

@@ -6,6 +6,10 @@ name: pr-title
 # required check counts as passing, so an earlier red result would turn green. Retargeting a pull
 # request's base to main fires only edited, so ci.yml runs again on the next push
 # (decisions/2026-11-17-pr-title-lint-runs-in-its-own-workflow.md).
+#
+# The same job checks the pull request's new unit tests against their budget, which a line
+# `Test-budget: <reason>` in the body clears; it runs here so that saving the body reruns it
+# (decisions/2026-11-18-a-pull-request-over-its-unit-test-budget-says-why.md).
 on:
   pull_request:
     branches: [main]
@@ -32,6 +36,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # The merge commit and its parents, so HEAD^1 is the base the budget diffs against.
+          fetch-depth: 2
           persist-credentials: false
       - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
         with:
@@ -43,3 +49,10 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: printf '%s\n' "$PR_TITLE" | pnpm exec commitlint
+      - name: New unit tests within budget, or the body says why
+        # Runs even when the title fails, so one run reports both. The body reaches the script
+        # through env only.
+        if: ${{ !cancelled() }}
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: node scripts/test-budget.mjs

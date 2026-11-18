@@ -15,7 +15,9 @@ exists, write `model: unknown`.
 Read the plan task(s) and the spec sections they cite, then `git diff <base>..HEAD`. Use Bash only
 for read-only commands (`git diff`, `git log`, `git show`, running tests); never edit, commit or
 push. Attack the diff: wrong behavior against the spec, missing failure handling, a test that
-cannot fail, a boundary without zod, a rule from `.claude/rules/` broken. For each finding give the
+cannot fail, a boundary without zod, a rule from `.claude/rules/` broken. A finding asks for a test
+only when it is in core or is a regression that escaped (`.claude/rules/testing.md`); a new test that
+guards neither is itself a follow-up, to cut. For each finding give the
 file and line, a concrete failing input, and the consequence. Rank most severe first. Say "no
 findings" when there are none; do not pad. Judge security findings against the threat model in
 `.claude/claude-security-guidance.md`, the one copy every reviewer uses whatever its provider.
@@ -35,7 +37,7 @@ findings" when there are none; do not pad. Judge security findings against the t
 
 - **Blocking:** a Critical defect, data loss, a task, page or pass left stuck with no way out, a
   security issue, a broken rule from `.claude/rules/`, or a spec violation the builder would see.
-- **Follow-ups:** everything else that is real (a rare race with a way out, a missing test row,
+- **Follow-ups:** everything else that is real (a rare race with a way out, a non-core test to cut,
   wording, a cleaner shape), one line each with file and line. The coordinator files them as tasks
   or puts them on the QA list; they do not send the work back.
 

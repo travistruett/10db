@@ -70,8 +70,9 @@ A local macOS control plane that runs Claude Code sessions as a software factory
 - **A plan is an index plus one card per task.** The index (`docs/superpowers/plans/<date>-<name>.md`) holds the
   brief, Global Constraints, provider parity, Interfaces, the state table, the tracks and one line per task.
   Each task is a card (`docs/superpowers/plans/<date>-<name>/task-<n>.md`) an implementer can work from alone: its
-  files, the Interfaces signatures it implements or calls (quoted exactly), the state-table rows it covers, its
-  tests, and the spec sections it implements, named by heading rather than restated. An implementer reads the
+  files, the Interfaces signatures it implements or calls (quoted exactly), the state-table rows it handles (as
+  design, not a test list), the tests it adds (only those `.claude/rules/testing.md` allows, often none), and the
+  spec sections it implements, named by heading rather than restated. An implementer reads the
   index's brief and Global Constraints and its card, not the whole plan or spec, so a fresh one starts in
   minutes and a heavy track can run one implementer per card.
 - **A branch generates its migrations last**, after its final merge of `main`, and only one open pull request

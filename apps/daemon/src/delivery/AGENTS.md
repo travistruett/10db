@@ -14,8 +14,9 @@
   open). Its job waits with `reserveGitWhenFree(…, { signal, lanesWait })`, runs `refuseOpen` again after the wait,
   and releases the token in a `finally`. A pass of one stacks on a closed pass as Start Pass does, refuses
   `BISECT_LOG`, and `workstream-changes.ts` reads a pass's kept turns by `ChangesScope`.
-- A switch back, a branch cut or a settle that waits for a chat's terminal (`folder-wait.ts`) takes its signal from 10db's shutdown, so quitting never hangs on it, and redoes the wait at the next start; no branch is settled while a terminal holds the folder, and each wait names the chat and keeps the project's delivery slot.
+- A switch back, branch cut or settle waiting on a chat's terminal (`folder-wait.ts`) ends on 10db's shutdown, so quitting never hangs, and waits again next start; no branch settles while a terminal holds the folder, and each wait names the chat and keeps the project's delivery slot.
 - A session's worktree is cut by `chat-worktree-cut.ts`; `worktree-sweep.ts` keeps one with unsaved files.
 - `hand-made-worktrees.ts` (`decisions/2026-11-17-hand-made-worktrees-are-offered-for-removal-and-kept-out-of-spotlight.md`) looks, from the pull request watch's `afterRound` and at most every six hours (`createHandMadeFolderLook`), at each pull request project's hand-made folder (`handMadeWorktreeFolder`) and raises `hand-made-cards.ts`'s cards: Remove Merged Worktrees (merged pull request, tip carried by its head, unlocked, clean, no loose ignored file) and Keep Spotlight Out. `worktree-card.ts` answers both through the scoped `Git.handMade*` calls; nothing is removed unanswered, and a removal looks again first. What an answer did (`handMadeNotices`) is a notice.
 - A `Card` needs `tier`, `urgency` and `closesWhen` (`decisions/2026-11-17-every-card-has-a-tier.md`); a notice
   goes through `post` or `postIn`.
+- `createPr` copies commits' `Test-budget:` lines into its body (`testBudgetLines`, `pr-text.ts`).

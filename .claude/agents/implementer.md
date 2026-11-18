@@ -20,8 +20,9 @@ Read each file once. Find code by symbol (`grep -n`, then that line range) rathe
 files, and keep what you learn (where things live, names, gotchas, commands that work) in a notes file
 in your own scratch folder, which your brief names. Look there before reading a file again.
 
-Follow the task's steps in order. Run every test red before making it pass, and report the red
-output you saw. Use the exact names and signatures in the task's Interfaces block; if they cannot
+Follow the task's steps in order. Add only the tests `.claude/rules/testing.md` allows (core behavior,
+an escaped bug, or an extended core e2e flow); run each one red before making it pass, and report the
+red output you saw. Use the exact names and signatures in the task's Interfaces block; if they cannot
 work, stop and report why instead of inventing new ones. Commit with explicit paths as the task
 says.
 

@@ -118,6 +118,42 @@ describe('subagents', () => {
   });
 });
 
+// A unit test is added only for core behavior or an escaped bug, so no instruction an agent reads
+// may ask for a test per behavior, state-table row, acceptance criterion or review finding.
+describe('test guidance', () => {
+  const guidance = repoFiles().filter(
+    (path) =>
+      path === 'AGENTS.md' ||
+      path === 'apps/daemon/src/briefing/prompts.ts' ||
+      /^\.claude\/(rules|agents)\/[^/]+\.md$/.test(path) ||
+      /^packages\/harness\/plugin\/personas\/[^/]+\.md$/.test(path) ||
+      /^packages\/harness\/plugin\/skills\/[^/]+\/SKILL\.md$/.test(path),
+  );
+  const text = (path: string): string => readRepoFile(path).replace(/\s+/g, ' ');
+
+  it.each([
+    ['a test per behavior', /one (red-first )?test per behaviou?r/i],
+    [
+      'a card listing its state-table rows and tests',
+      /lists the state-table rows it covers and its tests/i,
+    ],
+    ['every state-table row', /every state-table row/i],
+    ['a test for every acceptance criterion', /every acceptance criterion[^.]*has a test/i],
+    ['a step and a test for every criterion', /every criterion needs a step and a test/i],
+    ['tests that prove each criterion', /tests that prove each acceptance criterion/i],
+    ['exhaustive cases', /exhaustive cases/i],
+    ['count is not the cost', /count is not the cost/i],
+    ['one row per case', /one row per case/i],
+  ])('never asks for %s', (_name, phrasing) => {
+    expect(guidance.filter((path) => phrasing.test(text(path)))).toEqual([]);
+  });
+
+  it('keeps testing.md short', () => {
+    const words = readRepoFile('.claude/rules/testing.md').split(/\s+/).filter(Boolean).length;
+    expect(words).toBeLessThan(650);
+  });
+});
+
 describe('code layout', () => {
   it('never lets a package depend on an app', () => {
     const appNames = manifestPaths()

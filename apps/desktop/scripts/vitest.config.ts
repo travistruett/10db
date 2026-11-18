@@ -1,8 +1,10 @@
 import { defineProject } from 'vitest/config';
+import { localWorkerCap } from '../../../tests/max-workers';
 
 // Unit tests for the desktop app's build and dev scripts; they run in node, apart from the jsdom UI tests.
 export default defineProject({
   test: {
+    ...localWorkerCap,
     name: 'desktop-scripts',
     // Vitest roots a project at its config's directory; knip roots it at the workspace unless told.
     root: import.meta.dirname,

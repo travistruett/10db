@@ -116,7 +116,7 @@ import {
 } from './notices';
 import { readPrScopes, scopeOf } from './pr-scopes';
 import type { RetryMergeOptions } from './pr-watch';
-import { prBody, prSubject, prTitle, titlePrefix } from './pr-text';
+import { prBody, prSubject, prTitle, testBudgetLines, titlePrefix } from './pr-text';
 import { readPrTemplate } from './pr-template';
 import { retireWorktree } from './worktree-cleanup';
 import { madeWorktreeRoot, worktreePathFor } from './worktree-path';
@@ -729,6 +729,30 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   /**
+   * The `Test-budget:` lines the batch's commits carry, so the body clears CI's unit-test budget
+   * when a lane said why it adds more. Merges are left out: their messages are 10db's own. A git
+   * failure leaves them out rather than failing the ship.
+   */
+  async function testBudgetFor(
+    batch: BatchDto,
+    target: { readonly checkout: string; readonly baseSha: string },
+    sha: string,
+  ): Promise<string[]> {
+    try {
+      const commits = await deps.git.commitMessagesSince(target.checkout, target.baseSha, sha);
+      return testBudgetLines(
+        commits.filter((commit) => commit.parents.length <= 1).map((commit) => commit.message),
+      );
+    } catch (error) {
+      deps.logger.warn(
+        { batchId: batch.id, err: error instanceof Error ? error.message : String(error) },
+        'test budget lines not read',
+      );
+      return [];
+    }
+  }
+
+  /**
    * The project's title prefix when it sets one; otherwise the type from the tasks whose work shipped
    * (every task when none finished) and the batch's scope.
    */
@@ -806,6 +830,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         },
         ci: { repo: target.repo, sha },
         template: await readPrTemplate(deps.git, target.checkout, sha, deps.logger),
+        testBudget: await testBudgetFor(batch, target, sha),
       }),
     );
     const prUrl = await deps.gh.prCreate(
