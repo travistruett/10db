@@ -28,12 +28,13 @@ is mounted:
 
 - `TitleRow` (`title-row.tsx`): the title, an optional `switcher`, a dim `meta` line and `actions` at the right.
   The row's box and the space between its parts carry `data-tauri-drag-region`; a control a view puts in never
-  does. A view with no title passes `title={null}` (Sessions draws its tab strip as the switcher; today only Settings has a panel).
+  does. A view with no title passes `title={null}` (Sessions draws its tab strip as the switcher; today Settings and the Inbox have a panel).
   `lines` (1 or 2) is how many lines a long title takes before it is cut; two reads whole at a narrow width.
 - `Panel` (`panel.tsx`): a section's list, with a 44 px head (its `title`, `controls` and the hide button) on the
   lights' row. Mounting it is what tells the frame the section has a panel (`registerPanel`); unmounting withdraws it.
   A pick in a panel's list that changes no route (a row selected, a search change) calls `closeSheet()` from
   `useFrameSlots()`, since a sheet closes on its own only when the pathname changes.
+- `RenderLayout` (the screen frame) has a panel host only while a section registers a panel.
 - `PageIntro` (`page-intro.tsx`): not a slot, but the top of a view's content: an optional one-line intro (13 px, a
   sentence) and an optional toolbar of tabs and filters. A page has one header, the title row; the content never
   repeats it. Nothing is drawn when both are absent.

@@ -1,11 +1,11 @@
 # apps/daemon/src/inbox
 
 - Two routes list cards. `GET /inbox` (`?state=OPEN,ANSWERED`, comma-separated `InboxState`s) answers every
-  card in those states as an array, most urgent and then oldest first; the Open list, the sidebar badge, the
-  tray, the Sessions view and the daemon's own tests read it. `GET /inbox/page` (`InboxPageQuery`, served by
+  card in those states as an array, most urgent and then oldest first; notifications, Shape's waiting
+  permissions and the daemon's own tests read it, and the Inbox's lists and the badge read the page route. `GET /inbox/page` (`InboxPageQuery`, served by
   `pageInbox` in `packages/db/src/store/inbox-page.ts`) answers one page, an `InboxPageDto` (`items`,
-  `total`, `page`, `pageSize`), with filtering, sorting and counting done in the query; the Inbox's Waiting
-  and Resolved tables and the chat tab's resolved cards read it. A list that can grow without limit is read through the page route.
+  `total`, `page`, `pageSize`), with filtering, sorting and counting done in the query; the Inbox's Open,
+  Waiting and Resolved lists, its counts and the chat tab's resolved cards read it. A list that can grow without limit is read through the page route.
 - `InboxPageQuery` is a strict object (an unknown key is a 400): `state` (`open`, `waiting` or `resolved`),
   `project`, `kind`, `outcome`, `person`, `sort` (`updatedAt`, `createdAt`, `kind`, `title`, `sentAt`), `dir`,
   `page` (from 1), `pageSize` (1 to 100, 25 by default), `after` (the last row's sort as JSON: the page
@@ -33,6 +33,9 @@
   `packages/db/src/store/inbox-context.ts`). That is the conversation named by `detail.conversationId` when
   it exists, else the task's conversation of the first target's workstream, else none (`{ messages: [] }`).
   Tool calls and reasoning are left out. An unknown card is a 404.
+- Open's rows are grouped in code (`openRowsPage`, `packages/db/src/store/inbox-open-rows.ts`) over the open
+  cards' light columns, with `inboxRowKey` from contracts, not in SQL
+  (`decisions/2026-11-17-the-daemon-groups-inbox-rows-in-its-code-and-the-browser-groups-nothing.md`).
 - No index was added for the page, and search is `LIKE`: every page filters on `state` (`inbox_state_idx`) and the send subqueries
   use `stakeholder_sends_card_idx`. A `(state, updated_at)` index is for when resolved cards reach six figures.
 - A screen's render token may read `/inbox/page` and `/inbox/:id/context` (`screens/render-access.ts`), as it reads `/inbox`; the app

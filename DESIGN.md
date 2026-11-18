@@ -19,9 +19,10 @@ favors legibility and calm over decoration.
   paused (limits), red = failed, green = done or ready, gray = queued or cancelled. Green is the only
   "OK" color for a task or goal; don't use cyan or teal for success there. A connection's status (Overview,
   Integrations, an account's state) is the exception: teal = works, yellow = needs the builder, gray = off, never
-  green or red, and its dot always comes with words. Every card in the Inbox's Open tab waits on the
-  builder, so its kind is yellow, a flag's too: red there would read as an error. The Waiting tab holds what the
-  builder waits on someone else for; waiting on someone shows as a line on the card, not a color. A status is
+  green or red, and its dot always comes with words. Every card in the Inbox's Open state waits on the
+  builder, so its kind tag stays yellow, a flag's too: red there would read as an error. Waiting's and Resolved's
+  tags are gray. Waiting holds what the builder waits on someone else for; waiting on someone shows as a line on
+  the row, not a color. A status is
   never told by color alone: a bare dot means running, a dot with a ring waits on the builder (yellow, or red for
   a failure), and failed, paused and done are icons in their colors. Green on a Sessions tab means landed (merged,
   or a closed pass on a `local` project); a signed-off pass that isn't closed is a dimmed check.
@@ -161,7 +162,13 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   counts the tabs that need the builder: Needs you and Stopped by an error, and Ready once M6 brings it.
   A count is a small pill no taller than its label's text, in the sidebar, on tabs and in buttons. It is muted
   (`tone` neutral, the default) and blue (`tone="attention"`) only when it means something needs the builder:
-  Inbox's Open tab, the Sessions and Workbench needs-you counts.
+  Inbox's Open state, the Sessions and Workbench needs-you counts. The Inbox's Open count is the daemon's (the
+  rows `GET /inbox/page` counts with no filter), and a filter or a search on the list never changes it
+  (`decisions/2026-11-17-the-daemon-groups-inbox-rows-in-its-code-and-the-browser-groups-nothing.md`).
+- **Inbox rows:** a row is two lines at a fixed height: the kind tag in uppercase, the title, `×n` for rows that
+  stand for several cards and the age; then the project and the first line of the body. A flag's row offers
+  Dismiss on hover and focus, and `e` dismisses the selected one. The list keeps one row selected and its content
+  is drawn beside the panel.
 - **Page header:** a page has one header, the frame's title row (`TitleRow`,
   `apps/desktop/src/shell/title-row.tsx`), at the top of the content column on the content's own tone: the title
   at 14 px / 600, an optional switcher beside it, an optional dim meta line, then the actions at the right (28 px
@@ -204,12 +211,14 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
 - **Navigation:** the sidebar's rail holds the sections, global ones above the project's, with Settings at the
   foot. It is labelled (200 px) and ⇧⌘S switches it to icons only (76 px, each name in a tooltip), remembered. The
   active row fills with `bg2`; hover is half of it. The project is a row of its tile and name (a tile alone when
-  icons only). A section with a list has a 260 px panel beside the rail (Settings' sections today), whose head
+  icons only). A section with a list has a 260 px panel beside the rail (Settings' sections, the Inbox's rows and the open
+  Workbench pass's queue), whose head
   is the sidebar's top row with the section's name and controls. From 1000 px both show and ⌘\, a click on the
   open section's rail item or the head's button hides the panel. From 640 px the rail is icons only and ⇧⌘S opens the
   labelled sidebar over the content, ⌘\ the panel beside the icons; under 640 px the sidebar folds and the toggle
   beside the traffic lights opens it. The title row sits at the top of the content, level with the traffic lights,
-  44 px tall.
+  44 px tall. When the panel is not shown, the Workbench's queue becomes a strip across the top of the content,
+  and the title row names the open page.
 - **Tooltips:** the bright ink on the base tone in both schemes, 12 px and tight (`theme.ts`); a view never styles
   its own. A view with unsaved edits asks before anything discards them (`shell/unsaved-guard.tsx`).
 - **Scope follows the question, not the screen**
