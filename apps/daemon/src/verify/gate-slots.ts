@@ -5,6 +5,15 @@ import type { GateRequest, GateResult, GateRunner } from './gate-runner';
 /** The exit code of a gate stopped by its abort signal, as the gate runner reports it. */
 const ABORT_EXIT = 130;
 
+/**
+ * How a waiting gate ranks for a freed slot. A gate whose result decides whether work lands (a ship
+ * gate, a lane's step check) is `Decides`; one whose result is only a hint to the builder, such as the
+ * check after a Workbench turn, is `Advice` and waits behind every `Decides` gate, however late that
+ * one asked. Running gates are never stopped for either.
+ */
+export const GatePriority = { Decides: 'decides', Advice: 'advice' } as const;
+export type GatePriority = (typeof GatePriority)[keyof typeof GatePriority];
+
 export interface GateSlot {
   /** Frees the slot; a second call does nothing. */
   release(): void;
@@ -19,13 +28,19 @@ export interface GateSlots {
   /** Stops granting slots: every waiter, and every later caller, gets null. For shutdown. */
   close(): void;
   /**
-   * Resolves with a slot, in the order callers asked. `onWait` is called at once, with the number of
-   * gates ahead, only when the caller has to wait. Resolves null when `signal` aborts first.
+   * Resolves with a slot, in the order callers asked, except that an `Advice` caller waits behind
+   * every `Decides` caller (the default). `onWait` is called at once, with the number of gates that
+   * will run before it, only when the caller has to wait. Resolves null when `signal` aborts first.
    */
-  acquire(signal?: AbortSignal, onWait?: (ahead: number) => void): Promise<GateSlot | null>;
+  acquire(
+    signal?: AbortSignal,
+    onWait?: (ahead: number) => void,
+    priority?: GatePriority,
+  ): Promise<GateSlot | null>;
 }
 
 interface Waiter {
+  readonly priority: GatePriority;
   readonly grant: (slot: GateSlot) => void;
   readonly refuse: () => void;
 }
@@ -69,12 +84,19 @@ export function createGateSlots(limit: number): GateSlots {
       closed = true;
       for (const waiter of queue.splice(0)) waiter.refuse();
     },
-    acquire(signal, onWait) {
+    acquire(signal, onWait, priority = GatePriority.Decides) {
       if (closed || signal?.aborted) return Promise.resolve(null);
       if (busy < limit) return Promise.resolve(take());
-      onWait?.(busy + queue.length);
+      // A gate that decides goes ahead of the first waiting advice gate; advice goes last.
+      const at =
+        priority === GatePriority.Advice
+          ? queue.length
+          : queue.findIndex((w) => w.priority === GatePriority.Advice);
+      const insertAt = at < 0 ? queue.length : at;
+      onWait?.(busy + insertAt);
       return new Promise<GateSlot | null>((resolve) => {
         const waiter: Waiter = {
+          priority,
           grant(slot) {
             signal?.removeEventListener('abort', onAbort);
             resolve(slot);
@@ -89,7 +111,7 @@ export function createGateSlots(limit: number): GateSlots {
           if (at >= 0) queue.splice(at, 1);
           resolve(null);
         };
-        queue.push(waiter);
+        queue.splice(insertAt, 0, waiter);
         signal?.addEventListener('abort', onAbort, { once: true });
       });
     },
@@ -110,6 +132,8 @@ export interface LimitGatesOptions {
   readonly logger: Logger;
   /** A gate starts nothing, and holds no slot, until this lets it. */
   readonly hold?: Hold;
+  /** How this runner's gates rank when they wait for a slot; `Decides` when not given. */
+  readonly priority?: GatePriority;
 }
 
 /**
@@ -124,9 +148,13 @@ export function limitGates(runner: GateRunner, options: LimitGatesOptions): Gate
       // Before the slot, so a gate held for load never keeps one from a gate that could run.
       const released = (await options.hold?.untilClear(request.signal)) ?? true;
       const slot = released
-        ? await options.slots.acquire(request.signal, (ahead) => {
-            request.onWaiting?.(ahead);
-          })
+        ? await options.slots.acquire(
+            request.signal,
+            (ahead) => {
+              request.onWaiting?.(ahead);
+            },
+            options.priority,
+          )
         : null;
       if (slot === null) {
         options.logger.info({ logPath: request.logPath }, 'gate stopped while waiting for a slot');

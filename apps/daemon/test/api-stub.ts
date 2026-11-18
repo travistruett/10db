@@ -199,6 +199,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     sendToAgent: track('sendToAgent'),
     listGoals: track('listGoals'),
     humanTouch: track('humanTouch'),
+    cardTypes: track('cardTypes'),
     rigorFigures: track('rigorFigures'),
     openGoalDigest: track('openGoalDigest'),
     listShapes: track('listShapes'),

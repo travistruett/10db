@@ -3,21 +3,23 @@ import { ActionIcon, Menu, Tooltip } from '@mantine/core';
 import { IconCheck, IconCoffee, IconCoffeeOff } from '@tabler/icons-react';
 import { useKeepAwake, useSetKeepAwake } from '../daemon/queries';
 import { MODE_LABELS } from './keep-awake-labels';
+import { useRailMode } from './rail-mode';
 
 export function KeepAwakeControl() {
   const status = useKeepAwake();
   const setMode = useSetKeepAwake();
+  const { labels } = useRailMode();
   const active = status.data?.active ?? false;
   const label = active ? 'Keeping the Mac awake' : 'Not keeping the Mac awake';
   return (
     <Menu position="right-end">
-      <Tooltip label={label} position="right" openDelay={300}>
+      <Tooltip label={label} position="right">
         <Menu.Target>
           <ActionIcon
             variant="subtle"
             color="gray"
-            w={36}
-            h={34}
+            w={labels ? 28 : 40}
+            h={labels ? 28 : 34}
             aria-label={`Keep-awake: ${label}`}
           >
             {active ? (

@@ -6,7 +6,6 @@ import { useGoals } from '../../daemon/goal-queries';
 import { useLivePass } from '../../daemon/pass-queries';
 import { useInbox } from '../../daemon/queries';
 import { useNow } from '../../shell/relative';
-import { PageIntro } from '../../shell/page-intro';
 import { TitleRow } from '../../shell/title-row';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { ProjectFilter } from '../../shell/project-filter';
@@ -14,6 +13,7 @@ import { ProjectTile } from '../../shell/project-tile';
 import { useSelectedProject } from '../../shell/selected-project';
 import { BenchmarkSyncNote } from './benchmark-sync-note';
 import { GoalList } from './goal-list';
+import { CardTypesPanel } from './card-types-panel';
 import { HumanTouchPanel } from './human-touch-panel';
 import { RigorPanel } from './rigor-panel';
 import { UpdateDrainNote } from './update-drain-note';
@@ -48,7 +48,6 @@ export function FactoryView() {
         meta={<BenchmarkSyncNote />}
         actions={<ProjectFilter projects={all} value={filter ?? null} onChange={setFilter} />}
       />
-      <PageIntro description="Goals 10db is pursuing, by project" />
       <UpdateDrainNote />
       <AdmissionNote />
       {projects.isError ? (
@@ -63,6 +62,7 @@ export function FactoryView() {
         <>
           <RigorPanel projectId={only.id} />
           <HumanTouchPanel projectId={only.id} />
+          <CardTypesPanel projectId={only.id} />
         </>
       ) : shown.length > 1 ? (
         <Text size="sm" c="dimmed">
@@ -122,7 +122,7 @@ function ProjectGoals({
         <Group justify="space-between" wrap="nowrap">
           <Group gap="sm" wrap="nowrap">
             <ProjectTile name={project.name} />
-            <Title order={3} size="h4" id={headingId}>
+            <Title order={3} id={headingId}>
               {project.name}
             </Title>
           </Group>

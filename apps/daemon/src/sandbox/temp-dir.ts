@@ -116,7 +116,7 @@ export function ensurePrivateRoot(path: string): string {
 }
 
 /** The file that keeps Spotlight out of the directory it is in and everything under it. */
-const SPOTLIGHT_MARKER = '.metadata_never_index';
+export const SPOTLIGHT_MARKER = '.metadata_never_index';
 
 /**
  * Marks a sandbox root so Spotlight skips everything in it: every lane's package caches are there,

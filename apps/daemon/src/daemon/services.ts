@@ -68,6 +68,7 @@ import {
   latestEventSeq,
   listKinds,
   humanTouchDays,
+  inboxCardTypes,
   rigorFigures,
   latestWorkstreamOf,
   openGoalDigest,
@@ -713,6 +714,10 @@ export function createServices(deps: {
     humanTouch: (projectId) => {
       getProject(db, projectId);
       return { days: humanTouchDays(db, projectId, deps.clock.now()) };
+    },
+    cardTypes: (projectId) => {
+      getProject(db, projectId);
+      return { types: inboxCardTypes(db, projectId, deps.clock.now()) };
     },
     rigorFigures: (projectId, days) => {
       getProject(db, projectId);

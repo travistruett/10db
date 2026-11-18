@@ -26,6 +26,7 @@ import {
   type PassDirtRecord,
 } from '../git';
 import { GhError, SIGN_IN_IN_SETTINGS } from '../github';
+import { SPOTLIGHT_MARKER } from '../sandbox';
 import type { GateResult } from '../verify';
 import { batchCardFields } from './batch-card';
 import { maxCiFixes } from './ci-failure-action';
@@ -85,6 +86,10 @@ export const WorktreeChoice = {
   Remove: 'Remove worktree',
   /** Delete a directory git doesn't list as a worktree. */
   Delete: 'Delete directory',
+  /** Remove the worktrees in the builder's hand-made folder whose pull request merged. */
+  RemoveMerged: 'Remove Merged Worktrees',
+  /** Mark the builder's hand-made worktree folder so Spotlight skips it. */
+  KeepSpotlightOut: 'Keep Spotlight Out',
   Keep: 'Keep',
 } as const;
 export type WorktreeChoice = (typeof WorktreeChoice)[keyof typeof WorktreeChoice];
@@ -111,6 +116,10 @@ export type WorktreeOffer =
   | { readonly kind: 'orphan'; readonly path: string }
   /** A directory under the worktree root that git doesn't list as a worktree. */
   | { readonly kind: 'stray'; readonly path: string }
+  /** The worktrees in the project's hand-made folder whose pull request merged. */
+  | { readonly kind: 'merged-hand-made' }
+  /** The project's hand-made worktree folder, which Spotlight indexes. */
+  | { readonly kind: 'spotlight'; readonly path: string }
   /** A checkout left on a finished batch's branch; `place` is where it goes back to. */
   | {
       readonly kind: 'checkout';
@@ -161,6 +170,23 @@ export function worktreeOffer(
             description: 'Delete the directory and everything in it',
           },
           keep('the directory'),
+        ];
+      case 'merged-hand-made':
+        return [
+          {
+            label: WorktreeChoice.RemoveMerged,
+            description:
+              'Remove each listed worktree, its node_modules and build output with it; the branches stay',
+          },
+          keep('the worktrees'),
+        ];
+      case 'spotlight':
+        return [
+          {
+            label: WorktreeChoice.KeepSpotlightOut,
+            description: `Create an empty ${SPOTLIGHT_MARKER} file in ${offer.path}`,
+          },
+          keep('Spotlight indexing the folder'),
         ];
       case 'checkout':
         return [
