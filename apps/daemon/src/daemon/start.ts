@@ -143,6 +143,7 @@ import {
   createPassPullRequests,
   passGateKind,
   createShipper,
+  createNodeModulesTemplates,
   createWorktreeDependencies,
   createWorktreeGenerators,
   DEFAULT_DELIVERY_LIMITS,
@@ -168,6 +169,7 @@ import {
   raiseSkippedCard,
   skipFollowUpStarter,
   sweepUnlistedRuns,
+  templatesRoot,
   type DeliveryContext,
   type DeliveryLimits,
   type PassOpenDeps,
@@ -1299,6 +1301,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     timeoutMs: limits.gateTimeoutMs,
     resolvePnpm,
     pnpmVersion: readPnpmVersion,
+    templates: createNodeModulesTemplates({
+      root: templatesRoot(opts.dataDir),
+      logger: logger.child({ component: 'node-modules-template' }),
+    }),
   };
   const delivery: DeliveryContext = {
     state,
@@ -1322,8 +1328,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     putBack: (input) =>
       putBackKeptWork({ state, git, inbox, jobs: deliveryJobs, logger, clock }, input),
     worktreeRoot,
-    // Not behind the gate slots: waiting out a long gate would hold the cut. Each cut downloads the
-    // worktree's whole tree (the run's store is empty), so several cuts at once are several downloads.
+    // Not behind the gate slots: waiting out a long gate would hold the cut. A cut whose lockfile has
+    // a template clones it; the first cut of a lockfile downloads the whole tree (the run's store is
+    // empty), so several such cuts at once are several downloads.
     dependencies: createWorktreeDependencies(worktreeTools),
     generators: createWorktreeGenerators(worktreeTools),
   };

@@ -81,6 +81,7 @@ export {
   projectAtCheckout,
 } from './checkout';
 export { createWorktreeDependencies } from './worktree-dependencies';
+export { createNodeModulesTemplates, templatesRoot } from './node-modules-template';
 export { createWorktreeGenerators } from './worktree-generated';
 export { readPnpmVersion, resolvePnpm } from './pnpm-binary';
 export {

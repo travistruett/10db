@@ -5,6 +5,7 @@ import { createServer, type Server } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { templatesRoot } from '../src/delivery';
 import { createGit } from '../src/git';
 import { silentLogger } from '../src/log';
 import { resolveSandboxRuntime } from '../src/paths';
@@ -295,6 +296,67 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
     rmSync(dataDir, { recursive: true, force: true });
     rmSync(join(checkout, 'readable'), { force: true });
   }, 60_000);
+
+  it("can't write or remove a node_modules template, from a gate or a package install", async () => {
+    const dataDir = join(root, 'data');
+    const template = join(templatesRoot(dataDir), 'k', 'tree', 'node_modules', 'pkg');
+    mkdirSync(template, { recursive: true });
+    writeFileSync(join(template, 'index.js'), 'module.exports = 1;\n');
+    const git = createGit();
+    const withData = createGateRunner({
+      sandbox: createGateSandbox({
+        home: homedir(),
+        dataDir,
+        loginConfigDir: null,
+        gitDirs: (path) => git.gitDirs(path),
+        tmpRoot,
+        filesRoot: join(root, 'r'),
+        codexLaneTempRoot: join(root, 'l'),
+        log: silentLogger,
+        pnpmLockDir: join(root, 'pnpm-locks'),
+        runtime: resolveSandboxRuntime(),
+      }),
+      logger: silentLogger,
+    });
+    const probes: Record<string, string> = {
+      'write-template': `echo x > '${join(template, 'index.js')}'`,
+      'delete-template': `rm -rf '${templatesRoot(dataDir)}/k'`,
+      'write-root': `mkdir '${templatesRoot(dataDir)}/new'`,
+      'write-checkout': `echo x > '${join(checkout, 'template-probe')}'`,
+    };
+    const script = Object.entries(probes)
+      .map(
+        ([name, command]) =>
+          `if ( ${command} ) >/dev/null 2>&1; then echo "probe ${name} ok"; else echo "probe ${name} denied"; fi`,
+      )
+      .join('\n');
+    for (const packageInstall of [false, true]) {
+      const result = await withData.run({
+        project: { repoPath: checkout, sandboxLoopback: false },
+        command: script,
+        logPath: join(root, 'logs', `${randomBytes(4).toString('hex')}.log`),
+        timeoutMs: 60_000,
+        env: env(),
+        rules: [],
+        checkouts: [checkout],
+        packageInstall,
+      });
+      expect(result.exitCode, result.tail).toBe(0);
+      expect(
+        Object.fromEntries(
+          [...result.tail.matchAll(/^probe (\S+) (ok|denied)$/gm)].map((m) => [m[1], m[2]]),
+        ),
+      ).toEqual({
+        'write-template': 'denied',
+        'delete-template': 'denied',
+        'write-root': 'denied',
+        'write-checkout': 'ok',
+      });
+      expect(existsSync(join(template, 'index.js'))).toBe(true);
+    }
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(join(checkout, 'template-probe'), { force: true });
+  }, 120_000);
 
   it("can't write the main checkout or a sibling worktree from a gate in a worktree", async () => {
     const worktrees = tempDir('gate-worktrees');

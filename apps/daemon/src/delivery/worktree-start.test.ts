@@ -3,6 +3,7 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   statSync,
@@ -29,6 +30,7 @@ import { hangingSsh } from '../../test/hanging-ssh';
 import { parseWorktreeList, type WorktreeEntry } from '../git';
 import { allowFoundHosts, removeNetworkHost } from '../permissions';
 import { batchBranchName, createBatchStarter } from './index';
+import { templateKey, templatesRoot } from './node-modules-template';
 import { INSTALL_SUMMARY } from './worktree-dependencies';
 
 let h: DeliveryHarness;
@@ -320,6 +322,58 @@ describe('installing a new worktree’s dependencies', () => {
     expect(refused.body).toContain('The install was blocked from reaching registry.npmjs.org');
     expect(refused.body).not.toContain('SandboxDebug');
     expect(refused.body).not.toMatch(/the gate was blocked|run the gate again/i);
+  });
+});
+
+describe('a new copy’s node_modules from a template', () => {
+  const VERSION = '10.0.0';
+  const LEFT_PAD_LOCKFILE =
+    'importers:\n  .:\n    dependencies:\n      left-pad:\n        specifier: 1.3.0\n        version: 1.3.0\n';
+
+  beforeEach(() => {
+    h.close();
+    h = createDeliveryHarness(
+      { workspaceMode: 'worktree' },
+      { trigger: false, pnpmVersion: VERSION },
+    );
+    pushed('.gitignore', 'node_modules/\n');
+    pushed('pnpm-lock.yaml', LEFT_PAD_LOCKFILE);
+    // The builder's own install in Your folder, which no copy gets.
+    mkdirSync(join(h.repo, 'node_modules', 'builders-own'), { recursive: true });
+    h.pnpm.makes({ 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
+  });
+
+  const root = (): string => templatesRoot(h.dataDir);
+
+  it('installs once per lockfile: the next copy clones the first one’s install', async () => {
+    const first = await startedOne(h.addTask('Alpha'));
+    expect(first.state).toBe('OPEN');
+    expect(h.pnpm.calls()).toHaveLength(1);
+    expect(existsSync(join(pathOf(first), 'node_modules', 'builders-own'))).toBe(false);
+    const key = templateKey(pathOf(first), VERSION);
+    expect(readdirSync(root())).toEqual([key]);
+
+    const second = await startedOne(h.addTask('Beta'));
+    expect(second.state).toBe('OPEN');
+    expect(h.pnpm.calls()).toHaveLength(1);
+    expect(readFileSync(join(pathOf(second), 'node_modules/left-pad/index.js'), 'utf8')).toBe(
+      'module.exports = 1;\n',
+    );
+    expect(existsSync(join(pathOf(second), 'node_modules', 'builders-own'))).toBe(false);
+    expect(readdirSync(root())).toEqual([key]);
+
+    pushed('pnpm-lock.yaml', `${LEFT_PAD_LOCKFILE}# moved on\n`);
+    const third = await startedOne(h.addTask('Gamma'));
+    expect(h.pnpm.calls()).toHaveLength(2);
+    const next = templateKey(pathOf(third), VERSION);
+    expect(next).not.toBe(key);
+    expect(readdirSync(root())).toContain(next);
+  });
+
+  it('removes a template no checkout uses when it cuts', async () => {
+    mkdirSync(join(root(), 'f'.repeat(32), 'tree'), { recursive: true });
+    await startedOne(h.addTask('Alpha'));
+    expect(existsSync(join(root(), 'f'.repeat(32)))).toBe(false);
   });
 });
 

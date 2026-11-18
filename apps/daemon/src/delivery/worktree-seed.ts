@@ -36,7 +36,7 @@ export interface SeedResult {
  * True when `parent` is a directory itself (not a link) whose real path lies at or under `root`, so
  * a link higher up in the worktree, such as a tracked `apps -> /x`, can't lead a copy out of it.
  */
-async function isDirectoryInside(parent: string, root: string): Promise<boolean> {
+export async function isDirectoryInside(parent: string, root: string): Promise<boolean> {
   try {
     if (!(await lstat(parent)).isDirectory()) return false;
     const real = foldPathCase(realPathOf(parent));

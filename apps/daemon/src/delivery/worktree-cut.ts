@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import {
@@ -30,7 +31,7 @@ import { landingWarnings, missingLandingBranch, type SameStart } from './landing
 import { seedNotices } from './notices';
 import { forgetStartSiblings } from './start-siblings';
 import { resolveStartCards } from './stale-cards';
-import { raiseInstallHostCards } from './worktree-dependencies';
+import { PNPM_LOCKFILE, raiseInstallHostCards } from './worktree-dependencies';
 import { seedDirs, seedWorktree } from './worktree-seed';
 
 /** What a start hands its background job: the plans resolved in the request, by task. */
@@ -229,9 +230,16 @@ export async function cutWorktree(
       if (!stopped()) await refuse(worktreeCards.seedFailed(batch, error));
       return;
     }
+    // In a pnpm project the copy's install makes its `node_modules` from its own lockfile, cloned
+    // from the daemon's template for it or installed from nothing, so Your folder's is not cloned:
+    // pnpm would remove it anyway, since it names another store
+    // (`decisions/2026-11-17-a-copys-node-modules-is-cloned-from-a-template-made-once-per-lockfile.md`).
+    const installMakes =
+      existsSync(join(path, PNPM_LOCKFILE)) && dirs.some((dir) => basename(dir) === 'node_modules');
+    const cloned = installMakes ? dirs.filter((dir) => basename(dir) !== 'node_modules') : dirs;
     if (seed) {
       try {
-        const seeded = await seedWorktree({ from: main, to: path, dirs, signal });
+        const seeded = await seedWorktree({ from: main, to: path, dirs: cloned, signal });
         ctx.logger.info(
           { batchId, path, files: seeded.files, links: seeded.links, skipped: seeded.skipped },
           'worktree seeded',
@@ -242,7 +250,7 @@ export async function cutWorktree(
         // insert until it ends, after which the lane's session does.
         if (sharedLanes()) {
           await Promise.all(
-            dirs.map((dir) => rm(join(path, dir), { recursive: true, force: true })),
+            cloned.map((dir) => rm(join(path, dir), { recursive: true, force: true })),
           );
           seed = false;
         }
@@ -263,7 +271,8 @@ export async function cutWorktree(
       project,
       path,
       signal,
-      seeded: seed,
+      seeded: seed && !installMakes,
+      makeTemplate: true,
     });
     await recordInstall(ctx, batchId, path, installed);
     switch (installed.kind) {
@@ -299,8 +308,8 @@ export async function cutWorktree(
     // The install ran no install script, and no seed carried built output: a package the project
     // allows to build (a native addon, a generated client) is installed but not built. An install
     // that started over has told the builder already, recordInstall above.
-    if (!seed && installed.kind === 'installed' && !installed.startedOver)
-      noticeUnbuilt(ctx, batchId, path, 'seed_skipped');
+    if (installed.kind === 'installed' && !installed.startedOver && (!seed || installMakes))
+      noticeUnbuilt(ctx, batchId, path, seed ? 'made_by_install' : 'seed_skipped');
     ctx.state.write((w) => {
       patchBatch(w, batchId, { branch, baseSha, repo });
       transitionBatch(w, batchId, { to: BatchState.Open, reason: 'worktree cut' });
