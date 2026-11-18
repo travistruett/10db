@@ -37,7 +37,7 @@ import { enterHere, takeHereForGitTool } from './work-takes-checkout';
 import { checkoutBranchNow } from './checkout-branch';
 
 // Where a session's work happens (the place table in the sessions plan): the question a first change asks, and the
-// choice that answers it. The state machine is `work-place.ts`; this applies it to the store and the engine.
+// choice that answers it, applied to the store and the engine.
 
 export interface ChatWorkServiceDeps {
   readonly state: StateStore;
