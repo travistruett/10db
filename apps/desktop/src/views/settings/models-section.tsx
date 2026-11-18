@@ -10,6 +10,7 @@ import {
   Text,
   Tooltip,
 } from '@mantine/core';
+import { PAGE_TABS_CLASS_NAMES } from '../../shell/page-tabs';
 import { TitleRow } from '../../shell/title-row';
 import { Link } from '@tanstack/react-router';
 import { IconRefresh } from '@tabler/icons-react';
@@ -153,6 +154,7 @@ export function ModelsSection() {
         }
       />
       <Tabs
+        classNames={PAGE_TABS_CLASS_NAMES}
         value={view}
         onChange={(value) => {
           if (value !== null && isModelsView(value)) setView(value);

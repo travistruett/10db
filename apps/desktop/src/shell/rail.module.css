@@ -98,16 +98,20 @@
   min-height: 8px;
 }
 
-/* Labelled the foot is one row (Settings, then the status icons); icons only it stacks. */
+/*
+ * Labelled the foot is Settings on a row of its own, then the status icons in a row under it, so the
+ * name is never cut by the icons beside it; icons only it stacks.
+ */
 .foot {
   flex: none;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 2px;
 }
 
 .foot > .item {
-  flex: 1;
+  flex: 1 1 100%;
   min-width: 0;
 }
 

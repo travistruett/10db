@@ -21,7 +21,7 @@ hairlines.
 
 ## Why
 
-- The first frame (an `bg0` rail, a `bg1` title band and an inset `bg0` card) put the traffic lights across a tone
+- The first frame (a `bg0` rail, a `bg1` title band and an inset `bg0` card) put the traffic lights across a tone
   seam, and in light mode the band was darker than both its neighbours, so it read as a second header.
 - The inset card forced a frame-toned band over the content to wrap it. Without the card the content keeps the 8 px
   it lost on the right and bottom, and a title sits on the content's own tone.

@@ -83,6 +83,14 @@ test('⇧⌘S switches the rail between labelled and icons only at 1280, and ope
   await expect.poll(async () => (await board.boundingBox())?.width).toBeGreaterThan(150);
   await page.keyboard.press('Escape');
   await expect.poll(async () => (await board.boundingBox())?.width).toBeLessThan(60);
+
+  // At 600 px the same key opens the sidebar over the content, and Esc folds it again.
+  await page.setViewportSize({ width: 600, height: 800 });
+  await expect.poll(async () => (await board.boundingBox())?.width).toBeLessThan(60);
+  await page.keyboard.press('Meta+Shift+S');
+  await expect.poll(async () => (await board.boundingBox())?.width).toBeGreaterThan(150);
+  await page.keyboard.press('Escape');
+  await expect.poll(async () => (await board.boundingBox())?.width).toBeLessThan(60);
 });
 
 test('at 800 px the open panel sheet sits flush against the icons rail, from the window top', async ({

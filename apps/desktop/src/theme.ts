@@ -3,16 +3,13 @@ import {
   defaultVariantColorsResolver,
   MultiSelect,
   NavLink,
-  Input,
   Select,
   Switch,
-  Tabs,
   Tooltip,
   type CSSVariablesResolver,
   type MantineColorsTuple,
   type VariantColorsResolver,
 } from '@mantine/core';
-import tabClasses from './tabs.module.css';
 import {
   SelenizedDark,
   SelenizedLight,
@@ -130,11 +127,6 @@ export const theme = createTheme({
     Select: Select.extend({ defaultProps: { checkIconPosition: 'right' } }),
     MultiSelect: MultiSelect.extend({ defaultProps: { checkIconPosition: 'right' } }),
     Switch: Switch.extend({ defaultProps: { withThumbIndicator: false } }),
-    // A control sits on the sidebar's tone in both schemes. Mantine paints a light-scheme input with its
-    // `white`, which this theme maps to the dark scheme's ink, so the fill is set here instead.
-    Input: Input.extend({ styles: { input: { backgroundColor: 'var(--mantine-color-default)' } } }),
-    // The first tab's label sits on the content's edge, where the page's title does.
-    Tabs: Tabs.extend({ classNames: { tab: tabClasses['tab'] } }),
     // A tooltip is the bright ink on the base tone in both schemes, small and tight.
     Tooltip: Tooltip.extend({
       styles: {

@@ -1,0 +1,26 @@
+/*
+ * In the light scheme Mantine paints a raised surface with its `white`, which this theme maps to the dark
+ * scheme's ink (it is what text on a filled color uses). Each surface that would turn dark is set to the
+ * theme's own raised tone instead.
+ */
+[data-mantine-color-scheme='light'] .mantine-Input-input[data-variant='default'] {
+  --input-bg: var(--mantine-color-default);
+}
+
+[data-mantine-color-scheme='light']
+  :is(
+    .mantine-Popover-dropdown,
+    .mantine-Menu-dropdown,
+    .mantine-Combobox-dropdown,
+    .mantine-Card-root,
+    .mantine-Fieldset-root,
+    .mantine-Notification-root,
+    .mantine-Accordion-item[data-active],
+    .mantine-Pill-root[data-variant='default']
+  ) {
+  background-color: var(--mantine-color-default);
+}
+
+[data-mantine-color-scheme='light'] .mantine-Checkbox-input:not(:checked, :indeterminate) {
+  background-color: var(--mantine-color-default);
+}

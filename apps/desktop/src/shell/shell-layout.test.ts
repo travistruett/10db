@@ -108,6 +108,11 @@ describe('shellLayout', () => {
       input: { ...base, band: ShellBand.Narrow, hasPanel: false, sheet: SidebarSheet.Sections },
       expected: { column: 'none', rail: 'sheet', labels: true, panel: 'none' },
     },
+    {
+      name: 'narrow with no panel has nothing for the panel key to open, as when its panel leaves mid-sheet',
+      input: { ...base, band: ShellBand.Narrow, hasPanel: false, sheet: SidebarSheet.Panel },
+      expected: { column: 'none', rail: 'hidden', labels: false, panel: 'none' },
+    },
   ];
 
   it.each(rows)('$name', ({ input, expected }) => {

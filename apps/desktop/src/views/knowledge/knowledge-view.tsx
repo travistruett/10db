@@ -15,6 +15,7 @@ import {
   type RecordRef,
   type TracedRecord,
 } from '../../daemon/knowledge-queries';
+import { PAGE_TABS_CLASS_NAMES } from '../../shell/page-tabs';
 import { PageIntro } from '../../shell/page-intro';
 import { TitleRow } from '../../shell/title-row';
 import { useSelectedProject } from '../../shell/selected-project';
@@ -216,6 +217,7 @@ function ProjectKnowledge({
         }
       />
       <Tabs
+        classNames={PAGE_TABS_CLASS_NAMES}
         value={tab}
         onChange={(next) => {
           if (isKnowledgeTab(next)) setTab(next);

@@ -440,6 +440,76 @@ describe('the panel and ⌘\\', () => {
   });
 });
 
+describe('a sheet over the content', () => {
+  it('moves focus into the sheet, puts the content behind it out of reach, and gives focus back', async () => {
+    viewportWidth(480);
+    server.use(...baseHandlers());
+    renderApp('/board');
+    const railBox = await findRailBox();
+    const button = screen.getByRole('button', { name: 'Toggle sidebar' });
+    button.focus();
+    fireEvent.click(button);
+    await waitFor(() => {
+      expect(railBox.contains(document.activeElement)).toBe(true);
+    });
+    expect(screen.getByRole('main', { hidden: true }).closest('[inert]')).not.toBeNull();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(button);
+    });
+    expect(screen.getByRole('main').closest('[inert]')).toBeNull();
+  });
+
+  it('starts its dimming after the rail when only the panel is a sheet', async () => {
+    viewportWidth(800);
+    server.use(...baseHandlers());
+    renderApp('/settings/general');
+    const panel = await findPanel();
+    pressPanelKey();
+    await waitFor(() => {
+      expect(panel.dataset['panel']).toBe('sheet');
+    });
+    const backdrop = document.querySelector<HTMLElement>('[data-frame-backdrop]');
+    // The icons rail is 76 px and its hairline: it stays clickable.
+    expect(backdrop?.style.left).toBe('77px');
+    pressSidebarKey();
+    await waitFor(() => {
+      expect(document.querySelector<HTMLElement>('[data-frame-backdrop]')?.style.left).toBe('0px');
+    });
+  });
+
+  it('opens the sidebar on ⇧⌘S while the panel sheet is open, and reports only that as expanded', async () => {
+    viewportWidth(800);
+    server.use(...baseHandlers());
+    renderApp('/settings/general');
+    const panel = await findPanel();
+    const railBox = await findRailBox();
+    const button = screen.getByRole('button', { name: 'Toggle sidebar' });
+    pressPanelKey();
+    await waitFor(() => {
+      expect(panel.dataset['panel']).toBe('sheet');
+    });
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    pressSidebarKey();
+    await waitFor(() => {
+      expect(railBox.getAttribute('data-sheet')).toBe('joined');
+    });
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('shows on a wide window whether the sidebar is icons only', async () => {
+    viewportWidth(1280);
+    server.use(...baseHandlers());
+    renderApp('/board');
+    const button = await screen.findByRole('button', { name: 'Toggle sidebar' });
+    expect(button.getAttribute('aria-pressed')).toBe('false');
+    fireEvent.click(button);
+    await waitFor(() => {
+      expect(button.getAttribute('aria-pressed')).toBe('true');
+    });
+  });
+});
+
 describe('the frame', () => {
   it('puts a drag region on its empty boxes and on none of its controls', async () => {
     server.use(...baseHandlers());
@@ -467,5 +537,27 @@ describe('the frame', () => {
     expect(column?.firstElementChild).toBe(banner);
     // The view stays: its title is still in the title row.
     expect(screen.getByRole('heading', { name: 'Factory' })).toBeTruthy();
+  });
+
+  it('drops the title hairline when the next page opens at the top', async () => {
+    viewportWidth(1280);
+    server.use(...baseHandlers());
+    const { router } = renderApp('/board');
+    const main = await screen.findByRole('main');
+    main.scrollTop = 40;
+    fireEvent.scroll(main);
+    const row = document.querySelector('[data-title-row]');
+    await waitFor(() => {
+      expect(row?.hasAttribute('data-scrolled')).toBe(true);
+    });
+    // The next page starts at the top without the box reporting a scroll.
+    main.scrollTop = 0;
+    fireEvent.click(screen.getByRole('link', { name: 'Factory' }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/factory');
+    });
+    await waitFor(() => {
+      expect(row?.hasAttribute('data-scrolled')).toBe(false);
+    });
   });
 });

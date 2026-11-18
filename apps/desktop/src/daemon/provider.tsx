@@ -61,7 +61,8 @@ function ConnectingScreen({ lastError }: { readonly lastError: string | null }) 
         {lastError !== null && (
           // The reason is for the curious; what the builder needs is that it keeps trying.
           <Tooltip label={lastError} multiline maw={480}>
-            <Text size="sm" c="dimmed" maw={480} ta="center">
+            {/* Focusable, so the reason is there for the keyboard and a screen reader as well. */}
+            <Text size="sm" c="dimmed" maw={480} ta="center" tabIndex={0}>
               Still trying to reach the 10db daemon. It retries on its own.
             </Text>
           </Tooltip>

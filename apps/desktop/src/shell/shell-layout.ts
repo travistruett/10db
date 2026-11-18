@@ -56,7 +56,10 @@ export function shellLayout(input: {
     }
     case ShellBand.Narrow: {
       const panel = !hasPanel ? 'none' : sheet === null ? 'hidden' : 'sheet';
-      if (sheet === null) return { column: 'none', rail: 'hidden', labels: false, panel };
+      // The panel key has nothing to open where the section has no panel, as on a medium window.
+      if (sheet === null || (sheet === SidebarSheet.Panel && !hasPanel)) {
+        return { column: 'none', rail: 'hidden', labels: false, panel };
+      }
       return {
         column: 'none',
         rail: 'sheet',

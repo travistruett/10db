@@ -4,6 +4,7 @@ import { useRouterState } from '@tanstack/react-router';
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -88,9 +89,10 @@ export function AppFrame({
   // A sheet belongs to the page it was opened on and to the sheet bands: moving on, or growing to a window
   // that has no sheets, drops it for good rather than leaving it to come back on the way back.
   if (opened !== null && (opened.at !== location || band === ShellBand.Wide)) setOpened(null);
-  const sheet = opened !== null ? opened.kind : null;
-
   const hasPanel = panelSection !== null && panelSection === section;
+  // The panel's sheet has nothing to show once its section has no panel (it left while the sheet was open).
+  const sheet =
+    opened === null || (opened.kind === SidebarSheet.Panel && !hasPanel) ? null : opened.kind;
   const layout = shellLayout({
     band,
     hasPanel,
@@ -109,7 +111,11 @@ export function AppFrame({
   /** ⇧⌘S: the rail's labels on a wide window; the whole sidebar over the content otherwise. */
   const toggleSidebar = (): void => {
     if (band === ShellBand.Wide) toggleLabels();
-    else setOpened(sheet === null ? { at: location, kind: SidebarSheet.Sections } : null);
+    else {
+      setOpened(
+        sheet === SidebarSheet.Sections ? null : { at: location, kind: SidebarSheet.Sections },
+      );
+    }
   };
   /** ⌘\ and a click on the open section's row: the panel, a column when wide and a sheet otherwise. */
   const togglePanel = (): void => {
@@ -119,7 +125,41 @@ export function AppFrame({
   };
   const hidePanel = band === ShellBand.Wide && layout.panel === 'column' ? togglePanelHidden : null;
 
-  const slots: FrameSlots = { titleHost, panelHost, drawerHost, hidePanel, registerPanel };
+  const slots = useMemo<FrameSlots>(
+    () => ({ titleHost, panelHost, drawerHost, hidePanel, registerPanel }),
+    [titleHost, panelHost, drawerHost, hidePanel, registerPanel],
+  );
+
+  const mainRef = useRef<HTMLElement>(null);
+  const toggleRef = useRef<HTMLButtonElement>(null);
+  const railRef = useRef<HTMLDivElement>(null);
+  // The page's own scroll position says whether its title carries the hairline: a page that opens at the top
+  // has none, whatever the last page's scroll was.
+  useEffect(() => {
+    setScrolled((mainRef.current?.scrollTop ?? 0) > 0);
+  }, [location]);
+
+  // A sheet takes focus when it opens, on the section that is open, and gives it back when it closes, so a
+  // keyboard builder is neither left behind the sheet nor dropped on the page.
+  const sheetOpen = layout.rail === 'sheet' || layout.panel === 'sheet';
+  const sheetOpener = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!sheetOpen) return undefined;
+    const opener = document.activeElement;
+    sheetOpener.current = opener instanceof HTMLElement ? opener : null;
+    const toggle = toggleRef.current;
+    const inSheet = layout.rail === 'sheet' ? railRef.current : panelHost;
+    const target =
+      inSheet?.querySelector<HTMLElement>('[aria-current="page"]') ??
+      inSheet?.querySelector<HTMLElement>('a[href], button:not([disabled])');
+    target?.focus();
+    return () => {
+      const back = sheetOpener.current?.isConnected === true ? sheetOpener.current : toggle;
+      back?.focus();
+    };
+    // Only the sheet opening or closing moves focus, not a change of which parts it holds.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sheetOpen]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -157,7 +197,6 @@ export function AppFrame({
         : 0;
   const panelColumn = layout.panel === 'column' ? PANEL_WIDTH + HAIRLINE : 0;
   const narrow = band === ShellBand.Narrow;
-  const sheetOpen = layout.rail === 'sheet' || layout.panel === 'sheet';
   // The toggle sits beside the lights where the sidebar is labelled or folded away, and under them in the
   // icons-only rail, which has no room beside them.
   const toggleBeside = layout.rail === 'hidden' || layout.labels;
@@ -190,6 +229,7 @@ export function AppFrame({
             data-sheet={
               layout.rail === 'sheet' ? (layout.panel === 'sheet' ? 'joined' : '') : undefined
             }
+            ref={railRef}
             style={railStyle}
             inert={layout.rail === 'hidden'}
           >
@@ -218,7 +258,9 @@ export function AppFrame({
               size={28}
               aria-label="Toggle sidebar"
               // A wide window's toggle flips labels and discloses nothing; otherwise it opens the sidebar sheet.
-              aria-expanded={band === ShellBand.Wide ? undefined : sheet !== null}
+              ref={toggleRef}
+              aria-pressed={band === ShellBand.Wide ? !layout.labels : undefined}
+              aria-expanded={band === ShellBand.Wide ? undefined : sheet === SidebarSheet.Sections}
               onMouseEnter={showToggleTip}
               onMouseLeave={hideToggleTip}
               onClick={() => {
@@ -236,10 +278,12 @@ export function AppFrame({
             data-title-row=""
             data-scrolled={scrolled ? '' : undefined}
             data-tauri-drag-region
+            inert={sheetOpen}
           />
-          <div className={classes['content']}>
+          <div className={classes['content']} inert={sheetOpen}>
             {banner}
             <main
+              ref={mainRef}
               className={classes['main']}
               onScroll={(event) => {
                 setScrolled(event.currentTarget.scrollTop > 0);
@@ -253,6 +297,8 @@ export function AppFrame({
             <div
               className={classes['backdrop']}
               data-frame-backdrop
+              // Where only the panel is a sheet the icons rail beside it stays clear, and clickable.
+              style={{ left: layout.rail === 'column' ? columnWidth : 0 }}
               onClick={() => {
                 setOpened(null);
               }}
