@@ -156,6 +156,7 @@ import {
   returnBranchProblem,
   readPnpmVersion,
   recoverBatches,
+  createHandMadeFolderLook,
   removeMergedBranches,
   resolvePnpm,
   resumePassSettles,
@@ -2207,6 +2208,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // daemon left: its scratch gate's worktree and process are its own from here.
   passCloses.resume();
   // Outside the delivery job queues: a slow or offline gh never holds a cut or a ship.
+  const lookAtHandMadeFolders = createHandMadeFolderLook(delivery);
   const prWatch = createPrWatch({
     ctx: delivery,
     clock,
@@ -2219,8 +2221,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       abandon: (id) => shipper.abandon(id),
     },
     ...(opts.prWatchIntervalMs ? { intervalMs: opts.prWatchIntervalMs } : {}),
-    // A merged pull request's local branch goes in the round that reads the merge.
-    afterRound: (signal) => removeMergedBranches(delivery, signal),
+    // A merged pull request's local branch goes in the round that reads the merge. Then, now and
+    // then, the builder's hand-made worktrees whose pull request merged are offered for removal.
+    afterRound: async (signal) => {
+      await removeMergedBranches(delivery, signal);
+      await lookAtHandMadeFolders(signal);
+    },
   });
   const unsubscribePrWatch = subscribePrWatch(bus, prWatch);
   answerGhCard = createGhCardAnswers(prWatch);
