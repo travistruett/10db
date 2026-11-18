@@ -202,7 +202,7 @@ test('a deleted empty branch shows in Activity, and Open and the badge do not mo
       window.localStorage.setItem('mantine-color-scheme-value', value);
     }, mode);
     await page.goto(`/inbox?project=${projectId}`);
-    await page.getByRole('radiogroup', { name: 'Inbox state' }).getByText('Activity').click();
+    await page.getByRole('button', { name: 'Activity' }).click();
     const row = page.getByRole('option', { name: new RegExp(NOTICE_LINE) });
     await expect(row).toBeVisible();
     await row.click();
