@@ -214,6 +214,10 @@ export function createTitleRowGit(deps: TitleRowGitDeps): TitleRowGit {
         throw new ConflictError(
           `Merging ${chat.branch} into ${base} conflicts in ${merged.paths.join(', ')}, so nothing was merged.`,
         );
+      if (merged.kind === 'blocked')
+        throw new ConflictError(
+          `Your checkout has files where the merge writes (${[...merged.changed, ...merged.kept].join(', ')}), so nothing was merged.`,
+        );
     } finally {
       folderHold.releaseGit(token);
     }

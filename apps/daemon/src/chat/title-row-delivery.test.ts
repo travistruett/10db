@@ -295,6 +295,21 @@ describe('Merge into main on a local project', () => {
     expect(gitIn(repo(), 'status', '--porcelain')).toBe('');
   });
 
+  it('is refused, naming the files, when ignored files of the checkout lie where the merge writes', async () => {
+    const chat = setup('local');
+    writeFileSync(join(repo(), '.gitignore'), 'secret.env\n');
+    gitIn(repo(), 'add', '.gitignore');
+    gitIn(repo(), '-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'ignore');
+    const path = branchSession(chat, 'other.ts');
+    writeFileSync(join(path, 'secret.env'), 'theirs\n');
+    gitIn(path, 'add', '-f', 'secret.env');
+    gitIn(path, '-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'secret');
+    writeFileSync(join(repo(), 'secret.env'), 'mine\n');
+    const before = gitIn(repo(), 'rev-parse', 'main');
+    await expect(titleRow.merge(chat.id, signal)).rejects.toThrow(/secret\.env/);
+    expect(gitIn(repo(), 'rev-parse', 'main')).toBe(before);
+  });
+
   it('is served by POST /chats/:chatId/merge', async () => {
     const chat = setup('local');
     branchSession(chat);
