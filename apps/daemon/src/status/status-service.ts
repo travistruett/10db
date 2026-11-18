@@ -4,6 +4,9 @@ import type { Clock, Timer } from '../clock';
 /** A hold is shown once it has lasted this long, and kept this long after it lifts. */
 export const STATUS_HYSTERESIS_MS = 2 * 60_000;
 
+/** Below this level the client draws nothing for how busy the Mac is. */
+export const BUSY_DRAWN_FROM = 0.5;
+
 /** What a source says about a hold; the service adds the key and when it began. */
 export type StatusHold = Pick<
   StatusLine,
@@ -16,10 +19,12 @@ export interface StatusService {
   /** The hold lifted. */
   release(key: string): void;
   /**
-   * How busy the Mac is, from each load sample. The client hears of it only when the level, rounded to
-   * tenths, or `holding` changes, so a steady load writes no event per sample.
+   * How busy the Mac is, from each load sample, and while holding the plain names of what is busiest. The
+   * client hears of it only when the level, rounded to tenths, `holding` or those names change, so a
+   * steady load writes no event per sample, and none while the level is under `BUSY_DRAWN_FROM` before
+   * and after, where nothing is drawn.
    */
-  busy(level: number, holding: boolean): void;
+  busy(level: number, holding: boolean, busiest?: readonly string[]): void;
   /** The lines shown now, oldest first, and the busy level. */
   current(): StatusDto;
   /** Cancels every timer and drops every hold; a hold made after it is ignored, so nothing fires again. */
@@ -39,7 +44,7 @@ interface Entry {
  * The holds that pause work and end by themselves, with the hysteresis that keeps a flapping one from
  * flickering: pending until it has lasted `STATUS_HYSTERESIS_MS`, shown, then lingering for as long
  * after it lifts. It lives in memory, so a restart starts every hold again. `onChange` runs when the
- * shown set, the words of a shown line (its label or sentence, not the busy processes behind it) or the
+ * shown set, the words of a shown line's label (not its sentence or the busy processes behind it) or the
  * busy level change.
  */
 export function createStatusService(deps: {
@@ -82,7 +87,8 @@ export function createStatusService(deps: {
         });
         return;
       }
-      const reworded = entry.hold.label !== hold.label || entry.hold.line !== hold.line;
+      // The sentence carries the load, which changes at nearly every sample and is not drawn.
+      const reworded = entry.hold.kind !== hold.kind || entry.hold.label !== hold.label;
       entry.hold = hold;
       if (entry.phase === 'lingering') {
         entry.timer?.cancel();
@@ -108,11 +114,19 @@ export function createStatusService(deps: {
         changed();
       });
     },
-    busy(level, holding) {
+    busy(level, holding, busiest = []) {
       if (stopped) return;
-      const next = { level: Math.round(level * 10) / 10, holding };
-      if (busy?.level === next.level && busy.holding === next.holding) return;
+      const next = { level: Math.round(level * 10) / 10, holding, busiest: [...busiest] };
+      const previous = busy;
+      if (
+        previous?.level === next.level &&
+        previous.holding === next.holding &&
+        previous.busiest.join('\n') === next.busiest.join('\n')
+      )
+        return;
       busy = next;
+      if (previous !== null && previous.level < BUSY_DRAWN_FROM && next.level < BUSY_DRAWN_FROM)
+        return;
       changed();
     },
     current,

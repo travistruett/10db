@@ -5,7 +5,7 @@ import { createStatusService, STATUS_HYSTERESIS_MS, type StatusHold } from './st
 
 const hold = (line = 'Holding new lanes'): StatusHold => ({
   kind: 'admission_hold',
-  label: 'Held',
+  label: line,
   line,
   details: 'why',
   busiest: [],
@@ -81,7 +81,7 @@ describe('the status line hysteresis', () => {
 });
 
 describe('the busy level', () => {
-  const rows: { name: string; steps: [number, boolean][]; events: number }[] = [
+  const rows: { name: string; steps: [number, boolean, string[]?][]; events: number }[] = [
     { name: 'the first reading is a change', steps: [[0.3, false]], events: 1 },
     {
       name: 'the same tenth is no change',
@@ -94,8 +94,33 @@ describe('the busy level', () => {
     {
       name: 'crossing a tenth is a change',
       steps: [
-        [0.34, false],
-        [0.36, false],
+        [0.54, false],
+        [0.56, false],
+      ],
+      events: 2,
+    },
+    {
+      name: 'moving about under half is no change to tell',
+      steps: [
+        [0.2, false],
+        [0.4, false],
+      ],
+      events: 1,
+    },
+    {
+      name: 'crossing half is a change',
+      steps: [
+        [0.4, false],
+        [0.5, false],
+      ],
+      events: 2,
+    },
+    {
+      name: 'new busiest names while holding are a change',
+      steps: [
+        [1, true, ['Docker']],
+        [1, true, ['Docker']],
+        [1, true, ['Docker', 'Spotlight']],
       ],
       events: 2,
     },
@@ -111,7 +136,7 @@ describe('the busy level', () => {
   for (const row of rows) {
     it(row.name, () => {
       const { status, changes } = setup();
-      for (const [level, holding] of row.steps) status.busy(level, holding);
+      for (const [level, holding, names] of row.steps) status.busy(level, holding, names);
       expect(changes).toHaveLength(row.events);
     });
   }
@@ -120,7 +145,7 @@ describe('the busy level', () => {
     const { status } = setup();
     expect(status.current().busy).toBeNull();
     status.busy(0.74, false);
-    expect(status.current().busy).toEqual({ level: 0.7, holding: false });
+    expect(status.current().busy).toEqual({ level: 0.7, holding: false, busiest: [] });
   });
 
   it('does not tell the client when only the busy processes behind a shown line change', () => {
@@ -134,5 +159,7 @@ describe('the busy level', () => {
     });
     expect(changes).toHaveLength(1);
     expect(status.current().lines[0]?.busiest).toEqual(['Docker']);
+    status.hold('a', { ...hold(), line: 'Holding new lanes (load 31)' });
+    expect(changes).toHaveLength(1);
   });
 });

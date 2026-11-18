@@ -23,7 +23,7 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
   backdrop, or moving anywhere closes a sheet.
 - The rail is `rail.tsx` over `rail-items.ts` (`RAIL_ITEMS`, one flat list with no group type; a route maps to its
   section with `railSectionForPath`) and draws labelled or icons only from `RailModeContext` (`rail-mode.ts`), which the
-  project row and the status controls read. `rail-badges.tsx` draws the counts. `status-line.tsx` is the foot's status control (`GET /status`, refetched on `status.changed`, never polled): a thin Progress bar for how busy the Mac is (hidden below 0.5, gray from 0.5, full and orange while 10db holds new work, no numbers, icon-wide in the narrow rail) with a HoverCard in plain words and, while holding, the busiest things by name; the holds that are not the load keep their short label, "+N" when more, and a popover of details. It draws nothing while nothing is held or busy.
+  project row and the status controls read. `rail-badges.tsx` draws the counts. `status-line.tsx` is the foot's status control (`GET /status`, refetched on `status.changed`, never polled): a thin Progress bar for how busy the Mac is (hidden below 0.5, gray from 0.5, full and orange while 10db holds new work, no numbers, icon-wide in the narrow rail) with a HoverCard in plain words ("very busy" from level 1 before a hold starts) and, while holding, the busiest things by name from `busy.busiest`; the holds that are not the load keep their short label, "+N" when more, and a popover of details. It draws nothing while nothing is held or busy.
 
 ## Drawing into the frame
 

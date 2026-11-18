@@ -88,11 +88,18 @@
             },
             "holding": {
               "type": "boolean"
+            },
+            "busiest": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           },
           "required": [
             "level",
-            "holding"
+            "holding",
+            "busiest"
           ]
         },
         {

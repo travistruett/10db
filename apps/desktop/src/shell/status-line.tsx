@@ -29,22 +29,22 @@ export function StatusLineControl() {
   const busy = status?.busy ?? null;
   const showBar = busy !== null && busy.level >= BUSY_SHOWN_FROM;
   const lines = (status?.lines ?? []).filter((line) => line.kind !== StatusKind.AdmissionHold);
-  const busiest =
-    (status?.lines ?? []).find((l) => l.kind === StatusKind.AdmissionHold)?.busiest ?? [];
   if (!showBar && lines.length === 0) return null;
   return (
     <Stack gap={4} w="100%">
-      {showBar && <BusyBar busy={busy} busiest={busiest} />}
+      {showBar && <BusyBar busy={busy} />}
       {lines.length > 0 && <HoldLines lines={lines} />}
     </Stack>
   );
 }
 
-function BusyBar({ busy, busiest }: { busy: BusyLevel; busiest: readonly string[] }) {
+function BusyBar({ busy }: { busy: BusyLevel }) {
   const { labels } = useRailMode();
   const sentence = busy.holding
     ? 'Your Mac is too busy to start new work. 10db is waiting for it to calm down; work already running carries on.'
-    : 'Your Mac is busy. 10db keeps working, and waits before starting anything new if it gets much busier.';
+    : busy.level >= 1
+      ? 'Your Mac is very busy. If it stays this busy for a few minutes, 10db waits before starting anything new.'
+      : 'Your Mac is busy. 10db keeps working, and waits before starting anything new if it gets much busier.';
   return (
     <HoverCard position="right-end" width={280} shadow="md" withArrow>
       <HoverCard.Target>
@@ -60,8 +60,8 @@ function BusyBar({ busy, busiest }: { busy: BusyLevel; busiest: readonly string[
       <HoverCard.Dropdown>
         <Stack gap={6}>
           <Text size="sm">{sentence}</Text>
-          {busy.holding && busiest.length > 0 && (
-            <Text size="xs" c="dimmed">{`Busiest right now: ${busiest.join(', ')}`}</Text>
+          {busy.holding && busy.busiest.length > 0 && (
+            <Text size="xs" c="dimmed">{`Busiest right now: ${busy.busiest.join(', ')}`}</Text>
           )}
         </Stack>
       </HoverCard.Dropdown>

@@ -44,6 +44,8 @@ export const BusyLevel = z.object({
   level: z.number().nonnegative(),
   /** 10db is holding new work for it now. */
   holding: z.boolean(),
+  /** While holding, plain names of what is busiest, at most three; empty otherwise. */
+  busiest: z.array(z.string()),
 });
 export type BusyLevel = z.infer<typeof BusyLevel>;
 

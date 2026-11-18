@@ -32,14 +32,14 @@ const hoverTarget = (bar: HTMLElement): HTMLElement => bar.parentElement?.parent
 
 describe('the status line in the rail', () => {
   it('draws no bar while the Mac is below half busy', async () => {
-    serve({ lines: [], busy: { level: 0.4, holding: false } });
+    serve({ lines: [], busy: { level: 0.4, holding: false, busiest: [] } });
     renderApp('/board');
     await screen.findByRole('navigation').catch(() => undefined);
     expect(screen.queryByRole('progressbar')).toBeNull();
   });
 
   it('draws a bar and says the Mac is busy, with no numbers, when it is half busy or more', async () => {
-    serve({ lines: [], busy: { level: 0.7, holding: false } });
+    serve({ lines: [], busy: { level: 0.7, holding: false, busiest: [] } });
     renderApp('/board');
     const bar = await screen.findByRole('progressbar', { name: 'Mac busy' });
     fireEvent.mouseEnter(hoverTarget(bar));
@@ -47,10 +47,17 @@ describe('the status line in the rail', () => {
     expect(screen.queryByText(/Busiest right now/)).toBeNull();
   });
 
+  it('says the Mac is very busy once it is past the line and not yet holding', async () => {
+    serve({ lines: [], busy: { level: 1.2, holding: false, busiest: [] } });
+    renderApp('/board');
+    fireEvent.mouseEnter(hoverTarget(await screen.findByRole('progressbar', { name: 'Mac busy' })));
+    expect(await screen.findByText(/Your Mac is very busy\. If it stays this busy/)).toBeTruthy();
+  });
+
   it('says 10db is holding, and what is busiest in plain words, while it holds', async () => {
     serve({
-      lines: [line('overload', 'Holding new lanes', 'admission_hold', ['Docker', 'file indexing'])],
-      busy: { level: 1, holding: true },
+      lines: [],
+      busy: { level: 1, holding: true, busiest: ['Docker', 'file indexing'] },
     });
     renderApp('/board');
     fireEvent.mouseEnter(

@@ -160,6 +160,8 @@ export function createLoadMonitor(opts: LoadMonitorOptions): LoadGuard {
 
   // The latest report of the overload on now, for the notice that says what it was busy with.
   let latest: OverloadReport | null = null;
+  // The busiest names from the culprits gathered at the hold's start and at each sample after it.
+  let busiest: string[] = [];
 
   function noticeHoldEnded(report: OverloadReport): void {
     const ms = opts.clock.now().getTime() - report.since.getTime();
@@ -202,13 +204,15 @@ export function createLoadMonitor(opts: LoadMonitorOptions): LoadGuard {
       ),
     onOverloaded: (report) => {
       latest = report;
+      busiest = busiestNames(report.culprits, 3);
       opts.status.hold(OVERLOAD_STATUS_KEY, overloadStatus(report));
     },
     onLevel: (level, holding) => {
-      opts.status.busy(level, holding);
+      opts.status.busy(level, holding, holding ? busiest : []);
     },
     onCleared: () => {
       opts.status.release(OVERLOAD_STATUS_KEY);
+      busiest = [];
       const report = latest;
       latest = null;
       if (report !== null) noticeHoldEnded(report);
