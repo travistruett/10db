@@ -15,6 +15,7 @@ import {
   lockfileImporters,
   PNPM_LOCKFILE,
 } from './install-health';
+import { cloneWholeTrees } from './clone-tree';
 import { isDirectoryInside, seedWorktree } from './worktree-seed';
 
 /** The file a finished template holds beside its tree, written last: a template without it is unfinished. */
@@ -103,10 +104,10 @@ const execFileAsync = promisify(execFile);
 
 /**
  * Clones the directories `dirs` (relative, absent in `to`) from `from` into `to`, links copied as
- * links and never followed, nothing from the source run. On macOS each is one `cp -c`, which clones
- * a `node_modules` of some 70,000 files faster than `seedWorktree`'s walk; elsewhere, or when `cp`
- * fails, `seedWorktree` does it. Like the seed, a directory whose parent is not a directory inside
- * `to` is skipped, not copied.
+ * links and never followed, nothing from the source run. On macOS every directory is one
+ * `clonefile` of its whole tree, all in one call (`cloneWholeTrees`); one that can't be made is a
+ * `cp -c`, which clones file by file; and elsewhere, or when `cp` fails, `seedWorktree` copies.
+ * Like the seed, a directory whose parent is not a directory inside `to` is skipped, not copied.
  */
 async function cloneDirs(input: {
   readonly from: string;
@@ -117,6 +118,7 @@ async function cloneDirs(input: {
   if (process.platform !== 'darwin') return seedWorktree(input);
   const realTo = realPathOf(input.to);
   const skipped: string[] = [];
+  const pending: string[] = [];
   for (const dir of input.dirs) {
     input.signal.throwIfAborted();
     const target = join(input.to, dir);
@@ -126,6 +128,18 @@ async function cloneDirs(input: {
     }
     // cp would copy into a directory that is there, not as it.
     if (existsAsEntry(target)) throw new DamagedTemplate(`${dir} is already in ${input.to}`);
+    pending.push(dir);
+  }
+  const cloned = await cloneWholeTrees({
+    clones: pending.map((dir) => ({ from: join(input.from, dir), to: join(input.to, dir) })),
+    signal: input.signal,
+  });
+  for (const [index, dir] of pending.entries()) {
+    if (cloned.has(index)) continue;
+    input.signal.throwIfAborted();
+    const target = join(input.to, dir);
+    // A clone that stopped part-way, or a target another clone left, would have cp copy into it.
+    await rm(target, { recursive: true, force: true });
     try {
       await execFileAsync('/bin/cp', ['-cRP', join(input.from, dir), target], {
         signal: input.signal,
