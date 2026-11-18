@@ -1572,6 +1572,21 @@ describe('the resolved view', () => {
       });
     });
 
+    it('unfolds a folded panel and focuses the search with ⌘F', async () => {
+      serveBoth([], many(1));
+      renderApp('/inbox?state=resolved');
+      await panelRowTexts(1);
+      fireEvent.keyDown(document, { key: '\\', metaKey: true });
+      await waitFor(() => {
+        expect(document.querySelector('[data-panel]')?.getAttribute('data-panel')).toBe('hidden');
+      });
+      fireEvent.keyDown(document.body, { key: 'f', metaKey: true });
+      await waitFor(() => {
+        expect(document.querySelector('[data-panel]')?.getAttribute('data-panel')).toBe('column');
+        expect(document.activeElement).toBe(search());
+      });
+    });
+
     it('opens a URL with a search and a filter showing both', async () => {
       const asked = serveBoth([], many(1));
       renderApp('/inbox?state=resolved&q=x&kind=flag');

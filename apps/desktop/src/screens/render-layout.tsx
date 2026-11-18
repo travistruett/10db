@@ -4,6 +4,7 @@ import { Outlet, useRouterState } from '@tanstack/react-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { DaemonRequestError } from '../daemon/client';
 import { FrameSlotsContext } from '../shell/frame-slots';
+import { PANEL_WIDTH } from '../shell/shell-layout';
 import type { RailSection } from '../shell/rail-items';
 import { CRASH_ATTRIBUTE, CRASH_MESSAGE_ATTRIBUTE } from '../shell/view-boundary';
 import { SCREEN_LABEL, type FrameMessage } from './draw-screen';
@@ -83,9 +84,6 @@ function Reporter() {
 const RENDER_STYLE =
   '* { content-visibility: visible !important; } [data-render-title]:empty { display: none; }';
 
-/** The width of a section's panel beside the screen, as in the app's own frame. */
-const PANEL_WIDTH = 260;
-
 /**
  * The frame's root route: the screen, with the padding the app's own shell gives a view, and beside it the
  * section's panel only while a view registers one, so a picture of a screen without a list keeps its full width.
@@ -109,6 +107,7 @@ export function RenderLayout() {
         drawerHost: null,
         panelShown: panelSection !== null,
         hidePanel: null,
+        showPanel: () => undefined,
         closeSheet: () => undefined,
         registerPanel,
       }}

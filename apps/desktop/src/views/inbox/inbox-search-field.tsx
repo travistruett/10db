@@ -2,6 +2,7 @@ import { TextInput } from '@mantine/core';
 import { useDebouncedCallback } from '@mantine/hooks';
 import { IconSearch } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useFrameSlots } from '../../shell/frame-slots';
 
 /** How long the field waits after the last keystroke before the search reaches the URL. */
 export const SEARCH_DEBOUNCE_MS = 250;
@@ -20,6 +21,10 @@ export function InboxSearchField({
   readonly onQuery: (query: string | undefined) => void;
 }): ReactNode {
   const input = useRef<HTMLInputElement>(null);
+  const { panelShown, showPanel } = useFrameSlots();
+  // ⌘F while the panel is folded unfolds it first: the field takes focus once the panel is there to hold it.
+  const wantsFocus = useRef(false);
+  const [asked, setAsked] = useState(0);
   const [text, setText] = useState(query ?? '');
   // The last text written to the URL: a `q` that differs from it came from elsewhere.
   const [written, setWritten] = useState(query ?? '');
@@ -41,14 +46,21 @@ export function InboxSearchField({
       if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return;
       if (event.key.toLowerCase() !== 'f') return;
       event.preventDefault();
-      input.current?.focus();
-      input.current?.select();
+      showPanel();
+      wantsFocus.current = true;
+      setAsked((count) => count + 1);
     };
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('keydown', onKey);
     };
-  }, []);
+  }, [showPanel]);
+  useEffect(() => {
+    if (!wantsFocus.current || !panelShown) return;
+    wantsFocus.current = false;
+    input.current?.focus();
+    input.current?.select();
+  }, [asked, panelShown]);
 
   return (
     <TextInput
@@ -56,6 +68,7 @@ export function InboxSearchField({
       size="xs"
       aria-label="Search the Inbox"
       placeholder="Search"
+      maxLength={200}
       leftSection={<IconSearch size={14} />}
       value={text}
       onChange={(event) => {

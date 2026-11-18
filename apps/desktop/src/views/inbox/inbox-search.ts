@@ -4,7 +4,7 @@ import {
   InboxOutcome,
   PersonId,
   ProjectId,
-  type InboxPageQuery,
+  InboxPageQuery,
 } from '@10db/contracts';
 import { z } from 'zod';
 import type { InboxList } from '../../daemon/inbox-queries';
@@ -28,7 +28,12 @@ export interface InboxSearch {
 /** Each key on its own, so one that does not parse is dropped and the rest stay. */
 const InboxSearchKeys = z.object({
   state: z.enum(InboxListState).optional().catch(undefined),
-  q: z.string().min(1).optional().catch(undefined),
+  // Whatever the daemon would refuse is dropped here, so the URL never makes the list fail to load.
+  q: z
+    .string()
+    .refine((text) => InboxPageQuery.shape.q.safeParse(text).success)
+    .optional()
+    .catch(undefined),
   project: ProjectId.optional().catch(undefined),
   kind: z.enum(InboxKind).optional().catch(undefined),
   outcome: z.enum(InboxOutcome).optional().catch(undefined),
