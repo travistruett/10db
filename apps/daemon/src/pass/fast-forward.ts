@@ -1,6 +1,6 @@
-import type { PassBranchMovedDetail, PassDto, PassId } from '@10db/contracts';
-import { findOpenByFoldKey, getProject } from '@10db/db';
-import { flagCard, withdrawCard } from '../inbox';
+import type { PassDto, PassId } from '@10db/contracts';
+import { getProject } from '@10db/db';
+import { CardTier, postNotice } from '../inbox';
 import { passBranch, type PassWorkDeps } from './kept-work';
 import { branchMergeCommand } from './paste-command';
 
@@ -25,43 +25,29 @@ export type FastForward =
 function raiseBranchMoved(
   deps: PassWorkDeps,
   pass: PassDto,
-  reason: PassBranchMovedDetail['reason'],
+  reason: 'moved' | 'in_use_elsewhere',
   where: string | null,
   rewritten = false,
 ): void {
   const branch = passBranch(deps.state.db, pass);
-  const detail: PassBranchMovedDetail = {
-    kind: 'pass_branch_moved',
-    passId: pass.id,
-    returnBranch: pass.returnBranch,
-    passBranch: branch,
-    reason,
-    mergeCommand: branchMergeCommand(pass.returnBranch, branch),
-  };
   const why =
     reason === 'in_use_elsewhere'
       ? `${pass.returnBranch} is in use in ${where ?? 'another worktree'}, and moving a branch another worktree sits on would leave its files behind.`
       : rewritten
         ? `${branch} no longer holds the commit the pass started on, so moving ${pass.returnBranch} to it would drop commits; 10db did not move it.`
         : `${pass.returnBranch} moved since the pass opened, so 10db did not move it.`;
-  deps.state.write((ctx) =>
-    flagCard(ctx, {
-      projectId: pass.projectId,
-      workstreamId: null,
-      title: `Your folder stays on ${branch}`,
-      body: `UI Workbench pass "${pass.name}" closed. ${why} Your folder stays on ${branch}, which holds every signed-off page. To bring them into ${pass.returnBranch}, run \`${detail.mergeCommand}\`.`,
-      foldKey: branchMovedKey(pass.id),
-      refresh: true,
-      detail,
-    }),
-  );
-}
-
-/** Withdraws the pass's card about the branch it could not move, if it is open. */
-export function withdrawBranchMoved(deps: PassWorkDeps, pass: PassDto): void {
+  // A notice, not a card: it asks nothing, and stays in Activity as history even once the builder
+  // merges the branch by hand.
   deps.state.write((ctx) => {
-    const card = findOpenByFoldKey(ctx.tx, pass.projectId, branchMovedKey(pass.id));
-    if (card) withdrawCard(ctx, card.id);
+    postNotice(ctx, {
+      tier: CardTier.Notice,
+      projectId: pass.projectId,
+      taskId: null,
+      key: branchMovedKey(pass.id),
+      tone: 'warning',
+      line: `Your folder stays on ${branch}`,
+      body: `UI Workbench pass "${pass.name}" closed. ${why} Your folder stays on ${branch}, which holds every signed-off page. To bring them into ${pass.returnBranch}, run \`${branchMergeCommand(pass.returnBranch, branch)}\`.`,
+    });
   });
 }
 
@@ -111,6 +97,5 @@ export async function fastForwardReturn(deps: PassWorkDeps, pass: PassDto): Prom
     }
   }
   await git.refreshIndex(repo, await git.filesChangedBetween(repo, pass.startSha, tip));
-  withdrawBranchMoved(deps, pass);
   return { kind: 'returned' };
 }

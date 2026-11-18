@@ -15,7 +15,6 @@ import {
   type PassClosePreviewDto,
   type PassCloseRequest,
   type PassDto,
-  type PassGateFailedDetail,
   type PassId,
   type ProjectId,
   type TaskDto,
@@ -46,7 +45,7 @@ import {
 } from '@10db/db';
 import { jobKey, JobQueue, PASS_GATE_NOTICE } from '../delivery';
 import { GitNetworkError, GitTrustError, PassFolderOffBranchError, shellWord } from '../git';
-import { flagCard } from '../inbox';
+import { CardTier, postNotice } from '../inbox';
 import {
   checkCloseRequest,
   closeChanges,
@@ -234,13 +233,6 @@ async function failGate(
           .filter((page) => page.choice === PassClosePageChoice.TakeOut)
           .map((page) => getTask(deps.state.db, page.taskId).title)
       : [];
-  const detail: PassGateFailedDetail = {
-    kind: 'pass_gate_failed',
-    passId: pass.id,
-    where,
-    logPath: ran.logPath === '' ? null : ran.logPath,
-    tasks,
-  };
   const named =
     tasks.length === 0 ? '' : ` It names files of ${tasks.map((t) => t.title).join(', ')}.`;
   const one = takenOut.length === 1;
@@ -273,14 +265,14 @@ async function failGate(
         cardId: null,
         at: ctx.now,
       });
-    flagCard(ctx, {
+    postNotice(ctx, {
+      tier: CardTier.Notice,
       projectId: pass.projectId,
-      workstreamId: null,
-      title: `The gate failed as UI Workbench pass "${pass.name}" closed`,
+      taskId: null,
+      key: gateFailedKey(pass.id),
+      tone: 'warning',
+      line: `The gate failed as UI Workbench pass "${pass.name}" closed`,
       body: `The gate ran ${place}.${named} Finish runs it again.`,
-      foldKey: gateFailedKey(pass.id),
-      refresh: true,
-      detail,
     });
   });
 }
