@@ -13,6 +13,7 @@ import {
   type TaskDto,
   type TaskId,
   type WorkstreamId,
+  DEPS_HAZARD,
 } from '@10db/contracts';
 import {
   findOpenByFoldKey,
@@ -36,7 +37,7 @@ import { takeOut, TakeOutWithin, type TakeOutDeps } from './take-out';
 // (§8.2) is offered the same card where copies are allowed; its Not Now tells the agent nothing.
 
 /** The hazards a pass task leaves Your folder for. */
-const COPY_HAZARDS: readonly string[] = ['migrations', 'deps'];
+const COPY_HAZARDS: readonly string[] = ['migrations', DEPS_HAZARD];
 
 /** The fold key of a task's one Move to a Separate Copy card. */
 const moveToCopyKey = (taskId: TaskId): string => `pass-move-copy:${taskId}`;

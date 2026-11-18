@@ -1,4 +1,5 @@
 import { delimiter, join } from 'node:path';
+import type { LaneBrief } from '../../src/briefing';
 import { equalOrUnder } from '../../src/git';
 
 /** Variables that must not reach the eval daemon: the builder's own TENDB_* settings and billing switches. */
@@ -29,6 +30,8 @@ export function evalDaemonEnv(input: {
   readonly fakeBook: string | null;
   readonly catalogueSnapshot: string;
   readonly builder: BuilderPlaces;
+  /** How the eval daemon briefs its lanes; absent leaves it to the daemon's default. */
+  readonly brief?: LaneBrief;
 }): Record<string, string> {
   for (const place of [input.builder.dataDir, input.builder.worktreeBase]) {
     if (equalOrUnder(input.work, place) || equalOrUnder(place, input.work))
@@ -66,5 +69,6 @@ export function evalDaemonEnv(input: {
     TENDB_PARENT_STDIN: '1',
     TENDB_LANE_TRANSCRIPT_DAYS: String(EVAL_TRANSCRIPT_DAYS),
     ...(input.fakeBook === null ? {} : { TENDB_FAKE_SCRIPTS: input.fakeBook }),
+    ...(input.brief === undefined ? {} : { TENDB_LANE_BRIEF: input.brief }),
   };
 }

@@ -1,4 +1,11 @@
-import { ModelTier, Rigor, StepRole, type CellSetting, type KindInput } from '@10db/contracts';
+import {
+  DEPS_HAZARD,
+  ModelTier,
+  Rigor,
+  StepRole,
+  type CellSetting,
+  type KindInput,
+} from '@10db/contracts';
 import { getAppSetting, insertKind, listKinds, patchKind, setAppSetting } from '@10db/db';
 import type { WriteContext } from '@10db/db';
 
@@ -11,7 +18,7 @@ export const KINDS_IMPLIED_SEEDED_KEY = 'kinds.implied-seeded';
 /** The hazards whose presence on a task gives it a seeded kind, by the kind's key. */
 const SEEDED_IMPLIED_BY: Readonly<Record<string, readonly string[]>> = {
   migration: ['migrations'],
-  dependency: ['deps'],
+  dependency: [DEPS_HAZARD],
 };
 
 const tier = (name: ModelTier): CellSetting => ({
@@ -78,7 +85,7 @@ export const SEEDED_KINDS: readonly KindInput[] = [
     alwaysReviewed: true,
     ownCopy: true,
     toInbox: true,
-    impliedBy: ['deps'],
+    impliedBy: [DEPS_HAZARD],
   },
   {
     key: 'schema',

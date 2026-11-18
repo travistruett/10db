@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { FixBy, Rigor } from '@10db/contracts';
 import { z } from 'zod';
+import { LaneBrief } from '../src/briefing';
 import { DEFAULT_WORKTREE_BASE } from '../src/daemon';
 import { defaultDataDir } from '../src/runtime-files';
 import { BASELINES_DIR, CASES_DIR, loadCases, loadEvalProject, PROJECT_FILE } from './eval/case';
@@ -25,6 +26,8 @@ const Args = z.strictObject({
   plansInBuild: z.enum(['0', '1']).optional(),
   /** Sets the rigor's fixBy for the run: resumed fixes in the Build session, fresh in a new session. */
   fixBy: z.enum(FixBy).optional(),
+  /** Sets how the eval daemon briefs its lanes: index names the Plan and knowledge, full pastes them. */
+  brief: z.enum(LaneBrief).optional(),
   /** The report to compare with; absent takes the rigor's saved baseline, if there is one. */
   baseline: z.string().min(1).optional(),
   parallel: z.coerce.number().int().min(1).max(8).default(2),
@@ -76,6 +79,7 @@ const report = await runEval({
   log: say,
   ...(args.plansInBuild === undefined ? {} : { plansInBuild: args.plansInBuild === '1' }),
   ...(args.fixBy === undefined ? {} : { fixBy: args.fixBy }),
+  ...(args.brief === undefined ? {} : { brief: args.brief }),
 });
 const { markdown } = writeRun({
   work,

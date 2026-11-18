@@ -1,5 +1,6 @@
 import { FixBy, Rigor, Verdict } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
+import { LaneBrief } from '../../src/briefing';
 import { GateResult, Outcome } from './grade';
 import { EvalAgent, EvalReport, renderReport, type CaseRun } from './report';
 
@@ -28,6 +29,7 @@ const report = (plansInBuild: boolean | null, outcomes: readonly Outcome[]): Eva
   agent: EvalAgent.Fake,
   plansInBuild,
   fixBy: null,
+  brief: null,
   startedAt: '2026-11-18T00:00:00.000Z',
   finishedAt: '2026-11-18T00:01:00.000Z',
   cases: [
@@ -69,9 +71,19 @@ describe('the keep rule in a report', () => {
     const saved: Record<string, unknown> = { ...report(null, [Outcome.Met]) };
     delete saved['plansInBuild'];
     delete saved['fixBy'];
+    delete saved['brief'];
     const parsed = EvalReport.parse(saved);
     expect(parsed.plansInBuild).toBeNull();
     expect(parsed.fixBy).toBeNull();
+    expect(parsed.brief).toBeNull();
+  });
+
+  it.each([
+    { brief: LaneBrief.Index, want: ', indexed brief' },
+    { brief: LaneBrief.Full, want: ', full brief' },
+  ])('names the brief a run forced: $brief', ({ brief, want }) => {
+    const markdown = renderReport({ ...report(null, [Outcome.Met]), brief }, null);
+    expect(markdown).toContain(`# Lane-pipeline eval: careful, fake agent${want}\n`);
   });
 
   it.each([
@@ -91,6 +103,7 @@ describe('renderReport', () => {
         agent: EvalAgent.Fake,
         plansInBuild: null,
         fixBy: null,
+        brief: null,
         startedAt: '2026-11-18T00:00:00.000Z',
         finishedAt: '2026-11-18T00:01:00.000Z',
         cases: [

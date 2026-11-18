@@ -3,6 +3,8 @@ import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
 import {
   ClaimKind,
+  DEPS_HAZARD,
+  McpToolName,
   WHOLE_PROJECT_PAGE,
   type AreaDef,
   type Delivery,
@@ -768,13 +770,22 @@ function judgeShell(
         ) &&
         !claimed(input, ClaimKind.Hazard, hazard.name)
       ) {
-        return deny(
-          `"${line}" needs the "${hazard.name}" hazard claim. Call request_claim with kind "hazard" and name "${hazard.name}" first.`,
-        );
+        return deny(hazardCommandRefusal(line, hazard.name));
       }
     }
   }
   return coveredDeploy ? COVERED_DEPLOY : ALLOW;
+}
+
+/**
+ * Why a command that needs a hazard the lane doesn't hold is refused, and what to do instead. A
+ * dependency change also names install_dependencies: the sandbox can't install, so holding the hazard
+ * alone would only move the failure.
+ */
+function hazardCommandRefusal(line: string, hazard: string): string {
+  const claim = `"${line}" needs the "${hazard}" hazard claim. Call ${McpToolName.RequestClaim} with kind "hazard" and name "${hazard}" first.`;
+  if (hazard !== DEPS_HAZARD) return claim;
+  return `${claim} Your sandbox can't install dependencies: in a pnpm project, edit package.json with an exact version, then call ${McpToolName.InstallDependencies}, which installs and writes pnpm-lock.yaml for you. Never run pnpm add or pnpm install yourself.`;
 }
 
 /** Tools a read-only step may call besides Bash and the 10db MCP server's own tools. */
