@@ -15,6 +15,7 @@ import {
   type RecordRef,
   type TracedRecord,
 } from '../../daemon/knowledge-queries';
+import { PAGE_TABS_CLASS_NAMES } from '../../shell/page-tabs';
 import { PageIntro } from '../../shell/page-intro';
 import { TitleRow } from '../../shell/title-row';
 import { useSelectedProject } from '../../shell/selected-project';
@@ -124,11 +125,21 @@ function ShelfNote({
 }
 
 /** The view's header; the project's create button rides in `actions` once a project is chosen. */
-function KnowledgeHeader({ actions }: { readonly actions?: ReactNode }) {
+function KnowledgeHeader({
+  project,
+  actions,
+}: {
+  readonly project?: string;
+  readonly actions?: ReactNode;
+}) {
   return (
     <>
-      <TitleRow title="Knowledge" {...(actions === undefined ? {} : { actions })} />
-      <PageIntro description="What you, your agents and 10db have recorded for this project. The settings for 10db's own judgement calls are in Settings." />
+      <TitleRow
+        title="Knowledge"
+        {...(project === undefined ? {} : { meta: project })}
+        {...(actions === undefined ? {} : { actions })}
+      />
+      <PageIntro description="What you, your agents and 10db have recorded for this project." />
     </>
   );
 }
@@ -196,6 +207,7 @@ function ProjectKnowledge({
   return (
     <>
       <KnowledgeHeader
+        project={project.name}
         actions={
           tab === KnowledgeTab.Principles ? (
             <NewPrincipleButton project={project} />
@@ -205,6 +217,7 @@ function ProjectKnowledge({
         }
       />
       <Tabs
+        classNames={PAGE_TABS_CLASS_NAMES}
         value={tab}
         onChange={(next) => {
           if (isKnowledgeTab(next)) setTab(next);

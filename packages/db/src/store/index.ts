@@ -21,6 +21,7 @@ export * from './holds';
 export * from './human-touch';
 export * from './rigor-figures';
 export * from './inbox';
+export * from './inbox-card-types';
 export * from './inbox-page';
 export * from './kinds';
 export * from './knowledge';

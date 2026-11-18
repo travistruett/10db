@@ -28,11 +28,18 @@ function line(c: Culprit): string {
   return `- pid ${String(c.pid)} (${c.command}) at ${String(Math.round(c.cpu))}% of a core: ${whose(c.owner)}`;
 }
 
+/** The macOS services that follow every file a worktree's installs and test runs touch. */
+const FILE_WATCHERS = /(?:^|\/)(?:mds_stores|mdworker|fseventsd)/;
+
 /** What the builder can do about it, from who owns the busy processes. */
 function advice(culprits: readonly Culprit[]): string {
   const left = culprits.filter((c) => c.owner.kind === 'ended-lane');
   const other = culprits.filter((c) => c.owner.kind === 'other');
   const parts: string[] = [];
+  if (culprits.some((c) => FILE_WATCHERS.test(c.command)))
+    parts.push(
+      'Spotlight and the file-change watcher follow every file that worktrees’ installs and test runs touch. Two Inbox cards cut that: Keep Spotlight Out, for the folder of worktrees you made by hand, and Remove Merged Worktrees, for the ones whose pull request merged. 10db’s own worktrees are already kept out of Spotlight and removed when their batch ships.',
+    );
   if (left.length > 0)
     parts.push(
       `Stop what an ended lane left behind (${left.map((c) => `kill ${String(c.pid)}`).join(', ')}); 10db starts work again once the load falls.`,

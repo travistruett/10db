@@ -4,7 +4,7 @@ import {
   type PassTurnId,
   type ToolCallView,
 } from '@10db/contracts';
-import { Anchor, Group, Text, Title } from '@mantine/core';
+import { Anchor, Group, Text } from '@mantine/core';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { toolDoing, WorkingLine } from '../../conversation';
 import { ConversationLayout } from '../../conversation/conversation-layout';
@@ -112,13 +112,7 @@ export function PagePane(props: PagePaneProps) {
   return (
     <ConversationLayout
       label={page.label}
-      header={
-        header ?? (
-          <Title order={2} size="h4" px="md" pt="md" pb="sm">
-            {page.label}
-          </Title>
-        )
-      }
+      header={header}
       footer={
         <>
           {working === null ? null : (

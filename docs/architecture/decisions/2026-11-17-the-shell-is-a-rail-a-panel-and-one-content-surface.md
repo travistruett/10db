@@ -1,6 +1,7 @@
 # The shell is a rail, a panel and one content surface
 
 - **Date:** 2026-11-17
+- **Superseded by:** `decisions/2026-11-17-the-window-is-two-columns-a-sidebar-and-the-content.md`
 
 ## Decision
 

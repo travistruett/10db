@@ -1,5 +1,6 @@
-/* The window's frame: the rail, the panel and the title row share one flat tone, and the content sits on
-   one rounded surface inset from it. The grid's columns and rows are set inline from the layout. */
+/* The window's frame: two columns. The sidebar (rail and panel) is one tone, bg1, from the window's top to
+   its bottom; the content column beside it is the base tone, bg0, with its own title row. Hairlines divide
+   them; there is no inset card. The grid's columns and rows are set inline from the layout. */
 .root {
   position: relative;
   display: grid;
@@ -15,13 +16,11 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  background: var(--mantine-color-body);
+  background: var(--mantine-color-default);
+  border-right: 1px solid var(--mantine-color-default-border);
 }
 
-.rail[data-sheet] .railDrag {
-  display: none;
-}
-
+/* The traffic lights' row. The toggle and the content's title sit level with it. */
 .railDrag {
   flex: none;
   height: 44px;
@@ -34,33 +33,21 @@
   flex-direction: column;
 }
 
-.topLeft {
-  grid-column: 1 / 3;
-  grid-row: 1;
-  position: relative;
-  z-index: 22;
-  pointer-events: none;
-}
-
-.panelDrag {
-  grid-column: 2;
-  grid-row: 1;
-}
-
-.sidebarButton {
+.toggle {
   position: absolute;
-  top: 8px;
-  pointer-events: auto;
+  z-index: 22;
 }
 
 .panel {
   grid-column: 2;
-  grid-row: 2;
+  grid-row: 1 / 3;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
-  overflow-y: auto;
-  padding: 0 8px 10px 4px;
+  overflow: hidden;
   background: var(--mantine-color-default);
+  border-right: 1px solid var(--mantine-color-default-border);
   /* A selected row on the panel's own tone takes the next tone up, and hover shows in dark. */
   --mantine-primary-color-light: var(--mantine-color-default-hover);
   --mantine-primary-color-light-color: var(--mantine-color-bright);
@@ -77,6 +64,12 @@
   gap: 10px;
   min-width: 0;
   padding-right: 12px;
+  background: var(--mantine-color-body);
+}
+
+/* The title row has no lower edge until the content scrolls under it. */
+.titleRow[data-scrolled] {
+  box-shadow: 0 1px 0 var(--mantine-color-default-border);
 }
 
 /* Controls in the title row are 28 px tall, as the spec has them. Mantine declares each control's size
@@ -97,35 +90,22 @@
   font-size: var(--mantine-font-size-sm);
 }
 
-/* The pipe: the panel's edge, carried up through the title row. */
-.titleRow[data-pipe]::before {
-  content: '';
-  position: absolute;
-  left: -1px;
-  top: 10px;
-  bottom: 0;
-  width: 1px;
-  background: var(--mantine-color-default-border);
-}
-
-.surface {
+/* The content column's body: its own stacking context, so nothing inside it can rise over a sheet. */
+.content {
   grid-column: 3;
   grid-row: 2;
   position: relative;
+  isolation: isolate;
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  border-radius: 10px;
   background: var(--mantine-color-body);
-  box-shadow:
-    0 0 0 1px var(--mantine-color-default-border),
-    0 1px 2px light-dark(rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0.35));
 }
 
-/* Inside the surface, the column a view fills: it holds the scroll, so the window never scrolls. */
-.content {
+/* Inside the column, what a view fills: it holds the scroll, so the window never scrolls. */
+.main {
   flex: 1;
   min-height: 0;
   display: flex;
@@ -143,32 +123,32 @@
   overflow: hidden;
 }
 
-/* Folded rail and panel stand over the content as sheets. */
+/* Folded rail and panel stand over the content as sheets, from the window's top to its bottom. */
 .rail[data-sheet],
 .panel[data-sheet] {
   position: absolute;
   /* Placed against the whole frame, not the grid area the element would otherwise belong to. */
   grid-column: 1 / -1;
   grid-row: 1 / -1;
-  border-radius: 0 10px 10px 0;
-  top: 44px;
-  bottom: 8px;
+  top: 0;
+  bottom: 0;
   z-index: 20;
-  box-shadow:
-    8px 0 24px light-dark(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.25)),
-    0 0 0 1px var(--mantine-color-default-border);
+  box-shadow: 8px 0 24px light-dark(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.25));
 }
 
-/* With the panel beside it, the rail sheet is the left 52 px of one sheet: it takes no edge of its own. */
+.rail[data-sheet] {
+  left: 0;
+}
+
+/* With the panel beside it, the rail sheet is the left part of one sheet: it throws no shadow of its own. */
 .rail[data-sheet='joined'] {
-  border-radius: 0;
   box-shadow: none;
 }
 
 /* The content behind a folded sheet is dimmed, so the sheet reads as above it. */
 .backdrop {
   position: absolute;
-  inset: 44px 0 0 0;
+  inset: 0;
   z-index: 19;
   background: light-dark(rgba(251, 243, 219, 0.45), rgba(16, 60, 72, 0.45));
 }

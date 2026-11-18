@@ -1020,9 +1020,7 @@ describe('the Models page', () => {
 
 describe('the Models page switch', () => {
   const chooseView = (name: 'Agents' | 'Decisions') => {
-    fireEvent.click(
-      within(screen.getByRole('radiogroup', { name: 'Models view' })).getByText(name),
-    );
+    fireEvent.click(within(screen.getByRole('tablist', { name: 'Models view' })).getByText(name));
   };
   const PAID_BY = accountDto({ kind: 'openrouter', label: 'Decisions key', secretSet: true });
   const paidBy = () =>
@@ -1039,13 +1037,15 @@ describe('the Models page switch', () => {
         <ModelsSection />
       </FrameSlots>,
     );
-    const group = await screen.findByRole('radiogroup', { name: 'Models view' });
+    const group = await screen.findByRole('tablist', { name: 'Models view' });
     expect(
       within(group)
-        .getAllByRole('radio')
-        .map((r) => r.getAttribute('value')),
-    ).toEqual(['agents', 'decisions']);
-    expect(within(group).getByRole('radio', { name: 'Agents' })).toHaveProperty('checked', true);
+        .getAllByRole('tab')
+        .map((t) => t.textContent),
+    ).toEqual(['Agents', 'Decisions']);
+    expect(within(group).getByRole('tab', { name: 'Agents' }).getAttribute('aria-selected')).toBe(
+      'true',
+    );
     expect(await screen.findByRole('heading', { name: 'Playbook' })).toBeTruthy();
   });
 
@@ -1143,7 +1143,7 @@ describe('the Models page switch', () => {
         <ModelsSection />
       </FrameSlots>,
     );
-    await screen.findByRole('radiogroup', { name: 'Models view' });
+    await screen.findByRole('tablist', { name: 'Models view' });
     chooseView('Decisions');
     expect(await screen.findByRole('table', { name: 'Decisions' })).toBeTruthy();
   });

@@ -4,12 +4,13 @@ import {
   Anchor,
   Button,
   Group,
-  SegmentedControl,
   Select,
   Stack,
+  Tabs,
   Text,
   Tooltip,
 } from '@mantine/core';
+import { PAGE_TABS_CLASS_NAMES } from '../../shell/page-tabs';
 import { TitleRow } from '../../shell/title-row';
 import { Link } from '@tanstack/react-router';
 import { IconRefresh } from '@tabler/icons-react';
@@ -17,6 +18,7 @@ import { useState } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
 import { useJudgeStatus } from '../../daemon/judge-queries';
 import { useCatalogueStatus, useRefreshModels } from '../../daemon/model-queries';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { useNow } from '../../shell/relative';
 import { AgentsView } from './agents-view';
 import { ArtificialAnalysisCredit } from './artificial-analysis-credit';
@@ -151,18 +153,25 @@ export function ModelsSection() {
           </>
         }
       />
-      <SegmentedControl
-        size="xs"
-        w="fit-content"
-        aria-label="Models view"
-        data={[...VIEW_LABELS]}
+      <Tabs
+        classNames={PAGE_TABS_CLASS_NAMES}
         value={view}
         onChange={(value) => {
-          if (isModelsView(value)) setView(value);
+          if (value !== null && isModelsView(value)) setView(value);
         }}
-      />
+      >
+        <Tabs.List aria-label="Models view">
+          {VIEW_LABELS.map(({ value, label }) => (
+            <Tabs.Tab key={value} value={value}>
+              {label}
+            </Tabs.Tab>
+          ))}
+        </Tabs.List>
+      </Tabs>
       {agents ? (
-        <>
+        // One dim line that wraps: the catalogue and its credit, then where the scores come from. They stay
+        // text because they carry links (Add Key, Paid by) and AA's credit, which a tooltip cannot hold.
+        <Group gap="xs" align="baseline">
           <Text size="xs" c="dimmed">
             {status.data !== undefined
               ? catalogueLine(status.data, now)
@@ -173,14 +182,15 @@ export function ModelsSection() {
           </Text>
           <ArtificialAnalysisStatusLine />
           <OpenRouterStatusLine />
-        </>
+        </Group>
       ) : null}
     </Stack>
   );
 
   const body = () => {
     if (!agents) return <DecisionsModelsView />;
-    if (accounts.isPending) return <Text c="dimmed">Reading accounts…</Text>;
+    if (accounts.isPending)
+      return <PageLoading shape={PageLoadingShape.List} label="Reading accounts" />;
     // A failed background read keeps the accounts already shown, as during a daemon restart.
     if (accounts.isError && accounts.data === undefined)
       return (

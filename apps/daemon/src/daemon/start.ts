@@ -156,6 +156,7 @@ import {
   returnBranchProblem,
   readPnpmVersion,
   recoverBatches,
+  createHandMadeFolderLook,
   removeMergedBranches,
   resolvePnpm,
   resumePassSettles,
@@ -374,7 +375,7 @@ import {
   type TakeoverSource,
 } from '../takeover';
 import { conversationRun, planConversationModel, routingInputs, seedTeam } from '../team';
-import { createGateRunner, createGateSlots, limitGates } from '../verify';
+import { createGateRunner, createGateSlots, GatePriority, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { autoDocker } from './auto-docker';
@@ -1269,6 +1270,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'gate' }),
     hold: loadGuard,
   });
+  // The check after a Workbench turn is advice: same load hold and slots, but it waits behind any
+  // gate that decides whether work lands.
+  const turnCheckGate = limitGates(gateRunner, {
+    slots: gateSlots,
+    clock,
+    logger: logger.child({ component: 'gate' }),
+    hold: loadGuard,
+    priority: GatePriority.Advice,
+  });
   const answerGit = createGitCardAnswers(git);
   answerGitCard = (item, answer) => {
     // A re-trust reads the checkout first; a refusal it meets raises its own card.
@@ -1928,8 +1938,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   scheduler = createdScheduler;
 
-  // The changed-files check after a page's turn (Workbench spec §8.1): advice, through the shipping
-  // gates' limiter and its shared slots. Started before recovery, which settles turns a stopped daemon
+  // The changed-files check after a page's turn (Workbench spec §8.1): advice, through the shared
+  // slots at advice priority. Started before recovery, which settles turns a stopped daemon
   // ended and so raises their Ready: a check that daemon left running is stopped first, so a new one
   // never runs beside it or takes its pid's place.
   const {
@@ -1939,7 +1949,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   } = await startTurnChecks({
     state,
     git,
-    gate: shipGate,
+    gate: turnCheckGate,
     bus,
     processes,
     logger: logger.child({ component: 'gate' }),
@@ -2198,6 +2208,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // daemon left: its scratch gate's worktree and process are its own from here.
   passCloses.resume();
   // Outside the delivery job queues: a slow or offline gh never holds a cut or a ship.
+  const lookAtHandMadeFolders = createHandMadeFolderLook(delivery);
   const prWatch = createPrWatch({
     ctx: delivery,
     clock,
@@ -2210,8 +2221,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       abandon: (id) => shipper.abandon(id),
     },
     ...(opts.prWatchIntervalMs ? { intervalMs: opts.prWatchIntervalMs } : {}),
-    // A merged pull request's local branch goes in the round that reads the merge.
-    afterRound: (signal) => removeMergedBranches(delivery, signal),
+    // A merged pull request's local branch goes in the round that reads the merge. Then, now and
+    // then, the builder's hand-made worktrees whose pull request merged are offered for removal.
+    afterRound: async (signal) => {
+      await removeMergedBranches(delivery, signal);
+      await lookAtHandMadeFolders(signal);
+    },
   });
   const unsubscribePrWatch = subscribePrWatch(bus, prWatch);
   answerGhCard = createGhCardAnswers(prWatch);

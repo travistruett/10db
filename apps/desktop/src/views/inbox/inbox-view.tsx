@@ -17,6 +17,7 @@ import {
   useProjects,
   useSystemCheck,
 } from '../../daemon/queries';
+import { PAGE_TABS_CLASS_NAMES } from '../../shell/page-tabs';
 import { ProjectFilter } from '../../shell/project-filter';
 import { inProject } from './in-project';
 import { cardAnswer, recommended } from './card-answer';
@@ -77,6 +78,7 @@ export function InboxView() {
   // Each view is its own component, so the open view's keys are only live while it is shown.
   return (
     <Tabs
+      classNames={PAGE_TABS_CLASS_NAMES}
       value={tab}
       onChange={(value) => {
         if (isInboxTab(value)) setTab(value);

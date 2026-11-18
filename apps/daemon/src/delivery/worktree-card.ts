@@ -16,6 +16,8 @@ import {
   type WorktreeOffer,
 } from './cards';
 import { raise, type DeliveryContext } from './context';
+import { handMadeCards } from './hand-made-cards';
+import { keepHandMadeFolderOutOfSpotlight, removeMergedHandMade } from './hand-made-worktrees';
 import { jobKey, JobQueue } from './jobs';
 import type { BatchStarter } from './start';
 import { retireWorktree } from './worktree-cleanup';
@@ -31,6 +33,8 @@ const Offer = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('kept'), batchId: BatchId }),
   z.object({ kind: z.literal('orphan'), path: z.string() }),
   z.object({ kind: z.literal('stray'), path: z.string() }),
+  z.object({ kind: z.literal('merged-hand-made') }),
+  z.object({ kind: z.literal('spotlight'), path: z.string() }),
   z.object({
     kind: z.literal('checkout'),
     batchId: BatchId,
@@ -152,6 +156,27 @@ export function createWorktreeCardAnswers(
           return Promise.resolve();
         });
         return;
+      case 'merged-hand-made': {
+        if (answer.choice !== WorktreeChoice.RemoveMerged) return;
+        const project = getProject(ctx.state.db, item.projectId);
+        ctx.jobs.run(queue(project.id), async (signal) => {
+          try {
+            await removeMergedHandMade(ctx, project, signal);
+          } catch (error) {
+            ctx.logger.warn(
+              { projectId: project.id, err: message(error) },
+              'worktrees not removed',
+            );
+            raise(ctx.inbox, project.id, handMadeCards.removeFailed(error));
+          }
+        });
+        return;
+      }
+      case 'spotlight': {
+        if (answer.choice !== WorktreeChoice.KeepSpotlightOut) return;
+        keepHandMadeFolderOutOfSpotlight(ctx, getProject(ctx.state.db, item.projectId));
+        return;
+      }
       case 'checkout': {
         const toBase = answer.choice === CheckoutChoice.SwitchBase && offer.base !== undefined;
         if (answer.choice !== CheckoutChoice.SwitchBack && !toBase) return;

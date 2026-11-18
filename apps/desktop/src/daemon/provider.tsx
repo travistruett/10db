@@ -1,5 +1,5 @@
 import { HealthResponse, PROTOCOL_VERSION } from '@10db/contracts';
-import { Center, Loader, Stack, Text } from '@mantine/core';
+import { Center, Loader, Stack, Text, Tooltip } from '@mantine/core';
 import { createContext, use, useEffect, useState, type ReactNode } from 'react';
 import { VersionMismatch } from '../shell/version-mismatch';
 import { createDaemonClient, readJson, type DaemonClient } from './client';
@@ -59,9 +59,13 @@ function ConnectingScreen({ lastError }: { readonly lastError: string | null }) 
         <Loader size="sm" />
         <Text>Connecting to the 10db daemon…</Text>
         {lastError !== null && (
-          <Text size="sm" c="dimmed" maw={480} ta="center">
-            {lastError}
-          </Text>
+          // The reason is for the curious; what the builder needs is that it keeps trying.
+          <Tooltip label={lastError} multiline maw={480}>
+            {/* Focusable, so the reason is there for the keyboard and a screen reader as well. */}
+            <Text size="sm" c="dimmed" maw={480} ta="center" tabIndex={0}>
+              Still trying to reach the 10db daemon. It retries on its own.
+            </Text>
+          </Tooltip>
         )}
       </Stack>
     </Center>
