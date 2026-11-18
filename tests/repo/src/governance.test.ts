@@ -106,7 +106,7 @@ describe('rulesets', () => {
     expect(source).not.toMatch(/which the queue counts as passing/);
   });
 
-  it('requires exactly the checks that ci.yml reports, but desktop-scope and the informational test report', () => {
+  it('requires exactly the checks that ci.yml reports, but desktop-scope and the informational test report, then pr-title', () => {
     // desktop-scope is not required: the required desktop check is skipped, which counts as
     // passing, when it says no macOS runner is needed. Each test shard is a required check of its
     // own, so 10db reads the failing job's own log and cancelled state.
@@ -116,18 +116,20 @@ describe('rulesets', () => {
       context: string;
       integration_id?: number;
     }[];
-    expect(checks.map((c) => c.context)).toEqual(
-      workflowCheckNames('.github/workflows/ci.yml').filter(
+    // pr-title runs in a workflow of its own, so a title edit starts nothing else.
+    expect(checks.map((c) => c.context)).toEqual([
+      ...workflowCheckNames('.github/workflows/ci.yml').filter(
         (name) => !['desktop-scope', 'test-report', 'test-report-post'].includes(name),
       ),
-    );
+      ...workflowCheckNames('.github/workflows/pr-title.yml'),
+    ]);
   });
 
   it('accepts each required check only from GitHub Actions, never a posted commit status', () => {
     const main = byName('main-protection');
     const checks = (rule(main, 'required_status_checks')?.parameters?.['required_status_checks'] ??
       []) as { integration_id?: number }[];
-    expect(checks.length).toBe(13);
+    expect(checks.length).toBe(14);
     expect(checks.every((c) => c.integration_id === 15368)).toBe(true);
   });
 
@@ -682,7 +684,7 @@ describe('the new-machine setup checklist', () => {
       'mise trust',
       'make setup',
       'INSTALL_RUST=yes|no',
-      'mise install && pnpm install',
+      'mise install && lefthook install && pnpm install',
       'v26.11.1',
       'GATE PASS',
       'pnpm dev',
@@ -693,6 +695,8 @@ describe('the new-machine setup checklist', () => {
       'app.10db.desktop.dev',
       '.dev/data',
       'beside an installed 10db',
+      "Can't find lefthook in PATH",
+      'mise install lefthook && lefthook install',
       'ERR_PNPM_IGNORED_BUILDS',
       'allowBuilds',
     ];

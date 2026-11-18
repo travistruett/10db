@@ -73,6 +73,29 @@ describe('toolchain', () => {
     expect(names.filter((name) => !lock.includes(`[[tools.${name}]]`))).toEqual([]);
   });
 
+  // A lefthook that runs `install` writes its own absolute path into the hooks, and every checkout
+  // shares one .git/hooks. A copy in node_modules, or a package script that installs hooks, would
+  // point the builder's commits at whichever checkout installed last.
+  it('takes lefthook from mise.toml and from no package, so no install rewrites the git hooks', () => {
+    expect(misePin('lefthook') ?? 'unpinned').toMatch(/^\d+\.\d+\.\d+$/);
+    const manifests = manifestPaths().map((path) => ({ path, manifest: readManifest(path) }));
+    const depending = manifests
+      .filter(({ manifest }) =>
+        [manifest.dependencies, manifest.devDependencies, manifest.optionalDependencies].some(
+          (deps) => deps !== undefined && 'lefthook' in deps,
+        ),
+      )
+      .map(({ path }) => path);
+    expect(depending).toEqual([]);
+    const scripts = manifests.flatMap(({ path, manifest }) =>
+      Object.entries(manifest.scripts ?? {})
+        .filter(([, command]) => command.includes('lefthook'))
+        .map(([name]) => `${path}: ${name}`),
+    );
+    expect(scripts).toEqual([]);
+    expect(readRepoFile('pnpm-workspace.yaml')).not.toMatch(/^\s*lefthook:/m);
+  });
+
   it('runs tsc from TypeScript 7 and exposes the TypeScript 6 API to tools', async () => {
     const ts = await import('typescript');
     expect(ts.version).toMatch(/^6\.0\./);

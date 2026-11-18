@@ -206,14 +206,15 @@ describe('CI workflow', () => {
     expect(unbounded.map(([name]) => name)).toEqual([]);
   });
 
-  it('runs on pull requests into main only, and re-runs every job when a PR title is edited', () => {
+  it('runs on pull requests into main only, and never on a title edit, so earlier results stand', () => {
     // Each task's pull request goes to main and runs CI there, with no integration branch in
     // between (decisions/2026-11-02-merge-queue.md, which decisions/2026-11-02-main-has-no-merge-queue.md
-    // amends only by dropping the queue rule).
+    // amends only by dropping the queue rule). A title edit runs pr-title.yml alone: a gate job
+    // skipped on edited would count as passing and replace an earlier red result.
     const parsed = readWorkflow(CI);
     expect(parsed.on['pull_request']).toEqual({
       branches: ['main'],
-      types: ['opened', 'synchronize', 'reopened', 'edited'],
+      types: ['opened', 'synchronize', 'reopened'],
     });
     const skipsOnEvent = Object.entries(parsed.jobs).filter(([, job]) =>
       (job.if ?? '').includes('github.event.action'),
@@ -284,7 +285,7 @@ describe('CI workflow', () => {
     );
   });
 
-  it('has policy diff the queue entry against its base, and lint the PR title only on pull requests', () => {
+  it('has policy diff the queue entry against its base, and leave the PR title to pr-title.yml', () => {
     const steps = readWorkflow(CI).jobs['policy']?.steps ?? [];
     const policy = steps.find((step) => step.run?.includes('scripts/policy.sh'));
     expect(policy?.env?.['BASE_SHA']).toBe(
@@ -293,8 +294,7 @@ describe('CI workflow', () => {
     expect(policy?.env?.['HEAD_SHA']).toBe(
       '${{ github.event.merge_group.head_sha || github.event.pull_request.head.sha || github.sha }}',
     );
-    const title = steps.find((step) => step.run?.includes('commitlint'));
-    expect(title?.if).toBe("github.event_name == 'pull_request'");
+    expect(steps.filter((step) => step.run?.includes('commitlint'))).toEqual([]);
   });
 
   it('does not apply the ruleset from a workflow: make github-settings does, by hand', () => {
@@ -328,6 +328,76 @@ describe('CI workflow', () => {
       expect(runs[install + 1]).toBe('bash scripts/gate.sh');
       expect(runs.filter((run) => /playwright install|\bapt(-get)?\b/.test(run))).toEqual([]);
     }
+  });
+});
+
+const PR_TITLE = '.github/workflows/pr-title.yml';
+
+describe('PR title workflow', () => {
+  it('has the one required check pr-title, which a title edit starts on every pull request into main', () => {
+    // Squash merge makes the title the commit on main, so each new head and each edit lints the
+    // current title; synchronize gives every head the required check.
+    expect(workflowJobNames(PR_TITLE)).toEqual(['pr-title']);
+    const parsed = readWorkflow(PR_TITLE);
+    expect(parsed.on['pull_request']).toEqual({
+      branches: ['main'],
+      types: ['opened', 'synchronize', 'reopened', 'edited'],
+    });
+    expect(parsed.concurrency).toEqual({
+      group: 'pr-title-${{ github.event.pull_request.number || github.ref }}',
+      'cancel-in-progress': true,
+    });
+  });
+
+  it('lints the title through an env var, never inside the script', () => {
+    // An expression in `run:` would be spliced into the shell, so a crafted title could run code.
+    const steps = readWorkflow(PR_TITLE).jobs['pr-title']?.steps ?? [];
+    const lint = steps.filter((step) => step.run?.includes('commitlint'));
+    expect(lint).toHaveLength(1);
+    expect(lint[0]?.run).toBe(`printf '%s\\n' "$PR_TITLE" | pnpm exec commitlint`);
+    expect(lint[0]?.env).toEqual({ PR_TITLE: '${{ github.event.pull_request.title }}' });
+  });
+
+  it('reports on merge queue entries as skipped, as dependency-review does', () => {
+    // Inert while main has no queue (decisions/2026-11-02-main-has-no-merge-queue.md). A queue entry
+    // has no title; a required check skipped by its `if` counts as passing.
+    const parsed = readWorkflow(PR_TITLE);
+    expect(parsed.on['merge_group']).toEqual({ types: ['checks_requested'] });
+    expect(parsed.jobs['pr-title']?.if).toBe("github.event_name == 'pull_request'");
+  });
+
+  it('is the only workflow a title edit starts, so no earlier gate result is replaced', () => {
+    // A job skipped or rerun on edited would report again on the head commit and could turn an
+    // earlier red required check green.
+    const editedTriggered = workflowPaths().filter((path) => {
+      const trigger = readWorkflow(path).on['pull_request'];
+      const parsed = z
+        .object({ types: z.array(z.string()).optional() })
+        .nullable()
+        .safeParse(trigger);
+      // A pull_request with no types runs on opened, synchronize and reopened only.
+      return parsed.success && (parsed.data?.types ?? []).includes('edited');
+    });
+    expect(editedTriggered).toEqual([PR_TITLE]);
+    expect(workflowJobNames(PR_TITLE)).toEqual(['pr-title']);
+  });
+
+  it('names the pr-title check in one workflow only, so the required check is unambiguous', () => {
+    const owners = workflowPaths().filter((path) => workflowCheckNames(path).includes('pr-title'));
+    expect(owners).toEqual([PR_TITLE]);
+  });
+});
+
+describe('CodeQL workflow', () => {
+  it('runs on pushes to main and weekly, never on a pull request', () => {
+    // Advisory and not a required check, and each run takes minutes; main and the weekly run cover it.
+    const parsed = readWorkflow('.github/workflows/codeql.yml');
+    expect(Object.keys(parsed.on)).toEqual(['push', 'schedule']);
+    expect(parsed.on['push']).toEqual({ branches: ['main'] });
+    const schedule = z
+      .array(z.strictObject({ cron: z.string().min(1) }))
+      .safeParse(parsed.on['schedule']);
+    expect(schedule.success && schedule.data.length).toBe(1);
   });
 });
 
