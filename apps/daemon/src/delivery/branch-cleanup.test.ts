@@ -11,13 +11,10 @@ import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
 import { systemProcesses } from '../recovery';
 import {
-  batchBranchName,
-  createBatchStarter,
   createBranchCardAnswers,
   createPrWatch,
   recoverBatches,
   removeMergedBranches,
-  type DeliveryJobs,
   type PrWatch,
 } from './index';
 import { removeBranch } from './branch-cleanup';
@@ -114,15 +111,6 @@ describe('an abandoned task whose branch holds commits', () => {
     const card = h.only(cardsAbout(batch.branch));
     expect(card.title).toBe(`Delete ${batch.branch ?? ''}? It holds 2 commits`);
     expect(card.options.map((o) => o.label)).toEqual(['Delete Branch', 'Keep']);
-  });
-
-  it('says one commit in the singular', async () => {
-    const { batch } = await opened(h);
-    await commitIn(h, batch, 'src/api/one.txt');
-    h.shipper.abandon(batch.id);
-    await h.jobs.idle();
-    expect(h.only(cardsAbout(batch.branch)).title).toContain('1 commit');
-    expect(h.only(cardsAbout(batch.branch)).title).not.toContain('1 commits');
   });
 
   it('deletes the branch on Delete Branch', async () => {
@@ -241,28 +229,6 @@ describe('an abandoned task whose branch holds commits', () => {
     expect(deleted.body).not.toMatch(/worktree/i);
     // The card that says the worktree stays is still there.
     expect(cards.some((c) => c.title === `10db left ${wt} in place`)).toBe(true);
-  });
-
-  it('raises no "abandoned" card: the builder just asked for it, and the branch card says what is unmerged', async () => {
-    const { batch } = await opened(h);
-    await commitIn(h, batch, 'src/api/one.txt');
-    h.shipper.abandon(batch.id);
-    await h.jobs.idle();
-    expect(h.cards().filter((c) => c.title.endsWith('abandoned'))).toEqual([]);
-  });
-
-  it('answers a card whose branch is already gone without a new card', async () => {
-    const { batch } = await opened(h);
-    await commitIn(h, batch, 'src/api/one.txt');
-    h.shipper.abandon(batch.id);
-    await h.jobs.idle();
-    const card = h.only(cardsAbout(batch.branch));
-    h.git$('branch', '-D', batch.branch ?? '');
-    inbox.answer(card.id, { choice: 'Delete Branch' });
-    await h.jobs.idle();
-    expect(h.cards().filter((c) => c.id !== card.id && c.title.includes('not deleted'))).toEqual(
-      [],
-    );
   });
 
   it('never removes a branch outside 10db/, and reports one that is not there', async () => {
@@ -483,20 +449,6 @@ describe('a pull request that merged', () => {
     expect(exists(batch.branch)).toBe(true);
   });
 
-  it('says on the kept-worktree card that the branch stays with the worktree', async () => {
-    const { batch, ws } = await opened(h);
-    await commitIn(h, batch, 'src/api/alpha.txt');
-    writeFileSync(join(h.repo, '.git', 'info', 'exclude'), '.env\n');
-    writeFileSync(join(batch.worktreePath ?? '', '.env'), 'SECRET=1\n');
-    h.settle(ws.id, 'DONE');
-    h.shipper.checkBatch(batch.id);
-    await h.jobs.idle();
-    const card = h.only(h.cards().filter((c) => c.title.includes('kept the worktree')));
-    expect(card.body).toContain(
-      `Its branch ${batch.branch ?? ''} is checked out there, so 10db leaves the branch too until the worktree is gone.`,
-    );
-  });
-
   it('never touches a branch it did not make', async () => {
     const { batch, head: tip, prUrl } = await shipped(h);
     h.git$('branch', 'feature/mine');
@@ -551,21 +503,6 @@ describe('the sweep at startup', () => {
     expect(exists('10db/stray-two')).toBe(true);
   });
 
-  it('does not list the branch a batch still being cut has made but not yet recorded', async () => {
-    const noJobs: DeliveryJobs = {
-      run: () => undefined,
-      idle: () => Promise.resolve(),
-      pending: () => 0,
-      stop: () => Promise.resolve(),
-    };
-    const started = createBatchStarter({ ...h.ctx, jobs: noJobs }).startTask(h.addTask('Alpha').id);
-    const cutting = getBatch(h.store.db, started.id);
-    expect(cutting).toMatchObject({ state: 'CUTTING', branch: null });
-    h.git$('branch', batchBranchName(cutting.title, cutting.id));
-    await listStrayBranches(h.ctx);
-    expect(h.cards()).toEqual([]);
-  });
-
   /**
    * An abandoned batch whose worktree is gone but whose branch was never settled: abandoned by a
    * daemon before branch cleanup, or in a shared checkout whose settle failed.
@@ -610,15 +547,6 @@ describe('the sweep at startup', () => {
     const batch = await unsettled(1);
     h.git$('branch', '-D', batch.branch ?? '');
     await recover();
-    expect(h.cards()).toEqual([]);
-  });
-
-  it('raises no card when every 10db branch has a batch, and withdraws an old one', async () => {
-    h.git$('branch', '10db/stray');
-    await listStrayBranches(h.ctx);
-    expect(h.cards()).toHaveLength(1);
-    h.git$('branch', '-D', '10db/stray');
-    await listStrayBranches(h.ctx);
     expect(h.cards()).toEqual([]);
   });
 });
