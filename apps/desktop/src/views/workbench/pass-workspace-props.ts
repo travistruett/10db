@@ -1,3 +1,4 @@
+import type { PassActions } from './pass-header';
 import type { InboxItemDto, PassViewDto, ProjectViewDto, TaskId } from '@10db/contracts';
 
 /**
@@ -14,4 +15,6 @@ export interface PassWorkspaceProps {
   readonly onSelect: (taskId: TaskId) => void;
   /** Add Page at the foot of the queue, where the pages are. */
   readonly onAddPage: () => void;
+  /** The pass's own menu, which is the panel's head while the frame draws the panel; none without it. */
+  readonly passActions?: PassActions;
 }

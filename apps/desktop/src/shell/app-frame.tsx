@@ -129,8 +129,16 @@ export function AppFrame({
   }, []);
 
   const slots = useMemo<FrameSlots>(
-    () => ({ titleHost, panelHost, drawerHost, hidePanel, closeSheet, registerPanel }),
-    [titleHost, panelHost, drawerHost, hidePanel, closeSheet, registerPanel],
+    () => ({
+      titleHost,
+      panelHost,
+      drawerHost,
+      panelShown: layout.panel === 'column' || layout.panel === 'sheet',
+      hidePanel,
+      closeSheet,
+      registerPanel,
+    }),
+    [titleHost, panelHost, drawerHost, layout.panel, hidePanel, closeSheet, registerPanel],
   );
 
   const mainRef = useRef<HTMLElement>(null);

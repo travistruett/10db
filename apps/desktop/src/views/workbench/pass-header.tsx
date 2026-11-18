@@ -14,6 +14,7 @@ import { IconDots } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { CloseProgress } from './close-progress';
 import { PageStatus, pageStatus } from './page-status';
+import { useFrameSlots } from '../../shell/frame-slots';
 import { TitleRow } from '../../shell/title-row';
 import { medianTurnMinutes, timingLine } from './timing';
 
@@ -31,16 +32,28 @@ const COUNTS: readonly { readonly words: string; readonly of: readonly PageStatu
   { words: 'working', of: [PageStatus.Working, PageStatus.Paused] },
 ];
 
-/** "ampsio · Settings pass · 2 signed off · 1 ready": zero counts and pages not started left out. */
-export function headerLine(project: string, pass: string, statuses: readonly PageStatus[]): string {
-  const counts = COUNTS.flatMap(({ words, of }) => {
+/** "2 signed off · 1 ready": zero counts and pages not started left out; empty when nothing counts. */
+export function countsLine(statuses: readonly PageStatus[]): string {
+  return COUNTS.flatMap(({ words, of }) => {
     const count = statuses.filter((status) => of.includes(status)).length;
     return count === 0 ? [] : [`${String(count)} ${words}`];
-  });
-  return [project, pass, ...counts].join(' · ');
+  }).join(' · ');
 }
 
-export interface PassHeaderProps {
+/** "ampsio · Settings pass · 2 signed off · 1 ready": zero counts and pages not started left out. */
+export function headerLine(project: string, pass: string, statuses: readonly PageStatus[]): string {
+  return [project, pass, countsLine(statuses)].filter((part) => part !== '').join(' · ');
+}
+
+/** What the pass's own menu does; Finish is offered only with `onClose`. */
+export interface PassActions {
+  /** Without it there is no Close Pass. */
+  readonly onClose?: () => void;
+  readonly onRename: () => void;
+  readonly onAbandon: () => void;
+}
+
+export interface PassHeaderProps extends PassActions {
   readonly project: ProjectViewDto;
   readonly view: PassViewDto;
   /** The open Inbox items: a page's question or permission targets its run. */
@@ -51,10 +64,6 @@ export interface PassHeaderProps {
   readonly pullRequest?: ReactNode;
   /** Why Open Pull Request is disabled, a line of its own under the header's row. */
   readonly pullRequestReason?: ReactNode;
-  /** Without it there is no Close Pass. */
-  readonly onClose?: () => void;
-  readonly onRename: () => void;
-  readonly onAbandon: () => void;
 }
 
 /** When each open question or permission of the pass's pages was raised. */
@@ -70,22 +79,69 @@ function askingSince(view: PassViewDto, inbox: readonly InboxItemDto[]): string[
     .map((item) => item.createdAt);
 }
 
+/** The pass's own menu: Finish, Rename and Abandon, each enabled by where the pass is. */
+export function PassMenu({
+  state,
+  onClose,
+  onRename,
+  onAbandon,
+}: PassActions & { readonly state: PassState }) {
+  const open = state === PassState.Open;
+  // Abandon goes on from a close, and from an Abandon that stalled, which the daemon picks up where it
+  // stopped.
+  const abandonable = open || state === PassState.Closing || state === PassState.Abandoning;
+  return (
+    <Menu position="bottom-end" withinPortal>
+      <Menu.Target>
+        <ActionIcon variant="subtle" color="gray" aria-label="More actions">
+          <IconDots size={16} stroke={1.5} />
+        </ActionIcon>
+      </Menu.Target>
+      <Menu.Dropdown>
+        {onClose ? (
+          <MenuAction
+            label="Finish"
+            byline="Ship the signed-off pages as one pull request."
+            disabled={!open}
+            onClick={onClose}
+          />
+        ) : null}
+        <MenuAction
+          label="Rename"
+          byline="Change the name at the top."
+          disabled={!open}
+          onClick={onRename}
+        />
+        <MenuAction
+          label="Abandon"
+          byline="Stop here. Unfinished changes leave your folder and wait on their Board tasks."
+          color="red"
+          disabled={!abandonable}
+          onClick={onAbandon}
+        />
+      </Menu.Dropdown>
+    </Menu>
+  );
+}
+
 /**
  * The pass's line in the title row (the project, the pass and its counts) with its actions: Open Pull
  * Request once a page is signed off, and a menu with Finish, Rename and Abandon. Under the row, at the top
  * of the content: why Open Pull Request is missing, the close's progress, and the timing hint, dimmed,
- * when it has something to say. While the pass closes its page actions wait and Abandon stays.
+ * when it has something to say. While the pass closes its page actions wait and Abandon stays. While the
+ * frame draws the panel, the line, the pull request and the menu are the panel's head (the workspace draws
+ * them) and the title row names the shown page, so only the close's progress and the hint remain here.
  */
 export function PassHeader(props: PassHeaderProps) {
   const { project, view, inbox, now, pullRequest, pullRequestReason } = props;
-  const { onClose, onRename, onAbandon } = props;
+  const { panelShown } = useFrameSlots();
+  const menuActions: PassActions = {
+    ...(props.onClose === undefined ? {} : { onClose: props.onClose }),
+    onRename: props.onRename,
+    onAbandon: props.onAbandon,
+  };
   const clock = { now, medianTurnMinutes: medianTurnMinutes(view.turns) };
   const statuses = view.pages.map((page) => pageStatus(page, inbox, clock, view).status);
-  const open = view.pass.state === PassState.Open;
-  // Abandon goes on from a close, and from an Abandon that stalled, which the daemon picks up where it
-  // stopped.
-  const abandonable =
-    open || view.pass.state === PassState.Closing || view.pass.state === PassState.Abandoning;
   const hint = timingLine({
     turns: view.turns,
     pages: view.pages.map((page, n) => ({
@@ -98,46 +154,21 @@ export function PassHeader(props: PassHeaderProps) {
   const signedOff = statuses.includes(PageStatus.SignedOff);
   return (
     <Stack gap={4}>
-      <TitleRow
-        lines={2}
-        title={headerLine(project.name, view.pass.name, statuses)}
-        actions={
-          <>
-            {signedOff ? pullRequest : null}
-            <Menu position="bottom-end" withinPortal>
-              <Menu.Target>
-                <ActionIcon variant="subtle" color="gray" aria-label="More actions">
-                  <IconDots size={16} stroke={1.5} />
-                </ActionIcon>
-              </Menu.Target>
-              <Menu.Dropdown>
-                {onClose ? (
-                  <MenuAction
-                    label="Finish"
-                    byline="Ship the signed-off pages as one pull request."
-                    disabled={!open}
-                    onClick={onClose}
-                  />
-                ) : null}
-                <MenuAction
-                  label="Rename"
-                  byline="Change the name at the top."
-                  disabled={!open}
-                  onClick={onRename}
-                />
-                <MenuAction
-                  label="Abandon"
-                  byline="Stop here. Unfinished changes leave your folder and wait on their Board tasks."
-                  color="red"
-                  disabled={!abandonable}
-                  onClick={onAbandon}
-                />
-              </Menu.Dropdown>
-            </Menu>
-          </>
-        }
-      />
-      {signedOff ? pullRequestReason : null}
+      {panelShown ? null : (
+        <>
+          <TitleRow
+            lines={2}
+            title={headerLine(project.name, view.pass.name, statuses)}
+            actions={
+              <>
+                {signedOff ? pullRequest : null}
+                <PassMenu state={view.pass.state} {...menuActions} />
+              </>
+            }
+          />
+          {signedOff ? pullRequestReason : null}
+        </>
+      )}
       <CloseProgress
         state={view.pass.state}
         step={view.closeStep}

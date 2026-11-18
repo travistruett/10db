@@ -6,7 +6,14 @@ import { FrameSlotsContext } from '../shell/frame-slots';
  * view's `TitleRow` and `Panel` draw into, and a layer for a drawer. Find the title row with
  * `titleRowOf`.
  */
-export function FrameSlots({ children }: { readonly children: ReactNode }) {
+export function FrameSlots({
+  children,
+  panelShown = true,
+}: {
+  readonly children: ReactNode;
+  /** Whether the frame draws the panel; false is a folded or closed one. */
+  readonly panelShown?: boolean;
+}) {
   const [titleHost, setTitleHost] = useState<HTMLElement | null>(null);
   const [panelHost, setPanelHost] = useState<HTMLElement | null>(null);
   const [drawerHost, setDrawerHost] = useState<HTMLElement | null>(null);
@@ -16,6 +23,7 @@ export function FrameSlots({ children }: { readonly children: ReactNode }) {
         titleHost,
         panelHost,
         drawerHost,
+        panelShown,
         hidePanel: null,
         closeSheet: () => undefined,
         registerPanel: () => () => undefined,

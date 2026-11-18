@@ -12,6 +12,8 @@ export interface FrameSlots {
   readonly panelHost: HTMLElement | null;
   /** The layer over the content column that a drawer slides in on. */
   readonly drawerHost: HTMLElement | null;
+  /** Whether the frame draws the panel now: a column, or the sheet while it is open. */
+  readonly panelShown: boolean;
   /** Hides the panel when it is a column the builder can fold; null when it is not (a sheet, or none). */
   readonly hidePanel: (() => void) | null;
   /** Closes whatever sheet is open over the content, such as the panel's; does nothing when none is. */
@@ -29,6 +31,7 @@ export function useFrameSlots(): FrameSlots {
       titleHost: null,
       panelHost: null,
       drawerHost: null,
+      panelShown: false,
       hidePanel: null,
       closeSheet: () => undefined,
       registerPanel: () => () => undefined,
