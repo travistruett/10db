@@ -37,24 +37,20 @@ describe('design and docs sizing', () => {
     return found.instructions;
   };
 
-  it('tells the implementer to stop a design past about 300 lines and file the rest as follow-ups', () => {
-    const text = persona('implementer');
-    expect(text).toContain('about 300 lines');
-    expect(text).toContain('mcp__10db__file_follow_up');
-    expect(text).toContain('Icebox');
-  });
-
-  it('tells the implementer to change files with Edit or Write, not an interpreter or a redirect', () => {
-    const text = persona('implementer');
-    expect(text).toContain('Edit or Write');
-    expect(text).toContain('python3 -c');
-    expect(text).toContain('shell redirection');
-  });
-
-  it('tells the planner to plan a design to fit about one pull request and name what is left out', () => {
-    const text = persona('planner');
-    expect(text).toContain('about 300 changed lines');
-    expect(text).toContain('follow-up');
+  it('tells the implementer to stop a design past about 300 lines and edit files with Edit or Write, and the planner to plan a design to fit about one pull request', () => {
+    const implementer = persona('implementer');
+    for (const phrase of [
+      'about 300 lines',
+      'mcp__10db__file_follow_up',
+      'Icebox',
+      'Edit or Write',
+      'python3 -c',
+      'shell redirection',
+    ])
+      expect.soft(implementer, `implementer: ${phrase}`).toContain(phrase);
+    const planner = persona('planner');
+    for (const phrase of ['about 300 changed lines', 'follow-up'])
+      expect.soft(planner, `planner: ${phrase}`).toContain(phrase);
   });
 });
 
@@ -72,39 +68,47 @@ describe('malformed persona files', () => {
   }
   const body = `\n${'Read the change carefully. '.repeat(12)}\n`;
 
-  it.each([
-    { name: 'no frontmatter', file: 'a.md', text: body },
-    {
-      name: 'an unknown role',
-      file: 'a.md',
-      text: `---\nname: A\nrole: boss\ntools: edit\n---${body}`,
-    },
-    {
-      name: 'a reviewer that edits',
-      file: 'a.md',
-      text: `---\nname: A\nrole: review\ntools: edit\n---${body}`,
-    },
-    {
-      name: 'a file name that is not a key',
-      file: 'Big Name.md',
-      text: `---\nname: A\nrole: qa\ntools: read_only\n---${body}`,
-    },
-    {
-      name: 'an empty body',
-      file: 'a.md',
-      text: '---\nname: A\nrole: qa\ntools: read_only\n---\n',
-    },
-    {
-      name: 'a body over the cap',
-      file: 'a.md',
-      text: `---\nname: A\nrole: qa\ntools: read_only\n---\n${'x'.repeat(MAX_PERSONA_BYTES)}`,
-    },
-    {
-      name: 'a skill the harness does not ship',
-      file: 'a.md',
-      text: `---\nname: A\nrole: qa\ntools: read_only\nskills: telepathy\n---${body}`,
-    },
-  ])('rejects $name', ({ file, text }) => {
-    expect(() => readDefaultPersonas(pluginWith(file, text))).toThrow(PersonaManifestError);
+  it('rejects a malformed persona file', () => {
+    for (const { name, file, text } of [
+      { name: 'no frontmatter', file: 'a.md', text: body },
+      {
+        name: 'an unknown role',
+        file: 'a.md',
+        text: `---\nname: A\nrole: boss\ntools: edit\n---${body}`,
+      },
+      {
+        name: 'a reviewer that edits',
+        file: 'a.md',
+        text: `---\nname: A\nrole: review\ntools: edit\n---${body}`,
+      },
+      {
+        name: 'a file name that is not a key',
+        file: 'Big Name.md',
+        text: `---\nname: A\nrole: qa\ntools: read_only\n---${body}`,
+      },
+      {
+        name: 'an empty body',
+        file: 'a.md',
+        text: '---\nname: A\nrole: qa\ntools: read_only\n---\n',
+      },
+      {
+        name: 'a body over the cap',
+        file: 'a.md',
+        text: `---\nname: A\nrole: qa\ntools: read_only\n---\n${'x'.repeat(MAX_PERSONA_BYTES)}`,
+      },
+      {
+        name: 'a skill the harness does not ship',
+        file: 'a.md',
+        text: `---\nname: A\nrole: qa\ntools: read_only\nskills: telepathy\n---${body}`,
+      },
+    ]) {
+      let thrown: unknown;
+      try {
+        readDefaultPersonas(pluginWith(file, text));
+      } catch (error) {
+        thrown = error;
+      }
+      expect.soft(thrown, name).toBeInstanceOf(PersonaManifestError);
+    }
   });
 });
