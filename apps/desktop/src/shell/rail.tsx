@@ -29,6 +29,7 @@ import {
   type RailEntry,
 } from './rail-items';
 import { InboxBadge, SessionsBadge, WorkbenchBadge } from './rail-badges';
+import { lastInboxSearch } from '../views/inbox/inbox-search';
 import { latestOpenShape } from './shape-nav';
 import { useSelectedProject } from './selected-project';
 import classes from './rail.module.css';
@@ -167,7 +168,12 @@ function SectionLink({
     ) : undefined;
   return (
     <RailTooltip label={label}>
-      <Link {...props} to={route} onClick={claim}>
+      <Link
+        {...props}
+        to={route}
+        {...(section === RailSection.Inbox ? { search: lastInboxSearch.get() } : {})}
+        onClick={claim}
+      >
         <RailItemContent section={section} badge={badge} />
       </Link>
     </RailTooltip>

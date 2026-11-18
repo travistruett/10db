@@ -1,13 +1,13 @@
 import { InboxListState } from '@10db/contracts';
 import { Group } from '@mantine/core';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useProjects } from '../../daemon/queries';
 import { ProjectFilter } from '../../shell/project-filter';
 import { TitleRow } from '../../shell/title-row';
 import { useOpenInboxCount } from './inbox-count';
 import { InboxPanel } from './inbox-panel';
-import { withProject, withState } from './inbox-search';
+import { lastInboxSearch, withProject, withState } from './inbox-search';
 import { InboxShortcuts } from './inbox-shortcuts';
 import { OpenInbox } from './open-inbox';
 import { ResolvedInbox } from './resolved-inbox';
@@ -25,6 +25,10 @@ export function InboxView() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [listHost, setListHost] = useState<HTMLElement | null>(null);
   const state = search.state ?? InboxListState.Open;
+  // The rail opens the Inbox as it was left.
+  useEffect(() => {
+    lastInboxSearch.set(search);
+  }, [search]);
 
   const content = (() => {
     switch (state) {

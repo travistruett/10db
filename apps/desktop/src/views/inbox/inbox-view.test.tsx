@@ -12,6 +12,7 @@ import {
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
 import { afterEach, describe, expect, it } from 'vitest';
+import { lastInboxSearch, rememberScroll, rememberSelected } from './inbox-search';
 import { queryKeys } from '../../daemon/queries';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
 import { batchDto, daemonEvent, inboxItemDto, projectViewDto } from '../../test/fixtures';
@@ -2261,5 +2262,166 @@ describe('the Inbox panel', () => {
         expect(router.state.location.search).toEqual({});
       });
     });
+  });
+});
+
+describe('leaving the Inbox and coming back', () => {
+  const question = (title: string, at: number): InboxItemDto =>
+    inboxItemDto({
+      kind: 'question',
+      title,
+      body: '',
+      options: [
+        { label: 'A', description: '' },
+        { label: 'B', description: '' },
+      ],
+      projectId: project,
+      createdAt: new Date(Date.UTC(2026, 9, 13, 12, 0, at)).toISOString(),
+    });
+  const four = [
+    question('One?', 0),
+    question('Two?', 1),
+    question('Three?', 2),
+    question('Four?', 3),
+  ];
+  const viewport = (): HTMLElement => {
+    const el = document.querySelector('[data-inbox-list] .mantine-ScrollArea-viewport');
+    if (!(el instanceof HTMLElement)) throw new Error('no list viewport');
+    return el;
+  };
+  const railLink = (name: string): HTMLElement => {
+    const link = [...document.querySelectorAll<HTMLElement>('a[data-rail-item]')].find((a) =>
+      a.textContent.startsWith(name),
+    );
+    if (link === undefined) throw new Error(`no rail link ${name}`);
+    return link;
+  };
+
+  afterEach(() => {
+    lastInboxSearch.set({});
+    for (const state of ['open', 'waiting', 'resolved'] as const) {
+      rememberSelected(state, null);
+      rememberScroll(state, 0);
+    }
+  });
+
+  it('keeps the filter, the selected row and the scroll through the rail', async () => {
+    const { served } = inbox(four);
+    const asked = serveInboxRows(served);
+    const { router } = renderApp(`/inbox?project=${project}`);
+    await findText('One?');
+    fireEvent.click(await findRow('Three?'));
+    await waitFor(() => {
+      expect(selectedCard().textContent).toContain('Three?');
+    });
+    viewport().scrollTop = 80;
+    fireEvent.scroll(viewport());
+
+    fireEvent.click(railLink('Board'));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/board');
+    });
+    fireEvent.click(railLink('Inbox'));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/inbox');
+    });
+    expect(router.state.location.search).toEqual({ project });
+    await findRow('Three?');
+    await waitFor(() => {
+      expect(selectedCard().textContent).toContain('Three?');
+    });
+    expect(viewport().scrollTop).toBe(80);
+    expect(asked.length).toBeGreaterThan(0);
+  });
+
+  it('shows the list without a card resolved while away, and asks for nothing while away', async () => {
+    const { served } = inbox(four);
+    const sockets: { send: (data: string) => void }[] = [];
+    server.use(
+      eventStream.addEventListener('connection', ({ client }) => {
+        sockets.push(client);
+      }),
+    );
+    const asked = serveInboxRows(served);
+    const { router } = renderApp('/inbox');
+    await findText('One?');
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    fireEvent.click(railLink('Board'));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/board');
+    });
+    const before = asked.length;
+    const gone = four[1];
+    if (gone === undefined) throw new Error('no card');
+    served.open = four.filter((card) => card.id !== gone.id);
+    act(() => {
+      sockets[0]?.send(
+        JSON.stringify(
+          daemonEvent({ seq: 1, type: 'inbox.changed', entityType: 'inbox', entityId: gone.id }),
+        ),
+      );
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(asked.slice(before).filter((q) => q['card'] !== undefined)).toEqual([]);
+
+    fireEvent.click(railLink('Inbox'));
+    await findRow('One?');
+    await waitFor(() => {
+      expect(rows()).toHaveLength(3);
+    });
+    expect(rows().some((row) => row.textContent.includes('Two?'))).toBe(false);
+  });
+
+  it('puts focus on the selected row when arriving, so j moves at once', async () => {
+    inbox(four);
+    const { router } = renderApp('/board');
+    await waitFor(() => {
+      expect(railLink('Inbox')).toBeTruthy();
+    });
+    fireEvent.click(railLink('Inbox'));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/inbox');
+    });
+    await findRow('One?');
+    await waitFor(() => {
+      expect(document.activeElement).toBe(rowOf('One?'));
+    });
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'j' });
+    await waitFor(() => {
+      expect(selectedCard().textContent).toContain('Two?');
+    });
+    expect(document.activeElement).toBe(rowOf('Two?'));
+  });
+
+  it('leaves focus alone when the builder is somewhere else', async () => {
+    inbox(four);
+    renderApp('/inbox');
+    await findText('One?');
+    const field = screen.getByLabelText('Note for the agent (optional)');
+    field.focus();
+    key('j');
+    await findText('Two?');
+    expect(document.activeElement).toBe(field);
+  });
+
+  it('asks for the next question row context before that row is selected', async () => {
+    const contexts: string[] = [];
+    inbox(four);
+    server.use(
+      http.get(daemonUrl('/inbox/:id/context'), ({ params }) => {
+        contexts.push(String(params['id']));
+        return HttpResponse.json({ messages: [] });
+      }),
+    );
+    renderApp('/inbox');
+    await findText('One?');
+    const [one, two, three] = four;
+    await waitFor(() => {
+      expect(contexts).toContain(two?.id);
+    });
+    expect(contexts).not.toContain(three?.id);
+    expect(contexts).toContain(one?.id);
   });
 });

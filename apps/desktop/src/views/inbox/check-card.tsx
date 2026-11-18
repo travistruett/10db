@@ -32,7 +32,7 @@ const CODE_SURFACE = {
 } as const;
 
 /** The part of a check card's detail the card reads: the head the work reached. */
-const CheckDetail = z.object({ head: z.string() });
+export const CheckDetail = z.object({ head: z.string() });
 
 export interface CheckCardProps {
   readonly item: InboxItemDto;

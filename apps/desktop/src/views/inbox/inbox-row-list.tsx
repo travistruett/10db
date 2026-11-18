@@ -1,6 +1,6 @@
 import { Box, ScrollArea, Skeleton } from '@mantine/core';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { LIST_ATTRIBUTE } from './use-inbox-keys';
 import classes from './inbox-row-list.module.css';
 
@@ -22,6 +22,15 @@ export interface InboxRowListProps<T extends { readonly key: string }> {
   /** The last page's failure; the next near-end retries it. */
   readonly moreError: Error | null;
   readonly onNearEnd: () => void;
+  /** Where the list starts scrolled, in pixels. */
+  readonly initialScroll?: number;
+  /** The list's scroll position after the builder scrolls it. */
+  readonly onScrollTop?: (scrollTop: number) => void;
+  /**
+   * Whether the selected row takes focus when the list is first drawn and focus is not in the page's content, so
+   * `j` and `k` work at once. Focus already on a row follows the selection either way.
+   */
+  readonly focusOnArrival?: boolean;
   /** A click on a row. */
   readonly onPick?: (row: T) => void;
   /** The row's two lines; the list draws the row around them. */
@@ -41,6 +50,9 @@ export function InboxRowList<T extends { readonly key: string }>({
   loadingMore,
   moreError,
   onNearEnd,
+  initialScroll = 0,
+  onScrollTop,
+  focusOnArrival = false,
   onPick,
   renderRow,
 }: InboxRowListProps<T>) {
@@ -56,13 +68,42 @@ export function InboxRowList<T extends { readonly key: string }>({
     overscan: OVERSCAN_ROWS,
   });
 
-  // A row chosen with the keys stays in view.
+  // Where the builder left the list.
+  useLayoutEffect(() => {
+    if (initialScroll > 0 && viewport.current !== null) viewport.current.scrollTop = initialScroll;
+    // Only the first draw restores the scroll.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // A row chosen with the keys stays in view, and keeps focus when the list had it.
   const selectedIndex = selected === null ? -1 : rows.findIndex((row) => row.key === selected);
+  const arrived = useRef(false);
+  const mounted = useRef(false);
   useEffect(() => {
-    if (selectedIndex >= 0) virtualizer.scrollToIndex(selectedIndex);
+    const first = !mounted.current;
+    mounted.current = true;
+    // The restored scroll is the position to keep on the first draw.
+    if (selectedIndex >= 0 && !(first && initialScroll > 0))
+      virtualizer.scrollToIndex(selectedIndex);
     // The virtualizer is stable; only the selection moving scrolls.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedIndex]);
+
+  // Focus moves with the selection only while it is on a row or not yet anywhere in the page's content: a
+  // click or a Tab elsewhere is left alone.
+  useEffect(() => {
+    const el = viewport.current;
+    if (el === null || selectedIndex < 0) return;
+    const active = document.activeElement;
+    const inList = active !== null && el.contains(active);
+    const unplaced =
+      active === null || active === document.body || active.closest('[data-rail-item]') !== null;
+    if (!inList && !(focusOnArrival && !arrived.current && unplaced)) return;
+    const option = el.querySelector<HTMLElement>('[role="option"][aria-selected="true"]');
+    if (option === null) return;
+    arrived.current = true;
+    option.focus({ preventScroll: true });
+  }, [selectedIndex, selected, focusOnArrival, rows.length]);
 
   const nearEnd = (lastVisible: number): boolean =>
     hasMore && !loadingMore && lastVisible >= rows.length - NEAR_END_ROWS;
@@ -78,7 +119,9 @@ export function InboxRowList<T extends { readonly key: string }>({
 
   const onScroll = (): void => {
     const el = viewport.current;
-    if (el === null || moreError === null) return;
+    if (el === null) return;
+    onScrollTop?.(el.scrollTop);
+    if (moreError === null) return;
     if (nearEnd(Math.ceil((el.scrollTop + el.clientHeight) / ROW_HEIGHT_PX))) onNearEnd();
   };
 

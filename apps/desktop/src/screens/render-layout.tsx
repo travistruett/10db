@@ -1,9 +1,10 @@
 import { Box } from '@mantine/core';
 import { useIsFetching, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { Outlet, useRouterState } from '@tanstack/react-router';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { DaemonRequestError } from '../daemon/client';
 import { FrameSlotsContext } from '../shell/frame-slots';
+import type { RailSection } from '../shell/rail-items';
 import { CRASH_ATTRIBUTE, CRASH_MESSAGE_ATTRIBUTE } from '../shell/view-boundary';
 import { SCREEN_LABEL, type FrameMessage } from './draw-screen';
 import { useRenderMode } from './render-context';
@@ -82,40 +83,72 @@ function Reporter() {
 const RENDER_STYLE =
   '* { content-visibility: visible !important; } [data-render-title]:empty { display: none; }';
 
-/** The frame's root route: the screen, with the padding the app's own shell gives a view. */
+/** The width of a section's panel beside the screen, as in the app's own frame. */
+const PANEL_WIDTH = 260;
+
+/**
+ * The frame's root route: the screen, with the padding the app's own shell gives a view, and beside it the
+ * section's panel only while a view registers one, so a picture of a screen without a list keeps its full width.
+ */
 export function RenderLayout() {
   // A picture of a screen has no frame, so its title and actions draw in a row above the view.
   const [titleHost, setTitleHost] = useState<HTMLElement | null>(null);
+  const [panelHost, setPanelHost] = useState<HTMLElement | null>(null);
+  const [panelSection, setPanelSection] = useState<RailSection | null>(null);
+  const registerPanel = useCallback((registered: RailSection) => {
+    setPanelSection(registered);
+    return () => {
+      setPanelSection((now) => (now === registered ? null : now));
+    };
+  }, []);
   return (
     <FrameSlotsContext
       value={{
         titleHost,
-        panelHost: null,
+        panelHost: panelSection === null ? null : panelHost,
         drawerHost: null,
         hidePanel: null,
         closeSheet: () => undefined,
-        registerPanel: () => () => undefined,
+        registerPanel,
       }}
     >
       <Box
-        p="md"
-        style={{
-          minHeight: '100vh',
-          display: 'flex',
-          flexDirection: 'column',
-          '--shell-content-padding-block': 'var(--mantine-spacing-md)',
-          '--shell-content-padding-inline': 'var(--mantine-spacing-md)',
-        }}
+        style={{ minHeight: '100vh', display: 'flex', alignItems: 'stretch' }}
         bg="var(--mantine-color-body)"
       >
-        <style>{RENDER_STYLE}</style>
-        <Reporter />
-        <div
-          ref={setTitleHost}
-          data-render-title=""
-          style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}
-        />
-        <Outlet />
+        {panelSection === null ? null : (
+          <div
+            ref={setPanelHost}
+            data-render-panel=""
+            style={{
+              width: PANEL_WIDTH,
+              flexShrink: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              borderRight: '1px solid var(--mantine-color-default-border)',
+            }}
+          />
+        )}
+        <Box
+          p="md"
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            '--shell-content-padding-block': 'var(--mantine-spacing-md)',
+            '--shell-content-padding-inline': 'var(--mantine-spacing-md)',
+          }}
+        >
+          <style>{RENDER_STYLE}</style>
+          <Reporter />
+          <div
+            ref={setTitleHost}
+            data-render-title=""
+            style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}
+          />
+          <Outlet />
+        </Box>
       </Box>
     </FrameSlotsContext>
   );

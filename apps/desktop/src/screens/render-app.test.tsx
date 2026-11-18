@@ -1,5 +1,5 @@
 import { mintId } from '@10db/contracts';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, server, TEST_CONNECTION } from '../test/daemon';
@@ -26,7 +26,12 @@ interface Heard {
   readonly reason?: string;
 }
 let heard: Heard[];
-let requests: { method: string; path: string; authorization: string | null }[];
+let requests: {
+  method: string;
+  path: string;
+  search: URLSearchParams;
+  authorization: string | null;
+}[];
 const listen = (event: MessageEvent): void => {
   const data = event.data as Heard & { source?: string };
   if (data.source === 'tendb-screen') heard.push(data);
@@ -40,6 +45,7 @@ beforeEach(() => {
     requests.push({
       method: request.method,
       path: new URL(request.url).pathname,
+      search: new URL(request.url).searchParams,
       authorization: request.headers.get('authorization'),
     });
   });
@@ -193,11 +199,27 @@ describe('a frame the window draws a screen in', () => {
     );
     serveOpenRows(() => cards);
     render(<RenderApp params={{ ...params, screen: 'inbox', path: '/inbox' }} />);
-    expect(await screen.findByText('A card of this project')).toBeTruthy();
+    expect((await screen.findAllByText('A card of this project')).length).toBeGreaterThan(0);
     await waitFor(() => {
       expect(heard.map((h) => h.kind)).toEqual(['ready']);
     });
     expect(screen.queryByText('A card of another project')).toBeNull();
+    // The panel's list and its Open count draw in the frame, which asks for the frame's project only.
+    const list = screen.getByRole('listbox', { name: 'Inbox' });
+    expect(within(list).getAllByRole('option')).toHaveLength(1);
+    expect(screen.getByRole('radio', { name: /^Open\s?1$/ })).toBeTruthy();
+    const asked = requests
+      .filter((r) => r.path === '/inbox/page')
+      .map((r) => r.search.get('project'));
+    expect(asked.length).toBeGreaterThan(0);
+    expect(new Set(asked)).toEqual(new Set([project.id]));
+  });
+
+  it('gives a screen with no panel its full width', async () => {
+    serve();
+    render(<RenderApp params={params} />);
+    expect(await screen.findByRole('button', { name: 'Alpha' })).toBeTruthy();
+    expect(document.querySelector('[data-render-panel]')).toBeNull();
   });
 
   it('reads an Inbox with only another project’s cards as empty', async () => {

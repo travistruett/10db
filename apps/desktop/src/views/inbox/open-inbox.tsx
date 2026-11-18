@@ -8,7 +8,7 @@ import {
 } from '@10db/contracts';
 import { Alert } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { DaemonRequestError } from '../../daemon/client';
 import { dropCard, refreshCard as refreshCardEverywhere } from '../../daemon/inbox-live';
@@ -21,10 +21,17 @@ import { useNow } from '../../shell/relative';
 import { cardAnswer, recommended } from './card-answer';
 import { InboxRowList } from './inbox-row-list';
 import { inboxRowOf, InboxRowItem, OpenRowKind, systemRow, type OpenRow } from './inbox-row-item';
-import { inboxList, type InboxSearch } from './inbox-search';
+import {
+  inboxList,
+  inboxStateMemory,
+  rememberScroll,
+  rememberSelected,
+  type InboxSearch,
+} from './inbox-search';
 import { nextSelection } from './inbox-selection';
 import { OpenContent } from './open-content';
 import { useOpenPassWorkbench } from './pass-ready-row';
+import { usePrefetchNextRow } from './prefetch-next-row';
 import { defaultRecording } from './record-decision';
 import { stakeholderMode, StakeholderMode } from './route-line';
 import { systemCards } from './system-cards';
@@ -80,7 +87,9 @@ export function OpenInbox({
   const shown: OpenRow[] = [...ownCards.map(systemRow), ...open.rows.map(inboxRowOf)];
   const keys = shown.map((row) => row.key);
 
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // The row and scroll the builder left Open at come back with them.
+  const memory = inboxStateMemory(InboxListState.Open);
+  const [selectedKey, setSelectedKey] = useState<string | null>(memory.selected);
   const [lastIndex, setLastIndex] = useState(0);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -105,6 +114,9 @@ export function OpenInbox({
     if (selectedKey !== null) setDraft(null);
   }
   if (pick.index !== lastIndex) setLastIndex(pick.index);
+  useEffect(() => {
+    rememberSelected(InboxListState.Open, pick.key);
+  }, [pick.key]);
   const selectedRow = pick.key === null ? null : (shown[pick.index] ?? null);
   const selectedInbox = selectedRow?.kind === OpenRowKind.Inbox ? selectedRow.row : null;
   const selected = selectedInbox?.items[0] ?? null;
@@ -134,6 +146,8 @@ export function OpenInbox({
   // Until the builder changes it, a question is recorded as the daemon would record it by default.
   const recording =
     mine?.record !== undefined ? mine.record : selected ? defaultRecording(selected) : null;
+
+  usePrefetchNextRow(shown[pick.index + 1]);
 
   // A drafted message is sent with ⌘↵ only: its options are not live, and a bare Enter sends nothing.
   const previewing =
@@ -293,6 +307,11 @@ export function OpenInbox({
       loadingMore={open.loadingMore}
       moreError={open.moreError}
       onNearEnd={open.loadMore}
+      initialScroll={memory.scrollTop}
+      onScrollTop={(scrollTop) => {
+        rememberScroll(InboxListState.Open, scrollTop);
+      }}
+      focusOnArrival
       onPick={(row) => {
         select(row);
         // Where the panel is a sheet the pick has been made: show the card it chose.

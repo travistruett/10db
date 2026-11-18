@@ -99,3 +99,13 @@ const memory: Record<InboxListState, StateMemory> = {
 
 /** A state's selected row key and list scroll, kept across switching states and leaving the page. */
 export const inboxStateMemory = (state: InboxListState): StateMemory => memory[state];
+
+/** Remembers a state's selected row key. */
+export function rememberSelected(state: InboxListState, selected: string | null): void {
+  memory[state].selected = selected;
+}
+
+/** Remembers a state's list scroll position. */
+export function rememberScroll(state: InboxListState, scrollTop: number): void {
+  memory[state].scrollTop = scrollTop;
+}

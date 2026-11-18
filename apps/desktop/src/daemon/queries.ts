@@ -171,6 +171,26 @@ export function useWorkstreams(filter: { readonly active: boolean }) {
   });
 }
 
+/** The read of what a workstream changed, shared by the view and a prefetch of it. */
+export function workstreamChangesQuery(
+  client: DaemonClient,
+  id: WorkstreamId | undefined,
+  head: string | null,
+  scope: ChangesScope,
+) {
+  return queryOptions({
+    queryKey: queryKeys.workstreamChanges(id, head, scope),
+    queryFn:
+      id === undefined
+        ? skipToken
+        : async () =>
+            readJson(
+              await client.workstreams[':id'].changes.$get({ param: { id }, query: { scope } }),
+              WorkstreamChangesDto,
+            ),
+  });
+}
+
 /**
  * What a workstream changed since it started: the diff a finished, ungated task is checked by. It is
  * keyed by the head the card names, so a new round never shows the previous round's diff.
@@ -186,19 +206,11 @@ export function useWorkstreamChanges(
 ) {
   const { client } = useDaemon();
   return useQuery({
-    queryKey: queryKeys.workstreamChanges(id, head, scope),
+    ...workstreamChangesQuery(client, id, head, scope),
     placeholderData: (previous, previousQuery) =>
       follow && previousQuery?.queryKey[1] === id && previousQuery?.queryKey[3] === scope
         ? previous
         : undefined,
-    queryFn:
-      id === undefined
-        ? skipToken
-        : async () =>
-            readJson(
-              await client.workstreams[':id'].changes.$get({ param: { id }, query: { scope } }),
-              WorkstreamChangesDto,
-            ),
   });
 }
 

@@ -133,11 +133,10 @@ export function useInboxCount(state: 'open' | 'waiting'): number | undefined {
   return useInboxPage({ state, pageSize: 1 }).data?.total;
 }
 
-/** The last messages of a question's task conversation, for the row's content. Other kinds have none. */
-export function useCardContext(item: InboxItemDto | null): UseQueryResult<InboxCardContextDto> {
-  const { client } = useDaemon();
+/** The read of a question's last messages; a card of another kind has none, so the query is off. */
+export function cardContextQuery(client: DaemonClient, item: InboxItemDto | null) {
   const id = item?.kind === InboxKind.Question ? item.id : null;
-  return useQuery({
+  return {
     queryKey: ['inbox-card-context', id],
     queryFn: async () =>
       readJson(
@@ -146,5 +145,11 @@ export function useCardContext(item: InboxItemDto | null): UseQueryResult<InboxC
       ),
     enabled: id !== null,
     staleTime: Infinity,
-  });
+  };
+}
+
+/** The last messages of a question's task conversation, for the row's content. Other kinds have none. */
+export function useCardContext(item: InboxItemDto | null): UseQueryResult<InboxCardContextDto> {
+  const { client } = useDaemon();
+  return useQuery(cardContextQuery(client, item));
 }
