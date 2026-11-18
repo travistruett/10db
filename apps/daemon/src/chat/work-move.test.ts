@@ -82,6 +82,23 @@ describe('a session on its own branch', () => {
     expect(prepares[0]).toMatchObject({ checkout: worktree, writes: true });
   });
 
+  it("lets a branch session read and search its own worktree, and not the builder's checkout", async () => {
+    const { chat, worktree } = world();
+    writeFileSync(join(worktree, 'a.ts'), 'x');
+    const verdicts: string[] = [];
+    w.adapter.shapeBehaviour = (turn) => {
+      const asked = (toolName: string, input: Record<string, unknown>) =>
+        verdicts.push(turn.spec.preToolUse({ toolName, input }).decision);
+      asked('Read', { file_path: join(worktree, 'a.ts') });
+      asked('Grep', { pattern: 'x', path: worktree });
+      asked('Read', { file_path: join(repo.path, 'checkout', 'a.ts') });
+      return Promise.resolve();
+    };
+    w.chat.send(chat.conversationId, { text: 'one', mentions: [], pictures: [] });
+    await waitFor(() => verdicts.length === 3);
+    expect(verdicts).toEqual(['allow', 'allow', 'deny']);
+  });
+
   it('opens each session with where it works, and says once that it moved (call 11)', async () => {
     const { chat, worktree } = world();
     w.firstStartAfterMove.add(chat.id);

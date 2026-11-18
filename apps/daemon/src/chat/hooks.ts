@@ -461,8 +461,10 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       };
       sessionClosers.set(conv.id, release);
       const setup = ready?.setup ?? null;
+      // A branch session reads and runs in its own worktree, so that is the checkout its reads are judged against.
       const access: ShapeAccess = {
         ...launch.access,
+        checkout: root,
         filesDir: chatFolder(deps.dataDir, conv.id),
         agentModels: launch.agentModels,
         judge,
