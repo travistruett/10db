@@ -36,8 +36,10 @@ export {
   type InboxService,
 } from './service';
 export {
+  isSensitiveStray,
   isTrusted,
   readSmallFile,
+  sensitiveDetail,
   shaOf,
   shortSha,
   stampDetail,

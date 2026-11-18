@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   InboxKind,
@@ -16,6 +16,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import { z } from 'zod';
+import { existsAsEntry } from '../git';
 import { BY_ANSWER, CardTier } from './card-tier';
 import type { FlagInput } from './service';
 
@@ -32,6 +33,7 @@ const SHA_DETAIL = 'sha256';
 const ROOT_DETAIL = 'root';
 const PATH_DETAIL = 'path';
 const FOLD_DETAIL = 'foldKey';
+const SENSITIVE_DETAIL = 'sensitive';
 
 /** A file bigger than this is not stamped, so its card offers no trust and no answer reads it whole. */
 const MAX_STAMPED_BYTES = 32 * 1024 * 1024;
@@ -92,22 +94,20 @@ export function stampFile(root: string, rel: string): string | null {
   return read.kind === 'file' ? shaOf(read.bytes) : null;
 }
 
-/** Whether anything, a link included, is at the path. */
-function existsAsEntry(path: string): boolean {
-  try {
-    lstatSync(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** The first 12 hex digits of a stamp, as a card shows it. */
 export const shortSha = (sha: string): string => sha.slice(0, 12);
 
 /** What a stray-write card carries so its answer can trust the version it showed. */
 export function stampDetail(root: string, sha256: string, foldKey: string): Record<string, Json> {
   return { [ROOT_DETAIL]: root, [SHA_DETAIL]: sha256, [FOLD_DETAIL]: foldKey };
+}
+
+/** What a stray-write card for a sensitive path carries, so a lane's end or retry leaves it open. */
+export const sensitiveDetail = { [SENSITIVE_DETAIL]: true } as const;
+
+/** Whether the card is a stray write to a sensitive path: the builder's to decide, whatever becomes of the lane. */
+export function isSensitiveStray(item: InboxItemDto): boolean {
+  return item.kind === InboxKind.Flag && item.detail?.[SENSITIVE_DETAIL] === true;
 }
 
 /** The sha256 a card was raised with, or null when it carries none. */

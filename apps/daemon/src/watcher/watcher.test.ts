@@ -3871,4 +3871,50 @@ describe('stray writes in .git', () => {
     expect(() => trust(old?.id ?? ('' as InboxItemDto['id']))).toThrow(ConflictError);
     expect(trustedWrites(base.db, project.id)).toEqual([]);
   });
+
+  it('leaves a config card open when its lane is cancelled, and still names the key afterwards', async () => {
+    const lane = running();
+    watcher.sync();
+    git(repo.path, 'config', 'core.hooksPath', 'scripts/h');
+    emit('.git/config');
+    await watcher.flush();
+    expect(flags()).toHaveLength(1);
+
+    inbox.cancelForWorkstream(lane.workstream.id);
+    expect(flags()).toHaveLength(1);
+
+    git(repo.path, 'config', 'branch.main.merge', 'refs/heads/main');
+    emit('.git/config');
+    await watcher.flush();
+    expect(flags()[0]?.body.toLowerCase()).toContain('core.hookspath');
+  });
+
+  it('cards a config key again after its card was withdrawn rather than answered', async () => {
+    running();
+    watcher.sync();
+    git(repo.path, 'config', 'core.hooksPath', 'scripts/h');
+    emit('.git/config');
+    await watcher.flush();
+    inbox.withdraw(flags()[0]?.id ?? ('' as InboxItemDto['id']));
+    expect(flags()).toEqual([]);
+
+    git(repo.path, 'config', 'branch.main.merge', 'refs/heads/main');
+    emit('.git/config');
+    await watcher.flush();
+    expect(flags()[0]?.body.toLowerCase()).toContain('core.hookspath');
+  });
+
+  it('accepts a config key once its card was dismissed', async () => {
+    running();
+    watcher.sync();
+    git(repo.path, 'config', 'core.hooksPath', 'scripts/h');
+    emit('.git/config');
+    await watcher.flush();
+    inbox.answer(flags()[0]?.id ?? ('' as InboxItemDto['id']), { choice: 'Dismiss' });
+
+    git(repo.path, 'config', 'branch.main.merge', 'refs/heads/main');
+    emit('.git/config');
+    await watcher.flush();
+    expect(flags()).toEqual([]);
+  });
 });

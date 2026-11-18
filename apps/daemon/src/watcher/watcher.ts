@@ -6,6 +6,7 @@ import {
   EventType,
   InboxKind,
   InboxState,
+  type InboxItemId,
   LANE_STATES,
   WorkstreamId,
   WorkstreamState,
@@ -22,6 +23,7 @@ import {
   passAreasOf,
   getAppSetting,
   getBatch,
+  getInboxItem,
   getProject,
   findOpenByFoldKey,
   getWorkstream,
@@ -52,6 +54,7 @@ import type { FlagInput, InboxService } from '../inbox';
 import {
   isTrusted,
   readSmallFile,
+  sensitiveDetail,
   shaOf,
   shortSha,
   stampDetail,
@@ -226,6 +229,8 @@ export function createWatcher(deps: {
   interface SeenConfig {
     baseline: string;
     carded: string | null;
+    /** The open card that showed `carded`, once the batch has raised it. */
+    cardId: InboxItemId | null;
   }
   const seenConfigs = new Map<string, Map<string, SeenConfig>>();
   let timer: Timer | null = null;
@@ -275,19 +280,25 @@ export function createWatcher(deps: {
     const seen = seenConfigs.get(site.root) ?? new Map<string, SeenConfig>();
     seenConfigs.set(site.root, seen);
     // A worktree's own config file starts empty, and so does one first seen after the checkout was watched.
-    const entry = seen.get(rel) ?? { baseline: '', carded: null };
+    const entry = seen.get(rel) ?? { baseline: '', carded: null, cardId: null };
     seen.set(rel, entry);
     if (isTrusted(trustedWrites(db, project.id), rel, sha)) {
       entry.baseline = text;
       entry.carded = null;
+      entry.cardId = null;
       logTrusted(project.id, site.root, rel);
       return null;
     }
     const open = findOpenByFoldKey(db, project.id, strayFoldKey(site.scope, rel));
-    // The card is gone, answered or dismissed: the version it showed is now decided.
-    if (!open && entry.carded !== null) {
-      entry.baseline = entry.carded;
+    if (open) entry.cardId = open.id;
+    else if (entry.carded !== null) {
+      // The card is gone. Answered by the builder, its version is decided; withdrawn or cancelled, it is
+      // not, so the next write is judged against the old baseline and cards again.
+      const card = entry.cardId === null ? null : getInboxItem(db, entry.cardId);
+      if (card !== null && card.answer !== null && card.state !== InboxState.Cancelled)
+        entry.baseline = entry.carded;
       entry.carded = null;
+      entry.cardId = null;
     }
     let keys: string[];
     try {
@@ -435,7 +446,11 @@ export function createWatcher(deps: {
           closesWhen: BY_ANSWER,
           title: STRAY_TITLE,
           body: `${labelled(site, rel)}${during}${note === undefined ? '' : `\n${note}`}`,
-          detail: { path: rel, candidates: [...candidates] },
+          detail: {
+            path: rel,
+            candidates: [...candidates],
+            ...(isSensitivePath(rel) ? sensitiveDetail : {}),
+          },
           foldKey: strayFoldKey(site.scope, rel),
         },
         TrustChoice.Trust,
@@ -631,7 +646,12 @@ export function createWatcher(deps: {
           closesWhen: BY_ANSWER,
           title: "Write inside another workstream's claim",
           body: labelled(site, path),
-          detail: { path, candidates: running, claimedBy },
+          detail: {
+            path,
+            candidates: running,
+            claimedBy,
+            ...(isSensitivePath(path) ? sensitiveDetail : {}),
+          },
           foldKey: strayFoldKey(site.scope, path),
         },
         TrustChoice.Keep,
@@ -1186,6 +1206,12 @@ export function createWatcher(deps: {
       notes,
       stamps,
     );
+    // The card each carded config now has, so its answer can be told from its withdrawal.
+    for (const rel of notes.keys()) {
+      const card = findOpenByFoldKey(db, projectId, strayFoldKey(site.scope, rel));
+      const seen = seenConfigs.get(entry.root)?.get(rel);
+      if (card && seen) seen.cardId = card.id;
+    }
     raiseForeign(
       project,
       site,
@@ -1291,7 +1317,10 @@ export function createWatcher(deps: {
           // Read now, not at the first batch, so the first change to the config is seen as one.
           const config = configTextOf(root, GIT_CONFIG_PATH);
           if (config !== null)
-            seenConfigs.set(root, new Map([[GIT_CONFIG_PATH, { baseline: config, carded: null }]]));
+            seenConfigs.set(
+              root,
+              new Map([[GIT_CONFIG_PATH, { baseline: config, carded: null, cardId: null }]]),
+            );
         } catch (error) {
           deps.logger.warn({ projectId, root, err: String(error) }, 'could not watch the checkout');
         }
