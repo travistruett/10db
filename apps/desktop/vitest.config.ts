@@ -1,7 +1,9 @@
 import { configDefaults, defineProject } from 'vitest/config';
+import { localWorkerCap } from '../../tests/max-workers';
 
 export default defineProject({
   test: {
+    ...localWorkerCap,
     name: 'desktop',
     environment: 'jsdom',
     setupFiles: ['../../tests/git-isolation.setup.ts', './src/test/setup.ts'],

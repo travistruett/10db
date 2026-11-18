@@ -1,6 +1,7 @@
 import { configDefaults, defineConfig } from 'vitest/config';
 import { WeightedShardSequencer } from './tests/repo/src/shard-sequencer';
 import { TestTimingReporter } from './tests/repo/src/test-timing-reporter';
+import { localWorkerCap } from './tests/max-workers';
 
 // CI's test shards set this.
 const timings = process.env['TENDB_TEST_TIMINGS'];
@@ -20,6 +21,7 @@ export default defineConfig({
   test: {
     sequence: { sequencer: WeightedShardSequencer },
     reporters,
+    ...localWorkerCap,
     projects: [
       'tests/repo',
       'packages/contracts',

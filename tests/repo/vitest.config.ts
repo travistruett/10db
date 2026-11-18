@@ -1,7 +1,9 @@
 import { defineProject } from 'vitest/config';
+import { localWorkerCap } from '../max-workers';
 
 export default defineProject({
   test: {
+    ...localWorkerCap,
     name: 'repo',
     environment: 'node',
     include: ['src/**/*.test.ts'],
