@@ -43,7 +43,6 @@ export {
   trustedWrites,
   trustOptions,
   TrustChoice,
-  type TrustedWrite,
 } from './trusted-writes';
 export { BY_ANSWER, CardTier, type CardClosesWhen, type StoredTier } from './card-tier';
 export { postNotice, type NoticeInput } from './notice';
