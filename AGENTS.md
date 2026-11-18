@@ -107,9 +107,13 @@ A local macOS control plane that runs Claude Code sessions as a software factory
   own command names the paths again after `--`: `git commit -m '...' -- path/a path/b`. Never
   `git add -A`, `git add .` or `git commit -a`.
 - Use single quotes for `-m`; zsh runs backticks inside double quotes.
-- The git hooks (lefthook, installed by `pnpm install`) run gitleaks, Prettier, ESLint,
-  `cargo fmt` and a hygiene check before each commit, commitlint on the message, and `make precheck`
-  before a push. They need mise activated so the pinned tools are on `PATH`; Claude Code sessions
+- The git hooks run gitleaks, Prettier, ESLint, `cargo fmt` and a hygiene check before each
+  commit, commitlint on the message, and `make precheck` before a push. lefthook is pinned in
+  `mise.toml`, not in `package.json`, and `make setup` installs the hooks with it. A hook names the
+  lefthook that installed it, so the hooks name mise's copy, outside every checkout, and are the
+  same whichever checkout installed them; `pnpm install` never touches them. A new clone, or a
+  lefthook bump, runs `make setup` (or `mise install lefthook && lefthook install`). The hooks'
+  jobs need mise activated so the pinned tools are on `PATH`; Claude Code sessions
   get mise's shims from the `SessionStart` hook in `.claude/settings.json`. When a hook fails,
   fix the cause and rerun the same command; the paths are still staged. Agents never use
   `--no-verify`, `LEFTHOOK=0`, `LEFTHOOK_EXCLUDE` or `core.hooksPath`.
