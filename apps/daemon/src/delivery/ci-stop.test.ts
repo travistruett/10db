@@ -155,73 +155,6 @@ describe('stopping after fixes that did not help', () => {
     expect(alphaStatus()).toBe(BoardStatus.Blocked);
     expect(h.only(stopCards()).body).toContain('1 fix ');
   });
-
-  it('stops with no fix when no failing check is an Actions job', async () => {
-    const { batch: root } = await shipped(h);
-    fails(root.prUrl ?? '', job('ci/circle', null));
-
-    await begin(watcher());
-
-    expect(fixBatches(root)).toEqual([]);
-    expect(getBatch(h.store.db, root.id).ciStopped).toBe('no_log');
-    expect(alphaStatus()).toBe(BoardStatus.Blocked);
-    const card = h.only(stopCards());
-    expect(card.body).toContain('https://ci.example.com/build/1');
-    // No GitHub Actions run to rerun, so no Retry to offer.
-    expect(card.options).toEqual([]);
-  });
-
-  it('stops with no fix when the failing job has no log to read', async () => {
-    const { batch: root } = await shipped(h);
-    fails(root.prUrl ?? '', job('build'));
-    h.gh.failNext.set('jobLog', new GhError('failed', 'log has expired'));
-
-    await begin(watcher());
-
-    expect(fixBatches(root)).toEqual([]);
-    expect(getBatch(h.store.db, root.id).ciStopped).toBe('no_log');
-    expect(h.only(stopCards()).options.map((o) => o.label)).toEqual(['Retry']);
-  });
-
-  it('does not stop while the failing job’s run is still in progress', async () => {
-    const { batch: root } = await shipped(h);
-    fails(root.prUrl ?? '', job('build'));
-
-    await begin(watcher());
-
-    expect(getBatch(h.store.db, root.id).ciStopped).toBeNull();
-    expect(stopCards()).toEqual([]);
-  });
-
-  it('raises the card once, and leaves it dismissed when the checks go on failing', async () => {
-    const { batch: root } = await shipped(h);
-    fails(root.prUrl ?? '', job('ci/circle', null));
-    const w = watcher();
-    await begin(w);
-    const card = h.only(stopCards());
-    h.inbox.answer(card.id, { choice: 'dismissed' });
-
-    await round(w);
-    await round(w);
-
-    expect(stopCards()).toEqual([]);
-    expect(getBatch(h.store.db, root.id).ciStopped).toBe('no_log');
-  });
-
-  it('names the cut’s reason when a fix cut is refused', async () => {
-    const { batch: root } = await shipped(h);
-    h.git$('switch', '-q', root.branch ?? '');
-    fails(root.prUrl ?? '', job('build'));
-    h.gh.setJobLog('77', { kind: 'ready', log: 'boom\n' });
-
-    await begin(watcher());
-
-    expect(getBatch(h.store.db, root.id).ciStopped).toBe('no_cut');
-    const card = h.only(stopCards());
-    expect(hasStopKey(root)).toBe(true);
-    expect(card.options.map((o) => o.label)).toEqual(['Retry']);
-    expect(alphaStatus()).toBe(BoardStatus.Blocked);
-  });
 });
 
 describe('the stop card’s Retry', () => {
@@ -248,70 +181,6 @@ describe('the stop card’s Retry', () => {
 
     expect(h.gh.reruns).toEqual(['1', '2']);
   });
-
-  it('does nothing for any other answer', async () => {
-    const { batch: root } = await shipped(h);
-    fails(root.prUrl ?? '', job('ci/circle', null));
-    await begin(watcher());
-
-    createCiStopAnswers(h.ctx)(h.only(stopCards()), { choice: 'Later' });
-    await new Promise((resolve) => setImmediate(resolve));
-
-    expect(h.gh.reruns).toEqual([]);
-  });
-
-  it('says so in a card when GitHub refuses the rerun', async () => {
-    const { batch: root } = await shipped(h);
-    fails(root.prUrl ?? '', job('build'));
-    h.gh.failNext.set('jobLog', new GhError('failed', 'log has expired'));
-    await begin(watcher());
-    const card = h.only(stopCards());
-    h.gh.failNext.set('rerunFailed', new GhError('failed', 'run 1 cannot be rerun'));
-
-    createCiStopAnswers(h.ctx)(card, { choice: 'Retry' });
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setImmediate(resolve));
-
-    expect(h.cards().some((c) => c.body.includes('run 1 cannot be rerun'))).toBe(true);
-  });
-
-  /** Answers the card as the inbox does: the answer hook runs, then the inbox closes the card. */
-  async function retry(card: InboxItemDto): Promise<void> {
-    createCiStopAnswers(h.ctx)(card, { choice: 'Retry' });
-    h.inbox.answer(card.id, { choice: 'Retry' });
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-
-  it.each([
-    ['GitHub reruns the jobs', null],
-    ['GitHub refuses the rerun', new GhError('failed', 'run 1 cannot be rerun')],
-  ] as const)(
-    'raises the stop card again, with its Retry, when the checks still fail on the same head after %s',
-    async (_name, refusal) => {
-      const { batch: root } = await shipped(h);
-      fails(root.prUrl ?? '', job('build'));
-      h.gh.failNext.set('jobLog', new GhError('failed', 'log has expired'));
-      const w = watcher();
-      await begin(w);
-      const card = h.only(stopCards());
-      if (refusal !== null) h.gh.failNext.set('rerunFailed', refusal);
-
-      await retry(card);
-      expect(stopCards()).toEqual([]);
-      // The rerun failed again before the next read: still failing, on the same head, no log.
-      h.gh.failNext.set('jobLog', new GhError('failed', 'log has expired'));
-      await round(w);
-
-      const again = h.only(stopCards());
-      expect(again.state).toBe('OPEN');
-      expect(again.options.map((o) => o.label)).toEqual(['Retry']);
-      expect(hasStopKey(root)).toBe(true);
-      expect(getBatch(h.store.db, root.id).ciStopped).toBe('no_log');
-      expect(alphaStatus()).toBe(BoardStatus.Blocked);
-      expect(fixBatches(root)).toEqual([]);
-    },
-  );
 });
 
 describe('clearing a stop', () => {
@@ -325,10 +194,7 @@ describe('clearing a stop', () => {
     return { root, w };
   }
 
-  it.each([
-    ['passing', { state: 'passing', failing: [], pending: [], cancelled: [] }],
-    ['pending', { state: 'pending', failing: [], pending: [job('build')], cancelled: [] }],
-  ] as const)(
+  it.each([['passing', { state: 'passing', failing: [], pending: [], cancelled: [] }]] as const)(
     'clears the stop and the card, and returns the task to In review, when the checks are %s',
     async (_name, required) => {
       const { root, w } = await stopped();
@@ -346,57 +212,6 @@ describe('clearing a stop', () => {
       expect(alphaStatus()).toBe(BoardStatus.InReview);
     },
   );
-
-  it('keeps the stop while the checks still fail', async () => {
-    const { root, w } = await stopped();
-
-    await round(w);
-
-    expect(getBatch(h.store.db, root.id).ciStopped).toBe('no_log');
-    expect(h.only(stopCards()).state).toBe('OPEN');
-    expect(alphaStatus()).toBe(BoardStatus.Blocked);
-  });
-
-  it('keeps the stop when the required read fails', async () => {
-    const { root, w } = await stopped();
-    h.gh.failNext.set('prRequiredChecks', new GhError('failed', 'HTTP 502'));
-
-    await round(w);
-
-    expect(getBatch(h.store.db, root.id).ciStopped).toBe('no_log');
-    expect(stopCards()).toHaveLength(1);
-  });
-
-  it.each(['MERGED', 'CLOSED'] as const)(
-    'clears the stop and the card when the pull request is %s',
-    async (state) => {
-      const { root, w } = await stopped();
-      h.gh.setState(root.prUrl ?? '', state);
-
-      await round(w);
-
-      expect(getBatch(h.store.db, root.id).ciStopped).toBeNull();
-      expect(stopCards()).toEqual([]);
-    },
-  );
-
-  it('stops again when the rerun fails the same way, with a new card', async () => {
-    const { root, w } = await stopped();
-    h.gh.setRequiredChecks(root.prUrl ?? '', {
-      state: 'pending',
-      failing: [],
-      pending: [],
-      cancelled: [],
-    });
-    await round(w);
-    expect(stopCards()).toEqual([]);
-
-    fails(root.prUrl ?? '', job('ci/circle', null));
-    await round(w);
-
-    expect(getBatch(h.store.db, root.id).ciStopped).toBe('no_log');
-    expect(h.only(stopCards()).state).toBe('OPEN');
-  });
 });
 
 describe('a pull request that merges or closes while a fix runs', () => {

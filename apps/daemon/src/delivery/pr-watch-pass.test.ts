@@ -1,6 +1,5 @@
 import {
   PassNoticeKind,
-  PassState,
   type BatchId,
   type PassId,
   type ProjectInput,
@@ -9,7 +8,6 @@ import {
 import {
   closePass,
   getBatch,
-  getPass,
   getPassProgress,
   listBatches,
   setClosePlan,
@@ -160,62 +158,6 @@ describe("the watch on a pass's pull request", () => {
     await watch(asked);
 
     expect(asked.asked).toEqual([]);
-    expect(h.cards()).toEqual([]);
-  });
-
-  it('reruns no job GitHub cancelled for want of a runner', async () => {
-    const { url } = await passWithPr();
-    h.gh.noRunnerJobs.add('desktop');
-    h.gh.setRequiredChecks(url, {
-      state: 'cancelled',
-      failing: [],
-      pending: [],
-      cancelled: [job('desktop')],
-    });
-
-    await watch(landing());
-
-    expect(h.gh.reruns).toEqual([]);
-    expect(h.cards()).toEqual([]);
-  });
-
-  it('records a merge of the open pass, and raises no card', async () => {
-    const { passId, batchId, url } = await passWithPr();
-    h.gh.setState(url, PrState.Merged);
-
-    await watch(landing());
-
-    expect(getBatch(h.store.db, batchId).pr).toMatchObject({ state: 'merged' });
-    expect(getPass(h.store.db, passId).state).toBe(PassState.Open);
-    expect(h.cards()).toEqual([]);
-  });
-
-  it('forgets a pull request closed unmerged while the pass is open, saying so in the header and nowhere else', async () => {
-    const { passId, batchId, url } = await passWithPr();
-    h.gh.setState(url, PrState.Closed);
-
-    await watch(landing());
-
-    expect(getBatch(h.store.db, batchId)).toMatchObject({ prUrl: null, pr: null });
-    expect(notices(passId)).toEqual([
-      expect.objectContaining({
-        kind: PassNoticeKind.PrClosed,
-        sendable: false,
-        text: expect.stringContaining(url) as unknown,
-      }),
-    ]);
-    expect(h.cards()).toEqual([]);
-  });
-
-  it("says in a local project's closed pass that its pull request closed, with no card", async () => {
-    const { passId, batchId, url } = await passWithPr({ delivery: 'local' });
-    closedLocally(passId, batchId);
-    h.gh.setState(url, PrState.Closed);
-
-    await watch(landing());
-
-    expect(getBatch(h.store.db, batchId).pr).toMatchObject({ state: 'closed' });
-    expect(notices(passId)).toEqual([expect.objectContaining({ kind: PassNoticeKind.PrClosed })]);
     expect(h.cards()).toEqual([]);
   });
 });

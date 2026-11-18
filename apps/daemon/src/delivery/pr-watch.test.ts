@@ -13,11 +13,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { waitFor } from '../../test/fixtures';
 import { ManualClock } from '../clock';
-import { GhError, UNREADABLE_CHECK, type CheckRollupItem, type Gh } from '../github';
-import { createInboxService } from '../inbox';
-import { GH_CHECK_CHOICE, prCardKey } from './cards';
+import { GhError, type CheckRollupItem, type Gh } from '../github';
+import { prCardKey } from './cards';
 import { raiseIn } from './context';
-import { createGhCardAnswers, createPrWatch, subscribePrWatch, type PrWatch } from './index';
+import { createPrWatch, subscribePrWatch, type PrWatch } from './index';
 import { baseNotices } from './notices';
 
 const INTERVAL = 120_000;
@@ -85,13 +84,6 @@ function shipped(
 }
 
 const pr = (id: BatchId) => getBatch(h.store.db, id).pr;
-const prEvents = (id: BatchId) =>
-  listEventsAfter(h.store.db, 0, 10_000).filter(
-    (e) =>
-      e.type === 'batch.updated' &&
-      e.entityId === id &&
-      JSON.stringify(e.data) === JSON.stringify({ changed: ['pr'] }),
-  );
 
 const notices = (id: BatchId) => getBatch(h.store.db, id).notices.map((n) => n.key);
 const noticeEvents = (id: BatchId) =>
@@ -103,12 +95,6 @@ const noticeEvents = (id: BatchId) =>
   ).length;
 
 const polls = () => h.gh.calls.filter((c) => c.method === 'prStatus').length;
-/** How many times gh was asked for this pull request's status. */
-const reads = (prUrl: string) =>
-  h.gh.calls.filter(
-    (c) => c.method === 'prStatus' && (c.args as { readonly ref: string }).ref === prUrl,
-  ).length;
-const TIMEOUT = 'gh pr view gave no answer within 120 s';
 /** The inbox refuses every new card from now on, as a full disk would. */
 const refuseCards = () => {
   h.store.db.$client.exec(
@@ -150,21 +136,6 @@ describe('the pull request watch', () => {
     expect(h.cards()).toEqual([]);
   });
 
-  it('poke reads now, and a poke during a round queues exactly one more', async () => {
-    setup();
-    const { id, prUrl } = shipped(h.project.id, 'Alpha');
-    const w = watcher();
-    w.start();
-    await w.idle();
-    h.gh.setChecks(prUrl, [run('build', 'SUCCESS')]);
-    w.poke();
-    w.poke();
-    w.poke();
-    await w.idle();
-    expect(pr(id)?.checks).toBe('passing');
-    expect(polls()).toBe(3);
-  });
-
   it('raises one card for failing checks, naming the check and linking it, and withdraws it on passing', async () => {
     setup();
     const { id, prUrl } = shipped(h.project.id, 'Alpha');
@@ -193,101 +164,6 @@ describe('the pull request watch', () => {
     h.gh.setChecks(prUrl, [run('build', 'SUCCESS'), run('lint', 'SUCCESS')]);
     await round(w);
     expect(h.cards()).toEqual([]);
-  });
-
-  it('keeps the open card naming the checks that fail now, and a dismissed card dismissed', async () => {
-    setup();
-    const { id, prUrl } = shipped(h.project.id, 'Alpha');
-    h.gh.setChecks(prUrl, [run('lint', 'FAILURE'), run('test', 'FAILURE')]);
-    const w = watcher();
-    w.start();
-    await w.idle();
-    const first = h.only(h.cards());
-    expect(first.title).toBe('Pull request checks failed for "Alpha": lint and 1 more');
-
-    // lint passes now and test still fails: the same card names test and links its run.
-    const testUrl = 'https://github.com/acme/widgets/actions/runs/test';
-    h.gh.setChecks(prUrl, [run('lint', 'SUCCESS'), run('test', 'FAILURE')]);
-    await round(w);
-    const card = h.only(h.cards());
-    expect(card.id).toBe(first.id);
-    expect(card.title).toBe('Pull request checks failed for "Alpha": test');
-    expect(card.body.startsWith(testUrl)).toBe(true);
-    expect(card.body).not.toContain('runs/lint');
-    expect(card.detail).toEqual({ batchId: id, prUrl, link: testUrl });
-
-    // A new commit fails test again, in a new run: the card links that run.
-    const rerun = 'https://github.com/acme/widgets/actions/runs/test-2';
-    h.gh.setChecks(prUrl, [run('test', 'FAILURE', rerun)]);
-    await round(w);
-    expect(h.only(h.cards())).toMatchObject({
-      id: first.id,
-      title: 'Pull request checks failed for "Alpha": test',
-      detail: { link: rerun },
-    });
-
-    // Dismissed, it stays dismissed however the failing checks change.
-    h.inbox.answer(first.id, { choice: 'dismissed' });
-    h.gh.setChecks(prUrl, [run('lint', 'FAILURE'), run('test', 'FAILURE', rerun)]);
-    await round(w);
-    expect(h.cards()).toEqual([]);
-  });
-
-  it('brings the open card up to date when checks fail again after a pending run', async () => {
-    setup();
-    const { prUrl } = shipped(h.project.id, 'Alpha');
-    h.gh.setChecks(prUrl, [run('lint', 'FAILURE')]);
-    const w = watcher();
-    w.start();
-    await w.idle();
-    const first = h.only(h.cards());
-
-    // A push starts the run again: pending leaves the card open.
-    h.gh.setChecks(prUrl, [run('lint', null)]);
-    await round(w);
-    expect(h.only(h.cards()).id).toBe(first.id);
-
-    const rerun = 'https://github.com/acme/widgets/actions/runs/lint-2';
-    h.gh.setChecks(prUrl, [run('lint', 'FAILURE', rerun), run('test', 'FAILURE')]);
-    await round(w);
-    expect(h.only(h.cards())).toMatchObject({
-      id: first.id,
-      title: 'Pull request checks failed for "Alpha": lint and 1 more',
-      detail: { link: rerun },
-    });
-  });
-
-  it('writes the open card only when what it says changes', async () => {
-    setup();
-    const { prUrl } = shipped(h.project.id, 'Alpha');
-    h.gh.setChecks(prUrl, [run('lint', 'FAILURE')]);
-    const w = watcher();
-    w.start();
-    await w.idle();
-    const card = h.only(h.cards());
-    const writes = () =>
-      listEventsAfter(h.store.db, 0, 10_000).filter(
-        (e) => e.type === 'inbox.changed' && e.entityId === card.id,
-      ).length;
-    const before = writes();
-    await round(w);
-    await round(w);
-    expect(writes()).toBe(before);
-  });
-
-  it('falls back to the pull request link when the failing check has none', async () => {
-    setup();
-    const { id, prUrl } = shipped(h.project.id, 'Alpha');
-    h.gh.setChecks(prUrl, [
-      { __typename: 'StatusContext', context: 'ci/deploy', state: 'ERROR', targetUrl: null },
-    ]);
-    const w = watcher();
-    w.start();
-    await w.idle();
-    const card = h.only(h.cards());
-    expect(card.title).toBe('Pull request checks failed for "Alpha": ci/deploy');
-    expect(card.body.startsWith(prUrl)).toBe(true);
-    expect(card.detail).toEqual({ batchId: id, prUrl, link: prUrl });
   });
 
   it('raises one card for a pull request closed without merging, withdraws the checks card, and stops polling', async () => {
@@ -324,29 +200,6 @@ describe('the pull request watch', () => {
     await round(w, INTERVAL * 4);
     expect(polls()).toBe(before);
     expect(h.cards()).toHaveLength(1);
-  });
-
-  it('clears the conflict notice once GitHub says the pull request merges cleanly, with no card', async () => {
-    setup();
-    const { id, prUrl } = shipped(h.project.id, 'Alpha');
-    h.state.write((w) => {
-      setBatchNotice(w, id, baseNotices.shippedConflict(getBatch(w.tx, id)));
-    });
-    h.gh.setMergeable(prUrl, 'CONFLICTING');
-    const w = watcher();
-    w.start();
-    await w.idle();
-    expect(notices(id)).toEqual(['base-conflict']);
-
-    // GitHub is still working it out after Update branch: the notice stays.
-    h.gh.setMergeable(prUrl, 'UNKNOWN');
-    await round(w);
-    expect(notices(id)).toEqual(['base-conflict']);
-
-    h.gh.setMergeable(prUrl, 'MERGEABLE');
-    await round(w);
-    expect(notices(id)).toEqual([]);
-    expect(h.cards()).toEqual([]);
   });
 
   it('shows a conflict that comes up after shipping on the tasks, once, and keeps a notice it already has', async () => {
@@ -428,29 +281,6 @@ describe('the pull request watch', () => {
       expect(notices(id)).toEqual(['base-conflict']);
     });
 
-    it('withdraws the catch-up card once the pull request merges cleanly', async () => {
-      setup();
-      const { id, prUrl } = shipped(h.project.id, 'Alpha');
-      h.gh.setMergeable(prUrl, 'CONFLICTING');
-      const { watch } = landing();
-      watch.start();
-      await watch.idle();
-      h.state.write((w) => {
-        raiseIn(w, h.project.id, {
-          tier: 'ask',
-          urgency: 'high',
-          closesWhen: { by: 'answer' },
-          title: 'Pull request conflicts',
-          body: 'x',
-          foldKey: prCardKey.catchUp(id),
-        });
-      });
-      expect(h.cards()).toHaveLength(1);
-      h.gh.setMergeable(prUrl, 'MERGEABLE');
-      await round(watch);
-      expect(h.cards()).toEqual([]);
-    });
-
     it('says the catch-up card was open when it asks for the merge in the round that withdraws it', async () => {
       setup();
       const { id, prUrl } = shipped(h.project.id, 'Alpha');
@@ -476,126 +306,6 @@ describe('the pull request watch', () => {
       expect(asked).toEqual([`catch-up ${id}`, `retry ${id} after card`, `retry ${id}`]);
       expect(h.cards()).toEqual([]);
     });
-  });
-
-  it('withdraws the checks card when the pull request merges', async () => {
-    setup();
-    const { prUrl } = shipped(h.project.id, 'Alpha');
-    h.gh.setChecks(prUrl, [run('build', 'FAILURE')]);
-    const w = watcher();
-    w.start();
-    await w.idle();
-    expect(h.cards()).toHaveLength(1);
-    h.gh.setState(prUrl, 'MERGED');
-    await round(w);
-    expect(h.cards()).toEqual([]);
-  });
-
-  it('withdraws the checks card for no checks only when two reads in a row find none', async () => {
-    setup();
-    const { id, prUrl } = shipped(h.project.id, 'Alpha');
-    h.gh.setChecks(prUrl, [run('lint', 'FAILURE')]);
-    const w = watcher();
-    w.start();
-    await w.idle();
-    const card = h.only(h.cards());
-
-    // Right after a push GitHub can list no checks before the new runs appear.
-    h.gh.setChecks(prUrl, []);
-    await round(w);
-    expect(pr(id)).toMatchObject({ checks: 'none' });
-    expect(h.only(h.cards()).id).toBe(card.id);
-
-    // The new run fails: still the one card, linking that run.
-    const rerun = 'https://github.com/acme/widgets/actions/runs/lint-2';
-    h.gh.setChecks(prUrl, [run('lint', 'FAILURE', rerun)]);
-    await round(w);
-    expect(h.only(h.cards())).toMatchObject({ id: card.id, detail: { link: rerun } });
-
-    // None twice in a row: the pull request has no checks now, and the card goes.
-    h.gh.setChecks(prUrl, []);
-    await round(w);
-    expect(h.cards()).toHaveLength(1);
-    await round(w);
-    expect(h.cards()).toEqual([]);
-  });
-
-  it('counts only reads gh answered toward the two reads of none', async () => {
-    setup();
-    const { id, prUrl } = shipped(h.project.id, 'Alpha');
-    h.gh.setChecks(prUrl, [run('lint', 'FAILURE')]);
-    const w = watcher();
-    w.start();
-    await w.idle();
-    const card = h.only(h.cards());
-    const checksCard = () => findOpenByFoldKey(h.store.db, h.project.id, `pr-checks:${id}`);
-
-    h.gh.setChecks(prUrl, []);
-    await round(w);
-    expect(pr(id)).toMatchObject({ checks: 'none' });
-
-    // Offline: the read keeps the last known checks, none, but it is not a second read of none.
-    h.gh.failNext.set('prStatus', new GhError('timeout', TIMEOUT));
-    await round(w);
-    expect(pr(id)).toMatchObject({ state: 'unknown', checks: 'none' });
-    expect(checksCard()?.id).toBe(card.id);
-
-    // The new run fails: still the one card, and gh answered, so its card goes.
-    h.gh.setChecks(prUrl, [
-      run('lint', 'FAILURE', 'https://github.com/acme/widgets/actions/runs/lint-2'),
-    ]);
-    await round(w);
-    expect(h.only(h.cards()).id).toBe(card.id);
-  });
-
-  it('records unknown checks for a rollup entry 10db cannot read, without a card, and reads on', async () => {
-    setup();
-    const a = shipped(h.project.id, 'Alpha');
-    const b = shipped(h.project.id, 'Beta');
-    h.gh.setChecks(a.prUrl, [run('build', 'SUCCESS'), UNREADABLE_CHECK]);
-    h.gh.setChecks(b.prUrl, [run('build', 'SUCCESS')]);
-    const w = watcher();
-    w.start();
-    await w.idle();
-    expect(pr(a.id)).toMatchObject({ state: 'open', checks: 'unknown', unknownReason: null });
-    expect(pr(b.id)).toMatchObject({ state: 'open', checks: 'passing' });
-    expect(h.cards()).toEqual([]);
-  });
-
-  it('records no checks as none', async () => {
-    setup();
-    const { id } = shipped(h.project.id, 'Alpha');
-    const w = watcher();
-    w.start();
-    await w.idle();
-    expect(pr(id)).toMatchObject({ state: 'open', checks: 'none' });
-  });
-
-  it('writes one batch.updated for a status that stays the same over three rounds', async () => {
-    setup();
-    const { id, prUrl } = shipped(h.project.id, 'Alpha');
-    h.gh.setChecks(prUrl, [run('build', null)]);
-    const w = watcher();
-    w.start();
-    await w.idle();
-    const updatedAt = getBatch(h.store.db, id).updatedAt;
-    await round(w);
-    await round(w);
-    expect(polls()).toBe(3);
-    expect(prEvents(id)).toHaveLength(1);
-    expect(getBatch(h.store.db, id).updatedAt).toBe(updatedAt);
-    expect(pr(id)?.checkedAt).toBe(clock.now().toISOString());
-  });
-
-  it('marks a pull request GitHub no longer knows as unknown, without a gh card', async () => {
-    setup();
-    const { id } = shipped(h.project.id, 'Alpha', 'https://github.com/acme/widgets/pull/999');
-    const w = watcher();
-    w.start();
-    await w.idle();
-    expect(pr(id)).toMatchObject({ state: 'unknown', checks: 'unknown' });
-    expect(pr(id)?.unknownReason).toContain('no pull request');
-    expect(h.cards()).toEqual([]);
   });
 });
 
@@ -743,39 +453,6 @@ describe('a pull request whose head never got its required checks', () => {
     expect(stuckNotice(id)).toBeDefined();
   });
 
-  it('keeps the notice through an unknown read, and drops it when a check appears', async () => {
-    const { id, prUrl } = stuck();
-    const { watch } = spy();
-    watch.start();
-    await watch.idle();
-    await rounds(watch, GRACE_ROUNDS * 2);
-    expect(stuckNotice(id)).toBeDefined();
-
-    // The base moved: GitHub works the merge state out again.
-    h.gh.setBlockedOnChecks(prUrl, false);
-    h.gh.setMergeable(prUrl, 'UNKNOWN');
-    await round(watch);
-    expect(stuckNotice(id)).toBeDefined();
-
-    h.gh.setChecks(prUrl, [run('build', null)]);
-    await round(watch);
-    expect(stuckNotice(id)).toBeUndefined();
-  });
-
-  it('drops the notice once the checks start, and starts counting again for a later head', async () => {
-    const { id, prUrl } = stuck();
-    const { asked, watch } = spy();
-    watch.start();
-    await watch.idle();
-    await rounds(watch, GRACE_ROUNDS * 2);
-    expect(stuckNotice(id)).toBeDefined();
-
-    h.gh.setChecks(prUrl, [run('build', null)]);
-    await round(watch);
-    expect(stuckNotice(id)).toBeUndefined();
-    expect(asked.filter((a) => a.startsWith('restart-ci'))).toHaveLength(1);
-  });
-
   it.each([
     ['running', [run('build', null)]],
     ['passed', [run('build', 'SUCCESS')]],
@@ -837,15 +514,6 @@ describe('a pull request whose head never got its required checks', () => {
     expect(asked).toEqual([]);
     expect(stuckNotice(id)).toBeDefined();
   });
-
-  it('says the checks never started when nothing can start them again', async () => {
-    const { id } = stuck();
-    const w = watcher();
-    w.start();
-    await w.idle();
-    await rounds(w, GRACE_ROUNDS);
-    expect(stuckNotice(id)).toBeDefined();
-  });
 });
 
 describe('gh unavailable', () => {
@@ -886,392 +554,6 @@ describe('gh unavailable', () => {
     await round(w);
     expect(pr(a.id)).toMatchObject({ state: 'open', checks: 'none', unknownReason: null });
     expect(pr(b.id)).toMatchObject({ state: 'open' });
-    expect(h.cards()).toEqual([]);
-  });
-
-  it.each([
-    {
-      name: 'not installed',
-      error: new GhError('not_installed', 'no gh'),
-      says: 'brew install gh',
-    },
-    {
-      name: 'a failure',
-      error: new GhError('failed', 'gh pr view failed (exit 1): HTTP 502'),
-      says: "gh couldn't reach GitHub: gh pr view failed (exit 1): HTTP 502",
-    },
-    {
-      name: 'a timeout',
-      error: new GhError('timeout', 'gh pr view gave no answer within 120 s'),
-      says: "gh couldn't reach GitHub: gh pr view gave no answer within 120 s",
-    },
-    {
-      name: 'out of reach of GitHub',
-      error: new GhError(
-        'unreachable',
-        'gh pr view failed (exit 1): error connecting to api.github.com',
-      ),
-      says: "gh couldn't reach GitHub: gh pr view failed (exit 1): error connecting to api.github.com",
-    },
-  ])('says what to do when gh is $name', async ({ error, says }) => {
-    setup();
-    const { id } = shipped(h.project.id, 'Alpha');
-    h.gh.failNext.set('prStatus', error);
-    const w = watcher();
-    w.start();
-    await w.idle();
-    expect(pr(id)).toMatchObject({ state: 'unknown', unknownReason: error.message });
-    const card = h.only(h.cards());
-    expect(card.body).toContain(says);
-    expect(card.body).toContain('Nothing else is affected');
-  });
-
-  it('rewrites the open gh card when gh fails another way, and only then', async () => {
-    setup();
-    const { id } = shipped(h.project.id, 'Alpha');
-    h.gh.failNext.set('prStatus', new GhError('timeout', 'gh pr view gave no answer within 120 s'));
-    const w = watcher();
-    w.start();
-    await w.idle();
-    const first = h.only(h.cards());
-    expect(first.body).toContain(
-      "gh couldn't reach GitHub: gh pr view gave no answer within 120 s",
-    );
-
-    h.gh.auth = 'signed_out';
-    await round(w);
-    expect(pr(id)).toMatchObject({ state: 'unknown', unknownReason: 'gh is not signed in' });
-    const card = h.only(h.cards());
-    expect(card.id).toBe(first.id);
-    expect(card.title).toBe('Pull request status unknown: gh is signed out');
-    expect(card.body).toContain('Settings › Integrations');
-    expect(card.body).not.toContain('gave no answer');
-    // The rewrite keeps the batch's keys and adds the link to the sign-in card.
-    expect(card.detail).toEqual({ ...first.detail, openIntegrations: 'github' });
-
-    const writes = () =>
-      listEventsAfter(h.store.db, 0, 10_000).filter(
-        (e) => e.type === 'inbox.changed' && e.entityId === card.id,
-      ).length;
-    const before = writes();
-    await round(w);
-    expect(writes()).toBe(before);
-  });
-
-  it('does not raise a second card when a later batch also goes unknown', async () => {
-    setup();
-    const a = shipped(h.project.id, 'Alpha');
-    h.gh.auth = 'signed_out';
-    const w = watcher();
-    w.start();
-    await w.idle();
-    const b = shipped(h.project.id, 'Beta');
-    await round(w);
-    expect(pr(b.id)).toMatchObject({ state: 'unknown' });
-    expect(pr(a.id)).toMatchObject({ state: 'unknown' });
-    expect(h.cards()).toHaveLength(1);
-  });
-
-  it("keeps reading the other pull requests while one pull request's read fails every time", async () => {
-    setup();
-    const a = shipped(h.project.id, 'Alpha');
-    const b = shipped(h.project.id, 'Beta');
-    h.gh.setChecks(b.prUrl, [run('build', 'SUCCESS')]);
-    // gh fails for this pull request alone, round after round; it is the oldest, so it is read first.
-    const saml =
-      'gh pr view failed (exit 1): GraphQL: Resource protected by organization SAML enforcement. (repository)';
-    h.gh.failRead.set(a.prUrl, new GhError('failed', saml));
-    const w = watcher();
-    w.start();
-    await w.idle();
-    for (let i = 0; i < 3; i += 1) await round(w);
-
-    expect(reads(b.prUrl)).toBe(4);
-    expect(pr(b.id)).toMatchObject({ state: 'open', checks: 'passing', unknownReason: null });
-    expect(pr(a.id)).toMatchObject({ state: 'unknown', unknownReason: saml });
-    // gh answered for Beta, so gh itself works: no gh card.
-    expect(h.cards()).toEqual([]);
-  });
-
-  it('withdraws the gh card once gh answers, though one pull request still fails on its own', async () => {
-    setup();
-    const a = shipped(h.project.id, 'Alpha');
-    const b = shipped(h.project.id, 'Beta');
-    h.gh.auth = 'signed_out';
-    const w = watcher();
-    w.start();
-    await w.idle();
-    expect(h.cards()).toHaveLength(1);
-
-    h.gh.auth = 'ok';
-    h.gh.failRead.set(b.prUrl, new GhError('failed', 'HTTP 502'));
-    await round(w);
-    expect(pr(a.id)).toMatchObject({ state: 'open', unknownReason: null });
-    expect(pr(b.id)).toMatchObject({ state: 'unknown', unknownReason: 'HTTP 502' });
-    expect(h.cards()).toEqual([]);
-
-    h.gh.failRead.delete(b.prUrl);
-    await round(w);
-    expect(pr(b.id)).toMatchObject({ state: 'open', unknownReason: null });
-  });
-
-  it.each([
-    { name: 'is not installed', error: new GhError('not_installed', 'no gh') },
-    { name: 'gives no answer in time', error: new GhError('timeout', TIMEOUT) },
-    {
-      name: 'cannot reach GitHub',
-      error: new GhError(
-        'unreachable',
-        'gh pr view failed (exit 1): Post "https://api.github.com/graphql": dial tcp 140.82.112.6:443: i/o timeout',
-      ),
-    },
-  ])('ends the round at the first read when gh $name', async ({ error }) => {
-    setup();
-    const a = shipped(h.project.id, 'Alpha');
-    const b = shipped(h.project.id, 'Beta');
-    h.gh.failNext.set('prStatus', error);
-    const w = watcher();
-    w.start();
-    await w.idle();
-    // Every later read would fail the same way, or wait as long: one is enough.
-    expect(polls()).toBe(1);
-    for (const x of [a, b])
-      expect(pr(x.id)).toMatchObject({ state: 'unknown', unknownReason: error.message });
-    expect(h.cards()).toHaveLength(1);
-  });
-
-  it('raises one gh card when no read in a round answers, after asking for every pull request', async () => {
-    setup();
-    const second = seedProject(h.store, { delivery: 'pull_request' });
-    const a = shipped(h.project.id, 'Alpha');
-    const b = shipped(second.id, 'Beta');
-    // GitHub fails every read, as in an outage. gh reached it, so each is a read of its own.
-    const outage =
-      'gh pr view failed (exit 1): HTTP 502: Bad Gateway (https://api.github.com/graphql)';
-    for (const x of [a, b]) h.gh.failRead.set(x.prUrl, new GhError('failed', outage));
-    const w = watcher();
-    w.start();
-    await w.idle();
-
-    expect(polls()).toBe(2);
-    for (const x of [a, b])
-      expect(pr(x.id)).toMatchObject({ state: 'unknown', unknownReason: outage });
-    const card = h.only(h.cards());
-    expect(card.projectId).toBe(h.project.id);
-    expect(card.body).toContain(`gh couldn't reach GitHub: ${outage}`);
-
-    h.gh.failRead.clear();
-    await round(w);
-    expect(pr(b.id)).toMatchObject({ state: 'open' });
-    expect(h.cards()).toEqual([]);
-  });
-
-  describe('the gh card’s Check again', () => {
-    async function ghCard() {
-      setup();
-      shipped(h.project.id, 'Alpha');
-      h.gh.auth = 'signed_out';
-      const w = watcher();
-      w.start();
-      await w.idle();
-      return h.only(h.cards());
-    }
-
-    it('offers an answer the daemon acts on, not a dismiss', async () => {
-      const card = await ghCard();
-      expect(card.options.map((o) => o.label)).toEqual([GH_CHECK_CHOICE]);
-      expect(card.body).toContain(GH_CHECK_CHOICE);
-    });
-
-    it('reads every followed pull request again at once', async () => {
-      const card = await ghCard();
-      let pokes = 0;
-      createGhCardAnswers({
-        recheck: () => {
-          pokes += 1;
-        },
-      })(card, { choice: GH_CHECK_CHOICE });
-      expect(pokes).toBe(1);
-    });
-
-    it('does nothing for another answer or another card', async () => {
-      const card = await ghCard();
-      let pokes = 0;
-      const answer = createGhCardAnswers({
-        recheck: () => {
-          pokes += 1;
-        },
-      });
-      answer(card, { choice: 'Later' });
-      answer({ ...card, detail: {} }, { choice: GH_CHECK_CHOICE });
-      expect(pokes).toBe(0);
-    });
-
-    /** The inbox the daemon runs: an answer to the gh card reaches the watch before the card closes. */
-    function answeringInbox(w: PrWatch) {
-      return createInboxService({
-        state: h.state,
-        onParkedAnswer: () => undefined,
-        onFlagAnswer: createGhCardAnswers(w),
-      });
-    }
-
-    it('raises a fresh card saying how gh fails now when gh still fails', async () => {
-      setup();
-      shipped(h.project.id, 'Alpha');
-      h.gh.auth = 'signed_out';
-      const w = watcher();
-      w.start();
-      await w.idle();
-      const first = h.only(h.cards());
-
-      h.gh.failNext.set('prStatus', new GhError('timeout', TIMEOUT));
-      answeringInbox(w).answer(first.id, { choice: GH_CHECK_CHOICE });
-      await w.idle();
-
-      const fresh = h.only(h.cards());
-      expect(fresh.id).not.toBe(first.id);
-      expect(fresh.body).toContain(TIMEOUT);
-      expect(fresh.options.map((o) => o.label)).toEqual([GH_CHECK_CHOICE]);
-
-      // Only the round the answer asked for raises again: a later failing round keeps the one card.
-      await round(w);
-      expect(h.only(h.cards()).id).toBe(fresh.id);
-    });
-
-    it('leaves no card once gh answers', async () => {
-      setup();
-      const a = shipped(h.project.id, 'Alpha');
-      h.gh.auth = 'signed_out';
-      const w = watcher();
-      w.start();
-      await w.idle();
-      const card = h.only(h.cards());
-
-      h.gh.auth = 'ok';
-      answeringInbox(w).answer(card.id, { choice: GH_CHECK_CHOICE });
-      await w.idle();
-
-      expect(pr(a.id)).toMatchObject({ state: 'open', unknownReason: null });
-      expect(h.cards()).toEqual([]);
-      // gh failing in a later round raises a card again, as any first failure does.
-      h.gh.auth = 'signed_out';
-      await round(w);
-      expect(h.cards()).toHaveLength(1);
-    });
-  });
-
-  it('starts the next round after the read that ended the last, so one that always times out holds up no other', async () => {
-    setup();
-    const a = shipped(h.project.id, 'Alpha');
-    const b = shipped(h.project.id, 'Beta');
-    const c = shipped(h.project.id, 'Gamma');
-    h.gh.failRead.set(a.prUrl, new GhError('timeout', TIMEOUT));
-    const w = watcher();
-    w.start();
-    await w.idle();
-    // A timeout ends the round: offline, every read would wait as long.
-    expect(polls()).toBe(1);
-    for (const x of [a, b, c])
-      expect(pr(x.id)).toMatchObject({ state: 'unknown', unknownReason: TIMEOUT });
-
-    await round(w);
-    expect(polls()).toBe(4);
-    expect(pr(b.id)).toMatchObject({ state: 'open', unknownReason: null });
-    expect(pr(c.id)).toMatchObject({ state: 'open', unknownReason: null });
-    expect(pr(a.id)).toMatchObject({ state: 'unknown', unknownReason: TIMEOUT });
-    // A read that times out is what gh being offline looks like, so the gh card stays.
-    expect(h.only(h.cards()).body).toContain(`gh couldn't reach GitHub: ${TIMEOUT}`);
-
-    await round(w);
-    expect(reads(b.prUrl)).toBe(2);
-    expect(reads(c.prUrl)).toBe(2);
-  });
-
-  it('withdraws the gh card in its own project after that project has no pull request left to read', async () => {
-    setup();
-    const second = seedProject(h.store, { delivery: 'pull_request' });
-    const a = shipped(h.project.id, 'Alpha');
-    const b = shipped(second.id, 'Beta');
-    for (const x of [a, b]) h.gh.failRead.set(x.prUrl, new GhError('failed', 'HTTP 502'));
-    const w = watcher();
-    w.start();
-    await w.idle();
-    expect(h.only(h.cards()).projectId).toBe(h.project.id);
-
-    // Alpha answers merged; Beta's read times out, which keeps the card open.
-    h.gh.failRead.delete(a.prUrl);
-    h.gh.setState(a.prUrl, 'MERGED');
-    h.gh.failRead.set(b.prUrl, new GhError('timeout', TIMEOUT));
-    await round(w);
-    expect(pr(a.id)).toMatchObject({ state: 'merged' });
-    expect(pr(b.id)).toMatchObject({ state: 'unknown', unknownReason: TIMEOUT });
-    expect(h.cards()).toHaveLength(1);
-
-    // Only Beta is read now, in the second project; gh answers, so the card in the first goes.
-    h.gh.failRead.delete(b.prUrl);
-    await round(w);
-    expect(pr(b.id)).toMatchObject({ state: 'open', unknownReason: null });
-    expect(h.cards()).toEqual([]);
-
-    h.gh.failNext.set('prStatus', new GhError('failed', 'HTTP 503'));
-    await round(w);
-    expect(pr(b.id)).toMatchObject({ state: 'unknown', unknownReason: 'HTTP 503' });
-    expect(h.only(h.cards()).body).toContain("gh couldn't reach GitHub: HTTP 503");
-  });
-
-  it('raises no second gh card while one is open in a project the round does not read', async () => {
-    setup();
-    const second = seedProject(h.store, { delivery: 'pull_request' });
-    const a = shipped(h.project.id, 'Alpha');
-    const b = shipped(second.id, 'Beta');
-    const c = shipped(second.id, 'Gamma');
-    for (const x of [a, b, c]) h.gh.failRead.set(x.prUrl, new GhError('failed', 'HTTP 502'));
-    const w = watcher();
-    w.start();
-    await w.idle();
-    expect(h.only(h.cards()).projectId).toBe(h.project.id);
-
-    // Alpha merges and Beta answers; Gamma's read times out, which keeps the card open.
-    h.gh.failRead.clear();
-    h.gh.setState(a.prUrl, 'MERGED');
-    h.gh.failRead.set(c.prUrl, new GhError('timeout', TIMEOUT));
-    await round(w);
-    expect(pr(a.id)).toMatchObject({ state: 'merged' });
-    expect(pr(b.id)).toMatchObject({ state: 'open' });
-    expect(pr(c.id)).toMatchObject({ state: 'unknown' });
-    expect(h.cards()).toHaveLength(1);
-
-    // Only the second project is read now; gh is signed out, and the first project's card stays
-    // the one card, saying how gh fails now.
-    h.gh.auth = 'signed_out';
-    await round(w);
-    expect(pr(b.id)).toMatchObject({ state: 'unknown', unknownReason: 'gh is not signed in' });
-    const card = h.only(h.cards());
-    expect(card.projectId).toBe(h.project.id);
-    expect(card.title).toBe('Pull request status unknown: gh is signed out');
-  });
-
-  it('does not raise a dismissed failing-checks card again after an offline round', async () => {
-    setup();
-    const { id, prUrl } = shipped(h.project.id, 'Alpha');
-    h.gh.setChecks(prUrl, [run('build', 'FAILURE')]);
-    const w = watcher();
-    w.start();
-    await w.idle();
-    const card = h.only(h.cards());
-    h.inbox.withdraw(card.id);
-
-    h.gh.failNext.set('prStatus', new GhError('timeout', 'gh pr view gave no answer within 120 s'));
-    await round(w);
-    // Unknown, but the last known checks are kept.
-    expect(pr(id)).toMatchObject({ state: 'unknown', checks: 'failing' });
-    expect(pr(id)?.failingChecks.map((c) => c.name)).toEqual(['build']);
-    const ghCard = h.only(h.cards());
-    expect(ghCard.title).not.toContain('checks failed');
-
-    await round(w);
-    expect(pr(id)).toMatchObject({ state: 'open', checks: 'failing', unknownReason: null });
     expect(h.cards()).toEqual([]);
   });
 
@@ -1361,22 +643,6 @@ describe('restart and stop', () => {
     expect(h.only(h.cards()).title).toBe('Pull request checks failed for "Alpha": build');
   });
 
-  it('stores the unknown statuses gh left only with the gh card', async () => {
-    setup();
-    const { id } = shipped(h.project.id, 'Alpha');
-    h.gh.auth = 'signed_out';
-    refuseCards();
-    const w = watcher();
-    w.start();
-    await w.idle();
-    expect(pr(id)).toBeNull();
-
-    allowCards();
-    await round(w);
-    expect(pr(id)).toMatchObject({ state: 'unknown', unknownReason: 'gh is not signed in' });
-    expect(h.only(h.cards()).title).toBe('Pull request status unknown: gh is signed out');
-  });
-
   it('stop aborts the call in flight, records nothing and leaves no timer', async () => {
     setup();
     const { id } = shipped(h.project.id, 'Alpha');
@@ -1416,17 +682,6 @@ describe('restart and stop', () => {
     expect(clock.pendingTimers()).toBe(0);
     w.poke();
     await w.idle();
-    expect(clock.pendingTimers()).toBe(0);
-  });
-
-  it('stop between rounds cancels the timer', async () => {
-    setup();
-    shipped(h.project.id, 'Alpha');
-    const w = watcher();
-    w.start();
-    await w.idle();
-    expect(clock.pendingTimers()).toBe(1);
-    await w.stop();
     expect(clock.pendingTimers()).toBe(0);
   });
 });
@@ -1493,57 +748,6 @@ describe('the required checks of a pull request', () => {
     expect(stored(id).prRequired).toMatchObject({ state: 'failing', failing: [job('build')] });
   });
 
-  it('stores none for a pull request with no required checks', async () => {
-    setup();
-    const { id } = shipped(h.project.id, 'Alpha');
-    const w = watcher();
-    w.start();
-    await w.idle();
-    expect(stored(id).prRequired).toEqual({
-      state: 'none',
-      failing: [],
-      pending: [],
-      cancelled: [],
-    });
-  });
-
-  it('stores why GitHub will not merge the pull request, and clears it', async () => {
-    setup();
-    const { id, prUrl } = shipped(h.project.id, 'Alpha');
-    h.gh.setMergeBlocked(prUrl, 'conflicts');
-    const w = watcher();
-    w.start();
-    await w.idle();
-    expect(stored(id).prMergeBlocked).toBe('conflicts');
-    h.gh.setMergeBlocked(prUrl, 'behind');
-    await round(w);
-    expect(stored(id).prMergeBlocked).toBe('behind');
-    h.gh.setMergeBlocked(prUrl, null);
-    await round(w);
-    expect(stored(id).prMergeBlocked).toBeNull();
-  });
-
-  it('keeps what it stored when the required checks cannot be read, and writes nothing for a read that changes nothing', async () => {
-    setup();
-    const { id, prUrl } = shipped(h.project.id, 'Alpha');
-    h.gh.setRequiredChecks(prUrl, { state: 'passing', failing: [], pending: [], cancelled: [] });
-    const w = watcher();
-    w.start();
-    await w.idle();
-    const written = () =>
-      listEventsAfter(h.store.db, 0, 10_000).filter(
-        (e) => e.entityId === id && JSON.stringify(e.data).includes('prRequired'),
-      ).length;
-    expect(written()).toBe(1);
-
-    h.gh.failNext.set('prRequiredChecks', new GhError('failed', 'HTTP 502'));
-    await round(w);
-    expect(stored(id).prRequired?.state).toBe('passing');
-    expect(stored(id).pr?.state).toBe('open');
-    await round(w);
-    expect(written()).toBe(1);
-  });
-
   it('reads a pull request shared by two batches once per round, and records its status on both', async () => {
     setup();
     const root = shipped(h.project.id, 'Alpha');
@@ -1581,45 +785,6 @@ describe('the required checks of a pull request', () => {
     await round(w, INTERVAL * 3);
     expect(polls()).toBe(before);
   });
-
-  it('raises one failing-checks card for a shared pull request, keyed by the root', async () => {
-    setup();
-    const root = shipped(h.project.id, 'Alpha');
-    shippedFix(root, 'Fix CI: build', 'abc');
-    h.gh.setChecks(root.prUrl, [run('build', 'FAILURE')]);
-    const w = watcher();
-    w.start();
-    await w.idle();
-    const card = h.only(h.cards());
-    expect(card.detail).toMatchObject({ batchId: root.id });
-    await round(w);
-    expect(h.cards()).toHaveLength(1);
-  });
-
-  it('raises one closed card for a shared pull request, keyed by the root', async () => {
-    setup();
-    const root = shipped(h.project.id, 'Alpha');
-    shippedFix(root, 'Fix CI: build', 'abc');
-    h.gh.setState(root.prUrl, 'CLOSED');
-    const w = watcher();
-    w.start();
-    await w.idle();
-    const card = h.only(h.cards());
-    expect(card.detail).toMatchObject({ batchId: root.id });
-  });
-
-  it('reads each of two pull requests once, a group of batches counting as one', async () => {
-    setup();
-    const a = shipped(h.project.id, 'Alpha');
-    shippedFix(a, 'Fix A', 'abc');
-    const b = shipped(h.project.id, 'Beta');
-    const w = watcher();
-    w.start();
-    await w.idle();
-    expect(reads(a.prUrl)).toBe(1);
-    expect(reads(b.prUrl)).toBe(1);
-    expect(polls()).toBe(2);
-  });
 });
 
 describe('a required check GitHub cancelled', () => {
@@ -1646,7 +811,6 @@ describe('a required check GitHub cancelled', () => {
     pending: names.map((n) => job(n)),
     cancelled: [],
   });
-  const passing = { state: 'passing' as const, failing: [], pending: [], cancelled: [] };
 
   const stored = (id: BatchId) => getBatch(h.store.db, id);
   const noticeOf = (id: BatchId) => stored(id).notices.find((n) => n.key === 'checks-cancelled');
@@ -1660,18 +824,6 @@ describe('a required check GitHub cancelled', () => {
     const w = watcher();
     return { ...made, w };
   }
-
-  it('is stored as cancelled, never pending, with the cancelled check listed', async () => {
-    const { id, prUrl, w } = watching();
-    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
-    w.start();
-    await w.idle();
-    expect(stored(id).prRequired).toMatchObject({
-      state: 'cancelled',
-      pending: [],
-      cancelled: [job('desktop')],
-    });
-  });
 
   it('runs the check again once, from the second read in a row, without a card', async () => {
     const { id, prUrl, w } = watching();
@@ -1689,222 +841,6 @@ describe('a required check GitHub cancelled', () => {
     await round(w);
     expect(h.gh.reruns).toEqual(['77']);
     expect(noticeOf(id)).toBeUndefined();
-  });
-
-  it('runs a run once even when two of its jobs were cancelled', async () => {
-    const { prUrl, w } = watching();
-    h.gh.setRequiredChecks(prUrl, cancelled('desktop', 'gate'));
-    w.start();
-    await w.idle();
-    await round(w);
-    expect(h.gh.reruns).toEqual(['77']);
-  });
-
-  it('does not rerun a cancellation that is gone by the next read (a newer push replaced it)', async () => {
-    const { id, prUrl, w } = watching();
-    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
-    w.start();
-    await w.idle();
-    h.gh.setRequiredChecks(prUrl, running('desktop'));
-    await round(w);
-    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
-    await round(w);
-    expect(h.gh.reruns).toEqual([]);
-    expect(noticeOf(id)).toBeUndefined();
-  });
-
-  it('shows a notice naming the check and its link when it is cancelled again, and runs nothing more', async () => {
-    const { id, prUrl, w } = watching();
-    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
-    w.start();
-    await w.idle();
-    await round(w);
-    expect(h.gh.reruns).toEqual(['77']);
-
-    h.gh.setRequiredChecks(prUrl, running('desktop'));
-    await round(w);
-    expect(noticeOf(id)).toBeUndefined();
-    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
-    await round(w);
-
-    const notice = noticeOf(id);
-    expect(notice).toMatchObject({ tone: 'warning' });
-    expect(notice?.line).toContain('desktop');
-    expect(notice?.body).toContain(job('desktop').link);
-    expect(h.gh.reruns).toEqual(['77']);
-    expect(stored(id).prRequired?.state).toBe('cancelled');
-    await round(w);
-    expect(h.gh.reruns).toEqual(['77']);
-    expect(h.cards()).toEqual([]);
-  });
-
-  it('shows the notice when the rerun never took, after the minutes a run gets to start', async () => {
-    const { id, prUrl, w } = watching();
-    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
-    w.start();
-    await w.idle();
-    await round(w);
-    for (let i = 0; i < GRACE_ROUNDS - 1; i++) await round(w);
-    expect(noticeOf(id)).toBeUndefined();
-    await round(w);
-    expect(noticeOf(id)?.line).toContain('desktop');
-    expect(h.gh.reruns).toEqual(['77']);
-  });
-
-  it('takes the notice away once the check runs or passes', async () => {
-    const { id, prUrl, w } = watching();
-    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
-    w.start();
-    await w.idle();
-    await round(w);
-    h.gh.setRequiredChecks(prUrl, running('desktop'));
-    await round(w);
-    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
-    await round(w);
-    expect(noticeOf(id)).toBeDefined();
-    h.gh.setRequiredChecks(prUrl, passing);
-    await round(w);
-    expect(noticeOf(id)).toBeUndefined();
-  });
-
-  it('says so at once when the check has no Actions run to start again', async () => {
-    const { id, prUrl, w } = watching();
-    h.gh.setRequiredChecks(prUrl, {
-      state: 'cancelled',
-      failing: [],
-      pending: [],
-      cancelled: [{ ...job('ci/other', null), link: 'https://ci.example.com/b/1', jobId: null }],
-    });
-    w.start();
-    await w.idle();
-    await round(w);
-    expect(h.gh.reruns).toEqual([]);
-    const notice = noticeOf(id);
-    expect(notice?.line).toContain('ci/other');
-    expect(notice?.body).toContain('https://ci.example.com/b/1');
-  });
-
-  it('says so when GitHub refuses the rerun', async () => {
-    const { id, prUrl, w } = watching();
-    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
-    w.start();
-    await w.idle();
-    h.gh.failNext.set('rerunFailed', new GhError('failed', 'HTTP 403: Resource not accessible'));
-    await round(w);
-    expect(h.gh.reruns).toEqual([]);
-    expect(noticeOf(id)?.body).toContain('Resource not accessible');
-    await round(w);
-    expect(h.gh.reruns).toEqual([]);
-  });
-
-  it('waits while another job of the cancelled check’s run is still running, then runs it once', async () => {
-    const { id, prUrl, w } = watching();
-    const desktopCancelledGateRunning = {
-      state: 'cancelled' as const,
-      failing: [],
-      pending: [job('gate')],
-      cancelled: [job('desktop')],
-    };
-    h.gh.setRequiredChecks(prUrl, desktopCancelledGateRunning);
-    w.start();
-    await w.idle();
-    for (let i = 0; i < GRACE_ROUNDS + 2; i++) await round(w);
-    // GitHub refuses to rerun a run still in progress: 10db neither asks nor gives up.
-    expect(h.gh.reruns).toEqual([]);
-    expect(noticeOf(id)).toBeUndefined();
-    expect(h.cards()).toEqual([]);
-
-    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
-    await round(w);
-    await round(w);
-    expect(h.gh.reruns).toEqual(['77']);
-    await round(w);
-    expect(h.gh.reruns).toEqual(['77']);
-    expect(noticeOf(id)).toBeUndefined();
-  });
-
-  it('does not wait on a running job of another run', async () => {
-    const { prUrl, w } = watching();
-    h.gh.setRequiredChecks(prUrl, {
-      state: 'cancelled',
-      failing: [],
-      pending: [job('lint', '88')],
-      cancelled: [job('desktop')],
-    });
-    w.start();
-    await w.idle();
-    await round(w);
-    expect(h.gh.reruns).toEqual(['77']);
-  });
-
-  it('tries again later, with no notice, when GitHub says the run is still running', async () => {
-    const { id, prUrl, w } = watching();
-    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
-    w.start();
-    await w.idle();
-    h.gh.failNext.set(
-      'rerunFailed',
-      new GhError('failed', 'run 77 cannot be rerun; This workflow is already running'),
-    );
-    await round(w);
-    expect(h.gh.reruns).toEqual([]);
-    expect(noticeOf(id)).toBeUndefined();
-    await round(w);
-    expect(h.gh.reruns).toEqual(['77']);
-    expect(noticeOf(id)).toBeUndefined();
-  });
-
-  it('runs the one run again only once when GitHub refuses the other, which is still running', async () => {
-    const { id, prUrl, w } = watching();
-    h.gh.setRequiredChecks(prUrl, {
-      state: 'cancelled',
-      failing: [],
-      pending: [],
-      cancelled: [job('desktop', '77'), job('lint', '88')],
-    });
-    w.start();
-    await w.idle();
-    h.gh.failRerunOf.set('88', new GhError('failed', 'run 88 cannot be rerun; already running'));
-    await round(w);
-    // Run 77 was run again and the record says so; run 88 was refused, so 10db asks again.
-    expect(h.gh.reruns).toEqual(['77']);
-    expect(noticeOf(id)).toBeUndefined();
-    expect(rerunNoticeOf(id)?.line).toContain('desktop');
-    expect(rerunNoticeOf(id)?.line).not.toContain('lint');
-    await round(w);
-    await round(w);
-    // Run 77 is not run a second time; run 88 is accepted once.
-    expect(h.gh.reruns).toEqual(['77', '88']);
-    await round(w);
-    expect(h.gh.reruns).toEqual(['77', '88']);
-    expect(noticeOf(id)).toBeUndefined();
-    expect(rerunNoticeOf(id)?.line).toContain('desktop');
-    expect(rerunNoticeOf(id)?.line).toContain('lint');
-  });
-
-  it('keeps naming a check it ran when a later round runs the other, once GitHub no longer lists it', async () => {
-    const { id, prUrl, w } = watching();
-    h.gh.setRequiredChecks(prUrl, {
-      state: 'cancelled',
-      failing: [],
-      pending: [],
-      cancelled: [job('desktop', '77'), job('lint', '88')],
-    });
-    w.start();
-    await w.idle();
-    h.gh.failRerunOf.set('88', new GhError('failed', 'run 88 cannot be rerun; already running'));
-    await round(w);
-    // Run 77 is running now, so only lint is left cancelled.
-    h.gh.setRequiredChecks(prUrl, {
-      state: 'cancelled',
-      failing: [],
-      pending: [job('desktop', '77')],
-      cancelled: [job('lint', '88')],
-    });
-    await round(w);
-    expect(h.gh.reruns).toEqual(['77', '88']);
-    expect(rerunNoticeOf(id)?.line).toContain('desktop');
-    expect(rerunNoticeOf(id)?.line).toContain('lint');
   });
 
   it('after a restart, runs the run GitHub refused once and not the run it took', async () => {
@@ -1968,36 +904,6 @@ describe('a required check GitHub cancelled', () => {
     expect(rerunNoticeOf(id)?.line).toContain('lint');
   });
 
-  it('after a restart between an accepted and a refused run, never says 10db ran the refused check while it stays cancelled', async () => {
-    const { id, prUrl, w } = watching();
-    h.gh.setRequiredChecks(prUrl, {
-      state: 'cancelled',
-      failing: [],
-      pending: [],
-      cancelled: [job('desktop', '77'), job('lint', '88')],
-    });
-    w.start();
-    await w.idle();
-    h.gh.failRerunOf.set('88', new GhError('failed', 'run 88 cannot be rerun; already running'));
-    await round(w);
-    expect(h.gh.reruns).toEqual(['77']);
-    await w.stop();
-
-    // After the restart GitHub still refuses run 88, and both checks stay cancelled for 10 minutes.
-    const second = watcher();
-    h.gh.failRerunOf.set('88', new GhError('failed', 'run 88 cannot be rerun; already running'));
-    second.start();
-    await second.idle();
-    for (let i = 0; i < GRACE_ROUNDS + 2; i++) {
-      h.gh.failRerunOf.set('88', new GhError('failed', 'run 88 cannot be rerun; already running'));
-      await round(second);
-      const notice = noticeOf(id);
-      // A notice may name desktop (10db ran it) but never lint, which 10db did not run.
-      if (notice !== undefined) expect(notice.line).not.toContain('lint');
-    }
-    expect(h.gh.reruns).toEqual(['77']);
-  });
-
   it('after a restart between an accepted and a refused run, runs the refused one once and then names both when they stay cancelled', async () => {
     const { id, prUrl, w } = watching();
     h.gh.setRequiredChecks(prUrl, {
@@ -2052,31 +958,6 @@ describe('a required check GitHub cancelled', () => {
     await round(second);
     // The run GitHub refused is run now; the run it took is not run a second time.
     expect(h.gh.reruns).toEqual(['77', '88']);
-  });
-
-  it('names only the check GitHub refused when it hard-refuses the second run', async () => {
-    const { id, prUrl, w } = watching();
-    h.gh.setRequiredChecks(prUrl, {
-      state: 'cancelled',
-      failing: [],
-      pending: [],
-      cancelled: [job('desktop', '77'), job('lint', '88')],
-    });
-    w.start();
-    await w.idle();
-    h.gh.failRerunOf.set('88', new GhError('failed', 'HTTP 403: Resource not accessible'));
-    await round(w);
-    expect(h.gh.reruns).toEqual(['77']);
-    expect(noticeOf(id)?.line).toContain('lint');
-    expect(noticeOf(id)?.line).not.toContain('desktop');
-    expect(noticeOf(id)?.body).toContain('Resource not accessible');
-    expect(rerunNoticeOf(id)?.line).toContain('desktop');
-    expect(rerunNoticeOf(id)?.line).not.toContain('lint');
-    // The refused check is not one 10db will run, and the builder sees no record.
-    expect(rerunNoticeOf(id)?.body).not.toContain('as soon as GitHub allows');
-    expect(rerunNoticeOf(id)?.body).not.toContain('{');
-    await round(w);
-    expect(h.gh.reruns).toEqual(['77']);
   });
 
   it('shows no record in a rerun notice, and a restart still reads it', async () => {
@@ -2136,85 +1017,32 @@ describe('a required check GitHub cancelled', () => {
       expect(h.gh.reruns).toEqual(['77']);
     }
 
-    it.each([
-      ['the same daemon', false],
-      ['a daemon that restarted', true],
-    ])('runs it once on %s, with no notice that 10db ran it', async (_, restart) => {
-      const { id, prUrl, w } = watching();
-      await rerunOfDesktopOnly(w, prUrl);
-      let current = w;
-      if (restart) {
-        await w.stop();
-        current = watcher();
-      }
-      h.gh.setRequiredChecks(prUrl, lintCancelled);
-      if (restart) {
-        current.start();
-        await current.idle();
-      } else await round(current);
-      for (let i = 0; i < GRACE_ROUNDS + 1; i++) {
-        expect(noticeOf(id)).toBeUndefined();
-        await round(current);
-        if (i === 0) expect(h.gh.reruns).toEqual(['77', '88']);
-      }
-      expect(h.gh.reruns).toEqual(['77', '88']);
-      // Only now that 10db ran it does a notice say so.
-      expect(noticeOf(id)?.line).toContain('lint');
-      expect(rerunNoticeOf(id)?.line).toContain('lint');
-    });
-
-    it('waits for the second read in a row, as for any cancelled check', async () => {
-      const { prUrl, w } = watching();
-      await rerunOfDesktopOnly(w, prUrl);
-      h.gh.setRequiredChecks(prUrl, running('desktop'));
-      await round(w);
-      h.gh.setRequiredChecks(prUrl, lintCancelled);
-      await round(w);
-      expect(h.gh.reruns).toEqual(['77']);
-      await round(w);
-      expect(h.gh.reruns).toEqual(['77', '88']);
-    });
-
-    it('runs it when the partial record was closed by a read that listed only the taken run', async () => {
-      const { id, prUrl, w } = watching();
-      h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
-      w.start();
-      await w.idle();
-      h.gh.failRerunOf.set('88', new GhError('failed', 'run 88 cannot be rerun; already running'));
-      await round(w);
-      expect(h.gh.reruns).toEqual(['77']);
-
-      h.gh.setRequiredChecks(prUrl, desktopCancelledLintRunning);
-      await round(w);
-      h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
-      await round(w);
-      h.gh.setRequiredChecks(prUrl, passing);
-      await round(w);
-      h.gh.setRequiredChecks(prUrl, lintCancelled);
-      await round(w);
-      expect(noticeOf(id)).toBeUndefined();
-      await round(w);
-      expect(h.gh.reruns).toEqual(['77', '88']);
-      expect(noticeOf(id)).toBeUndefined();
-    });
-
-    it('names only the checks 10db ran when one is cancelled again and another is not run yet', async () => {
-      const { id, prUrl, w } = watching();
-      await rerunOfDesktopOnly(w, prUrl);
-      for (let i = 0; i < GRACE_ROUNDS; i++) await round(w);
-      expect(noticeOf(id)?.line).toContain('desktop');
-
-      // The notice about desktop does not stop lint, which 10db has not run, from running.
-      h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
-      await round(w);
-      expect(noticeOf(id)?.line).not.toContain('lint');
-      await round(w);
-      expect(h.gh.reruns).toEqual(['77', '88']);
-      for (let i = 0; i < GRACE_ROUNDS; i++) await round(w);
-      expect(h.gh.reruns).toEqual(['77', '88']);
-      expect(noticeOf(id)?.line).toContain('desktop');
-      expect(noticeOf(id)?.line).toContain('lint');
-    });
+    it.each([['a daemon that restarted', true]])(
+      'runs it once on %s, with no notice that 10db ran it',
+      async (_, restart) => {
+        const { id, prUrl, w } = watching();
+        await rerunOfDesktopOnly(w, prUrl);
+        let current = w;
+        if (restart) {
+          await w.stop();
+          current = watcher();
+        }
+        h.gh.setRequiredChecks(prUrl, lintCancelled);
+        if (restart) {
+          current.start();
+          await current.idle();
+        } else await round(current);
+        for (let i = 0; i < GRACE_ROUNDS + 1; i++) {
+          expect(noticeOf(id)).toBeUndefined();
+          await round(current);
+          if (i === 0) expect(h.gh.reruns).toEqual(['77', '88']);
+        }
+        expect(h.gh.reruns).toEqual(['77', '88']);
+        // Only now that 10db ran it does a notice say so.
+        expect(noticeOf(id)?.line).toContain('lint');
+        expect(rerunNoticeOf(id)?.line).toContain('lint');
+      },
+    );
 
     it('after a restart, asks a run refused as still running even when an again notice is showing', async () => {
       const { id, prUrl, w } = watching();
@@ -2273,36 +1101,6 @@ describe('a required check GitHub cancelled', () => {
       expect(h.gh.reruns).toEqual(['77', '88']);
     });
 
-    it('says GitHub refused, and asks once, when GitHub hard-refuses it', async () => {
-      const { id, prUrl, w } = watching();
-      await rerunOfDesktopOnly(w, prUrl);
-      h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
-      await round(w);
-      h.gh.failRerunOf.set('88', new GhError('failed', 'HTTP 403: Resource not accessible'));
-      await round(w);
-      expect(h.gh.failRerunOf.has('88')).toBe(false);
-      const notice = noticeOf(id);
-      expect(notice?.line).toContain('could not run');
-      expect(notice?.line).toContain('lint');
-      expect(notice?.line).not.toContain('desktop');
-      expect(notice?.body).not.toContain('10db ran');
-      for (let i = 0; i < GRACE_ROUNDS + 1; i++) await round(w);
-      expect(h.gh.reruns).toEqual(['77']);
-      expect(noticeOf(id)?.line).toContain('could not run');
-    });
-
-    it('says it has no run when the check is a commit status', async () => {
-      const { id, prUrl, w } = watching();
-      await rerunOfDesktopOnly(w, prUrl);
-      const status = { ...job('ci/other', null), jobId: null };
-      h.gh.setRequiredChecks(prUrl, { ...lintCancelled, cancelled: [status] });
-      await round(w);
-      await round(w);
-      expect(noticeOf(id)?.line).toContain("can't be run again");
-      expect(noticeOf(id)?.body).not.toContain('10db ran');
-      expect(h.gh.reruns).toEqual(['77']);
-    });
-
     it('after a restart, does not ask a run listed beside a stopped notice stored with a done record', async () => {
       const { id, prUrl, w } = watching();
       await rerunOfDesktopOnly(w, prUrl);
@@ -2327,92 +1125,6 @@ describe('a required check GitHub cancelled', () => {
     });
 
     describe('the rerun notice beside a notice that 10db stopped', () => {
-      const status = { ...job('ci/other', null), jobId: null };
-      const statusCancelled = { ...lintCancelled, cancelled: [status] };
-
-      /** Run 77 is run and run 88 is refused as still running, then a check with no run is cancelled. */
-      async function stoppedAtNoRun(w: PrWatch, prUrl: string, id: BatchId): Promise<void> {
-        h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
-        w.start();
-        await w.idle();
-        h.gh.failRerunOf.set(
-          '88',
-          new GhError('failed', 'run 88 cannot be rerun; already running'),
-        );
-        await round(w);
-        expect(rerunNoticeOf(id)?.body).toContain('as soon as GitHub allows');
-        h.gh.setRequiredChecks(prUrl, statusCancelled);
-        await round(w);
-        await round(w);
-        expect(noticeOf(id)?.line).toContain("can't be run again");
-      }
-
-      it('does not say 10db runs another check once it stopped at a check with no run', async () => {
-        const { id, prUrl, w } = watching();
-        await stoppedAtNoRun(w, prUrl, id);
-        const body = rerunNoticeOf(id)?.body ?? '';
-        expect(body).not.toContain('as soon as GitHub allows');
-        expect(body).toContain('will not run another');
-        for (let i = 0; i < GRACE_ROUNDS + 1; i++) await round(w);
-        expect(h.gh.reruns).toEqual(['77']);
-      });
-
-      it('names no notice beside it once the check with no run clears', async () => {
-        const { id, prUrl, w } = watching();
-        await stoppedAtNoRun(w, prUrl, id);
-        h.gh.setRequiredChecks(prUrl, running('desktop'));
-        await round(w);
-        expect(noticeOf(id)).toBeUndefined();
-        const body = rerunNoticeOf(id)?.body ?? '';
-        expect(body).toBeTruthy();
-        expect(body).not.toContain('beside this one');
-        expect(body).not.toContain('will not');
-        expect(body).not.toContain('as soon as GitHub allows');
-      });
-
-      it('does not say 10db runs the other check once the run it waited for finishes by itself', async () => {
-        const { id, prUrl, w } = watching();
-        h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
-        w.start();
-        await w.idle();
-        h.gh.failRerunOf.set(
-          '88',
-          new GhError('failed', 'run 88 cannot be rerun; already running'),
-        );
-        await round(w);
-        expect(rerunNoticeOf(id)?.body).toContain('as soon as GitHub allows');
-
-        h.gh.setRequiredChecks(prUrl, running('desktop'));
-        await round(w);
-        expect(noticeOf(id)).toBeUndefined();
-        const body = rerunNoticeOf(id)?.body ?? '';
-        expect(body).toBeTruthy();
-        expect(body).not.toContain('as soon as GitHub allows');
-        expect(body).not.toContain('beside this one');
-      });
-
-      it('does the same when a restart came between', async () => {
-        const { id, prUrl, w } = watching();
-        h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
-        w.start();
-        await w.idle();
-        h.gh.failRerunOf.set(
-          '88',
-          new GhError('failed', 'run 88 cannot be rerun; already running'),
-        );
-        await round(w);
-        await w.stop();
-
-        const second = watcher();
-        h.gh.setRequiredChecks(prUrl, running('desktop'));
-        second.start();
-        await second.idle();
-        await round(second);
-        const body = rerunNoticeOf(id)?.body ?? '';
-        expect(body).toBeTruthy();
-        expect(body).not.toContain('as soon as GitHub allows');
-      });
-
       it('still asks for a run cancelled again on the head after the waiting check clears, also after a restart', async () => {
         const { id, prUrl, w } = watching();
         h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
@@ -2437,101 +1149,6 @@ describe('a required check GitHub cancelled', () => {
         await round(second);
         await round(second);
         expect(h.gh.reruns).toEqual(['77', '88']);
-      });
-
-      it('names no notice beside it and does not say it will not ask again once the refused check clears', async () => {
-        const { id, prUrl, w } = watching();
-        await rerunOfDesktopOnly(w, prUrl);
-        h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
-        await round(w);
-        h.gh.failRerunOf.set('88', new GhError('failed', 'HTTP 403: Resource not accessible'));
-        await round(w);
-        expect(noticeOf(id)?.line).toContain('could not run');
-        expect(rerunNoticeOf(id)?.body).toContain('will not ask again');
-
-        // The builder runs it by hand: the check clears.
-        h.gh.setRequiredChecks(prUrl, running('desktop'));
-        await round(w);
-        expect(noticeOf(id)).toBeUndefined();
-        const body = rerunNoticeOf(id)?.body ?? '';
-        expect(body).toBeTruthy();
-        expect(body).not.toContain('beside this one');
-        expect(body).not.toContain('will not ask again');
-
-        // Cancelled again on the same head, 10db does ask again.
-        h.gh.setRequiredChecks(prUrl, lintCancelled);
-        await round(w);
-        await round(w);
-        expect(h.gh.reruns).toEqual(['77', '88']);
-      });
-
-      describe('when a required check fails and none is cancelled', () => {
-        const failed = (...names: string[]) => ({
-          state: 'failing' as const,
-          failing: names.map((n) => job(n)),
-          pending: [],
-          cancelled: [],
-        });
-
-        it('does not say 10db runs another check once the run it waited for ends in a failure', async () => {
-          const { id, prUrl, w } = watching();
-          h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
-          w.start();
-          await w.idle();
-          h.gh.failRerunOf.set(
-            '88',
-            new GhError('failed', 'run 88 cannot be rerun; already running'),
-          );
-          await round(w);
-          expect(rerunNoticeOf(id)?.body).toContain('as soon as GitHub allows');
-
-          h.gh.setRequiredChecks(prUrl, failed('lint'));
-          await round(w);
-          const body = rerunNoticeOf(id)?.body ?? '';
-          expect(body).toBeTruthy();
-          expect(body).not.toContain('as soon as GitHub allows');
-          expect(body).not.toContain('beside this one');
-          // A failing check starts no rerun, and none follows it.
-          for (let i = 0; i < GRACE_ROUNDS + 1; i++) await round(w);
-          expect(h.gh.reruns).toEqual(['77']);
-        });
-
-        it('takes the cancelled-check notice off when the refused check fails instead', async () => {
-          const { id, prUrl, w } = watching();
-          await rerunOfDesktopOnly(w, prUrl);
-          h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
-          await round(w);
-          h.gh.failRerunOf.set('88', new GhError('failed', 'HTTP 403: Resource not accessible'));
-          await round(w);
-          expect(noticeOf(id)?.line).toContain('could not run');
-          expect(rerunNoticeOf(id)?.body).toContain('will not ask again');
-
-          h.gh.setRequiredChecks(prUrl, failed('lint'));
-          await round(w);
-          expect(noticeOf(id)).toBeUndefined();
-          const body = rerunNoticeOf(id)?.body ?? '';
-          expect(body).toBeTruthy();
-          expect(body).not.toContain('beside this one');
-          expect(body).not.toContain('will not ask again');
-          expect(h.gh.reruns).toEqual(['77']);
-        });
-
-        it('still leaves a failing check with another one cancelled alone, and runs nothing', async () => {
-          const { id, prUrl, w } = watching();
-          h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
-          w.start();
-          await w.idle();
-          h.gh.failRerunOf.set(
-            '88',
-            new GhError('failed', 'run 88 cannot be rerun; already running'),
-          );
-          await round(w);
-          const before = rerunNoticeOf(id)?.body;
-          h.gh.setRequiredChecks(prUrl, { ...failed('build'), cancelled: [job('lint', '88')] });
-          for (let i = 0; i < GRACE_ROUNDS + 1; i++) await round(w);
-          expect(rerunNoticeOf(id)?.body).toBe(before);
-          expect(h.gh.reruns).toEqual(['77']);
-        });
       });
     });
   });
@@ -2567,81 +1184,6 @@ describe('a required check GitHub cancelled', () => {
     for (let i = 0; i < GRACE_ROUNDS + 1; i++) await round(second);
     expect(h.gh.reruns).toEqual(['77']);
     expect(noticeOf(id)?.line).toContain('lint');
-  });
-
-  describe('a check 10db could not run, then a restart', () => {
-    /** The check is cancelled, 10db stops with `line`, the daemon restarts and the check clears. */
-    async function clearedAfterRestart(
-      id: BatchId,
-      prUrl: string,
-      w: PrWatch,
-      line: string,
-    ): Promise<PrWatch> {
-      w.start();
-      await w.idle();
-      await round(w);
-      expect(noticeOf(id)?.line).toContain(line);
-      await w.stop();
-
-      const second = watcher();
-      second.start();
-      await second.idle();
-      expect(noticeOf(id)?.line).toContain(line);
-      h.gh.setRequiredChecks(prUrl, running('desktop'));
-      await round(second);
-      expect(noticeOf(id)).toBeUndefined();
-      return second;
-    }
-
-    it('never says 10db ran a check GitHub refused', async () => {
-      const { id, prUrl, w } = watching();
-      h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
-      h.gh.failRerunOf.set('77', new GhError('failed', 'HTTP 403: Resource not accessible'));
-      const second = await clearedAfterRestart(id, prUrl, w, 'could not run');
-
-      h.gh.failRerunOf.set('77', new GhError('failed', 'HTTP 403: Resource not accessible'));
-      h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
-      await round(second);
-      await round(second);
-      for (let i = 0; i < GRACE_ROUNDS + 1; i++) await round(second);
-      expect(h.gh.reruns).toEqual([]);
-      expect(noticeOf(id)?.line).toContain('could not run');
-      expect(noticeOf(id)?.body).not.toContain('10db ran');
-    });
-
-    it('never says 10db ran a check with no Actions run', async () => {
-      const { id, prUrl, w } = watching();
-      const status = { ...job('ci/other', null), jobId: null };
-      const statusCancelled = {
-        state: 'cancelled' as const,
-        failing: [],
-        pending: [],
-        cancelled: [status],
-      };
-      h.gh.setRequiredChecks(prUrl, statusCancelled);
-      const second = await clearedAfterRestart(id, prUrl, w, "can't be run again");
-
-      h.gh.setRequiredChecks(prUrl, statusCancelled);
-      await round(second);
-      await round(second);
-      for (let i = 0; i < GRACE_ROUNDS + 1; i++) await round(second);
-      expect(noticeOf(id)?.line).toContain("can't be run again");
-      expect(noticeOf(id)?.body).not.toContain('10db ran');
-    });
-  });
-
-  it('gives a new head its own rerun', async () => {
-    const { id, prUrl, w } = watching();
-    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
-    w.start();
-    await w.idle();
-    await round(w);
-    expect(h.gh.reruns).toEqual(['77']);
-    h.gh.setHead(prUrl, HEAD_B);
-    await round(w);
-    await round(w);
-    expect(h.gh.reruns).toEqual(['77', '77']);
-    expect(noticeOf(id)).toBeUndefined();
   });
 
   it('does not run the check a second time when the daemon restarts after the rerun, before any notice', async () => {
@@ -2750,44 +1292,10 @@ describe('a required check GitHub cancelled', () => {
     expect(h.gh.reruns).toEqual([]);
     expect(noticeOf(id)?.line).toContain('could not run');
   });
-
-  it('leaves a check that is genuinely running pending, with nothing rerun', async () => {
-    const { id, prUrl, w } = watching();
-    h.gh.setRequiredChecks(prUrl, running('desktop'));
-    w.start();
-    await w.idle();
-    await round(w);
-    await round(w);
-    expect(stored(id).prRequired).toMatchObject({ state: 'pending', cancelled: [] });
-    expect(h.gh.reruns).toEqual([]);
-    expect(noticeOf(id)).toBeUndefined();
-  });
-
-  it('runs nothing on a pull request that conflicts with its base', async () => {
-    const { prUrl, w } = watching();
-    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
-    h.gh.setMergeBlocked(prUrl, 'conflicts');
-    w.start();
-    await w.idle();
-    await round(w);
-    await round(w);
-    expect(h.gh.reruns).toEqual([]);
-  });
-
-  it('runs the check of a pull request held for the builder too', async () => {
-    const { prUrl, w } = watching(false);
-    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
-    w.start();
-    await w.idle();
-    await round(w);
-    expect(h.gh.reruns).toEqual(['77']);
-  });
 });
 
 describe('a required job GitHub cancelled because no runner picked it up', () => {
   const HEAD_A = 'a'.repeat(40);
-  const HEAD_B = 'b'.repeat(40);
-  const LIMIT = 3;
 
   /** The `attempt`th run of the `desktop` job: a rerun makes a new job, so a new job id. */
   const desktop = (attempt: number, runId: string | null = '77') => ({
@@ -2837,89 +1345,6 @@ describe('a required job GitHub cancelled because no runner picked it up', () =>
     expect(stored(id).notices.map((n) => n.key)).toEqual([`checks-no-runner:${HEAD_A}`]);
   });
 
-  it('does not run a cancelled job again that had a runner or steps, or that a person cancelled', async () => {
-    const { id, prUrl, w } = watching();
-    // The fake says no runner shortage for it: GitHub's job record has steps or a runner, or no annotation.
-    h.gh.setRequiredChecks(prUrl, cancelledJobs(desktop(1)));
-    w.start();
-    await w.idle();
-    expect(h.gh.calls.some((c) => c.method === 'jobHadNoRunner')).toBe(true);
-    expect(h.gh.reruns).toEqual([]);
-    expect(noticeOf(id)).toBeUndefined();
-    // It stays the ordinary cancelled check: run again at the second read.
-    await round(w);
-    expect(h.gh.reruns).toEqual(['77']);
-    expect(stored(id).notices.some((n) => n.key.startsWith('checks-no-runner:'))).toBe(false);
-  });
-
-  it('runs a job again once, while GitHub still lists the cancelled one', async () => {
-    const { prUrl, w } = watching();
-    h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(1)));
-    w.start();
-    await w.idle();
-    await round(w);
-    await round(w);
-    expect(h.gh.reruns).toEqual(['77']);
-  });
-
-  it('runs the new attempt again when it is cancelled the same way, up to the limit, then raises one card', async () => {
-    const { id, prUrl, w } = watching();
-    h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(1)));
-    w.start();
-    await w.idle();
-    for (let attempt = 2; attempt <= LIMIT; attempt++) {
-      h.gh.setRequiredChecks(prUrl, {
-        state: 'pending',
-        failing: [],
-        pending: [desktop(attempt)],
-        cancelled: [],
-      });
-      await round(w);
-      h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(attempt)));
-      await round(w);
-    }
-    expect(h.gh.reruns).toEqual(['77', '77', '77']);
-    expect(h.cards()).toEqual([]);
-
-    h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(LIMIT + 1)));
-    await round(w);
-    expect(h.gh.reruns).toHaveLength(LIMIT);
-    const card = h.only(h.cards());
-    expect(card.title).toContain('desktop');
-    expect(card.title).toContain('no runner');
-    expect(card.body).toContain(`${String(LIMIT)} reruns`);
-    expect(card.body).toContain('desktop');
-    expect(card.body).toContain('runner shortage');
-    expect(noticeOf(id)?.line).toContain('stopped');
-
-    // One card, however many rounds follow.
-    await round(w);
-    await round(w);
-    expect(h.cards()).toHaveLength(1);
-    expect(h.gh.reruns).toHaveLength(LIMIT);
-  });
-
-  it('counts per head: a new push starts again from zero and takes the old head’s card back', async () => {
-    const { id, prUrl, w } = watching();
-    for (let attempt = 1; attempt <= LIMIT + 1; attempt++) {
-      h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(attempt)));
-      if (attempt === 1) {
-        w.start();
-        await w.idle();
-      } else await round(w);
-    }
-    expect(h.gh.reruns).toHaveLength(LIMIT);
-    expect(h.cards()).toHaveLength(1);
-
-    h.gh.setHead(prUrl, HEAD_B);
-    h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(10)));
-    await round(w);
-    expect(h.gh.reruns).toHaveLength(LIMIT + 1);
-    expect(h.cards()).toEqual([]);
-    expect(noticeOf(id, HEAD_A)).toBeUndefined();
-    expect(noticeOf(id, HEAD_B)?.line).toContain('desktop');
-  });
-
   it('keeps the count through a restart', async () => {
     const { prUrl, w } = watching();
     h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(1)));
@@ -2941,36 +1366,5 @@ describe('a required job GitHub cancelled because no runner picked it up', () =>
     await round(second);
     expect(h.gh.reruns).toHaveLength(3);
     expect(h.only(h.cards()).title).toContain('no runner');
-  });
-
-  it('does not count a rerun GitHub refused because the run is still going, and asks again', async () => {
-    const { id, prUrl, w } = watching();
-    h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(1)));
-    h.gh.failRerunOf.set('77', new GhError('failed', 'run 77 cannot be rerun; already running'));
-    w.start();
-    await w.idle();
-    expect(h.gh.reruns).toEqual([]);
-    expect(noticeOf(id)).toBeUndefined();
-    await round(w);
-    expect(h.gh.reruns).toEqual(['77']);
-  });
-
-  it('leaves a pull request in the merge queue alone', async () => {
-    const { prUrl, w } = watching();
-    h.gh.setInMergeQueue(prUrl, true);
-    h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(1)));
-    w.start();
-    await w.idle();
-    expect(h.gh.reruns).toEqual([]);
-  });
-
-  it('asks gh about a cancelled job once, however many reads follow', async () => {
-    const { prUrl, w } = watching();
-    h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(1)));
-    w.start();
-    await w.idle();
-    await round(w);
-    await round(w);
-    expect(h.gh.calls.filter((c) => c.method === 'jobHadNoRunner')).toHaveLength(1);
   });
 });

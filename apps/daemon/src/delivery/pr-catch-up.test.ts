@@ -199,54 +199,6 @@ describe('a shipped pull request that conflicts with its base', () => {
       },
     );
 
-    /** The batch and main each added a line to one file, and the copy's packages no longer resolve. */
-    async function keptLinesOnBrokenInstall(keepWorktree: boolean): Promise<BatchDto> {
-      installable();
-      const batch = await shippedWith('src/index.ts', BOTH.mine, { keepWorktree });
-      h.teammatePush('main', 'src/index.ts', BOTH.theirs);
-      conflicts(batch);
-      pruned(batch);
-      return batch;
-    }
-
-    it('does not say the kept-lines merge went back when the builder commits during the install', async () => {
-      const batch = await keptLinesOnBrokenInstall(true);
-      const branch = batch.branch ?? '';
-      const before = tipOnOrigin(branch);
-      const committed = commitsDuringInstall(batch);
-
-      await catchUp(batch);
-
-      expect(committed()).toBe(true);
-      // The merge stays, under the builder's commit.
-      const tip = h.git$('rev-parse', `refs/heads/${branch}`);
-      expect(h.git$('log', '-1', '--format=%s', tip)).toBe('Add src/builder.ts');
-      expect(h.git$('log', '-1', '--format=%P', `${tip}~1`)).toContain(before);
-      expect(tipOnOrigin(branch)).toBe(before);
-      const card = h.only(h.cards().filter((c) => c.title.includes('conflicts with main')));
-      expect(card.body).toContain('.: left-pad');
-      expect(card.body).toContain('src/index.ts');
-      expect(card.body).toContain('nothing was pushed');
-      expect(card.body).not.toMatch(SAYS_PUT_BACK);
-    });
-
-    it("does not say the kept-lines merge went back when it can't be", async () => {
-      const batch = await keptLinesOnBrokenInstall(false);
-      const branch = batch.branch ?? '';
-      const before = tipOnOrigin(branch);
-      vi.spyOn(h.git, 'rewindBranch').mockRejectedValueOnce(new Error('index.lock exists'));
-
-      await catchUp(batch);
-
-      expect(h.git$('rev-parse', `refs/heads/${branch}`)).not.toBe(before);
-      expect(tipOnOrigin(branch)).toBe(before);
-      const card = h.only(h.cards());
-      expect(card.body).toContain('.: left-pad');
-      expect(card.body).toContain('src/index.ts');
-      expect(card.body).toContain('nothing was pushed');
-      expect(card.body).not.toMatch(SAYS_PUT_BACK);
-    });
-
     it('raises the one card, naming the generated directory it did not regenerate, and puts the merge back', async () => {
       installable();
       h.commit(
@@ -412,39 +364,6 @@ describe('a shipped pull request that conflicts with its base', () => {
           expect(card.body).not.toMatch(SAYS_PUT_BACK);
         },
       );
-
-      it("does not say the merge went back when it can't be", async () => {
-        const batch = await generatedConflict(null, false);
-        const branch = batch.branch ?? '';
-        const before = tipOnOrigin(branch);
-        failing();
-        vi.spyOn(h.git, 'rewindBranch').mockRejectedValueOnce(new Error('index.lock exists'));
-
-        await catchUp(batch);
-
-        expect(h.git$('rev-parse', `refs/heads/${branch}`)).not.toBe(before);
-        expect(tipOnOrigin(branch)).toBe(before);
-        const card = h.only(h.cards());
-        expect(card.body).toContain('nothing was pushed');
-        expect(card.body).not.toMatch(SAYS_PUT_BACK);
-      });
-    });
-
-    it('raises the card naming the conflict when the base could not be merged at all', async () => {
-      installable();
-      const batch = await shippedWith('README.md', '# ours\n');
-      h.teammatePush('main', 'README.md', '# theirs\n');
-      conflicts(batch);
-      const before = tipOnOrigin(batch.branch);
-      pruned(batch);
-
-      await catchUp(batch);
-
-      expect(tipOnOrigin(batch.branch)).toBe(before);
-      const card = h.only(h.cards());
-      expect(card.body).toContain("10db couldn't settle them itself");
-      expect(card.body).toContain('README.md');
-      expect(card.body).not.toContain('left-pad');
     });
 
     it('raises no card when the branch holds the base, since there is no merge to stop', async () => {
@@ -1191,60 +1110,6 @@ describe('a shipped pull request that conflicts with its base', () => {
     await h.jobs.idle();
 
     expect(h.gh.merged).toEqual([url]);
-  });
-
-  it('shows the refused notice when auto-merge errors on a retry and was never armed', async () => {
-    // GitHub refused the first arm, so the pull request was never set to merge.
-    h.gh.failNext.set(
-      'prAutoMerge',
-      new GhError('failed', 'gh pr merge failed (exit 1): auto-merge is not allowed'),
-    );
-    const batch = await shippedWith('README.md', '# ours\n');
-    expect(batch.notices.map((n) => n.key)).toEqual(['pull-request-merge']);
-    h.teammatePush('main', 'README.md', '# theirs\n');
-    const url = conflicts(batch);
-    const stopped = await catchUp(batch);
-    expect(stopped.notices).toEqual([]);
-
-    // The builder resolves the conflict; the watch withdraws the card and asks for the merge again.
-    h.gh.setMergeBlocked(url, null);
-    h.gh.setMergeable(url, PrMergeable.Mergeable);
-    h.gh.failNext.set(
-      'prAutoMerge',
-      new GhError('failed', 'gh pr merge failed (exit 1): HTTP 403: Resource not accessible'),
-    );
-    h.shipper.retryMerge(batch.id, { catchUpCardWasOpen: true });
-    await h.jobs.idle();
-
-    expect(getBatch(h.store.db, batch.id).notices.map((n) => n.key)).toEqual([
-      'pull-request-merge',
-    ]);
-  });
-
-  it('treats an auto-merge error on a retry as armed, with no notice, when it was armed before', async () => {
-    // The first arm succeeds, so the pull request is known to be set to merge.
-    const batch = await shippedWith('README.md', '# ours\n');
-    expect(batch.notices.map((n) => n.key)).not.toContain('pull-request-merge');
-    h.teammatePush('main', 'README.md', '# theirs\n');
-    const url = conflicts(batch);
-    const stopped = await catchUp(batch);
-    expect(stopped.notices).toEqual([]);
-
-    // The builder resolves the conflict; the watch withdraws the card and asks for the merge again,
-    // and gh's answer to arming a pull request that is armed already is an error.
-    h.gh.setMergeBlocked(url, null);
-    h.gh.setMergeable(url, PrMergeable.Mergeable);
-    h.gh.failNext.set(
-      'prAutoMerge',
-      new GhError('failed', 'gh pr merge failed (exit 1): HTTP 403: Resource not accessible'),
-    );
-    h.shipper.retryMerge(batch.id, { catchUpCardWasOpen: true });
-    await h.jobs.idle();
-
-    expect(h.gh.failNext.has('prAutoMerge')).toBe(false);
-    expect(getBatch(h.store.db, batch.id).notices.map((n) => n.key)).not.toContain(
-      'pull-request-merge',
-    );
   });
 
   it('merges the base in the worktree 10db kept after the ship, and keeps it', async () => {

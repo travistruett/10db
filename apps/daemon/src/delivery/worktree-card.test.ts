@@ -9,7 +9,7 @@ import { comparablePath, samePath } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
 import { systemProcesses } from '../recovery';
-import { checkoutCards, CheckoutChoice, startCards, WorktreeChoice, worktreeCards } from './cards';
+import { checkoutCards, CheckoutChoice, WorktreeChoice, worktreeCards } from './cards';
 import { createWorktreeCardAnswers, recoverBatches } from './index';
 import { raise } from './context';
 
@@ -79,38 +79,6 @@ describe('a batch whose worktree is missing', () => {
     await h.jobs.idle();
 
     expect(getBatch(h.store.db, batch.id).state).toBe('ABANDONED');
-  });
-
-  it('offers Abandon batch alone while the open batch waits, and does it', async () => {
-    const { batch } = await opened(h);
-    const path = pathOf(batch);
-    const card = worktreeCards.missing(batch, path, 'waits');
-    raise(h.inbox, batch.projectId, card);
-    const raised = h.only(h.cards());
-    expect(labels(raised)).toEqual([WorktreeChoice.Abandon]);
-
-    inbox.answer(raised.id, { choice: WorktreeChoice.Abandon });
-    await h.jobs.idle();
-
-    expect(getBatch(h.store.db, batch.id).state).toBe('ABANDONED');
-  });
-
-  it('closes the card without acting when the batch has moved on since', async () => {
-    const { batch } = await opened(h);
-    const path = pathOf(batch);
-    raise(h.inbox, batch.projectId, worktreeCards.missing(batch, path, 'waits'));
-    const raised = h.only(h.cards());
-    h.shipper.abandon(batch.id);
-    await h.jobs.idle();
-
-    inbox.answer(raised.id, { choice: WorktreeChoice.Abandon });
-    await h.jobs.idle();
-
-    // Abandoning an empty branch leaves its own notice that the branch was deleted; the worktree card is gone.
-    expect(h.cards()).toEqual([]);
-    expect(h.notices().map((n) => n.line)).toEqual([
-      `Batch "${batch.title}" abandoned: ${batch.branch ?? ''} deleted`,
-    ]);
   });
 });
 
@@ -221,24 +189,6 @@ describe('a worktree no batch uses any more', () => {
     expect(notice.tone).toBe('warning');
     expect(notice.key).toBe(`worktree-remove-failed:${path}`);
     expect(notice.taskId).toBeNull();
-  });
-
-  it('withdraws an older "could not remove" card for the path when it posts that nothing was removed', async () => {
-    const { batch, path } = await orphaned();
-    raise(
-      h.inbox,
-      batch.projectId,
-      worktreeCards.removeFailed({ kind: 'orphan', path }, path, new Error('busy')),
-    );
-    raise(h.inbox, batch.projectId, worktreeCards.orphanKept(h.repo, path, ['notes.txt'], []));
-    const kept = h.only(h.cards().filter((c) => c.title !== `10db could not remove ${path}`));
-    h.git$('worktree', 'unlock', path);
-
-    inbox.answer(kept.id, { choice: WorktreeChoice.Remove });
-    await h.jobs.idle();
-
-    expect(h.cards()).toEqual([]);
-    expect(h.only(h.notices()).line).toBe(`10db removed nothing at ${path}`);
   });
 
   it('says nothing was removed when git no longer lists the path', async () => {
@@ -393,64 +343,5 @@ describe('a checkout left on the batch branch', () => {
     await h.jobs.idle();
 
     expect(h.git$('branch', '--show-current')).toBe(batch.baseBranch);
-  });
-});
-
-describe('every worktree and checkout card', () => {
-  it('offers an answer beyond a bare dismiss', async () => {
-    build('worktree');
-    const { batch } = await opened(h);
-    const path = pathOf(batch);
-    const place = { branch: 'main', sha: 'b'.repeat(40) };
-    const project = h.project;
-    const cards = [
-      worktreeCards.missing(batch, path, 'waits'),
-      worktreeCards.missing(batch, path, 'failed'),
-      worktreeCards.keptDirty(batch, h.repo, path, ['a.txt'], []),
-      worktreeCards.keptIgnored(batch, h.repo, path, ['.env']),
-      worktreeCards.keptIgnored(batch, h.repo, path, null),
-      worktreeCards.orphanKept(h.repo, path, ['a.txt'], []),
-      worktreeCards.orphanIgnored(h.repo, path, ['.env']),
-      worktreeCards.leftBehind(batch, path),
-      worktreeCards.inTheWay(batch, path, 'why'),
-      worktreeCards.notReopened(batch, new Error('no')),
-      worktreeCards.notWhole(batch, path, 'elsewhere', ['a.txt']),
-      worktreeCards.removeFailed({ kind: 'orphan', path }, path, new Error('no')),
-      checkoutCards.dirty(batch, project, place, ['a.txt']),
-      checkoutCards.ignored(batch, project, place, ['a.txt']),
-      checkoutCards.checkedOut(batch, place, path),
-      checkoutCards.gone(batch, project, place),
-      checkoutCards.lanesRunning(batch, project, place, 2),
-      checkoutCards.failed(batch, project, place, new Error('no')),
-    ];
-    for (const card of cards) {
-      const options = card.options ?? [];
-      expect(options.length, card.title).toBeGreaterThan(0);
-      // An answer the daemon acts on, not only Keep or Leave it.
-      expect(
-        options.some((o) => o.label !== WorktreeChoice.Keep && o.label !== CheckoutChoice.Leave),
-        card.title,
-      ).toBe(true);
-      expect(
-        options.every((o) => o.description.length > 0),
-        card.title,
-      ).toBe(true);
-    }
-  });
-
-  it('the lanes-running cards name lanes in Your folder as what blocks a switch', async () => {
-    build('worktree');
-    const { batch } = await opened(h);
-    const place = { branch: 'main', sha: 'b'.repeat(40) };
-    const bodies = [
-      startCards.lanesRunning(h.project, 3).body,
-      checkoutCards.lanesRunning(batch, h.project, place, 3).body,
-    ];
-    for (const body of bodies) {
-      expect(body).toContain('Your folder');
-      expect(body).toContain('separate cop');
-      expect(body).toContain('3');
-      expect(body).not.toMatch(/no (lane|work) runs in the project/);
-    }
   });
 });

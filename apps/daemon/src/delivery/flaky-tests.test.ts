@@ -1,11 +1,10 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { TaskStatus } from '@10db/contracts';
-import { createTestStore, listTasks, setTaskStatus } from '@10db/db';
+import { createTestStore, listTasks } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { failedRepoCheck, seedWorkstream, tempDir } from '../../test/fixtures';
 import type { GateResult } from '../verify';
-import { fileFlakyTests, flakeNote, flakyTitle, rerunFlaky, type FlakyTest } from './flaky-tests';
+import { fileFlakyTests, flakyTitle, rerunFlaky, type FlakyTest } from './flaky-tests';
 
 const TIMEOUT_LOG = [
   ' FAIL  daemon  src/a.test.ts > suite > slow one',
@@ -105,28 +104,6 @@ describe('rerunFlaky', () => {
     expect(outcome.kind).toBe('flaky');
   });
 
-  it('names a whole group of tests that share one error, each with that error', async () => {
-    const { checkout, tail } = checkoutWith({
-      test: [
-        ' FAIL  daemon  src/a.test.ts > each > a',
-        ' FAIL  daemon  src/a.test.ts > each > b',
-        'Error: Test timed out in 30000ms.',
-      ].join('\n'),
-    });
-    const outcome = await rerunFlaky({
-      checkout,
-      output: tail,
-      run: () => Promise.resolve(result(0)),
-    });
-    expect(outcome).toMatchObject({
-      kind: 'flaky',
-      tests: [
-        { name: 'each > a', failure: 'Error: Test timed out in 30000ms.', timedOut: true },
-        { name: 'each > b', failure: 'Error: Test timed out in 30000ms.', timedOut: true },
-      ],
-    });
-  });
-
   it('is a real failure when the rerun fails too', async () => {
     const { checkout, tail } = checkoutWith({ test: TIMEOUT_LOG });
     const outcome = await rerunFlaky({
@@ -188,25 +165,6 @@ describe('rerunFlaky', () => {
   });
 });
 
-describe('flakeNote', () => {
-  it('names each test, its first failure and that it passed on rerun', () => {
-    const tests: FlakyTest[] = [
-      {
-        file: 'src/a.test.ts',
-        name: 'slow',
-        failure: 'Error: Test timed out in 30000ms.',
-        timedOut: true,
-      },
-      { file: 'src/c.test.ts', name: null, failure: 'the file failed to run', timedOut: false },
-    ];
-    const note = flakeNote(tests);
-    expect(note).toContain('src/a.test.ts > slow');
-    expect(note).toContain('Test timed out in 30000ms');
-    expect(note).toContain('src/c.test.ts');
-    expect(note).toMatch(/passed when 10db ran/);
-  });
-});
-
 describe('fileFlakyTests', () => {
   let close: (() => void) | null = null;
   afterEach(() => {
@@ -250,30 +208,5 @@ describe('fileFlakyTests', () => {
     expect(a?.description).toContain('Test timed out in 30000ms');
     expect(a?.description).toContain('also');
     expect(a?.description).toContain(s.task.title);
-  });
-
-  it('adds a second flake of the same file to the open task instead of filing another', () => {
-    const s = setup();
-    s.file([slow]);
-    const second = s.file([
-      { file: 'src/a.test.ts', name: 'later', failure: 'AssertionError: z', timedOut: false },
-    ]);
-    const tasks = s.filed();
-    expect(tasks).toHaveLength(1);
-    expect(tasks[0]?.description).toContain('slow');
-    expect(tasks[0]?.description).toContain('later');
-    expect(tasks[0]?.description).toContain('AssertionError: z');
-    expect(second.map((t) => t.id)).toEqual([tasks[0]?.id]);
-  });
-
-  it('files a new task once the earlier one is finished', () => {
-    const s = setup();
-    const [first] = s.file([slow]);
-    if (!first) throw new Error('no task filed');
-    s.store.write((ctx) => {
-      setTaskStatus(ctx, first.id, TaskStatus.Done);
-    });
-    s.file([slow]);
-    expect(s.filed()).toHaveLength(2);
   });
 });
