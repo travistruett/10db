@@ -75,8 +75,9 @@
 
 .item:not([data-labelled]) .badge {
   position: absolute;
+  /* The compact badge's centre sits over the icon's top-right corner, not over the glyph. */
   top: 1px;
-  right: 0;
+  right: 4px;
 }
 
 .divider {

@@ -80,6 +80,23 @@ describe('the rail', () => {
     expect(link.textContent).toContain('Inbox');
   });
 
+  it('draws a count as a compact corner badge when icons only and the normal pill when labelled', async () => {
+    viewportWidth(1280);
+    server.use(
+      http.get(daemonUrl('/inbox'), () => HttpResponse.json([inboxItemDto()])),
+      ...baseHandlers(),
+    );
+    renderApp('/factory');
+    const labelled = await screen.findByRole('link', { name: /Inbox.*1 open card/ });
+    expect(labelled.querySelector('[data-compact]')).toBeNull();
+    pressSidebarKey();
+    await waitFor(() => {
+      expect(isLabelled()).toBe(false);
+    });
+    const icons = await screen.findByRole('link', { name: /Inbox.*1 open card/ });
+    expect(icons.querySelector('[data-compact]')).not.toBeNull();
+  });
+
   it("moves between items with the arrow keys and opens one with Enter's own link behaviour", async () => {
     server.use(...baseHandlers());
     renderApp('/factory');
