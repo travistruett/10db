@@ -35,6 +35,7 @@ import {
 import {
   addStockHazardCommands,
   chatOfConversation,
+  getChat,
   countBatchesInFlight,
   countWaitingOnCard,
   isLaneWaitingOnCard,
@@ -2828,6 +2829,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           gh: delivery.gh,
           filesDir: (conversationId) => chatFolder(opts.dataDir, conversationId),
           repoOf: (projectId) => getProject(state.db, projectId).repoPath,
+          placeOf: (chatId) => {
+            const row = getChat(state.db, chatId);
+            return { place: row.workPlace, worktree: row.worktreePath };
+          },
           secretFilesOf: secretFilesIn,
           net: () => ({
             env: delivery.networkEnv(),
