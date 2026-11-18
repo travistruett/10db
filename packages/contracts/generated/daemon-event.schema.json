@@ -85,7 +85,8 @@
         "gate.started",
         "gate.finished",
         "folder_hold.changed",
-        "notice.posted"
+        "notice.posted",
+        "status.changed"
       ]
     },
     "entityType": {
