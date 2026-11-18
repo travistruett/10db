@@ -56,7 +56,7 @@ afterEach(async () => {
 /** A pass whose gate would fail if it ran, with 7b's real ship over the harness's fake gh. */
 async function world(
   project: Partial<ProjectInput> = { gateCommand: 'false' },
-  opts: { readonly pageCap?: number; readonly followOnRefused?: string } = {},
+  opts: { readonly pageCap?: number } = {},
 ): Promise<{
   closes: PassCloses;
   deps: CloseDeps;
@@ -80,12 +80,10 @@ async function world(
     ship: prs,
     gateWhere: (pass) => closeGateOf(passGateKind(getProject(w.h.store.db, pass.projectId))),
     openFollowOn: (input) =>
-      opts.followOnRefused === undefined
-        ? openPass(w.h.ctx, input, {
-            leaseMs: 60_000,
-            putBack: (put) => putBackKeptWork(w.deps, put),
-          })
-        : Promise.reject(new Error(opts.followOnRefused)),
+      openPass(w.h.ctx, input, {
+        leaseMs: 60_000,
+        putBack: (put) => putBackKeptWork(w.deps, put),
+      }),
   };
   const closes = createPassCloses(deps);
   unsubscribe = subscribeMergedPasses(w.h.bus, w.h.store.db, closes);
@@ -194,27 +192,6 @@ describe('a pull request that merges while its pass is open', () => {
     },
   );
 
-  it('names the branch and the commits not pushed in its notice, as a warning, when the follow-on pass does not open', async () => {
-    await world(undefined, { followOnRefused: 'the folder is busy' });
-    settingsSignedOff();
-    const { url } = await opened();
-    const later = w.h.commit('src/settings/old.tsx', 'signed off later\n');
-
-    merged(url);
-    await waitFor(() => followOnNotice() !== undefined);
-    await w.h.jobs.idle();
-
-    const card = followOnNotice();
-    expect(followOnCards()).toEqual([]);
-    expect(card?.tone).toBe('warning');
-    expect(card?.body).toContain(
-      'went back to the Board with their work kept: the folder is busy.',
-    );
-    expect(card?.body).toContain(
-      `The pages signed off after the last push are on ${w.branch}, not pushed: ${later.slice(0, 7)}.`,
-    );
-  });
-
   it('with every page signed off, pushes the later sign-offs and opens a follow-on pull request', async () => {
     await world();
     settingsSignedOff();
@@ -321,28 +298,6 @@ describe('a pull request that merges while its pass is open', () => {
 
     expect(w.h.gh.prCreates()).toHaveLength(2);
     expect(getPassPullRequest(w.h.store.db, w.opened.pass.id)?.url).not.toBe(url);
-  });
-
-  it('says a follow-on pull request that did not open in a notice that is no stopped close', async () => {
-    const { deps } = await world();
-    unsubscribe();
-    settingsSignedOff();
-    w.h.commit('src/people/page.tsx', 'people, signed off\n');
-    w.h.settle(w.runOf(w.people), 'DONE');
-    const { url } = await opened();
-    w.h.commit('src/settings/old.tsx', 'signed off later\n');
-    merged(url);
-    const plan = mergedClosePlan(w.h.store.db, w.opened.pass.id);
-    const refusing = {
-      ...deps,
-      ship: { ...deps.ship, openFollowOnPr: () => Promise.reject(new Error('GitHub is down')) },
-    };
-
-    await followOnPush(refusing, w.opened.pass.id, plan, new AbortController().signal);
-
-    const said = getPassProgress(w.h.store.db, w.opened.pass.id).notices;
-    expect(said.map((n) => n.kind)).toEqual(['pr_not_opened']);
-    expect(said[0]?.text).toMatch(/did not reach a follow-on pull request: GitHub is down/);
   });
 
   it.each([

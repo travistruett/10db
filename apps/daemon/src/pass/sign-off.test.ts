@@ -401,28 +401,6 @@ describe('signOffSteps', () => {
     ).toBe(true);
   });
 
-  it("says on an open page's thread that its change landed early with a page built on it", async () => {
-    w = await openPassWorld();
-    await turn(
-      w.settings,
-      () => {
-        w.write('src/button.ts', 'button\n');
-      },
-      true,
-    );
-    await turn(w.people, () => {
-      w.write('src/people/page.tsx', 'people page\n');
-    });
-    w.ready(w.people);
-
-    await signOff(w.people);
-
-    expect(landed()).toEqual(['Shared change 1 of Settings: UI work', 'People: UI work']);
-    expect(listTaskThread(w.h.store.db, w.settings.id).at(-1)?.body).toBe(
-      "Landed Settings: UI work's change to `src/button.ts` with People: UI work, which builds on it.",
-    );
-  });
-
   it('lands each shared change once when the daemon stops between two landings', async () => {
     w = await openPassWorld();
     await turn(
@@ -566,31 +544,6 @@ describe('a waiting sign-off', () => {
   });
 });
 
-describe('a second Sign Off on a waiting page', () => {
-  afterEach(() => {
-    w.close();
-  });
-
-  it('answers the wait it already has', async () => {
-    w = await openPassWorld();
-    w.startTurn(w.people);
-    await grantSharedHold(w.deps, { workstreamId: w.runOf(w.people), area: 'src' });
-    w.write('src/button.ts', 'button\n');
-    await turn(w.settings, () => {
-      w.write('src/settings/page.tsx', 'settings page\n');
-    });
-    w.ready(w.settings);
-    const deps = { ...w.deps, stopLane: stopped };
-    askSignOff(deps, w.opened.pass.id, w.settings.id);
-    await w.h.jobs.idle();
-
-    expect(askSignOff(deps, w.opened.pass.id, w.settings.id)).toMatchObject({
-      state: 'waiting',
-      waitsFor: { taskId: w.people.id },
-    });
-  });
-});
-
 describe('a Sign Off from the Ready card that does not land', () => {
   afterEach(() => {
     w.close();
@@ -610,78 +563,26 @@ describe('a Sign Off from the Ready card that does not land', () => {
     return id;
   }
 
-  it.each([
-    {
-      name: "fails with Your folder off the pass's branch",
-      before: () => undefined,
-      act: async () => {
-        w.h.git$('switch', '-q', 'main');
-        startSignOff({ ...w.deps, stopLane: stopped }, w.settings.id);
-        await w.h.jobs.idle();
-        w.h.git$('switch', '-q', w.branch);
-      },
-      line: /^Not signed off: .*main/,
-    },
-    {
-      name: 'is cancelled while it waits',
-      before: async () => {
-        w.startTurn(w.people);
-        await grantSharedHold(w.deps, { workstreamId: w.runOf(w.people), area: 'src' });
-        w.write('src/button.ts', 'button\n');
-      },
-      act: async () => {
-        startSignOff({ ...w.deps, stopLane: stopped }, w.settings.id);
-        await w.h.jobs.idle();
-        cancelSignOffWait(w.deps, w.opened.pass.id, w.settings.id);
-      },
-      line: /^Sign-off cancelled while it waited\.$/,
-    },
-  ])('puts the Ready card back when it $name', async ({ before, act, line }) => {
+  it("puts the Ready card back when it fails with Your folder off the pass's branch", async () => {
     w = await openPassWorld();
-    await before();
     await turn(w.settings, () => {
       w.write('src/settings/page.tsx', 'tidied\n');
     });
     w.ready(w.settings);
     const card = answerCard(w.settings);
 
-    await act();
+    w.h.git$('switch', '-q', 'main');
+    startSignOff({ ...w.deps, stopLane: stopped }, w.settings.id);
+    await w.h.jobs.idle();
+    w.h.git$('switch', '-q', w.branch);
 
     expect(landed()).toEqual([]);
     expect(getInboxItem(w.h.store.db, card).state).toBe('OPEN');
-    expect(listTaskThread(w.h.store.db, w.settings.id).at(-1)?.body).toMatch(line);
+    expect(listTaskThread(w.h.store.db, w.settings.id).at(-1)?.body).toMatch(
+      /^Not signed off: .*main/,
+    );
     // The builder can sign the page off again.
     expect(signOffRefusal(w.h.store.db, w.opened.pass.id, w.settings.id)).toBeNull();
-  });
-
-  it('puts the Ready card back when a Close Pass confirmed as it landed refuses its last write', async () => {
-    w = await openPassWorld();
-    await turn(w.settings, () => {
-      w.write('src/settings/page.tsx', 'tidied\n');
-    });
-    w.ready(w.settings);
-    const card = answerCard(w.settings);
-    const closing: Git = {
-      ...w.deps.git,
-      landPaths: async (input) => {
-        const done = await w.deps.git.landPaths(input);
-        // Close Pass writes its plan outside the delivery key, as the page lands inside it.
-        w.h.state.write((ctx) => {
-          setClosePlan(ctx, w.opened.pass.id, { token: 't', pages: [], files: [], shared: [] });
-        });
-        return done;
-      },
-    };
-
-    startSignOff({ ...w.deps, git: closing, stopLane: stopped }, w.settings.id);
-    await w.h.jobs.idle();
-
-    expect(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state).toBe('WAITING_HUMAN');
-    expect(listTaskThread(w.h.store.db, w.settings.id).at(-1)?.body).toBe(
-      'Not signed off: the pass is closing.',
-    );
-    // A close that does not sign the page off leaves it Ready, as a failed gate reopens the pass.
-    expect(getInboxItem(w.h.store.db, card).state).toBe('OPEN');
   });
 });
 

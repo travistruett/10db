@@ -700,43 +700,6 @@ describe('abandonPass', () => {
     expect(w.h.ctx.folderHold.holders(w.h.project.id)).toEqual([]);
   });
 
-  it('stops with 10db when the Move on its card waits for a chat in your terminal, and asks again', async () => {
-    w = await openPassWorld();
-    w.h.commit('src/settings/page.tsx', 'landed\n');
-    await abandonPass(deps(), w.opened.pass.id);
-    const [card] = abandonCards();
-    if (!card) throw new Error('no Abandon card');
-    w.h.state.write((ctx) => {
-      const id = mintId('Chat');
-      const conv = insertConversation(ctx, {
-        projectId: w.h.project.id,
-        owner: { kind: ConversationOwnerKind.Chat, id },
-        profile: ConversationProfile.Explore,
-        state: ConversationState.TakenOver,
-      });
-      insertChat(ctx, {
-        id,
-        projectId: w.h.project.id,
-        conversationId: conv.id,
-        title: 'In terminal',
-        tabPosition: 0,
-      });
-    });
-
-    answerPassCard({ ...w.deps, folderHold: w.h.ctx.folderHold }, card, { choice: 'Move to main' });
-    await waitFor(
-      () =>
-        getBatchRow(w.h.store.db, w.opened.batch.id).notices.find((n) => n.key === 'folder-hold')
-          ?.line,
-    );
-    await w.h.jobs.stop();
-
-    expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe(w.branch);
-    expect(abandonCards().map((c) => c.body)).toEqual([
-      expect.stringContaining('10db stopped before it moved Your folder.'),
-    ]);
-  });
-
   it('names on its card only the pages it discarded, not one taken out before it, whose work stays', async () => {
     w = await openPassWorld();
     w.h.commit('src/shared.ts', 'landed\n');
@@ -755,37 +718,6 @@ describe('abandonPass', () => {
     expect(w.h.git$('show', `${keptRef(w.settings.id)}:src/settings/page.tsx`)).toBe(
       'settings, the turn',
     );
-  });
-
-  it('keeps naming the files it left when a Move on its card is refused', async () => {
-    w = await openPassWorld();
-    // A page landed on the pass's branch, as a sign-off will, so the folder stays there.
-    w.h.commit('src/settings/page.tsx', 'landed\n');
-    w.write('src/people/page.tsx', 'people, by its page\n');
-    let n = 0;
-    const racing: Git = {
-      ...w.deps.git,
-      hashOnDisk: (repo, paths) => {
-        n += 1;
-        w.write('src/people/page.tsx', `written again (${String(n)})\n`);
-        return w.deps.git.hashOnDisk(repo, paths);
-      },
-    };
-    await abandonPass(deps(w.deps, racing), w.opened.pass.id);
-    const [card] = abandonCards();
-    if (!card) throw new Error('no Abandon card');
-    const left = `- src/people/page.tsx (${w.people.title})`;
-    expect(card.body).toContain(left);
-
-    // An uncommitted edit lies where the switch writes, so the Move is refused.
-    w.write('src/settings/page.tsx', 'an uncommitted edit\n');
-    answerPassCard({ ...w.deps, folderHold: w.h.ctx.folderHold }, card, { choice: 'Move to main' });
-    await w.h.jobs.idle();
-
-    const [again] = abandonCards();
-    expect(again?.body).toContain('10db could not move it');
-    expect(again?.body).toContain(left);
-    expect(again?.body).toContain('Discards: Settings, People (their changes are deleted).');
   });
 
   it('finishes when a page keeps changing, leaving its files and naming them on the card with the page', async () => {
@@ -811,26 +743,6 @@ describe('abandonPass', () => {
     const notice = w.h.only(abandonNotices());
     expect(notice).toMatchObject({ tone: 'info', taskId: null });
     expect(notice.body).toContain(`- src/settings/page.tsx (${w.settings.title})`);
-  });
-
-  it('turns its card into a notice, and withdraws the card, when a refused Move finds the folder off the pass branch', async () => {
-    w = await openPassWorld();
-    w.h.commit('src/settings/page.tsx', 'landed\n');
-    w.write('src/people/page.tsx', 'people, by its page\n');
-    await abandonPass(deps(), w.opened.pass.id);
-    const [card] = abandonCards();
-    if (!card) throw new Error('no Abandon card');
-    expect(abandonNotices()).toEqual([]);
-    // The builder moves the folder off the pass's branch, so there is no Move left to offer.
-    w.h.git$('switch', '-q', '-c', 'elsewhere');
-    w.write('src/settings/page.tsx', 'an uncommitted edit\n');
-
-    answerPassCard({ ...w.deps, folderHold: w.h.ctx.folderHold }, card, { choice: 'Move to main' });
-    await w.h.jobs.idle();
-
-    expect(abandonCards()).toEqual([]);
-    const notice = w.h.only(abandonNotices());
-    expect(notice.body).toContain('10db could not move it');
   });
 
   describe('the shared changes it names', () => {

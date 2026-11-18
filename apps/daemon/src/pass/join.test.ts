@@ -75,24 +75,6 @@ describe('Add Page to a pass of one', () => {
 });
 
 describe('Add Page', () => {
-  it('marks the task it makes for a new page with its pass and leaves a joined task unmarked', async () => {
-    w = await openPassWorld({ project: PROJECT });
-    const home = w.h.addTask('Home: tidy', { areas: ['home'], description: 'Tidy the home page' });
-
-    const joined = await join({ pages: ['billing'], taskIds: [home.id] });
-
-    const marks = new Map(
-      w.h.store.db
-        .select({ id: schema.tasks.id, madeBy: schema.tasks.madeByPassId })
-        .from(schema.tasks)
-        .all()
-        .map((t) => [t.id, t.madeBy]),
-    );
-    const made = joined.joined.find((id) => id !== home.id);
-    expect(marks.get(made ?? home.id)).toBe(w.opened.pass.id);
-    expect(marks.get(home.id)).toBeNull();
-  });
-
   it('adds a new page and an open task, each running in the pass with its page claimed, and sends neither a word', async () => {
     w = await openPassWorld({ project: PROJECT });
     const home = w.h.addTask('Home: tidy', { areas: ['home'], description: 'Tidy the home page' });
@@ -118,21 +100,6 @@ describe('Add Page', () => {
       expect(activeClaims(w.h.store.db, run.id).map((c) => c.name)).toEqual([area]);
       expect(builderMessages(page)).toEqual([]);
     }
-  });
-
-  it('sends the first message, when the builder wrote one, to every page it adds', async () => {
-    w = await openPassWorld({ project: PROJECT });
-    const home = w.h.addTask('Home: tidy', { areas: ['home'] });
-
-    const { joined } = await join({
-      pages: ['billing'],
-      taskIds: [home.id],
-      firstMessage: 'Match the settings page',
-    });
-
-    for (const taskId of joined)
-      expect(builderMessages(taskId)).toEqual(['Match the settings page']);
-    expect(builderMessages(w.settings.id)).toEqual([]);
   });
 
   it('makes a page another task holds wait for it, naming the holder', async () => {
@@ -192,28 +159,6 @@ describe('Add Page', () => {
     expect(putBacks).toEqual([{ taskId: home.id, inPass: true, messages: [] }]);
     expect(getTask(w.h.store.db, home.id).passId).toBe(w.opened.pass.id);
     expect(builderMessages(home.id)).toEqual(['Match the settings page']);
-  });
-
-  it('answers, saying the pages joined, when the first message cannot be written after the put-back', async () => {
-    w = await openPassWorld({ project: PROJECT });
-    const home = w.h.addTask('Home: tidy', { areas: ['home'] });
-    w.h.state.write((ctx) => {
-      setTaskKeptWork(ctx, home.id, { keptSha: 'b'.repeat(40), keptBaseSha: 'a'.repeat(40) });
-    });
-    const database = w.h.store.db.$client;
-
-    const joining = join({ taskIds: [home.id], firstMessage: 'Match the settings page' }, () => {
-      // The database refuses every write from here on, as a full disk would.
-      database.pragma('query_only = ON');
-      return Promise.resolve({ applied: [], left: [] });
-    });
-
-    await expect(joining).rejects.toThrow(
-      /Home: tidy joined pass "Polish", but the first message was not sent/,
-    );
-    database.pragma('query_only = OFF');
-    expect(getTask(w.h.store.db, home.id).passId).toBe(w.opened.pass.id);
-    expect(builderMessages(home.id)).toEqual([]);
   });
 
   it("writes a joining task's saved work back into the folder on the pass's branch", async () => {

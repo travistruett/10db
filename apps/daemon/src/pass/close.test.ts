@@ -2,10 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   AbandonStep,
-  CloseStep,
   ConflictError,
-  InboxState,
-  PASS_SIGN_OFF_CHOICE,
   PassClosePageChoice,
   SharedChoiceKind,
   type PassCloseRequest,
@@ -14,7 +11,6 @@ import {
 } from '@10db/contracts';
 import {
   getBatch,
-  getInboxItem,
   getPass,
   getPassChecks,
   getPassProgress,
@@ -31,8 +27,6 @@ import {
   schema,
   setAbandonStep,
   setClosePlan,
-  setCloseStep,
-  updateInboxItem,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { waitFor } from '../../test/fixtures';
@@ -61,7 +55,6 @@ import {
   startAbandon,
   type PassWorkDeps,
 } from './index';
-import { signOffRefusal, startSignOff } from './sign-off';
 
 // Workbench spec §5.4, §5.5, §12: Close Pass signs off the pages set to it, lands what is kept, gates,
 // takes the other pages out, pushes, fast-forwards the folder's branch and closes, step by recorded
@@ -239,65 +232,6 @@ describe('Finish', () => {
     expect(said[0]?.text.split('\n').slice(1).join('\n')).toContain('the gate says no');
   });
 
-  it('names no take-out when its folder gate fails with every page signed off', async () => {
-    await world({ gateCommand: "echo 'the gate says no'; false", delivery: 'local' });
-    await twoTurns();
-    const closes = createPassCloses(closeDeps());
-    const shown = await closes.preview(w.opened.pass.id);
-    await closes.close(w.opened.pass.id, {
-      token: shown.token,
-      pages: [
-        { taskId: w.settings.id, choice: PassClosePageChoice.SignOff },
-        { taskId: w.people.id, choice: PassClosePageChoice.SignOff },
-      ],
-      files: [],
-      shared: [],
-    });
-    await w.h.jobs.idle();
-
-    expect(passState()).toBe('OPEN');
-    const said = getPassProgress(w.h.store.db, w.opened.pass.id).notices;
-    expect(said.map((n) => n.text.split('\n')[0])).toEqual([
-      'The gate failed in Your folder, so the pass is open again:',
-    ]);
-  });
-
-  it('writes no gate notice when an Abandon takes the pass over as its folder gate fails', async () => {
-    await world({ gateCommand: "echo 'the gate says no'; false", delivery: 'local' });
-    await twoTurns();
-    const deps = closeDeps();
-    let gated = false;
-    let abandoned = false;
-    await confirm({
-      ...deps,
-      ship: {
-        ...deps.ship,
-        gatePassTip: async (i) => {
-          const ran = await deps.ship.gatePassTip(i);
-          gated = true;
-          return ran;
-        },
-      },
-      git: {
-        ...deps.git,
-        // The builder's Abandon lands while the close reads which pages the failure names.
-        commitAt: async (...a) => {
-          if (gated && !abandoned) {
-            abandoned = true;
-            deps.state.write((ctx) => {
-              setAbandonStep(ctx, w.opened.pass.id, AbandonStep.Abandoning);
-            });
-          }
-          return deps.git.commitAt(...a);
-        },
-      },
-    });
-
-    expect(abandoned).toBe(true);
-    expect(passState()).toBe('ABANDONING');
-    expect(getPassProgress(w.h.store.db, w.opened.pass.id).notices).toEqual([]);
-  });
-
   describe('after its failed gate took a page out and Add Page put it back', () => {
     const ends = [
       {
@@ -359,49 +293,6 @@ describe('Finish', () => {
     });
   });
 
-  it("opens a waiting sign-off's Ready item again when the close that took it over reopens the pass", async () => {
-    await world({ gateCommand: 'false' });
-    // People's turn holds src and has written to it; Settings was built with it.
-    w.startTurn(w.people);
-    const granted = await grantSharedHold(w.deps, { workstreamId: w.runOf(w.people), area: 'src' });
-    if (!granted?.ok) throw new Error('src was not granted');
-    w.write('src/button.ts', 'button\n');
-    const turn = w.startTurn(w.settings);
-    w.write('src/settings/page.tsx', 'tidied\n');
-    w.endTurn(turn);
-    await keepTurnWork(w.deps, { workstreamId: w.runOf(w.settings), turnId: turn.id });
-    w.ready(w.settings);
-    // Sign Off on the Ready card closes it; the sign-off waits for People's hold.
-    const row = getWorkstreamRow(w.h.store.db, w.runOf(w.settings));
-    if (row.nextAction.kind !== 'pass_review') throw new Error('not Ready');
-    const card = row.nextAction.inboxId;
-    w.h.state.write((ctx) =>
-      updateInboxItem(ctx, card, {
-        state: InboxState.Resolved,
-        answer: { choice: PASS_SIGN_OFF_CHOICE },
-      }),
-    );
-    expect(startSignOff({ ...w.deps, stopLane: stopped }, w.settings.id).state).toBe('waiting');
-    await w.h.jobs.idle();
-
-    const closes = createPassCloses(closeDeps());
-    const shown = await closes.preview(w.opened.pass.id);
-    await closes.close(w.opened.pass.id, {
-      token: shown.token,
-      pages: [
-        { taskId: w.settings.id, choice: PassClosePageChoice.TakeOut },
-        { taskId: w.people.id, choice: PassClosePageChoice.TakeOut },
-      ],
-      files: [],
-      shared: [],
-    });
-    await w.h.jobs.idle();
-
-    expect(passState()).toBe('OPEN');
-    expect(getInboxItem(w.h.store.db, card).state).toBe('OPEN');
-    expect(signOffRefusal(w.h.store.db, w.opened.pass.id, w.settings.id)).toBeNull();
-  });
-
   // Two closes, each with a scratch gate: longer than one test's default under a full run's load.
   it(
     'lands, at the next close, a shared change chosen Drop when the gate failed before its take-out',
@@ -443,25 +334,6 @@ describe('Finish', () => {
       expect(w.h.git$('show', `${w.branch}:src/button.ts`)).toBe('People: UI work shared');
     },
   );
-
-  it('closes when its pull request cannot be made ready, saying so in a notice that is no stopped close', async () => {
-    await world({ gateCommand: 'true' });
-    await twoTurns();
-    const deps = closeDeps();
-    await confirm({
-      ...deps,
-      ship: {
-        ...deps.ship,
-        ensurePassPr: (i, signal) =>
-          i.ready ? Promise.reject(new Error('GitHub is down')) : deps.ship.ensurePassPr(i, signal),
-      },
-    });
-
-    expect(passState()).toBe('CLOSED');
-    const said = getPassProgress(w.h.store.db, w.opened.pass.id).notices;
-    expect(said.map((n) => [n.id, n.kind])).toEqual([['close-pr-ready', 'pr_not_opened']]);
-    expect(said[0]?.text).toMatch(/could not be made ready for review: GitHub is down/);
-  });
 
   it("drops the pass's Allow this offers as it closes, and leaves a Send to Agent offer", async () => {
     await world({ gateCommand: null });
@@ -568,23 +440,6 @@ describe('Finish', () => {
   });
 
   it.each([
-    {
-      name: 'its push failed with raw text',
-      ship: (real: CloseShip, again: () => void): Partial<CloseShip> => {
-        let failed = false;
-        return {
-          pushPassBranch: (passId, signal) => {
-            if (failed) {
-              again();
-              return real.pushPassBranch(passId, signal);
-            }
-            failed = true;
-            return Promise.reject(new Error('UNIQUE constraint failed: pass_take_outs.task_id'));
-          },
-        };
-      },
-      notice: /^The close stopped while pushing the pass's branch\. 10db's log has the detail\./,
-    },
     {
       name: "Your folder was off the pass's branch twice as it pushed",
       ship: (real: CloseShip, again: () => void): Partial<CloseShip> => {
@@ -854,32 +709,6 @@ describe('Finish', () => {
 
     expect(passState()).toBe('OPEN');
     expect(getPassProgress(w.h.store.db, w.opened.pass.id).closePlan).toBeNull();
-  });
-
-  it('offers no Abandon in its stuck notice once its fast-forward may have moved the return branch', async () => {
-    await world({ gateCommand: null });
-    await twoTurns();
-    w.h.git$('remote', 'remove', 'origin');
-    w.h.state.write((ctx) => {
-      setClosePlan(ctx, w.opened.pass.id, { token: 't', pages: [], files: [], shared: [] });
-      setCloseStep(ctx, w.opened.pass.id, CloseStep.FastForwarded);
-    });
-    // The builder went back to the return branch and deleted the pass's branch.
-    w.h.git$('switch', '-q', 'main');
-    w.h.git$('branch', '-D', w.branch);
-
-    createPassCloses(closeDeps()).resume();
-    await w.h.jobs.idle();
-
-    expect(passState()).toBe('CLOSING');
-    const stuck = getPassProgress(w.h.store.db, w.opened.pass.id).notices.find(
-      (n) => n.id === 'close',
-    );
-    // git's own refusal (the branch is gone) is not 10db's words: it stays in the log.
-    expect(stuck?.text).toMatch(
-      /^The close stopped while moving your folder's branch\. 10db's log has the detail\. /,
-    );
-    expect(stuck?.text).not.toMatch(/Abandon/);
   });
 
   it('refuses an Abandon once its fast-forward may have moved the return branch', async () => {

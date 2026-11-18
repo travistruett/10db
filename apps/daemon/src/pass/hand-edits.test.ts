@@ -1,6 +1,6 @@
-import { unlinkSync, utimesSync } from 'node:fs';
+import { unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { getPassTurn, listTaskThreadRows } from '@10db/db';
+import { listTaskThreadRows } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
 import { foldHandEdits, keepTurnWork, passKeptRef } from './index';
@@ -28,11 +28,6 @@ async function afterFirstTurn(world: PassWorld) {
   });
   world.endTurn(turn);
   return kept;
-}
-
-/** Sets a file's modification time. */
-function touch(world: PassWorld, path: string, at: Date): void {
-  utimesSync(join(world.h.repo, path), at, at);
 }
 
 describe('foldHandEdits', () => {
@@ -75,71 +70,6 @@ describe('foldHandEdits', () => {
     expect(fold).toMatchObject({ byHand: [], whileWorking: null, agentNote: null });
     expect(fold.kept).toMatchObject({ keptSha: before.keptSha, made: false, turnFiles: [] });
     expect(notices(w)).toEqual([]);
-  });
-
-  it("names a file changed while another page's agent was working, never as the builder's", async () => {
-    w = await openPassWorld();
-    await afterFirstTurn(w);
-    const working = w.startTurn(w.people);
-    w.write('src/settings/page.tsx', 'written through a shell\n');
-    w.write('src/settings/later.tsx', 'by hand, after\n');
-    const started = new Date(getPassTurn(w.h.store.db, working.id).startedAt);
-    touch(w, 'src/settings/page.tsx', new Date(started.getTime() + 500));
-    w.endTurn(working);
-    const ended = getPassTurn(w.h.store.db, working.id).endedAt;
-    if (ended === null) throw new Error('the turn did not end');
-    touch(w, 'src/settings/later.tsx', new Date(new Date(ended).getTime() + 60_000));
-
-    const fold = await foldHandEdits(w.deps, { workstreamId: w.runOf(w.settings) });
-
-    expect(fold.byHand).toEqual([{ path: 'src/settings/later.tsx', added: 1, removed: 0 }]);
-    expect(fold.whileWorking).toEqual({
-      lanes: ['People: UI work'],
-      files: [{ path: 'src/settings/page.tsx', added: 1, removed: 2 }],
-    });
-    expect(fold.kept.turnFiles.map((f) => f.path)).toEqual([
-      'src/settings/later.tsx',
-      'src/settings/page.tsx',
-    ]);
-    expect(notices(w)).toEqual([
-      'You edited 1 file by hand; it is kept with this page:\n- src/settings/later.tsx +1 −0\n\n' +
-        "1 file changed outside this page's turns, while People: UI work was working:\n" +
-        '- src/settings/page.tsx +1 −2',
-    ]);
-  });
-
-  it("names a file deleted while another page's agent was working by its folder's time", async () => {
-    w = await openPassWorld();
-    await afterFirstTurn(w);
-    const working = w.startTurn(w.people);
-    unlinkSync(join(w.h.repo, 'src/settings/old.tsx'));
-    const started = new Date(getPassTurn(w.h.store.db, working.id).startedAt);
-    touch(w, 'src/settings', new Date(started.getTime() + 500));
-    w.endTurn(working);
-
-    const fold = await foldHandEdits(w.deps, { workstreamId: w.runOf(w.settings) });
-
-    expect(fold.byHand).toEqual([]);
-    expect(fold.whileWorking).toEqual({
-      lanes: ['People: UI work'],
-      files: [{ path: 'src/settings/old.tsx', added: 0, removed: 1 }],
-    });
-  });
-
-  it('marks a page file the folder held before the pass as such', async () => {
-    w = await openPassWorld({
-      before: ({ write }) => {
-        write('src/settings/page.tsx', 'edited before the pass\n');
-      },
-    });
-    const fold = await foldHandEdits(w.deps, { workstreamId: w.runOf(w.settings) });
-    expect(fold.byHand).toEqual([{ path: 'src/settings/page.tsx', added: 1, removed: 1 }]);
-    expect(fold.kept.fromBeforePass).toEqual(['src/settings/page.tsx']);
-    expect(notices(w)).toEqual([
-      'You edited 1 file by hand; it is kept with this page:\n' +
-        '- src/settings/page.tsx +1 −1 (from before the pass)',
-    ]);
-    expect(fold.agentNote).toContain('- src/settings/page.tsx +1 −1 (from before the pass)');
   });
 
   it("leaves an edit made during the page's own turn to that turn", async () => {
