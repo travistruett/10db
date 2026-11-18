@@ -55,6 +55,8 @@ export interface ChatGitToolsDeps {
    * or a merge, which the judge has already let through; throws the holder's words when it can't.
    */
   readonly takeHere: (chatId: ChatId) => void;
+  /** Drops the branch's cached pull request read, which a push, an open or a merge has made stale. */
+  readonly forgetPullRequest: (chatId: ChatId, branch: string) => void;
 }
 
 export interface ChatGitSession {
@@ -162,6 +164,7 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
       const { repo, branch } = await onBranch(true);
       // Never forced: the daemon's push names one fully qualified ref and no option.
       const run = await steps.push(siteOf(repo), branch);
+      deps.forgetPullRequest(chatId, branch);
       return { done: true, branch, note: run.output.trim().slice(-500) };
     },
     [ChatToolName.OpenPullRequest]: async (args: unknown) => {
@@ -176,12 +179,15 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
         title: input.title,
         body: input.body,
       });
+      deps.forgetPullRequest(chatId, branch);
       return { done: true, url };
     },
     [ChatToolName.MergePullRequest]: async (args: unknown) => {
       const { number } = ChatToolInputs.merge_pull_request.parse(args);
       const { repo } = await holding(true);
       const url = await steps.mergePullRequest(siteOf(repo), number);
+      const branch = await deps.git.currentBranch(repo);
+      if (branch !== null) deps.forgetPullRequest(chatId, branch);
       return { done: true, url };
     },
     [ChatToolName.CommitChanges]: async (args: unknown) => {

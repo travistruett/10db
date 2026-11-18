@@ -2855,6 +2855,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           takeHere: (chatId) => {
             chatWork.takeHereForGitTool(chatId);
           },
+          forgetPullRequest: (chatId, branch) => {
+            chatWork.forgetPullRequest(chatId, branch);
+          },
         },
       }),
     }),
