@@ -113,16 +113,20 @@ export function OpenInbox({
   // Selection follows the row's key, not its position. The row now shown is pinned at once, so a card that
   // sorts in ahead later never takes over the selection, a half-written note or the keys typed after it; and
   // when the selected row leaves, the row at its index takes its place and the leaver's draft goes with it.
-  const pick = nextSelection(keys, selectedKey, lastIndex);
+  // Until the list's first page is in, the remembered row has nothing to be found in: it is kept as it is.
+  const loaded = !open.isPending;
+  const pick = loaded
+    ? nextSelection(keys, selectedKey, lastIndex)
+    : { key: selectedKey, index: lastIndex };
   if (pick.key !== selectedKey) {
     setSelectedKey(pick.key);
     if (selectedKey !== null) setDraft(null);
   }
   if (pick.index !== lastIndex) setLastIndex(pick.index);
   useEffect(() => {
-    rememberSelected(InboxListState.Open, pick.key);
-  }, [pick.key]);
-  const selectedRow = pick.key === null ? null : (shown[pick.index] ?? null);
+    if (loaded) rememberSelected(InboxListState.Open, pick.key);
+  }, [loaded, pick.key]);
+  const selectedRow = !loaded || pick.key === null ? null : (shown[pick.index] ?? null);
   const selectedInbox = selectedRow?.kind === OpenRowKind.Inbox ? selectedRow.row : null;
   const selected = selectedInbox?.items[0] ?? null;
 

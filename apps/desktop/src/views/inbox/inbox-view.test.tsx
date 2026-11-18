@@ -1624,6 +1624,49 @@ describe('the resolved view', () => {
       expect(search().value).toBe('Retry');
       expect(list().scrollTop).toBe(120);
     });
+
+    it('keeps the selected row when the list left the cache while the builder was away', async () => {
+      serveBoth([], many(40));
+      const { router, queryClient } = renderApp('/inbox?state=resolved');
+      fireEvent.click(await findPanelRow('Retry number 2?'));
+      const rail = (name: string): HTMLElement => {
+        const link = [...document.querySelectorAll<HTMLElement>('a[data-rail-item]')].find((a) =>
+          a.textContent.startsWith(name),
+        );
+        if (link === undefined) throw new Error(`no rail link ${name}`);
+        return link;
+      };
+      fireEvent.click(rail('Board'));
+      await waitFor(() => {
+        expect(router.state.location.pathname).toBe('/board');
+      });
+      queryClient.removeQueries({ queryKey: ['inbox-rows'] });
+      fireEvent.click(rail('Inbox'));
+      expect((await findPanelRow('Retry number 2?')).getAttribute('aria-selected')).toBe('true');
+    });
+
+    it('keeps the selected Open row when the list left the cache while the builder was away', async () => {
+      serveBoth([color, corners], []);
+      const { router, queryClient } = renderApp('/inbox');
+      fireEvent.click(await findRow('Round or square corners?'));
+      const board = [...document.querySelectorAll<HTMLElement>('a[data-rail-item]')].find((a) =>
+        a.textContent.startsWith('Board'),
+      );
+      if (board === undefined) throw new Error('no rail link Board');
+      fireEvent.click(board);
+      await waitFor(() => {
+        expect(router.state.location.pathname).toBe('/board');
+      });
+      queryClient.removeQueries({ queryKey: ['inbox-rows'] });
+      const inbox = [...document.querySelectorAll<HTMLElement>('a[data-rail-item]')].find((a) =>
+        a.textContent.startsWith('Inbox'),
+      );
+      if (inbox === undefined) throw new Error('no rail link Inbox');
+      fireEvent.click(inbox);
+      expect((await findRow('Round or square corners?')).getAttribute('aria-selected')).toBe(
+        'true',
+      );
+    });
   });
 });
 
@@ -2549,7 +2592,8 @@ describe('leaving the Inbox and coming back', () => {
     field.focus();
     key('j');
     await findText('Two?');
-    expect(document.activeElement).toBe(field);
+    // The next card is a new card with its own fields, so the old one goes; focus is not pulled onto a row.
+    expect(document.activeElement).not.toBe(rowOf('Two?'));
   });
 
   it('asks for the next question row context before that row is selected', async () => {

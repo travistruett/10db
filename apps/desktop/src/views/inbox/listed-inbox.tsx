@@ -56,13 +56,17 @@ function Rows({
     setSeenList(listKey);
     setLastIndex(0);
   }
-  const pick = nextSelection(keys, selectedKey, lastIndex);
+  // Until the list's first page is in, the remembered row has nothing to be found in: it is kept as it is.
+  const loaded = !rows.isPending;
+  const pick = loaded
+    ? nextSelection(keys, selectedKey, lastIndex)
+    : { key: selectedKey, index: lastIndex };
   if (pick.key !== selectedKey) setSelectedKey(pick.key);
   if (pick.index !== lastIndex) setLastIndex(pick.index);
   useEffect(() => {
-    rememberSelected(state, pick.key);
-  }, [state, pick.key]);
-  const selectedRow = pick.key === null ? null : (shown[pick.index] ?? null);
+    if (loaded) rememberSelected(state, pick.key);
+  }, [loaded, state, pick.key]);
+  const selectedRow = !loaded || pick.key === null ? null : (shown[pick.index] ?? null);
   const item = selectedRow?.kind === OpenRowKind.Inbox ? selectedRow.row.items[0] : null;
 
   useInboxKeys({

@@ -68,26 +68,32 @@ export function InboxRowList<T extends { readonly key: string }>({
     overscan: OVERSCAN_ROWS,
   });
 
-  // Where the builder left the list.
+  // Where the builder left the list: restored once there are rows to scroll over, which is the first draw when
+  // the list was cached and a later one when it had to load again.
+  const hasRows = rows.length > 0;
+  const restored = useRef(initialScroll <= 0);
+  const justRestored = useRef(false);
   useLayoutEffect(() => {
-    if (initialScroll > 0 && viewport.current !== null) viewport.current.scrollTop = initialScroll;
-    // Only the first draw restores the scroll.
+    if (restored.current || !hasRows || viewport.current === null) return;
+    restored.current = true;
+    justRestored.current = true;
+    viewport.current.scrollTop = initialScroll;
+    // Only the first rows restore the scroll.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [hasRows]);
 
   // A row chosen with the keys stays in view, and keeps focus when the list had it.
   const selectedIndex = selected === null ? -1 : rows.findIndex((row) => row.key === selected);
   const arrived = useRef(false);
-  const mounted = useRef(false);
   useEffect(() => {
-    const first = !mounted.current;
-    mounted.current = true;
-    // The restored scroll is the position to keep on the first draw.
-    if (selectedIndex >= 0 && !(first && initialScroll > 0))
-      virtualizer.scrollToIndex(selectedIndex);
+    // The restored scroll is the position to keep.
+    if (selectedIndex >= 0 && !justRestored.current) virtualizer.scrollToIndex(selectedIndex);
     // The virtualizer is stable; only the selection moving scrolls.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedIndex]);
+  useEffect(() => {
+    justRestored.current = false;
+  });
 
   // Focus moves with the selection only while it is on a row or not yet anywhere in the page's content: a
   // click or a Tab elsewhere is left alone.
