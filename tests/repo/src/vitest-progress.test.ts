@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
 import { envWithoutGitVariables } from './fixtures';
-import { repoRoot } from './workspace';
+import { readRepoFile, repoRoot } from './workspace';
 
 const fixture = join(repoRoot, 'tests/repo/fixtures/vitest-progress');
 
@@ -25,4 +25,10 @@ it('prints a line as each test file starts, before vitest reports the file', () 
   const reported = result.stdout.indexOf('✓ one.check.mjs');
   expect(started, result.stdout).toBeGreaterThanOrEqual(0);
   expect(reported, result.stdout).toBeGreaterThan(started);
+});
+
+it('is one of the root config’s reporters, so every gate step that runs vitest prints it', () => {
+  expect(readRepoFile('vitest.config.ts')).toMatch(
+    /const reporters = \[[^\]]*'\.\/scripts\/vitest-progress\.mjs'/,
+  );
 });

@@ -440,12 +440,6 @@ function knipStep() {
 }
 
 /**
- * Vitest's default reporter, plus a line as each test file starts, so a test step that hangs names
- * the file it was running. The path is from the repository root, where every step runs.
- */
-const VITEST_REPORTERS = ['--reporter=default', '--reporter=./scripts/vitest-progress.mjs'];
-
-/**
  * @param {string[]} tests repo-relative test files in tests/repo
  * @returns {Step}
  */
@@ -453,7 +447,7 @@ function repoDocTestsStep(tests) {
   return {
     name: 'repo rules',
     command: 'pnpm',
-    args: ['exec', 'vitest', 'run', ...VITEST_REPORTERS, ...tests],
+    args: ['exec', 'vitest', 'run', ...tests],
   };
 }
 
@@ -613,7 +607,6 @@ async function main() {
               'exec',
               'vitest',
               'run',
-              ...VITEST_REPORTERS,
               '--passWithNoTests',
               ...plan.affected.map((d) => `${d}/`),
             ],

@@ -333,7 +333,7 @@ describe('scripts/check-changed.mjs --precheck, run', () => {
   // The four per-package steps, plus knip and the docs rule tests, which `runPrecheckEverywhere` adds.
   const EVERY_PACKAGE_STEPS = [
     'pnpm exec knip',
-    'pnpm exec vitest run --reporter=default --reporter=./scripts/vitest-progress.mjs tests/repo/src/agent-docs.test.ts tests/repo/src/architecture-docs.test.ts',
+    'pnpm exec vitest run tests/repo/src/agent-docs.test.ts tests/repo/src/architecture-docs.test.ts',
     'pnpm run drift',
     'pnpm run format:check',
     'pnpm run lint',
@@ -489,7 +489,7 @@ describe('scripts/check-changed.mjs --precheck, run', () => {
     const run = runFailing('exec\\ vitest*', ['apps/x/src/a.ts']);
     expect(run.status).toBe(1);
     expect(run.stdout).toContain(
-      '\nFAILED test: pnpm exec vitest run --reporter=default --reporter=./scripts/vitest-progress.mjs --passWithNoTests apps/x/ (log .gate/test.log)\n',
+      '\nFAILED test: pnpm exec vitest run --passWithNoTests apps/x/ (log .gate/test.log)\n',
     );
     expect(run.stdout.trimEnd().split('\n').at(-1)).toMatch(/^CHECK-CHANGED FAIL: test \(\d+s\)$/);
     expect(readFileSync(join(run.dir, '.gate/test.log'), 'utf8')).toBe("the step's output\n");
@@ -527,7 +527,7 @@ describe('scripts/check-changed.mjs --precheck, run', () => {
     const failed = run.stdout.split('\n').filter((line) => line.startsWith('FAILED '));
     expect(failed).toEqual([
       'FAILED format: node scripts/check-changed.mjs (log .gate/format.log)',
-      'FAILED test: pnpm exec vitest run --reporter=default --reporter=./scripts/vitest-progress.mjs --passWithNoTests apps/x/ (log .gate/test.log)',
+      'FAILED test: pnpm exec vitest run --passWithNoTests apps/x/ (log .gate/test.log)',
     ]);
   });
 

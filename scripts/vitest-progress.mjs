@@ -1,6 +1,6 @@
 // A Vitest reporter that prints a line as each test file starts. Vitest's own reporters print a file
 // only once it finishes, so a gate step that hangs or times out would otherwise not name the file it
-// was running. Gate steps that run tests add it beside the default reporter.
+// was running. The root vitest.config.ts lists it beside Vitest's default reporters.
 import { relative } from 'node:path';
 
 /** @implements {import('vitest/node').Reporter} */
