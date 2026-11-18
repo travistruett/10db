@@ -1,3 +1,4 @@
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { RIGORS, Rigor, type AccountDto, type ModelRowDto, type StepRole } from '@10db/contracts';
 import { Button, Group, SegmentedControl, Select, Stack, Text, Title } from '@mantine/core';
 import { useState } from 'react';
@@ -85,11 +86,7 @@ export function AgentsView({ account }: { readonly account: AccountDto }) {
       </Stack>
     );
   if (models.data === undefined)
-    return (
-      <Stack>
-        <Text c="dimmed">Loading models…</Text>
-      </Stack>
-    );
+    return <PageLoading shape={PageLoadingShape.List} label="Loading models" />;
 
   const everyModel = models.data;
   // Rows of another account stay up while this one loads; no ring is drawn on a price that is not this account's.

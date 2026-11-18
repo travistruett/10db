@@ -162,26 +162,31 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   A count is a small pill no taller than its label's text, in the sidebar, on tabs and in buttons. It is muted
   (`tone` neutral, the default) and blue (`tone="attention"`) only when it means something needs the builder:
   Inbox's Open tab, the Sessions and Workbench needs-you counts.
-- **Page header:** a view's title and actions go in the frame's title row (`TitleRow`,
-  `apps/desktop/src/shell/title-row.tsx`): the title at 14 px, an optional switcher beside it, an optional dim
-  meta line, then the actions at the right. Under it, at the top of the content, `PageIntro`
-  (`apps/desktop/src/shell/page-intro.tsx`) holds an optional one-line dimmed byline and an optional toolbar,
-  tabs left and filters right. A part that is absent takes no space. Workspaces, where the content is the work,
-  keep compact headers of their own: Sessions, Plan and an open Workbench pass.
-- **Surfaces:** the frame (rail, panel and title row) is flat and has no border or shadow. The rail is `bg0`,
-  one step darker, so it reads as the window's edge; the panel and the title row are `bg1`. The content sits on
-  one rounded `md` surface in `bg0`, inset 8 px from the right and bottom (6 px under 640 px), with a 1 px `bg2`
-  ring and one tight shadow (`0 1px 2px`). That is the only shadow in the window: a conversation's header takes
-  a 1 px hairline while its list scrolls under it, and nothing else casts one. Cards on the surface do not wear a
-  border and a shadow as well.
+- **Page header:** a page has one header, the frame's title row (`TitleRow`,
+  `apps/desktop/src/shell/title-row.tsx`), at the top of the content column on the content's own tone: the title
+  at 14 px / 600, an optional switcher beside it, an optional dim meta line, then the actions at the right (28 px
+  controls, `default` or one `primary`, then ⋯). Nothing in the content repeats it: no second title or byline that
+  names the same thing and no heading larger than the title. Under it, at the top of the content, `PageIntro`
+  (`apps/desktop/src/shell/page-intro.tsx`) holds at most one dim intro line (13 px, a sentence) and one toolbar,
+  underlined tabs on the left and filters on the right, whose first label sits on the content's edge. A part that
+  is absent takes no space. The type scale under the title: in-content section heads 14 / 600, card and row titles
+  14 / 500, a drawer's title 16 / 600, body 14, meta 12. A split view's pane may have a 13 px / 600 label row with
+  its own actions. Workspaces, where the content is the work, keep compact headers of their own: Sessions and an
+  open Workbench pass.
+- **Surfaces:** the window is two columns divided by 1 px `bg2` hairlines. The sidebar (the rail and the section's
+  panel) is `bg1` from the window's top to its bottom and carries the traffic lights; the content column, its
+  title row included, is `bg0` from top to bottom. There is no header band and no inset card. Nothing on the frame
+  casts a shadow: sheets (the sidebar over the content in a narrow window) and drawers do, and a conversation's
+  header or the title row takes a 1 px hairline while content scrolls under it. Cards on the content do not wear a
+  border and a shadow as well. A control sits on `bg1` in both schemes (`theme.ts`).
 - **Drawers:** one slide-out kind, `SurfaceDrawer` (`apps/desktop/src/shell/surface-drawer.tsx`), from the
-  content surface's right edge: half the surface, 480 to 760 px, all of it under 640 px, in the surface's tone with
-  a 1 px `bg2` left edge. It slides in over 150 ms (at once with reduced motion), is not modal, and closes with
+  content column's right edge, flush to the window: half the column, 480 to 760 px, all of it under 640 px, in the
+  content's tone with a 1 px `bg2` left edge, 24 px insets, no eyebrow and a 16 px / 600 title. It slides in over 150 ms (at once with reduced motion), is not modal, and closes with
   Esc inside it or its ×.
 - **Loading:** a page draws its header first, since the title and byline are known before the data. After 300 ms
   of waiting, quiet placeholder rows in the shape of what is coming take the content's place
   (`PageLoading`, `apps/desktop/src/shell/page-loading.tsx`: a list, cards or transcript lines), always static,
-  with no shimmer. A page never shows a lone spinner as its whole content; a spinner
+  with no shimmer, and no wider than 720 px. A page never shows a lone spinner as its whole content; a spinner
   stays inside a button or a row.
 - **Picking several from a list that is bounded** (a project's pages, which the builder reads whole) is tickable
   rows, each a checkbox named by the item, with its detail on the same line and why it can't be picked under it
@@ -196,12 +201,15 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   above the form where it can be scrolled away.
 - **Modals:** a form modal is centered, with a header and a footer of actions that stay put while its
   body scrolls.
-- **Navigation:** a 52 px icon rail holds the sections, global ones above the project's, with Settings at the
-  foot; the active item fills with `bg1`, the panel's tone, with no outline. A section with a list has a 260 px
-  panel beside the rail (Settings' sections today). From 1000 px both show
-  and ⌘\ hides the panel; from 640 px the rail shows and the panel opens over the content from the sidebar
-  button; under 640 px both fold behind it. The title row sits beside the traffic lights, 44 px tall; a pipe
-  carries the panel's edge up through it.
+- **Navigation:** the sidebar's rail holds the sections, global ones above the project's, with Settings at the
+  foot. It is labelled (200 px) and ⇧⌘S switches it to icons only (76 px, each name in a tooltip), remembered. The
+  active row fills with `bg2`; hover is half of it. The project is a row of its tile and name (a tile alone when
+  icons only). A section with a list has a 260 px panel beside the rail (Settings' sections today), whose head
+  is the sidebar's top row with the section's name and controls. From 1000 px both show and ⌘\, a click on the
+  open section's rail item or the head's button hides the panel. From 640 px the rail is icons only and ⇧⌘S opens the
+  labelled sidebar over the content, ⌘\ the panel beside the icons; under 640 px the sidebar folds and the toggle
+  beside the traffic lights opens it. The title row sits at the top of the content, level with the traffic lights,
+  44 px tall.
 - **Tooltips:** the bright ink on the base tone in both schemes, 12 px and tight (`theme.ts`); a view never styles
   its own. A view with unsaved edits asks before anything discards them (`shell/unsaved-guard.tsx`).
 - **Scope follows the question, not the screen**
