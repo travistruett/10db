@@ -4,6 +4,30 @@ const MIN_BUDGET = 3;
 const CODE_LINES_PER_TEST = 200;
 /** Playwright's core flows are the main check, so their specs never count against the budget. */
 const E2E_PREFIX = 'apps/desktop/e2e/';
+/**
+ * Core code, whose unit tests `.claude/rules/testing.md` asks for, so they never count against the
+ * budget: the guard, sandboxes, permissions, trust, git, recovery and claims, and migrations.
+ */
+const CORE_PREFIXES = [
+  'apps/daemon/src/guard/',
+  'apps/daemon/src/sandbox/',
+  'apps/daemon/src/permissions/',
+  'apps/daemon/src/trust/',
+  'apps/daemon/src/git/',
+  'apps/daemon/src/recovery/',
+  'apps/daemon/src/hazards/',
+  'packages/db/src/migrations-',
+  'tests/repo/src/git-guard',
+];
+const CORE_SUFFIX = '.seatbelt.test.ts';
+
+function isExempt(file: string): boolean {
+  return (
+    file.startsWith(E2E_PREFIX) ||
+    file.endsWith(CORE_SUFFIX) ||
+    CORE_PREFIXES.some((prefix) => file.startsWith(prefix))
+  );
+}
 /** A line that opens a case: `it(`, `test(`, `it.each(…)(`, `it.skip(`, a tagged template row. */
 const CASE_LINE = /^[+-]\s*(it|test)(\.\w+)*\s*[(`]/;
 const REASON_LINE = /^Test-budget:[ \t]*\S/m;
@@ -28,7 +52,7 @@ export function countTestCases(diff: string): number {
       file = line.startsWith('+++ b/') ? line.slice('+++ b/'.length) : '';
       continue;
     }
-    if (line.startsWith('--- ') || file.startsWith(E2E_PREFIX)) continue;
+    if (line.startsWith('--- ') || isExempt(file)) continue;
     if (!CASE_LINE.test(line)) continue;
     count += line.startsWith('+') ? 1 : -1;
   }
@@ -73,7 +97,7 @@ export function checkTestBudget(input: {
     message: [
       `This pull request ${counted}.`,
       'Add a line starting `Test-budget: <reason>` to the pull request body and save it; the check reruns on the edit. A 10db lane puts that line in the message of the commit that adds the tests.',
-      'Playwright e2e specs under apps/desktop/e2e do not count.',
+      'Playwright e2e specs and tests of core code (guard, sandbox, permissions, trust, git, recovery, claims, migrations) do not count.',
     ].join('\n'),
   };
 }
