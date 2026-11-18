@@ -448,6 +448,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     shapeHold.names = names;
     deps.status.hold(SHAPE_HOLD_STATUS_KEY, {
       kind: StatusKind.UpdateHold,
+      label: 'Update waiting on a shaping turn',
       line: `Holding new lanes: an update waits for ${names}`,
       details: shapeHoldDetails(names, drainingSince),
       culprits: [],

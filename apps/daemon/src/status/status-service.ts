@@ -5,7 +5,7 @@ import type { Clock, Timer } from '../clock';
 export const STATUS_HYSTERESIS_MS = 2 * 60_000;
 
 /** What a source says about a hold; the service adds the key and when it began. */
-export type StatusHold = Pick<StatusLine, 'kind' | 'line' | 'details' | 'culprits'>;
+export type StatusHold = Pick<StatusLine, 'kind' | 'label' | 'line' | 'details' | 'culprits'>;
 
 export interface StatusService {
   /** A hold starts, or a hold that continues is reworded. */

@@ -62,6 +62,7 @@ export function createModelListWait(deps: {
       waiting.set(account.id, { since: deps.clock.now() });
       deps.status.hold(statusKey(account.id), {
         kind: StatusKind.ModelListWait,
+        label: `${account.label} waiting for models`,
         line: `${account.label} is waiting for its model list`,
         details: `10db has no model profile for ${account.label} yet, so its queued work waits and is tried again when the model list arrives.`,
         culprits: [],

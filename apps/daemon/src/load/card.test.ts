@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { gateNote, overloadStatus } from './card';
+import { gateNote, overloadStatus, shortName } from './card';
 import type { Culprit, OverloadReport } from './guard';
 
 const report = (culprits: readonly Culprit[]): OverloadReport => ({
@@ -35,19 +35,19 @@ describe('overloadStatus', () => {
         },
       ]),
     );
-    expect(card.details).toContain(
-      'pid 4242 (sh loop.sh) at 100% of a core: the lane for task "Fix login"',
-    );
-    expect(card.details).toContain(
-      'pid 4300 (vitest run) at 80% of a core: the shipping gate of batch "Greetings"',
-    );
+    expect(card.culprits[0]).toEqual({
+      name: 'sh',
+      cpuPct: 100,
+      owner: 'the lane for task "Fix login"',
+    });
+    expect(card.culprits[1]?.owner).toBe('the shipping gate of batch "Greetings"');
   });
 
   it('says a process that is not 10db’s is not', () => {
     const card = overloadStatus(
       report([{ pid: 9, cpu: 300, command: 'ffmpeg', owner: { kind: 'other' } }]),
     );
-    expect(card.details).toContain('pid 9 (ffmpeg) at 300% of a core: not 10db’s');
+    expect(card.culprits[0]).toEqual({ name: 'ffmpeg', cpuPct: 300, owner: 'not 10db’s' });
     expect(card.details).toContain('Nothing here is 10db’s');
   });
 
@@ -81,7 +81,7 @@ describe('overloadStatus', () => {
     const card = overloadStatus(
       report([{ pid: 11, cpu: 99, command: 'sh loop.sh', owner: { kind: 'ended-lane' } }]),
     );
-    expect(card.details).toContain('left behind by a lane session that has ended');
+    expect(card.culprits[0]?.owner).toContain('left behind by a lane session that has ended');
     expect(card.details).toContain('kill 11');
   });
 
@@ -89,7 +89,7 @@ describe('overloadStatus', () => {
     const card = overloadStatus(
       report([{ pid: 100, cpu: 90, command: 'git gc', owner: { kind: 'daemon' } }]),
     );
-    expect(card.details).toContain('10db itself, not a lane or a gate');
+    expect(card.culprits[0]?.owner).toBe('10db itself, not a lane or a gate');
   });
 
   it('says so when it could not read what is busy', () => {
@@ -103,5 +103,15 @@ describe('gateNote', () => {
     expect(note).toContain('overloaded');
     expect(note).toContain('load average reached 187 on 10 cores');
     expect(note).toContain('timeouts');
+  });
+});
+
+describe('shortName', () => {
+  it.each([
+    ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --type=gpu', 'Google Chrome'],
+    ['/usr/local/bin/node /very/long/path/spin.js', 'node'],
+    ['sh loop.sh', 'sh'],
+  ])('%s is %s', (command, name) => {
+    expect(shortName(command)).toBe(name);
   });
 });

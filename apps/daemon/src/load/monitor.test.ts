@@ -138,9 +138,9 @@ describe('the overload status line', () => {
     ];
     load = 20 * CORES;
     await sampleFor(7 * MINUTE);
-    expect(statusLine()?.details).toContain(
-      'pid 901 (node spin.js) at 99% of a core: the lane for task "Fix login"',
-    );
+    expect(statusLine()?.culprits).toEqual([
+      { name: 'node', cpuPct: 99, owner: 'the lane for task "Fix login"' },
+    ]);
   });
 
   it('names a busy orphan by the temp dir its lane still has', async () => {
@@ -150,7 +150,7 @@ describe('the overload status line', () => {
     files = { 777: ['/private/tmp/10db-abc123/loop.sh'] };
     load = 20 * CORES;
     await sampleFor(7 * MINUTE);
-    expect(statusLine()?.details).toContain('the lane for task "Slow thing"');
+    expect(statusLine()?.culprits[0]?.owner).toBe('the lane for task "Slow thing"');
   });
 
   it('names a gate by the process group recorded for it', async () => {
@@ -161,7 +161,7 @@ describe('the overload status line', () => {
     rows = [{ pid: 3005, ppid: 1, pgid: 3000, cpu: 95, command: 'vitest' }];
     load = 20 * CORES;
     await sampleFor(7 * MINUTE);
-    expect(statusLine()?.details).toContain('the gate for task "Gated"');
+    expect(statusLine()?.culprits[0]?.owner).toBe('the gate for task "Gated"');
   });
 
   it("names a pass's turn check by the process group recorded for it", async () => {
@@ -194,7 +194,7 @@ describe('the overload status line', () => {
     rows = [{ pid: 4002, ppid: 1, pgid: 4000, cpu: 95, command: 'tsc --noEmit' }];
     load = 20 * CORES;
     await sampleFor(7 * MINUTE);
-    expect(statusLine()?.details).toContain('the UI Workbench check of pass "Polish"');
+    expect(statusLine()?.culprits[0]?.owner).toBe('the UI Workbench check of pass "Polish"');
   });
 
   it('says a process that is not 10db’s is not', async () => {
@@ -202,9 +202,7 @@ describe('the overload status line', () => {
     rows = [{ pid: 5, ppid: 1, pgid: 5, cpu: 99, command: 'ffmpeg -i in.mov' }];
     load = 20 * CORES;
     await sampleFor(7 * MINUTE);
-    expect(statusLine()?.details).toContain(
-      'pid 5 (ffmpeg -i in.mov) at 99% of a core: not 10db’s',
-    );
+    expect(statusLine()?.culprits).toEqual([{ name: 'ffmpeg', cpuPct: 99, owner: 'not 10db’s' }]);
   });
 
   it('rewords the same line as the busy processes change', async () => {
@@ -215,9 +213,7 @@ describe('the overload status line', () => {
     await sampleFor(MINUTE);
     const lines = status.current().lines;
     expect(lines).toHaveLength(1);
-    expect(lines[0]?.details).toContain('second');
-    expect(lines[0]?.details).not.toContain('first');
-    expect(lines[0]?.culprits).toEqual([{ name: 'second', cpuPct: 99 }]);
+    expect(lines[0]?.culprits).toEqual([{ name: 'second', cpuPct: 99, owner: 'not 10db’s' }]);
   });
 
   it('lets go of the hold when the load falls, and the line lingers then goes', async () => {

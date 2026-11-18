@@ -14,6 +14,10 @@
         "model_list_wait"
       ]
     },
+    "label": {
+      "type": "string",
+      "minLength": 1
+    },
     "line": {
       "type": "string",
       "minLength": 1
@@ -37,11 +41,15 @@
           "cpuPct": {
             "type": "number",
             "minimum": 0
+          },
+          "owner": {
+            "type": "string"
           }
         },
         "required": [
           "name",
-          "cpuPct"
+          "cpuPct",
+          "owner"
         ]
       }
     }
@@ -49,6 +57,7 @@
   "required": [
     "key",
     "kind",
+    "label",
     "line",
     "details",
     "since",

@@ -15,7 +15,7 @@ export function StatusLineControl() {
   if (first === undefined) return null;
   const name = more.length === 0 ? first.line : `${first.line} (+${String(more.length)} more)`;
   return (
-    <Popover position="right-end" width={340} shadow="md" withArrow>
+    <Popover position="right-end" width={360} shadow="md" withArrow>
       <Popover.Target>
         {labels ? (
           <UnstyledButton aria-label={name} title={name} px={8} py={4} w="100%">
@@ -27,7 +27,7 @@ export function StatusLineControl() {
                 aria-hidden
               />
               <Text size="xs" c="dimmed" lineClamp={1}>
-                {first.line}
+                {first.label}
               </Text>
               {more.length > 0 && (
                 <Text size="xs" c="dimmed">
@@ -50,7 +50,7 @@ export function StatusLineControl() {
         )}
       </Popover.Target>
       <Popover.Dropdown>
-        <Stack gap="md">
+        <Stack gap="md" style={{ overflowWrap: 'anywhere' }}>
           {lines.map((status) => (
             <Stack key={status.key} gap={4}>
               <Text size="sm" fw={500}>
@@ -62,8 +62,8 @@ export function StatusLineControl() {
               {status.culprits.length > 0 && (
                 <Stack gap={0}>
                   {status.culprits.map((culprit) => (
-                    <Text key={culprit.name} size="xs" c="dimmed" lineClamp={1}>
-                      {`${culprit.name}: ${String(culprit.cpuPct)}% of a core`}
+                    <Text key={`${culprit.name}:${culprit.owner}`} size="xs" c="dimmed">
+                      {`${culprit.name}: ${String(culprit.cpuPct)}% of a core, ${culprit.owner}`}
                     </Text>
                   ))}
                 </Stack>

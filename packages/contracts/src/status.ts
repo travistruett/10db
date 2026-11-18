@@ -15,14 +15,24 @@ export const StatusLine = z.object({
   /** Names the hold, so a hold that continues is one line. */
   key: z.string().min(1),
   kind: z.enum([StatusKind.AdmissionHold, StatusKind.UpdateHold, StatusKind.ModelListWait]),
-  /** The one sentence the header shows. */
+  /** A few words naming the cause, for the rail, where the sentence does not fit. */
+  label: z.string().min(1),
+  /** The one sentence: the popover's heading. */
   line: z.string().min(1),
-  /** What the header's popover shows: why, and what the builder can do about it. */
+  /** Why, and what the builder can do about it; the busy processes are in `culprits`, not here. */
   details: z.string(),
   /** When the hold began. */
   since: z.iso.datetime(),
   /** The busiest processes behind the hold; empty where none. */
-  culprits: z.array(z.object({ name: z.string(), cpuPct: z.number().nonnegative() })),
+  culprits: z.array(
+    z.object({
+      /** The program's short name, not its path. */
+      name: z.string(),
+      cpuPct: z.number().nonnegative(),
+      /** Whose it is: a lane or gate of 10db's, or "not 10db’s". */
+      owner: z.string(),
+    }),
+  ),
 });
 export type StatusLine = z.infer<typeof StatusLine>;
 

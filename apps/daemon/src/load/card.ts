@@ -26,10 +26,6 @@ function whose(owner: Owner): string {
   }
 }
 
-function line(c: Culprit): string {
-  return `- pid ${String(c.pid)} (${c.command}) at ${String(Math.round(c.cpu))}% of a core: ${whose(c.owner)}`;
-}
-
 /** The macOS services that follow every file a worktree's installs and test runs touch. */
 const FILE_WATCHERS = /(?:^|\/)(?:mds_stores|mdworker|fseventsd)/;
 
@@ -55,18 +51,32 @@ function advice(culprits: readonly Culprit[]): string {
   return parts.join(' ');
 }
 
+/** The program's own name from a command line: `/Applications/Foo.app/Contents/MacOS/Foo --x` is `Foo`. */
+export function shortName(command: string): string {
+  const app = /([^/]+)\.app\//.exec(command);
+  if (app?.[1]) return app[1];
+  const first = command.trim().split(/\s+/)[0] ?? command;
+  return first.split('/').pop() ?? first;
+}
+
 /** What the status line says while the Mac is overloaded, rewritten at each sample. */
 export function overloadStatus(report: OverloadReport): StatusHold {
+  const load = `load ${String(Math.round(report.load))} on ${String(report.cores)} cores`;
   const what =
     report.culprits.length === 0
       ? '10db could not read which processes are using the CPU.'
-      : `Using the most CPU now:\n${report.culprits.map(line).join('\n')}\n\n${advice(report.culprits)}`;
+      : advice(report.culprits);
   return {
     kind: StatusKind.AdmissionHold,
-    line: `Holding new lanes: the Mac is overloaded (load ${String(Math.round(report.load))} on ${String(report.cores)} cores)`,
+    label: 'Mac overloaded',
+    line: `Holding new lanes: the Mac is overloaded (${load})`,
     details:
       `The load average is ${String(Math.round(report.load))} on ${String(report.cores)} cores and has stayed above twice that for several minutes. 10db starts no new lane session or gate until it falls, and starts them again by itself then. Lanes and gates already running carry on.\n\n${what}`.trimEnd(),
-    culprits: report.culprits.map((c) => ({ name: c.command, cpuPct: Math.round(c.cpu) })),
+    culprits: report.culprits.map((c) => ({
+      name: shortName(c.command),
+      cpuPct: Math.round(c.cpu),
+      owner: whose(c.owner),
+    })),
   };
 }
 

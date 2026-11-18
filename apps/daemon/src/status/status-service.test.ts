@@ -5,6 +5,7 @@ import { createStatusService, STATUS_HYSTERESIS_MS, type StatusHold } from './st
 
 const hold = (line = 'Holding new lanes'): StatusHold => ({
   kind: 'admission_hold',
+  label: 'Held',
   line,
   details: 'why',
   culprits: [],
