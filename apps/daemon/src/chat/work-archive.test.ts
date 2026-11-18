@@ -75,10 +75,12 @@ async function onABranch() {
   return { chat, path: row.worktreePath ?? '', branch: row.branch ?? '' };
 }
 
-const preview = async (chatId: string) =>
-  ArchivePreviewDto.parse(
-    await (await chatRequest(w, `/chats/${chatId}/archive-preview`, 'GET')).json(),
-  );
+/** What Archive would lose: the 409 an archive with no list answers while the worktree holds files. */
+const preview = async (chatId: string) => {
+  const res = await chatRequest(w, `/chats/${chatId}/archive`, 'POST');
+  expect(res.status).toBe(409);
+  return ArchivePreviewDto.parse(await res.json());
+};
 
 describe('archiving a session on its own branch', () => {
   it('previews what it would lose, removes the worktree and its pin, and keeps the branch (row 33)', async () => {
@@ -105,7 +107,8 @@ describe('archiving a session on its own branch', () => {
 
   it('refuses with the fresh list when files were written after the preview, and changes nothing', async () => {
     const { chat, path } = await onABranch();
-    const shown = await preview(chat.id);
+    // The builder was told of nothing: the worktree was clean when the list was made.
+    const shown = { uncommitted: [], ignored: [] };
     writeFileSync(join(path, 'late.txt'), 'x\n');
     const refused = await chatRequest(w, `/chats/${chat.id}/archive`, 'POST', {
       uncommitted: shown.uncommitted,

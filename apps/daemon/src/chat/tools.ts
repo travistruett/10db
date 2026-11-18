@@ -5,9 +5,7 @@ import {
   ChatToolName,
   ChatTitleSource,
   ConflictError,
-  ConversationState,
   cutTitle,
-  EventType,
   DecisionId,
   InboxState,
   PermissionChoice,
@@ -23,7 +21,6 @@ import {
 import {
   chatMadeTask,
   chatView,
-  getConversation,
   getDecision,
   getInboxItem,
   getPrinciple,
@@ -36,7 +33,6 @@ import type { EventBus, StateStore } from '../events';
 import { ParkedError, type InboxService } from '../inbox';
 import type { ChatToolHandlers, ChatToolsFor } from '../mcp';
 import { z } from 'zod';
-import type { Briefs } from './briefs';
 import type { ChatLiveSessions } from './live-sessions';
 import { chatGitTools, type ChatGitToolsDeps } from './git-tools';
 import { CHAT_TOOL_POLICY, ChatToolPolicy } from './tool-policy';
@@ -58,8 +54,6 @@ export interface ChatToolsDeps {
   readonly getTask: (id: TaskId) => TaskDto;
   /** What the tools that change git in Your folder act through. */
   readonly gitTools: ChatGitToolsDeps;
-  /** The briefs the chats' agents wrote for Do It. */
-  readonly briefs: Briefs;
 }
 
 /** What a tool says when the builder kept their work. */
@@ -320,24 +314,6 @@ export function createChatTools(deps: ChatToolsDeps): ChatToolsFor {
       [ChatToolName.ListProposals]: (args) =>
         run(BuilderToolName.ListProposals, inProject(args, projectId)),
       ...chatGitTools(deps.gitTools, session),
-      [ChatToolName.WriteBrief]: (args) => {
-        const brief = ChatToolInputs.write_brief.parse(args);
-        // Only the chat's open session writes a brief, and not once Do It has sealed the chat.
-        if (deps.live.get(conversationId, sessionId) === null)
-          throw new ConflictError('This session has ended, so its brief is not kept.');
-        if (getConversation(state.db, conversationId).state === ConversationState.Sealed)
-          throw new ConflictError('This chat was handed to a task, so a brief is not kept.');
-        deps.briefs.write(chatId, brief, sessionId);
-        state.write((ctx) => {
-          ctx.emit({
-            type: EventType.ChatChanged,
-            entityType: 'chat',
-            entityId: chatId,
-            data: { projectId },
-          });
-        });
-        return Promise.resolve({ kept: true });
-      },
       [ChatToolName.SetTitle]: (args) => {
         const title = cutTitle(ChatToolInputs.set_title.parse(args).title);
         const previousTitle = chatView(state.db, chatId).title;

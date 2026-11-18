@@ -1,10 +1,9 @@
 import { z } from 'zod';
 import { BuilderToolInputs, BuilderToolName } from './builder-mcp-tools';
-import { TaskPatchFields, Title } from './entities';
+import { TaskPatchFields } from './entities';
 import { TaskId } from './ids';
 import { TaskLanding } from './landing';
 import { StartShapeInput } from './shape-files';
-import { TASK_MESSAGE_MAX_CHARS } from './task-thread';
 
 // Sessions spec §6.6: a chat's agent reaches every builder tool through 10db's own server, held to the
 // chat's project, plus `set_title`. What each returns for a row the screen draws is `ChatToolResult`.
@@ -23,25 +22,12 @@ export const ChatGitToolName = {
 export const ChatToolName = {
   ...BuilderToolName,
   SetTitle: 'set_title',
-  WriteBrief: 'write_brief',
   ...ChatGitToolName,
 } as const;
 export type ChatToolName = (typeof ChatToolName)[keyof typeof ChatToolName];
 
 /** The most characters a chat's title keeps, cut at a word (UI spec §5.4). */
 export const CHAT_TITLE_MAX = 28;
-
-/** The most areas and acceptance criteria a brief names. */
-export const BRIEF_LIST_MAX = 8;
-
-/** What the chat's agent writes for Do It: the task's title, brief, areas and acceptance criteria. */
-export const WriteBriefInput = z.object({
-  title: Title,
-  brief: z.string().trim().min(1).max(TASK_MESSAGE_MAX_CHARS),
-  areas: z.array(z.string().min(1).max(100)).max(BRIEF_LIST_MAX).optional(),
-  acceptanceCriteria: z.array(z.string().min(1).max(1000)).max(BRIEF_LIST_MAX).optional(),
-});
-export type WriteBriefInput = z.infer<typeof WriteBriefInput>;
 
 /** The builder tools' inputs with the project left out: a chat's tools act in its own project. */
 export const ChatToolInputs = {
@@ -66,7 +52,6 @@ export const ChatToolInputs = {
   [ChatToolName.WithdrawKnowledge]: BuilderToolInputs.withdraw_knowledge,
   [ChatToolName.ListProposals]: BuilderToolInputs.list_proposals.omit({ projectId: true }),
   [ChatToolName.SetTitle]: z.object({ title: z.string().trim().min(1).max(80) }),
-  [ChatToolName.WriteBrief]: WriteBriefInput,
   [ChatToolName.MakeBranch]: z.object({ name: z.string().min(1).max(200) }),
   [ChatToolName.SwitchBranch]: z.object({ name: z.string().min(1).max(200) }),
   [ChatToolName.Pull]: z.object({}),

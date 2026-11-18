@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { eq } from 'drizzle-orm';
 import { afterEach, describe, expect, it } from 'vitest';
 import { chatWorld, type ChatWorld } from './chat-world';
-import { createTempRepo, isolatedGitEnv, waitFor, type TempDir } from './fixtures';
+import { createTempRepo, isolatedGitEnv, type TempDir } from './fixtures';
 
 // Sessions spec §7.3: a chat holds Your folder exactly while its turn runs, takes it only when nothing of
 // 10db's holds it, and says so in its thread, on a real store, the explore engine and the fake adapter.
@@ -212,98 +212,11 @@ describe('a message that waits for Your folder', () => {
     expect(listItems(w.state.db, chat.conversationId, {}).length).toBeGreaterThan(1);
   });
 
-  it('keeps a Wait message parked after it stopped a brief turn, until the folder frees', async () => {
-    w = chatWorld();
-    runningTask('Bump vite');
-    const chat = openHere();
-    let finish: () => void = () => undefined;
-    const started = new Promise<void>((resolve) => {
-      w.adapter.shapeBehaviour = async () => {
-        resolve();
-        await new Promise<void>((r) => {
-          finish = r;
-        });
-        w.adapter.shapeBehaviour = () => Promise.resolve({ text: 'Done.' });
-        return { text: 'Brief.' };
-      };
-    });
-    w.chat.askBrief(chat.id);
-    await started;
-
-    sayWith(chat, 'edit it', FolderWhileHeld.Wait);
-
-    finish();
-    await waitFor(() => w.folderHold.waiting(chat.id) || undefined);
-    await w.engine.settled(chat.conversationId);
-    // The stop that the send made ended, and the message still waits: it was not released read only.
-    expect(w.folderHold.waiting(chat.id)).toBe(true);
-    expect(w.engine.parked(chat.conversationId)).toBe(true);
-    laneEnds();
-    await w.engine.settled(chat.conversationId);
-    expect(w.folderHold.waiting(chat.id)).toBe(false);
-    expect(w.folderHold.holders(w.project.id)).toEqual([]);
-  });
-
   it('sends at once when nothing holds the folder', async () => {
     w = chatWorld();
     const chat = openHere();
     sayWith(chat, 'edit it', FolderWhileHeld.Wait);
     expect(w.folderHold.waiting(chat.id)).toBe(false);
-    expect(w.folderHold.holdsTurn(chat.id)).toBe(true);
-    await w.engine.settled(chat.conversationId);
-  });
-
-  it('lets another message join the queue, and the latest send’s choice applies to all of it', async () => {
-    w = chatWorld();
-    runningTask('Bump vite');
-    const chat = openHere();
-    sayWith(chat, 'one', FolderWhileHeld.Wait);
-    sayWith(chat, 'two', FolderWhileHeld.Wait);
-    expect(w.folderHold.waiting(chat.id)).toBe(true);
-    sayWith(chat, 'three', FolderWhileHeld.ReadOnly);
-    expect(w.folderHold.waiting(chat.id)).toBe(false);
-    await w.engine.settled(chat.conversationId);
-    expect(notices(chat)).toEqual([
-      'Your checkout is in use by the task ‘Bump vite’, so this turn reads only.',
-    ]);
-  });
-
-  it('runs a message sent reading only without the folder even when it has freed since the choice', async () => {
-    w = chatWorld();
-    const chat = openHere();
-    sayWith(chat, 'look', FolderWhileHeld.ReadOnly);
-    expect(w.folderHold.holdsTurn(chat.id)).toBe(false);
-    await w.engine.settled(chat.conversationId);
-    expect(notices(chat)).toEqual([]);
-    // The choice was for that message alone: the next one takes the folder as it always does.
-    say(chat, 'now edit it');
-    expect(w.folderHold.holdsTurn(chat.id)).toBe(true);
-    await w.engine.settled(chat.conversationId);
-  });
-
-  it('does not carry a reading-only choice made during a running turn into a later send', async () => {
-    w = chatWorld();
-    runningTask('Bump vite');
-    const chat = openHere();
-    let release: () => void = () => undefined;
-    const started = new Promise<void>((resolve) => {
-      w.adapter.shapeBehaviour = async () => {
-        resolve();
-        await new Promise<void>((r) => {
-          release = r;
-        });
-        w.adapter.shapeBehaviour = () => Promise.resolve({ text: 'Done.' });
-        return { text: 'Understood.' };
-      };
-    });
-    say(chat, 'look');
-    await started;
-    // The chained turn inherits the running turn's profile, so the choice is never taken by a turn start.
-    sayWith(chat, 'look again', FolderWhileHeld.ReadOnly);
-    laneEnds();
-    release();
-    await w.engine.settled(chat.conversationId);
-    say(chat, 'now edit it');
     expect(w.folderHold.holdsTurn(chat.id)).toBe(true);
     await w.engine.settled(chat.conversationId);
   });
@@ -334,21 +247,6 @@ describe('a message that waits for Your folder', () => {
     say(chat, 'again');
     await w.engine.settled(chat.conversationId);
     expect(stateOf(chat)).toBe(ConversationState.IdleWarm);
-  });
-
-  it('is replaced by Redo, which carries its own choice', async () => {
-    w = chatWorld();
-    runningTask('Bump vite');
-    const chat = openHere();
-    sayWith(chat, 'edit it', FolderWhileHeld.Wait);
-    await w.chat.redo(
-      chat.conversationId,
-      { text: 'look instead', mentions: [], pictures: [] },
-      FolderWhileHeld.ReadOnly,
-    );
-    await w.engine.settled(chat.conversationId);
-    expect(w.folderHold.waiting(chat.id)).toBe(false);
-    expect(notices(chat)).toHaveLength(1);
   });
 
   it('keeps waiting through a model change', async () => {

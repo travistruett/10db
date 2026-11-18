@@ -1,10 +1,4 @@
-import {
-  NotFoundError,
-  type ChatId,
-  type DoItPreviewDto,
-  type DoItRequest,
-  type DoItResult,
-} from '@10db/contracts';
+import { NotFoundError } from '@10db/contracts';
 import { getProject } from '@10db/db';
 import type { TakeoverService } from '../takeover';
 import type { ApiServices } from '../api';
@@ -37,7 +31,6 @@ export type ChatApiServices = Pick<
   | 'createChat'
   | 'patchChat'
   | 'archiveChat'
-  | 'archivePreview'
   | 'unarchiveChat'
   | 'chooseChatWork'
   | 'chatWorkState'
@@ -46,10 +39,6 @@ export type ChatApiServices = Pick<
   | 'chatPullRequest'
   | 'chatMerge'
   | 'stopChatWaiting'
-  | 'askChatBrief'
-  | 'cancelChatBrief'
-  | 'doItPreview'
-  | 'doIt'
   | 'projectFolder'
   | 'chatModels'
   | 'sessionStarts'
@@ -75,10 +64,6 @@ export function createChatApiServices(deps: {
   readonly changes: ChatChanges;
   /** The title row's git steps. */
   readonly titleRow: TitleRowGit;
-  /** What the Do It sheet shows for a chat. */
-  readonly doItPreview: (chatId: ChatId) => Promise<DoItPreviewDto>;
-  /** Hands the chat's work on, in the place the request names. */
-  readonly doIt: (chatId: ChatId, input: DoItRequest) => Promise<DoItResult>;
   readonly now: () => Date;
   readonly log: Logger;
 }): ChatApiServices {
@@ -98,7 +83,6 @@ export function createChatApiServices(deps: {
         throw error;
       }
     },
-    archivePreview: (id) => chat.archivePreview(id),
     unarchiveChat: (id) => chat.unarchive(id),
     async chooseChatWork(id, choice) {
       try {
@@ -119,16 +103,6 @@ export function createChatApiServices(deps: {
       chat.stopWaiting(id);
       return chat.get(id);
     },
-    askChatBrief(id, input) {
-      chat.askBrief(id, input.draft);
-      return chat.briefOf(id);
-    },
-    async cancelChatBrief(id) {
-      await chat.cancelBrief(id);
-      return chat.briefOf(id);
-    },
-    doItPreview: deps.doItPreview,
-    doIt: deps.doIt,
     async projectFolder(projectId) {
       const project = getProject(state.db, projectId);
       let branch: string | null = null;

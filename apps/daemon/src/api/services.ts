@@ -15,12 +15,7 @@ import type {
   ChatWorkStateDto,
   ChatId,
   ChatModelsDto,
-  BriefRequest,
   ChatPatchInput,
-  DoItBriefDto,
-  DoItPreviewDto,
-  DoItRequest,
-  DoItResult,
   ProjectFileMatchDto,
   SessionStartDto,
   SessionsSettingsDto,
@@ -693,7 +688,6 @@ export interface ApiServices extends PlanRecordServices {
     | { readonly archived: true; readonly chat: ChatDto }
     | { readonly archived: false; readonly preview: ArchivePreviewDto }
   >;
-  archivePreview(id: ChatId): Promise<ArchivePreviewDto>;
   unarchiveChat(id: ChatId): ChatDto;
   /** The builder's choice of where a session's work happens; `settled` is false when another choice had won. */
   chooseChatWork(
@@ -716,14 +710,6 @@ export interface ApiServices extends PlanRecordServices {
   chatWorkState(id: ChatId, signal: AbortSignal): Promise<ChatWorkStateDto>;
   /** Stops a chat's wait for Your folder: what it queued runs reading only. */
   stopChatWaiting(id: ChatId): ChatDto;
-  /** Asks the chat's agent for a task's brief (between turns only) and answers the brief the sheet shows now. */
-  askChatBrief(id: ChatId, input: BriefRequest): DoItBriefDto;
-  /** Cancels the request for a brief, stopping its turn when it is still the brief's. */
-  cancelChatBrief(id: ChatId): Promise<DoItBriefDto>;
-  /** What the Do It sheet shows: the brief, the uncommitted files, and each place with its refusal. */
-  doItPreview(id: ChatId): Promise<DoItPreviewDto>;
-  /** Hands the chat's work to a task in a separate copy, or to a pass of one in Your folder. */
-  doIt(id: ChatId, input: DoItRequest): Promise<DoItResult>;
   /** Who holds the project's checkout now, and the branch it is on. */
   projectFolder(projectId: ProjectId): Promise<FolderDto>;
   chatModels(projectId: ProjectId): ChatModelsDto;

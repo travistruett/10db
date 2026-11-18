@@ -11,7 +11,6 @@ import { join } from 'node:path';
 import {
   ConflictError,
   ConversationItemKind,
-  DoItPlace,
   mintId,
   PassState,
   UpstreamError,
@@ -408,32 +407,29 @@ describe('Open while a task holds Your folder', () => {
   });
 });
 
-describe('Open while Do It is under way for the chat', () => {
+describe('Open while a pass is opening under the chat', () => {
   // A chat in the terminal can't be sealed, so a Do It that has stopped the chat would be left half done.
-  const DOING_IT = 'Do It is under way for this chat';
+  const DOING_IT = 'A pass is opening under this chat';
 
-  it.each([DoItPlace.Worktree, DoItPlace.Here])(
-    'is refused, in the preview too, for %s, and nothing is written',
-    async (place) => {
-      w = chatWorld();
-      const chat = await talked();
-      const release = await w.chat.stopForOpen(chat.id, place);
-      expect((await w.takeover.preview(chat.conversationId)).refusal).toBe(DOING_IT);
-      await expect(w.takeover.open(chat.conversationId)).rejects.toThrow(DOING_IT);
-      expect(stateOf(chat)).not.toBe('taken_over');
-      expect(existsSync(folderOf(chat))).toBe(false);
-      release();
-    },
-  );
+  it('is refused, in the preview too, and nothing is written', async () => {
+    w = chatWorld();
+    const chat = await talked();
+    const release = await w.chat.stopForOpen(chat.id);
+    expect((await w.takeover.preview(chat.conversationId)).refusal).toBe(DOING_IT);
+    await expect(w.takeover.open(chat.conversationId)).rejects.toThrow(DOING_IT);
+    expect(stateOf(chat)).not.toBe('taken_over');
+    expect(existsSync(folderOf(chat))).toBe(false);
+    release();
+  });
 
-  it('is refused when Do It begins while the open prepares, and nothing is left', async () => {
+  it('is refused when a pass begins to open while the open prepares, and nothing is left', async () => {
     w = chatWorld();
     const chat = await talked();
     const preparing = gate();
     w.terminal.prepareGate = preparing.promise;
     const opening = w.takeover.open(chat.conversationId).catch((e: unknown) => e);
     await waitFor(() => existsSync(folderOf(chat)));
-    const release = await w.chat.stopForOpen(chat.id, DoItPlace.Worktree);
+    const release = await w.chat.stopForOpen(chat.id);
     preparing.release();
     expect(await opening).toMatchObject({ message: DOING_IT });
     expect(stateOf(chat)).not.toBe('taken_over');

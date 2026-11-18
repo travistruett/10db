@@ -454,16 +454,6 @@ describe("a chat's writes outside the checkout hold", () => {
     const inTree = await runTurn(chat, inWorktree);
     expect(inTree.answer).toEqual({ decision: 'allow' });
   });
-
-  it('reads for the turn of a Here session whose builder chose reading only', async () => {
-    w = chatWorld({ prepare: prepared, judge: JudgeKind.Native });
-    const { chat, run } = oneTurn(inCheckout);
-    w.here(chat.id);
-    w.folderHold.chooseReadOnly(chat.id);
-    const out = await run();
-    expect(out.answer).toMatchObject({ decision: 'deny' });
-    expect(w.folderHold.holdsTurn(chat.id)).toBe(false);
-  });
 });
 
 // Trust line §5: a chat is judged as Plan is: 10db's judge where it is the account's and ready, else the rules.

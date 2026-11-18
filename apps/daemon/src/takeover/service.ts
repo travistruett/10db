@@ -51,8 +51,8 @@ import { settingFilesChanged } from './setting-files';
 const NOT_IN_TERMINAL = 'Not in your terminal';
 const ARCHIVED = 'This chat is archived';
 const NOT_A_CHAT = 'Only a chat opens in your terminal for now';
-/** A chat in the terminal can't be sealed, so Open waits for a Do It that has stopped the chat. */
-const DOING_IT = 'Do It is under way for this chat';
+/** A pass opening stops the chat's turn, so Open waits until the pass has opened. */
+const DOING_IT = 'A pass is opening under this chat';
 const MOVING = 'Wait for the move to finish.';
 const FOLDER_HELD_NOTE = 'Your folder is held until you hand back.';
 const closedPassNote = (name: string): string =>
@@ -62,7 +62,7 @@ export interface TakeoverServiceDeps {
   readonly state: StateStore;
   readonly engine: ExploreEngine;
   readonly folderHold: FolderHold;
-  /** Hand Back parks the held messages on the folder through the chat service, which knows a Do It under way. */
+  /** Hand Back parks the held messages on the folder through the chat service, which knows a pass opening under it. */
   readonly chats: () => Pick<ChatService, 'watchFolder' | 'underWay'>;
   /** Opening a reading or choosing session in the terminal makes it a Here session, inside the take. */
   readonly work: () => Pick<ChatWorkService, 'enterHere'>;
@@ -259,7 +259,7 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
         const row = getChat(state.db, chat.id);
         if (row.archivedAt !== null) throw new ConflictError(ARCHIVED);
         if (row.workPlace === WorkPlace.Moving) throw new ConflictError(MOVING);
-        // Read at the take too: a Do It may have stopped the chat while the files were prepared.
+        // Read at the take too: a pass's open may have stopped the chat while the files were prepared.
         if (deps.chats().underWay(chat.id)) throw new ConflictError(DOING_IT);
         // The engine refuses first, so a refused open leaves a choosing session choosing.
         const entered = engine.openTerminal(chat.conversationId);

@@ -140,8 +140,6 @@ import {
   ChatCommitRequest,
   ChatSearchQuery,
   ChatWorkChoice,
-  BriefRequest,
-  DoItRequest,
   ChatPatchInput,
   ConversationFilesQuery,
   SessionsSettingsDto,
@@ -794,31 +792,8 @@ export function createApp(deps: ApiDeps) {
     .post('/chats/:chatId/stop-waiting', (c) =>
       c.json(deps.services.stopChatWaiting(ChatId.parse(c.req.param('chatId')))),
     )
-    .post(
-      '/chats/:chatId/brief',
-      validator('json', (value): BriefRequest => BriefRequest.parse(value ?? {})),
-      (c) =>
-        c.json(
-          deps.services.askChatBrief(ChatId.parse(c.req.param('chatId')), c.req.valid('json')),
-        ),
-    )
-    .delete('/chats/:chatId/brief', async (c) =>
-      c.json(await deps.services.cancelChatBrief(ChatId.parse(c.req.param('chatId')))),
-    )
-    .post(
-      '/chats/:chatId/do-it',
-      validator('json', (value): DoItRequest => DoItRequest.parse(value)),
-      async (c) =>
-        c.json(await deps.services.doIt(ChatId.parse(c.req.param('chatId')), c.req.valid('json'))),
-    )
-    .get('/chats/:chatId/do-it', async (c) =>
-      c.json(await deps.services.doItPreview(ChatId.parse(c.req.param('chatId')))),
-    )
     .get('/projects/:projectId/folder', async (c) =>
       c.json(await deps.services.projectFolder(ProjectId.parse(c.req.param('projectId')))),
-    )
-    .get('/chats/:chatId/archive-preview', async (c) =>
-      c.json(await deps.services.archivePreview(ChatId.parse(c.req.param('chatId')))),
     )
     .post('/chats/:chatId/archive', async (c) => {
       // The body is optional: a session with no worktree has nothing to be warned about.

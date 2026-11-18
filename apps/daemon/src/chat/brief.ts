@@ -1,5 +1,4 @@
 import {
-  CHAT_DEFAULT_TITLE,
   ConversationItemAuthor,
   ConversationItemKind,
   parseItemBody,
@@ -76,9 +75,4 @@ export function briefFromChat(items: readonly ConversationItemRow[]): string {
   const room = Math.max(0, TASK_MESSAGE_MAX_CHARS - tail.length - 2);
   const head = digestText(items, Math.min(DIGEST_MAX_CHARS, room));
   return [head, tail].filter((part) => part !== '').join('\n\n');
-}
-
-/** A task title for the brief: the chat's, unless it still has the default. */
-export function briefTitle(chatTitle: string): string {
-  return chatTitle === CHAT_DEFAULT_TITLE ? '' : chatTitle;
 }
