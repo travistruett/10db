@@ -12,7 +12,7 @@ const Created = z.looseObject({ id: z.string() });
 export const auth = { Authorization: `Bearer ${E2E_TOKEN}` };
 
 /** A disposable repository for the project, with `files` committed; git config comes from nowhere but this repo. */
-function createRepository(repo: string, files: Readonly<Record<string, string>>): void {
+export function createRepository(repo: string, files: Readonly<Record<string, string>>): void {
   mkdirSync(repo, { recursive: true });
   const globalConfig = join(E2E_DIR, 'shape-gitconfig');
   writeFileSync(globalConfig, '');

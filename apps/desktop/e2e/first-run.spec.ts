@@ -1,17 +1,22 @@
+import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
 import { claudeIsInstalled } from './claude-is-installed';
 import { expectAccessible } from './expect-accessible';
-import { E2E_REPO } from './paths';
+import { E2E_DIR } from './paths';
+import { createRepository } from './shape-project';
 
 // Core flow 1: the first run through to a project on the Board. It runs before every other spec in its
 // shard (files run in name order with one worker), because the first run shows only while the daemon
 // has no project. The Board shows the first project by name, so this one sorts after the `e2e` project
-// that loop.spec.ts and the specs after it use.
+// that loop.spec.ts and the specs after it use. It adds its project on a repository of its own: a
+// repository is one project at most, and those specs add theirs on the shared one.
 const PROJECT = 'e2e-first-run';
+const REPO = join(E2E_DIR, 'first-run-repo');
 
 test('a fresh install walks Welcome, the setup check and Add a project, and lands on the Board with the project', async ({
   page,
 }) => {
+  createRepository(REPO, {});
   await claudeIsInstalled(page);
   await page.goto('/');
 
@@ -24,7 +29,7 @@ test('a fresh install walks Welcome, the setup check and Add a project, and land
   await expectAccessible(page, 'check your setup');
 
   await page.getByRole('button', { name: 'Continue' }).click();
-  await page.getByRole('textbox', { name: 'Folder path' }).fill(E2E_REPO);
+  await page.getByRole('textbox', { name: 'Folder path' }).fill(REPO);
   await page.getByRole('textbox', { name: 'Folder path' }).press('Enter');
   // The areas are proposed from the repository's files and history before the form is complete.
   await expect(page.getByRole('group', { name: 'Area 1' })).toBeVisible();

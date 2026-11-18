@@ -418,6 +418,60 @@ describe('FirstRun', () => {
     expect(served.posted).toHaveLength(1);
   });
 
+  it('still lands on the board when the project list shows it before the daemon answers the create', async () => {
+    let release: () => void = () => undefined;
+    const answered = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let created = false;
+    // The daemon's project event reaches the window ahead of the create's own response, so the list
+    // refetches and the first run gives way while the create is still out.
+    serve(
+      {},
+      http.get(daemonUrl('/projects'), () =>
+        HttpResponse.json(created ? [projectDto({ name: 'widgets' })] : []),
+      ),
+      http.post(daemonUrl('/projects'), async () => {
+        created = true;
+        sockets.at(-1)?.send(
+          JSON.stringify(
+            daemonEvent({
+              seq: 60,
+              type: 'project.created',
+              entityType: 'project',
+              entityId: projectDto().id,
+              data: {},
+            }),
+          ),
+        );
+        await answered;
+        return HttpResponse.json(projectDto({ name: 'widgets' }), { status: 201 });
+      }),
+    );
+    const { router } = renderApp('/');
+    await toSetup();
+    await within(card('Tools')).findByText('git version 2.50.0');
+    await waitFor(() => {
+      expect(next('Continue').hasAttribute('disabled')).toBe(false);
+    });
+    fireEvent.click(next('Continue'));
+    const path = await screen.findByRole('textbox', { name: 'Folder path' });
+    fireEvent.change(path, { target: { value: '/Users/me/widgets' } });
+    fireEvent.blur(path);
+    await screen.findByRole('textbox', { name: 'Name' });
+    await screen.findByRole('group', { name: 'Area 1' });
+    fireEvent.click(next('Create Project'));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('heading', { name: 'Add a project' })).toBeNull();
+    });
+    release();
+
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/board');
+    });
+  });
+
   it('shows a refusal from the daemon in the footer', async () => {
     serve(
       {},

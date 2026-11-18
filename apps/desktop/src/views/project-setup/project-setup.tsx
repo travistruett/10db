@@ -195,18 +195,22 @@ export function useProjectSetup(
         'Stopped waiting for proposed areas. One area covers the whole repository; split it here.',
       );
     }
-    create.mutate(
-      toProjectInput({
-        name: typed.name,
-        root: inspection.root,
-        gateCommand: typed.gate,
-        delivery,
-        baseBranch: typed.baseBranch,
-        areas: areasOf(chosen),
-        accountId: chooseAccount && accountId !== null ? AccountId.parse(accountId) : null,
-      }),
-      { onSuccess: onCreated },
-    );
+    // The daemon's project event can refetch the list before the create answers, and the first run gives
+    // way to the shell then. `mutate`'s own callbacks are dropped once the component that called it is
+    // gone, so the promise carries the follow-up instead. A refusal shows through `create.error`.
+    create
+      .mutateAsync(
+        toProjectInput({
+          name: typed.name,
+          root: inspection.root,
+          gateCommand: typed.gate,
+          delivery,
+          baseBranch: typed.baseBranch,
+          areas: areasOf(chosen),
+          accountId: chooseAccount && accountId !== null ? AccountId.parse(accountId) : null,
+        }),
+      )
+      .then(onCreated, () => undefined);
   };
 
   const fields = (
