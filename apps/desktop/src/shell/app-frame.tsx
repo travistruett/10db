@@ -56,7 +56,10 @@ export function AppFrame({
   const [scrolled, setScrolled] = useState(false);
   // What was opened over the content and where: moving anywhere (a row picked, a section opened) closes it.
   const [opened, setOpened] = useState<{ at: string; kind: SidebarSheet } | null>(null);
-  const sheet = opened !== null && opened.at === location ? opened.kind : null;
+  // A sheet belongs to the page it was opened on and to the sheet bands: moving on, or growing to a window
+  // that has no sheets, drops it for good rather than leaving it to come back on the way back.
+  if (opened !== null && (opened.at !== location || band === ShellBand.Wide)) setOpened(null);
+  const sheet = opened !== null ? opened.kind : null;
 
   const hasPanel = panelSection !== null && panelSection === section;
   const layout = shellLayout({
@@ -92,7 +95,11 @@ export function AppFrame({
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (!event.metaKey || event.altKey) {
-        if (event.key === 'Escape' && sheet !== null && !aMenuIsOpen()) setOpened(null);
+        if (event.key === 'Escape' && sheet !== null && !aMenuIsOpen()) {
+          // Taken: a view behind the sheet (a running turn's Esc) must not act on the key that closed it.
+          event.preventDefault();
+          setOpened(null);
+        }
         return;
       }
       if (event.shiftKey && event.key.toLowerCase() === 's') {

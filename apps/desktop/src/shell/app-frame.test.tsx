@@ -166,9 +166,64 @@ describe('the sidebar and ⇧⌘S', () => {
     fireEvent.mouseEnter(button);
     expect((await screen.findByRole('tooltip')).textContent).toContain('Toggle sidebar');
     fireEvent.click(button);
+    // At once: a tip that fades out on its own timer would also pass a wait.
+    expect(screen.queryByRole('tooltip')).toBeNull();
+  });
+
+  it('takes the Esc that closes a sheet, so a view behind it does not act on the same key', async () => {
+    viewportWidth(800);
+    server.use(...baseHandlers());
+    renderApp('/board');
+    const railBox = await findRailBox();
+    pressSidebarKey();
     await waitFor(() => {
-      expect(screen.queryByRole('tooltip')).toBeNull();
+      expect(railBox.getAttribute('data-sheet')).toBe('');
     });
+    // fireEvent returns false when a listener called preventDefault.
+    expect(fireEvent.keyDown(document, { key: 'Escape' })).toBe(false);
+    await waitFor(() => {
+      expect(railBox.hasAttribute('data-sheet')).toBe(false);
+    });
+    // With no sheet open the key is left alone.
+    expect(fireEvent.keyDown(document, { key: 'Escape' })).toBe(true);
+  });
+
+  it('stays closed when you come back to a page whose sheet a row pick closed', async () => {
+    viewportWidth(800);
+    server.use(...baseHandlers());
+    const { router } = renderApp('/board');
+    const railBox = await findRailBox();
+    pressSidebarKey();
+    await waitFor(() => {
+      expect(railBox.getAttribute('data-sheet')).toBe('');
+    });
+    fireEvent.click(screen.getByRole('link', { name: 'Factory' }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/factory');
+    });
+    fireEvent.click(screen.getByRole('link', { name: 'Board' }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/board');
+    });
+    expect(railBox.hasAttribute('data-sheet')).toBe(false);
+    expect(document.querySelector('[data-frame-backdrop]')).toBeNull();
+    // Growing to a wide window and back does not bring a sheet back either.
+    pressSidebarKey();
+    await waitFor(() => {
+      expect(railBox.getAttribute('data-sheet')).toBe('');
+    });
+    viewportWidth(1280);
+    await waitFor(() => {
+      expect(railBox.hasAttribute('data-sheet')).toBe(false);
+    });
+    viewportWidth(800);
+    await waitFor(() => {
+      expect(railBox.hasAttribute('inert')).toBe(false);
+    });
+    expect(railBox.hasAttribute('data-sheet')).toBe(false);
+    expect(
+      screen.getByRole('button', { name: 'Toggle sidebar' }).getAttribute('aria-expanded'),
+    ).toBe('false');
   });
 
   it('opens the labelled sidebar over the content at 800 px, with the panel beside it', async () => {
