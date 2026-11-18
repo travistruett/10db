@@ -1,0 +1,15 @@
+{
+  "id": "task-why-always",
+  "title": "An agent filing a task always says why it matters",
+  "description": "Every task an agent files from a Claude Code session (the `10db-task` skill in packages/agent-skill) should carry a one-sentence why. `create` should refuse a draft without one (`draftProblems` in packages/agent-skill/src/task-checks.ts), so the agent writes it before the task reaches the board. The in-app chat and the builder MCP's `create_task` (packages/contracts/src/builder-mcp-tools.ts, docs/builder-mcp.md) should be told to write a why on every task, without refusing a task that has none. The New Task form and the API still treat why as optional. Update the skill's SKILL.md and the package's AGENTS.md to say why is always written and why the skill is stricter than the form.",
+  "acceptanceCriteria": [
+    "The skill's create refuses a draft with a missing or blank why, with table rows for both",
+    "The builder MCP's drafting guidance asks for a why on every task",
+    "The New Task form and the API still accept a task with no why",
+    "The real-daemon skill API tests draft tasks that carry a why"
+  ],
+  "areas": ["agent-skill", "contracts", "daemon", "repo"],
+  "baseCommit": "ad689e5f1d52b7842be477c53d57903b7b08683f",
+  "mergedCommit": "7b8c4a42e0889ab7f47fa47c6845d2ef5d8ad6e3",
+  "tags": []
+}

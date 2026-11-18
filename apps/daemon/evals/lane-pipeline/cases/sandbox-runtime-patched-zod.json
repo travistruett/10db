@@ -1,0 +1,14 @@
+{
+  "id": "sandbox-runtime-patched-zod",
+  "title": "Sandbox-runtime gets the patched zod",
+  "description": "`pnpm audit` has failed on main for two weeks on GHSA-mrhx-c7xc-m3w5 (high), which marks zod below 4.6.6. Our packages are past it, but `@anthropic-ai/sandbox-runtime` 0.0.81, its latest release, needs `zod ^3.25.0` and resolves to 3.25.76. sandbox-runtime imports only `zod/v3`, and zod 4 still ships that entry, so a pnpm override can move it to 4.6.7 with the same API. Record the choice as a decision in docs/architecture/decisions/.",
+  "acceptanceCriteria": [
+    "`pnpm audit --prod` reports no known vulnerabilities, and zod 3.25.76 is gone from the lockfile",
+    "sandbox-runtime still runs a sandboxed command and refuses an invalid settings file",
+    "A decision file records why the override is safe"
+  ],
+  "areas": ["repo"],
+  "baseCommit": "779909361989a99db01c4b24e30c6fb9338b8590",
+  "mergedCommit": "61f74d995d40e24fac4e9bc921093574a94f57d2",
+  "tags": ["rule-deps"]
+}
