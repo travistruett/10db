@@ -58,12 +58,17 @@ function errorMessage(status: number, body: unknown): string {
   return error ?? `The daemon answered HTTP ${String(status)}`;
 }
 
+/** Throws the typed error for a non-2xx answer whose body was already read. */
+export function refuse(status: number, body: unknown): never {
+  throw new DaemonRequestError(status, body, errorMessage(status, body));
+}
+
 /** Parses a daemon response with its contract schema; throws `DaemonRequestError` on non-2xx. */
 export async function readJson<S extends z.ZodType>(
   res: Pick<Response, 'ok' | 'status' | 'json'>,
   schema: S,
 ): Promise<z.output<S>> {
   const body: unknown = await res.json().catch(() => null);
-  if (!res.ok) throw new DaemonRequestError(res.status, body, errorMessage(res.status, body));
+  if (!res.ok) refuse(res.status, body);
   return schema.parse(body);
 }

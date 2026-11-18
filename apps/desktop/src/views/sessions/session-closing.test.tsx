@@ -149,6 +149,22 @@ describe('Sessions: close, archive and reopen', () => {
       });
     });
 
+    it('a 409 that is not the files answer shows the daemon’s words, not a parse dump', async () => {
+      const { chat } = open();
+      server.use(
+        http.post(daemonUrl('/chats/:chatId/archive'), () =>
+          HttpResponse.json(
+            { error: 'conflict', message: 'Wait for the move to finish.' },
+            { status: 409 },
+          ),
+        ),
+      );
+      await archiveFromMenu();
+      expect(await screen.findByText('Wait for the move to finish.')).toBeTruthy();
+      expect(chat.archived).toEqual([]);
+      expect(screen.queryByRole('dialog', { name: 'Archive this session?' })).toBeNull();
+    });
+
     it('Cancel archives nothing', async () => {
       const { chat } = open(3, { archiveAsks: [lost] });
       await archiveFromMenu();

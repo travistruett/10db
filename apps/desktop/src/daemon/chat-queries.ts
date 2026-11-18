@@ -13,7 +13,7 @@ import {
 } from '@10db/contracts';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
-import { readJson, type DaemonClient } from './client';
+import { readJson, refuse, type DaemonClient } from './client';
 import { conversationKeys } from './conversation-queries';
 import { useDaemon } from './provider';
 
@@ -207,7 +207,11 @@ export function useArchiveChat() {
       );
       if (res.status === 409) {
         // A 409 is an answer, not a failure: the files archiving would delete, for the builder to see first.
-        return { archived: false, preview: ArchivePreviewDto.parse(await res.json()) };
+        const body: unknown = await res.json().catch(() => null);
+        const preview = ArchivePreviewDto.safeParse(body);
+        if (preview.success) return { archived: false, preview: preview.data };
+        // Any other 409 is a refusal with the daemon's words, such as a move still in flight.
+        return refuse(409, body);
       }
       return { archived: true, chat: await readJson(res, ChatDto) };
     },

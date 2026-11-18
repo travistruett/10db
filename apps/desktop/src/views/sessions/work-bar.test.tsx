@@ -181,6 +181,21 @@ describe('the bar that asks where the work happens', () => {
     ).toBeTruthy();
   });
 
+  it('a 409 that is not a settled place shows the daemon’s words', async () => {
+    openChoosing({
+      extra: [
+        http.post(daemonUrl('/chats/:chatId/work'), () =>
+          HttpResponse.json(
+            { error: 'conflict', message: 'Ask again once the turn has ended.' },
+            { status: 409 },
+          ),
+        ),
+      ],
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'On a New Branch' }));
+    expect(await screen.findByText('Ask again once the turn has ended.')).toBeTruthy();
+  });
+
   it('while moving, the composer says where, and no bar asks', async () => {
     openChoosing({
       work: { place: 'moving', branch: 'fix-login', base: 'main', worktree: null, askedAt: null },
