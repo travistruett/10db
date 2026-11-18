@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { mintId } from './ids';
-import { currentStep, StepIndexError, WorkstreamStep } from './steps';
+import { currentStep, planOf, StepIndexError, WorkstreamStep } from './steps';
 
 const base: WorkstreamStep = {
   role: 'review',
@@ -115,5 +115,61 @@ describe('currentStep', () => {
     expect(
       currentStep({ steps: [implement, base], stepIndex: 1, model: 'a', effort: 'low' }),
     ).toEqual(base);
+  });
+});
+
+describe('planOf', () => {
+  const result = (summary: string) => ({
+    summary,
+    verdict: null,
+    sessionId: mintId('Session'),
+    at: '2026-10-17T12:00:00.000Z',
+  });
+  const plan: WorkstreamStep = { ...base, role: 'plan', personaName: 'Planner' };
+  const implement: WorkstreamStep = {
+    ...base,
+    role: 'implement',
+    personaName: 'Implementer',
+    tools: 'edit',
+  };
+
+  it.each([
+    { name: 'no steps', steps: [], want: null },
+    { name: 'a plan step that has not finished', steps: [plan, implement], want: null },
+    {
+      name: 'a plan step with its result',
+      steps: [{ ...plan, result: result('Plan A') }, implement],
+      want: { role: 'plan', personaName: 'Planner', summary: 'Plan A' },
+    },
+    {
+      name: 'a build step that plans first and recorded its plan',
+      steps: [{ ...implement, plansFirst: true as const, result: result('Plan B') }],
+      want: { role: 'implement', personaName: 'Implementer', summary: 'Plan B' },
+    },
+    {
+      name: 'a build step that plans first and has no plan yet',
+      steps: [{ ...implement, plansFirst: true as const }],
+      want: null,
+    },
+    {
+      name: 'a build step that does not plan first',
+      steps: [{ ...implement, result: result('Not a plan') }],
+      want: null,
+    },
+    {
+      name: 'a review result, which is not a plan',
+      steps: [implement, { ...base, result: result('Looks right') }],
+      want: null,
+    },
+    {
+      name: 'the latest of two plans',
+      steps: [
+        { ...plan, result: result('Plan A') },
+        { ...implement, plansFirst: true as const, result: result('Plan B') },
+      ],
+      want: { role: 'implement', personaName: 'Implementer', summary: 'Plan B' },
+    },
+  ])('$name', ({ steps, want }) => {
+    expect(planOf(steps)).toEqual(want);
   });
 });

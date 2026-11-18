@@ -103,14 +103,30 @@ describe('PlaybookInput', () => {
     {
       name: 'a row with only its process fields',
       value: {
-        rows: [{ rigor: 'careful', reviewRounds: 2, fixBy: 'fresh', approvesPlan: false }],
+        rows: [
+          {
+            rigor: 'careful',
+            reviewRounds: 2,
+            fixBy: 'fresh',
+            approvesPlan: false,
+            plansInBuild: true,
+          },
+        ],
       },
       ok: true,
     },
     {
       name: 'a row with its process fields cleared',
       value: {
-        rows: [{ rigor: 'careful', reviewRounds: null, fixBy: null, approvesPlan: null }],
+        rows: [
+          {
+            rigor: 'careful',
+            reviewRounds: null,
+            fixBy: null,
+            approvesPlan: null,
+            plansInBuild: null,
+          },
+        ],
       },
       ok: true,
     },

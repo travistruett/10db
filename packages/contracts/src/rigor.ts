@@ -152,6 +152,7 @@ export const PlaybookInput = z.object({
         reviewRounds: ReviewRounds.nullable().optional(),
         fixBy: z.enum(FixBy).nullable().optional(),
         approvesPlan: z.boolean().nullable().optional(),
+        plansInBuild: z.boolean().nullable().optional(),
         ships: z.enum(Ships).nullable().optional(),
       }),
     )
@@ -182,6 +183,11 @@ export const PlaybookRowDto = z.object({
   fixBy: sourced(z.enum(FixBy)),
   /** Whether the builder approves the plan before the build starts. */
   approvesPlan: sourced(z.boolean()),
+  /**
+   * Whether the Build session writes the plan first, in its own context, instead of a separate Plan step.
+   * It drops the Plan step only for a row with no plan review whose plan the builder does not approve.
+   */
+  plansInBuild: sourced(z.boolean()),
   /** Whether tasks of this rigor that belong to one goal ship as one pull request. */
   ships: sourced(z.enum(Ships)),
 });

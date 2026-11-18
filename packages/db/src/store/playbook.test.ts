@@ -34,6 +34,7 @@ const row = (
   reviewRounds: null,
   fixBy: null,
   approvesPlan: null,
+  plansInBuild: null,
   ships: null,
   ...process,
 });
@@ -88,11 +89,13 @@ describe('playbook overrides', () => {
     set(null, { rows: [{ rigor: 'standard', reviewRounds: 2 }] });
     set(null, { rows: [{ rigor: 'standard', fixBy: 'fresh', approvesPlan: false }] });
     set(null, { rows: [{ rigor: 'standard', ships: 'alone' }] });
+    set(null, { rows: [{ rigor: 'standard', plansInBuild: true }] });
     expect(getPlaybook(store.db, null).rows).toEqual([
       row('standard', ['implement', 'review', 'qa'], {
         reviewRounds: 2,
         fixBy: 'fresh',
         approvesPlan: false,
+        plansInBuild: true,
         ships: 'alone',
       }),
     ]);
@@ -116,7 +119,9 @@ describe('playbook overrides', () => {
     set(null, { rows: [{ rigor: 'light', steps: ['implement'], reviewRounds: 1 }] });
     set(null, { rows: [{ rigor: 'light', steps: null }] });
     expect(getPlaybook(store.db, null).rows).toEqual([row('light', null, { reviewRounds: 1 })]);
-    set(null, { rows: [{ rigor: 'light', reviewRounds: null }] });
+    set(null, { rows: [{ rigor: 'light', reviewRounds: null, plansInBuild: false }] });
+    expect(getPlaybook(store.db, null).rows).toEqual([row('light', null, { plansInBuild: false })]);
+    set(null, { rows: [{ rigor: 'light', plansInBuild: null }] });
     expect(getPlaybook(store.db, null).rows).toEqual([]);
     expect(store.db.select().from(schema.playbookRows).all()).toEqual([]);
   });
