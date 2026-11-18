@@ -9,7 +9,13 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
 import { inboxItemDto, taskDto, workstreamDto } from '../../test/fixtures';
-import { findText, getText, queryText, serveOpenRows } from '../../test/inbox-page-fixtures';
+import {
+  findText,
+  getText,
+  panelRows,
+  queryText,
+  serveOpenRows,
+} from '../../test/inbox-page-fixtures';
 
 const projectId = mintId('Project');
 const workstreamId: WorkstreamId = mintId('Workstream');
@@ -307,6 +313,11 @@ describe('CheckCard', () => {
     await waitFor(() => {
       expect(served.rowLookups()).toBeGreaterThan(0);
     });
+    // The card leaves with its row; the notice stays.
+    await waitFor(() => {
+      expect(panelRows()).toHaveLength(0);
+    });
+    expect(queryText('This card was already answered.')).toBeTruthy();
   });
 
   it('keeps Approve off while the changes load', async () => {

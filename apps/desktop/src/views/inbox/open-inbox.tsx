@@ -379,6 +379,9 @@ export function OpenInbox({
           onSendBackNote: (value) => {
             if (selected) setSendBackNotes((current) => ({ ...current, [selected.id]: value }));
           },
+          onAnsweredElsewhere: () => {
+            setNotice(ANSWERED_ELSEWHERE);
+          },
           onNoteFocus: () => {
             if (selectedInbox) setSelectedKey(selectedInbox.key);
           },

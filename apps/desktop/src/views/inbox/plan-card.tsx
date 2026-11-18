@@ -18,6 +18,11 @@ export interface PlanCardProps {
   /** The Send Back note, kept by the Inbox so deselecting the card does not lose it. */
   readonly note: string;
   readonly onNote: (note: string) => void;
+  /**
+   * Called when the card turned out to be answered elsewhere. The Inbox shows the notice itself, since the
+   * card goes with its row; without it the card says so on its own.
+   */
+  readonly onAnsweredElsewhere?: () => void;
   /** Whether the card draws its own border; false where the Inbox's content area already frames it. */
   readonly framed?: boolean;
 }
@@ -26,7 +31,14 @@ export interface PlanCardProps {
  * A plan waiting for the builder before the build starts: they read it and either approve it or send
  * it back with a note saying what to change. Answered by its buttons, never by an Inbox key.
  */
-export function PlanCard({ item, header, note, onNote, framed = true }: PlanCardProps) {
+export function PlanCard({
+  item,
+  header,
+  note,
+  onNote,
+  onAnsweredElsewhere,
+  framed = true,
+}: PlanCardProps) {
   const answer = useAnswerInbox();
   const queryClient = useQueryClient();
   const { client } = useDaemon();
@@ -64,7 +76,8 @@ export function PlanCard({ item, header, note, onNote, framed = true }: PlanCard
             void fetchRowOf(client, { state: InboxListState.Open }, item.id)
               .then((row) => {
                 if (row !== null) return;
-                setStale(true);
+                if (onAnsweredElsewhere === undefined) setStale(true);
+                else onAnsweredElsewhere();
                 refreshCard(queryClient, client, item.id);
               })
               .catch(() => undefined);

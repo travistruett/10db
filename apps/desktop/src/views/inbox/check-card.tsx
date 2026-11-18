@@ -41,6 +41,11 @@ export interface CheckCardProps {
   /** The Send Back note, kept by the Inbox so deselecting the card does not lose it. */
   readonly note: string;
   readonly onNote: (note: string) => void;
+  /**
+   * Called when the card turned out to be answered elsewhere. The Inbox shows the notice itself, since the
+   * card goes with its row; without it the card says so on its own.
+   */
+  readonly onAnsweredElsewhere?: () => void;
   /** Whether the card draws its own border; false where the Inbox's content area already frames it. */
   readonly framed?: boolean;
 }
@@ -148,7 +153,14 @@ function Changes({ changes }: { readonly changes: UseQueryResult<WorkstreamChang
  * Finished work the project has no gate for: the builder checks the changes and either approves
  * them or sends them back with a note saying what to fix.
  */
-export function CheckCard({ item, header, note, onNote, framed = true }: CheckCardProps) {
+export function CheckCard({
+  item,
+  header,
+  note,
+  onNote,
+  onAnsweredElsewhere,
+  framed = true,
+}: CheckCardProps) {
   const answer = useAnswerInbox();
   const queryClient = useQueryClient();
   const { client } = useDaemon();
@@ -189,7 +201,8 @@ export function CheckCard({ item, header, note, onNote, framed = true }: CheckCa
             void fetchRowOf(client, { state: InboxListState.Open }, item.id)
               .then((row) => {
                 if (row !== null) return;
-                setStale(true);
+                if (onAnsweredElsewhere === undefined) setStale(true);
+                else onAnsweredElsewhere();
                 refreshCard(queryClient, client, item.id);
               })
               .catch(() => undefined);

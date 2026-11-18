@@ -75,6 +75,8 @@ export interface InboxCardProps {
   /** What the builder typed for sending a check card back; kept while another card is open. */
   readonly sendBackNote: string;
   readonly onSendBackNote: (note: string) => void;
+  /** A check or plan card found it was answered elsewhere. */
+  readonly onAnsweredElsewhere?: () => void;
   readonly onNoteFocus: () => void;
   readonly onSubmit: () => void;
   /** Dismisses the row's flags; only offered for a flag with no options. */
@@ -149,6 +151,7 @@ export function InboxCard({
   onRecord,
   sendBackNote,
   onSendBackNote,
+  onAnsweredElsewhere,
   onNoteFocus,
   onSubmit,
   onDismiss,
@@ -189,6 +192,7 @@ export function InboxCard({
         framed={framed}
         note={sendBackNote}
         onNote={onSendBackNote}
+        {...(onAnsweredElsewhere === undefined ? {} : { onAnsweredElsewhere })}
         header={
           <Group gap="sm" wrap="nowrap">
             {kind}
@@ -210,6 +214,7 @@ export function InboxCard({
         framed={framed}
         note={sendBackNote}
         onNote={onSendBackNote}
+        {...(onAnsweredElsewhere === undefined ? {} : { onAnsweredElsewhere })}
         header={
           <Group gap="sm" wrap="nowrap">
             {kind}
