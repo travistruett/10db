@@ -47,6 +47,7 @@ import { localRemotePath, parseRemoteUrl } from './remote-url';
 import { GitError, runGit, runGitCapped, type RunOptions } from './run';
 import { GitTrustError, GitTrustFailure, type GitTrustDetail } from './trust-error';
 import { embeddedRepository, GitMode, isGitComponent } from './worktree-files';
+import { handMadeWorktreeFolder } from './hand-made-folder';
 import { lockedBatchId, parseWorktreeList, type WorktreeEntry } from './worktree-list';
 
 const OP_TRAILER = '10db-Op';
@@ -1018,6 +1019,15 @@ export interface Git extends ChatGit {
    * none inside one, such as `node_modules/` or `dist/`.
    */
   worktreeIgnoredFiles(repo: string, path: string): Promise<string[]>;
+  /**
+   * `worktreeChanges`, `worktreeIgnoredFiles` and `removeWorktree` for a worktree the builder made by
+   * hand, in the folder beside `repo` (`handMadeWorktreeFolder`). It must be listed by git, unlocked,
+   * and pass the same checks of its git dir; anything else is refused with `WorktreeNotOursError`.
+   * The removal leaves the branch.
+   */
+  handMadeWorktreeChanges(repo: string, path: string): Promise<string[]>;
+  handMadeWorktreeIgnoredFiles(repo: string, path: string): Promise<string[]>;
+  removeHandMadeWorktree(repo: string, path: string): Promise<'removed' | 'absent'>;
   /** Drops the entries of worktrees whose directory is gone, but not a locked one. */
   pruneWorktrees(repo: string): Promise<void>;
   /**
@@ -4057,9 +4067,47 @@ export function createGit(opts: GitOptions = {}): Git {
     return parseWorktreeList(await git(main, ['worktree', 'list', '--porcelain', '-z']));
   }
 
-  async function removeWorktree(repo: string, path: string): Promise<'removed' | 'absent'> {
+  /** Which worktrees a removal or a read may touch, and how. */
+  interface WorktreeScope {
+    /** Where the worktree must lie; undefined when none is configured. */
+    readonly root: string | undefined;
+    /** How the root reads in a refusal. */
+    readonly rootName: string;
+    /** Why git's entry is not one this scope may touch; null when it is. */
+    refuses(entry: WorktreeEntry): string | null;
+    /** What `git worktree remove` is given to override. */
+    readonly forces: readonly string[];
+  }
+
+  /** 10db's own worktrees: under its root and locked by it. */
+  const ownScope: WorktreeScope = {
+    root: opts.worktreeRoot,
+    rootName: "10db's worktree root",
+    refuses: (entry) =>
+      lockedBatchId(entry) === null ? 'the worktree is not locked by 10db' : null,
+    forces: ['--force', '--force'],
+  };
+
+  /**
+   * The builder's worktrees in the folder beside `repo`: under it and not locked, since a lock is the
+   * builder's own mark that one is not to go. A single force removes an unlocked one.
+   */
+  function handMadeScope(repo: string): WorktreeScope {
+    return {
+      root: handMadeWorktreeFolder(realpathSync(repo)),
+      rootName: 'the hand-made worktree folder',
+      refuses: (entry) => (entry.locked === null ? null : 'the worktree is locked'),
+      forces: ['--force'],
+    };
+  }
+
+  async function removeWorktree(
+    repo: string,
+    path: string,
+    scope: WorktreeScope = ownScope,
+  ): Promise<'removed' | 'absent'> {
     const target = withRealParent(path);
-    const root = opts.worktreeRoot;
+    const root = scope.root;
     if (!root) throw new WorktreeNotOursError(path, 'no worktree root is configured');
     let present: ReturnType<typeof lstatSync> | null;
     try {
@@ -4078,7 +4126,7 @@ export function createGit(opts: GitOptions = {}): Git {
       }
     }
     if (!inside || samePath(target, realisticPath(root)))
-      throw new WorktreeNotOursError(path, "it is not under 10db's worktree root");
+      throw new WorktreeNotOursError(path, `it is not under ${scope.rootName}`);
     if (present && !present.isDirectory())
       throw new WorktreeNotOursError(path, 'it is a link or a file, not a worktree directory');
     return withRepoLock(realpathSync(repo), async () => {
@@ -4093,9 +4141,9 @@ export function createGit(opts: GitOptions = {}): Git {
         pins.delete(target);
         return 'absent';
       }
-      if (lockedBatchId(entry) === null)
-        throw new WorktreeNotOursError(path, 'the worktree is not locked by 10db');
-      await git(main, ['worktree', 'remove', '--force', '--force', '--', target]);
+      const refused = scope.refuses(entry);
+      if (refused !== null) throw new WorktreeNotOursError(path, refused);
+      await git(main, ['worktree', 'remove', ...scope.forces, '--', target]);
       pins.delete(target);
       return 'removed';
     });
@@ -4105,19 +4153,23 @@ export function createGit(opts: GitOptions = {}): Git {
    * The 10db worktree of `repo` at `path`, read through `repo`'s pin, once it has passed every check
    * `worktreeChanges` names.
    */
-  async function lockedWorktree(repo: string, path: string): Promise<Pinned> {
-    const root = opts.worktreeRoot;
+  async function lockedWorktree(
+    repo: string,
+    path: string,
+    scope: WorktreeScope = ownScope,
+  ): Promise<Pinned> {
+    const root = scope.root;
     if (!root) throw new WorktreeNotOursError(path, 'no worktree root is configured');
     const target = withRealParent(path);
     if (!isPlainDirectory(target))
       throw new WorktreeNotOursError(path, 'it is not a worktree directory');
     if (!surelyInside(target, root) || samePath(target, realisticPath(root)))
-      throw new WorktreeNotOursError(path, "it is not under 10db's worktree root");
+      throw new WorktreeNotOursError(path, `it is not under ${scope.rootName}`);
     const main = await pinned(repo);
     const entry = (await listWorktrees(main)).find((e) => samePath(comparablePath(e.path), target));
     if (!entry) throw new WorktreeNotOursError(path, 'git lists no worktree there');
-    if (lockedBatchId(entry) === null)
-      throw new WorktreeNotOursError(path, 'the worktree is not locked by 10db');
+    const refused = scope.refuses(entry);
+    if (refused !== null) throw new WorktreeNotOursError(path, refused);
     let gitDir: string;
     try {
       gitDir = readGitfile(target);
@@ -4149,12 +4201,20 @@ export function createGit(opts: GitOptions = {}): Git {
     };
   }
 
-  async function worktreeChanges(repo: string, path: string): Promise<string[]> {
-    return changes(await lockedWorktree(repo, path));
+  async function worktreeChanges(
+    repo: string,
+    path: string,
+    scope: WorktreeScope = ownScope,
+  ): Promise<string[]> {
+    return changes(await lockedWorktree(repo, path, scope));
   }
 
-  async function worktreeIgnoredFiles(repo: string, path: string): Promise<string[]> {
-    const out = await git(await lockedWorktree(repo, path), [
+  async function worktreeIgnoredFiles(
+    repo: string,
+    path: string,
+    scope: WorktreeScope = ownScope,
+  ): Promise<string[]> {
+    const out = await git(await lockedWorktree(repo, path, scope), [
       'ls-files',
       '-z',
       '--others',
@@ -4654,9 +4714,13 @@ export function createGit(opts: GitOptions = {}): Git {
         .split('\n')
         .filter(Boolean);
     },
-    removeWorktree,
-    worktreeChanges,
-    worktreeIgnoredFiles,
+    removeWorktree: (repo, path) => removeWorktree(repo, path),
+    worktreeChanges: (repo, path) => worktreeChanges(repo, path),
+    worktreeIgnoredFiles: (repo, path) => worktreeIgnoredFiles(repo, path),
+    removeHandMadeWorktree: (repo, path) => removeWorktree(repo, path, handMadeScope(repo)),
+    handMadeWorktreeChanges: (repo, path) => worktreeChanges(repo, path, handMadeScope(repo)),
+    handMadeWorktreeIgnoredFiles: (repo, path) =>
+      worktreeIgnoredFiles(repo, path, handMadeScope(repo)),
     async listWorktrees(repo) {
       return listWorktrees(await pinned(repo));
     },
