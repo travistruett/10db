@@ -1,5 +1,4 @@
 import {
-  CHAT_DEFAULT_TITLE,
   ConversationItemAuthor,
   ConversationItemKind,
   parseItemBody,
@@ -32,6 +31,8 @@ export function chatLines(items: readonly ConversationItemRow[]): string[] {
   for (const item of items) {
     if (item.kind === ConversationItemKind.Message) {
       const body = parseItemBody(item.kind, item.body);
+      // A carry-on is 10db's line to the session, not something the builder said.
+      if (body.purpose === 'carry_on') continue;
       inBriefTurn = body.purpose === 'brief';
       if (!inBriefTurn) lines.push(`Builder: ${body.text}`);
     } else if (
@@ -50,7 +51,7 @@ export function lastBuilderMessage(items: readonly ConversationItemRow[]): strin
   for (const item of [...items].reverse()) {
     if (item.kind !== ConversationItemKind.Message) continue;
     const body = parseItemBody(item.kind, item.body);
-    if (body.purpose !== 'brief') return body.text;
+    if (body.purpose !== 'brief' && body.purpose !== 'carry_on') return body.text;
   }
   return null;
 }
@@ -74,9 +75,4 @@ export function briefFromChat(items: readonly ConversationItemRow[]): string {
   const room = Math.max(0, TASK_MESSAGE_MAX_CHARS - tail.length - 2);
   const head = digestText(items, Math.min(DIGEST_MAX_CHARS, room));
   return [head, tail].filter((part) => part !== '').join('\n\n');
-}
-
-/** A task title for the brief: the chat's, unless it still has the default. */
-export function briefTitle(chatTitle: string): string {
-  return chatTitle === CHAT_DEFAULT_TITLE ? '' : chatTitle;
 }

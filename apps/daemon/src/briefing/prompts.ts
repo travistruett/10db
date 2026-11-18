@@ -15,10 +15,11 @@ import {
   type TaskDto,
   Verdict,
 } from '@10db/contracts';
-import { quotedWords, renderDecisions, renderRules } from '../knowledge';
+import { quotedWords, renderDecisionIndex, renderDecisions, renderRules } from '../knowledge';
 import { isOutsideCopy } from '../sandbox';
 import { failedSteps } from './failed-steps';
-import { renderPlanContext } from './plan-context-text';
+import { LaneBrief } from './lane-brief';
+import { renderPlanContext, renderPlanIndex } from './plan-context-text';
 import { AWAY_ANSWER } from '../trust';
 
 interface StepBrief {
@@ -31,7 +32,12 @@ interface StepBrief {
   /** The text of each skill, for a session that has no plugin to load them from. */
   readonly skillBodies?: readonly string[];
   readonly tools: ToolAccess;
+  /** A build step that writes and records its plan before it builds. */
+  readonly plansFirst?: boolean;
 }
+
+const PLAN_FIRST =
+  'Plan first: before you edit a file, plan with the planning skill and record the plan with mcp__10db__complete_step (summary only). Then build it. If the plan changes, call it again with the new plan.';
 
 interface PriorResult {
   readonly role: StepRole;
@@ -42,6 +48,8 @@ interface PriorResult {
 export interface PromptInput {
   /** The agent the account this session runs on uses; never the project's, which can move between accounts. */
   readonly provider: Provider;
+  /** How the brief carries the Plan and knowledge; absent pastes them whole. */
+  readonly brief?: LaneBrief;
   readonly task: Pick<TaskDto, 'title' | 'description' | 'acceptanceCriteria'>;
   readonly claims: readonly { readonly kind: ClaimKind; readonly name: string }[];
   readonly action: NextAction;
@@ -65,10 +73,15 @@ export interface PromptInput {
   readonly questionRoutes?: readonly QuestionRouteDto[];
   readonly step: StepBrief;
   readonly priorResults: readonly PriorResult[];
-  /** A read-only step sent back sees the result it gave before. */
+  /** A read-only step sent back sees the result it gave before; a build step that plans first, its plan. */
   readonly previousResult: StepResult | null;
   /** The results this step gave on earlier rounds (a review's rejections), oldest first. */
   readonly earlierResults: readonly StepResult[];
+  /**
+   * What the test-value judge said of the tests the work added, for a review's first round: input to the
+   * reviewer, not a finding. Absent or null when there is nothing to say.
+   */
+  readonly testValue?: string | null;
   readonly revisedBy: {
     readonly role: StepRole;
     readonly personaName: string;
@@ -389,10 +402,34 @@ const JUDGED_RULES: ReadonlyMap<string, string> = new Map([
 /** A skill, a persona or a tool result written for Claude names these tools. */
 const CODEX_TOOL_NAMES = 'In this session, the Edit or Write tool means apply_patch.';
 
+/**
+ * The guard's refusal of an edit outside the claims names request_claim (guard/judge.ts), and
+ * request_claim's own answer says to call again while it waits.
+ */
+const CLAIMS_RULE =
+  'Edit only files inside your claims. For anything else, call the request_claim tool first. When another task holds the claim, the call waits until it frees; if it answers waiting: true, call it again with the same opId. Do not edit those files without it.';
+
+/** The guard refuses git commit, push and every git write, naming the 10db commit tool (guard/git-rules.ts). */
+const COMMIT_ONLY_RULE =
+  'Commit only through the 10db commit tool, naming every path. Never run git commit, add, checkout, reset, stash or push: 10db pushes the work when it ships, and the git dir is read-only to you.';
+
+/**
+ * Kept in every brief: a lane holding the deps hazard that runs pnpm install meets a card an attended
+ * lane waits on, which names no tool, so the lane has to know install_dependencies before it gets there.
+ */
+const DEPS_RULE =
+  'To add or change a dependency, edit the package.json with an exact version (no ^, ~ or range), then call install_dependencies: 10db resolves it, writes pnpm-lock.yaml and installs, outside your sandbox. Never run pnpm add or pnpm install yourself, which your sandbox cannot do and which can leave the copy’s node_modules broken. Commit the manifests and the lockfile afterwards.';
+
+/**
+ * The rule bullets an indexed brief leaves out, because a tool's refusal already says what to do
+ * instead. A Codex lane keeps them: no check yet shows that Codex hands a hook's deny reason to the model.
+ */
+const REFUSAL_COVERED_RULES: ReadonlySet<string> = new Set([CLAIMS_RULE, COMMIT_ONLY_RULE]);
+
 const RULES = [
-  'Edit only files inside your claims. For anything else, call the request_claim tool first. When another task holds the claim, the call waits until it frees; if it answers waiting: true, call it again with the same opId. Do not edit those files without it.',
-  'Commit only through the 10db commit tool, naming every path. Never run git commit, add, checkout, reset, stash or push: 10db pushes the work when it ships, and the git dir is read-only to you.',
-  'To add or change a dependency, edit the package.json with an exact version (no ^, ~ or range), then call install_dependencies: 10db resolves it, writes pnpm-lock.yaml and installs, outside your sandbox. Never run pnpm add or pnpm install yourself, which your sandbox cannot do and which can leave the copy’s node_modules broken. Commit the manifests and the lockfile afterwards.',
+  CLAIMS_RULE,
+  COMMIT_ONLY_RULE,
+  DEPS_RULE,
   'Before you end your turn, commit every change in your claims through mcp__10db__commit. A step that ends with changes uncommitted is sent back to you, and no gate runs on it.',
   'When a decision is not yours to make, ask with ask_human (or your question tool). Record routine engineering decisions with record_decision.',
   'If you depart from the plan or a principle, call report_deviation with your reason.',
@@ -627,7 +664,12 @@ function renderQuestionRoutes(routes: readonly QuestionRouteDto[]): string[] {
   ];
 }
 
-function renderKnowledge(pack: ContextPack): string {
+/**
+ * The knowledge as the brief carries it: whole, or with each decision named by its question only. An
+ * indexed brief keeps every policy and heuristic whole: they are short and binding, and a lane can't
+ * look up a rule it doesn't know exists.
+ */
+function renderKnowledge(pack: ContextPack, brief: LaneBrief): string {
   const k = pack.knowledge;
   const omitted =
     k.droppedCount > 0
@@ -638,9 +680,21 @@ function renderKnowledge(pack: ContextPack): string {
       omitted ??
       'No recorded decisions or principles apply to this task yet. Call find_knowledge if you need one.'
     );
-  return [...renderRules(k), ...renderDecisions(k.decisions), ...(omitted ? [omitted] : [])].join(
-    '\n',
-  );
+  const decisions =
+    brief === LaneBrief.Index ? renderDecisionIndex(k.decisions) : renderDecisions(k.decisions);
+  return [...renderRules(k), ...decisions, ...(omitted ? [omitted] : [])].join('\n');
+}
+
+/** The Plan block as the brief carries it: the sections and entries whole, or named with the tools that read them. */
+function planBlock(plan: ContextPack['plan'], brief: LaneBrief): string[] {
+  if (plan === null) return [];
+  return ['', ...(brief === LaneBrief.Index ? renderPlanIndex(plan) : renderPlanContext(plan))];
+}
+
+/** The rule bullets as the brief carries them: an indexed Claude brief leaves out those a refusal covers. */
+function briefRules(rules: readonly string[], brief: LaneBrief, provider: Provider): string[] {
+  if (brief !== LaneBrief.Index || provider !== Provider.Claude) return [...rules];
+  return rules.filter((rule) => !REFUSAL_COVERED_RULES.has(rule));
 }
 
 /**
@@ -873,6 +927,7 @@ function stepSection(input: PromptInput): string[] {
   // A Codex session has no plugin, so the skills it names are in the briefing itself.
   if (codex) for (const body of step.skillBodies ?? []) lines.push('', body);
   if (step.instructions) lines.push('', `How you work:\n${step.instructions}`);
+  if (step.plansFirst === true) lines.push('', PLAN_FIRST);
   if (codex) lines.push('', CODEX_TOOL_NAMES);
   if (input.priorResults.length > 0) {
     lines.push('', 'Earlier steps:');
@@ -885,23 +940,29 @@ function stepSection(input: PromptInput): string[] {
       lines.push('---');
     }
   }
-  if (input.previousResult) {
+  if (input.previousResult && step.plansFirst === true)
+    lines.push('', 'Your plan:', input.previousResult.summary);
+  else if (input.previousResult) {
     const verdict = input.previousResult.verdict
       ? `: ${VERDICT_LABEL[input.previousResult.verdict]}`
       : '';
     lines.push('', `Your previous result${verdict}:`, input.previousResult.summary);
   }
   lines.push(...roundSection(step, input.earlierResults));
+  const firstRound = !input.earlierResults.some((r) => r.verdict === Verdict.Reject);
+  if (step.role === StepRole.Review && firstRound && input.testValue)
+    lines.push('', input.testValue);
   return lines;
 }
 
 export function buildSessionPrompt(input: PromptInput): string {
+  const brief = input.brief ?? LaneBrief.Full;
   const claims = input.claims.map((c) => `${c.kind} ${c.name}`).join(', ') || '(none)';
   const lines = withSandboxRules(
     input.step.tools === ToolAccess.ReadOnly
       ? readOnlyRules(input.step.role)
       : [
-          ...(input.inPass === true ? PASS_RULES : RULES),
+          ...(input.inPass === true ? PASS_RULES : briefRules(RULES, brief, input.provider)),
           ...(input.pictures === true ? [PICTURES_RULE] : []),
         ],
     input.sandboxed === true,
@@ -933,7 +994,7 @@ export function buildSessionPrompt(input: PromptInput): string {
     '',
     'Acceptance criteria:',
     bullets(input.task.acceptanceCriteria),
-    ...(input.contextPack.plan ? ['', ...renderPlanContext(input.contextPack.plan)] : []),
+    ...planBlock(input.contextPack.plan, brief),
     '',
     `Your claims: ${claims}.`,
     '',
@@ -941,7 +1002,7 @@ export function buildSessionPrompt(input: PromptInput): string {
     bullets(rules),
     '',
     'Context pack:',
-    renderKnowledge(input.contextPack),
+    renderKnowledge(input.contextPack, brief),
     ...renderQuestionRoutes(input.questionRoutes ?? []),
     ...(input.denials && input.denials.length > 0 ? ['', ...renderDenials(input.denials)] : []),
     ...renderAnsweredCards(input.step.role, input.answeredCards),
@@ -957,6 +1018,7 @@ export function compactionReinjection(
   pack: ContextPack,
   denials: readonly Denial[] = [],
   answered?: { readonly role: StepRole; readonly answeredCards: readonly AnsweredCard[] },
+  brief: LaneBrief = LaneBrief.Full,
 ): string {
   const claims = pack.claims.map((c) => `${c.kind} ${c.name}`).join(', ') || '(none)';
   return [
@@ -967,11 +1029,11 @@ export function compactionReinjection(
     '',
     'Acceptance criteria:',
     bullets(pack.task.acceptanceCriteria),
-    ...(pack.plan ? ['', ...renderPlanContext(pack.plan)] : []),
+    ...planBlock(pack.plan, brief),
     '',
     `Your claims: ${claims}.`,
     '',
-    renderKnowledge(pack),
+    renderKnowledge(pack, brief),
     ...(pack.handoff ? ['', 'Latest handoff:', renderHandoff(pack.handoff)] : []),
     ...(denials.length > 0 ? ['', ...renderDenials(denials)] : []),
     ...(answered ? renderAnsweredCards(answered.role, answered.answeredCards) : []),

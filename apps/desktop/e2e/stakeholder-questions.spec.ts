@@ -106,11 +106,12 @@ test('routes a question to someone outside Slack from its card, and the table sh
   await expectAccessible(page, 'people, dark');
 
   // The question card offers Ask Someone; Priya, Product, on the whole project.
-  await page.goto('/inbox');
-  await expect(page.getByText(QUESTION, { exact: true })).toBeVisible();
-  // The first row opens by itself; with 10db's own cards above it, it is a row to select.
-  const questionRow = page.getByRole('button', { name: new RegExp(QUESTION) });
-  if ((await questionRow.count()) > 0) await questionRow.click();
+  // Earlier specs leave cards that fill the panel's first page, so the list is narrowed to the question.
+  await page.goto(`/inbox?q=${encodeURIComponent(QUESTION)}`);
+  // The question is a row in the panel, and its card is the content once the row is selected.
+  const questionRow = page.getByRole('option', { name: new RegExp(QUESTION) });
+  await expect(questionRow).toBeVisible();
+  await questionRow.click();
   await page.getByRole('button', { name: 'Ask Someone', exact: true }).click();
   const ask = page.getByRole('dialog');
   await ask.getByRole('combobox', { name: 'Person' }).click();
@@ -126,16 +127,16 @@ test('routes a question to someone outside Slack from its card, and the table sh
 
   // The daemon remembers whom the card was asked of: after a reload Copy is still there.
   await page.reload();
-  await expect(page.getByText(QUESTION, { exact: true })).toBeVisible();
-  const reselect = page.getByRole('button', { name: new RegExp(QUESTION) });
-  if ((await reselect.count()) > 0) await reselect.click();
+  const reselect = page.getByRole('option', { name: new RegExp(QUESTION) });
+  await expect(reselect).toBeVisible();
+  await reselect.click();
   await expect(page.getByRole('button', { name: 'Copy for Priya Shah' })).toBeVisible();
   await expect(page.getByText('Product question → Priya Shah · chosen by you')).toBeVisible();
   await expectAccessible(page, 'inbox, routed to a person not in Slack, dark');
   await page.getByRole('radio', { name: /Seven days/ }).check();
   await page.getByRole('button', { name: 'Send answer' }).click();
   // Other cards may be open; this one is gone.
-  await expect(page.getByText(QUESTION, { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('option', { name: new RegExp(QUESTION) })).toHaveCount(0);
 
   // Who Answers shows the route the card wrote.
   await page.goto('/settings/routing-rules');

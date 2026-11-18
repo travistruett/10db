@@ -39,11 +39,13 @@ import {
   createBaseUpdates,
   createBatchStarter,
   createDeliveryJobs,
+  createNodeModulesTemplates,
   createShipper,
   createWorktreeDependencies,
   createWorktreeGenerators,
   DEFAULT_DELIVERY_LIMITS,
   subscribeShipTrigger,
+  templatesRoot,
   type BaseUpdates,
   type BatchStarter,
   type DeliveryContext,
@@ -98,6 +100,8 @@ function fakePnpm(root: string): FakePnpm {
       `if [ -f '${verdict}.'"$n" ]; then cat '${verdict}.'"$n"; exit 1; fi`,
       `if [ -f '${verdict}.stderr' ]; then cat '${verdict}.stderr' >&2; fi`,
       `if [ -f '${verdict}' ]; then cat '${verdict}'; read -r code < '${verdict}.code'; exit "$code"; fi`,
+      // A passing install always leaves a node_modules, as pnpm does, even with nothing to install.
+      'mkdir -p node_modules',
       '',
     ].join('\n'),
   );
@@ -134,6 +138,9 @@ function fakePnpm(root: string): FakePnpm {
         mkdirSync(dirname(join(made, relative)), { recursive: true });
         writeFileSync(join(made, relative), content);
       }
+    },
+    makesNothing() {
+      rmSync(made, { recursive: true, force: true });
     },
     makesOnCall(call, files) {
       for (const [relative, content] of Object.entries(files)) {
@@ -205,6 +212,8 @@ export interface FakePnpm {
   blockedFrom(host: string): void;
   /** Makes every later call write these files (path relative to its directory, content) first, as an install writes `node_modules`. */
   makes(files: Readonly<Record<string, string>>): void;
+  /** Undoes `makes`: later calls write nothing of their own. */
+  makesNothing(): void;
   /** Makes only the `call`th call overall (1 is the first the harness ever saw) write these files, as `makes` does. */
   makesOnCall(call: number, files: Readonly<Record<string, string>>): void;
   /** Makes every later call succeed again. */
@@ -345,6 +354,10 @@ export function createDeliveryHarness(
     rules: () => [],
     checkouts: () => [remote.repo.path],
     timeoutMs: opts.gateTimeoutMs ?? 20_000,
+    templates: createNodeModulesTemplates({
+      root: templatesRoot(data.path),
+      logger: logs.logger,
+    }),
   };
   const folderHold = createFolderHold({ state, bus });
   const ctx: DeliveryContext = {

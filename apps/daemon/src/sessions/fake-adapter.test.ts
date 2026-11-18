@@ -194,6 +194,41 @@ describe('FakeAdapter', () => {
     expect(canUseTool).not.toHaveBeenCalled();
   });
 
+  it('writes an edit step under the session cwd, asking the guard for the resolved path', async () => {
+    const asked: { toolName: string; input: unknown }[] = [];
+    const adapter = new FakeAdapter({
+      Alpha: [[{ do: 'edit', path: 'notes/a.md', text: 'hello' }]],
+    });
+    await collect(
+      adapter.open(
+        spec({
+          preToolUse: (request) => {
+            asked.push({ toolName: request.toolName, input: request.input });
+            return { decision: 'allow' };
+          },
+        }),
+      ).events,
+    );
+    expect(asked).toMatchObject([
+      { toolName: 'Write', input: { file_path: join(dir.path, 'notes/a.md') } },
+    ]);
+    expect(readFileSync(join(dir.path, 'notes/a.md'), 'utf8')).toBe('hello');
+  });
+
+  it('records an edit the guard denied and writes nothing', async () => {
+    const adapter = new FakeAdapter({
+      Alpha: [[{ do: 'edit', path: 'a.md', text: 'hello' }]],
+    });
+    await collect(
+      adapter.open(spec({ preToolUse: () => ({ decision: 'deny', reason: 'use the worktree' }) }))
+        .events,
+    );
+    expect(existsSync(join(dir.path, 'a.md'))).toBe(false);
+    expect(adapter.observations).toContainEqual(
+      expect.objectContaining({ kind: 'denied_by_guard', detail: { reason: 'use the worktree' } }),
+    );
+  });
+
   it('records a guard denial without calling canUseTool or writing', async () => {
     const canUseTool = vi.fn<LaneSessionSpec['canUseTool']>(() =>
       Promise.resolve({ behavior: 'allow' }),

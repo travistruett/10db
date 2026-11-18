@@ -117,7 +117,7 @@ export function createDependencyChanges(
       };
     const project = getProject(db, batch.projectId);
     const installed = await ctx.dependencies.refresh({
-      batch,
+      owner: { kind: 'batch', id: batch.id },
       project,
       path,
       signal,

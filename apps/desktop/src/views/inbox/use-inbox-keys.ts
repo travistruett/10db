@@ -8,6 +8,8 @@ export interface InboxKeys {
   readonly onChoose: (index: number) => void;
   readonly onNote: () => void;
   readonly onSubmit: () => void;
+  /** Dismisses the selected row when it is a flag. */
+  readonly onDismiss: () => void;
   readonly onHelp: () => void;
 }
 
@@ -19,10 +21,18 @@ export const SELECTED_CARD_ATTRIBUTE = 'data-inbox-selected';
 /** Marks a region that handles its own keys, such as a scrolling diff; the Inbox keys skip it. */
 export const KEYS_IGNORE_ATTRIBUTE = 'data-inbox-keys-ignore';
 
-/** Keys count on the page itself or inside the selected card; a focused link or button elsewhere keeps its own key. */
+/** Marks the panel's list of rows, which the keys move between. */
+export const LIST_ATTRIBUTE = 'data-inbox-list';
+
+/**
+ * Keys count on the page itself, inside the selected card or inside the panel's list; a focused link or
+ * button elsewhere, a row's own Dismiss included, keeps its own key.
+ */
 function inScope(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return true;
   if (target.closest(`[${KEYS_IGNORE_ATTRIBUTE}]`) !== null) return false;
+  if (target.closest(`[${LIST_ATTRIBUTE}]`) !== null)
+    return target.closest('button, a[href]') === null;
   return (
     target === document.body ||
     target === document.documentElement ||
@@ -36,7 +46,7 @@ function onOption(target: EventTarget | null): boolean {
 }
 
 /**
- * ↑/↓ and j/k move, 1–5 choose, n focuses the note, Enter sends, ? lists the shortcuts. Ignored
+ * ↑/↓ and j/k move, 1–5 choose, n focuses the note, e dismisses a flag, Enter sends, ? lists the shortcuts. Ignored
  * while typing in a field.
  */
 export function useInboxKeys(keys: InboxKeys): void {
@@ -76,6 +86,13 @@ export function useInboxKeys(keys: InboxKeys): void {
       'n',
       scoped(() => {
         if (keys.count > 0) keys.onNote();
+      }),
+      { preventDefault: false },
+    ],
+    [
+      'e',
+      scoped(() => {
+        if (keys.count > 0) keys.onDismiss();
       }),
       { preventDefault: false },
     ],

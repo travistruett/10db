@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash, randomInt } from 'node:crypto';
 import {
   mkdirSync,
@@ -25,6 +25,15 @@ const TOKEN_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123
  * runs them.
  */
 export const SANDBOXED = process.env['TENDB_SANDBOX'] === '1';
+
+/**
+ * True when no lefthook runs from PATH, outside CI. The hooks use mise's lefthook (mise.toml), which
+ * `make setup` installs; until a contributor has run it, the lefthook tests skip. CI's gate-test job
+ * installs it (ci.test checks), so there they never skip.
+ */
+export const LEFTHOOK_MISSING =
+  spawnSync('lefthook', ['version'], { stdio: 'ignore' }).status !== 0 &&
+  process.env['CI'] !== 'true';
 
 export function fakeGithubToken(): { token: string; body: string } {
   // randomInt draws without modulo bias.

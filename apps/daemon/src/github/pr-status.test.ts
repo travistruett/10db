@@ -151,7 +151,43 @@ describe('summariseChecks', () => {
       failing: [],
     },
   ])('$name', ({ rollup, checks, failing }) => {
-    expect(summariseChecks(rollup)).toEqual({ checks, failingChecks: failing });
+    expect(summariseChecks(rollup)).toMatchObject({ checks, failingChecks: failing });
+  });
+
+  // The counts the title row reads: finished and not failing, still going, and every entry 10db can read.
+  it.each<{
+    name: string;
+    rollup: CheckRollupEntry[];
+    counts: { passed: number; total: number; failing: number };
+  }>([
+    { name: 'no checks', rollup: [], counts: { passed: 0, total: 0, failing: 0 } },
+    {
+      name: 'all passed',
+      rollup: [run('a', 'SUCCESS'), status('b', 'SUCCESS')],
+      counts: { passed: 2, total: 2, failing: 0 },
+    },
+    {
+      name: 'cancelled and skipped runs count as passed, as they do not fail',
+      rollup: [run('a', 'CANCELLED'), run('b', 'SKIPPED')],
+      counts: { passed: 2, total: 2, failing: 0 },
+    },
+    {
+      name: 'running ones are in the total only',
+      rollup: [run('a', 'SUCCESS'), run('b', null), status('c', 'PENDING')],
+      counts: { passed: 1, total: 3, failing: 0 },
+    },
+    {
+      name: 'failing ones are counted apart',
+      rollup: [run('a', 'SUCCESS'), run('b', 'FAILURE'), status('c', 'ERROR')],
+      counts: { passed: 1, total: 3, failing: 2 },
+    },
+    {
+      name: 'an unreadable entry is in neither count, so the row never waits on it',
+      rollup: [run('a', 'SUCCESS'), UNREADABLE_CHECK],
+      counts: { passed: 1, total: 1, failing: 0 },
+    },
+  ])('counts: $name', ({ rollup, counts }) => {
+    expect(summariseChecks(rollup).counts).toEqual(counts);
   });
 });
 
@@ -202,6 +238,7 @@ describe('Gh.prStatus', () => {
       baseRef: 'main',
       checks: 'failing',
       failingChecks: [{ name: 'build', url: 'https://github.com/acme/widgets/actions/runs/1' }],
+      counts: { passed: 1, total: 2, failing: 1 },
     });
     expect(seen[0]).toEqual([
       'pr',
@@ -429,6 +466,7 @@ describe('Gh.prStatus', () => {
         baseRef: null,
         checks,
         failingChecks: failing,
+        counts: expect.any(Object) as unknown,
       });
     },
   );

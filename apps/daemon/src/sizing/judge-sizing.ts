@@ -6,7 +6,7 @@ import {
   type TaskId,
   type JudgeCallId,
 } from '@10db/contracts';
-import type { JudgeAnswer, JudgeRequest } from '../judge';
+import { fenced, type JudgeAnswer, type JudgeRequest } from '../judge';
 
 export const RIGOR_QUESTION = 'How much process does this task need?';
 
@@ -25,13 +25,6 @@ export interface SizingText {
   readonly description: string;
   readonly acceptanceCriteria: readonly string[];
   readonly areas: readonly string[];
-}
-
-/** Text between backtick fences longer than any run of backticks inside it, so it cannot close its own fence. */
-function fenced(text: string): string {
-  const longest = Math.max(0, ...(text.match(/`+/g) ?? []).map((run) => run.length));
-  const fence = '`'.repeat(Math.max(3, longest + 1));
-  return `${fence}\n${text}\n${fence}`;
 }
 
 /**

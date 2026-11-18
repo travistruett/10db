@@ -1,0 +1,13 @@
+{
+  "id": "goal-next-skips-parked",
+  "title": "An all-queued goal's Next passes over a parked queued task, as the scheduler does",
+  "description": "In packages/db/src/store/goal-digest.ts, nextOf's queued fallback adds every open task whose latest workstream is QUEUED. The scheduler also skips a parked task (apps/daemon/src/scheduler/scheduler.ts, `if (task.boardColumnId !== null) continue;`). Example: in a goal with tasks A and B and no dependencies, both are queued, A leads the queue and is parked. The drawer shows Next = A, but the scheduler starts B.",
+  "acceptanceCriteria": [
+    "In an all-queued goal, Next passes over parked queued tasks when one that isn't parked can start",
+    "goal-digest.test.ts covers a parked queued task that leads the queue"
+  ],
+  "areas": ["db"],
+  "baseCommit": "1578096df7e3d7486a76920b4864455df71b97bd",
+  "mergedCommit": "996d48c94aff42f4dcd839ddb325a65dc7bb9b14",
+  "tags": []
+}

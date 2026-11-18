@@ -50,25 +50,21 @@
   to a live system.
 - The folder routes (sessions spec §7.3): `GET /projects/:projectId/folder` (`FolderDto`, built by `folderView` in
   `folder-hold/view.ts` with each holder's words and whether it keeps a chat out; the branch is `symbolic-ref`, null
-  when detached or unreadable), `folder` (`wait` | `read_only`) in the message and redo bodies (JSON and multipart),
+  when detached or unreadable), `folder` (`wait`) in the message and redo bodies (JSON and multipart),
   and `POST /chats/:chatId/stop-waiting`. `conversationLive` carries `waitingForFolder` for a chat; the desktop reads
-  a chat's wait from the folder's `waiting_chat` holder instead. A send with `folder: read_only` (Send Reading Only,
-  or a Redo carrying it) runs its turn reading only even if the folder has freed (`FolderHold.chooseReadOnly`); a send
-  with no `folder` takes the folder when it is free.
-- `do-it.ts` hands a chat's work on (sessions spec §7.3). `previewDoIt` reads the refusals of both places up front
-  (`GET /chats/:chatId/do-it`); `doItInCopy` makes an ordinary task in a separate copy, links the chat and seals it
-  (`finishSeals` completes one the daemon stopped, once, after recovery); `doItHere` stops the chat's turn
-  (`ChatService.stopForOpen`, whose hold on the chat's starts only the open gives back) and opens a pass of one
-  through `openWhenBusy`, with `whenBusy` for other chats' turns. While a pass waits to open for a chat, Do It
-  and archive are refused for it; a chat sealed into a copy can't be archived while the copy's task is unfinished.
-  `task-session.ts` is `GET /tasks/:taskId/session`; the Changes scope is `workstream-changes.ts`'s.
-- The brief (sessions spec §7.3). `briefs.ts` keeps one per chat in memory (`BRIEF_WAIT_MS` 60 s, `BRIEF_KEEP_MS`
-  30 minutes; a restart drops them) and `write_brief` fills it, refused from any session that is not the chat's open
-  one. `ChatService.askBrief` sends the request only between turns, read only, as a message with `purpose: 'brief'`;
-  otherwise the brief is `briefFromChat` (`brief.ts`) at once. The brief turn is tracked in `briefTurns`, so a send
-  stops it first and Cancel (`DELETE /chats/:chatId/brief`) stops only it. `chatDigest` and `briefFromChat` leave out
-  every `purpose: 'brief'` message and the reply it began. A resumed agent session keeps the request in its own
-  transcript, which no digest can edit; that is accepted.
+  a chat's wait from the folder's `waiting_chat` holder instead. A send with `folder: wait` parks its turn until the folder frees; a send with no `folder` takes the folder when it
+  is free.
+- `finish-seals.ts` completes, once after recovery, a chat an old Do It linked to a task in a separate copy but did
+  not finish with. `ChatService.stopForOpen` stops a chat's turn so a whole-project pass can open under it (its hold on
+  the chat's starts only the open gives back); while it holds, Redo and archive are refused for the chat, and while a
+  pass waits to open for a chat, archive is too. A chat sealed into a copy can't be archived while the copy's task is
+  unfinished. `task-session.ts` is `GET /tasks/:taskId/session`; the Changes scope is `workstream-changes.ts`'s.
+- `brief.ts` reads the chat back as a brief for old rows: it leaves out every `purpose: 'brief'` message and the reply
+  it began.
 - Do It's tasks get a `chat_tasks` row on purpose (Recent counts them as filed, `edit_task` reaches them,
   `remove_task` on one doesn't ask, `chatMadeTask` in `tools.ts`). A copy's areas come from `chat-areas.ts`.
 - A chat in the builder's terminal (`taken_over`) is the takeover service's (`takeover/AGENTS.md`). Archiving it asks `takeover.serialized`/`ended` first, so the hold and the files go with the archive; the settings route `PATCH /settings/sessions` names only the field it changes (`terminalApp`, `notifyReplies`), and an older PUT without `terminalApp` reads as Terminal.
+- A session's place (`chats.work_place`, spec `docs/superpowers/specs/2026-11-17-10db-sessions-simplified-design.md`; decisions `decisions/2026-11-17-a-sessions-first-change-asks-where-the-work-happens.md`, `decisions/2026-11-17-a-session-on-a-new-branch-is-the-same-conversation-in-its-own-worktree.md`): null while it reads, then `choosing`, `here`, `moving` or `branch`. Every change is a compare-and-set in one transaction with its `ChatChanged` event and, where the state table says so, its Inbox card (`work-state.ts`, `work-card.ts`). `first-change.ts` records the question when a turn's first edit is refused; `work-service.ts` is `choose` (Here: hold, stop the turn, CAS, withdraw the card, post the carry-on message, release) and the move (`work-move`: claim the branch and path, cut the worktree through `delivery/chat-worktree-cut.ts`, restart the session on the same provider session id, record `branch`), with `work-recovery` finishing a move a restart interrupted. The bar and the card are two ways to the same CAS and one wins.
+- `chatRoot(chat, project)` (`work-root.ts`) is the only place `chat/` picks a folder: the checkout while reading, choosing, moving or Here; the worktree on a branch; a branch with no worktree reads the checkout and `writes` is false. `confinement.ts` judges an edit against that root and, for a moved session, points an edit of the old path at the same file in the worktree. A turn takes the folder hold only on a Here session (`turnStarting`, `spec()`'s `writes`, `mustWait`, the push, pull-request and merge tools); a branch's terminal holds nothing (`takeover/`).
+- Routes (`api/app.ts`, wired by `daemon/chat-services.ts`): `GET`/`POST /chats/:chatId/work` (a repeat of a settled choice answers 200, a different one 409 with `ChatWork`), `GET /chats/:chatId/changes`, `POST /chats/:chatId/{commit,pull-request,merge}` (the title row's git steps, `title-row-git.ts`, `next-git-step.ts`), `POST /chats/:chatId/archive` (a 409 carries what would be lost) and `/unarchive` (Reopen cuts the worktree again on the same branch).
+- Removed with Do It: the brief, task tabs, the pass of one, Send Reading Only and the archive preview route. An old sealed chat opens read-only with a link to its task; `brief.ts` and `finish-seals.ts` remain only to read old rows.

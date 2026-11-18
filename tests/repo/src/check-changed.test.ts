@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   copyFileSync,
@@ -540,6 +540,51 @@ describe('scripts/check-changed.mjs --precheck, run', () => {
     expect(run.stdout).toContain(
       '\nFAILED format: node scripts/check-changed.mjs --precheck (log .gate/format.log)\n',
     );
+  });
+
+  it('prints a test step’s output while the step still runs, and keeps it in the step’s log', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'check-changed-'));
+    dirs.push(dir);
+    mkdirSync(join(dir, 'scripts'));
+    mkdirSync(join(dir, 'bin'));
+    mkdirSync(join(dir, 'apps/x/src'), { recursive: true });
+    copyFileSync(
+      join(repoRoot, 'scripts/check-changed.mjs'),
+      join(dir, 'scripts/check-changed.mjs'),
+    );
+    writeFileSync(join(dir, 'apps/x/package.json'), JSON.stringify({ name: '@10db/x' }));
+    writeFileSync(join(dir, 'apps/x/src/a.ts'), 'export {};\n');
+    // The test step prints a line, then waits until the test creates `release`.
+    writeFileSync(
+      join(dir, 'bin/pnpm'),
+      `#!/bin/sh\ncase "$*" in\n  exec\\ vitest*) echo 'started tests/a.test.ts'; until [ -f '${dir}/release' ]; do sleep 0.05; done ;;\nesac\n`,
+    );
+    chmodSync(join(dir, 'bin/pnpm'), 0o755);
+    const child = spawn(process.execPath, ['scripts/check-changed.mjs', '--', 'apps/x/src/a.ts'], {
+      cwd: dir,
+      env: { PATH: `${join(dir, 'bin')}:/bin:/usr/bin` },
+    });
+    let stdout = '';
+    const marker = 'started tests/a.test.ts';
+    const sawMarker = await new Promise<boolean>((resolve) => {
+      const deadline = setTimeout(() => {
+        resolve(false);
+      }, 10_000);
+      child.stdout.on('data', (chunk) => {
+        stdout += String(chunk);
+        if (stdout.includes(marker)) {
+          clearTimeout(deadline);
+          resolve(true);
+        }
+      });
+    });
+    const exited = new Promise<number | null>((resolve) => child.on('close', resolve));
+    writeFileSync(join(dir, 'release'), '');
+    const status = await exited;
+    expect(sawMarker, stdout).toBe(true);
+    expect(status, stdout).toBe(0);
+    expect(stdout.split(marker)).toHaveLength(2);
+    expect(readFileSync(join(dir, '.gate/test.log'), 'utf8')).toBe(`${marker}\n`);
   });
 
   it('does run the gate for the same unplaced file without --precheck', () => {

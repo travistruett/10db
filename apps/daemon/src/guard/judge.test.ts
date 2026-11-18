@@ -2786,6 +2786,22 @@ describe('hazardFor agrees with the guard on which commands need a hazard claim'
   });
 });
 
+describe('what the refusal of an unclaimed hazard command says to do instead', () => {
+  it.each([
+    { command: 'pnpm add x', install: true },
+    { command: 'pnpm install', install: true },
+    { command: 'uv add requests', install: true },
+    { command: 'pnpm db:migrate', install: false },
+  ])('$command names install_dependencies: $install', ({ command, install }) => {
+    const verdict = judge('Bash', { command });
+    expect(verdict.decision).toBe('deny');
+    if (verdict.decision !== 'deny') return;
+    expect(verdict.reason).toContain('request_claim');
+    expect(verdict.reason.includes('install_dependencies')).toBe(install);
+    expect(verdict.reason.includes('Never run pnpm add or pnpm install yourself')).toBe(install);
+  });
+});
+
 describe('a Monitor command is judged as a Bash command', () => {
   const UNSAFE = [
     'git push --force origin main',

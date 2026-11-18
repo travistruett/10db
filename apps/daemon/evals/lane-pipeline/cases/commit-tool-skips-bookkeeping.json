@@ -1,0 +1,14 @@
+{
+  "id": "commit-tool-skips-bookkeeping",
+  "title": "The commit tool never names Claude Code's bookkeeping to git add, so a gitignore covering it can't make a commit fail",
+  "description": "The commit tool (`stage` in apps/daemon/src/git/git.ts) passes every named path to `git add -A -- <paths>`, then puts Claude Code's bookkeeping back as the tip has it. Git refuses a named path that an ignore rule covers, so when a lane names nested bookkeeping such as `.claude/hooks/.claude/.cc-writes/x.tmp`, the commit fails with '10db could not stage …'. That happens on any machine whose ignore rules cover it: the builder's `~/.config/git/ignore` holds `**/.claude/.cc-writes/`, and git reads that file even with `GIT_CONFIG_GLOBAL=/dev/null`. Two git tests fail locally for the same reason and pass on CI only because CI has no such file. Wanted: (1) the commit tool drops bookkeeping paths (by the rule in `git/claude-code-bookkeeping.ts`) from what it names to `git add`, and logs that it left them out; (2) test repositories in the daemon (and `isolatedGitEnvironment` in tests/repo) neutralise git's default excludes file, so a contributor's ignore file can't change results.",
+  "acceptanceCriteria": [
+    "Committing a named path list that includes nested Claude Code bookkeeping succeeds and stages none of the bookkeeping, even when an ignore rule (repo .gitignore or the user's default excludes file) covers it",
+    "The daemon's git tests and tests/repo give the same results with a ~/.config/git/ignore that ignores **/.claude/.cc-writes/ as without one",
+    "A named path that is ignored and is not bookkeeping still fails with the stage error as now"
+  ],
+  "areas": ["daemon", "repo"],
+  "baseCommit": "19b00e4be40a184a61ac9ffa1d2ebd82e0526e74",
+  "mergedCommit": "8fe91912e8adb35a5fb6164ec71f1e2a60c84c20",
+  "tags": ["rule-commit-tool"]
+}

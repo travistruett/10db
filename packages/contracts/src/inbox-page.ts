@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import { CARD_RESOLUTION, CardResolution } from './card-resolution';
 import { InboxItemDto } from './entities';
-import { PersonId, ProjectId } from './ids';
+import { InboxItemId, PersonId, ProjectId } from './ids';
 import { SortDirection } from './knowledge-api';
+import { InboxRowRef, InboxRowSort } from './inbox-rows';
 import { InboxKind } from './states';
 
 /**
@@ -57,25 +58,81 @@ export const INBOX_PAGE_SIZE_MAX = 100;
  * out first, and Open the most urgent and then oldest first. `person` keeps the cards whose live send
  * went to that person. A page past the last is answered with the last.
  */
-export const InboxPageQuery = z.strictObject({
-  state: z.enum(InboxListState),
-  project: ProjectId.optional(),
-  kind: z.enum(InboxKind).optional(),
-  outcome: z.enum(InboxOutcome).optional(),
-  person: PersonId.optional(),
-  sort: z.enum(InboxSort).optional(),
-  dir: z.enum(SortDirection).optional(),
-  page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(INBOX_PAGE_SIZE_MAX).default(INBOX_PAGE_SIZE),
-});
+export const InboxPageQuery = z
+  .strictObject({
+    state: z.enum(InboxListState),
+    project: ProjectId.optional(),
+    kind: z.enum(InboxKind).optional(),
+    outcome: z.enum(InboxOutcome).optional(),
+    person: PersonId.optional(),
+    sort: z.enum(InboxSort).optional(),
+    dir: z.enum(SortDirection).optional(),
+    /** 1 when absent. */
+    page: z.coerce.number().int().min(1).optional(),
+    pageSize: z.coerce.number().int().min(1).max(INBOX_PAGE_SIZE_MAX).default(INBOX_PAGE_SIZE),
+    /** The last row's sort, as JSON: the page after it. */
+    after: z
+      .string()
+      .transform((text, ctx): InboxRowSort => {
+        let json: unknown;
+        try {
+          json = JSON.parse(text);
+        } catch {
+          ctx.addIssue({ code: 'custom', message: 'after is not JSON' });
+          return z.NEVER;
+        }
+        const sort = InboxRowSort.safeParse(json);
+        if (!sort.success) {
+          ctx.addIssue({ code: 'custom', message: 'after is not a row sort' });
+          return z.NEVER;
+        }
+        return sort.data;
+      })
+      .optional(),
+    /** Title or body contains this, ASCII case folded. */
+    q: z.string().trim().min(1).max(200).optional(),
+    /** Resolved only: updated at or after. */
+    // Stored times are milliseconds with a Z, so a bound without them is written the same way before it is compared.
+    since: z.iso
+      .datetime()
+      .transform((text) => new Date(text).toISOString())
+      .optional(),
+    /** The page holds only this card's row, when it is in the list. */
+    card: InboxItemId.optional(),
+  })
+  .superRefine((q, ctx) => {
+    const refuse = (message: string): void => {
+      ctx.addIssue({ code: 'custom', message });
+    };
+    if (q.after !== undefined) {
+      if (q.page !== undefined) refuse('after and page cannot be combined');
+      if (q.sort !== undefined) refuse('after and sort cannot be combined');
+      if (q.dir !== undefined) refuse('after and dir cannot be combined');
+    }
+    if (q.card !== undefined && q.after !== undefined) refuse('card and after cannot be combined');
+    if (q.card !== undefined && q.page !== undefined) refuse('card and page cannot be combined');
+    if (q.since !== undefined && q.state !== InboxListState.Resolved)
+      refuse('since applies to resolved only');
+    if (q.state === InboxListState.Open) {
+      // Open's order is fixed and its filters are project, kind and the search.
+      for (const key of ['sort', 'dir', 'outcome', 'person'] as const)
+        if (q[key] !== undefined) refuse(`${key} does not apply to open`);
+    }
+  });
 export type InboxPageQuery = z.output<typeof InboxPageQuery>;
 
 export const InboxPageDto = z.object({
+  /** The rows' cards, in order. */
   items: z.array(InboxItemDto),
-  /** Every card the filters match, not just this page. */
+  /** Every card the filters match, not just this page; Open counts rows with a card triage has placed. */
   total: z.int().min(0),
-  /** The page answered, which is the last one when the page asked for is past it. */
+  /** The page answered, which is the last one when the page asked for is past it; 1 for a keyset or card answer. */
   page: z.int().min(1),
+  /** Rows per page. */
   pageSize: z.int().min(1),
+  /** One per card in the list, in order. */
+  rows: z.array(InboxRowRef).default([]),
+  /** `after` for the next page; null on the last. */
+  next: InboxRowSort.nullable().default(null),
 });
 export type InboxPageDto = z.infer<typeof InboxPageDto>;

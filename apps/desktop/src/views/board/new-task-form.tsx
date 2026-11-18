@@ -25,6 +25,8 @@ export interface NewTaskFormProps {
   /** Reports whether a create is in flight and why the last one failed, for the footer to show. */
   readonly onStatus: (status: { readonly pending: boolean; readonly error: string | null }) => void;
   readonly onCreated: (task: TaskDto) => void;
+  /** What the form opens with, such as the title of a session the task comes from. */
+  readonly initial?: { readonly title: string };
 }
 
 /** A project with one area is the common case; preselect it. */
@@ -33,12 +35,19 @@ function initialAreas(project: ProjectDto): string[] {
   return only && rest.length === 0 ? [only.name] : [];
 }
 
-export function NewTaskForm({ formId, project, tasks, onStatus, onCreated }: NewTaskFormProps) {
+export function NewTaskForm({
+  formId,
+  project,
+  tasks,
+  onStatus,
+  onCreated,
+  initial,
+}: NewTaskFormProps) {
   const create = useCreateTask(project.id);
   const criteriaId = useId();
   const areasId = useId();
   const [headline, setHeadline] = useState('');
-  const [title, setTitle] = useState('');
+  const [title, setTitle] = useState(initial?.title ?? '');
   const [why, setWhy] = useState('');
   const [description, setDescription] = useState('');
   const [criteriaText, setCriteriaText] = useState('');

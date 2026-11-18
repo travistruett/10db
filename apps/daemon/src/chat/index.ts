@@ -2,22 +2,30 @@
 // `createChatService` keeps its row and its messages; `chatHooks` says what its session is; its tools
 // answer on `/mcp`; the files and Start from routes read the project for the screen.
 
-export { chatFolderInUse, judgeChatCall, type ChatFolder } from './confinement';
+export { chatFolderInUse, judgeChatCall, type ChatPlace } from './confinement';
 export { createConversationFiles } from './conversation-files';
 export { chatFolder, chatHooks, type ChatHooksDeps } from './hooks';
-export { createBriefs, type Briefs } from './briefs';
 export { createChatLiveSessions } from './live-sessions';
-export { createChatService, type ChatService } from './service';
+export {
+  ChatArchiveWarning,
+  createChatService,
+  type ChatService,
+  type ChatWorktrees,
+} from './service';
+export { branchFor } from './chat-worktree';
+export {
+  applyChatWorkAnswer,
+  ChatWorkConflict,
+  createChatWorkService,
+  type ChatMoveDeps,
+  type ChatWorkService,
+} from './work-service';
+export { chatRoot } from './work-root';
+export { createChatWorkStateReader, type ChatWorkStateReader } from './work-state';
+export { createTitleRowGit, type TitleRowGit } from './title-row-git';
 export { sessionStarts } from './session-starts';
 export { patchSessionsSettings, sessionsSettings, setSessionsSettings } from './settings';
 export { startFacts, type StartGit } from './start-facts';
 export { createChatTools } from './tools';
-export {
-  doItHere,
-  doItInCopy,
-  finishSeals,
-  previewDoIt,
-  type DoItDeps,
-  type DoItHereDeps,
-} from './do-it';
+export { finishSeals } from './finish-seals';
 export { taskSession } from './task-session';

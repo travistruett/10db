@@ -260,6 +260,17 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
         onAddPage: () => {
           setDialog('add-page');
         },
+        passActions: {
+          onClose: () => {
+            setDialog('close');
+          },
+          onRename: () => {
+            setDialog('rename');
+          },
+          onAbandon: () => {
+            setDialog('abandon');
+          },
+        },
       })}
       {dialog === 'add-page' ? (
         <AddPageModal

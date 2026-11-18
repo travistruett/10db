@@ -21,8 +21,7 @@ import { z } from 'zod';
 import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
 import { inboxItemDto, projectViewDto } from '../../test/fixtures';
 import { multipartParts, useNodeMultipart } from '../../test/multipart';
-import { observeWidthsOf, resetObservedWidth } from '../../test/sized-observer';
-import { resetViewportWidth, viewportWidth } from '../../test/window-width';
+import { FrameSlots, titleRowOf } from '../../test/frame';
 import {
   askItem,
   minutesBeforeNow,
@@ -49,11 +48,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function renderWorkspace(selected: (pages: Pages) => TaskId | null = () => null) {
+async function renderWorkspace(
+  selected: (pages: Pages) => TaskId | null = () => null,
+  frame?: { readonly panelShown: boolean },
+) {
   const pages = pagesByStatus();
   const onSelect = vi.fn();
   const onAddPage = vi.fn();
-  renderWithDaemon(
+  const workspace = (
     <PassWorkspace
       view={passViewDto({ pages: Object.values(pages) })}
       inbox={[askItem(pages.asks)]}
@@ -61,10 +63,19 @@ async function renderWorkspace(selected: (pages: Pages) => TaskId | null = () =>
       selected={selected(pages)}
       onAddPage={onAddPage}
       onSelect={onSelect}
-    />,
+      passActions={{ onRename: vi.fn(), onAbandon: vi.fn() }}
+    />
   );
+  // Without a frame the workspace has no panel to draw into and keeps its narrow strip.
+  const framed = (panelShown: boolean) => (
+    <FrameSlots panelShown={panelShown}>{workspace}</FrameSlots>
+  );
+  const view = renderWithDaemon(frame === undefined ? workspace : framed(frame.panelShown));
   await screen.findByRole('list', { name: 'Open pages' });
-  return { pages, onSelect, onAddPage };
+  const rerender = (panelShown: boolean) => {
+    view.rerender(framed(panelShown));
+  };
+  return { pages, onSelect, onAddPage, rerender };
 }
 
 type Pages = ReturnType<typeof pagesByStatus>;
@@ -77,28 +88,92 @@ function queueRows() {
 }
 
 describe('PassWorkspace layout', () => {
-  afterEach(() => {
-    resetObservedWidth();
-    resetViewportWidth();
+  const openPages = () => screen.getAllByRole('list', { name: 'Open pages' });
+
+  // The frame says whether it draws the panel (a column, or the open sheet); the queue is drawn once,
+  // in the panel when it is shown and as the narrow strip when it is not.
+  it.each([
+    { name: 'the panel shown', panelShown: true, where: 'panel' },
+    { name: 'the panel folded or hidden with the keyboard', panelShown: false, where: 'content' },
+    { name: 'a medium window with the sheet closed', panelShown: false, where: 'content' },
+    { name: 'a medium window with the sheet open', panelShown: true, where: 'panel' },
+    { name: 'a narrow window', panelShown: false, where: 'content' },
+  ])('draws the queue once, in the $where, with $name', async ({ panelShown, where }) => {
+    const { pages } = await renderWorkspace(() => null, { panelShown });
+    expect(openPages()).toHaveLength(1);
+    const list = openPages()[0];
+    expect(list?.closest('[data-testid=panel]') !== null).toBe(where === 'panel');
+    const row = within(titleRowOf());
+    if (panelShown) {
+      // The title row names the page the thread shows, with its state and route and the row's menu.
+      expect(row.getByRole('heading', { name: 'People' })).toBeTruthy();
+      expect(row.getByText(`Asks a question · ${pages.asks.route ?? ''}`)).toBeTruthy();
+      expect(row.getByRole('button', { name: 'More actions for People' })).toBeTruthy();
+      // The pass's name and menu are the panel's head.
+      expect(
+        within(screen.getByTestId('panel')).getByRole('button', { name: 'More actions' }),
+      ).toBeTruthy();
+    } else {
+      expect(row.queryByRole('button', { name: 'More actions for People' })).toBeNull();
+      // The pass's own line and menu are the header's, drawn by the view.
+      expect(row.queryByRole('heading', { name: 'People' })).toBeNull();
+    }
   });
 
-  it.each([
-    { name: 'beside the browser in a wide window', container: 600, layout: 'column' },
-    { name: 'with room for the queue beside the thread', container: 1000, layout: 'row' },
-  ])(
-    'lays out by its own width, with the window held at 1280: $name',
-    async ({ container, layout }) => {
-      viewportWidth(1280);
-      observeWidthsOf(container);
-      await renderWorkspace();
-      const root = screen
-        .getByRole('list', { name: 'Open pages' })
-        .closest<HTMLElement>('[style*="flex-direction"]');
-      await waitFor(() => {
-        expect(root?.style.flexDirection).toBe(layout);
-      });
-    },
-  );
+  it("leaves the pass's menu to the title row while the pass has no page, so it is drawn once", async () => {
+    renderWithDaemon(
+      <FrameSlots panelShown>
+        <PassWorkspace
+          view={passViewDto({ pages: [] })}
+          inbox={[]}
+          project={projectViewDto()}
+          selected={null}
+          onAddPage={vi.fn()}
+          onSelect={vi.fn()}
+          passActions={{ onRename: vi.fn(), onAbandon: vi.fn() }}
+        />
+      </FrameSlots>,
+    );
+    await screen.findByTestId('panel');
+    expect(screen.queryAllByRole('button', { name: 'More actions' })).toHaveLength(0);
+  });
+
+  it('moves along the rows in the panel with j', async () => {
+    await renderWorkspace(() => null, { panelShown: true });
+    const rows = queueRows();
+    rows[0]?.focus();
+    fireEvent.keyDown(document.body, { key: 'j' });
+    expect(document.activeElement).toBe(rows[1]);
+  });
+
+  it('puts focus back on the shown page’s row when the queue moves between the panel and the strip', async () => {
+    const { rerender } = await renderWorkspace(() => null, { panelShown: true });
+    queueRows()[2]?.focus();
+    rerender(false);
+    const strip = queueRows();
+    expect(
+      screen.getByRole('list', { name: 'Open pages' }).closest('[data-testid=panel]'),
+    ).toBeNull();
+    // The shown page is the queue's first, as none is selected.
+    expect(document.activeElement).toBe(strip[0]);
+    fireEvent.keyDown(document.body, { key: 'j' });
+    expect(document.activeElement).toBe(queueRows()[1]);
+    rerender(true);
+    expect(document.activeElement).toBe(queueRows()[0]);
+    expect(
+      screen.getByRole('list', { name: 'Open pages' }).closest('[data-testid=panel]'),
+    ).not.toBeNull();
+  });
+
+  it('leaves the cursor off the strip when a row was picked with the pointer and the sheet then closes', async () => {
+    const { rerender } = await renderWorkspace(() => null, { panelShown: true });
+    const row = queueRows()[2];
+    // A browser that focuses a button on a click focuses it first; the row then hands the cursor on.
+    row?.focus();
+    if (row !== undefined) fireEvent.click(row, { detail: 1 });
+    rerender(false);
+    expect(queueRows()).not.toContain(document.activeElement);
+  });
 });
 
 describe('PassWorkspace queue', () => {

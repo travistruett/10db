@@ -1,4 +1,10 @@
-export { CheckoutPin, memoryPinStore, worktreePinKey, type PinStore } from './checkout-pin';
+export {
+  chatWorktreePinKey,
+  CheckoutPin,
+  memoryPinStore,
+  worktreePinKey,
+  type PinStore,
+} from './checkout-pin';
 export {
   bookkeepingAt,
   ignoredBookkeepingWrite,
@@ -19,6 +25,7 @@ export {
   type CheckoutPlace,
   type FolderAt,
   type Git,
+  OP_TRAILER,
   OVER_BUDGET_REFUSAL,
   type SurveyTexts,
   type KeptCommit,
@@ -42,10 +49,11 @@ export { GitTrustError, GitTrustFailure } from './trust-error';
 export { firstExecutable, installCandidates, INSTALL_PREFIXES_TEXT } from './install-prefixes';
 export { GitVersionError, resolveGit } from './version';
 export {
-  lockedBatchId,
+  lockedOwner,
   parseWorktreeList,
   WORKTREE_LOCK_PREFIX,
   type WorktreeEntry,
+  type WorktreeOwner,
 } from './worktree-list';
 export {
   builderCommandLine,

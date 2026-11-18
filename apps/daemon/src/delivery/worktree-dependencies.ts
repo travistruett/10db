@@ -1,9 +1,9 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { BatchDto, PermissionRuleDto, ProjectDto, ProjectId } from '@10db/contracts';
+import type { PermissionRuleDto, ProjectDto, ProjectId } from '@10db/contracts';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
-import type { Git } from '../git';
+import type { Git, WorktreeOwner } from '../git';
 import { raiseGateHostCards, type InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { takeFoundHostsReading } from '../registries';
@@ -13,17 +13,13 @@ import {
   describeBroken,
   madeByAnotherPnpm,
   storeRecordProblem,
+  INSTALL_SUMMARY,
   PNPM_LOCKFILE,
   removeBrokenInstall,
 } from './install-health';
+import { templateKey, type NodeModulesTemplates } from './node-modules-template';
 
-export { PNPM_LOCKFILE };
-
-/**
- * What the builder is told runs. The real command (`installCommand`) also fixes the program, the
- * store and the directories, which the repository's own config could otherwise choose.
- */
-export const INSTALL_SUMMARY = 'pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile';
+export { INSTALL_SUMMARY, PNPM_LOCKFILE };
 
 /**
  * `frozen` brings the packages in line with the lockfile as it is. `update` is a lane's dependency
@@ -46,9 +42,8 @@ const quoted = (text: string): string => `'${text.replaceAll("'", "'\\''")}'`;
 /**
  * Brings a seeded `node_modules` in line with the worktree's own lockfile, with a pnpm the daemon
  * resolved (`pnpm`, an absolute path outside every checkout). The scripts and the pnpmfile are off: a
- * worktree install runs no code from the repository, and the root `prepare` script (`lefthook
- * install`) would otherwise write git hooks into the main checkout's git directory, which every
- * worktree shares. The repository does not choose the program (`packageManager` and corepack are
+ * worktree install runs no code from the repository, so no install script can write into the main
+ * checkout's git directory, which every worktree shares. The repository does not choose the program (`packageManager` and corepack are
  * switched off) or where pnpm writes (`.npmrc` and workspace settings can name a store, a modules
  * directory and a virtual store, so all three are given on the command line).
  */
@@ -77,6 +72,8 @@ export type DependencyRefresh =
       readonly installs: number;
       /** Set by the retry after a failed install left the copy broken: what that install left unresolved. */
       readonly leftBroken?: string;
+      /** The copy's `node_modules` is a clone of the daemon's template for its lockfile; no install ran. */
+      readonly fromTemplate?: true;
     }
   | {
       readonly kind: 'failed';
@@ -123,7 +120,8 @@ export async function raiseInstallHostCards(
 
 export interface WorktreeDependencies {
   refresh(input: {
-    readonly batch: BatchDto;
+    /** The batch or session whose worktree this is; it names the install's log. */
+    readonly owner: WorktreeOwner;
     readonly project: ProjectDto;
     /** The worktree, after its seed. */
     readonly path: string;
@@ -141,6 +139,12 @@ export interface WorktreeDependencies {
      * This install is that start over, so a failure is reported as it is, with no retry of its own.
      */
     readonly startOver?: true;
+    /**
+     * Only a cut sets it: the copy is new and no lane has run in it, so a whole install of it is made
+     * the template for its lockfile, and the templates no checkout uses are removed
+     * (`decisions/2026-11-17-a-copys-node-modules-is-cloned-from-a-template-made-once-per-lockfile.md`).
+     */
+    readonly makeTemplate?: true;
   }): Promise<DependencyRefresh>;
 }
 
@@ -171,6 +175,11 @@ export interface WorktreeDependenciesDeps {
     pnpm: string,
     env: Readonly<Record<string, string>>,
   ) => Promise<string | null>;
+  /**
+   * The daemon's `node_modules` templates: a frozen install whose lockfile has one clones it instead
+   * of installing. Without them, or without the pnpm's version, every install runs.
+   */
+  readonly templates?: NodeModulesTemplates;
 }
 
 /**
@@ -184,13 +193,14 @@ export interface WorktreeDependenciesDeps {
 export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): WorktreeDependencies {
   return {
     async refresh({
-      batch,
+      owner,
       project,
       path,
       signal,
       seeded = true,
       mode = 'frozen',
       startOver: asked,
+      makeTemplate,
     }) {
       // Not pnpm's, or (seeded) the main checkout had no install to bring in line.
       if (!existsSync(join(path, PNPM_LOCKFILE))) return { kind: 'skipped' };
@@ -200,7 +210,7 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
         deps.dataDir,
         'logs',
         'install',
-        `batch-${batch.id}-${String(deps.clock.now().getTime())}.log`,
+        `${owner.kind}-${owner.id}-${String(deps.clock.now().getTime())}.log`,
       );
       const checkouts = [...new Set([...deps.checkouts(), path])];
       const pnpm = await deps.resolvePnpm(env, checkouts);
@@ -241,6 +251,57 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
       // checkout the builder installed with their own pnpm), or from another store, starts over, as
       // the first install of a copy does, which works. Sources are not touched.
       const version = (await deps.pnpmVersion?.(pnpm, env)) ?? null;
+      const templates = deps.templates;
+      const key = templates === undefined ? null : templateKey(path, version);
+      // A cut makes the template of its new copy's install and removes those no checkout uses.
+      const finish = async (result: DependencyRefresh): Promise<DependencyRefresh> => {
+        if (makeTemplate !== true || templates === undefined || key === null) return result;
+        if (result.kind === 'aborted') return result;
+        if (
+          result.kind === 'installed' &&
+          result.fromTemplate !== true &&
+          existsSync(join(path, 'node_modules')) &&
+          checkInstall(path).kind === 'whole'
+        )
+          await templates.capture({ key, path });
+        const inUse = deps.checkouts().flatMap((checkout) => templateKey(checkout, version) ?? []);
+        await templates.sweep(new Set([key, ...inUse]));
+        return result;
+      };
+      // A frozen install whose lockfile has a template is a clone of it: nothing is downloaded and no
+      // program runs. A dependency change (`update`) resolves new packages, and a start over asked
+      // for after a broken install is the install itself, so neither clones.
+      if (templates !== undefined && key !== null && mode === 'frozen' && asked !== true) {
+        const hadNodeModules = existsSync(join(path, 'node_modules'));
+        const started = deps.clock.now().getTime();
+        const cloned = await templates.cloneInto({ key, path, signal });
+        if (cloned === 'aborted') return { kind: 'aborted' };
+        if (cloned === 'cloned') {
+          try {
+            mkdirSync(dirname(logPath), { recursive: true });
+            writeFileSync(
+              logPath,
+              `cloned from 10db's template ${key}; no install ran, nothing downloaded\n`,
+            );
+          } catch {
+            // The daemon log says it too.
+          }
+          deps.logger?.info({ path, key }, 'node_modules cloned from its template');
+          return finish({
+            kind: 'installed',
+            logPath,
+            durationMs: deps.clock.now().getTime() - started,
+            startedOver: hadNodeModules,
+            installs: 0,
+            fromTemplate: true,
+          });
+        }
+        // A damaged template's clone took the copy's own node_modules with it.
+        if (hadNodeModules && !existsSync(join(path, 'node_modules'))) {
+          startedOver = true;
+          reasons.push("10db's template for its lockfile was damaged, and was removed");
+        }
+      }
       const store = env['pnpm_config_store_dir'];
       const health = checkInstall(path);
       const why = ((): string | null => {
@@ -328,12 +389,14 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
           // What the failed install left unresolved, so a caller that finds the copy whole after
           // this retry can say what was repaired.
           const retried = await install();
-          return retried.kind === 'installed' || retried.kind === 'failed'
-            ? { ...retried, leftBroken: describeBroken(left) }
-            : retried;
+          return finish(
+            retried.kind === 'installed' || retried.kind === 'failed'
+              ? { ...retried, leftBroken: describeBroken(left) }
+              : retried,
+          );
         }
       }
-      return first;
+      return finish(first);
     },
   };
 }

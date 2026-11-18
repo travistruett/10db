@@ -3,7 +3,7 @@ import { BlockList, isIPv6 } from 'node:net';
 import { homedir } from 'node:os';
 import { DeniedBy, Provider, providerOf, type ProjectDto } from '@10db/contracts';
 import { getProject, listPermissionRules, listProjects } from '@10db/db';
-import { allCheckouts } from '../delivery';
+import { allCheckouts, projectAtCheckout } from '../delivery';
 import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
 import { sessionConfigDir, type AwsCredentialsExporter } from '../environment';
 import type { StateStore } from '../events';
@@ -326,7 +326,8 @@ export function createShapePreparer(
     try {
       session = await deps.laneSandbox.forSession({
         setup: setupPlan.input,
-        project,
+        project:
+          input.checkout === undefined ? project : projectAtCheckout(project, input.checkout),
         env: input.env,
         // A conversation has no workstream: only the project's own rules hold.
         rules: listPermissionRules(state.db, project.id, null),

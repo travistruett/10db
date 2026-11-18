@@ -124,7 +124,9 @@ describe('WorkbenchView', () => {
     const live = passViewDto({ pass: passDto({ projectId: project.id }), pages: [ready, working] });
     const other = passViewDto({ pass: { name: 'Their pass' }, pages: [pagesByStatus().ready] });
     const { router } = open(`/workbench?task=${working.taskId}`, { live: [other, live] });
-    expect(await screen.findByText('ampsio · Settings pass · 1 ready · 1 working')).toBeTruthy();
+    // The pass's name is the panel's head and its counts the line under it.
+    expect(await screen.findByText('1 ready · 1 working')).toBeTruthy();
+    expect(screen.getByText('Settings pass')).toBeTruthy();
     const queue = screen.getByRole('list', { name: 'Open pages' });
     expect(
       within(queue)
@@ -248,7 +250,7 @@ describe('WorkbenchView', () => {
       }),
     );
     open('/workbench', { live: [live] });
-    await screen.findByText(/^ampsio · Settings pass/);
+    await screen.findByText('Settings pass');
     await act();
     await waitFor(() => {
       expect(asked).toHaveLength(1);

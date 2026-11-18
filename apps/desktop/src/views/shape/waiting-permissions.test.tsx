@@ -3,6 +3,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
+import { findText, serveOpenRows } from '../../test/inbox-page-fixtures';
 import { inboxItemDto, projectViewDto } from '../../test/fixtures';
 import { shapeDto, shapeMessageDto, shapeViewDto } from '../../test/shape-fixtures';
 
@@ -73,6 +74,9 @@ function serve(items: InboxItemDto[]): {
     }),
     ...baseHandlers(),
     eventStream.addEventListener('connection', () => undefined),
+  );
+  serveOpenRows(() =>
+    items.filter((i) => !answers.some((a) => a.id === i.id) && !closed.has(i.id)),
   );
   return {
     answers,
@@ -197,6 +201,6 @@ describe('A permission card in the conversation', () => {
   it('keeps the card in the Inbox too', async () => {
     serve([card()]);
     renderApp('/inbox');
-    expect(await screen.findByText('Allow Bash?')).toBeTruthy();
+    expect(await findText('Allow Bash?')).toBeTruthy();
   });
 });

@@ -661,7 +661,14 @@ describe('API', () => {
     const services = stubServices({
       pageInbox: (q) => {
         seen.push(q);
-        return { items: [], total: 0, page: q.page, pageSize: q.pageSize };
+        return {
+          items: [],
+          total: 0,
+          page: q.page ?? 1,
+          pageSize: q.pageSize,
+          rows: [],
+          next: null,
+        };
       },
     });
     const res = await app(services).request(
@@ -669,7 +676,14 @@ describe('API', () => {
       auth,
     );
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ items: [], total: 0, page: 2, pageSize: 50 });
+    expect(await res.json()).toEqual({
+      items: [],
+      total: 0,
+      page: 2,
+      pageSize: 50,
+      rows: [],
+      next: null,
+    });
     expect(seen).toEqual([
       {
         state: 'resolved',
@@ -690,9 +704,36 @@ describe('API', () => {
     ['an unknown kind', '/inbox/page?state=open&kind=nope'],
     ['a page size of 101', '/inbox/page?state=resolved&pageSize=101'],
     ['an unknown key', '/inbox/page?state=resolved&recent=100'],
+    [
+      'after with a page number',
+      `/inbox/page?state=open&after=${encodeURIComponent('[0,"x","y"]')}&page=2`,
+    ],
   ])('answers 400 for the inbox page with %s without reaching a service', async (_name, path) => {
     const services = stubServices({ pageInbox: track('pageInbox') });
     expect((await app(services).request(path, auth)).status).toBe(400);
+    expect(reached).toEqual([]);
+  });
+
+  it('reads a card’s context through the service with the parsed id', async () => {
+    const id = mintId('InboxItem');
+    const seen: unknown[] = [];
+    const services = stubServices({
+      inboxCardContext: (cardId) => {
+        seen.push(cardId);
+        return { messages: [{ author: 'agent', text: 'Hi', at: '2026-11-17T00:00:00.000Z' }] };
+      },
+    });
+    const res = await app(services).request(`/inbox/${id}/context`, auth);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      messages: [{ author: 'agent', text: 'Hi', at: '2026-11-17T00:00:00.000Z' }],
+    });
+    expect(seen).toEqual([id]);
+  });
+
+  it('answers 400 for a context id that is not an inbox id, without reaching a service', async () => {
+    const services = stubServices({ inboxCardContext: track('inboxCardContext') });
+    expect((await app(services).request('/inbox/nope/context', auth)).status).toBe(400);
     expect(reached).toEqual([]);
   });
 
@@ -2703,6 +2744,23 @@ describe('the chat routes', () => {
     });
     expect(res.status).toBe(400);
     expect(reached).toEqual([]);
+  });
+
+  it('GET /chats/search reaches the search, not a chat by id, and refuses a long query', async () => {
+    const asked: unknown[] = [];
+    const services = stubServices({
+      searchChats: (q) => {
+        asked.push(q);
+        return { rows: [], next: 'c1' };
+      },
+    });
+    const res = await app(services).request('/chats/search?q=login&after=c0', auth);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ rows: [], next: 'c1' });
+    expect(asked).toEqual([{ q: 'login', after: 'c0' }]);
+    const long = await app(services).request(`/chats/search?q=${'x'.repeat(201)}`, auth);
+    expect(long.status).toBe(400);
+    expect(asked).toHaveLength(1);
   });
 
   it('PATCH /chats/:id with {} is a 400, and its 409 reaches the client in words', async () => {

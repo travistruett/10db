@@ -21,6 +21,8 @@ export type ClaudeProfile =
       /** The session's policy as auto mode's rules; Claude Code reads them only while it runs in auto mode. */
       readonly autoMode: ClaudeAutoModeSettings;
       readonly setup: ClaudeProfileSetup;
+      /** Days Claude Code keeps the session's transcript, over the builder's own setting; absent leaves theirs. */
+      readonly transcriptDays?: number;
     }
   | {
       readonly kind: 'explore';
@@ -80,6 +82,9 @@ function laneOptions(
 ): ClaudeProfileOptions {
   // A lane's base prompt is the SDK's empty custom prompt; the setup adds to it, never the preset.
   const setupPrompt = setupPromptText(profile.setup.instructions, profile.setup.plugins);
+  // Inline settings outrank the user's, whose cleanupPeriodDays still reaches the session.
+  const kept =
+    profile.transcriptDays === undefined ? {} : { cleanupPeriodDays: profile.transcriptDays };
   return {
     // Never 'user' or 'local': user hooks and plugins stay out (spec §3), and settings.local.json can switch billing.
     // A sandboxed session loads no settings file at all, so the repo can't loosen its sandbox or its permissions.
@@ -96,8 +101,9 @@ function laneOptions(
           autoCompactEnabled: true,
           permissions: { ask: [...sandbox.askRules] },
           autoMode: profile.autoMode,
+          ...kept,
         }
-      : { autoCompactEnabled: true },
+      : { autoCompactEnabled: true, ...kept },
     ...(sandbox
       ? { sandbox: sandbox.settings, disallowedTools: [...sandbox.disallowedTools] }
       : {}),

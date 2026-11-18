@@ -155,6 +155,13 @@ export interface McpDeps {
   readonly chatTools?: ChatToolsFor;
 }
 
+/** What a build step that plans first is told once its plan is recorded. */
+const PLAN_RECORDED =
+  'Plan recorded. Now build it: commit through mcp__10db__commit and end your turn; 10db runs the gate.';
+
+/** Why a build step that plans first may not commit yet: the plan comes before the code. */
+const PLAN_BEFORE_COMMIT = 'Record your plan with mcp__10db__complete_step first.';
+
 type In<K extends McpToolName> = z.output<(typeof McpToolInputs)[K]>;
 type Out<K extends McpToolName> = z.output<(typeof McpToolOutputs)[K]>;
 export type ToolHandlers = { [K in McpToolName]: (input: In<K>) => Promise<Out<K>> };
@@ -217,7 +224,7 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   resize_task:
     "Change the rigor your own task runs at, when its size is not what it was filed as: a plan or build session only. The steps still to come follow the new rigor, and the builder is told why. You can't go below what the task's kinds ask for, can't change a rigor the builder set, and a Workbench page has none to change. A refusal comes back as the result, with what to do.",
   complete_step:
-    'Finish a plan, plan-review, review or QA step: your plan or findings as the summary and, for a review, a verdict. A review role may also send followUps; a step files at most 10 in all through complete_step, however many times you call it, and a call that would pass 10 is refused. They are not counted toward the per-step cap of 10 that propose and file_follow_up share. Implement steps never call this; they end by ending the turn.',
+    'Finish a plan, plan-review, review or QA step: your plan or findings as the summary and, for a review, a verdict. A review role may also send followUps; a step files at most 10 in all through complete_step, however many times you call it, and a call that would pass 10 is refused. They are not counted toward the per-step cap of 10 that propose and file_follow_up share. An implement step calls this only when its brief says to plan first: it records the plan (summary only), then builds; any other implement step ends by ending the turn.',
 };
 
 export function createToolHandlers(
@@ -839,8 +846,11 @@ export function createToolHandlers(
     commit: async (input) => {
       const done = prior(input.opId, McpToolName.Commit);
       if (done !== undefined) return McpToolOutputs.commit.parse(done);
-      if (currentStep(getWorkstreamRow(db, workstreamId)).tools === ToolAccess.ReadOnly)
+      const building = currentStep(getWorkstreamRow(db, workstreamId));
+      if (building.tools === ToolAccess.ReadOnly)
         throw new InvalidError('This step is read-only; only an implement step commits.');
+      if (building.plansFirst === true && building.result === null)
+        throw new InvalidError(PLAN_BEFORE_COMMIT);
       const { project, workstream, task } = context();
       const checkout = checkoutOf(db, workstream);
       const pass = passHoldingTask(db, task);
@@ -1056,6 +1066,32 @@ export function createToolHandlers(
         deps.state.write((ctx) => {
           const row = getWorkstreamRow(ctx.tx, workstreamId);
           const step = currentStep(row);
+          if (step.role === StepRole.Implement && step.plansFirst === true) {
+            if (input.followUps.length > 0)
+              throw new InvalidError(
+                'Only a review, plan review or QA step files follow-up tasks; leave followUps out of your plan.',
+              );
+            const plan = { summary: input.summary, verdict: null, sessionId, at: ctx.now };
+            patchWorkstream(ctx, workstreamId, null, {
+              steps: row.steps.map((s, i) => (i === row.stepIndex ? { ...s, result: plan } : s)),
+            });
+            ctx.emit({
+              type: EventType.StepChanged,
+              entityType: 'workstream',
+              entityId: workstreamId,
+              data: { stepIndex: row.stepIndex, role: step.role, verdict: null, followUps: [] },
+            });
+            const reply = { instruction: PLAN_RECORDED, followUps: [] };
+            if (!earlier) return record('complete_step', input.opId, reply, ctx);
+            replaceToolOp(ctx, {
+              workstreamId,
+              sessionId,
+              opId: input.opId,
+              tool: McpToolName.CompleteStep,
+              result: reply,
+            });
+            return reply;
+          }
           if (step.role === StepRole.Implement)
             throw new InvalidError(
               'An implement step ends by ending your turn; 10db runs the gate.',

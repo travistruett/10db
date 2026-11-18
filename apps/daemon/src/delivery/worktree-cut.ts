@@ -1,5 +1,4 @@
-import { rm } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { basename } from 'node:path';
 import {
   BatchState,
   CiStopped,
@@ -10,12 +9,10 @@ import {
 } from '@10db/contracts';
 import {
   deleteCuttingBatch,
-  findUnfinishedBatch,
   getBatch,
   getProject,
   getTask,
   patchBatch,
-  sharedLaneRan,
   transitionBatch,
 } from '@10db/db';
 import { existsAsEntry, WORKTREE_LOCK_PREFIX } from '../git';
@@ -31,7 +28,7 @@ import { seedNotices } from './notices';
 import { forgetStartSiblings } from './start-siblings';
 import { resolveStartCards } from './stale-cards';
 import { raiseInstallHostCards } from './worktree-dependencies';
-import { seedDirs, seedWorktree } from './worktree-seed';
+import { seedAndInstall } from './worktree-prepare';
 
 /** What a start hands its background job: the plans resolved in the request, by task. */
 export type Plans = ReadonlyMap<TaskId, StepPlanDto>;
@@ -213,58 +210,18 @@ export async function cutWorktree(
     // Never a fix batch's: its branch is the pull request's and outlives a refused cut.
     made.branch = fix === null;
     made.base = baseSha;
-    // A shared lane writes the main checkout's ignored directories, `node_modules` included, and a
-    // clone would carry that into this copy's gate. So nothing is cloned while a shared batch is
-    // unfinished (CUTTING, OPEN, SHIPPING or FAILED), nor once any shared lane has run in the project,
-    // since its writes outlive its batch. In a pnpm project the install then builds `node_modules`
-    // from the copy's own lockfile, and every seed directory left unmade is named in a notice on the
-    // batch's tasks (task placement spec §7, option b).
-    const sharedLanes = (): boolean =>
-      findUnfinishedBatch(db, project.id) !== undefined || sharedLaneRan(db, project.id);
-    let seed = !sharedLanes();
-    let dirs: string[];
-    try {
-      dirs = seedDirs(await ctx.git.ignoredDirectories(main), project.worktreeSeed);
-    } catch (error) {
-      if (!stopped()) await refuse(worktreeCards.seedFailed(batch, error));
-      return;
-    }
-    if (seed) {
-      try {
-        const seeded = await seedWorktree({ from: main, to: path, dirs, signal });
-        ctx.logger.info(
-          { batchId, path, files: seeded.files, links: seeded.links, skipped: seeded.skipped },
-          'worktree seeded',
-        );
-        // The clone holds no lock the shared cut takes: a shared batch that started meanwhile may
-        // have launched a lane that wrote what the clone read. Asked again, the answer is final:
-        // a lane launches only after its batch has been cut, and the batch stays visible from its
-        // insert until it ends, after which the lane's session does.
-        if (sharedLanes()) {
-          await Promise.all(
-            dirs.map((dir) => rm(join(path, dir), { recursive: true, force: true })),
-          );
-          seed = false;
-        }
-      } catch (error) {
-        if (!stopped()) await refuse(worktreeCards.seedFailed(batch, error));
-        return;
-      }
-    }
-    if (!seed) {
-      ctx.logger.info(
-        { batchId, path, dirs },
-        'worktree not seeded: a shared lane may have written the main checkout; a pnpm install builds node_modules, and nothing else is made',
-      );
-    }
-    if (stopped()) return;
-    const installed = await ctx.dependencies.refresh({
-      batch,
+    const prepared = await seedAndInstall(ctx, {
+      owner: { kind: 'batch', id: batchId },
       project,
+      main,
       path,
       signal,
-      seeded: seed,
     });
+    if ('failed' in prepared) {
+      if (!stopped()) await refuse(worktreeCards.seedFailed(batch, prepared.error));
+      return;
+    }
+    const { seeded: seed, installMakes, dirs, installed } = prepared;
     await recordInstall(ctx, batchId, path, installed);
     switch (installed.kind) {
       case 'aborted':
@@ -299,8 +256,8 @@ export async function cutWorktree(
     // The install ran no install script, and no seed carried built output: a package the project
     // allows to build (a native addon, a generated client) is installed but not built. An install
     // that started over has told the builder already, recordInstall above.
-    if (!seed && installed.kind === 'installed' && !installed.startedOver)
-      noticeUnbuilt(ctx, batchId, path, 'seed_skipped');
+    if (installed.kind === 'installed' && !installed.startedOver && (!seed || installMakes))
+      noticeUnbuilt(ctx, batchId, path, seed ? 'made_by_install' : 'seed_skipped');
     ctx.state.write((w) => {
       patchBatch(w, batchId, { branch, baseSha, repo });
       transitionBatch(w, batchId, { to: BatchState.Open, reason: 'worktree cut' });

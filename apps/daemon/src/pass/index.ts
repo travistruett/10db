@@ -57,11 +57,6 @@ export {
 } from './move-copy';
 export { reopenSignedOffPage } from './reopen';
 export { subscribeMergedPasses } from './merged-open';
-export {
-  openWhenBusy,
-  refuseWaitWhileDraining,
-  STOPPED_TURNS_DEADLINE_MS,
-  type OpenWhenBusyDeps,
-} from './open-when-busy';
+export { openWhenBusy, type OpenWhenBusyDeps } from './open-when-busy';
 export { createPendingOpens, type PendingOpens } from './pending-open';
 export { openFailure, postFirstMessages } from './first-messages';

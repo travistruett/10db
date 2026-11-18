@@ -121,6 +121,12 @@ export interface ExploreEngine {
   retire(id: ConversationId): Promise<void>;
   unretire(id: ConversationId): void;
   /**
+   * A chat's work moved to another folder: a turn still running is stopped (its stop, not its end, is awaited as
+   * far as the grace allows), then the warm session is closed so the next start opens in the new root, resuming
+   * the same provider session. Nothing else changes; starts held by the caller stay held.
+   */
+  relocate(id: ConversationId): Promise<void>;
+  /**
    * Do It hands the conversation's work to a task (sessions spec §7.3): a start is cancelled, a turn stopped
    * with its partial text kept, a card withdrawn, and a warm session closed with its row ended, so its token
    * reaches nothing. The conversation is `sealed` and its owner hears it. Refused while it is taken over.
@@ -778,6 +784,21 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     },
     unretire(id) {
       runtimeOf(id).retired = false;
+    },
+    async relocate(id) {
+      const rt = runtimeOf(id);
+      if (BUSY.has(rt.state)) {
+        const outcome = reduce(rt, { type: 'stop' });
+        if ('effects' in outcome && outcome.effects.includes(E.Interrupt))
+          await new Promise<void>((resolve) => {
+            enqueue(rt, resolve);
+          });
+      }
+      await settled(id);
+      // A stop leaves its session warm, and a session in the old root must not take the next turn.
+      if (rt.session !== null) reduce(rt, { type: 'idle_close' });
+      await rt.chain;
+      await rt.closing;
     },
     async seal(id) {
       const rt = runtimeOf(id);

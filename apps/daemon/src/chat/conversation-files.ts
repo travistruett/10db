@@ -4,9 +4,10 @@ import {
   type ConversationId,
   type ProjectFileMatchDto,
 } from '@10db/contracts';
-import { getConversation, getProject } from '@10db/db';
+import { chatOfConversation, getConversation, getProject } from '@10db/db';
 import type { StateStore } from '../events';
 import { rankFiles } from './file-rank';
+import { chatRoot } from './work-root';
 
 // Sessions spec §10, §11: `@` lists the files git tracks in the checkout the daemon resolves from the
 // conversation; the client never names a folder. A chat's checkout is its project's; a task's comes
@@ -37,7 +38,15 @@ export function createConversationFiles(deps: {
     switch (conv.ownerKind) {
       case ConversationOwnerKind.Task:
         throw new ConflictError(TASK_FILES_LATER);
-      case ConversationOwnerKind.Chat:
+      case ConversationOwnerKind.Chat: {
+        // A session on its own branch mentions the files of its worktree.
+        const project = getProject(deps.state.db, conv.projectId);
+        const chat = chatOfConversation(deps.state.db, conv.id);
+        return rankFiles(
+          tracked(chat === null ? project.repoPath : chatRoot(chat, project).root),
+          query,
+        );
+      }
       case ConversationOwnerKind.Shape:
         return rankFiles(tracked(getProject(deps.state.db, conv.projectId).repoPath), query);
     }

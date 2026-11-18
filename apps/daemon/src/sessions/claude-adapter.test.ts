@@ -3188,6 +3188,24 @@ describe('a Plan session through the adapter', () => {
     expect(signInCheck).not.toHaveBeenCalled();
   }, 2_000);
 
+  it('starts a session moved to a worktree there, resuming the same provider session', async () => {
+    // The account check ends the session early; the options the query was started with are what counts.
+    const { adapter, record } = adapterFor({
+      messages: [initMessage()],
+      then: 'hang',
+      account: otherAccount,
+    });
+    await collect(
+      adapter.open(
+        shapeSpec({ cwd: '/worktrees/fix', resumeProviderSessionId: 'prov-before-the-move' }),
+      ).events,
+    );
+    expect(record.options).toMatchObject({
+      cwd: '/worktrees/fix',
+      resume: 'prov-before-the-move',
+    });
+  });
+
   it('ends with Plan’s words when the email differs', async () => {
     const { adapter } = adapterFor({
       messages: [initMessage()],

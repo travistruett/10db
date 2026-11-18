@@ -410,6 +410,15 @@ export function runFakeLaneSession(
         });
         return 'continue';
       }
+      case 'edit':
+        return runStep(
+          {
+            do: 'tool',
+            toolName: 'Write',
+            input: { file_path: resolve(spec.cwd, step.path), content: step.text },
+          },
+          index,
+        );
       case 'say':
         said += 1;
         for (const event of sayEvents(`fake-msg-${String(said)}`, step.text)) emit(event);

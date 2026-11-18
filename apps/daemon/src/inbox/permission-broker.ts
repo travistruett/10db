@@ -22,6 +22,7 @@ import {
   type SessionId,
   type ShapeId,
   type WorkstreamId,
+  DEPS_HAZARD,
 } from '@10db/contracts';
 import { getInboxItem, listPermissionRules, updateInboxItem } from '@10db/db';
 import { z } from 'zod';
@@ -753,7 +754,7 @@ export function createPermissionBroker(
     if (hit === null && !req.escalated && unread === null && unreadable === null)
       return { behavior: 'allow' };
     const kind = hit !== null ? SkipKind.HazardCard : SkipKind.UnreadHazard;
-    return hit?.name === 'deps' && hit.words[0] === 'pnpm'
+    return hit?.name === DEPS_HAZARD && hit.words[0] === 'pnpm'
       ? { summary: command, body: `${command}\n\n${PNPM_CARD_BODY}`, kind }
       : { summary: command, kind };
   }

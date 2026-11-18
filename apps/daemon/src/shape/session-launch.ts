@@ -55,6 +55,11 @@ export interface ShapePrepareInput {
    * sandbox is read-only, as Plan's always is.
    */
   readonly writes?: boolean;
+  /**
+   * The folder the session works in when it is not the project's checkout (a session's own worktree): the
+   * sandbox roots there, and the checkout is denied to it.
+   */
+  readonly checkout?: string;
   /** The limits 10db's judge stopped calls at, which the broker asks with the trust line's three answers. */
   readonly limits?: LimitNotes;
 }

@@ -1513,7 +1513,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           'worktree packages do not match the lockfile; installing again',
         );
       const installed = await ctx.dependencies.refresh({
-        batch: getBatch(db, batch.id),
+        owner: { kind: 'batch', id: batch.id },
         project,
         path,
         signal,

@@ -1,4 +1,4 @@
-import type { BatchId } from '@10db/contracts';
+import type { BatchId, ChatId } from '@10db/contracts';
 import { z } from 'zod';
 
 /**
@@ -34,6 +34,9 @@ export function sameCheckoutIdentity(a: string, b: string): boolean {
 
 /** The app setting a batch's worktree pin is kept under. */
 export const worktreePinKey = (batchId: BatchId): string => `checkout_pin.${batchId}`;
+
+/** The app setting a chat's worktree pin is kept under. */
+export const chatWorktreePinKey = (chatId: ChatId): string => `checkout_pin.${chatId}`;
 
 /** Where pins live, keyed by the checkout's real path. */
 export interface PinStore {

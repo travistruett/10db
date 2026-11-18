@@ -4,6 +4,7 @@ import { ActivityPageDto, type ShapeMessageDto } from '@10db/contracts';
 import {
   BatchDto,
   ChatDto,
+  ChatId,
   ConversationItemDto,
   FolderDto,
   HealthResponse,
@@ -19,7 +20,7 @@ import {
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
-import { listShapeMessages } from '@10db/db';
+import { listShapeMessages, setChatWork } from '@10db/db';
 import { apiClient, sayToPlan } from '../../test/api-client';
 import { FakeGh } from '../../test/fake-gh';
 import { seedProfiles } from '../../test/seed-profiles';
@@ -898,6 +899,8 @@ describe('self-update in the daemon', () => {
       model: null,
       tabPosition: 0,
     });
+    // Only a session working in the checkout takes the folder for its turn.
+    daemon?.state.write((ctx) => setChatWork(ctx, ChatId.parse(chat.id), null, { place: 'here' }));
     await api.post(`/conversations/${chat.conversationId}/messages`, ConversationItemDto, {
       text: 'work on it',
     });

@@ -247,7 +247,7 @@ describe('scripts/gate.sh', () => {
       args: ' --shard=1/2',
     },
   ])(
-    'hands its arguments to the step and its rerun command: $name',
+    'hands its arguments to the step and its rerun command, and prints its output as it runs: $name',
     ({ step, command, env, args }) => {
       const fake = mkdtempSync(join(tmpdir(), '10db-fake-pnpm-'));
       writeFileSync(join(fake, 'pnpm'), '#!/bin/sh\necho "pnpm saw: $*"\nexit 1\n');
@@ -265,6 +265,8 @@ describe('scripts/gate.sh', () => {
         expect(readFileSync(join(sandbox.dir, `.gate/${step}.log`), 'utf8')).toContain(
           `pnpm saw: -s ${command}${args}\n`,
         );
+        // A test or e2e step that hangs until the gate's timeout still shows how far it got.
+        expect(stdout).toContain(`pnpm saw: -s ${command}${args}\n`);
       } finally {
         rmSync(fake, { recursive: true, force: true });
       }

@@ -86,7 +86,7 @@ async function draw(overrides: Partial<WorkbenchScreenProps> = {}) {
   server.use(...baseHandlers());
   const drawn = screenProps(overrides);
   await renderWithDaemonAndRouter(
-    <FrameSlots>
+    <FrameSlots panelShown={false}>
       <WorkbenchScreen {...drawn.props} />
     </FrameSlots>,
   );
@@ -245,7 +245,7 @@ describe('WorkbenchScreen', () => {
       );
     }
     await renderWithDaemonAndRouter(
-      <FrameSlots>
+      <FrameSlots panelShown={false}>
         <Settling {...screenProps().props} />
       </FrameSlots>,
     );

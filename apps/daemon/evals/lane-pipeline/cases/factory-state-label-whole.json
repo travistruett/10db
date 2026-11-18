@@ -1,0 +1,14 @@
+{
+  "id": "factory-state-label-whole",
+  "title": "Factory's State column shows each state's whole label instead of cutting it off",
+  "description": "On the Factory tab, in a goal's (or Ungrouped's) Sessions table, the State column cuts its badge off: the builder's screenshot shows \"FAI...\" for Failed and \"WA...\" for a waiting state. The badge is StateBadge (apps/desktop/src/views/factory/state-badge.tsx, a Mantine Badge with labels from workstream-state.ts), rendered in apps/desktop/src/views/factory/goal-sessions.tsx. A state that can't be read defeats the column. Guess: the column is too narrow for the badge's uppercase label at the window width the builder uses (about 900 px of content).",
+  "acceptanceCriteria": [
+    "Every state label in STATE_LABELS shows in full in the Factory Sessions table at a content width of 900 px",
+    "The task title and step columns stay readable at that width; no column's text overlaps another's",
+    "A failed session's state reads as a word a person understands (for example Failed), not a truncated fragment"
+  ],
+  "areas": ["desktop"],
+  "baseCommit": "4186559966fbf9c5fda0bbc6ca26a8eb62337e5d",
+  "mergedCommit": "c06b12c9a5dd98bd707981d7e2bc3df65365bf2e",
+  "tags": []
+}

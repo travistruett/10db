@@ -1,11 +1,18 @@
 import { mintId, type InboxItemDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { inboxItemDto } from '../../test/fixtures';
-import { pickOption } from '../../test/combobox';
-import { openEveryRow, serveInboxPage, tableRows } from '../../test/inbox-page-fixtures';
+import {
+  chooseFilter,
+  findPanelRow,
+  findText,
+  getText,
+  panelRows,
+  serveInboxRows,
+} from '../../test/inbox-page-fixtures';
+import { lastInboxSearch, rememberScroll, rememberSelected } from './inbox-search';
 import {
   BUILDER_PERSON,
   personDto,
@@ -83,105 +90,113 @@ function serve(
     ...baseHandlers(),
   );
   // After the base handlers, whose empty page it replaces.
-  asked = serveInboxPage({ waiting: items.filter(isOut) });
+  // The daemon keeps a sent card in Waiting only while Slack is connected; otherwise it is the builder's, in Open.
+  const connected = connection['state'] === 'connected';
+  asked = serveInboxRows({
+    open: items.filter((item) => !(connected && isOut(item))),
+    waiting: items.filter(isOut),
+  });
   return calls;
 }
 
-const WAITING = 'Waiting questions';
+/** The queries the Waiting list was asked with: its pages, not the counts. */
+const waitingPages = (): Record<string, string>[] =>
+  asked.filter((q) => q['state'] === 'waiting' && q['pageSize'] === '50');
 
-const tabs = () => within(screen.getByRole('tablist', { name: 'Inbox view' }));
+const tabs = () => within(screen.getByRole('radiogroup', { name: 'Inbox state' }));
+
+afterEach(() => {
+  lastInboxSearch.set({});
+  for (const state of ['open', 'waiting', 'resolved'] as const) {
+    rememberSelected(state, null);
+    rememberScroll(state, 0);
+  }
+});
+
+const openWaiting = async () => {
+  fireEvent.click(await screen.findByRole('radio', { name: /Waiting/ }));
+};
 
 describe('the Waiting tab', () => {
   it('holds a sent card, in no count and none of Open', async () => {
     serve([card({}), inboxItemDto({ title: 'Needs me' })]);
     renderApp('/inbox');
-    expect(await screen.findByText('Needs me')).toBeTruthy();
+    expect(await screen.findByRole('option', { name: /Needs me/ })).toBeTruthy();
     expect(screen.queryByText('How long should access last?')).toBeNull();
-    expect(tabs().getByText('Open')).toBeTruthy();
-    // Open counts the card that needs the builder; Waiting shows its number in the neutral tone.
     expect(tabs().getByText('Open').parentElement?.textContent).toBe('Open1');
-    expect(tabs().getByText('Waiting').parentElement?.textContent).toBe('Waiting1');
-    fireEvent.click(tabs().getByRole('tab', { name: /Waiting/ }));
-    expect(await screen.findByText('How long should access last?')).toBeTruthy();
-    expect(screen.getByText('Mark Ellis')).toBeTruthy();
-    expect(screen.getByText('sent 3h ago')).toBeTruthy();
-    // One page from the daemon, the longest out first; never every sent card.
-    expect(asked[0]).toEqual({
-      state: 'waiting',
-      sort: 'sentAt',
-      dir: 'asc',
-      page: '1',
-      pageSize: '25',
+    await waitFor(() => {
+      expect(tabs().getByText('Waiting').parentElement?.textContent).toBe('Waiting1');
     });
+    await openWaiting();
+    const row = await findPanelRow('How long should access last?');
+    expect(row.textContent).toContain('Waiting on Mark Ellis · 3h');
+    expect(row.textContent).toContain('ASK');
+    // One cursor page from the daemon; never every sent card.
+    expect(waitingPages()[0]).toEqual({ state: 'waiting', pageSize: '50' });
+  });
+
+  it('shows who it waits on and since when for the selected row, and a click picks another', async () => {
+    serve([
+      card({ text: 'Hi Mark, how long should access last?' }),
+      card({ text: 'Ana, which date?' }, { title: 'Which date?' }),
+    ]);
+    renderApp('/inbox?state=waiting');
+    expect(await findText('Hi Mark, how long should access last?')).toBeTruthy();
+    expect(getText('Mark Ellis')).toBeTruthy();
+    expect(getText('sent 3h ago')).toBeTruthy();
+    expect(
+      await screen.findByRole('button', { name: 'Answer Myself: Cut access at once' }),
+    ).toBeTruthy();
+    fireEvent.click(await findPanelRow('Which date?'));
+    expect(await findText('Ana, which date?')).toBeTruthy();
   });
 
   it('sends the Project filter in the URL and the With filter to the daemon', async () => {
     const only = mintId('Project');
-    serve([card({})]);
+    serve([card({}, { projectId: only })]);
     renderApp(`/inbox?project=${only}`);
-    fireEvent.click(await screen.findByRole('tab', { name: /Waiting/ }));
-    await tableRows(WAITING);
-    for (const query of asked) expect(query['project']).toBe(only);
-    fireEvent.click(screen.getByRole('button', { name: 'Filter With' }));
-    await pickOption(await screen.findByRole('combobox', { name: 'With' }), 'Ana Ortiz');
+    await openWaiting();
+    await findPanelRow('How long should access last?');
+    for (const query of waitingPages()) expect(query['project']).toBe(only);
+    await chooseFilter('With', 'Ana Ortiz');
     await waitFor(() => {
-      expect(asked.at(-1)).toEqual({
+      expect(waitingPages().at(-1)).toEqual({
         state: 'waiting',
         project: only,
         person: ana.id,
-        sort: 'sentAt',
-        dir: 'asc',
-        page: '1',
-        pageSize: '25',
+        pageSize: '50',
       });
-    });
-  });
-
-  it('opens a row with Enter for the message and its answers, and closes it with ←', async () => {
-    serve([card({ text: 'Hi Mark, how long should access last?' })]);
-    renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('tab', { name: /Waiting/ }));
-    const [row] = await openEveryRow(WAITING);
-    expect(await screen.findByText('Hi Mark, how long should access last?')).toBeTruthy();
-    expect(
-      await screen.findByRole('button', { name: 'Answer Myself: Cut access at once' }),
-    ).toBeTruthy();
-    if (row === undefined) throw new Error('no row');
-    fireEvent.keyDown(row, { key: 'ArrowLeft' });
-    await waitFor(() => {
-      expect(row.getAttribute('aria-expanded')).toBe('false');
     });
   });
 
   it('says Slack is not connected, and asks for no page, while it is not', async () => {
     serve([card({})], { state: 'off' });
     renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('tab', { name: /Waiting/ }));
+    await openWaiting();
     expect(
       await screen.findByText("Slack isn't connected, so questions sent there wait in Open."),
     ).toBeTruthy();
-    expect(asked).toEqual([]);
+    expect(waitingPages()).toEqual([]);
   });
 
   it('keeps the Waiting count in the neutral badge, not the filled one', async () => {
     serve([card({})]);
     renderApp('/inbox');
-    await screen.findByRole('tab', { name: /Waiting/ });
+    await screen.findByRole('radio', { name: /Waiting/ });
     const badge = await waitFor(() => {
       const found = tabs().getByText('Waiting').parentElement?.querySelector('.mantine-Badge-root');
       if (!found) throw new Error('no Waiting count yet');
       return found;
     });
     expect(badge.getAttribute('data-variant')).toBe('light');
-    // Nothing needs the builder, so Open shows no count rather than an attention-coloured 0.
     expect(tabs().getByText('Open').parentElement?.textContent).toBe('Open');
   });
 
-  it('says nothing is out with anyone when empty', async () => {
+  it('says nothing is waiting on anyone when empty', async () => {
     serve([]);
     renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('tab', { name: /Waiting/ }));
-    expect(await screen.findByText('Nothing is out with anyone.')).toBeTruthy();
+    await openWaiting();
+    expect(await screen.findByText('Nothing is waiting on anyone')).toBeTruthy();
   });
 
   it('a tie reads both names, a brought-in person adds "with", a reminded one says so', async () => {
@@ -195,14 +210,16 @@ describe('the Waiting tab', () => {
         remindedAt: ago(1),
       }),
     ]);
-    renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('tab', { name: /Waiting/ }));
-    expect(await screen.findByText('Mark Ellis + Ana Ortiz')).toBeTruthy();
-    expect(screen.getByText('with Priya')).toBeTruthy();
-    expect(screen.getByText('reminded 1h ago')).toBeTruthy();
+    renderApp('/inbox?state=waiting');
+    expect((await findPanelRow('How long')).textContent).toContain(
+      'Waiting on Mark Ellis + Ana Ortiz · 3h',
+    );
+    expect(await findText('Mark Ellis + Ana Ortiz')).toBeTruthy();
+    expect(getText('with Priya')).toBeTruthy();
+    expect(getText('reminded 1h ago')).toBeTruthy();
   });
 
-  it('expanding a row shows the conversation and an open proposal', async () => {
+  it('shows the conversation and an open proposal', async () => {
     serve([
       card({
         conversation: [
@@ -212,9 +229,7 @@ describe('the Waiting tab', () => {
         proposal: { choice: 'B', confidence: 0.9 },
       }),
     ]);
-    renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('tab', { name: /Waiting/ }));
-    fireEvent.click(await screen.findByText('How long should access last?'));
+    renderApp('/inbox?state=waiting');
     expect(await screen.findByText(/B is the only one legal signs/)).toBeTruthy();
     expect(screen.getByText(/agreed, but send the email/)).toBeTruthy();
     expect(screen.getByText("Proposed B, waiting for Mark Ellis's ✅")).toBeTruthy();
@@ -222,18 +237,15 @@ describe('the Waiting tab', () => {
 
   it('the thread link opens the permalink', async () => {
     serve([card({ permalink: 'https://acme.slack.com/archives/D1/p1' })]);
-    renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('tab', { name: /Waiting/ }));
+    renderApp('/inbox?state=waiting');
     const link = await screen.findByRole('link', { name: 'Open in Slack' });
     expect(link.getAttribute('href')).toBe('https://acme.slack.com/archives/D1/p1');
   });
 
-  it('Take Back from the row menu asks first, since it posts in Slack, then returns the card', async () => {
+  it('Take It Back asks first, since it posts in Slack, then returns the card', async () => {
     const calls = serve([card({})]);
-    renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('tab', { name: /Waiting/ }));
-    fireEvent.click(await screen.findByRole('button', { name: 'More for this question' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Take Back' }));
+    renderApp('/inbox?state=waiting');
+    fireEvent.click(await screen.findByRole('button', { name: 'Take It Back' }));
     const ask = await screen.findByRole('dialog', { name: 'Take this back from Mark Ellis?' });
     expect(within(ask).getByText(/tells them in the Slack thread/)).toBeTruthy();
     fireEvent.click(within(ask).getByRole('button', { name: 'Cancel' }));
@@ -241,8 +253,7 @@ describe('the Waiting tab', () => {
       expect(screen.queryByRole('dialog')).toBeNull();
     });
     expect(calls).toEqual([]);
-    fireEvent.click(screen.getByRole('button', { name: 'More for this question' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Take Back', hidden: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Take It Back' }));
     fireEvent.click(
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Take Back' }),
     );
@@ -251,11 +262,50 @@ describe('the Waiting tab', () => {
     });
   });
 
+  it('closes an open Take It Back question when another row is selected, so it never takes back that one', async () => {
+    const calls = serve([card({}), card({}, { title: 'Which date?' })]);
+    renderApp('/inbox?state=waiting');
+    fireEvent.click(await screen.findByRole('button', { name: 'Take It Back' }));
+    await screen.findByRole('dialog');
+    const other = await findPanelRow('Which date?');
+    fireEvent.click(other);
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    expect(calls).toEqual([]);
+  });
+
+  it('shows no Waiting row under Resolved while the Resolved page is on its way', async () => {
+    const waiting = card({});
+    const closed = inboxItemDto({
+      kind: 'question',
+      state: 'RESOLVED',
+      title: 'Closed long ago',
+      answer: { choice: 'Teal' },
+      options: [{ label: 'Teal', description: '' }],
+    });
+    serve([waiting]);
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    serveInboxRows({ waiting: [waiting], resolved: [closed] }, (query) =>
+      query['state'] === 'resolved' && query['pageSize'] === '50' ? held : undefined,
+    );
+    renderApp('/inbox?state=waiting');
+    await findPanelRow('How long should access last?');
+    fireEvent.click(await screen.findByRole('radio', { name: /Resolved/ }));
+    await waitFor(() => {
+      expect(screen.getByRole('radio', { name: /Resolved/ })).toHaveProperty('checked', true);
+    });
+    expect(panelRows().map((row) => row.textContent)).toEqual([]);
+    release();
+    expect(await findPanelRow('Closed long ago')).toBeTruthy();
+  });
+
   it('Answer Myself answers with an option', async () => {
     const calls = serve([card({})]);
-    renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('tab', { name: /Waiting/ }));
-    fireEvent.click(await screen.findByText('How long should access last?'));
+    renderApp('/inbox?state=waiting');
     fireEvent.click(
       await screen.findByRole('button', { name: 'Answer Myself: Cut access at once' }),
     );
@@ -267,6 +317,14 @@ describe('the Waiting tab', () => {
         },
       ]);
     });
+  });
+
+  it('leaves the table behind: no table, no per-row menu', async () => {
+    serve([card({})]);
+    renderApp('/inbox?state=waiting');
+    await findPanelRow('How long');
+    expect(screen.queryByRole('table')).toBeNull();
+    expect(panelRows()).toHaveLength(1);
   });
 });
 
@@ -321,13 +379,16 @@ describe('what leaves Waiting for Open', () => {
   ])('a sent card is in Open with a notice while Slack is %s', async (state, notice) => {
     serve([card({})], { state });
     renderApp('/inbox');
-    expect(await screen.findByText('How long should access last?')).toBeTruthy();
+    // A refused token is a 10db card, which sorts first; the sent card is the row under it.
+    fireEvent.click(await screen.findByRole('option', { name: /How long should access last\?/ }));
+    expect(await findText('How long should access last?')).toBeTruthy();
     expect((await screen.findAllByText(notice)).length).toBeGreaterThan(0);
   });
 
   it('a sent card in an outage can be taken back, after asking', async () => {
     const calls = serve([card({})], { state: 'refused' });
     renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('option', { name: /How long should access last\?/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Take Back' }));
     fireEvent.click(
       within(await screen.findByRole('dialog')).getByRole('button', { name: 'Take Back' }),
@@ -360,7 +421,7 @@ describe('what leaves Waiting for Open', () => {
   it('a sent card leaves Open for Waiting once Slack is connected', async () => {
     serve([card({})], { state: 'connected' });
     renderApp('/inbox');
-    await screen.findByText('Nothing needs you right now.');
+    await screen.findByText('Nothing needs you');
     expect(screen.queryByText('How long should access last?')).toBeNull();
   });
 });
@@ -403,14 +464,11 @@ describe('Resolved cards answered in Slack', () => {
   ])('%s', async (_name, send, answer, texts) => {
     const item = answered(send, answer);
     serve([]);
-    serveInboxPage({ resolved: [{ ...item, state: 'RESOLVED' }] });
-    renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('tab', { name: 'Resolved' }));
-    const [row] = await tableRows('Resolved cards');
-    expect(row?.textContent).toContain('Slack Answer');
-    expect(screen.queryByText(new RegExp(texts[0] ?? ''))).toBeNull();
-    await openEveryRow('Resolved cards');
-    for (const text of texts) expect(await screen.findByText(new RegExp(text))).toBeTruthy();
+    serveInboxRows({ resolved: [{ ...item, state: 'RESOLVED' }] });
+    renderApp('/inbox?state=resolved');
+    const row = await findPanelRow('How long should access last?');
+    expect(row.textContent).toContain('Slack Answer · Cut access at once');
+    for (const text of texts) expect(await findText(new RegExp(text))).toBeTruthy();
     // The thread it was answered in.
     const thread = await screen.findByRole('link', { name: 'Open in Slack' });
     expect(thread.getAttribute('href')).toBe('https://acme.slack.com/archives/D1/p1');

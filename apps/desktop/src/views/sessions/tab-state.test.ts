@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { needsYou, tabState, tabWidths, tabWords, TabState } from './tab-state';
+import { needsYou, tabState, tabWords, TabState } from './tab-state';
 
 const base = { openCards: 0, lastReplyAt: null, seenAt: null } as const;
 
@@ -84,9 +84,9 @@ describe('tabState', () => {
     expect(tabState(input)).toBe(want);
   });
 
-  it('counts needs you, a ready page and an error for the badge and ⌘J, and no other state', () => {
+  it('counts needs you and an error for the badge and ⌘J, and no other state', () => {
     const counted = Object.values(TabState).filter(needsYou);
-    expect(counted).toEqual([TabState.NeedsYou, TabState.Ready, TabState.Error]);
+    expect(counted).toEqual([TabState.NeedsYou, TabState.Error]);
   });
 });
 
@@ -150,26 +150,5 @@ describe('tabWords', () => {
   ];
   it.each(rows)('$state', ({ state, detail, want }) => {
     expect(tabWords(state, detail)).toEqual(want);
-  });
-});
-
-describe('tabWidths', () => {
-  it('lets five 180 px tabs in 1,000 px keep their width', () => {
-    expect(tabWidths([180, 180, 180, 180, 180], 0, 1000)).toEqual([180, 180, 180, 180, 180]);
-  });
-  it('shrinks the others first with eight tabs in 1,000 px and keeps the selected one whole', () => {
-    const widths = tabWidths(Array<number>(8).fill(180), 2, 1000);
-    expect(widths[2]).toBe(180);
-    expect(widths.filter((_, i) => i !== 2).every((w) => w >= 96 && w < 180)).toBe(true);
-    expect(widths.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(1000);
-  });
-  it('puts every other tab at 96 with twelve tabs, the selected one keeping its width', () => {
-    const widths = tabWidths(Array<number>(12).fill(180), 5, 1000);
-    expect(widths.map((w, i) => (i === 5 ? w : w === 96))).toEqual(
-      Array.from({ length: 12 }, (_, i) => (i === 5 ? 180 : true)),
-    );
-  });
-  it('caps a long title at 220', () => {
-    expect(tabWidths([400], 0, 1000)).toEqual([220]);
   });
 });

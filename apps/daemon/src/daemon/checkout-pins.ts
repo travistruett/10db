@@ -3,6 +3,7 @@ import type { ProjectDto } from '@10db/contracts';
 import {
   deleteAppSetting,
   findBatchByWorktreePath,
+  findChatByWorktreePath,
   getAppSetting,
   getProject,
   listProjects,
@@ -10,7 +11,7 @@ import {
   type DbReader,
 } from '@10db/db';
 import type { StateStore } from '../events';
-import { CheckoutPin, worktreePinKey, type PinStore } from '../git';
+import { chatWorktreePinKey, CheckoutPin, worktreePinKey, type PinStore } from '../git';
 
 function realOrNull(path: string): string | null {
   try {
@@ -20,7 +21,7 @@ function realOrNull(path: string): string | null {
   }
 }
 
-/** The project whose checkout is at `repo`, a real path, or whose batch has a worktree there. */
+/** The project whose checkout is at `repo`, a real path, or whose batch or chat has a worktree there. */
 export function projectAt(db: DbReader, repo: string): ProjectDto | undefined {
   return pinOwner(db, repo)?.project;
 }
@@ -35,12 +36,14 @@ function pinOwner(
   const project = listProjects(db).find((candidate) => realOrNull(candidate.repoPath) === repo);
   if (project) return { project, key: projectPinKey(project) };
   const batch = findBatchByWorktreePath(db, repo);
-  if (!batch) return undefined;
-  return { project: getProject(db, batch.projectId), key: worktreePinKey(batch.id) };
+  if (batch) return { project: getProject(db, batch.projectId), key: worktreePinKey(batch.id) };
+  const chat = findChatByWorktreePath(db, repo);
+  if (!chat) return undefined;
+  return { project: getProject(db, chat.projectId), key: chatWorktreePinKey(chat.id) };
 }
 
 /**
- * Pins that persist in the database, one per project checkout and one per batch worktree, so a
+ * Pins that persist in the database, one per project checkout and one per batch and chat worktree, so a
  * restart keeps trusting only what the builder trusted. A checkout no project or batch uses keeps
  * its pin in `fallback`.
  */

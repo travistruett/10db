@@ -1,12 +1,19 @@
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { JudgeKind } from '@10db/contracts';
+import { JudgeKind, type WorkPlace } from '@10db/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { tempDir, type TempDir } from '../../test/fixtures';
 import { fileAccessJudge } from '../sandbox';
 import { judgeShapeCall, type ShapeAccess } from '../shape';
 import { CHAT_GIT_REFUSAL } from './git-rule';
-import { CHAT_TURN_ENDED, chatFolderInUse, judgeChatCall, type ChatFolder } from './confinement';
+import {
+  CHAT_MOVING,
+  CHAT_TURN_ENDED,
+  chatFolderInUse,
+  judgeChatCall,
+  WAITING_FOR_CHOICE,
+  type ChatPlace,
+} from './confinement';
 
 // Sessions spec §7.3: a chat edits only while its turn holds Your folder, on the real path of each file, and
 // never git state or a protected path; a turn that doesn't hold is told who does.
@@ -58,12 +65,27 @@ afterAll(() => {
   dir.cleanup();
 });
 
-const holding: ChatFolder = { holds: () => true, writable: true, heldBy: () => 'nobody' };
-const notHolding: ChatFolder = {
+/** A session's place as the hook reads it; `firstChanges` counts the questions its first changes asked. */
+const placeOf = (over: Partial<ChatPlace> & { place: WorkPlace | null }): ChatPlace => ({
   holds: () => false,
+  current: () => true,
   writable: false,
+  heldBy: () => 'nobody',
+  firstChange: () => undefined,
+  ...over,
+  // The checkout is made once the suite starts.
+  get root() {
+    return checkout;
+  },
+  get checkout() {
+    return checkout;
+  },
+});
+const holding: ChatPlace = placeOf({ place: 'here', holds: () => true, writable: true });
+const notHolding: ChatPlace = placeOf({
+  place: 'here',
   heldBy: () => 'the task ‘Bump vite’',
-};
+});
 
 const edit = (tool: string, path: string, more: Partial<{ agentId: string }> = {}) => ({
   toolName: tool,
@@ -72,11 +94,11 @@ const edit = (tool: string, path: string, more: Partial<{ agentId: string }> = {
 });
 
 describe('a session that was opened able to write', () => {
-  const ended: ChatFolder = {
-    holds: () => false,
+  const ended: ChatPlace = placeOf({
+    place: 'here',
     writable: true,
     heldBy: () => 'the task ‘Bump vite’',
-  };
+  });
 
   it.each([
     ['Bash', { command: 'echo x >> src/a.ts' }],
@@ -195,7 +217,12 @@ describe('a chat’s edits', () => {
 
   it('reads the hold at each call', () => {
     let held = true;
-    const folder: ChatFolder = { holds: () => held, writable: true, heldBy: () => 'the pass ‘P’' };
+    const folder = placeOf({
+      place: 'here',
+      holds: () => held,
+      writable: true,
+      heldBy: () => 'the pass ‘P’',
+    });
     const call = edit('Write', join(checkout, 'src/new.ts'));
     expect(judgeChatCall(call, access, folder).decision).toBe('allow');
     held = false;
@@ -295,5 +322,148 @@ describe('a chat’s tools that reach GitHub', () => {
       holding,
     );
     expect(verdict.decision).toBe(decision);
+  });
+});
+
+// The first change asks where the work happens: rows 1, 2, 4 and 8 of the place table, at the guard.
+describe('a session that has not chosen where to work', () => {
+  const asks = (place: WorkPlace | null, over: Partial<ChatPlace> = {}) => {
+    const questions: string[] = [];
+    const folder = placeOf({ place, firstChange: () => questions.push('asked'), ...over });
+    return { folder, questions };
+  };
+
+  it.each<{
+    name: string;
+    place: WorkPlace | null;
+    call: () => Parameters<typeof judgeChatCall>[0];
+  }>([
+    {
+      name: 'an edit while reading',
+      place: null,
+      call: () => edit('Edit', join(checkout, 'src/a.ts')),
+    },
+    {
+      name: 'a write while choosing',
+      place: 'choosing',
+      call: () => edit('Write', join(checkout, 'x')),
+    },
+    {
+      name: "a subagent's edit",
+      place: null,
+      call: () => edit('Edit', join(checkout, 'src/a.ts'), { agentId: 'sub-1' }),
+    },
+    {
+      name: 'make_branch',
+      place: null,
+      call: () => ({ toolName: 'mcp__10db__make_branch', input: {} }),
+    },
+    {
+      name: 'commit_changes',
+      place: 'choosing',
+      call: () => ({ toolName: 'mcp__10db__commit_changes', input: {} }),
+    },
+  ])('asks once and denies with the waiting words: $name', ({ place, call }) => {
+    const { folder, questions } = asks(place);
+    expect(judgeChatCall(call(), access, folder)).toEqual({
+      decision: 'deny',
+      reason: WAITING_FOR_CHOICE,
+    });
+    expect(questions).toEqual(['asked']);
+  });
+
+  it.each<{ name: string; call: () => Parameters<typeof judgeChatCall>[0] }>([
+    {
+      name: 'a Read',
+      call: () => ({ toolName: 'Read', input: { file_path: join(checkout, 'src/a.ts') } }),
+    },
+    { name: 'a push', call: () => ({ toolName: 'mcp__10db__push_branch', input: {} }) },
+    {
+      name: 'a pull request',
+      call: () => ({ toolName: 'mcp__10db__open_pull_request', input: {} }),
+    },
+  ])('asks nothing for $name', ({ call }) => {
+    const { folder, questions } = asks(null);
+    judgeChatCall(call(), access, folder);
+    expect(questions).toEqual([]);
+  });
+
+  it.each<WorkPlace | null>([null, 'choosing'])(
+    'refuses every call of an older session with the ended words, asking nothing (%s)',
+    (place) => {
+      const { folder, questions } = asks(place, { current: () => false });
+      for (const call of [
+        edit('Edit', join(checkout, 'src/a.ts')),
+        { toolName: 'Read', input: { file_path: join(checkout, 'src/a.ts') } },
+      ])
+        expect(judgeChatCall(call, access, folder)).toEqual({
+          decision: 'deny',
+          reason: CHAT_TURN_ENDED,
+        });
+      expect(questions).toEqual([]);
+    },
+  );
+
+  it('refuses a change while the branch is being made, asking nothing', () => {
+    const { folder, questions } = asks('moving');
+    expect(judgeChatCall(edit('Edit', join(checkout, 'src/a.ts')), access, folder)).toEqual({
+      decision: 'deny',
+      reason: CHAT_MOVING,
+    });
+    expect(questions).toEqual([]);
+  });
+});
+
+describe('a session on its own branch', () => {
+  let worktree: string;
+  let onBranch: ChatPlace;
+  let branchAccess: ShapeAccess;
+
+  beforeAll(() => {
+    worktree = join(dir.path, 'worktree');
+    mkdirSync(join(worktree, 'src'), { recursive: true });
+    writeFileSync(join(worktree, 'src', 'a.ts'), 'a\n');
+    onBranch = {
+      ...placeOf({ place: 'branch', holds: () => true, writable: true }),
+      root: worktree,
+      checkout,
+    };
+    // The session's sandbox is rooted in the worktree, as `forSession(projectAtCheckout(project, worktree))` makes it.
+    branchAccess = {
+      ...access,
+      checkout: worktree,
+      commands: {
+        protectedPaths: [],
+        fileAccess: fileAccessJudge({
+          checkout: worktree,
+          home: join(dir.path, 'home'),
+          protectedReads: [],
+          readList: [],
+          systemDocRoots: [],
+          configDir: join(dir.path, 'no-claude-config'),
+          providerSessionId: null,
+          sandboxTemp: { roots: [join(dir.path, 'tmp')], own: join(dir.path, 'tmp', '10db-own') },
+        }),
+      },
+    };
+  });
+
+  it('edits its worktree, and an edit aimed at the checkout names the same file there (row 29)', () => {
+    expect(judgeChatCall(edit('Edit', join(worktree, 'src/a.ts')), branchAccess, onBranch)).toEqual(
+      { decision: 'allow' },
+    );
+    expect(judgeChatCall(edit('Edit', join(checkout, 'src/a.ts')), branchAccess, onBranch)).toEqual(
+      {
+        decision: 'deny',
+        reason: `This session works in ${worktree} now. The same file is at ${join(worktree, 'src/a.ts')}.`,
+      },
+    );
+  });
+
+  it('never writes the checkout, even when the guard is handed the checkout as its own', () => {
+    // A branch's write root is its worktree, and the checkout's `.git` stays out of reach in either.
+    expect(
+      judgeChatCall(edit('Write', join(checkout, 'brand-new.ts')), branchAccess, onBranch),
+    ).toMatchObject({ decision: 'deny' });
   });
 });

@@ -1,3 +1,4 @@
+import { mintId } from '@10db/contracts';
 import type { PassNotice, PassViewDto } from '@10db/contracts';
 import { fireEvent, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -6,7 +7,7 @@ import { minutesBeforeNow, PASS_NOW, pagesByStatus, passViewDto } from '../../te
 import { FrameSlots, titleRowOf } from '../../test/frame';
 import { renderWithTheme } from '../../test/theme';
 import { PageStatus } from './page-status';
-import { headerLine, PassHeader, type PassHeaderProps } from './pass-header';
+import { countsLine, headerLine, PassHeader, type PassHeaderProps } from './pass-header';
 
 const project = projectViewDto({ name: 'ampsio' });
 const now = Date.parse(PASS_NOW);
@@ -46,7 +47,16 @@ describe('headerLine', () => {
   });
 });
 
-function draw(view: PassViewDto, overrides: Partial<PassHeaderProps> = {}) {
+describe('countsLine', () => {
+  it('is the counts alone, empty when nothing counts', () => {
+    expect(countsLine([PageStatus.NotStarted])).toBe('');
+    expect(countsLine([PageStatus.Ready, PageStatus.Working, PageStatus.Ready])).toBe(
+      '2 ready · 1 working',
+    );
+  });
+});
+
+function draw(view: PassViewDto, overrides: Partial<PassHeaderProps> = {}, panelShown = false) {
   const props: PassHeaderProps = {
     project,
     view,
@@ -60,7 +70,7 @@ function draw(view: PassViewDto, overrides: Partial<PassHeaderProps> = {}) {
     ...overrides,
   };
   renderWithTheme(
-    <FrameSlots>
+    <FrameSlots panelShown={panelShown}>
       <PassHeader {...props} />
     </FrameSlots>,
   );
@@ -91,6 +101,28 @@ describe('PassHeader', () => {
     fireEvent.click(menu());
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Abandon', hidden: true }));
     expect(props.onAbandon).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the pass line and its menu to the panel while the frame draws it, and keeps the timing hint', () => {
+    const { ready } = pagesByStatus();
+    const readyFor = () => ({
+      ...ready,
+      taskId: mintId('Task'),
+      turn: ready.turn && { ...ready.turn, readyAt: minutesBeforeNow(15) },
+    });
+    draw(passViewDto({ pages: [readyFor(), readyFor()] }), {}, true);
+    expect(within(titleRowOf()).queryByRole('heading')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'More actions' })).toBeNull();
+    expect(screen.queryByText('ampsio has no origin')).toBeNull();
+    expect(screen.getByText('2 pages have been ready for over 10 minutes')).toBeTruthy();
+  });
+
+  it('draws the pass line itself while the panel is shown and the pass has no page to name', () => {
+    draw(passViewDto({ pages: [] }), {}, true);
+    expect(
+      within(titleRowOf()).getByRole('heading', { name: 'ampsio · Settings pass' }),
+    ).toBeTruthy();
+    expect(within(titleRowOf()).getByRole('button', { name: 'More actions' })).toBeTruthy();
   });
 
   it('shows Open Pull Request, and why it is not offered, once a page is signed off', () => {

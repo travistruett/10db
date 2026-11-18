@@ -7,8 +7,10 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router';
-import { render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Panel } from '../shell/panel';
+import { useFrameSlots } from '../shell/frame-slots';
 import { TitleRow } from '../shell/title-row';
 import { ViewBoundary } from '../shell/view-boundary';
 import { RenderLayout } from './render-layout';
@@ -93,5 +95,29 @@ describe('a view drawn for a frame', () => {
     ));
     expect(await screen.findByRole('heading', { level: 1, name: 'Board' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'New Task' })).toBeTruthy();
+  });
+});
+
+describe('a frame of a section with a panel', () => {
+  function Probe() {
+    const { panelShown } = useFrameSlots();
+    return <p>{`panel shown: ${String(panelShown)}`}</p>;
+  }
+
+  it('has no panel column until a view registers a panel, and then says the panel is shown', async () => {
+    draw(() => <Probe />);
+    expect(await screen.findByText('panel shown: false')).toBeTruthy();
+    expect(document.querySelector('[data-render-panel]')).toBeNull();
+    cleanup();
+    draw(() => (
+      <>
+        <Panel section="workbench" title="Settings pass">
+          <p>the queue</p>
+        </Panel>
+        <Probe />
+      </>
+    ));
+    expect(await screen.findByText('panel shown: true')).toBeTruthy();
+    expect(document.querySelector('[data-render-panel]')?.textContent).toContain('the queue');
   });
 });

@@ -1,47 +1,45 @@
-import type { InboxItemDto } from '@10db/contracts';
+import type { ChatDto, ConversationId, InboxItemDto } from '@10db/contracts';
+import { WorkPlace } from '@10db/contracts';
 import dayjs from 'dayjs';
-import type { ConversationId } from '@10db/contracts';
-import { tabState, tabWords, type TabState, type TabWords } from './tab-state';
-import { taskTabState } from './task-tab-state';
-import type { StripTab } from './strip-tabs';
+import { TabState, tabState, tabWords, type TabWords } from './tab-state';
 
 export interface TabInfo {
   readonly state: TabState;
   readonly words: TabWords;
+  /** What the words need: the title of the card the session waits on, and when a pause ends. */
+  readonly detail: { readonly cardTitle?: string; readonly resumes?: string };
 }
 
-/** What a tab shows, from its chat and the open cards that name its conversation. */
-export function tabInfo(
-  tab: StripTab,
+/**
+ * What a session shows, from its chat and the open cards that name its conversation. A session that has
+ * not been told where to work waits on the builder even before its card is read.
+ */
+export function chatInfo(
+  chat: ChatDto,
   cards: ReadonlyMap<ConversationId, InboxItemDto[]>,
   seen: Readonly<Record<string, string>>,
 ): TabInfo {
-  if (tab.kind === 'fresh') return { state: 'idle', words: tabWords('idle') };
-  if (tab.kind === 'task') {
-    const state = taskTabState(tab.facts);
-    return { state, words: tabWords(state) };
-  }
-  const open = cards.get(tab.chat.conversationId) ?? [];
-  const { conversation } = tab.chat;
-  const state = tabState({
+  const open = cards.get(chat.conversationId) ?? [];
+  const { conversation } = chat;
+  const read = tabState({
     state: conversation.state,
     openCards: open.length,
-    lastReplyAt: tab.chat.lastReplyAt,
-    seenAt: seen[tab.chat.id] ?? null,
+    lastReplyAt: chat.lastReplyAt,
+    seenAt: seen[chat.id] ?? null,
   });
+  const state =
+    chat.work?.place === WorkPlace.Choosing && read !== TabState.Error ? TabState.NeedsYou : read;
   const first = open[0];
-  return {
-    state,
-    words: tabWords(state, {
-      ...(first === undefined ? {} : { cardTitle: first.title }),
-      ...(conversation.pausedUntil === null
-        ? {}
-        : { resumes: dayjs(conversation.pausedUntil).format('HH:mm') }),
-    }),
+  const detail = {
+    ...(first === undefined ? {} : { cardTitle: first.title }),
+    ...(conversation.pausedUntil === null
+      ? {}
+      : { resumes: dayjs(conversation.pausedUntil).format('HH:mm') }),
   };
+  return { state, words: tabWords(state, detail), detail };
 }
 
-/** A tab's accessible name: "{title}, {project}, {state words}"; an idle tab has no state words. */
-export function tabName(title: string, project: string, info: TabInfo): string {
-  return [title, project, info.words.spoken].filter((part) => part !== '').join(', ');
+/** A session's accessible name: "{title}, {project}, {state words}"; an idle one has no state words. */
+export function sessionName(title: string, project: string, spoken: string): string {
+  return [title, project, spoken].filter((part) => part !== '').join(', ');
 }

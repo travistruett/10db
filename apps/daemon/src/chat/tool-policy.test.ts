@@ -18,7 +18,6 @@ describe('the chat tool policy', () => {
     [
       ...Object.values(BuilderToolName),
       ChatToolName.SetTitle,
-      ChatToolName.WriteBrief,
       ...Object.values(ChatGitToolName),
     ].map((name) => ({ name })),
   )('$name has its policy', ({ name }) => {
@@ -27,14 +26,9 @@ describe('the chat tool policy', () => {
     );
   });
 
-  it('names every builder tool, set_title, write_brief and the git tools, and nothing else', () => {
+  it('names every builder tool, set_title and the git tools, and nothing else', () => {
     expect(new Set(Object.values(ChatToolName))).toEqual(
-      new Set([
-        ...Object.values(BuilderToolName),
-        'set_title',
-        'write_brief',
-        ...Object.values(ChatGitToolName),
-      ]),
+      new Set([...Object.values(BuilderToolName), 'set_title', ...Object.values(ChatGitToolName)]),
     );
     expect(new Set(Object.keys(CHAT_TOOL_POLICY))).toEqual(new Set(Object.values(ChatToolName)));
   });

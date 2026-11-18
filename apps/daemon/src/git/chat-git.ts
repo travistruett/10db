@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { basename, isAbsolute, join, normalize, sep } from 'node:path';
-import { InvalidError } from '@10db/contracts';
+import { ConflictError, InvalidError } from '@10db/contracts';
 import { foldPathCase, isSecretFileName } from '../guard';
 import type { NetworkCall, NetworkRun } from './network';
 import { GitError } from './run';
@@ -98,6 +98,22 @@ export interface ChatGit {
       readonly beforeWrite?: BeforeWrite;
     },
   ): Promise<{ readonly sha: string }>;
+  /**
+   * Moves the commits a base branch is ahead by onto a new branch, in one hold of the repo lock: the branch `name`
+   * is made at HEAD and HEAD switched to it, and only then is `base` put back at `to` by a compare-and-set on
+   * `expectedOld`. The files and the index stay as they are, and a failure after the branch is made leaves the
+   * commits on it, never only on a base that was reset.
+   */
+  moveCommitsToBranch(
+    repo: string,
+    input: {
+      readonly name: string;
+      readonly base: string;
+      readonly to: string;
+      readonly expectedOld: string;
+      readonly beforeWrite?: BeforeWrite;
+    },
+  ): Promise<void>;
   /** Checks out the local branch `name`, keeping changes git can carry, and refusing what it would overwrite. */
   switchBranch(repo: string, name: string, beforeWrite?: BeforeWrite): Promise<void>;
   /** Fetches the branch's upstream and moves the checked-out branch to it when that is a fast-forward. */
@@ -229,6 +245,47 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
           `A branch named ${branch} already exists, or the name is not valid`,
         );
         await ctx.git(c, ['symbolic-ref', 'HEAD', ref]);
+      });
+    },
+
+    moveCommitsToBranch(repo, input) {
+      return ctx.lock(repo, async () => {
+        const c = await ctx.pinned(repo);
+        noOperation(c);
+        const branch = await localBranch(c, input.name);
+        const base = await localBranch(c, input.base);
+        await input.beforeWrite?.();
+        // Nothing is written unless the folder is as the caller saw it: on `base`, at `expectedOld`, with `to` in
+        // that commit's history. Otherwise the new branch would take another branch's commits and `base` lose its own.
+        const found = await ctx.currentBranch(c);
+        if (found !== base)
+          throw new ConflictError(
+            `Your checkout is not on ${base} any more (it is on ${found ?? 'no branch'}), so nothing was moved.`,
+          );
+        const head = await ctx.revParse(c, 'HEAD^{commit}');
+        if (head === null || head !== input.expectedOld)
+          throw new ConflictError(`${base} has moved since it was read, so nothing was moved.`);
+        if (!(await ctx.isAncestor(c, input.to, head)))
+          throw new ConflictError(
+            `${input.to} is not an ancestor of ${base}'s commits, so ${base} was not moved.`,
+          );
+        const ref = `refs/heads/${branch}`;
+        await said(
+          () => ctx.git(c, ['update-ref', '--no-deref', ref, head, '0'.repeat(head.length)]),
+          `A branch named ${branch} already exists, or the name is not valid`,
+        );
+        await ctx.git(c, ['symbolic-ref', 'HEAD', ref]);
+        await said(
+          () =>
+            ctx.git(c, [
+              'update-ref',
+              '--no-deref',
+              `refs/heads/${base}`,
+              input.to,
+              input.expectedOld,
+            ]),
+          `${base} is no longer where it was, so it was left alone; your commits are on ${branch}`,
+        );
       });
     },
 

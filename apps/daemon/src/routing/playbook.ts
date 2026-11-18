@@ -43,6 +43,8 @@ export interface ResolvedStep {
   readonly fallback: FallbackRung | null;
   /** The cell names one model, so a retry never steps it up. */
   readonly pinned: boolean;
+  /** A build step that writes the plan first, because the row plans in the Build session. */
+  readonly plansFirst: boolean;
 }
 
 /**
@@ -100,6 +102,7 @@ export function rowProcess(rigor: Rigor, playbook: PlaybookScopes): RowProcess {
     reviewRounds: rows.find((r) => r.reviewRounds !== null)?.reviewRounds ?? fallback.reviewRounds,
     fixBy: rows.find((r) => r.fixBy !== null)?.fixBy ?? fallback.fixBy,
     approvesPlan: rows.find((r) => r.approvesPlan !== null)?.approvesPlan ?? fallback.approvesPlan,
+    plansInBuild: rows.find((r) => r.plansInBuild !== null)?.plansInBuild ?? fallback.plansInBuild,
     ships: rows.find((r) => r.ships !== null)?.ships ?? fallback.ships,
   };
 }
@@ -154,6 +157,12 @@ export function resolveSteps(input: {
   ]);
   // A plan review judges a plan, so a row that gains one gains the plan too.
   if (wanted.has(StepRole.PlanReview)) wanted.add(StepRole.Plan);
+  // The Build session plans first only where no separate plan is wanted: a plan review judges one, and
+  // the builder approves one before the build.
+  const process = rowProcess(rigor, playbook);
+  const plansInBuild =
+    process.plansInBuild && !process.approvesPlan && !wanted.has(StepRole.PlanReview);
+  if (plansInBuild) wanted.delete(StepRole.Plan);
   const roles = ROLES.filter((role) => wanted.has(role));
   return roles.map((role): ResolvedStep => {
     const stronger = RIGORS.slice(RIGORS.indexOf(rigor));
@@ -182,6 +191,7 @@ export function resolveSteps(input: {
         overrides.map((o) => o.effort),
       ),
       pinned: cell.model?.kind === 'model',
+      plansFirst: plansInBuild && role === StepRole.Implement,
     };
   });
 }

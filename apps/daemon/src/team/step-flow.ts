@@ -42,10 +42,14 @@ export interface StepEntry {
 const withResultFiled = (s: WorkstreamStep): WorkstreamStep =>
   s.result?.verdict ? { ...s, earlier: [...s.earlier, s.result] } : s;
 
+/**
+ * A build step's only result is the plan it wrote first, which the fix session builds on, so it is kept;
+ * any other step entered again starts with none.
+ */
 const entered = (s: WorkstreamStep, entry: StepEntry): WorkstreamStep => ({
   ...withResultFiled(s),
   status: StepStatus.Running,
-  result: null,
+  result: s.role === StepRole.Implement ? s.result : null,
   startedAt: entry.now,
   sessionFloor: entry.sessions,
 });

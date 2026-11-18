@@ -44,6 +44,8 @@ export interface ClaudeAdapterOptions extends ClaudeSessionDeps {
    * test sets it, to pin a mode whatever the app-wide setting says.
    */
   readonly lanePermissionMode?: LanePermissionMode;
+  /** Days Claude Code keeps each lane's transcript (`TENDB_LANE_TRANSCRIPT_DAYS`); absent leaves the builder's setting. */
+  readonly transcriptDays?: number;
   /**
    * Asks whether the account a session runs on is signed in, when a start gets no account. Defaults to
    * `claude auth status` on `claudePath`; tests answer it so none of them runs the builder's claude.
@@ -240,6 +242,9 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): AgentAdapter {
                   ...(opts.lanePermissionMode === undefined
                     ? {}
                     : { lanePermissionMode: opts.lanePermissionMode }),
+                  ...(opts.transcriptDays === undefined
+                    ? {}
+                    : { transcriptDays: opts.transcriptDays }),
                   signInCheck:
                     opts.signInCheck ?? ((env) => claudeAuthStatus(opts.claudePath, env)),
                 },

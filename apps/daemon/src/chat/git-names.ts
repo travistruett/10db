@@ -1,4 +1,5 @@
-import { BRANCH_PREFIX, InvalidError } from '@10db/contracts';
+import { BRANCH_PREFIX, ConflictError, InvalidError } from '@10db/contracts';
+import type { Git } from '../git';
 
 /** The longest branch name a chat's tool takes. */
 const MAX_NAME = 200;
@@ -10,6 +11,23 @@ const MAX_NAME = 200;
 export function isTenDbBranch(name: string): boolean {
   const folded = name.normalize('NFC').toLowerCase();
   return folded === BRANCH_PREFIX.slice(0, -1) || folded.startsWith(BRANCH_PREFIX);
+}
+
+/**
+ * Refuses when `folder` has one of 10db's own branches checked out. Every git step a chat or the title row runs
+ * calls this before it starts and again under the repo lock before it writes, since the agent can switch its
+ * folder's branch between the two. A detached HEAD is not 10db's: the steps that need a branch say so themselves.
+ */
+export async function refuseOwnBranch(
+  git: Pick<Git, 'currentBranch'>,
+  folder: string,
+  where: string,
+): Promise<void> {
+  const head = await git.currentBranch(folder);
+  if (head !== null && isTenDbBranch(head))
+    throw new ConflictError(
+      `${where} is on ${head}, which is 10db's own, so a chat changes no git state there.`,
+    );
 }
 
 /**

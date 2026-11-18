@@ -1,6 +1,6 @@
 import { mintId, type AnchorCheckDto, type PlanContext } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { renderPlanContext } from './plan-context-text';
+import { renderPlanContext, renderPlanIndex } from './plan-context-text';
 
 const workstreamId = mintId('Workstream');
 const AT = '2026-11-12T08:00:00.000Z';
@@ -210,6 +210,73 @@ describe('renderPlanContext', () => {
       'Plan context (from Plan "Remote host", revision 2 of P1):',
       'Your section (p1#task-1):',
       SECTION,
+    ]);
+  });
+});
+
+describe('renderPlanIndex', () => {
+  it('names the section and each cited entry by key, and points to the tools that read them', () => {
+    expect(renderPlanIndex(plan({ notIncluded: ['x1', 'd9'] }))).toEqual([
+      'Plan context (from Plan "Remote host", revision 2 of P1):',
+      'Goal: A device pairs. — why: Nothing leaks',
+      'Your section: p1#task-1. Read it with get_plan_section before you start.',
+      'Shared sections (read each with get_plan_section): p1#calls-made',
+      'Decisions you rely on (read each with get_plan_entry): d1',
+      'Names (read each with get_plan_entry): n1',
+      'Facts (read each with get_plan_entry): f1',
+      'Open findings on this section (read each with get_plan_entry): p1-r1-1 (blocking, security)',
+      'Intent (read each with get_plan_entry): i1',
+      'Not included (call get_plan_entry): x1, d9',
+      'Search the plan with find_plan_entries.',
+    ]);
+  });
+
+  it('carries no section text, choice, rationale or quote', () => {
+    const text = renderPlanIndex(plan()).join('\n');
+    for (const pasted of [
+      'Pair it.',
+      'One.',
+      'The database',
+      'Local only',
+      'The Mac 10db runs on',
+      'Packs once',
+      'Revoked devices stay',
+      'Never in the repo.',
+    ])
+      expect(text).not.toContain(pasted);
+  });
+
+  it('a dropped entry says so beside its key', () => {
+    const lines = renderPlanIndex(
+      plan({
+        decisions: [
+          { key: 'd1', choice: 'X', rationale: 'Y', lasting: true, dropped: 'rejected' },
+          { key: 'd2', choice: 'X', rationale: 'Y', lasting: true, dropped: null },
+        ],
+      }),
+    );
+    expect(lines).toContain(
+      'Decisions you rely on (read each with get_plan_entry): d1 (rejected), d2',
+    );
+  });
+
+  it('empty groups are left out', () => {
+    expect(
+      renderPlanIndex(
+        plan({
+          goal: null,
+          shared: [],
+          decisions: [],
+          names: [],
+          facts: [],
+          findings: [],
+          intent: [],
+        }),
+      ),
+    ).toEqual([
+      'Plan context (from Plan "Remote host", revision 2 of P1):',
+      'Your section: p1#task-1. Read it with get_plan_section before you start.',
+      'Search the plan with find_plan_entries.',
     ]);
   });
 });

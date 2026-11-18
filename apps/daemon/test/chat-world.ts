@@ -3,6 +3,8 @@ import {
   JudgeKind,
   type AgentAccountKind,
   type ChatDto,
+  type ChatId,
+  type ConversationId,
   type DaemonEvent,
   type Effort,
   type ProjectDto,
@@ -10,14 +12,25 @@ import {
 } from '@10db/contracts';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
-import { createTestStore, seedProject, type Store } from '@10db/db';
+import {
+  chatOfConversation,
+  createTestStore,
+  seedProject,
+  setChatWork,
+  type Store,
+} from '@10db/db';
 import { ManualClock } from '../src/clock';
 import {
   chatHooks,
-  createBriefs,
   createChatLiveSessions,
-  type Briefs,
   createChatService,
+  applyChatWorkAnswer,
+  chatRoot,
+  createChatWorkService,
+  type ChatMoveDeps,
+  type ChatWorktrees,
+  type ChatWorkService,
+  type ChatWorkStateReader,
   type ChatHooksDeps,
   type ChatService,
 } from '../src/chat';
@@ -39,6 +52,20 @@ import { tempDir } from './fixtures';
 // A project's chats on a real store, the explore engine and the fake adapter: the chat service and
 // its hooks as the daemon wires them, with a launch that needs no account on disk.
 
+/** A world made with no git for the move: choosing a new branch there fails like a worktree that can't be made. */
+const NO_MOVE: ChatMoveDeps = {
+  signal: new AbortController().signal,
+  pick: () => Promise.reject(new Error('This world has no git for a move.')),
+  pathFor: () => Promise.reject(new Error('This world has no git for a move.')),
+  cut: () => Promise.reject(new Error('This world has no git for a move.')),
+};
+
+/** A world made with no git or GitHub for the title row's facts. */
+const NO_FACTS: ChatWorkStateReader = {
+  read: () => Promise.reject(new Error('This world reads no git state.')),
+  forgetPullRequest: () => undefined,
+};
+
 export interface ChatWorld {
   readonly store: Store;
   readonly state: StateStore;
@@ -46,8 +73,10 @@ export interface ChatWorld {
   readonly adapter: FakeAdapter;
   readonly clock: ManualClock;
   readonly chat: ChatService;
-  readonly briefs: Briefs;
+  readonly work: ChatWorkService;
   readonly folderHold: FolderHold;
+  /** The sessions whose next start says they moved; the move adds one, the start takes it. */
+  readonly firstStartAfterMove: Set<ChatId>;
   readonly inbox: InboxService;
   readonly project: ProjectDto;
   readonly dataDir: string;
@@ -75,6 +104,8 @@ export interface ChatWorld {
   };
   /** Moves the project to an account of this kind: the next launch and the next `models` see it. */
   launchOn(kind: AgentAccountKind): void;
+  /** Puts a chat where it works in the builder's checkout, as a choice of Here does. */
+  here(chatId: ChatDto['id']): void;
   /** A chat in its tab at `tabPosition`. */
   open(tabPosition?: number): ChatDto;
   close(): Promise<void>;
@@ -94,6 +125,16 @@ export function chatWorld(
     readonly checkout?: string;
     /** The project's own fields, such as the real `repoPath` a git-reading test needs. */
     readonly project?: Partial<ProjectInput>;
+    /** What the move to a new branch uses of git; a world with none refuses it. */
+    readonly move?: (world: { readonly state: StateStore }) => ChatMoveDeps;
+    /** What the title row's facts read of git and GitHub; a world with none refuses them. */
+    readonly facts?: (world: {
+      readonly state: StateStore;
+      readonly folderHold: FolderHold;
+      readonly clock: ManualClock;
+    }) => ChatWorkStateReader;
+    /** Git's side of Archive for a session on its own branch. */
+    readonly worktrees?: (world: { readonly state: StateStore }) => ChatWorktrees;
   } = {},
 ): ChatWorld {
   const { store, close } =
@@ -106,13 +147,20 @@ export function chatWorld(
   bus.subscribe((e) => events.push(e));
   const state = createStateStore(store, bus);
   const folderHold = createFolderHold({ state, bus });
+  const firstStartAfterMove = new Set<ChatId>();
   const adapter = new FakeAdapter(opts.book ?? {});
   const clock = new ManualClock();
   const dir =
     opts.over === undefined
       ? tempDir('chat')
       : { path: opts.over.dataDir, cleanup: () => undefined };
-  const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
+  let workRef: ChatWorkService | null = null;
+  const inbox = createInboxService({
+    state,
+    onParkedAnswer: () => undefined,
+    onFlagAnswerInWrite: (ctx, item, answer) =>
+      workRef === null ? undefined : applyChatWorkAnswer(workRef, silentLogger, ctx, item, answer),
+  });
   const launched = { kind: AccountKind.ClaudeSubscription as AgentAccountKind };
   const engine = createExploreEngine({
     state,
@@ -167,12 +215,29 @@ export function chatWorld(
           }),
     },
   });
+  // The chat service is made after the hooks, so the work service reaches it through this.
+  let chatService: ChatService | null = null;
+  const work = createChatWorkService({
+    state,
+    engine,
+    folderHold,
+    firstStartAfterMove,
+    move: opts.move === undefined ? NO_MOVE : opts.move({ state }),
+    facts: opts.facts === undefined ? NO_FACTS : opts.facts({ state, folderHold, clock }),
+    carryOn: (chatId, text) => {
+      chatService?.carryOn(chatId, text);
+    },
+    log: silentLogger,
+    now: () => clock.now(),
+  });
+  workRef = work;
   engine.register(
     'chat',
     chatHooks({
       live: createChatLiveSessions(),
       state,
       folderHold,
+      firstStartAfterMove,
       log: silentLogger,
       dataDir: dir.path,
       now: () => clock.now(),
@@ -183,17 +248,18 @@ export function chatWorld(
       judgeOf: () => opts.judge ?? JudgeKind.Native,
       webSearchOf: (kind, model) => adapter.capabilities({ kind }, model).webSearch,
       clock,
+      firstChange: (chatId) => {
+        work.firstChange(chatId);
+      },
       ...(opts.tendb === undefined ? {} : { judge: opts.tendb({ store }) }),
     }),
   );
-  const briefs = createBriefs(clock);
   let takeoverService: TakeoverService | null = null;
   const chat = createChatService({
     state,
     engine,
     folderHold,
     pendingOpens: createPendingOpens({ state }),
-    briefs,
     clock,
     dataDir: dir.path,
     log: silentLogger,
@@ -207,7 +273,10 @@ export function chatWorld(
     }),
     webSearchOf: () => adapter.capabilities({ kind: launched.kind }, null).webSearch,
     takeover: () => takeoverService,
+    reopenBranch: (chatId) => work.reopen(chatId),
+    ...(opts.worktrees === undefined ? {} : { worktrees: opts.worktrees({ state }) }),
   });
+  chatService = chat;
   const terminal: ChatWorld['terminal'] = {
     app: 'copy',
     openerFails: null,
@@ -219,11 +288,17 @@ export function chatWorld(
     setupNotes: [],
   };
   const opened: { app: string; script: string }[] = [];
+  const sourceRoot = (conversationId: ConversationId): string => {
+    const row = chatOfConversation(state.db, conversationId);
+    const checkout = opts.checkout ?? '/repo';
+    return row === null ? checkout : chatRoot(row, { repoPath: checkout }).root;
+  };
   const takeover = createTakeoverService({
     state,
     engine,
     folderHold,
     chats: () => chat,
+    work: () => work,
     dataDir: dir.path,
     now: () => clock.now(),
     log: silentLogger,
@@ -234,8 +309,9 @@ export function chatWorld(
         ? Promise.resolve()
         : Promise.reject(terminal.openerFails);
     },
-    sourceOf: () => ({
-      cwd: opts.checkout ?? '/repo',
+    sourceOf: (conv) => ({
+      // As production's: the session's root, which a branch session's worktree is.
+      cwd: sourceRoot(conv.id),
       kind: launched.kind,
       model: 'claude-opus-5-5',
       effort: 'high',
@@ -300,8 +376,9 @@ export function chatWorld(
     adapter,
     clock,
     chat,
-    briefs,
+    work,
     folderHold,
+    firstStartAfterMove,
     inbox,
     project,
     dataDir: dir.path,
@@ -311,6 +388,9 @@ export function chatWorld(
     terminal,
     launchOn(kind) {
       launched.kind = kind;
+    },
+    here(chatId) {
+      store.write((ctx) => setChatWork(ctx, chatId, null, { place: 'here' }));
     },
     open: (tabPosition = 0) => chat.create({ projectId: project.id, model: null, tabPosition }),
     async close() {

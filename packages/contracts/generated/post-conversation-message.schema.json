@@ -17,8 +17,7 @@
     "folder": {
       "type": "string",
       "enum": [
-        "wait",
-        "read_only"
+        "wait"
       ]
     }
   },

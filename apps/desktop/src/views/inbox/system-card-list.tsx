@@ -1,13 +1,13 @@
-import { Badge, Button, Group, Paper, Stack, Text } from '@mantine/core';
+import { Badge, Button, Group, Stack, Text } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import { useRecheckSystem } from '../../daemon/queries';
 import { SettingsSectionKey } from '../settings/sections';
 import { SystemCardKind, type SystemCard } from './system-cards';
-import { KEYS_IGNORE_ATTRIBUTE } from './use-inbox-keys';
+import { CardSurface } from './card-surface';
 
 /** What a 10db card says: what is wrong, and what the builder does about it. */
-function cardText(card: SystemCard): { readonly title: string; readonly body: string } {
+export function cardText(card: SystemCard): { readonly title: string; readonly body: string } {
   switch (card.kind) {
     case SystemCardKind.MissingTool:
       return {
@@ -51,7 +51,18 @@ function integrationsFocus(card: SystemCard): string | null {
   }
 }
 
-function SystemCardView({ card }: { readonly card: SystemCard }) {
+/**
+ * One of 10db's own cards: what stops or degrades work until the builder fixes it. They come from the system
+ * check and leave once it no longer finds them, so nothing answers or resolves them.
+ */
+export function SystemCardView({
+  card,
+  framed = true,
+}: {
+  readonly card: SystemCard;
+  /** Whether the card draws its own border; false in the Inbox's content area, which frames it. */
+  readonly framed?: boolean;
+}) {
   const recheck = useRecheckSystem();
   const { title, body } = cardText(card);
   let action: ReactNode = null;
@@ -87,7 +98,7 @@ function SystemCardView({ card }: { readonly card: SystemCard }) {
       </Button>
     );
   return (
-    <Paper withBorder p="md" shadow="xs">
+    <CardSurface framed={framed}>
       <Stack gap="sm" align="flex-start">
         <Group gap="sm" wrap="nowrap">
           {/* Every card waits on the builder: yellow, as a lane's cards are. */}
@@ -101,21 +112,6 @@ function SystemCardView({ card }: { readonly card: SystemCard }) {
         <Text size="sm">{body}</Text>
         {action}
       </Stack>
-    </Paper>
-  );
-}
-
-/**
- * 10db's own cards, above the lanes' cards: what stops or degrades work until the builder fixes it. They
- * come from the system check and leave once it no longer finds them, so nothing answers or resolves them.
- */
-export function SystemCardList({ cards }: { readonly cards: readonly SystemCard[] }) {
-  if (cards.length === 0) return null;
-  return (
-    <Stack gap="xs" {...{ [KEYS_IGNORE_ATTRIBUTE]: true }}>
-      {cards.map((card) => (
-        <SystemCardView key={card.key} card={card} />
-      ))}
-    </Stack>
+    </CardSurface>
   );
 }

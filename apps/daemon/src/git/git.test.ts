@@ -362,6 +362,34 @@ describe('history queries', () => {
     expect(await git.commitsSince(repo.path, base)).toEqual([sha]);
   });
 
+  it('reads each commit since a base with its message and parents, oldest first, merges marked', async () => {
+    const base = await git.head(repo.path);
+    write('a.txt', 'a');
+    const first = await git.commit({
+      repo: repo.path,
+      paths: ['a.txt'],
+      message: 'feat: a\n\nValue: protects=a; fails_when=b',
+      opId: 'op-messages-1',
+      branch: 'main',
+    });
+    write('b.txt', 'b');
+    const second = await git.commit({
+      repo: repo.path,
+      paths: ['b.txt'],
+      message: 'feat: b',
+      opId: 'op-messages-2',
+      branch: 'main',
+    });
+    const read = await git.commitMessagesSince(repo.path, base);
+    expect(read.map((c) => [c.sha, c.parents])).toEqual([
+      [first.sha, [base]],
+      [second.sha, [first.sha]],
+    ]);
+    expect(read[0]?.message).toContain('Value: protects=a; fails_when=b');
+    expect(read[1]?.message.startsWith('feat: b')).toBe(true);
+    expect(await git.commitMessagesSince(repo.path, second.sha)).toEqual([]);
+  });
+
   it('lists the files committed between two commits, not what is uncommitted', async () => {
     const base = await git.head(repo.path);
     mkdirSync(join(repo.path, 'dir'));

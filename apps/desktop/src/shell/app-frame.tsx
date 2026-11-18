@@ -15,14 +15,13 @@ import { usePanelHidden } from './panel-hidden';
 import { Rail } from './rail';
 import { railSectionForPath, type RailSection } from './rail-items';
 import { useSidebarLabels } from './sidebar-labels';
-import { shellLayout, ShellBand, SidebarSheet } from './shell-layout';
+import { PANEL_WIDTH, shellLayout, ShellBand, SidebarSheet } from './shell-layout';
 import { UnsavedGuardProvider } from './unsaved-guard';
 import { useShellBand } from './use-shell-band';
 import classes from './app-frame.module.css';
 
 const RAIL_LABELLED_WIDTH = 200;
 const RAIL_ICONS_WIDTH = 76;
-const PANEL_WIDTH = 260;
 /** The hairline that ends a sidebar column, in addition to its width. */
 const HAIRLINE = 1;
 const TITLE_ROW_HEIGHT = 44;
@@ -124,10 +123,37 @@ export function AppFrame({
     else setOpened(sheet === null ? { at: pathname, kind: SidebarSheet.Panel } : null);
   };
   const hidePanel = band === ShellBand.Wide && layout.panel === 'column' ? togglePanelHidden : null;
+  const closeSheet = useCallback(() => {
+    setOpened(null);
+  }, []);
+  const panelOpen = layout.panel === 'column' || layout.panel === 'sheet';
+  const showPanel = useCallback(() => {
+    if (!hasPanel || panelOpen) return;
+    if (band === ShellBand.Wide) togglePanelHidden();
+    else setOpened({ at: pathname, kind: SidebarSheet.Panel });
+  }, [hasPanel, panelOpen, band, togglePanelHidden, pathname]);
 
   const slots = useMemo<FrameSlots>(
-    () => ({ titleHost, panelHost, drawerHost, hidePanel, registerPanel }),
-    [titleHost, panelHost, drawerHost, hidePanel, registerPanel],
+    () => ({
+      titleHost,
+      panelHost,
+      drawerHost,
+      panelShown: layout.panel === 'column' || layout.panel === 'sheet',
+      hidePanel,
+      showPanel,
+      closeSheet,
+      registerPanel,
+    }),
+    [
+      titleHost,
+      panelHost,
+      drawerHost,
+      layout.panel,
+      hidePanel,
+      showPanel,
+      closeSheet,
+      registerPanel,
+    ],
   );
 
   const mainRef = useRef<HTMLElement>(null);

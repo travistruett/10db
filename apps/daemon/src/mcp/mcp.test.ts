@@ -3361,6 +3361,64 @@ describe('complete_step', () => {
         .isError,
     ).toBe(false);
   });
+
+  describe('a build step that plans first', () => {
+    async function onPlansFirst() {
+      const s = await seedSession();
+      state.write((ctx) => {
+        patchWorkstream(ctx, s.workstream.id, null, {
+          steps: [{ ...stepAt('implement'), plansFirst: true }, stepAt('review')],
+          stepIndex: 0,
+        });
+      });
+      return s;
+    }
+
+    it('records its plan with no verdict and tells it to build, then commits', async () => {
+      const s = await onPlansFirst();
+      writeRepoFile('src/api/a.ts', 'export {}\n');
+      const before = await s.call('commit', {
+        opId: 'op-pf-commit-1',
+        paths: ['src/api/a.ts'],
+        message: 'Add a',
+      });
+      expect(before.isError).toBe(true);
+      expect(before.text).toContain('Record your plan with mcp__10db__complete_step first');
+
+      const planned = await s.call('complete_step', {
+        opId: 'op-pf-step-1',
+        summary: '1. Add a.ts.',
+        verdict: 'approve',
+      });
+      expect(planned.isError).toBe(false);
+      expect(String(planned.json?.['instruction'])).toContain('Now build it');
+      expect(getWorkstream(base.db, s.workstream.id).steps[0]?.result).toMatchObject({
+        summary: '1. Add a.ts.',
+        verdict: null,
+        sessionId: s.session.id,
+      });
+
+      const after = await s.call('commit', {
+        opId: 'op-pf-commit-2',
+        paths: ['src/api/a.ts'],
+        message: 'Add a',
+      });
+      expect(after.json).toMatchObject({ alreadyCommitted: false });
+    });
+
+    it('files no follow-ups with its plan', async () => {
+      const s = await onPlansFirst();
+      const result = await s.call('complete_step', {
+        opId: 'op-pf-step-2',
+        summary: '1. Add a.ts.',
+        verdict: null,
+        followUps: [{ title: 'Later', description: 'Some other time.' }],
+      });
+      expect(result.isError).toBe(true);
+      expect(listTasks(base.db, s.project.id)).toHaveLength(1);
+      expect(getWorkstream(base.db, s.workstream.id).steps[0]?.result).toBeNull();
+    });
+  });
 });
 
 describe('principle proposals', () => {

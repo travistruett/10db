@@ -176,6 +176,14 @@ function withInstalledProject(): void {
   writeFileSync(join(h.repo, 'node_modules', 'pkg', 'index.js'), 'module.exports = 1;\n');
 }
 
+/** An installed main checkout with no pnpm lockfile: a copy's node_modules is cloned from it. */
+function withUnlockedProject(): void {
+  h.commit('.gitignore', 'node_modules/\n');
+  h.git$('push', '-q', 'origin', 'main');
+  mkdirSync(join(h.repo, 'node_modules', 'pkg'), { recursive: true });
+  writeFileSync(join(h.repo, 'node_modules', 'pkg', 'index.js'), 'module.exports = 1;\n');
+}
+
 describe("a copy's whole life with a shared batch open beside it", () => {
   it("leaves the main checkout's HEAD, index and files as they were", async () => {
     withInstalledProject();
@@ -261,15 +269,22 @@ describe('seeding a new copy', () => {
     return release;
   }
 
-  it('clones the main checkout node_modules when no shared batch is unfinished', async () => {
+  it('makes a pnpm copy’s node_modules by its install, never by a clone of the main checkout’s', async () => {
     withInstalledProject();
     const batch = await startedOne(copy('Copied'));
     expect(batch.state).toBe('OPEN');
-    expect(cloned(batch)).toBe(true);
+    expect(cloned(batch)).toBe(false);
+    expect(installsIn(batch)).toHaveLength(1);
+  });
+
+  it('clones the main checkout node_modules of a project that is not pnpm’s when no shared batch is unfinished', async () => {
+    withUnlockedProject();
+    const batch = await startedOne(copy('Copied'));
+    expect(batch.state).toBe('OPEN');
     expect(readFileSync(join(batch.worktreePath ?? '', 'node_modules/pkg/index.js'), 'utf8')).toBe(
       'module.exports = 1;\n',
     );
-    expect(installsIn(batch)).toHaveLength(1);
+    expect(installsIn(batch)).toHaveLength(0);
   });
 
   it('skips the clone and installs when a shared batch is OPEN', async () => {
@@ -326,46 +341,42 @@ describe('seeding a new copy', () => {
       expect(batch.notices).toEqual([]);
     });
 
-    it('says nothing when the clone carried the built output', async () => {
-      allowing('allowBuilds:\n  prisma: true\n');
-      h.pnpm.makes(installed('prisma', '6.0.0', { postinstall: 'node build.js' }));
-      const batch = await startedOne(copy('Copied'));
-      expect(batch.notices).toEqual([]);
-    });
-
-    describe('when the seed was installed by another pnpm', () => {
+    describe('when no shared batch kept the seed out', () => {
       beforeEach(() => {
         h.close();
         h = createDeliveryHarness({}, { trigger: false, pnpmVersion: '12.9.1' });
       });
 
-      function seededBy(version: string): void {
+      it.each(['12.15.0', '12.9.1'])(
+        'names the package the install left unbuilt, whichever pnpm (%s) made the main checkout’s',
+        async (version) => {
+          allowing('allowBuilds:\n  prisma: true\n');
+          writeFileSync(
+            join(h.repo, 'node_modules/.modules.yaml'),
+            `packageManager: pnpm@${version}\n`,
+          );
+          h.pnpm.makes(installed('prisma', '6.0.0', { postinstall: 'node build.js' }));
+          const batch = await startedOne(copy('Copied'));
+          expect(batch.state).toBe('OPEN');
+          expect(cloned(batch)).toBe(false);
+          const notice = h.only(batch.notices);
+          expect(notice).toMatchObject({ key: 'install-scripts-skipped', tone: 'warning' });
+          expect(notice.line).toContain('prisma');
+          expect(notice.body).toContain("10db made this copy's node_modules from its lockfile");
+          expect(notice.body).toContain('pnpm rebuild prisma');
+          expect(notice.body).not.toContain('unfinished');
+        },
+      );
+
+      it('names it the same way when the copy is cloned from the template', async () => {
         allowing('allowBuilds:\n  prisma: true\n');
-        writeFileSync(
-          join(h.repo, 'node_modules/.modules.yaml'),
-          `packageManager: pnpm@${version}\n`,
-        );
         h.pnpm.makes(installed('prisma', '6.0.0', { postinstall: 'node build.js' }));
-      }
-
-      it('says the built output went when the seed is removed', async () => {
-        seededBy('12.15.0');
-        const batch = await startedOne(copy('Copied'));
-        expect(batch.state).toBe('OPEN');
-        expect(cloned(batch)).toBe(false);
+        await startedOne(copy('First'));
+        const batch = await startedOne(copy('Second'));
+        expect(installsIn(batch)).toHaveLength(0);
         const notice = h.only(batch.notices);
-        expect(notice).toMatchObject({ key: 'install-scripts-skipped', tone: 'warning' });
         expect(notice.line).toContain('prisma');
-        expect(notice.body).toContain('removed it');
-        expect(notice.body).toContain('pnpm rebuild prisma');
-        expect(notice.body).not.toContain('unfinished');
-      });
-
-      it('says nothing when the seed is the daemon’s pnpm’s and stays', async () => {
-        seededBy('12.9.1');
-        const batch = await startedOne(copy('Copied'));
-        expect(cloned(batch)).toBe(true);
-        expect(batch.notices).toEqual([]);
+        expect(notice.body).toContain("10db made this copy's node_modules from its lockfile");
       });
     });
 
@@ -569,11 +580,13 @@ describe('seeding a new copy', () => {
         expect(batch.notices).toEqual([]);
       });
 
-      it('says nothing when the clone carried the built output', async () => {
+      it('names them too when no shared batch kept the seed out, since no clone carries built output', async () => {
         allowing('packages: []\n');
         h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
         const batch = await startedOne(copy('Copied'));
-        expect(batch.notices).toEqual([]);
+        const notice = h.only(batch.notices);
+        expect(notice.line).toContain('prisma');
+        expect(notice.body).toContain("10db made this copy's node_modules from its lockfile");
       });
     });
 
@@ -698,7 +711,7 @@ describe('seeding a new copy', () => {
   });
 
   it('clones again once the shared batch has ended', async () => {
-    withInstalledProject();
+    withUnlockedProject();
     const sharedBatch = await startedOne(shared('Alpha'));
     h.shipper.abandon(sharedBatch.id);
     await h.jobs.idle();

@@ -6,10 +6,11 @@ import {
   JudgeKind,
   parseItemBody,
 } from '@10db/contracts';
-import { listItems } from '@10db/db';
-import { afterEach, describe, expect, it } from 'vitest';
+import { getChat, listInbox, listItems, setChatWork } from '@10db/db';
+import { join } from 'node:path';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { chatWorld, type ChatWorld } from '../../test/chat-world';
-import { waitFor } from '../../test/fixtures';
+import { tempDir, waitFor } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore } from '../events';
 import { createJudge, type Judge } from '../judge';
@@ -18,6 +19,7 @@ import { silentLogger } from '../log';
 import { EMPTY_SETUP, type LaneSandboxSpec } from '../sandbox';
 import type { ExploreSessionSpec } from '../sessions';
 import type { ShapePrepared } from '../shape';
+import { CHAT_TURN_ENDED, WAITING_FOR_CHOICE } from './confinement';
 import { chatProfile, JOBS_STOP_DEADLINE_MS } from './hooks';
 
 // Sessions spec §7.1, trust line §5: a chat's session is the attended explore profile: the builder's
@@ -248,6 +250,7 @@ describe("a chat's background jobs", () => {
     jobs.ends = 0;
     w = chatWorld({ prepare: prepared, judge: JudgeKind.Native });
     const chat = w.open();
+    w.here(chat.id);
     w.chat.send(chat.conversationId, { text: 'Fix login', mentions: [], pictures: [] });
     await w.engine.settled(chat.conversationId);
     await waitFor(() => (jobs.ends === 1 ? true : undefined));
@@ -266,6 +269,7 @@ describe("a chat's hold while its jobs stop", () => {
     jobs.stopping = stopping;
     w = chatWorld({ prepare: prepared, judge: JudgeKind.Native });
     const chat = w.open();
+    w.here(chat.id);
     w.chat.send(chat.conversationId, { text: 'Fix login', mentions: [], pictures: [] });
     await w.engine.settled(chat.conversationId);
     await waitFor(() => (jobs.ends === 1 ? true : undefined));
@@ -372,6 +376,7 @@ describe("a chat's older session", () => {
   it('keeps no call of its own once a newer session of the chat holds Your folder', async () => {
     w = chatWorld({ prepare: prepared, judge: JudgeKind.Native });
     const chat = w.open();
+    w.here(chat.id);
     const edit = { toolName: 'Write', input: { file_path: '/repo/a.ts', content: 'x' } };
     /** Sends a message and runs `during` while its turn is in progress. */
     const turn = async (text: string, during: () => void) => {
@@ -407,6 +412,95 @@ describe("a chat's older session", () => {
       expect(w.adapter.shapeSessions[2]?.spec.preToolUse(edit)).toEqual({ decision: 'allow' });
       expect(first?.preToolUse(edit).decision).toBe('deny');
     });
+  });
+});
+
+describe("a chat's writes outside the checkout hold", () => {
+  const inCheckout = { toolName: 'Write', input: { file_path: '/repo/a.ts', content: 'x' } };
+  const worktree = tempDir('hooks-wt');
+  afterAll(() => {
+    worktree.cleanup();
+  });
+  const inWorktree = {
+    toolName: 'Write',
+    input: { file_path: join(worktree.path, 'a.ts'), content: 'x' },
+  };
+
+  /** One turn, in which the agent makes `call`; what the hook answered. */
+  function oneTurn(call: typeof inCheckout) {
+    const chat = w.open();
+    return { chat, run: () => runTurn(chat, call) };
+  }
+  async function runTurn(chat: ReturnType<ChatWorld['open']>, call: typeof inCheckout) {
+    let answer: unknown;
+    w.adapter.shapeBehaviour = (turn) => {
+      answer = turn.spec.preToolUse(call);
+      return Promise.resolve({ text: 'Done.' });
+    };
+    w.chat.send(chat.conversationId, { text: 'go', mentions: [], pictures: [] });
+    await w.engine.settled(chat.conversationId);
+    return { answer };
+  }
+
+  it('lets a branch session with no worktree write nothing, in the checkout least of all', async () => {
+    w = chatWorld({ prepare: prepared, judge: JudgeKind.Native });
+    const { chat, run } = oneTurn(inCheckout);
+    w.store.write((ctx) => setChatWork(ctx, chat.id, null, { place: 'branch', branch: 'x' }));
+    const out = await run();
+    expect(out.answer).toMatchObject({ decision: 'deny' });
+    expect(w.folderHold.holdsTurn(chat.id)).toBe(false);
+  });
+
+  it('keeps a branch session whose worktree folder was deleted from writing the checkout, and still lets it read', async () => {
+    const sandboxWrites: boolean[] = [];
+    w = chatWorld({
+      prepare: (input) => {
+        sandboxWrites.push(input.writes === true);
+        return prepared();
+      },
+      judge: JudgeKind.Native,
+    });
+    const gone = tempDir('hooks-gone');
+    const missing = join(gone.path, 'wt');
+    gone.cleanup();
+    const chat = w.open();
+    w.store.write((ctx) =>
+      setChatWork(ctx, chat.id, null, { place: 'branch', branch: 'x', worktreePath: missing }),
+    );
+    const answers: { write?: string; edit?: string; read?: string } = {};
+    w.adapter.shapeBehaviour = (turn) => {
+      answers.write = turn.spec.preToolUse(inCheckout).decision;
+      answers.edit = turn.spec.preToolUse({
+        toolName: 'Edit',
+        input: { file_path: '/repo/a.ts', old_string: 'a', new_string: 'b' },
+      }).decision;
+      answers.read = turn.spec.preToolUse({
+        toolName: 'Read',
+        input: { file_path: '/repo/a.ts' },
+      }).decision;
+      return Promise.resolve({ text: 'Done.' });
+    };
+    w.chat.send(chat.conversationId, { text: 'go', mentions: [], pictures: [] });
+    await w.engine.settled(chat.conversationId);
+    expect(answers).toMatchObject({ write: 'deny', edit: 'deny' });
+    expect(answers.read).toBe('allow');
+    expect(sandboxWrites).toEqual([false]);
+  });
+
+  it("judges a branch session's edits inside its worktree, never the checkout", async () => {
+    w = chatWorld({ prepare: prepared, judge: JudgeKind.Native });
+    const { chat } = oneTurn(inCheckout);
+    w.store.write((ctx) =>
+      setChatWork(ctx, chat.id, null, {
+        place: 'branch',
+        branch: 'x',
+        worktreePath: worktree.path,
+      }),
+    );
+    const inRepo = await runTurn(chat, inCheckout);
+    expect(inRepo.answer).toMatchObject({ decision: 'deny' });
+    const inTree = await runTurn(chat, inWorktree);
+    expect(inTree.answer).toEqual({ decision: 'allow' });
   });
 });
 
@@ -527,5 +621,94 @@ describe("a chat's judge", () => {
     });
     expect(texts).toHaveLength(1);
     expect(texts[0]).toContain("10db's judge didn't answer");
+  });
+});
+
+// The place table's rows 1-4 and 8, through the real hook, store and engine.
+describe("a chat's first change", () => {
+  const edit = { toolName: 'Write', input: { file_path: '/repo/a.ts', content: 'x' } };
+  const cards = () =>
+    listInbox(w.state.db, { states: ['OPEN'] }).filter((c) => c.detail?.['chatWork'] !== undefined);
+
+  /** A turn whose agent makes `calls`, then waits to be interrupted; what each call was answered is returned. */
+  async function turnThatMakes(
+    chatId: string,
+    conversationId: Parameters<ChatWorld['engine']['settled']>[0],
+    calls: readonly {
+      toolName: string;
+      input: unknown;
+      agentId?: string;
+      agentType?: string;
+    }[],
+  ) {
+    const answers: unknown[] = [];
+    const interrupted: boolean[] = [];
+    w.adapter.shapeBehaviour = async (turn) => {
+      for (const call of calls) answers.push(turn.spec.preToolUse(call));
+      await new Promise<void>((resolve) => {
+        turn.signal.addEventListener('abort', () => {
+          interrupted.push(true);
+          resolve();
+        });
+      });
+      return { text: 'Stopped.' };
+    };
+    w.chat.send(conversationId, { text: `go ${chatId}`, mentions: [], pictures: [] });
+    await w.engine.settled(conversationId);
+    return { answers, interrupted };
+  }
+
+  it('asks once with a card, denies with the waiting words, and stops the turn (rows 1, 8)', async () => {
+    w = chatWorld({ prepare: prepared, judge: JudgeKind.Native });
+    const chat = w.open();
+    const first = await turnThatMakes(chat.id, chat.conversationId, [edit]);
+    expect(first.answers).toEqual([{ decision: 'deny', reason: WAITING_FOR_CHOICE }]);
+    expect(first.interrupted).toEqual([true]);
+    const row = getChat(w.state.db, chat.id);
+    expect(row.workPlace).toBe('choosing');
+    const asked = row.workAskedAt;
+    expect(asked).not.toBeNull();
+    expect(cards()).toHaveLength(1);
+    expect(cards()[0]?.options.map((o) => o.label)).toEqual(['Here', 'On a New Branch']);
+    expect(cards()[0]?.detail).toMatchObject({ chatWork: chat.id });
+
+    // Another change, in a later turn, bumps askedAt and raises no second card.
+    w.clock.advance(5_000);
+    const second = await turnThatMakes(chat.id, chat.conversationId, [edit, edit]);
+    expect(second.answers).toHaveLength(2);
+    expect(second.answers.every((a) => JSON.stringify(a).includes(WAITING_FOR_CHOICE))).toBe(true);
+    expect(cards()).toHaveLength(1);
+    expect(getChat(w.state.db, chat.id).workAskedAt).not.toBe(asked);
+  });
+
+  it.each([
+    {
+      name: "a subagent's edit",
+      call: { ...edit, agentId: 'sub-1', agentType: 'general-purpose' },
+    },
+    { name: 'make_branch', call: { toolName: 'mcp__10db__make_branch', input: { name: 'x' } } },
+    { name: 'commit_changes', call: { toolName: 'mcp__10db__commit_changes', input: {} } },
+  ])('asks for $name too (row 2)', async ({ call }) => {
+    w = chatWorld({ prepare: prepared, judge: JudgeKind.Native });
+    const chat = w.open();
+    const out = await turnThatMakes(chat.id, chat.conversationId, [call]);
+    expect(out.answers).toEqual([{ decision: 'deny', reason: WAITING_FOR_CHOICE }]);
+    expect(cards()).toHaveLength(1);
+  });
+
+  it('refuses a call of an older session with no card and no stop (row 4)', async () => {
+    w = chatWorld({ prepare: prepared, judge: JudgeKind.Native });
+    const chat = w.open();
+    w.chat.send(chat.conversationId, { text: 'look', mentions: [], pictures: [] });
+    await w.engine.settled(chat.conversationId);
+    const older = w.adapter.shapeSessions[0]?.spec;
+    // An effort change closes the warm session; the next turn opens another.
+    await w.chat.patch(chat.id, { effort: 'low' });
+    w.chat.send(chat.conversationId, { text: 'again', mentions: [], pictures: [] });
+    await w.engine.settled(chat.conversationId);
+    expect(w.adapter.shapeSessions).toHaveLength(2);
+    expect(older?.preToolUse(edit)).toEqual({ decision: 'deny', reason: CHAT_TURN_ENDED });
+    expect(getChat(w.state.db, chat.id).workPlace).toBeNull();
+    expect(cards()).toEqual([]);
   });
 });

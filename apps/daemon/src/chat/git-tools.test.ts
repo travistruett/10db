@@ -13,11 +13,13 @@ import {
 } from '@10db/contracts';
 import {
   createTestStore,
+  getChat,
   insertChat,
   insertConversation,
   insertPass,
   insertTask,
   schema,
+  setChatWork,
   seedProject,
   type Store,
 } from '@10db/db';
@@ -33,12 +35,13 @@ import {
   type TempDir,
 } from '../../test/fixtures';
 import { FakeGh } from '../../test/fake-gh';
-import { createEventBus, createStateStore } from '../events';
+import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createFolderHold, type FolderHold } from '../folder-hold';
 import { createGit } from '../git';
 import { secretFilesIn } from '../sandbox';
 import { createChatLiveSessions } from './live-sessions';
 import { chatGitTools } from './git-tools';
+import { takeHereForGitTool } from './work-takes-checkout';
 
 // Sessions spec §7.3: the git tools run only while the turn holds Your folder, never on 10db's branches or
 // while a closed pass waits, and the daemon's git does the work in a real repository.
@@ -47,6 +50,7 @@ let store: Store;
 let closeStore: () => void;
 let project: ProjectDto;
 let hold: FolderHold;
+let state: StateStore;
 let pair: ReturnType<typeof createTempRepoWithOrigin>;
 let repo: TempDir;
 let network: ReturnType<typeof githubOrigin>;
@@ -56,7 +60,8 @@ let gh: FakeGh;
 beforeEach(() => {
   ({ store, close: closeStore } = createTestStore());
   const bus = createEventBus();
-  hold = createFolderHold({ state: createStateStore(store, bus), bus });
+  state = createStateStore(store, bus);
+  hold = createFolderHold({ state, bus });
   project = seedProject(store);
   pair = createTempRepoWithOrigin();
   repo = pair.repo;
@@ -130,6 +135,9 @@ const rg = (...args: string[]) =>
     .toString()
     .trim();
 
+/** The branches whose cached pull request read the tools asked to forget. */
+const forgotten: string[] = [];
+
 /** A chat's tools in a session of its own, open as the engine opens one. */
 function tools(chat: ReturnType<typeof newChat>, open = true, afterCheck?: () => void) {
   const live = createChatLiveSessions();
@@ -160,11 +168,21 @@ function tools(chat: ReturnType<typeof newChat>, open = true, afterCheck?: () =>
       gh,
       filesDir: () => join(scratch.path, 'files'),
       repoOf: () => repo.path,
+      placeOf: (chatId) => {
+        const row = getChat(state.db, chatId);
+        return { place: row.workPlace, worktree: row.worktreePath };
+      },
       secretFilesOf: secretFilesIn,
       net: () => ({
         env: { ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global },
         timeoutMs: 20_000,
       }),
+      takeHere: (chatId) => {
+        takeHereForGitTool({ state, folderHold: hold }, chatId);
+      },
+      forgetPullRequest: (_chatId, branch) => {
+        forgotten.push(branch);
+      },
     },
     { sessionId, conversationId: chat.conversationId, chatId: chat.id, projectId: project.id },
   );
@@ -277,7 +295,7 @@ describe("a chat's git tools", () => {
     expect(rg('show', '--name-only', '--format=', 'HEAD')).toBe('src/a.ts');
     expect(rg('ls-files', '--others', '--exclude-standard')).toBe('src/b.ts');
     await expect(t.commit_changes({ message: 'x', paths: ['../outside.txt'] })).rejects.toThrow(
-      'inside Your folder',
+      'inside your checkout',
     );
   });
 
@@ -328,7 +346,7 @@ describe("a chat's git tools", () => {
             hold.releaseTurn(me.id);
           }),
         ),
-      ).rejects.toThrow(/does not hold Your folder/);
+      ).rejects.toThrow(/does not have your checkout/);
       expect(rg('rev-parse', 'HEAD')).toBe(head);
       expect(rg('branch', '--show-current')).toBe('main');
       expect(rg('branch', '--list', 'topic')).toBe('');
@@ -347,7 +365,78 @@ describe("a chat's git tools", () => {
   });
 });
 
+describe('a session on its own branch', () => {
+  /** A chat whose row says it works in a worktree of the project, cut from main. */
+  let made = 0;
+  function branchChat(place: 'branch' | 'moving' = 'branch', hasWorktree = true) {
+    const me = newChat('Me');
+    made += 1;
+    const worktree = join(scratch.path, `worktree-${String(made)}`);
+    rg('worktree', 'add', '-q', '-b', `fix-${String(made)}`, worktree, 'HEAD');
+    store.write((ctx) =>
+      setChatWork(ctx, me.id, null, {
+        place,
+        branch: `fix-${String(made)}`,
+        worktreePath: hasWorktree ? worktree : null,
+        baseHead: rg('rev-parse', 'HEAD'),
+      }),
+    );
+    return { me, worktree };
+  }
+  const inWorktree = (worktree: string, ...args: string[]) =>
+    execFileSync('git', ['-C', worktree, ...args], { env: isolatedGitEnv(), stdio: 'pipe' })
+      .toString()
+      .trim();
+
+  it('commits in its worktree without holding Your folder, which someone else may have', async () => {
+    const { me, worktree } = branchChat();
+    // 10db's own git work has the checkout: a Here session's tool would be refused.
+    expect(hold.reserveGit(project.id, 'cutting a branch').reserved).toBe(true);
+    writeFileSync(join(worktree, 'a.ts'), 'a\n');
+    write('builders.txt', 'the builder’s\n');
+    const before = rg('rev-parse', 'HEAD');
+    await tools(me).commit_changes({ message: 'Add a' });
+    expect(inWorktree(worktree, 'show', '--name-only', '--format=', 'HEAD')).toBe('a.ts');
+    expect(rg('rev-parse', 'HEAD')).toBe(before);
+    expect(rg('ls-files', '--others', '--exclude-standard')).toBe('builders.txt');
+  });
+
+  it.each([
+    ['commit_changes', (t: Tools) => t.commit_changes({ message: 'x' })],
+    ['push_branch', (t: Tools) => t.push_branch({})],
+    ['make_branch', (t: Tools) => t.make_branch({ name: 'topic' })],
+  ])('%s refuses once its worktree is switched to one of 10db’s branches', async (_name, call) => {
+    const { me, worktree } = branchChat();
+    rg('branch', '10db/batch-abc123');
+    inWorktree(worktree, 'switch', '-q', '10db/batch-abc123');
+    writeFileSync(join(worktree, 'a.ts'), 'a\n');
+    const before = inWorktree(worktree, 'rev-parse', 'HEAD');
+    await expect(call(tools(me))).rejects.toThrow(/10db's own/);
+    expect(inWorktree(worktree, 'rev-parse', 'HEAD')).toBe(before);
+  });
+
+  it('refuses a call from a session that has ended, as a Here session does', async () => {
+    const { me } = branchChat();
+    await expect(tools(me, false).commit_changes({ message: 'x' })).rejects.toThrow(
+      /session has ended/,
+    );
+  });
+
+  it('refuses while it moves, and when its worktree is gone', async () => {
+    const moving = branchChat('moving');
+    await expect(tools(moving.me).commit_changes({ message: 'x' })).rejects.toThrow(
+      'Wait for the move to finish.',
+    );
+    const gone = branchChat('branch', false);
+    await expect(tools(gone.me).commit_changes({ message: 'x' })).rejects.toThrow(/no worktree/);
+  });
+});
+
 describe("a chat's tools that reach GitHub", () => {
+  beforeEach(() => {
+    forgotten.length = 0;
+  });
+
   /** The chat holds the folder on a branch of its own with one commit on it. */
   async function branchWithCommit(name = 'topic') {
     const me = newChat('Me');
@@ -447,5 +536,15 @@ describe("a chat's tools that reach GitHub", () => {
     const number = Number(/\/pull\/(\d+)$/.exec(mine.url)?.[1]);
     await t.merge_pull_request({ number });
     expect(gh.merged).toEqual([mine.url]);
+  });
+
+  it("clears the branch's cached pull request read after a push, an open and a merge", async () => {
+    const t = await branchWithCommit();
+    await t.push_branch({});
+    expect(forgotten).toEqual(['topic']);
+    const opened = (await t.open_pull_request({ title: 'Add a', body: 'Why' })) as { url: string };
+    expect(forgotten).toEqual(['topic', 'topic']);
+    await t.merge_pull_request({ number: Number(/\/pull\/(\d+)$/.exec(opened.url)?.[1]) });
+    expect(forgotten).toEqual(['topic', 'topic', 'topic']);
   });
 });

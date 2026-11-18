@@ -74,6 +74,11 @@ function applyPut(
           row.approvesPlan,
           defaultRow(row.rigor).approvesPlan.value,
         ),
+        plansInBuild: field(
+          sent.plansInBuild,
+          row.plansInBuild,
+          defaultRow(row.rigor).plansInBuild.value,
+        ),
       };
     }),
     cells: view.cells.map((cell) => {
@@ -526,6 +531,33 @@ describe('the playbook table', () => {
           },
         ]);
       });
+    });
+
+    it('turning on planning in the Build session sends it alone', async () => {
+      const puts = serve();
+      renderWithDaemon(<PlaybookTable projectId={null} accountId={DEFAULT_ACCOUNT.id} />);
+      const drawer = await openDrawer('Careful');
+      fireEvent.click(
+        drawer.getByRole('switch', { name: /The Build session writes the plan/, hidden: true }),
+      );
+      await waitFor(() => {
+        expect(puts).toEqual([
+          {
+            path: '/playbook',
+            body: { rows: [{ rigor: 'careful', plansInBuild: true }], cells: [] },
+          },
+        ]);
+      });
+    });
+
+    it('keeps the Plan step where a plan review or the builder’s approval needs it', async () => {
+      serve();
+      renderWithDaemon(<PlaybookTable projectId={null} accountId={DEFAULT_ACCOUNT.id} />);
+      const drawer = await openDrawer('Critical');
+      expect(
+        drawer.getByRole('switch', { name: /The Build session writes the plan/, hidden: true }),
+      ).toHaveProperty('disabled', true);
+      expect(drawer.getByText('A plan review or plan approval keeps the Plan step')).toBeTruthy();
     });
 
     it('needs a Plan step before the builder can approve the plan', async () => {

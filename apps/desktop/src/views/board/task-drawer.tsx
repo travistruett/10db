@@ -75,6 +75,7 @@ import { sameSetting } from '../settings/model-setting-options';
 import { ModelSettingSelect } from '../settings/model-setting-select';
 import { KeptWork } from './kept-work';
 import { TaskPictures } from './task-pictures';
+import { TaskPlan } from './task-plan';
 import { TaskSkips } from './task-skips';
 import { LandingField } from './landing-field';
 import { placementOpen } from './placement';
@@ -421,6 +422,7 @@ export function TaskDrawer({
                   />
                 </Stack>
               ) : null}
+              <TaskPlan steps={workstream?.steps ?? []} label={<SectionLabel>Plan</SectionLabel>} />
               {latestRound ? (
                 <Group gap="xs" data-testid="latest-review">
                   <SectionLabel>Latest review</SectionLabel>

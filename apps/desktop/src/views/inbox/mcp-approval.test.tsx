@@ -7,9 +7,9 @@ import {
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
-import { queryKeys } from '../../daemon/queries';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { inboxItemDto } from '../../test/fixtures';
+import { findText, getText, queryText, serveOpenRows } from '../../test/inbox-page-fixtures';
 
 const review = (overrides: Partial<McpServerReview> = {}): McpServerReview => ({
   name: 'mantine',
@@ -51,6 +51,7 @@ function serveInbox(items: ReturnType<typeof inboxItemDto>[]): { answers: unknow
     }),
     ...baseHandlers(),
   );
+  serveOpenRows(() => (answers.length > 0 ? [] : items));
   return { answers };
 }
 
@@ -58,13 +59,13 @@ describe('MCP approval card', () => {
   it('shows the daemon-built body and what the server reads', async () => {
     serveInbox([card(review({ variables: ['LOG_LEVEL'] }))]);
     renderApp('/inbox');
-    expect(await screen.findByText('Run the repo\'s MCP server "mantine"?')).toBeTruthy();
-    expect(screen.getByText('MCP server')).toBeTruthy();
-    expect(screen.getByText('Runs: npx -y @mantine/mcp-server@9.7.2')).toBeTruthy();
+    expect(await findText('Run the repo\'s MCP server "mantine"?')).toBeTruthy();
+    expect(getText('MCP server')).toBeTruthy();
+    expect(getText('Runs: npx -y @mantine/mcp-server@9.7.2')).toBeTruthy();
     // The daemon's body already says what the server is and that sessions run without it.
-    expect(screen.queryByText(/declares this stdio server/)).toBeNull();
-    expect(screen.getByText('LOG_LEVEL')).toBeTruthy();
-    expect(screen.queryByText(/Environment it gets/)).toBeNull();
+    expect(queryText(/declares this stdio server/)).toBeNull();
+    expect(getText('LOG_LEVEL')).toBeTruthy();
+    expect(queryText(/Environment it gets/)).toBeNull();
     expect(screen.getByRole('radio', { name: /Approve for this project/ })).toBeTruthy();
     expect(screen.getByRole('radio', { name: /Deny/ })).toBeTruthy();
   });
@@ -79,8 +80,8 @@ describe('MCP approval card', () => {
   ])('says, for a stdio server, %s', async (_name, hosts, shown) => {
     serveInbox([card(review({ hosts }))]);
     renderApp('/inbox');
-    expect(await screen.findByText('Reaches these hosts')).toBeTruthy();
-    expect(screen.getByText(shown, { normalizer: (text) => text })).toBeTruthy();
+    expect(await findText('Reaches these hosts')).toBeTruthy();
+    expect(getText(shown, { normalizer: (text) => text })).toBeTruthy();
   });
 
   it('warns about credential-like variables', async () => {
@@ -99,7 +100,7 @@ describe('MCP approval card', () => {
       ),
     ]);
     renderApp('/inbox');
-    expect(await screen.findByText(/Connects to: https:\/\/docs.example\/mcp/)).toBeTruthy();
+    expect(await findText(/Connects to: https:\/\/docs.example\/mcp/)).toBeTruthy();
     const warning = screen.getByRole('alert');
     expect(within(warning).getByText('Approving passes DOCS_TOKEN to this server.')).toBeTruthy();
   });
@@ -110,15 +111,15 @@ describe('MCP approval card', () => {
     serveInbox([card(review({ env: [{ name: 'PATH', value: './.tools' }] }), body)]);
     renderApp('/inbox');
     expect(
-      await screen.findByText((_, el) => el?.tagName === 'PRE' && el.textContent === body),
+      await findText((_, el) => el?.tagName === 'PRE' && el.textContent === body),
     ).toBeTruthy();
-    expect(screen.getByText(/\\u\{202e\}evil/)).toBeTruthy();
+    expect(getText(/\\u\{202e\}evil/)).toBeTruthy();
   });
 
   it('renders markup in the body as text', async () => {
     serveInbox([card(review(), 'Runs: <img src=x onerror=alert(1)> <b>bold</b>')]);
     renderApp('/inbox');
-    expect(await screen.findByText('Runs: <img src=x onerror=alert(1)> <b>bold</b>')).toBeTruthy();
+    expect(await findText('Runs: <img src=x onerror=alert(1)> <b>bold</b>')).toBeTruthy();
     expect(document.querySelector('img')).toBeNull();
     expect(document.querySelector('main b')).toBeNull();
   });
@@ -126,7 +127,7 @@ describe('MCP approval card', () => {
   it('approves with 1 and Enter, posting the stable choice', async () => {
     const { answers } = serveInbox([card(review())]);
     renderApp('/inbox');
-    await screen.findByText('Run the repo\'s MCP server "mantine"?');
+    await findText('Run the repo\'s MCP server "mantine"?');
     fireEvent.keyDown(document.body, { key: '1' });
     fireEvent.keyDown(document.body, { key: 'Enter' });
     await waitFor(() => {
@@ -137,9 +138,9 @@ describe('MCP approval card', () => {
   it('never approves by default: Enter with no choice posts nothing', async () => {
     const { answers } = serveInbox([card(review())]);
     renderApp('/inbox');
-    await screen.findByText('Run the repo\'s MCP server "mantine"?');
+    await findText('Run the repo\'s MCP server "mantine"?');
     fireEvent.keyDown(document.body, { key: 'Enter' });
-    expect(await screen.findByText('Choose an option first (1–5).')).toBeTruthy();
+    expect(await findText('Choose an option first (1–5).')).toBeTruthy();
     expect(answers).toEqual([]);
   });
 
@@ -156,8 +157,9 @@ describe('MCP approval card', () => {
       }),
       ...baseHandlers(),
     );
+    serveOpenRows(() => items);
     const { queryClient } = renderApp('/inbox');
-    await screen.findByText('Run the repo\'s MCP server "alpha"?');
+    await findText('Run the repo\'s MCP server "alpha"?');
     fireEvent.keyDown(document.body, { key: '1' });
     await waitFor(() => {
       expect(
@@ -167,9 +169,13 @@ describe('MCP approval card', () => {
       ).toBe('true');
     });
     items = [b, a];
-    await queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
-    await screen.findByText('Run the repo\'s MCP server "beta"?');
-    expect(screen.getAllByRole('radiogroup')).toHaveLength(1);
+    await queryClient.invalidateQueries({ queryKey: ['inbox-rows'] });
+    await screen.findByRole('option', { name: /beta/ });
+    expect(
+      screen
+        .getAllByRole('radiogroup')
+        .filter((g) => g.closest('[aria-label="Inbox panel"]') === null),
+    ).toHaveLength(1);
     fireEvent.keyDown(document.body, { key: 'Enter' });
     await waitFor(() => {
       expect(answers).toEqual([{ id: a.id, body: { choice: McpApprovalChoice.Approve } }]);

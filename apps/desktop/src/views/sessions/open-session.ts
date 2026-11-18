@@ -3,7 +3,6 @@ import { useNavigate } from '@tanstack/react-router';
 import { useOpenChats, usePatchChat } from '../../daemon/chat-queries';
 import { useSelectedProject } from '../../shell/selected-project';
 import { closedTabs } from './closed-tabs';
-import { taskTabs, type TaskTabPlace } from './task-tabs';
 
 /**
  * Opens a session's tab from anywhere (the Inbox's Open Session, a notification's click): it selects the
@@ -26,29 +25,18 @@ export function useOpenSession(): (chatId: ChatId, projectId: ProjectId) => Prom
   };
 }
 
-/** What opening a task's tab needs to put it in the strip. */
+/** What opening a task needs: the project to select, and the task whose drawer the Board opens. */
 export interface TaskToOpen {
   readonly taskId: TaskId;
   readonly projectId: ProjectId;
-  readonly title: string;
-  readonly place: TaskTabPlace;
 }
 
-/**
- * Opens a task's tab from anywhere (the chat's row, the Inbox, the Board's drawer): the tab is put in the strip
- * where it was closed, or at its end, and selected.
- */
+/** Opens a task in the Board's drawer from anywhere (a chat's task row, the sealed chat's line). */
 export function useOpenTask(): (task: TaskToOpen) => Promise<void> {
-  const open = useOpenChats().data;
   const navigate = useNavigate();
   const { select } = useSelectedProject();
   return async (task) => {
-    if (!taskTabs.list().some((t) => t.taskId === task.taskId)) {
-      const entry = closedTabs.take(task.taskId);
-      const end = (open?.length ?? 0) + taskTabs.list().length;
-      taskTabs.open({ ...task, position: Math.min(entry?.position ?? end, end) });
-    }
     select(task.projectId);
-    await navigate({ to: '/sessions', search: { task: task.taskId } });
+    await navigate({ to: '/board', search: { task: task.taskId } });
   };
 }

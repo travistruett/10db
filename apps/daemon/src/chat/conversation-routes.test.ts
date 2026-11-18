@@ -11,7 +11,14 @@ import {
   type ChatDto,
   WorkstreamState,
 } from '@10db/contracts';
-import { insertTask, insertWorkstream, listItemFiles, listItems, schema } from '@10db/db';
+import {
+  insertTask,
+  insertWorkstream,
+  listItemFiles,
+  listItems,
+  schema,
+  setChatWork,
+} from '@10db/db';
 import { eq } from 'drizzle-orm';
 import { defineWebSocketHelper } from 'hono/ws';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -47,11 +54,16 @@ function appOf(world: ChatWorld) {
       ...createChatApiServices({
         state: world.state,
         chat: world.chat,
+        work: world.work,
         takeover: world.takeover,
         folderHold: world.folderHold,
         pendingOpens: createPendingOpens({ state: world.state }),
-        doItPreview: () => Promise.reject(new Error('not read here')),
-        doIt: () => Promise.reject(new Error('not done here')),
+        changes: () => Promise.reject(new Error('not read here')),
+        titleRow: {
+          commit: () => Promise.reject(new Error('not done here')),
+          openPullRequest: () => Promise.reject(new Error('not done here')),
+          merge: () => Promise.reject(new Error('not done here')),
+        },
         // The world's checkout is no repository: its branch can't be read.
         git: () => Promise.reject(new Error('not a repository')),
         now: () => new Date(),
@@ -197,6 +209,7 @@ describe('the folder and a chat that meets it held', () => {
     w = chatWorld();
     runningTask('Bump vite');
     const chat = w.open();
+    w.here(chat.id);
     expect((await send(chat.conversationId, { folder: 'wait' })).status).toBe(202);
     expect((await live(chat.conversationId)).waitingForFolder).toBe(true);
     expect(w.engine.view(chat.conversationId).state).toBe(ConversationState.IdleCold);
@@ -206,15 +219,30 @@ describe('the folder and a chat that meets it held', () => {
     expect(w.adapter.shapeSessions).toHaveLength(1);
   });
 
-  it('runs a send with folder read_only at once, and without one', async () => {
+  it.each([
+    { name: 'a reading chat (row 7)', place: null },
+    { name: 'a chat on its own branch (row 30)', place: 'branch' as const },
+  ])('runs a send with folder wait at once under a lane, for $name', async ({ place }) => {
     w = chatWorld();
     runningTask('Bump vite');
     const chat = w.open();
-    await send(chat.conversationId, { folder: 'read_only' });
+    if (place !== null)
+      w.store.write((ctx) => setChatWork(ctx, chat.id, null, { place, branch: 'fix' }));
+    expect((await send(chat.conversationId, { folder: 'wait' })).status).toBe(202);
     expect((await live(chat.conversationId)).waitingForFolder).toBe(false);
     await w.engine.settled(chat.conversationId);
     expect(w.adapter.shapeSessions).toHaveLength(1);
+    expect(w.folderHold.waiting(chat.id)).toBe(false);
+  });
+
+  it('runs a send with no folder choice at once', async () => {
+    w = chatWorld();
+    runningTask('Bump vite');
+    const chat = w.open();
     await send(chat.conversationId, {});
+    expect((await live(chat.conversationId)).waitingForFolder).toBe(false);
+    await w.engine.settled(chat.conversationId);
+    expect(w.adapter.shapeSessions).toHaveLength(1);
     await w.engine.settled(chat.conversationId);
     expect(w.folderHold.waiting(chat.id)).toBe(false);
   });
@@ -223,6 +251,7 @@ describe('the folder and a chat that meets it held', () => {
     w = chatWorld();
     runningTask('Bump vite');
     const chat = w.open();
+    w.here(chat.id);
     const form = new FormData();
     form.append('text', 'edit notes.md');
     form.append('folder', 'wait');
@@ -235,10 +264,10 @@ describe('the folder and a chat that meets it held', () => {
     expect(w.folderHold.waiting(chat.id)).toBe(true);
   });
 
-  it('refuses a folder choice that is neither wait nor read_only', async () => {
+  it.each(['now', 'read_only'])('refuses a folder choice that is not wait: %s', async (folder) => {
     w = chatWorld();
     const chat = w.open();
-    expect((await send(chat.conversationId, { folder: 'now' })).status).toBe(400);
+    expect((await send(chat.conversationId, { folder })).status).toBe(400);
   });
 
   it('answers stop-waiting for a chat that waits for nothing with the chat, and starts nothing', async () => {
@@ -258,6 +287,7 @@ describe('the folder and a chat that meets it held', () => {
     w = chatWorld();
     runningTask('Bump vite');
     const chat = w.open();
+    w.here(chat.id);
     await send(chat.conversationId, { folder: 'wait' });
     const stopped = await appOf(w).request(`/chats/${chat.id}/stop-waiting`, {
       method: 'POST',

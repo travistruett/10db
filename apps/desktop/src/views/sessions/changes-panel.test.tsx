@@ -1,28 +1,23 @@
-import {
-  mintId,
-  WorkstreamChangesDto,
-  type PassViewDto,
-  type TaskSessionDto,
-  type WorkstreamId,
-} from '@10db/contracts';
+import { mintId, TaskId, type ChatDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import type { QueryClient } from '@tanstack/react-query';
-import { useState, type ReactNode } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { baseHandlers, daemonUrl, renderWithDaemonAndRouter, server } from '../../test/daemon';
-import { projectViewDto, workstreamDto } from '../../test/fixtures';
-import { pagesByStatus, PASS_NOW, passHandlers, passViewDto } from '../../test/pass-fixtures';
-import { taskSessionDto, taskSessionHandlers } from '../../test/task-session-fixtures';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import {
+  chatChangesDto,
+  chatDto,
+  chatServer,
+  type ChatServerOptions,
+} from '../../test/chat-fixtures';
+import { chatWorkStateDto } from '../../test/chat-work-fixtures';
+import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
+import { projectViewDto } from '../../test/fixtures';
 import { observeWidthsOf, resetObservedWidth } from '../../test/sized-observer';
-import { EMPTY_DRAFT } from '../../conversation/drafts';
 import { changesChoice } from './changes-choice';
-import { draftKey, sessionDrafts } from './session-drafts';
-import { TaskTab } from './task-tab';
-import { TaskTabPlace } from './task-tabs';
 
-// A task's tab reads its workstream's changes: the bar says how much, ⌘⇧D or a click opens the panel
-// beside the thread, and a line number quotes the line into the composer.
+// A session's Changes: the title row says how much changed, the drawer opens beside the conversation, and a
+// line number quotes its line into the composer.
+
+const project = projectViewDto({ name: 'ampsio' });
 
 const DIFF = [
   'diff --git a/src/api/client.ts b/src/api/client.ts',
@@ -35,273 +30,185 @@ const DIFF = [
   '',
 ].join('\n');
 
-function changesDto(): WorkstreamChangesDto {
-  return WorkstreamChangesDto.parse({
-    baseHead: '4e1a9c2'.padEnd(40, '0'),
-    head: 'b'.repeat(40),
-    commits: ['c'.repeat(40)],
-    diff: DIFF,
-    truncated: false,
-    files: [{ path: 'src/api/client.ts', added: 41, removed: 6 }],
-  });
-}
+const changed = chatChangesDto({
+  commits: ['c'.repeat(40)],
+  diff: DIFF,
+  files: [{ path: 'src/api/client.ts', added: 41, removed: 6 }],
+});
 
-const { ready } = pagesByStatus();
+const toggle = () => fireEvent.keyDown(document.body, { key: 'D', metaKey: true, shiftKey: true });
+const drawer = () => screen.queryByRole('dialog', { name: 'Changes' });
 
 beforeEach(() => {
-  vi.useFakeTimers({ toFake: ['Date'], now: Date.parse(PASS_NOW) });
+  observeWidthsOf(900);
 });
 afterEach(() => {
-  vi.useRealTimers();
   resetObservedWidth();
-  // Every test opens the same ready page's task: what one left in the window is not the next one's.
-  changesChoice.forget(ready.taskId);
-  sessionDrafts.set(draftKey.task(ready.taskId), EMPTY_DRAFT);
+  localStorage.clear();
 });
 
-interface Served {
-  readonly scopes: string[];
-}
-
-async function renderTask(options: {
-  readonly view?: PassViewDto;
-  readonly session?: Partial<TaskSessionDto>;
-  readonly changes?: (request: Request) => Response | Promise<Response>;
-  /** When the run last changed, as the workstreams list says; read again on every fetch. */
-  readonly updatedAt?: () => string;
-}): Promise<Served & { readonly queryClient: QueryClient }> {
-  const view = options.view ?? passViewDto({ pages: [ready] });
-  const page = view.pages[0];
-  if (page === undefined) throw new Error('a pass of one has its page');
-  const session = taskSessionDto({
-    taskId: page.taskId,
-    title: 'Fix the settings page',
-    place: 'pass',
-    branch: null,
-    passId: view.pass.id,
-    conversationId: page.conversationId,
-    workstreamId: page.workstreamId,
-    ...options.session,
-  });
-  const scopes: string[] = [];
-  server.use(
-    http.get(daemonUrl('/workstreams/:id/changes'), ({ request }) => {
-      scopes.push(new URL(request.url).searchParams.get('scope') ?? '');
-      return options.changes?.(request) ?? HttpResponse.json(changesDto());
+function open(
+  options: Omit<ChatServerOptions, 'chats'> = { changes: changed },
+  chatCount = 1,
+  path?: string,
+  conversation?: Partial<ChatDto['conversation']>,
+  work?: ChatDto['work'],
+) {
+  const chats = ['Login fails', 'Billing page'].slice(0, chatCount).map((title, tabPosition) =>
+    chatDto({
+      projectId: project.id,
+      title,
+      tabPosition,
+      // A session reads its changes once it works somewhere.
+      work:
+        work === undefined
+          ? { place: 'branch', branch: 'chat-work', base: null, worktree: null, askedAt: null }
+          : work,
+      ...(conversation === undefined ? {} : { conversation }),
     }),
-    ...workstreamsHandler(session.workstreamId, options.updatedAt),
-    ...passHandlers({ live: [view] }),
-    ...taskSessionHandlers([session]),
+  );
+  const served = chatServer({
+    chats,
+    work: Object.fromEntries(chats.map((c) => [c.id, chatWorkStateDto()])),
+    ...options,
+  });
+  server.use(
+    http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+    ...served.handlers,
     ...baseHandlers(),
   );
-  const project = projectViewDto({ id: view.pass.projectId });
-  const { queryClient } = await renderWithDaemonAndRouter(
-    <AwayAndBack>
-      <TaskTab
-        tab={{
-          taskId: session.taskId,
-          projectId: project.id,
-          title: session.title,
-          place: TaskTabPlace.Pass,
-          position: 0,
-        }}
-        project={project}
-      />
-    </AwayAndBack>,
-  );
-  return { scopes, queryClient };
+  const app = renderApp(path ?? `/sessions?chat=${chats[0]?.id ?? ''}`);
+  for (const chat of chats) changesChoice.forget(chat.id);
+  return { chats, served, ...app };
 }
 
-/** The workstreams list naming the task's run, with its last change read at each fetch. */
-function workstreamsHandler(id: WorkstreamId | null, updatedAt: (() => string) | undefined) {
-  if (id === null || updatedAt === undefined) return [];
-  return [
-    http.get(daemonUrl('/workstreams'), () =>
-      HttpResponse.json([workstreamDto({ id, updatedAt: updatedAt() })]),
-    ),
-  ];
-}
-
-/** The strip unmounts a tab when another is selected; this stands in for the other tab. */
-function AwayAndBack({ children }: { readonly children: ReactNode }) {
-  const [away, setAway] = useState(false);
-  return (
-    <>
-      <button
-        type="button"
-        onClick={() => {
-          setAway(!away);
-        }}
-      >
-        Switch tab
-      </button>
-      {away ? <p>Another tab</p> : children}
-    </>
-  );
-}
-
-const switchAwayAndBack = async (): Promise<void> => {
-  fireEvent.click(screen.getByRole('button', { name: 'Switch tab' }));
-  await screen.findByText('Another tab');
-  fireEvent.click(screen.getByRole('button', { name: 'Switch tab' }));
-};
-
-/** A changes read that stays on its way until released, so a test can look at the tab meanwhile. */
-function hold() {
-  let asked = false;
-  let release: () => void = () => undefined;
-  return {
-    asked: () => asked,
-    release: () => {
-      release();
-    },
-    response: (): Promise<Response> => {
-      asked = true;
-      return new Promise((resolve) => {
-        release = () => {
-          resolve(HttpResponse.json(changesDto()));
-        };
-      });
-    },
-  };
-}
-
-describe('a task’s Changes', () => {
-  it('says how much changed in the bar, and opens the panel on a click', async () => {
-    observeWidthsOf(900);
-    await renderTask({});
+describe('a session’s Changes', () => {
+  it('says how much changed in the title row, and opens the drawer on a click', async () => {
+    open();
     const button = await screen.findByRole('button', { name: /^Changes\s*\+41\s*−6/ });
-    expect(screen.queryByRole('complementary', { name: 'Changes' })).toBeNull();
+    expect(drawer()).toBeNull();
     fireEvent.click(button);
-    const panel = await screen.findByRole('complementary', { name: 'Changes' });
-    expect(within(panel).getAllByText('src/api/client.ts').length).toBeGreaterThan(0);
-  });
-
-  it('opens by itself once at 1100 px, then keeps the builder’s choice', async () => {
-    observeWidthsOf(1200);
-    await renderTask({});
-    expect(await screen.findByRole('complementary', { name: 'Changes' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /^Changes/ }));
+    const panel = await screen.findByRole('dialog', { name: 'Changes' });
+    expect((await within(panel).findAllByText('src/api/client.ts')).length).toBeGreaterThan(0);
+    fireEvent.click(within(panel).getByRole('button', { name: 'Close' }));
     await waitFor(() => {
-      expect(screen.queryByRole('complementary', { name: 'Changes' })).toBeNull();
+      expect(drawer()).toBeNull();
     });
   });
 
-  it.each([
-    { name: 'closed at 1100 px', width: 1200, open: false },
-    { name: 'opened at 900 px', width: 900, open: true },
-  ])('keeps the builder’s choice across a tab switch: $name', async ({ width, open }) => {
-    observeWidthsOf(width);
-    await renderTask({});
-    const button = await screen.findByRole('button', { name: /^Changes/ });
-    // Once the tab has measured itself, a wide one opens the panel by itself and the click closes it.
-    if (width >= 1100) await screen.findByRole('complementary', { name: 'Changes' });
-    fireEvent.click(button);
-    await waitFor(() => {
-      expect(screen.queryByRole('complementary', { name: 'Changes' }) !== null).toBe(open);
-    });
-    await switchAwayAndBack();
+  it('Esc closes the drawer from the composer, and sends no stop to a running turn', async () => {
+    const stops: string[] = [];
+    server.use(
+      http.post(daemonUrl('/conversations/:conversationId/stop'), ({ params }) => {
+        stops.push(String(params['conversationId']));
+        return HttpResponse.json({}, { status: 500 });
+      }),
+    );
+    open({ changes: changed }, 1, undefined, { state: 'running' });
     await screen.findByRole('button', { name: /^Changes/ });
-    expect(screen.queryByRole('complementary', { name: 'Changes' }) !== null).toBe(open);
-  });
-
-  it('keeps an unsent message across a tab switch', async () => {
-    observeWidthsOf(900);
-    await renderTask({});
-    fireEvent.change(await screen.findByRole('textbox', { name: /Message to/ }), {
-      target: { value: 'half a thought' },
-    });
-    await switchAwayAndBack();
-    expect(await screen.findByRole('textbox', { name: /Message to/ })).toHaveProperty(
-      'value',
-      'half a thought',
-    );
-  });
-
-  it('keeps a separate copy’s unsent message across a tab switch', async () => {
-    observeWidthsOf(900);
-    await renderTask({
-      session: { place: 'copy', passId: null, board: 'in_progress', branch: '10db/x' },
-    });
-    fireEvent.change(await screen.findByRole('textbox', { name: 'Message' }), {
-      target: { value: 'half a thought' },
-    });
-    await switchAwayAndBack();
-    expect(await screen.findByRole('textbox', { name: 'Message' })).toHaveProperty(
-      'value',
-      'half a thought',
-    );
-  });
-
-  it('keeps the diff and the open panel while a run update reads the changes again', async () => {
-    observeWidthsOf(1200);
-    let updatedAt = '2026-11-17T18:42:00.000Z';
-    let moved = false;
-    const held = hold();
-    const { queryClient } = await renderTask({
-      updatedAt: () => updatedAt,
-      changes: () => (moved ? held.response() : HttpResponse.json(changesDto())),
-    });
-    const panel = await screen.findByRole('complementary', { name: 'Changes' });
-    await within(panel).findByRole('button', { name: 'Quote line 42 of src/api/client.ts' });
-    updatedAt = '2026-11-17T18:43:00.000Z';
-    moved = true;
-    await queryClient.invalidateQueries({ queryKey: ['workstreams'] });
+    toggle();
+    await screen.findByRole('dialog', { name: 'Changes' });
+    const box = await screen.findByRole('textbox', { name: 'Message' });
+    box.focus();
+    fireEvent.keyDown(box, { key: 'Escape' });
     await waitFor(() => {
-      expect(held.asked()).toBe(true);
+      expect(drawer()).toBeNull();
+    });
+    expect(stops).toEqual([]);
+  });
+
+  it('Esc leaves the drawer open while a popup list owns the key', async () => {
+    open({ changes: changed });
+    await screen.findByRole('button', { name: /^Changes/ });
+    toggle();
+    await screen.findByRole('dialog', { name: 'Changes' });
+    const box = await screen.findByRole('textbox', { name: 'Message' });
+    // The composer's @ list is an open popup: its trigger reads aria-expanded and aria-haspopup.
+    box.setAttribute('aria-haspopup', 'listbox');
+    box.setAttribute('aria-expanded', 'true');
+    box.focus();
+    fireEvent.keyDown(box, { key: 'Escape' });
+    expect(drawer()).not.toBeNull();
+  });
+
+  it('does not read the changes of a session that has no place to work yet', async () => {
+    let reads = 0;
+    const { chats } = open({ changes: changed }, 1, undefined, undefined, null);
+    server.use(
+      http.get(daemonUrl('/chats/:chatId/changes'), () => {
+        reads += 1;
+        return HttpResponse.json({ error: 'conflict', message: 'No worktree.' }, { status: 409 });
+      }),
+    );
+    await screen.findByRole('textbox', { name: 'Message' });
+    expect(chats[0]?.work).toBeNull();
+    expect(reads).toBe(0);
+  });
+
+  it('offers no Changes button while nothing changed', async () => {
+    open({ changes: chatChangesDto() });
+    await screen.findByRole('textbox', { name: 'Message' });
+    expect(screen.queryByRole('button', { name: /^Changes/ })).toBeNull();
+  });
+
+  it('toggles with ⌘⇧D', async () => {
+    open();
+    await screen.findByRole('button', { name: /^Changes/ });
+    toggle();
+    expect(await screen.findByRole('dialog', { name: 'Changes' })).toBeTruthy();
+    toggle();
+    await waitFor(() => {
+      expect(drawer()).toBeNull();
+    });
+  });
+
+  it('keeps the builder’s choice for each session across a switch', async () => {
+    open({ changes: changed }, 2);
+    await screen.findByRole('button', { name: /^Changes/ });
+    toggle();
+    await screen.findByRole('dialog', { name: 'Changes' });
+    fireEvent.click(screen.getByRole('option', { name: /Billing page/ }));
+    await screen.findByRole('button', { name: /^Changes/ });
+    expect(drawer()).toBeNull();
+    fireEvent.click(screen.getByRole('option', { name: /Login fails/ }));
+    expect(await screen.findByRole('dialog', { name: 'Changes' })).toBeTruthy();
+  });
+
+  it('keeps the drawer and its diff while a newer read is under way', async () => {
+    let release: () => void = () => undefined;
+    let held = false;
+    const { queryClient } = open();
+    server.use(
+      http.get(daemonUrl('/chats/:chatId/changes'), () => {
+        if (!held) return HttpResponse.json(changed);
+        return new Promise<Response>((resolve) => {
+          release = () => {
+            resolve(HttpResponse.json(changed));
+          };
+        });
+      }),
+    );
+    await screen.findByRole('button', { name: /^Changes/ });
+    toggle();
+    const panel = await screen.findByRole('dialog', { name: 'Changes' });
+    await within(panel).findByRole('button', { name: 'Quote line 42 of src/api/client.ts' });
+    held = true;
+    void queryClient.invalidateQueries({ queryKey: ['chat-work'] });
+    await waitFor(() => {
+      expect(queryClient.isFetching({ queryKey: ['chat-work'] })).toBeGreaterThan(0);
     });
     expect(screen.queryByText('Reading the changes…')).toBeNull();
-    expect(screen.getByRole('complementary', { name: 'Changes' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Changes' })).toBeTruthy();
     expect(screen.getByRole('button', { name: /^Changes\s*\+41\s*−6/ })).toBeTruthy();
-    held.release();
-  });
-
-  it('keeps a panel that opened by itself open while Last Turn is read', async () => {
-    observeWidthsOf(1200);
-    const held = hold();
-    await renderTask({
-      changes: (request) =>
-        new URL(request.url).searchParams.get('scope') === 'last'
-          ? held.response()
-          : HttpResponse.json(changesDto()),
-    });
-    const panel = await screen.findByRole('complementary', { name: 'Changes' });
-    fireEvent.click(await within(panel).findByRole('radio', { name: 'Last Turn' }));
-    await waitFor(() => {
-      expect(held.asked()).toBe(true);
-    });
-    expect(screen.getByRole('complementary', { name: 'Changes' })).toBeTruthy();
-    held.release();
-  });
-
-  it('asks for the last turn when Last Turn is picked, and ⌘⇧D toggles the panel', async () => {
-    observeWidthsOf(900);
-    const served = await renderTask({});
-    await screen.findByRole('button', { name: /^Changes/ });
-    fireEvent.keyDown(document.body, { key: 'D', metaKey: true, shiftKey: true });
-    const panel = await screen.findByRole('complementary', { name: 'Changes' });
-    fireEvent.click(within(panel).getByRole('radio', { name: 'Last Turn' }));
-    await waitFor(() => {
-      expect(served.scopes).toContain('last');
-    });
-    fireEvent.keyDown(document.body, { key: 'D', metaKey: true, shiftKey: true });
-    await waitFor(() => {
-      expect(screen.queryByRole('complementary', { name: 'Changes' })).toBeNull();
-    });
-  });
-
-  it('quotes a clicked line into the composer', async () => {
-    observeWidthsOf(900);
-    await renderTask({});
-    fireEvent.click(await screen.findByRole('button', { name: /^Changes/ }));
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'Quote line 42 of src/api/client.ts' }),
-    );
-    const box = await screen.findByRole('textbox', { name: /Message to/ });
-    expect(box).toHaveProperty('value', expect.stringContaining('@src/api/client.ts:42'));
+    release();
   });
 
   it.each([
+    {
+      name: 'a line is the new file’s',
+      label: 'Quote line 42 of src/api/client.ts',
+      quote: '@src/api/client.ts:42\n> keep',
+    },
     {
       name: 'a removed line is named as the old file’s',
       label: 'Quote removed line 43 of src/api/client.ts',
@@ -312,38 +219,84 @@ describe('a task’s Changes', () => {
       label: 'Quote added line 43 of src/api/client.ts',
       quote: '@src/api/client.ts:43\n> if (res.status === 401 && req.retried) {',
     },
-  ])('quotes $name, with a button of its own', async ({ label, quote }) => {
-    observeWidthsOf(900);
-    await renderTask({});
+  ])('quotes $name into the composer', async ({ label, quote }) => {
+    open();
     fireEvent.click(await screen.findByRole('button', { name: /^Changes/ }));
     fireEvent.click(await screen.findByRole('button', { name: label }));
-    const box = await screen.findByRole('textbox', { name: /Message to/ });
+    const box = await screen.findByRole('textbox', { name: 'Message' });
     expect(box).toHaveProperty('value', expect.stringContaining(quote));
   });
 
-  it('says a finished copy is gone and points at its pull request', async () => {
-    observeWidthsOf(900);
-    await renderTask({
-      session: {
-        place: 'copy',
-        passId: null,
-        board: 'in_review',
-        branch: '10db/x',
-        workstreamId: mintId('Workstream'),
-        pullRequest: { url: 'https://github.com/o/r/pull/5', state: 'open' },
-      },
-      changes: () =>
-        HttpResponse.json({ error: 'not_found', message: 'No checkout' }, { status: 404 }),
+  it('says a finished worktree is gone and points at the pull request', async () => {
+    const chat = chatDto({
+      projectId: project.id,
+      work: { place: 'branch', branch: 'chat-done', base: null, worktree: null, askedAt: null },
     });
+    const served = chatServer({
+      chats: [chat],
+      work: {
+        [chat.id]: chatWorkStateDto({
+          pullRequest: {
+            number: 5,
+            url: 'https://github.com/o/r/pull/5',
+            checks: { passed: 1, total: 1, failing: 0 },
+            mergeable: true,
+            merged: true,
+          },
+        }),
+      },
+    });
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/chats/:chatId/changes'), () =>
+        HttpResponse.json({ error: 'not_found', message: 'No checkout' }, { status: 404 }),
+      ),
+      ...served.handlers,
+      ...baseHandlers(),
+    );
+    renderApp(`/sessions?chat=${chat.id}`);
+    await screen.findByRole('button', { name: 'Changes' });
+    toggle();
+    const panel = await screen.findByRole('dialog', { name: 'Changes' });
+    expect(
+      await within(panel).findByText(
+        'This session’s worktree is gone. Its pull request has the changes.',
+      ),
+    ).toBeTruthy();
+    expect(within(panel).getByRole('link', { name: 'Open Pull Request' })).toBeTruthy();
+  });
+
+  it.each([
+    { name: 'moves left of the drawer at 1200 px', width: 1200, moved: true },
+    { name: 'stays put under 1200 px', width: 900, moved: false },
+  ])('the conversation column $name', async ({ width, moved }) => {
+    observeWidthsOf(width);
+    open();
     await screen.findByRole('button', { name: /^Changes/ });
-    fireEvent.keyDown(document.body, { key: 'D', metaKey: true, shiftKey: true });
-    expect(
-      await screen.findByText('This task’s copy is gone. Its pull request has the changes.'),
-    ).toBeTruthy();
-    expect(
-      within(screen.getByRole('complementary', { name: 'Changes' })).getByRole('link', {
-        name: 'Open Pull Request',
-      }),
-    ).toBeTruthy();
+    toggle();
+    await screen.findByRole('dialog', { name: 'Changes' });
+    const column = (await screen.findByRole('textbox', { name: 'Message' })).closest(
+      '[style*="padding-right"]',
+    );
+    await waitFor(() => {
+      expect(column?.getAttribute('style')?.includes('clamp(480px, 50%, 760px)') ?? false).toBe(
+        moved,
+      );
+    });
+  });
+});
+
+describe('a task’s old tab', () => {
+  it('lands on the task in the Board', async () => {
+    const taskId = mintId('Task');
+    server.use(
+      http.get(daemonUrl('/projects/:projectId/board-columns'), () => HttpResponse.json([])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+    );
+    const { router } = open({}, 1, `/sessions?task=${taskId}`);
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/board');
+    });
+    expect(router.state.location.search).toEqual({ task: TaskId.parse(taskId) });
   });
 });

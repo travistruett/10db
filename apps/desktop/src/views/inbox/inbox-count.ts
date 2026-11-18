@@ -1,11 +1,14 @@
+import { useInboxCount } from '../../daemon/inbox-queries';
 import { useSlackConnection } from '../../daemon/people';
-import { useInbox, useSystemCheck } from '../../daemon/queries';
-import { openCount, splitInbox } from './inbox-rows';
+import { useSystemCheck } from '../../daemon/queries';
 import { systemCards } from './system-cards';
 
-/** What the sidebar and the menu bar count: the Inbox's Open rows and 10db's own cards above them. */
+/**
+ * What the sidebar and the menu bar count: the Inbox's Open rows, as the daemon counts them, and 10db's own
+ * cards above them. It reads 0 while the count loads, so the badge waits rather than show a wrong number.
+ */
 export function useOpenInboxCount(): number {
   const connection = useSlackConnection();
-  const { open } = splitInbox(useInbox().data ?? [], connection.data?.state);
-  return openCount(open) + systemCards(useSystemCheck().data, connection.data).length;
+  const rows = useInboxCount('open') ?? 0;
+  return rows + systemCards(useSystemCheck().data, connection.data).length;
 }

@@ -51,6 +51,8 @@ export function TitleRow({
           c="dimmed"
           style={{
             minWidth: 0,
+            // The meta line gives way before the title does.
+            flexShrink: 100,
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',

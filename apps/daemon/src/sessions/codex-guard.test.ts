@@ -14,7 +14,7 @@ import { createHookJudge, createLimitNotes } from '../inbox';
 import { createJudge } from '../judge';
 import { silentLogger } from '../log';
 import { buildTrustPolicy } from '../trust';
-import { chatFolderInUse, judgeChatCall, type ChatFolder } from '../chat';
+import { chatFolderInUse, judgeChatCall, type ChatPlace } from '../chat';
 import { judgeShapeCall, type ShapeAccess } from '../shape';
 import { codexHomes } from './codex-home';
 import {
@@ -434,10 +434,15 @@ describe('judgeHookCall', () => {
       filesDir: '/files',
       sandboxRoots: [],
     };
-    const folder = (holds: boolean): ChatFolder => ({
+    const folder = (holds: boolean): ChatPlace => ({
+      place: 'here',
       holds: () => holds,
+      current: () => true,
       writable: false,
       heldBy: () => 'the task ‘Bump vite’',
+      root: '/repo',
+      checkout: '/repo',
+      firstChange: () => undefined,
     });
     const spec: Spec = {
       ...ALLOW_ALL,

@@ -180,6 +180,9 @@ export const PathPattern = z
   .refine((g) => !g.split('/').includes('..'), 'must not go up a folder with ..')
   .refine(bracketsClose, 'has a [ or { that is never closed');
 
+/** The stock hazard over dependency manifests, lockfiles and the commands that change them. */
+export const DEPS_HAZARD = 'deps';
+
 export const DEFAULT_HAZARDS: readonly HazardDef[] = [
   {
     name: 'migrations',
@@ -228,7 +231,7 @@ export const DEFAULT_HAZARDS: readonly HazardDef[] = [
     scope: HazardScope.Project,
   },
   {
-    name: 'deps',
+    name: DEPS_HAZARD,
     globs: [
       '**/package.json',
       '**/package-lock.json',
@@ -505,7 +508,7 @@ const WorktreeSeed = z.array(WorktreeSeedName).max(32);
  * The area and hazard names whose tasks are proposed a separate copy unless a project says
  * otherwise: the stock hazards every project has. A project adds its own, such as `contracts`.
  */
-export const DEFAULT_ISOLATE = ['migrations', 'deps'] as const;
+export const DEFAULT_ISOLATE = ['migrations', DEPS_HAZARD] as const;
 
 /** Area and hazard names, not globs; a name the project doesn't define yet matches no task. */
 const Isolate = z.array(Name).max(64);

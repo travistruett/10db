@@ -5,13 +5,16 @@ import {
   ConversationItemAuthor,
   ConversationItemKind,
   HandedToNotice,
+  InvalidError,
   ConversationState,
   EventType,
   mintId,
   NotFoundError,
   TaskStatus,
+  WorkPlace,
   WorkstreamState,
   type ChatId,
+  type ChatWork,
   type ConversationId,
   type PassId,
   type ProjectId,
@@ -43,6 +46,19 @@ export interface ChatRowView {
   readonly archivedAt: string | null;
   readonly lastReplyAt: string | null;
   readonly tasksFiled: number;
+  readonly work: ChatWork | null;
+}
+
+/** What the Sessions screen reads of a row's place; null while the session only reads. */
+function workOf(row: ChatRow): ChatWork | null {
+  if (row.workPlace === null) return null;
+  return {
+    place: row.workPlace,
+    branch: row.branch,
+    base: row.baseHead,
+    worktree: row.worktreePath,
+    askedAt: row.workAskedAt,
+  };
 }
 
 const changed = (ctx: WriteContext, row: Pick<ChatRow, 'id' | 'projectId'>): void => {
@@ -80,6 +96,9 @@ export function takenOverChats(db: DbReader, projectId: ProjectId): ChatRow[] {
         eq(schema.conversations.state, ConversationState.TakenOver),
         // An archived chat holds nothing, whatever its conversation says.
         isNull(schema.chats.archivedAt),
+        // A branch session's terminal runs in its own worktree and holds nothing; one with no worktree
+        // runs in the checkout and holds it.
+        sql`(${schema.chats.workPlace} IS NOT ${WorkPlace.Branch} OR ${schema.chats.worktreePath} IS NULL)`,
       ),
     )
     .orderBy(asc(schema.chats.createdAt), asc(schema.chats.id))
@@ -158,6 +177,11 @@ export function insertChat(
     updatedAt: ctx.now,
     lastActivityAt: null,
     archivedAt: null,
+    workPlace: null,
+    worktreePath: null,
+    branch: null,
+    baseHead: null,
+    workAskedAt: null,
   };
   ctx.tx.insert(schema.chats).values(row).run();
   placeTab(ctx, row.id, input.tabPosition);
@@ -397,6 +421,7 @@ export function chatView(db: DbReader, chatId: ChatId): ChatRowView {
     archivedAt: row.archivedAt,
     lastReplyAt: reply?.at ?? null,
     tasksFiled: filed?.n ?? 0,
+    work: workOf(row),
   };
 }
 
@@ -421,4 +446,124 @@ export function latestFailedTaskTitle(
     .limit(1)
     .get();
   return row?.title ?? null;
+}
+
+/**
+ * Moves the chat's place from `expect` to `next`, only if the row is still at `expect`; returns whether it was.
+ * The row and its `ChatChanged` event go in the caller's write, and nothing is emitted when another writer won.
+ * A field `next` leaves out keeps its value; pass null to clear it.
+ */
+export function setChatWork(
+  ctx: WriteContext,
+  id: ChatId,
+  expect: WorkPlace | null,
+  next: {
+    readonly place: WorkPlace | null;
+    readonly worktreePath?: string | null;
+    readonly branch?: string | null;
+    readonly baseHead?: string | null;
+    readonly askedAt?: string | null;
+  },
+): boolean {
+  const row = getChat(ctx.tx, id);
+  const result = ctx.tx
+    .update(schema.chats)
+    .set({
+      workPlace: next.place,
+      ...(next.worktreePath !== undefined && { worktreePath: next.worktreePath }),
+      ...(next.branch !== undefined && { branch: next.branch }),
+      ...(next.baseHead !== undefined && { baseHead: next.baseHead }),
+      ...(next.askedAt !== undefined && { workAskedAt: next.askedAt }),
+      updatedAt: ctx.now,
+    })
+    .where(and(eq(schema.chats.id, id), sql`${schema.chats.workPlace} IS ${expect}`))
+    .run();
+  if (result.changes === 0) return false;
+  changed(ctx, row);
+  return true;
+}
+
+/** The chat whose worktree is at `path`, or undefined when none records it. */
+export function findChatByWorktreePath(db: DbReader, path: string): ChatRow | undefined {
+  return db.select().from(schema.chats).where(eq(schema.chats.worktreePath, path)).get();
+}
+
+/** The worktree paths chats have recorded: a worktree a chat owns is its own until the row lets it go. */
+export function chatWorktreePaths(db: DbReader): string[] {
+  return db
+    .select({ path: schema.chats.worktreePath })
+    .from(schema.chats)
+    .where(isNotNull(schema.chats.worktreePath))
+    .all()
+    .flatMap((row) => (row.path === null ? [] : [row.path]));
+}
+
+/** Every chat in `place`, archived ones included, oldest first. */
+export function chatsInPlace(db: DbReader, place: WorkPlace): ChatRow[] {
+  return db
+    .select()
+    .from(schema.chats)
+    .where(eq(schema.chats.workPlace, place))
+    .orderBy(asc(schema.chats.createdAt), asc(schema.chats.id))
+    .all();
+}
+
+/** The branches and worktree paths the project's chats have recorded, archived chats' branches included. */
+export function takenBranchesAndPaths(
+  db: DbReader,
+  projectId: ProjectId,
+): { branches: string[]; paths: string[] } {
+  const rows = db
+    .select({ branch: schema.chats.branch, path: schema.chats.worktreePath })
+    .from(schema.chats)
+    .where(eq(schema.chats.projectId, projectId))
+    .all();
+  return {
+    branches: rows.flatMap((r) => (r.branch === null ? [] : [r.branch])),
+    paths: rows.flatMap((r) => (r.path === null ? [] : [r.path])),
+  };
+}
+
+export interface ChatPage {
+  readonly rows: ChatRow[];
+  /** The cursor for the page after this one, or null on the last. */
+  readonly next: string | null;
+}
+
+const CURSOR_SEPARATOR = '|';
+
+/** A title search across open, closed and archived chats, newest activity first, chats with none last. */
+export function searchChats(
+  db: DbReader,
+  q: { readonly text: string; readonly after: string | null; readonly limit: number },
+): ChatPage {
+  const title = sql`coalesce(${schema.chats.title}, ${CHAT_DEFAULT_TITLE})`;
+  const escaped = q.text.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const match = sql`${title} LIKE ${`%${escaped}%`} ESCAPE '\\'`;
+  const at = schema.chats.lastActivityAt;
+  let after = sql`1`;
+  if (q.after !== null) {
+    const cut = q.after.indexOf(CURSOR_SEPARATOR);
+    if (cut < 0) throw new InvalidError('The search cursor is not one this search made');
+    const cursorAt = q.after.slice(0, cut);
+    const cursorId = q.after.slice(cut + 1);
+    after =
+      cursorAt === ''
+        ? sql`(${at} IS NULL AND ${schema.chats.id} < ${cursorId})`
+        : sql`(${at} IS NULL OR ${at} < ${cursorAt} OR (${at} = ${cursorAt} AND ${schema.chats.id} < ${cursorId}))`;
+  }
+  const rows = db
+    .select()
+    .from(schema.chats)
+    .where(and(match, after))
+    .orderBy(sql`${at} IS NULL`, desc(at), desc(schema.chats.id))
+    .limit(q.limit + 1)
+    .all();
+  const page = rows.slice(0, q.limit);
+  const last = page.at(-1);
+  const next =
+    rows.length > q.limit && last !== undefined
+      ? `${last.lastActivityAt ?? ''}${CURSOR_SEPARATOR}${last.id}`
+      : null;
+  return { rows: page, next };
 }

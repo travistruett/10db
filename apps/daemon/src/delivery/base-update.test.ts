@@ -131,6 +131,28 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     expect(getBatch(h.store.db, batch.id).baseSha).toBe(batch.baseSha);
   });
 
+  it('runs no install at a gate when the copy was cloned from a template and its lockfile is unchanged', async () => {
+    h = createDeliveryHarness(
+      { workspaceMode: 'worktree' },
+      { trigger: false, pnpmVersion: '10.0.0' },
+    );
+    h.commit('.gitignore', 'node_modules/\n');
+    h.commit(
+      'pnpm-lock.yaml',
+      'importers:\n  .:\n    dependencies:\n      left-pad:\n        specifier: 1.3.0\n        version: 1.3.0\n',
+    );
+    h.git$('push', '-q', 'origin', 'main');
+    mkdirSync(join(h.repo, 'node_modules'), { recursive: true });
+    h.pnpm.makes({ 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
+    // The first copy makes the template; the second is cloned from it.
+    await opened(h, { sessionStarted: true });
+    const { batch } = await opened(h, { title: 'Beta', sessionStarted: true });
+    expect(h.pnpm.calls()).toHaveLength(1);
+    h.teammatePush('main', 'src/ui/teammate.txt');
+    expect((await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).kind).toBe('merged');
+    expect(h.pnpm.calls()).toHaveLength(1);
+  });
+
   it('runs the install again when the base changed the lockfile', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     h.commit('.gitignore', 'node_modules/\n');
@@ -224,7 +246,9 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       h.commit('pnpm-lock.yaml', NEEDS_LEFT_PAD);
       if (workspace !== undefined) h.commit('pnpm-workspace.yaml', workspace);
       h.git$('push', '-q', 'origin', 'main');
-      mkdirSync(join(h.repo, 'node_modules', 'left-pad'), { recursive: true });
+      mkdirSync(join(h.repo, 'node_modules'), { recursive: true });
+      // The cut's install makes the copy's node_modules; Your folder's is not cloned.
+      h.pnpm.makesOnCall(1, { 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
       const { batch } = await opened(h, { sessionStarted: true });
       await commitOnBatch(batch, 'src/api/alpha.txt');
       const path = pathOf(batch);
@@ -606,7 +630,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     async function toRepair(): Promise<BatchDto> {
       const { batch, path } = await pruned();
       rmSync(path, { recursive: true, force: true });
-      rmSync(join(h.repo, 'node_modules', 'left-pad'), { recursive: true });
+      rmSync(join(h.repo, 'node_modules', 'left-pad'), { recursive: true, force: true });
       mkdirSync(join(h.repo, 'node_modules', 'other'), { recursive: true });
       return batch;
     }
@@ -1902,14 +1926,23 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     expect(getBatch(h.store.db, batch.id).baseSha).toBe(batch.baseSha);
   });
 
-  it('clears the conflict notice once the branch holds the base', async () => {
+  it('closes the conflict card an earlier build raised when a gate shows the conflict as a notice, clears the notice once the branch holds the base, and closes the cards an earlier build raised then', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     const { batch } = await opened(h, { sessionStarted: true });
+    raise(h.inbox, h.project.id, {
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'answer' },
+      title: `Batch "${batch.title}" conflicts with main`,
+      body: 'x',
+      foldKey: baseConflictKey(batch.id),
+    });
     await commitOnBatch(batch, 'README.md', '# ours\n');
     h.teammatePush('main', 'README.md', '# theirs\n');
     const updates = createBaseUpdates(h.ctx);
     await updates.beforeGate(batch.id, signal);
     expect(getBatch(h.store.db, batch.id).notices).toHaveLength(1);
+    expect(h.cards()).toEqual([]);
     // The builder merges by hand in the worktree, keeping the batch's side of the conflict.
     gitIn(
       pathOf(batch),
@@ -1926,11 +1959,9 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     expect((await updates.beforeGate(batch.id, signal)).kind).toBe('up_to_date');
     expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
     expect(h.cards()).toEqual([]);
-  });
 
-  it('closes the conflict and in-the-way cards an earlier build raised, once a gate finds the branch holds the base', async () => {
-    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    const { batch } = await opened(h, { sessionStarted: true });
+    // The conflict and in-the-way cards an earlier build raised close once a gate finds the branch
+    // holds the base.
     for (const foldKey of [baseConflictKey(batch.id), baseKeptKey(batch.id)])
       raise(h.inbox, h.project.id, {
         tier: 'ask',
@@ -1941,7 +1972,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
         foldKey,
       });
     expect(h.cards()).toHaveLength(2);
-    expect((await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).kind).toBe('up_to_date');
+    expect((await updates.beforeGate(batch.id, signal)).kind).toBe('up_to_date');
     expect(h.cards()).toEqual([]);
   });
 
@@ -1979,7 +2010,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
 });
 
 describe("bringing a queued batch's copy up to its base when a lane launches", () => {
-  it('starts a lane on a copy with no work of its own at the base as it is now', async () => {
+  it("starts a lane on a copy with no work of its own at the base as it is now, merges the base into a copy that holds the task's own commits and keeps them, and changes nothing when origin has nothing newer", async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     const { batch, ws } = await opened(h, { sessionStarted: true });
     // The task was started at the old main; main moves while its lane waits in the queue.
@@ -1993,28 +2024,23 @@ describe("bringing a queued batch's copy up to its base when a lane launches", (
     expect(getBatch(h.store.db, batch.id).baseSha).toBe(teammate);
     expect(getWorkstreamRow(h.store.db, ws.id).baseHead).toBe(teammate);
     expect(h.cards()).toEqual([]);
-  });
 
-  it("merges the base into a copy that holds the task's own commits, and keeps them", async () => {
-    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    const { batch } = await opened(h, { sessionStarted: true });
+    // A copy that holds the task's own commits takes the base by a merge that keeps them.
     const own = await commitOnBatch(batch, 'src/api/alpha.txt');
-    const teammate = h.teammatePush('main', 'src/ui/teammate.txt');
-    const update = await createBaseUpdates(h.ctx).atLaunch(batch.id, signal);
-    const path = pathOf(batch);
-    expect(update).toMatchObject({ kind: 'merged', base: teammate });
-    expect(gitIn(path, 'log', '-1', '--format=%P')).toBe(`${own} ${teammate}`);
-  });
+    const later = h.teammatePush('main', 'src/ui/later.txt');
+    expect(await createBaseUpdates(h.ctx).atLaunch(batch.id, signal)).toMatchObject({
+      kind: 'merged',
+      base: later,
+    });
+    expect(gitIn(path, 'log', '-1', '--format=%P')).toBe(`${own} ${later}`);
 
-  it('changes nothing when origin has nothing newer', async () => {
-    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    const { batch } = await opened(h, { sessionStarted: true });
-    const before = state(pathOf(batch));
+    // With nothing newer on origin, nothing changes.
+    const before = state(path);
     expect(await createBaseUpdates(h.ctx).atLaunch(batch.id, signal)).toEqual({
       kind: 'up_to_date',
       note: null,
     });
-    expect(state(pathOf(batch))).toEqual(before);
+    expect(state(path)).toEqual(before);
   });
 
   it('starts the lane on the copy as it is when the fetch fails, with a notice on the batch that the next fetch clears', async () => {

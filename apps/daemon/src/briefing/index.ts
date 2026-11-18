@@ -18,4 +18,5 @@ export {
   RESULT_NUDGE,
 } from './prompts';
 export { failedSteps } from './failed-steps';
+export { LaneBrief } from './lane-brief';
 export { quoteSlackAnswer } from './quote-answer';

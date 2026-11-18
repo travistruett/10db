@@ -137,8 +137,10 @@ import {
   type FolderWhileHeld,
   ChatCreateInput,
   ChatId,
-  BriefRequest,
-  DoItRequest,
+  ArchiveRequest,
+  ChatCommitRequest,
+  ChatSearchQuery,
+  ChatWorkChoice,
   ChatPatchInput,
   ConversationFilesQuery,
   SessionsSettingsDto,
@@ -769,6 +771,12 @@ export function createApp(deps: ApiDeps) {
         return c.json(deps.services.recentChats(query.projectId, query.limit));
       },
     )
+    // Registered before every `/chats/:chatId` route, so "search" is never read as a chat id.
+    .get(
+      '/chats/search',
+      validator('query', (value): ChatSearchQuery => ChatSearchQuery.parse(value)),
+      (c) => c.json(deps.services.searchChats(c.req.valid('query'))),
+    )
     .post(
       '/chats',
       validator('json', (value): ChatCreateInput => ChatCreateInput.parse(value)),
@@ -785,31 +793,54 @@ export function createApp(deps: ApiDeps) {
     .post('/chats/:chatId/stop-waiting', (c) =>
       c.json(deps.services.stopChatWaiting(ChatId.parse(c.req.param('chatId')))),
     )
-    .post(
-      '/chats/:chatId/brief',
-      validator('json', (value): BriefRequest => BriefRequest.parse(value ?? {})),
-      (c) =>
-        c.json(
-          deps.services.askChatBrief(ChatId.parse(c.req.param('chatId')), c.req.valid('json')),
-        ),
-    )
-    .delete('/chats/:chatId/brief', async (c) =>
-      c.json(await deps.services.cancelChatBrief(ChatId.parse(c.req.param('chatId')))),
-    )
-    .post(
-      '/chats/:chatId/do-it',
-      validator('json', (value): DoItRequest => DoItRequest.parse(value)),
-      async (c) =>
-        c.json(await deps.services.doIt(ChatId.parse(c.req.param('chatId')), c.req.valid('json'))),
-    )
-    .get('/chats/:chatId/do-it', async (c) =>
-      c.json(await deps.services.doItPreview(ChatId.parse(c.req.param('chatId')))),
-    )
     .get('/projects/:projectId/folder', async (c) =>
       c.json(await deps.services.projectFolder(ProjectId.parse(c.req.param('projectId')))),
     )
-    .post('/chats/:chatId/archive', async (c) =>
-      c.json(await deps.services.archiveChat(ChatId.parse(c.req.param('chatId')))),
+    .post('/chats/:chatId/archive', async (c) => {
+      // The body is optional: a session with no worktree has nothing to be warned about.
+      const text = await c.req.text();
+      const request = ArchiveRequest.parse(text === '' ? {} : (JSON.parse(text) as unknown));
+      const answer = await deps.services.archiveChat(ChatId.parse(c.req.param('chatId')), request);
+      return answer.archived ? c.json(answer.chat, 200) : c.json(answer.preview, 409);
+    })
+    .post(
+      '/chats/:chatId/commit',
+      validator('json', (value): ChatCommitRequest => ChatCommitRequest.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.chatCommit(
+            ChatId.parse(c.req.param('chatId')),
+            c.req.valid('json'),
+            c.req.raw.signal,
+          ),
+        ),
+    )
+    .post('/chats/:chatId/pull-request', async (c) =>
+      c.json(
+        await deps.services.chatPullRequest(ChatId.parse(c.req.param('chatId')), c.req.raw.signal),
+      ),
+    )
+    .post('/chats/:chatId/merge', async (c) =>
+      c.json(await deps.services.chatMerge(ChatId.parse(c.req.param('chatId')), c.req.raw.signal)),
+    )
+    .get('/chats/:chatId/changes', async (c) =>
+      c.json(await deps.services.chatChanges(ChatId.parse(c.req.param('chatId')))),
+    )
+    .get('/chats/:chatId/work', async (c) =>
+      c.json(
+        await deps.services.chatWorkState(ChatId.parse(c.req.param('chatId')), c.req.raw.signal),
+      ),
+    )
+    .post(
+      '/chats/:chatId/work',
+      validator('json', (value): ChatWorkChoice => ChatWorkChoice.parse(value)),
+      async (c) => {
+        const answer = await deps.services.chooseChatWork(
+          ChatId.parse(c.req.param('chatId')),
+          c.req.valid('json'),
+        );
+        return c.json(answer.work, answer.settled ? 200 : 409);
+      },
     )
     .post('/chats/:chatId/unarchive', (c) =>
       c.json(deps.services.unarchiveChat(ChatId.parse(c.req.param('chatId')))),
@@ -1851,6 +1882,9 @@ export function createApp(deps: ApiDeps) {
       '/activity/page',
       validator('query', (query) => ActivityPageQuery.parse(query)),
       (c) => c.json(deps.services.pageActivity(c.req.valid('query'))),
+    )
+    .get('/inbox/:id/context', (c) =>
+      c.json(deps.services.inboxCardContext(InboxItemId.parse(c.req.param('id')))),
     )
     .post(
       '/inbox/:id/answer',

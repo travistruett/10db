@@ -25,7 +25,8 @@ The Decisions view (`decisions-models-view.tsx`) draws, top to bottom: "Which mo
   control; ⌘↵ sends, a bare Enter and the digits do nothing), Ask Someone (`ask-someone.tsx`), and, for someone
   not in Slack, the message with Copy for them beside it, from `InboxItemDto.copyFor`. Take Back posts in Slack,
   so it asks first (`take-back-modal.tsx`). The Inbox has an Open, a Waiting and a
-  Resolved tab (`inbox-rows.ts` `splitInbox`: a sent, unreturned card is Waiting only while Slack is connected).
+  Resolved state (the daemon's placement, `InboxPlacement` in `packages/db/src/store/inbox-open-rows.ts`: a sent,
+  unreturned card is Waiting only while Slack is connected).
   `WorkstreamDto.waitingOn` draws "Waiting on Mark in Slack · 3h" on a card that keeps its plain border. A popover
   that holds a Select draws the Select's list inside itself (`comboboxProps={{ withinPortal: false }}`), or a click
   on an option closes it. `e2e/stakeholder-questions.spec.ts` seeds its cards with `apps/daemon/scripts/seed-*.ts`.

@@ -17,7 +17,7 @@ import { sendFailureWords } from './send-failure';
 import { ThreadLink } from './thread-link';
 
 /** The builder's answer as the card offered it; a choice no option matches reads as it was stored. */
-function answerWords(item: InboxItemDto, choice: string): string {
+export function answerWords(item: InboxItemDto, choice: string): string {
   const option = item.options.find((o) => o.label === choice);
   return option ? optionLabel(item, option) : choice;
 }

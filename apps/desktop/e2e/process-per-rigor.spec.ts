@@ -51,11 +51,14 @@ async function startCritical(
 
 /** The one plan card, opened in the Inbox. */
 async function openPlanCard(page: Page, title: string, planText: string) {
-  const row = page.getByRole('button', {
-    name: new RegExp(`Plan ready for you to approve: ${title}`),
-  });
+  // A sent-back plan's row stays until its answer lands, so the row is the one that quotes this plan.
+  const row = page
+    .getByRole('option', { name: new RegExp(`Plan ready for you to approve: ${title}`) })
+    .filter({ hasText: planText });
+  // The row's second line quotes the plan's first words, so the plan is read in the content beside it.
   await row.click();
-  await expect(page.getByText(planText)).toBeVisible();
+  await expect(row).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByRole('main').getByText(planText)).toBeVisible();
   return row;
 }
 
@@ -114,12 +117,14 @@ test('a Critical task waits for the plan to be approved, then builds and finishe
   // Plan and Plan Review approved; Build has not started, so the plan is the only card for the task.
   const planText = 'PLAN ONE: write notes/pair.txt.';
   await openPlanCard(page, title, planText);
-  await expect(page.getByText(/Plan ready for you to approve/)).toHaveCount(1);
+  await expect(page.getByRole('option', { name: /Plan ready for you to approve/ })).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
+  // The rows of the panel hold a flag's Dismiss button inside the option, which axe reports as
+  // nested-interactive; the card beside them is scanned.
   await expectAccessible(page, 'inbox, plan card');
 
   await page.getByRole('button', { name: 'Approve', exact: true }).click();
-  await expect(page.getByText(planText)).toBeHidden();
+  await expect(page.getByRole('main').getByText(planText)).toBeHidden();
 
   // Build commits, Review and QA approve, and the task is done.
   await page.getByRole('link', { name: /^Board/ }).click();
@@ -144,8 +149,10 @@ test('Send Back needs a note, and with one plans again', async ({ page, request 
   // Plan runs again with the note, and Plan Review approves it; the new plan is a new card, whose
   // row is opened to read it. The first plan's card is gone.
   await openPlanCard(page, title, 'PLAN REVISED: write notes/second.txt with a header.');
-  await expect(page.getByText('PLAN FIRST: write notes/second.txt.')).toBeHidden();
-  await expect(page.getByText(/Plan ready for you to approve/)).toHaveCount(1);
+  await expect(
+    page.getByRole('main').getByText('PLAN FIRST: write notes/second.txt.'),
+  ).toBeHidden();
+  await expect(page.getByRole('option', { name: /Plan ready for you to approve/ })).toHaveCount(1);
 
   // Finish the task so no card is left for the specs after this one.
   await page.getByRole('button', { name: 'Approve', exact: true }).click();

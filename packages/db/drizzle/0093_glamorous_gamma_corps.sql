@@ -1,0 +1,1 @@
+ALTER TABLE `playbook_rows` ADD `plans_in_build` integer;

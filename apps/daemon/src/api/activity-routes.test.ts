@@ -33,7 +33,7 @@ beforeEach(() => {
     token: TOKEN,
     services: stubServices({
       pageActivity: (query) => pageActivity(store.db, query),
-      pageInbox: (query) => pageInbox(store.db, query),
+      pageInbox: (query) => pageInbox(store.db, query, { waitingOut: false }),
     }),
     upgradeWebSocket: defineWebSocketHelper(() => new Response(null, { status: 426 })),
     mcp: () => Promise.resolve(new Response('mcp')),

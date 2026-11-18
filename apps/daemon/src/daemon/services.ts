@@ -85,6 +85,7 @@ import {
   listInbox,
   pageActivity,
   pageInbox,
+  inboxCardContext,
   listModelProfiles,
   listPeople,
   listPersonas,
@@ -151,6 +152,7 @@ import { taskSession } from '../chat';
 import type { Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
+import type { SlackConnection } from '../stakeholders';
 import {
   createTurnFiles,
   goalPassPages,
@@ -270,6 +272,9 @@ function recordOverrides(
   }
 }
 
+/** How many of a card's conversation's last messages the Inbox shows beside a question. */
+const CARD_CONTEXT_MESSAGES = 3;
+
 /** The HTTP layer's view of the daemon: reads go to the database, writes go through the state store. */
 export function createServices(deps: {
   readonly state: StateStore;
@@ -279,6 +284,8 @@ export function createServices(deps: {
   readonly runner: Runner;
   readonly scheduler: Scheduler;
   readonly inbox: InboxService;
+  /** Where the Slack connection stands: Open leaves out what Waiting holds only while it is connected. */
+  readonly slackConnection: Pick<SlackConnection, 'get'>;
   readonly keepAwake: KeepAwake;
   readonly agentSkill: AgentSkill;
   /** The one gate in front of new lanes, for Factory's note. */
@@ -746,8 +753,10 @@ export function createServices(deps: {
       return ws;
     },
     listInbox: ({ states }) => listInbox(db, states ? { states } : {}),
-    pageInbox: (query) => pageInbox(db, query),
+    pageInbox: (query) =>
+      pageInbox(db, query, { waitingOut: deps.slackConnection.get().state === 'connected' }),
     pageActivity: (query) => pageActivity(db, query),
+    inboxCardContext: (id) => inboxCardContext(db, id, CARD_CONTEXT_MESSAGES),
     answerInbox(id, answer) {
       const item = deps.inbox.answer(id, answer);
       deps.scheduler.requestTick();

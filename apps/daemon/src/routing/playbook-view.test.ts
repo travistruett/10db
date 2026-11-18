@@ -36,6 +36,7 @@ const row = (
   reviewRounds: null,
   fixBy: null,
   approvesPlan: null,
+  plansInBuild: null,
   ships: null,
   ...process,
 });
@@ -47,18 +48,20 @@ describe('playbookView: what a scope sees, and where each value comes from', () 
     const view = playbookView(
       scopes(
         { rows: [row(Rigor.Careful, null, { reviewRounds: 3 })] },
-        { rows: [row(Rigor.Careful, null, { fixBy: 'resumed' })] },
+        { rows: [row(Rigor.Careful, null, { fixBy: 'resumed', plansInBuild: true })] },
       ),
     );
     expect(view.rows.find((r) => r.rigor === Rigor.Careful)).toMatchObject({
       reviewRounds: { value: 3, source: 'global' },
       fixBy: { value: 'resumed', source: 'project' },
       approvesPlan: { value: false, source: 'default' },
+      plansInBuild: { value: true, source: 'project' },
       ships: { value: 'alone', source: 'default' },
     });
     expect(view.rows.find((r) => r.rigor === Rigor.Critical)).toMatchObject({
       reviewRounds: { value: 2, source: 'default' },
       approvesPlan: { value: true, source: 'default' },
+      plansInBuild: { value: false, source: 'default' },
     });
     expect(view.rows.find((r) => r.rigor === Rigor.Light)?.ships).toEqual({
       value: 'with_goal',

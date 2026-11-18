@@ -4,6 +4,7 @@ import { Link } from '@tanstack/react-router';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useSendInbox } from '../../daemon/people';
 import { SettingsSectionKey } from '../settings/sections';
+import { CardSurface } from './card-surface';
 import { AskSomeone } from './ask-someone';
 import { joinNames, routeLine } from './route-line';
 import { sendFailureWords } from './send-failure';
@@ -74,12 +75,15 @@ export function SlackPreview({
   people,
   header,
   onAnswerMyself,
+  framed = true,
 }: {
   readonly item: InboxItemDto;
   readonly send: StakeholderSendDto;
   readonly people: readonly PersonDto[];
   readonly header: ReactNode;
   readonly onAnswerMyself: () => void;
+  /** Whether the card draws its own border; false where the Inbox's content area already frames it. */
+  readonly framed?: boolean;
 }) {
   const sendInbox = useSendInbox();
   // Until the builder is bound to their Slack member their name is the seeded one, and the message would say it.
@@ -128,7 +132,7 @@ export function SlackPreview({
 
   if (unbound)
     return (
-      <Paper withBorder p="md" shadow="xs" data-inbox-selected>
+      <CardSurface framed={framed} selected>
         <Stack gap="sm">
           {header}
           <Alert color="yellow" variant="light" title="Finish setting up Slack">
@@ -153,11 +157,11 @@ export function SlackPreview({
             </Button>
           </Group>
         </Stack>
-      </Paper>
+      </CardSurface>
     );
 
   return (
-    <Paper withBorder p="md" shadow="xs" data-inbox-selected>
+    <CardSurface framed={framed} selected>
       <Stack gap="sm">
         {header}
         {/* Who gets it and why, with the card's one way to send it to someone else. */}
@@ -268,6 +272,6 @@ export function SlackPreview({
           </Group>
         </Group>
       </Stack>
-    </Paper>
+    </CardSurface>
   );
 }

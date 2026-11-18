@@ -71,8 +71,8 @@ describe('HealthResponse', () => {
 });
 
 describe('PROTOCOL_VERSION', () => {
-  it('is 11: an unattended ask_human answers with no Inbox item', () => {
-    expect(PROTOCOL_VERSION).toBe(11);
+  it('is 12: the chat, work and inbox page wire changed', () => {
+    expect(PROTOCOL_VERSION).toBe(12);
   });
 });
 

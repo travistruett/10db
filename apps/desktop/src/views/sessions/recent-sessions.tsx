@@ -4,8 +4,8 @@ import { useInbox } from '../../daemon/queries';
 import { fromNow, useNow } from '../../shell/relative';
 import { openCardsByConversation } from './needs-you';
 import { readSeen } from './seen';
-import { Mark } from './session-tab';
-import { tabInfo } from './tab-info';
+import { Mark } from './tab-mark';
+import { chatInfo } from './tab-info';
 
 // Sessions UI spec §6.2: the project's last sessions. One click opens one in this tab.
 
@@ -29,12 +29,7 @@ export function RecentSessions({
   const now = useNow();
   const cards = openCardsByConversation(useInbox().data ?? []);
   const seen = readSeen();
-  const marks = new Map(
-    chats.map((chat) => [
-      chat.id,
-      tabInfo({ kind: 'chat', key: chat.id, chat, position: 0 }, cards, seen),
-    ]),
-  );
+  const marks = new Map(chats.map((chat) => [chat.id, chatInfo(chat, cards, seen)]));
   if (chats.length === 0) return null;
   return (
     <Stack gap={2} component="section" aria-label="Recent">

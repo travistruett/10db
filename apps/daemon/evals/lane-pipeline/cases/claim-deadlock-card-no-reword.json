@@ -1,0 +1,13 @@
+{
+  "id": "claim-deadlock-card-no-reword",
+  "title": "The claim deadlock card raises with refresh alone, with no stale comment or unreachable reword after it",
+  "description": "apps/daemon/src/mcp/claim-wait.ts compares the deadlock card's option labels with `options` after raising it and calls `inbox.reword` when they differ. Its comment says 'A repeat that folds keeps the options it was raised with'. Since `flagCard` with refresh writes the title, options and detail itself, and this flag call passes refresh: true, the comment is false and the reword branch can never run. Check whether anything still needs that branch, then remove it and its comment, and check that no test depends on them.",
+  "acceptanceCriteria": [
+    "claim-wait.ts no longer claims a folded repeat keeps its options",
+    "The unreachable reword after the deadlock flag is gone, and a repeat with another holder still shows that holder's answers"
+  ],
+  "areas": ["daemon"],
+  "baseCommit": "1523dc0a4eda296397855fecc756ca25b13c277b",
+  "mergedCommit": "8802bab6d20b2fd19729a63fb31d60db13fb978c",
+  "tags": []
+}

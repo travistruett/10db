@@ -5,11 +5,13 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join } from 'node:path';
-import { mintId, type BatchDto, type ProjectDto } from '@10db/contracts';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+import { mintId, type ProjectDto } from '@10db/contracts';
 import { createTestStore, deleteAppSetting, listInbox, seedProject } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -26,7 +28,8 @@ import { createInboxService } from '../inbox';
 import { silentLogger } from '../log';
 import { listNetworkHosts } from '../permissions';
 import { createGateRunner, type GateRequest, type GateRunner } from '../verify';
-import { resolvePnpm } from './pnpm-binary';
+import { createNodeModulesTemplates, templateKey, templatesRoot } from './node-modules-template';
+import { readPnpmVersion, resolvePnpm } from './pnpm-binary';
 import {
   createWorktreeDependencies,
   installCommand,
@@ -46,7 +49,7 @@ let bin: string;
 let calls: string;
 let requests: GateRequest[];
 const signal = new AbortController().signal;
-const batch = { id: mintId('Batch') } as BatchDto;
+const owner = { kind: 'batch', id: mintId('Batch') } as const;
 // Only what the step reads.
 const project = { id: mintId('Project'), sandboxLoopback: true } as ProjectDto;
 
@@ -117,7 +120,7 @@ function installedCopy(modulesYaml: string): void {
 }
 
 function refresh(deps: ReturnType<typeof dependencies>) {
-  return deps.refresh({ batch, project, path: worktree, signal });
+  return deps.refresh({ owner, project, path: worktree, signal });
 }
 
 function withLockfileAndModules(): void {
@@ -151,7 +154,7 @@ describe('refreshing a worktree’s dependencies', () => {
     fakePnpm();
     writeFileSync(join(worktree, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
     const result = await dependencies().refresh({
-      batch,
+      owner,
       project,
       path: worktree,
       signal,
@@ -164,7 +167,7 @@ describe('refreshing a worktree’s dependencies', () => {
   it('still runs nothing without a lockfile when the cut skipped the seed', async () => {
     fakePnpm();
     expect(
-      await dependencies().refresh({ batch, project, path: worktree, signal, seeded: false }),
+      await dependencies().refresh({ owner, project, path: worktree, signal, seeded: false }),
     ).toEqual({ kind: 'skipped' });
     expect(existsSync(calls)).toBe(false);
   });
@@ -173,7 +176,7 @@ describe('refreshing a worktree’s dependencies', () => {
     fakePnpm();
     withLockfileAndModules();
     const result = await dependencies().refresh({
-      batch,
+      owner,
       project,
       path: worktree,
       signal,
@@ -301,7 +304,7 @@ describe('refreshing a worktree’s dependencies', () => {
     // The cut skipped the seed: nothing was there to lose, though the lockfile's package is missing.
     writeFileSync(join(worktree, 'pnpm-lock.yaml'), LEFT_PAD_LOCKFILE);
     const result = await dependencies().refresh({
-      batch,
+      owner,
       project,
       path: worktree,
       signal,
@@ -398,7 +401,7 @@ describe('refreshing a worktree’s dependencies', () => {
       );
       chmodSync(join(bin, 'pnpm'), 0o755);
       const result = await dependencies().refresh({
-        batch,
+        owner,
         project,
         path: worktree,
         signal,
@@ -433,7 +436,7 @@ describe('refreshing a worktree’s dependencies', () => {
       installedCopy('packageManager: pnpm@12.9.1\n');
       writeFileSync(join(bin, 'pnpm'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\nexit 1\n`);
       const result = await dependencies().refresh({
-        batch,
+        owner,
         project,
         path: worktree,
         signal,
@@ -544,7 +547,7 @@ describe('refreshing a worktree’s dependencies', () => {
     const deps = dependencies({}, 20_000, () => {
       stop.abort();
     });
-    const result = await deps.refresh({ batch, project, path: worktree, signal: stop.signal });
+    const result = await deps.refresh({ owner, project, path: worktree, signal: stop.signal });
     expect(result).toEqual({ kind: 'aborted' });
   });
 
@@ -655,7 +658,7 @@ describe('refreshing a worktree’s dependencies', () => {
       writeFileSync(join(bin, 'pnpm'), `#!/bin/sh\nexit 1\n`);
       chmodSync(join(bin, 'pnpm'), 0o755);
       const result = await dependencies().refresh({
-        batch,
+        owner,
         project,
         path: worktree,
         signal,
@@ -672,7 +675,7 @@ describe('refreshing a worktree’s dependencies', () => {
       writeFileSync(join(bin, 'pnpm'), `#!/bin/sh\nexit 1\n`);
       chmodSync(join(bin, 'pnpm'), 0o755);
       const result = await dependencies().refresh({
-        batch,
+        owner,
         project,
         path: worktree,
         signal,
@@ -747,6 +750,207 @@ describe('refreshing a worktree’s dependencies', () => {
     },
     90_000,
   );
+
+  it.skipIf(SANDBOXED || STANDALONE_PNPM === null)(
+    'makes a template of a real pnpm workspace install, and a clone of it resolves in another copy',
+    async () => {
+      const files: Record<string, string> = {
+        'package.json': '{"name":"root","private":true}\n',
+        'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+        'packages/lib/package.json': '{"name":"lib","version":"1.0.0","main":"index.js"}\n',
+        'packages/lib/index.js': 'module.exports = 1;\n',
+        'packages/app/package.json': '{"name":"app","dependencies":{"lib":"workspace:*"}}\n',
+        'pnpm-lock.yaml': [
+          "lockfileVersion: '9.0'",
+          '',
+          'importers:',
+          '',
+          '  .: {}',
+          '',
+          '  packages/app:',
+          '    dependencies:',
+          '      lib:',
+          '        specifier: workspace:*',
+          '        version: link:../lib',
+          '',
+          '  packages/lib: {}',
+          '',
+        ].join('\n'),
+      };
+      const other = join(tmp.path, 'other');
+      for (const at of [worktree, other])
+        for (const [relative, content] of Object.entries(files)) {
+          mkdirSync(dirname(join(at, relative)), { recursive: true });
+          writeFileSync(join(at, relative), content);
+        }
+      const env = Object.fromEntries(
+        Object.entries(process.env).flatMap(([k, v]) =>
+          v === undefined || k.startsWith('pnpm_config_') ? [] : [[k, v]],
+        ),
+      );
+      const deps = createWorktreeDependencies({
+        gate: createGateRunner({ sandbox: null, logger: silentLogger }),
+        clock: new ManualClock(),
+        dataDir: join(tmp.path, 'data'),
+        sessionEnv: () => ({ ...env, pnpm_config_store_dir: join(tmp.path, 'store') }),
+        rules: () => [],
+        checkouts: () => [worktree, other],
+        timeoutMs: 60_000,
+        resolvePnpm,
+        pnpmVersion: readPnpmVersion,
+        templates: createNodeModulesTemplates({
+          root: templatesRoot(join(tmp.path, 'data')),
+          logger: silentLogger,
+        }),
+      });
+      const made = await deps.refresh({
+        owner,
+        project,
+        path: worktree,
+        signal,
+        seeded: false,
+        makeTemplate: true,
+      });
+      expect(made.kind, JSON.stringify(made)).toBe('installed');
+      expect(readdirSync(templatesRoot(join(tmp.path, 'data')))).toHaveLength(1);
+      const cloned = await deps.refresh({ owner, project, path: other, signal, seeded: false });
+      expect(cloned).toMatchObject({ kind: 'installed', fromTemplate: true, installs: 0 });
+      const resolved = createRequire(join(other, 'packages/app/package.json')).resolve('lib');
+      expect(realpathSync(resolved)).toBe(realpathSync(join(other, 'packages/lib/index.js')));
+    },
+    90_000,
+  );
+});
+
+describe('a copy’s node_modules from a template', () => {
+  const VERSION = '10.0.0';
+  const root = (): string => templatesRoot(join(tmp.path, 'data'));
+
+  function withTemplates() {
+    const real = createGateRunner({ sandbox: null, logger: silentLogger });
+    return createWorktreeDependencies({
+      gate: {
+        run: (request) => {
+          requests.push(request);
+          return real.run(request);
+        },
+      },
+      clock: new ManualClock(),
+      dataDir: join(tmp.path, 'data'),
+      sessionEnv: () => ({ PATH: `${bin}:/usr/bin:/bin`, pnpm_config_store_dir: 'store' }),
+      resolvePnpm: () => Promise.resolve(join(bin, 'pnpm')),
+      pnpmVersion: () => Promise.resolve(VERSION),
+      rules: () => [],
+      checkouts: () => [worktree],
+      timeoutMs: 20_000,
+      templates: createNodeModulesTemplates({ root: root(), logger: silentLogger }),
+    });
+  }
+
+  /** A template made from another copy with the same lockfile, its `left-pad` installed. */
+  async function templateOfLeftPad(): Promise<string> {
+    const made = join(tmp.path, 'made');
+    mkdirSync(join(made, 'node_modules/left-pad'), { recursive: true });
+    writeFileSync(join(made, 'node_modules/left-pad/index.js'), 'module.exports = 1;\n');
+    writeFileSync(join(made, 'pnpm-lock.yaml'), LEFT_PAD_LOCKFILE);
+    const key = templateKey(made, VERSION);
+    if (key === null) throw new Error('no key');
+    await createNodeModulesTemplates({ root: root(), logger: silentLogger }).capture({
+      key,
+      path: made,
+    });
+    expect(existsSync(join(root(), key))).toBe(true);
+    return key;
+  }
+
+  const unseeded = (deps: ReturnType<typeof withTemplates>, extra: object = {}) =>
+    deps.refresh({ owner, project, path: worktree, signal, seeded: false, ...extra });
+
+  it('clones a template whose lockfile matches, and runs no install', async () => {
+    fakePnpm();
+    await templateOfLeftPad();
+    writeFileSync(join(worktree, 'pnpm-lock.yaml'), LEFT_PAD_LOCKFILE);
+    const result = await unseeded(withTemplates());
+    expect(result).toMatchObject({
+      kind: 'installed',
+      fromTemplate: true,
+      installs: 0,
+      startedOver: false,
+    });
+    expect(requests).toEqual([]);
+    expect(existsSync(calls)).toBe(false);
+    expect(readFileSync(join(worktree, 'node_modules/left-pad/index.js'), 'utf8')).toBe(
+      'module.exports = 1;\n',
+    );
+    if (result.kind === 'installed')
+      expect(readFileSync(result.logPath, 'utf8')).toContain('no install ran');
+  });
+
+  it.each<[string, (template: string) => void]>([
+    [
+      'there is no template',
+      (template) => {
+        rmSync(template, { recursive: true });
+      },
+    ],
+    [
+      'its marker is missing',
+      (template) => {
+        rmSync(join(template, 'template.json'));
+      },
+    ],
+    [
+      'its tree lacks a package',
+      (template) => {
+        rmSync(join(template, 'tree/node_modules/left-pad'), { recursive: true });
+      },
+    ],
+    [
+      'its tree is unreadable',
+      (template) => {
+        chmodSync(join(template, 'tree'), 0o000);
+      },
+    ],
+  ])('installs as before, and removes the template, when %s', async (_name, damage) => {
+    fakePnpm();
+    const key = await templateOfLeftPad();
+    damage(join(root(), key));
+    writeFileSync(join(worktree, 'pnpm-lock.yaml'), LEFT_PAD_LOCKFILE);
+    const result = await unseeded(withTemplates());
+    expect(result).toMatchObject({ kind: 'installed', installs: 1 });
+    expect(result).not.toHaveProperty('fromTemplate');
+    expect(requests).toHaveLength(1);
+    expect(existsSync(join(root(), key))).toBe(false);
+  });
+
+  it.each<[string, object]>([
+    ['a dependency change', { mode: 'update' }],
+    ['a start over', { startOver: true }],
+  ])('never clones for %s', async (_name, extra) => {
+    fakePnpm();
+    const key = await templateOfLeftPad();
+    writeFileSync(join(worktree, 'pnpm-lock.yaml'), LEFT_PAD_LOCKFILE);
+    const result = await unseeded(withTemplates(), extra);
+    expect(result).toMatchObject({ kind: 'installed', installs: 1 });
+    expect(requests).toHaveLength(1);
+    expect(existsSync(join(root(), key))).toBe(true);
+  });
+
+  it('makes a template of a whole install when asked, and sweeps one no copy uses', async () => {
+    fakePnpm();
+    mkdirSync(join(root(), 'stale', 'tree'), { recursive: true });
+    writeFileSync(join(worktree, 'pnpm-lock.yaml'), LEFT_PAD_LOCKFILE);
+    // What the install would have made: the fake pnpm makes nothing.
+    mkdirSync(join(worktree, 'node_modules/left-pad'), { recursive: true });
+    const deps = withTemplates();
+    expect(await unseeded(deps)).toMatchObject({ kind: 'installed', installs: 1 });
+    expect(readdirSync(root())).toEqual(['stale']);
+    expect(await unseeded(deps, { makeTemplate: true })).toMatchObject({
+      kind: 'installed',
+      installs: 1,
+    });
+    expect(readdirSync(root())).toEqual([templateKey(worktree, VERSION)]);
+  });
 });
 
 describe('raiseInstallHostCards', () => {
