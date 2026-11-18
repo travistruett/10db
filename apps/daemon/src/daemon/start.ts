@@ -381,6 +381,7 @@ import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { autoDocker } from './auto-docker';
 import { MAX_DOCKER_SCAN_BYTES, originBaseCommit } from './docker-need';
 import { createProjectPinStore } from './checkout-pins';
+import { resolveNoticeCards } from './notice-sweep';
 import {
   createCheckoutTrustedHandler,
   createGitCardAnswers,
@@ -1898,6 +1899,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     identifyProcess: (pid) => processes.identify(pid),
   });
   runner = createdRunner;
+  const closedNoticeCards = resolveNoticeCards(state.db, inbox);
+  if (closedNoticeCards > 0) {
+    logger.info({ closed: closedNoticeCards }, 'closed open cards that are notices now');
+  }
   const createdScheduler = createScheduler({
     state,
     folderHold,

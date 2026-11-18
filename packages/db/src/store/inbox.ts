@@ -214,6 +214,31 @@ export function listPendingTriage(db: DbReader): InboxItemDto[] {
     .map((row) => toInboxItemDto(db, row));
 }
 
+/** The few columns the start sweep reads of an open flag card; `InboxItemDto` carries no fold key. */
+export interface OpenFlagRow {
+  readonly id: InboxItemId;
+  readonly foldKey: string | null;
+  readonly title: string;
+  readonly body: string;
+  readonly optionCount: number;
+}
+
+/** Every open flag card, oldest first, as the start sweep reads them. */
+export function listOpenFlagRows(db: DbReader): OpenFlagRow[] {
+  return db
+    .select({
+      id: schema.inboxItems.id,
+      foldKey: schema.inboxItems.foldKey,
+      title: schema.inboxItems.title,
+      body: schema.inboxItems.body,
+      optionCount: sql<number>`json_array_length(${schema.inboxItems.options})`,
+    })
+    .from(schema.inboxItems)
+    .where(and(eq(schema.inboxItems.kind, 'flag'), eq(schema.inboxItems.state, InboxState.Open)))
+    .orderBy(asc(schema.inboxItems.createdAt), asc(schema.inboxItems.id))
+    .all();
+}
+
 export function findOpenByFoldKey(
   db: DbReader,
   projectId: ProjectId,
