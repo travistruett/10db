@@ -171,7 +171,10 @@ function SectionLink({
       <Link
         {...props}
         to={route}
-        {...(section === RailSection.Inbox ? { search: lastInboxSearch.get() } : {})}
+        {...(section === RailSection.Inbox
+          ? // Read when the link is followed: a value read in render is cached by the React Compiler.
+            { search: () => lastInboxSearch.get() }
+          : {})}
         onClick={claim}
       >
         <RailItemContent section={section} badge={badge} />
