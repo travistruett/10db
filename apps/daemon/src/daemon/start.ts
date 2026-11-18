@@ -345,6 +345,7 @@ import {
   type SandboxRuntime,
 } from '../sandbox';
 import { createFolderHold } from '../folder-hold';
+import { createStatusService } from '../status';
 import { createAdmission, createScheduler, type Scheduler } from '../scheduler';
 import {
   createDrain,
@@ -1031,11 +1032,26 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerDeadlockCard(item, answer);
     },
   });
+  // Holds that pause work and end by themselves show as a line in the app's header, not as Inbox cards.
+  const status = createStatusService({
+    clock,
+    onChange: (dto) => {
+      state.write((ctx) => {
+        ctx.emit({
+          type: EventType.StatusChanged,
+          entityType: 'app',
+          entityId: 'status',
+          data: dto,
+        });
+      });
+    },
+  });
   // A lane that finds no model profile for its account waits for the profiles instead of retrying every tick.
   const modelWait = createModelListWait({
     db,
     clock,
     inbox,
+    status,
     logger: logger.child({ component: 'catalogue' }),
     onReleased: () => {
       scheduler?.requestTick();
@@ -1055,11 +1071,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       return listModelProfiles(db).some((p) => p.provider === provider);
     });
   }
-  // Sustained overload holds new lane sessions and gates and raises one card naming what is busy.
+  // Sustained overload holds new lane sessions and gates and shows a status line naming what is busy.
   const laneTempDirs = createLaneTempDirs();
   const loadGuard = createLoadMonitor({
     state,
     inbox,
+    status,
     clock,
     logger: logger.child({ component: 'load' }),
     daemonPid: process.pid,
@@ -2415,6 +2432,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     keepAwake,
     agentSkill,
     admission,
+    status,
     systemCheck: () =>
       opts.systemCheck
         ? opts.systemCheck({ git: gitBin, gh: ghBin }, () =>
@@ -2648,6 +2666,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       selfUpdate = createSelfUpdate({
         state,
         inbox,
+        status,
         clock,
         logger: updateLogger,
         runningCommit: build.commit,

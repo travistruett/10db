@@ -4,6 +4,7 @@ import { capturingLogger } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore } from '../events';
 import { createInboxService, type InboxService } from '../inbox';
+import { createStatusService, STATUS_HYSTERESIS_MS, type StatusService } from '../status';
 import { createModelListWait, MODEL_LIST_WAIT_MS, type ModelListWait } from './model-list-wait';
 
 let store: Store;
@@ -11,6 +12,7 @@ let close: () => void;
 let clock: ManualClock;
 let inbox: InboxService;
 let logger: ReturnType<typeof capturingLogger>;
+let status: StatusService;
 let released: number;
 let wait: ModelListWait;
 
@@ -23,6 +25,7 @@ beforeEach(() => {
   });
   logger = capturingLogger();
   released = 0;
+  status = createStatusService({ clock, onChange: () => undefined });
   wait = startWait();
 });
 
@@ -32,6 +35,7 @@ function startWait(): ModelListWait {
     db: store.db,
     clock,
     inbox,
+    status,
     logger,
     onReleased: () => {
       released += 1;
@@ -49,7 +53,7 @@ describe('a lane waiting for its account’s model list', () => {
     const project = seedProject(store);
     const account = { id: project.accountId, label: 'Codex plan' };
     expect(wait.holds(account.id)).toBe(false);
-    wait.hold(account, project.id);
+    wait.hold(account);
     expect(wait.holds(account.id)).toBe(true);
     clock.advance(MODEL_LIST_WAIT_MS - 1);
     expect(wait.holds(account.id)).toBe(true);
@@ -60,74 +64,65 @@ describe('a lane waiting for its account’s model list', () => {
   it('holds only the account that is waiting', () => {
     const project = seedProject(store);
     const other = seedAccount(store, { kind: 'claude_subscription', label: 'Other' });
-    wait.hold({ id: project.accountId, label: 'Codex plan' }, project.id);
+    wait.hold({ id: project.accountId, label: 'Codex plan' });
     expect(wait.holds(other.id)).toBe(false);
   });
 
   it('logs once per account however often it is held again', () => {
     const project = seedProject(store);
     const account = { id: project.accountId, label: 'Codex plan' };
-    wait.hold(account, project.id);
+    wait.hold(account);
     clock.advance(MODEL_LIST_WAIT_MS);
-    wait.hold(account, project.id);
-    wait.hold(account, project.id);
+    wait.hold(account);
+    wait.hold(account);
     expect(logger.lines().filter((l) => l.includes('model list'))).toHaveLength(1);
   });
 
-  it('opens one card naming the account, however often it is held again', () => {
+  it('shows one line naming the account once the wait has lasted 2 minutes, and raises no card', () => {
     const project = seedProject(store);
     const account = { id: project.accountId, label: 'Codex plan' };
-    wait.hold(account, project.id);
-    wait.hold(account, project.id);
-    const cards = openCards();
-    expect(cards).toHaveLength(1);
-    expect(cards[0]?.title).toBe('Codex plan is waiting for its model list');
+    wait.hold(account);
+    wait.hold(account);
+    clock.advance(STATUS_HYSTERESIS_MS);
+    expect(status.current().lines.map((l) => l.line)).toEqual([
+      'Codex plan is waiting for its model list',
+    ]);
+    expect(openCards()).toEqual([]);
   });
 
-  it('keeps the card and the hold when a rebuild finds the account still without profiles, but lets a lane try', () => {
+  it('lets a lane try again on a rebuild, and asks for a tick', () => {
     const project = seedProject(store);
-    wait.hold({ id: project.accountId, label: 'Codex plan' }, project.id);
+    wait.hold({ id: project.accountId, label: 'Codex plan' });
     wait.release(() => false);
     expect(wait.holds(project.accountId)).toBe(false);
-    expect(openCards()).toHaveLength(1);
     expect(released).toBe(1);
   });
 
-  it('closes the card and asks for a tick when the account’s profiles appear', () => {
+  it('withdraws a card an earlier version left open when it is made', () => {
     const project = seedProject(store);
-    wait.hold({ id: project.accountId, label: 'Codex plan' }, project.id);
-    wait.release(() => true);
-    expect(wait.holds(project.accountId)).toBe(false);
-    expect(openCards()).toEqual([]);
-    expect(released).toBe(1);
-  });
-
-  it('closes a card an earlier daemon left, once the account’s profiles are built', () => {
-    const project = seedProject(store);
-    wait.hold({ id: project.accountId, label: 'Codex plan' }, project.id);
+    inbox.flag({
+      projectId: project.id,
+      workstreamId: null,
+      tier: 'status',
+      urgency: 'low',
+      closesWhen: { by: 'withdrawn', when: 'old' },
+      title: 'Codex plan is waiting for its model list',
+      body: 'stale',
+      foldKey: `model-list-wait:${project.accountId}`,
+    });
     expect(openCards()).toHaveLength(1);
-    const restarted = startWait();
-    restarted.release(() => true);
+    startWait();
     expect(openCards()).toEqual([]);
   });
 
-  it('keeps a card an earlier daemon left while the account still has no profiles', () => {
-    const project = seedProject(store);
-    wait.hold({ id: project.accountId, label: 'Codex plan' }, project.id);
-    const restarted = startWait();
-    restarted.release(() => false);
-    expect(openCards()).toHaveLength(1);
-    expect(restarted.holds(project.accountId)).toBe(false);
-  });
-
-  it('logs the first hold after a restart once, though the card was taken on', () => {
+  it('logs the first hold after a restart once', () => {
     const project = seedProject(store);
     const account = { id: project.accountId, label: 'Codex plan' };
-    wait.hold(account, project.id);
+    wait.hold(account);
     const restarted = startWait();
     const before = logger.lines().filter((l) => l.includes('model list')).length;
-    restarted.hold(account, project.id);
-    restarted.hold(account, project.id);
+    restarted.hold(account);
+    restarted.hold(account);
     expect(logger.lines().filter((l) => l.includes('model list')).length - before).toBe(1);
   });
 

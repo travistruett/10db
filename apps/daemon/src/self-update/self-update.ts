@@ -1,12 +1,12 @@
 import {
   SELF_UPDATE_SWITCH,
   SHAPE_HOLD_WAY_OUT,
-  type InboxItemId,
   type ProjectId,
   type SelfUpdateBlockerDto,
   type SelfUpdateNotInstalling,
   type ShapeId,
   Urgency,
+  StatusKind,
 } from '@10db/contracts';
 import {
   deleteAppSetting,
@@ -20,6 +20,7 @@ import type { StateStore } from '../events';
 import { GhError, GhFailure, SIGN_IN_IN_SETTINGS } from '../github';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
+import type { StatusService } from '../status';
 import { BY_ANSWER, CardTier } from '../inbox';
 
 /**
@@ -28,8 +29,9 @@ import { BY_ANSWER, CardTier } from '../inbox';
  * turns that keeps the update waiting while every lane is paused.
  */
 export const SHAPE_HOLD_ALERT_MS = 5 * 60_000;
-/** The card that says so. It outlives the run that raised it, so a new run looks for it by this. */
+/** The card an earlier version raised for the shaping hold; one left open is withdrawn at start. */
 export const SHAPE_HOLD_FOLD_KEY = 'self-update-shape-turn';
+const SHAPE_HOLD_STATUS_KEY = 'update-shape-turn';
 
 /** The commit an install that is under way was fetched for, and the head of main it was chosen for. */
 export const SELF_UPDATE_APPLYING_KEY = 'self_update.applying';
@@ -91,6 +93,7 @@ export interface ScriptStatus {
 export interface SelfUpdateDeps {
   readonly state: StateStore;
   readonly inbox: InboxService;
+  readonly status: Pick<StatusService, 'hold' | 'release'>;
   readonly clock: Clock;
   readonly logger: Logger;
   /** The commit this app was built from; null for a source run, which never updates itself. */
@@ -404,66 +407,54 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
   }
 
   /**
-   * Since when only shaping conversations have held the drain, and the card that told the builder
+   * Since when only shaping conversations have held the drain, and whether the status line was told
    * once they had for too long. Null while a lane, a gate or a job holds it too, or nothing does.
    */
   let shapeHold: {
     readonly since: Date;
-    cardId: InboxItemId | null;
-    /** The conversations the card names, to reword it when they change. */
+    reported: boolean;
+    /** The conversations the line names, to reword it when they change. */
     names: string;
   } | null = null;
 
-  function releaseShapeHold(reason: string): void {
-    if (shapeHold?.cardId) inbox.resolve(shapeHold.cardId, reason);
+  function releaseShapeHold(): void {
+    if (shapeHold?.reported) deps.status.release(SHAPE_HOLD_STATUS_KEY);
     shapeHold = null;
   }
 
   /**
    * A drain pauses every lane, so when the only thing it waits for is a shaping conversation's turn,
-   * Settings and the factory note name it, and past `SHAPE_HOLD_ALERT_MS` one card does too: the
+   * Settings and the factory note name it, and past `SHAPE_HOLD_ALERT_MS` the status line does too: the
    * conversation is no lane, so nothing else would say why lanes are paused.
    */
   function watchShapeHold(): void {
     const turns = deps.shapeTurns();
     if (drainingSince === null || turns.length === 0 || turns.length < deps.midSession()) {
-      releaseShapeHold('A lane, a gate or a job holds the update now, or nothing does.');
+      releaseShapeHold();
       return;
     }
     const now = deps.clock.now();
-    shapeHold ??= { since: now, cardId: null, names: '' };
+    shapeHold ??= { since: now, reported: false, names: '' };
     const names = turns.map((turn) => `“${turn.title}”`).join(', ');
-    if (shapeHold.cardId !== null) {
-      // New turns are parked during a drain, so the set only shrinks: say who still holds it.
-      if (names !== shapeHold.names) {
-        shapeHold.names = names;
-        inbox.reword(shapeHold.cardId, shapeHoldBody(names, drainingSince));
-      }
-      return;
-    }
-    if (now.getTime() - shapeHold.since.getTime() < SHAPE_HOLD_ALERT_MS) return;
+    if (!shapeHold.reported) {
+      if (now.getTime() - shapeHold.since.getTime() < SHAPE_HOLD_ALERT_MS) return;
+      logger.warn(
+        { shapes: turns.map((turn) => turn.id), since: shapeHold.since.toISOString() },
+        'only shaping conversations keep the update waiting, and lanes stay paused',
+      );
+    } else if (names === shapeHold.names) return;
+    // New turns are parked during a drain, so the set only shrinks: say who still holds it.
+    shapeHold.reported = true;
     shapeHold.names = names;
-    logger.warn(
-      { shapes: turns.map((turn) => turn.id), since: shapeHold.since.toISOString() },
-      'only shaping conversations keep the update waiting, and lanes stay paused',
-    );
-    const projectId = deps.cardProject();
-    // A card needs a project to sit under; Settings and the factory note still name the conversation.
-    if (projectId === null) return;
-    shapeHold.cardId = inbox.flag({
-      projectId,
-      workstreamId: null,
-      tier: CardTier.Status,
-      urgency: Urgency.Low,
-      // S2: status line
-      closesWhen: { by: 'withdrawn', when: 'the shaping hold is released' },
-      title: 'A shaping conversation is holding the update, and lanes are paused',
-      body: shapeHoldBody(names, drainingSince),
-      foldKey: SHAPE_HOLD_FOLD_KEY,
-    }).id;
+    deps.status.hold(SHAPE_HOLD_STATUS_KEY, {
+      kind: StatusKind.UpdateHold,
+      line: `Holding new lanes: an update waits for ${names}`,
+      details: shapeHoldDetails(names, drainingSince),
+      culprits: [],
+    });
   }
 
-  function shapeHoldBody(names: string, since: Date): string {
+  function shapeHoldDetails(names: string, since: Date): string {
     return [
       `An update to ${short(available ?? '')} is installed once nothing is mid-session, and 10db has started no lane since ${since.toISOString()} so that it can. No lane, gate or job is running: the only thing it waits for is a turn in ${names}.`,
       `Claude may still be answering, or the session may be hung. ${SHAPE_HOLD_WAY_OUT} Otherwise lanes start again once the turn ends and the app has installed and restarted.`,
@@ -471,9 +462,8 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
   }
 
   /**
-   * The hold is only in memory but its card is a row, so a card from before a restart would say for
-   * good that lanes are paused. This run holds nothing yet, and raises one again if a hold recurs.
-   * Every project, because the one that places the cards can change.
+   * The hold is only in memory, so a card an earlier version raised for it would say for good that
+   * lanes are paused. Every project, because the one that placed the cards could change.
    */
   function closeShapeHoldCards(): void {
     for (const project of listProjects(state.db)) {
@@ -487,7 +477,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
   }
 
   function endDrain(): void {
-    releaseShapeHold('The update no longer waits, so lanes start again.');
+    releaseShapeHold();
     if (drainingSince === null) return;
     drainingSince = null;
     logger.info({}, 'the update no longer waits: lanes start again');
@@ -765,7 +755,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       return TickResult.Off;
     }
     if (deps.midSession() > 0) return waitOrDrain();
-    releaseShapeHold('Nothing is mid-session now, so the update installs.');
+    releaseShapeHold();
     return install(runningCommit, { head: build.head, commit: build.commit }, build);
   }
 

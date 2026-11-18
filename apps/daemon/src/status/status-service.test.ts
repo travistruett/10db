@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import type { StatusDto } from '@10db/contracts';
 import { ManualClock } from '../clock';
-import { createStatusService, STATUS_HYSTERESIS_MS } from './status-service';
+import { createStatusService, STATUS_HYSTERESIS_MS, type StatusHold } from './status-service';
 
-const hold = (line = 'Holding new lanes') =>
-  ({ kind: 'admission_hold', line, details: 'why', culprits: [] }) as const;
+const hold = (line = 'Holding new lanes'): StatusHold => ({
+  kind: 'admission_hold',
+  line,
+  details: 'why',
+  culprits: [],
+});
 
 function setup() {
   const clock = new ManualClock();

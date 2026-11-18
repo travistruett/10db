@@ -187,14 +187,14 @@ describe('the model a planned step starts on', () => {
 
 describe('an account whose provider has no model profiles yet', () => {
   it('leaves the step queued without pausing the account, and runs it once the profiles exist', async () => {
-    const held: { account: string; projectId: string }[] = [];
+    const held: { account: string }[] = [];
     engine = await createTestEngine(
       { Alpha: [finish('op-profiles-01')] },
       {},
       {
         modelWait: {
-          hold: (account, projectId) => {
-            held.push({ account: account.label, projectId });
+          hold: (account) => {
+            held.push({ account: account.label });
           },
         },
       },
@@ -210,7 +210,7 @@ describe('an account whose provider has no model profiles yet', () => {
     expect(engine.accounts.isPaused(engine.project.accountId)).toBe(false);
     expect(openCards()).toEqual([]);
     // The scheduler is told, so it does not claim the row again on every tick.
-    expect(held).toEqual([{ account: 'Claude plan', projectId: engine.project.id }]);
+    expect(held).toEqual([{ account: 'Claude plan' }]);
 
     seedProfiles(engine.state);
     engine.launch(workstream.id);

@@ -70,6 +70,7 @@ import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type EventBus, type StateStore } from '../events';
 import { createGit, GitTrustError } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
+import { createStatusService } from '../status';
 import { silentLogger } from '../log';
 import { recoverOnStartup, systemProcesses } from '../recovery';
 import { createSelfUpdate } from '../self-update';
@@ -127,6 +128,7 @@ beforeEach(() => {
     db: store.db,
     clock,
     inbox,
+    status: createStatusService({ clock, onChange: () => undefined }),
     logger: silentLogger,
     onReleased: () => undefined,
   });
@@ -290,7 +292,7 @@ describe('scheduler', () => {
     state.write((ctx) => recordAccountSecret(ctx, keyed.id, 'sha256:0000000000000000'));
     const waiting = queue();
     const other = queue({ accountId: keyed.id });
-    modelWait.hold({ id: waiting.project.accountId, label: 'Waiting' }, waiting.project.id);
+    modelWait.hold({ id: waiting.project.accountId, label: 'Waiting' });
     const s = scheduler();
     expect(await s.tick()).toBe(1);
     expect(launched.map((l) => l.id)).toEqual([other.workstream.id]);
@@ -1535,6 +1537,7 @@ describe('pull-request delivery', () => {
       const update = createSelfUpdate({
         state,
         inbox,
+        status: createStatusService({ clock, onChange: () => undefined }),
         clock,
         logger: silentLogger,
         runningCommit: 'a'.repeat(40),

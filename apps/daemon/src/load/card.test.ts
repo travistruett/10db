@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { gateNote, overloadCard } from './card';
+import { gateNote, overloadStatus } from './card';
 import type { Culprit, OverloadReport } from './guard';
 
 const report = (culprits: readonly Culprit[]): OverloadReport => ({
@@ -9,17 +9,17 @@ const report = (culprits: readonly Culprit[]): OverloadReport => ({
   culprits,
 });
 
-describe('overloadCard', () => {
+describe('overloadStatus', () => {
   it('says what is held, and that 10db resumes by itself', () => {
-    const card = overloadCard(report([]));
-    expect(card.title).toBe('The Mac is overloaded: 10db is holding new lanes and gates');
-    expect(card.body).toContain('load average is 187 on 10 cores');
-    expect(card.body).toContain('starts no new lane session or gate');
-    expect(card.body).toContain('by itself');
+    const card = overloadStatus(report([]));
+    expect(card.line).toBe('Holding new lanes: the Mac is overloaded (load 187 on 10 cores)');
+    expect(card.details).toContain('load average is 187 on 10 cores');
+    expect(card.details).toContain('starts no new lane session or gate');
+    expect(card.details).toContain('by itself');
   });
 
   it('names each busy process and the lane or gate it belongs to', () => {
-    const card = overloadCard(
+    const card = overloadStatus(
       report([
         {
           pid: 4242,
@@ -35,20 +35,20 @@ describe('overloadCard', () => {
         },
       ]),
     );
-    expect(card.body).toContain(
+    expect(card.details).toContain(
       'pid 4242 (sh loop.sh) at 100% of a core: the lane for task "Fix login"',
     );
-    expect(card.body).toContain(
+    expect(card.details).toContain(
       'pid 4300 (vitest run) at 80% of a core: the shipping gate of batch "Greetings"',
     );
   });
 
   it('says a process that is not 10db’s is not', () => {
-    const card = overloadCard(
+    const card = overloadStatus(
       report([{ pid: 9, cpu: 300, command: 'ffmpeg', owner: { kind: 'other' } }]),
     );
-    expect(card.body).toContain('pid 9 (ffmpeg) at 300% of a core: not 10db’s');
-    expect(card.body).toContain('Nothing here is 10db’s');
+    expect(card.details).toContain('pid 9 (ffmpeg) at 300% of a core: not 10db’s');
+    expect(card.details).toContain('Nothing here is 10db’s');
   });
 
   it.each([
@@ -65,39 +65,35 @@ describe('overloadCard', () => {
       '/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd',
     ],
   ])('points a busy %s at what 10db can keep it off', (_name, command) => {
-    const card = overloadCard(report([{ pid: 5, cpu: 98, command, owner: { kind: 'other' } }]));
-    expect(card.body).toContain('Keep Spotlight Out');
-    expect(card.body).toContain('Remove Merged Worktrees');
+    const card = overloadStatus(report([{ pid: 5, cpu: 98, command, owner: { kind: 'other' } }]));
+    expect(card.details).toContain('Keep Spotlight Out');
+    expect(card.details).toContain('Remove Merged Worktrees');
   });
 
   it('does not mention Spotlight when it is not busy', () => {
-    const card = overloadCard(
+    const card = overloadStatus(
       report([{ pid: 9, cpu: 300, command: 'ffmpeg', owner: { kind: 'other' } }]),
     );
-    expect(card.body).not.toContain('Spotlight');
+    expect(card.details).not.toContain('Spotlight');
   });
 
   it('says a process left by an ended lane is 10db’s, and how to stop it', () => {
-    const card = overloadCard(
+    const card = overloadStatus(
       report([{ pid: 11, cpu: 99, command: 'sh loop.sh', owner: { kind: 'ended-lane' } }]),
     );
-    expect(card.body).toContain('left behind by a lane session that has ended');
-    expect(card.body).toContain('kill 11');
+    expect(card.details).toContain('left behind by a lane session that has ended');
+    expect(card.details).toContain('kill 11');
   });
 
   it('says the daemon itself is 10db’s', () => {
-    const card = overloadCard(
+    const card = overloadStatus(
       report([{ pid: 100, cpu: 90, command: 'git gc', owner: { kind: 'daemon' } }]),
     );
-    expect(card.body).toContain('10db itself, not a lane or a gate');
+    expect(card.details).toContain('10db itself, not a lane or a gate');
   });
 
   it('says so when it could not read what is busy', () => {
-    expect(overloadCard(report([])).body).toContain('could not read which processes');
-  });
-
-  it('folds under one key, so it is one card while it lasts', () => {
-    expect(overloadCard(report([])).foldKey).toBe('machine-overloaded');
+    expect(overloadStatus(report([])).details).toContain('could not read which processes');
   });
 });
 

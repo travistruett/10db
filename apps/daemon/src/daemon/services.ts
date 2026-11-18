@@ -176,6 +176,7 @@ import type { AgentSkill } from '../agent-skill';
 import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
 import type { Admission, Scheduler } from '../scheduler';
+import type { StatusService } from '../status';
 import { capacitySettings, setCapacitySettings } from '../load';
 import { ProjectMcpError, readRepoMcp, type RepoMcp } from '../sessions';
 import {
@@ -290,6 +291,7 @@ export function createServices(deps: {
   readonly agentSkill: AgentSkill;
   /** The one gate in front of new lanes, for Factory's note. */
   readonly admission: Pick<Admission, 'status'>;
+  readonly status: Pick<StatusService, 'current'>;
   /** Probes the tools and gh's login; the services keep its last answer. */
   readonly systemCheck: () => Promise<SystemCheckDto>;
   /** The pinned Claude Code and Codex, read for each request; null where none are managed. */
@@ -801,6 +803,7 @@ export function createServices(deps: {
       return saved;
     },
     admission: () => deps.admission.status(),
+    status: () => deps.status.current(),
     lanePermissions: () => ({ autoMode: laneAutoMode(db) }),
     setLanePermissions(autoMode) {
       deps.state.write((ctx) => {

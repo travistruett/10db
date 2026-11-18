@@ -1,3 +1,5 @@
+import { StatusKind } from '@10db/contracts';
+import type { StatusHold } from '../status';
 import type { Culprit, Owner, OverloadNote, OverloadReport } from './guard';
 
 export const OVERLOAD_FOLD_KEY = 'machine-overloaded';
@@ -53,16 +55,18 @@ function advice(culprits: readonly Culprit[]): string {
   return parts.join(' ');
 }
 
-/** The one card the builder gets while the Mac is overloaded, rewritten at each sample. */
-export function overloadCard(report: OverloadReport): OverloadCard {
+/** What the status line says while the Mac is overloaded, rewritten at each sample. */
+export function overloadStatus(report: OverloadReport): StatusHold {
   const what =
     report.culprits.length === 0
       ? '10db could not read which processes are using the CPU.'
       : `Using the most CPU now:\n${report.culprits.map(line).join('\n')}\n\n${advice(report.culprits)}`;
   return {
-    title: 'The Mac is overloaded: 10db is holding new lanes and gates',
-    body: `The load average is ${String(Math.round(report.load))} on ${String(report.cores)} cores and has stayed above twice that for several minutes. 10db starts no new lane session or gate until it falls, and starts them again by itself then. Lanes and gates already running carry on.\n\n${what}`.trimEnd(),
-    foldKey: OVERLOAD_FOLD_KEY,
+    kind: StatusKind.AdmissionHold,
+    line: `Holding new lanes: the Mac is overloaded (load ${String(Math.round(report.load))} on ${String(report.cores)} cores)`,
+    details:
+      `The load average is ${String(Math.round(report.load))} on ${String(report.cores)} cores and has stayed above twice that for several minutes. 10db starts no new lane session or gate until it falls, and starts them again by itself then. Lanes and gates already running carry on.\n\n${what}`.trimEnd(),
+    culprits: report.culprits.map((c) => ({ name: c.command, cpuPct: Math.round(c.cpu) })),
   };
 }
 

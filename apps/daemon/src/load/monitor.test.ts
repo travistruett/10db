@@ -17,6 +17,7 @@ import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
+import { createStatusService, type StatusService } from '../status';
 import type { ProcessRow, ProcessSnapshot } from './culprits';
 import type { LoadGuard } from './guard';
 import { createLaneTempDirs, createLoadMonitor, type LaneTempDirs } from './monitor';
@@ -36,6 +37,7 @@ let files: Record<number, string[]>;
 let tempDirs: LaneTempDirs;
 let cleared: number;
 let monitor: LoadGuard;
+let status: StatusService;
 
 const processes: ProcessSnapshot = {
   rows: () => Promise.resolve(rows),
@@ -54,6 +56,7 @@ beforeEach(() => {
   files = {};
   tempDirs = createLaneTempDirs();
   cleared = 0;
+  status = createStatusService({ clock, onChange: () => undefined });
   monitor = startMonitor();
 });
 
@@ -61,6 +64,7 @@ function startMonitor(): LoadGuard {
   return createLoadMonitor({
     state,
     inbox,
+    status,
     clock,
     logger: silentLogger,
     daemonPid: DAEMON_PID,
@@ -87,6 +91,7 @@ async function sampleFor(ms: number): Promise<void> {
   }
 }
 
+const statusLine = () => status.current().lines[0];
 const openCards = () => listInbox(base.db, { states: [InboxState.Open] });
 
 /** A lane STARTING with a live session whose process is `pid`. */
@@ -108,19 +113,21 @@ function runningLane(title: string, pid: number) {
   return seeded;
 }
 
-describe('the overload card', () => {
-  it('raises no card for a Mac that is fine', async () => {
+describe('the overload status line', () => {
+  it('shows no line for a Mac that is fine', async () => {
     await sampleFor(10 * MINUTE);
-    expect(openCards()).toEqual([]);
+    expect(status.current().lines).toEqual([]);
   });
 
-  it('raises one card once overloaded, and keeps it one however long it lasts', async () => {
+  it('shows one line once the hold has lasted 2 minutes, and no card', async () => {
     runningLane('Fix login', 900);
     load = 20 * CORES;
     await sampleFor(15 * MINUTE);
-    const cards = openCards();
-    expect(cards).toHaveLength(1);
-    expect(cards[0]?.title).toBe('The Mac is overloaded: 10db is holding new lanes and gates');
+    expect(status.current().lines).toHaveLength(1);
+    expect(status.current().lines[0]?.line).toBe(
+      'Holding new lanes: the Mac is overloaded (load 200 on 10 cores)',
+    );
+    expect(openCards()).toEqual([]);
   });
 
   it('names a busy process that belongs to a lane by its session', async () => {
@@ -130,8 +137,8 @@ describe('the overload card', () => {
       { pid: 901, ppid: 900, pgid: DAEMON_PID, cpu: 99, command: 'node spin.js' },
     ];
     load = 20 * CORES;
-    await sampleFor(5 * MINUTE);
-    expect(openCards()[0]?.body).toContain(
+    await sampleFor(7 * MINUTE);
+    expect(statusLine()?.details).toContain(
       'pid 901 (node spin.js) at 99% of a core: the lane for task "Fix login"',
     );
   });
@@ -142,8 +149,8 @@ describe('the overload card', () => {
     rows = [{ pid: 777, ppid: 1, pgid: 777, cpu: 99, command: 'sh loop.sh' }];
     files = { 777: ['/private/tmp/10db-abc123/loop.sh'] };
     load = 20 * CORES;
-    await sampleFor(5 * MINUTE);
-    expect(openCards()[0]?.body).toContain('the lane for task "Slow thing"');
+    await sampleFor(7 * MINUTE);
+    expect(statusLine()?.details).toContain('the lane for task "Slow thing"');
   });
 
   it('names a gate by the process group recorded for it', async () => {
@@ -153,8 +160,8 @@ describe('the overload card', () => {
     });
     rows = [{ pid: 3005, ppid: 1, pgid: 3000, cpu: 95, command: 'vitest' }];
     load = 20 * CORES;
-    await sampleFor(5 * MINUTE);
-    expect(openCards()[0]?.body).toContain('the gate for task "Gated"');
+    await sampleFor(7 * MINUTE);
+    expect(statusLine()?.details).toContain('the gate for task "Gated"');
   });
 
   it("names a pass's turn check by the process group recorded for it", async () => {
@@ -186,69 +193,59 @@ describe('the overload card', () => {
     });
     rows = [{ pid: 4002, ppid: 1, pgid: 4000, cpu: 95, command: 'tsc --noEmit' }];
     load = 20 * CORES;
-    await sampleFor(5 * MINUTE);
-    expect(openCards()[0]?.body).toContain('the UI Workbench check of pass "Polish"');
+    await sampleFor(7 * MINUTE);
+    expect(statusLine()?.details).toContain('the UI Workbench check of pass "Polish"');
   });
 
   it('says a process that is not 10db’s is not', async () => {
     runningLane('Fix login', 900);
     rows = [{ pid: 5, ppid: 1, pgid: 5, cpu: 99, command: 'ffmpeg -i in.mov' }];
     load = 20 * CORES;
-    await sampleFor(5 * MINUTE);
-    expect(openCards()[0]?.body).toContain('pid 5 (ffmpeg -i in.mov) at 99% of a core: not 10db’s');
+    await sampleFor(7 * MINUTE);
+    expect(statusLine()?.details).toContain(
+      'pid 5 (ffmpeg -i in.mov) at 99% of a core: not 10db’s',
+    );
   });
 
-  it('rewords the same card as the busy processes change', async () => {
-    seedProject(base);
+  it('rewords the same line as the busy processes change', async () => {
     load = 20 * CORES;
     rows = [{ pid: 5, ppid: 1, pgid: 5, cpu: 99, command: 'first' }];
-    await sampleFor(5 * MINUTE);
+    await sampleFor(7 * MINUTE);
     rows = [{ pid: 6, ppid: 1, pgid: 6, cpu: 99, command: 'second' }];
     await sampleFor(MINUTE);
-    const cards = openCards();
-    expect(cards).toHaveLength(1);
-    expect(cards[0]?.body).toContain('second');
-    expect(cards[0]?.body).not.toContain('first');
+    const lines = status.current().lines;
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.details).toContain('second');
+    expect(lines[0]?.details).not.toContain('first');
+    expect(lines[0]?.culprits).toEqual([{ name: 'second', cpuPct: 99 }]);
   });
 
-  it('withdraws the card when the load falls', async () => {
-    seedProject(base);
+  it('lets go of the hold when the load falls, and the line lingers then goes', async () => {
     load = 20 * CORES;
-    await sampleFor(5 * MINUTE);
-    expect(openCards()).toHaveLength(1);
+    await sampleFor(7 * MINUTE);
+    expect(status.current().lines).toHaveLength(1);
     load = 1;
     await sampleFor(MINUTE);
-    expect(openCards()).toEqual([]);
     expect(cleared).toBe(1);
+    expect(status.current().lines).toHaveLength(1);
+    await sampleFor(2 * MINUTE);
+    expect(status.current().lines).toEqual([]);
   });
 
-  it('raises a new card for a later overload', async () => {
-    seedProject(base);
-    load = 20 * CORES;
-    await sampleFor(5 * MINUTE);
-    load = 1;
-    await sampleFor(MINUTE);
-    load = 20 * CORES;
-    await sampleFor(5 * MINUTE);
-    expect(openCards()).toHaveLength(1);
-  });
-
-  it('withdraws, when 10db starts again, the card an overload left open before a restart', async () => {
+  it('withdraws, when 10db starts again, the card an overload left open before a restart', () => {
     const first = seedProject(base, { name: 'first' });
     const second = seedProject(base, { name: 'second' });
-    load = 20 * CORES;
-    await sampleFor(5 * MINUTE);
-    // An older stale card on another project, and an unrelated flag that must stay.
-    inbox.flag({
-      tier: 'ask',
-      urgency: 'high',
-      closesWhen: { by: 'answer' },
-      projectId: second.id,
-      workstreamId: null,
-      title: 'The Mac is overloaded: 10db is holding new lanes and gates',
-      body: 'stale',
-      foldKey: 'machine-overloaded',
-    });
+    for (const project of [first, second])
+      inbox.flag({
+        tier: 'status',
+        urgency: 'low',
+        closesWhen: { by: 'withdrawn', when: 'the load hold lifts (monitor)' },
+        projectId: project.id,
+        workstreamId: null,
+        title: 'The Mac is overloaded: 10db is holding new lanes and gates',
+        body: 'stale',
+        foldKey: 'machine-overloaded',
+      });
     inbox.flag({
       tier: 'ask',
       urgency: 'high',
@@ -260,29 +257,14 @@ describe('the overload card', () => {
       foldKey: 'something-else',
     });
     expect(openCards()).toHaveLength(3);
-    // The daemon restarts mid-overload and the load is normal after.
     monitor.stop();
-    load = 1;
     monitor = startMonitor();
     expect(openCards().map((c) => c.title)).toEqual(['Something else']);
+  });
+
+  it('holds with no project to show anything on, and raises no card at any time', async () => {
+    load = 20 * CORES;
     await sampleFor(10 * MINUTE);
-    expect(openCards().map((c) => c.title)).toEqual(['Something else']);
-  });
-
-  it('raises one card for an overload that is still on after a restart', async () => {
-    seedProject(base);
-    load = 20 * CORES;
-    await sampleFor(5 * MINUTE);
-    monitor.stop();
-    monitor = startMonitor();
-    expect(openCards()).toEqual([]);
-    await sampleFor(5 * MINUTE);
-    expect(openCards()).toHaveLength(1);
-  });
-
-  it('still holds, with no card, when there is no project to put it on', async () => {
-    load = 20 * CORES;
-    await sampleFor(5 * MINUTE);
     expect(monitor.overloaded).toBe(true);
     expect(openCards()).toEqual([]);
   });
