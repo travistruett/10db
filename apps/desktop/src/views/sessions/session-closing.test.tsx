@@ -132,6 +132,8 @@ describe('Sessions: close, archive and reopen', () => {
       for (const path of [...lost.uncommitted, ...lost.ignored])
         expect(within(dialog).getByText(path)).toBeTruthy();
       expect(dialog.textContent).toContain('Your commits stay on the branch.');
+      // The corner close button is named, or a screen reader reads it as nothing.
+      expect(within(dialog).getByRole('button', { name: 'Close' })).toBeTruthy();
       expect(chat.archived).toEqual([]);
       expect(rowNames()).toHaveLength(3);
       fireEvent.click(
