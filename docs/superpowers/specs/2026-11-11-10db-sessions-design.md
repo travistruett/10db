@@ -778,6 +778,8 @@ and Undo. **File as tasks** in the header is a prompt shortcut that asks the age
 
 ### 7.3 Writing in Your folder, and Do it
 
+> **Superseded** by `docs/superpowers/specs/2026-11-17-10db-sessions-simplified-design.md` (§1-§4: a session's first change asks where the work happens). Kept as the record of what was built before.
+
 **A chat writes in Your folder** (S2), as Claude Code does in a terminal.
 
 - **It writes while its turn holds the folder** (the folder hold, below), on a sandbox profile that follows the
@@ -963,6 +965,8 @@ uses, with a `scope` (all kept turns, or the last) for a pass of one's task. Bef
 already do (research T1), and the attended profile writes the checkout on both (§5.5).
 
 ### 7.4 What Do it never does
+
+> **Superseded** by `docs/superpowers/specs/2026-11-17-10db-sessions-simplified-design.md` (§1-§4: there is no Do It). Kept as the record of what was built before.
 
 - Hide what happens to uncommitted work in Your folder. The Do It sheet lists the changed files and says which
   rule applies **(call: the pass's existing rule wins; refusing a dirty folder would make "knock this out" fail on
