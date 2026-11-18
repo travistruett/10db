@@ -404,7 +404,14 @@ if [ "$mode" != apply ]; then
   fi
 
   step=download
-  gh run download "$run_id" --name "$artifact" --dir "$work/artifact"
+  # A download can fail on a passing network or GitHub error, and a failed update is not tried again
+  # until main moves, so it is tried once more; a second failure says what gh said.
+  if ! gh run download "$run_id" --name "$artifact" --dir "$work/artifact" 2> "$gh_err"; then
+    sleep "${TENDB_INSTALL_RETRY_SECONDS:-15}"
+    rm -rf "$work/artifact"
+    gh run download "$run_id" --name "$artifact" --dir "$work/artifact" 2> "$gh_err" \
+      || fail "gh could not download run $run_id's $artifact: $(cat "$gh_err")"
+  fi
 
   shopt -s nullglob
   dmgs=("$work/artifact"/*.dmg)
