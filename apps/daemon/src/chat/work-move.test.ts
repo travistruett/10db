@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConversationItemKind, parseItemBody, WorkPlace } from '@10db/contracts';
 import { getChat, listInbox, listItems, setChatWork } from '@10db/db';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { chatWorld, type ChatWorld } from '../../test/chat-world';
 import { gate } from '../../test/explore-world';
 import {
@@ -271,6 +271,19 @@ describe('moving a session to a new branch', () => {
     await w.work.moveSettled(chat.id);
     expect(getChat(w.state.db, chat.id).workPlace).toBe('branch');
     expect(w.engine.view(chat.conversationId).state).not.toBe('running');
+  });
+
+  it('goes back to choosing, with the error, when the session cannot be moved into its worktree', async () => {
+    moveWorld();
+    const chat = await choosingAfterARead();
+    vi.spyOn(w.engine, 'relocate').mockRejectedValue(new Error('the old session would not close'));
+    await w.work.choose(chat.id, 'branch');
+    await w.work.moveSettled(chat.id);
+    expect(getChat(w.state.db, chat.id)).toMatchObject({ workPlace: 'choosing', branch: null });
+    expect(w.work.moveFailure(chat.id)).toMatch(/would not close/);
+    // Its starts are released: a message runs.
+    w.chat.send(chat.conversationId, { text: 'still reading', mentions: [], pictures: [] });
+    await waitFor(() => (w.adapter.shapeSessions[0]?.sent.length ?? 0) >= 1);
   });
 
   it('goes back to choosing when the worktree cannot be made, with the error and the card again (row 24)', async () => {

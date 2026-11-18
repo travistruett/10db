@@ -283,7 +283,13 @@ export function createChatWorkService(deps: ChatWorkServiceDeps): ChatWorkServic
       }
       // A stopping daemon leaves the move for its restart: the row stays moving and the starts stay held.
       if (made === null) return;
-      await engine.relocate(chat.conversationId);
+      try {
+        await engine.relocate(chat.conversationId);
+      } catch (error) {
+        // The old session could not be closed, so the session is not in its worktree: back to where it was.
+        failMove(chat, project, error instanceof Error ? error.message : String(error), reopen);
+        return;
+      }
       const base = checkoutBranchNow(project.repoPath) ?? made.baseHead.slice(0, 7);
       const branch = chat.branch ?? '';
       const done = state.write((ctx) => {
@@ -302,7 +308,11 @@ export function createChatWorkService(deps: ChatWorkServiceDeps): ChatWorkServic
           });
         return true;
       });
-      if (!done) return;
+      if (!done) {
+        // The row changed under the move (it was archived, say): nothing more to finish, but the starts go back.
+        engine.releaseStarts(chat.conversationId);
+        return;
+      }
       if (!reopen) {
         deps.firstStartAfterMove.add(chatId);
         deps.carryOn(chatId, `The builder chose a new branch, ${branch}. Carry on.`);
