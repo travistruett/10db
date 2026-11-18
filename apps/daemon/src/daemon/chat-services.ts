@@ -18,6 +18,7 @@ import {
   ChatWorkConflict,
   type ChatService,
   type ChatWorkService,
+  type TitleRowGit,
   type StartGit,
 } from '../chat';
 import type { StateStore } from '../events';
@@ -40,6 +41,7 @@ export type ChatApiServices = Pick<
   | 'chooseChatWork'
   | 'chatWorkState'
   | 'chatChanges'
+  | 'chatCommit'
   | 'stopChatWaiting'
   | 'askChatBrief'
   | 'cancelChatBrief'
@@ -68,6 +70,8 @@ export function createChatApiServices(deps: {
   readonly git: StartGit;
   /** What a session changed, read from its root. */
   readonly changes: ChatChanges;
+  /** The title row's git steps. */
+  readonly titleRow: TitleRowGit;
   /** What the Do It sheet shows for a chat. */
   readonly doItPreview: (chatId: ChatId) => Promise<DoItPreviewDto>;
   /** Hands the chat's work on, in the place the request names. */
@@ -104,6 +108,7 @@ export function createChatApiServices(deps: {
     },
     chatWorkState: (id, signal) => deps.work.state(id, signal),
     chatChanges: (id) => deps.changes(id),
+    chatCommit: (id, request, signal) => deps.titleRow.commit(id, request, signal),
     stopChatWaiting(id) {
       chat.stopWaiting(id);
       return chat.get(id);

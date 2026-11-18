@@ -28,6 +28,7 @@ export {
   type ChatWorkStateDeps,
   type ChatWorkStateReader,
 } from './work-state';
+export { createTitleRowGit, type TitleRowGit, type TitleRowGitDeps } from './title-row-git';
 export { sessionStarts } from './session-starts';
 export { patchSessionsSettings, sessionsSettings, setSessionsSettings } from './settings';
 export { startFacts, type StartGit } from './start-facts';

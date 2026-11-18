@@ -243,6 +243,7 @@ import {
   chatRoot,
   createChatWorkService,
   createChatWorkStateReader,
+  createTitleRowGit,
   type ChatWorkService,
   doItHere,
   doItInCopy,
@@ -2473,6 +2474,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       folderHold,
       pendingOpens,
       changes: createChatChanges({ state, git }),
+      titleRow: createTitleRowGit({
+        state,
+        folderHold,
+        work: chatWork,
+        git,
+        gh: delivery.gh,
+        filesDir: (conversationId) => chatFolder(opts.dataDir, conversationId),
+        secretFilesOf: secretFilesIn,
+        net: () => ({
+          env: delivery.networkEnv(),
+          timeoutMs: delivery.limits.networkTimeoutMs,
+        }),
+      }),
       doItPreview: (chatId) => previewDoIt(doItDeps, chatId),
       doIt: (chatId, input) =>
         input.place === DoItPlace.Here

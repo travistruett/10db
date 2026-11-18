@@ -137,6 +137,7 @@ import {
   ChatCreateInput,
   ChatId,
   ArchiveRequest,
+  ChatCommitRequest,
   ChatWorkChoice,
   BriefRequest,
   DoItRequest,
@@ -819,6 +820,18 @@ export function createApp(deps: ApiDeps) {
       const answer = await deps.services.archiveChat(ChatId.parse(c.req.param('chatId')), request);
       return answer.archived ? c.json(answer.chat, 200) : c.json(answer.preview, 409);
     })
+    .post(
+      '/chats/:chatId/commit',
+      validator('json', (value): ChatCommitRequest => ChatCommitRequest.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.chatCommit(
+            ChatId.parse(c.req.param('chatId')),
+            c.req.valid('json'),
+            c.req.raw.signal,
+          ),
+        ),
+    )
     .get('/chats/:chatId/changes', async (c) =>
       c.json(await deps.services.chatChanges(ChatId.parse(c.req.param('chatId')))),
     )

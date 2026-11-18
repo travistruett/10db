@@ -8,6 +8,7 @@ import type {
   ChatWork,
   ArchivePreviewDto,
   ArchiveRequest,
+  ChatCommitRequest,
   ChatWorkChoice,
   ChatWorkStateDto,
   ChatId,
@@ -695,6 +696,12 @@ export interface ApiServices extends PlanRecordServices {
     id: ChatId,
     choice: ChatWorkChoice,
   ): Promise<{ readonly settled: boolean; readonly work: ChatWork }>;
+  /** The title row's Commit: the files given, in the session's own folder; answers the state after it. */
+  chatCommit(
+    id: ChatId,
+    request: ChatCommitRequest,
+    signal: AbortSignal,
+  ): Promise<ChatWorkStateDto>;
   /** What the session changed, for the drawer's Changes. */
   chatChanges(id: ChatId): Promise<WorkstreamChangesDto>;
   /** The git and GitHub facts the title row and the bar are drawn from; `signal` ends the GitHub read. */
