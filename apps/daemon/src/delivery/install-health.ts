@@ -6,6 +6,12 @@ import { z } from 'zod';
 /** The lockfile that says a project's packages are pnpm's. */
 export const PNPM_LOCKFILE = 'pnpm-lock.yaml';
 
+/**
+ * What the builder is told runs. The real command (`installCommand`) also fixes the program, the
+ * store and the directories, which the repository's own config could otherwise choose.
+ */
+export const INSTALL_SUMMARY = 'pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile';
+
 /** What pnpm records about an install in `node_modules/.modules.yaml`; only the store is read. */
 const ModulesState = z.looseObject({ storeDir: z.string().optional() });
 
@@ -58,7 +64,7 @@ const MAX_NAMED = 10;
 const DEPENDENCY_FIELDS = ['dependencies', 'devDependencies'] as const;
 
 /** A path inside the copy, relative, with no `..` that leaves it. */
-function insideCopy(importer: string): boolean {
+export function insideCopy(importer: string): boolean {
   if (isAbsolute(importer)) return false;
   const clean = normalize(importer);
   return clean !== '..' && !clean.startsWith('../');
@@ -98,21 +104,19 @@ function brokenLockfile(): InstallHealth {
 }
 
 /**
- * Whether the copy's packages are installed: for every workspace package the lockfile names, each
- * direct dependency must resolve from that package (its `node_modules` or one above it, inside the
- * copy, as Node looks) (`existsSync` follows the link,
- * so one that points into a pruned `.pnpm` fails). This is what the gate's tools need to start: the
- * run of 2026-11-03 left `.pnpm` with a fifth of its packages and `tsx` could not be found. It reads
- * the lockfile and the file system only; no program from the repository runs. An importer path
- * that leaves the copy is not looked at, since a lockfile is something a lane can write.
+ * The workspace packages the copy's lockfile names, each with its entry: null with no lockfile,
+ * `UNREADABLE` when it doesn't parse. An importer path that leaves the copy is dropped, since a
+ * lockfile is something a lane can write.
  */
-export function checkInstall(path: string): InstallHealth {
+function readImporters(
+  path: string,
+): (readonly [string, Record<string, unknown>])[] | null | typeof UNREADABLE {
   const lockfile = join(path, PNPM_LOCKFILE);
-  if (!existsSync(lockfile)) return { kind: 'not_pnpm' };
+  if (!existsSync(lockfile)) return null;
   let importers: Record<string, unknown>;
   try {
     const parsed = projectDocument(readFileSync(lockfile, 'utf8'));
-    if (parsed === UNREADABLE) return brokenLockfile();
+    if (parsed === UNREADABLE) return UNREADABLE;
     const found =
       typeof parsed === 'object' && parsed !== null
         ? (parsed as { importers?: unknown }).importers
@@ -123,14 +127,42 @@ export function checkInstall(path: string): InstallHealth {
         ? (found as Record<string, unknown>)
         : { '.': parsed };
   } catch {
-    return brokenLockfile();
+    return UNREADABLE;
   }
+  return Object.entries(importers).flatMap(([importer, entry]) =>
+    insideCopy(importer) && typeof entry === 'object' && entry !== null
+      ? [[importer, entry as Record<string, unknown>] as const]
+      : [],
+  );
+}
+
+/**
+ * The paths of the workspace packages the copy's lockfile names, inside the copy only; none when
+ * it has no lockfile or the lockfile can't be read.
+ */
+export function lockfileImporters(path: string): string[] {
+  const importers = readImporters(path);
+  return importers === null || importers === UNREADABLE ? [] : importers.map(([name]) => name);
+}
+
+/**
+ * Whether the copy's packages are installed: for every workspace package the lockfile names, each
+ * direct dependency must resolve from that package (its `node_modules` or one above it, inside the
+ * copy, as Node looks) (`existsSync` follows the link,
+ * so one that points into a pruned `.pnpm` fails). This is what the gate's tools need to start: the
+ * run of 2026-11-03 left `.pnpm` with a fifth of its packages and `tsx` could not be found. It reads
+ * the lockfile and the file system only; no program from the repository runs. An importer path
+ * that leaves the copy is not looked at, since a lockfile is something a lane can write.
+ */
+export function checkInstall(path: string): InstallHealth {
+  const importers = readImporters(path);
+  if (importers === null) return { kind: 'not_pnpm' };
+  if (importers === UNREADABLE) return brokenLockfile();
   let total = 0;
   const missing: string[] = [];
-  for (const [importer, entry] of Object.entries(importers)) {
-    if (!insideCopy(importer) || typeof entry !== 'object' || entry === null) continue;
+  for (const [importer, entry] of importers) {
     for (const field of DEPENDENCY_FIELDS) {
-      const names = (entry as Record<string, unknown>)[field];
+      const names = entry[field];
       if (typeof names !== 'object' || names === null) continue;
       for (const name of Object.keys(names)) {
         total += 1;

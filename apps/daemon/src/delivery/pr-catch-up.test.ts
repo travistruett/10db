@@ -132,7 +132,7 @@ describe('a shipped pull request that conflicts with its base', () => {
   describe('when the packages of the copy it merges in do not resolve', () => {
     const GENERATED = 'packages/contracts/generated';
 
-    /** Main's lockfile names left-pad, which every copy has until `pruned` removes it. */
+    /** Main's lockfile names left-pad, which every copy's install makes until `pruned` removes it. */
     function installable(): void {
       h.commit('.gitignore', 'node_modules/\n');
       h.commit(
@@ -149,10 +149,13 @@ describe('a shipped pull request that conflicts with its base', () => {
       );
       h.git$('push', '-q', 'origin', 'main');
       mkdirSync(join(h.repo, 'node_modules', 'left-pad'), { recursive: true });
+      // A pnpm copy's node_modules comes from its own install, not from the checkout's.
+      h.pnpm.makes({ 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
     }
 
-    /** No install brings left-pad back now: the copies seeded from the checkout lack it too. */
+    /** No install brings left-pad back now: the copy's own install lacks it too. */
     function pruned(batch: BatchDto): void {
+      h.pnpm.makesNothing();
       rmSync(join(h.repo, 'node_modules', 'left-pad'), { recursive: true });
       if (batch.worktreePath !== null)
         rmSync(join(batch.worktreePath, 'node_modules', 'left-pad'), {
