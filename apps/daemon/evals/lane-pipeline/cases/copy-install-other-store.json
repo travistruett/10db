@@ -1,0 +1,14 @@
+{
+  "id": "copy-install-other-store",
+  "title": "A copy's install starts over when its node_modules names another store",
+  "description": "Every new copy fails its first install with `ERR_PNPM_PACKAGE_MANAGER_REMOVE_MODULES_DIR … Operation not permitted`, so no batch can be cut. Each sandboxed install gets a pnpm store of its own in its run's temp dir. A new copy is seeded with a clone of the main checkout's `node_modules`, whose `.modules.yaml` names another store; pnpm then decides to remove `node_modules/.pnpm`, and the sandbox refuses. `refresh` in apps/daemon/src/delivery/worktree-dependencies.ts should also start over (remove `node_modules`) when `.modules.yaml` names a store other than the one the install is given, read through zod. A `node_modules` with no record, or a record naming no store, is kept, so the seed-clone tests still hold. Add the rule and why to docs/architecture/decisions/2026-11-03-a-broken-install-is-not-a-failed-gate.md.",
+  "acceptanceCriteria": [
+    "A copy whose node_modules was made from another store is installed from nothing, and the install succeeds in the sandbox",
+    "A node_modules with no .modules.yaml, or one naming no store, is kept",
+    "The broken-install decision states the rule and why"
+  ],
+  "areas": ["daemon", "repo"],
+  "baseCommit": "db9a11dd8e9d514584d6022f7833acb10b16435c",
+  "mergedCommit": "a793f191930d56295afd996ba54c38c48ad4031c",
+  "tags": []
+}

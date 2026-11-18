@@ -1,0 +1,11 @@
+{
+  "areas": [
+    { "name": "daemon", "globs": ["apps/daemon/**"] },
+    { "name": "desktop", "globs": ["apps/desktop/**"] },
+    { "name": "contracts", "globs": ["packages/contracts/**"] },
+    { "name": "db", "globs": ["packages/db/**"] },
+    { "name": "harness", "globs": ["packages/harness/**"] },
+    { "name": "agent-skill", "globs": ["packages/agent-skill/**"] },
+    { "name": "repo", "globs": ["**"], "catchAll": true }
+  ]
+}

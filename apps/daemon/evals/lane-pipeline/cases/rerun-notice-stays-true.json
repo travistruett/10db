@@ -1,0 +1,15 @@
+{
+  "id": "rerun-notice-stays-true",
+  "title": "A rerun notice stops saying 10db will run another check once no check is cancelled",
+  "description": "In apps/daemon/src/delivery/pr-watch.ts, followCancelled rewrites the rerun notice in the `cancelled.length === 0` branch only when `seen.notice === 'stopped'`. Example: round 1 runs 77 and 88 is refused as still running, so the stored notice is 'asking' and seen.notice is null. Then the builder reruns 88 by hand, or a read lists no cancelled check. The notice keeps saying 'Another cancelled run was still running, so 10db runs it as soon as GitHub allows' for the rest of the head, though nothing is left to run. The 'cleared' state already has true prose for this case. Also: `required.state === 'failing'` returns before that path, so with a required check failing and nothing cancelled the stale wording stays too; the function's doc comment says a failing check leaves reruns alone, so only correct the stored wording when `required.cancelled` is empty.",
+  "acceptanceCriteria": [
+    "After a read lists no cancelled check, a rerun notice that said 'asking' no longer says 10db runs another check as soon as GitHub allows",
+    "The record stays not done, so a run cancelled again on the same head is still asked for, also after a restart",
+    "With a required check failing and required.cancelled empty on the same head, a not-done rerun notice no longer says 10db will run a check, and a failing required check still starts no rerun",
+    "Tests cover an 'asking' notice whose cancelled check clears, and an 'asking' notice followed by a failing read with nothing cancelled"
+  ],
+  "areas": ["daemon"],
+  "baseCommit": "985eac845d898060c0347bfa047564bdfb08f4fa",
+  "mergedCommit": "1523dc0a4eda296397855fecc756ca25b13c277b",
+  "tags": []
+}
