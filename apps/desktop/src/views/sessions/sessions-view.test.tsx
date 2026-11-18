@@ -348,3 +348,24 @@ describe('Sessions: the panel', () => {
     expect(screen.getAllByRole('option').length).toBeLessThan(250);
   });
 });
+
+describe('Sessions: Make a Board Task… from a row of another project', () => {
+  it('selects that row’s project before the Board opens, so the task is filed there', async () => {
+    const mine = chatDto({ projectId: ampsio.id, title: 'Mine', tabPosition: 0 });
+    const theirs = chatDto({ projectId: billing.id, title: 'Theirs', tabPosition: 1 });
+    const { router } = open(`/sessions?chat=${mine.id}`, { chats: [mine, theirs] }, [
+      http.get(daemonUrl('/projects/:projectId/board-columns'), () => HttpResponse.json([])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+    ]);
+    await screen.findByRole('textbox', { name: 'Message' });
+    const row = (await screen.findAllByRole('option')).find((o) =>
+      o.getAttribute('aria-label')?.startsWith('Theirs'),
+    );
+    fireEvent.contextMenu(row ?? document.body);
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Make a Board Task…' }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/board');
+    });
+    expect(JSON.parse(localStorage.getItem('tendb.project') ?? 'null')).toBe(billing.id);
+  });
+});

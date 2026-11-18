@@ -218,6 +218,8 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
 
   const makeTask = (row: PanelRow): void => {
     if (row.kind !== 'chat') return;
+    // The Board files in the selected project, which a right-click on another project's row left alone.
+    select(row.chat.projectId);
     void navigate({ to: '/board', search: { newTask: row.chat.title } });
   };
 
