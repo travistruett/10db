@@ -23,6 +23,9 @@ export interface WorkBarProps {
   readonly error: string | null;
 }
 
+/** The holder's sentence as a clause: the daemon writes it with a backticked branch and a closing period. */
+const holderWords = (holder: string): string => holder.replaceAll('`', '').replace(/\.$/, '');
+
 const files = (n: number): string => `${String(n)} uncommitted ${n === 1 ? 'file' : 'files'}`;
 
 /** What a choice that lost to another says: the place that won. */
@@ -109,7 +112,7 @@ export function WorkBar({
       )}
       {holder === null ? null : (
         <Text size="xs" c="dimmed">
-          {holder}; this session will wait for it.
+          {holderWords(holder)}; this session will wait for it.
         </Text>
       )}
       {refusal === null ? null : (

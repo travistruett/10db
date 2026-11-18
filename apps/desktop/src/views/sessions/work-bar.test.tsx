@@ -91,7 +91,8 @@ describe('the bar that asks where the work happens', () => {
 
   it('says a Board task holds the checkout and follows the holder as it changes', async () => {
     const { setState, queryClient } = openChoosing({
-      state: { holder: 'A Board task is changing files on main' },
+      // The daemon's own sentence: backticked branch, closing period.
+      state: { holder: 'A Board task is changing files on `main`.' },
     });
     expect(
       await screen.findByText(
