@@ -235,15 +235,14 @@ describe('the folder and a chat that meets it held', () => {
     expect(w.folderHold.waiting(chat.id)).toBe(false);
   });
 
-  it('runs a send with folder read_only at once, and without one', async () => {
+  it('runs a send with no folder choice at once', async () => {
     w = chatWorld();
     runningTask('Bump vite');
     const chat = w.open();
-    await send(chat.conversationId, { folder: 'read_only' });
+    await send(chat.conversationId, {});
     expect((await live(chat.conversationId)).waitingForFolder).toBe(false);
     await w.engine.settled(chat.conversationId);
     expect(w.adapter.shapeSessions).toHaveLength(1);
-    await send(chat.conversationId, {});
     await w.engine.settled(chat.conversationId);
     expect(w.folderHold.waiting(chat.id)).toBe(false);
   });
@@ -265,10 +264,10 @@ describe('the folder and a chat that meets it held', () => {
     expect(w.folderHold.waiting(chat.id)).toBe(true);
   });
 
-  it('refuses a folder choice that is neither wait nor read_only', async () => {
+  it.each(['now', 'read_only'])('refuses a folder choice that is not wait: %s', async (folder) => {
     w = chatWorld();
     const chat = w.open();
-    expect((await send(chat.conversationId, { folder: 'now' })).status).toBe(400);
+    expect((await send(chat.conversationId, { folder })).status).toBe(400);
   });
 
   it('answers stop-waiting for a chat that waits for nothing with the chat, and starts nothing', async () => {
