@@ -31,6 +31,8 @@ export const JudgeDecision = {
   TaskKinds: 'task_kinds',
   /** Trust: does a tool call cross one of the four limits, where Claude Code's auto mode doesn't judge it? */
   CrossesLimit: 'crosses_limit',
+  /** Delivery: does a test a step added earn its place, or duplicate or fold into one that exists? */
+  TestValue: 'test_value',
 } as const;
 export type JudgeDecision = (typeof JudgeDecision)[keyof typeof JudgeDecision];
 
@@ -85,6 +87,7 @@ export const JudgeConfig = z.object({
     [JudgeDecision.TaskRigor]: shapeDecision(),
     [JudgeDecision.TaskKinds]: shapeDecision(),
     [JudgeDecision.CrossesLimit]: shapeDecision(),
+    [JudgeDecision.TestValue]: shapeDecision(),
   }),
 });
 export type JudgeConfig = z.infer<typeof JudgeConfig>;
@@ -106,6 +109,7 @@ export const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
     [JudgeDecision.TaskRigor]: { ...DEFAULT_DECISION },
     [JudgeDecision.TaskKinds]: { ...DEFAULT_DECISION },
     [JudgeDecision.CrossesLimit]: { ...DEFAULT_DECISION },
+    [JudgeDecision.TestValue]: { ...DEFAULT_DECISION },
   },
 };
 
@@ -151,6 +155,7 @@ export const JudgeConfigPatch = z
         [JudgeDecision.TaskRigor]: JudgeDecisionConfigPatch,
         [JudgeDecision.TaskKinds]: JudgeDecisionConfigPatch,
         [JudgeDecision.CrossesLimit]: JudgeDecisionConfigPatch,
+        [JudgeDecision.TestValue]: JudgeDecisionConfigPatch,
       })
       .partial()
       .strict(),
