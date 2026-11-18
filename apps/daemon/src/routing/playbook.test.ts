@@ -28,6 +28,7 @@ const row = (rigor: Rigor, ...steps: StepRole[]): PlaybookRowOverride => ({
   reviewRounds: null,
   fixBy: null,
   approvesPlan: null,
+  plansInBuild: null,
   ships: null,
 });
 const processRow = (
@@ -39,6 +40,7 @@ const processRow = (
   reviewRounds: null,
   fixBy: null,
   approvesPlan: null,
+  plansInBuild: null,
   ships: null,
   ...process,
 });
@@ -158,6 +160,52 @@ describe('resolveSteps: which steps run', () => {
   it('ignores a kind key no kind has', () => {
     expect(roles(resolve(Rigor.Light, scopes(), [], ['gone']))).toEqual(['implement']);
   });
+
+  const plansInBuild = (rigor: Rigor, fields: Partial<PlaybookRowOverride> = {}) =>
+    scopes({ rows: [processRow(rigor, { plansInBuild: true, ...fields })] });
+  const shape = (steps: { role: StepRole; plansFirst: boolean }[]) =>
+    steps.map((s) => (s.plansFirst ? `${s.role}(plans first)` : s.role));
+
+  it.each([
+    {
+      name: 'Careful with the setting off runs its Plan step as before',
+      rigor: Rigor.Careful,
+      playbook: scopes(),
+      kinds: [],
+      want: ['plan', 'implement', 'review'],
+    },
+    {
+      name: 'Careful with the setting on drops the Plan step and the build plans first',
+      rigor: Rigor.Careful,
+      playbook: plansInBuild(Rigor.Careful),
+      kinds: [],
+      want: ['implement(plans first)', 'review'],
+    },
+    {
+      name: 'Critical with the setting on keeps its Plan and Plan Review',
+      rigor: Rigor.Critical,
+      playbook: plansInBuild(Rigor.Critical),
+      kinds: [],
+      want: ['plan', 'plan_review', 'implement', 'review', 'qa'],
+    },
+    {
+      name: 'Careful with the setting on keeps the Plan the builder approves',
+      rigor: Rigor.Careful,
+      playbook: plansInBuild(Rigor.Careful, { approvesPlan: true }),
+      kinds: [],
+      want: ['plan', 'implement', 'review'],
+    },
+    {
+      name: 'Careful with the setting on keeps the Plan a kind’s plan review judges',
+      rigor: Rigor.Careful,
+      playbook: plansInBuild(Rigor.Careful),
+      kinds: ['migration'],
+      want: ['plan', 'plan_review', 'implement', 'review'],
+    },
+  ])('$name', ({ rigor, playbook, kinds, want }) => {
+    const all = [kind('migration', { addsSteps: [StepRole.PlanReview] })];
+    expect(shape(resolve(rigor, playbook, all, kinds))).toEqual(want);
+  });
 });
 
 describe('resolveSteps: what a step gets', () => {
@@ -182,6 +230,7 @@ describe('resolveSteps: what a step gets', () => {
       need: 40,
       fallback: { tier: 'capable', top: false, effort: 'high' },
       pinned: false,
+      plansFirst: false,
     });
   });
 
@@ -412,7 +461,20 @@ describe('rowProcess: project, then global, then default, field by field', () =>
       playbook: scopes({ rows: [processRow(Rigor.Critical, { reviewRounds: 0 })] }),
       want: { reviewRounds: 1, fixBy: 'resumed', approvesPlan: false, ships: 'with_goal' },
     },
+    {
+      name: 'a project row planning in the Build session',
+      rigor: Rigor.Careful,
+      playbook: scopes({}, { rows: [processRow(Rigor.Careful, { plansInBuild: true })] }),
+      want: {
+        reviewRounds: 2,
+        fixBy: 'fresh',
+        approvesPlan: false,
+        plansInBuild: true,
+        ships: 'alone',
+      },
+    },
   ])('$name', ({ rigor, playbook, want }) => {
-    expect(rowProcess(rigor, playbook)).toEqual(want);
+    // Every rigor plans in a separate Plan step until a scope says otherwise.
+    expect(rowProcess(rigor, playbook)).toEqual({ plansInBuild: false, ...want });
   });
 });

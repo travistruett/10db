@@ -79,6 +79,7 @@ function routedStep(step: ResolvedStep, input: PlanInput, reviewRounds: number):
     earlier: [],
     sentBack: 0,
     ...(REVIEW_ROLES.includes(step.role) ? { reviewRounds } : {}),
+    ...(step.plansFirst ? { plansFirst: true as const } : {}),
     setting: choice.setting,
     // With nothing to run on, the step names the tier and has no profile; the launcher never starts a tier name.
     profileId: choice.profile?.id ?? null,
