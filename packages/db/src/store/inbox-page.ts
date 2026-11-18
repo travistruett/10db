@@ -5,27 +5,22 @@ import {
   InboxSort,
   inboxRowSort,
   InboxState,
-  SendState,
   SortDirection,
   type InboxPageDto,
   type InboxPageQuery,
   type InboxRowRef,
 } from '@10db/contracts';
-import { and, asc, count, desc, eq, exists, inArray, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, exists, sql, type SQL } from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import * as schema from '../schema';
 import { INBOX_URGENCY_ORDER, toInboxItemDto } from './inbox';
+import { openRowsPage, type InboxPlacement } from './inbox-open-rows';
+import { SENT_AT, sendIsOut } from './inbox-sql';
 import type { DbReader } from './store';
 
 const items = schema.inboxItems;
 const sends = schema.stakeholderSends;
 const sendPeople = schema.stakeholderSendPeople;
-
-/** A card has at most one send in these states: the one it shows. */
-const LIVE_SEND_STATES = [SendState.Draft, SendState.Sending, SendState.Sent];
-
-/** The send is out with someone: sent, and not brought back by a timer or a disagreement. */
-const sendIsOut = and(eq(sends.state, SendState.Sent), isNull(sends.returnedAt));
 
 /** The `$."key"` path of one key of a card's detail. */
 const detailPath = (key: string, field: string) => `$."${key}"."${field}"`;
@@ -42,10 +37,6 @@ const OUTCOME = sql`CASE
     THEN ${InboxOutcome.TenDb}
   ELSE ${InboxOutcome.Answered}
 END`;
-
-/** When the card's live send went out; null for a card with none. */
-const SENT_AT = sql`(SELECT ${sends.sentAt} FROM ${sends}
-  WHERE ${sends.inboxItemId} = ${items.id} AND ${inArray(sends.state, LIVE_SEND_STATES)})`;
 
 function whereOf(db: DbReader, q: InboxPageQuery): SQL | undefined {
   const where: (SQL | undefined)[] = [
@@ -119,7 +110,12 @@ function orderOf(q: InboxPageQuery): SQL[] {
  * One page of the inbox's cards and how many match in all, filtered, sorted and counted in the query.
  * A page past the last answers the last.
  */
-export function pageInbox(db: DbReader, q: InboxPageQuery): InboxPageDto {
+export function pageInbox(
+  db: DbReader,
+  q: InboxPageQuery,
+  placement: InboxPlacement,
+): InboxPageDto {
+  if (q.state === InboxListState.Open) return openRowsPage(db, q, placement);
   const where = whereOf(db, q);
   const total = db.select({ n: count() }).from(items).where(where).get()?.n ?? 0;
   const page = Math.min(q.page ?? 1, Math.max(1, Math.ceil(total / q.pageSize)));

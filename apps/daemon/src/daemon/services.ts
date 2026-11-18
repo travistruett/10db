@@ -740,7 +740,7 @@ export function createServices(deps: {
       return ws;
     },
     listInbox: ({ states }) => listInbox(db, states ? { states } : {}),
-    pageInbox: (query) => pageInbox(db, query),
+    pageInbox: (query) => pageInbox(db, query, { waitingOut: false }),
     answerInbox(id, answer) {
       const item = deps.inbox.answer(id, answer);
       deps.scheduler.requestTick();

@@ -111,7 +111,7 @@ function send(id: InboxItemId, recipients: PersonId[], returned = false) {
 
 /** Every answer's rows mirror its items: one row per card, keyed by its id, with no next page. */
 const page = (query: Record<string, string>) => {
-  const answer = pageInbox(store.db, InboxPageQuery.parse(query));
+  const answer = pageInbox(store.db, InboxPageQuery.parse(query), { waitingOut: false });
   expect(answer.rows.map((row) => row.key)).toEqual(answer.items.map((item) => item.id));
   expect(answer.rows.map((row) => row.ids)).toEqual(answer.items.map((item) => [item.id]));
   expect(answer.rows.map((row) => row.passId)).toEqual(answer.items.map(() => null));
