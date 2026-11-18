@@ -60,13 +60,16 @@ Follow these steps in order on a new computer. Each one says how to check it wor
    make setup
    ```
    It first asks whether to install Rust (the question comes first so you can walk away
-   afterwards), then installs the pinned tools (Node, pnpm, gitleaks, actionlint, zizmor and
-   cargo-deny, plus Rust if you said yes), then runs `pnpm install`, which also installs the git
-   hooks (lefthook). The `INSTALL_RUST=yes|no` switch answers the Rust question in advance, for
-   example `INSTALL_RUST=yes make setup`. Rust is a download of about 1 GB; without it the desktop
-   shell can't build, and `make gate` reports `rust skipped`. Plain `mise install && pnpm install`
-   also works, but `mise install` installs every tool in `mise.toml`, Rust included, without
-   asking. `mise.toml` holds the pins and `mise.lock` their checksums.
+   afterwards), then installs the pinned tools (Node, pnpm, gitleaks, actionlint, zizmor,
+   cargo-deny and lefthook, plus Rust if you said yes), installs the git hooks with mise's
+   lefthook, and runs `pnpm install`. Each hook names the lefthook that installed it, so it names
+   mise's copy, which lies outside every checkout; `pnpm install` never touches the hooks. The
+   `INSTALL_RUST=yes|no` switch answers the Rust question in advance, for example
+   `INSTALL_RUST=yes make setup`. Rust is a download of about 1 GB; without it the desktop shell
+   can't build, and `make gate` reports `rust skipped`. Plain
+   `mise install && lefthook install && pnpm install` also works, but `mise install` installs
+   every tool in `mise.toml`, Rust included, without asking. `mise.toml` holds the pins and
+   `mise.lock` their checksums. After a lefthook bump in `mise.toml`, rerun `make setup`.
 10. **Verify.** `node --version` prints `v26.11.1`, and `make gate` runs every check and ends with
     `GATE PASS`. With Rust installed, the first `make gate` compiles about 400 crates and takes
     several minutes; later runs are fast. `make check` is the fast version for what you changed.
@@ -98,6 +101,8 @@ Follow these steps in order on a new computer. Each one says how to check it wor
 13. **Troubleshooting.**
     - A hook can't find a tool (`gitleaks: command not found`, `pnpm: command not found`): mise
       isn't activated in that shell. Redo step 7, or run `mise doctor`.
+    - A commit prints `Can't find lefthook in PATH` and runs no hook: the hooks name a lefthook
+      that is gone. Run `mise install lefthook && lefthook install` in the repository root.
     - `mise` reports that `mise.toml` is not trusted: run `mise trust` in the repository root.
     - `ERR_PNPM_IGNORED_BUILDS` during `pnpm install`: a new dependency has an install script.
       Add an `allowBuilds` entry for it in `pnpm-workspace.yaml`, `true` only if the package needs

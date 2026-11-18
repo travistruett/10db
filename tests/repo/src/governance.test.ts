@@ -682,7 +682,7 @@ describe('the new-machine setup checklist', () => {
       'mise trust',
       'make setup',
       'INSTALL_RUST=yes|no',
-      'mise install && pnpm install',
+      'mise install && lefthook install && pnpm install',
       'v26.11.1',
       'GATE PASS',
       'pnpm dev',
@@ -693,6 +693,8 @@ describe('the new-machine setup checklist', () => {
       'app.10db.desktop.dev',
       '.dev/data',
       'beside an installed 10db',
+      "Can't find lefthook in PATH",
+      'mise install lefthook && lefthook install',
       'ERR_PNPM_IGNORED_BUILDS',
       'allowBuilds',
     ];
