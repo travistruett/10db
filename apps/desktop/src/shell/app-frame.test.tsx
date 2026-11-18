@@ -164,10 +164,15 @@ describe('the sidebar and ⇧⌘S', () => {
     renderApp('/board');
     const button = await screen.findByRole('button', { name: 'Toggle sidebar' });
     fireEvent.mouseEnter(button);
-    expect((await screen.findByRole('tooltip')).textContent).toContain('Toggle sidebar');
+    // The button names its tip while the tip is open.
+    await waitFor(() => {
+      expect(button.getAttribute('aria-describedby')).not.toBeNull();
+    });
+    // It stays while the pointer is on the button, so it is the click that removes it.
+    expect(button.getAttribute('aria-describedby')).not.toBeNull();
     fireEvent.click(button);
-    // At once: a tip that fades out on its own timer would also pass a wait.
-    expect(screen.queryByRole('tooltip')).toBeNull();
+    // At once: a tip that closes on its own timer would also pass a wait.
+    expect(button.getAttribute('aria-describedby')).toBeNull();
   });
 
   it('takes the Esc that closes a sheet, so a view behind it does not act on the same key', async () => {

@@ -1,7 +1,14 @@
 import { Box, Tooltip, ActionIcon } from '@mantine/core';
 import { IconLayoutSidebar } from '@tabler/icons-react';
 import { useRouterState } from '@tanstack/react-router';
-import { useCallback, useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import { FrameSlotsContext, type FrameSlots } from './frame-slots';
 import { usePanelHidden } from './panel-hidden';
 import { Rail } from './rail';
@@ -18,6 +25,8 @@ const PANEL_WIDTH = 260;
 /** The hairline that ends a sidebar column, in addition to its width. */
 const HAIRLINE = 1;
 const TITLE_ROW_HEIGHT = 44;
+/** How long the pointer rests on the toggle before its tip shows. */
+const TOGGLE_TIP_DELAY = 300;
 /** Where a title lines up with the content's padding. */
 const CONTENT_PADDING = 24;
 /** Where the title starts when the traffic lights and the sidebar toggle sit on the content's own tone. */
@@ -54,6 +63,26 @@ export function AppFrame({
   const [drawerHost, setDrawerHost] = useState<HTMLElement | null>(null);
   const [panelSection, setPanelSection] = useState<RailSection | null>(null);
   const [scrolled, setScrolled] = useState(false);
+  // The toggle's tip is held by hand: it opens after a hover delay, and a click (or leaving) closes it,
+  // which Mantine's own hover tip does not do on a click.
+  const [toggleTip, setToggleTip] = useState(false);
+  const toggleTipTimer = useRef<number | undefined>(undefined);
+  const showToggleTip = (): void => {
+    window.clearTimeout(toggleTipTimer.current);
+    toggleTipTimer.current = window.setTimeout(() => {
+      setToggleTip(true);
+    }, TOGGLE_TIP_DELAY);
+  };
+  const hideToggleTip = (): void => {
+    window.clearTimeout(toggleTipTimer.current);
+    setToggleTip(false);
+  };
+  useEffect(
+    () => () => {
+      window.clearTimeout(toggleTipTimer.current);
+    },
+    [],
+  );
   // What was opened over the content and where: moving anywhere (a row picked, a section opened) closes it.
   const [opened, setOpened] = useState<{ at: string; kind: SidebarSheet } | null>(null);
   // A sheet belongs to the page it was opened on and to the sheet bands: moving on, or growing to a window
@@ -180,13 +209,7 @@ export function AppFrame({
             inert={layout.panel === 'hidden'}
             data-panel={layout.panel}
           />
-          <Tooltip
-            label="Toggle sidebar ⇧⌘S"
-            position="bottom"
-            openDelay={300}
-            // Not on focus: a click leaves focus on the button, which would keep the tip over what it changed.
-            events={{ hover: true, focus: false, touch: false }}
-          >
+          <Tooltip label="Toggle sidebar ⇧⌘S" position="bottom" opened={toggleTip}>
             <ActionIcon
               className={classes['toggle']}
               style={toggleBeside ? { left: 80, top: 8 } : { left: 24, top: 48 }}
@@ -196,7 +219,10 @@ export function AppFrame({
               aria-label="Toggle sidebar"
               // A wide window's toggle flips labels and discloses nothing; otherwise it opens the sidebar sheet.
               aria-expanded={band === ShellBand.Wide ? undefined : sheet !== null}
+              onMouseEnter={showToggleTip}
+              onMouseLeave={hideToggleTip}
               onClick={() => {
+                hideToggleTip();
                 toggleSidebar();
               }}
             >
