@@ -26,6 +26,10 @@ const TITLE_START_CLEAR_OF_BUTTON = 112;
 /** The surface's inner left edge, which a title lines up with. */
 const SURFACE_PADDING = 24;
 
+/** An open menu or list of options takes Esc first, so the overlay around it stays open. */
+const aMenuIsOpen = (): boolean =>
+  document.querySelector('[aria-haspopup][aria-expanded="true"]') !== null;
+
 /**
  * The window's frame, in place of a header and a sidebar: a rail, an optional panel, a title row beside
  * the traffic lights, and one rounded surface that holds the view. Views draw into the title row and the
@@ -81,13 +85,15 @@ export function AppFrame({
         if (!buttonShown) return;
         event.preventDefault();
         toggleSidebar();
-      } else if (event.key === 'Escape' && overlayOpen) {
+      } else if (event.key === 'Escape' && overlayOpen && !aMenuIsOpen()) {
         setOpenedAt(null);
       }
     };
-    document.addEventListener('keydown', onKeyDown);
+    // Capture, because a tooltip stops Esc from bubbling while it shows: a tooltip over the sidebar button
+    // would otherwise take the first Esc for itself and leave the overlay open.
+    document.addEventListener('keydown', onKeyDown, true);
     return () => {
-      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('keydown', onKeyDown, true);
     };
   });
 

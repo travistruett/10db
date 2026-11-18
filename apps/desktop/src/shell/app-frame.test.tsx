@@ -160,6 +160,25 @@ describe('the panel and ⌘\\', () => {
     });
   });
 
+  it("closes the overlay on the first Esc while the sidebar button's tooltip shows", async () => {
+    viewportWidth(800);
+    server.use(...baseHandlers());
+    renderApp('/settings/general');
+    const panel = await findPanel();
+    const button = screen.getByRole('button', { name: 'Show the panel' });
+    fireEvent.click(button);
+    await waitFor(() => {
+      expect(panel.dataset['panel']).toBe('overlay');
+    });
+    // The pointer still rests on the button, so its tooltip opens; the tooltip swallows Esc for itself.
+    fireEvent.mouseEnter(button);
+    await screen.findByRole('tooltip');
+    fireEvent.keyDown(button, { key: 'Escape' });
+    await waitFor(() => {
+      expect(panel.dataset['panel']).toBe('hidden');
+    });
+  });
+
   it('folds the rail too under 640 px, and the button opens both', async () => {
     viewportWidth(480);
     server.use(...baseHandlers());
