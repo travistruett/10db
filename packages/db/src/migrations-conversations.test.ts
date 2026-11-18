@@ -368,89 +368,97 @@ describe('migration 0076, the conversation copy', () => {
   it('makes one conversation per shape and per task with a thread, under its owner’s uuid', () => {
     const fields =
       'id, project_id, owner_kind, owner_id, profile, account_id, model, provider_session_id, state, next_seq';
-    expect(
-      rows(Conv, `SELECT ${fields} FROM conversations ORDER BY owner_kind, created_at`),
-    ).toEqual([
-      {
-        id: cnv(S1),
-        project_id: P,
-        owner_kind: 'shape',
-        owner_id: S1,
-        profile: 'explore',
-        account_id: B,
-        model: 'claude-opus-5-5',
-        provider_session_id: 'sdk-1',
-        state: 'idle_cold',
-        next_seq: 13,
-      },
-      {
-        id: cnv(S2),
-        project_id: P,
-        owner_kind: 'shape',
-        owner_id: S2,
-        profile: 'explore',
-        account_id: A,
-        model: null,
-        provider_session_id: null,
-        state: 'idle_cold',
-        next_seq: 1,
-      },
-      {
-        id: cnv(S3),
-        project_id: P2,
-        owner_kind: 'shape',
-        owner_id: S3,
-        profile: 'explore',
-        account_id: B,
-        model: null,
-        provider_session_id: null,
-        state: 'idle_cold',
-        next_seq: 4,
-      },
-      {
-        id: cnv(T1),
-        project_id: P,
-        owner_kind: 'task',
-        owner_id: T1,
-        profile: 'lane',
-        account_id: A,
-        model: null,
-        provider_session_id: null,
-        state: null,
-        next_seq: 5,
-      },
-      {
-        id: cnv(T3),
-        project_id: P,
-        owner_kind: 'task',
-        owner_id: T3,
-        profile: 'lane',
-        account_id: B,
-        model: null,
-        provider_session_id: null,
-        state: null,
-        next_seq: 3,
-      },
-    ]);
+    expect
+      .soft(rows(Conv, `SELECT ${fields} FROM conversations ORDER BY owner_kind, created_at`))
+      .toEqual([
+        {
+          id: cnv(S1),
+          project_id: P,
+          owner_kind: 'shape',
+          owner_id: S1,
+          profile: 'explore',
+          account_id: B,
+          model: 'claude-opus-5-5',
+          provider_session_id: 'sdk-1',
+          state: 'idle_cold',
+          next_seq: 13,
+        },
+        {
+          id: cnv(S2),
+          project_id: P,
+          owner_kind: 'shape',
+          owner_id: S2,
+          profile: 'explore',
+          account_id: A,
+          model: null,
+          provider_session_id: null,
+          state: 'idle_cold',
+          next_seq: 1,
+        },
+        {
+          id: cnv(S3),
+          project_id: P2,
+          owner_kind: 'shape',
+          owner_id: S3,
+          profile: 'explore',
+          account_id: B,
+          model: null,
+          provider_session_id: null,
+          state: 'idle_cold',
+          next_seq: 4,
+        },
+        {
+          id: cnv(T1),
+          project_id: P,
+          owner_kind: 'task',
+          owner_id: T1,
+          profile: 'lane',
+          account_id: A,
+          model: null,
+          provider_session_id: null,
+          state: null,
+          next_seq: 5,
+        },
+        {
+          id: cnv(T3),
+          project_id: P,
+          owner_kind: 'task',
+          owner_id: T3,
+          profile: 'lane',
+          account_id: B,
+          model: null,
+          provider_session_id: null,
+          state: null,
+          next_seq: 3,
+        },
+      ]);
   });
 
-  it('gives each conversation exactly its owner’s rows, numbered 1…n in their old order', () => {
+  it('gives each conversation exactly its owner’s rows, numbered 1…n in their old order, each Plan row as shapeItemOf and each thread row as taskItemOf maps it', () => {
     const owned = (owner: IdOf<'Shape'> | IdOf<'Task'>) => [
       ...shapeRows.filter((m) => m.shapeId === owner).map((m) => m.id),
       ...taskRows.filter((m) => m.taskId === owner).map((m) => m.id),
     ];
     for (const owner of [S1, S3, T1, T3]) {
       const items = itemsOf(cnv(owner));
-      expect(items.map((i) => i.id)).toEqual(owned(owner));
-      expect(items.map((i) => i.seq)).toEqual(owned(owner).map((_, n) => n + 1));
+      expect
+        .soft(
+          items.map((i) => i.id),
+          owner,
+        )
+        .toEqual(owned(owner));
+      expect
+        .soft(
+          items.map((i) => i.seq),
+          owner,
+        )
+        .toEqual(owned(owner).map((_, n) => n + 1));
     }
-    expect(itemsOf(cnv(S2))).toEqual([]);
-    expect(column('SELECT count(*) FROM conversation_items')).toEqual([
-      shapeRows.length + taskRows.length,
-    ]);
-  });
-
-  it('copies each Plan row as shapeItemOf maps it, and builder messages as delivered at their time', () => {
+    expect.soft(itemsOf(cnv(S2))).toEqual([]);
+    expect
+      .soft(column('SELECT count(*) FROM conversation_items'))
+      .toEqual([shapeRows.length + taskRows.length]);
+    // A Plan row as shapeItemOf maps it, and a builder message as delivered at its time.
     const copied = new Map(
       itemsOf(cnv(S1))
         .concat(itemsOf(cnv(S3)))
@@ -458,45 +466,46 @@ describe('migration 0076, the conversation copy', () => {
     );
     for (const m of shapeRows) {
       const item = copied.get(m.id);
-      expect(item).toMatchObject({ ...shapeItemOf(m, m.id), created_at: m.createdAt });
-      expect(item?.delivered_at).toBe(
-        m.author === 'builder' && m.kind === 'text' ? m.createdAt : null,
-      );
-      expect(item).toMatchObject({ turn_id: null, pushed_at: null, push_uuids: [] });
+      const label = `${m.author}/${m.kind}: ${m.body.slice(0, 40)}`;
+      expect.soft(item, label).toMatchObject({ ...shapeItemOf(m, m.id), created_at: m.createdAt });
+      expect
+        .soft(item?.delivered_at, label)
+        .toBe(m.author === 'builder' && m.kind === 'text' ? m.createdAt : null);
+      expect.soft(item, label).toMatchObject({ turn_id: null, pushed_at: null, push_uuids: [] });
     }
-    expect(itemsOf(cnv(S1)).map((i) => `${i.author}/${i.kind}`)).toEqual([
-      'builder/message',
-      'agent/agent_message',
-      'agent/tool_call',
-      'system/notice',
-      'system/digest',
-      'system/shape_event',
-      'system/shape_event',
-      'system/shape_event',
-      'system/shape_event',
-      'agent/shape_event',
-      'agent/tool_call',
-      'agent/tool_call',
-    ]);
+    expect
+      .soft(itemsOf(cnv(S1)).map((i) => `${i.author}/${i.kind}`))
+      .toEqual([
+        'builder/message',
+        'agent/agent_message',
+        'agent/tool_call',
+        'system/notice',
+        'system/digest',
+        'system/shape_event',
+        'system/shape_event',
+        'system/shape_event',
+        'system/shape_event',
+        'agent/shape_event',
+        'agent/tool_call',
+        'agent/tool_call',
+      ]);
     const tools = itemsOf(cnv(S1)).filter((i) => i.kind === 'tool_call');
     const views = tools.map((i) => ToolCallView.parse(i.body));
-    expect(views.map((v) => [v.kind, v.harnessTool])).toEqual([
+    expect.soft(views.map((v) => [v.kind, v.harnessTool])).toEqual([
       ['other', '10db.plan'],
       ['other', '10db.plan'],
       ['other', '10db.plan'],
     ]);
-    expect(views[1]?.title).toHaveLength(300);
-    expect(views[2]).toMatchObject({ inputPreview: '🙂'.repeat(100) });
-  });
-
-  it('copies each thread row as taskItemOf maps it, keeping its turn and delivery', () => {
-    const copied = new Map(
+    expect.soft(views[1]?.title).toHaveLength(300);
+    expect.soft(views[2]).toMatchObject({ inputPreview: '🙂'.repeat(100) });
+    // A thread row as taskItemOf maps it, keeping its turn and delivery.
+    const thread = new Map(
       itemsOf(cnv(T1))
         .concat(itemsOf(cnv(T3)))
         .map((i) => [i.id, i]),
     );
     for (const m of taskRows)
-      expect({ ...copied.get(m.id), seq: 0 }).toEqual({
+      expect.soft({ ...thread.get(m.id), seq: 0 }, `${m.author}/${m.kind}: ${m.body}`).toEqual({
         id: m.id,
         conversation_id: cnv(m.taskId),
         seq: 0,
@@ -507,14 +516,14 @@ describe('migration 0076, the conversation copy', () => {
         delivered_at: m.deliveredAt,
         created_at: m.createdAt,
       });
-    expect(copied.get(taskRows[2]?.id ?? '')).toMatchObject({
+    expect.soft(thread.get(taskRows[2]?.id ?? '')).toMatchObject({
       kind: 'agent_message',
       turn_id: PT1,
     });
   });
 
-  it('keeps each file’s id and conversation, and its marks', () => {
-    expect(rows(File, 'SELECT * FROM conversation_files ORDER BY created_at, id')).toEqual([
+  it('keeps each file’s id, conversation and marks, names each session’s conversation, and leaves every reference to a message naming an item', () => {
+    expect.soft(rows(File, 'SELECT * FROM conversation_files ORDER BY created_at, id')).toEqual([
       {
         id: s1Files.told,
         conversation_id: cnv(S1),
@@ -561,20 +570,14 @@ describe('migration 0076, the conversation copy', () => {
         unreadable_told_at: null,
       },
     ]);
-  });
-
-  it('names each session’s conversation', () => {
     const of = (id: IdOf<'Session'>) =>
       column('SELECT conversation_id FROM sessions WHERE id = ?', id)[0];
-    expect(of(sessions.s1Old)).toBe(cnv(S1));
-    expect(of(sessions.s1New)).toBe(cnv(S1));
-    expect(of(sessions.w1)).toBe(cnv(T1));
-    expect(of(sessions.w3Old)).toBe(cnv(T3));
-    expect(of(sessions.w3New)).toBe(cnv(T3));
-    expect(of(sessions.w2)).toBeNull();
-  });
-
-  it('leaves every reference to a message naming an item', () => {
+    expect.soft(of(sessions.s1Old)).toBe(cnv(S1));
+    expect.soft(of(sessions.s1New)).toBe(cnv(S1));
+    expect.soft(of(sessions.w1)).toBe(cnv(T1));
+    expect.soft(of(sessions.w3Old)).toBe(cnv(T3));
+    expect.soft(of(sessions.w3New)).toBe(cnv(T3));
+    expect.soft(of(sessions.w2)).toBeNull();
     const items = new Set(itemsOf(cnv(S1)).map((i) => i.id));
     const listed = [
       ...column(
@@ -586,44 +589,40 @@ describe('migration 0076, the conversation copy', () => {
         S1,
       ),
     ];
-    expect(listed).toHaveLength(3);
-    for (const id of listed) expect(items.has(String(id))).toBe(true);
+    expect.soft(listed).toHaveLength(3);
+    for (const id of listed) expect.soft(items.has(String(id))).toBe(true);
     const named = [
       ...column('SELECT message_id FROM shape_shadow_answers'),
       ...column('SELECT message_id FROM pass_turns'),
       ...column('SELECT notice_id FROM pass_preview_marks'),
     ];
-    expect(named).toHaveLength(3);
+    expect.soft(named).toHaveLength(3);
     for (const id of named)
-      expect(column('SELECT count(*) FROM conversation_items WHERE id = ?', id)).toEqual([1]);
+      expect.soft(column('SELECT count(*) FROM conversation_items WHERE id = ?', id)).toEqual([1]);
   });
 
-  it('leaves sessions naming their conversation and shapes without a session or model of their own', () => {
+  it('leaves sessions naming their conversation, shapes without a session or model of their own, a turn’s message and a preview mark’s notice declared as items, and the replaced tables dropped with no dangling reference', () => {
     const columns = (table: string) => column('SELECT name FROM pragma_table_info(?)', table);
-    expect(columns('sessions')).not.toContain('shape_id');
-    expect(columns('sessions')).toContain('conversation_id');
-    expect(columns('shapes')).not.toContain('sdk_session_id');
-    expect(columns('shapes')).not.toContain('model');
-  });
-
-  it('declares a turn’s message and a preview mark’s notice as conversation items', () => {
+    expect.soft(columns('sessions')).not.toContain('shape_id');
+    expect.soft(columns('sessions')).toContain('conversation_id');
+    expect.soft(columns('shapes')).not.toContain('sdk_session_id');
+    expect.soft(columns('shapes')).not.toContain('model');
     const target = (table: string, from: string) =>
       rows(
         z.object({ from: z.string(), table: z.string() }),
         'SELECT "from", "table" FROM pragma_foreign_key_list(?)',
         table,
       ).find((fk) => fk.from === from)?.table;
-    expect(target('pass_turns', 'message_id')).toBe('conversation_items');
-    expect(target('pass_preview_marks', 'notice_id')).toBe('conversation_items');
-  });
-
-  it('drops the tables the conversations replaced, leaving no dangling reference', () => {
-    expect(
-      column(
-        `SELECT name FROM sqlite_master WHERE type = 'table'
+    expect.soft(target('pass_turns', 'message_id')).toBe('conversation_items');
+    expect.soft(target('pass_preview_marks', 'notice_id')).toBe('conversation_items');
+    expect
+      .soft(
+        column(
+          `SELECT name FROM sqlite_master WHERE type = 'table'
            AND name IN ('shape_messages', 'shape_files', 'task_messages', 'task_files')`,
-      ),
-    ).toEqual([]);
-    expect(db.$client.pragma('foreign_key_check')).toEqual([]);
+        ),
+      )
+      .toEqual([]);
+    expect.soft(db.$client.pragma('foreign_key_check')).toEqual([]);
   });
 });

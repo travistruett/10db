@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -197,10 +197,15 @@ describe('the migration that drops the routing tables the playbook replaced', ()
     }).toThrow(PlaybookMoveMissingError);
   });
 
-  it.each(UNMOVED)(
-    'refuses, and changes nothing, when %s is held and the move has not run',
-    (_name, seed) => {
-      migrateDatabase(db, migrationsBefore(dir, DROP));
+  it('refuses, and changes nothing, when any pre-playbook row is held and the move has not run', () => {
+    migrateDatabase(db, migrationsBefore(dir, DROP));
+    db.$client.close();
+    const head = join(dir, '10db.sqlite');
+    for (const [i, [name, seed]] of UNMOVED.entries()) {
+      // Each row on a copy of its own of the database at the previous head.
+      const file = join(dir, `row-${String(i)}.sqlite`);
+      copyFileSync(head, file);
+      db = openDatabase(file);
       seed();
       const before = appliedCount();
       let refused: unknown;
@@ -209,13 +214,15 @@ describe('the migration that drops the routing tables the playbook replaced', ()
       } catch (error) {
         refused = error;
       }
-      expect(refused).toBeInstanceOf(PlaybookMoveMissingError);
-      expect(refused).toBeInstanceOf(SchemaMismatchError);
-      expect(refused instanceof Error ? refused.message : '').toContain(
-        'Open a 10db build from #608 (f31017b6) through 81715524 once',
-      );
-      expect(appliedCount()).toBe(before);
-      expect(tables()).toEqual(expect.arrayContaining(PRE_PLAYBOOK_TABLES));
-    },
-  );
+      expect.soft(refused, name).toBeInstanceOf(PlaybookMoveMissingError);
+      expect.soft(refused, name).toBeInstanceOf(SchemaMismatchError);
+      expect
+        .soft(refused instanceof Error ? refused.message : '', name)
+        .toContain('Open a 10db build from #608 (f31017b6) through 81715524 once');
+      expect.soft(appliedCount(), name).toBe(before);
+      expect.soft(tables(), name).toEqual(expect.arrayContaining(PRE_PLAYBOOK_TABLES));
+      db.$client.close();
+    }
+    db = openDatabase(head);
+  });
 });
