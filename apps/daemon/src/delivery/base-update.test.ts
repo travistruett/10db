@@ -10,7 +10,14 @@ import {
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { mintId, type BatchDto, type BatchId, type WorkstreamDto } from '@10db/contracts';
-import { getBatch, getWorkstreamRow, listWorkstreams, patchWorkstream, schema } from '@10db/db';
+import {
+  getBatch,
+  getWorkstreamRow,
+  listWorkstreams,
+  patchWorkstream,
+  schema,
+  transitionBatch,
+} from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { opened, pathOf } from '../../test/delivery-worlds';
@@ -19,6 +26,7 @@ import type { DeliveryContext } from './context';
 import { createBaseUpdates, ensureWorktreeWhole, workstreamChanges } from './index';
 import { baseConflictKey, baseKeptKey } from './cards';
 import { raise } from './context';
+import { retireWorktree } from './worktree-cleanup';
 import { INSTALL_SUMMARY } from './worktree-dependencies';
 
 // Each case builds a real repository, a worktree and a teammate's push: 3 to 12 s on an idle
@@ -1231,6 +1239,50 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(readFileSync(join(path, DB, 'meta/_journal.json'), 'utf8')).toBe(
         '["0000","0001_theirs"]\n',
       );
+    });
+
+    describe('after a failed regeneration that lost no migration', () => {
+      const failing: DeliveryContext['generators'] = {
+        regenerate: () =>
+          Promise.resolve({
+            kind: 'failed',
+            exitCode: 1,
+            timedOut: false,
+            tail: 'boom\n',
+            logPath: '/logs/generate.log',
+          }),
+      };
+
+      /** Only the journal differs, so the failed run loses no migration of the branch's. */
+      async function failedOnce(): Promise<BatchDto> {
+        h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+        seedMain(true);
+        const { batch } = await opened(h, { sessionStarted: true });
+        await commitOnBatch(batch, `${DB}/meta/_journal.json`, '["0000","0001_mine"]\n');
+        h.teammatePush('main', `${DB}/meta/_journal.json`, '["0000","0001_theirs"]\n');
+        h.teammatePush('main', `${DB}/0001_theirs.sql`, 'alter table a add c;\n');
+        await createBaseUpdates({ ...h.ctx, generators: failing }).beforeGate(batch.id, signal);
+        expect(regenerateNotice(batch.id).key).toBe('base-regenerate');
+        return batch;
+      }
+
+      it('drops the regenerate notice once a later merge of the base leaves nothing to regenerate', async () => {
+        const batch = await failedOnce();
+        h.teammatePush('main', 'docs/more.md', 'more\n');
+        const update = await createBaseUpdates({ ...h.ctx, generators: failing }).beforeGate(
+          batch.id,
+          signal,
+        );
+        expect(update.kind).toBe('merged');
+        expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+      });
+
+      it("drops the regenerate notice with the batch's worktree", async () => {
+        const batch = await failedOnce();
+        h.state.write((c) => transitionBatch(c, batch.id, { to: 'ABANDONED' }));
+        await retireWorktree(h.ctx, batch.id, true);
+        expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+      });
     });
 
     it('says on the card when it stopped after the merge and before regenerating, and removes what the run wrote', async () => {

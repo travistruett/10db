@@ -825,7 +825,10 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         note: joined(renumberedNote(batch, renumbered, !forPullRequest), other),
         ...(forPullRequest && renumbered.length > 0 ? { renumbered } : {}),
       }) as const;
-    if (problem === null) return { ...stands(null), made: true };
+    if (problem === null) {
+      cleared(batch);
+      return { ...stands(null), made: true };
+    }
     const lost = await keepLost(batch, path, merged, forPullRequest, problem.uncarried);
     if (lost === null) {
       // The generated directories are the base's, without the batch's changes in them: a catch-up
@@ -946,6 +949,19 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         showNotice(ctx.state, batch.id, notice);
       });
     return notice;
+  }
+
+  /**
+   * Takes the failed-regeneration notice off the batch once a merge of the base regenerated cleanly
+   * or had nothing to regenerate (a standing lost-migrations notice keeps it): the notice would otherwise stand on every task for good, with no
+   * way for the builder to dismiss it.
+   */
+  function cleared(batch: BatchDto): void {
+    // While a lost migration is still missing, the notice carries what the gate says of it.
+    if (uncarriedNotice(batch) !== undefined) return;
+    tell(batch, () => {
+      hideNotices(ctx.state, batch.id, [NOTICE_KEY.baseRegenerate]);
+    });
   }
 
   /**
@@ -1696,7 +1712,10 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       case 'unregenerated':
         return merged;
       case 'merged': {
-        if (pending === null) return { ...merged, note: joined(merged.note, installed.note) };
+        if (pending === null) {
+          cleared(batch);
+          return { ...merged, note: joined(merged.note, installed.note) };
+        }
         // Its own stop says so on the card; once it has run, a stop leaves nothing undone.
         const regenerated = await regenerate(
           batch,
