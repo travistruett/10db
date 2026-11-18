@@ -23,6 +23,8 @@ export interface ComposerPhaseInput {
   readonly narrow: boolean;
   /** The agent lists slash commands. */
   readonly slashCommands?: boolean;
+  /** The branch the session is being moved to; null when it is not moving. */
+  readonly movingTo?: string | null;
 }
 
 /** A turn is under way (or paused by the account, which Stop can end too). */
@@ -34,6 +36,8 @@ const WORKING: ReadonlySet<ConversationState> = new Set([
 
 function placeholderOf(input: ComposerPhaseInput, working: boolean): string {
   if (input.fresh) return `Ask about ${input.project}…`;
+  if (input.movingTo !== undefined && input.movingTo !== null)
+    return `Moving to ${input.movingTo}…`;
   if (input.state === ConversationState.TakenOver) return 'Held until you hand back…';
   if (!working) return 'Reply…';
   return input.steer === 'inject' ? 'Add to this turn…' : 'Queue for the next turn…';

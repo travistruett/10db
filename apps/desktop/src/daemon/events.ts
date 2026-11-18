@@ -13,6 +13,7 @@ import type { DaemonConnection } from './connection';
 import { useDaemon } from './provider';
 import { accountKeys, accountLoginKey } from './account-queries';
 import { chatKeys } from './chat-queries';
+import { chatWorkKeys } from './chat-work-queries';
 import { taskSessionKeys } from './task-session-queries';
 import { conversationKeys, liveKeys, writeLiveFrame } from './conversation-queries';
 import { githubKeys } from './github-queries';
@@ -57,7 +58,13 @@ const KNOWLEDGE: readonly QueryKey[] = [['knowledge'], ['proposals'], ['provenan
 export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // 10db adds to a project's hazards by itself, so the page that lists the additions follows the project.
   // Your folder's holders, a chat's wait among them, change with a hold event, which is the project's.
-  project: [queryKeys.projects, CANDIDATES, HAZARD_ASSESSMENT_KEY, folderKeys.all],
+  project: [
+    queryKeys.projects,
+    CANDIDATES,
+    HAZARD_ASSESSMENT_KEY,
+    folderKeys.all,
+    chatWorkKeys.all,
+  ],
   // A run's skip is recorded under its task's event; a task becoming done, or changing rigor, moves the rigor
   // figures.
   task: [['tasks'], goalKeys.all, CANDIDATES, skipKeys.all, rigorFiguresKeys.all],
@@ -76,9 +83,9 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // A conversation's transcript, proposals, round and turn all change under this one event.
   shape: [shapeKeys.all],
   // An explore conversation stored or changed an item, or moved state: its items and its state.
-  conversation: [conversationKeys.all, chatKeys.all],
+  conversation: [conversationKeys.all, chatKeys.all, chatWorkKeys.all],
   // A chat was created, renamed, moved, archived or touched: the open tabs and Recent.
-  chat: [chatKeys.all, taskSessionKeys.all],
+  chat: [chatKeys.all, chatWorkKeys.all, taskSessionKeys.all],
   // A pass opening, a turn starting or ending, a page Ready or signed off, a close step: each changes
   // the pass and its pages' turns.
   pass: [passKeys.all, folderKeys.all, taskSessionKeys.all],

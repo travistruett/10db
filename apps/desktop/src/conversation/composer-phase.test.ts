@@ -34,6 +34,11 @@ const rows: readonly {
     want: { placeholder: 'Ask about ampsio…', hint: '↵ sends · ⇧↵ new line · @ files' },
   },
   {
+    name: 'a session being moved to a branch',
+    input: { movingTo: 'fix-login' },
+    want: { placeholder: 'Moving to fix-login…' },
+  },
+  {
     name: 'no slash commands',
     input: { slashCommands: false },
     want: { hint: '↵ sends · ⇧↵ new line · Esc stops · @ files' },

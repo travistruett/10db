@@ -1,8 +1,6 @@
-import { ChatDto, FolderDto, type ChatId, type ProjectId } from '@10db/contracts';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { FolderDto, type ProjectId } from '@10db/contracts';
+import { useQuery } from '@tanstack/react-query';
 import { readJson } from './client';
-import { chatKeys } from './chat-queries';
-import { conversationKeys } from './conversation-queries';
 import { useDaemon } from './provider';
 
 // Sessions spec §7.3: who holds a project's checkout, Your folder. The daemon says it changed with a
@@ -35,23 +33,4 @@ export function useProjectFolder(projectId: ProjectId | null): FolderDto | null 
     refetchInterval: FOLDER_REFRESH_MS,
   });
   return query.data ?? null;
-}
-
-/** Stops a chat's wait for Your folder: what it queued runs reading only. */
-export function useStopWaiting() {
-  const { client } = useDaemon();
-  const queries = useQueryClient();
-  return useMutation({
-    mutationFn: async (chatId: ChatId) => {
-      await readJson(
-        await client.chats[':chatId']['stop-waiting'].$post({ param: { chatId } }),
-        ChatDto,
-      );
-    },
-    onSettled: () => {
-      void queries.invalidateQueries({ queryKey: chatKeys.all });
-      void queries.invalidateQueries({ queryKey: conversationKeys.all });
-      void queries.invalidateQueries({ queryKey: folderKeys.all });
-    },
-  });
 }

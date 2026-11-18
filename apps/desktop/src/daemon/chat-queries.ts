@@ -1,7 +1,9 @@
-import type { ChatCreateInput } from '@10db/contracts';
+import type { ArchiveRequest, ChatCreateInput } from '@10db/contracts';
 import {
+  ArchivePreviewDto,
   ChatDto,
   ChatModelsDto,
+  ChatSearchPage,
   ProjectFileMatchDto,
   SessionStartDto,
   type ChatId,
@@ -9,9 +11,10 @@ import {
   type ConversationId,
   type ProjectId,
 } from '@10db/contracts';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { readJson, type DaemonClient } from './client';
+import { chatRoutes } from './chat-routes';
 import { conversationKeys } from './conversation-queries';
 import { useDaemon } from './provider';
 
@@ -27,6 +30,7 @@ export const chatKeys = {
   files: (conversationId: ConversationId, q: string) =>
     ['conversation-files', conversationId, q] as const,
   starts: (projectId: ProjectId) => ['session-starts', projectId] as const,
+  search: (q: string) => ['chats', 'search', q] as const,
 } as const;
 
 const ChatList = z.array(ChatDto);
@@ -45,6 +49,23 @@ export function useOpenChats() {
     queryKey: chatKeys.open,
     queryFn: async () => readJson(await client.chats.$get({ query: { open: '1' } }), ChatList),
   });
+}
+
+/**
+ * Sessions whose title holds `q`, open, closed or archived. The rows of the last search stay while the next
+ * one is read, so the panel does not flash empty between keystrokes.
+ */
+export function useSearchChats(q: string) {
+  const { connection } = useDaemon();
+  const text = q.trim();
+  const query = useQuery({
+    queryKey: chatKeys.search(text),
+    queryFn: async ({ signal }) =>
+      readJson(await chatRoutes.search(connection, text, null, signal), ChatSearchPage),
+    enabled: text !== '',
+    placeholderData: keepPreviousData,
+  });
+  return { ...query, rows: text === '' ? NO_CHATS : (query.data?.rows ?? NO_CHATS) };
 }
 
 /** The project's last sessions, most recent first, the ones that were never written to left out. */
@@ -151,13 +172,43 @@ export function usePatchChat() {
   });
 }
 
-/** Archives a chat: its tab closes and it leaves the open list. */
+/** What Archive answered: the chat archived, or the files it would lose that the builder must see first. */
+export type ArchiveAnswer =
+  | { readonly archived: true; readonly chat: ChatDto }
+  | { readonly archived: false; readonly preview: ArchivePreviewDto };
+
+/**
+ * Archives a chat: its tab closes and it leaves the open list. A session on a branch answers 409 with the
+ * files that archiving would delete when `request` does not name them all; that is an answer, not a failure.
+ */
 export function useArchiveChat() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (chatId: ChatId) =>
-      readJson(await client.chats[':chatId'].archive.$post({ param: { chatId } }), ChatDto),
+    mutationFn: async ({
+      chatId,
+      request,
+    }: {
+      readonly chatId: ChatId;
+      readonly request?: ArchiveRequest;
+    }): Promise<ArchiveAnswer> => {
+      const res = await client.chats[':chatId'].archive.$post(
+        { param: { chatId } },
+        request === undefined
+          ? undefined
+          : {
+              init: {
+                body: JSON.stringify(request),
+                headers: { 'content-type': 'application/json' },
+              },
+            },
+      );
+      if (res.status === 409) {
+        // A 409 is an answer, not a failure: the files archiving would delete, for the builder to see first.
+        return { archived: false, preview: ArchivePreviewDto.parse(await res.json()) };
+      }
+      return { archived: true, chat: await readJson(res, ChatDto) };
+    },
     onSettled: () => queryClient.invalidateQueries({ queryKey: chatKeys.all }),
   });
 }
