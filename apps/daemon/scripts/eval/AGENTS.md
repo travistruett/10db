@@ -39,7 +39,21 @@ with it.
 - Each case-run gets a `git archive <baseCommit>` snapshot committed once into a fresh repo, with a
   bare `origin` whose `main` sits there. A snapshot carries no later history, so a lane can't read
   the merged answer, and the builder's checkout is never written. A real run installs dependencies
-  in the snapshot and gates with `make check-changed`; the fake gates with `git diff --quiet HEAD`.
+  in the snapshot and gates with `make precheck`; the fake gates with `git diff --quiet HEAD`.
+- `make precheck` is the check 10db's own project runs on a lane's work, as its pull-request
+  delivery's `precheckCommand`; CI runs the tests. Eval projects are local delivery, which ignores
+  `precheckCommand`, so the eval names it as the project's `gateCommand` (`GATE` in `run.ts`). It
+  once gated with `make check-changed`, which widened a daemon change to seven packages' full Vitest
+  suites: in the 2026-11-18 `task-why-always` run at load ~5, format (3 s), lint (74 s) and
+  typecheck (12 s) passed, then the test step printed nothing for 30 minutes and the gate exited 124.
+- **Gate time:** a real case-run's gate is expected to take about 1-2 minutes. No real case-run has
+  been timed with the pre-check yet; this is recorded evidence, not a measurement: the format, lint
+  and typecheck steps above took 89 s together, a one-package pre-check takes about 17 s, and the
+  CI-decides spec measured the pre-check under 2 minutes. The gate log's `durationMs` gives a run's
+  own time.
+- A gate step that runs tests streams its output, and a line as each test file starts
+  (`scripts/vitest-progress.mjs`), to the gate log, so a gate that times out names the file it was
+  running.
   The install is `mise exec -- pnpm install --frozen-lockfile --prefer-offline` run in the snapshot
   (`snapshot-install.ts`), so the snapshot's own node and pnpm run, not the runner's checkout's, and
   that snapshot's `mise.toml` is trusted for the command alone. A failed install stops the run with
@@ -83,6 +97,10 @@ approved where the rigor has one, and all four lane rules held (`grade.ts`):
 - commit tool: every commit since the base carries the `10db-Op` trailer;
 - no push: `origin`'s refs didn't move;
 - deps: a manifest or lockfile change comes with an `install_dependencies` op.
+
+The gate is the pre-check, so "met" proves what a production lane proves before CI: format, lint,
+typecheck, drift, knip and the docs rule tests pass. It does not show the tests pass; an eval has
+no CI (dec_01a1eef8).
 
 Otherwise the outcome is `not_met`, `failed` (not DONE) or `timed_out`. There is no model-graded
 rubric of the diff yet; the reference diff is `git diff <baseCommit> <mergedCommit>` in this
