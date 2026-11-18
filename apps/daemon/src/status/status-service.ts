@@ -1,18 +1,26 @@
-import type { StatusDto, StatusLine } from '@10db/contracts';
+import type { BusyLevel, StatusDto, StatusLine } from '@10db/contracts';
 import type { Clock, Timer } from '../clock';
 
 /** A hold is shown once it has lasted this long, and kept this long after it lifts. */
 export const STATUS_HYSTERESIS_MS = 2 * 60_000;
 
 /** What a source says about a hold; the service adds the key and when it began. */
-export type StatusHold = Pick<StatusLine, 'kind' | 'label' | 'line' | 'details' | 'culprits'>;
+export type StatusHold = Pick<
+  StatusLine,
+  'kind' | 'label' | 'line' | 'details' | 'busiest' | 'culprits'
+>;
 
 export interface StatusService {
   /** A hold starts, or a hold that continues is reworded. */
   hold(key: string, hold: StatusHold): void;
   /** The hold lifted. */
   release(key: string): void;
-  /** The lines shown now, oldest first. */
+  /**
+   * How busy the Mac is, from each load sample. The client hears of it only when the level, rounded to
+   * tenths, or `holding` changes, so a steady load writes no event per sample.
+   */
+  busy(level: number, holding: boolean): void;
+  /** The lines shown now, oldest first, and the busy level. */
   current(): StatusDto;
   /** Cancels every timer and drops every hold; a hold made after it is ignored, so nothing fires again. */
   stop(): void;
@@ -31,7 +39,8 @@ interface Entry {
  * The holds that pause work and end by themselves, with the hysteresis that keeps a flapping one from
  * flickering: pending until it has lasted `STATUS_HYSTERESIS_MS`, shown, then lingering for as long
  * after it lifts. It lives in memory, so a restart starts every hold again. `onChange` runs when the
- * shown set, or the words of a shown line, change.
+ * shown set, the words of a shown line (its label or sentence, not the busy processes behind it) or the
+ * busy level change.
  */
 export function createStatusService(deps: {
   readonly clock: Clock;
@@ -39,6 +48,7 @@ export function createStatusService(deps: {
 }): StatusService {
   const entries = new Map<string, Entry>();
   let stopped = false;
+  let busy: BusyLevel | null = null;
 
   const visible = (entry: Entry): boolean => entry.phase !== 'pending';
   const current = (): StatusDto => ({
@@ -46,6 +56,7 @@ export function createStatusService(deps: {
       .filter(([, entry]) => visible(entry))
       .sort(([, a], [, b]) => a.since.getTime() - b.since.getTime())
       .map(([key, entry]) => ({ key, ...entry.hold, since: entry.since.toISOString() })),
+    busy,
   });
   const changed = (): void => {
     deps.onChange(current());
@@ -71,7 +82,7 @@ export function createStatusService(deps: {
         });
         return;
       }
-      const reworded = JSON.stringify(entry.hold) !== JSON.stringify(hold);
+      const reworded = entry.hold.label !== hold.label || entry.hold.line !== hold.line;
       entry.hold = hold;
       if (entry.phase === 'lingering') {
         entry.timer?.cancel();
@@ -97,11 +108,19 @@ export function createStatusService(deps: {
         changed();
       });
     },
+    busy(level, holding) {
+      if (stopped) return;
+      const next = { level: Math.round(level * 10) / 10, holding };
+      if (busy?.level === next.level && busy.holding === next.holding) return;
+      busy = next;
+      changed();
+    },
     current,
     stop() {
       stopped = true;
       for (const entry of entries.values()) entry.timer?.cancel();
       entries.clear();
+      busy = null;
     },
   };
 }

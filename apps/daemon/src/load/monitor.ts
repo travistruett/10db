@@ -13,17 +13,23 @@ import {
 } from '@10db/db';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
-import type { InboxService } from '../inbox';
+import { CardTier, type InboxService } from '../inbox';
 import type { Logger } from '../log';
-import type { StatusService } from '../status';
-import { OVERLOAD_FOLD_KEY, overloadStatus } from './card';
+import { STATUS_HYSTERESIS_MS, type StatusService } from '../status';
+import { busiestNames, OVERLOAD_FOLD_KEY, overloadStatus } from './card';
 import {
   findCulprits,
   systemProcessSnapshot,
   type KnownProcesses,
   type ProcessSnapshot,
 } from './culprits';
-import { createLoadGuard, type LoadGuard, type LoadGuardOptions, type LoadReading } from './guard';
+import {
+  createLoadGuard,
+  type LoadGuard,
+  type LoadGuardOptions,
+  type LoadReading,
+  type OverloadReport,
+} from './guard';
 
 /** The temp dir of each lane session that is running, which the runner records and forgets. */
 export interface LaneTempDirs {
@@ -102,9 +108,9 @@ export interface LoadMonitorOptions extends Partial<
   Pick<LoadGuardOptions, 'read' | 'sampleMs' | 'overloadFactor' | 'sustainedMs' | 'clearFactor'>
 > {
   readonly state: StateStore;
-  /** Only to withdraw the card an earlier run raised for the overload. */
-  readonly inbox: Pick<InboxService, 'withdraw'>;
-  readonly status: Pick<StatusService, 'hold' | 'release'>;
+  /** Withdraws the card an earlier run raised for the overload, and posts the notice when a hold ends. */
+  readonly inbox: Pick<InboxService, 'withdraw' | 'notice'>;
+  readonly status: Pick<StatusService, 'hold' | 'release' | 'busy'>;
   readonly clock: Clock;
   readonly logger: Logger;
   readonly daemonPid: number;
@@ -118,6 +124,17 @@ export interface LoadMonitorOptions extends Partial<
 }
 
 const OVERLOAD_STATUS_KEY = 'overload';
+
+/** A hold shorter than this was never shown, so it earns no notice either. */
+const NOTICE_AFTER_MS = STATUS_HYSTERESIS_MS;
+
+function waited(ms: number): string {
+  const minutes = Math.max(1, Math.round(ms / 60_000));
+  if (minutes < 60) return `${String(minutes)} minute${minutes === 1 ? '' : 's'}`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return `${String(hours)} hour${hours === 1 ? '' : 's'}${rest === 0 ? '' : ` ${String(rest)} min`}`;
+}
 
 /**
  * The load guard with its status line: the hold is reported from the moment an overload is declared,
@@ -141,6 +158,32 @@ export function createLoadMonitor(opts: LoadMonitorOptions): LoadGuard {
     }
   }
 
+  // The latest report of the overload on now, for the notice that says what it was busy with.
+  let latest: OverloadReport | null = null;
+
+  function noticeHoldEnded(report: OverloadReport): void {
+    const ms = opts.clock.now().getTime() - report.since.getTime();
+    if (ms < NOTICE_AFTER_MS) return;
+    const names = busiestNames(report.culprits, 2);
+    const mostly = names.length === 0 ? '' : `, mostly with ${names.join(' and ')}`;
+    try {
+      opts.inbox.notice({
+        tier: CardTier.Notice,
+        projectId: null,
+        taskId: null,
+        key: `load-hold:${report.since.toISOString()}`,
+        tone: 'info',
+        line: `10db waited ${waited(ms)} to start new work because your Mac was busy${mostly}.`,
+        body: '',
+      });
+    } catch (error) {
+      opts.logger.error(
+        { err: error instanceof Error ? error.message : String(error) },
+        'could not post the notice that a load hold ended',
+      );
+    }
+  }
+
   return createLoadGuard({
     clock: opts.clock,
     logger: opts.logger,
@@ -158,10 +201,17 @@ export function createLoadMonitor(opts: LoadMonitorOptions): LoadGuard {
         }),
       ),
     onOverloaded: (report) => {
+      latest = report;
       opts.status.hold(OVERLOAD_STATUS_KEY, overloadStatus(report));
+    },
+    onLevel: (level, holding) => {
+      opts.status.busy(level, holding);
     },
     onCleared: () => {
       opts.status.release(OVERLOAD_STATUS_KEY);
+      const report = latest;
+      latest = null;
+      if (report !== null) noticeHoldEnded(report);
       opts.onCleared();
     },
   });

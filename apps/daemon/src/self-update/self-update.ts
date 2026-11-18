@@ -472,6 +472,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       label: 'Update waiting on a shaping turn',
       line: `Holding new lanes: an update waits for ${names}`,
       details: shapeHoldDetails(names, drainingSince),
+      busiest: [],
       culprits: [],
     });
   }

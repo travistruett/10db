@@ -8,6 +8,7 @@ const hold = (line = 'Holding new lanes'): StatusHold => ({
   label: 'Held',
   line,
   details: 'why',
+  busiest: [],
   culprits: [],
 });
 
@@ -76,5 +77,62 @@ describe('the status line hysteresis', () => {
     status.hold('a', hold('first, reworded'));
     expect(status.current().lines.map((l) => l.line)).toEqual(['first, reworded', 'second']);
     expect(changes).toHaveLength(3);
+  });
+});
+
+describe('the busy level', () => {
+  const rows: { name: string; steps: [number, boolean][]; events: number }[] = [
+    { name: 'the first reading is a change', steps: [[0.3, false]], events: 1 },
+    {
+      name: 'the same tenth is no change',
+      steps: [
+        [0.31, false],
+        [0.34, false],
+      ],
+      events: 1,
+    },
+    {
+      name: 'crossing a tenth is a change',
+      steps: [
+        [0.34, false],
+        [0.36, false],
+      ],
+      events: 2,
+    },
+    {
+      name: 'holding flipping is a change',
+      steps: [
+        [1, false],
+        [1, true],
+      ],
+      events: 2,
+    },
+  ];
+  for (const row of rows) {
+    it(row.name, () => {
+      const { status, changes } = setup();
+      for (const [level, holding] of row.steps) status.busy(level, holding);
+      expect(changes).toHaveLength(row.events);
+    });
+  }
+
+  it('reports the level rounded to tenths, and null before any reading', () => {
+    const { status } = setup();
+    expect(status.current().busy).toBeNull();
+    status.busy(0.74, false);
+    expect(status.current().busy).toEqual({ level: 0.7, holding: false });
+  });
+
+  it('does not tell the client when only the busy processes behind a shown line change', () => {
+    const { clock, status, changes } = setup();
+    status.hold('a', hold());
+    clock.advance(STATUS_HYSTERESIS_MS);
+    status.hold('a', {
+      ...hold(),
+      busiest: ['Docker'],
+      culprits: [{ name: 'x', cpuPct: 5, owner: 'y' }],
+    });
+    expect(changes).toHaveLength(1);
+    expect(status.current().lines[0]?.busiest).toEqual(['Docker']);
   });
 });

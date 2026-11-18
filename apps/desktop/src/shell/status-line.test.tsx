@@ -7,38 +7,66 @@ import { baseHandlers, daemonUrl, renderApp, server } from '../test/daemon';
 const line = (
   key: string,
   text: string,
-  culprits: { name: string; cpuPct: number; owner: string }[] = [],
+  kind: 'admission_hold' | 'model_list_wait',
+  busiest: string[] = [],
 ) => ({
   key,
-  kind: 'admission_hold' as const,
+  kind,
   label: text.split(':')[0] ?? text,
   line: text,
   details: `Details of ${text}.`,
   since: '2026-11-18T12:00:00.000Z',
-  culprits,
+  busiest,
+  culprits: [],
 });
 
+function serve(status: unknown) {
+  server.use(
+    http.get(daemonUrl('/status'), () => HttpResponse.json(StatusDto.parse(status))),
+    ...baseHandlers(),
+  );
+}
+
+// The hovercard listens for the native mouseenter, which does not bubble from the bar to the box that carries it (the progress root is in between).
+const hoverTarget = (bar: HTMLElement): HTMLElement => bar.parentElement?.parentElement ?? bar;
+
 describe('the status line in the rail', () => {
-  it('names the oldest hold, says how many more, and opens every hold’s details and busiest processes', async () => {
-    server.use(
-      http.get(daemonUrl('/status'), () =>
-        HttpResponse.json(
-          StatusDto.parse({
-            lines: [
-              line('overload', 'Holding new lanes: the Mac is overloaded (load 23 on 10 cores)', [
-                { name: 'sh', cpuPct: 99, owner: 'not 10db’s' },
-              ]),
-              line('wait', 'Codex plan is waiting for its model list'),
-            ],
-          }),
-        ),
-      ),
-      ...baseHandlers(),
-    );
+  it('draws no bar while the Mac is below half busy', async () => {
+    serve({ lines: [], busy: { level: 0.4, holding: false } });
     renderApp('/board');
-    fireEvent.click(await screen.findByRole('button', { name: /Holding new lanes.*\+1 more/ }));
-    expect(await screen.findByText(/Details of Holding new lanes/)).toBeTruthy();
-    expect(screen.getByText('sh: 99% of a core, not 10db’s')).toBeTruthy();
-    expect(screen.getByText(/Details of Codex plan is waiting/)).toBeTruthy();
+    await screen.findByRole('navigation').catch(() => undefined);
+    expect(screen.queryByRole('progressbar')).toBeNull();
+  });
+
+  it('draws a bar and says the Mac is busy, with no numbers, when it is half busy or more', async () => {
+    serve({ lines: [], busy: { level: 0.7, holding: false } });
+    renderApp('/board');
+    const bar = await screen.findByRole('progressbar', { name: 'Mac busy' });
+    fireEvent.mouseEnter(hoverTarget(bar));
+    expect(await screen.findByText(/Your Mac is busy\. 10db keeps working/)).toBeTruthy();
+    expect(screen.queryByText(/Busiest right now/)).toBeNull();
+  });
+
+  it('says 10db is holding, and what is busiest in plain words, while it holds', async () => {
+    serve({
+      lines: [line('overload', 'Holding new lanes', 'admission_hold', ['Docker', 'file indexing'])],
+      busy: { level: 1, holding: true },
+    });
+    renderApp('/board');
+    fireEvent.mouseEnter(
+      hoverTarget(await screen.findByRole('progressbar', { name: 'Mac too busy' })),
+    );
+    expect(await screen.findByText(/too busy to start new work/)).toBeTruthy();
+    expect(screen.getByText('Busiest right now: Docker, file indexing')).toBeTruthy();
+  });
+
+  it('keeps the short label and the details popover for a hold that is not the load', async () => {
+    serve({
+      lines: [line('wait', 'Codex plan is waiting for its model list', 'model_list_wait')],
+      busy: null,
+    });
+    renderApp('/board');
+    fireEvent.click(await screen.findByRole('button', { name: /Codex plan is waiting/ }));
+    expect(await screen.findByText(/Details of Codex plan is waiting/)).toBeTruthy();
   });
 });

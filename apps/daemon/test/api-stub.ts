@@ -88,7 +88,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     agentSkillInfo: none,
     capacitySettings: () => ({ machineLaneCap: 4, diskFloorGb: 20 }),
     setCapacitySettings: none,
-    status: () => ({ lines: [] }),
+    status: () => ({ lines: [], busy: null }),
     admission: () => ({
       holds: [],
       freeBytes: null,

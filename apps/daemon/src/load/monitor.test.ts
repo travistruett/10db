@@ -1,8 +1,9 @@
-import { InboxState, mintId, WorkstreamState } from '@10db/contracts';
+import { EventType, InboxState, mintId, NoticePostedData, WorkstreamState } from '@10db/contracts';
 import {
   createTestStore,
   insertPass,
   insertTask,
+  listEventsAfter,
   listInbox,
   markSessionStarted,
   insertSession,
@@ -263,5 +264,44 @@ describe('the overload status line', () => {
     await sampleFor(10 * MINUTE);
     expect(monitor.overloaded).toBe(true);
     expect(openCards()).toEqual([]);
+  });
+});
+
+describe('the hold-ended notice', () => {
+  const notices = () =>
+    listEventsAfter(base.db, 0, 1000)
+      .filter((e) => e.type === EventType.NoticePosted)
+      .map((e) => NoticePostedData.parse(e.data));
+
+  it('says how long 10db waited and what was busiest once a hold of over 2 minutes lifts, and says nothing for a short one', async () => {
+    rows = [
+      {
+        pid: 5,
+        ppid: 1,
+        pgid: 5,
+        cpu: 99,
+        command: '/Applications/Docker.app/Contents/MacOS/com.docker.backend',
+      },
+      { pid: 6, ppid: 1, pgid: 6, cpu: 80, command: '/System/Library/CoreServices/fseventsd' },
+      { pid: 7, ppid: 1, pgid: 7, cpu: 70, command: 'ffmpeg -i in.mov' },
+    ];
+    load = 20 * CORES;
+    await sampleFor(8 * MINUTE);
+    load = 1;
+    await sampleFor(MINUTE);
+    expect(notices()).toHaveLength(1);
+    expect(notices()[0]).toMatchObject({ projectId: null, tone: 'info' });
+    expect(notices()[0]?.line).toMatch(
+      /^10db waited \d+ minutes? to start new work because your Mac was busy, mostly with Docker and file indexing\.$/,
+    );
+    // A second hold that lifts within the 2-minute show delay posts nothing.
+    load = 20 * CORES;
+    await sampleFor(5 * MINUTE);
+    expect(monitor.holding()).toBe(true);
+    load = 1;
+    clock.advance(30_000);
+    await monitor.sample();
+    expect(monitor.holding()).toBe(false);
+    expect(notices()).toHaveLength(1);
   });
 });

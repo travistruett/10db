@@ -23,6 +23,8 @@ export const StatusLine = z.object({
   details: z.string(),
   /** When the hold began. */
   since: z.iso.datetime(),
+  /** Plain names of what is busiest, at most three ("Docker", "file indexing", "10db's own work"); empty where none. */
+  busiest: z.array(z.string()),
   /** The busiest processes behind the hold; empty where none. */
   culprits: z.array(
     z.object({
@@ -36,6 +38,18 @@ export const StatusLine = z.object({
 });
 export type StatusLine = z.infer<typeof StatusLine>;
 
-/** The holds shown now, oldest first: a hold is shown once it has lasted 2 minutes and for 2 minutes after it lifts. */
-export const StatusDto = z.object({ lines: z.array(StatusLine) });
+/** How busy the Mac is: 1 is where 10db holds new work. */
+export const BusyLevel = z.object({
+  /** The 1-minute load over the overload limit (the factor times the cores), rounded to tenths. */
+  level: z.number().nonnegative(),
+  /** 10db is holding new work for it now. */
+  holding: z.boolean(),
+});
+export type BusyLevel = z.infer<typeof BusyLevel>;
+
+/**
+ * The holds shown now, oldest first (a hold is shown once it has lasted 2 minutes and for 2 minutes after it
+ * lifts), and how busy the Mac is, which is null until the load has been read.
+ */
+export const StatusDto = z.object({ lines: z.array(StatusLine), busy: BusyLevel.nullable() });
 export type StatusDto = z.infer<typeof StatusDto>;

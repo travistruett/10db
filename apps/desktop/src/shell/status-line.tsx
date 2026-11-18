@@ -1,16 +1,76 @@
-import { ActionIcon, Group, Popover, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core';
+import {
+  ActionIcon,
+  Box,
+  Group,
+  HoverCard,
+  Popover,
+  Progress,
+  Stack,
+  Text,
+  Tooltip,
+  UnstyledButton,
+} from '@mantine/core';
+import { StatusKind, type BusyLevel, type StatusLine } from '@10db/contracts';
 import { IconPlayerPause } from '@tabler/icons-react';
 import { useStatus } from '../daemon/status-queries';
 import { useRailMode } from './rail-mode';
 
+/** Below this the Mac is not busy enough to say so. */
+const BUSY_SHOWN_FROM = 0.5;
+
 /**
- * What is holding work back and ends by itself, at the rail's foot: the oldest hold's sentence, "+N" when
- * more, and a popover with every hold's details and the busiest processes behind it. It draws nothing while
- * nothing is held, and never asks the builder to do anything: the daemon decides when a hold is shown.
+ * What is holding work back, at the rail's foot. How busy the Mac is draws as a thin bar with no numbers
+ * (hidden below half, full and orange while 10db holds new work) and a hovercard in plain words; the other
+ * holds, which end by themselves, show their short label with a popover of details. It draws nothing while
+ * nothing is held or busy, and never asks the builder to do anything: the daemon decides when a hold is shown.
  */
 export function StatusLineControl() {
+  const status = useStatus().data;
+  const busy = status?.busy ?? null;
+  const showBar = busy !== null && busy.level >= BUSY_SHOWN_FROM;
+  const lines = (status?.lines ?? []).filter((line) => line.kind !== StatusKind.AdmissionHold);
+  const busiest =
+    (status?.lines ?? []).find((l) => l.kind === StatusKind.AdmissionHold)?.busiest ?? [];
+  if (!showBar && lines.length === 0) return null;
+  return (
+    <Stack gap={4} w="100%">
+      {showBar && <BusyBar busy={busy} busiest={busiest} />}
+      {lines.length > 0 && <HoldLines lines={lines} />}
+    </Stack>
+  );
+}
+
+function BusyBar({ busy, busiest }: { busy: BusyLevel; busiest: readonly string[] }) {
   const { labels } = useRailMode();
-  const lines = useStatus().data?.lines ?? [];
+  const sentence = busy.holding
+    ? 'Your Mac is too busy to start new work. 10db is waiting for it to calm down; work already running carries on.'
+    : 'Your Mac is busy. 10db keeps working, and waits before starting anything new if it gets much busier.';
+  return (
+    <HoverCard position="right-end" width={280} shadow="md" withArrow>
+      <HoverCard.Target>
+        <Box px={labels ? 8 : 4} py={6} w={labels ? '100%' : 40}>
+          <Progress
+            size={4}
+            value={busy.holding ? 100 : Math.min(100, busy.level * 100)}
+            color={busy.holding ? 'orange' : 'gray'}
+            aria-label={busy.holding ? 'Mac too busy' : 'Mac busy'}
+          />
+        </Box>
+      </HoverCard.Target>
+      <HoverCard.Dropdown>
+        <Stack gap={6}>
+          <Text size="sm">{sentence}</Text>
+          {busy.holding && busiest.length > 0 && (
+            <Text size="xs" c="dimmed">{`Busiest right now: ${busiest.join(', ')}`}</Text>
+          )}
+        </Stack>
+      </HoverCard.Dropdown>
+    </HoverCard>
+  );
+}
+
+function HoldLines({ lines }: { lines: readonly StatusLine[] }) {
+  const { labels } = useRailMode();
   const [first, ...more] = lines;
   if (first === undefined) return null;
   const name = more.length === 0 ? first.line : `${first.line} (+${String(more.length)} more)`;
@@ -59,15 +119,6 @@ export function StatusLineControl() {
               <Text size="xs" c="dimmed" style={{ whiteSpace: 'pre-wrap' }}>
                 {status.details}
               </Text>
-              {status.culprits.length > 0 && (
-                <Stack gap={0}>
-                  {status.culprits.map((culprit) => (
-                    <Text key={`${culprit.name}:${culprit.owner}`} size="xs" c="dimmed">
-                      {`${culprit.name}: ${String(culprit.cpuPct)}% of a core, ${culprit.owner}`}
-                    </Text>
-                  ))}
-                </Stack>
-              )}
             </Stack>
           ))}
         </Stack>
