@@ -31,7 +31,11 @@ import { batchCardFields } from './batch-card';
 import { maxCiFixes } from './ci-failure-action';
 import type { BlockedTask, UnmergedDependency } from './deps';
 import type { GateStepFailure } from './gate-failures';
+import type { NoticeInput } from '../inbox';
 import { INSTALL_SUMMARY, type DependencyRefresh } from './worktree-dependencies';
+
+/** A notice a delivery step posts; the project is the caller's, passed beside it. */
+export type DeliveryNotice = Omit<NoticeInput, 'projectId'>;
 
 /** A flag card's text. Every delivery card says what to fix (batch delivery spec §1). */
 export interface Card {

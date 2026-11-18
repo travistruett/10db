@@ -40,6 +40,7 @@ import {
   InboxItemId,
   InboxState,
   JudgeCallsPageQuery,
+  ActivityPageQuery,
   InboxPageQuery,
   JudgeConfigPatch,
   BenchmarkKeyInput,
@@ -1842,6 +1843,11 @@ export function createApp(deps: ApiDeps) {
       '/inbox/page',
       validator('query', (query) => InboxPageQuery.parse(query)),
       (c) => c.json(deps.services.pageInbox(c.req.valid('query'))),
+    )
+    .get(
+      '/activity/page',
+      validator('query', (query) => ActivityPageQuery.parse(query)),
+      (c) => c.json(deps.services.pageActivity(c.req.valid('query'))),
     )
     .post(
       '/inbox/:id/answer',

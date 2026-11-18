@@ -38,6 +38,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     listWorkstreamSkips: () => [],
     listInbox: () => [],
     pageInbox: track('pageInbox'),
+    pageActivity: () => ({ rows: [], next: null }),
     answerInbox: none,
     eventsAfter: () => [] as DaemonEvent[],
     subscribe: () => () => undefined,

@@ -78,6 +78,7 @@ import { ESCALATED_KEY, EXACT_WRITE_KEY, mcpGrantRules, storableRule } from '../
 import { proposePlacement } from '../placement';
 import { grantTargetOf } from '../trust';
 import { applyDockerChoice } from './docker-card';
+import { postNotice, type NoticeInput } from './notice';
 import { applyGateHostChoice } from './gate-host-card';
 import { applyHazardChoice } from './hazard-card';
 import { GRANT_CALL_DETAIL, LIMIT_DETAIL } from './limit-card';
@@ -206,6 +207,8 @@ export interface InboxService {
     inTx: (ctx: WriteContext, item: InboxItemDto) => void,
   ): InboxItemDto;
   flag(input: FlagInput): InboxItemDto;
+  /** Posts a notice as an event, in one write. */
+  notice(input: NoticeInput): void;
   cancelForWorkstream(workstreamId: WorkstreamId): void;
   /**
    * Rewrites an open card's body (a cap card's running overshoot), and its title, options and detail
@@ -939,6 +942,12 @@ export function createInboxService(deps: {
 
     flag(input) {
       return deps.state.write((ctx) => flagCard(ctx, input));
+    },
+
+    notice(input) {
+      deps.state.write((ctx) => {
+        postNotice(ctx, input);
+      });
     },
 
     cancelForWorkstream(workstreamId) {
