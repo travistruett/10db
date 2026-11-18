@@ -1,7 +1,7 @@
 import { Rigor, Verdict } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { GateResult, Outcome } from './grade';
-import { EvalAgent, renderReport, type CaseRun } from './report';
+import { EvalAgent, EvalReport, renderReport, type CaseRun } from './report';
 
 const run = (n: number, outcome: Outcome, gate: GateResult): CaseRun => ({
   run: n,
@@ -23,12 +23,61 @@ const run = (n: number, outcome: Outcome, gate: GateResult): CaseRun => ({
   missingTranscripts: [],
 });
 
+const report = (plansInBuild: boolean | null, outcomes: readonly Outcome[]): EvalReport => ({
+  rigor: Rigor.Careful,
+  agent: EvalAgent.Fake,
+  plansInBuild,
+  startedAt: '2026-11-18T00:00:00.000Z',
+  finishedAt: '2026-11-18T00:01:00.000Z',
+  cases: [
+    {
+      id: 'a',
+      title: 'A',
+      runs: outcomes.map((o, i) => run(i + 1, o, GateResult.Passed)),
+    },
+  ],
+});
+
+describe('the keep rule in a report', () => {
+  it.each([
+    {
+      name: 'holds when the change meets as often as the baseline',
+      now: [Outcome.Met, Outcome.Met],
+      want: '**Holds**: 2 met runs against the baseline’s 2, and no case lost.',
+    },
+    {
+      name: 'fails and names the case the change lost',
+      now: [Outcome.NotMet, Outcome.Failed],
+      want: '**Fails**: 0 met runs against the baseline’s 2. Lost (met in the baseline, in neither run now): a.',
+    },
+  ])('$name', ({ now, want }) => {
+    const markdown = renderReport(report(true, now), report(false, [Outcome.Met, Outcome.Met]));
+    expect(markdown).toContain(
+      '# Lane-pipeline eval: careful, fake agent, plans in the Build session',
+    );
+    expect(markdown).toContain(`## Keep rule\n\n${want}`);
+  });
+
+  it('says there is nothing to keep against with no baseline', () => {
+    expect(renderReport(report(null, [Outcome.Met]), null)).toContain(
+      '## Keep rule\n\nNo baseline report was given.',
+    );
+  });
+
+  it('reads a report saved before it named the setting', () => {
+    const saved: Record<string, unknown> = { ...report(null, [Outcome.Met]) };
+    delete saved['plansInBuild'];
+    expect(EvalReport.parse(saved).plansInBuild).toBeNull();
+  });
+});
+
 describe('renderReport', () => {
   it('lists a case’s runs in order and counts them in the total', () => {
     const markdown = renderReport(
       {
         rigor: Rigor.Standard,
         agent: EvalAgent.Fake,
+        plansInBuild: null,
         startedAt: '2026-11-18T00:00:00.000Z',
         finishedAt: '2026-11-18T00:01:00.000Z',
         cases: [

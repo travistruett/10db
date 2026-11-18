@@ -1,8 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Rigor, Verdict, WorkstreamState } from '@10db/contracts';
+import { Rigor, Verdict, WorkstreamState, WorkstreamStep } from '@10db/contracts';
+import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { isolatedGitEnv, TEST_REPO_CONFIG, tempDir, type TempDir } from '../../test/fixtures';
 import { loadEvalProject, PROJECT_FILE, type EvalCase } from './case';
 import { GateResult, Outcome } from './grade';
@@ -35,38 +37,77 @@ function decoySource(): { source: string; base: string; merged: string } {
   return { source, base, merged: git('rev-parse', 'HEAD') };
 }
 
-describe('runEval on the fake agent', () => {
-  it('replays a case twice through a daemon of its own and reports, keeping the transcripts dir', async () => {
-    const { source, base, merged } = decoySource();
-    const workDir = tempDir('eval-work');
-    dirs.push(workDir);
-    const work = realpathSync(workDir.path);
-    const decoy: EvalCase = {
-      id: 'decoy-notice',
-      title: 'The notice reads two',
-      description: 'Change the notice in apps/daemon/src/notice.ts to 2.',
-      acceptanceCriteria: ['notice is 2'],
-      areas: ['daemon'],
-      baseCommit: base,
-      mergedCommit: merged,
-      tags: [],
-    };
+/** Replays the decoy case on the fake agent at `rigor`, in a work dir of its own. */
+async function runDecoy(rigor: Rigor, plansInBuild?: boolean) {
+  const { source, base, merged } = decoySource();
+  const workDir = tempDir('eval-work');
+  dirs.push(workDir);
+  const work = realpathSync(workDir.path);
+  const decoy: EvalCase = {
+    id: 'decoy-notice',
+    title: 'The notice reads two',
+    description: 'Change the notice in apps/daemon/src/notice.ts to 2.',
+    acceptanceCriteria: ['notice is 2'],
+    areas: ['daemon'],
+    baseCommit: base,
+    mergedCommit: merged,
+    tags: [],
+  };
+  const report = await runEval({
+    rigor,
+    agent: EvalAgent.Fake,
+    cases: [decoy],
+    project: loadEvalProject(PROJECT_FILE),
+    source,
+    work,
+    parallel: 1,
+    caseTimeoutMs: 60_000,
+    builder: {
+      dataDir: '/nonexistent/builder/10db',
+      worktreeBase: '/nonexistent/builder/worktrees',
+    },
+    log: () => undefined,
+    ...(plansInBuild === undefined ? {} : { plansInBuild }),
+  });
+  return { report, work, decoy };
+}
 
-    const report = await runEval({
-      rigor: Rigor.Standard,
-      agent: EvalAgent.Fake,
-      cases: [decoy],
-      project: loadEvalProject(PROJECT_FILE),
-      source,
-      work,
-      parallel: 1,
-      caseTimeoutMs: 60_000,
-      builder: {
-        dataDir: '/nonexistent/builder/10db',
-        worktreeBase: '/nonexistent/builder/worktrees',
-      },
-      log: () => undefined,
-    });
+/** The steps each workstream the eval daemon ran, read from its own database. */
+function stepsRun(work: string): WorkstreamStep[][] {
+  const db = new Database(join(work, 'data', '10db.sqlite'), { readonly: true });
+  try {
+    const rows = z
+      .array(z.object({ steps: z.string() }))
+      .parse(db.prepare('SELECT steps FROM workstreams').all());
+    return rows.map((r) => z.array(WorkstreamStep).parse(JSON.parse(r.steps)));
+  } finally {
+    db.close();
+  }
+}
+
+describe('runEval on the fake agent', () => {
+  it('runs Careful as Build then Review when it plans in the Build session, and keeps the plan', async () => {
+    const { report, work } = await runDecoy(Rigor.Careful, true);
+    expect(report.plansInBuild).toBe(true);
+    const runs = report.cases[0]?.runs ?? [];
+    expect(runs).toHaveLength(RUNS_PER_CASE);
+    for (const run of runs)
+      expect(run).toMatchObject({
+        outcome: Outcome.Met,
+        reviewVerdict: Verdict.Approve,
+        sessions: 2,
+      });
+    for (const steps of stepsRun(work)) {
+      expect(steps.map((s) => s.role)).toEqual(['implement', 'review']);
+      expect(steps[0]).toMatchObject({
+        plansFirst: true,
+        result: { summary: expect.stringContaining('Fake plan') as unknown, verdict: null },
+      });
+    }
+  }, 180_000);
+
+  it('replays a case twice through a daemon of its own and reports, keeping the transcripts dir', async () => {
+    const { report, work, decoy } = await runDecoy(Rigor.Standard);
 
     const runs = report.cases[0]?.runs ?? [];
     expect(runs).toHaveLength(RUNS_PER_CASE);

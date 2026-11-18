@@ -8,11 +8,13 @@ import {
   InboxKind,
   InboxState,
   PlanChoice,
+  PlaybookDto,
   ProjectDto,
   TaskDto,
   WorkstreamDto,
   WorkstreamState,
   WorkstreamStep,
+  type PlaybookInput,
   type Rigor,
 } from '@10db/contracts';
 import Database from 'better-sqlite3';
@@ -54,6 +56,11 @@ export interface EvalOptions {
   readonly caseTimeoutMs: number;
   readonly builder: BuilderPlaces;
   readonly log: (line: string) => void;
+  /**
+   * Sets the rigor's plansInBuild on the eval daemon's global playbook, to compare planning in the Build
+   * session with a separate Plan step. Absent runs the playbook as 10db ships it.
+   */
+  readonly plansInBuild?: boolean;
 }
 
 export class EvalRunError extends Error {
@@ -176,9 +183,15 @@ async function startDaemon(opts: EvalOptions, fakeBook: string | null): Promise<
   throw new EvalRunError(`The eval daemon did not start; see ${join(opts.work, 'daemon.log')}`);
 }
 
-async function api<T>(d: Daemon, schema: z.ZodType<T>, path: string, body?: unknown): Promise<T> {
+async function api<T>(
+  d: Daemon,
+  schema: z.ZodType<T>,
+  path: string,
+  body?: unknown,
+  method: 'POST' | 'PUT' = 'POST',
+): Promise<T> {
   const res = await fetch(`${d.url}${path}`, {
-    method: body === undefined ? 'GET' : 'POST',
+    method: body === undefined ? 'GET' : method,
     headers: { Authorization: `Bearer ${d.token}`, 'Content-Type': 'application/json' },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
@@ -441,12 +454,24 @@ export async function runEval(opts: EvalOptions): Promise<EvalReport> {
       editPath: fakeEditPath(c, opts),
     }));
     fakeBook = join(opts.work, 'fake-book.json');
-    writeFileSync(fakeBook, JSON.stringify(fakeBookFor(fakes, opts.rigor), null, 2));
+    writeFileSync(
+      fakeBook,
+      JSON.stringify(fakeBookFor(fakes, opts.rigor, opts.plansInBuild ?? null), null, 2),
+    );
   }
   const startedAt = new Date().toISOString();
   const daemon = await startDaemon(opts, fakeBook);
   let runs: CaseRun[][];
   try {
+    if (opts.plansInBuild !== undefined) {
+      const input: PlaybookInput = {
+        rows: [{ rigor: opts.rigor, plansInBuild: opts.plansInBuild }],
+      };
+      await api(daemon, PlaybookDto, '/playbook', input, 'PUT');
+      opts.log(
+        `${opts.rigor} plans ${opts.plansInBuild ? 'in the Build session' : 'in a Plan step'}`,
+      );
+    }
     const jobs = opts.cases.flatMap((c) =>
       Array.from({ length: RUNS_PER_CASE }, (_, i) => () => runCase(daemon, c, i + 1, opts)),
     );
@@ -465,6 +490,7 @@ export async function runEval(opts: EvalOptions): Promise<EvalReport> {
   return {
     rigor: opts.rigor,
     agent: opts.agent,
+    plansInBuild: opts.plansInBuild ?? null,
     startedAt,
     finishedAt: new Date().toISOString(),
     cases,
