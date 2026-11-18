@@ -76,6 +76,35 @@ export function withProject(search: InboxSearch, project: ProjectId | null): Inb
   return inboxSearch({ ...search, project: project ?? undefined });
 }
 
+/** The search with one key set, or removed when `value` is null. */
+export function withFilter<K extends 'q' | 'project' | 'kind' | 'outcome' | 'person' | 'since'>(
+  search: InboxSearch,
+  key: K,
+  value: InboxSearch[K] | null,
+): InboxSearch {
+  return inboxSearch({ ...search, [key]: value ?? undefined });
+}
+
+/** Whether a filter the search's state uses is set; the search text is not a filter. */
+export function filtersSet(search: InboxSearch): boolean {
+  return Object.keys(inboxList(search, new Date())).some((key) => key !== 'state' && key !== 'q');
+}
+
+/** Whether the list is narrowed by the search text or a filter its state uses. */
+export function narrowed(search: InboxSearch): boolean {
+  return Object.keys(inboxList(search, new Date())).some((key) => key !== 'state');
+}
+
+/** The search with its filters removed; the state and the search text stay. */
+export function withoutFilters(search: InboxSearch): InboxSearch {
+  return inboxSearch({ state: search.state, q: search.q });
+}
+
+/** The search with its text removed. */
+export function withoutQuery(search: InboxSearch): InboxSearch {
+  return withFilter(search, 'q', null);
+}
+
 let last: InboxSearch = {};
 
 /** The Inbox's search as the builder left it, so the rail's Inbox opens where it was. */

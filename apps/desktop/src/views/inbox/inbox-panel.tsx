@@ -6,6 +6,9 @@ import { useSlackConnection } from '../../daemon/people';
 import { CountBadge, CountTone } from '../../shell/count-badge';
 import { Panel } from '../../shell/panel';
 import { useOpenInboxCount } from './inbox-count';
+import { InboxFilterMenu } from './inbox-filter-menu';
+import { withFilter, type InboxSearch } from './inbox-search';
+import { InboxSearchField } from './inbox-search-field';
 
 const STATES: readonly InboxListState[] = Object.values(InboxListState);
 
@@ -20,11 +23,16 @@ function stateOf(value: string): InboxListState | null {
  */
 export function InboxPanel({
   state,
+  search,
   onState,
+  onSearch,
   onListHost,
 }: {
   readonly state: InboxListState;
+  readonly search: InboxSearch;
   readonly onState: (state: InboxListState) => void;
+  /** The search changed: its text (the field writes it after a pause) or a filter. */
+  readonly onSearch: (next: InboxSearch) => void;
   readonly onListHost: (host: HTMLElement | null) => void;
 }): ReactNode {
   const open = useOpenInboxCount();
@@ -33,13 +41,25 @@ export function InboxPanel({
   // Nothing in Waiting needs the builder, so its count is neutral, and it is told only while Slack can fill it.
   const showWaiting = slack.data?.state === 'connected' && waiting !== undefined && waiting > 0;
   return (
-    <Panel section="inbox" title="Inbox">
+    <Panel
+      section="inbox"
+      title="Inbox"
+      controls={<InboxFilterMenu state={state} search={search} onChange={onSearch} />}
+    >
       <Box
         component="section"
         aria-label="Inbox panel"
         style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}
       >
-        <Box px="xs" pt={4} pb={8}>
+        <Box px="xs" pt={4}>
+          <InboxSearchField
+            query={search.q}
+            onQuery={(q) => {
+              onSearch(withFilter(search, 'q', q ?? null));
+            }}
+          />
+        </Box>
+        <Box px="xs" pt={8} pb={8}>
           <SegmentedControl
             size="xs"
             fullWidth

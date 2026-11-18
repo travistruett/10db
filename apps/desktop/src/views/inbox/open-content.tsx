@@ -1,6 +1,7 @@
 import { InboxKind } from '@10db/contracts';
-import { Alert, Box, Stack, Text } from '@mantine/core';
+import { Alert, Box, Stack } from '@mantine/core';
 import { CardContext } from './card-context';
+import { InboxEmpty } from './inbox-empty';
 import { InboxCard, type InboxCardProps } from './inbox-card';
 import { OpenRowKind, type OpenRow } from './inbox-row-item';
 import { PassReadyRow } from './pass-ready-row';
@@ -17,6 +18,8 @@ export function OpenContent({
   row,
   notice,
   empty,
+  narrowed,
+  onClearFilters,
   card,
 }: {
   /** The selected row; null when there is none. */
@@ -24,6 +27,9 @@ export function OpenContent({
   readonly notice: string | null;
   /** Whether the list has loaded and holds nothing. */
   readonly empty: boolean;
+  /** Whether a search or a filter narrows the list, so an empty one says "No matches". */
+  readonly narrowed: boolean;
+  readonly onClearFilters: () => void;
   readonly card: OpenCardProps;
 }) {
   return (
@@ -33,7 +39,9 @@ export function OpenContent({
           {notice}
         </Alert>
       )}
-      {empty ? <Text c="dimmed">Nothing needs you</Text> : null}
+      {empty ? (
+        <InboxEmpty empty="Nothing needs you" narrowed={narrowed} onClear={onClearFilters} />
+      ) : null}
       {row === null ? null : <Selected row={row} card={card} />}
     </Stack>
   );

@@ -24,6 +24,7 @@ import { inboxRowOf, InboxRowItem, OpenRowKind, systemRow, type OpenRow } from '
 import {
   inboxList,
   inboxStateMemory,
+  narrowed,
   rememberScroll,
   rememberSelected,
   type InboxSearch,
@@ -66,17 +67,21 @@ interface AwaitedPage {
 export function OpenInbox({
   search,
   listHost,
+  onClearFilters,
   onHelp,
 }: {
   readonly search: InboxSearch;
   /** The element in the panel the list is drawn into; null until the frame has drawn the panel. */
   readonly listHost: HTMLElement | null;
+  readonly onClearFilters: () => void;
   readonly onHelp: () => void;
 }) {
   const now = useNow();
   const open = useInboxRows(inboxList(search, new Date(now)));
   const connection = useSlackConnection();
-  const ownCards = systemCards(useSystemCheck().data, connection.data);
+  const systemChecks = systemCards(useSystemCheck().data, connection.data);
+  // 10db's own cards are not in the daemon's list, so a search or a kind would otherwise leave them showing.
+  const ownCards = search.q === undefined && search.kind === undefined ? systemChecks : [];
   const answer = useAnswerInbox();
   const queryClient = useQueryClient();
   const { client } = useDaemon();
@@ -344,6 +349,8 @@ export function OpenInbox({
         row={selectedRow}
         notice={notice}
         empty={!open.isPending && shown.length === 0}
+        narrowed={narrowed(search)}
+        onClearFilters={onClearFilters}
         card={{
           choice: effectiveChoice,
           note,

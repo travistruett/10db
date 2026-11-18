@@ -2,16 +2,13 @@ import { InboxListState } from '@10db/contracts';
 import { Group } from '@mantine/core';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
-import { useProjects } from '../../daemon/queries';
-import { ProjectFilter } from '../../shell/project-filter';
 import { TitleRow } from '../../shell/title-row';
 import { useOpenInboxCount } from './inbox-count';
 import { InboxPanel } from './inbox-panel';
-import { lastInboxSearch, withProject, withState } from './inbox-search';
+import { ListedInbox } from './listed-inbox';
+import { lastInboxSearch, withoutFilters, withoutQuery, withState } from './inbox-search';
 import { InboxShortcuts } from './inbox-shortcuts';
 import { OpenInbox } from './open-inbox';
-import { ResolvedInbox } from './resolved-inbox';
-import { WaitingInbox } from './waiting-inbox';
 
 /**
  * The Inbox: its title row, the panel with Open, Waiting and Resolved, and the content for the state the URL
@@ -20,7 +17,6 @@ import { WaitingInbox } from './waiting-inbox';
 export function InboxView() {
   const search = useSearch({ from: '/inbox' });
   const navigate = useNavigate({ from: '/inbox' });
-  const projects = useProjects();
   const open = useOpenInboxCount();
   const [helpOpen, setHelpOpen] = useState(false);
   const [listHost, setListHost] = useState<HTMLElement | null>(null);
@@ -30,6 +26,10 @@ export function InboxView() {
     lastInboxSearch.set(search);
   }, [search]);
 
+  const clearFilters = (): void => {
+    void navigate({ search: withoutFilters(withoutQuery(search)), replace: true });
+  };
+
   const content = (() => {
     switch (state) {
       case InboxListState.Open:
@@ -37,15 +37,22 @@ export function InboxView() {
           <OpenInbox
             search={search}
             listHost={listHost}
+            onClearFilters={clearFilters}
             onHelp={() => {
               setHelpOpen(true);
             }}
           />
         );
       case InboxListState.Waiting:
-        return <WaitingInbox project={search.project} />;
       case InboxListState.Resolved:
-        return <ResolvedInbox project={search.project} />;
+        return (
+          <ListedInbox
+            state={state}
+            search={search}
+            listHost={listHost}
+            onClearFilters={clearFilters}
+          />
+        );
     }
   })();
 
@@ -56,13 +63,6 @@ export function InboxView() {
         {...(open > 0 ? { meta: `${String(open)} open` } : {})}
         actions={
           <Group gap="sm">
-            <ProjectFilter
-              projects={projects.data ?? []}
-              value={search.project ?? null}
-              onChange={(next) => {
-                void navigate({ search: withProject(search, next) });
-              }}
-            />
             <InboxShortcuts
               opened={helpOpen}
               onOpen={() => {
@@ -77,8 +77,12 @@ export function InboxView() {
       />
       <InboxPanel
         state={state}
+        search={search}
         onState={(next) => {
           void navigate({ search: withState(search, next) });
+        }}
+        onSearch={(next) => {
+          void navigate({ search: next, replace: true });
         }}
         onListHost={setListHost}
       />

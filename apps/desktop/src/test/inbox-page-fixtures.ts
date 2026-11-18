@@ -8,7 +8,7 @@ import {
   type InboxListState,
   type InboxRowRef,
 } from '@10db/contracts';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { daemonUrl, server } from './daemon';
 
@@ -145,26 +145,29 @@ export const getText = (text: TextQuery[0], options?: TextQuery[1]) =>
 export const queryText = (text: TextQuery[0], options?: TextQuery[1]) =>
   screen.queryByText(text, { ...options, ignore: IN_LIST });
 
-/** The record rows of the table named `label`, once it has drawn at least `count`. */
-export async function tableRows(label: string, count = 1): Promise<HTMLElement[]> {
-  const table = await screen.findByRole('table', { name: label });
-  return waitFor(() => {
-    const rows = [...table.querySelectorAll<HTMLElement>('tr[data-row-id]')];
-    if (rows.length < count) throw new Error(`${label} has ${String(rows.length)} rows`);
-    return rows;
-  });
-}
+/** The panel's rows. */
+export const panelRows = (): HTMLElement[] =>
+  within(screen.getByRole('listbox', { name: 'Inbox' })).queryAllByRole('option');
 
-/** Opens every row of the table named `label` with Enter, as the builder would from the keyboard. */
-export async function openEveryRow(label: string, count = 1): Promise<HTMLElement[]> {
-  const rows = await tableRows(label, count);
-  for (const row of rows) {
-    row.focus();
-    fireEvent.keyDown(row, { key: 'Enter' });
-  }
-  await waitFor(() => {
-    for (const row of rows)
-      if (row.getAttribute('aria-expanded') !== 'true') throw new Error('shut');
+/** The panel's row whose text holds `text`, once it has drawn. */
+export const findPanelRow = (text: string): Promise<HTMLElement> =>
+  waitFor(() => {
+    const row = panelRows().find((candidate) => candidate.textContent.includes(text));
+    if (row === undefined) throw new Error(`no row holds ${text}`);
+    return row;
   });
-  return rows;
+
+/** The panel's rows once there are exactly `count`, by their text. */
+export const panelRowTexts = (count: number): Promise<string[]> =>
+  waitFor(() => {
+    const rows = panelRows();
+    if (rows.length !== count) throw new Error(`${String(rows.length)} rows, not ${String(count)}`);
+    return rows.map((row) => row.textContent);
+  });
+
+/** Picks `item` from the group `group` of the panel's Filter menu. */
+export async function chooseFilter(group: string, item: string): Promise<void> {
+  fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+  const menu = await screen.findByRole('group', { name: group, hidden: true });
+  fireEvent.click(await within(menu).findByRole('menuitem', { name: item, hidden: true }));
 }

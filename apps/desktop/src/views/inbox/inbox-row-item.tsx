@@ -1,4 +1,11 @@
-import { InboxKind, isDismissable, type InboxItemDto, type InboxListState } from '@10db/contracts';
+import {
+  InboxKind,
+  InboxListState,
+  InboxOutcome,
+  inboxOutcome,
+  isDismissable,
+  type InboxItemDto,
+} from '@10db/contracts';
 import { Button, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 import type { InboxRow } from '../../daemon/inbox-queries';
@@ -6,9 +13,11 @@ import { ProjectLabel } from '../../shell/project-label';
 import { shortAgo } from '../factory/short-ago';
 import classes from './inbox-row-item.module.css';
 import { passReadyTitle } from './pass-ready-row';
+import { answerWords } from './resolved-detail';
 import { SessionBadge, useSessionOfCard } from './session-card-link';
 import { cardText } from './system-card-list';
 import type { SystemCard } from './system-cards';
+import { recipientsOf } from './waiting-row';
 
 /** The short word a row's first line starts with, by what the card is. */
 export const KIND_TAGS: Record<InboxKind, string> = {
@@ -20,6 +29,13 @@ export const KIND_TAGS: Record<InboxKind, string> = {
   [InboxKind.Check]: 'CHECK',
   [InboxKind.Plan]: 'PLAN',
   [InboxKind.PlaybookMoveReport]: 'SETTINGS',
+};
+
+/** The words for how a resolved card closed, on its row and in the filter. */
+export const OUTCOME_LABELS: Readonly<Record<InboxOutcome, string>> = {
+  [InboxOutcome.Answered]: 'Answered',
+  [InboxOutcome.TenDb]: 'Closed by 10db',
+  [InboxOutcome.Slack]: 'Slack Answer',
 };
 
 export const OpenRowKind = { System: 'system', Inbox: 'inbox' } as const;
@@ -110,6 +126,25 @@ function Lines({
   );
 }
 
+/** What a Waiting or Resolved row's second line says after the project. */
+function closedLine(state: InboxListState, item: InboxItemDto, now: number): string {
+  if (state === InboxListState.Waiting) {
+    const sent = item.send?.sentAt;
+    return `Waiting on ${recipientsOf(item)}${sent == null ? '' : ` · ${shortAgo(sent, now)}`}`;
+  }
+  const choice = item.answer?.choice;
+  const answer =
+    choice === undefined || choice === 'dismissed' ? 'Dismissed' : answerWords(item, choice);
+  return `${OUTCOME_LABELS[inboxOutcome(item)]} · ${answer}`;
+}
+
+/** How long ago a row's card happened: Open's arrived, Waiting's was sent, Resolved's closed. */
+function rowAge(state: InboxListState, item: InboxItemDto, now: number): string {
+  if (state === InboxListState.Waiting && item.send?.sentAt != null)
+    return shortAgo(item.send.sentAt, now);
+  return shortAgo(state === InboxListState.Resolved ? item.updatedAt : item.createdAt, now);
+}
+
 /** What a chat's card says in place of its body: the session that raised it. */
 function SessionLine({ item }: { readonly item: InboxItemDto }) {
   const session = useSessionOfCard(item);
@@ -142,7 +177,7 @@ export function InboxRowItem({
   readonly pending: boolean;
   readonly onDismiss: (row: InboxRow) => void;
 }) {
-  const tone = state === 'open' ? 'open' : 'quiet';
+  const tone = state === InboxListState.Open ? 'open' : 'quiet';
   if (row.kind === OpenRowKind.System) {
     const { title, body } = cardText(row.card);
     return (
@@ -165,7 +200,7 @@ export function InboxRowItem({
   const items = row.row.items;
   const [first] = items;
   const pass = row.row.passId !== null;
-  const dismissable = !pass && isDismissable(first);
+  const dismissable = state === InboxListState.Open && !pass && isDismissable(first);
   const verb = items.length > 1 ? 'Dismiss All' : 'Dismiss';
   return (
     <Lines
@@ -173,11 +208,15 @@ export function InboxRowItem({
       tone={tone}
       title={first.title}
       count={pass ? 1 : items.length}
-      age={shortAgo(first.createdAt, now)}
+      age={rowAge(state, first, now)}
       second={
         <>
           <ProjectLabel projectId={first.projectId} />
-          {pass ? (
+          {state !== InboxListState.Open ? (
+            <Text fz={12} c="dimmed" truncate style={{ minWidth: 0 }}>
+              {closedLine(state, first, now)}
+            </Text>
+          ) : pass ? (
             <Text fz={12} c="dimmed" truncate style={{ minWidth: 0 }}>
               {passReadyTitle(items.length)}
             </Text>

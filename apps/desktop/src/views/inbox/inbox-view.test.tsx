@@ -18,15 +18,15 @@ import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../t
 import { batchDto, daemonEvent, inboxItemDto, projectViewDto } from '../../test/fixtures';
 import { chatDto } from '../../test/chat-fixtures';
 import { resetViewportWidth, viewportWidth } from '../../test/window-width';
-import { pickOption } from '../../test/combobox';
 import {
   findText,
   getText,
-  openEveryRow,
+  chooseFilter,
+  findPanelRow,
+  panelRows,
+  panelRowTexts,
   queryText,
-  serveInboxPage,
   serveInboxRows,
-  tableRows,
 } from '../../test/inbox-page-fixtures';
 import { sendDto, slackConnection } from '../../test/people-fixtures';
 import { knowledgeList, proposalDto, provenanceDto } from '../../test/knowledge-fixtures';
@@ -1233,25 +1233,35 @@ describe('the resolved view', () => {
     state: 'RESOLVED',
     title: 'Which badge color?',
     answer: { choice: 'Teal' },
+    options: [{ label: 'Teal', description: 'Matches the theme' }],
     updatedAt: '2026-10-30T11:00:00.000Z',
   });
 
+  afterEach(() => {
+    lastInboxSearch.set({});
+    for (const state of ['open', 'waiting', 'resolved'] as const) {
+      rememberSelected(state, null);
+      rememberScroll(state, 0);
+    }
+  });
+
   /**
-   * Serves the open list and the resolved page; returns every query the resolved page was asked with.
-   * Every GET /inbox answers the open cards, so a view that asked it for resolved ones would show them.
+   * Serves the open list and the resolved rows; returns every query asked. Every GET /inbox answers the open
+   * cards, so a view that asked it for resolved ones would show them.
    */
-  function serveBoth(
-    open: InboxItemDto[],
-    resolved: InboxItemDto[],
-    total?: number,
-  ): Record<string, string>[] {
-    serve(http.get(daemonUrl('/inbox'), () => HttpResponse.json(open)));
-    return serveInboxPage({ open, resolved }, total === undefined ? {} : { resolved: total });
+  function serveBoth(open: InboxItemDto[], resolved: InboxItemDto[]): Record<string, string>[] {
+    serve(
+      http.get(daemonUrl('/inbox'), () => HttpResponse.json(open)),
+      http.get(daemonUrl('/inbox/:id/context'), () => HttpResponse.json({ messages: [] })),
+    );
+    return serveInboxRows({ open, resolved });
   }
 
-  const RESOLVED = 'Resolved cards';
+  /** The Resolved list's pages, not the counts. */
+  const pages = (asked: Record<string, string>[]): Record<string, string>[] =>
+    asked.filter((q) => q['state'] === 'resolved' && q['pageSize'] === '50');
   const lastAsked = (asked: Record<string, string>[]): Record<string, string> | undefined =>
-    asked.at(-1);
+    pages(asked).at(-1);
 
   it("draws the same header on Open and Resolved: title, the panel's state switch, a ? button", async () => {
     serveBoth([color], [answered]);
@@ -1267,7 +1277,7 @@ describe('the resolved view', () => {
     expect(help.getAttribute('data-variant')).toBe('subtle');
 
     fireEvent.click(screen.getByRole('radio', { name: 'Resolved' }));
-    await tableRows(RESOLVED);
+    await findPanelRow('Which badge color?');
 
     // The same elements stay mounted, so nothing in the header moves or resizes.
     expect(screen.getByRole('heading', { name: 'Inbox' })).toBe(title);
@@ -1282,127 +1292,103 @@ describe('the resolved view', () => {
     renderApp('/inbox');
     await findText('Which badge color?');
     fireEvent.click(screen.getByRole('radio', { name: 'Resolved' }));
-    await tableRows(RESOLVED);
+    await findPanelRow('Which badge color?');
     key('?', { shiftKey: true });
     expect(screen.queryByRole('dialog', { name: 'Keyboard Shortcuts' })).toBeNull();
   });
 
-  it('asks the daemon for one page, newest first, and draws the rows in its order', async () => {
-    const asked = serveBoth([color], [answered, closedBy10db]);
+  it('asks the daemon for one page of 50 with no page number, and draws the rows newest first', async () => {
+    const asked = serveBoth([color], [closedBy10db, answered]);
     renderApp('/inbox');
     await findText('Which badge color?');
     fireEvent.click(screen.getByRole('radio', { name: /^Resolved/ }));
 
-    const rows = await tableRows(RESOLVED, 2);
-    // One page, never a fixed count of the latest cards.
-    expect(asked[0]).toEqual({
-      state: 'resolved',
-      sort: 'updatedAt',
-      dir: 'desc',
-      page: '1',
-      pageSize: '25',
-    });
-    expect(rows.map((row) => row.textContent)).toEqual([
-      expect.stringContaining('Which badge color?'),
-      expect.stringContaining('Batch not started: 10db will not run git in /repo'),
-    ]);
-    expect(rows[0]?.textContent).toContain('Answered');
-    expect(rows[1]?.textContent).toContain('Closed by 10db');
+    const texts = await panelRowTexts(2);
+    expect(pages(asked)[0]).toEqual({ state: 'resolved', pageSize: '50' });
+    expect(texts[0]).toContain('Which badge color?');
+    expect(texts[0]).toContain('Answered · Teal');
+    expect(texts[1]).toContain('Batch not started: 10db will not run git in /repo');
+    expect(texts[1]).toContain('Closed by 10db · Dismissed');
     // The open cards and their keys are not there.
     expect(screen.queryByRole('button', { name: 'Send Answer' })).toBeNull();
   });
 
-  it('opens a row with Enter or → for who closed it and why, and closes it with ←', async () => {
+  it('shows how a card closed on a click, and the row above it on k', async () => {
     serveBoth([], [answered, closedBy10db]);
-    renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('radio', { name: /^Resolved/ }));
-    const [first, second] = await tableRows(RESOLVED, 2);
-    if (first === undefined || second === undefined) throw new Error('two rows');
-    expect(queryText('Answered: Teal')).toBeNull();
-    first.focus();
-    fireEvent.keyDown(first, { key: 'Enter' });
+    renderApp('/inbox?state=resolved');
     expect(await findText('Answered: Teal')).toBeTruthy();
-    expect(first.getAttribute('aria-expanded')).toBe('true');
-    // ↓ moves to the next row, and → opens it.
-    fireEvent.keyDown(first, { key: 'ArrowDown' });
-    expect(document.activeElement).toBe(second);
-    fireEvent.keyDown(second, { key: 'ArrowRight' });
+    fireEvent.click(await findPanelRow('Batch not started'));
     expect(await findText('Resolved by 10db: Alpha started')).toBeTruthy();
-    fireEvent.keyDown(second, { key: 'ArrowUp' });
-    expect(document.activeElement).toBe(first);
-    fireEvent.keyDown(first, { key: 'ArrowLeft' });
-    await waitFor(() => {
-      expect(first.getAttribute('aria-expanded')).toBe('false');
-    });
-    expect(second.getAttribute('aria-expanded')).toBe('true');
+    expect(queryText('Answered: Teal')).toBeNull();
+    key('k');
+    expect(await findText('Answered: Teal')).toBeTruthy();
   });
 
   it.each([
     ['Kind', 'Flag', { kind: 'flag' }],
     ['Outcome', 'Slack Answer', { outcome: 'slack' }],
     ['Outcome', 'Closed by 10db', { outcome: '10db' }],
-  ])('sends the %s filter %s to the daemon', async (column, choice, filter) => {
+  ])('sends the %s filter %s to the daemon', async (group, choice, filter) => {
     const asked = serveBoth([], [answered]);
-    renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('radio', { name: /^Resolved/ }));
-    await tableRows(RESOLVED);
-    fireEvent.click(screen.getByRole('button', { name: `Filter ${column}` }));
-    await pickOption(await screen.findByRole('combobox', { name: column }), choice);
+    renderApp('/inbox?state=resolved');
+    await findPanelRow('Which badge color?');
+    await chooseFilter(group, choice);
     await waitFor(() => {
-      expect(lastAsked(asked)).toEqual({
-        state: 'resolved',
-        sort: 'updatedAt',
-        dir: 'desc',
-        page: '1',
-        pageSize: '25',
-        ...filter,
-      });
+      expect(lastAsked(asked)).toEqual({ state: 'resolved', pageSize: '50', ...filter });
     });
   });
 
-  it('sorts by a column on the daemon', async () => {
+  it.each([
+    ['Today', 'day', 0],
+    ['Last 7 Days', 'week', 6],
+    ['Last 30 Days', 'month', 29],
+  ] as const)('sends When: %s as `since`, from local midnight', async (choice, since, back) => {
     const asked = serveBoth([], [answered]);
-    renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('radio', { name: /^Resolved/ }));
-    await tableRows(RESOLVED);
-    fireEvent.click(screen.getByRole('button', { name: 'Sort by Title' }));
+    const { router } = renderApp('/inbox?state=resolved');
+    await findPanelRow('Which badge color?');
+    await chooseFilter('When', choice);
     await waitFor(() => {
-      expect(lastAsked(asked)).toMatchObject({ sort: 'title', dir: 'desc' });
+      expect(router.state.location.search).toMatchObject({ since });
+    });
+    await waitFor(() => {
+      const from = new Date();
+      from.setHours(0, 0, 0, 0);
+      from.setDate(from.getDate() - back);
+      expect(lastAsked(asked)?.['since']).toBe(from.toISOString());
     });
   });
 
-  it('asks for the next page from the pager', async () => {
-    const asked = serveBoth([], [answered], 60);
-    renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('radio', { name: /^Resolved/ }));
-    await tableRows(RESOLVED);
-    expect(await findText('1–25 of 60')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Page 2' }));
+  it('puts the Project filter in the URL and the query, and marks the chosen project', async () => {
+    const alpha = projectViewDto({ name: 'alpha' });
+    const beta = projectViewDto({ name: 'beta' });
+    const asked = serveBoth([], [answered]);
+    server.use(http.get(daemonUrl('/projects'), () => HttpResponse.json([alpha, beta])));
+    const { router } = renderApp('/inbox?state=resolved');
+    await findPanelRow('Which badge color?');
+    await chooseFilter('Project', 'beta');
     await waitFor(() => {
-      expect(lastAsked(asked)).toMatchObject({ page: '2', pageSize: '25' });
+      expect(router.state.location.search).toMatchObject({ project: beta.id });
     });
+    await waitFor(() => {
+      expect(lastAsked(asked)).toEqual({ state: 'resolved', pageSize: '50', project: beta.id });
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+    expect(
+      await screen.findByRole('menuitem', { name: 'beta', current: true, hidden: true }),
+    ).toBeTruthy();
   });
 
-  it('sends the Project filter in the URL to the daemon', async () => {
+  it('sends the Project filter in the URL to the daemon, and only that one', async () => {
     const only = mintId('Project');
-    const asked = serveBoth([], [answered]);
-    renderApp(`/inbox?project=${only}`);
-    fireEvent.click(await screen.findByRole('radio', { name: /^Resolved/ }));
-    await tableRows(RESOLVED);
-    expect(asked.length).toBeGreaterThan(0);
-    // Every ask names the project: no page of every project's cards reaches the view.
-    for (const query of asked)
-      expect(query).toEqual({
-        state: 'resolved',
-        project: only,
-        sort: 'updatedAt',
-        dir: 'desc',
-        page: '1',
-        pageSize: '25',
-      });
+    const asked = serveBoth([], [inboxItemDto({ ...answered, projectId: only })]);
+    renderApp(`/inbox?state=resolved&project=${only}`);
+    await findPanelRow('Which badge color?');
+    expect(pages(asked).length).toBeGreaterThan(0);
+    for (const query of pages(asked))
+      expect(query).toEqual({ state: 'resolved', pageSize: '50', project: only });
   });
 
-  it('says why a send failed when its row opens', async () => {
+  it('says why a send failed when its row is shown', async () => {
     const failed = inboxItemDto({
       ...answered,
       send: sendDto({
@@ -1413,9 +1399,7 @@ describe('the resolved view', () => {
       }),
     });
     serveBoth([], [failed]);
-    renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('radio', { name: /^Resolved/ }));
-    await openEveryRow(RESOLVED);
+    renderApp('/inbox?state=resolved');
     expect(
       await findText('Slack refused: channel_not_found. Mark Ellis may have left the workspace.'),
     ).toBeTruthy();
@@ -1426,7 +1410,7 @@ describe('the resolved view', () => {
       inboxItemDto({
         kind: 'proposal',
         state: 'RESOLVED',
-        title: 'Tests never sleep',
+        title: `Tests never sleep (${choice})`,
         options: [
           { label: 'accept_project', description: 'Confirm it for this project' },
           { label: 'accept_you', description: 'Confirm it for you, in every project' },
@@ -1461,28 +1445,185 @@ describe('the resolved view', () => {
         gone,
       ],
     );
-    renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('radio', { name: /^Resolved/ }));
-    await openEveryRow(RESOLVED, 6);
+    renderApp('/inbox?state=resolved');
+    const texts = await panelRowTexts(6);
+    // The rows' second lines and the content use the same words.
     for (const words of [
-      'Answered: This Project',
-      'Answered: All Projects',
-      'Answered: This Area',
-      'Answered: Reject',
-      'Answered: Allow once',
-      'Answered: Violet',
+      'Answered · This Project',
+      'Answered · All Projects',
+      'Answered · This Area',
+      'Answered · Reject',
+      'Answered · Allow once',
+      'Answered · Violet',
     ]) {
-      expect(getText(words)).toBeTruthy();
+      expect(texts.some((text) => text.includes(words))).toBe(true);
+    }
+    for (const row of panelRows()) {
+      fireEvent.click(row);
+      expect(await findText(/^Answered: /)).toBeTruthy();
     }
     expect(queryText(/accept_|allow_once/)).toBeNull();
   });
 
-  it('says so when nothing has been resolved', async () => {
+  it('says nothing resolved yet', async () => {
     serveBoth([color], []);
     renderApp('/inbox');
     await findText('Which badge color?');
     fireEvent.click(screen.getByRole('radio', { name: /^Resolved/ }));
-    expect(await findText('Nothing has been resolved yet.')).toBeTruthy();
+    expect(await findText('Nothing resolved yet')).toBeTruthy();
+  });
+
+  describe('search and filters', () => {
+    const many = (n: number): InboxItemDto[] =>
+      Array.from({ length: n }, (_, i) =>
+        inboxItemDto({
+          kind: 'question',
+          state: 'RESOLVED',
+          title: `Retry number ${String(i)}?`,
+          answer: { choice: 'Teal' },
+          options: [{ label: 'Teal', description: '' }],
+          updatedAt: new Date(Date.UTC(2026, 9, 30, 10, 0, 59 - i)).toISOString(),
+        }),
+      );
+    const search = (): HTMLInputElement => {
+      const field = screen.getByRole('textbox', { name: 'Search the Inbox' });
+      if (!(field instanceof HTMLInputElement)) throw new Error('not an input');
+      return field;
+    };
+
+    it('sends one query for what is typed, after the debounce, not one per keystroke', async () => {
+      const asked = serveBoth([], many(3));
+      const { router } = renderApp('/inbox?state=resolved');
+      await panelRowTexts(3);
+      const before = pages(asked).length;
+      for (const text of ['r', 're', 'ret', 'retr', 'retry'])
+        fireEvent.change(search(), { target: { value: text } });
+      await waitFor(() => {
+        expect(router.state.location.search).toMatchObject({ q: 'retry' });
+      });
+      await waitFor(() => {
+        expect(pages(asked).length).toBeGreaterThan(before);
+      });
+      expect(
+        pages(asked)
+          .slice(before)
+          .map((q) => q['q']),
+      ).toEqual(['retry']);
+    });
+
+    it('keeps the old rows on screen while the new page is in flight', async () => {
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let reached: () => void = () => undefined;
+      const arrived = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      serveBoth([], many(3));
+      serveInboxRows({ resolved: many(3) }, (query) => {
+        if (query['q'] !== 'number 1') return undefined;
+        reached();
+        return held;
+      });
+      renderApp('/inbox?state=resolved');
+      await panelRowTexts(3);
+      fireEvent.change(search(), { target: { value: 'number 1' } });
+      // The new list's query has gone out and is held: the old rows are still there.
+      await arrived;
+      expect(panelRows()).toHaveLength(3);
+      expect(screen.queryByText('No matches')).toBeNull();
+      release();
+      const texts = await panelRowTexts(1);
+      expect(texts[0]).toContain('Retry number 1?');
+    });
+
+    it('says No matches with a Clear Filters button that empties q and the filters', async () => {
+      serveBoth([], many(2));
+      const { router } = renderApp('/inbox?state=resolved&kind=flag&q=zzz');
+      expect(await screen.findByText('No matches')).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Clear Filters' }));
+      await waitFor(() => {
+        expect(router.state.location.search).toEqual({ state: 'resolved' });
+      });
+      await panelRowTexts(2);
+      expect(search().value).toBe('');
+    });
+
+    it('focuses the search with ⌘F', async () => {
+      serveBoth([], many(1));
+      renderApp('/inbox?state=resolved');
+      await panelRowTexts(1);
+      fireEvent.keyDown(document.body, { key: 'f', metaKey: true });
+      await waitFor(() => {
+        expect(document.activeElement).toBe(search());
+      });
+    });
+
+    it('opens a URL with a search and a filter showing both', async () => {
+      const asked = serveBoth([], many(1));
+      renderApp('/inbox?state=resolved&q=x&kind=flag');
+      await waitFor(() => {
+        expect(search().value).toBe('x');
+      });
+      await waitFor(() => {
+        expect(lastAsked(asked)).toEqual({
+          state: 'resolved',
+          pageSize: '50',
+          q: 'x',
+          kind: 'flag',
+        });
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+      expect(
+        await screen.findByRole('menuitem', { name: 'Flag', current: true, hidden: true }),
+      ).toBeTruthy();
+    });
+
+    it('hides 10db’s own cards while a search is set', async () => {
+      serveBoth([], []);
+      server.use(
+        http.get(daemonUrl('/slack'), () =>
+          HttpResponse.json(slackConnection({ state: 'refused' })),
+        ),
+      );
+      renderApp('/inbox?q=zzz');
+      expect(await screen.findByText('No matches')).toBeTruthy();
+      expect(panelRows()).toHaveLength(0);
+    });
+
+    it('keeps the state, search, selected row and scroll through the rail', async () => {
+      serveBoth([], many(40));
+      const { router } = renderApp('/inbox?state=resolved&q=Retry');
+      fireEvent.click(await findPanelRow('Retry number 2?'));
+      expect((await findPanelRow('Retry number 2?')).getAttribute('aria-selected')).toBe('true');
+      const list = (): HTMLElement => {
+        const el = document.querySelector('[data-inbox-list] .mantine-ScrollArea-viewport');
+        if (!(el instanceof HTMLElement)) throw new Error('no list viewport');
+        return el;
+      };
+      list().scrollTop = 120;
+      fireEvent.scroll(list());
+      const rail = (name: string): HTMLElement => {
+        const link = [...document.querySelectorAll<HTMLElement>('a[data-rail-item]')].find((a) =>
+          a.textContent.startsWith(name),
+        );
+        if (link === undefined) throw new Error(`no rail link ${name}`);
+        return link;
+      };
+      fireEvent.click(rail('Board'));
+      await waitFor(() => {
+        expect(router.state.location.pathname).toBe('/board');
+      });
+      fireEvent.click(rail('Inbox'));
+      await waitFor(() => {
+        expect(router.state.location.pathname).toBe('/inbox');
+      });
+      expect(router.state.location.search).toEqual({ state: 'resolved', q: 'Retry' });
+      expect((await findPanelRow('Retry number 2?')).getAttribute('aria-selected')).toBe('true');
+      expect(search().value).toBe('Retry');
+      expect(list().scrollTop).toBe(120);
+    });
   });
 });
 
@@ -1747,14 +1888,14 @@ describe('a resolved answer that proposed a principle', () => {
 
   function serveResolved(resolved: InboxItemDto[]): void {
     serve(http.get(daemonUrl('/inbox'), () => HttpResponse.json([])));
-    serveInboxPage({ resolved });
+    serveInboxRows({ resolved });
   }
 
-  const RESOLVED = 'Resolved cards';
-  /** Opens the Resolved tab and every row in it; returns the rows' details, in order. */
+  /** Opens Resolved and picks each row in turn; returns the details of the last row shown. */
   async function openResolved(count = 1): Promise<HTMLElement[]> {
     fireEvent.click(await screen.findByRole('radio', { name: 'Resolved' }));
-    await openEveryRow(RESOLVED, count);
+    await panelRowTexts(count);
+    for (const row of panelRows()) fireEvent.click(row);
     return screen.findAllByTestId('resolved-detail');
   }
 
@@ -1786,10 +1927,14 @@ describe('a resolved answer that proposed a principle', () => {
 
   it('says a principle was proposed, on the card that proposed it only', async () => {
     serveResolved([answered, plain]);
-    renderApp('/inbox');
-    const details = await openResolved(2);
-    expect(details[0]?.textContent).toContain('A principle was proposed');
-    expect(details[1]?.textContent).not.toContain('principle');
+    renderApp('/inbox?state=resolved');
+    fireEvent.click(await findPanelRow('Which queue?'));
+    expect((await screen.findByTestId('resolved-detail')).textContent).toContain(
+      'A principle was proposed',
+    );
+    fireEvent.click(await findPanelRow('Which badge color?'));
+    expect(await findText('Answered: Teal')).toBeTruthy();
+    expect(screen.getByTestId('resolved-detail').textContent).not.toContain('principle');
   });
 
   it('opens a principle still waiting for a verdict, under Pending', async () => {
@@ -1937,9 +2082,10 @@ describe('Inbox across projects', () => {
     renderApp(`/inbox?project=${beta.id}`);
     expect(await findRow('Beta question?')).toBeTruthy();
     expect(rows()).toHaveLength(1);
-    expect(screen.getByRole('combobox', { name: 'Project' })).toBe(
-      screen.getByDisplayValue('beta'),
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+    expect(
+      await screen.findByRole('menuitem', { name: 'beta', current: true, hidden: true }),
+    ).toBeTruthy();
   });
 });
 

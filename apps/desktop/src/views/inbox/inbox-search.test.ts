@@ -1,6 +1,17 @@
 import { InboxKind, InboxListState, InboxOutcome, PersonId, ProjectId } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { inboxList, inboxSearch, lastInboxSearch, withProject, withState } from './inbox-search';
+import {
+  filtersSet,
+  inboxList,
+  inboxSearch,
+  lastInboxSearch,
+  narrowed,
+  withFilter,
+  withoutFilters,
+  withoutQuery,
+  withProject,
+  withState,
+} from './inbox-search';
 
 const PROJECT = ProjectId.parse('prj_01920000-0000-7000-8000-000000000001');
 const PERSON = PersonId.parse('psn_01920000-0000-7000-8000-000000000001');
@@ -86,6 +97,29 @@ describe('withState and withProject', () => {
     ],
   ])('%s', (_name, actual, expected) => {
     expect(actual).toEqual(expected);
+  });
+});
+
+describe('filters and the search', () => {
+  it.each([
+    ['nothing', { state: 'open' }, false, false],
+    ['q alone is no filter', { q: 'a' }, false, true],
+    ['a kind', { kind: InboxKind.Flag }, true, true],
+    ['a person in Open does not apply', { person: PERSON }, false, false],
+    ['a person in Waiting', { state: 'waiting', person: PERSON }, true, true],
+    ['an outcome in Resolved', { state: 'resolved', outcome: InboxOutcome.Slack }, true, true],
+    ['a since in Waiting does not apply', { state: 'waiting', since: 'day' }, false, false],
+  ] as const)('%s', (_name, search, filters, any) => {
+    expect(filtersSet(search)).toBe(filters);
+    expect(narrowed(search)).toBe(any);
+  });
+
+  it('sets and clears one key, and leaves the rest', () => {
+    const search = { state: InboxListState.Resolved, q: 'a', kind: InboxKind.Flag } as const;
+    expect(withFilter(search, 'kind', null)).toEqual({ state: 'resolved', q: 'a' });
+    expect(withFilter(search, 'q', 'b')).toEqual({ state: 'resolved', q: 'b', kind: 'flag' });
+    expect(withoutFilters({ ...search, project: PROJECT })).toEqual({ state: 'resolved', q: 'a' });
+    expect(withoutQuery(search)).toEqual({ state: 'resolved', kind: 'flag' });
   });
 });
 
