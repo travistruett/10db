@@ -7,18 +7,18 @@ import { CountBadge, CountTone } from '../../shell/count-badge';
 import { Panel } from '../../shell/panel';
 import { useOpenInboxCount } from './inbox-count';
 import { InboxFilterMenu } from './inbox-filter-menu';
-import { withFilter, type InboxSearch } from './inbox-search';
+import { withFilter, type InboxPanelState, type InboxSearch } from './inbox-search';
 import { InboxSearchField } from './inbox-search-field';
 
-const STATES: readonly InboxListState[] = Object.values(InboxListState);
+const STATES: readonly InboxPanelState[] = [...Object.values(InboxListState), 'activity'];
 
-function stateOf(value: string): InboxListState | null {
+function stateOf(value: string): InboxPanelState | null {
   return STATES.find((state) => state === value) ?? null;
 }
 
 /**
  * The Inbox's panel (spec §1.3 "Head", §4.1 "The panel's head"): the section's name, then a switch between
- * Open, Waiting and Resolved with their counts, then the list under them. The list is drawn into
+ * Open, Waiting, Resolved and Activity with their counts (Activity has none), then the list under them. The list is drawn into
  * `onListHost`'s element by whichever state has rows, so the switch stays mounted as the state changes.
  */
 export function InboxPanel({
@@ -28,9 +28,9 @@ export function InboxPanel({
   onSearch,
   onListHost,
 }: {
-  readonly state: InboxListState;
+  readonly state: InboxPanelState;
   readonly search: InboxSearch;
-  readonly onState: (state: InboxListState) => void;
+  readonly onState: (state: InboxPanelState) => void;
   /** The search changed: its text (the field writes it after a pause) or a filter. */
   readonly onSearch: (next: InboxSearch) => void;
   readonly onListHost: (host: HTMLElement | null) => void;
@@ -91,6 +91,8 @@ export function InboxPanel({
                 ),
               },
               { value: InboxListState.Resolved, label: 'Resolved' },
+              // Notices are kept, not counted: Activity never carries a badge.
+              { value: 'activity', label: 'Activity' },
             ]}
           />
         </Box>

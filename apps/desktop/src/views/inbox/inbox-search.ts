@@ -7,6 +7,7 @@ import {
   InboxPageQuery,
 } from '@10db/contracts';
 import { z } from 'zod';
+import type { ActivityList } from '../../daemon/activity-queries';
 import type { InboxList } from '../../daemon/inbox-queries';
 
 /** How far back Resolved reaches; each preset is a local midnight, so a query key holds all day. */
@@ -15,8 +16,13 @@ export type InboxSince = (typeof InboxSince)[keyof typeof InboxSince];
 
 const DAYS_BACK: Record<InboxSince, number> = { day: 0, week: 6, month: 29 };
 
+/** The panel's switch: the three states of cards, and Activity, the list of notices. */
+export type InboxPanelState = InboxListState | 'activity';
+
+const ACTIVITY_STATE = 'activity';
+
 export interface InboxSearch {
-  readonly state?: InboxListState;
+  readonly state?: InboxPanelState;
   readonly q?: string;
   readonly project?: ProjectId;
   readonly kind?: InboxKind;
@@ -27,7 +33,10 @@ export interface InboxSearch {
 
 /** Each key on its own, so one that does not parse is dropped and the rest stay. */
 const InboxSearchKeys = z.object({
-  state: z.enum(InboxListState).optional().catch(undefined),
+  state: z
+    .enum([...Object.values(InboxListState), ACTIVITY_STATE])
+    .optional()
+    .catch(undefined),
   // Whatever the daemon would refuse is dropped here, so the URL never makes the list fail to load.
   q: z
     .string()
@@ -47,9 +56,21 @@ export function inboxSearch(search: Record<string, unknown>): InboxSearch {
   return Object.fromEntries(Object.entries(parsed).filter(([, value]) => value !== undefined));
 }
 
-/** The query a search asks, leaving out a filter its state does not use. */
+/** The notices a search asks of Activity: its text and its project; nothing else applies there. */
+export function activityList(search: InboxSearch): ActivityList {
+  return {
+    ...(search.q === undefined ? {} : { q: search.q }),
+    ...(search.project === undefined ? {} : { project: search.project }),
+  };
+}
+
+/**
+ * The query a search asks of a list of cards, leaving out a filter its state does not use. Activity's list is
+ * `activityList`'s; here it reads as Open, which nothing draws.
+ */
 export function inboxList(search: InboxSearch, now: Date): InboxList {
-  const state = search.state ?? InboxListState.Open;
+  const state =
+    search.state === ACTIVITY_STATE ? InboxListState.Open : (search.state ?? InboxListState.Open);
   const list: {
     -readonly [K in keyof InboxList]: InboxList[K];
   } = { state };
@@ -72,7 +93,7 @@ export function inboxList(search: InboxSearch, now: Date): InboxList {
 }
 
 /** The search with another state: Open is the default, so it leaves no key. */
-export function withState(search: InboxSearch, state: InboxListState): InboxSearch {
+export function withState(search: InboxSearch, state: InboxPanelState): InboxSearch {
   return inboxSearch({ ...search, state: state === InboxListState.Open ? undefined : state });
 }
 
@@ -92,11 +113,13 @@ export function withFilter<K extends 'q' | 'project' | 'kind' | 'outcome' | 'per
 
 /** Whether a filter the search's state uses is set; the search text is not a filter. */
 export function filtersSet(search: InboxSearch): boolean {
+  if (search.state === ACTIVITY_STATE) return search.project !== undefined;
   return Object.keys(inboxList(search, new Date())).some((key) => key !== 'state' && key !== 'q');
 }
 
 /** Whether the list is narrowed by the search text or a filter its state uses. */
 export function narrowed(search: InboxSearch): boolean {
+  if (search.state === ACTIVITY_STATE) return Object.keys(activityList(search)).length > 0;
   return Object.keys(inboxList(search, new Date())).some((key) => key !== 'state');
 }
 
@@ -125,21 +148,22 @@ interface StateMemory {
   scrollTop: number;
 }
 
-const memory: Record<InboxListState, StateMemory> = {
+const memory: Record<InboxPanelState, StateMemory> = {
   open: { selected: null, scrollTop: 0 },
   waiting: { selected: null, scrollTop: 0 },
   resolved: { selected: null, scrollTop: 0 },
+  activity: { selected: null, scrollTop: 0 },
 };
 
 /** A state's selected row key and list scroll, kept across switching states and leaving the page. */
-export const inboxStateMemory = (state: InboxListState): StateMemory => memory[state];
+export const inboxStateMemory = (state: InboxPanelState): StateMemory => memory[state];
 
 /** Remembers a state's selected row key. */
-export function rememberSelected(state: InboxListState, selected: string | null): void {
+export function rememberSelected(state: InboxPanelState, selected: string | null): void {
   memory[state].selected = selected;
 }
 
 /** Remembers a state's list scroll position. */
-export function rememberScroll(state: InboxListState, scrollTop: number): void {
+export function rememberScroll(state: InboxPanelState, scrollTop: number): void {
   memory[state].scrollTop = scrollTop;
 }

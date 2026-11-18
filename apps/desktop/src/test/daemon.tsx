@@ -225,6 +225,7 @@ export function baseHandlers(
         pageSize: Number(params.get('pageSize') ?? '25'),
       });
     }),
+    http.get(daemonUrl('/activity/page', base), () => HttpResponse.json({ rows: [], next: null })),
     // The sidebar and the Workbench read every project's live pass; none is open.
     http.get(daemonUrl('/passes', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/settings/self-update', base), () =>

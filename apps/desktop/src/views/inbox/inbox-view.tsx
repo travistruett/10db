@@ -4,6 +4,7 @@ import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { TitleRow } from '../../shell/title-row';
 import { useOpenInboxCount } from './inbox-count';
+import { ActivityInbox } from './activity-inbox';
 import { InboxPanel } from './inbox-panel';
 import { ListedInbox } from './listed-inbox';
 import { lastInboxSearch, withoutFilters, withoutQuery, withState } from './inbox-search';
@@ -11,7 +12,7 @@ import { InboxShortcuts } from './inbox-shortcuts';
 import { OpenInbox } from './open-inbox';
 
 /**
- * The Inbox: its title row, the panel with Open, Waiting and Resolved, and the content for the state the URL
+ * The Inbox: its title row, the panel with Open, Waiting, Resolved and Activity, and the content for the state the URL
  * names. Each state's content is its own component, so Open's keys are only live while Open is shown.
  */
 export function InboxView() {
@@ -43,6 +44,8 @@ export function InboxView() {
             }}
           />
         );
+      case 'activity':
+        return <ActivityInbox search={search} listHost={listHost} onClearFilters={clearFilters} />;
       case InboxListState.Waiting:
       case InboxListState.Resolved:
         return (
