@@ -191,7 +191,9 @@ export function ChatTab({
   const work = useChatWork(chat.id);
   const choose = useChooseWork();
   // Changes: the button shows once anything changed; the builder's choice to open or close it holds for the session.
-  const changes = useChatChanges(chat.id, true);
+  // A session that has not chosen where to work, or is moving, has no root to read yet: the daemon refuses.
+  const placed = chat.work?.place === WorkPlace.Here || chat.work?.place === WorkPlace.Branch;
+  const changes = useChatChanges(chat.id, placed);
   const totals = changes.data === undefined ? null : changesTotals(changes.data.files);
   const hasChanges = totals !== null && totals.files > 0;
   // A session whose worktree is gone has no diff to read; its pull request has the changes, which the drawer links.

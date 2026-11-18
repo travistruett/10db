@@ -52,12 +52,18 @@ function open(
   chatCount = 1,
   path?: string,
   conversation?: Partial<ChatDto['conversation']>,
+  work?: ChatDto['work'],
 ) {
   const chats = ['Login fails', 'Billing page'].slice(0, chatCount).map((title, tabPosition) =>
     chatDto({
       projectId: project.id,
       title,
       tabPosition,
+      // A session reads its changes once it works somewhere.
+      work:
+        work === undefined
+          ? { place: 'branch', branch: 'chat-work', base: null, worktree: null, askedAt: null }
+          : work,
       ...(conversation === undefined ? {} : { conversation }),
     }),
   );
@@ -109,6 +115,20 @@ describe('a session’s Changes', () => {
       expect(drawer()).toBeNull();
     });
     expect(stops).toEqual([]);
+  });
+
+  it('does not read the changes of a session that has no place to work yet', async () => {
+    let reads = 0;
+    const { chats } = open({ changes: changed }, 1, undefined, undefined, null);
+    server.use(
+      http.get(daemonUrl('/chats/:chatId/changes'), () => {
+        reads += 1;
+        return HttpResponse.json({ error: 'conflict', message: 'No worktree.' }, { status: 409 });
+      }),
+    );
+    await screen.findByRole('textbox', { name: 'Message' });
+    expect(chats[0]?.work).toBeNull();
+    expect(reads).toBe(0);
   });
 
   it('offers no Changes button while nothing changed', async () => {
@@ -194,7 +214,10 @@ describe('a session’s Changes', () => {
   });
 
   it('says a finished worktree is gone and points at the pull request', async () => {
-    const chat = chatDto({ projectId: project.id });
+    const chat = chatDto({
+      projectId: project.id,
+      work: { place: 'branch', branch: 'chat-done', base: null, worktree: null, askedAt: null },
+    });
     const served = chatServer({
       chats: [chat],
       work: {
