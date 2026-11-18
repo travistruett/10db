@@ -113,7 +113,7 @@ describe('the git step button', () => {
     server.use(
       http.post(daemonUrl('/chats/:chatId/pull-request'), async () => {
         await gate;
-        return HttpResponse.json({ opened: true });
+        return HttpResponse.json(chatWorkStateDto());
       }),
     );
     fireEvent.click(await screen.findByRole('button', { name: 'Open Pull Request' }));

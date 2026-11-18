@@ -274,15 +274,15 @@ export function chatServer(opts: ChatServerOptions = {}): ChatServer {
         chatId: String(params['chatId']),
         body: ChatCommitRequest.parse(await request.json()),
       });
-      return HttpResponse.json({ committed: true });
+      return HttpResponse.json(chatWorkStateDto());
     }),
     http.post(daemonUrl('/chats/:chatId/pull-request'), ({ params }) => {
       server.pullRequests.push(String(params['chatId']));
-      return HttpResponse.json({ opened: true });
+      return HttpResponse.json(chatWorkStateDto());
     }),
     http.post(daemonUrl('/chats/:chatId/merge'), ({ params }) => {
       server.merges.push(String(params['chatId']));
-      return HttpResponse.json({ merged: true });
+      return HttpResponse.json(chatWorkStateDto());
     }),
     http.get(daemonUrl('/chats/:chatId/archive-preview'), () =>
       HttpResponse.json(archivePreviewDto()),
