@@ -1,0 +1,14 @@
+{
+  "id": "board-column-scrollbar-gutter",
+  "title": "A Board column's scrollbar sits in its own gutter beside the cards, never over them",
+  "description": "The builder reported that on the Board the vertical scrollbar of a column draws on top of the cards: it sits inside the card's right edge, over its text and border. The column's cards scroll in a Mantine ScrollArea in apps/desktop/src/views/board/board-column.tsx (type=\"hover\", scrollbars=\"y\"); Mantine overlays its scrollbar on the content by default. The board's horizontal scroll (board-scroll.tsx) already keeps its scrollbar in a strip of its own; the column's vertical one should behave the same way. Keep the scrollbar showing only on hover, and keep the hint above and the footer below the cards out of the scroll.",
+  "acceptanceCriteria": [
+    "With more cards than fit in a column, the column's vertical scrollbar is drawn in a strip to the right of the cards and overlaps no card's border or text",
+    "Cards are the same width whether or not the column scrolls, so they don't shift when the scrollbar appears on hover",
+    "The scrollbar still appears only while the pointer is over the column, and the column's hint and footer stay outside the scrolled area"
+  ],
+  "areas": ["desktop"],
+  "baseCommit": "1238bf85f06f8b1f23772cb12a5a20ebbd9d3a8d",
+  "mergedCommit": "fd36a791299e2438c9a91b6362c5b1dd2971fc5a",
+  "tags": ["rule-claims"]
+}
