@@ -42,16 +42,16 @@ const findRow = (text: string): Promise<HTMLElement> =>
 const switchBar = () => within(screen.getByRole('radiogroup', { name: 'Inbox state' }));
 
 describe('Activity in the Inbox', () => {
-  it('is a fourth item with no count, though notices exist', async () => {
+  it('opens from the head button, not the switch, and carries no count though notices exist', async () => {
     serve([activityRowDto(), activityRowDto()]);
     renderApp('/inbox');
     await screen.findByRole('radiogroup', { name: 'Inbox state' });
-    expect(
-      ['Open', 'Waiting', 'Resolved', 'Activity'].map((name) => switchBar().getByText(name)).length,
-    ).toBe(4);
-    fireEvent.click(switchBar().getByRole('radio', { name: 'Activity' }));
+    expect(switchBar().queryByText('Activity')).toBeNull();
+    const button = screen.getByRole('button', { name: 'Activity' });
+    fireEvent.click(button);
     await findRow('Something happened');
-    expect(switchBar().getByText('Activity').parentElement?.textContent).toBe('Activity');
+    expect(button.getAttribute('aria-pressed')).toBe('true');
+    expect(button.textContent).toBe('');
   });
 
   it('lists notices, and a selected grouped one shows its body, its span and Open Task', async () => {

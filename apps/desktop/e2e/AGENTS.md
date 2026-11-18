@@ -40,6 +40,8 @@ highlights code) and `see-screen.spec.ts` (the screen a session draws is a real 
   `expectAccessible` call that blocks a change may be removed.
 - **Run time stays about where it was.** CI runs two shards (`GATE_E2E_ARGS: --shard=n/2`); files run in name
   order with one worker. A flow that adds minutes folds into one that exists.
+- **A spec that routes a request imports `test` from `./routed-test`**, whose page drops its routes when the
+  test ends; the app polls `/system`, and a route callback still running then fails the test or the next one.
 - **Specs share one daemon per shard.** `first-run.spec.ts` runs first in shard 1 because the first run shows only
   while the daemon has no project. The Board shows the first project by name, so the project it makes,
   `e2e-first-run`, sorts after `e2e`, which `loop.spec.ts` and the specs after it open. Every spec adds its own

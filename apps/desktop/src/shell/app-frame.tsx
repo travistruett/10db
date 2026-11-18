@@ -1,4 +1,4 @@
-import { Box, Tooltip, ActionIcon } from '@mantine/core';
+import { Box, Splitter, Tooltip, ActionIcon } from '@mantine/core';
 import { IconLayoutSidebar } from '@tabler/icons-react';
 import { useRouterState } from '@tanstack/react-router';
 import {
@@ -12,10 +12,18 @@ import {
 } from 'react';
 import { FrameSlotsContext, type FrameSlots } from './frame-slots';
 import { usePanelHidden } from './panel-hidden';
+import { px, usePanelWidth } from './panel-width';
 import { Rail } from './rail';
 import { railSectionForPath, type RailSection } from './rail-items';
 import { useSidebarLabels } from './sidebar-labels';
-import { PANEL_WIDTH, shellLayout, ShellBand, SidebarSheet } from './shell-layout';
+import {
+  PANEL_MAX_WIDTH,
+  PANEL_MIN_WIDTH,
+  PANEL_WIDTH,
+  shellLayout,
+  ShellBand,
+  SidebarSheet,
+} from './shell-layout';
 import { UnsavedGuardProvider } from './unsaved-guard';
 import { useShellBand } from './use-shell-band';
 import classes from './app-frame.module.css';
@@ -24,7 +32,6 @@ const RAIL_LABELLED_WIDTH = 200;
 const RAIL_ICONS_WIDTH = 76;
 /** The hairline that ends a sidebar column, in addition to its width. */
 const HAIRLINE = 1;
-const TITLE_ROW_HEIGHT = 44;
 /** How long the pointer rests on the toggle before its tip shows. */
 const TOGGLE_TIP_DELAY = 300;
 /** Where a title lines up with the content's padding. */
@@ -57,6 +64,7 @@ export function AppFrame({
   const section = railSectionForPath(pathname);
   const { hidden: panelHidden, toggle: togglePanelHidden } = usePanelHidden(section);
   const { labels: labelsPreferred, toggle: toggleLabels } = useSidebarLabels();
+  const { width: panelWidth, setWidth: setPanelWidth } = usePanelWidth();
 
   const [titleHost, setTitleHost] = useState<HTMLElement | null>(null);
   const [panelHost, setPanelHost] = useState<HTMLElement | null>(null);
@@ -221,7 +229,7 @@ export function AppFrame({
       : layout.column === 'icons'
         ? RAIL_ICONS_WIDTH + HAIRLINE
         : 0;
-  const panelColumn = layout.panel === 'column' ? PANEL_WIDTH + HAIRLINE : 0;
+  const panelColumn = layout.panel === 'column';
   const narrow = band === ShellBand.Narrow;
   // The toggle sits beside the lights where the sidebar is labelled or folded away, and under them in the
   // icons-only rail, which has no room beside them.
@@ -237,7 +245,7 @@ export function AppFrame({
     layout.panel === 'column'
       ? {}
       : layout.panel === 'sheet'
-        ? { width: PANEL_WIDTH + HAIRLINE, left: layout.rail === 'hidden' ? 0 : railWidth }
+        ? { width: panelWidth + HAIRLINE, left: layout.rail === 'hidden' ? 0 : railWidth }
         : { display: 'none' };
 
   return (
@@ -246,8 +254,7 @@ export function AppFrame({
         <Box
           className={classes['root']}
           style={{
-            gridTemplateColumns: `${String(columnWidth)}px ${String(panelColumn)}px minmax(0, 1fr)`,
-            gridTemplateRows: `${String(TITLE_ROW_HEIGHT)}px minmax(0, 1fr)`,
+            gridTemplateColumns: `${String(columnWidth)}px minmax(0, 1fr)`,
           }}
         >
           <div
@@ -267,14 +274,6 @@ export function AppFrame({
               />
             </div>
           </div>
-          <div
-            ref={setPanelHost}
-            className={classes['panel']}
-            data-sheet={layout.panel === 'sheet' ? '' : undefined}
-            style={panelStyle}
-            inert={layout.panel === 'hidden'}
-            data-panel={layout.panel}
-          />
           <Tooltip label="Toggle sidebar ⇧⌘S" position="bottom" opened={toggleTip}>
             <ActionIcon
               className={classes['toggle']}
@@ -297,28 +296,61 @@ export function AppFrame({
               <IconLayoutSidebar size={16} stroke={1.6} />
             </ActionIcon>
           </Tooltip>
-          <div
-            ref={setTitleHost}
-            className={classes['titleRow']}
-            style={{ paddingLeft: narrow ? TITLE_START_BESIDE_LIGHTS : CONTENT_PADDING }}
-            data-title-row=""
-            data-scrolled={scrolled ? '' : undefined}
-            data-tauri-drag-region
-            inert={sheetOpen}
-          />
-          <div className={classes['content']} inert={sheetOpen}>
-            {banner}
-            <main
-              ref={mainRef}
-              className={classes['main']}
-              onScroll={(event) => {
-                setScrolled(event.currentTarget.scrollTop > 0);
-              }}
+          {/* The panel column and the content, with the panel's hairline as the handle that resizes it. */}
+          <Splitter
+            className={classes['split']}
+            classNames={{ handle: classes['handle'] }}
+            withHandle={false}
+            lineSize={HAIRLINE}
+            sizes={[px(panelWidth), 100]}
+            onSizeChange={([panelSize]) => {
+              if (panelSize !== undefined) setPanelWidth(parseFloat(String(panelSize)));
+            }}
+            mod={{ 'panel-column': panelColumn }}
+          >
+            {/* Only a panel column takes the pane's room: a sheet stands over the frame, and a hidden or absent
+                panel takes none. */}
+            <Splitter.Pane
+              defaultSize={px(PANEL_WIDTH)}
+              min={px(PANEL_MIN_WIDTH)}
+              max={px(PANEL_MAX_WIDTH)}
+              className={classes['panelPane']}
+              style={panelColumn ? undefined : { display: 'contents' }}
             >
-              {children}
-            </main>
-            <div ref={setDrawerHost} className={classes['drawerLayer']} />
-          </div>
+              <div
+                ref={setPanelHost}
+                className={classes['panel']}
+                data-sheet={layout.panel === 'sheet' ? '' : undefined}
+                style={panelStyle}
+                inert={layout.panel === 'hidden'}
+                data-panel={layout.panel}
+              />
+            </Splitter.Pane>
+            <Splitter.Pane defaultSize={100} className={classes['workspace']}>
+              <div
+                ref={setTitleHost}
+                className={classes['titleRow']}
+                style={{ paddingLeft: narrow ? TITLE_START_BESIDE_LIGHTS : CONTENT_PADDING }}
+                data-title-row=""
+                data-scrolled={scrolled ? '' : undefined}
+                data-tauri-drag-region
+                inert={sheetOpen}
+              />
+              <div className={classes['content']} inert={sheetOpen}>
+                {banner}
+                <main
+                  ref={mainRef}
+                  className={classes['main']}
+                  onScroll={(event) => {
+                    setScrolled(event.currentTarget.scrollTop > 0);
+                  }}
+                >
+                  {children}
+                </main>
+                <div ref={setDrawerHost} className={classes['drawerLayer']} />
+              </div>
+            </Splitter.Pane>
+          </Splitter>
           {sheetOpen ? (
             <div
               className={classes['backdrop']}

@@ -1,5 +1,6 @@
-import { expect, test } from '@playwright/test';
+import { expect } from '@playwright/test';
 import { claudeIsInstalled } from './claude-is-installed';
+import { test } from './routed-test';
 import { daemonUrl } from './daemon-url';
 import { createProject } from './shape-project';
 

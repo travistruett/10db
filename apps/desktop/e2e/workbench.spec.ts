@@ -1,8 +1,9 @@
 import { createServer } from 'node:net';
 import { join } from 'node:path';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { z } from 'zod';
 import { claudeIsInstalled } from './claude-is-installed';
+import { test } from './routed-test';
 import { inConversationColumn } from './conversation-column';
 import { daemonUrl } from './daemon-url';
 import { expectAccessible } from './expect-accessible';
