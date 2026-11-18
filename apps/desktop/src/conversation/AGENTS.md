@@ -8,12 +8,12 @@
   lines) stay out of the fold, so what the agent does now and what needs the builder are always in view. The run's id
   is `work:<its first row's id>`, never that row's own, because open state is kept by id and opening the row inside
   must not close the run. A reader at the end of the list stays there when the window resizes (a `ResizeObserver` on
-  the viewport); one who scrolled up stays put. The shell's main area is exactly the window's height and scrolls
-  inside itself (`shell/app-layout.tsx`), so a list with its composer at the foot is bounded by the window; the
+  the viewport); one who scrolled up stays put. The content surface is exactly the window's height less the title row and scrolls
+  inside itself (`shell/app-frame.tsx`), so a list with its composer at the foot is bounded by the window; the
   Workbench e2e measures it in a 420 px tall window.
-- `ConversationLayout` gives its list `ListScrolledContext` (`list-scrolled.ts`): the bar gains a hairline and a soft
-  shadow while the list is scrolled from its start, and the list draws a shadow at its foot while more of it is below
-  (`useHiddenEdges`). A screen that reads the draft after Send gets it from `onSend`, never from the input, which is
+- `ConversationLayout` gives its list `ListScrolledContext` (`list-scrolled.ts`): the bar gains a 1 px hairline (a
+  box-shadow, so its height never changes) while the list is scrolled from its start (`useHiddenEdges`); nothing is
+  drawn at the list's foot. A screen that reads the draft after Send gets it from `onSend`, never from the input, which is
   already empty. A tool row's output drops the terminal's escape codes
   (`terminal-text.ts`). `ZoomablePicture` is a picture in a thread that opens in a dialog on a click.
 - The composer's `held` prop (sessions spec §7.3): while a writer keeps the turn from Your folder, Send (and Stop and

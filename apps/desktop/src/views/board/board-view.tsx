@@ -31,7 +31,8 @@ import {
   useTasks,
   useWorkstreams,
 } from '../../daemon/queries';
-import { PageHeader } from '../../shell/page-header';
+import { PageIntro } from '../../shell/page-intro';
+import { TitleRow } from '../../shell/title-row';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { FormModal } from '../../shell/form-modal';
 import { useSelectedProject } from '../../shell/selected-project';
@@ -69,6 +70,7 @@ import { canCancelRun } from './task-cancel';
 import { holdOption, isHeld } from './task-hold';
 import { isSpent } from './task-spent';
 import { CancelRunModal } from './cancel-run-modal';
+import { useUnsavedGuard } from '../../shell/unsaved-guard';
 import { columnNameOf, TaskDrawer } from './task-drawer';
 import { useBoardActions } from './use-board-actions';
 import { useLinkedTask } from './use-linked-task';
@@ -183,6 +185,7 @@ function BoardColumns({
   const closeTask = useCloseTask();
   const reopenTask = useReopenTask();
   const navigate = useNavigate();
+  const guard = useUnsavedGuard();
   // The run the builder is being asked to confirm cancelling, from a card's menu or the drawer.
   const [cancelling, setCancelling] = useState<WorkstreamDto | null>(null);
   // What checks a step, as the daemon picks it: the changed-packages check where the project has one.
@@ -274,7 +277,10 @@ function BoardColumns({
           onDrop={drop}
           accepts={accepts}
           onOpen={(task) => {
-            setOpenId(task.id);
+            if (task.id !== openId)
+              guard.attempt(() => {
+                setOpenId(task.id);
+              });
           }}
           renderColumn={(column, cards, listRef, targeted) => (
             <BoardColumn
@@ -547,7 +553,7 @@ export function BoardView() {
 
   return (
     <Stack flex="1 1 0px">
-      <PageHeader
+      <TitleRow
         title="Board"
         actions={
           project ? (
@@ -588,6 +594,8 @@ export function BoardView() {
             </SplitButton>
           ) : undefined
         }
+      />
+      <PageIntro
         toolbar={
           goalList.length === 0 ? undefined : (
             <Group gap="md" align="center">

@@ -1,5 +1,6 @@
 import type { ProjectDto } from '@10db/contracts';
-import { Text, Title } from '@mantine/core';
+import { Text } from '@mantine/core';
+import { TitleRow } from '../../shell/title-row';
 import { AccountsSection } from './accounts/accounts-section';
 import { AgentSkillSection } from './agent-skill-section';
 import { AgentCopiesSection } from './agent-copies-section';
@@ -38,7 +39,7 @@ export function SectionBody({
   readonly project: ProjectDto | null;
 }) {
   const section = sectionByKey(sectionKey);
-  const heading = <Title order={3}>{section.label}</Title>;
+  const heading = <TitleRow title={section.label} />;
   switch (sectionKey) {
     case SettingsSectionKey.General:
       return (

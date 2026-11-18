@@ -1,18 +1,35 @@
 import { ProjectId } from '@10db/contracts';
-import { Box, Button, Combobox, Group, NavLink, Text, useCombobox } from '@mantine/core';
+import {
+  Box,
+  Button,
+  Combobox,
+  Group,
+  Text,
+  Tooltip,
+  UnstyledButton,
+  useCombobox,
+} from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { IconCheck, IconPlus, IconSelector } from '@tabler/icons-react';
+import { IconAdjustments, IconCheck, IconPlus } from '@tabler/icons-react';
+import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import { NewProjectModal } from './new-project-modal';
 import { ProjectTile } from './project-tile';
 import { useSelectedProject } from './selected-project';
+import { useUnsavedGuard } from './unsaved-guard';
+import { SettingsSectionKey } from '../views/settings/sections';
+import classes from './rail.module.css';
 
 /** A home-relative path reads shorter, and the home folder is the same on every row. */
 const tildePath = (path: string) => path.replace(/^\/Users\/[^/]+/u, '~');
 
-/** The current project, switched from the top of the sidebar; its list ends in "New Project". */
-export function ProjectSwitcher({ compact = false }: { readonly compact?: boolean }) {
+/**
+ * The current project, switched from its tile in the rail: the dropdown opens to the tile's right, lists
+ * the projects, and leads to Project Settings and "New Project".
+ */
+export function ProjectSwitcher() {
   const { projects, project, select } = useSelectedProject();
+  const guard = useUnsavedGuard();
   const [search, setSearch] = useState('');
   const [creating, creator] = useDisclosure(false);
   const combobox = useCombobox({
@@ -36,35 +53,38 @@ export function ProjectSwitcher({ compact = false }: { readonly compact?: boolea
       <Combobox
         store={combobox}
         width={300}
-        position="bottom-start"
+        position="right-start"
         onOptionSubmit={(value) => {
-          select(ProjectId.parse(value));
+          const chosen = ProjectId.parse(value);
+          if (chosen !== project?.id) {
+            guard.attempt(() => {
+              select(chosen);
+            });
+          }
           combobox.closeDropdown();
         }}
       >
-        <Combobox.Target targetType="button">
-          <NavLink
-            component="button"
+        <div className={classes['tileHost']}>
+          <Tooltip
             label={project?.name ?? 'Choose a project'}
-            aria-label={`Project: ${project?.name ?? 'none'}. Switch project`}
-            leftSection={<ProjectTile name={project?.name ?? '?'} size={compact ? 16 : 24} />}
-            rightSection={<IconSelector size={compact ? 12 : 14} stroke={1.5} />}
-            fw={600}
-            {...(compact
-              ? {
-                  // A darker outlined well, so it reads as a control among the section links.
-                  fz: 'sm',
-                  py: 6,
-                  mb: 'xs',
-                  bg: 'var(--mantine-color-body)',
-                  bd: '1px solid var(--mantine-color-default-border)',
-                }
-              : {})}
-            onClick={() => {
-              combobox.toggleDropdown();
-            }}
-          />
-        </Combobox.Target>
+            position="right"
+            openDelay={300}
+            disabled={combobox.dropdownOpened}
+          >
+            <Combobox.Target targetType="button">
+              <UnstyledButton
+                aria-label={`Project: ${project?.name ?? 'none'}. Switch project`}
+                onClick={() => {
+                  combobox.toggleDropdown();
+                }}
+              >
+                <span className={classes['tileRing']}>
+                  <ProjectTile name={project?.name ?? '?'} size={26} />
+                </span>
+              </UnstyledButton>
+            </Combobox.Target>
+          </Tooltip>
+        </div>
         <Combobox.Dropdown>
           <Combobox.Search
             value={search}
@@ -98,6 +118,28 @@ export function ProjectSwitcher({ compact = false }: { readonly compact?: boolea
           </Combobox.Options>
           <Combobox.Footer p="sm">
             <Button
+              renderRoot={(props) => (
+                <Link
+                  {...props}
+                  to="/settings/$section"
+                  params={{ section: SettingsSectionKey.General }}
+                />
+              )}
+              variant="subtle"
+              color="gray"
+              c="var(--mantine-color-text)"
+              size="sm"
+              fullWidth
+              justify="flex-start"
+              mb={4}
+              leftSection={<IconAdjustments size={14} stroke={1.5} />}
+              onClick={() => {
+                combobox.closeDropdown();
+              }}
+            >
+              Project Settings
+            </Button>
+            <Button
               variant="default"
               size="sm"
               fullWidth
@@ -116,7 +158,9 @@ export function ProjectSwitcher({ compact = false }: { readonly compact?: boolea
         <NewProjectModal
           onClose={creator.close}
           onCreated={(created) => {
-            select(created.id);
+            guard.attempt(() => {
+              select(created.id);
+            });
             creator.close();
           }}
         />

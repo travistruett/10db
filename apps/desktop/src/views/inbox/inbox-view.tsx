@@ -29,7 +29,8 @@ import { ResolvedInbox } from './resolved-inbox';
 import { SystemCardList } from './system-card-list';
 import { WaitingInbox } from './waiting-inbox';
 import { CountBadge, CountTone } from '../../shell/count-badge';
-import { PageHeader } from '../../shell/page-header';
+import { PageIntro } from '../../shell/page-intro';
+import { TitleRow } from '../../shell/title-row';
 import { systemCards, type SystemCard } from './system-cards';
 import { stakeholderMode, StakeholderMode } from './route-line';
 import { useInboxKeys } from './use-inbox-keys';
@@ -83,8 +84,8 @@ export function InboxView() {
       keepMounted={false}
     >
       <Stack>
-        <PageHeader
-          title="Inbox"
+        <TitleRow title="Inbox" />
+        <PageIntro
           toolbar={
             <>
               <Tabs.List aria-label="Inbox view" style={{ flex: 1 }}>

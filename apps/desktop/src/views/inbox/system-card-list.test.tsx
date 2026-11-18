@@ -68,9 +68,9 @@ describe('10db cards in the Inbox', () => {
     expect(rechecked).toBe(true);
     expect(queryClient.getQueryData(queryKeys.system)).toBeTruthy();
     expect(await screen.findByText('Nothing needs you right now.')).toBeTruthy();
-    // The download it started is told in the header, not in the Inbox.
-    const header = screen.getByRole('banner');
-    expect(within(header).getByRole('status', { name: 'Downloading Codex 0.167.0' })).toBeTruthy();
+    // The download it started is told at the rail's foot, not in the Inbox.
+    const rail = screen.getByRole('navigation', { name: 'Sections' });
+    expect(within(rail).getByRole('status', { name: 'Downloading Codex 0.167.0' })).toBeTruthy();
   });
 
   it.each([

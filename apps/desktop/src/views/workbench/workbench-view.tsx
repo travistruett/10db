@@ -31,7 +31,8 @@ import {
 import { useProjectFolder } from '../../daemon/project-folder-queries';
 import { useInbox, useTasks } from '../../daemon/queries';
 import { CountBadge } from '../../shell/count-badge';
-import { PageHeader } from '../../shell/page-header';
+import { PageIntro } from '../../shell/page-intro';
+import { TitleRow } from '../../shell/title-row';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { useNow } from '../../shell/relative';
 import { useSelectedProject } from '../../shell/selected-project';
@@ -63,20 +64,22 @@ function StartPageHeader({
   readonly onOpen?: () => void;
 }) {
   return (
-    <PageHeader
-      title="UI Workbench"
-      description="Work through pages with the agents, live."
-      actions={
-        <Button
-          variant="default"
-          disabled={onOpen === undefined}
-          rightSection={count === 0 ? null : <CountBadge count={count} />}
-          {...(onOpen === undefined ? {} : { onClick: onOpen })}
-        >
-          Workbench Settings
-        </Button>
-      }
-    />
+    <>
+      <TitleRow
+        title="UI Workbench"
+        actions={
+          <Button
+            variant="default"
+            disabled={onOpen === undefined}
+            rightSection={count === 0 ? null : <CountBadge count={count} />}
+            {...(onOpen === undefined ? {} : { onClick: onOpen })}
+          >
+            Workbench Settings
+          </Button>
+        }
+      />
+      <PageIntro description="Work through pages with the agents, live." />
+    </>
   );
 }
 

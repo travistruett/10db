@@ -17,7 +17,7 @@ const CHECK = 1;
 const ADD_PROJECT = 2;
 
 /** The window has no title bar; this strip drags it and clears the traffic lights. */
-const DRAG_STRIP_HEIGHT = 48;
+const DRAG_STRIP_HEIGHT = 44;
 const RAIL_WIDTH = 290;
 const CONTENT_PADDING = 48;
 

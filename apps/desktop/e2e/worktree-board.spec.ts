@@ -302,7 +302,7 @@ test.describe('the Board with several open batches', () => {
       }, projectId);
       // Factory lists every project's work; this one's alone, whatever earlier specs left behind.
       await page.goto(`/factory?project=${projectId}`);
-      await expect(page.getByRole('heading', { name: 'Factory', level: 2 })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Factory', level: 1 })).toBeVisible();
 
       // Every row starts collapsed. The queued task is not running: only two of the three count.
       const goal = page.getByRole('button', { name: new RegExp(`^${GOAL_TITLE}`) });

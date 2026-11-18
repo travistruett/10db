@@ -1179,6 +1179,7 @@ describe('the resolved view', () => {
     await screen.findByText('Which badge color?');
 
     const title = screen.getByRole('heading', { name: 'Inbox' });
+    expect(title.closest('[data-title-row]')).not.toBeNull();
     const switcher = screen.getByRole('tablist', { name: 'Inbox view' });
     const openTab = screen.getByRole('tab', { name: /^Open\s?1$/ });
     expect(openTab.getAttribute('aria-selected')).toBe('true');

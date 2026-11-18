@@ -12,7 +12,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useOpenChats, usePatchChat, useUnarchiveChat } from '../../daemon/chat-queries';
 import { useInbox } from '../../daemon/queries';
 import { Announcer } from '../../conversation/announcer';
-import { HeaderSlot } from '../../shell/header-slot';
+import { TitleRow } from '../../shell/title-row';
 import { useSelectedProject } from '../../shell/selected-project';
 import { ChatTab } from './chat-tab';
 import { TaskTab as TaskTabView } from './task-tab';
@@ -350,35 +350,38 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
           </Button>
         </Group>
       </Modal>
-      <HeaderSlot>
-        <TabStrip
-          tabs={tabs}
-          selectedKey={selected?.key ?? null}
-          projects={list}
-          cards={cards}
-          seen={seen}
-          onSelect={select_}
-          onClose={closing.close}
-          closed={closed}
-          onReopen={(entry) => {
-            void closing.reopen(entry);
-          }}
-          onRename={(tab) => {
-            select_(tab);
-            if (tab.kind === 'chat') setRenaming(tab.chat.id);
-          }}
-          onArchive={askArchive}
-          onOpenInTerminal={(tab) => {
-            select_(tab);
-            if (tab.kind === 'chat') setTerminalFor(tab.chat.id);
-          }}
-          onCloseOthers={closing.closeOthers}
-          onNew={newTab}
-          onReorder={(tab, position) => {
-            if (tab.kind === 'chat') patch.mutate({ chatId: tab.chat.id, tabPosition: position });
-          }}
-        />
-      </HeaderSlot>
+      <TitleRow
+        title={null}
+        switcher={
+          <TabStrip
+            tabs={tabs}
+            selectedKey={selected?.key ?? null}
+            projects={list}
+            cards={cards}
+            seen={seen}
+            onSelect={select_}
+            onClose={closing.close}
+            closed={closed}
+            onReopen={(entry) => {
+              void closing.reopen(entry);
+            }}
+            onRename={(tab) => {
+              select_(tab);
+              if (tab.kind === 'chat') setRenaming(tab.chat.id);
+            }}
+            onArchive={askArchive}
+            onOpenInTerminal={(tab) => {
+              select_(tab);
+              if (tab.kind === 'chat') setTerminalFor(tab.chat.id);
+            }}
+            onCloseOthers={closing.closeOthers}
+            onNew={newTab}
+            onReorder={(tab, position) => {
+              if (tab.kind === 'chat') patch.mutate({ chatId: tab.chat.id, tabPosition: position });
+            }}
+          />
+        }
+      />
       {closing.notice === null ? null : (
         <Paper role="status" withBorder px="sm" py={6} mx="md" mt="xs">
           <Group justify="space-between" wrap="nowrap">

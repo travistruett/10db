@@ -1,8 +1,9 @@
 import { Box } from '@mantine/core';
 import { useIsFetching, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { Outlet, useRouterState } from '@tanstack/react-router';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { DaemonRequestError } from '../daemon/client';
+import { FrameSlotsContext } from '../shell/frame-slots';
 import { CRASH_ATTRIBUTE, CRASH_MESSAGE_ATTRIBUTE } from '../shell/view-boundary';
 import { SCREEN_LABEL, type FrameMessage } from './draw-screen';
 import { useRenderMode } from './render-context';
@@ -75,21 +76,40 @@ function Reporter() {
 
 /**
  * The drawing copies each element's computed style into an SVG image, which never lays out what
- * `content-visibility: auto` skips, so a transcript's blocks would come out blank.
+ * `content-visibility: auto` skips, so a transcript's blocks would come out blank. A title row with
+ * nothing in it takes no room.
  */
-const DRAW_EVERYTHING = '* { content-visibility: visible !important; }';
+const RENDER_STYLE =
+  '* { content-visibility: visible !important; } [data-render-title]:empty { display: none; }';
 
 /** The frame's root route: the screen, with the padding the app's own shell gives a view. */
 export function RenderLayout() {
+  // A picture of a screen has no frame, so its title and actions draw in a row above the view.
+  const [titleHost, setTitleHost] = useState<HTMLElement | null>(null);
   return (
-    <Box
-      p="md"
-      style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}
-      bg="var(--mantine-color-body)"
+    <FrameSlotsContext
+      value={{ titleHost, panelHost: null, drawerHost: null, registerPanel: () => () => undefined }}
     >
-      <style>{DRAW_EVERYTHING}</style>
-      <Reporter />
-      <Outlet />
-    </Box>
+      <Box
+        p="md"
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          flexDirection: 'column',
+          '--shell-content-padding-block': 'var(--mantine-spacing-md)',
+          '--shell-content-padding-inline': 'var(--mantine-spacing-md)',
+        }}
+        bg="var(--mantine-color-body)"
+      >
+        <style>{RENDER_STYLE}</style>
+        <Reporter />
+        <div
+          ref={setTitleHost}
+          data-render-title=""
+          style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}
+        />
+        <Outlet />
+      </Box>
+    </FrameSlotsContext>
   );
 }

@@ -6,7 +6,8 @@ import { useGoals } from '../../daemon/goal-queries';
 import { useLivePass } from '../../daemon/pass-queries';
 import { useInbox } from '../../daemon/queries';
 import { useNow } from '../../shell/relative';
-import { PageHeader } from '../../shell/page-header';
+import { PageIntro } from '../../shell/page-intro';
+import { TitleRow } from '../../shell/title-row';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { ProjectFilter } from '../../shell/project-filter';
 import { ProjectTile } from '../../shell/project-tile';
@@ -42,12 +43,12 @@ export function FactoryView() {
 
   return (
     <Stack>
-      <PageHeader
+      <TitleRow
         title="Factory"
-        titleAside={<BenchmarkSyncNote />}
-        description="Goals 10db is pursuing, by project"
+        meta={<BenchmarkSyncNote />}
         actions={<ProjectFilter projects={all} value={filter ?? null} onChange={setFilter} />}
       />
+      <PageIntro description="Goals 10db is pursuing, by project" />
       <UpdateDrainNote />
       <AdmissionNote />
       {projects.isError ? (

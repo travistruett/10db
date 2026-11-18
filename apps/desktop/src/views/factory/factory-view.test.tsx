@@ -1425,7 +1425,8 @@ describe('FactoryView waiting update', () => {
     serve(selfUpdate(over));
     renderApp('/factory');
 
-    await screen.findByRole('heading', { name: 'Factory' });
+    const title = await screen.findByRole('heading', { name: 'Factory' });
+    expect(title.closest('[data-title-row]')).not.toBeNull();
     expect(screen.queryByRole('status', { name: 'Update draining the factory' })).toBeNull();
     expect(screen.queryByRole('status', { name: 'Update waiting' })).toBeNull();
   });

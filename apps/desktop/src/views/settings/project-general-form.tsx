@@ -640,10 +640,11 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         justify="space-between"
         wrap="nowrap"
         pos="sticky"
-        bottom={0}
+        // The surface pads its content, and a sticky edge is measured inside that padding: reach over it.
+        bottom="calc(var(--shell-content-padding-block) * -1)"
         py="md"
-        // Reaches over the shell's bottom padding, so the page ends at the bar: no extra scroll below it.
-        mb="calc(var(--app-shell-padding) * -1)"
+        // Reaches over the surface's bottom padding, so the page ends at the bar: no extra scroll below it.
+        mb="calc(var(--shell-content-padding-block) * -1)"
         bg="var(--mantine-color-body)"
         style={{
           borderTop: '1px solid var(--mantine-color-default-border)',

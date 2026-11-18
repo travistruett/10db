@@ -38,14 +38,7 @@ function pairsOf(screens: readonly TaskScreenDto[]): Pair[] {
   return [...pairs.values()];
 }
 
-export function TaskPictures({
-  taskId,
-  onZoom,
-}: {
-  readonly taskId: TaskId;
-  /** Told when a picture is enlarged and closed again, so the drawer keeps Esc for the picture. */
-  readonly onZoom: (open: boolean) => void;
-}) {
+export function TaskPictures({ taskId }: { readonly taskId: TaskId }) {
   const screens = useTaskScreens(taskId).data?.screens ?? [];
   const pairs = pairsOf(screens);
   if (pairs.length === 0) return null;
@@ -65,24 +58,14 @@ export function TaskPictures({
                 No before picture
               </Text>
             ) : (
-              <ScreenPicture
-                screen={pair.before}
-                name={pair.before.route}
-                width={180}
-                onOpenChange={onZoom}
-              />
+              <ScreenPicture screen={pair.before} name={pair.before.route} width={180} />
             )}
             {pair.after === null ? (
               <Text size="xs" c="dimmed" w={180}>
                 No after picture yet
               </Text>
             ) : (
-              <ScreenPicture
-                screen={pair.after}
-                name={pair.after.route}
-                width={180}
-                onOpenChange={onZoom}
-              />
+              <ScreenPicture screen={pair.after} name={pair.after.route} width={180} />
             )}
           </Group>
         </Stack>

@@ -1,5 +1,5 @@
-/* The bar casts a shadow over the list once the list scrolls under it. The hairline is part of the
-   shadow, so the bar's height never changes and a short window keeps the composer in view. */
+/* Once the list scrolls under the bar, the bar's foot takes a hairline. It is a shadow, not a border, so
+   the bar's height never changes and a short window keeps the composer in view. */
 .header {
   position: relative;
   z-index: 2;
@@ -8,9 +8,7 @@
 }
 
 .header[data-scrolled] {
-  box-shadow:
-    0 1px 0 var(--mantine-color-default-border),
-    0 6px 12px -6px light-dark(rgba(0, 0, 0, 0.18), rgba(0, 0, 0, 0.55));
+  box-shadow: 0 1px 0 var(--mantine-color-default-border);
 }
 
 @media (prefers-reduced-motion: reduce) {

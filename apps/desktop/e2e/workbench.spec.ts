@@ -108,17 +108,24 @@ async function queueOrder(page: Page): Promise<string[]> {
 }
 
 /**
- * At `width`, the pass header's line reads whole, its ⋯ menu (Close Pass, Abandon) is on screen and
- * nothing scrolls sideways; the project has no origin, so Open Draft PR says why beside it.
+ * At `width`, the pass's line in the title row is drawn (cut with an ellipsis when it must, its whole text in
+ * the heading's tooltip), its ⋯ menu (Close Pass, Abandon) is on screen and nothing scrolls sideways; the
+ * project has no origin, so Open Draft PR says why beside it.
  */
 async function headerFits(page: Page, width: number) {
   await page.setViewportSize({ width, height: 900 });
-  const title = page.getByRole('heading', { level: 2, name: /· 1 signed off/ });
+  const title = page.getByRole('heading', { level: 1, name: /· 1 signed off/ });
   await expect(title).toBeVisible();
-  const clipped = await title.evaluate(
-    (el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1,
-  );
-  expect(clipped, `the header's line is cut at ${String(width)}`).toBe(false);
+  await expect(title).toHaveAttribute('title', /· 1 signed off/);
+  const row = await page.locator('[data-title-row]').boundingBox();
+  const line = await title.boundingBox();
+  expect(row, `the title row is drawn at ${String(width)}`).not.toBeNull();
+  expect(line, `the line is drawn at ${String(width)}`).not.toBeNull();
+  if (row !== null && line !== null)
+    expect(
+      line.x + line.width,
+      `the line stays in the title row at ${String(width)}`,
+    ).toBeLessThanOrEqual(row.x + row.width);
   const menu = await page.getByRole('button', { name: 'More actions', exact: true }).boundingBox();
   expect(menu, `the ⋯ menu is drawn at ${String(width)}`).not.toBeNull();
   if (menu !== null)
@@ -133,7 +140,7 @@ async function headerFits(page: Page, width: number) {
 
 /**
  * In a window shorter than the page's thread, the window itself never scrolls: the thread scrolls
- * inside the page, so the sidebar, the pass header and the queue stay put and the composer stays at
+ * inside the page, so the rail, the title row and the queue stay put and the composer stays at
  * the window's foot.
  */
 async function threadScrollsInside(page: Page, region: Locator, label: string, width: number) {
@@ -318,7 +325,7 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   // With a page signed off the header holds Open Draft PR too, and so does the foot of the signed-off
   // page, where the builder is; the header fits at every width.
   await expect(page.getByRole('button', { name: 'Open Draft PR' })).toHaveCount(2);
-  for (const width of [1280, 800, 480, 420]) await headerFits(page, width);
+  for (const width of [1280, 900, 520, 420]) await headerFits(page, width);
   await page.setViewportSize({ width: 1280, height: 900 });
 
   // A reload keeps the queue as it was.

@@ -15,7 +15,8 @@ import {
   type RecordRef,
   type TracedRecord,
 } from '../../daemon/knowledge-queries';
-import { PageHeader } from '../../shell/page-header';
+import { PageIntro } from '../../shell/page-intro';
+import { TitleRow } from '../../shell/title-row';
 import { useSelectedProject } from '../../shell/selected-project';
 import { DecisionList } from './decision-list';
 import { NO_FILTERS, type FilterState, type ListControls } from './knowledge-filters';
@@ -125,11 +126,10 @@ function ShelfNote({
 /** The view's header; the project's create button rides in `actions` once a project is chosen. */
 function KnowledgeHeader({ actions }: { readonly actions?: ReactNode }) {
   return (
-    <PageHeader
-      title="Knowledge"
-      description="What you, your agents and 10db have recorded for this project. The settings for 10db's own judgement calls are in Settings."
-      {...(actions === undefined ? {} : { actions })}
-    />
+    <>
+      <TitleRow title="Knowledge" {...(actions === undefined ? {} : { actions })} />
+      <PageIntro description="What you, your agents and 10db have recorded for this project. The settings for 10db's own judgement calls are in Settings." />
+    </>
   );
 }
 

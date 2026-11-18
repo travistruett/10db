@@ -24,6 +24,7 @@ import {
   rolePickDto,
   rolePicksDto,
 } from '../../test/model-fixtures';
+import { FrameSlots } from '../../test/frame';
 import { ModelsSection } from './models-section';
 
 const NOW = new Date('2026-11-07T12:00:00.000Z');
@@ -195,14 +196,22 @@ async function chooseAccount(label: string) {
 describe('the Models page', () => {
   it('shows where the scores come from, beside the catalogue line', async () => {
     serve();
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     expect(await screen.findByText(/No Artificial Analysis key/)).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Add Key' })).toBeTruthy();
   });
 
   it('opens on the playbook and the kinds, above the chart and the model list', async () => {
     serve();
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     const playbook = await screen.findByRole('region', { name: 'Playbook section' });
     const kinds = await screen.findByRole('region', { name: 'Kinds' });
     const all = await screen.findByRole('heading', { name: 'All models' });
@@ -228,7 +237,11 @@ describe('the Models page', () => {
     const asked: (string | null)[] = [];
     const askedPicks: string[] = [];
     serve({ asked, askedPicks });
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     // The playbook table reads the same list for its model names, so the account may be asked twice.
     expect([...new Set(asked)]).toEqual([SUBSCRIPTION.id]);
@@ -252,7 +265,11 @@ describe('the Models page', () => {
 
   it('lists a row per model: tier, scores, cost, the roles that use it and steps run', async () => {
     serve();
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     const row = within(
       await screen.findByRole('button', { name: 'Open Alpha Max' }).then(() => rowOf('Alpha Max')),
     );
@@ -272,7 +289,11 @@ describe('the Models page', () => {
 
   it('shows a dash where there is no data, never a zero', async () => {
     serve({ rows: [BLANK], forAccount: () => [BLANK] });
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     await screen.findByRole('button', { name: 'Open Beta Plain' });
     const cells = within(rowOf('Beta Plain')).getAllByRole('cell');
     // Intelligence and Cost per task.
@@ -281,7 +302,11 @@ describe('the Models page', () => {
 
   it('shows a status as dimmed text after the name, and New for a model first seen in the last seven days', async () => {
     serve();
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     expect(within(rowOf('Alpha Max')).getByText('New')).toBeTruthy();
     expect(within(rowOf('Alpha Fast')).queryByText('New')).toBeNull();
@@ -298,7 +323,11 @@ describe('the Models page', () => {
         return HttpResponse.json(modelMeasuresDto());
       }),
     );
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     fireEvent.click(within(rowOf('Alpha Max')).getByText('Capable'));
     const drawer = await screen.findByRole('dialog', { name: 'Alpha Max' });
@@ -333,7 +362,11 @@ describe('the Models page', () => {
 
   it('opens the drawer with Enter on a name', async () => {
     serve();
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     const name = await screen.findByRole('button', { name: 'Open Alpha Max' });
     fireEvent.click(name);
     expect(await screen.findByRole('dialog', { name: 'Alpha Max' })).toBeTruthy();
@@ -351,7 +384,11 @@ describe('the Models page', () => {
         );
       }),
     );
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     const rings = await screen.findByRole('combobox', { name: 'Rigor for the rings' });
     expect(rings).toHaveProperty('value', 'Standard');
     fireEvent.click(rings);
@@ -367,7 +404,11 @@ describe('the Models page', () => {
 
   it('filters by tier from the Tier column, one tier or several', async () => {
     serve();
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     fireEvent.click(screen.getByRole('button', { name: 'Filter Tier' }));
     const tiers = await screen.findByRole('group', { name: 'Tier' });
@@ -382,7 +423,11 @@ describe('the Models page', () => {
 
   it('searches names and model IDs from the Model column, and says when nothing matches', async () => {
     serve();
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     fireEvent.click(screen.getByRole('button', { name: 'Filter Model' }));
     const search = await screen.findByRole('textbox', { name: 'Search models' });
@@ -394,7 +439,11 @@ describe('the Models page', () => {
 
   it('opens sorted by Intelligence, highest first, and sorts by a column with Unknown and blanks last', async () => {
     serve();
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     expect(shownNames()).toEqual(['Alpha Max', 'Alpha Fast', 'Beta Plain', 'house-model']);
     fireEvent.click(screen.getByRole('button', { name: 'Sort by Intelligence, descending' }));
@@ -404,7 +453,11 @@ describe('the Models page', () => {
 
   it('says to add an account when there is none, and lists no rows', async () => {
     serve({ accounts: [] });
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     const link = await screen.findByRole('link', { name: 'Add an account' });
     expect(link.getAttribute('href')).toBe('/settings/accounts');
     expect(link.parentElement?.textContent).toBe('Add an account to see what each role gets.');
@@ -422,7 +475,11 @@ describe('the Models page', () => {
           : HttpResponse.json({ error: 'internal', message: 'Accounts are down' }, { status: 500 }),
       ),
     );
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     expect((await screen.findByRole('alert')).textContent).toContain('Accounts are down');
     expect(screen.queryByText(/Add an account/)).toBeNull();
     healthy = true;
@@ -440,7 +497,11 @@ describe('the Models page', () => {
           : HttpResponse.json([SUBSCRIPTION, KEYED]),
       ),
     );
-    const { queryClient } = await renderWithDaemonAndRouter(<ModelsSection />);
+    const { queryClient } = await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     expect(await screen.findByRole('button', { name: 'Open Alpha Max' })).toBeTruthy();
     down = true;
     await queryClient.refetchQueries({ queryKey: ['accounts'] });
@@ -469,7 +530,11 @@ describe('the Models page', () => {
           : HttpResponse.json({ error: 'internal', message: 'Picks are down' }, { status: 500 }),
       ),
     );
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     expect((await screen.findByRole('alert')).textContent).toContain('Picks are down');
     healthy = true;
     fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
@@ -488,7 +553,11 @@ describe('the Models page', () => {
           : HttpResponse.json({ error: 'internal', message: 'The list is down' }, { status: 500 }),
       ),
     );
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     expect((await screen.findByRole('alert')).textContent).toContain('The list is down');
     expect(screen.queryByRole('button', { name: 'Show every account' })).toBeNull();
     healthy = true;
@@ -498,7 +567,11 @@ describe('the Models page', () => {
 
   it('says where the data came from and how old it is, and credits Artificial Analysis with a link', async () => {
     serve({ status: catalogueStatusDto({ fetchedAt: '2026-11-07T09:00:00.000Z', models: 40 }) });
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     expect(await screen.findByText(/models\.dev, fetched 3 hours ago/)).toBeTruthy();
     const credit = screen.getByRole('link', { name: 'Artificial Analysis' });
     expect(credit.getAttribute('href')).toBe('https://artificialanalysis.ai/');
@@ -527,7 +600,11 @@ describe('the Models page', () => {
     },
   ])('$name', async ({ status, text }) => {
     serve({ status: catalogueStatusDto(status) });
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     expect(await screen.findByText(text)).toBeTruthy();
   });
 
@@ -538,13 +615,21 @@ describe('the Models page', () => {
         HttpResponse.json({ error: 'boom' }, { status: 500 }),
       ),
     );
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     expect(await screen.findByText(/catalogue status could not be read/i)).toBeTruthy();
   });
 
   it('says there is no catalogue yet', async () => {
     serve({ status: catalogueStatusDto({ source: 'none', fetchedAt: null, models: 0 }), rows: [] });
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     expect(await screen.findByText(/No catalogue yet/)).toBeTruthy();
   });
 
@@ -568,7 +653,11 @@ describe('the Models page', () => {
         return HttpResponse.json(catalogueStatusDto({ fetchedAt: '2026-11-07T11:58:00.000Z' }));
       }),
     );
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     expect(await screen.findByText(/fetched 3 hours ago/)).toBeTruthy();
     fireEvent.mouseEnter(screen.getByRole('button', { name: 'Refresh Models' }));
     expect(
@@ -597,7 +686,11 @@ describe('the Models page', () => {
         HttpResponse.json({ error: 'internal', message: 'The refresh broke' }, { status: 500 }),
       ),
     );
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     fireEvent.click(screen.getByRole('button', { name: 'Refresh Models' }));
     expect((await screen.findByRole('alert')).textContent).toContain('The refresh broke');
@@ -613,7 +706,11 @@ describe('the Models page', () => {
       firstSeenAt: null,
     });
     serve({ rows: [dateless] });
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     fireEvent.click(await screen.findByRole('button', { name: 'Open Delta Held' }));
     const drawer = await screen.findByRole('dialog', { name: 'Delta Held' });
     expect(within(rowOf('Delta Held')).queryByText('New')).toBeNull();
@@ -655,7 +752,11 @@ describe('the Models page', () => {
         }),
       ],
     });
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     fireEvent.click(await screen.findByRole('button', { name: 'Open Alpha Max' }));
     const drawer = await screen.findByRole('dialog', { name: 'Alpha Max' });
     expect(await within(drawer).findByText('launch.alpha-max-v1')).toBeTruthy();
@@ -691,7 +792,11 @@ describe('the Models page', () => {
         }),
       ],
     });
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     fireEvent.click(await screen.findByRole('button', { name: 'Open Alpha Max' }));
     const drawer = await screen.findByRole('dialog', { name: 'Alpha Max' });
     const badges = await within(drawer).findAllByText('Marked from an error’s wording');
@@ -710,7 +815,11 @@ describe('the Models page', () => {
     serve({
       offers: [accountModelDto({ accountId: SUBSCRIPTION.id, model: 'alpha-max', unusable: true })],
     });
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     fireEvent.click(await screen.findByRole('button', { name: 'Open Alpha Max' }));
     const drawer = await screen.findByRole('dialog', { name: 'Alpha Max' });
     expect(await within(drawer).findByText('Refused by this account')).toBeTruthy();
@@ -729,7 +838,11 @@ describe('the Models page', () => {
       rows: [unconfirmed],
       offers: [accountModelDto({ accountId: SUBSCRIPTION.id, model: 'other' })],
     });
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     fireEvent.click(await screen.findByRole('button', { name: 'Open gamma-new' }));
     const drawer = await screen.findByRole('dialog', { name: 'gamma-new' });
     expect(
@@ -767,7 +880,11 @@ describe('the Models page', () => {
 
     it('shows 25 families a page, and Next shows the rest', async () => {
       serve({ rows: many, forAccount: () => many });
-      await renderWithDaemonAndRouter(<ModelsSection />);
+      await renderWithDaemonAndRouter(
+        <FrameSlots>
+          <ModelsSection />
+        </FrameSlots>,
+      );
       await screen.findByRole('button', { name: 'Open Solo 0' });
       expect(shownNames()).toHaveLength(25);
       expect(screen.getByText('1–25 of 30')).toBeTruthy();
@@ -803,7 +920,11 @@ describe('the Models page', () => {
       ],
     ])('goes back to the first page when %s changes', async (_case, change) => {
       serve({ rows: many, forAccount: () => many });
-      await renderWithDaemonAndRouter(<ModelsSection />);
+      await renderWithDaemonAndRouter(
+        <FrameSlots>
+          <ModelsSection />
+        </FrameSlots>,
+      );
       await screen.findByRole('button', { name: 'Open Solo 0' });
       fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
       expect(await screen.findByText('26–30 of 30')).toBeTruthy();
@@ -814,7 +935,11 @@ describe('the Models page', () => {
     it('stays on a page that exists when a refresh shrinks the list', async () => {
       let rows = many;
       serve({ rows, forAccount: () => rows });
-      const { queryClient } = await renderWithDaemonAndRouter(<ModelsSection />);
+      const { queryClient } = await renderWithDaemonAndRouter(
+        <FrameSlots>
+          <ModelsSection />
+        </FrameSlots>,
+      );
       await screen.findByRole('button', { name: 'Open Solo 0' });
       fireEvent.click(screen.getByRole('button', { name: 'Next page' }));
       expect(await screen.findByText('26–30 of 30')).toBeTruthy();
@@ -829,7 +954,11 @@ describe('the Models page', () => {
     it('nests a family’s older versions under its current model, and opening them opens no drawer', async () => {
       const rows = [ZED, zedOld(1), zedOld(0)];
       serve({ rows, forAccount: () => rows });
-      await renderWithDaemonAndRouter(<ModelsSection />);
+      await renderWithDaemonAndRouter(
+        <FrameSlots>
+          <ModelsSection />
+        </FrameSlots>,
+      );
       await screen.findByRole('button', { name: 'Open Zed 2' });
       expect(shownNames()).toEqual(['Zed 2']);
       fireEvent.click(
@@ -845,7 +974,11 @@ describe('the Models page', () => {
     it('opens the drawer on an older version from its row', async () => {
       const rows = [ZED, zedOld(1)];
       serve({ rows, forAccount: () => rows });
-      await renderWithDaemonAndRouter(<ModelsSection />);
+      await renderWithDaemonAndRouter(
+        <FrameSlots>
+          <ModelsSection />
+        </FrameSlots>,
+      );
       await screen.findByRole('button', { name: 'Open Zed 2' });
       fireEvent.click(
         within(rowOf('Zed 2')).getByRole('button', { name: 'Show 1 older version of Zed 2' }),
@@ -859,7 +992,11 @@ describe('the Models page', () => {
       const oldFast = { ...FAST, status: 'superseded' as const };
       const rows = [STRONG, oldFast];
       serve({ rows, forAccount: () => rows });
-      await renderWithDaemonAndRouter(<ModelsSection />);
+      await renderWithDaemonAndRouter(
+        <FrameSlots>
+          <ModelsSection />
+        </FrameSlots>,
+      );
       await screen.findByRole('button', { name: 'Open Alpha Max' });
       // Folded, the family's row says a role runs on a version under it.
       expect(
@@ -897,7 +1034,11 @@ describe('the Models page switch', () => {
   it('opens on Agents, first in the switch, with the playbook', async () => {
     serveJudge({});
     serve();
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     const group = await screen.findByRole('radiogroup', { name: 'Models view' });
     expect(
       within(group)
@@ -911,7 +1052,11 @@ describe('the Models page switch', () => {
   it('shows the decisions table and the paid-by account in a disabled select on Decisions', async () => {
     serveJudge({ status: paidBy() });
     serve();
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     await screen.findByRole('heading', { name: 'Playbook' });
     chooseView('Decisions');
     expect(await screen.findByRole('table', { name: 'Decisions' })).toBeTruthy();
@@ -928,7 +1073,11 @@ describe('the Models page switch', () => {
   it('reads No OpenRouter account on Decisions when none is picked', async () => {
     serveJudge({});
     serve();
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     await screen.findByRole('heading', { name: 'Playbook' });
     chooseView('Decisions');
     const select = await screen.findByRole('combobox', { name: 'Account' });
@@ -951,7 +1100,11 @@ describe('the Models page switch', () => {
         );
       }),
     );
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     await screen.findByRole('heading', { name: 'Playbook' });
     chooseView('Decisions');
     const select = await screen.findByRole('combobox', { name: 'Account' });
@@ -965,7 +1118,11 @@ describe('the Models page switch', () => {
   it('keeps the Agents account chosen across a switch', async () => {
     serveJudge({ status: paidBy() });
     serve();
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     await chooseAccount('Work key');
     chooseView('Decisions');
@@ -981,7 +1138,11 @@ describe('the Models page switch', () => {
     serveJudge({});
     serve();
     server.use(http.get(daemonUrl('/models'), () => new HttpResponse(null, { status: 500 })));
-    await renderWithDaemonAndRouter(<ModelsSection />);
+    await renderWithDaemonAndRouter(
+      <FrameSlots>
+        <ModelsSection />
+      </FrameSlots>,
+    );
     await screen.findByRole('radiogroup', { name: 'Models view' });
     chooseView('Decisions');
     expect(await screen.findByRole('table', { name: 'Decisions' })).toBeTruthy();

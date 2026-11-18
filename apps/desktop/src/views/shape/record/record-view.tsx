@@ -1,21 +1,11 @@
 import type { PlanRecordDto, ShapeId } from '@10db/contracts';
-import {
-  Alert,
-  Badge,
-  Button,
-  Group,
-  Loader,
-  Stack,
-  Tabs,
-  Text,
-  Title,
-  VisuallyHidden,
-} from '@mantine/core';
+import { Alert, Badge, Button, Loader, Stack, Tabs, Text, VisuallyHidden } from '@mantine/core';
 import { IconMessages } from '@tabler/icons-react';
 import { useNavigate } from '@tanstack/react-router';
 import dayjs from 'dayjs';
 import type { ReactNode } from 'react';
 import { usePlanRecord } from '../../../daemon/plan-record-queries';
+import { TitleRow } from '../../../shell/title-row';
 import { DecisionsTab } from './decisions-tab';
 import { DocumentsTab } from './documents-tab';
 import { EvidenceTab } from './evidence-tab';
@@ -163,36 +153,30 @@ export function RecordView({
       // A flex item of the shell's main column, as Plan's split pane is, so its height is the window's.
       style={{ flex: '1 1 0px', minHeight: 420 }}
     >
-      <Group justify="space-between" align="flex-start" wrap="nowrap" gap="md">
-        <Stack gap={2} miw={0}>
-          <Group gap="sm" wrap="nowrap" miw={0}>
-            <Title order={2} size="h4">
-              Record
-            </Title>
-            <Text size="sm" fw={500} lineClamp={1}>
-              {record.data?.title}
-            </Text>
-          </Group>
-          {record.data === undefined ? null : (
-            <Text size="xs" c="dimmed">
-              {importedLine(record.data)}
-            </Text>
-          )}
-        </Stack>
-        <Group gap="xs" wrap="nowrap" align="flex-start">
-          <Button
-            variant="default"
-            size="xs"
-            leftSection={<IconMessages size={14} stroke={1.5} />}
-            onClick={() => {
-              void navigate({ to: '/shape/$shapeId', params: { shapeId } });
-            }}
-          >
-            Conversation
-          </Button>
-          <ExportButton shapeId={shapeId} />
-        </Group>
-      </Group>
+      <TitleRow
+        title="Record"
+        meta={record.data?.title}
+        actions={
+          <>
+            <Button
+              variant="default"
+              size="xs"
+              leftSection={<IconMessages size={14} stroke={1.5} />}
+              onClick={() => {
+                void navigate({ to: '/shape/$shapeId', params: { shapeId } });
+              }}
+            >
+              Conversation
+            </Button>
+            <ExportButton shapeId={shapeId} />
+          </>
+        }
+      />
+      {record.data === undefined ? null : (
+        <Text size="xs" c="dimmed">
+          {importedLine(record.data)}
+        </Text>
+      )}
       {record.isError ? (
         <Alert color="red" title="Couldn't load the record">
           {record.error.message}

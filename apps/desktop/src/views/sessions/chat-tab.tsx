@@ -13,7 +13,7 @@ import {
   type ToolCallView,
 } from '@10db/contracts';
 import { Box, Button, Group, Text } from '@mantine/core';
-import { useClipboard, useMediaQuery } from '@mantine/hooks';
+import { useClipboard, useElementSize } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { ConversationList, toolDoing, WorkingLine } from '../../conversation';
@@ -63,7 +63,8 @@ import { draftKey, sessionDrafts, useSessionDraft } from './session-drafts';
 
 const CONTEXT_TIP = 'Past 70%, the next turn continues in a fresh session with a summary.';
 
-const NARROW_QUERY = '(max-width: 639px)';
+/** Under this width of the tab itself the composer drops its long labels. */
+const NARROW_PX = 640;
 
 /** The message File as Tasks sends, as the builder's own turn (sessions design spec §7.2). */
 export const FILE_AS_TASKS_MESSAGE = 'File the work we agreed on as tasks on the Board.';
@@ -167,7 +168,9 @@ export function ChatTab({
   const { items, loading } = useConversationItemsState(chat.conversationId);
   const live = useConversationLive(chat.conversationId);
   const loadFull = useToolCallFull(chat.conversationId, items);
-  const narrow = useMediaQuery(NARROW_QUERY);
+  // The tab's own width, not the window's; an unmeasured tab reads 0 and is not narrow.
+  const { ref: sizeRef, width } = useElementSize();
+  const narrow = width > 0 && width < NARROW_PX;
   const daemon = useDaemonStatus();
   const { client } = useDaemon();
   const key = draftKey.chat(chat.id);
@@ -407,206 +410,219 @@ export function ChatTab({
   };
 
   return (
-    <ConversationLayout
-      label="Conversation"
-      header={
-        <SessionBar
-          chat={chat}
-          conversation={conversation}
-          projectName={project?.name ?? ''}
-          folder={folder}
-          projectPath={project?.repoPath ?? null}
-          terminalSince={takeover.data?.since ?? null}
-          {...(openingTerminal === undefined ? {} : { openingTerminal })}
-          {...(onTerminalAsked === undefined ? {} : { onTerminalAsked })}
-          onTerminalUncopied={setUncopied}
-          loading={loading}
-          fileDisabledReason={removed ? 'This project was removed from 10db.' : disabledReason}
-          {...(actions === undefined ? {} : { actions })}
-          {...(renaming === undefined ? {} : { renaming })}
-          {...(onRenamed === undefined ? {} : { onRenamed })}
-          doItDisabledReason={doItReason}
-          onDoIt={() => {
-            setDoIt({});
-          }}
-          onFileAsTasks={() => {
-            void post({ ...EMPTY_DRAFT, text: FILE_AS_TASKS_MESSAGE }).catch((error: unknown) => {
-              setSendError(error instanceof Error ? error.message : String(error));
-            });
-          }}
-        />
-      }
-      footer={
-        <>
-          {caps.plan ? (
-            <TodoList steps={latestTodos(items)} working={working} cardWaiting={open.length > 0} />
-          ) : null}
-          <WorkingLine
-            conversation={conversation}
-            streaming={streaming}
-            {...(tool === undefined ? {} : { tool })}
-          />
-          <PermissionRequest items={open} />
-          <BackgroundTasks
-            capabilities={caps}
-            tasks={conversation.backgroundTasks}
-            cardWaiting={open.length > 0}
-          />
-          {inTerminal ? (
-            <TerminalBanner
-              label={caps.label}
-              since={takeover.data?.since ?? null}
-              notes={takeover.data?.notes ?? []}
-              onHandBack={() => {
-                setUncopied(null);
-                setLastCommand(null);
-                handBack.mutate(chat.conversationId);
-              }}
-              handingBack={handBack.isPending}
-              onCopyCommand={() => {
-                takeoverCommand.mutate(chat.conversationId, {
-                  onSuccess: ({ line }) => {
-                    setLastCommand(line);
-                    clipboard.copy(line);
-                  },
-                });
-              }}
-              copied={clipboard.copied}
-              line={uncopied ?? (clipboard.error === null ? null : lastCommand)}
-              error={handBack.error?.message ?? takeoverCommand.error?.message ?? null}
-            />
-          ) : null}
-          {waiting ? (
-            <FolderWait
-              holders={keeping}
-              onSendNow={() => {
-                stopWaiting.mutate(chat.id);
-              }}
-              onStop={stopNow}
-            />
-          ) : null}
-          {conversation.state === 'sealed' ? (
-            <HandedOffLine chat={chat} />
-          ) : removed ? (
-            <Text size="sm" c="dimmed" px="md" py="md">
-              This project was removed from 10db.
-            </Text>
-          ) : (
-            <Composer
-              draft={draft}
-              onDraft={(next) => {
-                setSendError(null);
-                stopWaiting.reset();
-                setDraft(next);
-              }}
-              capabilities={caps}
-              mentions={{
-                files: (q, signal) =>
-                  fetchConversationFiles(client, chat.conversationId, q, signal),
-                commands: conversation.commands,
-              }}
-              phase={phase}
-              disabledReason={disabledReason}
-              error={sendError ?? stopWaiting.error?.message ?? null}
-              inputRef={input}
-              modelControl={
-                <Group gap={4} wrap="nowrap">
-                  {caps.modelSwitch === 'none' || offered.length === 0 ? (
-                    named === null ? null : (
-                      <Text size="xs" c="dimmed">
-                        {nameOf(named, new Map((modelRows.data ?? []).map((r) => [r.model, r])))}
-                      </Text>
-                    )
-                  ) : (
-                    <ModelMenu
-                      offered={offered}
-                      default={models.data?.default ?? null}
-                      picked={conversation.model}
-                      effort={conversation.effort}
-                      busy={working}
-                      pending={patch.isPending}
-                      error={modelRefusal}
-                      onPick={changeModel}
-                    />
-                  )}
-                  <ContextRing
-                    percent={conversation.contextPct}
-                    more={[
-                      CONTEXT_TIP,
-                      ...(conversation.costUsd === null
-                        ? []
-                        : [`$${conversation.costUsd.toFixed(2)} so far`]),
-                    ]}
-                  />
-                </Group>
-              }
-              {...(keeping === null || inTerminal
-                ? {}
-                : {
-                    held: {
-                      holders: keeping,
-                      onChoose: async (d: Draft, choice: FolderWhileHeld, how: 'send' | 'redo') => {
-                        if (how === 'send') await post(d, choice);
-                        else
-                          await redo.mutateAsync({
-                            conversationId: chat.conversationId,
-                            text: d.text,
-                            folder: choice,
-                          });
-                      },
-                      onFileAsTasks: async () => {
-                        await post({ ...EMPTY_DRAFT, text: FILE_AS_TASKS_MESSAGE });
-                      },
-                      // A project that lands locally has no separate copies to offer.
-                      ...(doItReason === null && project.delivery !== Delivery.Local
-                        ? {
-                            onDoItSeparately: (d: Draft) => {
-                              setDoIt({ place: DoItPlace.Worktree, draft: d.text });
-                            },
-                          }
-                        : {}),
-                    },
-                  })}
-              onSend={post}
-              onStop={stopNow}
-              onRedo={async (d) => {
-                await redo.mutateAsync({ conversationId: chat.conversationId, text: d.text });
-              }}
-            />
-          )}
-        </>
-      }
+    <Box
+      ref={sizeRef}
+      style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}
     >
-      {loading ? (
-        <Box px="md" pt="md">
-          <PageLoading shape={PageLoadingShape.Lines} label="Loading the conversation" />
-        </Box>
-      ) : null}
-      <ConversationList
-        entries={shown}
-        highlight={null}
-        loadFull={loadFull}
-        onAllow={allow}
-        agentLabel={caps.label}
-        busy={streaming !== null}
-      />
-      {doIt === null || project === undefined ? null : (
-        <DoItSheet
-          chat={chat}
-          project={project}
+      <ConversationLayout
+        label="Conversation"
+        header={
+          <SessionBar
+            chat={chat}
+            conversation={conversation}
+            projectName={project?.name ?? ''}
+            folder={folder}
+            projectPath={project?.repoPath ?? null}
+            terminalSince={takeover.data?.since ?? null}
+            {...(openingTerminal === undefined ? {} : { openingTerminal })}
+            {...(onTerminalAsked === undefined ? {} : { onTerminalAsked })}
+            onTerminalUncopied={setUncopied}
+            loading={loading}
+            fileDisabledReason={removed ? 'This project was removed from 10db.' : disabledReason}
+            {...(actions === undefined ? {} : { actions })}
+            {...(renaming === undefined ? {} : { renaming })}
+            {...(onRenamed === undefined ? {} : { onRenamed })}
+            doItDisabledReason={doItReason}
+            onDoIt={() => {
+              setDoIt({});
+            }}
+            onFileAsTasks={() => {
+              void post({ ...EMPTY_DRAFT, text: FILE_AS_TASKS_MESSAGE }).catch((error: unknown) => {
+                setSendError(error instanceof Error ? error.message : String(error));
+              });
+            }}
+          />
+        }
+        footer={
+          <>
+            {caps.plan ? (
+              <TodoList
+                steps={latestTodos(items)}
+                working={working}
+                cardWaiting={open.length > 0}
+              />
+            ) : null}
+            <WorkingLine
+              conversation={conversation}
+              streaming={streaming}
+              {...(tool === undefined ? {} : { tool })}
+            />
+            <PermissionRequest items={open} />
+            <BackgroundTasks
+              capabilities={caps}
+              tasks={conversation.backgroundTasks}
+              cardWaiting={open.length > 0}
+            />
+            {inTerminal ? (
+              <TerminalBanner
+                label={caps.label}
+                since={takeover.data?.since ?? null}
+                notes={takeover.data?.notes ?? []}
+                onHandBack={() => {
+                  setUncopied(null);
+                  setLastCommand(null);
+                  handBack.mutate(chat.conversationId);
+                }}
+                handingBack={handBack.isPending}
+                onCopyCommand={() => {
+                  takeoverCommand.mutate(chat.conversationId, {
+                    onSuccess: ({ line }) => {
+                      setLastCommand(line);
+                      clipboard.copy(line);
+                    },
+                  });
+                }}
+                copied={clipboard.copied}
+                line={uncopied ?? (clipboard.error === null ? null : lastCommand)}
+                error={handBack.error?.message ?? takeoverCommand.error?.message ?? null}
+              />
+            ) : null}
+            {waiting ? (
+              <FolderWait
+                holders={keeping}
+                onSendNow={() => {
+                  stopWaiting.mutate(chat.id);
+                }}
+                onStop={stopNow}
+              />
+            ) : null}
+            {conversation.state === 'sealed' ? (
+              <HandedOffLine chat={chat} />
+            ) : removed ? (
+              <Text size="sm" c="dimmed" px="md" py="md">
+                This project was removed from 10db.
+              </Text>
+            ) : (
+              <Composer
+                draft={draft}
+                onDraft={(next) => {
+                  setSendError(null);
+                  stopWaiting.reset();
+                  setDraft(next);
+                }}
+                capabilities={caps}
+                mentions={{
+                  files: (q, signal) =>
+                    fetchConversationFiles(client, chat.conversationId, q, signal),
+                  commands: conversation.commands,
+                }}
+                phase={phase}
+                disabledReason={disabledReason}
+                error={sendError ?? stopWaiting.error?.message ?? null}
+                inputRef={input}
+                modelControl={
+                  <Group gap={4} wrap="nowrap">
+                    {caps.modelSwitch === 'none' || offered.length === 0 ? (
+                      named === null ? null : (
+                        <Text size="xs" c="dimmed">
+                          {nameOf(named, new Map((modelRows.data ?? []).map((r) => [r.model, r])))}
+                        </Text>
+                      )
+                    ) : (
+                      <ModelMenu
+                        offered={offered}
+                        default={models.data?.default ?? null}
+                        picked={conversation.model}
+                        effort={conversation.effort}
+                        busy={working}
+                        pending={patch.isPending}
+                        error={modelRefusal}
+                        onPick={changeModel}
+                      />
+                    )}
+                    <ContextRing
+                      percent={conversation.contextPct}
+                      more={[
+                        CONTEXT_TIP,
+                        ...(conversation.costUsd === null
+                          ? []
+                          : [`$${conversation.costUsd.toFixed(2)} so far`]),
+                      ]}
+                    />
+                  </Group>
+                }
+                {...(keeping === null || inTerminal
+                  ? {}
+                  : {
+                      held: {
+                        holders: keeping,
+                        onChoose: async (
+                          d: Draft,
+                          choice: FolderWhileHeld,
+                          how: 'send' | 'redo',
+                        ) => {
+                          if (how === 'send') await post(d, choice);
+                          else
+                            await redo.mutateAsync({
+                              conversationId: chat.conversationId,
+                              text: d.text,
+                              folder: choice,
+                            });
+                        },
+                        onFileAsTasks: async () => {
+                          await post({ ...EMPTY_DRAFT, text: FILE_AS_TASKS_MESSAGE });
+                        },
+                        // A project that lands locally has no separate copies to offer.
+                        ...(doItReason === null && project.delivery !== Delivery.Local
+                          ? {
+                              onDoItSeparately: (d: Draft) => {
+                                setDoIt({ place: DoItPlace.Worktree, draft: d.text });
+                              },
+                            }
+                          : {}),
+                      },
+                    })}
+                onSend={post}
+                onStop={stopNow}
+                onRedo={async (d) => {
+                  await redo.mutateAsync({ conversationId: chat.conversationId, text: d.text });
+                }}
+              />
+            )}
+          </>
+        }
+      >
+        {loading ? (
+          <Box px="md" pt="md">
+            <PageLoading shape={PageLoadingShape.Lines} label="Loading the conversation" />
+          </Box>
+        ) : null}
+        <ConversationList
+          entries={shown}
+          highlight={null}
+          loadFull={loadFull}
+          onAllow={allow}
           agentLabel={caps.label}
-          model={conversation.model}
-          {...(doIt.place === undefined ? {} : { place: doIt.place })}
-          {...(doIt.draft === undefined ? {} : { draft: doIt.draft })}
-          onClose={() => {
-            setDoIt(null);
-          }}
-          onDone={(result, title) => {
-            setDoIt(null);
-            onHandedOff?.(result, title);
-          }}
+          busy={streaming !== null}
         />
-      )}
-    </ConversationLayout>
+        {doIt === null || project === undefined ? null : (
+          <DoItSheet
+            chat={chat}
+            project={project}
+            agentLabel={caps.label}
+            model={conversation.model}
+            {...(doIt.place === undefined ? {} : { place: doIt.place })}
+            {...(doIt.draft === undefined ? {} : { draft: doIt.draft })}
+            onClose={() => {
+              setDoIt(null);
+            }}
+            onDone={(result, title) => {
+              setDoIt(null);
+              onHandedOff?.(result, title);
+            }}
+          />
+        )}
+      </ConversationLayout>
+    </Box>
   );
 }

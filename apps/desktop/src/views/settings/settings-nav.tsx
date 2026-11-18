@@ -1,6 +1,5 @@
 import { NavLink, SegmentedControl, Stack, Text } from '@mantine/core';
 import {
-  IconArrowLeft,
   IconBolt,
   IconCoffee,
   IconShieldCheck,
@@ -24,7 +23,7 @@ import {
 } from '@tabler/icons-react';
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useId } from 'react';
-import { ProjectSwitcher } from '../../shell/project-switcher';
+import classes from './settings-nav.module.css';
 import {
   isSettingsSectionKey,
   sectionByKey,
@@ -96,8 +95,10 @@ function SectionLinks({
         key={s.key}
         label={s.label}
         active={s.key === current}
-        py={5}
-        leftSection={<Icon size={16} stroke={1.5} />}
+        h={30}
+        py={0}
+        styles={{ label: { fontSize: 13, lineHeight: '30px' } }}
+        leftSection={<Icon size={14} stroke={1.7} />}
         renderRoot={(props) => (
           <Link {...props} to="/settings/$section" params={{ section: s.key }} />
         )}
@@ -128,8 +129,7 @@ function Subhead({
 }
 
 /**
- * The sidebar while Settings is open: it takes the app nav's place, with Back at the top and a
- * switch between the selected project's sections and the ones that apply everywhere. It lists one
+ * Settings' panel: a switch between the selected project's sections and the ones that apply everywhere. It lists one
  * scope at a time, under subheads. Planned sections stay out.
  */
 export function SettingsNav() {
@@ -141,17 +141,16 @@ export function SettingsNav() {
 
   return (
     <Stack component="nav" aria-label="Settings sections" gap={2}>
-      <NavLink
-        label="Back to Board"
-        leftSection={<IconArrowLeft size={16} stroke={1.5} />}
-        renderRoot={(props) => <Link {...props} to="/board" />}
-        mb="xs"
-      />
       <SegmentedControl
         aria-label="Settings scope"
         fullWidth
         size="xs"
         mb="sm"
+        classNames={{
+          root: classes['root'],
+          indicator: classes['indicator'],
+          label: classes['label'],
+        }}
         value={scope}
         data={SCOPE_OPTIONS}
         onChange={(value) => {
@@ -167,7 +166,6 @@ export function SettingsNav() {
           });
         }}
       />
-      {scope === SettingsScope.Project ? <ProjectSwitcher compact /> : null}
       {subheadRuns(scope).map((run) => (
         <Subhead
           key={run.subhead ?? ''}

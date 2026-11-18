@@ -240,15 +240,15 @@ describe('Sessions: a fresh tab', () => {
     expect(chat.chats).toHaveLength(0);
   });
 
-  it('puts the strip in the header on Sessions and leaves other views’ header as it was', async () => {
+  it('puts the strip in the title row on Sessions and takes it out on other views', async () => {
     const first = open('/sessions');
     expect(await screen.findByRole('tablist', { name: 'Sessions' })).toBeTruthy();
-    expect(document.querySelector('header [data-header-slot] [role="tablist"]')).not.toBeNull();
+    expect(document.querySelector('[data-title-row] [role="tablist"]')).not.toBeNull();
     first.router.history.push('/factory');
     await waitFor(() => {
       expect(screen.queryByRole('tablist', { name: 'Sessions' })).toBeNull();
     });
-    expect(document.querySelector('header[data-tauri-drag-region]')).not.toBeNull();
+    expect(document.querySelector('[data-title-row][data-tauri-drag-region]')).not.toBeNull();
     expect(mintId('Chat')).toMatch(/^cht_/);
   });
 });

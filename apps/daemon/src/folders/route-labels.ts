@@ -2,9 +2,9 @@ import { posix } from 'node:path';
 import { PageLabel } from '@10db/contracts';
 
 // Workbench setup: the name a page goes by in the app, guessed from the nav that links to it, an
-// object holding both a path (`to`, `path` or `href`) and a `label`.
+// object holding both a path (`to`, `path`, `href` or `route`) and a `label`.
 
-const PATH_KEYS: ReadonlySet<string> = new Set(['to', 'path', 'href']);
+const PATH_KEYS: ReadonlySet<string> = new Set(['to', 'path', 'href', 'route']);
 const LABEL_KEY = 'label';
 
 /** A string literal's text with an escaped quote or backslash read as the character it stands for. */
@@ -66,7 +66,7 @@ interface Entry {
 }
 
 /**
- * The label each route is given by an object literal holding both a path (`to`, `path` or `href`,
+ * The label each route is given by an object literal holding both a path (`to`, `path`, `href` or `route`,
  * starting with `/`) and a `label`, in one linear pass: strings and comments are stepped over, each
  * object's keys are read as they come and an object that closes holding both says one guess. The
  * first label a route gets stands. A label that is not one line of 1-40 characters is no guess.
@@ -147,6 +147,7 @@ const NAV_WORDS: ReadonlySet<string> = new Set([
   'nav',
   'navbar',
   'navigation',
+  'rail',
   'sidebar',
   'menu',
   'shell',
@@ -157,7 +158,7 @@ const NOT_NAV = /(?:\.(?:test|spec|stories)\.)|(?:^|\/)(?:__tests__|e2e)\//u;
 
 /**
  * Whether a file's name says it holds an app's nav: a whole word of its base name (split on `-`, `_`,
- * `.` and case) is layout, nav, navbar, navigation, sidebar, menu or shell. `navigate.ts`, tests,
+ * `.` and case) is layout, nav, navbar, navigation, rail, sidebar, menu or shell. `navigate.ts`, tests,
  * stories and `e2e/` files are not.
  */
 export function isNavFile(path: string): boolean {
