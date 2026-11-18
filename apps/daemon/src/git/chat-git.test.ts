@@ -124,7 +124,7 @@ describe('moveCommitsToBranch', () => {
     expect(rg('status', '--porcelain')).toBe('?? wip.txt');
   });
 
-  it('leaves everything as it was when main is not where the caller saw it', async () => {
+  it('writes nothing when main is not where the caller saw it', async () => {
     const { origin, tip } = twoAhead();
     await expect(
       git.moveCommitsToBranch(repo, {
@@ -133,10 +133,10 @@ describe('moveCommitsToBranch', () => {
         to: origin,
         expectedOld: origin,
       }),
-    ).rejects.toThrow(/main/);
-    // The commits are safe on the branch that was made first; main is untouched.
+    ).rejects.toThrow(/moved/);
     expect(rg('rev-parse', 'main')).toBe(tip);
-    expect(rg('rev-parse', 'topic')).toBe(tip);
+    expect(rg('branch', '--show-current')).toBe('main');
+    expect(rg('branch', '--list', 'topic')).toBe('');
   });
 
   it.each([
@@ -149,6 +149,78 @@ describe('moveCommitsToBranch', () => {
     ).rejects.toThrow();
     expect(rg('rev-parse', 'main')).toBe(tip);
     expect(rg('branch', '--show-current')).toBe('main');
+  });
+
+  describe('refuses, writing nothing, unless the checkout is as the caller saw it', () => {
+    const snapshot = () => [
+      rg('branch', '--show-current'),
+      rg('rev-parse', 'HEAD'),
+      rg('branch', '--format=%(refname) %(objectname)'),
+    ];
+
+    it('the checkout is on another branch', async () => {
+      const { origin, tip } = twoAhead();
+      rg('switch', '-q', '-c', 'other');
+      write('x.txt', 'x\n');
+      rg('add', 'x.txt');
+      rg('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'x');
+      const before = snapshot();
+      await expect(
+        git.moveCommitsToBranch(repo, {
+          name: 'topic',
+          base: 'main',
+          to: origin,
+          expectedOld: tip,
+        }),
+      ).rejects.toThrow(/not on main/);
+      expect(snapshot()).toEqual(before);
+    });
+
+    it('HEAD has moved past the commit the caller saw', async () => {
+      const { origin, tip } = twoAhead();
+      write('late.txt', 'late\n');
+      rg('add', 'late.txt');
+      rg('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'late');
+      const before = snapshot();
+      await expect(
+        git.moveCommitsToBranch(repo, {
+          name: 'topic',
+          base: 'main',
+          to: origin,
+          expectedOld: tip,
+        }),
+      ).rejects.toThrow(/moved/);
+      expect(snapshot()).toEqual(before);
+    });
+
+    it('the target is not an ancestor of the commit the caller saw', async () => {
+      const { tip } = twoAhead();
+      // A commit made on a side branch from the root: unrelated to main's tip.
+      rg('switch', '-q', '--orphan', 'side');
+      rg(
+        '-c',
+        'user.name=t',
+        '-c',
+        'user.email=t@example.com',
+        'commit',
+        '-q',
+        '--allow-empty',
+        '-m',
+        'orphan',
+      );
+      const unrelated = rg('rev-parse', 'HEAD');
+      rg('switch', '-q', 'main');
+      const before = snapshot();
+      await expect(
+        git.moveCommitsToBranch(repo, {
+          name: 'topic',
+          base: 'main',
+          to: unrelated,
+          expectedOld: tip,
+        }),
+      ).rejects.toThrow(/ancestor/);
+      expect(snapshot()).toEqual(before);
+    });
   });
 
   it('runs no hook', async () => {

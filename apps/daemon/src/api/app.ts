@@ -832,6 +832,14 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
+    .post('/chats/:chatId/pull-request', async (c) =>
+      c.json(
+        await deps.services.chatPullRequest(ChatId.parse(c.req.param('chatId')), c.req.raw.signal),
+      ),
+    )
+    .post('/chats/:chatId/merge', async (c) =>
+      c.json(await deps.services.chatMerge(ChatId.parse(c.req.param('chatId')), c.req.raw.signal)),
+    )
     .get('/chats/:chatId/changes', async (c) =>
       c.json(await deps.services.chatChanges(ChatId.parse(c.req.param('chatId')))),
     )
