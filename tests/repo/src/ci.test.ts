@@ -394,7 +394,10 @@ describe('CodeQL workflow', () => {
     const parsed = readWorkflow('.github/workflows/codeql.yml');
     expect(Object.keys(parsed.on)).toEqual(['push', 'schedule']);
     expect(parsed.on['push']).toEqual({ branches: ['main'] });
-    expect(parsed.on['schedule']).toEqual([{ cron: expect.any(String) }]);
+    const schedule = z
+      .array(z.strictObject({ cron: z.string().min(1) }))
+      .safeParse(parsed.on['schedule']);
+    expect(schedule.success && schedule.data.length).toBe(1);
   });
 });
 
