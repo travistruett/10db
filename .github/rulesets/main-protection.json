@@ -37,7 +37,8 @@
           { "context": "desktop", "integration_id": 15368 },
           { "context": "policy", "integration_id": 15368 },
           { "context": "dependency-review", "integration_id": 15368 },
-          { "context": "cargo-deny", "integration_id": 15368 }
+          { "context": "cargo-deny", "integration_id": 15368 },
+          { "context": "pr-title", "integration_id": 15368 }
         ]
       }
     }
