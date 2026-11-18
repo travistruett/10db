@@ -9,11 +9,7 @@ import {
 import { TaskSessionDto } from './task-session';
 import { TaskFileDto, TaskMessageDto, TaskMessageInput, TaskThreadDto } from './task-thread';
 import {
-  BriefRequest,
   ChatCreateInput,
-  DoItPreviewDto,
-  DoItRequest,
-  DoItResult,
   ChatDto,
   ChatModelsDto,
   ChatPatchInput,
@@ -25,6 +21,15 @@ import {
 } from './chat';
 import { TakeoverCommandDto, TakeoverDto, TakeoverPreviewDto } from './takeover';
 import { ChatToolResult } from './chat-tools';
+import { ChatSearchPage, ChatSearchQuery } from './chat-search';
+import {
+  ArchivePreviewDto,
+  ArchiveRequest,
+  ChatCommitRequest,
+  ChatWork,
+  ChatWorkChoice,
+  ChatWorkStateDto,
+} from './chat-work';
 import { FolderDto } from './folder-hold';
 import {
   AgentCommandDto,
@@ -126,6 +131,7 @@ import { GithubSigninDto, GithubStatusDto } from './github';
 import { DecisionModelListDto } from './decision-models';
 import { DecisionStatsListDto } from './decision-stats';
 import { InboxPageDto, InboxPageQuery } from './inbox-page';
+import { InboxCardContextDto } from './inbox-rows';
 import {
   JudgeCallDto,
   JudgeCallsPageDto,
@@ -336,14 +342,18 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'agent-command-dto': AgentCommandDto,
   'chat-create-input': ChatCreateInput,
   'chat-dto': ChatDto,
-  'do-it-request': DoItRequest,
-  'do-it-preview-dto': DoItPreviewDto,
-  'do-it-result': DoItResult,
-  'brief-request': BriefRequest,
   'task-session-dto': TaskSessionDto,
   'chat-models-dto': ChatModelsDto,
   'chat-patch-input': ChatPatchInput,
   'chat-tool-result': ChatToolResult,
+  'chat-work': ChatWork,
+  'chat-work-choice': ChatWorkChoice,
+  'chat-work-state-dto': ChatWorkStateDto,
+  'chat-commit-request': ChatCommitRequest,
+  'archive-preview-dto': ArchivePreviewDto,
+  'archive-request': ArchiveRequest,
+  'chat-search-query': ChatSearchQuery,
+  'chat-search-page': ChatSearchPage,
   'conversation-files-query': ConversationFilesQuery,
   'project-file-match-dto': ProjectFileMatchDto,
   'session-start-dto': SessionStartDto,
@@ -383,6 +393,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'project-patch': ProjectPatch,
   'task-patch': TaskPatch,
   'workstream-dto': WorkstreamDto,
+  'inbox-card-context-dto': InboxCardContextDto,
   'inbox-item-dto': InboxItemDto,
   'system-check-dto': SystemCheckDto,
   'keep-awake-status': KeepAwakeStatus,

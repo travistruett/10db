@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lockedBatchId, parseWorktreeList } from './worktree-list';
+import { lockedOwner, parseWorktreeList } from './worktree-list';
 
 const SHA = 'a'.repeat(40);
 
@@ -11,7 +11,7 @@ const rows = [
     name: 'the main checkout',
     fields: ['worktree /r', `HEAD ${SHA}`, 'branch refs/heads/main'],
     expected: { path: '/r', head: SHA, branch: 'main', locked: null, prunable: false, bare: false },
-    batch: null,
+    owner: null,
   },
   {
     name: 'a 10db worktree',
@@ -24,7 +24,7 @@ const rows = [
       prunable: false,
       bare: false,
     },
-    batch: null,
+    owner: null,
   },
   {
     name: 'a 10db worktree with a real batch id',
@@ -37,13 +37,26 @@ const rows = [
       prunable: false,
       bare: false,
     },
-    batch: 'bat_0a1b-2c',
+    owner: { kind: 'batch', id: 'bat_0a1b-2c' },
+  },
+  {
+    name: 'a 10db worktree of a chat',
+    fields: ['worktree /w/c', `HEAD ${SHA}`, 'branch refs/heads/c', 'locked 10db cht_0a1b-2c'],
+    expected: {
+      path: '/w/c',
+      head: SHA,
+      branch: 'c',
+      locked: '10db cht_0a1b-2c',
+      prunable: false,
+      bare: false,
+    },
+    owner: { kind: 'chat', id: 'cht_0a1b-2c' },
   },
   {
     name: 'locked with no reason',
     fields: ['worktree /w/a', `HEAD ${SHA}`, 'branch refs/heads/b', 'locked'],
     expected: { path: '/w/a', head: SHA, branch: 'b', locked: '', prunable: false, bare: false },
-    batch: null,
+    owner: null,
   },
   {
     name: 'a reason holding a newline',
@@ -56,13 +69,13 @@ const rows = [
       prunable: false,
       bare: false,
     },
-    batch: null,
+    owner: null,
   },
   {
     name: 'detached',
     fields: ['worktree /w/a', `HEAD ${SHA}`, 'detached'],
     expected: { path: '/w/a', head: SHA, branch: null, locked: null, prunable: false, bare: false },
-    batch: null,
+    owner: null,
   },
   {
     name: 'bare',
@@ -75,7 +88,7 @@ const rows = [
       prunable: false,
       bare: true,
     },
-    batch: null,
+    owner: null,
   },
   {
     name: 'prunable',
@@ -93,7 +106,7 @@ const rows = [
       prunable: true,
       bare: false,
     },
-    batch: null,
+    owner: null,
   },
   {
     name: "someone else's lock",
@@ -106,17 +119,17 @@ const rows = [
       prunable: false,
       bare: false,
     },
-    batch: null,
+    owner: null,
   },
 ];
 
 describe('parseWorktreeList', () => {
-  it.each(rows)('reads $name', ({ fields, expected, batch }) => {
+  it.each(rows)('reads $name', ({ fields, expected, owner }) => {
     const [entry, ...rest] = parseWorktreeList(record(...fields));
     expect(rest).toEqual([]);
     expect(entry).toEqual(expected);
     if (!entry) throw new Error('no entry');
-    expect(lockedBatchId(entry)).toBe(batch);
+    expect(lockedOwner(entry)).toEqual(owner);
   });
 
   it('reads several records in order', () => {

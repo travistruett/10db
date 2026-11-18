@@ -1,6 +1,4 @@
-import { existsSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { basename } from 'node:path';
 import {
   BatchState,
   CiStopped,
@@ -11,12 +9,10 @@ import {
 } from '@10db/contracts';
 import {
   deleteCuttingBatch,
-  findUnfinishedBatch,
   getBatch,
   getProject,
   getTask,
   patchBatch,
-  sharedLaneRan,
   transitionBatch,
 } from '@10db/db';
 import { existsAsEntry, WORKTREE_LOCK_PREFIX } from '../git';
@@ -31,8 +27,8 @@ import { landingWarnings, missingLandingBranch, type SameStart } from './landing
 import { seedNotices } from './notices';
 import { forgetStartSiblings } from './start-siblings';
 import { resolveStartCards } from './stale-cards';
-import { PNPM_LOCKFILE, raiseInstallHostCards } from './worktree-dependencies';
-import { seedDirs, seedWorktree } from './worktree-seed';
+import { raiseInstallHostCards } from './worktree-dependencies';
+import { seedAndInstall } from './worktree-prepare';
 
 /** What a start hands its background job: the plans resolved in the request, by task. */
 export type Plans = ReadonlyMap<TaskId, StepPlanDto>;
@@ -214,66 +210,18 @@ export async function cutWorktree(
     // Never a fix batch's: its branch is the pull request's and outlives a refused cut.
     made.branch = fix === null;
     made.base = baseSha;
-    // A shared lane writes the main checkout's ignored directories, `node_modules` included, and a
-    // clone would carry that into this copy's gate. So nothing is cloned while a shared batch is
-    // unfinished (CUTTING, OPEN, SHIPPING or FAILED), nor once any shared lane has run in the project,
-    // since its writes outlive its batch. In a pnpm project the install then builds `node_modules`
-    // from the copy's own lockfile, and every seed directory left unmade is named in a notice on the
-    // batch's tasks (task placement spec §7, option b).
-    const sharedLanes = (): boolean =>
-      findUnfinishedBatch(db, project.id) !== undefined || sharedLaneRan(db, project.id);
-    let seed = !sharedLanes();
-    let dirs: string[];
-    try {
-      dirs = seedDirs(await ctx.git.ignoredDirectories(main), project.worktreeSeed);
-    } catch (error) {
-      if (!stopped()) await refuse(worktreeCards.seedFailed(batch, error));
-      return;
-    }
-    // In a pnpm project the copy's install makes its `node_modules` from its own lockfile, cloned
-    // from the daemon's template for it or installed from nothing, so Your folder's is not cloned:
-    // pnpm would remove it anyway, since it names another store
-    // (`decisions/2026-11-17-a-copys-node-modules-is-cloned-from-a-template-made-once-per-lockfile.md`).
-    const installMakes =
-      existsSync(join(path, PNPM_LOCKFILE)) && dirs.some((dir) => basename(dir) === 'node_modules');
-    const cloned = installMakes ? dirs.filter((dir) => basename(dir) !== 'node_modules') : dirs;
-    if (seed) {
-      try {
-        const seeded = await seedWorktree({ from: main, to: path, dirs: cloned, signal });
-        ctx.logger.info(
-          { batchId, path, files: seeded.files, links: seeded.links, skipped: seeded.skipped },
-          'worktree seeded',
-        );
-        // The clone holds no lock the shared cut takes: a shared batch that started meanwhile may
-        // have launched a lane that wrote what the clone read. Asked again, the answer is final:
-        // a lane launches only after its batch has been cut, and the batch stays visible from its
-        // insert until it ends, after which the lane's session does.
-        if (sharedLanes()) {
-          await Promise.all(
-            cloned.map((dir) => rm(join(path, dir), { recursive: true, force: true })),
-          );
-          seed = false;
-        }
-      } catch (error) {
-        if (!stopped()) await refuse(worktreeCards.seedFailed(batch, error));
-        return;
-      }
-    }
-    if (!seed) {
-      ctx.logger.info(
-        { batchId, path, dirs },
-        'worktree not seeded: a shared lane may have written the main checkout; a pnpm install builds node_modules, and nothing else is made',
-      );
-    }
-    if (stopped()) return;
-    const installed = await ctx.dependencies.refresh({
-      batch,
+    const prepared = await seedAndInstall(ctx, {
+      owner: { kind: 'batch', id: batchId },
       project,
+      main,
       path,
       signal,
-      seeded: seed && !installMakes,
-      makeTemplate: true,
     });
+    if ('failed' in prepared) {
+      if (!stopped()) await refuse(worktreeCards.seedFailed(batch, prepared.error));
+      return;
+    }
+    const { seeded: seed, installMakes, dirs, installed } = prepared;
     await recordInstall(ctx, batchId, path, installed);
     switch (installed.kind) {
       case 'aborted':

@@ -5,6 +5,7 @@ const SHORTCUTS: readonly { readonly keys: readonly string[]; readonly action: s
   { keys: ['↑', '↓', 'j', 'k'], action: 'Move between cards' },
   { keys: ['1–5'], action: 'Choose an option' },
   { keys: ['n'], action: 'Write a note' },
+  { keys: ['e'], action: 'Dismiss a flag' },
   { keys: ['↵'], action: 'Send the answer, dismiss a flag, or open the UI Workbench' },
   { keys: ['⌘', '↵'], action: 'Send from the note' },
   { keys: ['?'], action: 'Show these shortcuts' },

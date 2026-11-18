@@ -58,10 +58,10 @@ describe('sessionKey', () => {
       want: null,
     },
     {
-      name: '⌘⇧↩ is Do It',
+      name: '⌘⇧↩ is free',
       press: press('Enter', { meta: true, shift: true }),
       place: on,
-      want: { kind: 'do_it' },
+      want: null,
     },
     {
       name: '⌘⇧↩ off Sessions',

@@ -34,6 +34,7 @@ import type { Shipper } from './ship';
 import type { BatchStarter } from './start';
 import { retireWorktree } from './worktree-cleanup';
 import { removeIfEmptyDirectory } from './worktree-leftover';
+import { chatBranchMerged } from './chat-worktree-merged';
 import { sweepWorktrees } from './worktree-sweep';
 
 /** Kills a recorded process (group) only while its start time still matches (recovery/processes.ts). */
@@ -280,6 +281,7 @@ export async function recoverBatches(deps: {
         inbox: deps.inbox,
         root: deps.worktrees.root,
         logger: deps.logger,
+        merged: chatBranchMerged(deps.worktrees.ctx, new AbortController().signal),
       })),
     );
   }

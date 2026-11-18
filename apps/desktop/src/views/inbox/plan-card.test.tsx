@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
 import { inboxItemDto } from '../../test/fixtures';
+import { findText, getText, serveOpenRows } from '../../test/inbox-page-fixtures';
 
 const projectId = mintId('Project');
 const workstreamId: WorkstreamId = mintId('Workstream');
@@ -35,6 +36,7 @@ function serve(): unknown[] {
     ...baseHandlers(),
     eventStream.addEventListener('connection', () => undefined),
   );
+  serveOpenRows(() => (answers.length === 0 ? [card] : []));
   return answers;
 }
 
@@ -42,9 +44,9 @@ describe('PlanCard', () => {
   it('shows the plan and its title', async () => {
     serve();
     renderApp('/inbox');
-    expect(await screen.findByText(/Plan ready for you to approve/)).toBeTruthy();
-    expect(screen.getByText(/Put the greeting in src\/api\/a\.txt/)).toBeTruthy();
-    expect(screen.getByText(/Cover the empty state/)).toBeTruthy();
+    expect(await findText(/Plan ready for you to approve/)).toBeTruthy();
+    expect(getText(/Put the greeting in src\/api\/a\.txt/)).toBeTruthy();
+    expect(getText(/Cover the empty state/)).toBeTruthy();
   });
 
   it('Approve sends approve', async () => {

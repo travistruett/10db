@@ -1,7 +1,7 @@
 import { PassSignOffDto, TaskId } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   baseHandlers,
   daemonUrl,
@@ -30,7 +30,7 @@ describe('PassReadyRow', () => {
     const people = { ...asks, state: ready.state, turn: ready.turn };
     const view = passViewDto({ pages: [ready, people] });
     const items = [readyItem(view, ready), readyItem(view, people)] as const;
-    renderWithDaemon(<PassReadyRow items={items} selected onSelect={vi.fn()} />);
+    renderWithDaemon(<PassReadyRow items={items} />);
     const row = (await screen.findByText(items[1].title)).closest('li');
     if (row === null) throw new Error('The page is not listed');
     fireEvent.click(within(row).getByRole('button', { name: 'Sign Off' }));
@@ -46,9 +46,7 @@ describe('PassReadyRow', () => {
     const people = { ...asks, state: ready.state, turn: ready.turn };
     const view = passViewDto({ pages: [ready, people] });
     const items = [readyItem(view, ready), readyItem(view, people)] as const;
-    const { router } = await renderWithDaemonAndRouter(
-      <PassReadyRow items={items} selected onSelect={vi.fn()} />,
-    );
+    const { router } = await renderWithDaemonAndRouter(<PassReadyRow items={items} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Open UI Workbench' }));
     await waitFor(() => {
       expect(router.state.location.pathname).toBe('/workbench');

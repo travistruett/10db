@@ -187,13 +187,15 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   // The fake's first probe recorded the default account's identity and said so in a card. That card
   // offers Record again, so it is a question the daemon acts on; it sits above the run's item and is
   // the open row, so the item's row is opened by selecting it.
-  await expect(page.getByText('Claude plan runs as builder@example.com')).toBeVisible();
-  const away = page.getByRole('button', {
+  await expect(page.getByText('Claude plan runs as builder@example.com').first()).toBeVisible();
+  const away = page.getByRole('option', {
     name: new RegExp(`Skipped while you were away: ${TASK}`),
   });
   await away.click();
-  await expect(page.getByText('Questions it would have asked:')).toBeVisible();
-  await expect(page.getByText(QUESTION)).toBeVisible();
+  // The row's own second line quotes the card's first words, so the card is read in the content beside it.
+  const content = page.getByRole('main');
+  await expect(content.getByText('Questions it would have asked:')).toBeVisible();
+  await expect(content.getByText(QUESTION)).toBeVisible();
   await expectAccessible(page, 'inbox, skipped while away, dark');
   await page.getByRole('radio', { name: /Dismiss/ }).check();
   await page.getByRole('button', { name: 'Send answer' }).click();
@@ -206,7 +208,8 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   ).toBeVisible();
   // Finished work with no goal is not Factory's: it shows the guide and nothing under Not in a goal.
   await open(page, 'Factory');
-  await expect(page.getByText(/^Goals are outcomes 10db pursues/)).toBeVisible();
+  // inbox.spec.ts runs first and leaves its own project, so each project's goals group says it.
+  await expect(page.getByText(/^Goals are outcomes 10db pursues/).first()).toBeVisible();
   await expect(page.getByRole('button', { name: /^Not in a goal/ })).toHaveCount(0);
   await expectAccessible(page, 'factory, no goals, dark');
 

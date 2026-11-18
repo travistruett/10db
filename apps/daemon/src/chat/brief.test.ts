@@ -43,6 +43,16 @@ const replied = (text: string) =>
   row(ConversationItemKind.AgentMessage, ConversationItemAuthor.Agent, { text });
 
 describe('the brief made from the chat', () => {
+  it("leaves out 10db's carry-on line, and keeps the agent's reply to it", () => {
+    const carryOn = row(ConversationItemKind.Message, ConversationItemAuthor.Builder, {
+      text: 'The builder chose to work here. Carry on.',
+      purpose: 'carry_on',
+    });
+    const items = [said('Fix the login'), carryOn, replied('Fixed')];
+    expect(chatLines(items)).toEqual(['Builder: Fix the login', 'You: Fixed']);
+    expect(lastBuilderMessage(items)).toBe('Fix the login');
+  });
+
   it('leaves out every brief request and the agent items of its turn, a second request included', () => {
     const items = [
       said('Fix the login'),

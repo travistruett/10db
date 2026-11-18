@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import {
   AccountCreatedDto,
   ChatDto,
+  ChatId,
   ConversationItemDto,
   FolderDto,
   PassOpenResponse,
@@ -61,6 +62,7 @@ import {
   listPassCheckPids,
   openDatabase,
   openPassTurn,
+  setChatWork,
   setPassCheckPid,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -1015,6 +1017,8 @@ describe('POST /projects/:projectId/passes while chats hold the folder', () => {
       model: null,
       tabPosition: 0,
     });
+    // Only a session working in the checkout takes the folder for its turn.
+    daemon.state.write((ctx) => setChatWork(ctx, ChatId.parse(chat.id), null, { place: 'here' }));
     await api().post(`/conversations/${chat.conversationId}/messages`, ConversationItemDto, {
       text: 'work on it',
     });

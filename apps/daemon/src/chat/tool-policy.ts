@@ -37,8 +37,6 @@ export const CHAT_TOOL_POLICY: Readonly<Record<ChatToolName, ChatToolPolicy>> = 
   [BuilderToolName.WithdrawKnowledge]: A,
   [BuilderToolName.ListProposals]: R,
   [ChatToolName.SetTitle]: R,
-  // The brief is kept in memory for Do It's sheet and changes nothing on disk.
-  [ChatToolName.WriteBrief]: R,
   // Branching, switching, pulling and committing change what the builder has in Your folder only while the turn
   // holds it, and run at once like the edits they follow.
   [ChatToolName.MakeBranch]: R,

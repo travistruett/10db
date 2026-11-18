@@ -12,5 +12,4 @@
 - Opens that wait for chats' turns (B10): `pending-open.ts` keeps one per project in memory, with its
   `AbortController`, `FolderDto.pendingOpen` and the chat that asked; the update drain calls `cancelAll`, so
   `jobs.pending()` never waits on it. `open-when-busy.ts` is `whenBusy`: `stop_turns` holds and stops each chat
-  holding the folder, `wait` answers `{ pending: true }`. Start Pass and Do It Here are refused up front while one
-  exists. `stop_turns` waits for the stopped turns at most `STOPPED_TURNS_DEADLINE_MS`, then the open refuses and releases the chats' starts; `wait` has no deadline and ends by Cancel, an update or a restart.
+  holding the folder, `wait` answers `{ pending: true }`. Start Pass is refused up front while one exists. `stop_turns` waits for the stopped turns at most `STOPPED_TURNS_DEADLINE_MS`, then the open refuses and releases the chats' starts; `wait` has no deadline and ends by Cancel, an update or a restart.

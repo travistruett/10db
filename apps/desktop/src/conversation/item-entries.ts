@@ -59,6 +59,9 @@ function answeredWords(card: InboxItemDto): string | null {
 }
 
 function messageEntry(item: Item<'message'>, opts: ItemEntryOptions): ConversationEntry {
+  // A carry-on is 10db's line to the session, not something the builder said.
+  if (item.purpose === 'carry_on')
+    return { kind: 'notice', id: item.id, text: item.text, tone: 'info' };
   const unsent = item.deliveredAt === null;
   const held = opts.inTerminal === true && unsent;
   const waiting = opts.working && opts.receipts && unsent;

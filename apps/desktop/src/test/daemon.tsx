@@ -218,6 +218,8 @@ export function baseHandlers(
       const params = new URL(request.url).searchParams;
       return HttpResponse.json({
         items: [],
+        rows: [],
+        next: null,
         total: 0,
         page: 1,
         pageSize: Number(params.get('pageSize') ?? '25'),

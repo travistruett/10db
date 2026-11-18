@@ -9,7 +9,6 @@ export type SessionKey =
   | { readonly kind: 'prev' }
   | { readonly kind: 'next' }
   | { readonly kind: 'next_needing' }
-  | { readonly kind: 'do_it' }
   | { readonly kind: 'changes' }
   | { readonly kind: 'stop' };
 
@@ -38,7 +37,6 @@ export function sessionKey(press: Press, place: Place): SessionKey | null {
     if (press.shift) {
       if (key === '[' || key === '{') return onSessions(place, { kind: 'prev' });
       if (key === ']' || key === '}') return onSessions(place, { kind: 'next' });
-      if (key === 'Enter') return onSessions(place, { kind: 'do_it' });
       if (key === 'd') return onSessions(place, { kind: 'changes' });
       return null;
     }
@@ -61,7 +59,7 @@ function onSessions(place: Place, key: SessionKey): SessionKey | null {
   return place.onSessions ? key : null;
 }
 
-/** The tab to go to for a key that moves between them, over `count` tabs with `selected` chosen. */
+/** The row to go to for a key that moves between them, over `count` rows with `selected` chosen. */
 export function targetIndex(key: SessionKey, selected: number, count: number): number | null {
   if (count === 0) return null;
   switch (key.kind) {
@@ -77,7 +75,6 @@ export function targetIndex(key: SessionKey, selected: number, count: number): n
     case 'close':
     case 'reopen':
     case 'next_needing':
-    case 'do_it':
     case 'changes':
     case 'stop':
       return null;

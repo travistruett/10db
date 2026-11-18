@@ -1,16 +1,22 @@
 import { Button, Group, Text } from '@mantine/core';
 
-// Sessions UI spec §7.3: a chat's message that chose to wait for Your folder. It runs when the folder frees;
-// Send Now Reading Only runs it at once, changing nothing, and Stop drops it.
+// A chat's message that waits for a holder of the checkout. It runs when the holder is done; Stop drops it.
 
 export interface FolderWaitProps {
-  /** The holders still in the way, as a sentence part: "the task ‘Bump vite’"; null when none is. */
-  readonly holders: string | null;
-  readonly onSendNow: () => void;
+  /** Who is changing files, each as a sentence part ("the task ‘Bump vite’"); empty when nothing is in the way. */
+  readonly holders: readonly string[];
+  /** The branch the checkout is on. */
+  readonly branch: string | null;
   readonly onStop: () => void;
 }
 
-export function FolderWait({ holders, onSendNow, onStop }: FolderWaitProps) {
+function andJoin(parts: readonly string[]): string {
+  if (parts.length < 3) return parts.join(' and ');
+  return `${parts.slice(0, -1).join(', ')} and ${parts.at(-1) ?? ''}`;
+}
+
+export function FolderWait({ holders, branch, onStop }: FolderWaitProps) {
+  const who = andJoin(holders);
   return (
     <Group
       role="status"
@@ -22,16 +28,13 @@ export function FolderWait({ holders, onSendNow, onStop }: FolderWaitProps) {
       style={{ flex: 'none' }}
     >
       <Text size="sm" c="dimmed" lineClamp={2}>
-        {holders === null ? 'Waits for Your folder' : `Waits for Your folder: in use by ${holders}`}
+        {holders.length === 0
+          ? 'Your message runs once the checkout is free.'
+          : `${who.charAt(0).toUpperCase()}${who.slice(1)} ${holders.length === 1 ? 'is' : 'are'} changing files${branch === null ? '' : ` on ${branch}`}. Your message runs once ${holders.length === 1 ? 'it’s' : 'they’re'} done.`}
       </Text>
-      <Group gap="xs" wrap="nowrap" style={{ flex: 'none' }}>
-        <Button size="xs" variant="default" onClick={onSendNow}>
-          Send Now Reading Only
-        </Button>
-        <Button size="xs" variant="subtle" onClick={onStop}>
-          Stop
-        </Button>
-      </Group>
+      <Button size="xs" variant="subtle" onClick={onStop} style={{ flex: 'none' }}>
+        Stop
+      </Button>
     </Group>
   );
 }

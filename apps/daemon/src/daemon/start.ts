@@ -7,7 +7,8 @@ import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-se
 import {
   AccountKind,
   ConversationOwnerKind,
-  DoItPlace,
+  type ChatId,
+  type ConversationId,
   EventType,
   ConflictError,
   InvalidError,
@@ -32,6 +33,8 @@ import {
 } from '@10db/contracts';
 import {
   addStockHazardCommands,
+  chatOfConversation,
+  getChat,
   countBatchesInFlight,
   countWaitingOnCard,
   isLaneWaitingOnCard,
@@ -152,9 +155,6 @@ import {
   moveRetiredLandings,
   checkPassOpen,
   openPass,
-  passBelow,
-  passOpenProblem,
-  returnBranchProblem,
   readPnpmVersion,
   recoverBatches,
   createHandMadeFolderLook,
@@ -239,12 +239,13 @@ import {
   chatHooks,
   createChatLiveSessions,
   createChatService,
-  doItHere,
-  doItInCopy,
+  applyChatWorkAnswer,
+  chatRoot,
+  createChatWorkService,
+  createChatWorkStateReader,
+  createTitleRowGit,
+  type ChatWorkService,
   finishSeals,
-  previewDoIt,
-  type DoItDeps,
-  createBriefs,
   createChatTools,
   createConversationFiles,
   sessionsSettings,
@@ -266,8 +267,6 @@ import {
   createPassCloses,
   discardKeptWork,
   createPendingOpens,
-  openFailure,
-  postFirstMessages,
   type OpenWhenBusyDeps,
   joinPass,
   putBackKeptWork,
@@ -308,6 +307,9 @@ import { createPlanRecordServices } from './plan-record-services';
 import { createShapeServices } from './shape-services';
 import { createConversationServices } from './conversation-services';
 import { createChatApiServices } from './chat-services';
+import { createChatChanges } from './chat-changes';
+import { createChatMove } from './chat-move';
+import { createChatWorktrees } from './chat-worktrees';
 import { createShapePreparer, createTakeoverPreparer } from './shape-session-tools';
 import {
   applyCheckAnswer,
@@ -872,6 +874,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // The inbox, pauses and runner call into each other, so each reaches the others through these
   // references; they are set before anything can fire a callback.
   let runner: Runner | null = null;
+  let chatWorkRef: ChatWorkService | null = null;
   let scheduler: Scheduler | null = null;
   // A waiting update drains the factory: no lane, session, task gate or ship starts until it installs.
   const updateDrain = createDrain();
@@ -1000,7 +1003,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         ? () => {
             startFollowUps();
           }
-        : undefined,
+        : chatWorkRef === null
+          ? undefined
+          : applyChatWorkAnswer(chatWorkRef, logger, ctx, item, answer),
     onCheckAnswer: (ctx, item, answer) => {
       const signOffPage = startPageSignOff;
       if (!runner || !signOffPage) throw new RunnerNotStartedError();
@@ -1704,13 +1709,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     models: conversationModels,
     launch: conversationLaunch,
   });
-  const chatBriefs = createBriefs(clock);
   const chat = createChatService({
     state,
     engine: exploreEngine,
     folderHold,
+    worktrees: createChatWorktrees({ state, git }),
+    reopenBranch: (chatId) => chatWork.reopen(chatId),
     pendingOpens,
-    briefs: chatBriefs,
     clock,
     dataDir: opts.dataDir,
     log: logger.child({ component: 'chat-service' }),
@@ -1725,7 +1730,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // What the chat's session ran with, for the builder's terminal: a launch that names no secret.
   const takeoverSource = (
-    conv: { readonly model: string | null; readonly effort: Effort | null },
+    conv: {
+      readonly id: ConversationId;
+      readonly model: string | null;
+      readonly effort: Effort | null;
+    },
     project: ProjectDto,
   ): TakeoverSource => {
     const row = getAccountRow(db, project.accountId);
@@ -1734,8 +1743,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     const kind = agentKind(row.kind);
     try {
       const launch = launcher.takeover(row, run.model, listAccountModels(db, row.id));
+      const chatRow = chatOfConversation(db, conv.id);
       return {
-        cwd: project.repoPath,
+        // Where the session works: its worktree on a branch, the checkout otherwise.
+        cwd: chatRow === null ? project.repoPath : chatRoot(chatRow, project).root,
         kind,
         model: launch.model,
         effort: run.effort,
@@ -1783,6 +1794,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     engine: exploreEngine,
     folderHold,
     chats: () => chat,
+    work: () => chatWork,
     dataDir: opts.dataDir,
     now: () => clock.now(),
     log: logger.child({ component: 'takeover' }),
@@ -1824,12 +1836,39 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   takeoverService = takeover;
   const chatLive = createChatLiveSessions();
+  const firstStartAfterMove = new Set<ChatId>();
+  const chatMovesAbort = new AbortController();
+  const chatWork = createChatWorkService({
+    state,
+    engine: exploreEngine,
+    folderHold,
+    firstStartAfterMove,
+    move: createChatMove({ state, delivery, signal: chatMovesAbort.signal }),
+    facts: createChatWorkStateReader({
+      state,
+      git,
+      gh: delivery.gh,
+      net: () => ({
+        env: delivery.networkEnv(),
+        timeoutMs: delivery.limits.networkTimeoutMs,
+      }),
+      folderHold,
+      clock,
+    }),
+    carryOn: (chatId, text) => {
+      chat.carryOn(chatId, text);
+    },
+    log: logger.child({ component: 'chat-work' }),
+    now: () => clock.now(),
+  });
+  chatWorkRef = chatWork;
   exploreEngine.register(
     ConversationOwnerKind.Chat,
     chatHooks({
       live: chatLive,
       state,
       folderHold,
+      firstStartAfterMove,
       log: logger.child({ component: 'chat' }),
       dataDir: opts.dataDir,
       now: () => clock.now(),
@@ -1845,6 +1884,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       webSearchOf: (kind, model) => adapter.capabilities({ kind }, model).webSearch,
       clock,
       judge,
+      firstChange: (chatId) => {
+        chatWork.firstChange(chatId);
+      },
     }),
   );
   const conversationFiles = createConversationFiles({
@@ -2341,19 +2383,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       inbox.flag({ projectId, workstreamId: null, title, body });
     },
   };
-  const doItDeps: DoItDeps = {
-    state,
-    engine: exploreEngine,
-    folderHold,
-    pendingOpens,
-    git: delivery.git,
-    chat,
-    openProblem: passOpenProblem,
-    returnBranchProblem,
-    stacksOn: (readDb, project) => passBelow(readDb, project.id)?.name ?? null,
-  };
   const services = createServices({
     state,
+    slackConnection,
     github: {
       githubStatus: github.githubStatus,
       startGithubSignin: github.startGithubSignin,
@@ -2440,61 +2472,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     chat: createChatApiServices({
       state,
       chat,
+      work: chatWork,
       takeover,
       folderHold,
       pendingOpens,
-      doItPreview: (chatId) => previewDoIt(doItDeps, chatId),
-      doIt: (chatId, input) =>
-        input.place === DoItPlace.Here
-          ? doItHere(
-              {
-                ...doItDeps,
-                openWhenBusy: openWhenBusyDeps,
-                openWholeProject: async ({ signal, ...whole }) => {
-                  try {
-                    await openPass(
-                      delivery,
-                      {
-                        projectId: whole.projectId,
-                        name: whole.title,
-                        taskIds: [],
-                        wholeProject: {
-                          title: whole.title,
-                          brief: whole.brief,
-                          chatId: whole.chatId,
-                          ...(whole.acceptanceCriteria === undefined
-                            ? {}
-                            : { acceptanceCriteria: whole.acceptanceCriteria }),
-                        },
-                        wait: { signal },
-                      },
-                      passOpenDeps,
-                    ).then((opened) => {
-                      postFirstMessages(state, opened.pass.id, undefined);
-                    });
-                  } catch (error) {
-                    throw openFailure(error);
-                  }
-                  createdScheduler.requestTick();
-                },
-              },
-              chatId,
-              input,
-            )
-          : doItInCopy(
-              {
-                ...doItDeps,
-                tasks: {
-                  create: (projectId, task) =>
-                    Promise.resolve(services.createTask(projectId, task)),
-                  settleSizing: (taskIds) => services.settleSizing(taskIds),
-                  start: (taskId) => services.startTask(taskId),
-                  remove: (taskId) => services.removeTask(taskId),
-                },
-              },
-              chatId,
-              input,
-            ),
+      changes: createChatChanges({ state, git }),
+      titleRow: createTitleRowGit({
+        state,
+        folderHold,
+        work: chatWork,
+        git,
+        gh: delivery.gh,
+        filesDir: (conversationId) => chatFolder(opts.dataDir, conversationId),
+        secretFilesOf: secretFilesIn,
+        net: () => ({
+          env: delivery.networkEnv(),
+          timeoutMs: delivery.limits.networkTimeoutMs,
+        }),
+      }),
       git: (repo, args) => runGit(repo, args, { bin: gitBin }),
       now: () => clock.now(),
       log: logger.child({ component: 'chat' }),
@@ -2784,7 +2779,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       dependencyChanges,
       shapeTools: shape.toolsFor,
       chatTools: createChatTools({
-        briefs: chatBriefs,
         state,
         bus,
         inbox,
@@ -2799,16 +2793,28 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           gh: delivery.gh,
           filesDir: (conversationId) => chatFolder(opts.dataDir, conversationId),
           repoOf: (projectId) => getProject(state.db, projectId).repoPath,
+          placeOf: (chatId) => {
+            const row = getChat(state.db, chatId);
+            return { place: row.workPlace, worktree: row.worktreePath };
+          },
           secretFilesOf: secretFilesIn,
           net: () => ({
             env: delivery.networkEnv(),
             timeoutMs: delivery.limits.networkTimeoutMs,
           }),
+          takeHere: (chatId) => {
+            chatWork.takeHereForGitTool(chatId);
+          },
+          forgetPullRequest: (chatId, branch) => {
+            chatWork.forgetPullRequest(chatId, branch);
+          },
         },
       }),
     }),
   });
   // What a restart found of each explore conversation is settled before the API serves it.
+  // A move the daemon lost keeps its session's starts held until `finishMoves` has made its worktree.
+  chatWork.holdMoving();
   await exploreEngine.recover();
   // A takeover the daemon lost while it was opening left files for a chat that is not in the terminal.
   takeover.recover();
@@ -2836,6 +2842,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const port = (server.address() as AddressInfo).port;
   listenPort = port;
   listening.resolve(port);
+  // A move the restart interrupted finishes now that the server answers; its starts were held meanwhile.
+  void chatWork.finishMoves();
   const url = `http://127.0.0.1:${String(port)}`;
   mcpUrl = `${url}/mcp`;
   writeRuntimeFiles(
@@ -2902,6 +2910,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         },
       );
       createdScheduler.stop();
+      // A move under way leaves its worktree and its row for the next start to finish.
+      chatMovesAbort.abort();
       // A sign-in's agent is a child of ours: it is told to end now, in step with the lanes, and awaited
       // before the database closes, so a slow stop does not eat the window the lanes need.
       github.stop();

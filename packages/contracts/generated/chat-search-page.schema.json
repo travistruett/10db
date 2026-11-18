@@ -1,0 +1,494 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^cht_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "projectId": {
+            "type": "string",
+            "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "conversationId": {
+            "type": "string",
+            "pattern": "^cnv_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "conversation": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^cnv_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "owner": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "chat",
+                      "shape",
+                      "task"
+                    ]
+                  },
+                  "id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "id"
+                ]
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "idle_cold",
+                  "idle_warm",
+                  "starting",
+                  "running",
+                  "waiting_card",
+                  "stopping",
+                  "taken_over",
+                  "paused_account",
+                  "ended_error",
+                  "sealed"
+                ]
+              },
+              "capabilities": {
+                "type": "object",
+                "properties": {
+                  "harness": {
+                    "type": "string",
+                    "enum": [
+                      "claude",
+                      "codex"
+                    ]
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "steer": {
+                    "type": "string",
+                    "enum": [
+                      "inject",
+                      "queue"
+                    ]
+                  },
+                  "receipts": {
+                    "type": "boolean"
+                  },
+                  "readBack": {
+                    "type": "boolean"
+                  },
+                  "images": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "png",
+                        "jpeg",
+                        "webp"
+                      ]
+                    }
+                  },
+                  "slashCommands": {
+                    "type": "boolean"
+                  },
+                  "plan": {
+                    "type": "boolean"
+                  },
+                  "reasoning": {
+                    "type": "boolean"
+                  },
+                  "subagents": {
+                    "type": "boolean"
+                  },
+                  "backgroundTasks": {
+                    "type": "boolean"
+                  },
+                  "webSearch": {
+                    "type": "boolean"
+                  },
+                  "modelSwitch": {
+                    "type": "string",
+                    "enum": [
+                      "next_turn",
+                      "none"
+                    ]
+                  },
+                  "takeover": {
+                    "type": "boolean"
+                  },
+                  "costUsd": {
+                    "type": "boolean"
+                  },
+                  "judge": {
+                    "type": "string",
+                    "enum": [
+                      "native",
+                      "tendb",
+                      "rules"
+                    ]
+                  }
+                },
+                "required": [
+                  "harness",
+                  "label",
+                  "steer",
+                  "receipts",
+                  "readBack",
+                  "images",
+                  "slashCommands",
+                  "plan",
+                  "reasoning",
+                  "subagents",
+                  "backgroundTasks",
+                  "webSearch",
+                  "modelSwitch",
+                  "takeover",
+                  "costUsd",
+                  "judge"
+                ],
+                "additionalProperties": false
+              },
+              "model": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "effort": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "contextPct": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "queued": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "costUsd": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "sendNow": {
+                "type": "boolean"
+              },
+              "pausedUntil": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "commands": {
+                "anyOf": [
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "argumentHint": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "description",
+                        "argumentHint"
+                      ]
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "backgroundTasks": {
+                "default": [],
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "description": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "shell",
+                        "monitor",
+                        "agent",
+                        "other"
+                      ]
+                    },
+                    "agent": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "description",
+                    "kind",
+                    "agent"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "id",
+              "owner",
+              "state",
+              "capabilities",
+              "model",
+              "effort",
+              "contextPct",
+              "queued",
+              "costUsd",
+              "sendNow",
+              "pausedUntil",
+              "commands"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "titleSource": {
+            "type": "string",
+            "enum": [
+              "agent",
+              "builder"
+            ]
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "explore",
+              "hands_on"
+            ]
+          },
+          "taskId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "passId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^pas_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tabPosition": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "lastActivityAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "archivedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastReplyAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tasksFiled": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "work": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "place": {
+                    "type": "string",
+                    "enum": [
+                      "choosing",
+                      "here",
+                      "moving",
+                      "branch"
+                    ]
+                  },
+                  "branch": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "base": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "worktree": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "askedAt": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "place",
+                  "branch",
+                  "base",
+                  "worktree",
+                  "askedAt"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "conversationId",
+          "conversation",
+          "title",
+          "titleSource",
+          "mode",
+          "taskId",
+          "passId",
+          "tabPosition",
+          "createdAt",
+          "lastActivityAt",
+          "archivedAt",
+          "lastReplyAt",
+          "tasksFiled",
+          "work"
+        ]
+      }
+    },
+    "next": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "rows",
+    "next"
+  ]
+}

@@ -6,10 +6,10 @@ import { chatSystemPrompt } from './prompt';
 
 describe("a chat's prompt", () => {
   it.each([true, false])(
-    'says it edits while its turn holds the folder, and not that it changes nothing (web %s)',
+    'says it edits while its turn has your checkout, and not that it changes nothing (web %s)',
     (web) => {
       const text = chatSystemPrompt(web);
-      expect(text).toContain('only while your turn holds the folder');
+      expect(text).toContain('only while your turn has your checkout');
       expect(text).not.toMatch(/changes nothing in it|don't edit files yet/);
     },
   );
@@ -29,6 +29,12 @@ describe("a chat's prompt", () => {
     expect(text).toContain('only when the builder asks');
     expect(text).toContain("Git hooks don't run");
     expect(text).toContain('10db/');
+  });
+
+  it('tells the session to make its first change with an edit, not a shell write', () => {
+    expect(chatSystemPrompt(true)).toContain(
+      'make your first change with an edit tool, not a shell write',
+    );
   });
 
   it('turns file checkpointing on for a chat that can edit, and off for one with no sandbox', () => {

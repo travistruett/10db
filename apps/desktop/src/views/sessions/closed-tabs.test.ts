@@ -47,6 +47,17 @@ describe('closed tabs', () => {
     const stack = pushClosed(pushClosed(pushClosed([], a), entry(1)), { ...a, position: 4 });
     expect(stack.map((e) => e.position)).toEqual([4, 1]);
   });
+  it('drops a stored task tab and keeps the sessions beside it', () => {
+    const kept = entry(2);
+    const stale = {
+      taskId: 'tsk_x',
+      projectId: kept.projectId,
+      title: 'T',
+      place: 'copy',
+      position: 0,
+    };
+    expect(parseClosed(JSON.stringify([stale, kept]))).toEqual([kept]);
+  });
   it.each(['{', 'null', '[{"chatId":"nope","position":1}]', '[{"position":-1}]'])(
     'reads a corrupt store (%s) as empty',
     (raw) => {

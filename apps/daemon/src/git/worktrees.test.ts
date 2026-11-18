@@ -51,14 +51,21 @@ const mainState = () =>
 const at = (name: string) => join(root.path, name);
 /** `path` with its parent read through links; the leaf may be gone. */
 const real = (path: string) => join(realpathSync(dirname(path)), basename(path));
-const add = (name: string, branch = `10db/${name}`, startPoint: string | null = 'main') =>
+const add = (
+  name: string,
+  branch = `10db/${name}`,
+  startPoint: string | null = 'main',
+  lockReason = '10db bat_0a1',
+) =>
   git.addWorktree({
     repo: main(),
     path: at(name),
     branch,
     startPoint,
-    lockReason: '10db bat_0a1',
+    lockReason,
   });
+/** A chat's worktree, locked with its chat's id. */
+const addChat = (name: string) => add(name, `chat/${name}`, 'main', '10db cht_0a1');
 const listed = async () => (await git.listWorktrees(main())).map((e) => e.path);
 
 beforeEach(() => {
@@ -227,6 +234,13 @@ describe('removeWorktree', () => {
     expect(pins.get(real(at('a')))).toBeUndefined();
   });
 
+  it('removes a chat’s worktree, its directory and its pin', async () => {
+    await addChat('c');
+    await expect(git.removeWorktree(main(), at('c'))).resolves.toBe('removed');
+    expect(await listed()).toEqual([real(main())]);
+    expect(pins.get(real(at('c')))).toBeUndefined();
+  });
+
   it('removes a locked entry whose directory is gone', async () => {
     await add('a');
     rmSync(at('a'), { recursive: true, force: true });
@@ -308,6 +322,11 @@ describe('removeWorktree', () => {
     expect(await listed()).toContain(real(at('l')));
   });
 
+  it('refuses a lock that names neither a batch nor a chat', async () => {
+    raw(main(), 'worktree', 'add', '-q', '--lock', '--reason', '10db cht_', '-b', 'm', at('m'));
+    await expect(git.removeWorktree(main(), at('m'))).rejects.toBeInstanceOf(WorktreeNotOursError);
+  });
+
   it('refuses when no worktree root is configured', async () => {
     await add('a');
     await expect(createGit({ pins }).removeWorktree(main(), at('a'))).rejects.toBeInstanceOf(
@@ -333,6 +352,12 @@ describe('worktreeChanges', () => {
     await add('a');
     writeFileSync(join(at('a'), 'notes.txt'), 'mine\n');
     await expect(git.worktreeChanges(main(), at('a'))).resolves.toEqual(['notes.txt']);
+  });
+
+  it("lists a chat's worktree's uncommitted changes", async () => {
+    await addChat('c');
+    writeFileSync(join(at('c'), 'notes.txt'), 'mine\n');
+    await expect(git.worktreeChanges(main(), at('c'))).resolves.toEqual(['notes.txt']);
   });
 
   it.each<{ name: string; make: () => Promise<string> }>([
@@ -414,6 +439,13 @@ describe('worktreeIgnoredFiles', () => {
       writeFileSync(join(at('a'), file), 'local\n');
     }
     await expect(git.worktreeIgnoredFiles(main(), at('a'))).resolves.toEqual(expected);
+  });
+
+  it("lists a chat's worktree's ignored files", async () => {
+    ignore('.env');
+    await addChat('c');
+    writeFileSync(join(at('c'), '.env'), 'local\n');
+    await expect(git.worktreeIgnoredFiles(main(), at('c'))).resolves.toEqual(['.env']);
   });
 
   it("refuses a worktree 10db didn't lock", async () => {

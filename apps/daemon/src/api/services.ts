@@ -5,14 +5,17 @@ import type {
   CapacitySettingsDto,
   ChatCreateInput,
   ChatDto,
+  ChatWork,
+  ArchivePreviewDto,
+  ArchiveRequest,
+  ChatCommitRequest,
+  ChatSearchPage,
+  ChatSearchQuery,
+  ChatWorkChoice,
+  ChatWorkStateDto,
   ChatId,
   ChatModelsDto,
-  BriefRequest,
   ChatPatchInput,
-  DoItBriefDto,
-  DoItPreviewDto,
-  DoItRequest,
-  DoItResult,
   ProjectFileMatchDto,
   SessionStartDto,
   SessionsSettingsDto,
@@ -100,6 +103,7 @@ import type {
   ComposePreviewDto,
   InboxItemDto,
   InboxItemId,
+  InboxCardContextDto,
   InboxPageDto,
   InboxPageQuery,
   InboxState,
@@ -638,6 +642,8 @@ export interface ApiServices extends PlanRecordServices {
   listInbox(filter: { readonly states: readonly InboxState[] | null }): InboxItemDto[];
   /** One page of open, waiting or resolved cards, filtered and sorted; `total` counts every match. */
   pageInbox(query: InboxPageQuery): InboxPageDto;
+  /** The card's conversation's last messages; a `NotFoundError` for an unknown card. */
+  inboxCardContext(id: InboxItemId): InboxCardContextDto;
   answerInbox(id: InboxItemId, answer: InboxAnswer): InboxItemDto;
   eventsAfter(afterSeq: number, limit: number): DaemonEvent[];
   subscribe(listener: (event: DaemonEvent) => void): () => void;
@@ -676,23 +682,43 @@ export interface ApiServices extends PlanRecordServices {
   openChats(): ChatDto[];
   /** A project's chats that have had a message and are not archived, newest first. */
   recentChats(projectId: ProjectId, limit: number): ChatDto[];
+  /** A title search across every session, open, closed or archived, newest activity first. */
+  searchChats(query: ChatSearchQuery): ChatSearchPage;
   /** A new chat on the project's account; ConflictError, in words, on an account that runs none yet. */
   createChat(input: ChatCreateInput): ChatDto;
   /** Renames, moves or closes a tab, or picks a model between turns. */
   patchChat(id: ChatId, input: ChatPatchInput): Promise<ChatDto>;
   /** Ends the chat's session in whatever state it is in, then archives it and removes its folder. */
-  archiveChat(id: ChatId): Promise<ChatDto>;
+  /** Archives; a list of files at risk longer than the request's answers `{ archived: false }` with the fresh preview. */
+  archiveChat(
+    id: ChatId,
+    request: ArchiveRequest,
+  ): Promise<
+    | { readonly archived: true; readonly chat: ChatDto }
+    | { readonly archived: false; readonly preview: ArchivePreviewDto }
+  >;
   unarchiveChat(id: ChatId): ChatDto;
+  /** The builder's choice of where a session's work happens; `settled` is false when another choice had won. */
+  chooseChatWork(
+    id: ChatId,
+    choice: ChatWorkChoice,
+  ): Promise<{ readonly settled: boolean; readonly work: ChatWork }>;
+  /** The title row's Commit: the files given, in the session's own folder; answers the state after it. */
+  chatCommit(
+    id: ChatId,
+    request: ChatCommitRequest,
+    signal: AbortSignal,
+  ): Promise<ChatWorkStateDto>;
+  /** The title row's Open Pull Request: pushes the session's branch and opens it; answers the state after. */
+  chatPullRequest(id: ChatId, signal: AbortSignal): Promise<ChatWorkStateDto>;
+  /** The title row's Merge: the session's pull request, or its branch into the base on a local project. */
+  chatMerge(id: ChatId, signal: AbortSignal): Promise<ChatWorkStateDto>;
+  /** What the session changed, for the drawer's Changes. */
+  chatChanges(id: ChatId): Promise<WorkstreamChangesDto>;
+  /** The git and GitHub facts the title row and the bar are drawn from; `signal` ends the GitHub read. */
+  chatWorkState(id: ChatId, signal: AbortSignal): Promise<ChatWorkStateDto>;
   /** Stops a chat's wait for Your folder: what it queued runs reading only. */
   stopChatWaiting(id: ChatId): ChatDto;
-  /** Asks the chat's agent for a task's brief (between turns only) and answers the brief the sheet shows now. */
-  askChatBrief(id: ChatId, input: BriefRequest): DoItBriefDto;
-  /** Cancels the request for a brief, stopping its turn when it is still the brief's. */
-  cancelChatBrief(id: ChatId): Promise<DoItBriefDto>;
-  /** What the Do It sheet shows: the brief, the uncommitted files, and each place with its refusal. */
-  doItPreview(id: ChatId): Promise<DoItPreviewDto>;
-  /** Hands the chat's work to a task in a separate copy, or to a pass of one in Your folder. */
-  doIt(id: ChatId, input: DoItRequest): Promise<DoItResult>;
   /** Who holds the project's checkout now, and the branch it is on. */
   projectFolder(projectId: ProjectId): Promise<FolderDto>;
   chatModels(projectId: ProjectId): ChatModelsDto;

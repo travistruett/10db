@@ -9,6 +9,7 @@ import {
 import {
   getBatch,
   getProject,
+  chatWorktreePaths,
   listLiveWorktrees,
   listProjects,
   listWorkstreams,
@@ -61,11 +62,12 @@ export function batchCheckout(db: DbReader, batch: BatchDto): string {
   return batch.worktreePath ?? getProject(db, batch.projectId).repoPath;
 }
 
-/** Every registered checkout and every live worktree: what every sandbox denies writes to. */
+/** Every registered checkout and every live batch or chat worktree: what every sandbox denies writes to. */
 export function allCheckouts(db: DbReader): string[] {
   return [
     ...listProjects(db).map((project) => project.repoPath),
     ...listLiveWorktrees(db).flatMap((batch) => (batch.worktreePath ? [batch.worktreePath] : [])),
+    ...chatWorktreePaths(db),
   ];
 }
 

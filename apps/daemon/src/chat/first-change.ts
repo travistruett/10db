@@ -1,0 +1,30 @@
+import { ChatToolName } from '@10db/contracts';
+import type { ChatCall } from './confinement';
+
+// What counts as a session's first change: the call that makes it ask where the work happens. A shell write the
+// sandbox refused is not one yet, since neither provider reports it to 10db (the session is told to make its
+// first change with an edit instead, `chat/prompt.ts`).
+
+/** The file tools. Codex's `apply_patch` reaches the guard as one `Edit` per hunk (`codex-guard.ts`). */
+const EDIT_TOOLS: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+
+const OWN_PREFIX = 'mcp__10db__';
+
+/** The chat tools that change git in the builder's checkout. Push, pull request and merge are not among them. */
+const GIT_TOOLS: ReadonlySet<string> = new Set([
+  ChatToolName.MakeBranch,
+  ChatToolName.SwitchBranch,
+  ChatToolName.Pull,
+  ChatToolName.CommitChanges,
+]);
+
+/**
+ * Whether a call is a first change: an edit, or a git tool that changes the checkout, by the agent or by one of
+ * its subagents. Everything else, a push, a pull request and a merge included, is not.
+ */
+export function firstChangeOf(call: Pick<ChatCall, 'toolName'>): 'edit' | 'git' | null {
+  if (EDIT_TOOLS.has(call.toolName)) return 'edit';
+  if (call.toolName.startsWith(OWN_PREFIX) && GIT_TOOLS.has(call.toolName.slice(OWN_PREFIX.length)))
+    return 'git';
+  return null;
+}

@@ -105,8 +105,8 @@ export const ConversationItemBody = {
   message: z.object({
     text: z.string(),
     mentions: z.array(z.string()).optional(),
-    /** Set on the request that asks the agent for a task's brief, which no digest or brief repeats. */
-    purpose: z.literal('brief').optional(),
+    /** Set on the request that asks the agent for a task's brief, which no digest or brief repeats; `carry_on` marks the message that resumes a turn after the builder's choice. */
+    purpose: z.enum(['brief', 'carry_on']).optional(),
   }),
   agent_message: TextBody,
   reasoning: TextBody,

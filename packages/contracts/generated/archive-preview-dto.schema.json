@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "worktree": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "branch": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "uncommitted": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "ignored": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "worktree",
+    "branch",
+    "uncommitted",
+    "ignored"
+  ]
+}

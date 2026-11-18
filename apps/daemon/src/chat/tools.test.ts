@@ -8,15 +8,13 @@ import {
   ChatDto,
   ChatToolName,
   ConversationDto,
-  ConversationState,
-  DoItBriefDto,
   DecisionItem,
   PrincipleItem,
   ProjectDto,
   TaskDto,
   TaskId,
 } from '@10db/contracts';
-import { chatMadeTask, getDecisionDto, getPrinciple, listInbox, patchConversation } from '@10db/db';
+import { chatMadeTask, getDecisionDto, getPrinciple, listInbox, setChatWork } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { apiClient } from '../../test/api-client';
@@ -295,40 +293,6 @@ describe("a chat's tools on /mcp", () => {
     expect(getDecisionDto(running().state.db, decision.id).state).toBe('current');
   });
 
-  it('keeps the brief the agent writes for Do It, and the sheet reads it back', async () => {
-    const chat = await newChat();
-    await agentTurn(chat, async (call) => {
-      await call('write_brief', {
-        title: 'Fix the login',
-        brief: 'Retry once on a 401.',
-        areas: ['src'],
-        acceptanceCriteria: ['A 401 retries once'],
-      });
-    });
-    const brief = await api.post(`/chats/${chat.id}/brief`, DoItBriefDto, {});
-    expect(brief).toMatchObject({
-      title: 'Fix the login',
-      text: 'Retry once on a 401.',
-      areas: ['src'],
-      criteria: ['A 401 retries once'],
-      source: 'agent',
-    });
-  });
-
-  it('refuses a brief once Do It has sealed the chat, and keeps nothing', async () => {
-    const chat = await newChat();
-    let said = '';
-    await agentTurn(chat, async (call) => {
-      running().state.write((ctx) => {
-        patchConversation(ctx, chat.conversationId, { state: ConversationState.Sealed });
-      });
-      said = await call('write_brief', { title: 'Late', brief: 'Too late.' });
-    });
-    expect(said).toContain('handed to a task');
-    const brief = await api.post(`/chats/${chat.id}/brief`, DoItBriefDto, {});
-    expect(brief.source).not.toBe('agent');
-  });
-
   it("renames an agent-titled chat cut at a word, and leaves the builder's name", async () => {
     const chat = await newChat();
     await agentTurn(chat, async (call) => {
@@ -419,6 +383,8 @@ describe("a chat's git tools through the daemon", () => {
 
   it('branches and commits what the turn edited with the builder’s identity, then refuses once the turn is over', async () => {
     const chat = await newChat();
+    // The git tools change the checkout, so the session works there.
+    running().state.write((ctx) => setChatWork(ctx, chat.id, null, { place: 'here' }));
     let token = '';
     let url = '';
     await agentTurn(chat, async (call, turn) => {
@@ -442,7 +408,7 @@ describe("a chat's git tools through the daemon", () => {
       await client.callTool({ name: 'commit_changes', arguments: { message: 'late' } }),
     );
     await client.close();
-    expect(late.content.map((c) => c.text).join('')).toMatch(/does not hold Your folder/);
+    expect(late.content.map((c) => c.text).join('')).toMatch(/does not have your checkout/);
     expect(gitOf('rev-list', '--count', 'HEAD')).toBe('2');
   });
 });

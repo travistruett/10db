@@ -52,8 +52,8 @@ export type PassWhenBusy = (typeof PassWhenBusy)[keyof typeof PassWhenBusy];
 export const PendingOpenDto = z.object({ name: z.string(), waitsFor: z.string() });
 export type PendingOpenDto = z.infer<typeof PendingOpenDto>;
 
-/** What a chat's send does when Your folder is held: wait for it, or run reading only. */
-export const FolderWhileHeld = { Wait: 'wait', ReadOnly: 'read_only' } as const;
+/** What a chat's send does when Your folder is held: wait for it. */
+export const FolderWhileHeld = { Wait: 'wait' } as const;
 export type FolderWhileHeld = (typeof FolderWhileHeld)[keyof typeof FolderWhileHeld];
 export const FolderWhileHeldInput = z.enum(FolderWhileHeld);
 

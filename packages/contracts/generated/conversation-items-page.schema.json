@@ -71,6 +71,13 @@
                   "type": "string"
                 }
               },
+              "purpose": {
+                "type": "string",
+                "enum": [
+                  "brief",
+                  "carry_on"
+                ]
+              },
               "files": {
                 "type": "array",
                 "items": {

@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { queryKeys } from '../../daemon/queries';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
+import { findText, getText, queryText } from '../../test/inbox-page-fixtures';
 import { slackConnection } from '../../test/people-fixtures';
 
 const codex = (over: Partial<AgentCopy>): AgentCopy => ({
@@ -55,19 +56,19 @@ describe('10db cards in the Inbox', () => {
     });
     const { queryClient } = renderApp('/inbox');
 
-    expect(await screen.findByText("Codex 0.167.0 can't be used")).toBeTruthy();
-    expect(screen.getByText(/was refused: changed files/)).toBeTruthy();
-    expect(screen.getByRole('tab', { name: /^Open\s?1$/ })).toBeTruthy();
+    expect(await findText("Codex 0.167.0 can't be used")).toBeTruthy();
+    expect(getText(/was refused: changed files/)).toBeTruthy();
+    expect(screen.getByRole('radio', { name: /^Open\s?1$/ })).toBeTruthy();
     expect(screen.getByRole('link', { name: /Inbox.*1 open card/ })).toBeTruthy();
-    expect(screen.queryByText('Nothing needs you right now.')).toBeNull();
+    expect(queryText('Nothing needs you')).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Fetch It Again' }));
     await waitFor(() => {
-      expect(screen.queryByText("Codex 0.167.0 can't be used")).toBeNull();
+      expect(queryText("Codex 0.167.0 can't be used")).toBeNull();
     });
     expect(rechecked).toBe(true);
     expect(queryClient.getQueryData(queryKeys.system)).toBeTruthy();
-    expect(await screen.findByText('Nothing needs you right now.')).toBeTruthy();
+    expect(await findText('Nothing needs you')).toBeTruthy();
     // The download it started is told at the rail's foot, not in the Inbox.
     const rail = screen.getByRole('navigation', { name: 'Sections' });
     expect(within(rail).getByRole('status', { name: 'Downloading Codex 0.167.0' })).toBeTruthy();
@@ -104,9 +105,9 @@ describe('10db cards in the Inbox', () => {
   ])('says what to do about $name', async ({ check, title, body }) => {
     serveCheck(() => check);
     renderApp('/inbox');
-    expect(await screen.findByText(title)).toBeTruthy();
-    expect(screen.getByText(body)).toBeTruthy();
-    expect(screen.getByRole('tab', { name: /^Open\s?1$/ })).toBeTruthy();
+    expect(await findText(title)).toBeTruthy();
+    expect(getText(body)).toBeTruthy();
+    expect(screen.getByRole('radio', { name: /^Open\s?1$/ })).toBeTruthy();
   });
 
   it.each([
@@ -150,8 +151,8 @@ describe('10db cards in the Inbox', () => {
     await waitFor(() => {
       expect(queryClient.getQueryState(queryKeys.system)?.status).toBe('success');
     });
-    expect(screen.queryByText('Codex 0.168.0 is out')).toBeNull();
-    expect(screen.queryByText(/Codex 0\.166\.0 is not 0\.167\.0/)).toBeNull();
+    expect(queryText('Codex 0.168.0 is out')).toBeNull();
+    expect(queryText(/Codex 0\.166\.0 is not 0\.167\.0/)).toBeNull();
     expect(screen.queryByRole('link', { name: /open card/ })).toBeNull();
   });
 });

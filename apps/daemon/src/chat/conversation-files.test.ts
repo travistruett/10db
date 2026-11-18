@@ -9,7 +9,15 @@ import {
   mintId,
   NotFoundError,
 } from '@10db/contracts';
-import { createTestStore, insertChat, insertConversation, seedProject, insertTask } from '@10db/db';
+import {
+  chatOfConversation,
+  createTestStore,
+  insertChat,
+  insertConversation,
+  insertTask,
+  seedProject,
+  setChatWork,
+} from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTempRepo, isolatedGitEnv, type TempDir } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
@@ -92,6 +100,31 @@ describe('conversationFiles', () => {
       'docs/a b.md',
       'src/login.ts',
     ]);
+  });
+
+  it("lists a branch session's worktree, not the checkout", () => {
+    const { state, chat } = world();
+    const row = chatOfConversation(state.db, chat.id);
+    if (row === null) throw new Error('no chat');
+    state.write((ctx) => {
+      setChatWork(ctx, row.id, null, {
+        place: 'branch',
+        worktreePath: '/worktrees/fix',
+        branch: 'fix',
+        baseHead: 'abc',
+      });
+    });
+    const asked: string[] = [];
+    const files = createConversationFiles({
+      state,
+      now: () => 0,
+      trackedFiles: (path) => {
+        asked.push(path);
+        return ['only-in-worktree.ts'];
+      },
+    });
+    expect(files(chat.id, 'only').map((m) => m.path)).toEqual(['only-in-worktree.ts']);
+    expect(asked).toEqual(['/worktrees/fix']);
   });
 
   it("refuses a task's conversation, and an unknown one", () => {

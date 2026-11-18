@@ -1,12 +1,13 @@
 import { ChatId, TaskId } from '@10db/contracts';
 
 /**
- * Sessions' address: `chat` selects an open session, `fresh` a tab not yet made into one. Each is kept
+ * Sessions' address: `chat` selects an open session, `fresh` a tab not yet made into one, and `task` is only read so a link to a
+ * task's old tab can be redirected. Each is kept
  * only when it parses.
  */
 export interface SessionsSearch {
   readonly chat?: ChatId;
-  /** A task's tab. */
+  /** A task's old tab: the route sends it to the Board. */
   readonly task?: TaskId;
   readonly fresh?: string;
 }

@@ -1,9 +1,9 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { BatchDto, PermissionRuleDto, ProjectDto, ProjectId } from '@10db/contracts';
+import type { PermissionRuleDto, ProjectDto, ProjectId } from '@10db/contracts';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
-import type { Git } from '../git';
+import type { Git, WorktreeOwner } from '../git';
 import { raiseGateHostCards, type InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { takeFoundHostsReading } from '../registries';
@@ -120,7 +120,8 @@ export async function raiseInstallHostCards(
 
 export interface WorktreeDependencies {
   refresh(input: {
-    readonly batch: BatchDto;
+    /** The batch or session whose worktree this is; it names the install's log. */
+    readonly owner: WorktreeOwner;
     readonly project: ProjectDto;
     /** The worktree, after its seed. */
     readonly path: string;
@@ -192,7 +193,7 @@ export interface WorktreeDependenciesDeps {
 export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): WorktreeDependencies {
   return {
     async refresh({
-      batch,
+      owner,
       project,
       path,
       signal,
@@ -209,7 +210,7 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
         deps.dataDir,
         'logs',
         'install',
-        `batch-${batch.id}-${String(deps.clock.now().getTime())}.log`,
+        `${owner.kind}-${owner.id}-${String(deps.clock.now().getTime())}.log`,
       );
       const checkouts = [...new Set([...deps.checkouts(), path])];
       const pnpm = await deps.resolvePnpm(env, checkouts);

@@ -20,6 +20,7 @@ import {
   type AgentAccountKind,
   type ProjectId,
   type ChatId,
+  WorkPlace,
 } from '@10db/contracts';
 import {
   chatOfConversation,
@@ -32,6 +33,7 @@ import {
   listItems,
   touchChat,
   type ConversationItemRow,
+  type ChatRow,
   type ConversationRow,
 } from '@10db/db';
 import {
@@ -63,7 +65,9 @@ import {
   startingJudge,
 } from '../trust';
 import { digestText } from './brief';
-import { judgeChatCall, type ChatFolder } from './confinement';
+import { judgeChatCall, type ChatPlace } from './confinement';
+import { workNote } from './work-note';
+import { chatRoot, withWorktreeOnDisk } from './work-root';
 import { JUDGED_CHAT_TOOLS } from './git-rule';
 import type { ChatLiveSessions } from './live-sessions';
 import { chatSystemPrompt } from './prompt';
@@ -156,6 +160,11 @@ export interface ChatHooksDeps {
   readonly state: StateStore;
   /** Who holds Your folder: a chat's turn takes it, and writes only while it holds it. */
   readonly folderHold: FolderHold;
+  /**
+   * The sessions whose next start tells them they moved to a branch before their last change. The move adds a
+   * chat; the start takes it, so it is said once and a restart drops it.
+   */
+  readonly firstStartAfterMove?: Set<ChatId>;
   readonly log: Logger;
   readonly dataDir: string;
   readonly now: () => Date;
@@ -173,6 +182,8 @@ export interface ChatHooksDeps {
   readonly clock: Clock;
   /** Where the chat's tools find the session that calls them. */
   readonly live: ChatLiveSessions;
+  /** A reading session's first change: asks the builder where the work happens. */
+  readonly firstChange?: (chatId: ChatId) => void;
 }
 
 /** A builder message's words for the session: under its id, with each picture not sent as a block named by path. */
@@ -197,7 +208,7 @@ function deliverable(state: StateStore, item: ConversationItemRow): DeliverableM
 
 /** The thread's line for a turn that can only read: who has Your folder. */
 function readOnlyNotice(blockers: readonly FolderBlocker[]): string {
-  return `Your folder is in use by ${blockers.map((b) => holderWords(b.holder)).join(' and ')}, so this turn reads only.`;
+  return `Your checkout is in use by ${blockers.map((b) => holderWords(b.holder)).join(' and ')}, so this turn reads only.`;
 }
 
 /** A call as the chat's confinement reads it. */
@@ -260,6 +271,12 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
     });
   };
 
+  // Whether the chat's session can write now: Here, while its turn holds the checkout; a branch, in its worktree.
+  // A branch with no worktree has nowhere to write, and never falls back to the checkout.
+  const writesNow = (chat: ChatRow, repoPath: string): boolean =>
+    chatRoot(withWorktreeOnDisk(chat), { repoPath }).writes &&
+    (chat.workPlace !== WorkPlace.Here || deps.folderHold.holdsTurn(chat.id));
+
   return {
     freshAtContextPct: CHAT_FRESH_AT_CONTEXT_PCT,
 
@@ -270,14 +287,11 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         waiting.cancelled = true;
         pendingReleases.delete(chat.id);
       }
-      if (deps.folderHold.takeReadOnlyChoice(chat.id)) {
-        // The builder chose reading only: the turn reads even when the folder has freed, and says who held it.
-        const blockers = deps.folderHold.blockers(conv.projectId, {
-          kind: FolderAsker.ChatTurn,
-          chatId: chat.id,
-        });
-        notices.set(chat.id, blockers.length === 0 ? [] : [readOnlyNotice(blockers)]);
-        return { writes: false };
+      // Only a session working in the builder's checkout takes the hold. One that reads or is being asked holds
+      // nothing, and one on its own branch writes its own worktree.
+      if (chat.workPlace !== WorkPlace.Here) {
+        notices.set(chat.id, []);
+        return { writes: writesNow(chat, getProject(state.db, conv.projectId).repoPath) };
       }
       const taken = deps.folderHold.takeTurn(conv.projectId, chat.id);
       if (!taken.taken) {
@@ -299,7 +313,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
             ? [
                 {
                   conversationId: getChat(state.db, h.chatId).conversationId,
-                  line: `Your folder is also in use by ${joined}.`,
+                  line: `Your checkout is also in use by ${joined}.`,
                 },
               ]
             : [],
@@ -307,7 +321,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       );
       notices.set(
         chat.id,
-        others.length === 0 ? [] : [`Your folder is also in use by ${others.join(' and ')}.`],
+        others.length === 0 ? [] : [`Your checkout is also in use by ${others.join(' and ')}.`],
       );
       return { writes: true };
     },
@@ -326,8 +340,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       }
       notices.delete(chat.id);
       toldOthers.delete(chat.id);
-      // A reading-only choice no turn start took (a chained turn starts without one) ends with the turn.
-      if (running.delete(chat.id)) deps.folderHold.takeReadOnlyChoice(chat.id);
+      running.delete(chat.id);
       // A release already waits for this chat's jobs: a later change outside a turn (an idle close) joins it, so the
       // chat's next turn has one release to cancel and no earlier one outlives the cancel.
       if (pendingReleases.has(chat.id)) return;
@@ -372,19 +385,37 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         true,
         tendbReady,
       );
-      const writable = deps.folderHold.holdsTurn(chat.id);
-      const folder: ChatFolder = {
-        holds: () =>
-          deps.folderHold.holdsTurn(chat.id) && holdingSession.get(chat.id) === start.sessionId,
+      const project = getProject(state.db, conv.projectId);
+      const { root } = chatRoot(withWorktreeOnDisk(chat), { repoPath: launch.cwd });
+      const writable = writesNow(chat, launch.cwd);
+      const folder: ChatPlace = {
+        get place() {
+          return getChat(state.db, chat.id).workPlace;
+        },
+        holds: () => {
+          const place = getChat(state.db, chat.id).workPlace;
+          const current = holdingSession.get(chat.id) === start.sessionId;
+          if (place === WorkPlace.Here) return current && deps.folderHold.holdsTurn(chat.id);
+          if (place === WorkPlace.Branch)
+            return (
+              current &&
+              running.has(chat.id) &&
+              withWorktreeOnDisk(getChat(state.db, chat.id)).worktreePath !== null
+            );
+          return false;
+        },
+        current: () => holdingSession.get(chat.id) === start.sessionId,
         writable,
         heldBy: () =>
           deps.folderHold
             .blockers(conv.projectId, { kind: FolderAsker.ChatTurn, chatId: chat.id })
             .map((b) => holderWords(b.holder))
             .join(' and ') || 'something else',
+        root,
+        checkout: launch.cwd,
+        firstChange: () => deps.firstChange?.(chat.id),
       };
       const limitNotes = createLimitNotes();
-      const project = getProject(state.db, conv.projectId);
       const ending = new AbortController();
       const ready =
         deps.prepare === undefined
@@ -397,6 +428,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               env: launch.env,
               resumeProviderSessionId: start.resume,
               writes: writable,
+              ...(root === launch.cwd ? {} : { checkout: root }),
               signal: ending.signal,
               observer: start.observer,
               limits: limitNotes,
@@ -431,8 +463,10 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       };
       sessionClosers.set(conv.id, release);
       const setup = ready?.setup ?? null;
+      // A branch session reads and runs in its own worktree, so that is the checkout its reads are judged against.
       const access: ShapeAccess = {
         ...launch.access,
+        checkout: root,
         filesDir: chatFolder(deps.dataDir, conv.id),
         agentModels: launch.agentModels,
         judge,
@@ -451,7 +485,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       const policy = buildTrustPolicy({
         surface: TrustSurface.Chat,
         projectName: project.name,
-        checkout: launch.cwd,
+        checkout: root,
         gateCommand: project.gateCommand,
         liveSystems: projectLiveSystems(state.db, project.id, (stored) => {
           log.warn(
@@ -467,7 +501,12 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       // The thread says once per session that 10db's judge stopped answering.
       let saidUnavailable = false;
       // A session with nothing to resume is told the standing rules, and what it missed as a digest.
+      const where =
+        chat.workPlace === WorkPlace.Branch
+          ? workNote(chat, launch.cwd, deps.firstStartAfterMove?.delete(chat.id) ?? false)
+          : null;
       const parts = [
+        ...(where === null ? [] : [where]),
         ...(ready?.note === null || ready?.note === undefined ? [] : [ready.note]),
         ...(start.resume === null ? [principlesBrief(state.db, conv.projectId)] : []),
         ...(start.digest === null ? [] : [start.digest]),
@@ -487,7 +526,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
             ),
             ...chatProfile(ready?.commands !== undefined),
           },
-          cwd: launch.cwd,
+          cwd: root,
           instructions: ready?.instructions ?? null,
           ...(setup === null
             ? {}
@@ -543,8 +582,8 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
                     taskId: null,
                     // The fast path's write rule is a lane's; a chat's edits are judged by `folder` above it.
                     fastPath: {
-                      checkout: launch.cwd,
-                      tmpDir: launch.cwd,
+                      checkout: root,
+                      tmpDir: root,
                       secretFiles: access.secretFiles ?? [],
                       preExisting: [],
                     },
@@ -586,7 +625,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               }),
         },
         limits,
-        writes: deps.folderHold.holdsTurn(chat.id),
+        writes: writable,
         expiresAt: ready?.credentialsExpireAt ?? null,
         accountId: launch.account.accountId,
         model: launch.modelId,

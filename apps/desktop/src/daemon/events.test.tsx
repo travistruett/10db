@@ -15,6 +15,7 @@ import { daemonEvent } from '../test/fixtures';
 import { passActivityData, passViewDto, pagesByStatus } from '../test/pass-fixtures';
 import { useAccounts, useAccountUsage } from './account-queries';
 import { liveKeys, useConversationLive } from './conversation-queries';
+import { chatWorkKeys } from './chat-work-queries';
 import { folderKeys } from './project-folder-queries';
 import { EVENT_INVALIDATIONS, eventStreamUrl, INVALIDATIONS, useEventStream } from './events';
 import { screenKeys } from './screen-queries';
@@ -391,6 +392,13 @@ describe('useEventStream', () => {
     // Each re-read of the folder runs git once per cached project; a transcript item changes no holder.
     expect(INVALIDATIONS['project']).toEqual(expect.arrayContaining([folderKeys.all]));
     expect(INVALIDATIONS['conversation']).not.toContainEqual(folderKeys.all);
+  });
+
+  it('re-reads a session’s work and changes when a turn ends or the chat changes, and not on every stored item', () => {
+    // Each read of the work runs git in the session's worktree; a transcript item changes none of it.
+    expect(INVALIDATIONS['conversation']).not.toContainEqual(chatWorkKeys.all);
+    expect(EVENT_INVALIDATIONS['conversation.state']).toContainEqual(chatWorkKeys.all);
+    expect(INVALIDATIONS['chat']).toContainEqual(chatWorkKeys.all);
   });
 
   it('refetches the Models page when a profile, an account or its list, a persona, the playbook or a kind changes', () => {

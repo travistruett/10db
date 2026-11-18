@@ -48,7 +48,7 @@ import { GitError, runGit, runGitCapped, type RunOptions } from './run';
 import { GitTrustError, GitTrustFailure, type GitTrustDetail } from './trust-error';
 import { embeddedRepository, GitMode, isGitComponent } from './worktree-files';
 import { handMadeWorktreeFolder } from './hand-made-folder';
-import { lockedBatchId, parseWorktreeList, type WorktreeEntry } from './worktree-list';
+import { lockedOwner, parseWorktreeList, type WorktreeEntry } from './worktree-list';
 
 /** The trailer the commit tool writes on every commit it makes, naming the call's opId. */
 export const OP_TRAILER = '10db-Op';
@@ -4084,8 +4084,7 @@ export function createGit(opts: GitOptions = {}): Git {
   const ownScope: WorktreeScope = {
     root: opts.worktreeRoot,
     rootName: "10db's worktree root",
-    refuses: (entry) =>
-      lockedBatchId(entry) === null ? 'the worktree is not locked by 10db' : null,
+    refuses: (entry) => (lockedOwner(entry) === null ? 'the worktree is not locked by 10db' : null),
     forces: ['--force', '--force'],
   };
 

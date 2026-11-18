@@ -1,0 +1,15 @@
+/* The two lines inside a panel row; the row's own box, height and fill come from the list. */
+.item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}

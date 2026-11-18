@@ -1,43 +1,20 @@
-import { ChangesScope, type ChangedFileDto, type WorkstreamChangesDto } from '@10db/contracts';
-import {
-  ActionIcon,
-  Anchor,
-  Box,
-  Group,
-  ScrollArea,
-  SegmentedControl,
-  Stack,
-  Text,
-} from '@mantine/core';
-import { IconX } from '@tabler/icons-react';
+import type { ChangedFileDto, WorkstreamChangesDto } from '@10db/contracts';
+import { Anchor, Box, Group, ScrollArea, Stack, Text } from '@mantine/core';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { HunkDiff } from '../../conversation/hunk-diff';
 import type { GutterLine } from '../../conversation/hunk-gutter';
 import { ExternalLink } from '../board/pull-request-link';
 import { changesTotals, parseChanges } from './changes-files';
 
-// Sessions UI §9: a task's changes beside its thread: a jump list of files, then every file's diff under a
-// sticky header. A number quotes its line into the composer. The diff is repository text, drawn as text.
-
-const SCOPES = [
-  { value: ChangesScope.All, label: 'All Turns' },
-  { value: ChangesScope.Last, label: 'Last Turn' },
-];
+// A session's changes in the Changes drawer: a jump list of files, then every file's diff under a sticky
+// header. A number quotes its line into the composer. The diff is repository text, drawn as text.
 
 export interface ChangesPanelProps {
   readonly changes: UseQueryResult<WorkstreamChangesDto>;
-  /** The branch the changes are read against, when the task names one. */
-  readonly base: string | null;
-  /** A pass of one reads all its turns or the last; a copy has one answer. */
-  readonly scope: {
-    readonly value: ChangesScope;
-    readonly onChange: (scope: ChangesScope) => void;
-  } | null;
-  /** Its pull request, which has the changes once the copy is gone. */
+  /** The pull request, which has the changes once the worktree is gone. */
   readonly pullRequest: string | null;
   /** The quote to put in the composer for a clicked line. */
   readonly onQuote: (text: string) => void;
-  readonly onClose: () => void;
 }
 
 /**
@@ -105,61 +82,25 @@ function Files({
   );
 }
 
-export function ChangesPanel({
-  changes,
-  base,
-  scope,
-  pullRequest,
-  onQuote,
-  onClose,
-}: ChangesPanelProps) {
+export function ChangesPanel({ changes, pullRequest, onQuote }: ChangesPanelProps) {
   const data = changes.data;
   const totals = data === undefined ? null : changesTotals(data.files);
   const diffs = data === undefined ? [] : parseChanges(data.diff);
   return (
     <Box
-      component="aside"
       aria-label="Changes"
-      style={{
-        flex: 'none',
-        width: '44%',
-        minWidth: 360,
-        maxWidth: '60%',
-        display: 'flex',
-        flexDirection: 'column',
-        borderLeft: '1px solid var(--mantine-color-default-border)',
-        minHeight: 0,
-      }}
+      role="region"
+      style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}
     >
-      <Group px="md" h={44} justify="space-between" wrap="nowrap" style={{ flex: 'none' }}>
-        <Text fw={600} size="sm">
-          Changes
-          {totals === null ? null : (
-            <Text span size="xs" c="dimmed" ml="xs">
-              {`${String(totals.files)} ${totals.files === 1 ? 'file' : 'files'} +${String(totals.added)} −${String(totals.removed)}`}
-            </Text>
-          )}
-        </Text>
-        <ActionIcon variant="subtle" color="gray" aria-label="Close Changes" onClick={onClose}>
-          <IconX size={16} stroke={1.5} />
-        </ActionIcon>
-      </Group>
-      <Group px="md" pb="xs" justify="space-between" wrap="wrap" style={{ flex: 'none' }}>
+      <Group pb="xs" justify="space-between" wrap="wrap" style={{ flex: 'none' }}>
         <Text size="xs" c="dimmed">
-          {data === undefined
+          {totals === null
             ? ''
-            : `against ${base === null ? '' : `${base} at `}${data.baseHead.slice(0, 7)}`}
+            : `${String(totals.files)} ${totals.files === 1 ? 'file' : 'files'} +${String(totals.added)} −${String(totals.removed)}`}
         </Text>
-        {scope === null ? null : (
-          <SegmentedControl
-            size="xs"
-            data={SCOPES}
-            value={scope.value}
-            onChange={(v) => {
-              scope.onChange(v === ChangesScope.Last ? ChangesScope.Last : ChangesScope.All);
-            }}
-          />
-        )}
+        <Text size="xs" c="dimmed">
+          {data === undefined ? '' : `against ${data.baseHead.slice(0, 7)}`}
+        </Text>
       </Group>
       <ScrollArea style={{ flex: 1, minHeight: 0 }}>
         {changes.isPending ? (
@@ -173,7 +114,9 @@ export function ChangesPanel({
             </Text>
           ) : (
             <Stack gap="xs" px="md">
-              <Text size="sm">This task’s copy is gone. Its pull request has the changes.</Text>
+              <Text size="sm">
+                This session’s worktree is gone. Its pull request has the changes.
+              </Text>
               <Group>
                 <ExternalLink url={pullRequest} label="Open Pull Request" />
               </Group>

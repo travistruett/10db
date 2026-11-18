@@ -61,7 +61,7 @@ export async function gateInScratch(
   try {
     // The folder's ignored directories hold what the pass's lanes wrote: nothing is cloned from it.
     const installed = await deps.dependencies.refresh({
-      batch: input.batch,
+      owner: { kind: 'batch', id: input.batch.id },
       project: input.project,
       path,
       signal: input.signal,

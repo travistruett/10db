@@ -19,12 +19,13 @@ favors legibility and calm over decoration.
   paused (limits), red = failed, green = done or ready, gray = queued or cancelled. Green is the only
   "OK" color for a task or goal; don't use cyan or teal for success there. A connection's status (Overview,
   Integrations, an account's state) is the exception: teal = works, yellow = needs the builder, gray = off, never
-  green or red, and its dot always comes with words. Every card in the Inbox's Open tab waits on the
-  builder, so its kind is yellow, a flag's too: red there would read as an error. The Waiting tab holds what the
-  builder waits on someone else for; waiting on someone shows as a line on the card, not a color. A status is
+  green or red, and its dot always comes with words. Every card in the Inbox's Open state waits on the
+  builder, so its kind tag stays yellow, a flag's too: red there would read as an error. Waiting's and Resolved's
+  tags are gray. Waiting holds what the builder waits on someone else for; waiting on someone shows as a line on
+  the row, not a color. A status is
   never told by color alone: a bare dot means running, a dot with a ring waits on the builder (yellow, or red for
-  a failure), and failed, paused and done are icons in their colors. Green on a Sessions tab means landed (merged,
-  or a closed pass on a `local` project); a signed-off pass that isn't closed is a dimmed check.
+  a failure), and failed, paused and done are icons in their colors. Green on a Sessions row means landed (a pull request merged,
+  or the branch merged into its base on a `local` project).
 - **Type:** system font stack; monospace for IDs, paths, commands and logs.
 - **Density:** `size="sm"` controls in lists and tables; `md` in forms and dialogs.
 - **Board cards:** compact `Paper`s that drag from anywhere on the card, with no handle: a pointer drag
@@ -66,8 +67,8 @@ favors legibility and calm over decoration.
   as a line with a dot, such as "Waiting on you: answer in Inbox", only when the color is yellow, red or
   orange, because only then does the builder have something to do or read. A failed task's line is the
   plain-words one below. Blue, green and gray cards show no line: the border and the column say it, and
-  the screen-reader summary still does. A Sessions tab follows the same states as a pill: a 1 px yellow ring
-  waits on you, a 1 px red ring stopped on an error, and its state mark sits where × shows on hover.
+  the screen-reader summary still does. A Sessions row follows the same states as a pill: a 1 px yellow ring
+  waits on you, a 1 px red ring stopped on an error, and its one state mark sits at the row's right edge.
 - **A failure in plain words:** a failed task says what happened and what Retry will do, in one line from
   `failureLine` (`task-state.ts`), the same on the card, in the task drawer and in Factory's Needs you block:
   "The review session stopped without reporting a result. Retry runs the review step again." The line is
@@ -141,7 +142,7 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
 - **Agent output** renders as markdown through one component, by
   `docs/architecture/decisions/2026-11-13-agent-output-renders-as-hardened-markdown.md`, with a Selenized Shiki
   theme for code. **Tool calls** are rows, not cards; cards stay for what the builder answers.
-- **Keys:** ⌘↩ sends in every composer; on Sessions, ⌘T (anywhere), ⌘W, ⌘⇧T, ⌘1–9, ⌘⇧[ ], ⌘J and Esc.
+- **Keys:** ⌘↩ sends in every composer; on Sessions, ⌘T (anywhere), ⌘W, ⌘⇧T, ⌘1–9, ⌘⇧[ ], ⌃Tab, ⌘J, ⌘⇧D (Changes) and Esc. A session's work bar answers 1 (Here) and 2 (On a New Branch).
 - **Alerts:** an `Alert` is for something the builder must act on, such as a missing tool or a
   refused key. A condition that clears on its own, such as a rate-limited sync, is a dimmed
   `xs` line with an icon in the header of the view it affects.
@@ -158,10 +159,16 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   waiting is a `CountBadge` (`apps/desktop/src/shell/count-badge.tsx`) in the control's `rightSection`, or
   beside the label in a control that has none; a row with a line of its own says it in words there ("4
   goals"). See `docs/architecture/decisions/2026-11-11-a-label-never-carries-its-count.md`. The Sessions badge
-  counts the tabs that need the builder: Needs you and Stopped by an error, and Ready once M6 brings it.
-  A count is a small pill no taller than its label's text, in the sidebar, on tabs and in buttons. It is muted
+  counts the sessions that need the builder: Needs you and Stopped by an error, and Ready once M6 brings it.
+  A count is a small pill no taller than its label's text, in the sidebar, on rows, tabs and in buttons. It is muted
   (`tone` neutral, the default) and blue (`tone="attention"`) only when it means something needs the builder:
-  Inbox's Open tab, the Sessions and Workbench needs-you counts.
+  Inbox's Open state, the Sessions and Workbench needs-you counts. The Inbox's Open count is the daemon's (the
+  rows `GET /inbox/page` counts with no filter), and a filter or a search on the list never changes it
+  (`decisions/2026-11-17-the-daemon-groups-inbox-rows-in-its-code-and-the-browser-groups-nothing.md`).
+- **Inbox rows:** a row is two lines at a fixed height: the kind tag in uppercase, the title, `×n` for rows that
+  stand for several cards and the age; then the project and the first line of the body. A flag's row offers
+  Dismiss on hover and focus, and `e` dismisses the selected one. The list keeps one row selected and its content
+  is drawn beside the panel.
 - **Page header:** a page has one header, the frame's title row (`TitleRow`,
   `apps/desktop/src/shell/title-row.tsx`), at the top of the content column on the content's own tone: the title
   at 14 px / 600, an optional switcher beside it, an optional dim meta line, then the actions at the right (28 px
@@ -171,8 +178,13 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   underlined tabs on the left and filters on the right, whose first label sits on the content's edge. A part that
   is absent takes no space. The type scale under the title: in-content section heads 14 / 600, card and row titles
   14 / 500, a drawer's title 16 / 600, body 14, meta 12. A split view's pane may have a 13 px / 600 label row with
-  its own actions. Workspaces, where the content is the work, keep compact headers of their own: Sessions and an
-  open Workbench pass.
+  its own actions. Workspaces, where the content is the work, keep compact headers of their own: an open Workbench pass.
+  Sessions' title row is the frame's: the session's title and a ⌄ switcher, a dim meta line in git's words
+  ("on `main` · 2 files changed"), then the agent, Changes, the next git step (Commit…, Open Pull Request,
+  Merge), the terminal button and ⋯. The panel lists sessions by project, one 30 px row each with its place
+  icon (reading, here, branch, terminal) and one mark; there is no tab strip. A session reads freely, and the
+  first time it goes to change files a bar above the composer asks **Here, on `<branch>`** or **On a New
+  Branch**; Changes opens as a drawer from the right.
 - **Surfaces:** the window is two columns divided by 1 px `bg2` hairlines. The sidebar (the rail and the section's
   panel) is `bg1` from the window's top to its bottom and carries the traffic lights; the content column, its
   title row included, is `bg0` from top to bottom. There is no header band and no inset card. Nothing on the frame
@@ -204,12 +216,14 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
 - **Navigation:** the sidebar's rail holds the sections, global ones above the project's, with Settings at the
   foot. It is labelled (200 px) and ⇧⌘S switches it to icons only (76 px, each name in a tooltip), remembered. The
   active row fills with `bg2`; hover is half of it. The project is a row of its tile and name (a tile alone when
-  icons only). A section with a list has a 260 px panel beside the rail (Settings' sections today), whose head
+  icons only). A section with a list has a 260 px panel beside the rail (Settings' sections, the Inbox's rows and, while a
+  pass is open, the Workbench's queue: the Workbench has a panel only then), whose head
   is the sidebar's top row with the section's name and controls. From 1000 px both show and ⌘\, a click on the
   open section's rail item or the head's button hides the panel. From 640 px the rail is icons only and ⇧⌘S opens the
   labelled sidebar over the content, ⌘\ the panel beside the icons; under 640 px the sidebar folds and the toggle
   beside the traffic lights opens it. The title row sits at the top of the content, level with the traffic lights,
-  44 px tall.
+  44 px tall. When the panel is not shown, the Workbench's queue becomes a strip across the top of the content,
+  and the title row names the open page.
 - **Tooltips:** the bright ink on the base tone in both schemes, 12 px and tight (`theme.ts`); a view never styles
   its own. A view with unsaved edits asks before anything discards them (`shell/unsaved-guard.tsx`).
 - **Scope follows the question, not the screen**
@@ -217,7 +231,7 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   me?" or "what is running, and on what?" is global: the Inbox and Factory. They show every project and
   narrow by a visible project filter, never by the project chosen elsewhere. A view of how one repo's work
   is shaped belongs to a project: Board, Plan, Knowledge and the project's settings. Sessions is global too:
-  its tabs cross projects, each naming its own. The sidebar reads in that order: Inbox, Factory and Sessions; then a "Project" label over the project switcher and that project's Board,
+  its panel lists sessions across projects, each under its own. The sidebar reads in that order: Inbox, Factory and Sessions; then a "Project" label over the project switcher and that project's Board,
   Plan, Knowledge and Project Settings; then app-wide Settings at the foot. The Settings sidebar keeps the
   same order (Back to Board, the project's sections, then the app-wide ones), one scope at a time: a "This
   project" / "All projects" switch under Back to Board picks which half the sections list shows, under subheads,

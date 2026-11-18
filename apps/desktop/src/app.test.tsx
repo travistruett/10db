@@ -95,26 +95,9 @@ describe('App shell', () => {
 
   it('shows the open-card count on the Inbox link', async () => {
     server.use(
-      http.get(daemonUrl('/inbox'), () => HttpResponse.json([inboxItemDto()])),
-      ...baseHandlers(),
-    );
-    renderApp('/factory');
-    expect(await screen.findByRole('link', { name: /Inbox.*1 open card/ })).toBeTruthy();
-  });
-
-  it('counts the Inbox rows, not the cards folded into them', async () => {
-    const project = mintId('Project');
-    const twins = [1, 2].map(() =>
-      inboxItemDto({
-        kind: 'flag',
-        title: 'Batch not started',
-        body: 'The batch did not start',
-        options: [],
-        projectId: project,
-      }),
-    );
-    server.use(
-      http.get(daemonUrl('/inbox'), () => HttpResponse.json(twins)),
+      http.get(daemonUrl('/inbox/page'), () =>
+        HttpResponse.json({ items: [inboxItemDto()], total: 1, page: 1, pageSize: 1 }),
+      ),
       ...baseHandlers(),
     );
     renderApp('/factory');

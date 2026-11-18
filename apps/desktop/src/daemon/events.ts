@@ -12,7 +12,9 @@ import { readJson } from './client';
 import type { DaemonConnection } from './connection';
 import { useDaemon } from './provider';
 import { accountKeys, accountLoginKey } from './account-queries';
+import { applyInboxEvent } from './inbox-live';
 import { chatKeys } from './chat-queries';
+import { chatWorkKeys } from './chat-work-queries';
 import { taskSessionKeys } from './task-session-queries';
 import { conversationKeys, liveKeys, writeLiveFrame } from './conversation-queries';
 import { githubKeys } from './github-queries';
@@ -58,7 +60,13 @@ const KNOWLEDGE: readonly QueryKey[] = [['knowledge'], ['proposals'], ['provenan
 export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // 10db adds to a project's hazards by itself, so the page that lists the additions follows the project.
   // Your folder's holders, a chat's wait among them, change with a hold event, which is the project's.
-  project: [queryKeys.projects, CANDIDATES, HAZARD_ASSESSMENT_KEY, folderKeys.all],
+  project: [
+    queryKeys.projects,
+    CANDIDATES,
+    HAZARD_ASSESSMENT_KEY,
+    folderKeys.all,
+    chatWorkKeys.all,
+  ],
   // A run's skip is recorded under its task's event; a task becoming done, or changing rigor, moves the rigor
   // figures.
   task: [['tasks'], goalKeys.all, CANDIDATES, skipKeys.all, rigorFiguresKeys.all],
@@ -79,7 +87,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // An explore conversation stored or changed an item, or moved state: its items and its state.
   conversation: [conversationKeys.all, chatKeys.all],
   // A chat was created, renamed, moved, archived or touched: the open tabs and Recent.
-  chat: [chatKeys.all, taskSessionKeys.all],
+  chat: [chatKeys.all, chatWorkKeys.all, taskSessionKeys.all],
   // A pass opening, a turn starting or ending, a page Ready or signed off, a close step: each changes
   // the pass and its pages' turns.
   pass: [passKeys.all, folderKeys.all, taskSessionKeys.all],
@@ -116,7 +124,9 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // and so do the Models page's picks.
   persona: [CANDIDATES, modelKeys.all, PERSONAS_KEY],
   person: [PEOPLE_KEY, ROUTING_RULES_KEY, QUESTION_ROUTES_KEY],
-  slack: [SLACK_KEY],
+  // Placement follows the live connection: a sent card is Waiting's while Slack is connected, so every list
+  // and every count is read again.
+  slack: [SLACK_KEY, queryKeys.inbox, ['inbox-rows']],
   stakeholder_timers: [TIMERS_KEY],
   stakeholder_send: [queryKeys.inbox, ['workstreams'], goalKeys.all],
   // The Models page lists profiles and what each account offers.
@@ -140,8 +150,9 @@ export const EVENT_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly Qu
   'task.message_added': [passKeys.turnsAll, passKeys.live, liveKeys.all],
   // A picture of a task's page was kept: its thread and its drawer show it.
   'task.screen_added': [screenKeys.all],
-  // A turn began or ended: what streams is read again, so an item that finished leaves it.
-  'conversation.state': [liveKeys.all],
+  // A turn began or ended: what streams is read again, so an item that finished leaves it, and what the turn
+  // changed in the session's worktree is read again.
+  'conversation.state': [liveKeys.all, chatWorkKeys.all],
 };
 
 export function eventStreamUrl(conn: DaemonConnection, after: number): string {
@@ -199,6 +210,7 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
         ...(EVENT_INVALIDATIONS[event.type] ?? []),
       ])
         void queryClient.invalidateQueries({ queryKey });
+      applyInboxEvent(queryClient, client, event);
       if (event.type === EventType.AccountLoginEnded) {
         const ended = AccountLoginEndedData.safeParse(event.data);
         if (ended.success)

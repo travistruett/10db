@@ -23,3 +23,4 @@ lane's start can't interleave.
   announces, and serves waiters, so 10db's git work that waited for the takeover is handed the folder (the wake's
   reservation) before the chat's held message, which `chat/service.ts` parks as a waiter. `takenOverChats` skips
   archived chats, so an archived chat never holds.
+- A session on a branch with a worktree holds nothing in the builder's checkout: its terminal and its turns take no hold. Only a reading, choosing or Here session, or a branch with no worktree on disk, does (`takeover/service.ts` `holdsCheckout`).

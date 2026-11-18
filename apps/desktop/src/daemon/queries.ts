@@ -61,7 +61,7 @@ export const queryKeys = {
   workstreams: (active: boolean) => ['workstreams', { active }] as const,
   inbox: ['inbox'],
   // Under `inbox`, so the events that refresh the open cards refresh the pages too.
-  inboxPage: (query: InboxPageQuery) => ['inbox', 'page', query] as const,
+  inboxPage: (query: InboxPageRead) => ['inbox', 'page', query] as const,
   workstreamChanges: (id: WorkstreamId | undefined, head: string | null, scope: ChangesScope) =>
     ['workstream-changes', id, head, scope] as const,
   keepAwake: ['keep-awake'],
@@ -171,6 +171,26 @@ export function useWorkstreams(filter: { readonly active: boolean }) {
   });
 }
 
+/** The read of what a workstream changed, shared by the view and a prefetch of it. */
+export function workstreamChangesQuery(
+  client: DaemonClient,
+  id: WorkstreamId | undefined,
+  head: string | null,
+  scope: ChangesScope,
+) {
+  return queryOptions({
+    queryKey: queryKeys.workstreamChanges(id, head, scope),
+    queryFn:
+      id === undefined
+        ? skipToken
+        : async () =>
+            readJson(
+              await client.workstreams[':id'].changes.$get({ param: { id }, query: { scope } }),
+              WorkstreamChangesDto,
+            ),
+  });
+}
+
 /**
  * What a workstream changed since it started: the diff a finished, ungated task is checked by. It is
  * keyed by the head the card names, so a new round never shows the previous round's diff.
@@ -186,19 +206,11 @@ export function useWorkstreamChanges(
 ) {
   const { client } = useDaemon();
   return useQuery({
-    queryKey: queryKeys.workstreamChanges(id, head, scope),
+    ...workstreamChangesQuery(client, id, head, scope),
     placeholderData: (previous, previousQuery) =>
       follow && previousQuery?.queryKey[1] === id && previousQuery?.queryKey[3] === scope
         ? previous
         : undefined,
-    queryFn:
-      id === undefined
-        ? skipToken
-        : async () =>
-            readJson(
-              await client.workstreams[':id'].changes.$get({ param: { id }, query: { scope } }),
-              WorkstreamChangesDto,
-            ),
   });
 }
 
@@ -213,14 +225,17 @@ export function useInbox() {
   });
 }
 
+/** What `useInboxPage` sends: the fields the query key holds are the fields the request carries. */
+export type InboxPageRead = Omit<InboxPageQuery, 'q' | 'since' | 'after' | 'card'>;
+
 /**
  * One page of open, waiting or resolved cards, filtered, sorted and counted by the daemon. A frame drawn
  * for a session asks for that session's project only (§5.5), whatever project the query names.
  */
-export function useInboxPage(query: InboxPageQuery) {
+export function useInboxPage(query: InboxPageRead) {
   const { client } = useDaemon();
   const renderProject = useRenderMode()?.projectId;
-  const asked: InboxPageQuery =
+  const asked: InboxPageRead =
     renderProject === undefined ? query : { ...query, project: renderProject };
   return useQuery({
     queryKey: queryKeys.inboxPage(asked),
@@ -229,7 +244,7 @@ export function useInboxPage(query: InboxPageQuery) {
         await client.inbox.page.$get({
           query: {
             state: asked.state,
-            page: String(asked.page),
+            ...(asked.page === undefined ? {} : { page: asked.page }),
             pageSize: String(asked.pageSize),
             ...(asked.project === undefined ? {} : { project: asked.project }),
             ...(asked.kind === undefined ? {} : { kind: asked.kind }),

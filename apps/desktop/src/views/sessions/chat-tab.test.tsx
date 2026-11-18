@@ -5,9 +5,9 @@ import {
   type ChatToolResult,
   type ConversationItemDto,
 } from '@10db/contracts';
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { chatDto, chatServer } from '../../test/chat-fixtures';
 import { FILE_AS_TASKS_MESSAGE } from './chat-tab';
 import {
@@ -16,7 +16,6 @@ import {
   systemItem,
   toolItem,
 } from '../../test/conversation-fixtures';
-import { FOLDER_REFRESH_MS, folderKeys } from '../../daemon/project-folder-queries';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { folderDto, folderHolder } from '../../test/folder-fixtures';
 import { inboxItemDto, projectViewDto, taskDto } from '../../test/fixtures';
@@ -77,13 +76,12 @@ const createRow = (chat: ChatDto) =>
     }),
   );
 
-describe('ChatTab: the session bar', () => {
-  it('shows the title, what the session is, the agent, and the composer’s model chip and context ring', async () => {
+describe('ChatTab: the title row', () => {
+  it('shows the title, the agent and its model and the context ring in the title row, and the model chip in the composer', async () => {
     openChat({ title: 'Login fails after sleep', conversation: { contextPct: 41 } });
     expect((await screen.findByTitle('Double-click to rename')).textContent).toBe(
       'Login fails after sleep',
     );
-    expect(await screen.findByText('Chat · Your folder · on main')).toBeTruthy();
     expect(await screen.findByText('Claude Code')).toBeTruthy();
     expect((await screen.findByRole('button', { name: 'Model and effort' })).textContent).toContain(
       'claude-opus-5',
@@ -106,7 +104,7 @@ describe('ChatTab: the session bar', () => {
 
   it('File as Tasks sends the fixed message as the builder’s turn', async () => {
     const { served } = openChat();
-    fireEvent.click(await screen.findByRole('button', { name: 'More ways to hand off' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'More session actions' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'File as Tasks' }));
     await waitFor(() => {
       expect(served.messages).toHaveLength(1);
@@ -440,53 +438,7 @@ describe('ChatTab: cards, held-back calls and states', () => {
   });
 });
 
-describe('ChatTab: the session bar and Your folder', () => {
-  it('says what holds Your folder and follows it when a task starts or ends', async () => {
-    let folder = folderDto({ projectId: project.id });
-    const { queryClient } = openChat({}, () => [], [
-      http.get(daemonUrl('/projects/:projectId/folder'), () => HttpResponse.json(folder)),
-    ]);
-    expect(await screen.findByText('Chat · Your folder · on main')).toBeTruthy();
-
-    folder = folderDto({
-      projectId: project.id,
-      holders: [folderHolder(FolderHolderKind.Lane, 'Bump vite')],
-    });
-    await queryClient.invalidateQueries({ queryKey: folderKeys.all });
-    expect(
-      await screen.findByText('Chat · reads only: Your folder is in use by the task ‘Bump vite’'),
-    ).toBeTruthy();
-
-    folder = folderDto({ projectId: project.id, branch: 'fix/login' });
-    await queryClient.invalidateQueries({ queryKey: folderKeys.all });
-    expect(await screen.findByText('Chat · Your folder · on fix/login')).toBeTruthy();
-  });
-});
-
-describe('ChatTab: the branch on the bar', () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it('follows a branch switched in a terminal without an event', async () => {
-    let branch = 'main';
-    // Only the interval is faked, so the poll is stepped by hand and everything else runs for real.
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
-    openChat({}, () => [], [
-      http.get(daemonUrl('/projects/:projectId/folder'), () =>
-        HttpResponse.json(folderDto({ projectId: project.id, branch })),
-      ),
-    ]);
-    expect(await screen.findByText('Chat · Your folder · on main')).toBeTruthy();
-    branch = 'fix/login';
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(FOLDER_REFRESH_MS);
-    });
-    expect(await screen.findByText('Chat · Your folder · on fix/login')).toBeTruthy();
-  });
-});
-
-describe('ChatTab: the composer and Your folder', () => {
+describe('ChatTab: the composer and a held checkout', () => {
   const lane = () =>
     folderDto({
       projectId: project.id,
@@ -499,38 +451,17 @@ describe('ChatTab: the composer and Your folder', () => {
   };
   const bodies = (served: ReturnType<typeof chatServer>) => served.messages.map((m) => m.body);
 
-  it('sends at once when nothing holds the folder', async () => {
-    const { served } = openChat();
-    await screen.findByText('Chat · Your folder · on main');
+  it('sends at once, naming no folder choice, whether or not a task holds the checkout', async () => {
+    const { served } = openChat({}, () => [], [
+      http.get(daemonUrl('/projects/:projectId/folder'), () => HttpResponse.json(lane())),
+    ]);
     await typeAndSend('fix the typo');
     await waitFor(() => {
       expect(bodies(served)).toEqual([{ text: 'fix the typo' }]);
     });
   });
 
-  it.each([
-    { button: 'Wait for It', folder: 'wait' },
-    { button: 'Send Reading Only', folder: 'read_only' },
-  ])(
-    'asks while a task holds the folder, and $button sends folder $folder',
-    async ({ button, folder }) => {
-      const { served } = openChat({}, () => [], [
-        http.get(daemonUrl('/projects/:projectId/folder'), () => HttpResponse.json(lane())),
-      ]);
-      await screen.findByText('Chat · reads only: Your folder is in use by the task ‘Bump vite’');
-      await typeAndSend('fix the typo');
-      expect(
-        await screen.findByText('Your folder is in use by the task ‘Bump vite’.'),
-      ).toBeTruthy();
-      expect(served.messages).toEqual([]);
-      fireEvent.click(screen.getByRole('button', { name: button }));
-      await waitFor(() => {
-        expect(bodies(served)).toEqual([{ text: 'fix the typo', folder }]);
-      });
-    },
-  );
-
-  it('Allow This with the folder held puts "Go ahead" in the composer, so it asks before it runs', async () => {
+  it('Allow This sends "Go ahead" as a message, with the checkout held or not', async () => {
     const { served } = openChat(
       {},
       (chat) => [
@@ -551,81 +482,59 @@ describe('ChatTab: the composer and Your folder', () => {
       ],
       [http.get(daemonUrl('/projects/:projectId/folder'), () => HttpResponse.json(lane()))],
     );
-    await screen.findByText('Chat · reads only: Your folder is in use by the task ‘Bump vite’');
     fireEvent.click(await screen.findByRole('button', { name: 'Allow This' }));
-    const field = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: 'Message' });
-    expect(field.value).toBe('Go ahead: curl example.com');
-    expect(served.messages).toEqual([]);
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Wait for It' }));
     await waitFor(() => {
-      expect(bodies(served)).toEqual([{ text: 'Go ahead: curl example.com', folder: 'wait' }]);
+      expect(bodies(served)).toEqual([{ text: 'Go ahead: curl example.com' }]);
     });
   });
 
-  it('shows the waiting row for a message that waits, and Send Now Reading Only runs it', async () => {
-    const chat = chatDto({ projectId: project.id });
-    const waiting = folderDto({
-      projectId: project.id,
-      holders: [
-        folderHolder(FolderHolderKind.Lane, 'Bump vite'),
-        folderHolder(FolderHolderKind.WaitingChat, chat.title, { chatId: chat.id }),
-      ],
-    });
-    const { served } = openChat({ id: chat.id, conversationId: chat.conversationId }, () => [], [
-      http.get(daemonUrl('/projects/:projectId/folder'), () => HttpResponse.json(waiting)),
-    ]);
-    expect(
-      await screen.findByText('Waits for Your folder: in use by the task ‘Bump vite’'),
-    ).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Send Now Reading Only' }));
-    await waitFor(() => {
-      expect(served.stoppedWaiting).toEqual([chat.id]);
-    });
-  });
-
-  describe('a message parked for Your folder with nothing keeping the chat out', () => {
-    const parked = (chat: ChatDto) =>
+  describe('a message that waits for the checkout', () => {
+    const waiting = (chat: ChatDto, others: readonly string[] = ['Bump vite']) =>
       folderDto({
         projectId: project.id,
-        holders: [folderHolder(FolderHolderKind.WaitingChat, chat.title, { chatId: chat.id })],
+        holders: [
+          ...others.map((name) => folderHolder(FolderHolderKind.Lane, name)),
+          folderHolder(FolderHolderKind.WaitingChat, chat.title, { chatId: chat.id }),
+        ],
       });
-    const openParked = () => {
-      const chat = chatDto({ projectId: project.id });
-      const { served } = openChat({ id: chat.id, conversationId: chat.conversationId }, () => [], [
-        http.get(daemonUrl('/projects/:projectId/folder'), () => HttpResponse.json(parked(chat))),
-      ]);
-      return { chat, served };
-    };
 
-    it('keeps the waiting row and its Stop', async () => {
-      openParked();
-      expect(await screen.findByText(/^Waits for Your folder/)).toBeTruthy();
-      expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
-    });
-
-    it('shows why Send Now Reading Only failed and keeps the row', async () => {
+    it.each([
+      {
+        name: 'says who is changing files and on which branch, and offers Stop only',
+        others: ['Bump vite'],
+        text: 'The task ‘Bump vite’ is changing files on main. Your message runs once it’s done.',
+      },
+      {
+        name: 'with several holders agrees in number',
+        others: ['Bump vite', 'Fix login'],
+        text: 'The task ‘Bump vite’ and the task ‘Fix login’ are changing files on main. Your message runs once they’re done.',
+      },
+      {
+        name: 'with nothing still in the way says it runs once the checkout is free',
+        others: [],
+        text: 'Your message runs once the checkout is free.',
+      },
+    ])('$name', async ({ others, text }) => {
       const chat = chatDto({ projectId: project.id });
       openChat({ id: chat.id, conversationId: chat.conversationId }, () => [], [
-        http.post(daemonUrl('/chats/:chatId/stop-waiting'), () =>
-          HttpResponse.json({ error: 'conflict', message: 'The daemon is busy.' }, { status: 409 }),
+        http.get(daemonUrl('/projects/:projectId/folder'), () =>
+          HttpResponse.json(waiting(chat, others)),
         ),
-        http.get(daemonUrl('/projects/:projectId/folder'), () => HttpResponse.json(parked(chat))),
       ]);
-      fireEvent.click(await screen.findByRole('button', { name: 'Send Now Reading Only' }));
-      expect(await screen.findByText('The daemon is busy.')).toBeTruthy();
+      expect(await screen.findByText(text)).toBeTruthy();
       expect(screen.getByRole('button', { name: 'Stop' })).toBeTruthy();
-      // The next thing the builder types is a new attempt: the old refusal does not stick.
-      fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), {
-        target: { value: 'again' },
-      });
-      expect(screen.queryByText('The daemon is busy.')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Send Now Reading Only' })).toBeNull();
     });
 
-    it('sends File as Tasks with wait, so it does not cancel the wait', async () => {
-      const { served } = openParked();
-      await screen.findByText(/^Waits for Your folder/);
-      fireEvent.click(screen.getByRole('button', { name: 'More ways to hand off' }));
+    it('File as Tasks sends with wait, so it does not cancel the wait', async () => {
+      const chat = chatDto({ projectId: project.id });
+      const { served } = openChat({ id: chat.id, conversationId: chat.conversationId }, () => [], [
+        http.get(daemonUrl('/projects/:projectId/folder'), () =>
+          HttpResponse.json(waiting(chat, [])),
+        ),
+      ]);
+      await screen.findByText('Your message runs once the checkout is free.');
+      fireEvent.click(screen.getByRole('button', { name: 'More session actions' }));
       fireEvent.click(await screen.findByRole('menuitem', { name: 'File as Tasks' }));
       await waitFor(() => {
         expect(bodies(served)).toEqual([{ text: FILE_AS_TASKS_MESSAGE, folder: 'wait' }]);

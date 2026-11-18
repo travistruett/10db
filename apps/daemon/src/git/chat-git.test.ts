@@ -96,6 +96,146 @@ describe('makeBranchHere', () => {
   });
 });
 
+describe('moveCommitsToBranch', () => {
+  /** Two local commits on main, with origin/main still at the first. */
+  function twoAhead(): { origin: string; tip: string } {
+    const origin = rg('rev-parse', 'HEAD');
+    for (const name of ['a.txt', 'b.txt']) {
+      write(name, `${name}\n`);
+      rg('add', name);
+      rg('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', `add ${name}`);
+    }
+    return { origin, tip: rg('rev-parse', 'HEAD') };
+  }
+
+  it('makes the branch at HEAD, switches to it and puts main back at the origin, keeping uncommitted work', async () => {
+    const { origin, tip } = twoAhead();
+    write('wip.txt', 'wip\n');
+    await git.moveCommitsToBranch(repo, {
+      name: 'topic',
+      base: 'main',
+      to: origin,
+      expectedOld: tip,
+    });
+    expect(rg('branch', '--show-current')).toBe('topic');
+    expect(rg('rev-parse', 'topic')).toBe(tip);
+    expect(rg('rev-parse', 'main')).toBe(origin);
+    expect(rg('ls-files', '--others', '--exclude-standard')).toBe('wip.txt');
+    expect(rg('status', '--porcelain')).toBe('?? wip.txt');
+  });
+
+  it('writes nothing when main is not where the caller saw it', async () => {
+    const { origin, tip } = twoAhead();
+    await expect(
+      git.moveCommitsToBranch(repo, {
+        name: 'topic',
+        base: 'main',
+        to: origin,
+        expectedOld: origin,
+      }),
+    ).rejects.toThrow(/moved/);
+    expect(rg('rev-parse', 'main')).toBe(tip);
+    expect(rg('branch', '--show-current')).toBe('main');
+    expect(rg('branch', '--list', 'topic')).toBe('');
+  });
+
+  it.each([
+    ['an existing branch name', 'main'],
+    ['a name that reads as an option', '-c'],
+  ])('refuses %s without moving main', async (_what, name) => {
+    const { origin, tip } = twoAhead();
+    await expect(
+      git.moveCommitsToBranch(repo, { name, base: 'main', to: origin, expectedOld: tip }),
+    ).rejects.toThrow();
+    expect(rg('rev-parse', 'main')).toBe(tip);
+    expect(rg('branch', '--show-current')).toBe('main');
+  });
+
+  describe('refuses, writing nothing, unless the checkout is as the caller saw it', () => {
+    const snapshot = () => [
+      rg('branch', '--show-current'),
+      rg('rev-parse', 'HEAD'),
+      rg('branch', '--format=%(refname) %(objectname)'),
+    ];
+
+    it('the checkout is on another branch', async () => {
+      const { origin, tip } = twoAhead();
+      rg('switch', '-q', '-c', 'other');
+      write('x.txt', 'x\n');
+      rg('add', 'x.txt');
+      rg('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'x');
+      const before = snapshot();
+      await expect(
+        git.moveCommitsToBranch(repo, {
+          name: 'topic',
+          base: 'main',
+          to: origin,
+          expectedOld: tip,
+        }),
+      ).rejects.toThrow(/not on main/);
+      expect(snapshot()).toEqual(before);
+    });
+
+    it('HEAD has moved past the commit the caller saw', async () => {
+      const { origin, tip } = twoAhead();
+      write('late.txt', 'late\n');
+      rg('add', 'late.txt');
+      rg('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'late');
+      const before = snapshot();
+      await expect(
+        git.moveCommitsToBranch(repo, {
+          name: 'topic',
+          base: 'main',
+          to: origin,
+          expectedOld: tip,
+        }),
+      ).rejects.toThrow(/moved/);
+      expect(snapshot()).toEqual(before);
+    });
+
+    it('the target is not an ancestor of the commit the caller saw', async () => {
+      const { tip } = twoAhead();
+      // A commit made on a side branch from the root: unrelated to main's tip.
+      rg('switch', '-q', '--orphan', 'side');
+      rg(
+        '-c',
+        'user.name=t',
+        '-c',
+        'user.email=t@example.com',
+        'commit',
+        '-q',
+        '--allow-empty',
+        '-m',
+        'orphan',
+      );
+      const unrelated = rg('rev-parse', 'HEAD');
+      rg('switch', '-q', 'main');
+      const before = snapshot();
+      await expect(
+        git.moveCommitsToBranch(repo, {
+          name: 'topic',
+          base: 'main',
+          to: unrelated,
+          expectedOld: tip,
+        }),
+      ).rejects.toThrow(/ancestor/);
+      expect(snapshot()).toEqual(before);
+    });
+  });
+
+  it('runs no hook', async () => {
+    const { origin, tip } = twoAhead();
+    const marker = plantHooks();
+    await git.moveCommitsToBranch(repo, {
+      name: 'topic',
+      base: 'main',
+      to: origin,
+      expectedOld: tip,
+    });
+    expect(existsSync(marker)).toBe(false);
+  });
+});
+
 describe('commitInFolder', () => {
   it('commits the named paths, an untracked one too, and leaves another staged file staged', async () => {
     write('staged.txt', 'staged\n');

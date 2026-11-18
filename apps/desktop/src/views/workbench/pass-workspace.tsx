@@ -1,53 +1,51 @@
 import { PassState, type TaskId } from '@10db/contracts';
-import { Box, Button, Flex } from '@mantine/core';
+import { Box, Button, Flex, Text } from '@mantine/core';
 import { IconPlus } from '@tabler/icons-react';
-import { useElementSize, useMergedRef } from '@mantine/hooks';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { markPassNotificationsActed, shownPassNotifications } from '../../desktop/notify-pass';
+import { useFrameSlots } from '../../shell/frame-slots';
+import { Panel } from '../../shell/panel';
 import { useNow } from '../../shell/relative';
+import { TitleRow } from '../../shell/title-row';
 import { Announcer } from './announcer';
 import { hasContent } from '../../conversation/drafts';
 import { draftKey, sessionDrafts, useSessionDraft } from '../sessions/session-drafts';
 import { focusTarget } from './focus-target';
+import { CodeSpans } from '../../shell/code-spans';
 import { PagePane } from './page-pane';
-import { PrButton } from './pr-button';
+import { countsLine, PassMenu } from './pass-header';
+import { PageStatus } from './page-status';
+import { PrButton, PrReason } from './pr-button';
+import { RowMenu } from './row-menu';
 import type { PassWorkspaceProps } from './pass-workspace-props';
 import { QUEUE_ATTRIBUTE, QueueList } from './queue-list';
 import { queueRows, shownRow } from './queue-rows';
 import { TakeOutModal } from './take-out-modal';
 import { useWorkbenchKeys } from './use-workbench-keys';
 import { nextWaiting, stepIndex, WorkbenchKey } from './workbench-keys';
-import { WorkbenchLayout, workbenchLayout } from './workbench-layout';
-
-/** The queue's width beside the thread in the wide layout. */
-const QUEUE_WIDTH_PX = 220;
 
 /** A working line's minutes move once a minute; half that keeps them on time. */
 const CLOCK_TICK_MS = 30_000;
 
 /**
- * The open pass's queue and the shown page's thread (Workbench spec §4.3). Narrow: the queue is a strip
- * of rows across the top and the thread fills the rest. Wide: the queue on the left, the thread beside
- * it. With no page selected the thread shows the queue's first page. Each page keeps its own draft,
- * after the Workbench is left too.
+ * The open pass's queue and the shown page's thread (Workbench spec §4.3). While the frame draws the
+ * panel the queue is the panel's body, under the pass's name and menu, and the title row names the
+ * shown page; otherwise (the panel folded, closed or absent) the queue is a strip of rows across the top
+ * of the content and the pass's own line is the title row's. The queue is drawn once either way. With no
+ * page selected the thread shows the queue's first page. Each page keeps its own draft, after the
+ * Workbench is left too.
  */
 export function PassWorkspace(props: PassWorkspaceProps) {
-  const { view, inbox, project, selected, onSelect, onAddPage } = props;
+  const { view, inbox, project, selected, onAddPage, passActions } = props;
+  const { panelShown, closeSheet } = useFrameSlots();
   const now = useNow(CLOCK_TICK_MS);
-  // The Workbench's own width, not the window's: the rail and panel take some of the window.
-  const { ref: observedRef, width: observedWidth } = useElementSize();
-  const [firstWidth, setFirstWidth] = useState(0);
-  const root = useRef<HTMLDivElement | null>(null);
-  const rootRef = useMergedRef(observedRef, root);
-  // The observer reports after the first paint, so the width is read once before it: the wide layout
-  // is not preceded by a frame of the narrow one.
-  useLayoutEffect(() => {
-    setFirstWidth(root.current?.getBoundingClientRect().width ?? 0);
-  }, []);
-  const layout = workbenchLayout(observedWidth || firstWidth);
   const rows = queueRows(view, inbox, now);
   const shown = shownRow(rows, selected);
-  const wide = layout === WorkbenchLayout.Wide;
+  // A row picked in a sheet closes it, as the page it shows does not change the path the frame watches.
+  const onSelect = (taskId: TaskId): void => {
+    closeSheet();
+    props.onSelect(taskId);
+  };
   // Each page's unsent draft is kept by its task, as Sessions keeps a task tab's, so another page, another
   // view or a restart (its words) finds it where it was left.
   const [draft, setDraft] = useSessionDraft(draftKey.task(shown?.page.taskId ?? ''));
@@ -75,7 +73,7 @@ export function PassWorkspace(props: PassWorkspaceProps) {
       });
       if (target !== null) {
         markPassNotificationsActed(target);
-        if (target !== shown?.page.taskId) onSelect(target);
+        if (target !== shown?.page.taskId) props.onSelect(target);
       }
       if (document.querySelector('[role="dialog"]') === null)
         setComposerFocus((asked) => asked + 1);
@@ -93,6 +91,34 @@ export function PassWorkspace(props: PassWorkspaceProps) {
 
   // J and K move the focus along the queue's rows, and Enter on a row selects it.
   const queue = useRef<HTMLDivElement>(null);
+  // The queue is a new list when it moves between the panel and the strip, which drops the focus it held:
+  // where the focus last went says whether it was in the queue, and it goes back to the shown page's row.
+  const focusInQueue = useRef(false);
+  useEffect(() => {
+    const track = (event: FocusEvent): void => {
+      focusInQueue.current =
+        event.target instanceof Node && queue.current?.contains(event.target) === true;
+    };
+    // A row that lets go of the cursor on purpose (a pointer pick hands it to the composer) leaves the queue;
+    // a row removed while it held the cursor is not connected any more and leaves the answer as it was.
+    const release = (event: FocusEvent): void => {
+      if (event.relatedTarget === null && event.target instanceof Node && event.target.isConnected)
+        focusInQueue.current = false;
+    };
+    document.addEventListener('focusin', track);
+    document.addEventListener('focusout', release);
+    return () => {
+      document.removeEventListener('focusin', track);
+      document.removeEventListener('focusout', release);
+    };
+  }, []);
+  const placed = useRef(panelShown);
+  useLayoutEffect(() => {
+    if (placed.current === panelShown) return;
+    placed.current = panelShown;
+    if (focusInQueue.current)
+      queue.current?.querySelector<HTMLButtonElement>('button[aria-current]')?.focus();
+  }, [panelShown]);
   const move = (delta: 1 | -1): void => {
     // The rows' own buttons, not their menus.
     const buttons = [
@@ -125,44 +151,97 @@ export function PassWorkspace(props: PassWorkspaceProps) {
         rows.map((row) => ({ taskId: row.page.taskId, status: row.status })),
         shown?.page.taskId ?? null,
       );
-      if (next !== null) onSelect(next);
+      if (next !== null) props.onSelect(next);
     },
   });
 
-  return (
-    <Flex ref={rootRef} direction={wide ? 'row' : 'column'} style={{ flex: 1, minHeight: 0 }}>
-      <Box
-        ref={queue}
-        style={{
-          flex: 'none',
-          width: wide ? QUEUE_WIDTH_PX : undefined,
-          borderRight: wide ? '1px solid var(--mantine-color-default-border)' : undefined,
-          overflowY: 'auto',
-        }}
-      >
-        <QueueList
-          rows={rows}
-          current={shown?.page.taskId ?? null}
-          onSelect={onSelect}
-          onTakeOut={view.pass.state === PassState.Open ? setTakingOut : null}
-        />
-        {/* A page is added where the pages are: an outline at the list's foot, quieter than a row. */}
-        <Box p="xs">
-          <Button
-            variant="default"
-            size="xs"
-            fullWidth
-            justify="flex-start"
-            leftSection={<IconPlus size={14} stroke={1.5} />}
-            disabled={view.pass.state !== PassState.Open}
-            onClick={onAddPage}
-            style={{ borderStyle: 'dashed', background: 'transparent', fontWeight: 400 }}
-          >
-            Add Page
-          </Button>
-        </Box>
-        <Announcer rows={rows} />
+  const queueList = (
+    <>
+      <QueueList
+        rows={rows}
+        current={shown?.page.taskId ?? null}
+        onSelect={onSelect}
+        onTakeOut={view.pass.state === PassState.Open ? setTakingOut : null}
+      />
+      {/* A page is added where the pages are: an outline at the list's foot, quieter than a row. */}
+      <Box p="xs">
+        <Button
+          variant="default"
+          size="xs"
+          fullWidth
+          justify="flex-start"
+          leftSection={<IconPlus size={14} stroke={1.5} />}
+          disabled={view.pass.state !== PassState.Open}
+          onClick={onAddPage}
+          style={{ borderStyle: 'dashed', background: 'transparent', fontWeight: 400 }}
+        >
+          Add Page
+        </Button>
       </Box>
+    </>
+  );
+  const counts = countsLine(rows.map((row) => row.status));
+  const signedOff = rows.some((row) => row.status === PageStatus.SignedOff);
+
+  return (
+    <Flex direction="column" style={{ flex: 1, minHeight: 0 }}>
+      {/* Always mounted, so the frame knows the section has a panel; it holds the queue only while drawn. */}
+      <Panel
+        section="workbench"
+        title={view.pass.name}
+        controls={
+          panelShown && view.pages.length > 0 && passActions !== undefined ? (
+            <PassMenu state={view.pass.state} {...passActions} />
+          ) : undefined
+        }
+      >
+        {panelShown ? (
+          <div ref={queue}>
+            {counts === '' ? null : (
+              <Text size="xs" c="dimmed" px="sm" pb={6}>
+                {counts}
+              </Text>
+            )}
+            {signedOff ? (
+              <Box px="sm" pb="xs">
+                <PrButton view={view} />
+                <PrReason view={view} />
+              </Box>
+            ) : null}
+            {queueList}
+          </div>
+        ) : null}
+      </Panel>
+      {panelShown && shown !== null ? (
+        <TitleRow
+          title={shown.page.label}
+          meta={
+            <CodeSpans
+              text={
+                shown.page.route === null
+                  ? shown.state.line
+                  : `${shown.state.line} · ${shown.page.route}`
+              }
+            />
+          }
+          actions={
+            view.pass.state === PassState.Open ? (
+              <RowMenu
+                label={shown.page.label}
+                onTakeOut={() => {
+                  setTakingOut(shown.page.taskId);
+                }}
+              />
+            ) : undefined
+          }
+        />
+      ) : null}
+      {panelShown ? null : (
+        <Box ref={queue} style={{ flex: 'none', overflowY: 'auto' }}>
+          {queueList}
+        </Box>
+      )}
+      <Announcer rows={rows} />
       {shown === null ? null : (
         <PagePane
           passId={view.pass.id}
