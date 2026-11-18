@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Runs every repository check and ends with one summary line, which gives each step's seconds in the order
-# the steps ran. Each step's output goes to .gate/<step>.log.
+# the steps ran. Each step's output goes to .gate/<step>.log; the test and e2e steps also print theirs as
+# they run.
 # GATE_STEPS="lint test" limits the run (used by tests and for quick reruns). GATE_SKIP_RUST=1
 # reports rust as skipped even when cargo is installed (a Linux machine with no Tauri system libraries).
 # GATE_TEST_ARGS="--shard=1/4" adds arguments to the test step, split on spaces (CI's test shards).
@@ -33,11 +34,27 @@ run_step() {
   command=" $* "
   command=${command// -s / }
   command=${command# }
-  if ! "$@" > ".gate/$name.log" 2>&1; then
+  local status=0
+  if [[ $live == 1 ]]; then
+    # pipefail gives the step's own status, not tee's.
+    "$@" 2>&1 | tee ".gate/$name.log" || status=$?
+  else
+    "$@" > ".gate/$name.log" 2>&1 || status=$?
+  fi
+  if [[ $status != 0 ]]; then
     failed+=("$name")
     failed_lines+=("FAILED $name: ${command% } (log .gate/$name.log)")
   fi
   steps_run+=("$name $((SECONDS - began))s")
+}
+
+# The test and e2e steps print their output as they run, as well as to their log, so a step that
+# hangs until a timeout kills the gate still shows the test it was running.
+live=0
+run_step_live() {
+  live=1
+  run_step "$@"
+  live=0
 }
 
 # cargo reads the crates.io index and downloads crates from two hosts. Inside a sandbox whose network
@@ -57,7 +74,7 @@ for step in "${steps[@]}"; do
     lint) run_step lint pnpm -s lint ;;
     typecheck) run_step typecheck pnpm -s typecheck ;;
     # bash 3.2 treats expanding an empty array as unbound under set -u.
-    test) run_step test pnpm -s test ${test_args[@]+"${test_args[@]}"} ;;
+    test) run_step_live test pnpm -s test ${test_args[@]+"${test_args[@]}"} ;;
     build) run_step build pnpm -s build ;;
     e2e)
       # WebKit runs its page, network and GPU processes as XPC services that launchd starts outside
@@ -65,7 +82,7 @@ for step in "${steps[@]}"; do
       if [[ "${TENDB_SANDBOX:-}" == 1 ]]; then
         steps_run+=("e2e skipped (sandboxed)")
       else
-        run_step e2e pnpm -s --filter @10db/desktop e2e ${e2e_args[@]+"${e2e_args[@]}"}
+        run_step_live e2e pnpm -s --filter @10db/desktop e2e ${e2e_args[@]+"${e2e_args[@]}"}
       fi
       ;;
     drift) run_step drift pnpm -s drift ;;
