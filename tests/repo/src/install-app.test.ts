@@ -308,6 +308,19 @@ describe('install-app.sh puts the previous app back', () => {
 });
 
 describe('install-app.sh', () => {
+  it.each([
+    { name: 'a download that fails once is tried again and installs', fails: '1', status: 0 },
+    { name: 'a download that fails twice stops with gh’s own error', fails: '2', status: 1 },
+  ])('$name', ({ fails, status }) => {
+    const result = install([], { STUB_DOWNLOAD_FAILS: fails, TENDB_INSTALL_RETRY_SECONDS: '0' });
+    expect(result.status).toBe(status);
+    expect(gh().filter((call) => call.startsWith('gh run download 42 '))).toHaveLength(2);
+    if (status === 1) {
+      expect(result.stderr).toContain('HTTP 502: Bad Gateway');
+      expectUntouched();
+    }
+  });
+
   it('reuses the build of the head commit when it has finished, and says it is not behind', () => {
     const result = install();
     expect(result.status).toBe(0);
