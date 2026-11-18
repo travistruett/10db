@@ -8,6 +8,7 @@ import {
   chatServer,
   type ChatServerOptions,
 } from '../../test/chat-fixtures';
+import { chatWorkKeys } from '../../daemon/chat-work-queries';
 import { chatWorkStateDto } from '../../test/chat-work-fixtures';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { projectViewDto } from '../../test/fixtures';
@@ -190,6 +191,47 @@ describe('Commit…', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'Commit' })).toBeNull();
     });
+  });
+
+  it('says in the form that the commit waits while the session’s own turn runs', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    open({ next: ChatGitStep.Commit, touched: ['src/a.ts'] }, { changes }, 'running');
+    server.use(
+      http.post(daemonUrl('/chats/:chatId/commit'), async () => {
+        await gate;
+        return HttpResponse.json(chatWorkStateDto());
+      }),
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Commit…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Commit' });
+    await within(dialog).findByRole('checkbox', { name: 'src/a.ts' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Commit' }));
+    expect(
+      await within(dialog).findByRole('button', { name: 'Waits for the turn to end' }),
+    ).toBeTruthy();
+    release();
+  });
+
+  it('keeps the form and its edits when the next step stops being Commit under it', async () => {
+    const { queryClient } = open({ next: ChatGitStep.Commit, touched: ['src/a.ts'] }, { changes });
+    fireEvent.click(await screen.findByRole('button', { name: 'Commit…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Commit' });
+    fireEvent.change(within(dialog).getByLabelText('Message'), { target: { value: 'My words' } });
+    server.use(
+      http.get(daemonUrl('/chats/:chatId/work'), () =>
+        HttpResponse.json(chatWorkStateDto({ place: 'branch', next: ChatGitStep.OpenPullRequest })),
+      ),
+    );
+    await queryClient.invalidateQueries({ queryKey: chatWorkKeys.all });
+    await screen.findByRole('button', { name: 'Open Pull Request' });
+    expect(
+      within(screen.getByRole('dialog', { name: 'Commit' })).getByLabelText<HTMLInputElement>(
+        'Message',
+      ).value,
+    ).toBe('My words');
   });
 
   it('keeps the form open with the daemon’s words when the commit is refused', async () => {
