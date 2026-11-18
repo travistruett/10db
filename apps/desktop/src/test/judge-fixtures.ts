@@ -1,16 +1,14 @@
 import {
   DecisionModelDto,
-  DecisionStatsDto,
   type DecisionStatsListDto,
   DEFAULT_JUDGE_CONFIG,
   type AccountDto,
   type AskedDecision,
-  JudgeCallDto,
+  type JudgeCallDto,
   JudgeCallsPageQuery,
   JudgeConfigPatch,
   JudgeDecision,
   JudgeStatusDto,
-  mintId,
   SHAPE_JUDGE_DECISIONS,
   ShapeMeasuresDto,
 } from '@10db/contracts';
@@ -39,45 +37,6 @@ export function shapeMeasuresDto(overrides: Partial<ShapeMeasuresDto> = {}): Sha
       agreed: 0,
       canShow: false,
     })),
-    ...overrides,
-  });
-}
-
-export function judgeCallDto(overrides: Partial<JudgeCallDto> = {}): JudgeCallDto {
-  return JudgeCallDto.parse({
-    id: mintId('JudgeCall'),
-    decision: JudgeDecision.ReviewSize,
-    model: 'typesafe/jev-1.13',
-    question: 'Does this change need an independent code review?',
-    answer: 'skip',
-    confidence: 0.93,
-    outcome: 'acted',
-    latencyMs: 410,
-    costUsd: 0.0001,
-    workstreamId: null,
-    taskId: null,
-    createdAt: '2026-10-31T12:00:00.000Z',
-    ...overrides,
-  });
-}
-
-/** A decision's last 30 days: no calls unless `overrides` says so. */
-export function decisionStatsDto(
-  decision: JudgeDecision,
-  overrides: Partial<DecisionStatsDto> = {},
-): DecisionStatsDto {
-  return DecisionStatsDto.parse({
-    decision,
-    calls: 0,
-    acted: 0,
-    belowFloor: 0,
-    shadow: 0,
-    overridden: 0,
-    stopped: 0,
-    fallbacks: { off: 0, no_key: 0, timeout: 0, error: 0 },
-    costUsd: 0,
-    medianLatencyMs: null,
-    answers: [],
     ...overrides,
   });
 }

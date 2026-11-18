@@ -1,10 +1,4 @@
-import {
-  mintId,
-  PersonDto,
-  SlackConnectionDto,
-  SlackMemberDto,
-  StakeholderSendDto,
-} from '@10db/contracts';
+import { mintId, PersonDto, SlackConnectionDto, StakeholderSendDto } from '@10db/contracts';
 
 const AT = '2026-10-13T12:00:00.000Z';
 
@@ -44,19 +38,6 @@ export function slackConnection(over: Record<string, unknown> = {}): SlackConnec
     botUserId: null,
     checkedAt: null,
     error: null,
-    ...over,
-  });
-}
-
-export function slackMember(over: Record<string, unknown> = {}): SlackMemberDto {
-  return SlackMemberDto.parse({
-    userId: 'U1',
-    teamId: 'T1',
-    name: 'mark',
-    realName: 'Mark Ellis',
-    title: 'Product',
-    email: 'mark@acme.test',
-    avatarUrl: null,
     ...over,
   });
 }

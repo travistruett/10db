@@ -101,11 +101,6 @@ export function withState(search: InboxSearch, state: InboxPanelState): InboxSea
   return inboxSearch({ ...search, state: state === InboxListState.Open ? undefined : state });
 }
 
-/** The search narrowed to a project, or to every project when `project` is null. */
-export function withProject(search: InboxSearch, project: ProjectId | null): InboxSearch {
-  return inboxSearch({ ...search, project: project ?? undefined });
-}
-
 /** The search with one key set, or removed when `value` is null. */
 export function withFilter<K extends 'q' | 'project' | 'kind' | 'outcome' | 'person' | 'since'>(
   search: InboxSearch,

@@ -26,7 +26,7 @@ const SYNCED = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
 const FETCHED = new Date(Date.now() - 2 * 60_000).toISOString();
 
 /** A daemon where every connection works, serving `accounts`. */
-function serve(accounts: unknown) {
+function serve(accounts: ReturnType<typeof accountDto>[]) {
   server.use(
     http.get(daemonUrl('/accounts'), () => HttpResponse.json(accounts)),
     http.get(daemonUrl('/github'), () => HttpResponse.json(githubStatusDto())),
