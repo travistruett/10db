@@ -1,6 +1,7 @@
 import {
   CHAT_DEFAULT_TITLE,
   ConflictError,
+  Delivery,
   WorkPlace,
   type ChatCommitRequest,
   type ChatId,
@@ -12,6 +13,7 @@ import type { FolderHold } from '../folder-hold';
 import type { Git } from '../git';
 import { blockingHolder, checkoutHolderWords } from './checkout-words';
 import { gitSteps, type GitStepsDeps, type StepSite } from './git-steps';
+import { branchFor } from './chat-worktree';
 import { refuseOwnBranch } from './git-names';
 import type { ChatWorkService } from './work-service';
 
@@ -24,7 +26,11 @@ export interface TitleRowGitDeps extends GitStepsDeps {
   readonly state: StateStore;
   readonly folderHold: FolderHold;
   readonly work: Pick<ChatWorkService, 'state' | 'forgetPullRequest'>;
-  readonly git: GitStepsDeps['git'] & Pick<Git, 'currentBranch'>;
+  readonly git: GitStepsDeps['git'] &
+    Pick<
+      Git,
+      'currentBranch' | 'changedPaths' | 'trackingTip' | 'localBranches' | 'moveCommitsToBranch'
+    >;
 }
 
 export interface TitleRowGit {
@@ -34,6 +40,11 @@ export interface TitleRowGit {
     request: ChatCommitRequest,
     signal: AbortSignal,
   ): Promise<ChatWorkStateDto>;
+  /**
+   * Pushes the session's branch and opens its pull request. From the base branch, the commits first move to a
+   * branch of their own and the base goes back to its origin.
+   */
+  openPullRequest(chatId: ChatId, signal: AbortSignal): Promise<ChatWorkStateDto>;
 }
 
 const MOVING_WORDS = 'Wait for the move to finish.';
@@ -120,7 +131,74 @@ export function createTitleRowGit(deps: TitleRowGitDeps): TitleRowGit {
     return result;
   }
 
+  /** The branch a session's commits are on, made from the base branch first when the checkout is still on it. */
+  async function branchForPullRequest(
+    site: StepSite,
+    chatId: ChatId,
+    base: string,
+  ): Promise<string> {
+    const chat = getChat(state.db, chatId);
+    const branch = await deps.git.currentBranch(site.repo);
+    if (branch === null)
+      throw new ConflictError(
+        'The session is on no branch (a detached HEAD), so there is nothing to push.',
+      );
+    if (chat.workPlace !== WorkPlace.Here || branch !== base) return branch;
+    if ((await deps.git.changedPaths(site.repo)).length > 0)
+      throw new ConflictError(
+        `Your checkout has uncommitted changes on ${base}. Commit them first, so the commits can move to a branch of their own.`,
+      );
+    const origin = await deps.git.trackingTip(site.repo, base);
+    if (origin === null)
+      throw new ConflictError(`origin/${base} is not known here, so ${base} can't be put back.`);
+    const head = await deps.git.head(site.repo);
+    const taken = (await deps.git.localBranches(site.repo, '')).map((b) => b.name);
+    const { branch: name } = branchFor(
+      chat.title ?? CHAT_DEFAULT_TITLE,
+      { branches: taken, paths: [] },
+      (b) => b,
+    );
+    await deps.git.moveCommitsToBranch(site.repo, {
+      name,
+      base,
+      to: origin,
+      expectedOld: head,
+      beforeWrite: site.beforeWrite,
+    });
+    return name;
+  }
+
   return {
+    openPullRequest(chatId, signal) {
+      return step(chatId, 'pull-request', async () => {
+        const chat = getChat(state.db, chatId);
+        const project = getProject(state.db, chat.projectId);
+        if (project.delivery === Delivery.Local)
+          throw new ConflictError(
+            'This project merges locally, so there is no pull request to open.',
+          );
+        const title = chat.title ?? CHAT_DEFAULT_TITLE;
+        const made: { branch: string | null } = { branch: null };
+        try {
+          await inFolder(chatId, `opening a pull request for ‘${title}’`, signal, async (site) => {
+            const branch = await branchForPullRequest(site, chatId, project.baseBranch);
+            made.branch = branch;
+            await steps.push(site, branch);
+            await steps.openPullRequest(site, {
+              conversationId: chat.conversationId,
+              branch,
+              base: project.baseBranch,
+              title,
+              body: '',
+            });
+          });
+        } finally {
+          if (made.branch !== null) deps.work.forgetPullRequest(chatId, made.branch);
+        }
+        return deps.work.state(chatId, signal);
+      });
+    },
+
     commit(chatId, request, signal) {
       return step(chatId, 'commit', async () => {
         const title = getChat(state.db, chatId).title ?? CHAT_DEFAULT_TITLE;

@@ -42,6 +42,7 @@ export type ChatApiServices = Pick<
   | 'chatWorkState'
   | 'chatChanges'
   | 'chatCommit'
+  | 'chatPullRequest'
   | 'stopChatWaiting'
   | 'askChatBrief'
   | 'cancelChatBrief'
@@ -109,6 +110,7 @@ export function createChatApiServices(deps: {
     chatWorkState: (id, signal) => deps.work.state(id, signal),
     chatChanges: (id) => deps.changes(id),
     chatCommit: (id, request, signal) => deps.titleRow.commit(id, request, signal),
+    chatPullRequest: (id, signal) => deps.titleRow.openPullRequest(id, signal),
     stopChatWaiting(id) {
       chat.stopWaiting(id);
       return chat.get(id);

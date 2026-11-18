@@ -64,6 +64,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     chatWorkState: none,
     chatChanges: none,
     chatCommit: none,
+    chatPullRequest: none,
     stopChatWaiting: none,
     askChatBrief: none,
     cancelChatBrief: none,

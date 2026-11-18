@@ -12,6 +12,7 @@ import type { ChatWorld } from './chat-world';
 /** A world whose title row has no git: its steps are refused. */
 const NO_TITLE_ROW: TitleRowGit = {
   commit: () => Promise.reject(new Error('This world has no title-row git.')),
+  openPullRequest: () => Promise.reject(new Error('This world has no title-row git.')),
 };
 
 /** The token the app under test accepts. */

@@ -61,7 +61,10 @@ function appOf(world: ChatWorld) {
         doItPreview: () => Promise.reject(new Error('not read here')),
         doIt: () => Promise.reject(new Error('not done here')),
         changes: () => Promise.reject(new Error('not read here')),
-        titleRow: { commit: () => Promise.reject(new Error('not done here')) },
+        titleRow: {
+          commit: () => Promise.reject(new Error('not done here')),
+          openPullRequest: () => Promise.reject(new Error('not done here')),
+        },
         // The world's checkout is no repository: its branch can't be read.
         git: () => Promise.reject(new Error('not a repository')),
         now: () => new Date(),

@@ -702,6 +702,8 @@ export interface ApiServices extends PlanRecordServices {
     request: ChatCommitRequest,
     signal: AbortSignal,
   ): Promise<ChatWorkStateDto>;
+  /** The title row's Open Pull Request: pushes the session's branch and opens it; answers the state after. */
+  chatPullRequest(id: ChatId, signal: AbortSignal): Promise<ChatWorkStateDto>;
   /** What the session changed, for the drawer's Changes. */
   chatChanges(id: ChatId): Promise<WorkstreamChangesDto>;
   /** The git and GitHub facts the title row and the bar are drawn from; `signal` ends the GitHub read. */
