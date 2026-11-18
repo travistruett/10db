@@ -3,6 +3,7 @@ import {
   SelfUpdateStatusDto,
   SystemCheckDto,
   type BenchmarkSyncWarning,
+  type CardTypesDto,
   type GoalDigestDto,
   type GoalListDto,
   type GoalSummaryDto,
@@ -1673,6 +1674,93 @@ describe('FactoryView human-touch panel', () => {
     renderApp('/factory');
 
     expect(await screen.findByText("Couldn't load how often a person was needed")).toBeTruthy();
+  });
+});
+
+describe('FactoryView card-types panel', () => {
+  const counts = (raised: number, acted: number, dismissed: number, withdrawn: number) => ({
+    raised,
+    acted,
+    dismissed,
+    withdrawn,
+  });
+
+  function cardTypes(types: CardTypesDto['types']): RequestHandler {
+    return http.get(daemonUrl('/projects/:projectId/card-types'), () =>
+      HttpResponse.json({ types }),
+    );
+  }
+
+  it('lists each card type with its counts for both windows and marks the noisy one', async () => {
+    serve(
+      goals(goalListDto()),
+      cardTypes([
+        {
+          type: 'machine-overloaded',
+          last7Days: counts(57, 0, 0, 55),
+          last30Days: counts(64, 0, 0, 61),
+          noisy: true,
+        },
+        {
+          type: 'question',
+          last7Days: counts(9, 8, 0, 0),
+          last30Days: counts(20, 18, 1, 0),
+          noisy: false,
+        },
+      ]),
+    );
+    renderApp('/factory');
+
+    const table = await screen.findByRole('table', { name: 'Inbox card types' });
+    expect(
+      within(table)
+        .getAllByRole('columnheader')
+        .map((h) => h.textContent),
+    ).toEqual([
+      'Card type',
+      'Raised, 7 days',
+      'Acted on, 7 days',
+      'Dismissed, 7 days',
+      'Withdrawn, 7 days',
+      'Raised, 30 days',
+      'Acted on, 30 days',
+      'Dismissed, 30 days',
+      'Withdrawn, 30 days',
+      '',
+    ]);
+    const [noisy, fine] = within(table)
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) =>
+        within(row)
+          .getAllByRole('cell')
+          .map((c) => c.textContent),
+      );
+    expect(noisy).toEqual([
+      'machine-overloaded',
+      '57',
+      '0',
+      '0',
+      '55',
+      '64',
+      '0',
+      '0',
+      '61',
+      'Noisy',
+    ]);
+    expect(fine).toEqual(['question', '9', '8', '0', '0', '20', '18', '1', '0', '']);
+  });
+
+  it('says so when the card types cannot be loaded', async () => {
+    serve(
+      goals(goalListDto()),
+      http.get(daemonUrl('/projects/:projectId/card-types'), () =>
+        HttpResponse.json({ error: 'internal', message: 'boom' }, { status: 500 }),
+      ),
+    );
+    renderApp('/factory');
+
+    expect(await screen.findByText("Couldn't load the Inbox card types")).toBeTruthy();
   });
 });
 
