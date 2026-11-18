@@ -42,6 +42,7 @@ export function itemDtoOf(
         kind: row.kind,
         text: body.text,
         mentions: body.mentions ?? [],
+        ...(body.purpose === undefined ? {} : { purpose: body.purpose }),
         ...(extras.files.length === 0 ? {} : { files: extras.files }),
       });
     }
