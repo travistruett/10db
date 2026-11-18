@@ -7,18 +7,6 @@ import { PageRoute } from './task-screens';
 // §8.4: the Inbox cards a pass raises. Each card's `detail` is one of these, told apart by `kind`, so
 // the built `POST /inbox/:id/answer` dispatches on it.
 
-/** D8: the folder stays on the pass's branch, because its return branch is in use or moved. */
-export const PassBranchMovedDetail = z.object({
-  kind: z.literal('pass_branch_moved'),
-  passId: PassId,
-  returnBranch: z.string(),
-  passBranch: z.string(),
-  reason: z.enum(['in_use_elsewhere', 'moved']),
-  /** The command that merges the pass's branch into the return branch. */
-  mergeCommand: z.string(),
-});
-export type PassBranchMovedDetail = z.infer<typeof PassBranchMovedDetail>;
-
 /** Why the folder's branch was not realigned with the base by itself (D22). */
 export const PassMoveReason = {
   /** The pass closed; its pull request has not merged yet. */
@@ -54,17 +42,6 @@ export const PassRetargetDetail = z.object({
 export type PassRetargetDetail = z.infer<typeof PassRetargetDetail>;
 export const PASS_RETARGET_CHOICE = 'Retarget';
 
-/** A close's gate failed: the pass is open again, and the next Close Pass retries. It has no Retry. */
-export const PassGateFailedDetail = z.object({
-  kind: z.literal('pass_gate_failed'),
-  passId: PassId,
-  where: z.enum(['scratch', 'folder']),
-  logPath: z.string().nullable(),
-  /** The pages whose files the failure names. */
-  tasks: z.array(z.object({ taskId: TaskId, title: z.string() })),
-});
-export type PassGateFailedDetail = z.infer<typeof PassGateFailedDetail>;
-
 /**
  * §8.4: a pass task asked for a hazard (migrations, dependencies) that runs in a separate copy, or broke
  * the preview of its route on two turns running; exactly one of `hazard` and `route` names why. A card
@@ -87,26 +64,11 @@ export type PassMoveToCopyDetail = z.infer<typeof PassMoveToCopyDetail>;
 export const PASS_MOVE_TO_COPY_CHOICE = 'Move to a Separate Copy';
 export const PASS_NOT_NOW_CHOICE = 'Not Now';
 
-/** The pass's pull request merged while it was open: it closed, and its unfinished pages carry over. */
-export const PassFollowOnDetail = z.object({
-  kind: z.literal('pass_follow_on'),
-  passId: PassId,
-  /** The pass the unfinished pages carried over to; null when none was left. */
-  followOnPassId: PassId.nullable(),
-  /** A follow-on pull request for sign-offs after the last push; null when none was opened. */
-  prUrl: z.string().nullable(),
-  carried: z.array(TaskId),
-});
-export type PassFollowOnDetail = z.infer<typeof PassFollowOnDetail>;
-
 /** The detail of any card a pass raises, by `kind`. */
 export const PassCardDetail = z.discriminatedUnion('kind', [
   SharedAskDetail,
-  PassBranchMovedDetail,
   PassMoveDetail,
   PassRetargetDetail,
-  PassGateFailedDetail,
   PassMoveToCopyDetail,
-  PassFollowOnDetail,
 ]);
 export type PassCardDetail = z.infer<typeof PassCardDetail>;

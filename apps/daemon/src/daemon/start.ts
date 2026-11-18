@@ -210,7 +210,7 @@ import {
   type GhTools,
 } from '../github';
 import { createGithubServices } from './github-services';
-import { createInboxService, createParkAnswers, leftWithBuilder } from '../inbox';
+import { CardTier, createInboxService, createParkAnswers, leftWithBuilder } from '../inbox';
 import { repairKnowledgeIndex } from '../knowledge';
 import { backfillAttachmentRevisions } from '../plan-record';
 import { guessPendingPageLabels, seedPendingPageLabels } from './page-label-guess';
@@ -386,6 +386,7 @@ import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { autoDocker } from './auto-docker';
 import { MAX_DOCKER_SCAN_BYTES, originBaseCommit } from './docker-need';
 import { createProjectPinStore } from './checkout-pins';
+import { resolveNoticeCards } from './notice-sweep';
 import {
   createCheckoutTrustedHandler,
   createGitCardAnswers,
@@ -1951,6 +1952,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     ...(opts.laneBrief === undefined ? {} : { laneBrief: opts.laneBrief }),
   });
   runner = createdRunner;
+  const closedNoticeCards = resolveNoticeCards(state.db, inbox);
+  if (closedNoticeCards > 0) {
+    logger.info({ closed: closedNoticeCards }, 'closed open cards that are notices now');
+  }
   const createdScheduler = createScheduler({
     state,
     folderHold,
@@ -2379,8 +2384,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     stopChatForOpen: (chatId) => chat.stopForOpen(chatId),
     logger: logger.child({ component: 'pass-open' }),
     draining: () => updateDrain.draining,
-    notify: (projectId, title, body) => {
-      inbox.flag({ projectId, workstreamId: null, title, body });
+    notify: (projectId, name, title, body) => {
+      inbox.notice({
+        tier: CardTier.Notice,
+        projectId,
+        taskId: null,
+        // A pass that waited has no id yet, so its name tells one open from another.
+        key: `pass-open-failed:${name.slice(0, 120)}`,
+        tone: 'warning',
+        line: title,
+        body,
+      });
     },
   };
   const services = createServices({
@@ -2658,10 +2672,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
             updateDrain.begin(since);
             // An open that waits for chats' turns would hold the update's wait on 10db's jobs for good.
             for (const { projectId, name } of pendingOpens.cancelAll())
-              inbox.flag({
+              inbox.notice({
+                tier: CardTier.Notice,
                 projectId,
-                workstreamId: null,
-                title: `Pass ‘${name}’ was cancelled for 10db’s update`,
+                taskId: null,
+                key: `pass-open-cancelled:${name.slice(0, 120)}`,
+                tone: 'info',
+                line: `Pass ‘${name}’ was cancelled for 10db’s update`,
                 body: 'It was waiting for chats’ turns to end. Open it again once the update is done.',
               });
           },

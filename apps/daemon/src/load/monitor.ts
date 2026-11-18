@@ -5,6 +5,7 @@ import {
   type InboxItemId,
   type ProjectId,
   type WorkstreamId,
+  Urgency,
 } from '@10db/contracts';
 import {
   findOpenByFoldKey,
@@ -36,6 +37,7 @@ import {
   type LoadReading,
   type OverloadReport,
 } from './guard';
+import { CardTier } from '../inbox';
 
 /** The temp dir of each lane session that is running, which the runner records and forgets. */
 export interface LaneTempDirs {
@@ -162,6 +164,10 @@ export function createLoadMonitor(opts: LoadMonitorOptions): LoadGuard {
     const item = opts.inbox.flag({
       projectId: cardProject,
       workstreamId: null,
+      tier: CardTier.Status,
+      urgency: Urgency.Low,
+      // S2: status line
+      closesWhen: { by: 'withdrawn', when: 'the load hold lifts (monitor)' },
       title: content.title,
       body: content.body,
       foldKey: content.foldKey,

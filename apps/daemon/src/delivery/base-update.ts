@@ -110,7 +110,7 @@ export type BaseUpdate =
    * and the regeneration reported a problem (the install it needs failed, a generator failed, it
    * changed nothing, or it lost a file of the branch's), so the merge at `head` lacks the batch's own
    * changes there. The caller puts it back and pushes nothing, with or without a check; `note` says
-   * what went wrong and is the whole of what the builder is told, since no regenerate card is raised
+   * what went wrong and is the whole of what the builder is told, since no regenerate notice is raised
    * for a merge that is put back.
    */
   | { readonly kind: 'unregenerated'; readonly head: string; readonly note: string }
@@ -163,7 +163,7 @@ export type BaseUpdate =
   /**
    * Shutdown or a cancel stopped it: no gate runs. Asked for a pull request, `head` is the head the
    * update had written when it stopped, when it had made a merge: the caller puts that merge back
-   * like any other it does not push, and no regenerate card is raised for it.
+   * like any other it does not push, and no regenerate notice is raised for it.
    */
   | { readonly kind: 'aborted'; readonly head?: string };
 
@@ -825,11 +825,15 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         note: joined(renumberedNote(batch, renumbered, !forPullRequest), other),
         ...(forPullRequest && renumbered.length > 0 ? { renumbered } : {}),
       }) as const;
-    if (problem === null) return { ...stands(null), made: true };
+    if (problem === null) {
+      // A catch-up's caller may put the merge back, so it decides whether the notice goes.
+      if (!forPullRequest) cleared(batch);
+      return { ...stands(null), made: true };
+    }
     const lost = await keepLost(batch, path, merged, forPullRequest, problem.uncarried);
     if (lost === null) {
       // The generated directories are the base's, without the batch's changes in them: a catch-up
-      // pushes nothing, so its merge goes back and its own card says why. No regenerate card is
+      // pushes nothing, so its merge goes back and its own card says why. No regenerate notice is
       // raised, which would name a worktree the catch-up removes and a merge it rewinds.
       if (forPullRequest)
         return {
@@ -858,7 +862,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
   }
 
   /**
-   * Puts the builder's way out on the batch's regenerate card: the lost-migrations notice has no
+   * Puts the builder's way out on the batch's regenerate notice: the lost-migrations notice has no
    * list to read, so only the builder can say the journal holds the migrations. A card that already
    * offers it is left as it is, so a gate that meets the notice again changes nothing.
    */
@@ -949,9 +953,22 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
   }
 
   /**
+   * Takes the failed-regeneration notice off the batch once a merge of the base regenerated cleanly
+   * or had nothing to regenerate (a standing lost-migrations notice keeps it): the notice would otherwise stand on every task for good, with no
+   * way for the builder to dismiss it.
+   */
+  function cleared(batch: BatchDto): void {
+    // While a lost migration is still missing, the notice carries what the gate says of it.
+    if (uncarriedNotice(batch) !== undefined) return;
+    tell(batch, () => {
+      hideNotices(ctx.state, batch.id, [NOTICE_KEY.baseRegenerate]);
+    });
+  }
+
+  /**
    * What a gate is told while a migration an earlier merge lost is still missing: that merge's answer
    * came and went, and the branch now holds the base, so nothing else would look at it again. Once
-   * the journal at HEAD holds them all, the notice and the regenerate card go.
+   * the journal at HEAD holds them all, the notices go.
    */
   async function standing(
     batch: BatchDto,
@@ -995,7 +1012,10 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     }
     if (left.length === 0) {
       tell(batch, () => {
-        hideNotices(ctx.state, batch.id, [NOTICE_KEY.migrationsUncarried]);
+        hideNotices(ctx.state, batch.id, [
+          NOTICE_KEY.migrationsUncarried,
+          NOTICE_KEY.baseRegenerate,
+        ]);
         withdraw(ctx.state, ctx.inbox, batch.projectId, [baseRegenerateKey(batch.id)]);
       });
       return answer;
@@ -1039,9 +1059,9 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
   }
 
   /**
-   * Tells the builder, on one card, what kept the generated directories `merged` took from the base
+   * Tells the builder, on one notice, what kept the generated directories `merged` took from the base
    * from being regenerated, unless `card` is false: a caller that puts the merge back has nothing
-   * for that card's instructions to act on, and says so on its own. Resolves with what the gate's
+   * for that notice's instructions to act on, and says so on its own. Resolves with what the gate's
    * note says of it; with `lost` no gate will run, so it says nothing of one.
    */
   function unregenerated(
@@ -1073,12 +1093,12 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           };
     if (card)
       tell(batch, () => {
-        raise(ctx.inbox, batch.projectId, baseCards.regenerate(batch, path, dirs, told));
+        showNotice(ctx.state, batch.id, baseNotices.regenerate(batch, path, dirs, told));
       });
     const said = `10db couldn't regenerate ${named(dirs)} after merging origin/${batch.baseBranch}: ${told.why}.`;
     return lost
       ? said
-      : `${said} This gate may see generated files that don't match their sources; the builder has a card.`;
+      : `${said} This gate may see generated files that don't match their sources; the builder has a notice.`;
   }
 
   /**
@@ -1693,7 +1713,10 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       case 'unregenerated':
         return merged;
       case 'merged': {
-        if (pending === null) return { ...merged, note: joined(merged.note, installed.note) };
+        if (pending === null) {
+          // Nothing to regenerate from: the files stay as they were, so a standing notice does too.
+          return { ...merged, note: joined(merged.note, installed.note) };
+        }
         // Its own stop says so on the card; once it has run, a stop leaves nothing undone.
         const regenerated = await regenerate(
           batch,

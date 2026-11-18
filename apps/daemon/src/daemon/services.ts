@@ -83,6 +83,7 @@ import {
   listEventsAfter,
   listGoalSummaries,
   listInbox,
+  pageActivity,
   pageInbox,
   inboxCardContext,
   listModelProfiles,
@@ -754,6 +755,7 @@ export function createServices(deps: {
     listInbox: ({ states }) => listInbox(db, states ? { states } : {}),
     pageInbox: (query) =>
       pageInbox(db, query, { waitingOut: deps.slackConnection.get().state === 'connected' }),
+    pageActivity: (query) => pageActivity(db, query),
     inboxCardContext: (id) => inboxCardContext(db, id, CARD_CONTEXT_MESSAGES),
     answerInbox(id, answer) {
       const item = deps.inbox.answer(id, answer);

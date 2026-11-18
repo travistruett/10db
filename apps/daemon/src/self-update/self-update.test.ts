@@ -783,6 +783,9 @@ describe('a drain that only shaping conversations hold', () => {
     /** A card a run before this one left open, on `project`: nothing in this run holds it. */
     function cardLeftOpen(project: ProjectId) {
       createInboxService({ state, onParkedAnswer: () => undefined }).flag({
+        tier: 'ask',
+        urgency: 'high',
+        closesWhen: { by: 'answer' },
         projectId: project,
         workstreamId: null,
         title: 'A shaping conversation is holding the update, and lanes are paused',

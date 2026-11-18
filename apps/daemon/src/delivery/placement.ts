@@ -1,5 +1,5 @@
 import { ConflictError, WorkspaceMode, type BatchDto, type TaskDto } from '@10db/contracts';
-import { startCards, type Card } from './cards';
+import { startCards, type CardText } from './cards';
 
 /** Where an unfinished batch works: a copy has a worktree path, the shared batch never does. */
 export function batchPlacement(batch: Pick<BatchDto, 'worktreePath'>): WorkspaceMode {
@@ -24,7 +24,7 @@ export function placementWords(mode: WorkspaceMode): string {
  */
 export function refuseCrossPlacementDependency(
   tasks: readonly TaskDto[],
-  raise: (card: Card, taskIds: readonly [TaskDto['id'], TaskDto['id']]) => void,
+  raise: (card: CardText, taskIds: readonly [TaskDto['id'], TaskDto['id']]) => void,
 ): void {
   const byId = new Map(tasks.map((task) => [task.id, task]));
   for (const task of tasks) {

@@ -201,6 +201,9 @@ export function createAccountPauses(opts: {
         const item = opts.inbox.flag({
           projectId: at.projectId,
           workstreamId: null,
+          tier: card.tier,
+          urgency: card.urgency,
+          closesWhen: card.closesWhen,
           title: card.title,
           body: card.body,
           detail: card.detail,

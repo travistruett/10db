@@ -109,6 +109,8 @@ export const EventType = {
   GateFinished: 'gate.finished',
   /** Who holds a project's checkout changed (`entityType: 'project'`, `entityId` the project). */
   FolderHoldChanged: 'folder_hold.changed',
+  /** A notice that asks the builder nothing (`NoticePostedData`); filed under its task, else its project, else the app. */
+  NoticePosted: 'notice.posted',
 } as const;
 export type EventType = (typeof EventType)[keyof typeof EventType];
 

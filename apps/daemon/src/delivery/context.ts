@@ -1,13 +1,13 @@
-import { CARD_RESOLVES_WHEN, type BatchId, type Notice, type ProjectId } from '@10db/contracts';
+import type { BatchId, Notice, ProjectId } from '@10db/contracts';
 import { clearBatchNotice, findOpenByFoldKey, setBatchNotice, type WriteContext } from '@10db/db';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
 import type { FolderHold } from '../folder-hold';
 import type { Git, NetworkCall } from '../git';
 import type { Gh, GhCall } from '../github';
-import { flagCard, rewordCard, withdrawCard, type InboxService } from '../inbox';
+import { flagCard, postNotice, rewordCard, withdrawCard, type InboxService } from '../inbox';
 import type { Logger } from '../log';
-import type { Card } from './cards';
+import type { Card, DeliveryNotice } from './cards';
 import type { DeliveryJobs } from './jobs';
 import type { PutBackKeptWork } from './pass-open';
 import type { WorktreeDependencies } from './worktree-dependencies';
@@ -85,14 +85,10 @@ function flagOf(projectId: ProjectId, card: Card) {
     body: card.body,
     ...(card.foldKey ? { foldKey: card.foldKey } : {}),
     ...(card.refresh ? { refresh: true } : {}),
-    ...(card.detail || card.resolvesWhen
-      ? {
-          detail: {
-            ...card.detail,
-            ...(card.resolvesWhen ? { [CARD_RESOLVES_WHEN]: card.resolvesWhen } : {}),
-          },
-        }
-      : {}),
+    tier: card.tier,
+    urgency: card.urgency,
+    closesWhen: card.closesWhen,
+    ...(card.detail ? { detail: card.detail } : {}),
     ...(card.options ? { options: card.options } : {}),
   };
 }
@@ -115,6 +111,16 @@ export function hideNotices(state: StateStore, batchId: BatchId, keys: readonly 
 /** Delivery cards belong to the project, not to one workstream. */
 export function raise(inbox: InboxService, projectId: ProjectId, card: Card): void {
   inbox.flag(flagOf(projectId, card));
+}
+
+/** A notice about the project's delivery: an event, never a card. */
+export function post(inbox: InboxService, projectId: ProjectId, notice: DeliveryNotice): void {
+  inbox.notice({ ...notice, projectId });
+}
+
+/** `post` inside the caller's write: the notice commits with the change that raised it, or neither does. */
+export function postIn(write: WriteContext, projectId: ProjectId, notice: DeliveryNotice): void {
+  postNotice(write, { ...notice, projectId });
 }
 
 /** `raise` inside the caller's write: the card commits with the change that raised it, or neither does. */

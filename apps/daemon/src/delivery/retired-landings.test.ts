@@ -15,10 +15,10 @@ afterEach(() => {
 const NEXT: TaskLanding = { kind: 'branch', branch: 'next' };
 const landingOf = (id: string) => getTask(h.store.db, id as never).landing;
 const run = () => moveRetiredLandings(h.ctx, new AbortController().signal);
-const cards = () => h.cards().filter((c) => c.title.includes('no longer exists'));
+const notices = () => h.notices().filter((n) => n.line.includes('no longer exists'));
 
 describe('a task whose landing names a branch that is gone from origin', () => {
-  it('takes the default landing, started or not, and a card lists the tasks that moved', async () => {
+  it('takes the default landing, started or not, and a notice lists the tasks that moved', async () => {
     h = createDeliveryHarness();
     const fresh = h.addTask('Fresh', { landing: NEXT });
     const started = h.addTask('Started', { landing: NEXT });
@@ -33,13 +33,31 @@ describe('a task whose landing names a branch that is gone from origin', () => {
     expect(landingOf(fresh.id)).toEqual({ kind: 'base' });
     expect(landingOf(started.id)).toEqual({ kind: 'base' });
     expect(landingOf(kept.id)).toEqual({ kind: 'base' });
-    const [card] = cards();
-    expect(cards()).toHaveLength(1);
-    expect(card?.body).toContain(`Fresh (${fresh.id})`);
-    expect(card?.body).toContain(`Started (${started.id})`);
-    expect(card?.body).not.toContain('Kept');
-    expect(card?.body).toContain('next');
-    expect(card?.body).toContain('main');
+    const [notice] = notices();
+    expect(notices()).toHaveLength(1);
+    expect(h.cards()).toEqual([]);
+    expect(notice).toMatchObject({ key: 'retired-landings:next', tone: 'info', taskId: null });
+    expect(notice?.body).toContain(`Fresh (${fresh.id})`);
+    expect(notice?.body).toContain(`Started (${started.id})`);
+    expect(notice?.body).not.toContain('Kept');
+    expect(notice?.body).toContain('next');
+    expect(notice?.body).toContain('main');
+  });
+
+  it('moves the tasks and posts the notice when the branch names make the key longer than a notice key allows', async () => {
+    h = createDeliveryHarness();
+    const names = ['a', 'b', 'c', 'd'].map((c) => `retired/${c.repeat(70)}`);
+    const tasks = names.map((branch, i) =>
+      h.addTask(`Old ${String(i)}`, { landing: { kind: 'branch', branch } }),
+    );
+
+    const moved = await run();
+
+    expect(moved).toHaveLength(tasks.length);
+    for (const task of tasks) expect(landingOf(task.id)).toEqual({ kind: 'base' });
+    const notice = h.only(notices());
+    expect(notice.key.startsWith('retired-landings:retired/')).toBe(true);
+    expect(notice.key.length).toBeLessThanOrEqual(200);
   });
 
   it('can then join a batch that merges into main', async () => {
@@ -72,7 +90,7 @@ describe('a task whose landing names a branch that is gone from origin', () => {
     const task = h.addTask('Alive', { landing: NEXT });
     expect(await run()).toEqual([]);
     expect(landingOf(task.id)).toEqual(NEXT);
-    expect(cards()).toEqual([]);
+    expect(notices()).toEqual([]);
   });
 
   it('is left alone while an unfinished batch is based on the branch', async () => {
@@ -123,7 +141,7 @@ describe('a task whose landing names a branch that is gone from origin', () => {
     const task = h.addTask('Old', { landing: NEXT });
     expect(await run()).toEqual([]);
     expect(landingOf(task.id)).toEqual(NEXT);
-    expect(cards()).toEqual([]);
+    expect(notices()).toEqual([]);
   });
 
   it('does nothing twice', async () => {
@@ -131,6 +149,6 @@ describe('a task whose landing names a branch that is gone from origin', () => {
     h.addTask('Old', { landing: NEXT });
     expect(await run()).toHaveLength(1);
     expect(await run()).toEqual([]);
-    expect(cards()).toHaveLength(1);
+    expect(notices()).toHaveLength(1);
   });
 });

@@ -57,8 +57,9 @@ export function inboxRowOf(row: InboxRow): OpenRow {
 
 const firstLine = (text: string): string => text.split('\n')[0] ?? '';
 
-function Lines({
+export function Lines({
   tag,
+  tagColor,
   tone,
   title,
   count,
@@ -67,6 +68,8 @@ function Lines({
   failure,
 }: {
   readonly tag: string;
+  /** The tag's colour in place of the state's own. */
+  readonly tagColor?: string;
   readonly tone: 'open' | 'quiet';
   readonly title: string;
   readonly count: number;
@@ -80,7 +83,7 @@ function Lines({
         <Text
           fz={10}
           fw={700}
-          c={tone === 'open' ? 'var(--mantine-color-yellow-text)' : 'dimmed'}
+          c={tagColor ?? (tone === 'open' ? 'var(--mantine-color-yellow-text)' : 'dimmed')}
           style={{ flexShrink: 0, letterSpacing: '0.04em' }}
         >
           {tag}

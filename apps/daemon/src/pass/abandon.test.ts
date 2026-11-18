@@ -74,6 +74,9 @@ const deps = (base: PassWorkDeps = w.deps, git: Git = base.git) => ({
   stopLane: (): Promise<void> => Promise.resolve(),
   wrote: (): Promise<void> => Promise.resolve(),
 });
+/** What an Abandon with no Move to offer says: a notice, never a card. */
+const abandonNotices = () =>
+  w.h.notices().filter((n) => n.key === `pass-abandon:${w.opened.pass.id}`);
 const abandonCards = () =>
   listInbox(w.h.store.db, { states: [InboxState.Open] }).filter(
     (item) => item.detail?.['passCard'] === 'abandon',
@@ -804,8 +807,30 @@ describe('abandonPass', () => {
     expect(read('src/settings/page.tsx')).toMatch(/^written again/);
     expect(read('src/settings/old.tsx')).toBe('old\n');
     expect(getTask(w.h.store.db, w.settings.id).passId).toBeNull();
+    expect(abandonCards()).toEqual([]);
+    const notice = w.h.only(abandonNotices());
+    expect(notice).toMatchObject({ tone: 'info', taskId: null });
+    expect(notice.body).toContain(`- src/settings/page.tsx (${w.settings.title})`);
+  });
+
+  it('turns its card into a notice, and withdraws the card, when a refused Move finds the folder off the pass branch', async () => {
+    w = await openPassWorld();
+    w.h.commit('src/settings/page.tsx', 'landed\n');
+    w.write('src/people/page.tsx', 'people, by its page\n');
+    await abandonPass(deps(), w.opened.pass.id);
     const [card] = abandonCards();
-    expect(card?.body).toContain(`- src/settings/page.tsx (${w.settings.title})`);
+    if (!card) throw new Error('no Abandon card');
+    expect(abandonNotices()).toEqual([]);
+    // The builder moves the folder off the pass's branch, so there is no Move left to offer.
+    w.h.git$('switch', '-q', '-c', 'elsewhere');
+    w.write('src/settings/page.tsx', 'an uncommitted edit\n');
+
+    answerPassCard({ ...w.deps, folderHold: w.h.ctx.folderHold }, card, { choice: 'Move to main' });
+    await w.h.jobs.idle();
+
+    expect(abandonCards()).toEqual([]);
+    const notice = w.h.only(abandonNotices());
+    expect(notice.body).toContain('10db could not move it');
   });
 
   describe('the shared changes it names', () => {

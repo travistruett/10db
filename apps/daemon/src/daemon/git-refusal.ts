@@ -1,13 +1,15 @@
-import {
-  CARD_RESOLVES_WHEN,
-  type InboxAnswer,
-  type InboxItemDto,
-  type InboxOption,
-} from '@10db/contracts';
+import { type InboxAnswer, type InboxItemDto, type InboxOption, Urgency } from '@10db/contracts';
 import type { DbReader } from '@10db/db';
 import { z } from 'zod';
 import { CheckoutPin, GitTrustError, trustCard, type Git } from '../git';
-import { cardsResolvedByEvent, resolveStaleCards, type InboxService } from '../inbox';
+import {
+  BY_ANSWER,
+  CardTier,
+  cardsResolvedByEvent,
+  resolveStaleCards,
+  type CardClosesWhen,
+  type InboxService,
+} from '../inbox';
 import type { Logger } from '../log';
 import { projectAt } from './checkout-pins';
 
@@ -36,19 +38,25 @@ export function createGitRefusalHandler(deps: {
     const project = projectAt(deps.db, error.repo);
     if (!project) return;
     const card = trustCard(error);
+    const closesWhen: CardClosesWhen = card.candidate
+      ? // Trusting the checkout again, by whichever card, settles every card that offers it.
+        { by: 'event', when: { event: 'checkout_trusted', repo: error.repo } }
+      : // S2: the next git call of that kind passes; Open the Checkout
+        BY_ANSWER;
     deps.inbox.flag({
       projectId: project.id,
       workstreamId: null,
       title: card.title,
       body: card.body,
       foldKey: card.foldKey,
+      tier: CardTier.Ask,
+      urgency: Urgency.High,
+      closesWhen,
       ...(card.candidate
         ? {
             options: OPTIONS,
             detail: {
               [GIT_TRUST_DETAIL]: { repo: error.repo, candidate: { ...card.candidate } },
-              // Trusting the checkout again, by whichever card, settles every card that offers it.
-              [CARD_RESOLVES_WHEN]: { event: 'checkout_trusted', repo: error.repo },
             },
           }
         : {}),

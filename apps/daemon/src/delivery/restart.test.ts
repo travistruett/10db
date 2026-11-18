@@ -174,6 +174,9 @@ describe('the failed card of a task that is started again', () => {
   /** The card the runner raises when the workstream fails. */
   function failedCard(ws: { id: WorkstreamId }) {
     return h.inbox.flag({
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'answer' },
       projectId: h.project.id,
       workstreamId: ws.id,
       title: 'Workstream failed: Alpha',

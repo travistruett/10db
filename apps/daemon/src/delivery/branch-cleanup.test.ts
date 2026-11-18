@@ -206,19 +206,21 @@ describe('an abandoned task whose branch holds commits', () => {
     expect(h.only(cardsAbout(batch.branch)).body).toContain(elsewhere);
   });
 
-  it('deletes the branch of an abandoned task that never moved off its base, and a card says so', async () => {
+  it('deletes the branch of an abandoned task that never moved off its base, and a notice says so', async () => {
     const { batch } = await opened(h);
     const wt = batch.worktreePath ?? '';
     h.shipper.abandon(batch.id);
     await h.jobs.idle();
     expect(exists(batch.branch)).toBe(false);
     expect(existsSync(wt)).toBe(false);
-    const card = h.only(cardsAbout(batch.branch));
-    expect(card.title).toBe(`Batch "${batch.title}" abandoned: ${batch.branch ?? ''} deleted`);
-    expect(card.body).toContain('no commits');
-    // 10db removed the worktree (the check above), so the card says it went with the branch.
-    expect(card.body).toContain("deleted it along with the batch's worktree");
-    expect(card.options).toEqual([]);
+    expect(cardsAbout(batch.branch)).toEqual([]);
+    const notice = h.only(h.notices().filter((n) => n.key === `branch-deleted:${batch.id}`));
+    expect(notice.line).toBe(`Batch "${batch.title}" abandoned: ${batch.branch ?? ''} deleted`);
+    expect(notice.body).toContain('no commits');
+    // 10db removed the worktree (the check above), so the notice says it went with the branch.
+    expect(notice.body).toContain("deleted it along with the batch's worktree");
+    expect(notice.tone).toBe('info');
+    expect(notice.taskId).toBeNull();
   });
 
   it('does not say the worktree was deleted when 10db left it behind, and still deletes the branch', async () => {
@@ -234,7 +236,7 @@ describe('an abandoned task whose branch holds commits', () => {
     expect(exists(batch.branch)).toBe(false);
     expect(existsSync(join(wt, 'notes.txt'))).toBe(true);
     const cards = h.cards();
-    const deleted = h.only(cards.filter((c) => c.title.endsWith('deleted')));
+    const deleted = h.only(h.notices().filter((n) => n.line.endsWith('deleted')));
     expect(deleted.body).toContain('no commits');
     expect(deleted.body).not.toMatch(/worktree/i);
     // The card that says the worktree stays is still there.
@@ -600,7 +602,8 @@ describe('the sweep at startup', () => {
     await recover();
     await recover();
     expect(exists(batch.branch)).toBe(false);
-    expect(h.only(h.cards()).title).toContain('deleted');
+    expect(h.cards()).toEqual([]);
+    expect(h.only(h.notices()).line).toContain('deleted');
   });
 
   it('leaves an abandoned batch whose branch is gone alone', async () => {

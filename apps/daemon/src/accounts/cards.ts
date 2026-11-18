@@ -14,14 +14,19 @@ import {
   type AccountRefusal,
   type InboxOption,
   type ProjectDto,
+  Urgency,
 } from '@10db/contracts';
 import type { AccountRow, Json } from '@10db/db';
+import { BY_ANSWER, CardTier, type CardClosesWhen, type StoredTier } from '../inbox';
 import { signInCommand, signInCommandFor } from '../environment';
 import type { NamedModel } from '../catalogue';
 import type { CapStatus } from './cap';
 import type { UsageReport } from './usage-reports';
 
 export interface AccountCard {
+  readonly tier: StoredTier;
+  readonly urgency: Urgency;
+  readonly closesWhen: CardClosesWhen;
   readonly title: string;
   readonly body: string;
   readonly foldKey: string;
@@ -123,6 +128,12 @@ export function usageLimitCard(
       ? 'until the account is fixed.'
       : `until ${until.toISOString()}. Work resumes automatically.`;
   return {
+    tier: CardTier.Ask,
+    urgency: Urgency.High,
+    closesWhen: {
+      by: 'withdrawn',
+      when: 'the account is ready or the pause ends (accounts/stale-cards)',
+    },
     title: `${account.label} usage limit reached`,
     body: `Every lane on ${account.label} is paused ${paused}${
       moves.length > 0
@@ -208,6 +219,9 @@ export function usageHighCard(
   const where = only ? only.label : 'another account';
   const resets = report.resetsAt ? ` It resets at ${report.resetsAt.toISOString()}.` : '';
   return {
+    tier: CardTier.Ask,
+    urgency: Urgency.Normal,
+    closesWhen: { by: 'withdrawn', when: 'usage drops below the threshold (limits)' },
     title:
       moves.length > 0
         ? `${account.label} ${standing(report, models)}: hand off and move ${project.name} to ${where}?`
@@ -244,6 +258,9 @@ export function movedCard(
   const handedOff =
     report.status === 'rejected' ? '' : ' after asking its running lanes to hand off';
   return {
+    tier: CardTier.Ask,
+    urgency: Urgency.Low,
+    closesWhen: BY_ANSWER,
     title: `${project.name} moved to ${fallback.label}: ${account.label} ${standing(report, models)}`,
     body: `A session on ${account.label} reported that it ${standing(report, models)}. ${project.name} names ${accountDisplayName(fallback)} as its fallback, so 10db moved it there${handedOff}. Each lane's next session runs on ${fallback.label} from its latest handoff; work neither committed nor handed off stays behind. 10db moves it back by itself once ${account.label}'s limit resets, unless you choose Stay.`,
     foldKey: accountFoldKey(account.id, MOVED_CARD),
@@ -277,6 +294,9 @@ export function moveBackCard(
       ? "10db doesn't know whether that limit has reset, because Claude Code didn't say when it would"
       : 'that limit has reset';
   return {
+    tier: CardTier.Ask,
+    urgency: Urgency.Low,
+    closesWhen: BY_ANSWER,
     title: `${from.label} is available again: move ${project.name} back?`,
     body: `${project.name} moved to ${current.label} when ${from.label} reached its usage limit, and ${reset}. Move it back, and each lane's next session runs on ${from.label} from its latest handoff; or stay on ${current.label}.`,
     foldKey: accountFoldKey(from.id, MOVE_BACK_CARD),
@@ -321,6 +341,12 @@ export function capCard(account: AccountRow, cap: CapStatus): AccountCard {
   const toUsd = raisedCap(cap);
   const choice = `Raise cap to ${money(toUsd).replace('.00', '')}`;
   return {
+    tier: CardTier.Ask,
+    urgency: Urgency.High,
+    closesWhen: {
+      by: 'withdrawn',
+      when: 'the account is ready or the pause ends (accounts/stale-cards)',
+    },
     title: `${account.label} reached its monthly cap`,
     body: `${money(cap.spentUsd)} of its ${money(cap.capUsd)} cap is spent in ${cap.window.month}${over > 0 ? `, ${money(over)} over` : ''}. New sessions on ${account.label} wait until ${cap.window.end.toISOString()} or until the cap is raised: answer ${choice} to raise it now. Sessions already running finish, and this card shows what they add.`,
     foldKey: accountFoldKey(account.id, AccountPauseReason.MonthlyCap),
@@ -342,6 +368,12 @@ export function refusedCard(account: AccountRow, refusal: AccountRefusal): Accou
   const seen =
     refusal.seenIdentity === null ? '' : ` ${agentOf(account)} reported ${refusal.seenIdentity}.`;
   return {
+    tier: CardTier.Ask,
+    urgency: Urgency.High,
+    closesWhen: {
+      by: 'withdrawn',
+      when: 'the account is ready or the pause ends (accounts/stale-cards)',
+    },
     title: `${account.label}: sessions refused`,
     body: `${refusal.message}.${seen} ${account.label}'s work waits until the account is fixed. ${fixFor(account, refusal.problem)}`,
     foldKey: accountFoldKey(account.id, AccountPauseReason.Refused, refusal.problem),
@@ -372,6 +404,12 @@ export function confirmCard(account: AccountRow, email: string): AccountCard {
   const reported =
     account.kind === AccountKind.CodexSignin ? 'this email and workspace' : 'this email';
   return {
+    tier: CardTier.Ask,
+    urgency: Urgency.High,
+    closesWhen: {
+      by: 'withdrawn',
+      when: 'the account is ready or the pause ends (accounts/stale-cards)',
+    },
     title: `Confirm the account ${account.label}`,
     body: `${agentOf(account)} in ${account.configDir ?? `${agentOf(account)}'s default directory`} is signed in as ${email}. Confirm it, and ${account.label}'s sessions run only while they report ${reported}.`,
     foldKey: accountFoldKey(account.id, AccountProblem.Unconfirmed),
@@ -393,6 +431,12 @@ export function signInCard(account: AccountRow, why: string | null = null): Acco
       ? `${agentOf(account)} is not signed in for ${account.label}`
       : `${why}, so ${account.label} may be signed out`;
   return {
+    tier: CardTier.Ask,
+    urgency: Urgency.High,
+    closesWhen: {
+      by: 'withdrawn',
+      when: 'the account is ready or the pause ends (accounts/stale-cards)',
+    },
     title: `Sign in the account ${account.label}`,
     body: `${seen}. Its work waits; 10db tries again in a minute. Sign in with: ${signInCommandFor(account)}, then answer Check again to try now.`,
     foldKey: accountFoldKey(account.id, AccountProblem.SignedOut),
@@ -413,6 +457,9 @@ const checkAgain = (account: AccountRow): InboxOption => ({
  */
 export function recordedCard(account: AccountRow, email: string): AccountCard {
   return {
+    tier: CardTier.Ask,
+    urgency: Urgency.Low,
+    closesWhen: BY_ANSWER,
     title: `${account.label} runs as ${email}`,
     body: `10db recorded ${email}, the login in ${account.configDir ?? "Claude Code's default directory"}, as ${account.label}'s identity, and runs its sessions only while they report it. If that is the wrong login, sign in as the right one with: ${signInCommand(account.configDir)}, then answer Record again: 10db forgets ${email} and records the login the directory holds now.`,
     foldKey: accountFoldKey(account.id, 'recorded'),
@@ -428,6 +475,12 @@ export function recordedCard(account: AccountRow, email: string): AccountCard {
 
 export function secretCard(account: AccountRow): AccountCard {
   return {
+    tier: CardTier.Ask,
+    urgency: Urgency.High,
+    closesWhen: {
+      by: 'withdrawn',
+      when: 'the account is ready or the pause ends (accounts/stale-cards)',
+    },
     title: `Set the secret of ${account.label}`,
     body: `${account.label} has no secret yet, so its work waits. ${fixFor(account, AccountProblem.SecretMissing)}`,
     foldKey: accountFoldKey(account.id, AccountProblem.SecretMissing),
@@ -439,6 +492,12 @@ export function secretCard(account: AccountRow): AccountCard {
 /** A first-party directory that reports credentials a subscription can't run on; signing in doesn't change that. */
 export function credentialsCard(account: AccountRow, refusal: AccountRefusal): AccountCard {
   return {
+    tier: CardTier.Ask,
+    urgency: Urgency.High,
+    closesWhen: {
+      by: 'withdrawn',
+      when: 'the account is ready or the pause ends (accounts/stale-cards)',
+    },
     title: `Fix the credentials of ${account.label}`,
     body: `${refusal.message}. ${account.label}'s work waits; 10db tries again in a minute. ${fixFor(account, AccountProblem.WrongCredentials)}`,
     foldKey: accountFoldKey(account.id, AccountProblem.WrongCredentials),

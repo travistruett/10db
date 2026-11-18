@@ -8,6 +8,7 @@ import {
   type InboxItemId,
   type NextAction,
   type WorkstreamId,
+  Urgency,
 } from '@10db/contracts';
 import {
   clearLease,
@@ -50,6 +51,7 @@ import {
 import { recoverPage } from './pass-pages';
 import { failStep } from '../team';
 import type { ProcessTerminator } from './processes';
+import { CardTier } from '../inbox';
 
 export interface RecoveryReport {
   readonly requeued: WorkstreamId[];
@@ -279,6 +281,12 @@ export async function recoverOnStartup(opts: {
       opts.inbox.flag({
         projectId: project.id,
         workstreamId: ws.id,
+        tier: CardTier.Ask,
+        urgency: Urgency.High,
+        closesWhen: {
+          by: 'withdrawn',
+          when: 'the run is retried, cancelled or shipped (cancelForWorkstream)',
+        },
         title: `${WORKSTREAM_FAILED_TITLE_PREFIX}${getTask(db, row.taskId).title}`,
         body: `Recovery failed ${String(attempts)} times.`,
         ...batchCardFields(row),

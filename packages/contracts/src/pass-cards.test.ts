@@ -29,17 +29,6 @@ describe("a pass card's detail", () => {
       },
     },
     {
-      name: "D8's moved branch",
-      detail: {
-        kind: 'pass_branch_moved',
-        passId,
-        returnBranch: 'build',
-        passBranch: '10db/polish-abc',
-        reason: 'moved',
-        mergeCommand: 'git merge 10db/polish-abc',
-      },
-    },
-    {
       name: "D22's Move",
       detail: {
         kind: 'pass_move',
@@ -55,16 +44,6 @@ describe("a pass card's detail", () => {
       detail: { kind: 'pass_retarget', passId, stackedOn: mintId('Pass'), base: 'main' },
     },
     {
-      name: 'a failed close gate',
-      detail: {
-        kind: 'pass_gate_failed',
-        passId,
-        where: 'scratch',
-        logPath: null,
-        tasks: [{ taskId, title: 'People' }],
-      },
-    },
-    {
       name: 'Move to a Separate Copy for a broken preview',
       detail: {
         kind: 'pass_move_to_copy',
@@ -73,16 +52,6 @@ describe("a pass card's detail", () => {
         workstreamId: mintId('Workstream'),
         hazard: null,
         route: '/settings',
-      },
-    },
-    {
-      name: 'the follow-on after a merge while open',
-      detail: {
-        kind: 'pass_follow_on',
-        passId,
-        followOnPassId: null,
-        prUrl: null,
-        carried: [taskId],
       },
     },
   ])('reads $name', ({ detail }) => {

@@ -515,11 +515,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     if (!moved) return;
     deps.logger.warn({ batchId: batch.id, failure, title: reason }, 'batch not shipped');
     // A later ship of the batch that succeeds makes the card stale.
-    if (card)
-      raise(deps.inbox, batch.projectId, {
-        ...card,
-        resolvesWhen: { event: 'batch_shipped', batchId: batch.id },
-      });
+    if (card) raise(deps.inbox, batch.projectId, card);
   }
 
   /**

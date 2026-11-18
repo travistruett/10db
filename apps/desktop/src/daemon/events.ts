@@ -12,6 +12,7 @@ import { readJson } from './client';
 import type { DaemonConnection } from './connection';
 import { useDaemon } from './provider';
 import { accountKeys, accountLoginKey } from './account-queries';
+import { activityKeys } from './activity-queries';
 import { applyInboxEvent } from './inbox-live';
 import { chatKeys } from './chat-queries';
 import { chatWorkKeys } from './chat-work-queries';
@@ -150,6 +151,8 @@ export const EVENT_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly Qu
   'task.message_added': [passKeys.turnsAll, passKeys.live, liveKeys.all],
   // A picture of a task's page was kept: its thread and its drawer show it.
   'task.screen_added': [screenKeys.all],
+  // A notice that asks nothing joined Activity, and its task's drawer lists it.
+  'notice.posted': [activityKeys.all],
   // A turn began or ended: what streams is read again, so an item that finished leaves it, and what the turn
   // changed in the session's worktree is read again.
   'conversation.state': [liveKeys.all, chatWorkKeys.all],

@@ -87,9 +87,11 @@ import type { Git } from '../git';
 import { judgeToolUse, type ProtectedPath } from '../guard';
 import {
   AnsweredAwayError,
+  CardTier,
   carriesKinds,
   fileProposalByItself,
   leftWithBuilder,
+  postNotice,
   proposalCardBody,
   proposalFiling,
   raisedAsCardLine,
@@ -1032,20 +1034,19 @@ export function createToolHandlers(
         resized: true,
         message: `This task now runs at ${rigorTitle(input.rigor)}; the steps still to come follow it.`,
       };
+      // The notice is posted in the write that records the rigor, so a replayed opId posts none.
       deps.state.write((ctx) => {
         setAgentRigor(ctx, task.id, input.rigor, input.why);
+        postNotice(ctx, {
+          tier: CardTier.Notice,
+          projectId: task.projectId,
+          taskId: task.id,
+          key: `resize:${task.id}`,
+          tone: 'info',
+          line: `${task.title} was resized`,
+          body: `${role === StepRole.Plan ? 'Plan' : 'The build'} session resized ${task.title} to ${rigorTitle(input.rigor)}: ${input.why}`,
+        });
         record('resize_task', input.opId, reply, ctx);
-      });
-      // A second write, so a crash between the two loses the notice; the card still shows the reason.
-      deps.inbox.flag({
-        projectId: task.projectId,
-        workstreamId,
-        title: `${task.title} was resized`,
-        body: `${role === StepRole.Plan ? 'Plan' : 'The build'} session resized ${task.title} to ${rigorTitle(input.rigor)}: ${input.why}`,
-        options: [{ label: 'Got it', description: '' }],
-        recommendation: null,
-        foldKey: `resize:${task.id}`,
-        refresh: true,
       });
       return Promise.resolve(reply);
     },

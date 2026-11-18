@@ -31,6 +31,10 @@ const DB = `${PACKAGE}/drizzle`;
 const JOURNAL = `${DB}/meta/_journal.json`;
 const signal = new AbortController().signal;
 
+/** The notice that a failed regeneration leaves on the batch, which asks nothing. */
+const regenerateNotice = (batchId: BatchDto['id']): BatchDto['notices'][number] =>
+  h.only(getBatch(h.store.db, batchId).notices.filter((n) => n.key === NOTICE_KEY.baseRegenerate));
+
 const NOTE = "  note: text('note'),";
 const OWNER = "  owner: text('owner'),";
 const SHAPE = "  shape_id: text('shape_id'),";
@@ -601,7 +605,8 @@ describe('carrying a branch with several generated migrations over, each as its 
       schemaFile({ columns: [NOTE, OWNER], after: [LOGS] }),
     );
     expect(existsSync(join(pathOf(batch), DB, '0002_note.sql'))).toBe(false);
-    expect(h.only(h.cards()).body).toContain('0002_owner');
+    expect(h.cards()).toEqual([]);
+    expect(regenerateNotice(batch.id).body).toContain('0002_owner');
   });
 
   it('commits nothing and names the step when it changed what main changed another way', async () => {
@@ -620,7 +625,8 @@ describe('carrying a branch with several generated migrations over, each as its 
     expect((await update(batch)).kind).toBe('uncarried');
 
     expect(statusOf(pathOf(batch))).toBe('');
-    const card = h.only(h.cards());
+    expect(h.cards()).toEqual([]);
+    const card = regenerateNotice(batch.id);
     expect(card.body).toContain('0001_default');
     expect(card.body).toContain('both sides changed tables.sessions.columns.workstream_id.default');
   });
@@ -637,7 +643,8 @@ describe('carrying a branch with several generated migrations over, each as its 
     expect((await update(batch)).kind).toBe('uncarried');
 
     expect(statusOf(pathOf(batch))).toBe('');
-    const card = h.only(h.cards());
+    expect(h.cards()).toEqual([]);
+    const card = regenerateNotice(batch.id);
     expect(card.body).toContain('0002_owner');
     expect(card.body).toContain('made no migration');
   });

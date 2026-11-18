@@ -14,7 +14,7 @@ import {
   type TaskId,
 } from '@10db/contracts';
 import { listBatches, listTasks, listWorkstreams } from '@10db/db';
-import { startCards, type Card } from './cards';
+import { startCards, type CardText } from './cards';
 import { networkCall, type DeliveryContext } from './context';
 import { landingNotices } from './notices';
 
@@ -28,7 +28,7 @@ export async function missingLandingBranch(
   project: Pick<ProjectDto, 'repoPath' | 'baseBranch'>,
   batch: Pick<BatchDto, 'baseBranch'>,
   signal: AbortSignal,
-): Promise<Card | null> {
+): Promise<CardText | null> {
   if (batch.baseBranch === project.baseBranch) return null;
   const there = await ctx.git.branchOnOrigin(
     project.repoPath,

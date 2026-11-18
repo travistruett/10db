@@ -40,8 +40,8 @@ export function createLostMigrationsAnswers(
       throw new InvalidError(
         "This batch's lost-migrations list can be read again, so the next gate checks it against the journal; it can't be cleared by hand",
       );
-    hideNotices(ctx.state, batch.id, [NOTICE_KEY.migrationsUncarried]);
-    // The card answered closes with its answer; the regenerate card, when it is another one, goes now.
+    hideNotices(ctx.state, batch.id, [NOTICE_KEY.migrationsUncarried, NOTICE_KEY.baseRegenerate]);
+    // The card answered closes with its answer; the lost-migrations card, when it is another one, goes now.
     const regenerate = findOpenByFoldKey(
       ctx.state.db,
       batch.projectId,

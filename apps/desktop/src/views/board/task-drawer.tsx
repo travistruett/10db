@@ -38,6 +38,7 @@ import {
   Tooltip,
 } from '@mantine/core';
 import { useState } from 'react';
+import { useTaskNotices } from '../../daemon/activity-queries';
 import { SurfaceDrawer } from '../../shell/surface-drawer';
 import { useReportUnsaved } from '../../shell/unsaved-guard';
 import { OpenConversation } from '../shape/open-conversation';
@@ -340,6 +341,7 @@ export function TaskDrawer({
           {...(onCancelRun && batch?.passId == null ? { onCancelRun } : {})}
         />
         <TaskNotices
+          taskId={task.id}
           notices={[...taskNotices(workstream, batch), ...taskHistory(workstream, batch)]}
           {...(onOpenWorkbench ? { onOpenWorkbench } : {})}
         />
@@ -666,15 +668,20 @@ function SectionLabel({ children }: { readonly children: string }) {
 /**
  * What stands beside the task's state that asks the builder nothing: another task's hazard it waits
  * for, a conflict its batch has with the base. The line is what the card says; the body says the rest
- * and how to fix it, with its line breaks. Nothing when there is none.
+ * and how to fix it, with its line breaks, then the task's notices from Activity. Nothing when there is none.
  */
 function TaskNotices({
-  notices,
+  taskId,
+  notices: standing,
   onOpenWorkbench,
 }: {
+  readonly taskId: TaskId;
   readonly notices: readonly Notice[];
   readonly onOpenWorkbench?: () => void;
 }) {
+  // What the daemon posted about the task follows the notices its batch and run stand on.
+  const posted = useTaskNotices(taskId);
+  const notices = [...standing, ...posted];
   if (notices.length === 0) return null;
   return (
     <Stack gap="xs" data-testid="task-notice">

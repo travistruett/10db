@@ -113,6 +113,9 @@ function failedCard(workstreamId: WorkstreamId, batchId: BatchId) {
   const fields = batchCardFields({ id: workstreamId, batchId });
   if (!fields) throw new Error('a batch member gets card actions');
   return inbox.flag({
+    tier: 'ask',
+    urgency: 'high',
+    closesWhen: { by: 'answer' },
     projectId: h.project.id,
     workstreamId,
     title: 'Workstream failed',
@@ -203,6 +206,9 @@ async function failedInBatch(
   const fields = batchCardFields({ id: a.id, batchId: started.id });
   if (!fields) throw new Error('a batch member gets card actions');
   const card = inbox.flag({
+    tier: 'ask',
+    urgency: 'high',
+    closesWhen: { by: 'answer' },
     projectId: h.project.id,
     workstreamId: a.id,
     title: 'Workstream failed: Alpha',
@@ -1109,6 +1115,9 @@ describe('the failed workstream card', () => {
           const plain = batchCardFields({ id: failed, batchId });
           if (!plain) throw new Error('a batch member gets card actions');
           const other = inbox.flag({
+            tier: 'ask',
+            urgency: 'high',
+            closesWhen: { by: 'answer' },
             projectId: h.project.id,
             workstreamId: failed,
             title: 'Workstream failed: Alpha again',
@@ -1135,6 +1144,9 @@ describe('the failed workstream card', () => {
           const plain = batchCardFields({ id: made.failed, batchId: made.batchId });
           if (!plain) throw new Error('a batch member gets card actions');
           const other = inbox.flag({
+            tier: 'ask',
+            urgency: 'high',
+            closesWhen: { by: 'answer' },
             projectId: h.project.id,
             workstreamId: made.failed,
             title: 'Workstream failed: Alpha again',
@@ -1180,6 +1192,9 @@ describe('the failed workstream card', () => {
           const plain = batchCardFields({ id: merge.id, batchId: made.batchId });
           if (!plain) throw new Error('a batch member gets card actions');
           const other = inbox.flag({
+            tier: 'ask',
+            urgency: 'high',
+            closesWhen: { by: 'answer' },
             projectId: h.project.id,
             workstreamId: merge.id,
             title: 'Workstream failed: Beta',
@@ -1219,6 +1234,9 @@ describe('the failed workstream card', () => {
           const plain = batchCardFields({ id: made.failed, batchId: made.batchId });
           if (!plain) throw new Error('a batch member gets card actions');
           const other = inbox.flag({
+            tier: 'ask',
+            urgency: 'high',
+            closesWhen: { by: 'answer' },
             projectId: h.project.id,
             workstreamId: made.failed,
             title: 'Workstream failed: Alpha again',
@@ -2523,6 +2541,9 @@ describe('the failed workstream card', () => {
     expect(getWorkstream(h.store.db, failed).state).toBe('FAILED');
     expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
     const plain = inbox.flag({
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'answer' },
       projectId: h.project.id,
       workstreamId: null,
       title: 'FYI',

@@ -2018,6 +2018,9 @@ describe('worktree checkouts', () => {
           launchIn(lane.batch, 'Beta', 'docs');
           // A card from before Beta's claim, listing a path only Beta's claim covers.
           inbox.flag({
+            tier: 'ask',
+            urgency: 'high',
+            closesWhen: { by: 'answer' },
             projectId: project.id,
             workstreamId: lane.workstream.id,
             title: `${String(STRAY_BULK_THRESHOLD + 1)} writes outside every claim`,
@@ -2039,6 +2042,9 @@ describe('worktree checkouts', () => {
       it('stays open when a path it lists is sensitive', async () => {
         const lane = inWorktree('Alpha', 'repo', WorkstreamState.Running, false);
         inbox.flag({
+          tier: 'ask',
+          urgency: 'high',
+          closesWhen: { by: 'answer' },
           projectId: project.id,
           workstreamId: lane.workstream.id,
           title: `${String(STRAY_BULK_THRESHOLD + 1)} writes outside every claim`,

@@ -12,6 +12,7 @@ import {
   type InboxItemId,
   type Notice,
   type ProjectId,
+  Urgency,
 } from '@10db/contracts';
 import {
   acquireClaims,
@@ -36,6 +37,7 @@ import { claimScopeOf } from '../delivery';
 import type { EventBus, StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import { DEADLOCK_DETAIL, deadlockAnswers } from './claim-deadlock';
+import { CardTier } from '../inbox';
 
 /** How often a task waiting for a claim looks again; the holder's release is not pushed to it. */
 export const CLAIM_POLL_MS = 2_000;
@@ -494,6 +496,9 @@ function deadlock(a: Asking, heldBy: WorkstreamId, waits: ClaimWaits): InboxItem
   const card = a.inbox.flag({
     projectId: a.projectId,
     workstreamId: a.workstreamId,
+    tier: CardTier.Ask,
+    urgency: Urgency.High,
+    closesWhen: { by: 'withdrawn', when: 'the deadlock clears (claim-wait)' },
     title: `Claim deadlock: ${a.kind} ${a.name}`,
     body,
     options,

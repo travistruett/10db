@@ -9,8 +9,9 @@ import {
   type TaskLanding,
 } from '@10db/contracts';
 import { listBatches, listProjects, listTasks, resetTaskLanding } from '@10db/db';
-import type { Card } from './cards';
-import { networkCall, raiseIn, type DeliveryContext } from './context';
+import type { DeliveryNotice } from './cards';
+import { networkCall, postIn, type DeliveryContext } from './context';
+import { CardTier } from '../inbox';
 
 /** A project's open tasks that land on a branch other than its base, by branch. */
 function branchLandings(project: ProjectDto, tasks: readonly TaskDto[]): Map<string, TaskDto[]> {
@@ -23,26 +24,31 @@ function branchLandings(project: ProjectDto, tasks: readonly TaskDto[]): Map<str
   return byBranch;
 }
 
-/** The card that says which tasks moved; the builder only reads it. */
-function movedCard(
+/** The notice that says which tasks moved; the builder only reads it. Its key names the branches. */
+function movedNotice(
   project: ProjectDto,
   moved: readonly { readonly task: TaskDto; readonly from: string }[],
   to: TaskLanding,
-): Card {
+): DeliveryNotice {
   const lines = moved.map(
     ({ task, from }) =>
       `- ${task.title} (${task.id}): was ${from}, now ${landingText(to, project.baseBranch)}`,
   );
-  const branches = [...new Set(moved.map((m) => m.from))].join(', ');
+  const names = [...new Set(moved.map((m) => m.from))].sort();
+  const branches = names.join(', ');
   return {
-    title: `${String(moved.length)} task${moved.length === 1 ? '' : 's'} moved off ${branches}, which no longer exists`,
+    tier: CardTier.Notice,
+    taskId: null,
+    key: `retired-landings:${names.join(',')}`,
+    tone: 'info',
+    line: `${String(moved.length)} task${moved.length === 1 ? '' : 's'} moved off ${branches}, which no longer exists`,
     body: `Origin has no branch named ${branches} and no open batch is based on it, so ${project.name} tasks that landed there could not be built or join a batch. They now land where the project's tasks land by default:\n${lines.join('\n')}`,
   };
 }
 
 /**
  * Moves every open task that lands on a branch that origin no longer has, and that no unfinished
- * batch is based on, to its project's default landing, and raises one card per project naming the
+ * batch is based on, to its project's default landing, and posts one notice per project naming the
  * tasks that moved. A branch is moved only when origin answers that it is missing: an unreachable
  * origin, a project default that names the same missing branch, or one that names another branch
  * origin lacks, changes nothing. Running it again finds nothing to move. Returns the tasks moved.
@@ -98,7 +104,7 @@ export async function moveRetiredLandings(
     if (moved.length === 0) continue;
     const written = ctx.state.write((w) => {
       const done = moved.map(({ task }) => resetTaskLanding(w, task.id, target));
-      raiseIn(w, project.id, movedCard(project, moved, target));
+      postIn(w, project.id, movedNotice(project, moved, target));
       return done;
     });
     ctx.logger.info(

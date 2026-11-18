@@ -40,3 +40,22 @@
   use `stakeholder_sends_card_idx`. A `(state, updated_at)` index is for when resolved cards reach six figures.
 - A screen's render token may read `/inbox/page` and `/inbox/:id/context` (`screens/render-access.ts`), as it reads `/inbox`; the app
   names the frame's project in the query.
+- Every card has a tier (`CardTier` in `card-tier.ts`: `ask`, `notice`, `status`), and `decisions/2026-11-17-every-card-has-a-tier.md`
+  says why. `FlagInput` requires `tier` (an `StoredTier`: a notice is never stored), `urgency` and `closesWhen`
+  (`BY_ANSWER`, `{ by: 'event', when }` or `{ by: 'withdrawn', when }`); `flagCard` stores the urgency it is given,
+  writes an event closer into `detail.resolvesWhen` on insert and on a refresh, and never throws for a missing tier
+  (the contract is the compiler's). A new card builder declares its tier, urgency and `closesWhen`; a notice is
+  posted, never flagged.
+- A notice is `postNotice(ctx, NoticeInput)` (`notice.ts`; `InboxService.notice` for a caller with no write open): a
+  `notice.posted` event appended in the caller's write, with the key cut by `fitNoticeKey` (200 characters, a
+  readable head and a sha256) and the line and body by `fitNotice`. A task's notice is on entity `task` (it needs a
+  `projectId`, or `InvalidNoticeError`), a project's on `project`, any other on `app`. It never counts, badges or
+  notifies.
+- `GET /activity/page` (`ActivityPageQuery`: `project` or `task`, not both, `q`, `after` a `seq`, `pageSize`) answers
+  an `ActivityPageDto` from `pageActivity` (`packages/db/src/store/activity.ts`): notices newest first, a repeat of
+  one key, project and task within 10 minutes folded into one row with a count (`groupNotices`). A project's page
+  includes its tasks' notices. It reads the events table, so it needs no migration.
+- At start `resolveNoticeCards` (`daemon/notice-sweep.ts`) resolves each open card of the 16 kinds that are notices
+  now, one write each, with the reason `NOTICE_SWEEP_REASON`. A kind is matched by its raiser's fold key, and by title,
+  body or option count where an ask shares the prefix. A new notice kind that replaces a card adds a row and a
+  near-miss row to its table.

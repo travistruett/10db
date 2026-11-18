@@ -13,6 +13,8 @@ import {
 } from '../sessions';
 import { earlierMcpApproval, requestMcpApproval } from './mcp-approval';
 import type { InboxService } from './service';
+import { Urgency } from '@10db/contracts';
+import { BY_ANSWER, CardTier } from './card-tier';
 
 /** A flag for an approved server 10db can't run as written; it folds per server. */
 export function flagMcpFailure(
@@ -24,6 +26,10 @@ export function flagMcpFailure(
   inbox.flag({
     projectId,
     workstreamId,
+    tier: CardTier.Ask,
+    urgency: Urgency.Normal,
+    // S2: mcp_config_changed; Open the Config
+    closesWhen: BY_ANSWER,
     title: `The repo's MCP server "${failure.name}" can't run as written`,
     body: failure.message,
     foldKey: `project-mcp-failure:${projectId}:${failure.name}`,
@@ -69,6 +75,10 @@ export function createProjectMcpReader(deps: ProjectMcpReaderDeps): ProjectMcpRe
           deps.inbox.flag({
             projectId: project.id,
             workstreamId,
+            tier: CardTier.Ask,
+            urgency: Urgency.High,
+            // S2: mcp_config_changed; Open the Config
+            closesWhen: BY_ANSWER,
             title: "The repo's MCP config stops sessions from starting",
             body: error.message,
             foldKey: `project-mcp-error:${project.id}`,
@@ -92,6 +102,10 @@ export function createProjectMcpReader(deps: ProjectMcpReaderDeps): ProjectMcpRe
         deps.inbox.flag({
           projectId: project.id,
           workstreamId,
+          tier: CardTier.Ask,
+          urgency: Urgency.Normal,
+          // S2: mcp_config_changed; Open the Config
+          closesWhen: BY_ANSWER,
           title: "Check the repo's MCP config",
           body: warning,
           foldKey: `project-mcp-warning:${project.id}`,
