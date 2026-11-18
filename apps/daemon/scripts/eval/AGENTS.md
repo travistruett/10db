@@ -16,6 +16,7 @@ pipeline: change one thing, run the set, keep the change only if it scores the s
 | `make eval RIGOR=standard SAVE_BASELINE=1` | also saves the report as the rigor's baseline        |
 | `make eval RIGOR=careful PLANS_IN_BUILD=1` | the rigor plans in its Build session for the run     |
 | `make eval RIGOR=careful FIX_BY=resumed`   | the rigor fixes a send-back in its Build session     |
+| `make eval RIGOR=careful BRIEF=index`      | lanes get the indexed brief for the run              |
 
 `RIGOR` is `light`, `standard`, `careful` or `critical`. The CLI (`scripts/eval.ts`) also takes
 `--baseline=<report.json>`, `--parallel=<n>` (default 2) and `--case-timeout-minutes=<n>` (default 90).
@@ -23,6 +24,9 @@ pipeline: change one thing, run the set, keep the change only if it scores the s
 `plansInBuild`, and `FIX_BY=resumed` (or `fresh`; `--fix-by`) its `fixBy`, on the eval daemon's global
 playbook once it starts, and the report records each; left out, the playbook runs as 10db ships it. The fake
 agent's reviewers always approve, so a fake run never sends work back and shows nothing of `fixBy`.
+`BRIEF=index` (or `full`; `--brief`) sets `TENDB_LANE_BRIEF` on the eval daemon, so its lanes' briefs index
+the Plan and knowledge instead of pasting them (`src/briefing/lane-brief.ts`), and the report records it. The
+fake agent ignores its prompt, so a fake run proves only the plumbing.
 
 **Recording the real baseline:** from a plain terminal signed in to Claude (not a 10db lane, whose
 sandbox can't read `~/.claude/projects`), run `make eval RIGOR=standard SAVE_BASELINE=1`. It starts

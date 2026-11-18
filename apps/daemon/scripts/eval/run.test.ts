@@ -5,6 +5,7 @@ import { FixBy, Rigor, Verdict, WorkstreamState, WorkstreamStep } from '@10db/co
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import { LaneBrief } from '../../src/briefing';
 import { isolatedGitEnv, TEST_REPO_CONFIG, tempDir, type TempDir } from '../../test/fixtures';
 import { loadEvalProject, PROJECT_FILE, type EvalCase } from './case';
 import { GateResult, Outcome } from './grade';
@@ -38,7 +39,7 @@ function decoySource(): { source: string; base: string; merged: string } {
 }
 
 /** Replays the decoy case on the fake agent at `rigor`, in a work dir of its own. */
-async function runDecoy(rigor: Rigor, plansInBuild?: boolean, fixBy?: FixBy) {
+async function runDecoy(rigor: Rigor, plansInBuild?: boolean, fixBy?: FixBy, brief?: LaneBrief) {
   const { source, base, merged } = decoySource();
   const workDir = tempDir('eval-work');
   dirs.push(workDir);
@@ -69,6 +70,7 @@ async function runDecoy(rigor: Rigor, plansInBuild?: boolean, fixBy?: FixBy) {
     log: () => undefined,
     ...(plansInBuild === undefined ? {} : { plansInBuild }),
     ...(fixBy === undefined ? {} : { fixBy }),
+    ...(brief === undefined ? {} : { brief }),
   });
   return { report, work, decoy };
 }
@@ -120,6 +122,13 @@ describe('runEval on the fake agent', () => {
     } finally {
       db.close();
     }
+    for (const run of report.cases[0]?.runs ?? []) expect(run.outcome).toBe(Outcome.Met);
+  }, 180_000);
+
+  it('briefs the eval daemon’s lanes as the run says and records it in the report', async () => {
+    const { report } = await runDecoy(Rigor.Careful, undefined, undefined, LaneBrief.Index);
+    expect(report.brief).toBe(LaneBrief.Index);
+    expect(report.fixBy).toBeNull();
     for (const run of report.cases[0]?.runs ?? []) expect(run.outcome).toBe(Outcome.Met);
   }, 180_000);
 

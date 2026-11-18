@@ -1,5 +1,6 @@
 import { FixBy, Rigor, Verdict } from '@10db/contracts';
 import { z } from 'zod';
+import { LaneBrief } from '../../src/briefing';
 import {
   flipsAgainstBaseline,
   flipsBetweenRuns,
@@ -48,6 +49,8 @@ export const EvalReport = z.object({
   plansInBuild: z.boolean().nullable().default(null),
   /** The rigor's fixBy setting the run forced; null when it ran on the playbook as it is. */
   fixBy: z.enum(FixBy).nullable().default(null),
+  /** How the run's lanes were briefed (`TENDB_LANE_BRIEF`); null when it ran on the daemon's default. */
+  brief: z.enum(LaneBrief).nullable().default(null),
   startedAt: z.iso.datetime(),
   finishedAt: z.iso.datetime(),
   cases: z.array(CaseReport),
@@ -160,7 +163,13 @@ export function renderReport(report: EvalReport, baseline: EvalReport | null): s
       : report.fixBy === FixBy.Resumed
         ? ', fixes in the Build session'
         : ', fixes in a fresh session';
-  const setting = `${planSetting}${fixSetting}`;
+  const briefSetting =
+    report.brief === null
+      ? ''
+      : report.brief === LaneBrief.Index
+        ? ', indexed brief'
+        : ', full brief';
+  const setting = `${planSetting}${fixSetting}${briefSetting}`;
   return [
     `# Lane-pipeline eval: ${report.rigor}, ${report.agent} agent${setting}`,
     '',

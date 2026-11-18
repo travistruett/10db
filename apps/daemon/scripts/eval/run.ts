@@ -20,6 +20,7 @@ import {
 } from '@10db/contracts';
 import Database from 'better-sqlite3';
 import { z } from 'zod';
+import type { LaneBrief } from '../../src/briefing';
 import { loginConfigDirOf } from '../../src/environment';
 import { OP_TRAILER, withoutGitRepoEnv } from '../../src/git';
 import { classifyPath } from '../../src/guard';
@@ -67,6 +68,11 @@ export interface EvalOptions {
    * session with a fresh one. Absent runs the playbook as 10db ships it.
    */
   readonly fixBy?: FixBy;
+  /**
+   * Sets how the eval daemon briefs its lanes (`TENDB_LANE_BRIEF`), to compare a brief that pastes the
+   * Plan and knowledge with one that indexes them. Absent runs the daemon's default.
+   */
+  readonly brief?: LaneBrief;
 }
 
 export class EvalRunError extends Error {
@@ -158,6 +164,7 @@ async function startDaemon(opts: EvalOptions, fakeBook: string | null): Promise<
     fakeBook,
     catalogueSnapshot: CATALOGUE_SNAPSHOT,
     builder: opts.builder,
+    ...(opts.brief === undefined ? {} : { brief: opts.brief }),
   });
   const dataDir = env['TENDB_DATA_DIR'] ?? join(opts.work, 'data');
   mkdirSync(dataDir, { recursive: true });
@@ -509,6 +516,7 @@ export async function runEval(opts: EvalOptions): Promise<EvalReport> {
     agent: opts.agent,
     plansInBuild: opts.plansInBuild ?? null,
     fixBy: opts.fixBy ?? null,
+    brief: opts.brief ?? null,
     startedAt,
     finishedAt: new Date().toISOString(),
     cases,
