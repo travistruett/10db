@@ -32,6 +32,13 @@ const signal = new AbortController().signal;
 
 let h: DeliveryHarness;
 
+/** What a batch's tasks were told about its migrations, apart from the regenerate notice. */
+const lostNotices = (batchId: BatchDto['id']): BatchDto['notices'] =>
+  getBatch(h.store.db, batchId).notices.filter((n) => n.key !== NOTICE_KEY.baseRegenerate);
+/** The notice that a failed regeneration leaves on the batch, which asks nothing. */
+const regenerateNotice = (batchId: BatchDto['id']): BatchDto['notices'][number] =>
+  h.only(getBatch(h.store.db, batchId).notices.filter((n) => n.key === NOTICE_KEY.baseRegenerate));
+
 const journal = (...tags: string[]): string =>
   `${JSON.stringify({
     version: '7',
@@ -238,7 +245,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
     );
   });
 
-  it('commits nothing and names the migration on a card when its generate fails', async () => {
+  it('commits nothing and names the migration on a notice when its generate fails', async () => {
     const batch = await bothSidesAdded([
       { tag: '0001_mine', sql: 'alter table a add b;\n' },
       { tag: '0002_mine_backfill', sql: 'update a;\n', custom: true },
@@ -262,11 +269,11 @@ describe('carrying a batch over when main and the batch both added migrations', 
     ).toHaveLength(2);
     expect(statusOf(path)).toBe('');
     expect(existsSync(join(path, DB, '0002_mine.sql'))).toBe(false);
-    const card = h.only(h.cards());
-    expect(card.body).toContain('0002_mine_backfill');
-    expect(card.body).not.toContain('`0001_mine`');
+    const regenerate = regenerateNotice(batch.id);
+    expect(regenerate.body).toContain('0002_mine_backfill');
+    expect(regenerate.body).not.toContain('`0001_mine`');
     // Nothing renumbered: all the lane hears is what the merge lost, the migration before it included.
-    const notice = h.only(getBatch(h.store.db, batch.id).notices);
+    const notice = h.only(lostNotices(batch.id));
     expect(notice.key).toBe(NOTICE_KEY.migrationsUncarried);
     expect(notice.body).toContain('0001_mine');
     expect(notice.body).toContain('0002_mine_backfill');
@@ -283,7 +290,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
     }).beforeGate(batch.id, signal);
 
     expect(update.kind).toBe('uncarried');
-    expect(h.only(h.cards()).body).toContain('0001_mine_backfill');
+    expect(regenerateNotice(batch.id).body).toContain('0001_mine_backfill');
   });
 
   it('refuses every later gate until the branch holds the migration again, then clears what it said', async () => {
@@ -299,7 +306,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
     if (again.kind !== 'uncarried') throw new Error(`uncarried expected, got ${again.kind}`);
     expect(again.note).toContain('0001_mine_backfill');
     expect(again.head).toBe(headOf(pathOf(batch)));
-    expect(h.cards()).toHaveLength(1);
+    expect(regenerateNotice(batch.id).key).toBe(NOTICE_KEY.baseRegenerate);
 
     // The lane re-creates it after main's, under its name.
     await commitOnBatch(batch, `${DB}/0002_mine_backfill.sql`, sql);
@@ -325,7 +332,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
       });
       await updates.beforeGate(batch.id, signal);
       // As fitNotice leaves a notice whose record was too long, or a malformed record would.
-      const stored = h.only(getBatch(h.store.db, batch.id).notices);
+      const stored = h.only(lostNotices(batch.id));
       const bare = { key: stored.key, tone: stored.tone, line: stored.line, body: stored.body };
       h.state.write((w) => {
         setBatchNotice(w, batch.id, record === undefined ? bare : { ...bare, record });
@@ -340,7 +347,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
       expect(again.unreadable).toBe(true);
       expect(again.head).toBe(headOf(pathOf(batch)));
       expect(h.cards()).toHaveLength(1);
-      const shown = h.only(getBatch(h.store.db, batch.id).notices);
+      const shown = h.only(lostNotices(batch.id));
       expect(shown.key).toBe(NOTICE_KEY.migrationsUncarried);
       // What the builder reads says abandoning ends it, not the re-create steps of a list it lost.
       expect(shown.body).toContain('abandoning the batch');
@@ -357,7 +364,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
       generators: drizzle({ failAt: 'mine_backfill' }),
     });
     await updates.beforeGate(batch.id, signal);
-    const stored = h.only(getBatch(h.store.db, batch.id).notices);
+    const stored = h.only(lostNotices(batch.id));
     h.state.write((w) => {
       setBatchNotice(w, batch.id, { ...stored, record: 'not json' });
     });
@@ -369,7 +376,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
       kind: 'uncarried',
       unreadable: true,
     });
-    expect(h.only(getBatch(h.store.db, batch.id).notices).key).toBe(NOTICE_KEY.migrationsUncarried);
+    expect(h.only(lostNotices(batch.id)).key).toBe(NOTICE_KEY.migrationsUncarried);
   });
 
   describe('the builder clearing a notice whose list could not be read', () => {
@@ -383,7 +390,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
         generators: drizzle({ failAt: 'mine_backfill' }),
       });
       await updates.beforeGate(batch.id, signal);
-      const stored = h.only(getBatch(h.store.db, batch.id).notices);
+      const stored = h.only(lostNotices(batch.id));
       const bare = { key: stored.key, tone: stored.tone, line: stored.line, body: stored.body };
       h.state.write((w) => {
         setBatchNotice(w, batch.id, record === undefined ? bare : { ...bare, record });
@@ -439,7 +446,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
 
       expect(merged).toMatchObject({ kind: 'uncarried' });
       expect(merged).not.toHaveProperty('unreadable');
-      expect(getBatch(h.store.db, batch.id).notices).toHaveLength(1);
+      expect(lostNotices(batch.id)).toHaveLength(1);
     });
 
     it('refuses the answer for a notice whose list reads, which the journal alone clears', async () => {
@@ -456,7 +463,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
         onFlagAnswer: createLostMigrationsAnswers(h.ctx),
       });
       // A readable notice has no card with the answer; a card from before it was read is made by hand.
-      const stored = h.only(getBatch(h.store.db, batch.id).notices);
+      const stored = h.only(lostNotices(batch.id));
       const flagged = inbox.flag({
         tier: 'ask',
         urgency: 'high',
@@ -471,7 +478,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
 
       expect(() => inbox.answer(flagged.id, { choice: LostChoice.Clear })).toThrow();
 
-      expect(h.only(getBatch(h.store.db, batch.id).notices)).toEqual(stored);
+      expect(h.only(lostNotices(batch.id))).toEqual(stored);
     });
   });
 
@@ -483,7 +490,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
       ...h.ctx,
       generators: drizzle({ failAt: 'mine_backfill' }),
     }).beforeGate(batch.id, signal);
-    const stored = h.only(getBatch(h.store.db, batch.id).notices);
+    const stored = h.only(lostNotices(batch.id));
     const bare = { key: stored.key, tone: stored.tone, line: stored.line, body: stored.body };
     h.state.write((w) => {
       setBatchNotice(w, batch.id, bare);
@@ -506,7 +513,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
     expect(merged.note).not.toContain(stored.body);
     expect(existsSync(join(pathOf(batch), DB, '0002_more.sql'))).toBe(false);
     // The list stays as it was (unreadable); only the words the builder reads change.
-    expect(h.only(getBatch(h.store.db, batch.id).notices)).toEqual({
+    expect(h.only(lostNotices(batch.id))).toEqual({
       ...bare,
       body: uncarriedSaid(bare),
     });
@@ -524,7 +531,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
       ...h.ctx,
       generators: drizzle({ failAt: 'mine_backfill' }),
     }).beforeGate(batch.id, signal);
-    const stored = h.only(getBatch(h.store.db, batch.id).notices);
+    const stored = h.only(lostNotices(batch.id));
     h.state.write((w) => {
       setBatchNotice(w, batch.id, {
         key: stored.key,
@@ -552,11 +559,11 @@ describe('carrying a batch over when main and the batch both added migrations', 
     expect(merged.note).toContain('drizzle-kit is not installed');
     expect(merged.note).not.toMatch(/to re-create/);
     expect(merged.note).not.toContain('under the same name');
-    const cards = h.cards();
-    expect(cards.length).toBeGreaterThan(0);
-    for (const card of cards) {
-      expect(card.body).not.toMatch(/to re-create/);
-      expect(card.body).not.toContain('under the same name');
+    const told = [...h.cards(), ...getBatch(h.store.db, batch.id).notices];
+    expect(told.length).toBeGreaterThan(0);
+    for (const said of told) {
+      expect(said.body).not.toMatch(/to re-create/);
+      expect(said.body).not.toContain('under the same name');
     }
   });
 
@@ -578,7 +585,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
     if (update.kind !== 'uncarried') throw new Error(`uncarried expected, got ${update.kind}`);
     expect(update.note).toContain('0002_mine_backfill');
     expect(update.note).not.toContain('0001_mine ');
-    expect(h.only(getBatch(h.store.db, batch.id).notices).body).not.toContain('0001_mine ');
+    expect(h.only(lostNotices(batch.id)).body).not.toContain('0001_mine ');
   });
 
   it('stops the gate when the install fails, so the generators never ran', async () => {
@@ -591,7 +598,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
     }).beforeGate(batch.id, signal);
 
     expect(update.kind).toBe('uncarried');
-    expect(h.only(h.cards()).body).toContain('0001_mine');
+    expect(regenerateNotice(batch.id).body).toContain('0001_mine');
   });
 
   it('stops the gate when the generators throw', async () => {
@@ -602,7 +609,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
     }).beforeGate(batch.id, signal);
 
     expect(update.kind).toBe('uncarried');
-    expect(h.only(h.cards()).body).toContain('0001_mine');
+    expect(regenerateNotice(batch.id).body).toContain('0001_mine');
   });
 
   it('does not ship a batch whose only migration is custom when the shipping gate could not carry it', async () => {
@@ -645,7 +652,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
     expect(h.origin$('for-each-ref', `refs/heads/${batch.branch ?? ''}`)).toBe('');
   });
 
-  it("commits nothing and names the migration on a card when the schema of a step can't be told", async () => {
+  it("commits nothing and names the migration on a notice when the schema of a step can't be told", async () => {
     // Two generated migrations, whose snapshots here hold no schema a step could be made from.
     const batch = await bothSidesAdded([
       { tag: '0001_mine', sql: 'alter table a add b;\n' },
@@ -662,12 +669,12 @@ describe('carrying a batch over when main and the batch both added migrations', 
     expect(calls).toEqual([]);
     expect(statusOf(path)).toBe('');
     expect(existsSync(join(path, DB, '0002_mine.sql'))).toBe(false);
-    const card = h.only(h.cards());
-    expect(card.body).toContain('0001_mine');
-    expect(card.body).toContain('a schema for its step could not be made');
+    const notice = regenerateNotice(batch.id);
+    expect(notice.body).toContain('0001_mine');
+    expect(notice.body).toContain('a schema for its step could not be made');
   });
 
-  it('names what the merge dropped on the card when the run is stopped before it re-creates it', async () => {
+  it('names what the merge dropped on the notice when the run is stopped before it re-creates it', async () => {
     const batch = await bothSidesAdded([{ tag: '0001_mine', sql: 'alter table a add b;\n' }]);
     const stop = new AbortController();
     await createBaseUpdates({
@@ -680,7 +687,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
       },
     }).beforeGate(batch.id, stop.signal);
 
-    expect(h.only(h.cards()).body).toContain(`${DB}/0001_mine.sql`);
+    expect(regenerateNotice(batch.id).body).toContain(`${DB}/0001_mine.sql`);
     // The merge stands, and the next gate finds the branch holding the base.
     expect((await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).kind).toBe('uncarried');
   });
@@ -698,7 +705,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
     }).beforeGate(batch.id, signal);
 
     expect(update.kind).toBe('uncarried');
-    expect(h.only(h.cards()).body).toContain('0001_mine');
+    expect(regenerateNotice(batch.id).body).toContain('0001_mine');
   });
 
   it('refuses a FIFO the generators left at the journal, without blocking on it', async () => {
@@ -714,7 +721,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
     }).beforeGate(batch.id, signal);
 
     expect(update.kind).toBe('uncarried');
-    expect(h.only(h.cards()).body).toContain('0001_mine');
+    expect(regenerateNotice(batch.id).body).toContain('0001_mine');
   });
 
   it('truncates nothing through a hard link the generators left at a custom migration', async () => {
@@ -735,7 +742,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
     expect(readFileSync(outside, 'utf8')).toBe('untouched\n');
     expect(update.kind).toBe('uncarried');
     expect(statusOf(path)).toBe('');
-    expect(h.only(h.cards()).body).toContain('0001_mine');
+    expect(regenerateNotice(batch.id).body).toContain('0001_mine');
   });
 
   it("writes nothing through a link the generators left where a custom migration's SQL goes", async () => {
@@ -755,7 +762,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
 
     expect(readFileSync(outside, 'utf8')).toBe('untouched\n');
     expect(statusOf(path)).toBe('');
-    expect(h.only(h.cards()).body).toContain('0001_mine');
+    expect(regenerateNotice(batch.id).body).toContain('0001_mine');
   });
 
   it('tells the batch which migrations were renumbered and to what, and leaves docs to its lane', async () => {
@@ -765,7 +772,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
       signal,
     );
 
-    const notice = h.only(getBatch(h.store.db, batch.id).notices);
+    const notice = h.only(lostNotices(batch.id));
     expect(notice.key).toBe(NOTICE_KEY.migrationsRenumbered);
     expect(notice.body).toContain('0001_mine → 0002_mine');
     expect(notice.body).toContain("Docs that name a renumbered migration are the lane's to fix");
@@ -784,7 +791,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
 
     expect(h.cards()).toEqual([]);
     expect(existsSync(join(pathOf(batch), DB, '0003_mine.sql'))).toBe(true);
-    const notice = h.only(getBatch(h.store.db, batch.id).notices);
+    const notice = h.only(lostNotices(batch.id));
     expect(notice.body).toContain('0001_mine → 0003_mine');
     expect(notice.body).not.toContain('0002_mine');
   });
