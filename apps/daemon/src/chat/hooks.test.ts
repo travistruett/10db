@@ -451,6 +451,42 @@ describe("a chat's writes outside the checkout hold", () => {
     expect(w.folderHold.holdsTurn(chat.id)).toBe(false);
   });
 
+  it('keeps a branch session whose worktree folder was deleted from writing the checkout, and still lets it read', async () => {
+    const sandboxWrites: boolean[] = [];
+    w = chatWorld({
+      prepare: (input) => {
+        sandboxWrites.push(input.writes);
+        return prepared();
+      },
+      judge: JudgeKind.Native,
+    });
+    const gone = tempDir('hooks-gone');
+    const missing = join(gone.path, 'wt');
+    gone.cleanup();
+    const chat = w.open();
+    w.store.write((ctx) =>
+      setChatWork(ctx, chat.id, null, { place: 'branch', branch: 'x', worktreePath: missing }),
+    );
+    const answers: Record<string, string> = {};
+    w.adapter.shapeBehaviour = (turn) => {
+      answers.write = turn.spec.preToolUse(inCheckout).decision;
+      answers.edit = turn.spec.preToolUse({
+        toolName: 'Edit',
+        input: { file_path: '/repo/a.ts', old_string: 'a', new_string: 'b' },
+      }).decision;
+      answers.read = turn.spec.preToolUse({
+        toolName: 'Read',
+        input: { file_path: '/repo/a.ts' },
+      }).decision;
+      return Promise.resolve({ text: 'Done.' });
+    };
+    w.chat.send(chat.conversationId, { text: 'go', mentions: [], pictures: [] });
+    await w.engine.settled(chat.conversationId);
+    expect(answers).toMatchObject({ write: 'deny', edit: 'deny' });
+    expect(answers.read).toBe('allow');
+    expect(sandboxWrites).toEqual([false]);
+  });
+
   it("judges a branch session's edits inside its worktree, never the checkout", async () => {
     w = chatWorld({ prepare: prepared, judge: JudgeKind.Native });
     const { chat } = oneTurn(inCheckout);

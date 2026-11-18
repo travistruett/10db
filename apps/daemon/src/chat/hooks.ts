@@ -398,7 +398,9 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           if (place === WorkPlace.Here) return current && deps.folderHold.holdsTurn(chat.id);
           if (place === WorkPlace.Branch)
             return (
-              current && running.has(chat.id) && getChat(state.db, chat.id).worktreePath !== null
+              current &&
+              running.has(chat.id) &&
+              withWorktreeOnDisk(getChat(state.db, chat.id)).worktreePath !== null
             );
           return false;
         },
