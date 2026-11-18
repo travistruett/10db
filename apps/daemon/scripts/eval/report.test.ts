@@ -1,4 +1,4 @@
-import { Rigor, Verdict } from '@10db/contracts';
+import { FixBy, Rigor, Verdict } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { GateResult, Outcome } from './grade';
 import { EvalAgent, EvalReport, renderReport, type CaseRun } from './report';
@@ -27,6 +27,7 @@ const report = (plansInBuild: boolean | null, outcomes: readonly Outcome[]): Eva
   rigor: Rigor.Careful,
   agent: EvalAgent.Fake,
   plansInBuild,
+  fixBy: null,
   startedAt: '2026-11-18T00:00:00.000Z',
   finishedAt: '2026-11-18T00:01:00.000Z',
   cases: [
@@ -67,7 +68,18 @@ describe('the keep rule in a report', () => {
   it('reads a report saved before it named the setting', () => {
     const saved: Record<string, unknown> = { ...report(null, [Outcome.Met]) };
     delete saved['plansInBuild'];
-    expect(EvalReport.parse(saved).plansInBuild).toBeNull();
+    delete saved['fixBy'];
+    const parsed = EvalReport.parse(saved);
+    expect(parsed.plansInBuild).toBeNull();
+    expect(parsed.fixBy).toBeNull();
+  });
+
+  it.each([
+    { fixBy: FixBy.Resumed, want: ', fixes in the Build session' },
+    { fixBy: FixBy.Fresh, want: ', fixes in a fresh session' },
+  ])('names the fix setting a run forced: $fixBy', ({ fixBy, want }) => {
+    const markdown = renderReport({ ...report(null, [Outcome.Met]), fixBy }, null);
+    expect(markdown).toContain(`# Lane-pipeline eval: careful, fake agent${want}\n`);
   });
 });
 
@@ -78,6 +90,7 @@ describe('renderReport', () => {
         rigor: Rigor.Standard,
         agent: EvalAgent.Fake,
         plansInBuild: null,
+        fixBy: null,
         startedAt: '2026-11-18T00:00:00.000Z',
         finishedAt: '2026-11-18T00:01:00.000Z',
         cases: [

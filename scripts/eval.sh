@@ -12,4 +12,4 @@ if [ "$AGENT" != fake ] && [ -n "${CI:-}" ]; then
 fi
 exec pnpm --filter @10db/daemon exec tsx scripts/eval.ts \
   "--rigor=$RIGOR" "--agent=$AGENT" "--cases=${CASES:-}" "--save-baseline=${SAVE_BASELINE:-0}" \
-  "--plans-in-build=${PLANS_IN_BUILD:-}"
+  "--plans-in-build=${PLANS_IN_BUILD:-}" "--fix-by=${FIX_BY:-}"

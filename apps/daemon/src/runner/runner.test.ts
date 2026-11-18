@@ -3378,6 +3378,36 @@ describe('flows', () => {
       expect(step(workstream.id, 0)?.reason).not.toContain('escalated');
     });
 
+    it('resumes the Build session of a Careful task when its row says resumed, after the Plan step', async () => {
+      const plan = {
+        do: 'mcp' as const,
+        tool: 'complete_step',
+        args: { opId: 'op-fixby-0030', summary: '1. Put it in src/api/a.txt.', verdict: null },
+      };
+      engine = await createTestEngine({
+        Alpha: [
+          [plan, turn],
+          implement('op-fixby-0031'),
+          [reject('op-fixby-0032'), turn],
+          implement('op-fixby-0033'),
+          [approve('op-fixby-0034'), turn],
+        ],
+      });
+      engine.state.write((ctx) =>
+        setPlaybook(ctx, null, { rows: [{ rigor: 'careful', fixBy: 'resumed' }] }),
+      );
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'careful' });
+      await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+      expect(ws(workstream.id).state).toBe('DONE');
+      const sessions = listSessions(engine.store.db, workstream.id);
+      const build = sessions[1];
+      expect(sessions).toHaveLength(5);
+      expect(engine.adapter.prompts[3]?.resume).toBe(build?.providerSessionId);
+      expect(sessions[3]?.model).toBe(build?.model);
+      expect(engine.adapter.prompts[3]?.prompt).toContain('1. The empty state has no test.');
+      expect(step(workstream.id, 1)?.reason).toContain('fixing in its own session');
+    });
+
     it('starts a fresh session one profile up, once, when the resumed fix crashes', async () => {
       engine = await createTestEngine({
         Alpha: [

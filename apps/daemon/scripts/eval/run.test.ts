@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Rigor, Verdict, WorkstreamState, WorkstreamStep } from '@10db/contracts';
+import { FixBy, Rigor, Verdict, WorkstreamState, WorkstreamStep } from '@10db/contracts';
 import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -38,7 +38,7 @@ function decoySource(): { source: string; base: string; merged: string } {
 }
 
 /** Replays the decoy case on the fake agent at `rigor`, in a work dir of its own. */
-async function runDecoy(rigor: Rigor, plansInBuild?: boolean) {
+async function runDecoy(rigor: Rigor, plansInBuild?: boolean, fixBy?: FixBy) {
   const { source, base, merged } = decoySource();
   const workDir = tempDir('eval-work');
   dirs.push(workDir);
@@ -68,6 +68,7 @@ async function runDecoy(rigor: Rigor, plansInBuild?: boolean) {
     },
     log: () => undefined,
     ...(plansInBuild === undefined ? {} : { plansInBuild }),
+    ...(fixBy === undefined ? {} : { fixBy }),
   });
   return { report, work, decoy };
 }
@@ -104,6 +105,22 @@ describe('runEval on the fake agent', () => {
         result: { summary: expect.stringContaining('Fake plan') as unknown, verdict: null },
       });
     }
+  }, 180_000);
+
+  it('forces the fix setting on the eval daemon’s playbook and records it in the report', async () => {
+    const { report, work } = await runDecoy(Rigor.Careful, undefined, FixBy.Resumed);
+    expect(report.fixBy).toBe(FixBy.Resumed);
+    expect(report.plansInBuild).toBeNull();
+    const db = new Database(join(work, 'data', '10db.sqlite'), { readonly: true });
+    try {
+      const rows = z
+        .array(z.object({ rigor: z.string(), fix_by: z.string().nullable() }))
+        .parse(db.prepare('SELECT rigor, fix_by FROM playbook_rows').all());
+      expect(rows).toEqual([{ rigor: Rigor.Careful, fix_by: FixBy.Resumed }]);
+    } finally {
+      db.close();
+    }
+    for (const run of report.cases[0]?.runs ?? []) expect(run.outcome).toBe(Outcome.Met);
   }, 180_000);
 
   it('replays a case twice through a daemon of its own and reports, keeping the transcripts dir', async () => {

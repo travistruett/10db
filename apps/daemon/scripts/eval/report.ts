@@ -1,4 +1,4 @@
-import { Rigor, Verdict } from '@10db/contracts';
+import { FixBy, Rigor, Verdict } from '@10db/contracts';
 import { z } from 'zod';
 import {
   flipsAgainstBaseline,
@@ -46,6 +46,8 @@ export const EvalReport = z.object({
   agent: z.enum(EvalAgent),
   /** The rigor's plansInBuild setting the run forced; null when it ran on the playbook as it is. */
   plansInBuild: z.boolean().nullable().default(null),
+  /** The rigor's fixBy setting the run forced; null when it ran on the playbook as it is. */
+  fixBy: z.enum(FixBy).nullable().default(null),
   startedAt: z.iso.datetime(),
   finishedAt: z.iso.datetime(),
   cases: z.array(CaseReport),
@@ -146,12 +148,19 @@ export function renderReport(report: EvalReport, baseline: EvalReport | null): s
   );
   const against = flips.againstBaseline;
   const keep = baseline === null ? null : keepRule(outcomesOf(report), outcomesOf(baseline));
-  const setting =
+  const planSetting =
     report.plansInBuild === null
       ? ''
       : report.plansInBuild
         ? ', plans in the Build session'
         : ', plans in a Plan step';
+  const fixSetting =
+    report.fixBy === null
+      ? ''
+      : report.fixBy === FixBy.Resumed
+        ? ', fixes in the Build session'
+        : ', fixes in a fresh session';
+  const setting = `${planSetting}${fixSetting}`;
   return [
     `# Lane-pipeline eval: ${report.rigor}, ${report.agent} agent${setting}`,
     '',

@@ -6,7 +6,7 @@
 import { existsSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { Rigor } from '@10db/contracts';
+import { FixBy, Rigor } from '@10db/contracts';
 import { z } from 'zod';
 import { DEFAULT_WORKTREE_BASE } from '../src/daemon';
 import { defaultDataDir } from '../src/runtime-files';
@@ -23,6 +23,8 @@ const Args = z.strictObject({
   saveBaseline: z.enum(['0', '1']).default('0'),
   /** Sets the rigor's plansInBuild for the run: 1 plans in the Build session, 0 in a Plan step. */
   plansInBuild: z.enum(['0', '1']).optional(),
+  /** Sets the rigor's fixBy for the run: resumed fixes in the Build session, fresh in a new session. */
+  fixBy: z.enum(FixBy).optional(),
   /** The report to compare with; absent takes the rigor's saved baseline, if there is one. */
   baseline: z.string().min(1).optional(),
   parallel: z.coerce.number().int().min(1).max(8).default(2),
@@ -73,6 +75,7 @@ const report = await runEval({
   builder: { dataDir: defaultDataDir(), worktreeBase: DEFAULT_WORKTREE_BASE },
   log: say,
   ...(args.plansInBuild === undefined ? {} : { plansInBuild: args.plansInBuild === '1' }),
+  ...(args.fixBy === undefined ? {} : { fixBy: args.fixBy }),
 });
 const { markdown } = writeRun({
   work,
