@@ -82,6 +82,14 @@ describe('sessionMeta', () => {
       want: 'on qa · 3 commits not in a pull request',
     },
     {
+      name: 'a branch with nothing ahead of its base, as after a merge',
+      input: {
+        place: WorkPlace.Branch,
+        state: chatWorkStateDto({ place: 'branch', branch: 'qa', baseBranch: 'main' }),
+      },
+      want: 'on qa · nothing ahead of main',
+    },
+    {
       name: 'a branch, committed, on a project that merges locally',
       input: {
         place: WorkPlace.Branch,
