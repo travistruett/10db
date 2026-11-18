@@ -5,6 +5,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -26,6 +27,7 @@ import { createInboxService } from '../inbox';
 import { silentLogger } from '../log';
 import { listNetworkHosts } from '../permissions';
 import { createGateRunner, type GateRequest, type GateRunner } from '../verify';
+import { createNodeModulesTemplates, templateKey, templatesRoot } from './node-modules-template';
 import { resolvePnpm } from './pnpm-binary';
 import {
   createWorktreeDependencies,
@@ -747,6 +749,120 @@ describe('refreshing a worktree’s dependencies', () => {
     },
     90_000,
   );
+});
+
+describe('a copy’s node_modules from a template', () => {
+  const VERSION = '10.0.0';
+  const root = (): string => templatesRoot(join(tmp.path, 'data'));
+
+  function withTemplates() {
+    const real = createGateRunner({ sandbox: null, logger: silentLogger });
+    return createWorktreeDependencies({
+      gate: {
+        run: (request) => {
+          requests.push(request);
+          return real.run(request);
+        },
+      },
+      clock: new ManualClock(),
+      dataDir: join(tmp.path, 'data'),
+      sessionEnv: () => ({ PATH: `${bin}:/usr/bin:/bin`, pnpm_config_store_dir: 'store' }),
+      resolvePnpm: () => Promise.resolve(join(bin, 'pnpm')),
+      pnpmVersion: () => Promise.resolve(VERSION),
+      rules: () => [],
+      checkouts: () => [worktree],
+      timeoutMs: 20_000,
+      templates: createNodeModulesTemplates({ root: root(), logger: silentLogger }),
+    });
+  }
+
+  /** A template made from another copy with the same lockfile, its `left-pad` installed. */
+  async function templateOfLeftPad(): Promise<string> {
+    const made = join(tmp.path, 'made');
+    mkdirSync(join(made, 'node_modules/left-pad'), { recursive: true });
+    writeFileSync(join(made, 'node_modules/left-pad/index.js'), 'module.exports = 1;\n');
+    writeFileSync(join(made, 'pnpm-lock.yaml'), LEFT_PAD_LOCKFILE);
+    const key = templateKey(made, VERSION);
+    if (key === null) throw new Error('no key');
+    await createNodeModulesTemplates({ root: root(), logger: silentLogger }).capture({
+      key,
+      path: made,
+    });
+    expect(existsSync(join(root(), key))).toBe(true);
+    return key;
+  }
+
+  const unseeded = (deps: ReturnType<typeof withTemplates>, extra: object = {}) =>
+    deps.refresh({ batch, project, path: worktree, signal, seeded: false, ...extra });
+
+  it('clones a template whose lockfile matches, and runs no install', async () => {
+    fakePnpm();
+    await templateOfLeftPad();
+    writeFileSync(join(worktree, 'pnpm-lock.yaml'), LEFT_PAD_LOCKFILE);
+    const result = await unseeded(withTemplates());
+    expect(result).toMatchObject({
+      kind: 'installed',
+      fromTemplate: true,
+      installs: 0,
+      startedOver: false,
+    });
+    expect(requests).toEqual([]);
+    expect(existsSync(calls)).toBe(false);
+    expect(readFileSync(join(worktree, 'node_modules/left-pad/index.js'), 'utf8')).toBe(
+      'module.exports = 1;\n',
+    );
+    if (result.kind === 'installed')
+      expect(readFileSync(result.logPath, 'utf8')).toContain('no install ran');
+  });
+
+  it.each<[string, (template: string) => void]>([
+    ['there is no template', (template) => { rmSync(template, { recursive: true }); }],
+    ['its marker is missing', (template) => { rmSync(join(template, 'template.json')); }],
+    [
+      'its tree lacks a package',
+      (template) => { rmSync(join(template, 'tree/node_modules/left-pad'), { recursive: true }); },
+    ],
+    ['its tree is unreadable', (template) => { chmodSync(join(template, 'tree'), 0o000); }],
+  ])('installs as before, and removes the template, when %s', async (_name, damage) => {
+    fakePnpm();
+    const key = await templateOfLeftPad();
+    damage(join(root(), key));
+    writeFileSync(join(worktree, 'pnpm-lock.yaml'), LEFT_PAD_LOCKFILE);
+    const result = await unseeded(withTemplates());
+    expect(result).toMatchObject({ kind: 'installed', installs: 1 });
+    expect(result).not.toHaveProperty('fromTemplate');
+    expect(requests).toHaveLength(1);
+    expect(existsSync(join(root(), key))).toBe(false);
+  });
+
+  it.each<[string, object]>([
+    ['a dependency change', { mode: 'update' }],
+    ['a start over', { startOver: true }],
+  ])('never clones for %s', async (_name, extra) => {
+    fakePnpm();
+    const key = await templateOfLeftPad();
+    writeFileSync(join(worktree, 'pnpm-lock.yaml'), LEFT_PAD_LOCKFILE);
+    const result = await unseeded(withTemplates(), extra);
+    expect(result).toMatchObject({ kind: 'installed', installs: 1 });
+    expect(requests).toHaveLength(1);
+    expect(existsSync(join(root(), key))).toBe(true);
+  });
+
+  it('makes a template of a whole install when asked, and sweeps one no copy uses', async () => {
+    fakePnpm();
+    mkdirSync(join(root(), 'stale', 'tree'), { recursive: true });
+    writeFileSync(join(worktree, 'pnpm-lock.yaml'), LEFT_PAD_LOCKFILE);
+    // What the install would have made: the fake pnpm makes nothing.
+    mkdirSync(join(worktree, 'node_modules/left-pad'), { recursive: true });
+    const deps = withTemplates();
+    expect(await unseeded(deps)).toMatchObject({ kind: 'installed', installs: 1 });
+    expect(readdirSync(root())).toEqual(['stale']);
+    expect(await unseeded(deps, { makeTemplate: true })).toMatchObject({
+      kind: 'installed',
+      installs: 1,
+    });
+    expect(readdirSync(root())).toEqual([templateKey(worktree, VERSION)]);
+  });
 });
 
 describe('raiseInstallHostCards', () => {
