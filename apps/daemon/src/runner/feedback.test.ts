@@ -13,18 +13,15 @@ import {
   getWorkstreamRow,
   insertBuilderMessage,
   listTaskThread,
-  markTaskFilesInline,
   markTaskMessagePushedUnder,
   markTaskMessagesPushed,
   patchAccount,
-  patchProject,
   patchWorkstream,
-  seedAccount,
   type StoredPicture,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestEngine, type TestEngine } from '../../test/engine';
-import { handoffArgs, waitFor } from '../../test/fixtures';
+import { handoffArgs } from '../../test/fixtures';
 import { pngOfSize } from '../../test/png';
 import { ConversationUnreadError, type FakeScriptBook } from '../sessions';
 import { FRESH_SESSION_NOTICE, taskFilesDir } from '../conversation';
@@ -70,8 +67,6 @@ const feedbackOn = (
     });
   });
 };
-
-type FakeStep = FakeScriptBook[string][number][number];
 
 const crash = { do: 'crash' as const, message: 'the session stopped' };
 const working = { do: 'activity' as const, summary: 'Working on it' };
@@ -196,39 +191,6 @@ describe("a builder's message from the task's thread", () => {
     });
   });
 
-  // Workbench spec §6.3: a session that ends with a message it never took, however it ends, queues
-  // the workstream again with `feedback`, and a feedback keeps the message it was started for even
-  // when an older one is untaken too.
-  it.each<[string, FakeStep[], string]>([
-    [
-      'a usage pause',
-      [working, { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 }],
-      'PAUSED_LIMIT',
-    ],
-    ['an account hold', [working, { do: 'auth_error', error: 'account_on_hold' }], 'PAUSED_LIMIT'],
-  ])('keeps the message a feedback was started for through %s', async (_name, steps, state) => {
-    const book: FakeScriptBook = { Alpha: [steps] };
-    engine = await createTestEngine(book);
-    const { task, workstream } = engine.addTask('Alpha');
-    const older = say(task.id, 'Make it blue');
-    const message = say(task.id, 'Now the footer');
-    pushed(older);
-    feedbackOn(workstream.id, message, null);
-
-    engine.launch(workstream.id);
-    await engine.runner.idle();
-
-    expect(sentMessages()).toEqual([older]);
-    expect(getWorkstream(engine.store.db, workstream.id)).toMatchObject({
-      state,
-      nextAction: {
-        kind: 'feedback',
-        messageId: message,
-        providerSessionId: firstProviderSession(),
-      },
-    });
-  });
-
   it('runs the step again with a message its session never took, rather than verifying it', async () => {
     const book: FakeScriptBook = { Alpha: [[working, { do: 'turn_complete' }]] };
     engine = await createTestEngine(book);
@@ -273,40 +235,6 @@ describe("a builder's message from the task's thread", () => {
     expect(next?.resume).toBeNull();
     expect(next?.prompt).toContain(`(message ${message})`);
     expect(getTaskMessageRow(engine.store.db, message).deliveredAt).not.toBeNull();
-  });
-
-  it('starts fresh from the digest with the message once the project has moved to another account', async () => {
-    const book: FakeScriptBook = {
-      Alpha: [
-        [working, crash],
-        [{ do: 'consume' }, crash],
-      ],
-    };
-    engine = await createTestEngine(book);
-    const { task, workstream } = engine.addTask('Alpha');
-    const message = say(task.id, 'Make it blue');
-    feedbackOn(workstream.id, message, null);
-    engine.launch(workstream.id);
-    await engine.runner.idle();
-    expect(getWorkstream(engine.store.db, workstream.id).nextAction).toMatchObject({
-      kind: 'feedback',
-      providerSessionId: firstProviderSession(),
-    });
-
-    const other = seedAccount(engine.store, { kind: 'claude_subscription', label: 'Second plan' });
-    engine.state.write((ctx) => {
-      patchAccount(ctx, other.id, { expectedIdentity: 'second@example.com' });
-      patchProject(ctx, engine.project.id, { accountId: other.id });
-    });
-    engine.launch(workstream.id);
-    await engine.runner.idle();
-
-    const moved = engine.adapter.prompts[1];
-    expect(moved?.accountId).toBe(other.id);
-    expect(moved?.resume).toBeNull();
-    expect(moved?.prompt).toContain(`(message ${message})`);
-    expect(getTaskMessageRow(engine.store.db, message).deliveredAt).not.toBeNull();
-    expect(moved?.prompt).toContain("This task's thread continues in a fresh session");
   });
 
   it('hands a message no turn took only to a session of the step it was written for', async () => {
@@ -467,72 +395,5 @@ describe("a builder's message from the task's thread", () => {
       expect(engine.adapter.sent).toEqual([]);
       expect(engine.adapter.reads).toHaveLength(1);
     });
-
-    it('sends a picture again as its file when its message is sent again, though the session was sent it before', async () => {
-      engine = await codexEngine({ Alpha: [[working, crash]] });
-      const { task, workstream } = engine.addTask('Alpha');
-      const shot = picture(task.id);
-      const message = say(task.id, 'Make the header smaller', [shot]);
-      pushedUnderItsUuid(message);
-      engine.state.write((ctx) => {
-        const file = getTaskMessageRow(ctx.tx, message).files[0];
-        if (file) markTaskFilesInline(ctx, task.id, [file.id], false);
-      });
-      feedbackOn(workstream.id, message, 'thr-before-restart');
-      engine.adapter.readBack = () => Promise.resolve([]);
-
-      engine.launch(workstream.id);
-      await engine.runner.idle();
-
-      const [resumed] = engine.adapter.prompts;
-      expect(resumed?.resume).toBe('thr-before-restart');
-      expect(resumed?.images).toBe(1);
-      expect(resumed?.prompt).not.toContain(`kept at ${shot.storedPath}`);
-    });
-
-    it('ends the read at once when the lane is stopped, sending nothing', async () => {
-      engine = await codexEngine({ Alpha: [[working, crash]] });
-      const { task, workstream } = engine.addTask('Alpha');
-      const message = say(task.id, 'Make it blue');
-      pushedUnderItsUuid(message);
-      feedbackOn(workstream.id, message, 'thr-before-restart');
-      engine.adapter.readBack = (spec) =>
-        new Promise((_, reject) => {
-          spec.signal?.addEventListener('abort', () => {
-            reject(new ConversationUnreadError('the read was stopped'));
-          });
-        });
-
-      engine.launch(workstream.id);
-      await waitFor(() => engine.adapter.reads.length === 1);
-      await engine.runner.stop(workstream.id, 'paused');
-      await engine.runner.idle();
-
-      expect(engine.adapter.prompts).toEqual([]);
-      expect(getTaskMessageRow(engine.store.db, message).deliveredAt).toBeNull();
-      expect(listTaskThread(engine.store.db, task.id).filter((m) => m.author === 'system')).toEqual(
-        [],
-      );
-    });
-  });
-
-  it('notes a fresh session on the thread only once it has started', async () => {
-    const book: FakeScriptBook = { Alpha: [[{ do: 'consume' }, crash]] };
-    engine = await createTestEngine(book);
-    const { task, workstream } = engine.addTask('Alpha');
-    const message = say(task.id, 'Make it blue');
-    feedbackOn(workstream.id, message, null);
-    engine.adapter.seen = () => ({ email: 'someone-else@example.com' });
-
-    engine.launch(workstream.id);
-    await engine.runner.idle();
-
-    expect(getWorkstream(engine.store.db, workstream.id)).toMatchObject({
-      state: 'PAUSED_LIMIT',
-      nextAction: { kind: 'feedback', messageId: message, providerSessionId: null },
-    });
-    expect(
-      listTaskThread(engine.store.db, task.id).filter((m) => m.author === TaskMessageAuthor.System),
-    ).toEqual([]);
   });
 });

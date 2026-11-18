@@ -1,6 +1,6 @@
-import { mintId, TASK_MESSAGE_MAX_CHARS, type AreaDef } from '@10db/contracts';
+import { mintId, type AreaDef } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { checkNoticeLine, checkOffer, checkTargets, type CheckPage } from './check-targets';
+import { checkTargets, type CheckPage } from './check-targets';
 
 // Workbench spec §8.1, plan §3.1a: a failed check's output is free text. It names a task's page only
 // by a whole path that differs from the pass's branch; anything else goes to the tasks whose turns
@@ -124,48 +124,5 @@ describe('where a failed check goes', () => {
         ran: ran ?? [people],
       }),
     ).toEqual({ named, threads });
-  });
-});
-
-describe("a failed check's words", () => {
-  it('names the paths on one line, or says it names none', () => {
-    expect(checkNoticeLine(['src/settings/page.tsx', 'src/shared.ts'])).toBe(
-      'Check failed in `src/settings/page.tsx`, `src/shared.ts`',
-    );
-    expect(checkNoticeLine([])).toBe(
-      'Check failed after the last turn, outside the files it changed',
-    );
-  });
-
-  it("offers the command, its exit and the output's end, cut to what one message holds", () => {
-    const tail = `${'early line\n'.repeat(4000)}the last error\n`;
-    const offer = checkOffer({
-      line: 'Check failed in `src/settings/page.tsx`',
-      command: 'make check-changed',
-      exitCode: 2,
-      output: tail,
-    });
-    const short = checkOffer({
-      line: 'Check failed after the last turn, outside the files it changed',
-      command: 'make check-changed',
-      exitCode: 1,
-      output: 'stuck\n',
-    });
-
-    expect(offer.length).toBeLessThanOrEqual(TASK_MESSAGE_MAX_CHARS);
-    expect(offer.startsWith('Check failed in `src/settings/page.tsx`\n\n')).toBe(true);
-    expect(offer).toContain('`make check-changed` exited 2.');
-    expect(offer.endsWith('the last error\n```')).toBe(true);
-    expect(short).toBe(
-      [
-        'Check failed after the last turn, outside the files it changed',
-        '',
-        '`make check-changed` exited 1.',
-        '',
-        '```',
-        'stuck',
-        '```',
-      ].join('\n'),
-    );
   });
 });

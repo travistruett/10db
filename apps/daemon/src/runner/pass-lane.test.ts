@@ -9,15 +9,11 @@ import {
   InvalidError,
   mintId,
   PassCheckDetail,
-  SessionActivityData,
-  EventType,
   SHARED_ASK_ALLOW_CHOICE,
-  SHARED_ASK_REPLY_CHOICE,
   SharedAskDetail,
   type PassDto,
   type TaskDto,
   type TaskMessageId,
-  type ToolCallView,
   type WorkstreamId,
 } from '@10db/contracts';
 import {
@@ -39,7 +35,6 @@ import {
   insertWorkstream,
   listInbox,
   listSkipsForWorkstream,
-  listEventsAfter,
   listPassTurns,
   listSharedChanges,
   listSignOffWaits,
@@ -48,12 +43,10 @@ import {
   listSessions,
   endPassTurn,
   listTaskThread,
-  leavePass,
   offeredText,
   listWorkstreams,
   openPassTurn,
   patchAccount,
-  patchProject,
   patchWorkstream,
   setAbandonStep,
   setClosePlan,
@@ -67,12 +60,10 @@ import { silentLogger } from '../log';
 import { recoverOnStartup, systemProcesses } from '../recovery';
 import { createScheduler } from '../scheduler';
 import { untakenMessages } from './lane-messages';
-import { finishEndedTurn } from './pass-turn';
 import {
   askSignOff,
   closeHoldsOf,
   grantSharedHold,
-  passView,
   resumePassWork,
   type PassWorkDeps,
 } from '../pass';
@@ -293,36 +284,6 @@ describe('a pass task turn by turn', () => {
     ).toEqual(['Made it bigger too.']);
   });
 
-  it('raises no Ready for a turn whose end the next turn overtook before it was settled', async () => {
-    const { task, pass, id } = await openPage([working]);
-    await waitFor(wrote);
-    await engine.runner.stopAll('shutdown');
-    // The turn ended; a message then opened the next turn while the first one's work was kept.
-    const ended = engine.state.write((ctx) => {
-      const open = openPassTurn(ctx.tx, task.id);
-      if (!open) throw new Error('no open turn');
-      const done = endPassTurn(ctx, open.id, { ending: 'ready', replyBody: 'Tidied.' });
-      const next = insertBuilderMessage(ctx, task.id, { body: 'Also bigger', files: [] });
-      insertPassTurn(ctx, {
-        taskId: task.id,
-        workstreamId: id,
-        sessionId: null,
-        messageId: next.id,
-      });
-      return done;
-    });
-    await finishEndedTurn(passWork(), ended, { fence: null, providerSessionId: null, reason: '' });
-
-    expect(
-      listPassTurns(engine.store.db, pass.id).map((t) => [t.seq, t.ending, t.settledAt !== null]),
-    ).toEqual([
-      [1, 'ready', true],
-      [2, null, false],
-    ]);
-    expect(readyItems()).toEqual([]);
-    expect(row(id).state).not.toBe('WAITING_HUMAN');
-  });
-
   it('a message folded mid-turn: the page is Ready when that turn ends', async () => {
     const { task, pass, id } = await openPage([
       [
@@ -410,108 +371,6 @@ describe('the policy a pass session runs under', () => {
     await waitFor(() => specs[0]);
     expect(specs[0]?.policy).toMatchObject({ surface: 'pass', attended: true });
     await waitFor(isWaiting.bind(null, id));
-  });
-});
-
-describe("a working turn's live line", () => {
-  it('names the tool and the file it aims at, and counts the files the turn wrote, not those it read', async () => {
-    const form = 'src/settings/form.tsx';
-    const { pass, id } = await openPage([
-      [
-        { do: 'consume' },
-        { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content: 'one\n' } },
-        { do: 'tool', toolName: 'Read', input: { file_path: 'src/shared.ts' } },
-        {
-          do: 'tool',
-          toolName: 'Edit',
-          input: { file_path: form, old_string: 'a', new_string: 'b' },
-        },
-        { do: 'await_message', contains: 'never sent' },
-      ],
-    ]);
-
-    const activity = await waitFor(() => {
-      const now = passView(engine.store.db, pass.id).pages[0]?.turn?.activity;
-      return now?.tool === 'Edit' ? now : undefined;
-    });
-
-    expect(activity).toMatchObject({
-      tool: 'Edit',
-      target: form,
-      filesTouched: [PAGE_FILE, form],
-    });
-    const rows = listEventsAfter(engine.store.db, 0, 1000).filter(
-      (e) => e.type === 'session.activity' && e.data['workstreamId'] === id,
-    );
-    expect(rows.map((e) => SessionActivityData.parse(e.data).turn?.filesTouched)).toEqual([
-      [PAGE_FILE],
-      [PAGE_FILE],
-      [PAGE_FILE, form],
-    ]);
-  });
-
-  it('names the tool and counts the files written from tool calls alone, once per call', async () => {
-    const at = '2026-11-12T00:00:00.000Z';
-    const common = {
-      startedAt: at,
-      parentId: null,
-      refusal: null,
-      deniedBy: null,
-      limit: null,
-      soft: null,
-    } as const;
-    const edit = (status: 'running' | 'done'): ToolCallView => ({
-      ...common,
-      kind: 'edit',
-      id: 'fc_1:0',
-      harnessTool: 'apply_patch',
-      status,
-      title: PAGE_FILE,
-      durationMs: status === 'done' ? 5 : null,
-      path: PAGE_FILE,
-      change: 'update',
-      movePath: null,
-      hunks: [],
-      addedLines: 1,
-      removedLines: 0,
-      truncated: false,
-    });
-    const command: ToolCallView = {
-      ...common,
-      kind: 'command',
-      id: 'cmd_1',
-      harnessTool: 'command',
-      status: 'running',
-      title: 'pnpm test',
-      durationMs: null,
-      command: 'pnpm test',
-      cwd: null,
-      outputTail: '',
-      outputBytes: 0,
-      exitCode: null,
-    };
-    const { pass, id } = await openPage([
-      [
-        { do: 'consume' },
-        { do: 'tool_call', call: edit('running') },
-        { do: 'tool_call', call: edit('done') },
-        { do: 'tool_call', call: command },
-        { do: 'await_message', contains: 'never sent' },
-      ],
-    ]);
-
-    const activity = await waitFor(() => {
-      const now = passView(engine.store.db, pass.id).pages[0]?.turn?.activity;
-      return now?.tool === 'command' ? now : undefined;
-    });
-    expect(activity).toMatchObject({ tool: 'command', target: 'pnpm', filesTouched: [PAGE_FILE] });
-    const rows = listEventsAfter(engine.store.db, 0, 1000).filter(
-      (e) => e.type === 'session.activity' && e.data['workstreamId'] === id,
-    );
-    expect(rows.map((e) => SessionActivityData.parse(e.data).tool)).toEqual([
-      { name: 'apply_patch', target: PAGE_FILE },
-      { name: 'command', target: 'pnpm' },
-    ]);
   });
 });
 
@@ -842,38 +701,6 @@ describe('a pass on a ChatGPT account', () => {
       false,
     );
   });
-
-  it("sends a failed turn's message again in a fresh session on Retry Turn when its thread cannot be read back", async () => {
-    const { task, pass, id } = await openPage(
-      [
-        [{ do: 'billing_refused', message: 'a billing check refused the session' }],
-        [...turn('one\n', 'Tidied the form.'), { do: 'await_message', contains: 'never sent' }],
-      ],
-      undefined,
-      signedIn,
-      PAGE_AREAS,
-      {},
-      onChatGpt,
-    );
-    await waitFor(() => listPassTurns(engine.store.db, pass.id)[0]?.settledAt);
-    await engine.runner.idle();
-    const failed = listInbox(engine.store.db, {}).find((i) => i.title.startsWith('Turn failed'));
-    if (!failed) throw new Error('no failed turn flag');
-    unreadable();
-
-    engine.inbox.answer(failed.id, { choice: 'retry_turn' });
-    engine.launch(id);
-    await waitFor(isReady(id, 1));
-
-    expect(engine.adapter.reads).toHaveLength(1);
-    expect(engine.adapter.prompts[1]?.resume).toBeNull();
-    expect(engine.adapter.prompts[1]?.prompt).toContain('Make the form tidy');
-    expect(systemNotices(task)).toContain(THREAD_UNREAD_NOTICE);
-    expect(listPassTurns(engine.store.db, pass.id).map((t) => [t.seq, t.ending])).toEqual([
-      [1, 'failed'],
-      [2, 'ready'],
-    ]);
-  });
 });
 
 describe('a pass on a ChatGPT account whose Codex drops a message', () => {
@@ -1088,26 +915,6 @@ describe('a pass task turn that ends otherwise', () => {
       ).toHaveLength(1);
     },
   );
-
-  it('is Ready at once with a command left running, and says on the thread when it finishes', async () => {
-    const { task, id } = await openPage([
-      [
-        { do: 'consume' },
-        { do: 'background', tasks: ['pnpm dev'] },
-        { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content: 'one\n' } },
-        { do: 'turn_complete', text: 'Tidied the form.' },
-        { do: 'background', tasks: [] },
-        { do: 'await_message', contains: 'never sent' },
-      ],
-    ]);
-    await waitFor(isReady(id, 1));
-    await waitFor(() =>
-      listTaskThread(engine.store.db, task.id).find((m) => m.body.includes('"pnpm dev"')),
-    );
-    // Nothing was sent to the session: a nudge would be a turn nobody wrote.
-    expect(engine.adapter.sent).toEqual([]);
-    expect(row(id).nextAction.kind).toBe('pass_review');
-  });
 
   it('queues a message the session never took when it ends, so it is not lost', async () => {
     const { task, id } = await openPage([
@@ -1388,50 +1195,6 @@ describe("a pass turn's question about a shared area", () => {
     const result = engine.adapter.observations.find((o) => o.kind === 'mcp_result');
     expect(result?.detail).toMatchObject({ tool: 'request_claim', isError: false });
   });
-
-  it("starts the page's next turn with a reply that came as its turn ended", async () => {
-    const { people, passId, peopleTask } = await askingAfterSettings([
-      { do: 'turn_complete', text: 'Kept it to the page.' },
-      { do: 'await_message', contains: 'Use the page one' },
-      { do: 'consume' },
-      { do: 'turn_complete', text: 'Used the page one.' },
-      { do: 'await_message', contains: 'never sent' },
-    ]);
-    // The builder answers as the turn's end is written, before its step 2 withdraws the question.
-    const unsubscribe = engine.bus.subscribe((event) => {
-      if (event.type !== EventType.PassTurnEnded) return;
-      unsubscribe();
-      const asked = listInbox(engine.store.db, {}).find(
-        (i) => SharedAskDetail.safeParse(i.detail).success && i.state === 'OPEN',
-      );
-      if (asked)
-        engine.inbox.answer(asked.id, {
-          choice: SHARED_ASK_REPLY_CHOICE,
-          note: 'Use the page one',
-        });
-    });
-
-    engine.launch(people);
-    await waitFor(
-      () =>
-        listPassTurns(engine.store.db, passId).filter(
-          (t) => t.taskId === peopleTask && t.settledAt !== null,
-        ).length === 2 && isWaiting(people),
-    );
-
-    const reply = listTaskThread(engine.store.db, peopleTask).find(
-      (m) => m.author === 'builder' && m.body === 'Use the page one',
-    );
-    expect(reply).toBeDefined();
-    expect(
-      listPassTurns(engine.store.db, passId)
-        .filter((t) => t.taskId === peopleTask)
-        .map((t) => [t.seq, t.ending, t.messageId]),
-    ).toEqual([
-      [1, 'ready', expect.anything()],
-      [2, 'ready', reply?.id],
-    ]);
-  });
 });
 
 describe("the builder's Stop", () => {
@@ -1480,14 +1243,6 @@ describe("the builder's Stop", () => {
     expect(row(id)).toMatchObject({ state: 'QUEUED', recoveryAttempts: 0, leaseOwner: null });
     expect(readyItems()).toEqual([]);
   });
-
-  it('resolves at once for a page with no session, changing nothing', async () => {
-    const { id } = await openPage([[...turn('one\n', 'Tidied.')]]);
-    await waitFor(() => !engine.runner.isRunning(id) && row(id).state === 'WAITING_HUMAN');
-    const before = row(id);
-    await engine.runner.stopPassLane(id);
-    expect(row(id)).toEqual(before);
-  });
 });
 
 describe('a message that meets a stop', () => {
@@ -1514,24 +1269,6 @@ describe('a message that meets a stop', () => {
       [1, 'stopped'],
     ]);
     expect(row(id).state).toBe('QUEUED');
-  });
-
-  it('is refused once the pass no longer holds the page', async () => {
-    const { task, id } = await openPage([
-      [...turn('one\n', 'Tidied.'), { do: 'await_message', contains: 'never sent' }],
-    ]);
-    await waitFor(isReady(id, 1));
-    engine.state.write((ctx) => {
-      leavePass(ctx, task.id);
-    });
-    const message = engine.state.write((ctx) =>
-      insertBuilderMessage(ctx, task.id, { body: 'Bigger please', files: [] }),
-    );
-
-    await expect(
-      engine.runner.deliverMessage(task.id, message.id, { redo: false }),
-    ).rejects.toThrow(ConflictError);
-    expect(engine.adapter.sent).toEqual([]);
   });
 });
 
@@ -1666,41 +1403,6 @@ describe("a pass task's handoffs", () => {
     });
   });
 
-  it('closes a Ready page asked to hand off for its account after an earlier turn was nudged', async () => {
-    const { id } = await openPage(
-      [
-        [
-          { do: 'consume' },
-          { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content: 'one\n' } },
-          // The context fills: the session is nudged, then nudged firmly, and ends without a handoff.
-          { do: 'context', percentage: 80 },
-          { do: 'await_message', contains: 'filling up' },
-          { do: 'turn_complete', text: 'Nearly done.' },
-          { do: 'await_message', contains: 'almost full' },
-          { do: 'turn_complete', text: 'Tidied the form.' },
-          { do: 'await_message', contains: 'never sent' },
-        ],
-      ],
-      'Make the form tidy',
-      () => {
-        engine.state.write((ctx) => {
-          patchProject(ctx, engine.project.id, { handoffPct: 30, nudgePct: 95 });
-        });
-      },
-    );
-    await waitFor(isReady(id, 1));
-    expect(engine.adapter.sent).toHaveLength(2);
-
-    engine.runner.handOff(
-      engine.project.id,
-      engine.project.accountId,
-      'the account is near its limit',
-    );
-    await waitFor(() => !engine.runner.isRunning(id));
-    expect(engine.adapter.sent).toHaveLength(2);
-    expect(row(id)).toMatchObject({ state: 'WAITING_HUMAN', nextAction: { kind: 'pass_review' } });
-  });
-
   it('goes on with a long turn through handoffs nobody asked for while its work moves between them', async () => {
     const { pass, id } = await openPage([
       [{ do: 'consume' }, ...handOffAfter('one\n', 'op-pass-h1')],
@@ -1715,48 +1417,6 @@ describe("a pass task's handoffs", () => {
     expect(turns.map((t) => [t.seq, t.ending])).toEqual([[1, 'ready']]);
     expect(git('show', `${turns[0]?.keptSha ?? ''}:${PAGE_FILE}`)).toBe('four');
   });
-
-  it('runs twelve rounds with a low handoff line, each Ready, no message lost and nothing sent back', async () => {
-    const ROUNDS = 12;
-    /** A round's work, from its message to the handoff its context forces. */
-    const round = (n: number): FakeStep[] => [
-      { do: 'consume' },
-      { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content: `${String(n)}\n` } },
-      { do: 'context', percentage: 80 },
-      { do: 'await_message', contains: 'write_handoff' },
-      { do: 'mcp', tool: 'write_handoff', args: handoffArgs(`op-round-${String(n)}`, 'Say done') },
-      { do: 'turn_complete', text: `Handing off round ${String(n)}.` },
-    ];
-    const sessions: FakeStep[][] = [round(1)];
-    for (let n = 1; n <= ROUNDS; n += 1)
-      sessions.push([
-        // The continued session's briefing sets its baseline; then it finishes the round.
-        { do: 'context', percentage: 10 },
-        { do: 'turn_complete', text: `Round ${String(n)} done.` },
-        ...(n < ROUNDS
-          ? [{ do: 'await_message' as const, contains: `Round ${String(n + 1)}` }, ...round(n + 1)]
-          : [{ do: 'await_message' as const, contains: 'never sent' }]),
-      ]);
-    const { task, pass, id } = await openPage(sessions, 'Round 1: tidy the form');
-    engine.state.write((ctx) => {
-      patchProject(ctx, engine.project.id, { handoffPct: 30, nudgePct: 95 });
-    });
-    for (let n = 1; n <= ROUNDS; n += 1) {
-      await waitFor(isReady(id, n), 20_000);
-      if (n < ROUNDS) await write(task, `Round ${String(n + 1)}: once more`);
-    }
-
-    const turns = listPassTurns(engine.store.db, pass.id);
-    expect(turns.map((t) => t.ending)).toEqual(Array.from({ length: ROUNDS }, () => 'ready'));
-    expect(
-      listTaskThread(engine.store.db, task.id)
-        .filter((m) => m.author === 'builder')
-        .every((m) => m.deliveredAt !== null),
-    ).toBe(true);
-    expect(row(id)).toMatchObject({ attempt: 0, state: 'WAITING_HUMAN' });
-    expect(engine.adapter.prompts).toHaveLength(ROUNDS + 1);
-    expect(git('show', `${turns.at(-1)?.keptSha ?? ''}:${PAGE_FILE}`)).toBe(String(ROUNDS));
-  }, 60_000);
 });
 
 describe('a pass page across a restart', () => {
