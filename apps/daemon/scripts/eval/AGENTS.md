@@ -33,8 +33,11 @@ with it.
 - Each case-run gets a `git archive <baseCommit>` snapshot committed once into a fresh repo, with a
   bare `origin` whose `main` sits there. A snapshot carries no later history, so a lane can't read
   the merged answer, and the builder's checkout is never written. A real run installs dependencies
-  in the snapshot (`pnpm install --frozen-lockfile --prefer-offline`) and gates with
-  `make check-changed`; the fake gates with `git diff --quiet HEAD`.
+  in the snapshot and gates with `make check-changed`; the fake gates with `git diff --quiet HEAD`.
+  The install is `mise exec -- pnpm install --frozen-lockfile --prefer-offline` run in the snapshot
+  (`snapshot-install.ts`), so the snapshot's own node and pnpm run, not the runner's checkout's, and
+  that snapshot's `mise.toml` is trusted for the command alone. No env variable is needed. A failed
+  install stops the run with its own output in the error.
 - One daemon runs from source with its own data dir and worktree root inside the work dir
   (`daemon-env.ts`), billing and provider variables dropped, and the off switches set. It refuses to
   start on the builder's data dir or worktree base, so no task, card, batch or worktree lands in the
