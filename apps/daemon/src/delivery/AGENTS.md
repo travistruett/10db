@@ -16,13 +16,7 @@
   `BISECT_LOG`, and `workstream-changes.ts` reads a pass's kept turns by `ChangesScope`.
 - A switch back, branch cut or settle waiting on a chat's terminal (`folder-wait.ts`) ends on 10db's shutdown, so quitting never hangs, and waits again next start; no branch settles while a terminal holds the folder, and each wait names the chat and keeps the project's delivery slot.
 - A session's worktree is cut by `chat-worktree-cut.ts`; `worktree-sweep.ts` keeps one with unsaved files.
-<<<<<<< 57281a7de39a2654b75b2521260ea3387fcb7dd5
-- `hand-made-worktrees.ts` (`decisions/2026-11-17-hand-made-worktrees-are-offered-for-removal-and-kept-out-of-spotlight.md`) looks, from the pull request watch's `afterRound` and at most every six hours (`createHandMadeFolderLook`), at each pull request project's hand-made folder (`handMadeWorktreeFolder`) and raises `hand-made-cards.ts`'s cards: Remove Merged Worktrees (merged pull request, tip carried by its head, unlocked, clean, no loose ignored file) and Keep Spotlight Out. Both are answered in `worktree-card.ts` (`merged-hand-made`, `spotlight`), through the scoped `Git.handMade*` calls; nothing is removed unanswered, and a removal looks again first.
-- `createPr` copies commits' `Test-budget:` lines into its body (`testBudgetLines`, `pr-text.ts`).
-||||||| 50641f4b
-- `hand-made-worktrees.ts` (`decisions/2026-11-17-hand-made-worktrees-are-offered-for-removal-and-kept-out-of-spotlight.md`) looks, from the pull request watch's `afterRound` and at most every six hours (`createHandMadeFolderLook`), at each pull request project's hand-made folder (`handMadeWorktreeFolder`) and raises `hand-made-cards.ts`'s cards: Remove Merged Worktrees (merged pull request, tip carried by its head, unlocked, clean, no loose ignored file) and Keep Spotlight Out. Both are answered in `worktree-card.ts` (`merged-hand-made`, `spotlight`), through the scoped `Git.handMade*` calls; nothing is removed unanswered, and a removal looks again first.
-=======
 - `hand-made-worktrees.ts` (`decisions/2026-11-17-hand-made-worktrees-are-offered-for-removal-and-kept-out-of-spotlight.md`) looks, from the pull request watch's `afterRound` and at most every six hours (`createHandMadeFolderLook`), at each pull request project's hand-made folder (`handMadeWorktreeFolder`) and raises `hand-made-cards.ts`'s cards: Remove Merged Worktrees (merged pull request, tip carried by its head, unlocked, clean, no loose ignored file) and Keep Spotlight Out. `worktree-card.ts` answers both through the scoped `Git.handMade*` calls; nothing is removed unanswered, and a removal looks again first. What an answer did (`handMadeNotices`) is a notice.
 - A `Card` needs `tier`, `urgency` and `closesWhen` (`decisions/2026-11-17-every-card-has-a-tier.md`); a notice
   goes through `post` or `postIn`.
->>>>>>> aa80c6623eb3cfcd044c38ccb0e6b3f1b3a769e9
+- `createPr` copies commits' `Test-budget:` lines into its body (`testBudgetLines`, `pr-text.ts`).
