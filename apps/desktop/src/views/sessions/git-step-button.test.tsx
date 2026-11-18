@@ -70,6 +70,19 @@ describe('the git step button', () => {
     });
   });
 
+  it('reads Push, and still posts the same step, when a pull request is open and commits are not pushed', async () => {
+    const { chat, served } = open({
+      next: ChatGitStep.OpenPullRequest,
+      ahead: 2,
+      pullRequest: pullRequest({ passed: 3, total: 9, failing: 0 }),
+    });
+    expect(screen.queryByRole('button', { name: 'Open Pull Request' })).toBeNull();
+    fireEvent.click(await screen.findByRole('button', { name: 'Push' }));
+    await waitFor(() => {
+      expect(served.pullRequests).toEqual([chat.id]);
+    });
+  });
+
   it('merges when the checks pass', async () => {
     const { chat, served } = open({
       next: ChatGitStep.Merge,

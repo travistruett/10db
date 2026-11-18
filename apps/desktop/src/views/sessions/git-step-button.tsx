@@ -60,7 +60,8 @@ export function GitStepButton({
       case ChatGitStep.Commit:
         return 'Commit…';
       case ChatGitStep.OpenPullRequest:
-        return 'Open Pull Request';
+        // With a pull request already open the step only pushes the new commits to it.
+        return state.pullRequest === null ? 'Open Pull Request' : 'Push';
       case ChatGitStep.Merge:
         return 'Merge';
       case ChatGitStep.MergeLocal:
