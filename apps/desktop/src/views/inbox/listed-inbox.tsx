@@ -75,6 +75,23 @@ function Rows({
   useEffect(() => {
     if (loaded) rememberSelected(state, pick.key);
   }, [loaded, state, pick.key]);
+  // A move past the loaded end waits for the page it asked for, then goes to the first new row; the page
+  // failing, or turning out empty, drops it.
+  const [awaiting, setAwaiting] = useState<{
+    readonly length: number;
+    readonly failure: Error | null;
+  } | null>(null);
+  if (awaiting !== null) {
+    const newRow = keys[awaiting.length];
+    if (newRow !== undefined) {
+      setSelectedKey(newRow);
+      setAwaiting(null);
+    } else if (
+      !rows.loadingMore &&
+      (!rows.hasMore || (rows.moreError !== null && rows.moreError !== awaiting.failure))
+    )
+      setAwaiting(null);
+  }
   const selectedRow = !loaded || pick.key === null ? null : (shown[pick.index] ?? null);
   const item = selectedRow?.kind === OpenRowKind.Inbox ? selectedRow.row.items[0] : null;
 
@@ -84,10 +101,13 @@ function Rows({
     onMove: (delta) => {
       const next = shown[pick.index + delta];
       if (next === undefined) {
-        // Past the loaded end: the next page loads, and the key can be pressed again.
-        if (delta === 1) rows.loadMore();
-        return false;
+        // Past the loaded end: ask for the next page and move when it lands; at the true end, nothing moves.
+        if (delta !== 1 || !rows.hasMore) return false;
+        rows.loadMore();
+        setAwaiting({ length: shown.length, failure: rows.moreError });
+        return true;
       }
+      setAwaiting(null);
       setSelectedKey(next.key);
       return true;
     },
@@ -113,6 +133,7 @@ function Rows({
       }}
       focusOnArrival
       onPick={(row) => {
+        setAwaiting(null);
         setSelectedKey(row.key);
         // Where the panel is a sheet the pick has been made: show the card it chose.
         closeSheet();

@@ -1523,6 +1523,24 @@ describe('the resolved view', () => {
       expect(panelRows()[0]?.getAttribute('aria-selected')).toBe('true');
     });
 
+    it('reads page two on j past the loaded end of Resolved, then selects the next row', async () => {
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      serveBoth([], many(52));
+      serveInboxRows({ resolved: many(52) }, (query) =>
+        query['after'] !== undefined ? gate : undefined,
+      );
+      renderApp('/inbox?state=resolved');
+      await findPanelRow('Retry number 0?');
+      for (let i = 0; i < 49; i += 1) key('j');
+      expect(await findText('Retry number 49?')).toBeTruthy();
+      key('j');
+      release();
+      expect(await findText('Retry number 50?')).toBeTruthy();
+    });
+
     it('keeps the old rows on screen while the new page is in flight', async () => {
       let release: () => void = () => undefined;
       const held = new Promise<void>((resolve) => {
