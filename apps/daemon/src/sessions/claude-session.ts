@@ -213,7 +213,7 @@ export function toYourSdkServer(server: YourSessionServer): McpServerConfig {
 /**
  * A claude.ai connector as the CLI takes it over `mcp_set_servers`. The SDK's `McpServerConfig` omits
  * `McpClaudeAIProxyServerConfig`, but Claude Code 2.1.302 accepts it (verified); the value was parsed by
- * `connectorsFromStatus`, so the cast only names the one shape the type lacks.
+ * the connector probe's `readStatus`, so the cast only names the one shape the type lacks.
  */
 function toSdkConnector(connector: ClaudeConnector): McpServerConfig {
   const entry: unknown = { type: 'claudeai-proxy', url: connector.url, id: connector.id };

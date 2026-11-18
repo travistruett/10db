@@ -247,7 +247,7 @@ export interface Gh {
   prMerge(input: { readonly repo: string; readonly url: string }, call: GhCall): Promise<void>;
 }
 
-export interface GhOutput {
+interface GhOutput {
   readonly exitCode: number;
   readonly stdout: string;
   readonly stderr: string;
@@ -478,7 +478,7 @@ const ACTIONS_PATH = /^\/[^/]+\/[^/]+\/actions\/runs\/(\d+)(?:\/jobs?\/(\d+))?\/
  * gives both, a link to the run gives only the run, and anything else (a commit status from another CI,
  * a link that is not https, no link) gives neither.
  */
-export function jobIdsOfLink(link: string | null | undefined): {
+function jobIdsOfLink(link: string | null | undefined): {
   runId: string | null;
   jobId: string | null;
 } {
@@ -610,7 +610,7 @@ const RUN_IN_PROGRESS =
  * stderr, with exit 1 and nothing on stdout, is `none`; nothing else is. Any other failure, a network or
  * auth error with the same exit code included, throws a GhError, so it is never read as `none`.
  */
-export function parseRequiredChecks(args: readonly string[], out: GhOutput): RequiredChecks {
+function parseRequiredChecks(args: readonly string[], out: GhOutput): RequiredChecks {
   const none: RequiredChecks = { state: 'none', failing: [], pending: [], cancelled: [] };
   const empty = out.stdout.trim() === '';
   if (CHECKS_EXITS.has(out.exitCode) && !empty) {
@@ -664,7 +664,7 @@ export function parseRequiredChecks(args: readonly string[], out: GhOutput): Req
  * Reads what `gh run view --job <id> --log-failed` printed: the log on exit 0 (empty when no step
  * failed), `not_yet` when gh says the run is still in progress, else a GhError.
  */
-export function parseJobLog(args: readonly string[], out: GhOutput): JobLog {
+function parseJobLog(args: readonly string[], out: GhOutput): JobLog {
   if (out.exitCode === 0) return { kind: 'ready', log: out.stdout };
   if (out.exitCode !== AUTH_REQUIRED_EXIT && RUN_IN_PROGRESS.test(out.stderr.trim()))
     return { kind: 'not_yet' };

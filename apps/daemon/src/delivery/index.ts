@@ -17,7 +17,7 @@ export { createDependencyChanges, type DependencyChanges } from './dependency-ch
 export { retireWorktree } from './worktree-cleanup';
 export { chatWorktreeLosses } from './chat-worktree-losses';
 export { madeWorktreeRoot, worktreePathFor } from './worktree-path';
-export { chatWorktreeLockReason, cutChatWorktree } from './chat-worktree-cut';
+export { cutChatWorktree } from './chat-worktree-cut';
 export { ensureWorktreeWhole } from './worktree-repair';
 export { reserveGitNaming } from './folder-wait';
 export { DEFAULT_DELIVERY_LIMITS, type DeliveryContext, type DeliveryLimits } from './context';

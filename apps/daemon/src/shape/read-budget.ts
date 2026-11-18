@@ -2,15 +2,7 @@ import { statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { expandHome } from '../sandbox';
 import type { ShapeAccess } from './confinement';
-import {
-  largestReadMeasured,
-  type PictureLimits,
-  poolBytes,
-  READ_CHARGE_MAX_BYTES,
-  readBytesSpent,
-  readCountedLine,
-  type ReadKind,
-} from '../conversation';
+import { type PictureLimits, poolBytes, type ReadKind } from '../conversation';
 
 // Shape spec §5.4. A picture or PDF Claude pulls in with `Read` comes back as a tool result, and a resumed
 // session resends every earlier tool result with each request, beside the pictures the daemon sends
@@ -21,13 +13,7 @@ import {
 // with the size the result really had.
 // Everything here counts Reads of pictures and of PDFs alike; a name that says "read" means either kind.
 
-export {
-  READ_CHARGE_MAX_BYTES,
-  largestReadMeasured,
-  readBytesSpent,
-  readCountedLine,
-  type ReadKind,
-};
+export type { ReadKind };
 
 /**
  * What Reads may add to a request, in bytes before base64, once the live session carries `inlineSpent` bytes

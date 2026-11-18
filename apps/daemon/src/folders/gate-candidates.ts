@@ -1,8 +1,6 @@
 import { GateSource } from '@10db/contracts';
 import { z } from 'zod';
 
-export { GateSource };
-
 /** What a folder holds that names a gate command, already read from disk. */
 export interface FolderFiles {
   readonly makefile: string | null;

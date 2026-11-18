@@ -39,7 +39,7 @@ import { closeNoLoginCards, closeSettledCards } from './stale-cards';
 import type { StartGate } from './start-gate';
 
 /** How long an unready account waits before it is probed again. */
-export const PREPARE_RETRY_MS = 60_000;
+const PREPARE_RETRY_MS = 60_000;
 
 export interface AccountPreparer {
   /** Works toward making an unready account ready: at most one probe a minute, and one card per problem. */

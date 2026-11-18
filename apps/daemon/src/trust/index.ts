@@ -19,7 +19,6 @@ export {
 } from './crosses-limit';
 export {
   grantCallSummary,
-  grantLine,
   grantTargetOf,
   isGrantedCall,
   projectGrantedCalls,

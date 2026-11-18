@@ -1,4 +1,4 @@
-export { CATALOGUE_URL, parseCatalogue, type Catalogue } from './source';
+export { parseCatalogue, type Catalogue } from './source';
 export { CATALOGUE_SNAPSHOT_FILE, readCatalogueSnapshot } from './snapshot';
 export { deriveTiers } from './tiers';
 export { storedModelNames, type NamedModel } from './sync';

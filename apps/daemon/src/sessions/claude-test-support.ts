@@ -7,7 +7,6 @@ import type {
   SDKCommandsChangedMessage,
   SDKCompactBoundaryMessage,
   SDKPartialAssistantMessage,
-  SDKPermissionDeniedMessage,
   SDKRateLimitEvent,
   SDKRateLimitInfo,
   SDKResultSuccess,
@@ -179,20 +178,6 @@ export function compactBoundary(trigger: 'manual' | 'auto'): SDKCompactBoundaryM
   };
 }
 
-export function permissionDenied(
-  fields: Pick<SDKPermissionDeniedMessage, 'tool_name' | 'tool_use_id'> &
-    Partial<SDKPermissionDeniedMessage>,
-): SDKPermissionDeniedMessage {
-  return {
-    type: 'system',
-    subtype: 'permission_denied',
-    message: 'denied',
-    uuid: randomUUID(),
-    session_id: PROVIDER_SESSION,
-    ...fields,
-  };
-}
-
 type StreamEventBody = SDKPartialAssistantMessage['event'];
 
 /** A partial-message frame around one streaming event; `parent` is a subagent's tool use. */
@@ -233,20 +218,6 @@ export const textDelta = (index: number, text: string): StreamEventBody =>
     index,
     delta: { type: 'text_delta', text },
   }) as unknown as StreamEventBody;
-export const thinkingDelta = (index: number, thinking: string): StreamEventBody =>
-  ({
-    type: 'content_block_delta',
-    index,
-    delta: { type: 'thinking_delta', thinking },
-  }) as unknown as StreamEventBody;
-export const inputJsonDelta = (index: number, partial: string): StreamEventBody =>
-  ({
-    type: 'content_block_delta',
-    index,
-    delta: { type: 'input_json_delta', partial_json: partial },
-  }) as unknown as StreamEventBody;
-export const blockStop = (index: number): StreamEventBody =>
-  ({ type: 'content_block_stop', index }) as unknown as StreamEventBody;
 
 /** The user frame carrying a tool's result back to the model. */
 export function toolResultMessage(

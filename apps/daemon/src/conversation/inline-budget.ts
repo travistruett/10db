@@ -108,7 +108,7 @@ export const READ_CHARGE_MAX_BYTES = 1 * MIB;
  * as many pages as 1 MiB each made up its counted charge. A page's share is rounded up: it is charged as a
  * bound, and the transcript lines that carry a charge hold whole bytes.
  */
-export function largestReadMeasured(messages: readonly ShapeMessageDto[]): number {
+function largestReadMeasured(messages: readonly ShapeMessageDto[]): number {
   return liveMessages(messages).reduce((largest, message) => {
     if (message.kind !== ShapeMessageKind.Tool) return largest;
     const measured = MEASURED.exec(message.body);

@@ -15,7 +15,7 @@ import {
 import type { LeftOut } from './left-out';
 import { readPluginMcp } from './plugin-mcp';
 
-export type { DeclaredYourServer, YourMcpEntry } from './your-mcp-entry';
+export type { YourMcpEntry } from './your-mcp-entry';
 
 /** `~/.claude.json` holds the builder's project history too, and grows. */
 export const YOUR_MCP_FILE_MAX_BYTES = 32 * 1024 * 1024;

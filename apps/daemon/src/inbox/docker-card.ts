@@ -77,11 +77,11 @@ export function raiseDockerOnNote(
 const DOCKER_NEEDED_DETAIL = 'dockerNeeded';
 
 /** The answers the note a refused docker leaves offers; the card shows them as written. */
-export const DockerNeededChoice = {
+const DockerNeededChoice = {
   TurnOn: 'Turn Docker on',
   KeepOff: 'Keep it off',
 } as const;
-export type DockerNeededChoice = (typeof DockerNeededChoice)[keyof typeof DockerNeededChoice];
+type DockerNeededChoice = (typeof DockerNeededChoice)[keyof typeof DockerNeededChoice];
 
 /** The fold key of a project's note that a gate asked for Docker; one per project, ever. */
 export function dockerNeededFoldKey(projectId: ProjectId): string {

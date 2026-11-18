@@ -53,8 +53,6 @@ import { createStops } from './explore-stops';
 import { createTurns } from './explore-turns';
 import { warmToClose } from './warm-cap';
 
-export type { ExploreEngineDeps } from './explore-runtime';
-
 // Sessions spec §6.3–§6.8: the engine that owns every explore conversation's live session. Each
 // conversation's state moves only through the reducer, is written with the conversation, and its
 // effects run one at a time on the conversation's chain. Its parts: how a session starts

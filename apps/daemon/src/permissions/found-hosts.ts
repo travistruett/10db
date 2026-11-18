@@ -11,7 +11,7 @@ const key = (projectId: ProjectId): string => `network-hosts-found:${projectId}`
  * allowed now. A lane's or a gate's blocked-host card reads it to say a file names the host. Only
  * hosts and file paths are kept: nothing else of a file's text is.
  */
-export function readFoundHosts(db: DbReader, projectId: ProjectId): FoundHostDto[] {
+function readFoundHosts(db: DbReader, projectId: ProjectId): FoundHostDto[] {
   const parsed = FoundHostList.safeParse(getAppSetting(db, key(projectId)));
   return parsed.success ? parsed.data : [];
 }

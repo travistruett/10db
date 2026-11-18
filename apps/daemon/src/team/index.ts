@@ -16,10 +16,6 @@ export {
 export {
   afterMarkersResolved,
   commitAdaptsMerge,
-  commitAfterResolution,
-  commitCoveredByRevert,
-  commitGotThroughGate,
-  commitResolvedMarkers,
   commitResultAsStored,
   fixingFailedGate,
   revertCommitLine,

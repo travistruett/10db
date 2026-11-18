@@ -36,7 +36,7 @@ export interface SlackClientDeps {
   readonly timeoutMs: number;
 }
 
-export interface SlackPostInput {
+interface SlackPostInput {
   readonly channel: string;
   readonly text: string;
   readonly blocks: readonly SlackBlock[];

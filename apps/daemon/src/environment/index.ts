@@ -15,7 +15,6 @@ export {
   ACCOUNT_NAMES_VERIFIED_ON,
   AccountLaunchError,
   claudeMcpSignInCommand,
-  codexSignInCommand,
   connectorProbeEnv,
   createLauncher,
   loginConfigDirOf,
@@ -35,8 +34,6 @@ export { captureLoginEnv, LOGIN_ENV_MARKER, parseEnvBlock, type LoginEnv } from 
 export { BILLING_SWITCH_VARS, NESTED_SESSION_VARS, stripBillingSwitches } from './session-env';
 export { buildNetworkEnv } from './network-env';
 export {
-  claudeCodeWarning,
-  codexWarning,
   markGhRequired,
   probeVersion,
   REQUIRED_TOOLS,
@@ -52,7 +49,6 @@ export {
   AgentState,
   ensureAgent,
   startPinnedTools,
-  type AgentStatus,
   type AgentTools,
   type RunningAgentTools,
 } from './pinned-tools';

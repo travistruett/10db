@@ -25,8 +25,6 @@ export function limitOptions(noteNeeded: boolean): InboxOption[] {
   ];
 }
 
-export const LIMIT_OPTIONS: readonly InboxOption[] = limitOptions(false);
-
 const TITLES: Readonly<Record<LimitName, string>> = {
   destroys_data: "Allow this? It may destroy data this session didn't create",
   sends_data_out: 'Allow this? It may send data out',

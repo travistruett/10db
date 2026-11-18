@@ -14,7 +14,6 @@ export {
   HANDOFF_NUDGE_ACCOUNT_READ_ONLY,
   HANDOFF_NUDGE_READ_ONLY,
   passReviewPrompt,
-  renderHandoff,
   RESULT_NUDGE,
 } from './prompts';
 export { failedSteps } from './failed-steps';

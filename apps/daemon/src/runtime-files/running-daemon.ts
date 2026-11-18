@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { readRuntimeInfo, type RuntimeInfo } from './files';
 
 /** The ui-token file's text, without a trailing newline. */
-export function readUiToken(dataDir: string): string {
+function readUiToken(dataDir: string): string {
   return readFileSync(join(dataDir, 'ui-token'), 'utf8').trim();
 }
 

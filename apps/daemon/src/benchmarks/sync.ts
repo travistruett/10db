@@ -22,7 +22,7 @@ import { fetchAaModels } from './aa-client';
 import { aaSlugFor } from './slugs';
 
 /** A daily sync stays far inside the free tier's 100 requests a day. */
-export const AA_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const AA_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
 /** The wait before the retry after one failure; each further failure in a row doubles it, up to the cap. */
 const AA_RETRY_BASE_MS = 15 * 60 * 1000;
 const AA_RETRY_CAP_MS = 6 * 60 * 60 * 1000;

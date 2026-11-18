@@ -20,4 +20,4 @@ export const systemClock: Clock = {
 };
 
 export { ManualClock } from './manual-clock';
-export { MAX_TIMER_MS, timerAt } from './timer-at';
+export { timerAt } from './timer-at';

@@ -1,6 +1,6 @@
 import { BoardStatus, TaskStatus, type TaskDto, type TaskId } from '@10db/contracts';
 
-export type PickerTask = Pick<
+type PickerTask = Pick<
   TaskDto,
   | 'id'
   | 'title'

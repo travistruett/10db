@@ -586,7 +586,7 @@ const VERDICT_LABEL = { approve: 'approved', reject: 'rejected' } as const;
 const bullets = (lines: readonly string[]) =>
   lines.length === 0 ? '- (none)' : lines.map((l) => `- ${l}`).join('\n');
 
-export function renderHandoff(h: HandoffDto): string {
+function renderHandoff(h: HandoffDto): string {
   const c = h.content;
   return [
     `Objective: ${c.objective.task}`,

@@ -21,12 +21,10 @@ export {
   TakeoverRefusedError,
   type TakeoverArg,
   type TakeoverCommand,
-  type TakeoverSpec,
 } from './takeover-command';
-export { FAKE_ACCOUNT_EMAIL, FakeAdapter } from './fake-adapter';
+export { FakeAdapter } from './fake-adapter';
 export { FakeScriptBook, loadFakeScriptBook } from './fake-script';
 export { scriptedShapeBehaviour } from './fake-plan-script';
-export type { FakeShapeBehaviour, FakeShapeTurn } from './fake-session';
 export { checkAccount, loginIdentity, type SeenAccount, type SeenModel } from './account-check';
 export {
   AccountLoginError,
@@ -44,10 +42,8 @@ export type {
   InterruptReceipt,
   LanePermissionMode,
   AgentAdapter,
-  AgentSessionSpec,
   ExploreProfile,
   ExploreSessionSpec,
-  LaneProfile,
   LaneSessionSpec,
   McpSignIn,
   SessionEvent,
@@ -81,7 +77,6 @@ export {
   type ProjectMcp,
   type RepoMcp,
 } from './project-mcp';
-export { createUnavailableAdapter } from './unavailable-adapter';
 export { createPinnedAdapter, type AdapterSource } from './pinned-adapter';
 export {
   readRepoConfigFile,

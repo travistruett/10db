@@ -674,7 +674,7 @@ export interface FakeShapeTurnResult {
 }
 
 /** One turn the fake runs for a message it was sent. */
-export interface FakeShapeTurn {
+interface FakeShapeTurn {
   readonly spec: ExploreSessionSpec;
   /** The message the turn answers. */
   readonly message: string;
