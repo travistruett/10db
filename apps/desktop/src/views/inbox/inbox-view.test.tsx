@@ -923,6 +923,24 @@ describe('InboxView', () => {
       expect(await findText('Which badge color?')).toBeTruthy();
     });
 
+    it('keeps focus on the list when the focused selected row leaves', async () => {
+      const first = flag('First stray', 'a.md');
+      const second = flag('Second stray', 'b.md');
+      inbox([first, second]);
+      renderApp('/inbox');
+      await findText('First stray');
+      await waitFor(() => {
+        expect(document.activeElement).toBe(rowOf('First stray'));
+      });
+      key('e');
+      await waitFor(() => {
+        expect(rows()).toHaveLength(1);
+      });
+      await waitFor(() => {
+        expect(document.activeElement).toBe(rowOf('Second stray'));
+      });
+    });
+
     it('leaves e alone on a card that cannot be dismissed', async () => {
       const { answers } = inbox([color]);
       renderApp('/inbox');

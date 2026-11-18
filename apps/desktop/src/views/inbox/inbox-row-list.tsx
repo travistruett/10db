@@ -85,6 +85,8 @@ export function InboxRowList<T extends { readonly key: string }>({
   // A row chosen with the keys stays in view, and keeps focus when the list had it.
   const selectedIndex = selected === null ? -1 : rows.findIndex((row) => row.key === selected);
   const arrived = useRef(false);
+  // Whether focus is on a row: a row that leaves while focused gives no blur, so this is what remembers it.
+  const listHasFocus = useRef(false);
   useEffect(() => {
     // The restored scroll is the position to keep.
     if (selectedIndex >= 0 && !justRestored.current) virtualizer.scrollToIndex(selectedIndex);
@@ -101,7 +103,8 @@ export function InboxRowList<T extends { readonly key: string }>({
     const el = viewport.current;
     if (el === null || selectedIndex < 0) return;
     const active = document.activeElement;
-    const inList = active !== null && el.contains(active);
+    const lostWithRow = listHasFocus.current && (active === null || active === document.body);
+    const inList = (active !== null && el.contains(active)) || lostWithRow;
     const unplaced =
       active === null || active === document.body || active.closest('[data-rail-item]') !== null;
     if (!inList && !(focusOnArrival && !arrived.current && unplaced)) return;
@@ -135,7 +138,16 @@ export function InboxRowList<T extends { readonly key: string }>({
     <ScrollArea
       style={{ flex: 1, minHeight: 0 }}
       viewportRef={viewport}
-      viewportProps={{ onScroll }}
+      viewportProps={{
+        onScroll,
+        onFocus: () => {
+          listHasFocus.current = true;
+        },
+        onBlur: (event) => {
+          // Focus going to another element is left; focus lost with a removed row is not a blur at all.
+          if (event.relatedTarget !== null) listHasFocus.current = false;
+        },
+      }}
       {...{ [LIST_ATTRIBUTE]: true }}
     >
       <Box
@@ -160,6 +172,8 @@ export function InboxRowList<T extends { readonly key: string }>({
             );
           }
           const isSelected = row.key === selected;
+          // One row is a tab stop, so Tab reaches the list: the selected row, else the first.
+          const isTabStop = selectedIndex >= 0 ? isSelected : item.index === 0;
           return (
             <div
               key={item.key}
@@ -169,7 +183,7 @@ export function InboxRowList<T extends { readonly key: string }>({
               className={classes['row']}
               style={style}
               // Focusable so the keys can be given from the list; j, k and Enter are the Inbox's, Space picks.
-              tabIndex={-1}
+              tabIndex={isTabStop ? 0 : -1}
               onClick={() => {
                 onPick?.(row);
               }}

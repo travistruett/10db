@@ -73,6 +73,24 @@ describe('InboxRowList', () => {
     expect(options.map((o) => o.getAttribute('aria-selected'))).toEqual(['false', 'true', 'false']);
   });
 
+  it('lets Tab into the list on the selected row only', () => {
+    renderWithTheme(draw({ rows: rowsOf(3), selected: 'r1' }));
+    expect(screen.getAllByRole('option').map((o) => o.getAttribute('tabindex'))).toEqual([
+      '-1',
+      '0',
+      '-1',
+    ]);
+  });
+
+  it('lets Tab into the list on the first row when none is selected', () => {
+    renderWithTheme(draw({ rows: rowsOf(3) }));
+    expect(screen.getAllByRole('option').map((o) => o.getAttribute('tabindex'))).toEqual([
+      '0',
+      '-1',
+      '-1',
+    ]);
+  });
+
   it('asks for the next page only near the end', () => {
     const onNearEnd = vi.fn();
     renderWithTheme(draw({ rows: rowsOf(30), hasMore: true, onNearEnd }));

@@ -130,7 +130,8 @@ export function PassMenu({
  * of the content: why Open Pull Request is missing, the close's progress, and the timing hint, dimmed,
  * when it has something to say. While the pass closes its page actions wait and Abandon stays. While the
  * frame draws the panel, the line, the pull request and the menu are the panel's head (the workspace draws
- * them) and the title row names the shown page, so only the close's progress and the hint remain here.
+ * them) and the title row names the shown page, so only the close's progress and the hint remain here; a pass
+ * with no page has none to name, so the row keeps the line.
  */
 export function PassHeader(props: PassHeaderProps) {
   const { project, view, inbox, now, pullRequest, pullRequestReason } = props;
@@ -154,7 +155,7 @@ export function PassHeader(props: PassHeaderProps) {
   const signedOff = statuses.includes(PageStatus.SignedOff);
   return (
     <Stack gap={4}>
-      {panelShown ? null : (
+      {panelShown && view.pages.length > 0 ? null : (
         <>
           <TitleRow
             lines={2}

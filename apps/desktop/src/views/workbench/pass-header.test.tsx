@@ -117,6 +117,14 @@ describe('PassHeader', () => {
     expect(screen.getByText('2 pages have been ready for over 10 minutes')).toBeTruthy();
   });
 
+  it('draws the pass line itself while the panel is shown and the pass has no page to name', () => {
+    draw(passViewDto({ pages: [] }), {}, true);
+    expect(
+      within(titleRowOf()).getByRole('heading', { name: 'ampsio · Settings pass' }),
+    ).toBeTruthy();
+    expect(within(titleRowOf()).getByRole('button', { name: 'More actions' })).toBeTruthy();
+  });
+
   it('shows Open Pull Request, and why it is not offered, once a page is signed off', () => {
     const { ready, working } = pagesByStatus();
     draw(passViewDto({ pages: [ready, { ...working, signOff: 'done' }] }));
