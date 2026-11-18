@@ -1,4 +1,4 @@
-.PHONY: setup gate check check-changed precheck rust-check deny github-settings shard-weights live-acceptance install-app rollback-app
+.PHONY: setup gate check check-changed precheck rust-check deny github-settings shard-weights live-acceptance eval install-app rollback-app
 
 TAURI_DIR := apps/desktop/src-tauri
 # install-app takes REF from the make command line only; a REF exported by the shell is ignored.
@@ -32,6 +32,12 @@ rust-check:
 ## live-acceptance: manual §1.3 run on real Claude Code (subscription only; never CI).
 live-acceptance:
 	@bash scripts/live-acceptance.sh
+
+## eval: replay the lane-pipeline eval set at RIGOR=light|standard|careful|critical, twice per case, and write
+## its report. AGENT=fake spends nothing; CASES=a,b picks cases; SAVE_BASELINE=1 keeps it as the rigor's baseline.
+## A real run spends usage on the default Claude account; never CI.
+eval:
+	@bash scripts/eval.sh
 
 ## deny: cargo-deny advisories, licences, bans and sources for the Tauri crate.
 deny:

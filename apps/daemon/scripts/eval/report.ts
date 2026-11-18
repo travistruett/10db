@@ -66,7 +66,7 @@ const sum = (runs: readonly CaseRun[], pick: (r: CaseRun) => number | null): num
 const dash = (v: number | null, text: (n: number) => string = String): string =>
   v === null ? '—' : text(v);
 const dollars = (n: number) => `$${n.toFixed(2)}`;
-const seconds = (n: number) => `${Math.round(n)} s`;
+const seconds = (n: number) => `${String(Math.round(n))} s`;
 
 function row(label: string, runs: readonly CaseRun[]): string {
   const met = runs.filter((r) => r.outcome === Outcome.Met).length;
