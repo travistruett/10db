@@ -60,18 +60,18 @@ describe('inboxRowKey', () => {
     {
       name: 'a flag with no options, its text',
       card: flag(),
-      key: `flags:${JSON.stringify([project, 'T', 'B'])}`,
+      key: `flags:${JSON.stringify([project, 'flag', 'T', 'B'])}`,
     },
     {
       name: 'the same flag in another project, another key',
       card: flag({ projectId: elsewhere }),
-      key: `flags:${JSON.stringify([elsewhere, 'T', 'B'])}`,
+      key: `flags:${JSON.stringify([elsewhere, 'flag', 'T', 'B'])}`,
     },
     { name: "a failed turn's flag, its id", card: failedTurn, key: failedTurn.id },
     {
-      name: 'a move report with no options, its text',
+      name: 'a move report with no options, its text and its kind, apart from a flag of that text',
       card: card({ kind: 'playbook_move_report', options: [] }),
-      key: `flags:${JSON.stringify([project, 'T', 'B'])}`,
+      key: `flags:${JSON.stringify([project, 'playbook_move_report', 'T', 'B'])}`,
     },
     { name: 'a Ready page, its pass', card: ready(pass, 'Ready: A'), key: `pass:${pass}` },
     { name: 'a check of any other detail, its id', card: builderCheck, key: builderCheck.id },

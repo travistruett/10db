@@ -6,7 +6,7 @@ import {
   type InboxCardContextDto,
   type InboxItemId,
 } from '@10db/contracts';
-import { desc, inArray, eq, and } from 'drizzle-orm';
+import { desc, inArray, eq, and, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import { conversationOf } from './conversations';
 import { getInboxItem } from './inbox';
@@ -55,6 +55,8 @@ export function inboxCardContext(
           ConversationItemKind.Message,
           ConversationItemKind.AgentMessage,
         ]),
+        // The line 10db posts to resume a turn is not something either side said.
+        sql`coalesce(json_extract(${schema.conversationItems.body}, '$.purpose'), '') <> 'carry_on'`,
       ),
     )
     .orderBy(desc(schema.conversationItems.seq))

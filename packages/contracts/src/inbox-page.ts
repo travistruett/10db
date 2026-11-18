@@ -92,7 +92,11 @@ export const InboxPageQuery = z
     /** Title or body contains this, ASCII case folded. */
     q: z.string().trim().min(1).max(200).optional(),
     /** Resolved only: updated at or after. */
-    since: z.iso.datetime().optional(),
+    // Stored times are milliseconds with a Z, so a bound without them is written the same way before it is compared.
+    since: z.iso
+      .datetime()
+      .transform((text) => new Date(text).toISOString())
+      .optional(),
     /** The page holds only this card's row, when it is in the list. */
     card: InboxItemId.optional(),
   })
@@ -109,6 +113,11 @@ export const InboxPageQuery = z
     if (q.card !== undefined && q.page !== undefined) refuse('card and page cannot be combined');
     if (q.since !== undefined && q.state !== InboxListState.Resolved)
       refuse('since applies to resolved only');
+    if (q.state === InboxListState.Open) {
+      // Open's order is fixed and its filters are project, kind and the search.
+      for (const key of ['sort', 'dir', 'outcome', 'person'] as const)
+        if (q[key] !== undefined) refuse(`${key} does not apply to open`);
+    }
   });
 export type InboxPageQuery = z.output<typeof InboxPageQuery>;
 

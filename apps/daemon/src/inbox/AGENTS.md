@@ -11,7 +11,7 @@
   `page` (from 1), `pageSize` (1 to 100, 25 by default), `after` (the last row's sort as JSON: the page
   after it), `q` (title or body contains it, ASCII case folded), `since` (Resolved only) and `card` (the
   page holds only that card's row). `after` refuses `page`, `sort` and `dir`; `card` refuses `after` and
-  `page`; `since` refuses a state but Resolved. Each refusal is a 400.
+  `page`; `since` refuses a state but Resolved; Open refuses `sort`, `dir`, `outcome` and `person`, since its order is fixed. Each refusal is a 400.
   - `open` is an `OPEN` card, answered grouped into rows (a pass's cards are one row): `total` counts rows,
     `rows` lists each row's key, sort and card ids, `items` holds the cards of the rows on the page, and
     `next` is the last row's sort for `after`. `waiting` is an `OPEN` card whose live send is `sent` with no

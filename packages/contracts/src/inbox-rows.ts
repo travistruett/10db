@@ -31,14 +31,14 @@ export function readyPassOf(card: InboxRowCard): PassId | null {
 
 /**
  * The row a card belongs to: a pass's Ready pages share one, and so do dismissable flags of one project with
- * the same title and body; every other card, a failed turn's flag included, has its own. The key stays the
+ * the same kind, title and body (so a kind filter never cuts a row); every other card, a failed turn's flag included, has its own. The key stays the
  * same while members leave the row.
  */
 export function inboxRowKey(card: InboxRowCard): string {
   const passId = readyPassOf(card);
   if (passId !== null) return `pass:${passId}`;
   if (isDismissable(card))
-    return `flags:${JSON.stringify([card.projectId, card.title, card.body])}`;
+    return `flags:${JSON.stringify([card.projectId, card.kind, card.title, card.body])}`;
   return card.id;
 }
 

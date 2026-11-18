@@ -18,7 +18,7 @@ afterEach(() => {
   close();
 });
 
-type Say = ['builder' | 'agent' | 'tool', string];
+type Say = ['builder' | 'agent' | 'tool' | 'carry_on', string];
 
 function world() {
   const project = seedProject(store);
@@ -39,6 +39,12 @@ function world() {
       for (const [who, text] of said) {
         if (who === 'builder')
           insertItem(ctx, conv.id, { author: 'builder', kind: 'message', body: { text } });
+        else if (who === 'carry_on')
+          insertItem(ctx, conv.id, {
+            author: 'builder',
+            kind: 'message',
+            body: { text, purpose: 'carry_on' },
+          });
         else if (who === 'agent')
           insertItem(ctx, conv.id, { author: 'agent', kind: 'agent_message', body: { text } });
         else
@@ -89,6 +95,17 @@ describe('inboxCardContext', () => {
       'builder:four',
       'builder:five',
     ]);
+  });
+
+  it('leaves out the line 10db posted to resume a turn, before it counts the newest messages', () => {
+    const w = world();
+    const conv = w.conversation('chat', mintId('Chat'), [
+      ['agent', 'asked'],
+      ['builder', 'chose'],
+      ['carry_on', 'Carry on'],
+    ]);
+    const id = w.card({ conversationId: conv.id }, false);
+    expect(texts(inboxCardContext(store.db, id, 2))).toEqual(['agent:asked', 'builder:chose']);
   });
 
   it('finds a lane card’s thread through its workstream’s task', () => {

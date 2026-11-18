@@ -5,6 +5,7 @@ import { InboxOutcome, InboxPageDto, InboxPageQuery, inboxOutcome } from './inbo
 
 const projectId = mintId('Project');
 const cardId = mintId('InboxItem');
+const personId = mintId('Person');
 const sortJson = JSON.stringify([1, '2026-11-01T00:00:00.000Z', cardId]);
 
 describe('inbox page query', () => {
@@ -58,6 +59,12 @@ describe('inbox page query', () => {
     expect(InboxPageQuery.parse(input)).toEqual(expected);
   });
 
+  it('writes a since the way stored times are, with milliseconds', () => {
+    expect(InboxPageQuery.parse({ state: 'resolved', since: '2026-11-01T00:30:00Z' }).since).toBe(
+      '2026-11-01T00:30:00.000Z',
+    );
+  });
+
   it.each([
     ['no state', {}],
     ['an unknown state', { state: 'OPEN' }],
@@ -77,6 +84,10 @@ describe('inbox page query', () => {
     ['a card with a page', { state: 'open', card: cardId, page: '2' }],
     ['a since outside resolved', { state: 'open', since: '2026-11-01T00:00:00.000Z' }],
     ['a blank search', { state: 'open', q: '  ' }],
+    ['a sort on open', { state: 'open', sort: 'title' }],
+    ['a dir on open', { state: 'open', dir: 'asc' }],
+    ['an outcome on open', { state: 'open', outcome: 'slack' }],
+    ['a person on open', { state: 'open', person: personId }],
   ])('rejects %s', (_name, input) => {
     expect(InboxPageQuery.safeParse(input).success).toBe(false);
   });
