@@ -84,7 +84,8 @@
         "plan.anchor_checked",
         "gate.started",
         "gate.finished",
-        "folder_hold.changed"
+        "folder_hold.changed",
+        "notice.posted"
       ]
     },
     "entityType": {

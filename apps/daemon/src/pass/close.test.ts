@@ -13,7 +13,6 @@ import {
   type TaskDto,
 } from '@10db/contracts';
 import {
-  findOpenByFoldKey,
   getBatch,
   getInboxItem,
   getPass,
@@ -221,9 +220,14 @@ describe('Finish', () => {
     expect(passState()).toBe('OPEN');
     expect(getPassProgress(w.h.store.db, w.opened.pass.id).closeStep).toBeNull();
     expect(batchState()).toBe('OPEN');
-    expect(
-      findOpenByFoldKey(w.h.store.db, w.h.project.id, gateFailedKey(w.opened.pass.id)),
-    ).toMatchObject({ kind: 'flag', options: [] });
+    expect(w.h.cards()).toEqual([]);
+    expect(w.h.notices().filter((n) => n.key === gateFailedKey(w.opened.pass.id))).toMatchObject([
+      {
+        tone: 'warning',
+        taskId: null,
+        line: 'The gate failed as UI Workbench pass "Polish" closed',
+      },
+    ]);
     // Step 2 stands: Settings is signed off; nothing was pushed or fast-forwarded.
     expect(landed()).toEqual(['Settings: UI work']);
     expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe(w.branch);

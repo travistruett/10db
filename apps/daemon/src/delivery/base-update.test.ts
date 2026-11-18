@@ -9,8 +9,15 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { mintId, type BatchDto, type WorkstreamDto } from '@10db/contracts';
-import { getBatch, getWorkstreamRow, listWorkstreams, patchWorkstream, schema } from '@10db/db';
+import { mintId, type BatchDto, type BatchId, type WorkstreamDto } from '@10db/contracts';
+import {
+  getBatch,
+  getWorkstreamRow,
+  listWorkstreams,
+  patchWorkstream,
+  schema,
+  transitionBatch,
+} from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { opened, pathOf } from '../../test/delivery-worlds';
@@ -19,6 +26,7 @@ import type { DeliveryContext } from './context';
 import { createBaseUpdates, ensureWorktreeWhole, workstreamChanges } from './index';
 import { baseConflictKey, baseKeptKey } from './cards';
 import { raise } from './context';
+import { retireWorktree } from './worktree-cleanup';
 import { INSTALL_SUMMARY } from './worktree-dependencies';
 
 // Each case builds a real repository, a worktree and a teammate's push: 3 to 12 s on an idle
@@ -33,6 +41,13 @@ afterEach(() => {
 });
 
 const signal = new AbortController().signal;
+
+/** The batch's notices with this key. */
+const noticesKeyed = (batchId: BatchId, key: string) =>
+  getBatch(h.store.db, batchId).notices.filter((n) => n.key === key);
+
+/** The one `base-regenerate` notice on the batch: what 10db says when it can't regenerate files. */
+const regenerateNotice = (batchId: BatchId) => h.only(noticesKeyed(batchId, 'base-regenerate'));
 
 function gitIn(dir: string, ...args: string[]): string {
   return execFileSync('git', ['-C', dir, ...args], { env: isolatedGitEnv(), stdio: 'pipe' })
@@ -1177,8 +1192,8 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
         ]);
         expect(run.ran).toBe(0);
         expect(state(path).status).toBe('');
-        const card = h.only(h.cards());
-        expect(card.title).toBe(`Batch "Alpha": 10db couldn't regenerate files after merging main`);
+        const card = regenerateNotice(batch.id);
+        expect(card.line).toBe(`Batch "Alpha": 10db couldn't regenerate files after merging main`);
         expect(card.body).toContain('a commit 10db did not make');
       });
 
@@ -1204,7 +1219,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
         ]);
         // What the run wrote is removed: the builder regenerates on top of their own commit.
         expect(state(path).status).toBe('');
-        const card = h.only(h.cards());
+        const card = regenerateNotice(batch.id);
         expect(card.body).toContain('a commit 10db did not make');
       });
     });
@@ -1232,13 +1247,14 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       }).beforeGate(batch.id, signal);
       expect(update.kind).toBe('uncarried');
       expect(update.kind === 'uncarried' && update.note).toContain(`${DB}/`);
-      const card = h.only(h.cards());
-      expect(card.title).toBe(`Batch "Alpha": 10db couldn't regenerate files after merging main`);
+      const card = regenerateNotice(batch.id);
+      expect(card.line).toBe(`Batch "Alpha": 10db couldn't regenerate files after merging main`);
       expect(card.body).toContain(`- ${DB}/`);
       expect(card.body).toContain('exit 1');
       expect(card.body).toContain('/logs/generate.log');
       expect(card.body).toContain('10db removed what the failed run wrote there');
-      expect(card.detail).toEqual({ batchId: batch.id, paths: [`${DB}/`] });
+      expect(card).toMatchObject({ key: 'base-regenerate', tone: 'warning' });
+      expect(h.cards()).toEqual([]);
       // The directory is as the merge left it, main's version, so the next merge isn't in its way.
       expect(gitIn(path, 'show', '-s', '--format=%s', 'HEAD')).toBe(
         `Merge origin/main into ${batch.branch ?? ''}`,
@@ -1247,6 +1263,72 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(readFileSync(join(path, DB, 'meta/_journal.json'), 'utf8')).toBe(
         '["0000","0001_theirs"]\n',
       );
+    });
+
+    describe('after a failed regeneration that lost no migration', () => {
+      const failing: DeliveryContext['generators'] = {
+        regenerate: () =>
+          Promise.resolve({
+            kind: 'failed',
+            exitCode: 1,
+            timedOut: false,
+            tail: 'boom\n',
+            logPath: '/logs/generate.log',
+          }),
+      };
+
+      /** Only the journal differs, so the failed run loses no migration of the branch's. */
+      async function failedOnce(): Promise<BatchDto> {
+        h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+        seedMain(true);
+        const { batch } = await opened(h, { sessionStarted: true });
+        await commitOnBatch(batch, `${DB}/meta/_journal.json`, '["0000","0001_mine"]\n');
+        h.teammatePush('main', `${DB}/meta/_journal.json`, '["0000","0001_theirs"]\n');
+        h.teammatePush('main', `${DB}/0001_theirs.sql`, 'alter table a add c;\n');
+        await createBaseUpdates({ ...h.ctx, generators: failing }).beforeGate(batch.id, signal);
+        expect(regenerateNotice(batch.id).key).toBe('base-regenerate');
+        return batch;
+      }
+
+      it('keeps the regenerate notice after a later merge of the base that leaves nothing to regenerate', async () => {
+        const batch = await failedOnce();
+        h.teammatePush('main', 'docs/more.md', 'more\n');
+        const update = await createBaseUpdates({ ...h.ctx, generators: failing }).beforeGate(
+          batch.id,
+          signal,
+        );
+        expect(update.kind).toBe('merged');
+        // The files are still unregenerated: a merge that regenerated nothing repairs none of them.
+        expect(regenerateNotice(batch.id).key).toBe('base-regenerate');
+      });
+
+      it('drops the regenerate notice once a later regeneration succeeds', async () => {
+        const batch = await failedOnce();
+        await commitOnBatch(
+          batch,
+          `${DB}/meta/_journal.json`,
+          '["0000","0001_theirs","0002_mine"]\n',
+          '-again',
+        );
+        h.teammatePush('main', `${DB}/meta/_journal.json`, '["0000","0001_theirs","0002_more"]\n');
+        h.teammatePush('main', `${DB}/0002_more.sql`, 'alter table a add d;\n');
+        const update = await createBaseUpdates({
+          ...h.ctx,
+          generators: generating({
+            [`${DB}/meta/_journal.json`]: '["0000","0001_theirs","0002_more","0003_mine"]\n',
+            [`${DB}/0003_mine.sql`]: MINE,
+          }),
+        }).beforeGate(batch.id, signal);
+        expect(update.kind).toBe('merged');
+        expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+      });
+
+      it("drops the regenerate notice with the batch's worktree", async () => {
+        const batch = await failedOnce();
+        h.state.write((c) => transitionBatch(c, batch.id, { to: 'ABANDONED' }));
+        await retireWorktree(h.ctx, batch.id, true);
+        expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+      });
     });
 
     it('says on the card when it stopped after the merge and before regenerating, and removes what the run wrote', async () => {
@@ -1264,7 +1346,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       }).beforeGate(batch.id, signal);
       expect(update).toEqual({ kind: 'aborted' });
       // The next gate finds the branch up to date and regenerates nothing: the card is all that says so.
-      expect(h.only(h.cards()).body).toContain('10db stopped before it regenerated them');
+      expect(regenerateNotice(batch.id).body).toContain('10db stopped before it regenerated them');
       expect(state(path).status).toBe('');
     });
 
@@ -1340,7 +1422,9 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
           generators: generating({}),
         }).beforeGate(batch.id, stopsInInstall());
         expect(update).toEqual({ kind: 'aborted' });
-        expect(h.only(h.cards()).body).toContain('10db stopped before it regenerated them');
+        expect(regenerateNotice(batch.id).body).toContain(
+          '10db stopped before it regenerated them',
+        );
       });
     });
 
@@ -1404,8 +1488,8 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(update.kind === 'uncarried' && update.note).toContain(
         `${DB}/ (taken from origin/main`,
       );
-      const card = h.only(h.cards());
-      expect(card.title).toBe(`Batch "Alpha": 10db couldn't regenerate files after merging main`);
+      const card = regenerateNotice(batch.id);
+      expect(card.line).toBe(`Batch "Alpha": 10db couldn't regenerate files after merging main`);
       expect(card.body).toContain(
         `regenerating changed nothing in ${DB}/, so the batch's own changes there are gone from it`,
       );
@@ -1449,7 +1533,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       }).beforeGate(batch.id, signal);
       expect(run.ran).toBe(0);
       expect(update.kind).toBe('uncarried');
-      expect(h.only(h.cards()).body).toContain(
+      expect(regenerateNotice(batch.id).body).toContain(
         "the install the merged lockfile needs failed, so 10db didn't run the generators",
       );
     });
@@ -1472,7 +1556,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
         `Merge origin/main into ${batch.branch ?? ''}`,
       );
       expect(state(path).status).toBe('?? packages/db/src/schema.ts');
-      const card = h.only(h.cards());
+      const card = regenerateNotice(batch.id);
       expect(card.body).toContain(
         'the worktree has uncommitted changes the generators would read (packages/db/src/schema.ts)',
       );
@@ -1512,9 +1596,68 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
           [`${DB}/0002_other.sql`]: 'something else entirely;\n',
         }),
       }).beforeGate(batch.id, signal);
-      const card = h.only(h.cards());
+      const card = regenerateNotice(batch.id);
       expect(card.body).toContain(`${DB}/0001_mine.sql`);
       expect(card.body).toContain('regenerating did not make it again');
+    });
+
+    it('hides the regenerate notice once a gate finds the journal holds the branch’s migration', async () => {
+      h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+      // Journals drizzle can read, so the gate can tell which migrations the branch's journal holds.
+      const journalOf = (...tags: string[]): string =>
+        `${JSON.stringify({
+          version: '7',
+          dialect: 'sqlite',
+          entries: tags.map((tag, idx) => ({
+            idx,
+            version: '6',
+            when: idx,
+            tag,
+            breakpoints: true,
+          })),
+        })}\n`;
+      seedMain(true);
+      h.commit(`${DB}/meta/_journal.json`, journalOf('0000_init'));
+      h.git$('push', '-q', 'origin', 'main');
+      const { batch } = await opened(h, { sessionStarted: true });
+      await commitOnBatch(
+        batch,
+        'src/index.ts',
+        "import a from './a';\nimport b from './b';\nexport {};\n",
+      );
+      await commitOnBatch(batch, `${DB}/meta/_journal.json`, journalOf('0000_init', '0001_mine'));
+      await commitOnBatch(batch, `${DB}/0001_mine.sql`, MINE);
+      h.teammatePush(
+        'main',
+        'src/index.ts',
+        "import a from './a';\nimport c from './c';\nexport {};\n",
+      );
+      h.teammatePush('main', `${DB}/meta/_journal.json`, journalOf('0000_init', '0001_theirs'));
+      h.teammatePush('main', `${DB}/0001_theirs.sql`, 'alter table a add c;\n');
+      const updates = createBaseUpdates({
+        ...h.ctx,
+        generators: generating({
+          [`${DB}/meta/_journal.json`]: journalOf('0000_init', '0001_theirs'),
+          [`${DB}/0002_other.sql`]: 'something else entirely;\n',
+        }),
+      });
+      expect((await updates.beforeGate(batch.id, signal)).kind).toBe('uncarried');
+      regenerateNotice(batch.id);
+      expect(noticesKeyed(batch.id, 'migrations-uncarried')).toHaveLength(1);
+      // The builder regenerates the migration on top of the base's and commits it.
+      await commitOnBatch(batch, `${DB}/0002_mine.sql`, MINE);
+      await commitOnBatch(
+        batch,
+        `${DB}/meta/_journal.json`,
+        journalOf('0000_init', '0001_theirs', '0002_mine'),
+        '-again',
+      );
+
+      await updates.beforeGate(batch.id, signal);
+
+      expect(noticesKeyed(batch.id, 'base-regenerate')).toEqual([]);
+      expect(noticesKeyed(batch.id, 'migrations-uncarried')).toEqual([]);
+      expect(h.cards()).toEqual([]);
     });
 
     it('leaves a conflict in a lockfile for the builder, with one notice that says so', async () => {
@@ -1677,8 +1820,8 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
         );
         expect(update).toMatchObject({ kind: 'conflicted', paths: ['src/index.ts'] });
         expect(update.kind === 'conflicted' && update.note).toContain('update-ref failed');
-        const card = h.only(h.cards());
-        expect(card.title).toContain("couldn't regenerate");
+        const card = regenerateNotice(batch.id);
+        expect(card.line).toContain("couldn't regenerate");
         expect(card.body).toContain(`${DB}/`);
         expect(card.body).toContain('update-ref failed');
         // The branch's own migration is gone from the directory the merge took from the base.
@@ -1809,6 +1952,9 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     const { batch } = await opened(h, { sessionStarted: true });
     raise(h.inbox, h.project.id, {
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'answer' },
       title: `Batch "${batch.title}" conflicts with main`,
       body: 'x',
       foldKey: baseConflictKey(batch.id),
@@ -1840,12 +1986,33 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     // holds the base.
     for (const foldKey of [baseConflictKey(batch.id), baseKeptKey(batch.id)])
       raise(h.inbox, h.project.id, {
+        tier: 'ask',
+        urgency: 'high',
+        closesWhen: { by: 'answer' },
         title: `Batch "${batch.title}" conflicts with main`,
         body: 'x',
         foldKey,
       });
     expect(h.cards()).toHaveLength(2);
     expect((await updates.beforeGate(batch.id, signal)).kind).toBe('up_to_date');
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('closes the conflict card an earlier build raised when a gate shows the conflict as a notice', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    const { batch } = await opened(h, { sessionStarted: true });
+    raise(h.inbox, h.project.id, {
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'answer' },
+      title: `Batch "${batch.title}" conflicts with main`,
+      body: 'x',
+      foldKey: baseConflictKey(batch.id),
+    });
+    await commitOnBatch(batch, 'README.md', '# ours\n');
+    h.teammatePush('main', 'README.md', '# theirs\n');
+    await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+    expect(getBatch(h.store.db, batch.id).notices).toHaveLength(1);
     expect(h.cards()).toEqual([]);
   });
 

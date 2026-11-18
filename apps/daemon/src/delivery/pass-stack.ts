@@ -11,6 +11,7 @@ import {
   type PassDto,
   type PassId,
   type ProjectId,
+  Urgency,
 } from '@10db/contracts';
 import {
   clearPassNotice,
@@ -32,6 +33,7 @@ import {
 import type { Card } from './cards';
 import { ghCall, networkCall, raise, withdraw, type DeliveryContext } from './context';
 import { pushBranch } from './ship';
+import { CardTier } from '../inbox';
 
 // Workbench spec §5.3, D24, calls 34 and 35: a pass may open on a pass that has closed and not
 // settled, and stacks on it: the same return branch, its start at the closed pass's tip, its pull
@@ -275,6 +277,12 @@ function retargetCard(above: PassDto, below: PassDto, base: string, prUrl: strin
     base,
   };
   return {
+    tier: CardTier.Ask,
+    urgency: Urgency.Normal,
+    closesWhen: {
+      by: 'withdrawn',
+      when: 'the pass settles or the pull request is already on its base',
+    },
     title: `Retarget "${above.name}" to ${base}`,
     body: [
       `Pass "${below.name}", which pass "${above.name}" is built on, closed without merging${prUrl === null ? '' : ` (${prUrl})`}.`,

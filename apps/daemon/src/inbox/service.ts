@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   type ConversationId,
   CARD_PROPOSED_PRINCIPLES,
+  CARD_RESOLVES_WHEN,
   CARD_RELEASED_WORKSTREAMS,
   CARD_RESOLUTION,
   ReleasedWorkstreams,
@@ -77,7 +78,9 @@ import type { Logger } from '../log';
 import { ESCALATED_KEY, EXACT_WRITE_KEY, mcpGrantRules, storableRule } from '../permissions';
 import { proposePlacement } from '../placement';
 import { grantTargetOf } from '../trust';
+import { BY_ANSWER, CardTier, type CardClosesWhen, type StoredTier } from './card-tier';
 import { applyDockerChoice } from './docker-card';
+import { postNotice, type NoticeInput } from './notice';
 import { applyGateHostChoice } from './gate-host-card';
 import { applyHazardChoice } from './hazard-card';
 import { GRANT_CALL_DETAIL, LIMIT_DETAIL } from './limit-card';
@@ -150,8 +153,14 @@ const SHAPE_CARD_KEY = 'shapeId';
 const CONVERSATION_CARD_KEY = 'conversationId';
 
 /** A flag card, as `InboxService.flag` and `flagCard` raise it. */
-interface FlagInput {
+export interface FlagInput {
   readonly projectId: ProjectId;
+  /** What the card asks of the builder; a notice is never stored, so it is not a choice here. */
+  readonly tier: StoredTier;
+  /** How soon the builder should look (§4.4): work stopped is high, a choice is normal, an undo offer is low. */
+  readonly urgency: Urgency;
+  /** How the open card closes; an event closer is stored in the detail, where `resolveStaleCards` finds it. */
+  readonly closesWhen: CardClosesWhen;
   readonly workstreamId: WorkstreamId | null;
   readonly title: string;
   readonly body: string;
@@ -206,6 +215,8 @@ export interface InboxService {
     inTx: (ctx: WriteContext, item: InboxItemDto) => void,
   ): InboxItemDto;
   flag(input: FlagInput): InboxItemDto;
+  /** Posts a notice as an event, in one write. */
+  notice(input: NoticeInput): void;
   cancelForWorkstream(workstreamId: WorkstreamId): void;
   /**
    * Rewrites an open card's body (a cap card's running overshoot), and its title, options and detail
@@ -233,6 +244,10 @@ export interface InboxService {
  * change it records commits both together, or neither.
  */
 export function flagCard(ctx: WriteContext, input: FlagInput): InboxItemDto {
+  const detail =
+    input.closesWhen.by === 'event'
+      ? { ...input.detail, [CARD_RESOLVES_WHEN]: input.closesWhen.when }
+      : (input.detail ?? null);
   if (input.foldKey) {
     const existing = findOpenByFoldKey(ctx.tx, input.projectId, input.foldKey);
     if (existing && !input.refresh) return existing;
@@ -245,7 +260,7 @@ export function flagCard(ctx: WriteContext, input: FlagInput): InboxItemDto {
         title: input.title,
         body: input.body,
         options: input.options ?? [],
-        detail: input.detail ?? null,
+        detail,
       });
   }
   return insertInboxItem(ctx, {
@@ -256,8 +271,8 @@ export function flagCard(ctx: WriteContext, input: FlagInput): InboxItemDto {
     options: input.options ? [...input.options] : [],
     recommendation: input.recommendation ?? null,
     category: QuestionCategory.Other,
-    urgency: Urgency.High,
-    detail: input.detail ?? null,
+    urgency: input.urgency,
+    detail,
     foldKey: input.foldKey ?? null,
     targets: input.workstreamId ? [{ workstreamId: input.workstreamId, sessionId: null }] : [],
   });
@@ -675,6 +690,9 @@ export function createInboxService(deps: {
         flagCard(ctx, {
           projectId: now.projectId,
           workstreamId: now.targets[0]?.workstreamId ?? null,
+          tier: CardTier.Ask,
+          urgency: Urgency.High,
+          closesWhen: BY_ANSWER,
           title: 'An answer was stored but not delivered',
           body: `The answer to “${now.title}” was recorded, but handing it to the lane failed, so the lane may still be waiting. Retry delivery once the cause is fixed.`,
           detail: { [REDELIVER_KEY]: now.id },
@@ -939,6 +957,12 @@ export function createInboxService(deps: {
 
     flag(input) {
       return deps.state.write((ctx) => flagCard(ctx, input));
+    },
+
+    notice(input) {
+      deps.state.write((ctx) => {
+        postNotice(ctx, input);
+      });
     },
 
     cancelForWorkstream(workstreamId) {

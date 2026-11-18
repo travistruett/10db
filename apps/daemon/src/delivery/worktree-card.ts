@@ -10,12 +10,13 @@ import { z } from 'zod';
 import { returnCheckout } from './checkout-return';
 import {
   CheckoutChoice,
+  keptWorktreeKey,
   WORKTREE_CARD_DETAIL,
   WorktreeChoice,
   worktreeCards,
   type WorktreeOffer,
 } from './cards';
-import { raise, type DeliveryContext } from './context';
+import { post, raise, withdraw, type DeliveryContext } from './context';
 import { handMadeCards } from './hand-made-cards';
 import { keepHandMadeFolderOutOfSpotlight, removeMergedHandMade } from './hand-made-worktrees';
 import { jobKey, JobQueue } from './jobs';
@@ -144,7 +145,9 @@ export function createWorktreeCardAnswers(
               { projectId: project.id, path: offer.path, why: outcome.why },
               'orphaned worktree not removed: no longer an orphan',
             );
-            raise(ctx.inbox, project.id, worktreeCards.orphanNotRemoved(offer.path, outcome.why));
+            // A removeFailed card an earlier answer left open for this path is stale now.
+            withdraw(ctx.state, ctx.inbox, project.id, [keptWorktreeKey.removeFailed(offer.path)]);
+            post(ctx.inbox, project.id, worktreeCards.orphanNotRemoved(offer.path, outcome.why));
           }
         });
         return;

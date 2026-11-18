@@ -13,6 +13,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/re
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
+import { activityRowDto, serveActivity } from '../../test/activity-fixtures';
 import { DEFAULT_ACCOUNT } from '../../test/account-fixtures';
 import { batchDto, projectViewDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
 import { kindDto } from '../../test/playbook-fixtures';
@@ -983,6 +984,37 @@ describe('TaskDrawer', () => {
         expect(within(d).getByText(repaired.line)).toBeTruthy();
         expect(within(d).queryByText('Conflicts with main: README.md')).toBeNull();
       });
+    });
+
+    it("lists the task's notices from Activity after its batch notices", async () => {
+      const taskId = mintId('Task');
+      serve();
+      serveActivity([
+        activityRowDto({
+          taskId,
+          tone: 'warning',
+          line: 'Task was resized',
+          body: 'It grew to large.',
+          count: 2,
+        }),
+      ]);
+      open({
+        task: { id: taskId },
+        workstream: workstreamDto({
+          state: 'RUNNING',
+          notice: {
+            key: 'claim-wait:hazard:migrations',
+            tone: 'info',
+            line: 'Waiting for hazard migrations',
+            body: 'Task "Beta" holds it.',
+          },
+        }),
+      });
+      const d = await dialog();
+      const posted = await within(d).findByText('Task was resized ×2');
+      expect(within(d).getByTestId('task-notice').contains(posted)).toBe(true);
+      expect(within(d).getByText('It grew to large.')).toBeTruthy();
+      expect(follows(within(d).getByText('Waiting for hazard migrations'), posted)).toBe(true);
     });
 
     it('shows no notice for a task with none', async () => {

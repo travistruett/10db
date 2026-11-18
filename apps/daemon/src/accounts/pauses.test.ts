@@ -49,6 +49,9 @@ function pauses() {
   });
 }
 const card = (id: AccountId, kind: string): AccountCard => ({
+  tier: 'ask',
+  urgency: 'high',
+  closesWhen: { by: 'answer' },
   title: 'paused',
   body: 'body',
   foldKey: `account:${id}:${kind}`,

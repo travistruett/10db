@@ -264,6 +264,9 @@ describe("the base, brought into a worktree batch's branch before the shipping g
       setBatchNotice(w, batch.id, baseNotices.kept(batch, path, ['build/']));
     });
     raise(h.inbox, h.project.id, {
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'answer' },
       title: 'Batch conflicts with main',
       body: 'x',
       foldKey: baseConflictKey(batch.id),
@@ -652,6 +655,9 @@ describe('Retry of a FAILED worktree batch', () => {
     const fields = batchCardFields({ id: ws.id, batchId: batch.id });
     if (!fields) throw new Error('a batch member gets card actions');
     const card = inbox.flag({
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'answer' },
       projectId: h.project.id,
       workstreamId: ws.id,
       title: 'Workstream failed: Alpha',
@@ -852,8 +858,9 @@ describe('a finished worktree with git-ignored files', () => {
       expect(outcome).toEqual({ kind: 'retired' });
       expect(getBatch(h.store.db, batch.id).worktreePath).toBeNull();
       expect(worktreePaths()).toEqual([realpathSync(h.repo)]);
-      // An abandoned batch's branch, with nothing on it, is deleted and a card says so.
-      expect(h.cards().map((c) => c.title)).toEqual(
+      // An abandoned batch's branch, with nothing on it, is deleted and a notice says so.
+      expect(h.cards()).toEqual([]);
+      expect(h.notices().map((n) => n.line)).toEqual(
         to === 'ABANDONED' && (tracked ?? []).length === 0
           ? [`Batch "${batch.title}" abandoned: ${batch.branch ?? ''} deleted`]
           : [],
@@ -960,8 +967,9 @@ describe('a finished worktree with git-ignored files', () => {
       for (const file of files) rmSync(join(wt, file));
       expect(await retireWorktree(h.ctx, batch.id)).toEqual({ kind: 'retired' });
 
-      // Only the note that an abandoned batch's empty branch was deleted is left.
-      expect(h.cards().map((c) => c.title)).toEqual(
+      // Only the note that an abandoned batch's empty branch was deleted is left, and it is a notice.
+      expect(h.cards()).toEqual([]);
+      expect(h.notices().map((n) => n.line)).toEqual(
         to === 'ABANDONED'
           ? [`Batch "${batch.title}" abandoned: ${batch.branch ?? ''} deleted`]
           : [],

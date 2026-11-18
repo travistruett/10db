@@ -105,6 +105,9 @@ export function createMoveBack(opts: {
     opts.inbox.flag({
       projectId,
       workstreamId: null,
+      tier: card.tier,
+      urgency: card.urgency,
+      closesWhen: card.closesWhen,
       title: card.title,
       body: card.body,
       detail: card.detail,

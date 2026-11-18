@@ -1,4 +1,10 @@
-import { InboxKind, type InboxAnswer, type InboxItemDto, type ProjectId } from '@10db/contracts';
+import {
+  InboxKind,
+  type InboxAnswer,
+  type InboxItemDto,
+  type ProjectId,
+  Urgency,
+} from '@10db/contracts';
 import {
   insertDecision,
   insertPermissionRule,
@@ -15,6 +21,7 @@ import {
 } from '../permissions';
 import { BlockedRun } from '../verify';
 import type { InboxService } from './service';
+import { BY_ANSWER, CardTier } from './card-tier';
 
 const NETWORK_TOOL = 'SandboxNetworkAccess';
 const GATE_HOST_DETAIL = 'gateHost';
@@ -117,6 +124,9 @@ export function raiseGateHostCards(
       deps.inbox.flag({
         projectId: input.projectId,
         workstreamId: null,
+        tier: CardTier.Ask,
+        urgency: Urgency.Normal,
+        closesWhen: BY_ANSWER,
         title: `Allow network access to ${host}?`,
         body: cardBody(input.run, host, input.command, file),
         options: [

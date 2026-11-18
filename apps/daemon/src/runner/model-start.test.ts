@@ -26,6 +26,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestEngine, type TestEngine } from '../../test/engine';
 import { handoffArgs } from '../../test/fixtures';
+import { noticesPosted } from '../../test/notices-posted';
 import { seedProfiles } from '../../test/seed-profiles';
 import type { LaneSessionSpec } from '../sessions';
 
@@ -98,6 +99,9 @@ function recordSpecs(): LaneSessionSpec[] {
 
 const quick = { flow: 'quick' } as const;
 const openCards = () => listInbox(engine.store.db, { states: ['OPEN'] });
+/** The refusals 10db retried on another model: notices on the task, never cards. */
+const refusalNotices = () =>
+  noticesPosted(engine.store.db).filter((n) => n.key.startsWith('model-refused:'));
 
 describe('the model a planned step starts on', () => {
   it('is the account’s own ID for the model, and the step keeps its canonical one', async () => {
@@ -334,7 +338,7 @@ describe('a send-back that would resume the step’s own session', () => {
 });
 
 describe('a model the account refuses at the first reply', () => {
-  it('is marked unusable, raises a card, and the step starts over on another model', async () => {
+  it('is marked unusable, posts a notice on its task, and the step starts over on another model', async () => {
     engine = await createTestEngine({
       Alpha: [[{ do: 'model_refused' }], finish('op-refused-01')],
     });
@@ -350,7 +354,16 @@ describe('a model the account refuses at the first reply', () => {
     expect(next).not.toBe(first);
     const rows = listAccountModels(engine.store.db, engine.project.accountId);
     expect(rows.filter((r) => r.unusable).map((r) => r.model)).toEqual([first]);
-    expect(openCards().map((c) => c.title)).toEqual([`Claude plan cannot run ${first ?? ''}`]);
+    expect(openCards()).toEqual([]);
+    expect(refusalNotices()).toMatchObject([
+      {
+        key: `model-refused:${engine.project.accountId}:${first ?? ''}`,
+        tone: 'warning',
+        line: `Claude plan cannot run ${first ?? ''}`,
+        projectId: engine.project.id,
+        taskId: ws(workstream.id).taskId,
+      },
+    ]);
     expect(ws(workstream.id).steps[0]?.reason).toMatch(
       new RegExp(`${first ?? ''} is marked unusable on Claude plan`),
     );
@@ -491,7 +504,8 @@ describe('a model the account refuses at the first reply', () => {
     await engine.runner.idle();
 
     expect(ws(workstream.id).state).toBe('DONE');
-    const [card] = openCards();
+    expect(openCards()).toEqual([]);
+    const [card] = refusalNotices();
     expect(card?.body).toMatch(new RegExp(`running the step on ${specs[1]?.model ?? ''}`));
     expect(card?.body).not.toMatch(/marked .* unusable/);
   });
@@ -544,7 +558,7 @@ describe('a model the account refuses by an error’s wording alone', () => {
       unusable: true,
       wordingMarkEndsAt: new Date(engine.clock.now().getTime() + WORDING_MARK_MS).toISOString(),
     });
-    expect(openCards()[0]?.body).toMatch(/error’s wording/);
+    expect(refusalNotices()[0]?.body).toMatch(/error’s wording/);
 
     // A real refusal is not routed to again while its mark holds.
     engine.clock.advance(WORDING_MARK_MS - 1);

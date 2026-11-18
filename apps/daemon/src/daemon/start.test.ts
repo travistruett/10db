@@ -26,6 +26,7 @@ import {
   GithubStatusDto,
   FolderInspectResult,
   InboxItemDto,
+  InboxPageDto,
   KeepAwakeStatus,
   McpServerStatusDto,
   mintId,
@@ -40,8 +41,14 @@ import {
   WorkstreamId,
 } from '@10db/contracts';
 import {
+  createStore,
+  DB_MIGRATIONS_DIR,
   findModelProfile,
   getAccount,
+  insertInboxItem,
+  migrateDatabase,
+  openDatabase,
+  seedProject,
   getWorkstream,
   listAccountModels,
   listAccounts,
@@ -1376,6 +1383,52 @@ describe('startDaemon', () => {
 
       daemon = await startDaemon(options(1));
       expect(await overloadCards(apiClient(daemon.url, daemon.token))).toEqual([]);
+    } finally {
+      await daemon?.stop();
+      daemon = null;
+      repo.cleanup();
+    }
+  });
+
+  it('closes the open cards of a kind that is a notice now when it starts, and leaves the asks', async () => {
+    const repo = createTempRepo();
+    const seeding = openDatabase(join(dir.path, '10db.sqlite'));
+    migrateDatabase(seeding, DB_MIGRATIONS_DIR);
+    const store = createStore(seeding);
+    const project = seedProject(store, { repoPath: repo.path });
+    const card = (title: string, foldKey: string) =>
+      store.write((ctx) =>
+        insertInboxItem(ctx, {
+          projectId: project.id,
+          kind: 'flag',
+          title,
+          body: 'Body.',
+          options: [{ label: 'Got it', description: '' }],
+          recommendation: null,
+          category: 'other',
+          urgency: 'normal',
+          detail: null,
+          foldKey,
+          targets: [],
+        }),
+      ).value;
+    const notice = card('Batch "B" abandoned: its branch deleted', 'branch-deleted:bat_1');
+    const ask = card('Your folder is on another branch', 'checkout-return:bat_1');
+    seeding.$client.close();
+    try {
+      daemon = await startDaemon({
+        sandbox: null,
+        dataDir: dir.path,
+        port: 0,
+        adapter: new FakeAdapter({}),
+        logLevel: 'warn',
+        ...QUIET,
+      });
+      const api = apiClient(daemon.url, daemon.token);
+      const open = await api.get('/inbox?state=OPEN', z.array(InboxItemDto));
+      expect(open.map((item) => item.id)).toEqual([ask.id]);
+      const resolved = await api.get('/inbox/page?state=resolved', InboxPageDto);
+      expect(resolved.items.map((item) => item.id)).toEqual([notice.id]);
     } finally {
       await daemon?.stop();
       daemon = null;

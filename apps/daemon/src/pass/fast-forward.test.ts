@@ -1,5 +1,4 @@
 import { join } from 'node:path';
-import { findOpenByFoldKey } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
 import { branchMovedKey, fastForwardReturn } from './fast-forward';
@@ -19,8 +18,8 @@ async function landedPass(): Promise<string> {
   return w.h.commit('src/settings/page.tsx', 'signed off\n');
 }
 
-const card = () =>
-  findOpenByFoldKey(w.h.store.db, w.h.project.id, branchMovedKey(w.opened.pass.id));
+/** The notice that says the folder stayed on the pass's branch; it is history in Activity, never a card. */
+const notice = () => w.h.notices().find((n) => n.key === branchMovedKey(w.opened.pass.id));
 const head = () => w.h.git$('symbolic-ref', '--short', 'HEAD');
 
 describe('fastForwardReturn', () => {
@@ -48,7 +47,7 @@ describe('fastForwardReturn', () => {
     expect(w.h.git$('rev-parse', 'main')).toBe(tip);
     expect(head()).toBe('main');
     expect(w.h.git$('status', '--porcelain')).toBe('');
-    expect(card()).toBeUndefined();
+    expect(notice()).toBeUndefined();
   });
 
   it('forces nothing when the return branch moved since the pass opened, and says how to merge', async () => {
@@ -61,11 +60,14 @@ describe('fastForwardReturn', () => {
 
     expect(w.h.git$('rev-parse', 'main')).toBe(moved);
     expect(head()).toBe(w.branch);
-    expect(card()?.detail).toMatchObject({
-      kind: 'pass_branch_moved',
-      reason: 'moved',
-      mergeCommand: `git switch main && git merge ${w.branch}`,
+    expect(w.h.cards()).toEqual([]);
+    expect(notice()).toMatchObject({
+      tone: 'warning',
+      taskId: null,
+      line: `Your folder stays on ${w.branch}`,
     });
+    expect(notice()?.body).toContain('main moved since the pass opened');
+    expect(notice()?.body).toContain(`git switch main && git merge ${w.branch}`);
   });
 
   it("forces nothing when the pass's branch no longer holds where the pass started", async () => {
@@ -85,7 +87,7 @@ describe('fastForwardReturn', () => {
 
     expect(w.h.git$('rev-parse', 'main')).toBe(w.opened.pass.startSha);
     expect(head()).toBe(w.branch);
-    expect(card()?.body).toMatch(/no longer holds the commit the pass started on/);
+    expect(notice()?.body).toMatch(/no longer holds the commit the pass started on/);
   });
 
   it('forces nothing when the builder switched the folder back to the return branch by hand', async () => {
@@ -95,7 +97,7 @@ describe('fastForwardReturn', () => {
     expect(await fastForwardReturn(w.deps, w.opened.pass)).toEqual({ kind: 'moved' });
 
     expect(w.h.git$('rev-parse', 'main')).not.toBe(tip);
-    expect(card()?.detail).toMatchObject({ reason: 'moved' });
+    expect(notice()?.body).toContain('main moved since the pass opened');
   });
 
   it('forces nothing while the return branch is checked out in another worktree', async () => {
@@ -107,6 +109,7 @@ describe('fastForwardReturn', () => {
 
     expect(w.h.git$('rev-parse', 'main')).not.toBe(tip);
     expect(head()).toBe(w.branch);
-    expect(card()?.detail).toMatchObject({ reason: 'in_use_elsewhere' });
+    expect(w.h.cards()).toEqual([]);
+    expect(notice()?.body).toContain('main is in use in');
   });
 });

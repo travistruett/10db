@@ -437,6 +437,9 @@ describe('the pull request watch', () => {
       await watch.idle();
       h.state.write((w) => {
         raiseIn(w, h.project.id, {
+          tier: 'ask',
+          urgency: 'high',
+          closesWhen: { by: 'answer' },
           title: 'Pull request conflicts',
           body: 'x',
           foldKey: prCardKey.catchUp(id),
@@ -458,6 +461,9 @@ describe('the pull request watch', () => {
       await watch.idle();
       h.state.write((w) => {
         raiseIn(w, h.project.id, {
+          tier: 'ask',
+          urgency: 'high',
+          closesWhen: { by: 'answer' },
           title: 'Pull request conflicts',
           body: 'x',
           foldKey: prCardKey.catchUp(id),

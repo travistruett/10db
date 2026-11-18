@@ -32,7 +32,6 @@ import { CheckCard } from './check-card';
 import { PlanCard } from './plan-card';
 import { ReviewRejection, reviewRejection } from '../review/review-rejection';
 import { McpApprovalDetails, mcpReview } from './mcp-approval';
-import { PassCardExtras } from './pass-card-extras';
 import { CardSurface } from './card-surface';
 import { KIND_LABELS, optionLabel } from './permission-labels';
 import { usePrincipleOf } from './principle-card';
@@ -345,7 +344,6 @@ export function InboxCard({
             }}
           />
         ) : null}
-        <PassCardExtras item={item} />
         <BatchCardActions item={item} onDone={onDismiss} />
         {hasOptions ? (
           <Radio.Group value={choice} onChange={onChoose} aria-label="Answer">

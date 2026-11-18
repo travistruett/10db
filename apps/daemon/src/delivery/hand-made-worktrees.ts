@@ -8,8 +8,13 @@ import { keepSpotlightOut, SPOTLIGHT_MARKER } from '../sandbox';
 import { looseWork } from './build-output';
 import { detailOf } from './cards';
 import { haveCommit } from './branch-sweep';
-import { ghCall, raise, withdraw, type DeliveryContext } from './context';
-import { handMadeCards, handMadeKey, type MergedHandMade } from './hand-made-cards';
+import { ghCall, post, raise, withdraw, type DeliveryContext } from './context';
+import {
+  handMadeCards,
+  handMadeKey,
+  handMadeNotices,
+  type MergedHandMade,
+} from './hand-made-cards';
 import { ghDown } from './pr-watch';
 
 /** How long after a look the next one waits: each look asks GitHub about every worktree. */
@@ -148,13 +153,13 @@ export async function removeMergedHandMade(
     }
   }
   ctx.logger.info({ projectId: project.id, folder, removed }, 'merged hand-made worktrees removed');
-  raise(ctx.inbox, project.id, handMadeCards.removed(folder, removed));
+  post(ctx.inbox, project.id, handMadeNotices.removed(folder, removed));
   return removed;
 }
 
 /**
  * The builder's Keep Spotlight Out answer: creates the marker in the project's hand-made folder, and
- * only there, whatever `path` the card carried. Raises a card saying what changed.
+ * only there, whatever `path` the card carried. Posts a notice saying what changed.
  */
 export function keepHandMadeFolderOutOfSpotlight(ctx: DeliveryContext, project: ProjectDto): void {
   const folder = folderOf(project);
@@ -166,5 +171,5 @@ export function keepHandMadeFolderOutOfSpotlight(ctx: DeliveryContext, project: 
     { projectId: project.id, folder, created },
     'hand-made folder kept out of Spotlight',
   );
-  raise(ctx.inbox, project.id, handMadeCards.spotlightKept(folder, created));
+  post(ctx.inbox, project.id, handMadeNotices.spotlightKept(folder, created));
 }

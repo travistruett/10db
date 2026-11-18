@@ -8,7 +8,6 @@ import {
   TaskStatus,
   type PassCloseRequest,
   type PassDto,
-  type PassFollowOnDetail,
   type PassId,
   type TaskId,
 } from '@10db/contracts';
@@ -21,12 +20,13 @@ import {
   getProject,
   getTask,
   hasAnsweredByFoldKey,
+  hasNoticeKey,
   passHoldingTask,
   setPassNotice,
   type DbReader,
 } from '@10db/db';
 import type { EventBus } from '../events';
-import { flagCard } from '../inbox';
+import { CardTier, postNotice } from '../inbox';
 import type { CloseDeps } from './close';
 import { passBranch } from './kept-work';
 import { unfinishedPages } from './unowned';
@@ -118,7 +118,7 @@ export async function followOnPush(
   }
 }
 
-/** The fold key of a merged pass's one follow-on card, which also marks its carry-over done. */
+/** The key of a merged pass's one follow-on notice, which also marks its carry-over done. */
 const followOnKey = (passId: PassId): string => `pass-follow-on:${passId}`;
 
 /** Whether the closed pass came from a merge and has not yet carried its pages over. */
@@ -128,7 +128,9 @@ export function carryOverDue(db: DbReader, passId: PassId): boolean {
   const plan = getPassProgress(db, passId).closePlan;
   if (plan === null || !isMergedClose(plan)) return false;
   const key = followOnKey(passId);
+  // The card checks stay for a card an earlier build raised: it marked the carry-over done too.
   return (
+    !hasNoticeKey(db, pass.projectId, key) &&
     findOpenByFoldKey(db, pass.projectId, key) === undefined &&
     !hasAnsweredByFoldKey(db, pass.projectId, key)
   );
@@ -145,7 +147,7 @@ async function unpushedCommits(deps: CloseDeps, pass: PassDto): Promise<string[]
 /**
  * After a merged close, outside the delivery key: the pages it took out carry over to a follow-on
  * pass, opened as Start Pass opens one, which stacks on the closed pass and puts their kept work
- * back. One card says what happened. A page already in a pass (a restart after the opening) names
+ * back. One notice says what happened, and marks the carry-over done. A page already in a pass (a restart after the opening) names
  * that pass; one no longer open stays where it is.
  */
 export async function carryOver(deps: CloseDeps, passId: PassId): Promise<void> {
@@ -180,15 +182,8 @@ export async function carryOver(deps: CloseDeps, passId: PassId): Promise<void> 
   const pr = getPassPullRequest(db, passId);
   const prUrl =
     carried.length === 0 && pr !== null && pr.state !== PullRequestState.Merged ? pr.url : null;
-  const detail: PassFollowOnDetail = {
-    kind: 'pass_follow_on',
-    passId,
-    followOnPassId,
-    prUrl,
-    carried: carried.map((task) => task.id),
-  };
   // With no follow-on pass to ride, the pages signed off after the last push are on the branch
-  // alone: the card names them, since nothing pushes them.
+  // alone: the notice names them, since nothing pushes them.
   const unpushed =
     carried.length > 0 && followOnPassId === null ? await unpushedCommits(deps, pass) : [];
   const titles = carried.map((task) => `"${task.title}"`).join(', ');
@@ -210,19 +205,19 @@ export async function carryOver(deps: CloseDeps, passId: PassId): Promise<void> 
           `The pages signed off after the last push are on ${passBranch(db, pass)}, not pushed: ${unpushed.map((sha) => sha.slice(0, 7)).join(', ')}. Push it and open a pull request from it on GitHub.`,
         ]),
   ].join(' ');
-  deps.state.write((ctx) =>
-    flagCard(ctx, {
+  deps.state.write((ctx) => {
+    postNotice(ctx, {
+      tier: CardTier.Notice,
       projectId: pass.projectId,
-      workstreamId: null,
-      title: `UI Workbench pass "${pass.name}" closed when its pull request merged`,
+      taskId: null,
+      key: followOnKey(passId),
+      tone: unpushed.length > 0 ? 'warning' : 'info',
+      line: `UI Workbench pass "${pass.name}" closed when its pull request merged`,
       body,
-      foldKey: followOnKey(passId),
-      refresh: true,
-      detail,
-    }),
-  );
+    });
+  });
   deps.logger.info(
-    { passId, followOnPassId, prUrl, carried: detail.carried },
+    { passId, followOnPassId, prUrl, carried: carried.map((task) => task.id) },
     'merged pass carried over',
   );
 }

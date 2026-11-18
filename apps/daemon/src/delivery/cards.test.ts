@@ -1,11 +1,23 @@
-import { BatchDto, mintId, OPEN_INTEGRATIONS_DETAIL } from '@10db/contracts';
+import {
+  BatchDto,
+  mintId,
+  OPEN_INTEGRATIONS_DETAIL,
+  type CardResolvesWhen,
+  type Urgency,
+} from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { batchCardFields } from './batch-card';
 import { GhError } from '../github';
+import type { CardClosesWhen, StoredTier } from '../inbox';
 import {
+  baseCards,
+  branchCards,
   checkoutCards,
+  forTasks,
+  leftOutCards,
   LOST_MIGRATIONS_DETAIL,
   LostChoice,
+  passCards,
   prCards,
   shipCards,
   startCards,
@@ -298,5 +310,188 @@ describe('the card for a pull request not updated after the base merged', () => 
     expect(prCards.catchUpStopped(batch, { ...gateStop, settled: [] }).body).not.toContain(
       'settled',
     );
+  });
+});
+
+describe("every delivery card's tier, urgency and closer", () => {
+  const taskId = mintId('Task');
+  const attempt = { workstreamId: mintId('Workstream'), titles: ['Alpha'] };
+  const place = { branch: 'main', sha: 'b'.repeat(40) };
+  const project = { name: 'acme', repoPath: '/repo' };
+  const shipped: CardResolvesWhen = { event: 'batch_shipped', batchId: batch.id };
+  const started: CardResolvesWhen = { event: 'tasks_started', taskIds: [taskId] };
+  const byEvent = (when: CardResolvesWhen): CardClosesWhen => ({ by: 'event', when });
+  const answer: CardClosesWhen = { by: 'answer' };
+  const withdrawn = (when: string): CardClosesWhen => ({ by: 'withdrawn', when });
+  const batchWorktreeGone = withdrawn("the batch's worktree is removed (worktree-cleanup)");
+  const orphanGone = withdrawn('the orphan worktree is removed (worktree-sweep)');
+
+  interface Row {
+    readonly card: Card;
+    readonly tier: StoredTier;
+    readonly urgency: Urgency;
+    readonly closesWhen: CardClosesWhen;
+  }
+  const row = (card: Card, urgency: Urgency, closesWhen: CardClosesWhen): Row => ({
+    card,
+    tier: 'ask',
+    urgency,
+    closesWhen,
+  });
+  const high = 'high';
+  const normal = 'normal';
+
+  const rows: Record<string, Row> = {
+    'a refused start, with tasks': row(
+      forTasks(startCards.fetchFailed('main', new Error('x')), [taskId]),
+      high,
+      byEvent(started),
+    ),
+    'a refused start, with no tasks': row(
+      forTasks(startCards.branchMissing('release'), []),
+      high,
+      answer,
+    ),
+    'a cut that found its path taken': row(
+      forTasks(worktreeCards.pathExists(batch, '/wt/greetings'), [taskId]),
+      high,
+      byEvent(started),
+    ),
+    'a join the checkout was off the branch for': row(
+      forTasks(wrongBranchCard(batch, 'main', '/repo', 'not_joined'), [taskId]),
+      high,
+      byEvent(started),
+    ),
+    'wrong branch, waits': row(wrongBranchCard(batch, 'main', '/repo', 'waits'), high, answer),
+    'wrong branch, failed': row(wrongBranchCard(batch, 'main', '/repo', 'failed'), high, answer),
+    'wrong branch, not shipped': row(
+      wrongBranchCard(batch, 'main', '/repo', 'not_shipped'),
+      high,
+      byEvent(shipped),
+    ),
+    'a failed gate': row(shipCards.gateFailed(batch, gate).card, high, byEvent(shipped)),
+    'a base conflict': row(
+      shipCards.baseConflict(batch, ['a.ts'], 'no session').card,
+      high,
+      byEvent(shipped),
+    ),
+    'lost migrations, readable': row(
+      shipCards.migrationsLost(batch, { note: 'lost' }).card,
+      high,
+      byEvent(shipped),
+    ),
+    'lost migrations, unreadable': row(
+      shipCards.migrationsLost(batch, { note: 'lost', unreadable: true }).card,
+      high,
+      byEvent(shipped),
+    ),
+    'gh signed out on a ship': row(
+      shipCards.network(batch, 'gh pr create', new GhError('signed_out', 'x')).card,
+      high,
+      byEvent(shipped),
+    ),
+    'left out, answerable': row(
+      leftOutCards.conflict(batch, attempt, ['a.ts']),
+      high,
+      byEvent(shipped),
+    ),
+    'left out, not answerable': row(
+      leftOutCards.notStarted(batch, attempt, 'it moved', false),
+      normal,
+      answer,
+    ),
+    'revert kept while shipping': row(
+      leftOutCards.revertKept(batch, attempt, 'c'.repeat(40), 'boom', 'SHIPPING'),
+      high,
+      byEvent(shipped),
+    ),
+    'revert kept after shipping': row(
+      leftOutCards.revertKept(batch, attempt, 'c'.repeat(40), 'boom', 'SHIPPED'),
+      normal,
+      answer,
+    ),
+    'worktree missing, waits': row(
+      worktreeCards.missing(batch, '/wt/greetings', 'waits'),
+      high,
+      answer,
+    ),
+    'worktree missing, failed': row(
+      worktreeCards.missing(batch, '/wt/greetings', 'failed'),
+      high,
+      answer,
+    ),
+    'worktree in the way': row(worktreeCards.inTheWay(batch, '/wt', 'a file'), high, answer),
+    'worktree kept with changes': row(
+      worktreeCards.keptDirty(batch, '/repo', '/wt', ['a.ts'], []),
+      normal,
+      batchWorktreeGone,
+    ),
+    'orphan kept with changes': row(
+      worktreeCards.orphanKept('/repo', '/wt/old', ['a.ts'], []),
+      normal,
+      orphanGone,
+    ),
+    'a directory left behind': row(worktreeCards.leftBehind(batch, '/wt'), normal, answer),
+    'lost migrations nobody can list': row(
+      baseCards.lostUnreadable(batch, '/wt/greetings'),
+      high,
+      answer,
+    ),
+    'a checkout that stays on the branch': row(
+      checkoutCards.dirty(batch, project, place, ['a.ts']),
+      normal,
+      answer,
+    ),
+    'a pull request that conflicts': row(
+      prCards.catchUpStopped(batch, { kind: 'other', why: 'x' }),
+      high,
+      withdrawn('GitHub reads the pull request as mergeable (pr-watch, ship)'),
+    ),
+    'CI that stopped': row(
+      prCards.ciStopped(batch, 'limit', [], 1),
+      high,
+      withdrawn("the pull request's CI passes or it ends (clearCiStop)"),
+    ),
+    'a required job with no runner': row(
+      prCards.noRunner(batch, ['build'], 3),
+      high,
+      withdrawn('a new head, a merge or a close (pr-watch)'),
+    ),
+    'checks that failed': row(
+      prCards.checksFailed(batch, [{ name: 'lint', url: null }]),
+      normal,
+      withdrawn('the checks pass or the pull request merges (pr-watch)'),
+    ),
+    'a rerun GitHub refused': row(prCards.rerunFailed(batch, new Error('no')), normal, answer),
+    'a pull request closed unmerged': row(prCards.closed(batch), normal, answer),
+    'gh unavailable': row(
+      prCards.ghUnavailable(batch, new Error('x')),
+      normal,
+      withdrawn('gh works again (pr-watch)'),
+    ),
+    'an abandoned branch with commits': row(branchCards.abandoned(batch, 2), normal, answer),
+    'branches without a task': row(
+      branchCards.withoutBatch(['10db/x']),
+      normal,
+      withdrawn('no branch under 10db/ lacks a task (branch-sweep)'),
+    ),
+    'a pass branch left with no pass': row(
+      passCards.unopened({
+        ref: 'refs/10db/passes/p/dirt',
+        branch: '10db/pass',
+        returnBranch: 'main',
+        startSha: 'd'.repeat(40),
+      }),
+      high,
+      answer,
+    ),
+  };
+
+  it.each(Object.entries(rows))('%s', (_name, expected) => {
+    expect(expected.card).toMatchObject({
+      tier: expected.tier,
+      urgency: expected.urgency,
+      closesWhen: expected.closesWhen,
+    });
   });
 });

@@ -3,6 +3,8 @@ import { findOpenByFoldKey, listAccounts, listProjects, type DbReader } from '@1
 import type { Clock } from '../clock';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
+import { Urgency } from '@10db/contracts';
+import { CardTier } from '../inbox';
 
 /** How long a lane's queued work leaves an account alone when no model profile exists for it yet. */
 export const MODEL_LIST_WAIT_MS = 5 * 60_000;
@@ -80,6 +82,10 @@ export function createModelListWait(deps: {
         deps.inbox.flag({
           projectId,
           workstreamId: null,
+          tier: CardTier.Status,
+          urgency: Urgency.Low,
+          // S2: status line
+          closesWhen: { by: 'withdrawn', when: "the account's model list arrives" },
           title: `${account.label} is waiting for its model list`,
           body: `10db has no model profile for ${account.label} yet, so its queued work waits and is tried again when the model list arrives. This card closes by itself.`,
           foldKey: cardKey(account.id),

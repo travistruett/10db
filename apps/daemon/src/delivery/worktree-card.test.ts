@@ -107,7 +107,8 @@ describe('a batch whose worktree is missing', () => {
     await h.jobs.idle();
 
     // Abandoning an empty branch leaves its own notice that the branch was deleted; the worktree card is gone.
-    expect(h.cards().map((c) => c.title)).toEqual([
+    expect(h.cards()).toEqual([]);
+    expect(h.notices().map((n) => n.line)).toEqual([
       `Batch "${batch.title}" abandoned: ${batch.branch ?? ''} deleted`,
     ]);
   });
@@ -213,10 +214,31 @@ describe('a worktree no batch uses any more', () => {
 
     expect(existsSync(path)).toBe(true);
     expect(await listed(path)).toBe(true);
-    const notice = h.only(h.cards());
-    expect(notice.id).not.toBe(card.id);
-    expect(notice.title).toBe(`10db removed nothing at ${path}`);
+    expect(h.cards()).toEqual([]);
+    const notice = h.only(h.notices());
+    expect(notice.line).toBe(`10db removed nothing at ${path}`);
     expect(notice.body).toContain('a batch uses it');
+    expect(notice.tone).toBe('warning');
+    expect(notice.key).toBe(`worktree-remove-failed:${path}`);
+    expect(notice.taskId).toBeNull();
+  });
+
+  it('withdraws an older "could not remove" card for the path when it posts that nothing was removed', async () => {
+    const { batch, path } = await orphaned();
+    raise(
+      h.inbox,
+      batch.projectId,
+      worktreeCards.removeFailed({ kind: 'orphan', path }, path, new Error('busy')),
+    );
+    raise(h.inbox, batch.projectId, worktreeCards.orphanKept(h.repo, path, ['notes.txt'], []));
+    const kept = h.only(h.cards().filter((c) => c.title !== `10db could not remove ${path}`));
+    h.git$('worktree', 'unlock', path);
+
+    inbox.answer(kept.id, { choice: WorktreeChoice.Remove });
+    await h.jobs.idle();
+
+    expect(h.cards()).toEqual([]);
+    expect(h.only(h.notices()).line).toBe(`10db removed nothing at ${path}`);
   });
 
   it('says nothing was removed when git no longer lists the path', async () => {
@@ -229,8 +251,9 @@ describe('a worktree no batch uses any more', () => {
     inbox.answer(card.id, { choice: WorktreeChoice.Remove });
     await h.jobs.idle();
 
-    const notice = h.only(h.cards());
-    expect(notice.title).toBe(`10db removed nothing at ${path}`);
+    expect(h.cards()).toEqual([]);
+    const notice = h.only(h.notices());
+    expect(notice.line).toBe(`10db removed nothing at ${path}`);
     expect(notice.body).toContain('git no longer lists');
   });
 
@@ -245,9 +268,9 @@ describe('a worktree no batch uses any more', () => {
 
     expect(existsSync(path)).toBe(true);
     expect(await listed(path)).toBe(true);
-    const notice = h.only(h.cards());
-    expect(notice.id).not.toBe(card.id);
-    expect(notice.title).toBe(`10db removed nothing at ${path}`);
+    expect(h.cards()).toEqual([]);
+    const notice = h.only(h.notices());
+    expect(notice.line).toBe(`10db removed nothing at ${path}`);
     expect(notice.body).toContain('10db no longer has it locked');
   });
 });

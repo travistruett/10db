@@ -1,6 +1,13 @@
-import { InboxKind, type InboxAnswer, type InboxItemDto, type ProjectId } from '@10db/contracts';
+import {
+  InboxKind,
+  type InboxAnswer,
+  type InboxItemDto,
+  type ProjectId,
+  Urgency,
+} from '@10db/contracts';
 import { patchProject, type WriteContext } from '@10db/db';
 import type { InboxService } from './service';
+import { BY_ANSWER, CardTier } from './card-tier';
 
 const DOCKER_DETAIL = 'dockerAuto';
 
@@ -42,6 +49,9 @@ export function raiseDockerOnNote(
   return deps.inbox.flag({
     projectId: input.project.id,
     workstreamId: null,
+    tier: CardTier.Ask,
+    urgency: Urgency.Low,
+    closesWhen: BY_ANSWER,
     title: `Docker is on for ${input.project.name}'s gate and lanes`,
     body: [
       REASON[input.why],
@@ -92,6 +102,9 @@ export function raiseDockerMayBeNeededNote(
   return deps.inbox.flag({
     projectId: input.project.id,
     workstreamId: null,
+    tier: CardTier.Ask,
+    urgency: Urgency.Normal,
+    closesWhen: BY_ANSWER,
     title: `${input.project.name} may need Docker`,
     body: [
       'A gate ran docker, which the sandbox refused, and the gate failed. The gate asked for Docker.',

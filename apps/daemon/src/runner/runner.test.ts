@@ -165,6 +165,7 @@ import { bundleJson, inlineBodies, parseBundle } from '../../test/plan-bundle-fi
 import { importBundle, planImportChanges } from '../plan-record';
 import { failedRepoCheck } from '../../test/fixtures';
 import { captureLogs } from '../../test/log-capture';
+import { noticesPosted } from '../../test/notices-posted';
 
 let engine: TestEngine;
 
@@ -526,6 +527,38 @@ describe('runner', () => {
       .filter((e) => e.type === 'workstream.changed')
       .map((e) => e.data['to']);
     expect(states).toContain('HANDING_OFF');
+  });
+
+  it('posts a notice on the task when a session ends its turn twice without the handoff it was asked for', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          write('src/api/a.txt'),
+          commit('op-nohand-001', ['src/api/a.txt']),
+          { do: 'context', percentage: 75 },
+          { do: 'await_message', contains: 'write_handoff' },
+          turn,
+          { do: 'await_message', contains: 'almost full' },
+          turn,
+        ],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(
+      listInbox(engine.store.db, { states: ['OPEN'] }).filter((i) => i.kind === 'flag'),
+    ).toEqual([]);
+    expect(noticesPosted(engine.store.db)).toMatchObject([
+      {
+        key: `no-handoff:${workstream.id}:implement`,
+        tone: 'warning',
+        line: 'Session ended without the requested handoff',
+        projectId: engine.project.id,
+        taskId: ws(workstream.id).taskId,
+      },
+    ]);
   });
 
   it('checks a step with the pre-check in pull request delivery, never the gate or the changed-packages check, and sends a failed pre-check back as a fix with its output', async () => {
@@ -4631,7 +4664,7 @@ describe('flows', () => {
     expect(engine.adapter.prompts[1]?.prompt).toContain('Commit the file');
   });
 
-  it('flags a read-only step that leaves changes in its claims, and the flow still completes', async () => {
+  it('posts a notice for a read-only step that leaves changes in its claims, and the flow still completes', async () => {
     engine = await createTestEngine({
       Alpha: [implement('op-flow-0101'), [approve('op-flow-0102'), turn]],
     });
@@ -4646,13 +4679,16 @@ describe('flows', () => {
 
     expect(ws(workstream.id).state).toBe('DONE');
     expect(
-      listInbox(engine.store.db, { states: ['OPEN'] })
-        .filter((i) => i.kind === 'flag')
-        .map((i) => ({ title: i.title, body: i.body })),
-    ).toEqual([
+      listInbox(engine.store.db, { states: ['OPEN'] }).filter((i) => i.kind === 'flag'),
+    ).toEqual([]);
+    expect(noticesPosted(engine.store.db)).toMatchObject([
       {
-        title: 'The review step left changes in its claims',
+        key: `left-changes:${workstream.id}:review`,
+        tone: 'warning',
+        line: 'The review step left changes in its claims',
         body: 'src/api/review-note.txt',
+        projectId: engine.project.id,
+        taskId: ws(workstream.id).taskId,
       },
     ]);
   });
