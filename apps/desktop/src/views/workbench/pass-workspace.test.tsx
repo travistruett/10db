@@ -164,6 +164,16 @@ describe('PassWorkspace layout', () => {
       screen.getByRole('list', { name: 'Open pages' }).closest('[data-testid=panel]'),
     ).not.toBeNull();
   });
+
+  it('leaves the cursor off the strip when a row was picked with the pointer and the sheet then closes', async () => {
+    const { rerender } = await renderWorkspace(() => null, { panelShown: true });
+    const row = queueRows()[2];
+    // A browser that focuses a button on a click focuses it first; the row then hands the cursor on.
+    row?.focus();
+    if (row !== undefined) fireEvent.click(row, { detail: 1 });
+    rerender(false);
+    expect(queueRows()).not.toContain(document.activeElement);
+  });
 });
 
 describe('PassWorkspace queue', () => {

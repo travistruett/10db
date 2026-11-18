@@ -99,9 +99,17 @@ export function PassWorkspace(props: PassWorkspaceProps) {
       focusInQueue.current =
         event.target instanceof Node && queue.current?.contains(event.target) === true;
     };
+    // A row that lets go of the cursor on purpose (a pointer pick hands it to the composer) leaves the queue;
+    // a row removed while it held the cursor is not connected any more and leaves the answer as it was.
+    const release = (event: FocusEvent): void => {
+      if (event.relatedTarget === null && event.target instanceof Node && event.target.isConnected)
+        focusInQueue.current = false;
+    };
     document.addEventListener('focusin', track);
+    document.addEventListener('focusout', release);
     return () => {
       document.removeEventListener('focusin', track);
+      document.removeEventListener('focusout', release);
     };
   }, []);
   const placed = useRef(panelShown);

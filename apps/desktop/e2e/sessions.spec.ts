@@ -30,8 +30,11 @@ async function setScheme(page: Page, scheme: 'dark' | 'light'): Promise<void> {
   const html = page.locator('html');
   if ((await html.getAttribute('data-mantine-color-scheme')) === scheme) return;
   const toggle = page.getByRole('button', { name: `Switch to ${scheme} mode` });
-  // Under 640 px the rail, which holds the toggle, is folded behind the sidebar toggle.
-  const folded = (await toggle.count()) === 0 || !(await toggle.isVisible());
+  // Under 640 px the rail, which holds the toggle, is folded behind the sidebar toggle. The frame
+  // follows a resize a moment later, so the rail is waited on until it matches the window's width.
+  const folded = (page.viewportSize()?.width ?? 0) < 640;
+  if (folded) await expect(toggle).toBeHidden();
+  else await expect(toggle).toBeVisible();
   const sidebar = page.getByRole('button', { name: 'Toggle sidebar' });
   if (folded) await sidebar.click();
   await toggle.click();
@@ -398,6 +401,8 @@ test('a session on a new branch: the first change asks, the move cuts a worktree
   const drawer = page.getByRole('dialog', { name: 'Changes' });
   await expect(drawer.getByText('notes.md').first()).toBeVisible();
   await scan(page, [1280], 'the Changes drawer');
+  // Esc closes the drawer while focus is inside it; the scan's last click left it on the rail's toggle.
+  await drawer.focus();
   await page.keyboard.press('Escape');
   await expect(drawer).toBeHidden();
 
