@@ -119,12 +119,31 @@ function enqueue(queryClient: QueryClient, query: Query, job: () => Promise<void
   });
 }
 
+/**
+ * Resolves once the list is not being fetched, its first page included, or is no longer cached. A page that
+ * read the daemon before an event would otherwise land over the merge; the merge goes after it.
+ */
+function whenIdle(queryClient: QueryClient, query: Query): Promise<void> {
+  if (query.state.fetchStatus === 'idle') return Promise.resolve();
+  const cache = queryClient.getQueryCache();
+  return new Promise((resolve) => {
+    const stop = cache.subscribe((event) => {
+      if (event.query !== query) return;
+      if (event.type !== 'removed' && query.state.fetchStatus !== 'idle') return;
+      stop();
+      resolve();
+    });
+  });
+}
+
 function patch(
   queryClient: QueryClient,
   query: Query,
   state: InboxListState,
   change: { readonly cardId: InboxItemId; readonly row: InboxRow | null },
 ): void {
+  // A list that left the cache while it waited has nothing to patch, and must not be written back.
+  if (queryClient.getQueryCache().get(query.queryHash) !== query) return;
   queryClient.setQueryData<RowsData>(query.queryKey, (old) =>
     old === undefined ? old : { ...old, pages: mergeRow(old.pages, state, change) },
   );
@@ -149,13 +168,15 @@ async function lookUp(
   list: InboxList,
   cardId: InboxItemId,
 ): Promise<void> {
-  const before = rowHolding(query, cardId);
   const row = await fetchRowOf(client, list, cardId);
+  await whenIdle(queryClient, query);
+  const before = rowHolding(query, cardId);
   patch(queryClient, query, list.state, { cardId, row });
   if (before === null || (row !== null && row.key === before.key)) return;
   const other = before.items.find((item) => item.id !== cardId);
   if (other === undefined) return;
   const moved = await fetchRowOf(client, list, other.id);
+  await whenIdle(queryClient, query);
   patch(queryClient, query, list.state, { cardId: other.id, row: moved });
 }
 
@@ -164,9 +185,9 @@ export function dropCard(queryClient: QueryClient, cardId: InboxItemId): void {
   for (const query of queryClient.getQueryCache().findAll({ queryKey: ROWS_KEY })) {
     const list = listOf(query);
     if (list === null) continue;
-    enqueue(queryClient, query, () => {
+    enqueue(queryClient, query, async () => {
+      await whenIdle(queryClient, query);
       patch(queryClient, query, list.state, { cardId, row: null });
-      return Promise.resolve();
     });
   }
 }

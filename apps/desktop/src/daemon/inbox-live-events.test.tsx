@@ -7,6 +7,7 @@ import { baseHandlers, daemonUrl, eventStream, renderWithDaemon, server } from '
 import { daemonEvent, inboxItemDto } from '../test/fixtures';
 import { serveInboxRows } from '../test/inbox-page-fixtures';
 import { useEventStream } from './events';
+import { dropCard } from './inbox-live';
 import { useInboxRows, type InboxList } from './inbox-queries';
 
 type Rows = ReturnType<typeof useInboxRows>;
@@ -80,6 +81,7 @@ async function mount(
   byState: Partial<Record<InboxListState, InboxItemDto[]>>,
   hold?: (query: Record<string, string>) => Promise<void> | undefined,
   list: InboxList = { state: 'open' },
+  showRows = true,
 ) {
   const seen: { rows: Rows | null } = { rows: null };
   let released: () => void = () => undefined;
@@ -110,13 +112,19 @@ async function mount(
     return null;
   }
   const { queryClient, rerender } = renderWithDaemon(
-    <>
+    showRows ? (
+      <>
+        <Stream />
+        <Probe />
+      </>
+    ) : (
       <Stream />
-      <Probe />
-    </>,
+    ),
   );
+  if (!showRows) released();
   await waitFor(() => {
     expect(sockets).toHaveLength(1);
+    if (!showRows) return;
     expect(asked.length).toBeGreaterThanOrEqual(2);
     expect(queryClient.isFetching()).toBe(0);
   });
@@ -128,6 +136,11 @@ async function mount(
     rerender,
     Probe,
     Stream,
+    loadMore: () => {
+      act(() => {
+        seen.rows?.loadMore();
+      });
+    },
     keys: () => (seen.rows?.rows ?? []).map((row) => row.key),
     ids: () => (seen.rows?.rows ?? []).flatMap((row) => row.items.map((item) => item.id)),
     send: (type: 'inbox.opened' | 'inbox.changed', cardId: string) => {
@@ -282,5 +295,113 @@ describe('applyInboxEvent', () => {
     expect(
       reads.every((query) => query['card'] === undefined && query['after'] === undefined),
     ).toBe(true);
+  });
+});
+
+/** Runs `then` each time the daemon has answered a `card=` read, which is when the lookup's answer is on its way. */
+function onLookupAnswered(then: () => void): () => void {
+  const listener = ({ request }: { readonly request: Request }) => {
+    if (new URL(request.url).searchParams.has('card')) then();
+  };
+  server.events.on('response:mocked', listener);
+  return () => {
+    server.events.removeListener('response:mocked', listener);
+  };
+}
+
+describe('a fetch in flight', () => {
+  /** Holds the first read that asks for the page after `after`, until `release()`. */
+  function holdSecondPage() {
+    let release: () => void = () => undefined;
+    let held = false;
+    return {
+      hold: (query: Record<string, string>) => {
+        if (query['after'] === undefined || held) return undefined;
+        held = true;
+        return new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      },
+      release: () => {
+        release();
+      },
+    };
+  }
+
+  it('merges an event after page two lands, and shows the card once (row 12)', async () => {
+    const all = cards(52);
+    const gate = holdSecondPage();
+    const view = await mount({ open: all }, gate.hold);
+    view.loadMore();
+    await waitFor(() => {
+      expect(view.asked.some((query) => query['after'] !== undefined)).toBe(true);
+    });
+    // Page two was answered without this card. Page two lands only after the lookup has been answered.
+    const fresh = inboxItemDto({
+      projectId: all[0]?.projectId ?? mintId('Project'),
+      createdAt: T(-5),
+    });
+    all.unshift(fresh);
+    const off = onLookupAnswered(gate.release);
+    view.send('inbox.opened', fresh.id);
+    await waitFor(() => {
+      expect(view.ids()).toEqual(all.map((card) => card.id));
+    });
+    off();
+  });
+
+  it('merges an event into a list whose first page was answered before the event (row 12, pending)', async () => {
+    const all = cards(3);
+    let release: () => void = () => undefined;
+    let held = false;
+    const view = await mount(
+      { open: all },
+      () => {
+        if (held) return undefined;
+        held = true;
+        return new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      },
+      { state: 'open' },
+      false,
+    );
+    view.rerender(
+      <>
+        <view.Stream />
+        <view.Probe />
+      </>,
+    );
+    await waitFor(() => {
+      expect(view.asked).toHaveLength(1);
+    });
+    const fresh = inboxItemDto({
+      projectId: all[0]?.projectId ?? mintId('Project'),
+      createdAt: T(-5),
+    });
+    all.unshift(fresh);
+    const off = onLookupAnswered(release);
+    view.send('inbox.opened', fresh.id);
+    await waitFor(() => {
+      expect(view.ids()).toEqual(all.map((card) => card.id));
+    });
+    off();
+  });
+
+  it('drops a card after the page that holds it lands (row 27)', async () => {
+    const all = cards(52);
+    const gate = holdSecondPage();
+    const view = await mount({ open: all }, gate.hold);
+    view.loadMore();
+    await waitFor(() => {
+      expect(view.asked.some((query) => query['after'] !== undefined)).toBe(true);
+    });
+    const answered = all[51];
+    dropCard(view.queryClient, answered?.id ?? mintId('InboxItem'));
+    gate.release();
+    await waitFor(() => {
+      expect(view.ids()).toHaveLength(51);
+    });
+    expect(view.ids()).not.toContain(answered?.id);
   });
 });
