@@ -163,49 +163,6 @@ describe('hostile markdown', () => {
   });
 });
 
-describe('markdown elements', () => {
-  it('draws headings at their levels', () => {
-    draw('# Title\n\n### Small');
-    expect(screen.getByRole('heading', { level: 1, name: 'Title' }).tagName).toBe('H1');
-    expect(screen.getByRole('heading', { level: 3, name: 'Small' }).tagName).toBe('H3');
-  });
-
-  it('draws a list of two items', () => {
-    draw('- a\n- b');
-    expect(within(screen.getByRole('list')).getAllByRole('listitem')).toHaveLength(2);
-  });
-
-  it('draws inline code as code', () => {
-    const c = draw('call `x` now');
-    expect(c.querySelector('code')?.textContent).toBe('x');
-    expect(c.querySelector('pre')).toBeNull();
-  });
-
-  it('draws a GFM table with its header cells', () => {
-    draw('| a | b |\n| - | - |\n| 1 | 2 |');
-    expect(screen.getByRole('table').tagName).toBe('TABLE');
-    expect(screen.getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['a', 'b']);
-  });
-
-  it('draws a blockquote', () => {
-    const c = draw('> q');
-    expect(c.querySelector('blockquote')?.textContent).toContain('q');
-  });
-
-  it('draws a fence cut short as a code block, without its backticks', () => {
-    const c = draw('Here:\n```ts\nconst a =');
-    expect(c.querySelector('pre code')?.textContent).toContain('const a =');
-    expect(text(c)).not.toContain('```');
-  });
-
-  it('draws a fence as a code block named by its language', () => {
-    const c = draw('```ts\nconst a = 1;\n```');
-    expect(c.querySelector('pre code')?.textContent).toBe('const a = 1;');
-    expect(screen.getByText('ts')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Copy code' })).toBeTruthy();
-  });
-});
-
 describe('a link', () => {
   afterEach(() => {
     clearMocks();

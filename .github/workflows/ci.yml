@@ -148,7 +148,7 @@ jobs:
           retention-days: 7
 
   # Decides whether desktop needs a macOS runner, from the pull request's files alone
-  # (scripts/desktop-scope.mjs; decisions/2026-11-04-desktop-runs-on-macos-only-when-its-files-change.md).
+  # (scripts/desktop-scope.mjs; decisions/2026-11-18-desktop-runs-on-macos-only-for-what-it-tests.md).
   # It reads no event action, so every event of a head decides alike.
   desktop-scope:
     runs-on: ubuntu-24.04
@@ -172,7 +172,7 @@ jobs:
 
   desktop:
     needs: desktop-scope
-    # The required check. Skipped when no file of the pull request can affect it, which GitHub counts
+    # The required check. Skipped when no file of the pull request is one the job tests, which GitHub counts
     # as passing, and without taking a macOS runner. Runs when desktop-scope failed or was skipped
     # (its output is then empty), so a broken decision never hides a build. !cancelled() lets it
     # evaluate after a failed need, which a plain `if` would not.

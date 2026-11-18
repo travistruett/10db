@@ -4,9 +4,6 @@ import {
   GoalListDto,
   GoalSummaryDto,
   mintId,
-  type DigestDeviation,
-  type DigestWaitingOn,
-  type GoalCriterionDto,
   type GoalId,
   type GoalStatus,
   type UngroupedDigestDto,
@@ -32,27 +29,6 @@ export function goalDto(overrides: Partial<GoalDto> = {}): GoalDto {
     updatedAt: AT,
     ...overrides,
   });
-}
-
-export function goalCriterionDto(
-  goalId: GoalId,
-  overrides: Partial<GoalCriterionDto> = {},
-): GoalCriterionDto {
-  return {
-    id: mintId('GoalCriterion'),
-    goalId,
-    text: 'The greeting names the visitor',
-    check: 'accept',
-    taskId: null,
-    command: null,
-    commandApproved: false,
-    personId: null,
-    state: 'unproven',
-    proof: [],
-    provenAt: null,
-    provenBy: null,
-    ...overrides,
-  };
 }
 
 export function goalDigestDto(
@@ -88,21 +64,6 @@ export function goalSummaryDto(
 
 export function goalListDto(...goals: GoalSummaryDto[]): GoalListDto {
   return GoalListDto.parse({ goals, ungrouped: null });
-}
-
-export function digestDeviation(summary: string, at: string): DigestDeviation {
-  return { id: mintId('Deviation'), taskId: null, summary, at };
-}
-
-export function digestWaitingOn(title: string, at: string): DigestWaitingOn {
-  return {
-    inboxItemId: mintId('InboxItem'),
-    taskId: mintId('Task'),
-    title,
-    assigneeId: null,
-    assigneeName: 'You',
-    at,
-  };
 }
 
 export function ungroupedDto(
