@@ -228,6 +228,7 @@ import {
   type ProtectedPath,
 } from '../guard';
 import {
+  CardTier,
   createHookJudge,
   createLimitNotes,
   createPermissionBroker,
@@ -2192,17 +2193,30 @@ export function createRunner(opts: RunnerOptions): Runner {
             : `${marking} until the account's model list changes`;
     // A tier name is no model: the account has none left that 10db may run, and its next session holds it.
     const nothingLeft = isModelTier(again.model);
-    opts.inbox.flag({
-      projectId: row.projectId,
-      workstreamId: id,
-      title: `${account.label} cannot run ${outcome.model}`,
-      body: !retry
-        ? `${outcome.message}. ${marked ? `10db marked ${outcome.model} unusable on ${account.label}, but` : `${account.label} lists no models, so 10db cannot mark ${outcome.model} unusable, and`} it would still choose ${outcome.model} for the step, so it stopped the task instead of asking for it again. Name a model for each tier in the account's settings.`
-        : nothingLeft
-          ? `${outcome.message}. ${lead}, and ${account.label} has nothing left to run the step on.`
-          : `${outcome.message}. ${lead}, and is running the step on ${again.model}.`,
-      foldKey: `model-refused:${account.id}:${outcome.model}`,
-    });
+    const title = `${account.label} cannot run ${outcome.model}`;
+    const foldKey = `model-refused:${account.id}:${outcome.model}`;
+    if (retry && !nothingLeft) {
+      // 10db is already running the step on another model: nothing is asked, so it is a notice on the task.
+      opts.inbox.notice({
+        tier: CardTier.Notice,
+        projectId: row.projectId,
+        taskId: row.taskId,
+        key: foldKey,
+        tone: 'warning',
+        line: title,
+        body: `${outcome.message}. ${lead}, and is running the step on ${again.model}.`,
+      });
+    } else {
+      opts.inbox.flag({
+        projectId: row.projectId,
+        workstreamId: id,
+        title,
+        body: !retry
+          ? `${outcome.message}. ${marked ? `10db marked ${outcome.model} unusable on ${account.label}, but` : `${account.label} lists no models, so 10db cannot mark ${outcome.model} unusable, and`} it would still choose ${outcome.model} for the step, so it stopped the task instead of asking for it again. Name a model for each tier in the account's settings.`
+          : `${outcome.message}. ${lead}, and ${account.label} has nothing left to run the step on.`,
+        foldKey,
+      });
+    }
     if (retry) return 'retry';
     // A pass task's turn fails in its own way, and the lane never does.
     if (passOfWorkstream(db, id)) return 'stop';
@@ -4658,10 +4672,14 @@ export function createRunner(opts: RunnerOptions): Runner {
             return;
           }
           if (changed.length > 0) {
-            opts.inbox.flag({
+            const role = currentStep(finished).role;
+            opts.inbox.notice({
+              tier: CardTier.Notice,
               projectId: finished.projectId,
-              workstreamId: id,
-              title: `The ${currentStep(finished).role} step left changes in its claims`,
+              taskId: finished.taskId,
+              key: `left-changes:${id}:${role}`,
+              tone: 'warning',
+              line: `The ${role} step left changes in its claims`,
               body: changed.join('\n'),
             });
           }
@@ -4675,10 +4693,13 @@ export function createRunner(opts: RunnerOptions): Runner {
           }
           if (outcome.withoutHandoff) {
             const row = finished;
-            opts.inbox.flag({
+            opts.inbox.notice({
+              tier: CardTier.Notice,
               projectId: row.projectId,
-              workstreamId: id,
-              title: 'Session ended without the requested handoff',
+              taskId: row.taskId,
+              key: `no-handoff:${id}:${currentStep(row).role}`,
+              tone: 'warning',
+              line: 'Session ended without the requested handoff',
               body: 'The agent ended its turn twice after being asked for a handoff; 10db is verifying the work as it stands.',
             });
           }

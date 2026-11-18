@@ -72,6 +72,7 @@ import {
 } from '../../test/fixtures';
 import type { DependencyChanges, MigrationsBase, MigrationsBaseTake } from '../delivery';
 import { createEventBus, createStateStore, type StateStore } from '../events';
+import { noticesPosted } from '../../test/notices-posted';
 import { createGit } from '../git';
 import {
   advanceSteps,
@@ -2710,13 +2711,14 @@ describe('resize_task', () => {
   const why = 'It touches two areas and a migration';
   const cards = () =>
     listInbox(state.db, { states: ['OPEN'] }).filter((c) => c.title.includes('resized'));
+  const notices = () => noticesPosted(state.db).filter((n) => n.key.startsWith('resize:'));
   const taskOf = (s: { task: { id: TaskId } }) => getTask(state.db, s.task.id);
 
   it.each([
     { role: 'implement' as const, by: 'The build session' },
     { role: 'plan' as const, by: 'Plan session' },
   ])(
-    'resizes the task from a $role step, pinning it as the agent’s with the reason, and tells the builder once',
+    'resizes the task from a $role step, pinning it as the agent’s with the reason, and posts one notice on the task',
     async ({ role, by }) => {
       const s = await onStep(role);
       const result = await s.call('resize_task', { opId: 'op-resize-01', rigor: 'careful', why });
@@ -2728,11 +2730,14 @@ describe('resize_task', () => {
         effectiveRigor: 'careful',
         effectiveRigorSource: 'agent',
       });
-      expect(cards()).toHaveLength(1);
-      expect(cards()[0]).toMatchObject({
-        title: expect.stringContaining('Alpha') as string,
+      expect(cards()).toEqual([]);
+      expect(notices()).toHaveLength(1);
+      expect(notices()[0]).toMatchObject({
+        key: `resize:${s.task.id}`,
+        tone: 'info',
+        line: expect.stringContaining('Alpha') as string,
         body: expect.stringContaining(`${by} resized Alpha to Careful: ${why}`) as string,
-        options: [{ label: 'Got it', description: '' }],
+        taskId: s.task.id,
       });
     },
   );
@@ -2742,10 +2747,10 @@ describe('resize_task', () => {
     const first = await s.call('resize_task', { opId: 'op-resize-02', rigor: 'light', why });
     const replay = await s.call('resize_task', { opId: 'op-resize-02', rigor: 'light', why });
     expect(replay.json).toEqual(first.json);
-    expect(cards()).toHaveLength(1);
+    expect(notices()).toHaveLength(1);
   });
 
-  it('folds a later resize of the task into the one open notice', async () => {
+  it('posts a later resize of the task as another notice under the same key', async () => {
     const s = await onStep('implement');
     await s.call('resize_task', {
       opId: 'op-resize-03',
@@ -2758,8 +2763,10 @@ describe('resize_task', () => {
       why: 'Bigger after all',
     });
     expect(taskOf(s).rigor).toBe('critical');
-    expect(cards()).toHaveLength(1);
-    expect(cards()[0]?.body).toContain('Critical: Bigger after all');
+    expect(cards()).toEqual([]);
+    expect(notices()).toHaveLength(2);
+    expect(notices()[0]?.key).toBe(notices()[1]?.key);
+    expect(notices()[1]?.body).toContain('Critical: Bigger after all');
   });
 
   it.each([
