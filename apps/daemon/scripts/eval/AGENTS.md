@@ -42,12 +42,29 @@ with it.
   in the snapshot and gates with `make check-changed`; the fake gates with `git diff --quiet HEAD`.
   The install is `mise exec -- pnpm install --frozen-lockfile --prefer-offline` run in the snapshot
   (`snapshot-install.ts`), so the snapshot's own node and pnpm run, not the runner's checkout's, and
-  that snapshot's `mise.toml` is trusted for the command alone. No env variable is needed. A failed
-  install stops the run with its own output in the error.
+  that snapshot's `mise.toml` is trusted for the command alone. A failed install stops the run with
+  its own output in the error.
+- The install runs outside any sandbox and uses the builder's own pnpm store, so the snapshot's
+  `node_modules/.modules.yaml` names that store. This matches production's shared mode, where the
+  checkout is the builder's own install. A worktree-mode copy is installed differently: under the
+  gate sandbox with a per-run store (`delivery/worktree-dependencies.ts`). Eval projects are shared
+  mode, so the eval follows shared mode. The recorded store doesn't stop a gate: a copy's
+  `.modules.yaml` also names a store its gate never opens.
 - One daemon runs from source with its own data dir and worktree root inside the work dir
   (`daemon-env.ts`), billing and provider variables dropped, and the off switches set. It refuses to
   start on the builder's data dir or worktree base, so no task, card, batch or worktree lands in the
   builder's 10db.
+- A case's base pins its own pnpm in `packageManager`, often not the builder's. A pnpm that meets
+  another pin switches engines, which locks `/tmp/pnpm-store-operation-locks-<uid>`. The gate
+  sandbox refuses that lock, so every check fails with `ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK`
+  ("lock the package-manager engine store"). The daemon env closes both paths to it:
+  - `MISE_TRUSTED_CONFIG_PATHS` includes `<work>/repos`, so a mise shim runs the snapshot's pinned
+    node and pnpm, as in a builder's trusted checkout. Without it, the shim stops on the untrusted
+    config, which carries `[settings]`.
+  - `pnpm_config_manage_package_manager_versions=false` lets a pnpm reached directly run as it is.
+    `make eval` starts through the mise pnpm shim, which puts the checkout's own install dirs ahead
+    of the shims on the runner's PATH, and so on the daemon's. A copy's install sets the same
+    variable.
 - Each project is shared mode with local delivery, one lane; the task gets an explicit rigor. The
   runner polls the eval database read-only and answers only plan-approval cards.
 - The eval daemon keeps 10db's overload hold: on a busy Mac its lanes and gates wait, and wall time
