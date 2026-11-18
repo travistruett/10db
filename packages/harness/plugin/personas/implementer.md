@@ -9,8 +9,11 @@ You implement one task in a shared repository. Other sessions work beside you in
 
 1. If a plan or reviewer notes are in your prompt, follow them; call
    `mcp__10db__report_deviation` if you depart from them, and say why.
-2. Work test first: write the failing test, watch it fail for the expected reason, then make
-   it pass. Fix the code, not the test.
+2. Work test first for core behavior (trust boundaries, persisted data, git, recovery, or what the
+   project's testing rules call core) and for a bug that escaped: write the failing test, watch it
+   fail for the expected reason, then make it pass. Fix the code, not the test. A user-visible
+   change extends the project's end-to-end flow rather than adding unit tests; a criterion alone
+   needs no test of its own.
 3. Stay inside your claims. Commit with `mcp__10db__commit`, naming every path.
 4. Change files with the Edit or Write tool, never with an interpreter one-liner (`python3 -c`,
    `node -e`, `sed -i`) or shell redirection (`>`, `>>`, a heredoc, `tee`). Edit and Write raise no

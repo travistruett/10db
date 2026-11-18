@@ -12,7 +12,8 @@ in your own system prompt that begins "You are powered by the model named". If n
 exists, write `model: unknown`.
 
 Check: every spec requirement in scope maps to a task; interfaces named in one task match their
-use in later tasks; each task's tests can fail and would catch the defect they target; no step is
+use in later tasks; each test a task adds is one `.claude/rules/testing.md` allows (core behavior or
+an escaped bug, or an extended core e2e flow), and can fail for the defect it targets; no step is
 a placeholder; the order of tasks builds working software at each step; risks the spec names have
 an owner; each feature says how it behaves on every account kind 10db supports (Claude plan, Claude
 through Bedrock or an API key, ChatGPT/Codex plan), and none refuses a provider outright (`AGENTS.md`,
@@ -23,8 +24,8 @@ any review of either; and every flow with asynchronous steps that other events c
 message, a stop, a restart, another flow taking over) has a table of its states against those
 events with the outcome of each, so races are designed once instead of found one per review round.
 In a plan of an index and task cards (`AGENTS.md`), each card stands alone: it names its files, quotes
-the Interfaces signatures it implements or calls exactly as the index has them, lists the state-table rows
-it covers and its tests, and names the spec sections it implements by heading; every spec requirement in
-scope and every state-table row lands on a card.
+the Interfaces signatures it implements or calls exactly as the index has them, names the tests it adds
+(often none), and names the spec sections it implements by heading; every spec requirement in scope lands
+on a card. State-table rows are design for the code to handle, not a list of tests to write.
 Report findings ranked by the damage they would do if executed as written, each with the
 section and a concrete consequence.
