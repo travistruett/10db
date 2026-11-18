@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { equalOrUnder } from '../../src/git';
 
 /** Variables that must not reach the eval daemon: the builder's own TENDB_* settings and billing switches. */
@@ -39,8 +39,18 @@ export function evalDaemonEnv(input: {
   const kept = Object.entries(input.inherited).filter(
     (e): e is [string, string] => e[1] !== undefined && !DROPPED_ENV.test(e[0]),
   );
+  const miseTrusted = [input.inherited['MISE_TRUSTED_CONFIG_PATHS'], join(input.work, 'repos')]
+    .filter((p): p is string => p !== undefined && p !== '')
+    .join(delimiter);
   return {
     ...Object.fromEntries(kept),
+    // Every case's snapshot pins its own pnpm in `packageManager`, often not the builder's. Gates
+    // run under the sandbox, where pnpm's switch to the pinned engine is refused (it locks a dir in
+    // the system temp dir), so the gate must not need one. A mise shim finds the snapshot's pin once
+    // mise trusts its config; a pnpm reached directly (a mise shim puts its own install dirs first on
+    // the runner's PATH) runs as it is instead of switching.
+    MISE_TRUSTED_CONFIG_PATHS: miseTrusted,
+    pnpm_config_manage_package_manager_versions: 'false',
     TENDB_DATA_DIR: join(input.work, 'data'),
     TENDB_WORKTREE_ROOT: join(input.work, 'worktrees'),
     // The daemon picks a free port and writes it to daemon.json.

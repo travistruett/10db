@@ -1,3 +1,4 @@
+import { delimiter } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { EvalIsolationError, evalDaemonEnv } from './daemon-env';
 
@@ -56,6 +57,24 @@ describe('evalDaemonEnv', () => {
       TENDB_FAKE_SCRIPTS: '/tmp/eval-run/book.json',
     });
   });
+
+  it.each([
+    ['nothing trusted before', {}, '/tmp/eval-run/repos'],
+    ['an empty value', { MISE_TRUSTED_CONFIG_PATHS: '' }, '/tmp/eval-run/repos'],
+    [
+      'paths trusted before',
+      { MISE_TRUSTED_CONFIG_PATHS: '/a/b' },
+      `/a/b${delimiter}/tmp/eval-run/repos`,
+    ],
+  ])(
+    "runs the snapshot's pinned pnpm with no engine switch, given %s",
+    (_name, inherited, trusted) => {
+      expect(evalDaemonEnv({ ...base, inherited })).toMatchObject({
+        MISE_TRUSTED_CONFIG_PATHS: trusted,
+        pnpm_config_manage_package_manager_versions: 'false',
+      });
+    },
+  );
 
   it.each([
     ['inside the data dir', `${builder.dataDir}/eval`],
