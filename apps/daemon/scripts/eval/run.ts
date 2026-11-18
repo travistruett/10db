@@ -5,6 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import {
   ClaimKind,
   DEFAULT_HAZARDS,
+  FixBy,
   InboxKind,
   InboxState,
   PlanChoice,
@@ -61,6 +62,11 @@ export interface EvalOptions {
    * session with a separate Plan step. Absent runs the playbook as 10db ships it.
    */
   readonly plansInBuild?: boolean;
+  /**
+   * Sets the rigor's fixBy on the eval daemon's global playbook, to compare a fix that resumes the Build
+   * session with a fresh one. Absent runs the playbook as 10db ships it.
+   */
+  readonly fixBy?: FixBy;
 }
 
 export class EvalRunError extends Error {
@@ -463,14 +469,25 @@ export async function runEval(opts: EvalOptions): Promise<EvalReport> {
   const daemon = await startDaemon(opts, fakeBook);
   let runs: CaseRun[][];
   try {
-    if (opts.plansInBuild !== undefined) {
+    if (opts.plansInBuild !== undefined || opts.fixBy !== undefined) {
       const input: PlaybookInput = {
-        rows: [{ rigor: opts.rigor, plansInBuild: opts.plansInBuild }],
+        rows: [
+          {
+            rigor: opts.rigor,
+            ...(opts.plansInBuild === undefined ? {} : { plansInBuild: opts.plansInBuild }),
+            ...(opts.fixBy === undefined ? {} : { fixBy: opts.fixBy }),
+          },
+        ],
       };
       await api(daemon, PlaybookDto, '/playbook', input, 'PUT');
-      opts.log(
-        `${opts.rigor} plans ${opts.plansInBuild ? 'in the Build session' : 'in a Plan step'}`,
-      );
+      if (opts.plansInBuild !== undefined)
+        opts.log(
+          `${opts.rigor} plans ${opts.plansInBuild ? 'in the Build session' : 'in a Plan step'}`,
+        );
+      if (opts.fixBy !== undefined)
+        opts.log(
+          `${opts.rigor} fixes ${opts.fixBy === FixBy.Resumed ? 'in the Build session' : 'in a fresh session'}`,
+        );
     }
     const jobs = opts.cases.flatMap((c) =>
       Array.from({ length: RUNS_PER_CASE }, (_, i) => () => runCase(daemon, c, i + 1, opts)),
@@ -491,6 +508,7 @@ export async function runEval(opts: EvalOptions): Promise<EvalReport> {
     rigor: opts.rigor,
     agent: opts.agent,
     plansInBuild: opts.plansInBuild ?? null,
+    fixBy: opts.fixBy ?? null,
     startedAt,
     finishedAt: new Date().toISOString(),
     cases,
