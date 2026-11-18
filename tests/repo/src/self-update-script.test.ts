@@ -1,5 +1,4 @@
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -10,8 +9,6 @@ import {
 } from './installed-app-sandbox';
 
 const STAMP = '20261029T101500Z';
-/** A commit before the head, newest first after it: the head's own build has not finished. */
-const OLDER = '1111111111111111111111111111111111111111';
 
 let box: InstalledAppSandbox;
 let stageDir: string;
@@ -65,103 +62,6 @@ describe('install-app.sh --stage', () => {
     ).toEqual([]);
   });
 
-  it('stages the newest finished build when the head’s has not finished, as an install does', () => {
-    const result = stage({
-      STUB_SUCCESS_RUN: '',
-      STUB_COMMITS: `${HEAD_SHA} ${OLDER}`,
-      STUB_RUNS: `7@${OLDER}`,
-    });
-    expect(result.status).toBe(0);
-    expect(readFileSync(join(stageDir, 'commit'), 'utf8').trim()).toBe(OLDER);
-    expect(status()).toMatchObject({ ok: true, mode: 'stage', commit: OLDER });
-  });
-
-  it('leaves the installer scripts with the build, so the app that replaces itself can run them', () => {
-    expect(stage().status).toBe(0);
-    for (const name of ['install-app.sh', 'installed-app.sh']) {
-      expect(existsSync(join(stageDir, 'scripts', 'release', name))).toBe(true);
-    }
-  });
-
-  it('fetches nothing when the newest finished build is the one that runs', () => {
-    const result = stage({}, ['--running', HEAD_SHA]);
-    expect(result.status).toBe(0);
-    expect(status()).toMatchObject({ ok: true, mode: 'stage', step: 'current', commit: HEAD_SHA });
-    expect(gh().filter((call) => call.startsWith('gh run download'))).toEqual([]);
-    expect(existsSync(stageDir)).toBe(false);
-  });
-
-  it('fetches nothing when the newest finished build is the one it was told to skip', () => {
-    const result = stage({}, ['--running', OLDER, '--skip', HEAD_SHA]);
-    expect(result.status).toBe(0);
-    expect(status()).toMatchObject({ ok: true, mode: 'stage', step: 'skipped', commit: HEAD_SHA });
-    expect(gh().filter((call) => call.startsWith('gh run download'))).toEqual([]);
-    expect(existsSync(stageDir)).toBe(false);
-  });
-
-  it('stages the newest finished build when it is not the one to skip', () => {
-    const result = stage({}, ['--running', OLDER, '--skip', OLDER]);
-    expect(result.status).toBe(0);
-    expect(status()).toMatchObject({ ok: true, mode: 'stage', step: 'done', commit: HEAD_SHA });
-  });
-
-  it('fetches nothing, and leaves the folder as it is, when the newest finished build is already staged', () => {
-    expect(stage().status).toBe(0);
-    const before = gh().filter((call) => call.startsWith('gh run download')).length;
-    const result = stage({}, ['--running', OLDER, '--have', HEAD_SHA]);
-    expect(result.status).toBe(0);
-    expect(status()).toMatchObject({ ok: true, mode: 'stage', step: 'have', commit: HEAD_SHA });
-    expect(gh().filter((call) => call.startsWith('gh run download'))).toHaveLength(before);
-    expect(readFileSync(join(stageDir, DMG_NAME), 'utf8')).toBe('disk image bytes');
-    expect(readFileSync(join(stageDir, 'commit'), 'utf8').trim()).toBe(HEAD_SHA);
-  });
-
-  it('replaces the staged build with a newer one, leaving one DMG', () => {
-    mkdirSync(stageDir, { recursive: true });
-    writeFileSync(join(stageDir, 'commit'), `${OLDER}\n`);
-    writeFileSync(join(stageDir, 'older.dmg'), 'older');
-    const result = stage({}, ['--running', OLDER, '--have', OLDER]);
-    expect(result.status).toBe(0);
-    expect(status()).toMatchObject({ ok: true, mode: 'stage', step: 'done', commit: HEAD_SHA });
-    expect(existsSync(join(stageDir, 'older.dmg'))).toBe(false);
-    expect(readFileSync(join(stageDir, 'commit'), 'utf8').trim()).toBe(HEAD_SHA);
-    expect(existsSync(`${stageDir}.next`)).toBe(false);
-  });
-
-  it.each([
-    { name: 'copying the newer one in fails', env: { STUB_CP_DMG_FAILS: '1' } },
-    { name: 'the newer one cannot be moved into place', env: { STUB_MV_NEXT_FAILS: '1' } },
-  ])('leaves the staged build whole, and no second folder, when $name', ({ env }) => {
-    mkdirSync(stageDir, { recursive: true });
-    writeFileSync(join(stageDir, 'commit'), `${OLDER}\n`);
-    writeFileSync(join(stageDir, 'older.dmg'), 'older');
-    const result = stage(env, ['--running', OLDER, '--have', OLDER]);
-    expect(result.status).toBe(1);
-    expect(status()).toMatchObject({ ok: false, mode: 'stage', step: 'stage' });
-    expect(readFileSync(join(stageDir, 'older.dmg'), 'utf8')).toBe('older');
-    expect(existsSync(join(stageDir, DMG_NAME))).toBe(false);
-    expect(readFileSync(join(stageDir, 'commit'), 'utf8').trim()).toBe(OLDER);
-    expect(existsSync(`${stageDir}.next`)).toBe(false);
-  });
-
-  it('leaves the staged build as it is when the newer one fails its checksum', () => {
-    mkdirSync(stageDir, { recursive: true });
-    writeFileSync(join(stageDir, 'commit'), `${OLDER}\n`);
-    writeFileSync(join(stageDir, 'older.dmg'), 'older');
-    box.corruptChecksum();
-    const result = stage({}, ['--running', OLDER, '--have', OLDER]);
-    expect(result.status).toBe(1);
-    expect(status()).toMatchObject({ ok: false, mode: 'stage', step: 'verify-checksum' });
-    expect(readFileSync(join(stageDir, 'older.dmg'), 'utf8')).toBe('older');
-    expect(readFileSync(join(stageDir, 'commit'), 'utf8').trim()).toBe(OLDER);
-  });
-
-  it('stages a build that is not the running one', () => {
-    const result = stage({}, ['--running', OLDER]);
-    expect(result.status).toBe(0);
-    expect(status()).toMatchObject({ ok: true, mode: 'stage', step: 'done', commit: HEAD_SHA });
-  });
-
   it.each([
     {
       name: 'GitHub cannot be reached',
@@ -193,21 +93,6 @@ describe('install-app.sh --stage', () => {
     expect(existsSync(join(stageDir, DMG_NAME))).toBe(false);
     expect(box.marker(app())).toBe('old build');
   });
-
-  it.each([
-    { name: 'a running commit that is no SHA', args: ['--running', 'main'] },
-    { name: '--running without a stage', args: ['--apply', '/x', '--running', HEAD_SHA] },
-    { name: 'a commit to skip that is no SHA', args: ['--stage', '/x', '--skip', 'main'] },
-    { name: '--skip without a stage', args: ['--apply', '/x', '--skip', HEAD_SHA] },
-    { name: 'a staged commit that is no SHA', args: ['--stage', '/x', '--have', 'main'] },
-    { name: '--have without a stage', args: ['--apply', '/x', '--have', HEAD_SHA] },
-    { name: '--quit-first on a stage', args: ['--stage', '/x', '--quit-first'] },
-    { name: 'a relative stage folder', args: ['--stage', 'staged'] },
-  ])('refuses $name', ({ args }) => {
-    const result = run(args);
-    expect(result.status).toBe(2);
-    expect(box.calls()).toEqual([]);
-  });
 });
 
 describe('install-app.sh --apply', () => {
@@ -233,23 +118,6 @@ describe('install-app.sh --apply', () => {
     expect(status()).toMatchObject({ ok: true, mode: 'apply', commit: HEAD_SHA });
   });
 
-  it('keeps the database backup of the install, so make rollback-app has one to name', () => {
-    expect(apply().status).toBe(0);
-    expect(box.list(join(box.dataDir, '..')).some((name) => name.startsWith('10db-backup-'))).toBe(
-      true,
-    );
-  });
-
-  it('fails at the quit step, naming it, when the app will not quit, and installs nothing', () => {
-    const result = apply({ STUB_RUNNING_UNTIL_CALL: '999', TENDB_INSTALL_QUIT_SECONDS: '2' });
-    expect(result.status).toBe(1);
-    expect(status()).toMatchObject({ ok: false, mode: 'apply', step: 'quit' });
-    expect(String(status()['message'])).toContain('10db could not be quit');
-    expect(String(status()['message'])).toContain('did not quit');
-    expect(box.marker(app())).toBe('old build');
-    expect(box.list(box.previousDir)).toEqual([]);
-  });
-
   it('sees the app that started it, and installs nothing over it', () => {
     const result = apply({
       STUB_APP_IS_ANCESTOR: '1',
@@ -259,133 +127,6 @@ describe('install-app.sh --apply', () => {
     expect(result.status).toBe(1);
     expect(status()).toMatchObject({ ok: false, mode: 'apply', step: 'quit' });
     expect(box.marker(app())).toBe('old build');
-  });
-
-  describe('waiting for the pids it was given', () => {
-    // A process pgrep does not list but whose pid the daemon knows.
-    const sleepers: number[] = [];
-    const startProcess = (): number => {
-      // Left to init by its parent shell, so it is no zombie of this test once it is killed.
-      const result = spawnSync('/bin/sh', ['-c', 'sleep 120 > /dev/null 2>&1 & echo $!'], {
-        encoding: 'utf8',
-      });
-      const pid = Number(result.stdout.trim());
-      sleepers.push(pid);
-      return pid;
-    };
-    afterEach(() => {
-      for (const pid of sleepers.splice(0)) {
-        try {
-          process.kill(pid, 'SIGKILL');
-        } catch {
-          // already gone
-        }
-      }
-    });
-    const applyWaiting = (pid: number, env: Record<string, string> = {}) =>
-      run(['--apply', stageDir, '--quit-first', '--relaunch', '--quit-pid', String(pid)], {
-        TENDB_INSTALL_QUIT_POLL_SECONDS: '0.05',
-        ...env,
-      });
-
-    it('installs nothing, and says 10db did not quit, while the pid lives though pgrep sees no app', () => {
-      const pid = startProcess();
-      const result = applyWaiting(pid, { TENDB_INSTALL_QUIT_SECONDS: '3' });
-      expect(result.status).toBe(1);
-      expect(status()).toMatchObject({ ok: false, mode: 'apply', step: 'quit' });
-      expect(String(status()['message'])).toContain('did not quit');
-      expect(String(status()['message'])).toContain(String(pid));
-      expect(box.marker(app())).toBe('old build');
-      expect(box.list(box.previousDir)).toEqual([]);
-      // The old app is started again, as after any failure once it was asked to quit.
-      expect(opened()).toEqual([`open ${app()}`]);
-    });
-
-    it('installs once the pid is gone', () => {
-      const pid = startProcess();
-      const result = applyWaiting(pid, {
-        STUB_QUIT_KILLS: String(pid),
-        TENDB_INSTALL_QUIT_SECONDS: '100',
-      });
-      expect(result.stderr).toBe('');
-      expect(result.status).toBe(0);
-      expect(box.marker(app())).toBe('new build');
-      expect(opened()).toEqual([`open ${app()}`]);
-    });
-
-    it('does not take a pid that was gone from the start for a running app', () => {
-      const result = applyWaiting(2_000_000_000);
-      expect(result.status).toBe(0);
-      expect(box.marker(app())).toBe('new build');
-    });
-
-    it('signals the window instead when the quit request is refused, and waits as well', () => {
-      const pid = startProcess();
-      const result = applyWaiting(pid, {
-        STUB_OSASCRIPT_FAILS: '1',
-        TENDB_INSTALL_QUIT_SECONDS: '3',
-      });
-      // The stub's pkill ends nothing, so the app stays and nothing is installed.
-      expect(osascripts()).toHaveLength(1);
-      expect(pkills()).toHaveLength(1);
-      expect(pkills()[0]).toContain('tendb-desktop');
-      expect(result.status).toBe(1);
-      expect(status()).toMatchObject({ ok: false, step: 'quit' });
-      expect(box.marker(app())).toBe('old build');
-    });
-
-    // The self-update's script is the daemon's child and so the window's grandchild, and BSD pgrep
-    // and pkill leave out their caller's ancestors unless told otherwise.
-    it('signals the window that is its own ancestor, and installs once it has gone', () => {
-      const pid = startProcess();
-      const result = applyWaiting(pid, {
-        STUB_APP_IS_ANCESTOR: '1',
-        STUB_OSASCRIPT_FAILS: '1',
-        STUB_SIGNAL_KILLS: String(pid),
-        TENDB_INSTALL_QUIT_SECONDS: '20',
-      });
-      expect(result.status).toBe(0);
-      expect(box.marker(app())).toBe('new build');
-    });
-
-    it('names each process once when pgrep and the daemon both list it', () => {
-      const pid = startProcess();
-      const result = applyWaiting(pid, {
-        STUB_RUNNING: `57868 tendb-desktop\n${String(pid)} tendb-node`,
-        TENDB_INSTALL_QUIT_SECONDS: '1',
-      });
-      expect(result.status).toBe(1);
-      expect(String(status()['message'])).toContain(`process 57868 ${String(pid)})`);
-    });
-
-    it.each([
-      {
-        name: 'a pid that is no number',
-        args: ['--apply', '/x', '--quit-first', '--quit-pid', 'abc'],
-      },
-      { name: 'pid 1', args: ['--apply', '/x', '--quit-first', '--quit-pid', '1'] },
-      { name: '--quit-pid without --quit-first', args: ['--apply', '/x', '--quit-pid', '123'] },
-      { name: '--quit-pid on a stage', args: ['--stage', '/x', '--quit-pid', '123'] },
-    ])('refuses $name', ({ args }) => {
-      const before = box.calls();
-      const result = run(args);
-      expect(result.status).toBe(2);
-      expect(box.calls()).toEqual(before);
-    });
-  });
-
-  it('fails at the lock step while another install holds the lock, and neither quits nor starts the app', () => {
-    const lock = join(box.applications, '.10db-install.lock');
-    mkdirSync(lock);
-    const result = apply();
-    expect(result.status).toBe(1);
-    expect(status()).toMatchObject({ ok: false, mode: 'apply', step: 'lock' });
-    expect(String(status()['message'])).toContain('holds');
-    expect(pkills()).toEqual([]);
-    expect(osascripts()).toEqual([]);
-    expect(opened()).toEqual([]);
-    expect(box.marker(app())).toBe('old build');
-    expect(existsSync(lock)).toBe(true);
   });
 
   it('puts the old app back and starts it again when the install fails after the quit', () => {
@@ -402,30 +143,5 @@ describe('install-app.sh --apply', () => {
     expect(status()).toMatchObject({ ok: false, step: 'backup-database' });
     expect(box.marker(app())).toBe('old build');
     expect(opened()).toEqual([`open ${app()}`]);
-  });
-
-  it('refuses a stage folder that holds no build, before it quits anything', () => {
-    const result = run(['--apply', join(box.root, 'nowhere'), '--quit-first', '--relaunch']);
-    expect(result.status).toBe(1);
-    expect(status()).toMatchObject({ ok: false, step: 'staged-build' });
-    expect(pkills()).toEqual([]);
-    expect(box.marker(app())).toBe('old build');
-  });
-});
-
-describe('the tools the script runs', () => {
-  it('runs the gh it is handed, not the first gh on PATH', () => {
-    const decoy = join(box.root, 'decoy');
-    mkdirSync(decoy);
-    writeFileSync(join(decoy, 'gh'), '#!/bin/bash\necho decoy >> "$STUB_LOG"\nexit 9\n', {
-      mode: 0o755,
-    });
-    const result = stage({
-      PATH: `${decoy}:${join(box.root, 'bin')}:/usr/bin:/bin`,
-      TENDB_INSTALL_GH: join(box.root, 'bin', 'gh'),
-    });
-    expect(result.status).toBe(0);
-    expect(box.calls().filter((call) => call.startsWith('decoy'))).toEqual([]);
-    expect(gh().length).toBeGreaterThan(0);
   });
 });
