@@ -104,8 +104,8 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** The case's reference diff names a file in its areas; the fake build writes a new file beside it. */
 function fakeEditPath(c: EvalCase, opts: EvalOptions): string {
-  const changed = git(opts.source, ['diff', '--name-only', c.baseCommit, c.mergedCommit])
-    .split('\n')
+  const changed = git(opts.source, ['diff', '--name-only', '-z', c.baseCommit, c.mergedCommit])
+    .split('\0')
     .filter((p) => p !== '');
   const inArea = changed.find((p) =>
     classifyPath(p, opts.project.areas, []).areas.some((a) => c.areas.includes(a)),
@@ -302,11 +302,12 @@ function commitsOf(repo: string): { sha: string; opTrailer: string | null }[] {
 
 /** Paths changed from the base, committed or not, and those whose change alters what is installed. */
 function changesOf(repo: string): { changed: string[]; dependency: string[] } {
-  const lines = (text: string) => text.split('\n').filter((p) => p !== '');
+  // -z lists names NUL-separated, so git neither quotes nor escapes a non-ASCII name.
+  const paths = (text: string) => text.split('\0').filter((p) => p !== '');
   const changed = [
     ...new Set([
-      ...lines(git(repo, ['diff', '--name-only', 'origin/main'])),
-      ...lines(git(repo, ['ls-files', '--others', '--exclude-standard'])),
+      ...paths(git(repo, ['diff', '--name-only', '-z', 'origin/main'])),
+      ...paths(git(repo, ['ls-files', '-z', '--others', '--exclude-standard'])),
     ]),
   ].sort();
   const show = (ref: string, path: string): string => {
