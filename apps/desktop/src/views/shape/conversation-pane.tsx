@@ -38,7 +38,6 @@ import { addFiles } from '../../conversation/dropped-files';
 import { HistoryButton } from './history-button';
 import { PlanModelMenu } from './plan-model-menu';
 import { keepBoth, leaveLate, takeLate, useLate } from './late-outcome';
-import { PlanMeasures } from './plan-measures';
 import { RecentConversations } from './recent-conversations';
 import { Transcript, type TranscriptProps } from './transcript';
 import { useShapeKeys } from './use-shape-keys';
@@ -413,7 +412,6 @@ export function ConversationPane({
               style={{ flex: 'none', maxHeight: '45%', overflowY: 'auto' }}
             >
               <RecentConversations projectId={projectId} />
-              <PlanMeasures />
             </Flex>
           ) : null
         }

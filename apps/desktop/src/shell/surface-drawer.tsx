@@ -1,4 +1,4 @@
-import { CloseButton, Text } from '@mantine/core';
+import { CloseButton } from '@mantine/core';
 import { useElementSize } from '@mantine/hooks';
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -72,9 +72,6 @@ export function SurfaceDrawer({
         onKeyDown={onKeyDown}
       >
         <div className={classes['head']}>
-          <Text fw={600} size="sm">
-            {label}
-          </Text>
           <CloseButton aria-label="Close" onClick={onClose} />
         </div>
         <div className={classes['body']}>{children}</div>

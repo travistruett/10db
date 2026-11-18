@@ -14,21 +14,35 @@ export function CountBadge({
   tone = CountTone.Neutral,
   phrase,
   cap,
+  compact = false,
 }: {
   readonly count: number;
   readonly tone?: CountTone;
   readonly phrase?: string;
   /** The largest count shown whole; above it the badge reads "99+" style. */
   readonly cap?: number;
+  /** The icons-only rail's badge: 14 px, sat on the icon's corner and ringed in the sidebar's tone. */
+  readonly compact?: boolean;
 }) {
   const attention = tone === CountTone.Attention;
   const shown = cap !== undefined && count > cap ? `${String(cap)}+` : count;
   return (
     <Badge
       size="xs"
-      fw={600}
-      px={5}
-      miw={16}
+      data-compact={compact ? '' : undefined}
+      {...(compact
+        ? {
+            fw: 700,
+            fz: 9,
+            px: 4,
+            miw: 14,
+            h: 14,
+            style: {
+              fontVariantNumeric: 'tabular-nums',
+              boxShadow: '0 0 0 2px var(--mantine-color-default)',
+            },
+          }
+        : { fw: 600, px: 5, miw: 16 })}
       variant={attention ? 'filled' : 'light'}
       // An attention count takes the theme's primary colour, Badge's own default.
       {...(attention ? {} : { color: 'gray' })}

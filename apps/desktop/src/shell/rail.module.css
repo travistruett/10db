@@ -1,33 +1,51 @@
+/* The rail: labelled rows (200 px) or icons only (76 px). The frame holds the traffic lights' row above it
+   and, icons only, the sidebar toggle's row at its top. */
 .rail {
   display: flex;
   flex-direction: column;
-  align-items: center;
   flex: 1;
-  gap: 4px;
-  padding: 4px 0 10px;
+  gap: 2px;
+  padding: 4px 8px 10px;
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: none;
 }
 
+.rail:not([data-labelled]) {
+  align-items: center;
+  gap: 4px;
+  padding: 40px 0 10px;
+}
+
 .item {
   position: relative;
   flex: none;
-  width: 36px;
-  height: 34px;
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  padding: 0 8px;
   border: 0;
   border-radius: var(--mantine-radius-md);
   background: transparent;
   color: var(--mantine-color-text);
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
   text-decoration: none;
+  white-space: nowrap;
+}
+
+.item:not([data-labelled]) {
+  width: 40px;
+  height: 34px;
+  padding: 0;
+  justify-content: center;
 }
 
 /* Hover reads lighter than the active item's fill. */
 .item:hover {
-  background: color-mix(in srgb, var(--mantine-color-default) 50%, transparent);
+  background: color-mix(in srgb, var(--mantine-color-default-hover) 50%, transparent);
   color: var(--mantine-color-bright);
 }
 
@@ -37,28 +55,86 @@
 }
 
 .item[aria-current='page'] {
-  background: var(--mantine-color-default);
+  background: var(--mantine-color-default-hover);
   color: var(--mantine-color-bright);
 }
 
+.label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Labelled, a count ends the row; icons only, it is pinned to the icon's corner. */
 .badge {
-  position: absolute;
-  top: 1px;
-  right: 0;
+  flex: none;
+  display: inline-flex;
   pointer-events: auto;
+}
+
+.item:not([data-labelled]) .badge {
+  position: absolute;
+  /* The compact badge's centre sits over the icon's top-right corner, not over the glyph. */
+  top: 1px;
+  right: 4px;
 }
 
 .divider {
   flex: none;
-  width: 24px;
   height: 1px;
   margin: 6px 0;
+  align-self: stretch;
   background: var(--mantine-color-default-border);
+}
+
+.rail:not([data-labelled]) .divider {
+  align-self: center;
+  width: 28px;
 }
 
 .spacer {
   flex: 1;
   min-height: 8px;
+}
+
+/*
+ * Labelled the foot is Settings on a row of its own, then the status icons in a row under it, so the
+ * name is never cut by the icons beside it; icons only it stacks.
+ */
+.foot {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+}
+
+.foot > .item {
+  flex: 1 1 100%;
+  min-width: 0;
+}
+
+.rail:not([data-labelled]) .foot {
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rail:not([data-labelled]) .foot > .item {
+  flex: none;
+}
+
+.status {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+}
+
+.rail:not([data-labelled]) .status {
+  width: 40px;
+  height: 34px;
 }
 
 .tileHost {
@@ -70,7 +146,7 @@
 .tileHost > button {
   display: grid;
   place-items: center;
-  width: 36px;
+  width: 40px;
   height: 34px;
   border: 0;
   background: transparent;
@@ -78,10 +154,40 @@
   border-radius: var(--mantine-radius-md);
 }
 
+.tileHost > button[data-labelled] {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  color: var(--mantine-color-bright);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tileHost > button[data-labelled]:hover {
+  background: color-mix(in srgb, var(--mantine-color-default-hover) 50%, transparent);
+}
+
+.tileHost > button[data-labelled] svg {
+  flex: none;
+  color: var(--mantine-color-dimmed);
+}
+
+.projectName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tileRing {
   display: block;
   border-radius: 6px;
   box-shadow:
-    0 0 0 2px var(--mantine-color-body),
+    0 0 0 2px var(--mantine-color-default),
     0 0 0 3px var(--mantine-color-default-border);
 }
