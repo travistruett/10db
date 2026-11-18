@@ -6,7 +6,7 @@ import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { projectViewDto } from '../../test/fixtures';
 import { closedTabs } from './closed-tabs';
 
-// Close, Archive and Reopen: closing loses nothing, and ⌘⇧T restores the tab and its draft.
+// Close, Archive and Reopen: closing loses nothing, and ⌘⇧T restores the session and its draft.
 
 const ampsio = projectViewDto({ name: 'ampsio' });
 
@@ -35,7 +35,7 @@ function open(count = 3) {
 
 const press = (key: string, mods: { metaKey?: boolean; shiftKey?: boolean }) =>
   fireEvent.keyDown(document.body, { key, ...mods });
-const tabNames = () => screen.queryAllByRole('tab').map((t) => t.getAttribute('aria-label'));
+const rowNames = () => screen.queryAllByRole('option').map((t) => t.getAttribute('aria-label'));
 
 describe('Sessions: close, archive and reopen', () => {
   it('closes a tab with a draft, and ⌘⇧T puts it back at its place with the draft', async () => {
@@ -44,11 +44,11 @@ describe('Sessions: close, archive and reopen', () => {
     fireEvent.change(box, { target: { value: 'Half a thought' } });
     press('w', { metaKey: true });
     await waitFor(() => {
-      expect(tabNames()).toEqual(['First, ampsio', 'Third, ampsio']);
+      expect(rowNames()).toEqual(['First, ampsio', 'Third, ampsio']);
     });
     press('T', { metaKey: true, shiftKey: true });
     await waitFor(() => {
-      expect(tabNames()).toEqual(['First, ampsio', 'Second, ampsio', 'Third, ampsio']);
+      expect(rowNames()).toEqual(['First, ampsio', 'Second, ampsio', 'Third, ampsio']);
     });
     expect(chat.patches.at(-1)).toEqual({ chatId: chats[1]?.id, body: { tabPosition: 1 } });
     await waitFor(() => {
@@ -56,48 +56,45 @@ describe('Sessions: close, archive and reopen', () => {
     });
   });
 
-  it('Close Other Tabs from a tab’s menu leaves that tab alone', async () => {
-    open();
-    await screen.findAllByRole('tab');
-    fireEvent.contextMenu(screen.getAllByRole('tab')[2] ?? document.body);
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Close Other Tabs' }));
+  it('Close from a row’s right-click menu closes that row and not the selected one', async () => {
+    const { chat, chats } = open();
+    await screen.findAllByRole('option');
+    fireEvent.contextMenu(screen.getAllByRole('option')[2] ?? document.body);
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Close' }));
     await waitFor(() => {
-      expect(tabNames()).toEqual(['Third, ampsio']);
+      expect(rowNames()).toEqual(['First, ampsio', 'Second, ampsio']);
     });
+    expect(chat.patches).toEqual([{ chatId: chats[2]?.id, body: { tabPosition: null } }]);
   });
 
-  it('archives from the ⋯ menu, lists it in All Tabs as Archived, and Reopen unarchives it and brings the tab back', async () => {
+  it('archives from the ⋯ menu, lists it under Recently closed, and Reopen unarchives it and brings it back', async () => {
     const { chat, chats } = open();
-    await screen.findAllByRole('tab');
+    await screen.findAllByRole('option');
     fireEvent.click(await screen.findByRole('button', { name: 'More session actions' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Archive' }));
     await waitFor(() => {
-      expect(tabNames()).toEqual(['First, ampsio', 'Third, ampsio']);
+      expect(rowNames()).toEqual(['First, ampsio', 'Third, ampsio']);
     });
     expect(chat.archived).toEqual([chats[1]?.id]);
-    fireEvent.click(screen.getByRole('button', { name: 'All Tabs' }));
-    const row = await screen.findByRole('menuitem', { name: 'Reopen Second' });
-    expect(row.textContent).toContain('Archived');
-    fireEvent.click(row);
+    fireEvent.click(await screen.findByRole('button', { name: 'Reopen Second' }));
     await waitFor(() => {
       expect(chat.unarchived).toEqual([chats[1]?.id]);
     });
     await waitFor(() => {
-      expect(tabNames()).toContain('Second, ampsio');
+      expect(rowNames()).toContain('Second, ampsio');
     });
   });
 
-  it('lists the last closed tab in All Tabs with Reopen', async () => {
+  it('lists the last closed session under Recently closed with Reopen', async () => {
     const { chat, chats } = open();
-    await screen.findAllByRole('tab');
+    await screen.findAllByRole('option');
     press('w', { metaKey: true });
     await waitFor(() => {
-      expect(tabNames()).toHaveLength(2);
+      expect(rowNames()).toHaveLength(2);
     });
-    fireEvent.click(screen.getByRole('button', { name: 'All Tabs' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Reopen Second' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Reopen Second' }));
     await waitFor(() => {
-      expect(tabNames()).toHaveLength(3);
+      expect(rowNames()).toHaveLength(3);
     });
     expect(chat.patches.at(-1)?.chatId).toBe(chats[1]?.id);
   });

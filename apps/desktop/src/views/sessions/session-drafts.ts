@@ -1,5 +1,4 @@
 import { useSyncExternalStore } from 'react';
-import type { FolderWhileHeld } from '@10db/contracts';
 import { z } from 'zod';
 import {
   applyDraftChange,
@@ -18,11 +17,10 @@ export const DRAFTS_KEY = 'tendb.sessions.drafts';
 
 /**
  * A send a fresh tab asked its chat to make: what it sends, since the fresh tab's input emptied as Send
- * was pressed, and how it runs when Your folder is held, when it was asked.
+ * was pressed.
  */
 export interface SendRequest {
   readonly draft: Draft;
-  readonly folder?: FolderWhileHeld;
 }
 
 const Stored = z.record(z.string(), z.object({ text: z.string(), mentions: z.array(z.string()) }));

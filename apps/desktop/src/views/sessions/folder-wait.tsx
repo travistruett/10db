@@ -1,16 +1,16 @@
 import { Button, Group, Text } from '@mantine/core';
 
-// Sessions UI spec §7.3: a chat's message that chose to wait for Your folder. It runs when the folder frees;
-// Send Now Reading Only runs it at once, changing nothing, and Stop drops it.
+// A chat's message that waits for a holder of the checkout. It runs when the holder is done; Stop drops it.
 
 export interface FolderWaitProps {
-  /** The holders still in the way, as a sentence part: "the task ‘Bump vite’"; null when none is. */
+  /** Who is changing files, as a sentence part ("the task ‘Bump vite’"); null when nothing is still in the way. */
   readonly holders: string | null;
-  readonly onSendNow: () => void;
+  /** The branch the checkout is on. */
+  readonly branch: string | null;
   readonly onStop: () => void;
 }
 
-export function FolderWait({ holders, onSendNow, onStop }: FolderWaitProps) {
+export function FolderWait({ holders, branch, onStop }: FolderWaitProps) {
   return (
     <Group
       role="status"
@@ -22,16 +22,13 @@ export function FolderWait({ holders, onSendNow, onStop }: FolderWaitProps) {
       style={{ flex: 'none' }}
     >
       <Text size="sm" c="dimmed" lineClamp={2}>
-        {holders === null ? 'Waits for Your folder' : `Waits for Your folder: in use by ${holders}`}
+        {holders === null
+          ? 'Your message runs once the checkout is free.'
+          : `${holders.charAt(0).toUpperCase()}${holders.slice(1)} is changing files${branch === null ? '' : ` on ${branch}`}. Your message runs once it’s done.`}
       </Text>
-      <Group gap="xs" wrap="nowrap" style={{ flex: 'none' }}>
-        <Button size="xs" variant="default" onClick={onSendNow}>
-          Send Now Reading Only
-        </Button>
-        <Button size="xs" variant="subtle" onClick={onStop}>
-          Stop
-        </Button>
-      </Group>
+      <Button size="xs" variant="subtle" onClick={onStop} style={{ flex: 'none' }}>
+        Stop
+      </Button>
     </Group>
   );
 }

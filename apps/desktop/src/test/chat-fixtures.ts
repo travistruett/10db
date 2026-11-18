@@ -1,6 +1,8 @@
 import {
   ChatDto,
   ChatModelsDto,
+  type ChatWork,
+  type ChatWorkStateDto,
   ChatPatchInput,
   ConversationItemDto,
   mintId,
@@ -12,6 +14,7 @@ import {
 } from '@10db/contracts';
 import { http, HttpResponse, type HttpHandler } from 'msw';
 import { daemonUrl } from './daemon';
+import { chatWorkStateDto } from './chat-work-fixtures';
 import { folderDto } from './folder-fixtures';
 import { builderItem, conversationDto } from './conversation-fixtures';
 
@@ -82,6 +85,15 @@ export interface ChatServerOptions {
   readonly createRefusal?: string;
   /** The status the message route answers; 202 by default. */
   readonly messageStatus?: number;
+  /** What `GET /chats/:id/work` answers, by chat; a reading session with nothing changed by default. */
+  readonly work?: Readonly<Record<string, ChatWorkStateDto>>;
+  /**
+   * What `POST /chats/:id/work` answers: the place that was chosen (200), or with `settled` the place that
+   * had already won (409).
+   */
+  readonly settled?: ChatWork;
+  /** What the panel's search can find; the open chats by default. */
+  readonly searchable?: readonly ChatDto[];
 }
 
 export interface ChatServer {
@@ -97,6 +109,10 @@ export interface ChatServer {
   readonly fileQueries: { readonly conversationId: string; readonly q: string }[];
   /** The chats the server holds, including the ones `POST /chats` made. */
   readonly chats: ChatDto[];
+  /** Each panel search's text. */
+  readonly searches: string[];
+  /** Each choice the bar sent. */
+  readonly chosen: { readonly chatId: string; readonly place: string }[];
 }
 
 /** The routes of Sessions, over chats held in memory. */
@@ -112,6 +128,8 @@ export function chatServer(opts: ChatServerOptions = {}): ChatServer {
     stoppedWaiting: [],
     fileQueries: [],
     chats,
+    searches: [],
+    chosen: [],
   };
   const byId = (id: string): ChatDto | undefined => chats.find((c) => c.id === id);
   const byConversation = (id: string): ChatDto | undefined =>
@@ -124,6 +142,37 @@ export function chatServer(opts: ChatServerOptions = {}): ChatServer {
       const projectId = new URL(request.url).searchParams.get('projectId');
       const list = opts.recent ?? chats.filter((c) => c.lastActivityAt !== null);
       return HttpResponse.json(list.filter((c) => c.projectId === projectId));
+    }),
+    http.get(daemonUrl('/chats/search'), ({ request }) => {
+      const q = new URL(request.url).searchParams.get('q') ?? '';
+      server.searches.push(q);
+      const rows = (opts.searchable ?? chats).filter((c) =>
+        c.title.toLowerCase().includes(q.toLowerCase()),
+      );
+      return HttpResponse.json({ rows, next: null });
+    }),
+    http.get(daemonUrl('/chats/:chatId/work'), ({ params }) => {
+      const chat = byId(String(params['chatId']));
+      if (chat === undefined) return HttpResponse.json({ error: 'gone' }, { status: 404 });
+      return HttpResponse.json(
+        opts.work?.[chat.id] ?? chatWorkStateDto({ place: chat.work?.place ?? null }),
+      );
+    }),
+    http.post(daemonUrl('/chats/:chatId/work'), async ({ params, request }) => {
+      const chat = byId(String(params['chatId']));
+      if (chat === undefined) return HttpResponse.json({ error: 'gone' }, { status: 404 });
+      const body = (await request.json()) as { place: 'here' | 'branch' };
+      server.chosen.push({ chatId: chat.id, place: body.place });
+      if (opts.settled !== undefined) return HttpResponse.json(opts.settled, { status: 409 });
+      const work: ChatWork = {
+        place: body.place === 'here' ? 'here' : 'moving',
+        branch: body.place === 'here' ? null : 'fix-login',
+        base: null,
+        worktree: null,
+        askedAt: null,
+      };
+      chats.splice(chats.indexOf(chat), 1, chatDto({ ...chat, work }));
+      return HttpResponse.json(work);
     }),
     http.post(daemonUrl('/chats'), async ({ request }) => {
       if (opts.createRefusal !== undefined)

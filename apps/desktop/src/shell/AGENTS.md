@@ -63,5 +63,5 @@ jsdom has no layout, so a component that draws into the frame or measures itself
   `titleRowOf()`.
 - `sized-observer.ts`: `observeWidthsOf(width)` makes every `ResizeObserver` report `width`, `resizeObservedTo`
   changes it, `resetObservedWidth` restores the real one. Use it for a view that measures its container.
-- `window-width.ts`: `windowWidth` sets the width media queries answer for, `viewportWidth` sets `innerWidth`
+- `window-width.ts`: `viewportWidth` sets `innerWidth`
   (which the frame reads); each has a reset to call after the test.

@@ -2,7 +2,7 @@ import { mintId, type ProjectId } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { chatDto } from '../../test/chat-fixtures';
 import type { FreshTab } from './fresh-tabs';
-import { panelGroups, panelOrder } from './panel-order';
+import { dropTarget, panelGroups, panelOrder, topPosition } from './panel-order';
 
 const a = mintId('Project');
 const b = mintId('Project');
@@ -82,5 +82,52 @@ describe('panelGroups and panelOrder', () => {
       tabs,
     );
     expect(keys(groups)).toEqual(want);
+  });
+});
+
+describe('topPosition', () => {
+  const chats = [
+    chatDto({ projectId: a, tabPosition: 1 }),
+    chatDto({ projectId: a, tabPosition: 3 }),
+    chatDto({ projectId: b, tabPosition: 0 }),
+    chatDto({ projectId: b, tabPosition: 2 }),
+  ];
+  it.each([
+    { name: 'the place of the project’s first open session', project: a, want: 1 },
+    { name: 'the place of another project’s first, not the list’s first', project: b, want: 0 },
+    { name: 'the end for a project with none open', project: gone, want: 4 },
+  ])('$name', ({ project, want }) => {
+    expect(topPosition(chats, project)).toBe(want);
+  });
+});
+
+describe('dropTarget', () => {
+  const first = chatDto({ projectId: a, title: 'first', tabPosition: 1 });
+  const second = chatDto({ projectId: a, title: 'second', tabPosition: 4 });
+  const other = chatDto({ projectId: b, title: 'other', tabPosition: 2 });
+  const rows = panelOrder(
+    panelGroups([{ id: a }, { id: b }], [first, second, other], [fresh('x', a)]),
+  );
+  const key = (title: string): string =>
+    rows.find((r) => r.kind === 'chat' && r.chat.title === title)?.key ?? '';
+
+  it.each([
+    { name: 'takes the dropped-on session’s place', active: 'first', over: 'second', want: 4 },
+    { name: 'moves up as well as down', active: 'second', over: 'first', want: 1 },
+    { name: 'a drop on itself is nothing', active: 'first', over: 'first', want: null },
+    {
+      name: 'another project’s place is not one to take',
+      active: 'first',
+      over: 'other',
+      want: null,
+    },
+  ])('$name', ({ active, over, want }) => {
+    expect(dropTarget(rows, key(active), key(over))?.position ?? null).toBe(want);
+  });
+
+  it('a fresh row neither moves nor is dropped on', () => {
+    const freshKey = rows.find((r) => r.kind === 'fresh')?.key ?? '';
+    expect(dropTarget(rows, freshKey, key('first'))).toBeNull();
+    expect(dropTarget(rows, key('first'), freshKey)).toBeNull();
   });
 });

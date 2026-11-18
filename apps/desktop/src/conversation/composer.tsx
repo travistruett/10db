@@ -1,8 +1,7 @@
-import { FolderWhileHeld, type AgentCapabilitiesDto } from '@10db/contracts';
+import type { AgentCapabilitiesDto } from '@10db/contracts';
 import {
   ActionIcon,
   Box,
-  Button,
   Center,
   CloseButton,
   Group,
@@ -24,35 +23,13 @@ import { ComposerInput, type ComposerMentions } from './composer-mentions';
 import { DictationButton } from './dictation-button';
 import type { ComposerPhase } from './composer-phase';
 import { afterFailedSend, afterSend, hasContent, type Draft, type DraftChange } from './drafts';
-import { isComposing, isSendKey, OWNS_ESCAPE_ATTRIBUTE } from './escape';
+import { isComposing, isSendKey } from './escape';
 import { mentionText } from './mention-text';
 import { pickerAccept, withPictures } from './pictures';
 
 // Sessions UI spec §7.9, §7.11: one frame holding the input and its bar, with the hint under it. Enter
 // sends and Shift+Enter is a new line, never while an IME composes and never while an `@` or `/` list
 // is open, where Enter picks; pictures paste, drop or attach and wait as thumbnails.
-
-/**
- * Your folder is held by a writer that keeps this turn from writing (sessions spec §7.3): Send asks first
- * how the message should run.
- */
-export interface ComposerHeld {
-  /** The holders, as a sentence part: "the task ‘Bump vite’". */
-  readonly holders: string;
-  /** Sends the draft as the builder chose; rejects with the daemon's words, and the draft comes back. */
-  readonly onChoose: (
-    draft: Draft,
-    choice: FolderWhileHeld,
-    how: 'send' | 'redo',
-  ) => Promise<void> | void;
-  /** File as Tasks: the standing request goes, and the draft stays; a tab with no conversation has none. */
-  readonly onFileAsTasks?: () => Promise<void> | void;
-  /**
-   * Do It in a Separate Copy: the draft is not sent; the screen opens the Do It sheet on that place with it.
-   * A tab with no chat to hand over has none.
-   */
-  readonly onDoItSeparately?: (draft: Draft) => void;
-}
 
 /**
  * Files that go to the conversation as they are added (Plan's documents), instead of waiting in the
@@ -111,8 +88,6 @@ export interface ComposerProps {
   readonly actions?: ReactNode;
   /** The model chip and the context ring, beside Attach. */
   readonly modelControl?: ReactNode;
-  /** Set while a writer keeps the turn from Your folder; Send then offers the choices. */
-  readonly held?: ComposerHeld;
 }
 
 /** Whether the input's suggestion list is open: the list it controls is in the page only then. */
@@ -186,7 +161,6 @@ export function Composer({
   leading,
   actions,
   modelControl,
-  held,
   uploads,
   notes,
   onFailure,
@@ -200,9 +174,7 @@ export function Composer({
   const [failure, setFailure] = useState<string | null>(null);
   const [ownRefused, setOwnRefused] = useState<readonly string[]>([]);
   const refused = uploads?.refused ?? ownRefused;
-  const [choosing, setChoosing] = useState<'send' | 'redo' | null>(null);
   const [dragging, setDragging] = useState(false);
-  const waitButton = useRef<HTMLButtonElement>(null);
   const dragDepth = useRef(0);
   const picker = useRef<HTMLInputElement>(null);
   const ownInput = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
@@ -214,13 +186,6 @@ export function Composer({
   useEffect(() => {
     current.current = draft;
   });
-
-  // The choices belong to a held folder: when it frees, Send sends as it always does.
-  const asking = held !== undefined && choosing !== null;
-  if (held === undefined && choosing !== null) setChoosing(null);
-  useEffect(() => {
-    if (asking) waitButton.current?.focus();
-  }, [asking]);
 
   const addFiles = (files: readonly File[]): void => {
     if (files.length === 0 || locked) return;
@@ -260,10 +225,6 @@ export function Composer({
     // A plain Stop on its way doesn't hold a message back: it goes, or queues, as the agent takes it.
     // Stop and Redo is already carrying this draft.
     if (sendingNow.current || stoppingNow.current === 'redo') return;
-    if (held !== undefined) {
-      setChoosing('send');
-      return;
-    }
     startSend(() => onSend(outgoing(draft)), draft);
   };
   const startSend = (action: () => Promise<void> | void, sent: Draft | null): void => {
@@ -285,10 +246,6 @@ export function Composer({
   const stop = (): void => {
     if (stoppingNow.current !== null) return;
     const redo = phase.stop === 'stop_and_redo' && onRedo !== undefined && !sendingNow.current;
-    if (redo && held !== undefined) {
-      setChoosing('redo');
-      return;
-    }
     if (redo) {
       startRedo(() => onRedo(outgoing(draft)));
       return;
@@ -300,21 +257,6 @@ export function Composer({
       setStopping(null);
     });
   };
-  const choose = (choice: FolderWhileHeld): void => {
-    if (held === undefined || choosing === null) return;
-    if (locked || disabledReason !== null) return;
-    if (sendingNow.current || stoppingNow.current !== null) return;
-    const how = choosing;
-    setChoosing(null);
-    const action = (): Promise<void> | void => held.onChoose(outgoing(draft), choice, how);
-    if (how === 'redo') startRedo(action);
-    else startSend(action, draft);
-  };
-  const cancelChoice = (): void => {
-    setChoosing(null);
-    field.current?.focus();
-  };
-
   const hasFiles = (event: DragEvent): boolean => event.dataTransfer.types.includes('Files');
   // A screenshot pastes as a file with no text; a copy that carries text too is pasted as text.
   const onPaste = (event: ClipboardEvent): void => {
@@ -414,18 +356,7 @@ export function Composer({
           onPaste={onPaste}
           onKeyDown={(event) => {
             if (isComposing(event)) return;
-            if (asking && event.key === 'Escape') {
-              event.preventDefault();
-              cancelChoice();
-              return;
-            }
             if (!isSendKey(event)) return;
-            if (asking) {
-              // The choices are on screen: ⌘↩ waits, and a plain Enter picks nothing.
-              event.preventDefault();
-              if (event.metaKey || event.ctrlKey) choose(FolderWhileHeld.Wait);
-              return;
-            }
             // With a suggestion list open Enter belongs to the list, which picks the highlighted one.
             if (suggestionsOpen(event.currentTarget)) return;
             event.preventDefault();
@@ -458,74 +389,6 @@ export function Composer({
               event.currentTarget.value = '';
             }}
           />
-        ) : null}
-        {held !== undefined && asking ? (
-          <Box
-            role="group"
-            aria-label="Your folder is in use"
-            pt="xs"
-            {...{ [OWNS_ESCAPE_ATTRIBUTE]: '' }}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                event.preventDefault();
-                event.stopPropagation();
-                cancelChoice();
-              } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-                event.preventDefault();
-                choose(FolderWhileHeld.Wait);
-              }
-            }}
-          >
-            <Text size="sm">Your folder is in use by {held.holders}.</Text>
-            <Group gap="xs" pt={4}>
-              <Button
-                ref={waitButton}
-                size="xs"
-                onClick={() => {
-                  choose(FolderWhileHeld.Wait);
-                }}
-              >
-                Wait for It
-              </Button>
-              <Button
-                size="xs"
-                variant="default"
-                onClick={() => {
-                  choose(FolderWhileHeld.ReadOnly);
-                }}
-              >
-                Send Reading Only
-              </Button>
-              {held.onFileAsTasks === undefined ? null : (
-                <Button
-                  size="xs"
-                  variant="subtle"
-                  onClick={() => {
-                    setChoosing(null);
-                    if (held.onFileAsTasks !== undefined) startSend(held.onFileAsTasks, null);
-                  }}
-                >
-                  File as Tasks
-                </Button>
-              )}
-              {held.onDoItSeparately === undefined ? null : (
-                <Button
-                  size="xs"
-                  variant="subtle"
-                  onClick={() => {
-                    setChoosing(null);
-                    if (held.onDoItSeparately !== undefined) held.onDoItSeparately(outgoing(draft));
-                  }}
-                >
-                  Do It in a Separate Copy
-                </Button>
-              )}
-            </Group>
-            <Text size="xs" c="dimmed" pt={4}>
-              Wait for It runs this once Your folder is free, ahead of any task that hasn&apos;t
-              started. Send Reading Only runs it now and changes nothing. ⌘↩ waits · Esc cancels
-            </Text>
-          </Box>
         ) : null}
         <Group justify="space-between" wrap="nowrap" gap="xs" pt={4}>
           <Group gap="xs" wrap="nowrap">
@@ -570,7 +433,7 @@ export function Composer({
             )}
             {actions}
             {/* A send on its way keeps its button and spinner though the input emptied at once. */}
-            {(phase.send === 'hidden' && !sending) || asking ? null : (
+            {phase.send === 'hidden' && !sending ? null : (
               <ActionIcon
                 variant={phase.send === 'filled' ? 'filled' : 'default'}
                 size="lg"

@@ -1,18 +1,12 @@
-import type { ChatDto, Effort, FolderWhileHeld, ProjectId, ProjectViewDto } from '@10db/contracts';
+import type { ChatDto, Effort, ProjectId, ProjectViewDto } from '@10db/contracts';
 import { Box, Group, Select, Text } from '@mantine/core';
 import { useElementSize } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
 import { Composer } from '../../conversation/composer';
 import { CONVERSATION_WIDTH } from '../../conversation/conversation-layout';
 import { composerPhase } from '../../conversation/composer-phase';
-import {
-  applyDraftChange,
-  hasContent,
-  type Draft,
-  type DraftChange,
-} from '../../conversation/drafts';
+import { applyDraftChange, hasContent, type DraftChange } from '../../conversation/drafts';
 import { ModelMenu } from '../../conversation/model-menu';
-import { useProjectFolder } from '../../daemon/project-folder-queries';
 import {
   useChatModels,
   useCreateChat,
@@ -20,7 +14,6 @@ import {
   useSessionStarts,
 } from '../../daemon/chat-queries';
 import type { FreshTab as FreshTabState } from './fresh-tabs';
-import { keepingWords } from './kind-line';
 import { RecentSessions } from './recent-sessions';
 import { draftKey, sessionDrafts, useSessionDraft, type SendRequest } from './session-drafts';
 import { StartFrom } from './start-from';
@@ -38,6 +31,8 @@ const NARROW_PX = 640;
 
 export interface FreshTabProps {
   readonly tab: FreshTabState;
+  /** Where the chat made from this tab goes among the open ones: the top of its project. */
+  readonly tabPosition: number;
   readonly projects: readonly ProjectViewDto[];
   readonly onProject: (projectId: ProjectId) => void;
   readonly onModel: (model: string | null, effort: Effort | null) => void;
@@ -48,6 +43,7 @@ export interface FreshTabProps {
 
 export function FreshTab({
   tab,
+  tabPosition,
   projects,
   onProject,
   onModel,
@@ -66,8 +62,6 @@ export function FreshTab({
   const starts = useSessionStarts(tab.projectId);
   const recent = useRecentChats(tab.projectId);
   const create = useCreateChat();
-  // Holders that would keep the new chat's first message from writing: Send asks before it runs.
-  const keeping = keepingWords(null, useProjectFolder(tab.projectId));
   const [createError, setCreateError] = useState<string | null>(null);
   const input = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
   // The chat being made, shared by an `@` and a send that come together, so there is only ever one.
@@ -90,7 +84,7 @@ export function FreshTab({
         projectId: tab.projectId,
         model: tab.model,
         effort: tab.effort,
-        tabPosition: tab.position,
+        tabPosition,
       })
       .then((chat) => {
         onChatMade(chat, want.send);
@@ -175,16 +169,6 @@ export function FreshTab({
                 />
               )
             }
-            {...(keeping === null
-              ? {}
-              : {
-                  held: {
-                    holders: keeping,
-                    onChoose: async (sent: Draft, choice: FolderWhileHeld) => {
-                      await ensureChat({ draft: sent, folder: choice });
-                    },
-                  },
-                })}
             onSend={async (sent) => {
               await ensureChat({ draft: sent });
             }}

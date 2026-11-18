@@ -1,5 +1,5 @@
 import { TaskSessionDto, type TaskId } from '@10db/contracts';
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { readJson, type DaemonClient } from './client';
 import { useDaemon } from './provider';
 
@@ -31,16 +31,4 @@ export function useTaskSession(taskId: TaskId | null) {
         : sessionOptions(client, taskId).queryFn(),
     enabled: taskId !== null,
   });
-}
-
-/** The sessions of the tasks whose tabs are open, by task. */
-export function useTaskSessions(taskIds: readonly TaskId[]): ReadonlyMap<TaskId, TaskSessionDto> {
-  const { client } = useDaemon();
-  const results = useQueries({ queries: taskIds.map((id) => sessionOptions(client, id)) });
-  const map = new Map<TaskId, TaskSessionDto>();
-  results.forEach((result, index) => {
-    const id = taskIds[index];
-    if (id !== undefined && result.data !== undefined) map.set(id, result.data);
-  });
-  return map;
 }

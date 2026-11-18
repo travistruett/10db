@@ -24,9 +24,6 @@ export const TaskTab = z.object({
 });
 export type TaskTab = z.infer<typeof TaskTab>;
 
-/** The strip's key of a task's tab. */
-export const taskTabKey = (taskId: string): string => `task:${taskId}`;
-
 /** `entry` added, or the tab already open for the task kept where it is. */
 export function openTaskTab(tabs: readonly TaskTab[], entry: TaskTab): readonly TaskTab[] {
   return tabs.some((t) => t.taskId === entry.taskId) ? tabs : [...tabs, entry];

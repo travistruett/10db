@@ -1,49 +1,38 @@
-import type { ChatDto, ConversationDto, FolderDto } from '@10db/contracts';
-import { ActionIcon, Box, Group, Loader, Menu, Stack, Text, TextInput } from '@mantine/core';
+import type { ChatDto, ConversationDto } from '@10db/contracts';
+import { ActionIcon, Box, Menu, Text, TextInput } from '@mantine/core';
 import { IconDots } from '@tabler/icons-react';
-import { useRef, useState } from 'react';
-import { JudgeLine } from '../../conversation';
+import { useRef, useState, type ReactNode } from 'react';
+import { ContextRing } from '../../conversation/context-ring';
 import { OWNS_ESCAPE_ATTRIBUTE } from '../../conversation/escape';
 import { usePatchChat } from '../../daemon/chat-queries';
+import { TitleRow } from '../../shell/title-row';
 import { canOpenTerminal } from './can-open-terminal';
-import { PendingOpenLine } from './pending-open-line';
-import { SplitButton } from '../../shell/split-button';
-import { kindLine } from './kind-line';
-import { TabMenuItems, type TabActions } from './tab-menu';
+import { SessionMenuItems, type SessionActions } from './session-menu';
 import { TerminalButton } from './terminal-button';
 
-// Sessions UI spec §4, §7.10: the 44 px row under the header. At its left the title over what the session
-// is; at its right the agent's name, File as Tasks and the ⋯ menu. The model's menu and the
-// context ring are the composer's.
+const CONTEXT_TIP = 'Past 70%, the next turn continues in a fresh session with a summary.';
 
-export interface SessionBarProps {
+export interface SessionTitleProps {
   readonly chat: ChatDto;
   readonly conversation: ConversationDto;
-  readonly projectName: string;
-  /** Who holds Your folder, once read. */
-  readonly folder: FolderDto | null;
+  /** Where the session works and what changed, in git's words. */
+  readonly meta: string | null;
+  /** The ⌄ switcher. */
+  readonly switcher: ReactNode;
   /** The project's folder; null once the project was removed from 10db. */
   readonly projectPath: string | null;
-  /** When the chat went to the builder's terminal, once read. */
-  readonly terminalSince?: string | null;
-  /** The transcript is still being read. */
-  readonly loading: boolean;
-  /** File as Tasks, disabled with this reason when it cannot be sent. */
-  readonly fileDisabledReason: string | null;
-  readonly onFileAsTasks: () => void;
-  /** Do It…, disabled with this reason (Hand back first); a sealed chat has no Do It. */
-  readonly doItDisabledReason: string | null;
-  readonly onDoIt: () => void;
-  /** What the ⋯ menu does for the tab; Rename edits the title in place. */
-  readonly actions?: Omit<TabActions, 'onRename'>;
-  /** The builder asked to rename from the strip. */
+  /** What the menus do; Rename edits the title in place and the terminal opens its popover. */
+  readonly actions: Omit<SessionActions, 'onRename' | 'onOpenInTerminal'>;
+  /** The builder asked to rename from the panel. */
   readonly renaming?: boolean;
   readonly onRenamed?: () => void;
-  /** The builder asked to open the chat in a terminal from the strip. */
+  /** The builder asked to open the session in a terminal from the panel. */
   readonly openingTerminal?: boolean;
   readonly onTerminalAsked?: () => void;
   /** The clipboard refused the open's command; the banner shows it. */
   readonly onTerminalUncopied?: (line: string) => void;
+  /** Controls between the context ring and the terminal button: Changes and the git step. */
+  readonly steps?: ReactNode;
 }
 
 /** The title, edited in place: Enter saves through `usePatchChat`, Esc puts the old one back. */
@@ -64,9 +53,8 @@ function Title({
   if (!editing) {
     return (
       <Text
-        fw={600}
-        size="sm"
-        lineClamp={1}
+        component="span"
+        inherit
         title="Double-click to rename"
         onDoubleClick={() => {
           setDraft(chat.title);
@@ -115,73 +103,68 @@ function Title({
   );
 }
 
-export function SessionBar({
+/**
+ * A session's title row (sessions spec §6.5): the title, the ⌄ switcher, the meta line, then the agent and
+ * its model, the context ring, Changes and the git step, the terminal button and ⋯.
+ */
+export function SessionTitle({
   chat,
   conversation,
-  projectName,
-  folder,
-  loading,
-  fileDisabledReason,
-  onFileAsTasks,
-  doItDisabledReason,
-  onDoIt,
+  meta,
+  switcher,
+  projectPath,
   actions,
   renaming = false,
   onRenamed,
-  projectPath,
-  terminalSince = null,
   openingTerminal = false,
   onTerminalAsked,
   onTerminalUncopied,
-}: SessionBarProps) {
+  steps,
+}: SessionTitleProps) {
   const [typing, setEditing] = useState(false);
   const [askedHere, setAskedHere] = useState(false);
   const editing = typing || renaming;
   const { capabilities } = conversation;
-  // Only a chat the agent can take to a terminal, and not one in it already or sealed.
+  // Only a session the agent can take to a terminal, and not one in it already or sealed.
   const offersTerminal = projectPath !== null && canOpenTerminal(conversation);
   const terminalOpen = offersTerminal && (askedHere || openingTerminal);
   return (
-    <Box style={{ flex: 'none' }}>
-      <Group h={44} px="md" justify="space-between" wrap="nowrap" gap="sm">
-        <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
-          {loading ? <Loader size="xs" aria-label="Loading the session" /> : null}
-          <Stack gap={0} style={{ minWidth: 0 }}>
-            <Title
-              chat={chat}
-              editing={editing}
-              onEdit={() => {
-                setEditing(true);
-              }}
-              onDone={() => {
-                setEditing(false);
-                onRenamed?.();
-              }}
-            />
-            <Text size="xs" c="dimmed" lineClamp={1}>
-              {kindLine(chat, projectName, folder, terminalSince)}
-            </Text>
-          </Stack>
-        </Group>
-        <Group gap="sm" wrap="nowrap" style={{ flex: 'none' }}>
-          <Text size="xs" c="dimmed">
+    <TitleRow
+      title={
+        <Title
+          chat={chat}
+          editing={editing}
+          onEdit={() => {
+            setEditing(true);
+          }}
+          onDone={() => {
+            setEditing(false);
+            onRenamed?.();
+          }}
+        />
+      }
+      switcher={switcher}
+      meta={meta}
+      actions={
+        <>
+          <Text size="xs" c="dimmed" component="span" visibleFrom="md">
             {capabilities.label}
           </Text>
-          {conversation.state === 'sealed' ? null : (
-            <SplitButton
-              size="xs"
-              disabledReason={doItDisabledReason}
-              menuLabel="More ways to hand off"
-              onClick={onDoIt}
-              menu={
-                <Menu.Item disabled={fileDisabledReason !== null} onClick={onFileAsTasks}>
-                  File as Tasks
-                </Menu.Item>
-              }
-            >
-              Do It…
-            </SplitButton>
+          {conversation.model === null ? null : (
+            <Text size="xs" c="dimmed" component="span" visibleFrom="md">
+              {conversation.model}
+            </Text>
           )}
+          <ContextRing
+            percent={conversation.contextPct}
+            more={[
+              CONTEXT_TIP,
+              ...(conversation.costUsd === null
+                ? []
+                : [`$${conversation.costUsd.toFixed(2)} so far`]),
+            ]}
+          />
+          {steps}
           {offersTerminal ? (
             <TerminalButton
               chat={chat}
@@ -202,11 +185,8 @@ export function SessionBar({
               </ActionIcon>
             </Menu.Target>
             <Menu.Dropdown>
-              <TabMenuItems
+              <SessionMenuItems
                 actions={{
-                  othersOpen: false,
-                  onClose: () => undefined,
-                  onCloseOthers: () => undefined,
                   ...actions,
                   onRename: () => {
                     setEditing(true);
@@ -222,10 +202,8 @@ export function SessionBar({
               />
             </Menu.Dropdown>
           </Menu>
-        </Group>
-      </Group>
-      <PendingOpenLine folder={folder} />
-      <JudgeLine judge={capabilities.judge} />
-    </Box>
+        </>
+      }
+    />
   );
 }

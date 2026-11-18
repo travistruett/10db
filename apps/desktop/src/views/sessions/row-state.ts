@@ -65,9 +65,9 @@ export function rowState(input: RowStateInput, detail: TabDetail = {}): RowState
   const icon = iconOf(input);
   const words = tabWords(tab, detail);
   const base = { icon, bold: false, dim: tab === TabState.InTerminal };
-  if (tab === TabState.NeedsYou) return { ...base, mark: RowMark.NeedsYou, spoken: words.spoken };
-  if (place === WorkPlace.Choosing)
+  if (place === WorkPlace.Choosing && tab !== TabState.Error)
     return { ...base, mark: RowMark.NeedsYou, spoken: 'needs you: choose where it works' };
+  if (tab === TabState.NeedsYou) return { ...base, mark: RowMark.NeedsYou, spoken: words.spoken };
   if (tab === TabState.Error) return { ...base, mark: RowMark.Error, spoken: words.spoken };
   if (tab === TabState.Paused) return { ...base, mark: RowMark.Paused, spoken: words.spoken };
   if (place === WorkPlace.Moving)

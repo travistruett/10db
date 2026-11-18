@@ -50,3 +50,32 @@ export function panelGroups(
 export function panelOrder(groups: readonly PanelGroup[]): readonly PanelRow[] {
   return groups.flatMap((g) => g.rows);
 }
+
+/**
+ * Where a new session goes in the open sessions: the top of its project, which is the place of that
+ * project's first open session, or the end when it has none. The daemon moves the ones at or after it right.
+ */
+export function topPosition(chats: readonly ChatDto[], projectId: ProjectId): number {
+  const places = chats
+    .filter((c) => c.projectId === projectId && c.tabPosition !== null)
+    .map((c) => c.tabPosition ?? 0);
+  return places.length === 0 ? chats.length : Math.min(...places);
+}
+
+/**
+ * What dropping the row `active` on the row `over` asks of the daemon: the dragged session takes the
+ * dropped-on one's place. A row moves within its project only, since the panel groups by project, so
+ * another project's place is not one it can take; a fresh row has no place to take or give.
+ */
+export function dropTarget(
+  rows: readonly PanelRow[],
+  active: string,
+  over: string,
+): { readonly chat: ChatDto; readonly position: number } | null {
+  if (active === over) return null;
+  const moved = rows.find((r) => r.key === active);
+  const target = rows.find((r) => r.key === over);
+  if (moved?.kind !== 'chat' || target?.kind !== 'chat') return null;
+  if (moved.chat.projectId !== target.chat.projectId) return null;
+  return { chat: moved.chat, position: target.chat.tabPosition ?? 0 };
+}

@@ -105,7 +105,7 @@ describe('Open in Terminal', () => {
     expect(screen.queryByRole('button', { name: 'Open in Terminal' })).toBeNull();
   });
 
-  it('opens the chat: the daemon is asked once, the banner shows, and the strip says since when', async () => {
+  it('opens the chat: the daemon is asked once, the banner shows, and the panel row says terminal', async () => {
     const { taken } = openChat();
     const popover = await openPopover();
     await within(popover).findByText('Your folder is held until you hand back.');
@@ -113,7 +113,7 @@ describe('Open in Terminal', () => {
     const banner = await screen.findByRole('region', { name: 'In your terminal' });
     expect(taken.opened).toHaveLength(1);
     expect(banner.textContent).toContain("This runs outside 10db's sandbox");
-    expect(await screen.findByText(/^Chat · in your terminal since \d\d:\d\d$/)).toBeTruthy();
+    expect((await screen.findByRole('option')).getAttribute('data-place')).toBe('terminal');
     expect(screen.queryByRole('button', { name: 'Open in Terminal' })).toBeNull();
     expect(writeText).not.toHaveBeenCalled();
   });
@@ -179,9 +179,9 @@ describe('Open in Terminal', () => {
     await screen.findByRole('dialog', { name: 'Open in Terminal' });
   });
 
-  it('the tab menu opens the popover on the chat', async () => {
+  it('the row’s menu opens the popover on the chat', async () => {
     openChat();
-    fireEvent.contextMenu(await screen.findByRole('tab'));
+    fireEvent.contextMenu(await screen.findByRole('option'));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Open in Terminal' }));
     await screen.findByRole('dialog', { name: 'Open in Terminal' });
   });
@@ -215,11 +215,11 @@ describe('a chat in the builder’s terminal', () => {
     expect(taken.handedBack).toHaveLength(1);
   });
 
-  it('the tab says in your terminal', async () => {
+  it('the row says in your terminal', async () => {
     inTerminal();
-    const tab = await screen.findByRole('tab');
-    expect(tab.getAttribute('aria-label')).toMatch(/, in your terminal$/);
-    expect(tab.getAttribute('data-state')).toBe('in_terminal');
+    const row = await screen.findByRole('option');
+    expect(row.getAttribute('aria-label')).toMatch(/, in your terminal$/);
+    expect(row.getAttribute('data-place')).toBe('terminal');
   });
 
   it('Copy Command asks the daemon for the command and copies it', async () => {
