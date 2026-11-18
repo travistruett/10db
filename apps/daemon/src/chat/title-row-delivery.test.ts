@@ -135,6 +135,15 @@ describe('Open Pull Request', () => {
     expect(gitIn(repo(), 'branch', '--show-current')).toBe('main');
   });
 
+  it('is refused from main with nothing ahead, and makes no branch', async () => {
+    const chat = setup();
+    const before = gitIn(repo(), 'branch', '--list');
+    await expect(titleRow.openPullRequest(chat.id, signal)).rejects.toThrow();
+    expect(gitIn(repo(), 'branch', '--show-current')).toBe('main');
+    expect(gitIn(repo(), 'branch', '--list')).toBe(before);
+    expect(gh.prCreates()).toEqual([]);
+  });
+
   it('leaves the checkout on the new branch when GitHub fails, and offers Open Pull Request on it again (row 46)', async () => {
     const chat = setup();
     commitFile(repo(), 'a.ts');
