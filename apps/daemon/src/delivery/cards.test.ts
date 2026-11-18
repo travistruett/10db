@@ -504,7 +504,7 @@ describe("every delivery card's tier, urgency and closer", () => {
         '/repo',
       ),
       high,
-      withdrawn('the branch is gone (pass-recover, at start)'),
+      answer,
     ),
   };
 

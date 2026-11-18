@@ -35,7 +35,7 @@ export type CardResolvesWhen = z.infer<typeof CardResolvesWhen>;
 
 /**
  * The `detail` key of a card that closes when its condition clears and not when the builder answers it
- * (`closesWhen` is not `by: 'answer'`). Such a card is never dismissed: the Inbox offers no Dismiss and the
+ * (`closesWhen` is `by: 'event'`). Such a card is never dismissed: the Inbox offers no Dismiss and the
  * daemon refuses one, so nothing can be dismissed and come back.
  */
 export const CARD_CLOSES_ITSELF = 'closesItself';

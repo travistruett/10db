@@ -59,6 +59,8 @@ export const DEV_UI_READS: readonly string[] = [
   '/models/measures',
   '/models/offers',
   '/models/status',
+  // The header's status line: what pauses work, with process names and no command lines. Memory only.
+  '/status',
   '/settings/keep-awake',
   '/settings/agent-skill',
   '/agent-skill',

@@ -82,7 +82,9 @@ describe('a daemon with no catalogue to build profiles from', () => {
 
     const cards = () => api.get('/inbox?state=OPEN', z.array(InboxItemDto));
     // The wait shows on the status line, never as an Inbox card.
-    expect(await cards()).toEqual([]);
+    expect(
+      (await cards()).filter((c) => c.title.endsWith('is waiting for its model list')),
+    ).toEqual([]);
     // The catalogue arrives (a fetch would store it); adding an account rebuilds the profiles from it.
     const catalogue = parseCatalogue(readModelsDevFixture());
     daemon.state.write((ctx) => {

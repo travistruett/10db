@@ -4528,7 +4528,7 @@ describe('a flag with a fold key', () => {
     expect(cardsResolvedByEvent(state.db, null).map((c) => c.item.id)).toEqual([first.id]);
   });
 
-  it('stores no closer in the detail for a card the builder answers, and only the marker for one 10db withdraws', () => {
+  it('stores no closer in the detail for a card the builder answers, and none for one 10db withdraws', () => {
     const answered = inbox.flag({ ...refusal(), foldKey: 'ans-one' });
     expect(answered.detail).toBeNull();
     const withdrawn = inbox.flag({
@@ -4536,7 +4536,7 @@ describe('a flag with a fold key', () => {
       foldKey: 'wd-one',
       closesWhen: { by: 'withdrawn', when: 'the cause is gone (test)' },
     });
-    expect(withdrawn.detail).toEqual({ closesItself: true });
+    expect(withdrawn.detail).toBeNull();
   });
 });
 
@@ -4584,7 +4584,10 @@ describe('a card that closes itself', () => {
     return inbox.flag({
       tier: 'ask',
       urgency: 'high',
-      closesWhen: { by: 'withdrawn', when: 'the hold lifts' },
+      closesWhen: {
+        by: 'event',
+        when: { event: 'update_installed', commit: 'abc' },
+      },
       projectId: ws.project.id,
       workstreamId: null,
       title: 'Free disk is low',

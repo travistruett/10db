@@ -14,6 +14,8 @@ export interface StatusService {
   release(key: string): void;
   /** The lines shown now, oldest first. */
   current(): StatusDto;
+  /** Cancels every timer and drops every hold; a hold made after it is ignored, so nothing fires again. */
+  stop(): void;
 }
 
 type Phase = 'pending' | 'shown' | 'lingering';
@@ -36,6 +38,7 @@ export function createStatusService(deps: {
   readonly onChange: (status: StatusDto) => void;
 }): StatusService {
   const entries = new Map<string, Entry>();
+  let stopped = false;
 
   const visible = (entry: Entry): boolean => entry.phase !== 'pending';
   const current = (): StatusDto => ({
@@ -57,6 +60,7 @@ export function createStatusService(deps: {
 
   return {
     hold(key, hold) {
+      if (stopped) return;
       const entry = entries.get(key);
       if (entry === undefined) {
         const created: Entry = { hold, since: deps.clock.now(), phase: 'pending', timer: null };
@@ -94,5 +98,10 @@ export function createStatusService(deps: {
       });
     },
     current,
+    stop() {
+      stopped = true;
+      for (const entry of entries.values()) entry.timer?.cancel();
+      entries.clear();
+    },
   };
 }

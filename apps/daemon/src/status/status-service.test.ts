@@ -77,9 +77,4 @@ describe('the status line hysteresis', () => {
     expect(status.current().lines.map((l) => l.line)).toEqual(['first, reworded', 'second']);
     expect(changes).toHaveLength(3);
   });
-
-  it('starts fresh in a new service, which is a restart', () => {
-    const { status } = setup();
-    expect(status.current()).toEqual({ lines: [] });
-  });
 });

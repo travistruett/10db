@@ -1,7 +1,14 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { McpVerdict, type ProjectDto } from '@10db/contracts';
-import { createTestStore, recordMcpApproval, seedProject, type Store } from '@10db/db';
+import {
+  createTestStore,
+  getInboxItem,
+  listInbox,
+  recordMcpApproval,
+  seedProject,
+  type Store,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
 import { AwsCredentialsError, type AwsCredentialsExporter } from '../environment';
@@ -31,8 +38,8 @@ const logger: Logger = {
 
 beforeEach(() => {
   ({ store, close } = createTestStore());
-  project = seedProject(store);
   repo = tempDir('project-mcp-reader');
+  project = seedProject(store, { repoPath: repo.path });
   flags = [];
   logs = [];
   const real = createInboxService({
@@ -197,5 +204,25 @@ describe('the project MCP reader', () => {
     expect(flags.map((f) => f.title)).toEqual([
       "The repo's MCP config stops sessions from starting",
     ]);
+  });
+
+  it('an MCP failure card is dismissed like any, and still closes when the config changes', async () => {
+    declare({ 'aws-billing': BILLING });
+    approveAll();
+    const failing = () => reader(() => Promise.reject(new AwsCredentialsError('Expired.', true)));
+    await read(failing());
+    const open = () => listInbox(store.db, { states: ['OPEN'] });
+    const card = open()[0];
+    if (!card) throw new Error('no card');
+    inbox.answer(card.id, { choice: 'dismissed' });
+    expect(getInboxItem(store.db, card.id).state).not.toBe('OPEN');
+
+    await read(failing());
+    const again = open()[0];
+    if (!again) throw new Error('no second card');
+    expect(again.id).not.toBe(card.id);
+    declare({ 'aws-billing': { ...BILLING, args: ['changed'] } });
+    await read(reader(() => Promise.resolve(CREDENTIALS)));
+    expect(getInboxItem(store.db, again.id).state).toBe('RESOLVED');
   });
 });

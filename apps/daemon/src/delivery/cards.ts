@@ -742,6 +742,7 @@ export function wrongBranchCard(
         closesWhen: { by: 'event', when: { event: 'batch_shipped', batchId: batch.id } },
         title: `Batch "${batch.title}" not shipped: ${where}`,
         body: `10db ships only from the batch branch, and pushed nothing. Run git switch ${shellWord(branch)} in ${repoPath}, then press Retry in a task's drawer on the Board.`,
+        foldKey: shipFailureFoldKey(batch.id),
         // Retry ship and Abandon, as every other ship failure offers.
         detail: answers(batch),
       };
@@ -835,8 +836,14 @@ export interface ShipFailure {
 }
 
 /**
- * A ship failure's card: it stays until the batch ships, which closes it, and it is high because the
- * batch is stopped until the builder acts.
+ * The fold key of a batch's ship-failure cards: one open at a time, so a failure that repeats updates the
+ * card in place, and abandoning the batch withdraws it.
+ */
+export const shipFailureFoldKey = (batchId: BatchId): string => `ship-failed:${batchId}`;
+
+/**
+ * A ship failure's card: it stays until the batch ships, which closes it (or the batch is abandoned,
+ * which withdraws it), and it is high because the batch is stopped until the builder acts.
  */
 function shipCard(
   batch: BatchDto,
@@ -844,6 +851,7 @@ function shipCard(
 ): Card {
   return {
     ...text,
+    foldKey: shipFailureFoldKey(batch.id),
     tier: CardTier.Ask,
     urgency: Urgency.High,
     closesWhen: { by: 'event', when: { event: 'batch_shipped', batchId: batch.id } },
@@ -1544,12 +1552,14 @@ export const passCards = {
   /**
    * The daemon stopped opening a pass after it made the pass's branch and before the pass was
    * written, and something has moved since, so start-up could not take it back. `folder` is Your
-   * folder, where the branch is dealt with; the card closes once the branch is gone.
+   * folder, where the branch is dealt with; the card closes once the branch is gone, or on a dismiss.
    */
   unopened: (record: PassDirtRecord, folder: string): Card => ({
     tier: CardTier.Ask,
     urgency: Urgency.High,
-    closesWhen: { by: 'withdrawn', when: 'the branch is gone (pass-recover, at start)' },
+    // The branch is dealt with by hand and may be left, so a dismiss closes the card as well as the
+    // start-up withdrawal once the branch is gone.
+    closesWhen: BY_ANSWER,
     title: `${record.branch} is left from a UI Workbench pass that did not open`,
     body:
       `10db stopped while opening a UI Workbench pass, after it made ${record.branch} at the commit ${record.returnBranch} was on and before the pass was recorded. ` +
@@ -1643,6 +1653,9 @@ const leftOutAgain = (attempt: LeftOutAttempt): string =>
       : `Ship anyway would put the commits of ${leftOutNames(attempt)} in the pull request.`
   }`;
 
+const batchIsOver = ({ state }: BatchDto): boolean =>
+  state === BatchState.Abandoned || state === BatchState.Shipped || state === BatchState.Closed;
+
 /** What Ship without it tells the builder when it could not revert a failed task's commits. */
 export const leftOutCards = {
   /**
@@ -1668,8 +1681,11 @@ export const leftOutCards = {
           refresh: true,
           tier: CardTier.Ask,
           urgency: Urgency.Normal,
-          // The batch may still ship another way, and abandoning it withdraws the card.
-          closesWhen: { by: 'event', when: { event: 'batch_shipped', batchId: batch.id } },
+          // An open or failed batch may still ship another way, which closes the card. One that is over
+          // never ships, so only the builder closes it.
+          closesWhen: batchIsOver(batch)
+            ? BY_ANSWER
+            : { by: 'event', when: { event: 'batch_shipped', batchId: batch.id } },
         };
   },
   /**

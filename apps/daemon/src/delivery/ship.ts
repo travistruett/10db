@@ -1591,7 +1591,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
             `The batch became ${state.toLowerCase()} while the answer ran, so its notices were not written.`,
             state,
           )
-        : leftOutCards.notStarted(batch, attempt, `the batch is ${state.toLowerCase()}`, false);
+        : leftOutCards.notStarted(
+            { ...batch, state },
+            attempt,
+            `the batch is ${state.toLowerCase()}`,
+            false,
+          );
     };
     /** Null when the state cannot be read: a stopping daemon may have closed the database. */
     const stateNow = (): BatchState | null => {

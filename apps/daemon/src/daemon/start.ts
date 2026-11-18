@@ -3029,6 +3029,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       loadGuard.stop();
       updateDrain.stop();
       installHold.stop();
+      // After every source that holds or releases a line: a pending timer must not write to the closed database.
+      status.stop();
       // After the runner too: what its sessions could not stop stays for the next start.
       ledgerSweep?.stop();
       await preparer.idle();

@@ -9,6 +9,7 @@ import {
   insertEvidence,
   insertToolOp,
   listEvidence,
+  listInbox,
   listToolOps,
   listWorkstreams,
   setTaskStatus,
@@ -25,7 +26,7 @@ import {
   planForStart,
   retryWorkstream,
 } from '../team';
-import { leftOutCards } from './cards';
+import { leftOutCards, shipCards } from './cards';
 import { raise } from './context';
 import { batchCardFields, createBatchCardAnswers } from './index';
 import { leftOutNotices } from './notices';
@@ -737,7 +738,12 @@ describe('the failed workstream card', () => {
         await h.jobs.idle();
 
         expect(getBatch(h.store.db, batchId).state).toBe('SHIPPED');
-        const stopped = h.only(h.cards().filter((c) => c.title.includes('was not left out')));
+        // The ship finished, which closes the card; what it said stays on the resolved card.
+        const stopped = h.only(
+          listInbox(h.store.db, { states: ['OPEN', 'RESOLVED'] }).filter((c) =>
+            c.title.includes('was not left out'),
+          ),
+        );
         expect(stopped.title).toMatch(/the batch is shipping/);
         expect(stopped.body).toMatch(/Ship without it changed nothing/);
         expect(stopped.body).not.toMatch(/Nothing was shipped|branch is unchanged/);
@@ -1483,7 +1489,12 @@ describe('the failed workstream card', () => {
           h.shipper.shipAnyway(batchId);
           await h.jobs.idle();
 
-          const stopped = h.only(h.cards().filter((c) => c.title.includes('was not left out')));
+          // The ship finished, which closes the card; what it said stays on the resolved card.
+          const stopped = h.only(
+            listInbox(h.store.db, { states: ['OPEN', 'RESOLVED'] }).filter((c) =>
+              c.title.includes('was not left out'),
+            ),
+          );
           expect(stopped.body).toContain(revert.slice(0, 9));
           expect(stopped.body).not.toMatch(/Ship without it changed nothing/);
           expect(stopped.options).toEqual([]);
@@ -1774,6 +1785,22 @@ describe('the failed workstream card', () => {
           ),
         );
         const open = h.only(h.cards().filter((c) => c.title.includes('conflicts')));
+
+        h.shipper.abandon(batchId);
+
+        expect(getInboxItem(h.store.db, open.id).state).not.toBe('OPEN');
+      });
+
+      it('keeps one ship-failure card when the failure repeats, and closes it when the batch is abandoned', async () => {
+        const { batchId } = await failedInBatch('DONE', { 'src/api/alpha.txt': 'a\n' });
+        const batch = getBatch(h.store.db, batchId);
+        const fail = (path: string) => {
+          raise(inbox, h.project.id, shipCards.dirtyCheckout(batch, [path]).card);
+        };
+        fail('a.txt');
+        fail('b.txt');
+        const open = h.only(h.cards().filter((c) => c.title.includes('uncommitted')));
+        expect(open.body).toContain('b.txt');
 
         h.shipper.abandon(batchId);
 

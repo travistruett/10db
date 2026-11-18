@@ -2630,7 +2630,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     // it is left out and named.
     const sandboxFailures = laneSession?.mcpFailures ?? [];
     for (const failure of sandboxFailures)
-      flagMcpFailure(opts.inbox, project.id, id, failure, checkout);
+      flagMcpFailure(opts.inbox, project.id, id, failure, project.repoPath);
     const mcpNote = skippedServersNote(
       { ...projectMcp, failures: [...projectMcp.failures, ...sandboxFailures] },
       opts.laneSandbox ? [] : Object.keys(mcpServers.stdio),

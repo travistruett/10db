@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import {
   CARD_OPENS,
+  CARD_RESOLVES_WHEN,
   Urgency,
   type ProjectDto,
   type ProjectId,
@@ -20,44 +21,48 @@ import {
   type RepoMcp,
 } from '../sessions';
 import { earlierMcpApproval, requestMcpApproval } from './mcp-approval';
-import type { CardClosesWhen } from './card-tier';
 import type { InboxService } from './service';
-import { CardTier } from './card-tier';
+import { BY_ANSWER, CardTier } from './card-tier';
 import { resolveStaleCards } from './resolve-cards';
 
 /**
- * What an MCP config card carries: the closer that names the config it was raised on, and the link that
- * opens the file where the fix is made.
+ * What an MCP config card carries: the link that opens the project's own config file, where the fix is
+ * made, and the closer that names the hash of that file. The fix can also be made elsewhere (an
+ * environment variable, an AWS sign-in), so the card is answered by a dismiss as well; it still closes
+ * itself when the config changes. The hash is the project checkout's, never a worktree's, so
+ * alternating worktrees can't close and re-raise the card.
  */
 function configCard(
   projectId: ProjectId,
-  checkout: string,
+  repoPath: string,
 ): {
-  readonly closesWhen: CardClosesWhen;
+  readonly closesWhen: typeof BY_ANSWER;
   readonly detail: Record<string, Json>;
 } {
   return {
-    closesWhen: {
-      by: 'event',
-      when: { event: 'mcp_config_changed', projectId, hash: repoMcpHash(checkout) },
-    },
+    closesWhen: BY_ANSWER,
     detail: {
-      [CARD_OPENS]: { to: 'path', path: join(checkout, '.mcp.json'), label: 'Open the Config' },
+      [CARD_OPENS]: { to: 'path', path: join(repoPath, '.mcp.json'), label: 'Open the Config' },
+      [CARD_RESOLVES_WHEN]: {
+        event: 'mcp_config_changed',
+        projectId,
+        hash: repoMcpHash(repoPath),
+      },
     },
   };
 }
 
 /**
- * Closes the project's open MCP config cards raised on a config that has changed since: `checkout`'s
- * config hashes to something else now.
+ * Closes the project's open MCP config cards raised on a config that has changed since: the project
+ * checkout's config at `repoPath` hashes to something else now.
  */
 export function resolveMcpConfigCards(
   db: DbReader,
   inbox: Pick<InboxService, 'resolve'>,
   projectId: ProjectId,
-  checkout: string,
+  repoPath: string,
 ): void {
-  const hash = repoMcpHash(checkout);
+  const hash = repoMcpHash(repoPath);
   resolveStaleCards(db, inbox, projectId, (when) =>
     when.event === 'mcp_config_changed' && when.projectId === projectId && when.hash !== hash
       ? "The repo's MCP config changed"
@@ -71,14 +76,14 @@ export function flagMcpFailure(
   projectId: ProjectId,
   workstreamId: WorkstreamId | null,
   failure: { readonly name: string; readonly message: string },
-  checkout: string,
+  repoPath: string,
 ): void {
   inbox.flag({
     projectId,
     workstreamId,
     tier: CardTier.Ask,
     urgency: Urgency.Normal,
-    ...configCard(projectId, checkout),
+    ...configCard(projectId, repoPath),
     title: `The repo's MCP server "${failure.name}" can't run as written`,
     body: failure.message,
     foldKey: `project-mcp-failure:${projectId}:${failure.name}`,
@@ -117,7 +122,7 @@ export function createProjectMcpReader(deps: ProjectMcpReaderDeps): ProjectMcpRe
   return {
     async read({ project, checkout, workstreamId, env }) {
       // A config that changed since a card was raised ends the card, whether or not this read is clean.
-      resolveMcpConfigCards(deps.state.db, deps.inbox, project.id, checkout);
+      resolveMcpConfigCards(deps.state.db, deps.inbox, project.id, project.repoPath);
       let repo: RepoMcp;
       try {
         repo = readRepoMcp(checkout);
@@ -128,7 +133,7 @@ export function createProjectMcpReader(deps: ProjectMcpReaderDeps): ProjectMcpRe
             workstreamId,
             tier: CardTier.Ask,
             urgency: Urgency.High,
-            ...configCard(project.id, checkout),
+            ...configCard(project.id, project.repoPath),
             title: "The repo's MCP config stops sessions from starting",
             body: error.message,
             foldKey: `project-mcp-error:${project.id}`,
@@ -154,7 +159,7 @@ export function createProjectMcpReader(deps: ProjectMcpReaderDeps): ProjectMcpRe
           workstreamId,
           tier: CardTier.Ask,
           urgency: Urgency.Normal,
-          ...configCard(project.id, checkout),
+          ...configCard(project.id, project.repoPath),
           title: "Check the repo's MCP config",
           body: warning,
           foldKey: `project-mcp-warning:${project.id}`,
@@ -168,7 +173,7 @@ export function createProjectMcpReader(deps: ProjectMcpReaderDeps): ProjectMcpRe
           earlierMcpApproval(deps.state.db, project.id, review.name),
         );
       for (const failure of mcp.failures)
-        flagMcpFailure(deps.inbox, project.id, workstreamId, failure, checkout);
+        flagMcpFailure(deps.inbox, project.id, workstreamId, failure, project.repoPath);
       // Names only, never values. The live acceptance check reads this line by its message and field names.
       deps.logger.info(
         {

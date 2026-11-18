@@ -257,11 +257,11 @@ export interface InboxService {
  * change it records commits both together, or neither.
  */
 export function flagCard(ctx: WriteContext, input: FlagInput): InboxItemDto {
-  const closesItself = input.closesWhen.by !== 'answer';
+  const closesItself = input.closesWhen.by === 'event';
   const stored: Record<string, Json> | null = closesItself
     ? {
         ...input.detail,
-        ...(input.closesWhen.by === 'event' ? { [CARD_RESOLVES_WHEN]: input.closesWhen.when } : {}),
+        [CARD_RESOLVES_WHEN]: input.closesWhen.when,
         [CARD_CLOSES_ITSELF]: true,
       }
     : (input.detail ?? null);

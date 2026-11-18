@@ -17,7 +17,7 @@ export type InboxRowCard = Pick<
 
 /**
  * A flag or a move report with no options closes on any answer, so it can be dismissed without opening it.
- * A condition card, which closes when its cause clears (`detail.closesItself`), is never dismissed.
+ * A condition card, which closes on an event (`detail.closesItself`), is never dismissed.
  */
 export function isDismissable(card: Pick<InboxItemDto, 'kind' | 'options' | 'detail'>): boolean {
   return (
