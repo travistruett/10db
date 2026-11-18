@@ -64,7 +64,7 @@ function Rows({
   let fromIndex = lastIndex;
   if (firstRowDue && loaded && !rows.isPlaceholder) {
     setFirstRowDue(false);
-    fromKey = keys[0] ?? null;
+    fromKey = selectedKey !== null && keys.includes(selectedKey) ? selectedKey : (keys[0] ?? null);
     fromIndex = 0;
   }
   const pick = loaded

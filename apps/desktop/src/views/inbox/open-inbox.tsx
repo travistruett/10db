@@ -127,9 +127,7 @@ export function OpenInbox({
   let fromIndex = lastIndex;
   if (firstRowDue && loaded && !open.isPlaceholder) {
     setFirstRowDue(false);
-    setDraft(null);
-    setNotice(null);
-    fromKey = keys[0] ?? null;
+    fromKey = selectedKey !== null && keys.includes(selectedKey) ? selectedKey : (keys[0] ?? null);
     fromIndex = 0;
   }
   const pick = loaded

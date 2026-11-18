@@ -2281,6 +2281,36 @@ describe('the Inbox panel', () => {
     expect(answers).toEqual([]);
   });
 
+  it('keeps the selected row and its draft when a search still holds the row', async () => {
+    const cards = [
+      question('Alpha retry?', 0),
+      question('Beta retry?', 1),
+      question('Gamma other?', 2),
+    ];
+    inbox(cards);
+    serveInboxRows({ open: cards });
+    renderApp('/inbox');
+    await findText('Alpha retry?');
+    key('j');
+    await waitFor(() => {
+      expect(selectedCard().textContent).toContain('Beta retry?');
+    });
+    fireEvent.change(screen.getByLabelText('Note for the agent (optional)'), {
+      target: { value: 'half written' },
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search the Inbox' }), {
+      target: { value: 'retry' },
+    });
+    await waitFor(() => {
+      expect(panelRowTexts(2)).toBeTruthy();
+      expect(rows()).toHaveLength(2);
+    });
+    expect(selectedCard().textContent).toContain('Beta retry?');
+    expect(screen.getByLabelText<HTMLTextAreaElement>('Note for the agent (optional)').value).toBe(
+      'half written',
+    );
+  });
+
   describe('paging with the keys', () => {
     const pageTwo = (query: Record<string, string>): boolean => query['after'] !== undefined;
     const pageTwoReads = (asked: Record<string, string>[]): number => asked.filter(pageTwo).length;
