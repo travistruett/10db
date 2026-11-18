@@ -1959,6 +1959,7 @@ export function createApp(deps: ApiDeps) {
       (c) => c.json(deps.services.setCapacitySettings(c.req.valid('json'))),
     )
     .get('/admission', (c) => c.json(deps.services.admission()))
+    .get('/status', (c) => c.json(deps.services.status()))
     .get('/settings/sessions', (c) => c.json(deps.services.sessionsSettings()))
     .put(
       '/settings/sessions',

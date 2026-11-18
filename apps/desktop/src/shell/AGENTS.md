@@ -23,7 +23,7 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
   backdrop, or moving anywhere closes a sheet.
 - The rail is `rail.tsx` over `rail-items.ts` (`RAIL_ITEMS`, one flat list with no group type; a route maps to its
   section with `railSectionForPath`) and draws labelled or icons only from `RailModeContext` (`rail-mode.ts`), which the
-  project row and the status controls read. `rail-badges.tsx` draws the counts.
+  project row and the status controls read. `rail-badges.tsx` draws the counts. `status-line.tsx` is the foot's status control: the oldest shown hold's sentence (`GET /status`, refetched on `status.changed`, never polled), "+N" when more, and a popover with every hold's details and busiest processes; it draws nothing while nothing is held.
 
 ## Drawing into the frame
 

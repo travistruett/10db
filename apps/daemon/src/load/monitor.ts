@@ -1,12 +1,5 @@
 import { availableParallelism, loadavg } from 'node:os';
-import {
-  ACTIVE_STATES,
-  BatchState,
-  type InboxItemId,
-  type ProjectId,
-  type WorkstreamId,
-  Urgency,
-} from '@10db/contracts';
+import { ACTIVE_STATES, BatchState, type WorkstreamId } from '@10db/contracts';
 import {
   findOpenByFoldKey,
   getBatchRow,
@@ -22,22 +15,15 @@ import type { Clock } from '../clock';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
-import { OVERLOAD_FOLD_KEY, overloadCard } from './card';
-import { projectForMachineCard } from './card-project';
+import type { StatusService } from '../status';
+import { OVERLOAD_FOLD_KEY, overloadStatus } from './card';
 import {
   findCulprits,
   systemProcessSnapshot,
   type KnownProcesses,
   type ProcessSnapshot,
 } from './culprits';
-import {
-  createLoadGuard,
-  type LoadGuard,
-  type LoadGuardOptions,
-  type LoadReading,
-  type OverloadReport,
-} from './guard';
-import { CardTier } from '../inbox';
+import { createLoadGuard, type LoadGuard, type LoadGuardOptions, type LoadReading } from './guard';
 
 /** The temp dir of each lane session that is running, which the runner records and forgets. */
 export interface LaneTempDirs {
@@ -116,7 +102,9 @@ export interface LoadMonitorOptions extends Partial<
   Pick<LoadGuardOptions, 'read' | 'sampleMs' | 'overloadFactor' | 'sustainedMs' | 'clearFactor'>
 > {
   readonly state: StateStore;
-  readonly inbox: Pick<InboxService, 'flag' | 'withdraw'>;
+  /** Only to withdraw the card an earlier run raised for the overload. */
+  readonly inbox: Pick<InboxService, 'withdraw'>;
+  readonly status: Pick<StatusService, 'hold' | 'release'>;
   readonly clock: Clock;
   readonly logger: Logger;
   readonly daemonPid: number;
@@ -129,21 +117,18 @@ export interface LoadMonitorOptions extends Partial<
   readonly processes?: ProcessSnapshot;
 }
 
+const OVERLOAD_STATUS_KEY = 'overload';
+
 /**
- * The load guard with its card: one card from the moment an overload is declared, reworded as the busy
- * processes change, and withdrawn when it ends. The card sits on the project with the oldest work in
- * flight, or the first project; with no project there is nowhere to put it and only the log says so.
- * A card left open by an earlier run is withdrawn when the monitor is made.
+ * The load guard with its status line: the hold is reported from the moment an overload is declared,
+ * with the busy processes as they change, and lifted when it ends. It raises no card; one left open by
+ * an earlier run, which raised one, is withdrawn when the monitor is made.
  */
 export function createLoadMonitor(opts: LoadMonitorOptions): LoadGuard {
   const db = opts.state.db;
   const processes = opts.processes ?? systemProcessSnapshot();
-  let card: { readonly id: InboxItemId; body: string } | null = null;
-  let cardProject: ProjectId | null = null;
 
-  // A card a run before this one left open, when the daemon restarted mid-overload, would otherwise
-  // say 10db is holding work for good. This guard starts not overloaded and raises a card again if
-  // the overload is still on.
+  // A card an earlier version raised and a run left open would say for good that 10db is holding work.
   for (const project of listProjects(db)) {
     try {
       const stale = findOpenByFoldKey(db, project.id, OVERLOAD_FOLD_KEY);
@@ -154,26 +139,6 @@ export function createLoadMonitor(opts: LoadMonitorOptions): LoadGuard {
         'could not withdraw an overload card left from before a restart',
       );
     }
-  }
-
-  function raise(report: OverloadReport): void {
-    const content = overloadCard(report);
-    if (card?.body === content.body) return;
-    cardProject ??= projectForMachineCard(db);
-    if (cardProject === null) return;
-    const item = opts.inbox.flag({
-      projectId: cardProject,
-      workstreamId: null,
-      tier: CardTier.Status,
-      urgency: Urgency.Low,
-      // S2: status line
-      closesWhen: { by: 'withdrawn', when: 'the load hold lifts (monitor)' },
-      title: content.title,
-      body: content.body,
-      foldKey: content.foldKey,
-      refresh: true,
-    });
-    card = { id: item.id, body: content.body };
   }
 
   return createLoadGuard({
@@ -193,26 +158,10 @@ export function createLoadMonitor(opts: LoadMonitorOptions): LoadGuard {
         }),
       ),
     onOverloaded: (report) => {
-      try {
-        raise(report);
-      } catch (error) {
-        opts.logger.error(
-          { err: error instanceof Error ? error.message : String(error) },
-          'could not raise the overload card',
-        );
-      }
+      opts.status.hold(OVERLOAD_STATUS_KEY, overloadStatus(report));
     },
     onCleared: () => {
-      try {
-        if (card) opts.inbox.withdraw(card.id);
-      } catch (error) {
-        opts.logger.error(
-          { err: error instanceof Error ? error.message : String(error) },
-          'could not withdraw the overload card',
-        );
-      }
-      card = null;
-      cardProject = null;
+      opts.status.release(OVERLOAD_STATUS_KEY);
       opts.onCleared();
     },
   });

@@ -1,10 +1,9 @@
-import type { AccountId, InboxItemId, ProjectId } from '@10db/contracts';
+import { StatusKind, type AccountId } from '@10db/contracts';
 import { findOpenByFoldKey, listAccounts, listProjects, type DbReader } from '@10db/db';
 import type { Clock } from '../clock';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
-import { Urgency } from '@10db/contracts';
-import { CardTier } from '../inbox';
+import type { StatusService } from '../status';
 
 /** How long a lane's queued work leaves an account alone when no model profile exists for it yet. */
 export const MODEL_LIST_WAIT_MS = 5 * 60_000;
@@ -12,15 +11,15 @@ export const MODEL_LIST_WAIT_MS = 5 * 60_000;
 export interface ModelListWait {
   /**
    * A lane found no model profile of the account's provider, so its step went back to the queue. The account's
-   * queued work is left alone until profiles are rebuilt or `MODEL_LIST_WAIT_MS` passes, a card says so, and
-   * the first hold of an account is logged.
+   * queued work is left alone until profiles are rebuilt or `MODEL_LIST_WAIT_MS` passes, the status line says
+   * so, and the first hold of an account is logged.
    */
-  hold(account: { readonly id: AccountId; readonly label: string }, projectId: ProjectId): void;
+  hold(account: { readonly id: AccountId; readonly label: string }): void;
   /** Whether the scheduler should leave this account's queued work alone now. */
   holds(id: AccountId): boolean;
   /**
-   * Profiles were rebuilt: every hold ends, so a lane tries again, and the card of an account that now has
-   * profiles is closed. Asks for a scheduler tick when it ended a hold.
+   * Profiles were rebuilt: every hold ends, so a lane tries again, and one that still finds none holds again.
+   * Asks for a scheduler tick when it ended a hold.
    */
   release(hasProfiles: (id: AccountId) => boolean): void;
 }
@@ -28,69 +27,46 @@ export interface ModelListWait {
 interface Waiting {
   /** When the hold began; null once a rebuild has ended it. */
   since: Date | null;
-  /** Whether this daemon has logged a hold of the account; a card taken on from an earlier one is not. */
-  logged: boolean;
-  readonly cards: Map<ProjectId, InboxItemId>;
 }
 
-const cardKey = (id: AccountId): string => `model-list-wait:${id}`;
+const statusKey = (id: AccountId): string => `model-list-wait:${id}`;
 
 export function createModelListWait(deps: {
-  /** Read once, at creation, for the cards an earlier daemon left open. */
+  /** Read once, at creation, for the cards an earlier version left open. */
   readonly db: DbReader;
   readonly clock: Clock;
-  readonly inbox: Pick<InboxService, 'flag' | 'resolve'>;
+  readonly inbox: Pick<InboxService, 'withdraw'>;
+  readonly status: Pick<StatusService, 'hold' | 'release'>;
   readonly logger: Pick<Logger, 'info'>;
   /** A hold ended: the scheduler looks again. */
   readonly onReleased: () => void;
 }): ModelListWait {
   const waiting = new Map<AccountId, Waiting>();
-  // The holds lived in the earlier daemon's memory, but its cards are stored: they are taken on with no hold,
-  // so the first rebuild closes those of an account that has profiles, and a lane that still finds none folds
-  // its new card into the same one.
-  const accounts = listAccounts(deps.db, { includeArchived: true });
+  // A card an earlier version raised for this wait and left open would say for good that an account waits.
   for (const project of listProjects(deps.db)) {
-    for (const account of accounts) {
-      const card = findOpenByFoldKey(deps.db, project.id, cardKey(account.id));
-      if (card === undefined) continue;
-      const entry = waiting.get(account.id) ?? {
-        since: null,
-        logged: false,
-        cards: new Map<ProjectId, InboxItemId>(),
-      };
-      entry.cards.set(project.id, card.id);
-      waiting.set(account.id, entry);
+    for (const account of listAccounts(deps.db, { includeArchived: true })) {
+      const card = findOpenByFoldKey(deps.db, project.id, statusKey(account.id));
+      if (card !== undefined) deps.inbox.withdraw(card.id);
     }
   }
+  const logged = new Set<AccountId>();
   return {
-    hold(account, projectId) {
-      let entry = waiting.get(account.id);
-      if (entry === undefined) {
-        entry = { since: null, logged: false, cards: new Map() };
-        waiting.set(account.id, entry);
-      }
-      if (!entry.logged) {
-        entry.logged = true;
+    hold(account) {
+      if (!logged.has(account.id)) {
+        logged.add(account.id);
         deps.logger.info(
           { accountId: account.id },
           'an account has no model profile yet, so its queued work waits for the model list',
         );
       }
-      entry.since = deps.clock.now();
-      entry.cards.set(
-        projectId,
-        deps.inbox.flag({
-          projectId,
-          workstreamId: null,
-          tier: CardTier.Status,
-          urgency: Urgency.Low,
-          // S2: status line
-          closesWhen: { by: 'withdrawn', when: "the account's model list arrives" },
-          title: `${account.label} is waiting for its model list`,
-          body: `10db has no model profile for ${account.label} yet, so its queued work waits and is tried again when the model list arrives. This card closes by itself.`,
-          foldKey: cardKey(account.id),
-        }).id,
-      );
+      waiting.set(account.id, { since: deps.clock.now() });
+      deps.status.hold(statusKey(account.id), {
+        kind: StatusKind.ModelListWait,
+        label: `${account.label} waiting for models`,
+        line: `${account.label} is waiting for its model list`,
+        details: `10db has no model profile for ${account.label} yet, so its queued work waits and is tried again when the model list arrives.`,
+        culprits: [],
+      });
     },
     holds(id) {
       const since = waiting.get(id)?.since;
@@ -104,11 +80,9 @@ export function createModelListWait(deps: {
       let ended = false;
       for (const [id, entry] of waiting) {
         if (entry.since !== null) ended = true;
-        entry.since = null;
-        if (!hasProfiles(id)) continue;
-        for (const card of entry.cards.values())
-          deps.inbox.resolve(card, 'The account’s model profiles are ready.');
-        waiting.delete(id);
+        deps.status.release(statusKey(id));
+        if (hasProfiles(id)) waiting.delete(id);
+        else entry.since = null;
       }
       if (ended) deps.onReleased();
     },

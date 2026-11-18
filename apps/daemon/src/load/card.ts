@@ -1,3 +1,5 @@
+import { StatusKind } from '@10db/contracts';
+import type { StatusHold } from '../status';
 import type { Culprit, Owner, OverloadNote, OverloadReport } from './guard';
 
 export const OVERLOAD_FOLD_KEY = 'machine-overloaded';
@@ -22,10 +24,6 @@ function whose(owner: Owner): string {
     case 'other':
       return 'not 10db’s';
   }
-}
-
-function line(c: Culprit): string {
-  return `- pid ${String(c.pid)} (${c.command}) at ${String(Math.round(c.cpu))}% of a core: ${whose(c.owner)}`;
 }
 
 /** The macOS services that follow every file a worktree's installs and test runs touch. */
@@ -53,16 +51,32 @@ function advice(culprits: readonly Culprit[]): string {
   return parts.join(' ');
 }
 
-/** The one card the builder gets while the Mac is overloaded, rewritten at each sample. */
-export function overloadCard(report: OverloadReport): OverloadCard {
+/** The program's own name from a command line: `/Applications/Foo.app/Contents/MacOS/Foo --x` is `Foo`. */
+export function shortName(command: string): string {
+  const app = /([^/]+)\.app\//.exec(command);
+  if (app?.[1]) return app[1];
+  const first = command.trim().split(/\s+/)[0] ?? command;
+  return first.split('/').pop() ?? first;
+}
+
+/** What the status line says while the Mac is overloaded, rewritten at each sample. */
+export function overloadStatus(report: OverloadReport): StatusHold {
+  const load = `load ${String(Math.round(report.load))} on ${String(report.cores)} cores`;
   const what =
     report.culprits.length === 0
       ? '10db could not read which processes are using the CPU.'
-      : `Using the most CPU now:\n${report.culprits.map(line).join('\n')}\n\n${advice(report.culprits)}`;
+      : advice(report.culprits);
   return {
-    title: 'The Mac is overloaded: 10db is holding new lanes and gates',
-    body: `The load average is ${String(Math.round(report.load))} on ${String(report.cores)} cores and has stayed above twice that for several minutes. 10db starts no new lane session or gate until it falls, and starts them again by itself then. Lanes and gates already running carry on.\n\n${what}`.trimEnd(),
-    foldKey: OVERLOAD_FOLD_KEY,
+    kind: StatusKind.AdmissionHold,
+    label: 'Mac overloaded',
+    line: `Holding new lanes: the Mac is overloaded (${load})`,
+    details:
+      `The load average is ${String(Math.round(report.load))} on ${String(report.cores)} cores and has stayed above twice that for several minutes. 10db starts no new lane session or gate until it falls, and starts them again by itself then. Lanes and gates already running carry on.\n\n${what}`.trimEnd(),
+    culprits: report.culprits.map((c) => ({
+      name: shortName(c.command),
+      cpuPct: Math.round(c.cpu),
+      owner: whose(c.owner),
+    })),
   };
 }
 

@@ -42,6 +42,7 @@ import { queryKeys } from './queries';
 import { shapeKeys } from './shape-queries';
 import { screenKeys } from './screen-queries';
 import { skipKeys } from './skip-queries';
+import { statusKeys } from './status-queries';
 import { trustKeys } from './trust-queries';
 
 export const STREAM_RETRY_BASE_MS = 500;
@@ -139,6 +140,8 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   kind: [KINDS_KEY, modelKeys.all, ['tasks'], CANDIDATES],
   routing_rules: [CANDIDATES, ROUTING_RULES_KEY, QUESTION_ROUTES_KEY],
   benchmarks: [CANDIDATES],
+  // The holds the rail's status line shows: the daemon says when the shown set changes.
+  app: [statusKeys.all],
 };
 
 /** What to refetch for one event type, on top of its entity type's entries. */

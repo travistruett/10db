@@ -1977,7 +1977,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       case 'awaiting_profiles':
         requeue(id, ctl, 'the model catalogue has not been read yet', 'waiting for model profiles');
         // Without this the scheduler would claim the row again on every tick.
-        opts.modelWait?.hold(getAccountRow(db, ctl.accountId), row.projectId);
+        opts.modelWait?.hold(getAccountRow(db, ctl.accountId));
         return;
       case 'unready': {
         requeue(

@@ -27,6 +27,7 @@ describe('the rail', () => {
       'UI Workbench',
       'Knowledge',
       'spacer',
+      'control:status',
       'control:download',
       'control:daemon',
       'control:keep-awake',

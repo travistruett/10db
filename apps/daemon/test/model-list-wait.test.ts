@@ -64,7 +64,7 @@ const start = async (catalogueSnapshot?: string) => {
 };
 
 describe('a daemon with no catalogue to build profiles from', () => {
-  it('holds a lane with one card, then runs it on a real scheduler tick once an account is added and profiles are built', async () => {
+  it('holds a lane with no card, then runs it on a real scheduler tick once an account is added and profiles are built', async () => {
     const api = await start();
     const project = await api.post('/projects', ProjectDto, {
       name: 'wait',
@@ -81,10 +81,8 @@ describe('a daemon with no catalogue to build profiles from', () => {
     await api.post(`/tasks/${task.id}/start`, WorkstreamDto);
 
     const cards = () => api.get('/inbox?state=OPEN', z.array(InboxItemDto));
-    const card = await waitForAsync(async () =>
-      (await cards()).find((c) => c.title.endsWith('is waiting for its model list')),
-    );
-    expect(card.projectId).toBe(project.id);
+    // The wait shows on the status line, never as an Inbox card.
+    expect(await cards()).toEqual([]);
     // The catalogue arrives (a fetch would store it); adding an account rebuilds the profiles from it.
     const catalogue = parseCatalogue(readModelsDevFixture());
     daemon.state.write((ctx) => {
