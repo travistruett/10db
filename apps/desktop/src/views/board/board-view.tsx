@@ -563,8 +563,8 @@ export function BoardView() {
                 <Select
                   aria-label="Goal"
                   size="xs"
-                  // 220 px where there is room; narrower before it pushes the split button out of the row.
-                  style={{ flex: '0 1 220px', minWidth: 96 }}
+                  // 220 px where there is room, narrower in a narrow window so it never pushes the split button out.
+                  w="clamp(96px, 20vw, 220px)"
                   allowDeselect={false}
                   data={[
                     { value: ALL_GOALS, label: 'All goals' },

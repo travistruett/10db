@@ -86,9 +86,9 @@ export function AppFrame({
   );
   // What was opened over the content and where: moving anywhere (a row picked, a section opened) closes it.
   const [opened, setOpened] = useState<{ at: string; kind: SidebarSheet } | null>(null);
-  // A sheet belongs to the page it was opened on and to the sheet bands: moving on, or growing to a window
+  // A sheet belongs to the page (path) it was opened on and to the sheet bands: moving on, or growing to a window
   // that has no sheets, drops it for good rather than leaving it to come back on the way back.
-  if (opened !== null && (opened.at !== location || band === ShellBand.Wide)) setOpened(null);
+  if (opened !== null && (opened.at !== pathname || band === ShellBand.Wide)) setOpened(null);
   const hasPanel = panelSection !== null && panelSection === section;
   // The panel's sheet has nothing to show once its section has no panel (it left while the sheet was open).
   const sheet =
@@ -113,7 +113,7 @@ export function AppFrame({
     if (band === ShellBand.Wide) toggleLabels();
     else {
       setOpened(
-        sheet === SidebarSheet.Sections ? null : { at: location, kind: SidebarSheet.Sections },
+        sheet === SidebarSheet.Sections ? null : { at: pathname, kind: SidebarSheet.Sections },
       );
     }
   };
@@ -121,7 +121,7 @@ export function AppFrame({
   const togglePanel = (): void => {
     if (!hasPanel) return;
     if (band === ShellBand.Wide) togglePanelHidden();
-    else setOpened(sheet === null ? { at: location, kind: SidebarSheet.Panel } : null);
+    else setOpened(sheet === null ? { at: pathname, kind: SidebarSheet.Panel } : null);
   };
   const hidePanel = band === ShellBand.Wide && layout.panel === 'column' ? togglePanelHidden : null;
 
