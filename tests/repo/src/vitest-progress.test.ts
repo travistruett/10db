@@ -17,7 +17,13 @@ it('prints a line as each test file starts, before vitest reports the file', () 
       '--reporter=default',
       `--reporter=${join(repoRoot, 'scripts/vitest-progress.mjs')}`,
     ],
-    { cwd: fixture, encoding: 'utf8', env: { ...envWithoutGitVariables(), CI: '1' } },
+    {
+      cwd: fixture,
+      encoding: 'utf8',
+      // A runner that forces color (CI sets FORCE_COLOR) would wrap the check mark in escape codes
+      // and the text search below would not find it.
+      env: { ...envWithoutGitVariables(), CI: '1', FORCE_COLOR: '0', NO_COLOR: '1' },
+    },
   );
 
   expect(result.status, result.stderr).toBe(0);
