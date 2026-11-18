@@ -120,6 +120,24 @@ describe('PassWorkspace layout', () => {
     }
   });
 
+  it("leaves the pass's menu to the title row while the pass has no page, so it is drawn once", async () => {
+    renderWithDaemon(
+      <FrameSlots panelShown>
+        <PassWorkspace
+          view={passViewDto({ pages: [] })}
+          inbox={[]}
+          project={projectViewDto()}
+          selected={null}
+          onAddPage={vi.fn()}
+          onSelect={vi.fn()}
+          passActions={{ onRename: vi.fn(), onAbandon: vi.fn() }}
+        />
+      </FrameSlots>,
+    );
+    await screen.findByTestId('panel');
+    expect(screen.queryAllByRole('button', { name: 'More actions' })).toHaveLength(0);
+  });
+
   it('moves along the rows in the panel with j', async () => {
     await renderWorkspace(() => null, { panelShown: true });
     const rows = queueRows();

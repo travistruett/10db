@@ -182,7 +182,7 @@ export function PassWorkspace(props: PassWorkspaceProps) {
         section="workbench"
         title={view.pass.name}
         controls={
-          panelShown && passActions !== undefined ? (
+          panelShown && view.pages.length > 0 && passActions !== undefined ? (
             <PassMenu state={view.pass.state} {...passActions} />
           ) : undefined
         }
