@@ -37,6 +37,10 @@ add migrations at a time.
 
 **S4 follows S1,** because both change the watcher's `flag(` calls.
 
+**S4's hooks part runs ahead as its own task** (`tsk_01a1ed31-b681-76ca-9d4d-2c26012c83ef`), because it closes a live
+path out of the sandbox and touches no Inbox code. S4 keeps Trust This Version and the config and checksum
+excusals.
+
 **S3 runs last of the four.** Until S4 gives stray-write cards Trust This Version, they are Dismiss-only with no
 closer on sensitive paths, and S3's test would flag them. No milestone ever stops a card from being raised.
 
@@ -110,5 +114,5 @@ Spec §8. The plan is written only if you move it to needed. It absorbs `tsk_01a
 
 ## Filed separately (not in this roadmap)
 
-- Reduce the Mac's load: worktree sweep and Spotlight exclusion.
-- Per-type noise report on the Factory page.
+- Reduce the Mac's load: worktree sweep and Spotlight exclusion (`tsk_01a1ed31-b803-7029-9a68-b250e4d5f54d`).
+- Per-type noise report on the Factory page (`tsk_01a1ed31-b969-7799-a014-a3e5c33c2a11`).
