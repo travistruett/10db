@@ -10,6 +10,7 @@ import {
   HazardLookAgainResult,
   DevUiConnectionDto,
   HealthResponse,
+  CardTypesDto,
   HumanTouchDto,
   RigorFiguresDto,
   InvalidError,
@@ -1631,6 +1632,34 @@ describe('goal routes', () => {
     expect(HumanTouchDto.parse(await ok.json())).toEqual({ days: [day] });
     expect(asked).toEqual([projectId]);
     expect((await app(services).request('/projects/not-a-project/human-touch', auth)).status).toBe(
+      400,
+    );
+  });
+
+  it('GET /projects/:projectId/card-types answers the Inbox card types of the project asked for', async () => {
+    const asked: string[] = [];
+    const counts = { raised: 57, acted: 0, dismissed: 0, withdrawn: 55 };
+    const types: CardTypesDto = {
+      types: [
+        {
+          type: 'machine-overloaded',
+          last7Days: counts,
+          last30Days: { ...counts, raised: 64, withdrawn: 61 },
+          noisy: true,
+        },
+      ],
+    };
+    const services = stubServices({
+      cardTypes: (id) => {
+        asked.push(id);
+        return types;
+      },
+    });
+    const ok = await app(services).request(`/projects/${projectId}/card-types`, auth);
+    expect(ok.status).toBe(200);
+    expect(CardTypesDto.parse(await ok.json())).toEqual(types);
+    expect(asked).toEqual([projectId]);
+    expect((await app(services).request('/projects/not-a-project/card-types', auth)).status).toBe(
       400,
     );
   });

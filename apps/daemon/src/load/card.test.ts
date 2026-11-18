@@ -51,6 +51,32 @@ describe('overloadCard', () => {
     expect(card.body).toContain('Nothing here is 10db’s');
   });
 
+  it.each([
+    [
+      'Spotlight',
+      '/System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Support/mds_stores',
+    ],
+    [
+      'Spotlight',
+      '/System/Library/Frameworks/CoreServices.framework/Frameworks/Metadata.framework/Versions/A/Support/mdworker_shared',
+    ],
+    [
+      'the file-change watcher',
+      '/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd',
+    ],
+  ])('points a busy %s at what 10db can keep it off', (_name, command) => {
+    const card = overloadCard(report([{ pid: 5, cpu: 98, command, owner: { kind: 'other' } }]));
+    expect(card.body).toContain('Keep Spotlight Out');
+    expect(card.body).toContain('Remove Merged Worktrees');
+  });
+
+  it('does not mention Spotlight when it is not busy', () => {
+    const card = overloadCard(
+      report([{ pid: 9, cpu: 300, command: 'ffmpeg', owner: { kind: 'other' } }]),
+    );
+    expect(card.body).not.toContain('Spotlight');
+  });
+
   it('says a process left by an ended lane is 10db’s, and how to stop it', () => {
     const card = overloadCard(
       report([{ pid: 11, cpu: 99, command: 'sh loop.sh', owner: { kind: 'ended-lane' } }]),

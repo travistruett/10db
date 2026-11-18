@@ -42,6 +42,10 @@ describe('loadEnv', () => {
     expect(loadEnv({ TENDB_PORT: '0' }).TENDB_PORT).toBe(0);
   });
 
+  it('reads the days an eval run keeps its lane transcripts', () => {
+    expect(loadEnv({ TENDB_LANE_TRANSCRIPT_DAYS: '30' }).TENDB_LANE_TRANSCRIPT_DAYS).toBe(30);
+  });
+
   it('treats empty values as unset, as an exported .env.example leaves them', () => {
     expect(loadEnv({ TENDB_DATA_DIR: '', TENDB_PORT: '', TENDB_LOG_LEVEL: '' })).toEqual({
       TENDB_PORT: 4317,
@@ -131,6 +135,7 @@ describe('loadEnv', () => {
     ['zero gate slots', { TENDB_GATE_SLOTS: '0' }, 'TENDB_GATE_SLOTS'],
     ['a fractional gate slot count', { TENDB_GATE_SLOTS: '1.5' }, 'TENDB_GATE_SLOTS'],
     ['a text gate slot count', { TENDB_GATE_SLOTS: 'two' }, 'TENDB_GATE_SLOTS'],
+    ['zero transcript days', { TENDB_LANE_TRANSCRIPT_DAYS: '0' }, 'TENDB_LANE_TRANSCRIPT_DAYS'],
     [
       'a worktree root with a home shorthand',
       { TENDB_WORKTREE_ROOT: '~/wt' },

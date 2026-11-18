@@ -94,6 +94,7 @@ import type {
   GoalDto,
   GoalId,
   GoalListDto,
+  CardTypesDto,
   HumanTouchDto,
   RigorFiguresDto,
   RigorFiguresPeriod,
@@ -499,6 +500,11 @@ export interface ApiServices extends PlanRecordServices {
    * NotFoundError for an unknown project.
    */
   humanTouch(projectId: ProjectId): HumanTouchDto;
+  /**
+   * What became of each type of Inbox card the project raised over the last 7 and 30 days. Throws
+   * NotFoundError for an unknown project.
+   */
+  cardTypes(projectId: ProjectId): CardTypesDto;
   /**
    * What the project's tasks that became done in the last `days` days took, by rigor, and how often the
    * builder overrode the judge's sizing in the period. Throws NotFoundError for an unknown project.

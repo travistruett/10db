@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "2a4f10c0-a59e-4143-a73f-339f05b136b3",
+  "id": "e36de3f6-b543-4e14-ba14-b8474265aa22",
   "prevId": "2246ee87-b8a8-4338-9847-7ae098d2f506",
   "tables": {
     "aa_models": {
@@ -844,41 +844,6 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "work_place": {
-          "name": "work_place",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "worktree_path": {
-          "name": "worktree_path",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "branch": {
-          "name": "branch",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "base_head": {
-          "name": "base_head",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "work_asked_at": {
-          "name": "work_asked_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
         }
       },
       "indexes": {
@@ -895,14 +860,6 @@
             "conversation_id"
           ],
           "isUnique": true
-        },
-        "chats_worktree_path_unique": {
-          "name": "chats_worktree_path_unique",
-          "columns": [
-            "worktree_path"
-          ],
-          "isUnique": true,
-          "where": "worktree_path IS NOT NULL"
         }
       },
       "foreignKeys": {
@@ -5052,6 +5009,13 @@
         },
         "approves_plan": {
           "name": "approves_plan",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "plans_in_build": {
+          "name": "plans_in_build",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,

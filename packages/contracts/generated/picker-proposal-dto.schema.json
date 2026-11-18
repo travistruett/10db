@@ -807,6 +807,10 @@
                           "type": "boolean",
                           "const": true
                         },
+                        "plansFirst": {
+                          "type": "boolean",
+                          "const": true
+                        },
                         "providerSessionId": {
                           "type": "string",
                           "minLength": 1

@@ -31,7 +31,12 @@ interface StepBrief {
   /** The text of each skill, for a session that has no plugin to load them from. */
   readonly skillBodies?: readonly string[];
   readonly tools: ToolAccess;
+  /** A build step that writes and records its plan before it builds. */
+  readonly plansFirst?: boolean;
 }
+
+const PLAN_FIRST =
+  'Plan first: before you edit a file, plan with the planning skill and record the plan with mcp__10db__complete_step (summary only). Then build it. If the plan changes, call it again with the new plan.';
 
 interface PriorResult {
   readonly role: StepRole;
@@ -65,7 +70,7 @@ export interface PromptInput {
   readonly questionRoutes?: readonly QuestionRouteDto[];
   readonly step: StepBrief;
   readonly priorResults: readonly PriorResult[];
-  /** A read-only step sent back sees the result it gave before. */
+  /** A read-only step sent back sees the result it gave before; a build step that plans first, its plan. */
   readonly previousResult: StepResult | null;
   /** The results this step gave on earlier rounds (a review's rejections), oldest first. */
   readonly earlierResults: readonly StepResult[];
@@ -873,6 +878,7 @@ function stepSection(input: PromptInput): string[] {
   // A Codex session has no plugin, so the skills it names are in the briefing itself.
   if (codex) for (const body of step.skillBodies ?? []) lines.push('', body);
   if (step.instructions) lines.push('', `How you work:\n${step.instructions}`);
+  if (step.plansFirst === true) lines.push('', PLAN_FIRST);
   if (codex) lines.push('', CODEX_TOOL_NAMES);
   if (input.priorResults.length > 0) {
     lines.push('', 'Earlier steps:');
@@ -885,7 +891,9 @@ function stepSection(input: PromptInput): string[] {
       lines.push('---');
     }
   }
-  if (input.previousResult) {
+  if (input.previousResult && step.plansFirst === true)
+    lines.push('', 'Your plan:', input.previousResult.summary);
+  else if (input.previousResult) {
     const verdict = input.previousResult.verdict
       ? `: ${VERDICT_LABEL[input.previousResult.verdict]}`
       : '';

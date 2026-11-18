@@ -18,7 +18,13 @@ import {
 } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { useSetPlaybook } from '../../daemon/playbook-queries';
-import { FIX_BY_LABELS, hasReviewingStep, scopeSource, toggleStep } from './playbook-edits';
+import {
+  FIX_BY_LABELS,
+  hasReviewingStep,
+  keepsPlanStep,
+  scopeSource,
+  toggleStep,
+} from './playbook-edits';
 import { RIGOR_LABELS } from './rigor-labels';
 import { ROLES } from './role-labels';
 
@@ -94,7 +100,7 @@ function ProcessField({
 
 /**
  * A rigor's process: the steps it runs, how many rounds a reviewer may send work back, what fixes a send-back,
- * whether the builder approves the plan, and how its tasks ship: with the rest of their goal in one pull request,
+ * whether the builder approves the plan, whether the Build session writes it, and how its tasks ship: with the rest of their goal in one pull request,
  * or alone. A change saves at once, and only the field changed is sent, in this
  * scope; a field's Reset (Use global, in a project) hands only that field back to the scope above.
  */
@@ -222,6 +228,27 @@ export function PlaybookRowDrawer({
               disabled={!hasPlan || set.isPending}
               onChange={(e) => {
                 set.mutate({ rows: [{ rigor: row.rigor, approvesPlan: e.currentTarget.checked }] });
+              }}
+            />
+          </ProcessField>
+          <ProcessField
+            title="Plan in the Build session"
+            name="plan in the build session"
+            source={row.plansInBuild.source}
+            scope={scope}
+            busy={set.isPending}
+            note={keepsPlanStep(row) ? 'A plan review or plan approval keeps the Plan step' : null}
+            onReset={() => {
+              set.mutate({ rows: [{ rigor: row.rigor, plansInBuild: null }] });
+            }}
+          >
+            <Switch
+              label="The Build session writes the plan first"
+              description="No separate Plan step runs: Build plans in its own session, and the task shows its plan."
+              checked={row.plansInBuild.value && !keepsPlanStep(row)}
+              disabled={keepsPlanStep(row) || set.isPending}
+              onChange={(e) => {
+                set.mutate({ rows: [{ rigor: row.rigor, plansInBuild: e.currentTarget.checked }] });
               }}
             />
           </ProcessField>

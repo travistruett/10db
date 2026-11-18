@@ -150,6 +150,9 @@ function chooseAdapter(): AgentAdapter | ((logger: Logger) => AgentAdapter) {
             logger: logger.child({ component: 'claude' }),
             loginConfigDir: () => loginConfigDirOf(login.vars),
             connectorProbeRoot: connectorProbeRoot(dataDir),
+            ...(env.TENDB_LANE_TRANSCRIPT_DAYS === undefined
+              ? {}
+              : { transcriptDays: env.TENDB_LANE_TRANSCRIPT_DAYS }),
           }),
         (account, model) => claudeCapabilities(account.kind, model),
         claudeTakeoverNotes,

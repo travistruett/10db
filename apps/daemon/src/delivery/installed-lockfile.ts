@@ -94,7 +94,7 @@ export async function recordInstall(
     else setAppSetting(w, installedLockfileKey(batchId), blob);
   });
   if (outcome.kind === 'installed' && outcome.startedOver)
-    noticeUnbuilt(ctx, batchId, path, 'started_over');
+    noticeUnbuilt(ctx, batchId, path, outcome.fromTemplate ? 'made_by_install' : 'started_over');
   const repaired = repairedBy(outcome, path, goesOnAfterFailure);
   if (repaired !== null) noticeRepaired(ctx, batchId, repaired);
 }

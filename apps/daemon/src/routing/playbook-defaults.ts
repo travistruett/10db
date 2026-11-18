@@ -29,26 +29,45 @@ export interface RowProcess {
   readonly reviewRounds: number;
   readonly fixBy: FixBy;
   readonly approvesPlan: boolean;
+  /** Whether the Build session writes the plan first instead of a separate Plan step (see `resolveSteps`). */
+  readonly plansInBuild: boolean;
   /** Whether tasks of one goal at this rigor ship as one pull request. */
   readonly ships: Ships;
 }
 
-/** The process each rigor starts with. */
+/**
+ * The process each rigor starts with. Every rigor plans in a separate Plan step until an eval against the
+ * saved baseline shows planning in the Build session holds up.
+ */
 export const DEFAULT_PROCESS: Readonly<Record<Rigor, RowProcess>> = {
   [Rigor.Light]: {
     reviewRounds: 1,
     fixBy: FixBy.Resumed,
     approvesPlan: false,
+    plansInBuild: false,
     ships: Ships.WithGoal,
   },
   [Rigor.Standard]: {
     reviewRounds: 1,
     fixBy: FixBy.Resumed,
     approvesPlan: false,
+    plansInBuild: false,
     ships: Ships.WithGoal,
   },
-  [Rigor.Careful]: { reviewRounds: 2, fixBy: FixBy.Fresh, approvesPlan: false, ships: Ships.Alone },
-  [Rigor.Critical]: { reviewRounds: 2, fixBy: FixBy.Fresh, approvesPlan: true, ships: Ships.Alone },
+  [Rigor.Careful]: {
+    reviewRounds: 2,
+    fixBy: FixBy.Fresh,
+    approvesPlan: false,
+    plansInBuild: false,
+    ships: Ships.Alone,
+  },
+  [Rigor.Critical]: {
+    reviewRounds: 2,
+    fixBy: FixBy.Fresh,
+    approvesPlan: true,
+    plansInBuild: false,
+    ships: Ships.Alone,
+  },
 };
 
 /**

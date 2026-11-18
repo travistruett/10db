@@ -1,10 +1,11 @@
+import { existsSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { ProjectDto } from '@10db/contracts';
 import { findUnfinishedBatch, sharedLaneRan } from '@10db/db';
 import { existsAsEntry, type WorktreeOwner } from '../git';
 import type { DeliveryContext } from './context';
-import type { DependencyRefresh } from './worktree-dependencies';
+import { PNPM_LOCKFILE, type DependencyRefresh } from './worktree-dependencies';
 import { seedDirs, seedWorktree } from './worktree-seed';
 
 /**
@@ -27,7 +28,7 @@ export async function seedAndInstall(
     readonly signal: AbortSignal;
   },
 ): Promise<
-  | { seeded: boolean; dirs: string[]; installed: DependencyRefresh }
+  | { seeded: boolean; installMakes: boolean; dirs: string[]; installed: DependencyRefresh }
   | { failed: 'seed'; error: unknown }
 > {
   const { owner, project, main, path, signal } = input;
@@ -43,10 +44,17 @@ export async function seedAndInstall(
   } catch (error) {
     return { failed: 'seed', error };
   }
+  // In a pnpm project the copy's install makes its `node_modules` from its own lockfile, cloned from the
+  // daemon's template for it or installed from nothing, so Your folder's is not cloned: pnpm would remove it
+  // anyway, since it names another store
+  // (`decisions/2026-11-17-a-copys-node-modules-is-cloned-from-a-template-made-once-per-lockfile.md`).
+  const installMakes =
+    existsSync(join(path, PNPM_LOCKFILE)) && dirs.some((dir) => basename(dir) === 'node_modules');
+  const cloned = installMakes ? dirs.filter((dir) => basename(dir) !== 'node_modules') : dirs;
   if (seeded) {
     try {
       // A directory already there is one an earlier, interrupted run of this cut made: the install repairs it.
-      const fresh = dirs.filter((dir) => !existsAsEntry(join(path, dir)));
+      const fresh = cloned.filter((dir) => !existsAsEntry(join(path, dir)));
       const copied = await seedWorktree({ from: main, to: path, dirs: fresh, signal });
       ctx.logger.info(
         {
@@ -63,7 +71,9 @@ export async function seedAndInstall(
       // batch has been cut, and the batch stays visible from its insert until it ends, after which the lane's
       // session does.
       if (sharedLanes()) {
-        await Promise.all(dirs.map((dir) => rm(join(path, dir), { recursive: true, force: true })));
+        await Promise.all(
+          cloned.map((dir) => rm(join(path, dir), { recursive: true, force: true })),
+        );
         seeded = false;
       }
     } catch (error) {
@@ -76,7 +86,14 @@ export async function seedAndInstall(
       'worktree not seeded: a shared lane may have written the main checkout; a pnpm install builds node_modules, and nothing else is made',
     );
   }
-  if (signal.aborted) return { seeded, dirs, installed: { kind: 'aborted' } };
-  const installed = await ctx.dependencies.refresh({ owner, project, path, signal, seeded });
-  return { seeded, dirs, installed };
+  if (signal.aborted) return { seeded, dirs, installMakes, installed: { kind: 'aborted' } };
+  const installed = await ctx.dependencies.refresh({
+    owner,
+    project,
+    path,
+    signal,
+    seeded: seeded && !installMakes,
+    makeTemplate: true,
+  });
+  return { seeded, installMakes, dirs, installed };
 }

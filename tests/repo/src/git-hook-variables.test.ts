@@ -19,6 +19,7 @@ import {
   createThrowawayRepo,
   envWithoutGitVariables,
   isolatedGitEnvironment,
+  LEFTHOOK_MISSING,
   snapshotFiles,
   type BareRepo,
   type ThrowawayRepo,
@@ -133,58 +134,69 @@ describe('git hook variables', () => {
     };
   }
 
-  it('never reach make precheck when pre-push runs from a linked worktree', () => {
-    const repo = createThrowawayRepo('10db-hook-env');
-    cleanup.push(repo);
-    const origin = createBareRepo('10db-hook-env-origin');
-    const worktree = mkdtempSync(join(tmpdir(), '10db-hook-env-worktree-'));
-    const records = mkdtempSync(join(tmpdir(), '10db-hook-env-record-'));
-    const record = join(records, 'env');
-    cleanup.push(origin, worktree, records);
-    cpSync(resolve(repoRoot, 'lefthook.yml'), join(repo.dir, 'lefthook.yml'));
-    cpSync(resolve(repoRoot, 'scripts/hooks'), join(repo.dir, 'scripts/hooks'), {
-      recursive: true,
-    });
-    // A stand-in make, first on PATH, that records the environment `make precheck` was given
-    // instead of running the precheck, and needs no make installed.
-    const fakeMake = join(records, 'bin', 'make');
-    mkdirSync(dirname(fakeMake));
-    writeFileSync(fakeMake, '#!/bin/sh\n[ "$1" = precheck ] || exit 2\nenv > "$HOOK_ENV_RECORD"\n');
-    chmodSync(fakeMake, 0o755);
-    repo.git('add', 'lefthook.yml', 'scripts/hooks');
-    repo.commit('chore(repo): init');
-    repo.git('remote', 'add', 'origin', origin.dir);
-    rmSync(worktree, { recursive: true });
-    repo.git('worktree', 'add', '-q', '-b', 'feat/y', worktree);
-    const env = {
-      ...repo.env,
-      PATH: [dirname(fakeMake), BIN, repo.env['PATH'] ?? ''].join(delimiter),
-      LEFTHOOK: '1',
-      HOOK_ENV_RECORD: record,
-    };
-    const install = spawnSync(join(BIN, 'lefthook'), ['install', '--force'], {
-      cwd: repo.dir,
-      env,
-      encoding: 'utf8',
-    });
-    expect(install.status, `${install.stdout}${install.stderr}`).toBe(0);
+  it.skipIf(LEFTHOOK_MISSING)(
+    'never reach make precheck when pre-push runs from a linked worktree',
+    () => {
+      const repo = createThrowawayRepo('10db-hook-env');
+      cleanup.push(repo);
+      const origin = createBareRepo('10db-hook-env-origin');
+      const worktree = mkdtempSync(join(tmpdir(), '10db-hook-env-worktree-'));
+      const records = mkdtempSync(join(tmpdir(), '10db-hook-env-record-'));
+      const record = join(records, 'env');
+      cleanup.push(origin, worktree, records);
+      cpSync(resolve(repoRoot, 'lefthook.yml'), join(repo.dir, 'lefthook.yml'));
+      cpSync(resolve(repoRoot, 'scripts/hooks'), join(repo.dir, 'scripts/hooks'), {
+        recursive: true,
+      });
+      // A stand-in make, first on PATH, that records the environment `make precheck` was given
+      // instead of running the precheck, and needs no make installed.
+      const fakeMake = join(records, 'bin', 'make');
+      mkdirSync(dirname(fakeMake));
+      writeFileSync(
+        fakeMake,
+        '#!/bin/sh\n[ "$1" = precheck ] || exit 2\nenv > "$HOOK_ENV_RECORD"\n',
+      );
+      chmodSync(fakeMake, 0o755);
+      repo.git('add', 'lefthook.yml', 'scripts/hooks');
+      repo.commit('chore(repo): init');
+      repo.git('remote', 'add', 'origin', origin.dir);
+      rmSync(worktree, { recursive: true });
+      repo.git('worktree', 'add', '-q', '-b', 'feat/y', worktree);
+      const env = {
+        ...repo.env,
+        PATH: [dirname(fakeMake), BIN, repo.env['PATH'] ?? ''].join(delimiter),
+        LEFTHOOK: '1',
+        HOOK_ENV_RECORD: record,
+      };
+      const install = spawnSync('lefthook', ['install', '--force'], {
+        cwd: repo.dir,
+        env,
+        encoding: 'utf8',
+      });
+      expect(install.status, `${install.stdout}${install.stderr}`).toBe(0);
 
-    // `-c` makes git export GIT_CONFIG_PARAMETERS to the hook as well.
-    const push = spawnSync('git', ['-c', 'push.default=simple', 'push', '-q', 'origin', 'feat/y'], {
-      cwd: worktree,
-      env,
-      encoding: 'utf8',
-    });
+      // `-c` makes git export GIT_CONFIG_PARAMETERS to the hook as well.
+      const push = spawnSync(
+        'git',
+        ['-c', 'push.default=simple', 'push', '-q', 'origin', 'feat/y'],
+        {
+          cwd: worktree,
+          env,
+          encoding: 'utf8',
+        },
+      );
 
-    expect(push.status, `${push.stdout}${push.stderr}`).toBe(0);
-    const names = readFileSync(record, 'utf8')
-      .split('\n')
-      .map((line) => line.split('=')[0]);
-    expect(names).toContain('HOOK_ENV_RECORD');
-    expect(names.filter((name) => REPO_VARIABLES.includes(name ?? ''))).toEqual([]);
-    // lefthook install and a real push through the hook: seconds of child processes, more under
-    // the full suite's load than the 5s default allows.
-  }, 60_000);
+      expect(push.status, `${push.stdout}${push.stderr}`).toBe(0);
+      const names = readFileSync(record, 'utf8')
+        .split('\n')
+        .map((line) => line.split('=')[0]);
+      expect(names).toContain('HOOK_ENV_RECORD');
+      expect(names.filter((name) => REPO_VARIABLES.includes(name ?? ''))).toEqual([]);
+      // lefthook install and a real push through the hook: seconds of child processes, more under
+      // the full suite's load than the 5s default allows.
+    },
+    60_000,
+  );
 
   it('cannot steer the daemon tests that create, commit to and configure repositories', () => {
     const { repo, variables } = decoy();

@@ -6,5 +6,5 @@ export { escalateStep } from './router';
 export { offeredModels, offeredProfiles } from './offered';
 export { atEffort } from './pools';
 export { costOnAccount } from './cost-on-account';
-export { resolveSteps, rowProcess, type PlaybookScopes } from './playbook';
+export { resolveSteps, rowProcess, type PlaybookScopes, type ResolvedStep } from './playbook';
 export { playbookView } from './playbook-view';

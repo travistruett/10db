@@ -65,6 +65,7 @@ export { createWorktreeCardAnswers } from './worktree-card';
 export { createStartCardAnswers } from './start-card';
 export { createLostMigrationsAnswers } from './lost-migrations';
 export { removeMergedBranches } from './branch-sweep';
+export { createHandMadeFolderLook } from './hand-made-worktrees';
 export {
   batchLaunchVerdict,
   flagWorktreeMissing,
@@ -82,6 +83,7 @@ export {
   projectAtCheckout,
 } from './checkout';
 export { createWorktreeDependencies } from './worktree-dependencies';
+export { createNodeModulesTemplates, templatesRoot } from './node-modules-template';
 export { createWorktreeGenerators } from './worktree-generated';
 export { readPnpmVersion, resolvePnpm } from './pnpm-binary';
 export {

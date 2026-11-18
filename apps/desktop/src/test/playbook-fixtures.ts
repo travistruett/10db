@@ -65,6 +65,8 @@ export function playbookDto(
     reviewRounds: own(DEFAULT_PROCESS[rigor].reviewRounds),
     fixBy: own(DEFAULT_PROCESS[rigor].fixBy),
     approvesPlan: own(DEFAULT_PROCESS[rigor].approvesPlan),
+    // Every rigor plans in a separate Plan step by default.
+    plansInBuild: own(false),
     ships: own(DEFAULT_PROCESS[rigor].ships),
     ...over.rows?.find((r) => r.rigor === rigor),
   }));

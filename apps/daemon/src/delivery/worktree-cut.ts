@@ -221,7 +221,7 @@ export async function cutWorktree(
       if (!stopped()) await refuse(worktreeCards.seedFailed(batch, prepared.error));
       return;
     }
-    const { seeded: seed, dirs, installed } = prepared;
+    const { seeded: seed, installMakes, dirs, installed } = prepared;
     await recordInstall(ctx, batchId, path, installed);
     switch (installed.kind) {
       case 'aborted':
@@ -256,8 +256,8 @@ export async function cutWorktree(
     // The install ran no install script, and no seed carried built output: a package the project
     // allows to build (a native addon, a generated client) is installed but not built. An install
     // that started over has told the builder already, recordInstall above.
-    if (!seed && installed.kind === 'installed' && !installed.startedOver)
-      noticeUnbuilt(ctx, batchId, path, 'seed_skipped');
+    if (installed.kind === 'installed' && !installed.startedOver && (!seed || installMakes))
+      noticeUnbuilt(ctx, batchId, path, seed ? 'made_by_install' : 'seed_skipped');
     ctx.state.write((w) => {
       patchBatch(w, batchId, { branch, baseSha, repo });
       transitionBatch(w, batchId, { to: BatchState.Open, reason: 'worktree cut' });

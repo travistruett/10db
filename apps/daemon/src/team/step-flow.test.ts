@@ -134,6 +134,17 @@ describe('advanceSteps, sendBackSteps and restartStep', () => {
     expect(moved[1]).toMatchObject({ status: 'pending', result: { verdict: 'reject' } });
   });
 
+  it('keeps the plan a build step that plans first recorded when a review sends the work back', () => {
+    const build: WorkstreamStep = { ...step('implement', null), plansFirst: true };
+    const moved = sendBackSteps([build, step('review', 'reject')], 1, 0, build, ENTRY);
+    expect(moved[0]).toMatchObject({
+      status: 'running',
+      attempts: 1,
+      result: { summary: 'notes' },
+      earlier: [],
+    });
+  });
+
   it('keeps a read-only target’s previous result when it is sent back', () => {
     const plan = step('plan', null);
     const moved = sendBackSteps([plan, step('plan_review', 'reject')], 1, 0, plan, ENTRY);

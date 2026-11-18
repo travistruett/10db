@@ -119,19 +119,30 @@ export const hasReviewingStep = (steps: readonly StepRole[]): boolean =>
 
 /**
  * A row's process in a line: its review rounds and how a send-back is fixed, or "no review" when no step
- * reviews, and "you approve the plan" when the row asks for it and has a plan to approve.
+ * reviews, "you approve the plan" when the row asks for it and has a plan to approve, and "the build plans
+ * first" when the Build session writes the plan.
  */
 export function processLine(row: PlaybookRowDto): string {
   const rounds = row.reviewRounds.value;
   const review = hasReviewingStep(row.steps.value)
     ? [`${String(rounds)} ${rounds === 1 ? 'round' : 'rounds'}`, `${row.fixBy.value} fix`]
     : ['no review'];
-  const approval =
-    row.approvesPlan.value && row.steps.value.includes(StepRole.Plan)
-      ? ['you approve the plan']
-      : [];
-  return [...review, ...approval].join(' · ');
+  const approval = approvesPlan(row) ? ['you approve the plan'] : [];
+  const inBuild = row.plansInBuild.value && !keepsPlanStep(row) ? ['the build plans first'] : [];
+  return [...review, ...approval, ...inBuild].join(' · ');
 }
+
+/** Whether the builder approves a row's plan: it asks to and has a Plan step to approve. */
+const approvesPlan = (row: PlaybookRowDto): boolean =>
+  row.approvesPlan.value && row.steps.value.includes(StepRole.Plan);
+
+/**
+ * Whether a row keeps its separate Plan step whatever planning in the Build session says: a plan review
+ * judges that plan, and the builder approves it before the build. The daemon's routing drops the step
+ * by the same rule.
+ */
+export const keepsPlanStep = (row: PlaybookRowDto): boolean =>
+  row.steps.value.includes(StepRole.PlanReview) || approvesPlan(row);
 
 /** What each way of fixing a send-back is called. */
 export const FIX_BY_LABELS: Readonly<Record<FixBy, string>> = {

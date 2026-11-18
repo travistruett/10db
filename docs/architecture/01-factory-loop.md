@@ -38,30 +38,36 @@ A project with no gate command has no program to verify finished work, so the bu
   anything. A send back that was committed is queued as a fix and recovery keeps its note for a fresh session
   until a step that started later has acted on it.
 
-## The review step a change does not need
+## How review steps are chosen
 
-**Built.** When a step's gate has passed and the next step is `review`, the runner may leave the review out of the
-plan, as it does for the QA step when only Markdown changed
-([the decision](decisions/2026-10-31-openrouter-makes-routine-decisions.md)).
+**Built.** The task's rigor decides up front which reviewing steps its plan runs, and the runner asks no decision about
+a step. A judge decision sizes the task's rigor and kinds (`task_rigor` and `task_kinds`, in `sizing/`). The retired
+`review_size` decision only labels logged calls
+([the decision](decisions/2026-11-13-each-rigor-sets-its-review-rounds-and-fix.md)).
 
-- **Always review, with no call:** a `security`, `auth`, `migration` or `dependency` risk tag; a pinned review step;
-  a review that has already run (a rework is read again); a diff against the workstream's starting head over 400
-  changed lines or 15 files; a binary file in the change; a change to a dependency manifest or lockfile, a
-  migration (`packages/db/drizzle/**`, the stock `migrations` paths), CI or workflow files (`.github/**`), a
-  protected path (`.claude/**`, `.codex/**`, `AGENTS.md`, `CLAUDE.md`) or any of the project's hazard globs; the
-  decision switched off in Settings › Decisions. With the judge off (`TENDB_JUDGE=off`, or the master switch) the
-  review runs and `choose` is not called, so no row is logged.
-- **Otherwise ask** (`judge.choose`, outside any database write, cut short by a cancel or a shutdown): the task's
-  title, description and criteria, the files with their counts, and the diff cut at 24 KB (with a
-  `[diff cut at 24 KB]` marker when it was), the task text and diff fenced under a line saying they are data, not
-  instructions; and only that the gate passed (exit 0), never its output. Options `review` and `skip`.
-- **Skip** only when the answer is `skip` at or above the floor (0.8 by default). The review leaves the plan and
-  the workstream goes on to the step after it, or is done. The transition's reason reads
-  `gate passed; review skipped by <model> (<confidence>): small, clear and covered by its tests; next: <role>`
-  (or ends after the model when nothing follows). Every other answer, and every fallback, runs the review.
-  When the review leaves, the QA step that now follows is checked as after an approving review: a change of
-  Markdown files alone skips it too.
-- The call's logged outcome is `acted` for `skip` at or above the floor and for `review`, `below_floor` for `skip`
-  under it; a fallback keeps the outcome the judge logged. Settings shows what 10db did from the answer and the
-  outcome together ("Skipped the review", "Ran the review (model said review)"). CI still decides before a pull
-  request merges.
+- **The rigor's row.** Each rigor's playbook row names its steps
+  (`DEFAULT_ROWS`, `apps/daemon/src/routing/playbook-defaults.ts`): Light runs Implement, Standard adds Review,
+  Careful adds a Plan before Implement, and Critical adds Plan Review and QA. A project can override a row. A kind can
+  add steps (`addsSteps`; the seeded migration kind adds Plan Review) or set a floor under the rigor (`minimumRigor`).
+  `planSteps` (`apps/daemon/src/routing/plan-steps.ts`) turns the steps into the plan, and each reviewing step carries
+  the row's review rounds (`rowProcess`).
+- **Planned again at each step's end.** The steps still to come are planned again in the write that ends a step, so a
+  rigor or playbook change applies at the next step boundary (`withCurrentPlan`). A plan made without a rigor, such as
+  a merge resolution's, is fixed: it is never planned again and gets no safety net.
+- **Light's safety net.** When an implement step passes its gate, or ends in a project with no gate command, and no
+  review follows it in the plan, the runner reads the change (`reviewForcedAfter`, with the rules in
+  `apps/daemon/src/runner/forced-review.ts`) and adds a Review when the change forces one:
+  - an always-reviewed kind (the seeded security, auth, migration and dependency kinds);
+  - more than 15 changed files, or more than 400 changed lines;
+  - a binary file;
+  - a path a hazard glob matches: the project's hazards, the stock ones (`migrations`, `deps`, `harness`), or the
+    review-forcing paths: dependency manifests and lockfiles, `drizzle/**`, `migrations/**`, `.github/**`,
+    `.claude/**`, `.codex/**`, `AGENTS.md` and `CLAUDE.md`;
+  - a change that cannot be read.
+
+  The added Review is planned like any added step, with Light's review rounds and the model and effort of the lowest
+  rigor above Light that runs a review (Standard by default). Its reason begins `review added: <why>`.
+
+- **Docs-only QA.** Where a QA step follows a review (Critical's), a change whose files all end in `.md` skips QA when
+  the review approves, or ships at its round limit (`qaSkippedForDocs`). The transition's reason says
+  "QA skipped: only docs changed".

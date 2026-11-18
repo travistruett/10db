@@ -112,6 +112,26 @@
               "source"
             ]
           },
+          "plansInBuild": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "boolean"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "default",
+                  "global",
+                  "project"
+                ]
+              }
+            },
+            "required": [
+              "value",
+              "source"
+            ]
+          },
           "ships": {
             "type": "object",
             "properties": {
@@ -143,6 +163,7 @@
           "reviewRounds",
           "fixBy",
           "approvesPlan",
+          "plansInBuild",
           "ships"
         ]
       }

@@ -1134,6 +1134,9 @@ export function createApp(deps: ApiDeps) {
     .get('/projects/:projectId/human-touch', (c) =>
       c.json(deps.services.humanTouch(ProjectId.parse(c.req.param('projectId')))),
     )
+    .get('/projects/:projectId/card-types', (c) =>
+      c.json(deps.services.cardTypes(ProjectId.parse(c.req.param('projectId')))),
+    )
     .get(
       '/projects/:projectId/rigor-figures',
       validator('query', (value): RigorFiguresQuery => RigorFiguresQuery.parse(value)),
