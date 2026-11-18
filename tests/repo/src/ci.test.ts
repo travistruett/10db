@@ -356,6 +356,10 @@ describe('PR title workflow', () => {
     expect(lint).toHaveLength(1);
     expect(lint[0]?.run).toBe(`printf '%s\\n' "$PR_TITLE" | pnpm exec commitlint`);
     expect(lint[0]?.env).toEqual({ PR_TITLE: '${{ github.event.pull_request.title }}' });
+    // The unit-test budget reads the body the same way, so an edited body reruns it.
+    const budget = steps.filter((step) => step.run === 'node scripts/test-budget.mjs');
+    expect(budget).toHaveLength(1);
+    expect(budget[0]?.env).toEqual({ PR_BODY: '${{ github.event.pull_request.body }}' });
   });
 
   it('reports on merge queue entries as skipped, as dependency-review does', () => {
