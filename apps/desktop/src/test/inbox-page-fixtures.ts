@@ -8,7 +8,7 @@ import {
   type InboxListState,
   type InboxRowRef,
 } from '@10db/contracts';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { daemonUrl, server } from './daemon';
 
@@ -111,30 +111,3 @@ export const getText = (text: TextQuery[0], options?: TextQuery[1]) =>
   screen.getByText(text, { ...options, ignore: IN_LIST });
 export const queryText = (text: TextQuery[0], options?: TextQuery[1]) =>
   screen.queryByText(text, { ...options, ignore: IN_LIST });
-
-/** The panel's rows. */
-export const panelRows = (): HTMLElement[] =>
-  within(screen.getByRole('listbox', { name: 'Inbox' })).queryAllByRole('option');
-
-/** The panel's row whose text holds `text`, once it has drawn. */
-export const findPanelRow = (text: string): Promise<HTMLElement> =>
-  waitFor(() => {
-    const row = panelRows().find((candidate) => candidate.textContent.includes(text));
-    if (row === undefined) throw new Error(`no row holds ${text}`);
-    return row;
-  });
-
-/** The panel's rows once there are exactly `count`, by their text. */
-export const panelRowTexts = (count: number): Promise<string[]> =>
-  waitFor(() => {
-    const rows = panelRows();
-    if (rows.length !== count) throw new Error(`${String(rows.length)} rows, not ${String(count)}`);
-    return rows.map((row) => row.textContent);
-  });
-
-/** Picks `item` from the group `group` of the panel's Filter menu. */
-export async function chooseFilter(group: string, item: string): Promise<void> {
-  fireEvent.click(screen.getByRole('button', { name: 'Filter' }));
-  const menu = await screen.findByRole('group', { name: group, hidden: true });
-  fireEvent.click(await within(menu).findByRole('menuitem', { name: item, hidden: true }));
-}

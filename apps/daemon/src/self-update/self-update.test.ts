@@ -16,6 +16,7 @@ import { silentLogger, type Logger } from '../log';
 import { createStatusService, STATUS_HYSTERESIS_MS, type StatusService } from '../status';
 import {
   createSelfUpdate,
+  DRAIN_LIMIT_MS,
   SELF_UPDATE_APPLYING_KEY,
   SELF_UPDATE_FAILED_KEY,
   SHAPE_HOLD_ALERT_MS,
@@ -880,6 +881,18 @@ describe('a waiting update drains the factory', () => {
     expect(await update.tick()).toBe('applying');
     expect(world.calls).toEqual(['stage', 'drain', 'pause', 'apply']);
     expect(update.status().draining).toBe(true);
+  });
+
+  it('installs once it has drained for DRAIN_LIMIT_MS, though steps still run', async () => {
+    world.busy = 3;
+    world.waitLimitMs = 0;
+    const update = make();
+    expect(await update.tick()).toBe('draining');
+    clock.advance(DRAIN_LIMIT_MS - 1);
+    expect(await update.tick()).toBe('draining');
+    clock.advance(1);
+    expect(await update.tick()).toBe('applying');
+    expect(world.calls).toEqual(['stage', 'drain', 'pause', 'apply']);
   });
 
   it('lets lanes start again when the install does not start', async () => {

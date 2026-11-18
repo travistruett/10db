@@ -1,6 +1,7 @@
 # The desktop check runs on macOS only when a file that can affect it changed
 
 - **Date:** 2026-11-04
+- **Superseded by:** `decisions/2026-11-18-desktop-runs-on-macos-only-for-what-it-tests.md`
 
 ## Decision
 

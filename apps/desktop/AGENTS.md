@@ -27,7 +27,9 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
   component docs (pinned to our Mantine version).
 - Dark by default; every view must work in light mode too.
 - The React Compiler is on; don't hand-write `useMemo`/`useCallback` for render performance.
-- Tests: Testing Library + MSW. Hit the daemon URL through MSW, never a real daemon.
+- Tests: few (dec_01a1efc1). The core e2e flows (`e2e/AGENTS.md`) are the check. A view or component no flow
+  opens keeps one render test (Testing Library + MSW, hitting the daemon URL through MSW, never a real daemon).
+  Pure code gets a test only as a tricky rule table or parser, and a bug that escapes gets its regression test.
 - Rust in `src-tauri/`: `cargo fmt`, `cargo clippy -- -D warnings` with pedantic lints.
 - The app icon's source is `app-icon.svg` ("10" in Geist Bold, "db" in Geist Light, outlined to paths).
   `src-tauri/icons/` is generated from it with `pnpm --filter @10db/desktop tauri icon app-icon.svg`;

@@ -10,9 +10,3 @@ export function githubStatusDto(overrides: Partial<GithubStatusDto> = {}): Githu
     ...overrides,
   });
 }
-
-export const DEVICE_SIGNIN = {
-  code: 'ABCD-1234',
-  url: 'https://github.com/login/device',
-  startedAt: '2026-11-12T10:00:00.000Z',
-} as const;

@@ -31,6 +31,13 @@ import { CardTier } from '../inbox';
  * turns that keeps the update waiting while every lane is paused.
  */
 export const SHAPE_HOLD_ALERT_MS = 5 * 60_000;
+
+/**
+ * How long the factory drains for an update before it installs over the steps still running. Startup
+ * recovery puts each cut-off lane back first in line, from its worktree as it stands, so an update
+ * never waits behind one long step while nothing else may start.
+ */
+export const DRAIN_LIMIT_MS = 10 * 60_000;
 /** The card an earlier version raised for the shaping hold; one left open is withdrawn at start. */
 export const SHAPE_HOLD_FOLD_KEY = 'self-update-shape-turn';
 const SHAPE_HOLD_STATUS_KEY = 'update-shape-turn';
@@ -775,7 +782,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       clearWaiting();
       return TickResult.Off;
     }
-    if (deps.midSession() > 0) return waitOrDrain();
+    if (deps.midSession() > 0 && !drainedPastLimit()) return waitOrDrain();
     releaseShapeHold();
     return install(runningCommit, { head: build.head, commit: build.commit }, build);
   }
@@ -784,6 +791,13 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
    * Work is running, so the build can't install yet. Within the limit it waits quietly; past it (or
    * once the builder asked) the factory drains: nothing new starts until what runs has finished.
    */
+  function drainedPastLimit(): boolean {
+    return (
+      drainingSince !== null &&
+      deps.clock.now().getTime() - drainingSince.getTime() >= DRAIN_LIMIT_MS
+    );
+  }
+
   function waitOrDrain(): TickResult {
     const waited = waitingSince === null ? 0 : deps.clock.now().getTime() - waitingSince.getTime();
     if (drainingSince === null && !forced && waited < deps.waitLimitMs()) return TickResult.Busy;
@@ -815,9 +829,16 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
         clearWaiting();
         return TickResult.Off;
       }
-      if (deps.midSession() > 0) {
+      const running = deps.midSession();
+      if (running > 0 && !drainedPastLimit()) {
         deps.resume();
         return TickResult.Busy;
+      }
+      if (running > 0) {
+        logger.info(
+          { running, drainingSince: drainingSince?.toISOString() ?? null },
+          'the update has drained for its limit: installing over the steps still running; recovery puts them first in line',
+        );
       }
       state.write((ctx) => {
         setAppSetting(ctx, SELF_UPDATE_APPLYING_KEY, {

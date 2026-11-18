@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Says whether the `desktop` job of .github/workflows/ci.yml has to run on a macOS runner: it
-// prints and writes `desktop=true` or `desktop=false`. The paths that count are listed in
-// docs/architecture/decisions/2026-11-04-desktop-runs-on-macos-only-when-its-files-change.md.
-// The answer depends on the pull request's files and on nothing else, not even the event action: a
+// prints and writes `desktop=true` or `desktop=false`. Only the paths listed below count, as
+// docs/architecture/decisions/2026-11-18-desktop-runs-on-macos-only-for-what-it-tests.md says: a
+// pull request whose files are all unlisted skips the job. The answer depends on the pull request's files and on nothing else, not even the event action: a
 // title edit gets the decision of the last push, and a skipped job must never replace a red result.
 // Only a pull_request event can skip the job. Whatever stops the files from being known, it runs.
 // Usage: EVENT_NAME=<event> REPOSITORY=<owner>/<repo> PR_NUMBER=<n> GH_TOKEN=<token> \
@@ -15,34 +15,73 @@ import { appendFileSync } from 'node:fs';
 const FILES_API_LIMIT = 3000;
 const MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
 
-// Paths the desktop job cannot read. Everything else counts as desktop, so a path nobody listed
-// runs the job.
-const SKIPPED_PREFIXES = ['docs/', '.github/', '.claude/', '.codex/', '.vscode/', 'scripts/'];
-// Inside a skipped prefix, but read by the desktop job.
-const DESKTOP_PREFIXES = ['scripts/release/'];
+// Everything under these is what the job builds or tests on macOS.
+const DESKTOP_PREFIXES = [
+  // The Tauri shell: make rust-check and tauri build.
+  'apps/desktop/src-tauri/',
+  // The modules the Seatbelt and macOS-only daemon tests exercise; gate-sandbox.seatbelt runs the
+  // gate runner in src/verify.
+  'apps/daemon/src/sandbox/',
+  'apps/daemon/src/guard/',
+  'apps/daemon/src/keep-awake/',
+  'apps/daemon/src/verify/',
+  // install-app.sh and installed-app.sh, which the self-update test runs.
+  'scripts/release/',
+];
+// Every Seatbelt test in the daemon, including one the job's vitest line does not name yet.
+const SEATBELT_TEST = /^apps\/daemon\/test\/[^/]+\.seatbelt\.test\.ts$/;
 const DESKTOP_FILES = new Set([
   // The job's own definition, and the decision itself.
   '.github/workflows/ci.yml',
   'scripts/desktop-scope.mjs',
-]);
-// The one repo test the job runs, and what it imports; the rest of tests/repo/src is the gate's.
-const DESKTOP_TEST_FILES = new Set([
+  // What the install and the toolchain come from.
+  'pnpm-lock.yaml',
+  'pnpm-workspace.yaml',
+  'package.json',
+  'mise.toml',
+  'mise.lock',
+  'rust-toolchain.toml',
+  'Makefile',
+  // The desktop build tauri build runs: its frontend build and the daemon sidecar.
+  'apps/desktop/package.json',
+  'apps/desktop/vite.config.ts',
+  'apps/desktop/postcss.config.cjs',
+  'apps/desktop/index.html',
+  'apps/desktop/tsconfig.json',
+  'apps/desktop/scripts/prepare-sidecar.ts',
+  'apps/daemon/package.json',
+  'apps/daemon/vitest.config.ts',
+  'apps/daemon/scripts/build.ts',
+  // Daemon modules the job's tests name, and the macOS paths and tools they reach first.
+  'apps/daemon/src/git/lane-writable.ts',
+  'apps/daemon/src/git/lane-writable.test.ts',
+  'apps/daemon/src/git/run-as-builder.ts',
+  'apps/daemon/src/session-setup/builder-skills.ts',
+  'apps/daemon/src/session-setup/builder-skills.test.ts',
+  'apps/daemon/src/environment/pinned-install.ts',
+  'apps/daemon/src/environment/pinned-install.test.ts',
+  'apps/daemon/src/environment/agent-pins.ts',
+  'apps/daemon/src/sessions/open-in-root.ts',
+  'apps/daemon/src/sessions/open-in-root.test.ts',
+  'apps/daemon/src/paths.ts',
+  // Daemon test helpers the Seatbelt tests import.
+  'apps/daemon/test/fixtures.ts',
+  'apps/daemon/test/pinned-tarball.ts',
+  // The one repo test the job runs, what it imports, and the config that runs it.
   'tests/repo/src/self-update-real-processes.test.ts',
   'tests/repo/src/installed-app-sandbox.ts',
   'tests/repo/src/workspace.ts',
+  'tests/repo/vitest.config.ts',
+  'tests/repo/package.json',
+  'vitest.config.ts',
+  'tests/max-workers.ts',
+  'tests/git-isolation.setup.ts',
 ]);
-// Files in the root that no job reads but the policy and gate ones.
-const SKIPPED_ROOT_FILES = new Set(['LICENSE', 'NOTICE', 'renovate.json']);
 
 /** True when a change to `path` can affect what the desktop job builds or tests. */
 function affectsDesktop(path) {
-  if (DESKTOP_FILES.has(path) || DESKTOP_TEST_FILES.has(path)) return true;
-  if (DESKTOP_PREFIXES.some((prefix) => path.startsWith(prefix))) return true;
-  if (SKIPPED_PREFIXES.some((prefix) => path.startsWith(prefix))) return false;
-  if (path.startsWith('tests/repo/src/')) return false;
-  // A Markdown or licence file in the root.
-  if (!path.includes('/') && (path.endsWith('.md') || SKIPPED_ROOT_FILES.has(path))) return false;
-  return true;
+  if (DESKTOP_FILES.has(path) || SEATBELT_TEST.test(path)) return true;
+  return DESKTOP_PREFIXES.some((prefix) => path.startsWith(prefix));
 }
 
 /** The pull request's file names, or undefined when GitHub cannot say. */
