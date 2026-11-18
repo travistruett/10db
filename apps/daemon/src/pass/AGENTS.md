@@ -14,3 +14,8 @@
   `jobs.pending()` never waits on it. `open-when-busy.ts` is `whenBusy`: `stop_turns` holds and stops each chat
   holding the folder, `wait` answers `{ pending: true }`. Start Pass and Do It Here are refused up front while one
   exists. `stop_turns` waits for the stopped turns at most `STOPPED_TURNS_DEADLINE_MS`, then the open refuses and releases the chats' starts; `wait` has no deadline and ends by Cancel, an update or a restart.
+- A pass's follow-on, a gate that failed as the pass closed, a folder that stays on the pass branch and an abandon
+  with no Move to offer are notices (`pass-follow-on:<pass>`, `pass-gate:<pass>`, `pass-branch-moved:<pass>`,
+  `pass-abandon:<pass>`), posted with `postNotice` in the write that records the step (`decisions/2026-11-17-every-card-has-a-tier.md`).
+  The follow-on notice is the carry-over's marker: `carryOverDue` reads `hasNoticeKey` (`packages/db`), and still
+  reads a card an earlier build raised. An abandon whose Move is gone withdraws the open card in the same write.
