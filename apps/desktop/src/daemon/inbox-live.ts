@@ -229,6 +229,13 @@ export function applyInboxEvent(
       });
       continue;
     }
-    enqueue(queryClient, query, () => lookUp(queryClient, client, query, list, cardId));
+    enqueue(queryClient, query, async () => {
+      try {
+        await lookUp(queryClient, client, query, list, cardId);
+      } catch {
+        // The list may now be wrong in a way no merge can tell: read it whole.
+        await queryClient.invalidateQueries({ queryKey: query.queryKey, exact: true });
+      }
+    });
   }
 }

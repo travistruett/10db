@@ -405,3 +405,27 @@ describe('a fetch in flight', () => {
     expect(view.ids()).not.toContain(answered?.id);
   });
 });
+
+describe('a failed lookup', () => {
+  it('reads the whole list again from its first page (row 20)', async () => {
+    const all = cards(3);
+    const view = await mount({ open: all });
+    server.use(
+      http.get(daemonUrl('/inbox/page'), ({ request }) =>
+        new URL(request.url).searchParams.has('card')
+          ? new HttpResponse(null, { status: 500 })
+          : undefined,
+      ),
+    );
+    const [gone] = all.splice(1, 1);
+    view.send('inbox.changed', gone?.id ?? '');
+    await waitFor(() => {
+      expect(view.ids()).toEqual(all.map((card) => card.id));
+    });
+    const reads = view.asked.slice(view.baseline);
+    expect(
+      reads.every((query) => query['card'] === undefined && query['after'] === undefined),
+    ).toBe(true);
+    expect(reads.length).toBeGreaterThan(0);
+  });
+});
