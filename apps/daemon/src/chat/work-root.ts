@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { WorkPlace } from '@10db/contracts';
 
 /** What a session's root reads of its row. */
@@ -20,4 +21,13 @@ export function chatRoot(
     return { root: project.repoPath, writes: false };
   }
   return { root: project.repoPath, writes: chat.workPlace === WorkPlace.Here };
+}
+
+/**
+ * The chat as a session about to start sees it: a worktree folder that is gone from disk counts as no worktree, so
+ * the session reads the checkout instead of failing to start in a missing folder.
+ */
+export function withWorktreeOnDisk<T extends ChatRootFacts>(chat: T): T {
+  if (chat.worktreePath === null || existsSync(chat.worktreePath)) return chat;
+  return { ...chat, worktreePath: null };
 }

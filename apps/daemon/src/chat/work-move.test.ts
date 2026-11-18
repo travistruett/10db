@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConversationItemKind, parseItemBody, WorkPlace } from '@10db/contracts';
 import { getChat, listInbox, listItems, setChatWork } from '@10db/db';
@@ -97,6 +97,15 @@ describe('a session on its own branch', () => {
     w.chat.send(chat.conversationId, { text: 'one', mentions: [], pictures: [] });
     await waitFor(() => verdicts.length === 3);
     expect(verdicts).toEqual(['allow', 'allow', 'deny']);
+  });
+
+  it('starts reading the checkout when its worktree folder is gone, instead of failing in a missing cwd', async () => {
+    const { chat, worktree } = world();
+    rmSync(worktree, { recursive: true });
+    w.chat.send(chat.conversationId, { text: 'one', mentions: [], pictures: [] });
+    await waitFor(() => w.adapter.shapeSessions.length === 1);
+    expect(w.adapter.shapeSessions[0]?.spec.cwd).toBe(join(repo.path, 'checkout'));
+    expect(prepares[0]).toMatchObject({ writes: false });
   });
 
   it('opens each session with where it works, and says once that it moved (call 11)', async () => {

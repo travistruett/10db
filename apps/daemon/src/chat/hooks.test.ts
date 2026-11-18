@@ -7,9 +7,10 @@ import {
   parseItemBody,
 } from '@10db/contracts';
 import { getChat, listInbox, listItems, setChatWork } from '@10db/db';
-import { afterEach, describe, expect, it } from 'vitest';
+import { join } from 'node:path';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { chatWorld, type ChatWorld } from '../../test/chat-world';
-import { waitFor } from '../../test/fixtures';
+import { tempDir, waitFor } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore } from '../events';
 import { createJudge, type Judge } from '../judge';
@@ -416,7 +417,14 @@ describe("a chat's older session", () => {
 
 describe("a chat's writes outside the checkout hold", () => {
   const inCheckout = { toolName: 'Write', input: { file_path: '/repo/a.ts', content: 'x' } };
-  const inWorktree = { toolName: 'Write', input: { file_path: '/wt/a.ts', content: 'x' } };
+  const worktree = tempDir('hooks-wt');
+  afterAll(() => {
+    worktree.cleanup();
+  });
+  const inWorktree = {
+    toolName: 'Write',
+    input: { file_path: join(worktree.path, 'a.ts'), content: 'x' },
+  };
 
   /** One turn, in which the agent makes `call`; what the hook answered. */
   function oneTurn(call: typeof inCheckout) {
@@ -447,7 +455,11 @@ describe("a chat's writes outside the checkout hold", () => {
     w = chatWorld({ prepare: prepared, judge: JudgeKind.Native });
     const { chat } = oneTurn(inCheckout);
     w.store.write((ctx) =>
-      setChatWork(ctx, chat.id, null, { place: 'branch', branch: 'x', worktreePath: '/wt' }),
+      setChatWork(ctx, chat.id, null, {
+        place: 'branch',
+        branch: 'x',
+        worktreePath: worktree.path,
+      }),
     );
     const inRepo = await runTurn(chat, inCheckout);
     expect(inRepo.answer).toMatchObject({ decision: 'deny' });
