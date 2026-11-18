@@ -106,6 +106,11 @@ export function failedRepoCheck(testLog: string, flags: readonly string[] = []):
   writeFileSync(join(checkout, 'apps/x/package.json'), '{"name":"x"}');
   writeFileSync(join(checkout, 'apps/x/src/a.ts'), 'export {};\n');
   writeFileSync(join(checkout, 'docs/a.md'), 'a\n');
+  // The pre-check runs no package tests, only the repo rule tests, and only where tests/repo exists.
+  if (flags.includes('--precheck')) {
+    mkdirSync(join(checkout, 'tests/repo'), { recursive: true });
+    writeFileSync(join(checkout, 'tests/repo/package.json'), '{"name":"repo"}');
+  }
   writeFileSync(join(checkout, 'test-output.txt'), testLog);
   const pnpm = join(checkout, 'bin/pnpm');
   writeFileSync(
