@@ -35,5 +35,5 @@ export {
   type InboxService,
 } from './service';
 export { BY_ANSWER, CardTier, type CardClosesWhen, type StoredTier } from './card-tier';
-export { fitNoticeKey, InvalidNoticeError, postNotice, type NoticeInput } from './notice';
+export { postNotice, type NoticeInput } from './notice';
 export { createHookJudge, createLimitNotes, type LimitNotes } from './hook-judge';
