@@ -199,6 +199,12 @@ const sessionsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/sessions',
   validateSearch: sessionsSearch,
+  // A task's tab is gone: an old link to one lands on the task in the Board.
+  beforeLoad: ({ search }) => {
+    // TanStack Router's redirect is thrown by design.
+    // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router redirects by throwing.
+    if (search.task !== undefined) throw redirect({ to: '/board', search: { task: search.task } });
+  },
   component: SessionsPage,
 });
 const knowledgeRoute = createRoute({
@@ -217,12 +223,17 @@ const boardRoute = createRoute({
   path: '/board',
   // `task` opens that task's drawer, so a link from elsewhere (a recent decision) lands on the task.
   // `goal` sets the Board's goal filter, so a Factory row lands on the task among its goal's tasks.
-  validateSearch: (search: Record<string, unknown>): { task?: TaskId; goal?: GoalId } => {
+  // `newTask` opens New Task with that title, so a session can offer its own as a Board task.
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { task?: TaskId; goal?: GoalId; newTask?: string } => {
     const task = TaskId.safeParse(search['task']);
     const goal = GoalId.safeParse(search['goal']);
+    const newTask = typeof search['newTask'] === 'string' ? search['newTask'].trim() : '';
     return {
       ...(task.success ? { task: task.data } : {}),
       ...(goal.success ? { goal: goal.data } : {}),
+      ...(newTask === '' ? {} : { newTask: newTask.slice(0, 200) }),
     };
   },
   component: BoardPage,

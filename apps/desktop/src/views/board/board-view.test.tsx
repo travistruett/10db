@@ -42,6 +42,24 @@ function type(label: string | RegExp, value: string, scope: HTMLElement): void {
 }
 
 describe('BoardView', () => {
+  describe('the ?newTask= link', () => {
+    it('opens New Task with the title it carries, and drops the link so a reload does not reopen it', async () => {
+      const project = projectViewDto({ gateCommand: null });
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+      );
+      const { router } = renderApp('/board?newTask=Login%20fails%20after%20sleep');
+      const dialog = await screen.findByRole('dialog', { name: 'New Task' });
+      expect(within(dialog).getByLabelText<HTMLInputElement>('Title').value).toBe(
+        'Login fails after sleep',
+      );
+      await waitFor(() => {
+        expect(router.state.location.search).toEqual({});
+      });
+    });
+  });
+
   describe('the ?task= link', () => {
     function serveTasks(...titles: string[]) {
       const project = projectViewDto({ gateCommand: null });

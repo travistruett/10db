@@ -1,4 +1,4 @@
-import { ChatId, ProjectId, TaskId } from '@10db/contracts';
+import { ChatId, ProjectId } from '@10db/contracts';
 import { useSyncExternalStore } from 'react';
 import { z } from 'zod';
 
@@ -22,25 +22,13 @@ export const ClosedChat = z.object({
 });
 export type ClosedChat = z.infer<typeof ClosedChat>;
 
-/** A task's tab closed: reopening it puts the tab back, and the task itself was never touched. */
-export const ClosedTask = z.object({
-  taskId: TaskId,
-  projectId: ProjectId,
-  title: z.string(),
-  place: z.enum(['copy', 'pass']),
-  position: z.int().nonnegative(),
-});
-export type ClosedTask = z.infer<typeof ClosedTask>;
+/** A closed tab is a session's. */
+export type ClosedTab = ClosedChat;
 
-export const ClosedTab = z.union([ClosedChat, ClosedTask]);
-export type ClosedTab = z.infer<typeof ClosedTab>;
-
-/** The id a closed tab is kept under: its chat's or its task's. */
+/** The id a closed tab is kept under: its chat's. */
 export function closedId(entry: ClosedTab): string {
-  return 'chatId' in entry ? entry.chatId : entry.taskId;
+  return entry.chatId;
 }
-
-const Stored = z.array(ClosedTab);
 
 /** `entry` on top of the stack; a tab already in it moves to the top, and only the newest five stay. */
 export function pushClosed(stack: readonly ClosedTab[], entry: ClosedTab): readonly ClosedTab[] {
@@ -58,7 +46,7 @@ export function popClosed(stack: readonly ClosedTab[]): {
   return { entry: stack[0] ?? null, rest: stack.slice(1) };
 }
 
-/** The entry for the chat or task `id`, wherever it sits, and the stack without it. */
+/** The entry for the chat `id`, wherever it sits, and the stack without it. */
 export function takeClosed(
   stack: readonly ClosedTab[],
   id: string,
@@ -69,12 +57,18 @@ export function takeClosed(
   };
 }
 
-/** A store that does not parse reads as empty. */
+/** A store that does not parse reads as empty; an entry that does not parse, as a task's tab once was, is dropped. */
 export function parseClosed(raw: string | null): readonly ClosedTab[] {
   if (raw === null) return [];
   try {
-    const parsed = Stored.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data.slice(0, CLOSED_LIMIT) : [];
+    const parsed = z.array(z.unknown()).safeParse(JSON.parse(raw));
+    if (!parsed.success) return [];
+    const kept: ClosedTab[] = [];
+    for (const item of parsed.data) {
+      const entry = ClosedChat.safeParse(item);
+      if (entry.success) kept.push(entry.data);
+    }
+    return kept.slice(0, CLOSED_LIMIT);
   } catch {
     return [];
   }

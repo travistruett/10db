@@ -1,7 +1,7 @@
-import { FolderHolderKind, mintId } from '@10db/contracts';
+import { mintId, type ChatDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { pickOption } from '../../test/combobox';
 import {
   chatDto,
@@ -10,8 +10,6 @@ import {
   type ChatServerOptions,
 } from '../../test/chat-fixtures';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
-import { folderKeys } from '../../daemon/project-folder-queries';
-import { folderDto, folderHolder } from '../../test/folder-fixtures';
 import { projectViewDto } from '../../test/fixtures';
 
 // Sessions' first screen: a fresh tab that starts a chat, and Recent and Start from beneath it.
@@ -21,6 +19,7 @@ const billing = projectViewDto({ name: 'billing' });
 
 afterEach(() => {
   localStorage.clear();
+  vi.restoreAllMocks();
 });
 
 function open(
@@ -173,43 +172,6 @@ describe('Sessions: a fresh tab', () => {
     });
   });
 
-  it.each([
-    { button: 'Wait for It', folder: 'wait' },
-    { button: 'Send Reading Only', folder: 'read_only' },
-  ])(
-    'with Your folder held, the first message makes and posts nothing until a choice: $button sends folder $folder',
-    async ({ button, folder }) => {
-      const { chat, queryClient } = open('/sessions', {}, [
-        http.get(daemonUrl('/projects/:projectId/folder'), () =>
-          HttpResponse.json(
-            folderDto({
-              projectId: ampsio.id,
-              holders: [folderHolder(FolderHolderKind.Lane, 'Bump vite')],
-            }),
-          ),
-        ),
-      ]);
-      await screen.findByRole('textbox', { name: 'Message' });
-      await waitFor(() => {
-        expect(queryClient.getQueryData(folderKeys.of(ampsio.id))).toBeDefined();
-      });
-      type('Why does login fail?');
-      send();
-      expect(
-        await screen.findByText('Your folder is in use by the task ‘Bump vite’.'),
-      ).toBeTruthy();
-      expect(chat.created).toHaveLength(0);
-      expect(chat.messages).toHaveLength(0);
-      expect(screen.queryByRole('button', { name: 'File as Tasks' })).toBeNull();
-      fireEvent.click(screen.getByRole('button', { name: button }));
-      await waitFor(() => {
-        expect(chat.messages).toHaveLength(1);
-      });
-      expect(chat.created).toHaveLength(1);
-      expect(chat.messages[0]?.body).toEqual({ text: 'Why does login fail?', folder });
-    },
-  );
-
   it('a first @ makes the chat before any send, then lists the files of its conversation', async () => {
     const { chat, router } = open('/sessions', {
       files: [{ path: 'src/login.ts', matches: [[4, 9]] }],
@@ -240,15 +202,149 @@ describe('Sessions: a fresh tab', () => {
     expect(chat.chats).toHaveLength(0);
   });
 
-  it('puts the strip in the title row on Sessions and takes it out on other views', async () => {
+  it('draws the panel on Sessions and takes it out on other views', async () => {
     const first = open('/sessions');
-    expect(await screen.findByRole('tablist', { name: 'Sessions' })).toBeTruthy();
-    expect(document.querySelector('[data-title-row] [role="tablist"]')).not.toBeNull();
+    expect(await screen.findByRole('navigation', { name: 'Sessions panel' })).toBeTruthy();
+    expect(screen.queryByRole('tablist')).toBeNull();
     first.router.history.push('/factory');
     await waitFor(() => {
-      expect(screen.queryByRole('tablist', { name: 'Sessions' })).toBeNull();
+      expect(screen.queryByRole('navigation', { name: 'Sessions panel' })).toBeNull();
     });
     expect(document.querySelector('[data-title-row][data-tauri-drag-region]')).not.toBeNull();
     expect(mintId('Chat')).toMatch(/^cht_/);
+  });
+});
+
+const rowNames = (): (string | null)[] =>
+  screen.queryAllByRole('option').map((row) => row.getAttribute('aria-label'));
+
+const chatIn = (
+  project: typeof ampsio,
+  title: string,
+  tabPosition: number,
+  more: Parameters<typeof chatDto>[0] = {},
+): ChatDto => chatDto({ projectId: project.id, title, tabPosition, ...more });
+
+describe('Sessions: the panel', () => {
+  it('groups sessions by project in the project list’s order, each by its place, with a fresh row on top of its project', async () => {
+    const chats = [
+      chatIn(billing, 'Refund flow', 0),
+      chatIn(ampsio, 'Second', 2),
+      chatIn(ampsio, 'First', 1),
+    ];
+    const fresh = [{ id: 'abc', projectId: billing.id, model: null, effort: null, position: 9 }];
+    localStorage.setItem('tendb.sessions.fresh', JSON.stringify(fresh));
+    open(`/sessions?chat=${chats[2]?.id ?? ''}`, { chats });
+    await screen.findByRole('option', { name: 'Refund flow, billing' });
+    expect(rowNames()).toEqual([
+      'First, ampsio',
+      'Second, ampsio',
+      'New session, billing',
+      'Refund flow, billing',
+    ]);
+    const panel = screen.getByRole('navigation', { name: 'Sessions panel' });
+    expect(within(panel).getByText('ampsio')).toBeTruthy();
+    expect(within(panel).getByText('billing')).toBeTruthy();
+    expect(
+      screen.getByRole('option', { name: 'First, ampsio' }).getAttribute('aria-selected'),
+    ).toBe('true');
+  });
+
+  it('shows a running turn, a choice waiting and an error each as its own mark, never by colour alone', async () => {
+    const chats = [
+      chatIn(ampsio, 'Running', 0, { conversation: { state: 'running' } }),
+      chatIn(ampsio, 'Choosing', 1, {
+        work: { place: 'choosing', branch: null, base: null, worktree: null, askedAt: null },
+      }),
+      chatIn(ampsio, 'Broken', 2, { conversation: { state: 'ended_error' } }),
+    ];
+    open(`/sessions?chat=${chats[0]?.id ?? ''}`, { chats });
+    const running = await screen.findByRole('option', { name: 'Running, ampsio, working' });
+    expect(running.querySelector('[data-mark="working"]')).not.toBeNull();
+    const choosing = screen.getByRole('option', {
+      name: 'Choosing, ampsio, needs you: choose where it works',
+    });
+    expect(choosing.querySelector('[data-mark="needs_you"]')).not.toBeNull();
+    expect(choosing.getAttribute('data-ring')).toBe('needs_you');
+    const broken = screen.getByRole('option', { name: /^Broken, ampsio, needs you/ });
+    expect(broken.querySelector('[data-mark="error"]')).not.toBeNull();
+  });
+
+  it('a row says where its session works: reading, here, on a branch', async () => {
+    const work = (place: 'here' | 'branch') => ({
+      place,
+      branch: place === 'branch' ? 'fix-login' : null,
+      base: null,
+      worktree: null,
+      askedAt: null,
+    });
+    const chats = [
+      chatIn(ampsio, 'Reads', 0),
+      chatIn(ampsio, 'Edits here', 1, { work: work('here') }),
+      chatIn(ampsio, 'On a branch', 2, { work: work('branch') }),
+    ];
+    open(`/sessions?chat=${chats[0]?.id ?? ''}`, { chats });
+    await screen.findByRole('option', { name: 'Reads, ampsio' });
+    const places = screen.getAllByRole('option').map((row) => row.getAttribute('data-place'));
+    expect(places).toEqual(['reading', 'here', 'branch']);
+  });
+
+  it('the ⌄ switcher lists open sessions by project, then New Session, and picks one', async () => {
+    const chats = [chatIn(ampsio, 'First', 0), chatIn(billing, 'Refund flow', 1)];
+    const { router } = open(`/sessions?chat=${chats[0]?.id ?? ''}`, { chats });
+    fireEvent.click(await screen.findByRole('button', { name: 'Switch session' }));
+    expect(
+      (await screen.findAllByRole('menuitem', { hidden: true })).map((i) => i.textContent),
+    ).toEqual(['First', 'Refund flow', 'New Session⌘T']);
+    fireEvent.click((await screen.findAllByRole('menuitem', { hidden: true }))[1] ?? document.body);
+    await waitFor(() => {
+      expect(router.state.location.search).toMatchObject({ chat: chats[1]?.id });
+    });
+  });
+
+  it('search finds a session by title in any state, and keeps the old rows while the next search is read', async () => {
+    const closedOne = chatIn(ampsio, 'Login flow', 0, { tabPosition: null });
+    const chats = [chatIn(ampsio, 'Login fails', 0), closedOne, chatIn(ampsio, 'Invoices', 1)];
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const calls: string[] = [];
+    open(`/sessions?chat=${chats[0]?.id ?? ''}`, { chats }, [
+      http.get(daemonUrl('/chats/search'), async ({ request }) => {
+        const q = new URL(request.url).searchParams.get('q') ?? '';
+        calls.push(q);
+        if (q === 'login fa') await held;
+        return HttpResponse.json({
+          rows: chats.filter((c) => c.title.toLowerCase().includes(q.toLowerCase())),
+          next: null,
+        });
+      }),
+    ]);
+    const box = await screen.findByRole('textbox', { name: 'Search sessions' });
+    fireEvent.change(box, { target: { value: 'login' } });
+    const results = await screen.findByRole('list', { name: 'Search results' });
+    await within(results).findByRole('button', { name: 'Login flow, ampsio, closed' });
+    expect(within(results).getAllByRole('button')).toHaveLength(2);
+    fireEvent.change(box, { target: { value: 'login fa' } });
+    await waitFor(() => {
+      expect(calls).toContain('login fa');
+    });
+    // The second read is held: the first one's rows are still drawn.
+    expect(within(results).getAllByRole('button')).toHaveLength(2);
+    release();
+    await waitFor(() => {
+      expect(within(results).getAllByRole('button')).toHaveLength(1);
+    });
+  });
+
+  it('draws fewer than 250 rows for 1,000 sessions', async () => {
+    // jsdom does no layout: the panel is given a height to draw rows in.
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600);
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(260);
+    const chats = Array.from({ length: 1000 }, (_, i) => chatIn(ampsio, `Session ${String(i)}`, i));
+    open(`/sessions?chat=${chats[0]?.id ?? ''}`, { chats });
+    await screen.findByRole('option', { name: /^Session 0, ampsio/ });
+    expect(screen.getAllByRole('option').length).toBeLessThan(250);
   });
 });

@@ -1,26 +1,23 @@
 import {
   ConversationState,
-  Delivery,
-  DoItPlace,
   FolderHolderKind,
   FolderWhileHeld,
   INBOX_PAGE_SIZE_MAX,
+  WorkPlace,
   InboxListState,
   type ChatDto,
-  type DoItResult,
   type Effort,
   type ProjectViewDto,
   type ToolCallView,
 } from '@10db/contracts';
-import { Box, Button, Group, Text } from '@mantine/core';
+import { Alert, Box, Button, Group, Text } from '@mantine/core';
 import { useClipboard, useElementSize } from '@mantine/hooks';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { ConversationList, toolDoing, WorkingLine } from '../../conversation';
 import { Composer } from '../../conversation/composer';
 import { ConversationLayout } from '../../conversation/conversation-layout';
 import { composerPhase } from '../../conversation/composer-phase';
-import { ContextRing } from '../../conversation/context-ring';
 import { afterFailedSend, EMPTY_DRAFT, hasContent, type Draft } from '../../conversation/drafts';
 import { escapeHasOwner, escapeIsTaken } from '../../conversation/escape';
 import { itemEntries } from '../../conversation/item-entries';
@@ -31,6 +28,8 @@ import { latestTodos, TodoList } from '../../conversation/todo-list';
 import { PermissionRequest, useConversationCards } from '../../conversation/permission-request';
 import type { Streaming } from '../../conversation/working-line';
 import { fetchConversationFiles, useChatModels, usePatchChat } from '../../daemon/chat-queries';
+import { useChatChanges } from '../../daemon/chat-changes-queries';
+import { useChatWork, useChooseWork, type ChoseWork } from '../../daemon/chat-work-queries';
 import {
   useConversation,
   useConversationItemsState,
@@ -42,26 +41,29 @@ import {
   useToolCallFull,
 } from '../../daemon/conversation-queries';
 import { useModels } from '../../daemon/model-queries';
-import { useProjectFolder, useStopWaiting } from '../../daemon/project-folder-queries';
+import { useProjectFolder } from '../../daemon/project-folder-queries';
 import { useDaemon, useDaemonStatus } from '../../daemon/provider';
 import { useInboxPage } from '../../daemon/queries';
 import { useHandBack, useTakeover, useTakeoverCommand } from '../../daemon/takeover-queries';
 import dayjs from 'dayjs';
 import { chatEntries } from './chat-entries';
 import { FolderWait } from './folder-wait';
-import { keepingWords } from './kind-line';
-import { DoItSheet } from './do-it-sheet';
+import { keepingWords } from './folder-holders';
 import { useOpenTask } from './open-session';
-import { TaskTabPlace } from './task-tabs';
 import { useTaskSession } from '../../daemon/task-session-queries';
-import { useSessionKeys } from './use-session-keys';
 import { sessionAnnouncement, type SessionEvent } from './session-announcements';
-import { SessionBar } from './session-bar';
-import type { TabActions } from './tab-menu';
+import { JudgeLine } from '../../conversation';
+import { SessionTitle } from './session-title';
+import { WorkBar } from './work-bar';
+import { ChangesDrawer, BESIDE_PX, DRAWER_WIDTH } from './changes-drawer';
+import { changesChoice } from './changes-choice';
+import { changesTotals, withQuote } from './changes-files';
+import { GitStepButton } from './git-step-button';
+import { useSessionKeys } from './use-session-keys';
+import { sessionMeta } from './session-meta';
+import type { SessionActions } from './session-menu';
 import { TerminalBanner } from './terminal-banner';
 import { draftKey, sessionDrafts, useSessionDraft } from './session-drafts';
-
-const CONTEXT_TIP = 'Past 70%, the next turn continues in a fresh session with a summary.';
 
 /** Under this width of the tab itself the composer drops its long labels. */
 const NARROW_PX = 640;
@@ -83,15 +85,15 @@ export interface ChatTabProps {
   readonly project: ProjectViewDto | undefined;
   /** Says something to the screen's one polite live region. */
   readonly onAnnounce?: (message: string) => void;
-  /** What the session bar's ⋯ menu does; without it the menu only renames. */
-  readonly actions?: Omit<TabActions, 'onRename'>;
+  /** The ⌄ beside the title. */
+  readonly switcher: ReactNode;
+  /** What the title row's ⋯ menu does besides renaming and File as Tasks. */
+  readonly actions: Omit<SessionActions, 'onRename' | 'onFileAsTasks' | 'onOpenInTerminal'>;
   readonly renaming?: boolean;
   readonly onRenamed?: () => void;
   /** The builder asked to open the chat in a terminal from the strip. */
   readonly openingTerminal?: boolean;
   readonly onTerminalAsked?: () => void;
-  /** Do It was accepted; the screen puts the task's tab where it belongs. */
-  readonly onHandedOff?: (result: DoItResult, title: string) => void;
 }
 
 /** What stands where a sealed chat's composer was: its work moved to a task, which the line opens. */
@@ -120,12 +122,7 @@ function HandedOffLine({ chat }: { readonly chat: ChatDto }) {
           size="xs"
           variant="default"
           onClick={() => {
-            void openTask({
-              taskId: session.taskId,
-              projectId: chat.projectId,
-              title: session.title,
-              place: session.place === 'pass' ? TaskTabPlace.Pass : TaskTabPlace.Copy,
-            });
+            void openTask({ taskId: session.taskId, projectId: chat.projectId });
           }}
         >
           Open Task
@@ -133,19 +130,6 @@ function HandedOffLine({ chat }: { readonly chat: ChatDto }) {
       )}
     </Group>
   );
-}
-
-/** Why Do It… is off for the chat, or null when it is on. */
-function doItOff(
-  chat: ChatDto,
-  state: string,
-  removed: boolean,
-  reason: string | null,
-): string | null {
-  if (state === 'taken_over') return 'Hand back first';
-  if (removed) return 'This project was removed from 10db.';
-  if (chat.archivedAt !== null) return 'This session is archived.';
-  return reason;
 }
 
 /**
@@ -156,10 +140,10 @@ export function ChatTab({
   chat,
   project,
   onAnnounce,
+  switcher,
   actions,
   renaming,
   onRenamed,
-  onHandedOff,
   openingTerminal,
   onTerminalAsked,
 }: ChatTabProps) {
@@ -199,9 +183,36 @@ export function ChatTab({
   const [uncopied, setUncopied] = useState<string | null>(null);
   const [lastCommand, setLastCommand] = useState<string | null>(null);
   const [modelRefusal, setModelRefusal] = useState<string | null>(null);
+  // A git step the daemon refused or that failed, until the builder dismisses it.
+  const [gitError, setGitError] = useState<string | null>(null);
   const models = useChatModels(chat.projectId);
   const folder = useProjectFolder(chat.projectId);
-  const stopWaiting = useStopWaiting();
+  const work = useChatWork(chat.id);
+  const choose = useChooseWork();
+  // Changes: the button shows once anything changed; the builder's choice to open or close it holds for the session.
+  const changes = useChatChanges(chat.id, true);
+  const totals = changes.data === undefined ? null : changesTotals(changes.data.files);
+  const hasChanges = totals !== null && totals.files > 0;
+  // A session whose worktree is gone has no diff to read; its pull request has the changes, which the drawer links.
+  const offersChanges =
+    hasChanges || (changes.isError && (work.data?.pullRequest ?? null) !== null);
+  const [changesOpen, setChangesOpen] = useState(() => changesChoice.get(chat.id) === true);
+  const toggleChanges = (): void => {
+    changesChoice.set(chat.id, !changesOpen);
+    setChangesOpen(!changesOpen);
+  };
+  useSessionKeys((key) => {
+    if (key.kind !== 'changes' || (!offersChanges && !changesOpen)) return false;
+    toggleChanges();
+    return true;
+  });
+  // Esc hides the bar until a refused change asks again, which changes `askedAt`.
+  const [hiddenFor, setHiddenFor] = useState<string | null | undefined>(undefined);
+  const [settled, setSettled] = useState<ChoseWork['work'] | null>(null);
+  const place = chat.work?.place ?? null;
+  const askedAt = chat.work?.askedAt ?? null;
+  const asking = place === WorkPlace.Choosing && hiddenFor !== askedAt;
+  const movingTo = place === WorkPlace.Moving ? (chat.work?.branch ?? null) : null;
   // Holders that keep this chat's turn from writing: Send asks before a message runs.
   const keeping = keepingWords(chat, folder);
   // A message that chose to wait is listed by the daemon as this chat waiting, whoever still holds the folder.
@@ -214,21 +225,16 @@ export function ChatTab({
   const offered = models.data?.offered ?? [];
   const named = conversation.model ?? models.data?.default ?? null;
   const input = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
+  const asked = useRef(asking);
+  useEffect(() => {
+    asked.current = asking;
+  });
   const caps = conversation.capabilities;
   const working = WORKING_STATES.has(conversation.state);
   const removed = project === undefined;
-  // The Do It sheet, when open: the place it opens on and the unsent words that go with it.
-  const [doIt, setDoIt] = useState<{ place?: DoItPlace; draft?: string } | null>(null);
-  const doItReason = doItOff(chat, conversation.state, removed, null);
-  useSessionKeys((key) => {
-    if (key.kind !== 'do_it' || doItReason !== null || conversation.state === 'sealed')
-      return false;
-    setDoIt({});
-    return true;
-  });
 
-  const post = async (d: Draft, folderChoice?: FolderWhileHeld): Promise<void> => {
-    const chosen = folderChoice ?? whileWaiting;
+  const post = async (d: Draft): Promise<void> => {
+    const chosen = whileWaiting;
     await send.mutateAsync({
       conversationId: chat.conversationId,
       text: d.text,
@@ -242,8 +248,9 @@ export function ChatTab({
   // The caret goes to the end of what was typed before the tab was a chat, which WebKit leaves at the start.
   useEffect(() => {
     const field = input.current;
-    // A chat in the terminal puts the focus on Hand Back, the likely next act.
-    if (field === null || inTerminal) return;
+    // A chat in the terminal puts the focus on Hand Back, the likely next act; a bar asking where the work
+    // happens takes it, so 1, 2 and Esc work at once.
+    if (field === null || inTerminal || asked.current) return;
     field.focus();
     field.setSelectionRange(field.value.length, field.value.length);
     // The focus moves when the tab is shown, not each time the chat changes state.
@@ -255,7 +262,7 @@ export function ChatTab({
   useEffect(() => {
     const request = sessionDrafts.takeSendRequest(key);
     if (request === null) return;
-    post(request.draft, request.folder).catch((error: unknown) => {
+    post(request.draft).catch((error: unknown) => {
       sessionDrafts.set(key, afterFailedSend(sessionDrafts.get(key), request.draft));
       setSendError(error instanceof Error ? error.message : String(error));
     });
@@ -324,19 +331,11 @@ export function ChatTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversation.state]);
 
-  // While Your folder is held the go-ahead is a message like any other: it waits in the composer, whose Send
-  // asks how it runs.
+  // The go-ahead is a message like any other.
   const allow = (call: ToolCallView): void => {
-    const text = `Go ahead: ${call.title}`;
-    if (keeping === null) {
-      void post({ ...EMPTY_DRAFT, text }).catch((error: unknown) => {
-        setSendError(error instanceof Error ? error.message : String(error));
-      });
-      return;
-    }
-    const current = sessionDrafts.get(key);
-    setDraft({ ...current, text: current.text === '' ? text : `${current.text}\n${text}` });
-    input.current?.focus();
+    void post({ ...EMPTY_DRAFT, text: `Go ahead: ${call.title}` }).catch((error: unknown) => {
+      setSendError(error instanceof Error ? error.message : String(error));
+    });
   };
 
   const entries = chatEntries(
@@ -350,12 +349,7 @@ export function ChatTab({
       inTerminal,
       cards: [...(resolved.data?.items ?? []), ...open],
       openTask: (task) => {
-        void openTask({
-          taskId: task.taskId,
-          projectId: chat.projectId,
-          title: task.title,
-          place: task.place === 'here' ? TaskTabPlace.Pass : TaskTabPlace.Copy,
-        });
+        void openTask({ taskId: task.taskId, projectId: chat.projectId });
       },
     }),
     { chatId: chat.id, projectId: chat.projectId },
@@ -393,6 +387,7 @@ export function ChatTab({
     fresh: false,
     narrow,
     slashCommands: caps.slashCommands,
+    movingTo,
   });
   const reconnecting = daemon.kind === 'reconnecting';
   const disabledReason = reconnecting ? 'Reconnecting… your message stays here.' : null;
@@ -414,215 +409,256 @@ export function ChatTab({
       ref={sizeRef}
       style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}
     >
-      <ConversationLayout
-        label="Conversation"
-        header={
-          <SessionBar
-            chat={chat}
-            conversation={conversation}
-            projectName={project?.name ?? ''}
-            folder={folder}
-            projectPath={project?.repoPath ?? null}
-            terminalSince={takeover.data?.since ?? null}
-            {...(openingTerminal === undefined ? {} : { openingTerminal })}
-            {...(onTerminalAsked === undefined ? {} : { onTerminalAsked })}
-            onTerminalUncopied={setUncopied}
-            loading={loading}
-            fileDisabledReason={removed ? 'This project was removed from 10db.' : disabledReason}
-            {...(actions === undefined ? {} : { actions })}
-            {...(renaming === undefined ? {} : { renaming })}
-            {...(onRenamed === undefined ? {} : { onRenamed })}
-            doItDisabledReason={doItReason}
-            onDoIt={() => {
-              setDoIt({});
+      {/* The measured box keeps its width; this one gives the drawer's share of the surface up. */}
+      <Box
+        style={{
+          flex: 1,
+          minWidth: 0,
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          paddingRight: changesOpen && width >= BESIDE_PX ? DRAWER_WIDTH : 0,
+        }}
+      >
+        <SessionTitle
+          chat={chat}
+          conversation={conversation}
+          meta={sessionMeta({
+            projectName: project?.name ?? '',
+            place,
+            movingTo,
+            state: work.data,
+            terminalSince:
+              takeover.data === undefined ? null : dayjs(takeover.data.since).format('HH:mm'),
+            inTerminal,
+          })}
+          steps={
+            <>
+              {offersChanges || changesOpen ? (
+                <Button
+                  size="compact-sm"
+                  variant="default"
+                  aria-pressed={changesOpen}
+                  onClick={toggleChanges}
+                >
+                  {totals === null || !hasChanges
+                    ? 'Changes'
+                    : `Changes +${String(totals.added)} −${String(totals.removed)}`}
+                </Button>
+              ) : null}
+              {work.data === undefined || removed ? null : (
+                <GitStepButton
+                  chatId={chat.id}
+                  state={work.data}
+                  title={chat.title}
+                  turnRunning={working}
+                  onError={setGitError}
+                />
+              )}
+            </>
+          }
+          switcher={switcher}
+          projectPath={project?.repoPath ?? null}
+          actions={{
+            ...actions,
+            ...(removed || reconnecting
+              ? {}
+              : {
+                  onFileAsTasks: () => {
+                    void post({ ...EMPTY_DRAFT, text: FILE_AS_TASKS_MESSAGE }).catch(
+                      (error: unknown) => {
+                        setSendError(error instanceof Error ? error.message : String(error));
+                      },
+                    );
+                  },
+                }),
+          }}
+          {...(renaming === undefined ? {} : { renaming })}
+          {...(onRenamed === undefined ? {} : { onRenamed })}
+          {...(openingTerminal === undefined ? {} : { openingTerminal })}
+          {...(onTerminalAsked === undefined ? {} : { onTerminalAsked })}
+          onTerminalUncopied={setUncopied}
+        />
+        {gitError === null ? null : (
+          <Alert
+            role="alert"
+            color="red"
+            mx="md"
+            mt="xs"
+            py={6}
+            withCloseButton
+            closeButtonLabel="Dismiss"
+            onClose={() => {
+              setGitError(null);
             }}
-            onFileAsTasks={() => {
-              void post({ ...EMPTY_DRAFT, text: FILE_AS_TASKS_MESSAGE }).catch((error: unknown) => {
-                setSendError(error instanceof Error ? error.message : String(error));
-              });
-            }}
-          />
-        }
-        footer={
-          <>
-            {caps.plan ? (
-              <TodoList
-                steps={latestTodos(items)}
-                working={working}
+          >
+            {gitError}
+          </Alert>
+        )}
+        <ConversationLayout
+          label="Conversation"
+          header={<JudgeLine judge={caps.judge} />}
+          footer={
+            <>
+              {caps.plan ? (
+                <TodoList
+                  steps={latestTodos(items)}
+                  working={working}
+                  cardWaiting={open.length > 0}
+                />
+              ) : null}
+              <WorkingLine
+                conversation={conversation}
+                streaming={streaming}
+                {...(tool === undefined ? {} : { tool })}
+              />
+              <PermissionRequest items={open} />
+              <BackgroundTasks
+                capabilities={caps}
+                tasks={conversation.backgroundTasks}
                 cardWaiting={open.length > 0}
               />
-            ) : null}
-            <WorkingLine
-              conversation={conversation}
-              streaming={streaming}
-              {...(tool === undefined ? {} : { tool })}
-            />
-            <PermissionRequest items={open} />
-            <BackgroundTasks
-              capabilities={caps}
-              tasks={conversation.backgroundTasks}
-              cardWaiting={open.length > 0}
-            />
-            {inTerminal ? (
-              <TerminalBanner
-                label={caps.label}
-                since={takeover.data?.since ?? null}
-                notes={takeover.data?.notes ?? []}
-                onHandBack={() => {
-                  setUncopied(null);
-                  setLastCommand(null);
-                  handBack.mutate(chat.conversationId);
-                }}
-                handingBack={handBack.isPending}
-                onCopyCommand={() => {
-                  takeoverCommand.mutate(chat.conversationId, {
-                    onSuccess: ({ line }) => {
-                      setLastCommand(line);
-                      clipboard.copy(line);
-                    },
-                  });
-                }}
-                copied={clipboard.copied}
-                line={uncopied ?? (clipboard.error === null ? null : lastCommand)}
-                error={handBack.error?.message ?? takeoverCommand.error?.message ?? null}
-              />
-            ) : null}
-            {waiting ? (
-              <FolderWait
-                holders={keeping}
-                onSendNow={() => {
-                  stopWaiting.mutate(chat.id);
-                }}
-                onStop={stopNow}
-              />
-            ) : null}
-            {conversation.state === 'sealed' ? (
-              <HandedOffLine chat={chat} />
-            ) : removed ? (
-              <Text size="sm" c="dimmed" px="md" py="md">
-                This project was removed from 10db.
-              </Text>
-            ) : (
-              <Composer
-                draft={draft}
-                onDraft={(next) => {
-                  setSendError(null);
-                  stopWaiting.reset();
-                  setDraft(next);
-                }}
-                capabilities={caps}
-                mentions={{
-                  files: (q, signal) =>
-                    fetchConversationFiles(client, chat.conversationId, q, signal),
-                  commands: conversation.commands,
-                }}
-                phase={phase}
-                disabledReason={disabledReason}
-                error={sendError ?? stopWaiting.error?.message ?? null}
-                inputRef={input}
-                modelControl={
-                  <Group gap={4} wrap="nowrap">
-                    {caps.modelSwitch === 'none' || offered.length === 0 ? (
-                      named === null ? null : (
-                        <Text size="xs" c="dimmed">
-                          {nameOf(named, new Map((modelRows.data ?? []).map((r) => [r.model, r])))}
-                        </Text>
-                      )
-                    ) : (
-                      <ModelMenu
-                        offered={offered}
-                        default={models.data?.default ?? null}
-                        picked={conversation.model}
-                        effort={conversation.effort}
-                        busy={working}
-                        pending={patch.isPending}
-                        error={modelRefusal}
-                        onPick={changeModel}
-                      />
-                    )}
-                    <ContextRing
-                      percent={conversation.contextPct}
-                      more={[
-                        CONTEXT_TIP,
-                        ...(conversation.costUsd === null
-                          ? []
-                          : [`$${conversation.costUsd.toFixed(2)} so far`]),
-                      ]}
-                    />
-                  </Group>
-                }
-                {...(keeping === null || inTerminal
-                  ? {}
-                  : {
-                      held: {
-                        holders: keeping,
-                        onChoose: async (
-                          d: Draft,
-                          choice: FolderWhileHeld,
-                          how: 'send' | 'redo',
-                        ) => {
-                          if (how === 'send') await post(d, choice);
-                          else
-                            await redo.mutateAsync({
-                              conversationId: chat.conversationId,
-                              text: d.text,
-                              folder: choice,
-                            });
-                        },
-                        onFileAsTasks: async () => {
-                          await post({ ...EMPTY_DRAFT, text: FILE_AS_TASKS_MESSAGE });
-                        },
-                        // A project that lands locally has no separate copies to offer.
-                        ...(doItReason === null && project.delivery !== Delivery.Local
-                          ? {
-                              onDoItSeparately: (d: Draft) => {
-                                setDoIt({ place: DoItPlace.Worktree, draft: d.text });
-                              },
-                            }
-                          : {}),
+              {inTerminal ? (
+                <TerminalBanner
+                  label={caps.label}
+                  since={takeover.data?.since ?? null}
+                  notes={takeover.data?.notes ?? []}
+                  onHandBack={() => {
+                    setUncopied(null);
+                    setLastCommand(null);
+                    handBack.mutate(chat.conversationId);
+                  }}
+                  handingBack={handBack.isPending}
+                  onCopyCommand={() => {
+                    takeoverCommand.mutate(chat.conversationId, {
+                      onSuccess: ({ line }) => {
+                        setLastCommand(line);
+                        clipboard.copy(line);
                       },
-                    })}
-                onSend={post}
-                onStop={stopNow}
-                onRedo={async (d) => {
-                  await redo.mutateAsync({ conversationId: chat.conversationId, text: d.text });
-                }}
-              />
-            )}
-          </>
-        }
-      >
-        {loading ? (
-          <Box px="md" pt="md">
-            <PageLoading shape={PageLoadingShape.Lines} label="Loading the conversation" />
-          </Box>
-        ) : null}
-        <ConversationList
-          entries={shown}
-          highlight={null}
-          loadFull={loadFull}
-          onAllow={allow}
-          agentLabel={caps.label}
-          busy={streaming !== null}
-        />
-        {doIt === null || project === undefined ? null : (
-          <DoItSheet
-            chat={chat}
-            project={project}
+                    });
+                  }}
+                  copied={clipboard.copied}
+                  line={uncopied ?? (clipboard.error === null ? null : lastCommand)}
+                  error={handBack.error?.message ?? takeoverCommand.error?.message ?? null}
+                />
+              ) : null}
+              {waiting ? (
+                <FolderWait
+                  holders={keeping}
+                  branch={folder?.branch ?? work.data?.baseBranch ?? null}
+                  onStop={stopNow}
+                />
+              ) : null}
+              {asking && !removed && conversation.state !== 'sealed' ? (
+                <WorkBar
+                  key={askedAt ?? 'asked'}
+                  agentLabel={caps.label}
+                  branch={folder?.branch ?? work.data?.baseBranch ?? 'main'}
+                  state={work.data}
+                  pending={choose.isPending}
+                  settled={settled}
+                  error={choose.error?.message ?? null}
+                  onHide={() => {
+                    setHiddenFor(askedAt);
+                    input.current?.focus();
+                  }}
+                  onChoose={(next) => {
+                    choose.mutate(
+                      { chatId: chat.id, place: next },
+                      {
+                        onSuccess: (answer) => {
+                          setSettled(answer.chosen ? null : answer.work);
+                        },
+                      },
+                    );
+                  }}
+                />
+              ) : null}
+              {conversation.state === 'sealed' ? (
+                <HandedOffLine chat={chat} />
+              ) : removed ? (
+                <Text size="sm" c="dimmed" px="md" py="md">
+                  This project was removed from 10db.
+                </Text>
+              ) : (
+                <Composer
+                  draft={draft}
+                  onDraft={(next) => {
+                    setSendError(null);
+                    setDraft(next);
+                  }}
+                  capabilities={caps}
+                  mentions={{
+                    files: (q, signal) =>
+                      fetchConversationFiles(client, chat.conversationId, q, signal),
+                    commands: conversation.commands,
+                  }}
+                  phase={phase}
+                  disabledReason={disabledReason}
+                  error={sendError}
+                  inputRef={input}
+                  modelControl={
+                    <Group gap={4} wrap="nowrap">
+                      {caps.modelSwitch === 'none' || offered.length === 0 ? (
+                        named === null ? null : (
+                          <Text size="xs" c="dimmed">
+                            {nameOf(
+                              named,
+                              new Map((modelRows.data ?? []).map((r) => [r.model, r])),
+                            )}
+                          </Text>
+                        )
+                      ) : (
+                        <ModelMenu
+                          offered={offered}
+                          default={models.data?.default ?? null}
+                          picked={conversation.model}
+                          effort={conversation.effort}
+                          busy={working}
+                          pending={patch.isPending}
+                          error={modelRefusal}
+                          onPick={changeModel}
+                        />
+                      )}
+                    </Group>
+                  }
+                  onSend={post}
+                  onStop={stopNow}
+                  onRedo={async (d) => {
+                    await redo.mutateAsync({ conversationId: chat.conversationId, text: d.text });
+                  }}
+                />
+              )}
+            </>
+          }
+        >
+          {loading ? (
+            <Box px="md" pt="md">
+              <PageLoading shape={PageLoadingShape.Lines} label="Loading the conversation" />
+            </Box>
+          ) : null}
+          <ConversationList
+            entries={shown}
+            highlight={null}
+            loadFull={loadFull}
+            onAllow={allow}
             agentLabel={caps.label}
-            model={conversation.model}
-            {...(doIt.place === undefined ? {} : { place: doIt.place })}
-            {...(doIt.draft === undefined ? {} : { draft: doIt.draft })}
-            onClose={() => {
-              setDoIt(null);
-            }}
-            onDone={(result, title) => {
-              setDoIt(null);
-              onHandedOff?.(result, title);
-            }}
+            busy={streaming !== null}
           />
-        )}
-      </ConversationLayout>
+        </ConversationLayout>
+      </Box>
+      <ChangesDrawer
+        opened={changesOpen}
+        onClose={() => {
+          changesChoice.set(chat.id, false);
+          setChangesOpen(false);
+        }}
+        changes={changes}
+        pullRequest={work.data?.pullRequest?.url ?? null}
+        onQuote={(text) => {
+          setDraft({ ...draft, text: withQuote(draft.text, text) });
+        }}
+      />
     </Box>
   );
 }

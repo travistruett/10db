@@ -18,7 +18,7 @@ import { Alert, Button, Group, Menu, Select, Stack, Text } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconColumns, IconPlayerPlay, IconPlus } from '@tabler/icons-react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useGoals } from '../../daemon/goal-queries';
 import { useKinds } from '../../daemon/kind-queries';
 import {
@@ -510,9 +510,30 @@ export function BoardView() {
   const workstreams = useWorkstreams({ active: false });
   const batches = useBatches(project?.id ?? null);
   const navigate = useNavigate();
-  const { task, goal: linkedGoalId } = useSearch({ from: '/board' });
+  const { task, goal: linkedGoalId, newTask } = useSearch({ from: '/board' });
   const linked = useLinkedTask(task, projects.data ?? [], project?.id ?? null, select);
   const [taskOpen, taskModal] = useDisclosure(false);
+  // The title a link asked New Task to open with; the link is dropped once it has been read.
+  const [taskTitle, setTaskTitle] = useState<string | null>(null);
+  const [titleLinkedFor, setTitleLinkedFor] = useState<string | undefined>(undefined);
+  if (titleLinkedFor !== newTask) {
+    setTitleLinkedFor(newTask);
+    if (newTask !== undefined) {
+      setTaskTitle(newTask);
+      taskModal.open();
+    }
+  }
+  useEffect(() => {
+    if (newTask === undefined) return;
+    void navigate({
+      to: '/board',
+      search: {
+        ...(task === undefined ? {} : { task }),
+        ...(linkedGoalId === undefined ? {} : { goal: linkedGoalId }),
+      },
+      replace: true,
+    });
+  }, [newTask, task, linkedGoalId, navigate]);
   const [taskStatus, setTaskStatus] = useState<{ pending: boolean; error: string | null }>({
     pending: false,
     error: null,
@@ -712,7 +733,10 @@ export function BoardView() {
       {project ? (
         <FormModal
           opened={taskOpen}
-          onClose={taskModal.close}
+          onClose={() => {
+            taskModal.close();
+            setTaskTitle(null);
+          }}
           title="New Task"
           error={taskStatus.error}
           actions={
@@ -727,8 +751,9 @@ export function BoardView() {
           }
         >
           <NewTaskForm
-            key={project.id}
+            key={`${project.id}:${taskTitle ?? ''}`}
             formId={NEW_TASK_FORM_ID}
+            {...(taskTitle === null ? {} : { initial: { title: taskTitle } })}
             onStatus={setTaskStatus}
             project={project}
             tasks={taskList}

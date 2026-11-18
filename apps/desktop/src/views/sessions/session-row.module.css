@@ -1,0 +1,114 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding-inline: 8px;
+  border-radius: var(--mantine-radius-md);
+  cursor: pointer;
+  user-select: none;
+  color: var(--mantine-color-text);
+}
+
+.row:hover,
+.row[data-selected] {
+  background: var(--mantine-color-default-hover);
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: -2px;
+}
+
+.row[data-selected] {
+  color: var(--mantine-color-bright);
+}
+
+/* A row that needs the builder keeps a ring around it, in the primary colour. */
+.row[data-ring='needs_you'] {
+  box-shadow: inset 0 0 0 1px var(--mantine-color-yellow-filled);
+}
+
+.row[data-ring='error'] {
+  box-shadow: inset 0 0 0 1px var(--mantine-color-red-filled);
+}
+
+.icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--mantine-color-dimmed);
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--mantine-font-size-sm);
+}
+
+.title[data-fresh] {
+  font-style: italic;
+  color: var(--mantine-color-dimmed);
+}
+
+.end {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  display: grid;
+  place-items: center;
+}
+
+.close {
+  display: none;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  width: 14px;
+  height: 14px;
+  place-items: center;
+}
+
+/* Hovered or focused, the × takes the mark's place and adds no width. */
+.row:hover .close,
+.row:focus-within .close {
+  display: grid;
+}
+
+.row:hover .mark,
+.row:focus-within .mark {
+  display: none;
+}
+
+.dot {
+  display: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--mantine-color-blue-filled);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    display: none;
+  }
+
+  .dot {
+    display: block;
+  }
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 8px 4px;
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 600;
+  color: var(--mantine-color-dimmed);
+}

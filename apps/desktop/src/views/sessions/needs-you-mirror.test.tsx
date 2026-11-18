@@ -56,7 +56,7 @@ describe('Sessions: needs you mirrors the Inbox', () => {
     );
     renderApp(`/sessions?chat=${chat.id}`);
     await waitFor(() => {
-      expect(screen.getByRole('tab').getAttribute('data-ring')).toBe('yellow');
+      expect(screen.getByRole('option').getAttribute('data-ring')).toBe('needs_you');
     });
     const sessions = screen.getAllByRole('link').find((l) => l.textContent.startsWith('Sessions'));
     expect(sessions?.textContent).toContain('1 session needs you');
@@ -64,7 +64,7 @@ describe('Sessions: needs you mirrors the Inbox', () => {
     fireEvent.click(within(region).getByRole('radio', { name: /Allow once/ }));
     fireEvent.click(within(region).getByRole('button', { name: 'Send answer' }));
     await waitFor(() => {
-      expect(screen.getByRole('tab').getAttribute('data-ring')).toBeNull();
+      expect(screen.getByRole('option').getAttribute('data-ring')).toBeNull();
     });
     await waitFor(() => {
       expect(
@@ -112,6 +112,6 @@ describe('Sessions: needs you mirrors the Inbox', () => {
     });
     expect(router.state.location.search).toMatchObject({ chat: second.id });
     expect(served.patches).toEqual([{ chatId: second.id, body: { tabPosition: 1 } }]);
-    expect(await screen.findAllByRole('tab')).toHaveLength(2);
+    expect(await screen.findAllByRole('option')).toHaveLength(2);
   });
 });
