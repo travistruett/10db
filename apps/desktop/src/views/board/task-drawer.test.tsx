@@ -1503,6 +1503,45 @@ describe('TaskDrawer', () => {
     });
   });
 
+  describe('the plan', () => {
+    const planned = (summary: string) => ({
+      summary,
+      verdict: null,
+      sessionId: mintId('Session'),
+      at: '2026-10-29T10:00:00.000Z',
+    });
+
+    it('shows the plan a build step that plans first recorded on Overview, above the latest review', async () => {
+      serve();
+      open({
+        workstream: workstreamDto({
+          state: 'DONE',
+          steps: [
+            stepDto({ plansFirst: true, result: planned('1. Add the badge.\n2. Test it.') }),
+            stepDto({
+              role: 'review',
+              personaName: 'Reviewer',
+              tools: 'read_only',
+              result: { ...planned('Looks right.'), verdict: 'approve' },
+            }),
+          ],
+        }),
+      });
+      const d = await dialog();
+      const plan = within(d).getByTestId('task-plan');
+      expect(within(plan).getByText('Plan')).toBeTruthy();
+      expect(within(plan).getByText('by Implementer')).toBeTruthy();
+      expect(within(plan).getByText(/1\. Add the badge\.\s+2\. Test it\./)).toBeTruthy();
+      expect(follows(plan, within(d).getByTestId('latest-review'))).toBe(true);
+    });
+
+    it('shows no plan for a run that has none', async () => {
+      serve();
+      open({ workstream: workstreamDto({ steps: [stepDto()] }) });
+      expect(within(await dialog()).queryByTestId('task-plan')).toBeNull();
+    });
+  });
+
   describe('review rounds', () => {
     const round = (d: HTMLElement, index: number): HTMLElement => {
       const found = within(d).getAllByTestId('review-round')[index];

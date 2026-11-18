@@ -119,11 +119,12 @@ describe('currentStep', () => {
 });
 
 describe('planOf', () => {
+  const AT = '2026-10-17T12:00:00.000Z';
   const result = (summary: string) => ({
     summary,
     verdict: null,
     sessionId: mintId('Session'),
-    at: '2026-10-17T12:00:00.000Z',
+    at: AT,
   });
   const plan: WorkstreamStep = { ...base, role: 'plan', personaName: 'Planner' };
   const implement: WorkstreamStep = {
@@ -170,6 +171,6 @@ describe('planOf', () => {
       want: { role: 'implement', personaName: 'Implementer', summary: 'Plan B' },
     },
   ])('$name', ({ steps, want }) => {
-    expect(planOf(steps)).toEqual(want);
+    expect(planOf(steps)).toEqual(want === null ? null : { ...want, at: AT });
   });
 });

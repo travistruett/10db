@@ -123,6 +123,8 @@ export interface TaskPlan {
   readonly role: StepRole;
   readonly personaName: string;
   readonly summary: string;
+  /** When the plan was recorded. */
+  readonly at: string;
 }
 
 /** The latest plan a run recorded: a Plan step's result, or the one a build step that plans first wrote. */
@@ -133,7 +135,12 @@ export function planOf(steps: readonly WorkstreamStep[]): TaskPlan | null {
       (s.role === StepRole.Plan || (s.role === StepRole.Implement && s.plansFirst === true)),
   );
   if (!step?.result) return null;
-  return { role: step.role, personaName: step.personaName, summary: step.result.summary };
+  return {
+    role: step.role,
+    personaName: step.personaName,
+    summary: step.result.summary,
+    at: step.result.at,
+  };
 }
 
 /** A stored plan has no step at the index; falling back would hand a read-only step edit access. */
