@@ -120,6 +120,8 @@ export function useInboxRows(list: InboxList) {
       if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
     },
     isPending: query.isPending,
+    /** The rows are the previous list's, kept until the new list's first page arrives. */
+    isPlaceholder: query.isPlaceholderData,
     error: query.isFetchNextPageError ? null : query.error,
     moreError: query.isFetchNextPageError ? query.error : null,
   };

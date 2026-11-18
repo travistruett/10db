@@ -1511,6 +1511,18 @@ describe('the resolved view', () => {
       ).toEqual(['retry']);
     });
 
+    it('selects the first row of the new list, not the row at the old index', async () => {
+      serveBoth([], many(12));
+      renderApp('/inbox?state=resolved');
+      fireEvent.click(await findPanelRow('Retry number 5?'));
+      expect(panelRows()[5]?.getAttribute('aria-selected')).toBe('true');
+      fireEvent.change(search(), { target: { value: 'number 1' } });
+      await waitFor(() => {
+        expect(panelRows().map((row) => row.textContent.slice(0, 15))).toHaveLength(3);
+      });
+      expect(panelRows()[0]?.getAttribute('aria-selected')).toBe('true');
+    });
+
     it('keeps the old rows on screen while the new page is in flight', async () => {
       let release: () => void = () => undefined;
       const held = new Promise<void>((resolve) => {
@@ -2259,6 +2271,32 @@ describe('the Inbox panel', () => {
       });
       expect(selectedCard().textContent).not.toContain('Card 51');
       expect(pageTwoReads(asked)).toBe(1);
+    });
+
+    it('drops the pending move when the builder picks another row before the page lands', async () => {
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const asked: Record<string, string>[] = [];
+      inbox(numbered(52), (query) => {
+        asked.push(query);
+        return pageTwo(query) ? gate : undefined;
+      });
+      const { queryClient } = renderApp('/inbox');
+      await findText('Card 0');
+      toLastLoaded();
+      key('j');
+      await waitFor(() => {
+        expect(pageTwoReads(asked)).toBe(1);
+      });
+      key('k');
+      expect(selectedCard().textContent).toContain('Card 48');
+      release();
+      await waitFor(() => {
+        expect(queryClient.isFetching()).toBe(0);
+      });
+      expect(selectedCard().textContent).toContain('Card 48');
     });
 
     it('does nothing at the true end, and leaves the arrow its default', async () => {

@@ -52,14 +52,23 @@ function Rows({
   // The old rows stay until the new list's first page arrives; a selection they do not hold goes to the first.
   const listKey = JSON.stringify(list);
   const [seenList, setSeenList] = useState(listKey);
+  const [firstRowDue, setFirstRowDue] = useState(false);
   if (seenList !== listKey) {
     setSeenList(listKey);
-    setLastIndex(0);
+    setFirstRowDue(true);
   }
   // Until the list's first page is in, the remembered row has nothing to be found in: it is kept as it is.
   const loaded = !rows.isPending;
+  // A new search or filter lands on its first row once its first page is in, not on the old row's index.
+  let fromKey = selectedKey;
+  let fromIndex = lastIndex;
+  if (firstRowDue && loaded && !rows.isPlaceholder) {
+    setFirstRowDue(false);
+    fromKey = keys[0] ?? null;
+    fromIndex = 0;
+  }
   const pick = loaded
-    ? nextSelection(keys, selectedKey, lastIndex)
+    ? nextSelection(keys, fromKey, fromIndex)
     : { key: selectedKey, index: lastIndex };
   if (pick.key !== selectedKey) setSelectedKey(pick.key);
   if (pick.index !== lastIndex) setLastIndex(pick.index);

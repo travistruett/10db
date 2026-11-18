@@ -115,8 +115,25 @@ export function OpenInbox({
   // when the selected row leaves, the row at its index takes its place and the leaver's draft goes with it.
   // Until the list's first page is in, the remembered row has nothing to be found in: it is kept as it is.
   const loaded = !open.isPending;
+  // A new search or filter lands on its first row once its first page is in, not on the old row's index.
+  const listKey = JSON.stringify(inboxList(search, new Date(now)));
+  const [seenList, setSeenList] = useState(listKey);
+  const [firstRowDue, setFirstRowDue] = useState(false);
+  if (seenList !== listKey) {
+    setSeenList(listKey);
+    setFirstRowDue(true);
+  }
+  let fromKey = selectedKey;
+  let fromIndex = lastIndex;
+  if (firstRowDue && loaded && !open.isPlaceholder) {
+    setFirstRowDue(false);
+    setDraft(null);
+    setNotice(null);
+    fromKey = keys[0] ?? null;
+    fromIndex = 0;
+  }
   const pick = loaded
-    ? nextSelection(keys, selectedKey, lastIndex)
+    ? nextSelection(keys, fromKey, fromIndex)
     : { key: selectedKey, index: lastIndex };
   if (pick.key !== selectedKey) {
     setSelectedKey(pick.key);
@@ -167,6 +184,7 @@ export function OpenInbox({
     );
 
   const select = (row: OpenRow): void => {
+    setAwaiting(null);
     setSelectedKey(row.key);
     setDraft(null);
     setNotice(null);
