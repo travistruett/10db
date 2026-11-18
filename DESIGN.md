@@ -216,8 +216,8 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
 - **Navigation:** the sidebar's rail holds the sections, global ones above the project's, with Settings at the
   foot. It is labelled (200 px) and ⇧⌘S switches it to icons only (76 px, each name in a tooltip), remembered. The
   active row fills with `bg2`; hover is half of it. The project is a row of its tile and name (a tile alone when
-  icons only). A section with a list has a 260 px panel beside the rail (Settings' sections, the Inbox's rows and the open
-  Workbench pass's queue), whose head
+  icons only). A section with a list has a 260 px panel beside the rail (Settings' sections, the Inbox's rows and, while a
+  pass is open, the Workbench's queue: the Workbench has a panel only then), whose head
   is the sidebar's top row with the section's name and controls. From 1000 px both show and ⌘\, a click on the
   open section's rail item or the head's button hides the panel. From 640 px the rail is icons only and ⇧⌘S opens the
   labelled sidebar over the content, ⌘\ the panel beside the icons; under 640 px the sidebar folds and the toggle

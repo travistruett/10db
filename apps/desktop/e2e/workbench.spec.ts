@@ -107,10 +107,53 @@ async function queueOrder(page: Page): Promise<string[]> {
     );
 }
 
+/** The frame's panel; `data-panel` is also a conversation's own attribute, so the frame's values are named. */
+const framePanel = (page: Page) =>
+  page.locator('[data-panel="column"], [data-panel="hidden"], [data-panel="sheet"]');
+
+/** The pass's queue is drawn exactly once at any width, in the panel, the sheet or the strip. */
+async function oneQueue(page: Page, width: number) {
+  await expect(
+    page.getByRole('list', { name: 'Open pages' }),
+    `one queue at ${String(width)}`,
+  ).toHaveCount(1);
+}
+
+/** Nothing on the page scrolls sideways. */
+async function expectNoSideways(page: Page, width: number) {
+  const sideways = await page.evaluate(
+    () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  );
+  expect(sideways, `the page scrolls sideways at ${String(width)}`).toBe(false);
+}
+
 /**
- * At `width`, the pass's line in the title row is drawn (cut with an ellipsis when it must, its whole text in
- * the heading's tooltip), its ⋯ menu (Close Pass, Abandon) is on screen and nothing scrolls sideways; the
- * project has no origin, so Open Draft PR says why beside it.
+ * At `width` with the panel drawn (a wide window), the panel's head holds the pass's name and its ⋯ menu
+ * (Finish, Rename, Abandon) on screen, the title row names the shown page, and nothing scrolls sideways.
+ */
+async function panelHeadFits(page: Page, width: number) {
+  await page.setViewportSize({ width, height: 900 });
+  const head = framePanel(page).locator('[data-tauri-drag-region]');
+  await expect(head).toContainText('Settings and People');
+  const menu = await head.getByRole('button', { name: 'More actions', exact: true }).boundingBox();
+  expect(menu, `the ⋯ menu is drawn in the panel's head at ${String(width)}`).not.toBeNull();
+  if (menu !== null)
+    expect(menu.x + menu.width, `the ⋯ menu is on screen at ${String(width)}`).toBeLessThanOrEqual(
+      width,
+    );
+  // The title row names a page, not the pass.
+  await expect(page.locator('[data-title-row]').getByRole('heading', { level: 1 })).toHaveText(
+    /^(Settings|People)$/,
+  );
+  await oneQueue(page, width);
+  await expectNoSideways(page, width);
+}
+
+/**
+ * At `width` with no panel drawn (a window under 1000 px, or ⌘\ at a wide one), the pass's line in the title
+ * row is drawn (cut with an ellipsis when it must, its whole text in the heading's tooltip), its ⋯ menu
+ * (Close Pass, Abandon) is on screen and nothing scrolls sideways; the project has no origin, so Open Draft
+ * PR says why beside it.
  */
 async function headerFits(page: Page, width: number) {
   await page.setViewportSize({ width, height: 900 });
@@ -132,10 +175,8 @@ async function headerFits(page: Page, width: number) {
     expect(menu.x + menu.width, `the ⋯ menu is on screen at ${String(width)}`).toBeLessThanOrEqual(
       width,
     );
-  const sideways = await page.evaluate(
-    () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
-  );
-  expect(sideways, `the page scrolls sideways at ${String(width)}`).toBe(false);
+  await oneQueue(page, width);
+  await expectNoSideways(page, width);
 }
 
 /**
@@ -325,8 +366,29 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   // With a page signed off the header holds Open Draft PR too, and so does the foot of the signed-off
   // page, where the builder is; the header fits at every width.
   await expect(page.getByRole('button', { name: 'Open Draft PR' })).toHaveCount(2);
-  for (const width of [1280, 900, 520, 420]) await headerFits(page, width);
+  await panelHeadFits(page, 1280);
+  for (const width of [900, 520, 420]) await headerFits(page, width);
+  // At 900 the queue is the strip until the sheet opens, and it is drawn once in the sheet too. A page picked
+  // there with the pointer closes the sheet and takes the cursor in its composer, not on its strip row.
+  await page.setViewportSize({ width: 900, height: 900 });
+  await page.keyboard.press('Meta+Backslash');
+  await oneQueue(page, 900);
+  await expect(framePanel(page).getByRole('list', { name: 'Open pages' })).toBeVisible();
+  await row(page, 'People')
+    .getByRole('button', { name: /^People/ })
+    .click();
+  await expect(page.getByRole('textbox', { name: 'Message to People' })).toBeFocused();
+  await oneQueue(page, 900);
+  // ⌘\ hides the panel at 1280: the strip and the pass's line in the title row come back; ⌘\ again
+  // restores the panel.
   await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(framePanel(page)).toHaveAttribute('data-panel', 'column');
+  await page.keyboard.press('Meta+Backslash');
+  await expect(framePanel(page)).toHaveAttribute('data-panel', 'hidden');
+  await headerFits(page, 1280);
+  await page.keyboard.press('Meta+Backslash');
+  await expect(framePanel(page)).toHaveAttribute('data-panel', 'column');
+  await panelHeadFits(page, 1280);
 
   // A reload keeps the queue as it was.
   const before = await queueOrder(page);
