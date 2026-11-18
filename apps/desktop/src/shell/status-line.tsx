@@ -1,6 +1,5 @@
 import {
   ActionIcon,
-  Box,
   Group,
   HoverCard,
   Popover,
@@ -45,17 +44,19 @@ function BusyBar({ busy }: { busy: BusyLevel }) {
     : busy.level >= 1
       ? 'Your Mac is very busy. If it stays this busy for a few minutes, 10db waits before starting anything new.'
       : 'Your Mac is busy. 10db keeps working, and waits before starting anything new if it gets much busier.';
+  const label = busy.holding ? 'Mac too busy' : 'Mac busy';
   return (
     <HoverCard position="right-end" width={280} shadow="md" withArrow>
+      {/* A button, so the hovercard's popup attributes sit on an element that allows them. */}
       <HoverCard.Target>
-        <Box px={labels ? 8 : 4} py={6} w={labels ? '100%' : 40}>
+        <UnstyledButton px={labels ? 8 : 4} py={6} w={labels ? '100%' : 40} aria-label={label}>
           <Progress
             size={4}
             value={busy.holding ? 100 : Math.min(100, busy.level * 100)}
             color={busy.holding ? 'orange' : 'gray'}
-            aria-label={busy.holding ? 'Mac too busy' : 'Mac busy'}
+            aria-label={label}
           />
-        </Box>
+        </UnstyledButton>
       </HoverCard.Target>
       <HoverCard.Dropdown>
         <Stack gap={6}>
