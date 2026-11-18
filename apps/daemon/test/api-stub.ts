@@ -55,6 +55,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     conversationFiles: none,
     openChats: () => [],
     recentChats: () => [],
+    searchChats: none,
     createChat: none,
     patchChat: none,
     archiveChat: none,

@@ -106,6 +106,9 @@ export const DEV_UI_REFUSED_READS: Readonly<Record<string, string>> = {
   '/health': 'Open to every caller; it needs no token.',
   '/chats': "A chat is the builder's own words to an agent, kept to the 10db app.",
   '/chats/recent': "A chat is the builder's own words to an agent, kept to the 10db app.",
+  '/chats/search': "A chat is the builder's own words to an agent, kept to the 10db app.",
+  '/chats/:chatId/work': "A session's git state reads its checkout, kept to the 10db app.",
+  '/chats/:chatId/changes': "A session's changes read its checkout with git, kept to the 10db app.",
   '/conversations/:conversationId/files': 'The `@` list reads the checkout with git.',
   '/conversations/:conversationId/files/:fileId':
     "A picture the builder sent is the builder's own, kept to the 10db app.",

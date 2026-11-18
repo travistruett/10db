@@ -2676,6 +2676,23 @@ describe('the chat routes', () => {
     expect(reached).toEqual([]);
   });
 
+  it('GET /chats/search reaches the search, not a chat by id, and refuses a long query', async () => {
+    const asked: unknown[] = [];
+    const services = stubServices({
+      searchChats: (q) => {
+        asked.push(q);
+        return { rows: [], next: 'c1' };
+      },
+    });
+    const res = await app(services).request('/chats/search?q=login&after=c0', auth);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ rows: [], next: 'c1' });
+    expect(asked).toEqual([{ q: 'login', after: 'c0' }]);
+    const long = await app(services).request(`/chats/search?q=${'x'.repeat(201)}`, auth);
+    expect(long.status).toBe(400);
+    expect(asked).toHaveLength(1);
+  });
+
   it('PATCH /chats/:id with {} is a 400, and its 409 reaches the client in words', async () => {
     const empty = await app().request(`/chats/${chatId}`, {
       method: 'PATCH',

@@ -9,6 +9,8 @@ import type {
   ArchivePreviewDto,
   ArchiveRequest,
   ChatCommitRequest,
+  ChatSearchPage,
+  ChatSearchQuery,
   ChatWorkChoice,
   ChatWorkStateDto,
   ChatId,
@@ -676,6 +678,8 @@ export interface ApiServices extends PlanRecordServices {
   openChats(): ChatDto[];
   /** A project's chats that have had a message and are not archived, newest first. */
   recentChats(projectId: ProjectId, limit: number): ChatDto[];
+  /** A title search across every session, open, closed or archived, newest activity first. */
+  searchChats(query: ChatSearchQuery): ChatSearchPage;
   /** A new chat on the project's account; ConflictError, in words, on an account that runs none yet. */
   createChat(input: ChatCreateInput): ChatDto;
   /** Renames, moves or closes a tab, or picks a model between turns. */

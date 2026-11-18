@@ -33,6 +33,7 @@ export type ChatApiServices = Pick<
   ApiServices,
   | 'openChats'
   | 'recentChats'
+  | 'searchChats'
   | 'createChat'
   | 'patchChat'
   | 'archiveChat'
@@ -85,6 +86,7 @@ export function createChatApiServices(deps: {
   return {
     openChats: () => chat.open(),
     recentChats: (projectId, limit) => chat.recent(projectId, limit),
+    searchChats: (query) => chat.search(query),
     createChat: (input) => chat.create(input),
     patchChat: (id, input) => chat.patch(id, input),
     async archiveChat(id, request) {

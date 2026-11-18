@@ -153,6 +153,12 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/chats': "A chat is the builder's own words to an agent, and no screen Plan draws shows it.",
   '/chats/recent':
     "A chat is the builder's own words to an agent, and no screen Plan draws shows it.",
+  '/chats/search':
+    "A chat is the builder's own words to an agent, and no screen Plan draws shows it.",
+  '/chats/:chatId/work':
+    "A session's git state reads its checkout, and no screen Plan draws shows it.",
+  '/chats/:chatId/changes':
+    "A session's changes read its checkout with git, and no screen Plan draws shows it.",
   '/conversations/:conversationId/files': 'The `@` list reads the checkout with git.',
   '/projects/:projectId/chat-models': 'No screen draws the model list.',
   '/projects/:projectId/folder': 'Only Sessions draws who holds Your folder, in the 10db app.',

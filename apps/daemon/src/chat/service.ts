@@ -23,6 +23,8 @@ import {
   TASK_MESSAGE_PICTURES_MAX,
   TASK_MESSAGE_PICTURES_MAX_BYTES,
   type ChatCreateInput,
+  type ChatSearchPage,
+  type ChatSearchQuery,
   type ChatDto,
   type ChatId,
   type ChatModelsDto,
@@ -57,6 +59,7 @@ import {
   openChats,
   patchConversation,
   recentChats,
+  searchChats,
   setChatTitle,
   setChatWork,
   touchChat,
@@ -119,6 +122,9 @@ export const CHANGE_MODEL_BETWEEN_TURNS = 'Change the model between turns.';
 /** What a model the account doesn't offer is refused with. */
 export const MODEL_NOT_OFFERED = 'Not available on this account';
 
+/** Matches a panel search returns at a time. */
+const CHAT_SEARCH_PAGE = 30;
+
 const BUSY: ReadonlySet<ConversationState> = new Set([
   ConversationState.Starting,
   ConversationState.Running,
@@ -144,6 +150,7 @@ export interface ChatService {
   get(id: ChatId): ChatDto;
   open(): ChatDto[];
   recent(projectId: ProjectId, limit?: number): ChatDto[];
+  search(query: ChatSearchQuery): ChatSearchPage;
   patch(id: ChatId, input: ChatPatchInput): Promise<ChatDto>;
   models(projectId: ProjectId): ChatModelsDto;
   /**
@@ -338,6 +345,15 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     get: dtoOf,
 
     open: () => openChats(state.db).map((row) => dtoOf(row.id)),
+
+    search(query) {
+      const page = searchChats(state.db, {
+        text: query.q,
+        after: query.after ?? null,
+        limit: CHAT_SEARCH_PAGE,
+      });
+      return { rows: page.rows.map((row) => dtoOf(row.id)), next: page.next };
+    },
 
     recent: (projectId, limit = 6) =>
       recentChats(state.db, projectId, limit).map((row) => dtoOf(row.id)),

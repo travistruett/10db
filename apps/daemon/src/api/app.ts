@@ -138,6 +138,7 @@ import {
   ChatId,
   ArchiveRequest,
   ChatCommitRequest,
+  ChatSearchQuery,
   ChatWorkChoice,
   BriefRequest,
   DoItRequest,
@@ -770,6 +771,12 @@ export function createApp(deps: ApiDeps) {
         const query = c.req.valid('query');
         return c.json(deps.services.recentChats(query.projectId, query.limit));
       },
+    )
+    // Registered before every `/chats/:chatId` route, so "search" is never read as a chat id.
+    .get(
+      '/chats/search',
+      validator('query', (value): ChatSearchQuery => ChatSearchQuery.parse(value)),
+      (c) => c.json(deps.services.searchChats(c.req.valid('query'))),
     )
     .post(
       '/chats',
