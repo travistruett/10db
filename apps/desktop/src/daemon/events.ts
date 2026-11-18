@@ -12,6 +12,7 @@ import { readJson } from './client';
 import type { DaemonConnection } from './connection';
 import { useDaemon } from './provider';
 import { accountKeys, accountLoginKey } from './account-queries';
+import { applyInboxEvent } from './inbox-live';
 import { chatKeys } from './chat-queries';
 import { chatWorkKeys } from './chat-work-queries';
 import { taskSessionKeys } from './task-session-queries';
@@ -205,6 +206,7 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
         ...(EVENT_INVALIDATIONS[event.type] ?? []),
       ])
         void queryClient.invalidateQueries({ queryKey });
+      applyInboxEvent(queryClient, client, event);
       if (event.type === EventType.AccountLoginEnded) {
         const ended = AccountLoginEndedData.safeParse(event.data);
         if (ended.success)
