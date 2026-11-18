@@ -236,6 +236,9 @@ describe('a refusal of the daemon git', () => {
     if (!project) throw new Error('expected a project');
     // Another checkout's card.
     inbox.flag({
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'answer' },
       projectId: project.id,
       workstreamId: null,
       title: 'Elsewhere',

@@ -264,6 +264,9 @@ describe("the base, brought into a worktree batch's branch before the shipping g
       setBatchNotice(w, batch.id, baseNotices.kept(batch, path, ['build/']));
     });
     raise(h.inbox, h.project.id, {
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'answer' },
       title: 'Batch conflicts with main',
       body: 'x',
       foldKey: baseConflictKey(batch.id),
@@ -652,6 +655,9 @@ describe('Retry of a FAILED worktree batch', () => {
     const fields = batchCardFields({ id: ws.id, batchId: batch.id });
     if (!fields) throw new Error('a batch member gets card actions');
     const card = inbox.flag({
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'answer' },
       projectId: h.project.id,
       workstreamId: ws.id,
       title: 'Workstream failed: Alpha',

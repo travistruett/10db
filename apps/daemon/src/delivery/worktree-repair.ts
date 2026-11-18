@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { BatchState, InvalidError, type BatchDto, type BatchId } from '@10db/contracts';
+import { BatchState, InvalidError, type BatchDto, type BatchId, Urgency } from '@10db/contracts';
 import { getBatch, getProject, transitionBatch, type WriteContext } from '@10db/db';
 import { existsAsEntry, GitTrustError, WorktreeNotOursError } from '../git';
 import { worktreeCards, worktreeOffer } from './cards';
@@ -11,6 +11,7 @@ import { worktreeLockReason } from './worktree-cut';
 import { raiseInstallHostCards } from './worktree-dependencies';
 import { withWorktreeLock } from './worktree-lock';
 import { seedDirs, seedWorktree } from './worktree-seed';
+import { BY_ANSWER, CardTier } from '../inbox';
 
 /** What `ensureWorktreeWhole` found: a worktree kept, one made again, or a refusal with its card. */
 export type Wholeness = 'whole' | 'replaced' | 'refused';
@@ -140,6 +141,9 @@ async function makeWhole(
       // A Retry's repair, not a start: the batch is FAILED, and its card offers Retry and Abandon.
       raise(ctx.inbox, batch.projectId, {
         ...worktreeCards.installFailed(batch, installed),
+        tier: CardTier.Ask,
+        urgency: Urgency.High,
+        closesWhen: BY_ANSWER,
         ...worktreeOffer({ kind: 'batch', batchId: batch.id }, { batchId: batch.id }),
       });
       await raiseInstallHostCards(ctx, batch.projectId, installed);

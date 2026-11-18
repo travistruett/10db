@@ -2232,6 +2232,9 @@ describe('MCP tools', () => {
     const other = seedWorkstream(base, { project: a.project, title: 'Beta', areas: ['ui'] });
     holdClaim(a.project, other, { kind: 'area', name: 'ui' });
     const stale = inbox.flag({
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'answer' },
       projectId: a.project.id,
       workstreamId: other.workstream.id,
       title: 'Waiting for area api',

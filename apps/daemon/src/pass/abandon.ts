@@ -10,6 +10,7 @@ import {
   type PassId,
   type PassSharedChangeDto,
   type TaskDto,
+  Urgency,
 } from '@10db/contracts';
 import {
   abandonPassAndBatch,
@@ -210,6 +211,9 @@ export function raiseAbandonCard(
     flagCard(ctx, {
       projectId: pass.projectId,
       workstreamId: null,
+      tier: CardTier.Ask,
+      urgency: Urgency.Normal,
+      closesWhen: { by: 'withdrawn', when: 'the folder moves to the return branch (abandon)' },
       title,
       body,
       foldKey: passAbandonCardKey(pass.id),

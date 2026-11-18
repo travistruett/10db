@@ -458,6 +458,9 @@ describe('carrying a batch over when main and the batch both added migrations', 
       // A readable notice has no card with the answer; a card from before it was read is made by hand.
       const stored = h.only(getBatch(h.store.db, batch.id).notices);
       const flagged = inbox.flag({
+        tier: 'ask',
+        urgency: 'high',
+        closesWhen: { by: 'answer' },
         projectId: h.project.id,
         workstreamId: null,
         title: 'Clear',

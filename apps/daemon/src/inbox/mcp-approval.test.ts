@@ -343,6 +343,9 @@ describe('MCP approval cards', () => {
     // The detail as stored before reviews carried hosts.
     const older = Object.fromEntries(Object.entries(npx()).filter(([key]) => key !== 'hosts'));
     const card = inbox.flag({
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'answer' },
       projectId: project.id,
       workstreamId: null,
       title: 'Run the repo\'s MCP server "mantine"?',
@@ -386,6 +389,9 @@ describe('MCP approval cards', () => {
     const card = requestMcpApproval(inbox, project.id, review());
     expect(() => inbox.answer(card.id, { choice: 'dismissed' })).toThrow(InvalidError);
     const plain = inbox.flag({
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'answer' },
       projectId: project.id,
       workstreamId: null,
       title: 'Watcher',

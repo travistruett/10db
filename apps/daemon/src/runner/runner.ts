@@ -66,6 +66,7 @@ import {
   type PassId,
   type TaskId,
   type TaskDto,
+  Urgency,
 } from '@10db/contracts';
 import {
   approvedLines,
@@ -237,6 +238,7 @@ import {
   flagMcpFailure,
   type InboxService,
   type WaitObserver,
+  BY_ANSWER,
 } from '../inbox';
 import type { Judge } from '../judge';
 import type { Logger } from '../log';
@@ -1201,6 +1203,12 @@ export function createRunner(opts: RunnerOptions): Runner {
     opts.inbox.flag({
       projectId: row.projectId,
       workstreamId: row.id,
+      tier: CardTier.Ask,
+      urgency: Urgency.High,
+      closesWhen: {
+        by: 'withdrawn',
+        when: 'the run is retried, cancelled or shipped (cancelForWorkstream)',
+      },
       title: `${WORKSTREAM_FAILED_TITLE_PREFIX}${getTask(db, row.taskId).title}`,
       body: reason,
       ...(batch ? { options: batch.options } : {}),
@@ -2210,6 +2218,10 @@ export function createRunner(opts: RunnerOptions): Runner {
       opts.inbox.flag({
         projectId: row.projectId,
         workstreamId: id,
+        tier: CardTier.Ask,
+        urgency: Urgency.High,
+        // S2: Choose Another Model
+        closesWhen: BY_ANSWER,
         title,
         body: !retry
           ? `${outcome.message}. ${marked ? `10db marked ${outcome.model} unusable on ${account.label}, but` : `${account.label} lists no models, so 10db cannot mark ${outcome.model} unusable, and`} it would still choose ${outcome.model} for the step, so it stopped the task instead of asking for it again. Name a model for each tier in the account's settings.`

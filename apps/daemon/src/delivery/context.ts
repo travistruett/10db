@@ -1,4 +1,4 @@
-import { CARD_RESOLVES_WHEN, type BatchId, type Notice, type ProjectId } from '@10db/contracts';
+import type { BatchId, Notice, ProjectId } from '@10db/contracts';
 import { clearBatchNotice, findOpenByFoldKey, setBatchNotice, type WriteContext } from '@10db/db';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
@@ -85,14 +85,10 @@ function flagOf(projectId: ProjectId, card: Card) {
     body: card.body,
     ...(card.foldKey ? { foldKey: card.foldKey } : {}),
     ...(card.refresh ? { refresh: true } : {}),
-    ...(card.detail || card.resolvesWhen
-      ? {
-          detail: {
-            ...card.detail,
-            ...(card.resolvesWhen ? { [CARD_RESOLVES_WHEN]: card.resolvesWhen } : {}),
-          },
-        }
-      : {}),
+    tier: card.tier,
+    urgency: card.urgency,
+    closesWhen: card.closesWhen,
+    ...(card.detail ? { detail: card.detail } : {}),
     ...(card.options ? { options: card.options } : {}),
   };
 }

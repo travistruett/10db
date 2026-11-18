@@ -77,6 +77,9 @@ export function createAccountRuntime(opts: {
     const item = opts.inbox.flag({
       projectId: project.id,
       workstreamId: null,
+      tier: card.tier,
+      urgency: card.urgency,
+      closesWhen: card.closesWhen,
       title: card.title,
       body: card.body,
       detail: card.detail,

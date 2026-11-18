@@ -13,6 +13,7 @@ import {
   type InboxItemDto,
   type ProjectDto,
   type ProjectId,
+  Urgency,
 } from '@10db/contracts';
 import {
   activeClaims,
@@ -74,6 +75,7 @@ import {
   STRAY_BULK_THRESHOLD,
   strayFoldKey,
 } from './strays';
+import { BY_ANSWER, CardTier } from '../inbox';
 
 const WATCH_BATCH_MS = 500;
 /**
@@ -252,6 +254,10 @@ export function createWatcher(deps: {
       deps.inbox.flag({
         projectId: project.id,
         workstreamId,
+        tier: CardTier.Ask,
+        urgency: Urgency.High,
+        // S4: Trust This Version
+        closesWhen: BY_ANSWER,
         title: STRAY_TITLE,
         body: `${labelled(site, rel)}${during}`,
         detail: { path: rel, candidates: [...candidates] },
@@ -264,6 +270,10 @@ export function createWatcher(deps: {
       deps.inbox.flag({
         projectId: project.id,
         workstreamId,
+        tier: CardTier.Ask,
+        urgency: Urgency.High,
+        // S4: Trust This Version
+        closesWhen: BY_ANSWER,
         title: `${String(ordinary.length)} writes outside every claim`,
         body: `${listed.map((rel) => labelled(site, rel)).join('\n')}\n…and ${String(ordinary.length - listed.length)} more${during}`,
         detail: { count: ordinary.length, paths: listed, candidates: [...candidates] },
@@ -430,6 +440,10 @@ export function createWatcher(deps: {
       deps.inbox.flag({
         projectId: project.id,
         workstreamId,
+        tier: CardTier.Ask,
+        urgency: Urgency.High,
+        // S4: Keep It / Show the Diff
+        closesWhen: BY_ANSWER,
         title: "Write inside another workstream's claim",
         body: labelled(site, path),
         detail: { path, candidates: running, claimedBy },
@@ -442,6 +456,10 @@ export function createWatcher(deps: {
       deps.inbox.flag({
         projectId: project.id,
         workstreamId,
+        tier: CardTier.Ask,
+        urgency: Urgency.High,
+        // S4: Keep It / Show the Diff
+        closesWhen: BY_ANSWER,
         title: `${String(ordinary.length)} writes inside another workstream's claim`,
         body: `${listed.map((rel) => labelled(site, rel)).join('\n')}\n…and ${String(ordinary.length - listed.length)} more`,
         detail: { count: ordinary.length, paths: listed, candidates: running },

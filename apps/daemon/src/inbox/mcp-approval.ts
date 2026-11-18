@@ -8,6 +8,7 @@ import {
   type InboxItemDto,
   type InboxOption,
   type ProjectId,
+  Urgency,
 } from '@10db/contracts';
 import {
   getLatestApprovedMcpApproval,
@@ -16,6 +17,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import type { InboxService } from './service';
+import { BY_ANSWER, CardTier } from './card-tier';
 
 /**
  * Characters that can hide, reorder or add lines to text the builder reads: C0 and C1 controls, the
@@ -176,6 +178,9 @@ export function requestMcpApproval(
   return inbox.flag({
     projectId,
     workstreamId: null,
+    tier: CardTier.Ask,
+    urgency: Urgency.Normal,
+    closesWhen: BY_ANSWER,
     title: `Run the repo's MCP server "${visible(review.name)}"?`,
     body: approvalBody(review, earlier),
     options: approvalOptions(review),

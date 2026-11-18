@@ -1881,6 +1881,9 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     const { batch } = await opened(h, { sessionStarted: true });
     for (const foldKey of [baseConflictKey(batch.id), baseKeptKey(batch.id)])
       raise(h.inbox, h.project.id, {
+        tier: 'ask',
+        urgency: 'high',
+        closesWhen: { by: 'answer' },
         title: `Batch "${batch.title}" conflicts with main`,
         body: 'x',
         foldKey,
@@ -1894,6 +1897,9 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     const { batch } = await opened(h, { sessionStarted: true });
     raise(h.inbox, h.project.id, {
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'answer' },
       title: `Batch "${batch.title}" conflicts with main`,
       body: 'x',
       foldKey: baseConflictKey(batch.id),

@@ -334,11 +334,17 @@ describe('when GitHub refuses to turn auto-merge on', () => {
     h = createDeliveryHarness();
     const batch = await start('One', h.addTask('Alpha'));
     raise(h.inbox, h.project.id, {
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'answer' },
       title: "This repository doesn't allow auto-merge",
       body: 'x',
       foldKey: autoMergeOffKey(h.project.id),
     });
     raise(h.inbox, h.project.id, {
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'answer' },
       title: 'Pull request opened but not set to merge by itself',
       body: 'x',
       foldKey: autoMergeRefusedKey(batch.id),
@@ -353,6 +359,9 @@ describe('when GitHub refuses to turn auto-merge on', () => {
     h = createDeliveryHarness();
     const batch = await start('One', h.addTask('Alpha'));
     raise(h.inbox, h.project.id, {
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'answer' },
       title: 'Pull request opened but not set to merge by itself',
       body: 'x',
       foldKey: autoMergeRefusedKey(batch.id),
@@ -459,6 +468,9 @@ describe('when only the pre-check ran and GitHub says the pull request has nothi
     h.gh.noRequiredChecks = true;
     const batch = await start('One', h.addTask('Alpha'));
     raise(h.inbox, h.project.id, {
+      tier: 'ask',
+      urgency: 'high',
+      closesWhen: { by: 'answer' },
       title: 'not merged: main has no required checks and only the pre-check ran',
       body: 'x',
       foldKey: preCheckOnlyKey(batch.id),

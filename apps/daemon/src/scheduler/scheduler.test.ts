@@ -256,7 +256,15 @@ function pause(project: ReturnType<typeof seedProject>): void {
     { reason: 'usage_limit', until: new Date(clock.now().getTime() + 60_000) },
     {
       projectId: project.id,
-      card: { title: 't', body: 'b', foldKey: 'k', detail: {} },
+      card: {
+        tier: 'ask',
+        urgency: 'high',
+        closesWhen: { by: 'answer' },
+        title: 't',
+        body: 'b',
+        foldKey: 'k',
+        detail: {},
+      },
     },
   );
 }

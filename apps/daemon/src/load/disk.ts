@@ -6,6 +6,8 @@ import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { diskCard, DISK_FOLD_KEY } from './card';
 import { projectForMachineCard } from './card-project';
+import { Urgency } from '@10db/contracts';
+import { CardTier } from '../inbox';
 
 /** How far above the floor free disk must climb before a hold ends, so it doesn't flap at the edge. */
 export const CLEAR_MARGIN_BYTES = 5_000_000_000;
@@ -87,6 +89,10 @@ export function createDiskHold(opts: DiskHoldOptions): DiskHold {
       const item = opts.inbox.flag({
         projectId,
         workstreamId: null,
+        tier: CardTier.Ask,
+        urgency: Urgency.High,
+        // S2: Open Capacity Settings
+        closesWhen: { by: 'withdrawn', when: 'free disk is above the floor again (disk)' },
         title: content.title,
         body: content.body,
         foldKey: content.foldKey,

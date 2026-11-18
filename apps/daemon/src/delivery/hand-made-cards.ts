@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { Urgency } from '@10db/contracts';
+import { BY_ANSWER, CardTier } from '../inbox';
 import { SPOTLIGHT_MARKER } from '../sandbox';
 import { detailOf, listPaths, worktreeOffer, type Card } from './cards';
 
@@ -29,6 +31,9 @@ export const handMadeKey = {
 
 export const handMadeCards = {
   merged: (folder: string, worktrees: readonly MergedHandMade[]): Card => ({
+    tier: CardTier.Ask,
+    urgency: Urgency.Normal,
+    closesWhen: BY_ANSWER,
     title: `${String(worktrees.length)} worktree${worktrees.length === 1 ? '' : 's'} in ${folder} ${worktrees.length === 1 ? 'has' : 'have'} merged`,
     body: `Each pull request below merged, the branch holds nothing the pull request lacks, and the worktree has no uncommitted changes or loose files. Every one keeps a copy of node_modules and build output that the editor, Spotlight and the file watcher keep reading, which adds to the load.\n\n${listPaths(worktrees.map((w) => `${w.path} (${w.branch})`))}\n\nRemove Merged Worktrees removes them; the branches stay.`,
     foldKey: handMadeKey.merged(worktrees),
@@ -36,6 +41,9 @@ export const handMadeCards = {
   }),
   /** What the removal did, for the builder to read. */
   removed: (folder: string, removed: readonly string[]): Card => ({
+    tier: CardTier.Ask,
+    urgency: Urgency.Low,
+    closesWhen: BY_ANSWER,
     title: `Removed ${String(removed.length)} merged worktree${removed.length === 1 ? '' : 's'} from ${folder}`,
     body:
       removed.length === 0
@@ -45,6 +53,12 @@ export const handMadeCards = {
     refresh: true,
   }),
   spotlight: (folder: string): Card => ({
+    tier: CardTier.Ask,
+    urgency: Urgency.Low,
+    closesWhen: {
+      by: 'withdrawn',
+      when: 'the folder is marked or the answer is given (hand-made-worktrees)',
+    },
     title: `Spotlight indexes ${folder}`,
     body: `${folder} holds your hand-made worktrees, each with its own node_modules and build output. Spotlight (mds_stores and mdworker) indexes every file there, and installs and test runs keep it busy.\n\nKeep Spotlight Out creates one empty file, ${folder}/${SPOTLIGHT_MARKER}, which tells Spotlight to skip the folder and everything under it. It changes nothing else, and deleting that file lets Spotlight index the folder again. Files there stop showing in Spotlight search.`,
     foldKey: handMadeKey.spotlight(folder),
@@ -52,6 +66,9 @@ export const handMadeCards = {
   }),
   /** A Remove Merged Worktrees answer that failed: the same offer again. */
   removeFailed: (error: unknown): Card => ({
+    tier: CardTier.Ask,
+    urgency: Urgency.Normal,
+    closesWhen: BY_ANSWER,
     title: 'Merged worktrees were not removed',
     body: `${detailOf(error)}\n\nWhat was removed before the failure is gone. 10db does not offer the same worktrees again; remove the rest yourself with git worktree remove.`,
     foldKey: 'hand-made-remove-failed',
@@ -59,6 +76,9 @@ export const handMadeCards = {
   }),
   /** What the Keep Spotlight Out answer changed. */
   spotlightKept: (folder: string, created: boolean): Card => ({
+    tier: CardTier.Ask,
+    urgency: Urgency.Low,
+    closesWhen: BY_ANSWER,
     title: created
       ? `Spotlight now skips ${folder}`
       : `Spotlight already skipped ${folder}, or the file could not be written`,
