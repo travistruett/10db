@@ -1290,13 +1290,35 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
         return batch;
       }
 
-      it('drops the regenerate notice once a later merge of the base leaves nothing to regenerate', async () => {
+      it('keeps the regenerate notice after a later merge of the base that leaves nothing to regenerate', async () => {
         const batch = await failedOnce();
         h.teammatePush('main', 'docs/more.md', 'more\n');
         const update = await createBaseUpdates({ ...h.ctx, generators: failing }).beforeGate(
           batch.id,
           signal,
         );
+        expect(update.kind).toBe('merged');
+        // The files are still unregenerated: a merge that regenerated nothing repairs none of them.
+        expect(regenerateNotice(batch.id).key).toBe('base-regenerate');
+      });
+
+      it('drops the regenerate notice once a later regeneration succeeds', async () => {
+        const batch = await failedOnce();
+        await commitOnBatch(
+          batch,
+          `${DB}/meta/_journal.json`,
+          '["0000","0001_theirs","0002_mine"]\n',
+          '-again',
+        );
+        h.teammatePush('main', `${DB}/meta/_journal.json`, '["0000","0001_theirs","0002_more"]\n');
+        h.teammatePush('main', `${DB}/0002_more.sql`, 'alter table a add d;\n');
+        const update = await createBaseUpdates({
+          ...h.ctx,
+          generators: generating({
+            [`${DB}/meta/_journal.json`]: '["0000","0001_theirs","0002_more","0003_mine"]\n',
+            [`${DB}/0003_mine.sql`]: MINE,
+          }),
+        }).beforeGate(batch.id, signal);
         expect(update.kind).toBe('merged');
         expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
       });
