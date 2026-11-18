@@ -75,7 +75,11 @@ describe('the hand-made worktree folder', () => {
     expect(existsSync(merged.path)).toBe(false);
     expect(existsSync(open.path)).toBe(true);
     expect(h.git$('branch', '--list', merged.branch)).toContain(merged.branch);
-    expect(cardTitled('Removed 1 merged worktree').body).toContain(merged.path);
+    const removed = h.only(h.notices());
+    expect(removed.line).toBe('Removed 1 merged worktree from ' + folder);
+    expect(removed.body).toContain(merged.path);
+    expect(removed.key).toBe(`hand-made-removed:${folder}`);
+    expect(titles().filter((t) => t.startsWith('Removed'))).toEqual([]);
   });
 
   const stays: readonly { name: string; hold: (path: string) => void }[] = [
@@ -134,7 +138,8 @@ describe('the hand-made worktree folder', () => {
     inbox.answer(cardTitled('1 worktree in').id, { choice: WorktreeChoice.RemoveMerged });
     await h.jobs.idle();
     expect(existsSync(worktree.path)).toBe(true);
-    expect(cardTitled('Removed 0 merged worktrees').body).toContain('Nothing was removed');
+    expect(h.only(h.notices()).body).toContain('Nothing was removed');
+    expect(titles().filter((t) => t.startsWith('Removed'))).toEqual([]);
   });
 
   it('offers to keep Spotlight out, says what it changed, and offers nothing once the marker is there', async () => {
@@ -150,7 +155,11 @@ describe('the hand-made worktree folder', () => {
     inbox.answer(card.id, { choice: WorktreeChoice.KeepSpotlightOut });
 
     expect(existsSync(join(folder, SPOTLIGHT_MARKER))).toBe(true);
-    expect(cardTitled('Spotlight now skips').body).toContain('created');
+    const kept = h.only(h.notices());
+    expect(kept.line).toBe(`Spotlight now skips ${folder}`);
+    expect(kept.body).toContain('created');
+    expect(kept.key).toBe(`hand-made-spotlight-done:${folder}`);
+    expect(titles().filter((t) => t.startsWith('Spotlight now'))).toEqual([]);
     await offerHandMadeFolders(h.ctx, signal);
     expect(titles().filter((t) => t.startsWith('Spotlight indexes'))).toEqual([]);
   });
