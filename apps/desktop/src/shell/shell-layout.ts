@@ -5,7 +5,7 @@ export type ShellBand = (typeof ShellBand)[keyof typeof ShellBand];
 /** The width at which the panel column fits beside the content. */
 export const WIDE_FROM_PX = 1000;
 /** The width of a section's panel column, in the app's frame and in a picture of a screen. */
-export const PANEL_WIDTH = 260;
+export const PANEL_WIDTH = 340;
 /** The width at which the rail fits beside the content. */
 export const MEDIUM_FROM_PX = 640;
 
