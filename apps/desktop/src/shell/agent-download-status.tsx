@@ -25,7 +25,7 @@ export function AgentDownloadStatus() {
             <Box
               role="status"
               aria-label={`Downloading ${name}`}
-              style={{ display: 'grid', placeItems: 'center', width: 36, height: 34 }}
+              style={{ display: 'grid', placeItems: 'center', width: 28, height: 28 }}
             >
               <IconDownload
                 size={18}

@@ -13,16 +13,7 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import {
-  ActionIcon,
-  Box,
-  Group,
-  Menu,
-  Text,
-  TextInput,
-  Tooltip,
-  UnstyledButton,
-} from '@mantine/core';
+import { ActionIcon, Box, Menu, Text, TextInput, Tooltip, UnstyledButton } from '@mantine/core';
 import { IconPlus, IconSearch } from '@tabler/icons-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useRef, useState, type ReactNode } from 'react';
@@ -251,23 +242,23 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
 
   const menuChat = menu?.row.kind === 'chat' ? menu.row.chat : null;
   return (
-    <Panel section="sessions">
+    <Panel
+      section="sessions"
+      title="Sessions"
+      controls={
+        <Tooltip label="New Session ⌘T" openDelay={500}>
+          <ActionIcon variant="subtle" aria-label="New Session" onClick={props.onNew}>
+            <IconPlus size={16} stroke={1.5} />
+          </ActionIcon>
+        </Tooltip>
+      }
+    >
       <Box
         style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}
         aria-label="Sessions panel"
         component="nav"
       >
-        <Group justify="space-between" px="sm" pt="sm" pb={6} wrap="nowrap">
-          <Text fw={600} size="sm">
-            Sessions
-          </Text>
-          <Tooltip label="New Session ⌘T" openDelay={500}>
-            <ActionIcon variant="subtle" aria-label="New Session" onClick={props.onNew}>
-              <IconPlus size={16} stroke={1.5} />
-            </ActionIcon>
-          </Tooltip>
-        </Group>
-        <Box px="sm" pb={6}>
+        <Box px="sm" pt={4} pb={6}>
           <TextInput
             size="xs"
             aria-label="Search sessions"

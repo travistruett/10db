@@ -6,10 +6,10 @@ import { chatSystemPrompt } from './prompt';
 
 describe("a chat's prompt", () => {
   it.each([true, false])(
-    'says it edits while its turn holds the folder, and not that it changes nothing (web %s)',
+    'says it edits while its turn has your checkout, and not that it changes nothing (web %s)',
     (web) => {
       const text = chatSystemPrompt(web);
-      expect(text).toContain('only while your turn holds the folder');
+      expect(text).toContain('only while your turn has your checkout');
       expect(text).not.toMatch(/changes nothing in it|don't edit files yet/);
     },
   );

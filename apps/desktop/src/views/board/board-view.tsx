@@ -576,77 +576,80 @@ export function BoardView() {
     <Stack flex="1 1 0px">
       <TitleRow
         title="Board"
+        meta={project?.name}
         actions={
           project ? (
-            <SplitButton
-              leftSection={<IconPlus size={16} stroke={1.5} />}
-              onClick={taskModal.open}
-              menuLabel="More board actions"
-              menu={
-                <>
-                  <Menu.Item
-                    leftSection={<IconPlayerPlay size={16} stroke={1.5} />}
-                    disabled={readyCount === 0}
-                    onClick={sheet.open}
-                  >
-                    {/* The count shares the label's baseline; as a right section it centers on a different box. */}
-                    <Group justify="space-between" align="baseline" wrap="nowrap" gap="md">
-                      <span>Start Ready Tasks</span>
-                      <Text span size="xs" c="dimmed">
-                        {readyCount === 0 ? 'Nothing in Ready' : `${String(readyCount)} ready`}
-                      </Text>
-                    </Group>
-                  </Menu.Item>
-                  <Menu.Item
-                    leftSection={<IconColumns size={16} stroke={1.5} />}
-                    onClick={() => {
-                      void navigate({
-                        to: '/settings/$section',
-                        params: { section: SettingsSectionKey.BoardColumns },
-                      });
-                    }}
-                  >
-                    Add Column
-                  </Menu.Item>
-                </>
-              }
-            >
-              New Task
-            </SplitButton>
+            <>
+              {goalList.length === 0 ? null : (
+                <Select
+                  aria-label="Goal"
+                  size="xs"
+                  // 220 px where there is room, narrower in a narrow window so it never pushes the split button out.
+                  w="clamp(96px, 20vw, 220px)"
+                  allowDeselect={false}
+                  data={[
+                    { value: ALL_GOALS, label: 'All goals' },
+                    ...goalList.map((g) => ({ value: g.goal.id, label: g.goal.title })),
+                  ]}
+                  value={filterGoal?.goal.id ?? ALL_GOALS}
+                  onChange={(id) => {
+                    setFilterGoalId(goalList.find((g) => g.goal.id === id)?.goal.id ?? null);
+                  }}
+                />
+              )}
+              <SplitButton
+                leftSection={<IconPlus size={16} stroke={1.5} />}
+                onClick={taskModal.open}
+                menuLabel="More board actions"
+                menu={
+                  <>
+                    <Menu.Item
+                      leftSection={<IconPlayerPlay size={16} stroke={1.5} />}
+                      disabled={readyCount === 0}
+                      onClick={sheet.open}
+                    >
+                      {/* The count shares the label's baseline; as a right section it centers on a different box. */}
+                      <Group justify="space-between" align="baseline" wrap="nowrap" gap="md">
+                        <span>Start Ready Tasks</span>
+                        <Text span size="xs" c="dimmed">
+                          {readyCount === 0 ? 'Nothing in Ready' : `${String(readyCount)} ready`}
+                        </Text>
+                      </Group>
+                    </Menu.Item>
+                    <Menu.Item
+                      leftSection={<IconColumns size={16} stroke={1.5} />}
+                      onClick={() => {
+                        void navigate({
+                          to: '/settings/$section',
+                          params: { section: SettingsSectionKey.BoardColumns },
+                        });
+                      }}
+                    >
+                      Add Column
+                    </Menu.Item>
+                  </>
+                }
+              >
+                New Task
+              </SplitButton>
+            </>
           ) : undefined
         }
       />
       <PageIntro
         toolbar={
-          goalList.length === 0 ? undefined : (
-            <Group gap="md" align="center">
-              <Select
-                aria-label="Goal"
-                w={220}
-                allowDeselect={false}
-                data={[
-                  { value: ALL_GOALS, label: 'All goals' },
-                  ...goalList.map((g) => ({ value: g.goal.id, label: g.goal.title })),
-                ]}
-                value={filterGoal?.goal.id ?? ALL_GOALS}
-                onChange={(id) => {
-                  setFilterGoalId(goalList.find((g) => g.goal.id === id)?.goal.id ?? null);
-                }}
-              />
-              {filterGoal ? (
-                <GoalLine
-                  summary={filterGoal}
-                  ready={readyCountOf(filterGoal.goal.id, taskList)}
-                  onStartReady={() => {
-                    setSheetGoalId(filterGoal.goal.id);
-                  }}
-                  onOpenFactory={() => {
-                    void navigate({ to: '/factory', search: { goal: filterGoal.goal.id } });
-                  }}
-                />
-              ) : null}
-            </Group>
-          )
+          filterGoal ? (
+            <GoalLine
+              summary={filterGoal}
+              ready={readyCountOf(filterGoal.goal.id, taskList)}
+              onStartReady={() => {
+                setSheetGoalId(filterGoal.goal.id);
+              }}
+              onOpenFactory={() => {
+                void navigate({ to: '/factory', search: { goal: filterGoal.goal.id } });
+              }}
+            />
+          ) : undefined
         }
       />
 
@@ -692,6 +695,8 @@ export function BoardView() {
       ) : null}
       {projects.isPending ? (
         <PageLoading shape={PageLoadingShape.Cards} label="Loading projects" />
+      ) : project && (tasks.isPending || columns.isPending) ? (
+        <PageLoading shape={PageLoadingShape.Cards} label="Loading the board" />
       ) : null}
       {project && tasks.isSuccess && (columns.data !== undefined || columns.isError) ? (
         <BoardColumns

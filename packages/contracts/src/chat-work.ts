@@ -87,7 +87,7 @@ export const ChatCommitRequest = z.strictObject({
 });
 export type ChatCommitRequest = z.infer<typeof ChatCommitRequest>;
 
-/** `GET /chats/:chatId/archive-preview`: what Archive would delete with the worktree. */
+/** What Archive would delete with the worktree: the 409 an archive answers when the list it was given is short. */
 export const ArchivePreviewDto = z.object({
   worktree: z.string().nullable(),
   branch: z.string().nullable(),

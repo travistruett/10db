@@ -22,9 +22,7 @@ import {
 import { ManualClock } from '../src/clock';
 import {
   chatHooks,
-  createBriefs,
   createChatLiveSessions,
-  type Briefs,
   createChatService,
   applyChatWorkAnswer,
   chatRoot,
@@ -76,7 +74,6 @@ export interface ChatWorld {
   readonly clock: ManualClock;
   readonly chat: ChatService;
   readonly work: ChatWorkService;
-  readonly briefs: Briefs;
   readonly folderHold: FolderHold;
   /** The sessions whose next start says they moved; the move adds one, the start takes it. */
   readonly firstStartAfterMove: Set<ChatId>;
@@ -257,14 +254,12 @@ export function chatWorld(
       ...(opts.tendb === undefined ? {} : { judge: opts.tendb({ store }) }),
     }),
   );
-  const briefs = createBriefs(clock);
   let takeoverService: TakeoverService | null = null;
   const chat = createChatService({
     state,
     engine,
     folderHold,
     pendingOpens: createPendingOpens({ state }),
-    briefs,
     clock,
     dataDir: dir.path,
     log: silentLogger,
@@ -382,7 +377,6 @@ export function chatWorld(
     clock,
     chat,
     work,
-    briefs,
     folderHold,
     firstStartAfterMove,
     inbox,

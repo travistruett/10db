@@ -208,7 +208,7 @@ function deliverable(state: StateStore, item: ConversationItemRow): DeliverableM
 
 /** The thread's line for a turn that can only read: who has Your folder. */
 function readOnlyNotice(blockers: readonly FolderBlocker[]): string {
-  return `Your folder is in use by ${blockers.map((b) => holderWords(b.holder)).join(' and ')}, so this turn reads only.`;
+  return `Your checkout is in use by ${blockers.map((b) => holderWords(b.holder)).join(' and ')}, so this turn reads only.`;
 }
 
 /** A call as the chat's confinement reads it. */
@@ -293,15 +293,6 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         notices.set(chat.id, []);
         return { writes: writesNow(chat, getProject(state.db, conv.projectId).repoPath) };
       }
-      if (deps.folderHold.takeReadOnlyChoice(chat.id)) {
-        // The builder chose reading only: the turn reads even when the checkout has freed, and says who held it.
-        const blockers = deps.folderHold.blockers(conv.projectId, {
-          kind: FolderAsker.ChatTurn,
-          chatId: chat.id,
-        });
-        notices.set(chat.id, blockers.length === 0 ? [] : [readOnlyNotice(blockers)]);
-        return { writes: false };
-      }
       const taken = deps.folderHold.takeTurn(conv.projectId, chat.id);
       if (!taken.taken) {
         notices.set(chat.id, [readOnlyNotice(taken.blockers)]);
@@ -322,7 +313,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
             ? [
                 {
                   conversationId: getChat(state.db, h.chatId).conversationId,
-                  line: `Your folder is also in use by ${joined}.`,
+                  line: `Your checkout is also in use by ${joined}.`,
                 },
               ]
             : [],
@@ -330,7 +321,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       );
       notices.set(
         chat.id,
-        others.length === 0 ? [] : [`Your folder is also in use by ${others.join(' and ')}.`],
+        others.length === 0 ? [] : [`Your checkout is also in use by ${others.join(' and ')}.`],
       );
       return { writes: true };
     },
@@ -349,8 +340,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       }
       notices.delete(chat.id);
       toldOthers.delete(chat.id);
-      // A reading-only choice no turn start took (a chained turn starts without one) ends with the turn.
-      if (running.delete(chat.id)) deps.folderHold.takeReadOnlyChoice(chat.id);
+      running.delete(chat.id);
       // A release already waits for this chat's jobs: a later change outside a turn (an idle close) joins it, so the
       // chat's next turn has one release to cancel and no earlier one outlives the cancel.
       if (pendingReleases.has(chat.id)) return;

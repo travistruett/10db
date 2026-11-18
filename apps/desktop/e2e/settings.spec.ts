@@ -108,13 +108,19 @@ test.describe('Settings › Models', () => {
     test(`Models switches between agents and decisions (${scheme})`, async ({ page }) => {
       await openModels(page, scheme);
       const main = page.getByRole('main');
-      const view = main.getByRole('radiogroup', { name: 'Models view' });
-      await expect(view.getByRole('radio', { name: 'Agents' })).toBeChecked();
+      const view = main.getByRole('tablist', { name: 'Models view' });
+      await expect(view.getByRole('tab', { name: 'Agents' })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
       await expect(main.getByRole('region', { name: 'Playbook section' })).toBeVisible();
       await expectAccessible(page, `settings models agents ${scheme}`);
 
-      await view.getByText('Decisions').click();
-      await expect(view.getByRole('radio', { name: 'Decisions' })).toBeChecked();
+      await view.getByRole('tab', { name: 'Decisions' }).click();
+      await expect(view.getByRole('tab', { name: 'Decisions' })).toHaveAttribute(
+        'aria-selected',
+        'true',
+      );
       await expect(main.getByRole('region', { name: 'Playbook section' })).toHaveCount(0);
       const decisions = main.getByRole('table', { name: 'Decisions', exact: true });
       for (const group of ['Plan', 'Stakeholder questions']) {

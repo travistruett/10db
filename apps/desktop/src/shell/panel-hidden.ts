@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import type { RailSection } from './rail-items';
 
 // Whether the builder hid a section's panel, kept per section so it is still hidden after a restart.
@@ -45,10 +45,9 @@ export function usePanelHidden(section: RailSection | null): {
   readonly toggle: () => void;
 } {
   const hidden = useSyncExternalStore(subscribe, () => (section === null ? false : read(section)));
-  return {
-    hidden,
-    toggle: () => {
-      if (section !== null) write(section, !read(section));
-    },
-  };
+  // Stable while the section is, so the frame's slots do not change on every render.
+  const toggle = useCallback(() => {
+    if (section !== null) write(section, !read(section));
+  }, [section]);
+  return { hidden, toggle };
 }

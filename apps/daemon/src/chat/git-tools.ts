@@ -55,6 +55,8 @@ export interface ChatGitToolsDeps {
    * or a merge, which the judge has already let through; throws the holder's words when it can't.
    */
   readonly takeHere: (chatId: ChatId) => void;
+  /** Drops the branch's cached pull request read, which a push, an open or a merge has made stale. */
+  readonly forgetPullRequest: (chatId: ChatId, branch: string) => void;
 }
 
 export interface ChatGitSession {
@@ -66,7 +68,7 @@ export interface ChatGitSession {
 
 /** What a chat's git tool answers when the turn does not hold Your folder. */
 export const gitNeedsFolder = (holder: string): string =>
-  `This turn does not hold Your folder (${holder}), so it can change no git state. Reading (git status, diff, log) still works.`;
+  `This turn does not have your checkout (${holder}), so it can change no git state. Reading (git status, diff, log) still works.`;
 
 export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
   const { projectId, chatId } = session;
@@ -75,7 +77,7 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
   /** Runs in Your folder only while this session's turn holds it; answers the checkout and who shares it. */
   async function holding(takesHere = false): Promise<{ repo: string; sharedWith: string[] }> {
     if (deps.live.get(session.conversationId, session.sessionId) === null)
-      throw new ConflictError('This session has ended, so it changes nothing in Your folder.');
+      throw new ConflictError('This session has ended, so it changes nothing in your checkout.');
     if (takesHere) deps.takeHere(chatId);
     const { place, worktree } = deps.placeOf(chatId);
     if (place === WorkPlace.Moving) throw new ConflictError('Wait for the move to finish.');
@@ -101,10 +103,10 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
     const closed = others.find((h) => h.kind === FolderHolderKind.PassClosed);
     if (closed !== undefined)
       throw new ConflictError(
-        `Git in Your folder waits: ${holderWords(closed)}. Its branch is the folder's until then.`,
+        `Git in your checkout waits: ${holderWords(closed)}. Its branch is the checkout's until then.`,
       );
     const repo = deps.repoOf(projectId);
-    await refuseOwnBranch(deps.git, repo, 'Your folder');
+    await refuseOwnBranch(deps.git, repo, 'Your checkout');
     return {
       repo,
       sharedWith: others
@@ -125,7 +127,8 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
   async function onBranch(takesHere = false): Promise<{ repo: string; branch: string }> {
     const { repo } = await holding(takesHere);
     const branch = await deps.git.currentBranch(repo);
-    if (branch === null) throw new ConflictError('Your folder is on no branch (a detached HEAD).');
+    if (branch === null)
+      throw new ConflictError('Your checkout is on no branch (a detached HEAD).');
     return { repo, branch };
   }
 
@@ -142,7 +145,7 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
       return {
         done: true,
         branch,
-        note: 'The changes in Your folder came along; nothing was committed.',
+        note: 'The changes in your checkout came along; nothing was committed.',
       };
     },
     [ChatToolName.SwitchBranch]: async (args: unknown) => {
@@ -162,6 +165,7 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
       const { repo, branch } = await onBranch(true);
       // Never forced: the daemon's push names one fully qualified ref and no option.
       const run = await steps.push(siteOf(repo), branch);
+      deps.forgetPullRequest(chatId, branch);
       return { done: true, branch, note: run.output.trim().slice(-500) };
     },
     [ChatToolName.OpenPullRequest]: async (args: unknown) => {
@@ -176,12 +180,15 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
         title: input.title,
         body: input.body,
       });
+      deps.forgetPullRequest(chatId, branch);
       return { done: true, url };
     },
     [ChatToolName.MergePullRequest]: async (args: unknown) => {
       const { number } = ChatToolInputs.merge_pull_request.parse(args);
       const { repo } = await holding(true);
       const url = await steps.mergePullRequest(siteOf(repo), number);
+      const branch = await deps.git.currentBranch(repo);
+      if (branch !== null) deps.forgetPullRequest(chatId, branch);
       return { done: true, url };
     },
     [ChatToolName.CommitChanges]: async (args: unknown) => {
@@ -197,7 +204,7 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
         // Everything changed in the folder is taken when no path is named, other chats' edits included.
         ...(input.paths === undefined && sharedWith.length > 0
           ? {
-              warning: `Your folder is shared with ${sharedWith.join(' and ')}, so this commit may hold their changes too. Name paths to commit only yours.`,
+              warning: `Your checkout is shared with ${sharedWith.join(' and ')}, so this commit may hold their changes too. Name paths to commit only yours.`,
             }
           : {}),
       };

@@ -7,7 +7,6 @@ import {
   ChatToolResult,
   AreaName,
   areaLabel,
-  DoItRequest,
   WHOLE_PROJECT_PAGE,
   noticeText,
   ConversationFilesQuery,
@@ -15,8 +14,6 @@ import {
   cutTitle,
   mintId,
   PostConversationMessage,
-  TASK_MESSAGE_MAX_CHARS,
-  WriteBriefInput,
 } from './index';
 
 // Sessions spec §10, §11: the wire shapes Sessions reads, and what the chat's tools return.
@@ -154,21 +151,6 @@ describe('chat contracts', () => {
       value: { kind: 'model_change' },
     },
     {
-      name: 'a Do It request with nine areas',
-      schema: DoItRequest,
-      value: {
-        place: 'here',
-        title: 'T',
-        brief: 'b',
-        areas: Array.from({ length: 9 }, (_, n) => `a${String(n)}`),
-      },
-    },
-    {
-      name: 'a Do It brief over the cap',
-      schema: DoItRequest,
-      value: { place: 'worktree', title: 'T', brief: 'x'.repeat(20_001) },
-    },
-    {
       name: 'the whole-project page name as an area name',
       schema: AreaName,
       value: WHOLE_PROJECT_PAGE.name,
@@ -181,10 +163,6 @@ describe('chat contracts', () => {
     { name: 'a chat whose id is not a chat id', schema: ChatDto, value: { ...chat, id: 'shp_x' } },
   ])('$name is refused', ({ schema, value }) => {
     expect(schema.safeParse(value).success).toBe(false);
-  });
-
-  it('a Do It request without whenBusy parses', () => {
-    expect(DoItRequest.safeParse({ place: 'worktree', title: 'T', brief: 'b' }).success).toBe(true);
   });
 
   it('the whole-project page reads as "Whole project", and an old notice still parses', () => {
@@ -218,34 +196,5 @@ describe('cutTitle', () => {
     { name: 'one long word is cut at the cap', title: 'a'.repeat(40), cut: 'a'.repeat(28) },
   ])('$name', ({ title, cut }) => {
     expect(cutTitle(title)).toBe(cut);
-  });
-});
-
-describe('write_brief input', () => {
-  const ok = { title: 'Fix login', brief: 'Do it.' };
-  it.each([
-    { name: 'a title and a brief', input: ok, accepted: true },
-    { name: 'a title with a newline', input: { ...ok, title: 'Fix\nlogin' }, accepted: false },
-    { name: 'a title with a tab', input: { ...ok, title: 'Fix\tlogin' }, accepted: false },
-    { name: 'an empty brief', input: { ...ok, brief: '  ' }, accepted: false },
-    {
-      name: 'a brief at the cap',
-      input: { ...ok, brief: 'a'.repeat(TASK_MESSAGE_MAX_CHARS) },
-      accepted: true,
-    },
-    {
-      name: 'a brief over the cap',
-      input: { ...ok, brief: 'a'.repeat(TASK_MESSAGE_MAX_CHARS + 1) },
-      accepted: false,
-    },
-    { name: 'eight areas', input: { ...ok, areas: Array(8).fill('api') }, accepted: true },
-    { name: 'nine areas', input: { ...ok, areas: Array(9).fill('api') }, accepted: false },
-    {
-      name: 'nine criteria',
-      input: { ...ok, acceptanceCriteria: Array(9).fill('x') },
-      accepted: false,
-    },
-  ])('$name', ({ input, accepted }) => {
-    expect(WriteBriefInput.safeParse(input).success).toBe(accepted);
   });
 });

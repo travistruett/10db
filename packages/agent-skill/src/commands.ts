@@ -1,5 +1,5 @@
 import { matchesGlob, resolve } from 'node:path';
-import { BatchId, Rigor, TaskId } from '@10db/contracts';
+import { BatchId, KnowledgeItemKind, Rigor, TaskId } from '@10db/contracts';
 import { z } from 'zod';
 import {
   AccountView,
@@ -21,6 +21,16 @@ import {
 import type { Api } from './connection';
 import { TendbError, UnknownCommandError } from './errors';
 import { mergeHazards } from './hazards';
+import {
+  KnowledgeItemView,
+  KnowledgeListView,
+  kindOfId,
+  knowledgeBody,
+  knowledgeLine,
+  knowledgeListPath,
+  placeLabel,
+  summaryOf,
+} from './knowledge-commands';
 import { draftProblems, patchProblems, withKindObjects } from './task-checks';
 
 export interface CommandDeps {
@@ -446,18 +456,63 @@ const hold: Command = async ([raw], deps) => {
   deps.out(`Held ${id} (${workstream.state}).`);
 };
 
-const principle: Command = async (args, deps) => {
+/** Lists a project's decisions and principles, the builder's own (All Projects) included. Reads only. */
+const knowledge: Command = async ([projectId, ...flags], deps) => {
+  if (!projectId) throw new TendbError('usage: knowledge <projectId> [--q <text>] [--kind ...]');
+  const list = await get(deps, knowledgeListPath(projectId, flags), KnowledgeListView);
+  if (list.search.message) deps.out(list.search.message);
+  for (const item of list.items) deps.out(knowledgeLine(item));
+  deps.out(
+    `Showing ${String(list.items.length)} of ${String(list.total)} (page ${String(list.page)}, ${String(list.pageSize)} a page).`,
+  );
+};
+
+/** Records a decision or a principle; the same command shape for both, `kind` naming the route. */
+function record(kind: KnowledgeItemKind): Command {
+  const usage = `usage: ${kind} <projectId> <${kind}.json> [--dry-run]`;
+  return async (args, deps) => {
+    const {
+      dryRun,
+      rest: [projectId, file],
+    } = withDryRun(args);
+    if (!projectId || !file) throw new TendbError(usage);
+    const body = knowledgeBody('write', kind, readJson(deps, file), deps.cwd, dryRun);
+    const p = await projectById(deps, projectId);
+    const path = `/projects/${projectId}/${kind}s`;
+    if (dryRun) {
+      const result = await call(deps, 'POST', path, z.unknown(), body);
+      deps.out(`DRY RUN: valid for ${p.name}; would POST ${path}, which answers:`);
+      print(deps, result);
+      return;
+    }
+    const item = await call(deps, 'POST', path, KnowledgeItemView, body);
+    deps.out(`Recorded ${kind} ${item.id} (${placeLabel(item)}): ${summaryOf(item)}`);
+    if (item.supersedesId) deps.out(`It replaced ${item.supersedesId}, now superseded.`);
+  };
+}
+
+/** Replaces a current decision or principle with a changed copy; the id's prefix says which route. */
+const supersede: Command = async (args, deps) => {
   const {
     dryRun,
-    rest: [projectId, file],
+    rest: [id, file],
   } = withDryRun(args);
-  if (!projectId || !file) {
-    throw new TendbError('usage: principle <projectId> <principle.json> [--dry-run]');
+  const usage = 'usage: supersede <decisionId|principleId> <changes.json> [--dry-run]';
+  if (!id || !file) throw new TendbError(usage);
+  const kind = kindOfId(id);
+  if (!kind) {
+    throw new TendbError(`${id} isn't a decision or principle id (dec_… or pri_…). ${usage}`);
   }
-  const body = readJson(deps, file);
-  const payload =
-    dryRun && typeof body === 'object' && body !== null ? { ...body, dryRun: true } : body;
-  print(deps, await call(deps, 'POST', `/projects/${projectId}/principles`, z.unknown(), payload));
+  const body = knowledgeBody('edit', kind, readJson(deps, file), deps.cwd, dryRun);
+  const path = `/${kind}s/${id}/supersede`;
+  if (dryRun) {
+    const result = await call(deps, 'POST', path, z.unknown(), body);
+    deps.out(`DRY RUN: valid; would POST ${path}, which answers:`);
+    print(deps, result);
+    return;
+  }
+  const item = await call(deps, 'POST', path, KnowledgeItemView, body);
+  deps.out(`Superseded ${id} with ${item.id} (${placeLabel(item)}, ${kind}).`);
 };
 
 const resaveAccount: Command = async (args, deps) => {
@@ -588,7 +643,10 @@ const COMMANDS: Record<string, Command> = {
   create,
   goal,
   'plan-import': planImport,
-  principle,
+  knowledge,
+  decision: record(KnowledgeItemKind.Decision),
+  principle: record(KnowledgeItemKind.Principle),
+  supersede,
   edit,
   remove,
   start,
@@ -607,7 +665,7 @@ const COMMANDS: Record<string, Command> = {
 };
 
 const USAGE =
-  'usage: node tendb.mjs context|project|areas|create|goal|plan-import|edit|remove|start|move|inbox|answer|ship|abandon|close|join|next ... (commands and arguments: SKILL.md beside this file)';
+  'usage: node tendb.mjs context|project|areas|create|goal|plan-import|knowledge|decision|principle|supersede|edit|remove|start|move|inbox|answer|ship|abandon|close|join|next ... (commands and arguments: SKILL.md beside this file)';
 
 /** Runs one command line, as `node tendb.mjs <argv>` does. */
 export async function runCommand(argv: readonly string[], deps: CommandDeps): Promise<void> {

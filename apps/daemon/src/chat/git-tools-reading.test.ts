@@ -71,6 +71,7 @@ function world() {
       takeHere: (chatId) => {
         w.work.takeHereForGitTool(chatId);
       },
+      forgetPullRequest: () => undefined,
     },
     { sessionId, conversationId: chat.conversationId, chatId: chat.id, projectId: w.project.id },
   );

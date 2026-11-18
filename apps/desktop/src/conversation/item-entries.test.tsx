@@ -1,4 +1,4 @@
-import { mintId, type ConversationItemDto, type InboxItemDto } from '@10db/contracts';
+import { ConversationItemDto, mintId, type InboxItemDto } from '@10db/contracts';
 import { screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { builderItem, replyItem, systemItem, toolItem } from '../test/conversation-fixtures';
@@ -58,6 +58,14 @@ const answeredCard = (choice: string): [ConversationItemDto, InboxItemDto] => {
 describe('itemEntries', () => {
   it.each<[string, ConversationItemDto, string[]]>([
     ['the builder’s message', builderItem(conv, 'Hi'), ['builder Hi']],
+    [
+      'a carry-on line, which 10db posted, as a notice',
+      ConversationItemDto.parse({
+        ...builderItem(conv, 'The builder chose a new branch, b. Carry on.'),
+        purpose: 'carry_on',
+      }),
+      ['notice The builder chose a new branch, b. Carry on.'],
+    ],
     ['a reply', replyItem(conv, '# Hi'), ['reply # Hi']],
     ['a reply cut short', replyItem(conv, 'Half', { partial: true }), ['reply partial Half']],
     ['a note', systemItem(conv, { kind: 'agent_message', text: 'Resumed' }), ['notice Resumed']],

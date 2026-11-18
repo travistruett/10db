@@ -88,7 +88,13 @@ export function RenderLayout() {
   const [titleHost, setTitleHost] = useState<HTMLElement | null>(null);
   return (
     <FrameSlotsContext
-      value={{ titleHost, panelHost: null, drawerHost: null, registerPanel: () => () => undefined }}
+      value={{
+        titleHost,
+        panelHost: null,
+        drawerHost: null,
+        hidePanel: null,
+        registerPanel: () => () => undefined,
+      }}
     >
       <Box
         p="md"

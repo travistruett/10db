@@ -5,7 +5,6 @@
 export { chatFolderInUse, judgeChatCall, type ChatPlace } from './confinement';
 export { createConversationFiles } from './conversation-files';
 export { chatFolder, chatHooks, type ChatHooksDeps } from './hooks';
-export { createBriefs, type Briefs } from './briefs';
 export { createChatLiveSessions } from './live-sessions';
 export {
   ChatArchiveWarning,
@@ -13,7 +12,7 @@ export {
   type ChatService,
   type ChatWorktrees,
 } from './service';
-export { branchFor, type TakenNames } from './chat-worktree';
+export { branchFor } from './chat-worktree';
 export {
   applyChatWorkAnswer,
   ChatWorkConflict,
@@ -22,23 +21,11 @@ export {
   type ChatWorkService,
 } from './work-service';
 export { chatRoot } from './work-root';
-export {
-  createChatWorkStateReader,
-  PULL_REQUEST_READ_MS,
-  type ChatWorkStateDeps,
-  type ChatWorkStateReader,
-} from './work-state';
-export { createTitleRowGit, type TitleRowGit, type TitleRowGitDeps } from './title-row-git';
+export { createChatWorkStateReader, type ChatWorkStateReader } from './work-state';
+export { createTitleRowGit, type TitleRowGit } from './title-row-git';
 export { sessionStarts } from './session-starts';
 export { patchSessionsSettings, sessionsSettings, setSessionsSettings } from './settings';
 export { startFacts, type StartGit } from './start-facts';
 export { createChatTools } from './tools';
-export {
-  doItHere,
-  doItInCopy,
-  finishSeals,
-  previewDoIt,
-  type DoItDeps,
-  type DoItHereDeps,
-} from './do-it';
+export { finishSeals } from './finish-seals';
 export { taskSession } from './task-session';

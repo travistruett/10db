@@ -38,7 +38,7 @@ function insideFolder(repo: string, path: string): string {
   const absolute = resolve(repo, path);
   const rel = relative(repo, absolute);
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel))
-    throw new InvalidError(`${path} is not a path inside Your folder`);
+    throw new InvalidError(`${path} is not a path inside your checkout`);
   return rel;
 }
 
@@ -46,7 +46,7 @@ export function gitSteps(deps: GitStepsDeps) {
   /** The GitHub repository the folder's pinned origin names. */
   async function pinnedRepo(repo: string): Promise<string> {
     const slug = githubRepoOf(await deps.git.pinnedPushUrl(repo));
-    if (slug === null) throw new InvalidError("Your folder's origin is not a GitHub repository");
+    if (slug === null) throw new InvalidError("Your checkout's origin is not a GitHub repository");
     return slug;
   }
 

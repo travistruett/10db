@@ -135,6 +135,9 @@ const rg = (...args: string[]) =>
     .toString()
     .trim();
 
+/** The branches whose cached pull request read the tools asked to forget. */
+const forgotten: string[] = [];
+
 /** A chat's tools in a session of its own, open as the engine opens one. */
 function tools(chat: ReturnType<typeof newChat>, open = true, afterCheck?: () => void) {
   const live = createChatLiveSessions();
@@ -176,6 +179,9 @@ function tools(chat: ReturnType<typeof newChat>, open = true, afterCheck?: () =>
       }),
       takeHere: (chatId) => {
         takeHereForGitTool({ state, folderHold: hold }, chatId);
+      },
+      forgetPullRequest: (_chatId, branch) => {
+        forgotten.push(branch);
       },
     },
     { sessionId, conversationId: chat.conversationId, chatId: chat.id, projectId: project.id },
@@ -289,7 +295,7 @@ describe("a chat's git tools", () => {
     expect(rg('show', '--name-only', '--format=', 'HEAD')).toBe('src/a.ts');
     expect(rg('ls-files', '--others', '--exclude-standard')).toBe('src/b.ts');
     await expect(t.commit_changes({ message: 'x', paths: ['../outside.txt'] })).rejects.toThrow(
-      'inside Your folder',
+      'inside your checkout',
     );
   });
 
@@ -340,7 +346,7 @@ describe("a chat's git tools", () => {
             hold.releaseTurn(me.id);
           }),
         ),
-      ).rejects.toThrow(/does not hold Your folder/);
+      ).rejects.toThrow(/does not have your checkout/);
       expect(rg('rev-parse', 'HEAD')).toBe(head);
       expect(rg('branch', '--show-current')).toBe('main');
       expect(rg('branch', '--list', 'topic')).toBe('');
@@ -427,6 +433,10 @@ describe('a session on its own branch', () => {
 });
 
 describe("a chat's tools that reach GitHub", () => {
+  beforeEach(() => {
+    forgotten.length = 0;
+  });
+
   /** The chat holds the folder on a branch of its own with one commit on it. */
   async function branchWithCommit(name = 'topic') {
     const me = newChat('Me');
@@ -526,5 +536,15 @@ describe("a chat's tools that reach GitHub", () => {
     const number = Number(/\/pull\/(\d+)$/.exec(mine.url)?.[1]);
     await t.merge_pull_request({ number });
     expect(gh.merged).toEqual([mine.url]);
+  });
+
+  it("clears the branch's cached pull request read after a push, an open and a merge", async () => {
+    const t = await branchWithCommit();
+    await t.push_branch({});
+    expect(forgotten).toEqual(['topic']);
+    const opened = (await t.open_pull_request({ title: 'Add a', body: 'Why' })) as { url: string };
+    expect(forgotten).toEqual(['topic', 'topic']);
+    await t.merge_pull_request({ number: Number(/\/pull\/(\d+)$/.exec(opened.url)?.[1]) });
+    expect(forgotten).toEqual(['topic', 'topic', 'topic']);
   });
 });

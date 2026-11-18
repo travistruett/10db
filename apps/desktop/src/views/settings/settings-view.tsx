@@ -16,7 +16,7 @@ export function SettingsView() {
   const { ref } = useFocusTarget<HTMLDivElement>(key);
   return (
     <>
-      <Panel section="settings">
+      <Panel section="settings" title="Settings">
         <SettingsNav />
       </Panel>
       <Stack ref={ref}>

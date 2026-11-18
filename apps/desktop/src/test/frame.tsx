@@ -12,7 +12,13 @@ export function FrameSlots({ children }: { readonly children: ReactNode }) {
   const [drawerHost, setDrawerHost] = useState<HTMLElement | null>(null);
   return (
     <FrameSlotsContext
-      value={{ titleHost, panelHost, drawerHost, registerPanel: () => () => undefined }}
+      value={{
+        titleHost,
+        panelHost,
+        drawerHost,
+        hidePanel: null,
+        registerPanel: () => () => undefined,
+      }}
     >
       <div data-testid="title-row" data-title-row="" ref={setTitleHost} />
       <div data-testid="panel" ref={setPanelHost} />

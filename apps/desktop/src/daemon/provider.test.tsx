@@ -1,5 +1,5 @@
 import { PROTOCOL_VERSION } from '@10db/contracts';
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse, ws } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderWithDaemon, server, TEST_CONNECTION } from '../test/daemon';
@@ -28,7 +28,10 @@ describe('DaemonProvider', () => {
       Promise.reject(new Error('Set VITE_DAEMON_TOKEN to the daemon UI token'));
     renderWithDaemon(<StatusProbe />, { resolve: failing });
     expect(await screen.findByText('Connecting to the 10db daemon…')).toBeTruthy();
-    expect(await screen.findByText(/Set VITE_DAEMON_TOKEN/)).toBeTruthy();
+    // The screen says what happens next; the reason is in a tooltip.
+    const note = await screen.findByText(/Still trying to reach the 10db daemon/);
+    fireEvent.mouseEnter(note);
+    expect((await screen.findByRole('tooltip')).textContent).toMatch(/Set VITE_DAEMON_TOKEN/);
     expect(screen.queryByTestId('probe')).toBeNull();
   });
 

@@ -284,9 +284,6 @@ export function chatServer(opts: ChatServerOptions = {}): ChatServer {
       server.merges.push(String(params['chatId']));
       return HttpResponse.json(chatWorkStateDto());
     }),
-    http.get(daemonUrl('/chats/:chatId/archive-preview'), () =>
-      HttpResponse.json(archivePreviewDto()),
-    ),
     http.post(daemonUrl('/chats/:chatId/archive'), async ({ params, request }) => {
       const chat = byId(String(params['chatId']));
       if (chat === undefined) return HttpResponse.json({ error: 'gone' }, { status: 404 });

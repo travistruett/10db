@@ -112,6 +112,8 @@ export const ConversationItemDto = z.discriminatedUnion('kind', [
     text: z.string(),
     /** The paths the message's `@` mentions name; none for a message without. */
     mentions: z.array(z.string()).default([]),
+    /** Set on a line 10db posted to the session, not one the builder wrote: `carry_on` goes on after a hold. */
+    purpose: z.enum(['brief', 'carry_on']).optional(),
     /** The pictures sent with it; absent for a message without. */
     files: z.array(ConversationFileDto).optional(),
   }),
@@ -234,7 +236,7 @@ export const MentionPath = z
 export const PostConversationMessage = z.object({
   text: z.string(),
   mentions: z.array(MentionPath).default([]),
-  /** What a chat's send does when Your folder is held: absent takes it when free, and reads only otherwise; read_only never takes it. */
+  /** What a chat's send does when Your folder is held: absent takes it when free, and reads only otherwise. */
   folder: FolderWhileHeldInput.optional(),
 });
 export type PostConversationMessage = z.infer<typeof PostConversationMessage>;

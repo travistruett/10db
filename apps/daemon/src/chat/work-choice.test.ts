@@ -43,8 +43,6 @@ function appOf(world: ChatWorld) {
         takeover: world.takeover,
         folderHold: world.folderHold,
         pendingOpens: createPendingOpens({ state: world.state }),
-        doItPreview: () => Promise.reject(new Error('not read here')),
-        doIt: () => Promise.reject(new Error('not done here')),
         changes: () => Promise.reject(new Error('not read here')),
         titleRow: {
           commit: () => Promise.reject(new Error('not done here')),

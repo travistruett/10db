@@ -9,7 +9,6 @@ import {
   ConversationOwnerKind,
   type ChatId,
   type ConversationId,
-  DoItPlace,
   EventType,
   ConflictError,
   InvalidError,
@@ -155,9 +154,6 @@ import {
   moveRetiredLandings,
   checkPassOpen,
   openPass,
-  passBelow,
-  passOpenProblem,
-  returnBranchProblem,
   readPnpmVersion,
   recoverBatches,
   removeMergedBranches,
@@ -245,12 +241,7 @@ import {
   createChatWorkStateReader,
   createTitleRowGit,
   type ChatWorkService,
-  doItHere,
-  doItInCopy,
   finishSeals,
-  previewDoIt,
-  type DoItDeps,
-  createBriefs,
   createChatTools,
   createConversationFiles,
   sessionsSettings,
@@ -272,8 +263,6 @@ import {
   createPassCloses,
   discardKeptWork,
   createPendingOpens,
-  openFailure,
-  postFirstMessages,
   type OpenWhenBusyDeps,
   joinPass,
   putBackKeptWork,
@@ -1700,7 +1689,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     models: conversationModels,
     launch: conversationLaunch,
   });
-  const chatBriefs = createBriefs(clock);
   const chat = createChatService({
     state,
     engine: exploreEngine,
@@ -1708,7 +1696,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     worktrees: createChatWorktrees({ state, git }),
     reopenBranch: (chatId) => chatWork.reopen(chatId),
     pendingOpens,
-    briefs: chatBriefs,
     clock,
     dataDir: opts.dataDir,
     log: logger.child({ component: 'chat-service' }),
@@ -2370,17 +2357,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       inbox.flag({ projectId, workstreamId: null, title, body });
     },
   };
-  const doItDeps: DoItDeps = {
-    state,
-    engine: exploreEngine,
-    folderHold,
-    pendingOpens,
-    git: delivery.git,
-    chat,
-    openProblem: passOpenProblem,
-    returnBranchProblem,
-    stacksOn: (readDb, project) => passBelow(readDb, project.id)?.name ?? null,
-  };
   const services = createServices({
     state,
     slackConnection,
@@ -2488,58 +2464,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           timeoutMs: delivery.limits.networkTimeoutMs,
         }),
       }),
-      doItPreview: (chatId) => previewDoIt(doItDeps, chatId),
-      doIt: (chatId, input) =>
-        input.place === DoItPlace.Here
-          ? doItHere(
-              {
-                ...doItDeps,
-                openWhenBusy: openWhenBusyDeps,
-                openWholeProject: async ({ signal, ...whole }) => {
-                  try {
-                    await openPass(
-                      delivery,
-                      {
-                        projectId: whole.projectId,
-                        name: whole.title,
-                        taskIds: [],
-                        wholeProject: {
-                          title: whole.title,
-                          brief: whole.brief,
-                          chatId: whole.chatId,
-                          ...(whole.acceptanceCriteria === undefined
-                            ? {}
-                            : { acceptanceCriteria: whole.acceptanceCriteria }),
-                        },
-                        wait: { signal },
-                      },
-                      passOpenDeps,
-                    ).then((opened) => {
-                      postFirstMessages(state, opened.pass.id, undefined);
-                    });
-                  } catch (error) {
-                    throw openFailure(error);
-                  }
-                  createdScheduler.requestTick();
-                },
-              },
-              chatId,
-              input,
-            )
-          : doItInCopy(
-              {
-                ...doItDeps,
-                tasks: {
-                  create: (projectId, task) =>
-                    Promise.resolve(services.createTask(projectId, task)),
-                  settleSizing: (taskIds) => services.settleSizing(taskIds),
-                  start: (taskId) => services.startTask(taskId),
-                  remove: (taskId) => services.removeTask(taskId),
-                },
-              },
-              chatId,
-              input,
-            ),
       git: (repo, args) => runGit(repo, args, { bin: gitBin }),
       now: () => clock.now(),
       log: logger.child({ component: 'chat' }),
@@ -2829,7 +2753,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       dependencyChanges,
       shapeTools: shape.toolsFor,
       chatTools: createChatTools({
-        briefs: chatBriefs,
         state,
         bus,
         inbox,
@@ -2855,6 +2778,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           }),
           takeHere: (chatId) => {
             chatWork.takeHereForGitTool(chatId);
+          },
+          forgetPullRequest: (chatId, branch) => {
+            chatWork.forgetPullRequest(chatId, branch);
           },
         },
       }),
