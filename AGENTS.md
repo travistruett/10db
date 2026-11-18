@@ -65,8 +65,15 @@ A local macOS control plane that runs Claude Code sessions as a software factory
   agents. The builder approves by replying to the brief; with nothing needed from them, work goes ahead.
 - **A roadmap is cut by the builder before it runs.** It opens with a "Builder's cut" table: each milestone is
   needed for the goal, later, or cut, and only the needed ones run. A plan is written once its predecessors
-  have merged, so at most one milestone is planned ahead, and one plan stays under about 8,000 words; a bigger
-  one is split (`docs/architecture/research/2026-11-14-build-process-audit.md` §3.2).
+  have merged, so at most one milestone is planned ahead, and one plan's index stays under about 8,000 words; a
+  bigger one is split (`docs/architecture/research/2026-11-14-build-process-audit.md` §3.2).
+- **A plan is an index plus one card per task.** The index (`docs/superpowers/plans/<date>-<name>.md`) holds the
+  brief, Global Constraints, provider parity, Interfaces, the state table, the tracks and one line per task.
+  Each task is a card (`docs/superpowers/plans/<date>-<name>/task-<n>.md`) an implementer can work from alone: its
+  files, the Interfaces signatures it implements or calls (quoted exactly), the state-table rows it covers, its
+  tests, and the spec sections it implements, named by heading rather than restated. An implementer reads the
+  index's brief and Global Constraints and its card, not the whole plan or spec, so a fresh one starts in
+  minutes and a heavy track can run one implementer per card.
 - **A branch generates its migrations last**, after its final merge of `main`, and only one open pull request
   adds migrations at a time. Two branches that both number migrations renumber each other at every landing.
 - Done means the pull request's CI is green. Before a push, run `make check-changed` (the packages the diff

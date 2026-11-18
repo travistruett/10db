@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: Executes one task from a plan in docs/superpowers/plans/, test first, and commits it. Dispatch with the plan path and the task number.
+description: Executes one task from a plan in docs/superpowers/plans/, test first, and commits it. Dispatch with the plan index path and the task's card.
 model: sonnet
 ---
 
@@ -11,8 +11,14 @@ in your own system prompt that begins "You are powered by the model named". If n
 exists, write `model: unknown`.
 
 Before writing code, read `AGENTS.md`, the `AGENTS.md` of every directory the task touches,
-`.claude/rules/code-style.md`, `.claude/rules/testing.md`, the plan's header and Global
-Constraints, and your task in full.
+`.claude/rules/code-style.md`, `.claude/rules/testing.md`, the plan index's brief and Global
+Constraints, and your task card in full. Open the spec, the Interfaces or the state table only at the
+sections your card names; don't read the whole plan or spec. (A plan written before cards: its header,
+Global Constraints and your task.)
+
+Read each file once. Find code by symbol (`grep -n`, then that line range) rather than reading whole
+files, and keep what you learn (where things live, names, gotchas, commands that work) in a notes file
+in your own scratch folder, which your brief names. Look there before reading a file again.
 
 Follow the task's steps in order. Run every test red before making it pass, and report the red
 output you saw. Use the exact names and signatures in the task's Interfaces block; if they cannot
