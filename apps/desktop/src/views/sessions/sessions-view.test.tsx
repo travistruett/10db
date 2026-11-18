@@ -1,6 +1,7 @@
 import { mintId, type ChatDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
+import { z } from 'zod';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { pickOption } from '../../test/combobox';
 import {
@@ -326,6 +327,7 @@ describe('Sessions: the panel', () => {
     fireEvent.change(box, { target: { value: 'login' } });
     const results = await screen.findByRole('list', { name: 'Search results' });
     await within(results).findByRole('button', { name: 'Login flow, ampsio, closed' });
+    expect(within(results).getAllByRole('listitem')).toHaveLength(2);
     expect(within(results).getAllByRole('button')).toHaveLength(2);
     fireEvent.change(box, { target: { value: 'login fa' } });
     await waitFor(() => {
@@ -362,6 +364,59 @@ describe('Sessions: the panel', () => {
       expect(closedTabs.list()).toEqual([]);
     });
     closedTabs.reset();
+  });
+
+  it('puts one row in the Tab order, the selected one, and the arrow keys move between rows', async () => {
+    const chats = [
+      chatIn(ampsio, 'First', 0),
+      chatIn(ampsio, 'Second', 1),
+      chatIn(ampsio, 'Third', 2),
+    ];
+    open(`/sessions?chat=${chats[1]?.id ?? ''}`, { chats });
+    await screen.findByRole('option', { name: /^Second/ });
+    const rows = screen.getAllByRole('option');
+    expect(rows.map((r) => r.getAttribute('tabindex'))).toEqual(['-1', '0', '-1']);
+    rows[1]?.focus();
+    fireEvent.keyDown(rows[1] ?? document.body, { key: 'ArrowDown' });
+    expect(document.activeElement).toBe(rows[2]);
+    fireEvent.keyDown(rows[2] ?? document.body, { key: 'Home' });
+    expect(document.activeElement).toBe(rows[0]);
+  });
+
+  it('scrolls the selected row into view when another row is selected', async () => {
+    const scrolled = vi.fn();
+    vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(scrolled);
+    const chats = [chatIn(ampsio, 'First', 0), chatIn(ampsio, 'Second', 1)];
+    const { router } = open(`/sessions?chat=${chats[0]?.id ?? ''}`, { chats });
+    await screen.findByRole('option', { name: /^First/ });
+    scrolled.mockClear();
+    await router.navigate({ to: '/sessions', search: { chat: chats[1]?.id ?? '' } });
+    await waitFor(() => {
+      expect(scrolled).toHaveBeenCalled();
+    });
+  });
+
+  it('scrolls a virtual list to the selected row, which is not drawn yet', async () => {
+    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600);
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(260);
+    // jsdom lays nothing out: the list is given the height of its 1,001 rows to scroll within.
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(30_030);
+    const scrollTo = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+      configurable: true,
+      writable: true,
+      value: scrollTo,
+    });
+    const chats = Array.from({ length: 1000 }, (_, i) => chatIn(ampsio, `Session ${String(i)}`, i));
+    open(`/sessions?chat=${chats[700]?.id ?? ''}`, { chats });
+    await screen.findByRole('option', { name: /^Session 0, ampsio/ });
+    await waitFor(() => {
+      const tops = scrollTo.mock.calls.map((call): unknown => call[0]);
+      expect(
+        tops.some((arg) => z.object({ top: z.number().gt(10_000) }).safeParse(arg).success),
+      ).toBe(true);
+    });
+    Reflect.deleteProperty(HTMLElement.prototype, 'scrollTo');
   });
 
   it('draws fewer than 250 rows for 1,000 sessions', async () => {
