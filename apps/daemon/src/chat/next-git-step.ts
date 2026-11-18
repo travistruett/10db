@@ -17,6 +17,8 @@ export interface NextStepFacts {
   readonly dirtyFiles: number;
   /** Commits the session's branch has that its base lacks. */
   readonly ahead: number;
+  /** Commits the branch has that its pushed copy lacks; they are on no pull request yet. */
+  readonly unpushed: number;
   readonly pullRequest: {
     readonly checks: { readonly passed: number; readonly total: number; readonly failing: number };
     readonly mergeable: boolean | null;
@@ -75,6 +77,8 @@ export function nextGitStep(facts: NextStepFacts): NextStep {
   if (facts.dirtyFiles > 0) return step(ChatGitStep.Commit);
   const pr = facts.pullRequest;
   if (pr?.merged === true) return none();
+  // Commits the pull request lacks are pushed first, or Merge would land the pull request without them.
+  if (pr !== null && facts.unpushed > 0) return step(ChatGitStep.OpenPullRequest);
   if (pr !== null) return step(ChatGitStep.Merge, mergeRefusal(pr, facts.baseBranch));
   if (facts.ahead === 0) return none();
   if (facts.local) {

@@ -13,6 +13,7 @@ const base: NextStepFacts = {
   onBase: false,
   dirtyFiles: 0,
   ahead: 0,
+  unpushed: 0,
   pullRequest: null,
   checkout: { branch: 'main', dirtyFiles: 0 },
   holder: null,
@@ -91,6 +92,12 @@ describe('nextGitStep', () => {
       name: 'nothing to do on a clean branch with no commits',
       facts: {},
       next: null,
+      refusal: null,
+    },
+    {
+      name: 'commits the open pull request lacks are pushed before it merges',
+      facts: { ahead: 3, unpushed: 1, pullRequest: open() },
+      next: ChatGitStep.OpenPullRequest,
       refusal: null,
     },
     {

@@ -173,6 +173,12 @@ export function createChatWorkStateReader(deps: ChatWorkStateDeps): ChatWorkStat
           ? await pullRequestOf(chat.projectId, repo, branch, signal)
           : null;
 
+      // Commits past the pushed copy of the branch; a branch never pushed has no copy, and reads as none.
+      const unpushed =
+        writes && pullRequest !== null && branch !== null
+          ? await orElse(git.countCommits(root, `origin/${branch}`, 'HEAD'), 0)
+          : 0;
+
       const blocking =
         place === null || place === WorkPlace.Choosing || place === WorkPlace.Here
           ? blockingHolder(deps.folderHold.holders(chat.projectId, chatId))
@@ -188,6 +194,7 @@ export function createChatWorkStateReader(deps: ChatWorkStateDeps): ChatWorkStat
         onBase: branch === baseBranch,
         dirtyFiles: rootChanges.length,
         ahead,
+        unpushed,
         pullRequest,
         checkout: { branch: checkoutBranch, dirtyFiles: checkoutChanges.length },
         holder: place === WorkPlace.Here ? holder : null,

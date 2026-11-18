@@ -156,6 +156,20 @@ describe('Open Pull Request', () => {
     await expect(titleRow.openPullRequest(chat.id, signal)).rejects.toThrow(/merges locally/);
   });
 
+  it('pushes later commits to the branch of an open pull request without opening another, then offers Merge', async () => {
+    const chat = setup();
+    const path = branchSession(chat);
+    await titleRow.openPullRequest(chat.id, signal);
+    commitFile(path, 'later.ts');
+    expect(ChatWorkStateDto.parse(await w.work.state(chat.id, signal))).toMatchObject({
+      next: 'open_pull_request',
+    });
+    const state = await titleRow.openPullRequest(chat.id, signal);
+    expect(gitIn(pair.origin.path, 'rev-parse', 'fix')).toBe(gitIn(path, 'rev-parse', 'HEAD'));
+    expect(gh.prCreates()).toHaveLength(1);
+    expect(ChatWorkStateDto.parse(state)).toMatchObject({ next: 'merge' });
+  });
+
   it('is served by POST /chats/:chatId/pull-request', async () => {
     const chat = setup();
     commitFile(repo(), 'a.ts');
