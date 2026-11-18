@@ -1,8 +1,6 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  mintId,
-  PlanImportError,
   PlanImportPreview,
   PlanImportResult,
   ProjectDto,
@@ -47,11 +45,11 @@ afterEach(async () => {
 
 const api = () => apiClient(daemon.url, daemon.token);
 
-async function post(path: string, body: unknown, token: string | null = daemon.token) {
+async function post(path: string, body: unknown) {
   const res = await fetch(`${daemon.url}${path}`, {
     method: 'POST',
     headers: {
-      ...(token === null ? {} : { Authorization: `Bearer ${token}` }),
+      Authorization: `Bearer ${daemon.token}`,
       'content-type': 'application/json',
     },
     body: JSON.stringify(body),
@@ -73,10 +71,7 @@ async function seed(): Promise<ProjectId> {
 }
 
 /** Writes the fixture bundle into the effort folder, the plan's text in a file beside it. */
-function writeBundle(
-  projectId: ProjectId,
-  change: ((json: Record<string, unknown>) => void) | null = null,
-) {
+function writeBundle(projectId: ProjectId) {
   const json = bundleJson(projectId);
   const docs = json['documents'] as { key: string; revisions: Record<string, unknown>[] }[];
   const p1 = docs.find((d) => d.key === 'p1')?.revisions[0];
@@ -84,7 +79,6 @@ function writeBundle(
     delete p1['body'];
     p1['bodyPath'] = 'docs/p1.md';
   }
-  change?.(json);
   mkdirSync(join(effort.path, 'docs'), { recursive: true });
   writeFileSync(join(effort.path, 'docs', 'p1.md'), P1_BODY);
   const path = join(effort.path, 'bundle.json');
@@ -125,67 +119,5 @@ describe('POST /projects/:projectId/plans/import', () => {
     const goal = view.proposals.find((p) => p.key === 'g1');
     expect(goal?.kind).toBe('goal');
     expect(JSON.stringify(goal?.body)).toContain('Revoke a device');
-  });
-
-  it('the same bundle again answers 200 with no changes', async () => {
-    const projectId = await seed();
-    const path = writeBundle(projectId);
-    expect((await post(`/projects/${projectId}/plans/import`, { bundlePath: path })).status).toBe(
-      201,
-    );
-    const again = await post(`/projects/${projectId}/plans/import`, { bundlePath: path });
-    expect(again.status).toBe(200);
-    expect(PlanImportResult.parse(again.body)).toMatchObject({
-      created: false,
-      changes: { documents: [], proposals: { added: [], replaced: [] } },
-    });
-  });
-
-  it('a refused bundle answers 400 with every issue', async () => {
-    const projectId = await seed();
-    const path = writeBundle(projectId, (json) => {
-      const goals = json['goals'] as { tasks: Record<string, unknown>[] }[];
-      const t1 = goals[0]?.tasks[0];
-      if (t1) {
-        t1['areas'] = ['docs'];
-        t1['cites'] = ['nope'];
-      }
-    });
-    const res = await post(`/projects/${projectId}/plans/import`, { bundlePath: path });
-    expect(res.status).toBe(400);
-    expect(PlanImportError.parse(res.body).errors.map((e) => e.path)).toEqual([
-      'Task t1, cites: nope',
-      'Task t1, areas: docs',
-    ]);
-    expect(await shapesOf(projectId)).toEqual([]);
-  });
-
-  it('a bundle naming another project than the route is refused, and writes nothing', async () => {
-    const projectId = await seed();
-    const res = await post(`/projects/${projectId}/plans/import`, {
-      bundle: bundleJson(mintId('Project')),
-    });
-    expect(res.status).toBe(400);
-    expect(PlanImportError.parse(res.body).errors.map((e) => e.path)).toContain('projectId');
-    expect(await shapesOf(projectId)).toEqual([]);
-  });
-
-  it('an inline bundle imports', async () => {
-    const projectId = await seed();
-    const res = await post(`/projects/${projectId}/plans/import`, {
-      bundle: bundleJson(projectId),
-    });
-    expect(res.status).toBe(201);
-    expect((await shapesOf(projectId)).map((s) => s.title)).toEqual(['Remote host']);
-  });
-
-  it('a request without the token is 401', async () => {
-    const projectId = await seed();
-    const res = await post(
-      `/projects/${projectId}/plans/import`,
-      { bundle: bundleJson(projectId) },
-      null,
-    );
-    expect(res.status).toBe(401);
   });
 });

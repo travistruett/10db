@@ -30,7 +30,6 @@ import {
 } from '@10db/db';
 import { inject } from 'vitest';
 import type { Keychain } from '../src/environment';
-import type { Logger } from '../src/log';
 import type { SandboxRuntime } from '../src/sandbox';
 import { buildTrustPolicy } from '../src/trust';
 
@@ -413,23 +412,6 @@ export function seedSpend(store: Store, project: ProjectDto, costUsd: number): S
     updateSessionUsage(ctx, session.id, { costUsd });
     return getSession(ctx.tx, session.id);
   }).value;
-}
-
-/** A logger that keeps every call, with its fields and message as JSON text, so a test can look for what must never be logged. */
-export function capturingLogger(): Logger & { readonly lines: () => string[] } {
-  const lines: string[] = [];
-  const keep = (obj: object, msg?: string): void => {
-    lines.push(JSON.stringify({ ...obj, msg }));
-  };
-  const logger: Logger & { readonly lines: () => string[] } = {
-    debug: keep,
-    info: keep,
-    warn: keep,
-    error: keep,
-    child: () => logger,
-    lines: () => [...lines],
-  };
-  return logger;
 }
 
 /** A session's trust policy as the runner or Plan builds one, for a spec a test opens by hand. */

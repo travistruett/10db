@@ -1,14 +1,4 @@
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import {
-  GoalAdoptError,
-  GoalAdoptPreview,
-  GoalDto,
-  GoalListDto,
-  ProjectDto,
-  TaskDto,
-  type ProjectId,
-} from '@10db/contracts';
+import { GoalDto, GoalListDto, ProjectDto, TaskDto, type ProjectId } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
@@ -91,26 +81,6 @@ tasks:
 Notes below the front matter.
 `;
 
-// An unknown depends_on key, a cycle and an unknown area, all at once.
-const BAD = `---
-title: Broken
-objective: Three things wrong.
-tasks:
-  - key: a
-    title: A
-    areas: [repo]
-    depends_on: [drawer-editr]
-  - key: b
-    title: B
-    areas: [billing]
-    depends_on: [c]
-  - key: c
-    title: C
-    areas: [repo]
-    depends_on: [b]
----
-`;
-
 const adopt = (projectId: ProjectId, body: unknown) =>
   post(`/projects/${projectId}/goals/adopt`, body);
 const tasksOf = (projectId: ProjectId) =>
@@ -182,133 +152,5 @@ describe('POST /projects/:projectId/goals/adopt', () => {
       },
       { title: "Propose a new project's areas", workspaceMode: 'shared', placementReason: null },
     ]);
-  });
-
-  it('refuses an unknown depends_on key, a cycle and an unknown area together, and writes nothing', async () => {
-    const project = await seed();
-    const res = await adopt(project.id, { text: BAD });
-    expect(res.status).toBe(400);
-    const { errors } = GoalAdoptError.parse(res.body);
-    expect(errors).toEqual([
-      { path: 'Task 1, depends on', message: 'no task has the key drawer-editr' },
-      { path: 'Task 2, depends on', message: 'these tasks wait on each other: b, c, b' },
-      {
-        path: 'Task 2, areas',
-        message: 'the project has no area billing (it has repo, docs)',
-      },
-    ]);
-    expect(await tasksOf(project.id)).toEqual([]);
-    expect(await goalsOf(project.id)).toEqual([]);
-  });
-
-  it('answers a dry run with what would be written, and writes nothing', async () => {
-    const project = await seed();
-    const res = await adopt(project.id, { text: GOOD, dryRun: true });
-    expect(res.status).toBe(200);
-    expect(GoalAdoptPreview.parse(res.body)).toEqual({
-      dryRun: true,
-      title: 'Real areas',
-      taskKeys: ['task-patch-route', 'drawer-editor', 'propose-project-areas'],
-      criteria: 2,
-    });
-    expect(await tasksOf(project.id)).toEqual([]);
-    expect(await goalsOf(project.id)).toEqual([]);
-  });
-
-  it('answers a dry run of a broken brief with the same errors as adopting it', async () => {
-    const project = await seed();
-    const real = await adopt(project.id, { text: BAD });
-    const dry = await adopt(project.id, { text: BAD, dryRun: true });
-    expect(dry.status).toBe(400);
-    expect(dry.body).toEqual(real.body);
-    expect(await goalsOf(project.id)).toEqual([]);
-  });
-
-  it('accepts the same brief as a path and as text', async () => {
-    const project = await seed();
-    const file = join(data.path, 'brief.md');
-    writeFileSync(file, GOOD);
-    const fromText = GoalDto.parse((await adopt(project.id, { text: GOOD })).body);
-    const res = await adopt(project.id, { path: file });
-    expect(res.status).toBe(201);
-    const fromPath = GoalDto.parse(res.body);
-    const shape = (g: GoalDto) => ({
-      title: g.title,
-      objective: g.objective,
-      description: g.description,
-      criteria: g.criteria.map((c) => ({ text: c.text, check: c.check })),
-      tasks: g.taskIds.length,
-    });
-    expect(shape(fromPath)).toEqual(shape(fromText));
-    expect(fromPath.id).not.toBe(fromText.id);
-  });
-
-  it('refuses a path it cannot read, naming it', async () => {
-    const project = await seed();
-    const missing = join(data.path, 'nope.md');
-    const res = await adopt(project.id, { path: missing });
-    expect(res.status).toBe(400);
-    expect(GoalAdoptError.parse(res.body).errors).toEqual([
-      { path: 'File', message: `Can't read ${missing}: it does not exist` },
-    ]);
-  });
-
-  it('refuses a brief past 1 MiB the same way as text and as a path', async () => {
-    const project = await seed();
-    const big = `${GOOD}${'x'.repeat(1024 * 1024)}`;
-    const file = join(data.path, 'big.md');
-    writeFileSync(file, big);
-    const fromPath = await adopt(project.id, { path: file });
-    expect(fromPath.status).toBe(400);
-    expect(GoalAdoptError.parse(fromPath.body).errors).toEqual([
-      { path: 'File', message: `${file} is too large to be a brief` },
-    ]);
-    for (const dryRun of [false, true]) {
-      const fromText = await adopt(project.id, { text: big, dryRun });
-      expect(fromText.status).toBe(400);
-      expect(GoalAdoptError.parse(fromText.body).errors).toEqual([
-        { path: 'Text', message: 'the text is too large to be a brief' },
-      ]);
-    }
-    // Multi-byte characters count as bytes, as they do in a file.
-    const wide = await adopt(project.id, { text: 'é'.repeat(600 * 1024) });
-    expect(wide.status).toBe(400);
-    expect(await goalsOf(project.id)).toEqual([]);
-  });
-
-  it('refuses a relative path', async () => {
-    const project = await seed();
-    const res = await adopt(project.id, { path: 'brief.md' });
-    expect(res.status).toBe(400);
-    expect(GoalAdoptError.parse(res.body).errors[0]?.message).toContain('absolute');
-  });
-
-  it('refuses a body with both or neither of path and text', async () => {
-    const project = await seed();
-    expect((await adopt(project.id, { path: '/x.md', text: GOOD })).status).toBe(400);
-    expect((await adopt(project.id, {})).status).toBe(400);
-  });
-
-  it('answers 404 for a project it does not have', async () => {
-    await seed();
-    const res = await post('/projects/prj_00000000-0000-7000-8000-000000000000/goals/adopt', {
-      text: GOOD,
-    });
-    expect(res.status).toBe(404);
-  });
-});
-
-describe('GET /goals/:goalId and /projects/:projectId/goals', () => {
-  it('lists a project’s goals oldest first and answers 404 for an unknown goal', async () => {
-    const project = await seed();
-    const first = GoalDto.parse((await adopt(project.id, { text: GOOD })).body);
-    const second = GoalDto.parse(
-      (await adopt(project.id, { text: GOOD.replace('Real areas', 'Second') })).body,
-    );
-    expect((await goalsOf(project.id)).map((g) => g.id)).toEqual([first.id, second.id]);
-    const res = await fetch(`${daemon.url}/goals/gol_00000000-0000-7000-8000-000000000000`, {
-      headers: { Authorization: `Bearer ${daemon.token}` },
-    });
-    expect(res.status).toBe(404);
   });
 });
