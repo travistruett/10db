@@ -77,12 +77,8 @@ export function createChatWorkStateReader(deps: ChatWorkStateDeps): ChatWorkStat
   const cache = new Map<string, Cached>();
   const keyOf = (projectId: ProjectId, branch: string): string => `${projectId}\u0000${branch}`;
 
-  async function readPullRequest(
-    repo: string,
-    branch: string,
-    signal: AbortSignal,
-  ): Promise<PullRequestFacts | null> {
-    const call = { ...deps.net(), signal };
+  async function readPullRequest(repo: string, branch: string): Promise<PullRequestFacts | null> {
+    const call = deps.net();
     const found = await gh.prView({ repo, ref: branch }, call);
     if (found === null || found.state === PrState.Closed) return null;
     const number = Number(PULL_NUMBER.exec(found.url)?.[1] ?? '');
@@ -108,18 +104,20 @@ export function createChatWorkStateReader(deps: ChatWorkStateDeps): ChatWorkStat
     };
   }
 
-  /** The branch's pull request, from GitHub at most once per interval; a read that failed is not kept. */
+  /**
+   * The branch's pull request, from GitHub at most once per interval; a read that failed is not kept. The read is
+   * shared by every caller, so it answers to none of their signals; the net's own timeout bounds it.
+   */
   function pullRequestOf(
     projectId: ProjectId,
     repo: string,
     branch: string,
-    signal: AbortSignal,
   ): Promise<PullRequestFacts | null> {
     const key = keyOf(projectId, branch);
     const now = deps.clock.now().getTime();
     const held = cache.get(key);
     if (held !== undefined && now - held.at < PULL_REQUEST_READ_MS) return held.read;
-    const read = readPullRequest(repo, branch, signal).catch(() => {
+    const read = readPullRequest(repo, branch).catch(() => {
       if (cache.get(key)?.read === read) cache.delete(key);
       return null;
     });
@@ -133,6 +131,7 @@ export function createChatWorkStateReader(deps: ChatWorkStateDeps): ChatWorkStat
     },
 
     async read(chatId, signal, moveFailure) {
+      signal.throwIfAborted();
       const db = deps.state.db;
       const chat = getChat(db, chatId);
       const project = getProject(db, chat.projectId);
@@ -170,7 +169,7 @@ export function createChatWorkStateReader(deps: ChatWorkStateDeps): ChatWorkStat
       const repo = local ? null : githubRepoOf(await orElse(git.pinnedPushUrl(checkout), ''));
       const pullRequest =
         own && repo !== null && branch !== null && branch !== baseBranch
-          ? await pullRequestOf(chat.projectId, repo, branch, signal)
+          ? await pullRequestOf(chat.projectId, repo, branch)
           : null;
 
       // Commits past the pushed copy of the branch; a branch never pushed has no copy, and reads as none.

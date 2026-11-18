@@ -455,7 +455,7 @@ describe("a chat's writes outside the checkout hold", () => {
     const sandboxWrites: boolean[] = [];
     w = chatWorld({
       prepare: (input) => {
-        sandboxWrites.push(input.writes);
+        sandboxWrites.push(input.writes === true);
         return prepared();
       },
       judge: JudgeKind.Native,
@@ -467,7 +467,7 @@ describe("a chat's writes outside the checkout hold", () => {
     w.store.write((ctx) =>
       setChatWork(ctx, chat.id, null, { place: 'branch', branch: 'x', worktreePath: missing }),
     );
-    const answers: Record<string, string> = {};
+    const answers: { write?: string; edit?: string; read?: string } = {};
     w.adapter.shapeBehaviour = (turn) => {
       answers.write = turn.spec.preToolUse(inCheckout).decision;
       answers.edit = turn.spec.preToolUse({
