@@ -32,8 +32,19 @@ export {
   ParkedError,
   rewordCard,
   withdrawCard,
+  type FlagInput,
   type InboxService,
 } from './service';
+export {
+  isTrusted,
+  stampDetail,
+  stampFile,
+  stampOf,
+  trustedWrites,
+  trustOptions,
+  TrustChoice,
+  type TrustedWrite,
+} from './trusted-writes';
 export { BY_ANSWER, CardTier, type CardClosesWhen, type StoredTier } from './card-tier';
 export { postNotice, type NoticeInput } from './notice';
 export { createHookJudge, createLimitNotes, type LimitNotes } from './hook-judge';

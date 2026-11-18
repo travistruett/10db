@@ -5,3 +5,24 @@
   (`forCheckout` in `watcher.ts`), so a pass of one's writes are claimed by its whole-project page and raise no
   stray-write cards. A write outside every claim, such as a hazard file with no claim, is still carded. A copy's
   root keeps `project.areas`.
+- **Strays in `.git`** stay sensitive but are narrowed, never muted.
+  - **Trust This Version.** A single stray-write card (and a single foreign-claim card, where it reads Keep It)
+    carries `sha256`, `root` and `foldKey` in its detail, stamped when the watcher raises it (`flagStamped`), with
+    options Trust This Version and Dismiss. A repeat write whose content differs is raised with `refresh`, so the
+    stamp is the latest; the same content stays a silent no-op. Answering restamps the file in the answer's own
+    transaction (`applyTrustChoice`, `inbox/trusted-writes.ts`): a match stores `{ path, sha256, trustedAt }` in the
+    app setting `trusted_writes.<projectId>` (zod-parsed on read, newest 500 kept), and a mismatch trusts nothing,
+    closes the old card and raises a fresh one with the new stamp. A write that leaves a trusted path holding
+    exactly a trusted sha256 raises no card (`withoutTrusted`). Bulk cards, a directory, a link, a deleted file and a
+    file over 32 MiB have no stamp and no trust option. There is no Show the Diff: the app has no way to open a
+    file's diff from a card.
+  - **Checksum.** `.git/info/lefthook.checksum` is excused only at that exact path with content matching
+    `^[0-9a-f]{32} \d+\s*$` (`isLefthookChecksum`); any other file in `.git/info` stays sensitive.
+  - **Config.** The watcher keeps each config file's last text per checkout (`.git/config` is read when the
+    checkout starts being watched). A write is diffed key by key with `git config --file <copy> --list` through the
+    git wrapper (`Git.configText`) and `changedConfigKeys`. Only git's own bookkeeping is excused: a branch's
+    `merge`, a branch's `remote` when its value names a remote the config defines (a URL or path is carded), and
+    `worktree.guessremote`. Every other key, `extensions.worktreeconfig` and the rest of `branch.<name>.*`
+    included, raises a card whose body lists the changed keys, lowercase as git prints them. `.git/config.worktree`
+    and `.git/worktrees/*/config.worktree` are sensitive and diffed the same way against an empty start. A repeat
+    write to a config shows only the keys that changed in that write.

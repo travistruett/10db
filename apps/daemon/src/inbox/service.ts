@@ -80,6 +80,7 @@ import { proposePlacement } from '../placement';
 import { grantTargetOf } from '../trust';
 import { BY_ANSWER, CardTier, type CardClosesWhen, type StoredTier } from './card-tier';
 import { applyDockerChoice } from './docker-card';
+import { applyTrustChoice } from './trusted-writes';
 import { postNotice, type NoticeInput } from './notice';
 import { applyGateHostChoice } from './gate-host-card';
 import { applyHazardChoice } from './hazard-card';
@@ -886,6 +887,9 @@ export function createInboxService(deps: {
           applyGateHostChoice(ctx, updated, answer);
           applyDockerChoice(ctx, updated, answer);
           applyHazardChoice(ctx, updated, answer);
+          // A file that changed under a Trust answer trusts nothing: its card comes back with the new stamp.
+          const again = applyTrustChoice(ctx, updated, answer);
+          if (again) flagCard(ctx, again);
           afterCommit = deps.onFlagAnswerInWrite?.(ctx, updated, answer);
         }
         return updated;

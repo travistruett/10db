@@ -51,6 +51,9 @@ describe('isSensitivePath', () => {
     ['.claude/settings.local.json', true],
     ['.codex/config.toml', true],
     ['.git/config', true],
+    ['.git/config.worktree', true],
+    ['.git/worktrees/feat/config.worktree', true],
+    ['.git/worktrees/feat/HEAD', false],
     ['.git/hooks/pre-commit', true],
     ['.git/info/exclude', true],
     ['.git/index', false],
@@ -242,15 +245,32 @@ describe('changedConfigKeys', () => {
   const before = config(...BASE);
   it.each([
     [
+      'a branch remote set to a URL',
+      config(...BASE, ['branch.main.remote', 'https://evil/x.git']),
+      ['branch.main.remote'],
+    ],
+    [
+      'a branch remote naming a defined remote',
+      config(...BASE, ['branch.main.remote', 'origin']),
+      [],
+    ],
+    [
+      'a branch pushremote',
+      config(...BASE, ['branch.main.pushremote', 'origin']),
+      ['branch.main.pushremote'],
+    ],
+    ['a branch rebase', config(...BASE, ['branch.main.rebase', 'true']), ['branch.main.rebase']],
+    [
+      'the worktree config extension',
+      config(...BASE, ['extensions.worktreeconfig', 'true']),
+      ['extensions.worktreeconfig'],
+    ],
+    [
       'a push -u',
       config(...BASE, ['branch.main.remote', 'origin'], ['branch.main.merge', 'refs/heads/main']),
       [],
     ],
-    [
-      'a worktree add',
-      config(...BASE, ['extensions.worktreeconfig', 'true'], ['worktree.guessremote', 'true']),
-      [],
-    ],
+    ['a worktree add', config(...BASE, ['worktree.guessremote', 'true']), []],
     ['a branch name with dots', config(...BASE, ['branch.feat/a.b.remote', 'origin']), []],
     ['a hooks path', config(...BASE, ['core.hookspath', 'x']), ['core.hookspath']],
     [
@@ -266,7 +286,7 @@ describe('changedConfigKeys', () => {
     ],
     [
       'bookkeeping beside a real change',
-      config(...BASE, ['branch.m.remote', 'o'], ['alias.x', '!sh']),
+      config(...BASE, ['branch.m.remote', 'origin'], ['alias.x', '!sh']),
       ['alias.x'],
     ],
   ])('%s', (_name, after, expected) => {

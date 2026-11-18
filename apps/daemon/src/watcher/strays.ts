@@ -25,6 +25,7 @@ export function isSensitivePath(rel: string): boolean {
   if (isInsideClaudeCodeBookkeeping(rel)) return false;
   if (SENSITIVE_DIRECTORIES.some((dir) => rel === dir || rel.startsWith(`${dir}/`))) return true;
   if (SENSITIVE_FILES.some((file) => file === rel)) return true;
+  if (rel === '.git/config.worktree' || WORKTREE_CONFIG.test(rel)) return true;
   return SENSITIVE_BASENAME.test(rel.slice(rel.lastIndexOf('/') + 1));
 }
 
@@ -39,16 +40,17 @@ export function isLefthookChecksum(rel: string, content: string): boolean {
 }
 
 /**
- * The config keys git itself writes for `worktree add`, `push -u`, `branch --set-upstream-to` and
- * `checkout -b`, as `git config --list` prints them (section and key lowercase): a branch's own section,
- * the worktree section and the worktree-config extension.
+ * What git itself writes for `worktree add`, `push -u` and `branch --set-upstream-to`, as `git config --list`
+ * prints keys (section and key lowercase): a branch's `merge`, its `remote` when the value names a remote the
+ * config already defines (a URL or path there is a program-reachable target, so it is carded), and
+ * `worktree.guessremote`. Every other key, `extensions.worktreeconfig` and the rest of `branch.<name>.*`
+ * included, is a change.
  */
-function isGitBookkeepingKey(name: string): boolean {
-  return (
-    /^branch\..+\.[^.]+$/.test(name) ||
-    name.startsWith('worktree.') ||
-    name === 'extensions.worktreeconfig'
-  );
+function isGitBookkeepingKey(name: string, after: ReadonlyMap<string, readonly string[]>): boolean {
+  if (name === 'worktree.guessremote') return true;
+  if (/^branch\..+\.merge$/.test(name)) return true;
+  if (!/^branch\..+\.remote$/.test(name)) return false;
+  return (after.get(name) ?? []).every((remote) => after.has(`remote.${remote}.url`));
 }
 
 /** The keys whose values differ between two parsed configs, git's own bookkeeping keys left out. */
@@ -59,9 +61,15 @@ export function changedConfigKeys(
   const same = (a: readonly string[] | undefined, b: readonly string[] | undefined): boolean =>
     a?.length === b?.length && (a ?? []).every((value, i) => value === b?.[i]);
   return [...new Set([...before.keys(), ...after.keys()])].filter(
-    (name) => !isGitBookkeepingKey(name) && !same(before.get(name), after.get(name)),
+    (name) => !same(before.get(name), after.get(name)) && !isGitBookkeepingKey(name, after),
   );
 }
+
+/** A config file whose keys are diffed rather than carded whole: the repository's, or a worktree's own. */
+export function isConfigFile(rel: string): boolean {
+  return rel === '.git/config' || rel === '.git/config.worktree' || WORKTREE_CONFIG.test(rel);
+}
+const WORKTREE_CONFIG = /^\.git\/worktrees\/[^/]+\/config\.worktree$/;
 
 /** Splits items so sensitive paths can get their own cards and never fold into a bulk card. */
 export function splitSensitive<T>(

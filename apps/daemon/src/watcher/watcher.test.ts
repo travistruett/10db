@@ -72,7 +72,7 @@ import { createEventBus, createStateStore, type StateStore } from '../events';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
 import { passDirtRef } from '../delivery';
 import { createGit } from '../git';
-import { createInboxService, type InboxService } from '../inbox';
+import { createInboxService, stampFile, trustedWrites, type InboxService } from '../inbox';
 import { silentLogger, type Logger } from '../log';
 import { dropShared, grantSharedHold, keepHold, landSharedChanges } from '../pass';
 import { editResult } from '../permissions';
@@ -361,7 +361,7 @@ describe('watcher', () => {
       emit('.git/index');
       emit('.git/refs/heads/main');
       await watcher.flush();
-      expect(flags().map((f) => f.body)).toEqual([rel]);
+      expect(flags().map((f) => f.body.split('\n')[0])).toEqual([rel]);
     },
   );
 
@@ -422,7 +422,7 @@ describe('watcher', () => {
         commitFile(rel);
         emit(rel);
         await watcher.flush();
-        expect(flags().map((f) => f.body)).toEqual([rel]);
+        expect(flags().map((f) => f.body.split('\n')[0])).toEqual([rel]);
       },
     );
 
@@ -720,7 +720,7 @@ describe('watcher', () => {
       emit(lock);
       emit(rel);
       await watcher.flush();
-      expect(flags().map((f) => f.body)).toEqual([rel]);
+      expect(flags().map((f) => f.body.split('\n')[0])).toEqual([rel]);
       expect(bookkeepingLogs()).toEqual([lock]);
     });
   });
@@ -1483,7 +1483,7 @@ describe('watcher on the real file system', () => {
       // FSEvents can take a moment to start delivering; keep writing until a flag appears.
       await waitFor(() => {
         writeFileSync(join(repo.path, 'docs', 'real.md'), String(Date.now()));
-        return flags().find((f) => f.body === 'docs/real.md');
+        return flags().find((f) => f.body.split('\n')[0] === 'docs/real.md');
       }, 15_000);
     } finally {
       real.stop();
@@ -3716,5 +3716,94 @@ describe('worktree checkouts', () => {
       await write(SENSITIVE_FILE);
       expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
     });
+  });
+});
+
+describe('stray writes in .git', () => {
+  const HOOK = '.git/hooks/pre-commit';
+  const git = (cwd: string, ...args: string[]): string =>
+    execFileSync('git', args, { cwd, env: isolatedGitEnv(), encoding: 'utf8' });
+  const writeHook = (text: string) => {
+    mkdirSync(join(repo.path, '.git/hooks'), { recursive: true });
+    writeFileSync(join(repo.path, HOOK), text);
+    emit(HOOK);
+  };
+  const trust = (id: InboxItemDto['id']) => inbox.answer(id, { choice: 'Trust This Version' });
+
+  it('trusts a hook version once, and raises a card again for any other', async () => {
+    running();
+    watcher.sync();
+    writeHook('#!/bin/sh\necho a\n');
+    await watcher.flush();
+    const [card] = flags();
+    expect(card?.detail?.['sha256']).toBe(stampFile(repo.path, HOOK));
+    expect(card?.options.map((o) => o.label)).toEqual(['Trust This Version', 'Dismiss']);
+
+    trust(card?.id ?? ('' as InboxItemDto['id']));
+    expect(flags()).toEqual([]);
+    expect(trustedWrites(base.db, project.id)).toMatchObject([{ path: HOOK }]);
+
+    writeHook('#!/bin/sh\necho a\n');
+    await watcher.flush();
+    expect(flags()).toEqual([]);
+
+    writeHook('#!/bin/sh\necho b\n');
+    await watcher.flush();
+    expect(flags().map((f) => f.body)).toEqual([HOOK]);
+  });
+
+  it('does not trust a hook rewritten while its card was open, and shows the new version', async () => {
+    running();
+    watcher.sync();
+    writeHook('#!/bin/sh\necho a\n');
+    await watcher.flush();
+    const [card] = flags();
+    // Rewritten after the card, before the watcher's next batch: the answer stamps the file itself.
+    writeFileSync(join(repo.path, HOOK), '#!/bin/sh\necho b\n');
+    trust(card?.id ?? ('' as InboxItemDto['id']));
+
+    expect(trustedWrites(base.db, project.id)).toEqual([]);
+    const open = flags();
+    expect(open).toHaveLength(1);
+    expect(open[0]?.id).not.toBe(card?.id);
+    expect(open[0]?.detail?.['sha256']).toBe(stampFile(repo.path, HOOK));
+
+    // A rewrite seen by the watcher refreshes the open card's stamp in place.
+    writeHook('#!/bin/sh\necho c\n');
+    await watcher.flush();
+    expect(flags()[0]?.detail?.['sha256']).toBe(stampFile(repo.path, HOOK));
+  });
+
+  it('raises nothing for what a real worktree add and push -u write to the config', async () => {
+    const origin = tempDir('origin');
+    git(origin.path, 'init', '--bare', '-q');
+    git(origin.path, 'config', 'receive.autogc', 'false');
+    git(repo.path, 'remote', 'add', 'origin', origin.path);
+    const branch = git(repo.path, 'branch', '--show-current').trim();
+    running();
+    watcher.sync();
+    const worktrees = tempDir('worktrees');
+    git(repo.path, 'worktree', 'add', '-q', join(worktrees.path, 'w'), '-b', 'feat/x');
+    emit('.git/config');
+    emit('.git/worktrees/w/HEAD');
+    await watcher.flush();
+    git(repo.path, 'push', '-q', '-u', 'origin', branch);
+    emit('.git/config');
+    await watcher.flush();
+    expect(git(repo.path, 'config', `branch.${branch}.remote`).trim()).toBe('origin');
+    expect(flags()).toEqual([]);
+    worktrees.cleanup();
+    origin.cleanup();
+  });
+
+  it('raises a card naming the key a real git config call changed', async () => {
+    running();
+    watcher.sync();
+    git(repo.path, 'config', 'core.hooksPath', 'x');
+    emit('.git/config');
+    await watcher.flush();
+    const [card] = flags();
+    expect(card?.body).toContain('.git/config');
+    expect(card?.body.toLowerCase()).toContain('core.hookspath');
   });
 });
