@@ -57,6 +57,54 @@ function close_(id: InboxItemId, patch: Parameters<typeof updateInboxItem>[2]): 
 
 const OVERLOAD = 'machine-overloaded';
 
+// The ask path stores the sha256 of what was asked as the fold key of a card with none of its own.
+const HASH_KEY = 'a3f1c0de'.repeat(8);
+
+describe('inboxCardTypes: the type of a card', () => {
+  it.each([
+    [
+      'a fold key with a prefix',
+      InboxKind.Flag,
+      'Stray write',
+      'stray-write:/r:.git',
+      'stray-write',
+    ],
+    [
+      'a fold key with no colon',
+      InboxKind.Flag,
+      'Overloaded',
+      'machine-overloaded',
+      'machine-overloaded',
+    ],
+    [
+      'a hash fold key on a flag',
+      InboxKind.Flag,
+      'Workstream failed: Add a thing',
+      HASH_KEY,
+      'Workstream failed',
+    ],
+    ['a hash fold key on a question', InboxKind.Question, 'Which database?', HASH_KEY, 'question'],
+    ['no fold key on a flag', InboxKind.Flag, 'Gate is slow: 12 min', null, 'Gate is slow'],
+    ['an empty fold key on a flag', InboxKind.Flag, 'Gate is slow: 12 min', '', 'Gate is slow'],
+    ['a flag title that starts with a colon', InboxKind.Flag, ': odd', null, 'flag'],
+    ['a flag with a blank title prefix', InboxKind.Flag, '  : odd', null, 'flag'],
+    [
+      'a fold key that starts with a colon',
+      InboxKind.Flag,
+      'Gate is slow: 12 min',
+      ':x',
+      'Gate is slow',
+    ],
+    ['no fold key on a question', InboxKind.Question, 'Which database?', null, 'question'],
+  ] as const)('types %s', (_name, kind, title, foldKey, type) => {
+    const project = seedProject(store);
+    raise(project.id, kind, title, foldKey);
+    expect(inboxCardTypes(store.db, project.id, new Date(nowMs)).map((t) => t.type)).toEqual([
+      type,
+    ]);
+  });
+});
+
 describe('inboxCardTypes', () => {
   it('counts what became of each type, in the 7 and 30 day windows apart', () => {
     const project = seedProject(store);

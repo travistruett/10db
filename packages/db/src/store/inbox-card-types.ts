@@ -24,12 +24,25 @@ const beforeColon = (column: SQL | typeof items.foldKey | typeof items.title): S
   sql`substr(${column}, 1, instr(${column} || ':', ':') - 1)`;
 
 /**
- * A card's type: its fold-key prefix. A card with no fold key is a flag typed by its title up to the
- * first colon, or any other kind typed by the kind, whose title is the question asked.
+ * Whether the fold key names a type. The ask path gives a card with no key of its own the sha256 of what
+ * was asked, 64 lowercase hex characters: it tells two asks apart and says nothing of their type. Nor
+ * does a key with nothing before its first colon.
+ */
+const FOLD_KEY_TYPED = sql`(${items.foldKey} IS NOT NULL AND ${items.foldKey} <> ''
+  AND ${items.foldKey} NOT LIKE ':%'
+  AND NOT (length(${items.foldKey}) = 64 AND ${items.foldKey} NOT GLOB '*[^0-9a-f]*'))`;
+
+/** A flag's title up to its first colon; empty when the title starts with one. */
+const TITLE_PREFIX = sql`trim(${beforeColon(items.title)})`;
+
+/**
+ * A card's type: its fold-key prefix. A card whose key names no type is a flag typed by its title up to
+ * the first colon, or any other kind typed by the kind, whose title is the question asked. A flag with
+ * no title prefix is typed by its kind, so a type is never empty.
  */
 const TYPE = sql<string>`CASE
-  WHEN ${items.foldKey} IS NOT NULL AND ${items.foldKey} <> '' THEN ${beforeColon(items.foldKey)}
-  WHEN ${items.kind} = ${InboxKind.Flag} THEN trim(${beforeColon(items.title)})
+  WHEN ${FOLD_KEY_TYPED} THEN ${beforeColon(items.foldKey)}
+  WHEN ${items.kind} = ${InboxKind.Flag} AND ${TITLE_PREFIX} <> '' THEN ${TITLE_PREFIX}
   ELSE ${items.kind}
 END`;
 
