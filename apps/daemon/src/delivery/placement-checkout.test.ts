@@ -580,11 +580,13 @@ describe('seeding a new copy', () => {
         expect(batch.notices).toEqual([]);
       });
 
-      it('says nothing when the clone carried the built output', async () => {
+      it('names them too when no shared batch kept the seed out, since no clone carries built output', async () => {
         allowing('packages: []\n');
         h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
         const batch = await startedOne(copy('Copied'));
-        expect(batch.notices).toEqual([]);
+        const notice = h.only(batch.notices);
+        expect(notice.line).toContain('prisma');
+        expect(notice.body).toContain("10db made this copy's node_modules from its lockfile");
       });
     });
 
