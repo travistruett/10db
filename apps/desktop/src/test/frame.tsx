@@ -3,8 +3,7 @@ import { FrameSlotsContext } from '../shell/frame-slots';
 
 /**
  * The frame's slots without the frame, for a component rendered alone: a title row and a panel box a
- * view's `TitleRow` and `Panel` draw into, and a layer for a drawer. Find the title row with
- * `titleRowOf`.
+ * view's `TitleRow` and `Panel` draw into, and a layer for a drawer.
  */
 export function FrameSlots({
   children,
@@ -37,11 +36,3 @@ export function FrameSlots({
     </FrameSlotsContext>
   );
 }
-
-function slot(testId: string): HTMLElement {
-  const element = document.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
-  if (element === null) throw new Error(`no ${testId}: render the component inside FrameSlots`);
-  return element;
-}
-
-export const titleRowOf = (): HTMLElement => slot('title-row');

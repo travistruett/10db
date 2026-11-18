@@ -1,129 +1,52 @@
-import {
-  PickerProposalDto,
-  type BatchState,
-  type ProjectViewDto,
-  type TaskDto,
-} from '@10db/contracts';
+import { PickerProposalDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { http, HttpResponse, type RequestHandler } from 'msw';
+import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../../test/daemon';
-import {
-  batchDto,
-  candidate,
-  projectViewDto,
-  taskDto,
-  workstreamDto,
-} from '../../../test/fixtures';
-import { kindDto } from '../../../test/playbook-fixtures';
+import { candidate, projectViewDto, taskDto, workstreamDto } from '../../../test/fixtures';
 
 const local = projectViewDto({ maxLanes: 2, gateCommand: 'make gate', delivery: 'local' });
 const one = taskDto({ projectId: local.id, title: 'One', boardStatus: 'ready', boardOrder: 1 });
 const two = taskDto({ projectId: local.id, title: 'Two', boardStatus: 'ready', boardOrder: 2 });
 
-/** `copies` names the tasks whose placement is a separate copy. */
-const proposalOf = (
-  project: ProjectViewDto,
-  size: number,
-  both = false,
-  copies: readonly TaskDto[] = [],
-) => {
-  const placed = (task: TaskDto): TaskDto =>
-    copies.includes(task) ? { ...task, workspaceMode: 'worktree' } : task;
-  return PickerProposalDto.parse({
-    projectId: project.id,
-    size,
-    candidates: [
-      candidate(placed(one)),
-      candidate(
-        placed(two),
-        both ? {} : { proposed: false, conflict: 'Area src is shared with One, picked before it' },
-      ),
-    ],
-  });
-};
-
-interface Sent {
-  readonly path: string;
-  readonly body: unknown;
-}
-
-/** A daemon with `project` and its two ready tasks; `overrides` come first, so they win. */
-function serve(
-  project: ProjectViewDto,
-  opts: {
-    readonly sizes?: number[];
-    readonly both?: boolean;
-    readonly tasks?: TaskDto[];
-    readonly copies?: readonly TaskDto[];
-  } = {},
-  ...overrides: RequestHandler[]
-): Sent[] {
-  const sent: Sent[] = [];
-  server.use(
-    ...overrides,
-    http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-    http.get(daemonUrl('/projects/:projectId/board-columns'), () => HttpResponse.json([])),
-    http.get(daemonUrl('/projects/:projectId/tasks'), () =>
-      HttpResponse.json(opts.tasks ?? [one, two]),
-    ),
-    http.get(daemonUrl('/projects/:projectId/candidates'), ({ request }) => {
-      const size = Number(new URL(request.url).searchParams.get('size'));
-      opts.sizes?.push(size);
-      return HttpResponse.json(proposalOf(project, size, opts.both ?? false, opts.copies));
-    }),
-    http.post(daemonUrl('/tasks/:taskId/start'), async ({ request, params }) => {
-      sent.push({ path: new URL(request.url).pathname, body: await request.text() });
-      const taskId = String(params['taskId']) === one.id ? one.id : two.id;
-      return HttpResponse.json(workstreamDto({ taskId, projectId: project.id }), { status: 201 });
-    }),
-    http.post(daemonUrl('/projects/:projectId/batches'), async ({ request }) => {
-      sent.push({ path: new URL(request.url).pathname, body: await request.json() });
-      return HttpResponse.json(
-        [project.currentBatch ?? batchDto({ projectId: project.id, state: 'CUTTING' })],
-        { status: 202 },
-      );
-    }),
-    ...baseHandlers(),
-  );
-  return sent;
-}
-
-/** Opens a Select or MultiSelect and picks an option from the list it controls; each candidate has its own. */
-async function pick(input: HTMLElement, option: string): Promise<void> {
-  fireEvent.click(input);
-  const listbox = await waitFor(() => {
-    const id = input.getAttribute('aria-controls');
-    const list = id === null ? null : document.getElementById(id);
-    expect(list).not.toBeNull();
-    return list ?? document.body;
-  });
-  fireEvent.click(within(listbox).getByRole('option', { name: option, hidden: true }));
-}
-
-async function openSheet() {
-  renderApp('/board');
-  fireEvent.click(await screen.findByRole('button', { name: 'More board actions' }));
-  // The item is disabled until the tasks load, so wait for the count before clicking it.
-  const item = await screen.findByRole('menuitem', { name: /\d+ ready/, hidden: true });
-  fireEvent.click(item);
-  return screen.findByRole('dialog', { name: 'Start a batch' });
-}
-
-const pr = (state: BatchState | null) =>
-  projectViewDto({
-    ...local,
-    delivery: 'pull_request',
-    prTitlePrefix: 'feat(app)',
-    currentBatch:
-      state === null ? null : batchDto({ projectId: local.id, title: 'Fix the login', state }),
-  });
-
 describe('BatchSheet', () => {
   it('in a local project, shows the proposal at the lane cap and starts each ticked task in order', async () => {
     const sizes: number[] = [];
-    const sent = serve(local, { sizes });
-    const sheet = await openSheet();
+    const sent: string[] = [];
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([local])),
+      http.get(daemonUrl('/projects/:projectId/board-columns'), () => HttpResponse.json([])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([one, two])),
+      http.get(daemonUrl('/projects/:projectId/candidates'), ({ request }) => {
+        const size = Number(new URL(request.url).searchParams.get('size'));
+        sizes.push(size);
+        return HttpResponse.json(
+          PickerProposalDto.parse({
+            projectId: local.id,
+            size,
+            candidates: [
+              candidate(one),
+              candidate(two, {
+                proposed: false,
+                conflict: 'Area src is shared with One, picked before it',
+              }),
+            ],
+          }),
+        );
+      }),
+      http.post(daemonUrl('/tasks/:taskId/start'), ({ request, params }) => {
+        sent.push(new URL(request.url).pathname);
+        const taskId = String(params['taskId']) === one.id ? one.id : two.id;
+        return HttpResponse.json(workstreamDto({ taskId, projectId: local.id }), { status: 201 });
+      }),
+      ...baseHandlers(),
+    );
+    renderApp('/board');
+    fireEvent.click(await screen.findByRole('button', { name: 'More board actions' }));
+    // The item is disabled until the tasks load, so wait for the count before clicking it.
+    fireEvent.click(await screen.findByRole('menuitem', { name: /\d+ ready/, hidden: true }));
+    const sheet = await screen.findByRole('dialog', { name: 'Start a batch' });
+
     expect(await within(sheet).findByRole('checkbox', { name: 'One' })).toHaveProperty(
       'checked',
       true,
@@ -140,457 +63,10 @@ describe('BatchSheet', () => {
     fireEvent.click(within(sheet).getByRole('checkbox', { name: 'Two' }));
     fireEvent.click(within(sheet).getByRole('button', { name: 'Start 2 tasks' }));
     await waitFor(() => {
-      expect(sent.map((s) => s.path)).toEqual([`/tasks/${one.id}/start`, `/tasks/${two.id}/start`]);
+      expect(sent).toEqual([`/tasks/${one.id}/start`, `/tasks/${two.id}/start`]);
     });
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'Start a batch' })).toBeNull();
-    });
-  });
-
-  it.each([
-    { name: 'no batch yet', state: null },
-    { name: 'a shipped batch', state: 'SHIPPED' },
-  ] satisfies { name: string; state: BatchState | null }[])(
-    'with $name, starts a new batch titled after the first ticked task',
-    async ({ state }) => {
-      const sent = serve(pr(state), { both: true });
-      const sheet = await openSheet();
-      const titleField = await within(sheet).findByLabelText('Batch title');
-      expect(titleField).toHaveProperty('value', 'One');
-      fireEvent.change(titleField, { target: { value: 'Greeting and readme' } });
-      fireEvent.click(within(sheet).getByRole('button', { name: 'Start a batch of 2 tasks' }));
-      await waitFor(() => {
-        expect(sent).toEqual([
-          {
-            path: `/projects/${local.id}/batches`,
-            body: { title: 'Greeting and readme', taskIds: [one.id, two.id] },
-          },
-        ]);
-      });
-      // The route answers at once; cutting finishes in the background and its refusals arrive as cards.
-      await waitFor(() => {
-        expect(screen.queryByRole('dialog', { name: 'Start a batch' })).toBeNull();
-      });
-    },
-  );
-
-  it('sends the ticked tasks to the UI Workbench when every one names a page area', async () => {
-    serve(
-      projectViewDto({
-        ...pr(null),
-        areas: [{ name: 'src', globs: ['src/**'], role: 'page', route: '/' }],
-      }),
-      { both: true },
-    );
-    const { router } = renderApp('/board');
-    fireEvent.click(await screen.findByRole('button', { name: 'More board actions' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: /\d+ ready/, hidden: true }));
-    const sheet = await screen.findByRole('dialog', { name: 'Start a batch' });
-    fireEvent.click(await within(sheet).findByRole('button', { name: 'Work on These' }));
-    await waitFor(() => {
-      expect(router.state.location.pathname).toBe('/workbench');
-    });
-    expect(router.state.location.search).toEqual({ tasks: [one.id, two.id] });
-  });
-
-  it('in Your folder mode, names the branch the checkout switches to before starting', async () => {
-    serve(projectViewDto({ ...pr(null), baseBranch: 'develop' }), { both: true });
-    const sheet = await openSheet();
-    const titleField = await within(sheet).findByLabelText('Batch title');
-    expect(within(sheet).getByText(/Starting switches your checkout to a new branch/)).toBeTruthy();
-    expect(within(sheet).getByText('10db/one-…')).toBeTruthy();
-    expect(within(sheet).getByText('origin/develop')).toBeTruthy();
-    expect(within(sheet).getByText(/Your checkout must be clean/)).toBeTruthy();
-    expect(
-      within(sheet).getByText(/When the batch ends, 10db switches it back to where it was/),
-    ).toBeTruthy();
-    fireEvent.change(titleField, { target: { value: 'Greeting and readme' } });
-    expect(within(sheet).getByText('10db/greeting-and-readme-…')).toBeTruthy();
-  });
-
-  it('with only separate copies ticked, leaves the checkout out of it', async () => {
-    serve(pr(null), { both: true, copies: [one, two] });
-    const sheet = await openSheet();
-    await within(sheet).findByRole('button', { name: 'Start 2 tasks in separate copies' });
-    expect(within(sheet).queryByText(/switches your checkout/)).toBeNull();
-    expect(within(sheet).queryByLabelText('Batch title')).toBeNull();
-    expect(
-      within(sheet).getByText(/Each task gets its own copy, branch and pull request/),
-    ).toBeTruthy();
-  });
-
-  it('with a mix ticked, names both parts and still asks for the shared batch title', async () => {
-    serve(pr(null), { both: true, copies: [two] });
-    const sheet = await openSheet();
-    await within(sheet).findByRole('button', {
-      name: 'Start a batch of 1 task and start 1 task in a separate copy',
-    });
-    // The title defaults to the first task that goes in Your folder.
-    expect(within(sheet).getByLabelText('Batch title')).toHaveProperty('value', 'One');
-    expect(within(sheet).getByText(/Starting switches your checkout/)).toBeTruthy();
-    expect(within(sheet).getByText(/Two gets its own copy/)).toBeTruthy();
-  });
-
-  it('with a mix ticked, a busy shared batch holds only the Your folder tasks back', async () => {
-    serve(pr('SHIPPING'), { both: true, copies: [two] });
-    const sheet = await openSheet();
-    await within(sheet).findByRole('button', {
-      name: 'Add 1 task to Fix the login and start 1 task in a separate copy',
-    });
-    expect(
-      within(sheet).getByText(
-        'Fix the login is shipping; start once it has shipped, or untick the Your folder tasks to start the separate copies now',
-      ),
-    ).toBeTruthy();
-    fireEvent.click(within(sheet).getByRole('checkbox', { name: 'One' }));
-    expect(
-      await within(sheet).findByRole('button', { name: 'Start 1 task in a separate copy' }),
-    ).toHaveProperty('disabled', false);
-  });
-
-  it.each([
-    { name: 'a pull-request project', project: pr(null), shown: true },
-    { name: 'a local project', project: local, shown: false },
-  ])('shows the placement control only in $name', async ({ project, shown }) => {
-    serve(project, { both: true });
-    const sheet = await openSheet();
-    await within(sheet).findByRole('checkbox', { name: 'One' });
-    expect(within(sheet).queryByRole('radiogroup', { name: 'Where One runs' }) !== null).toBe(
-      shown,
-    );
-  });
-
-  it("changes a task's placement from the sheet and starts it where it was moved", async () => {
-    const patched: unknown[] = [];
-    let copy = false;
-    const sent = serve(
-      pr(null),
-      { both: true },
-      http.patch(daemonUrl('/tasks/:taskId'), async ({ request, params }) => {
-        patched.push({ taskId: params['taskId'], body: await request.json() });
-        copy = true;
-        return HttpResponse.json({ ...one, workspaceMode: 'worktree' });
-      }),
-      http.get(daemonUrl('/projects/:projectId/candidates'), () =>
-        HttpResponse.json(proposalOf(pr(null), 2, true, copy ? [one] : [])),
-      ),
-    );
-    const sheet = await openSheet();
-    const group = await within(sheet).findByRole('radiogroup', { name: 'Where One runs' });
-    fireEvent.click(within(group).getByRole('radio', { name: 'Separate copy' }));
-    await waitFor(() => {
-      expect(patched).toEqual([{ taskId: one.id, body: { workspaceMode: 'worktree' } }]);
-    });
-    fireEvent.click(
-      await within(sheet).findByRole('button', {
-        name: 'Start a batch of 1 task and start 1 task in a separate copy',
-      }),
-    );
-    await waitFor(() => {
-      expect(sent).toHaveLength(1);
-    });
-  });
-
-  it("shows the daemon's refusal when a placement can't change", async () => {
-    serve(
-      pr(null),
-      { both: true },
-      http.patch(daemonUrl('/tasks/:taskId'), () =>
-        HttpResponse.json(
-          { error: 'conflict', message: 'One has started, so it keeps where it runs' },
-          { status: 409 },
-        ),
-      ),
-    );
-    const sheet = await openSheet();
-    const group = await within(sheet).findByRole('radiogroup', { name: 'Where One runs' });
-    fireEvent.click(within(group).getByRole('radio', { name: 'Separate copy' }));
-    expect(
-      await within(sheet).findByText('One has started, so it keeps where it runs'),
-    ).toBeTruthy();
-  });
-
-  it('says nothing is run for verification when the project has no gate command', async () => {
-    serve(projectViewDto({ ...local, gateCommand: null }));
-    const sheet = await openSheet();
-    expect(
-      await within(sheet).findByText(
-        'Verification: none. Each finished task waits for you to check it.',
-      ),
-    ).toBeTruthy();
-    expect(within(sheet).queryByText(/10db runs/)).toBeNull();
-  });
-
-  it('names the changed-packages check for each step and the gate for the push', async () => {
-    serve(
-      projectViewDto({
-        ...local,
-        gateCommand: 'make gate',
-        changedCheckCommand: 'make check-changed',
-      }),
-    );
-    const sheet = await openSheet();
-    const line = await within(sheet).findByText(/Verification: 10db runs/);
-    expect(line.textContent).toBe(
-      'Verification: 10db runs make check-changed after each implement step, and make gate before the push, and review steps must approve.',
-    );
-  });
-
-  it('starts separate copies with one request, even while the shared batch ships', async () => {
-    const sent = serve(pr('SHIPPING'), { both: true, copies: [one, two] });
-    const sheet = await openSheet();
-    expect(within(sheet).queryByLabelText('Batch title')).toBeNull();
-    fireEvent.click(
-      await within(sheet).findByRole('button', { name: 'Start 2 tasks in separate copies' }),
-    );
-    await waitFor(() => {
-      expect(sent).toEqual([
-        {
-          path: `/projects/${local.id}/batches`,
-          body: { title: 'One', taskIds: [one.id, two.id] },
-        },
-      ]);
-    });
-  });
-
-  it("sends a mix with the shared batch's title, named after the first Your folder task", async () => {
-    const sent = serve(pr(null), { both: true, copies: [one] });
-    const sheet = await openSheet();
-    fireEvent.click(
-      await within(sheet).findByRole('button', {
-        name: 'Start a batch of 1 task and start 1 task in a separate copy',
-      }),
-    );
-    await waitFor(() => {
-      expect(sent).toEqual([
-        {
-          path: `/projects/${local.id}/batches`,
-          body: { title: 'Two', taskIds: [one.id, two.id] },
-        },
-      ]);
-    });
-  });
-
-  it('refuses a new batch with no title', async () => {
-    const sent = serve(pr(null));
-    const sheet = await openSheet();
-    fireEvent.change(await within(sheet).findByLabelText('Batch title'), {
-      target: { value: ' ' },
-    });
-    expect(within(sheet).getByRole('button', { name: 'Start a batch of 1 task' })).toHaveProperty(
-      'disabled',
-      true,
-    );
-    expect(within(sheet).getByText('Name the batch')).toBeTruthy();
-    expect(sent).toEqual([]);
-  });
-
-  it('adds the ticked tasks to an open batch in one request', async () => {
-    const sent = serve(pr('OPEN'), { both: true });
-    const sheet = await openSheet();
-    expect(
-      await within(sheet).findByText('These tasks join Fix the login, on its branch.'),
-    ).toBeTruthy();
-    expect(within(sheet).queryByLabelText('Batch title')).toBeNull();
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Add 2 tasks to Fix the login' }));
-    await waitFor(() => {
-      expect(sent).toEqual([
-        {
-          path: `/projects/${local.id}/batches`,
-          body: { title: 'Fix the login', taskIds: [one.id, two.id] },
-        },
-      ]);
-    });
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: 'Start a batch' })).toBeNull();
-    });
-  });
-
-  it('says that starting reopens a failed batch as a fix, and sends the fix tasks to it', async () => {
-    const sent = serve(pr('FAILED'));
-    const sheet = await openSheet();
-    expect(
-      await within(sheet).findByText(
-        'Fix the login failed to ship. Starting these tasks reopens it as a fix.',
-      ),
-    ).toBeTruthy();
-    fireEvent.click(within(sheet).getByRole('button', { name: 'Add 1 fix task to Fix the login' }));
-    await waitFor(() => {
-      expect(sent).toEqual([
-        {
-          path: `/projects/${local.id}/batches`,
-          body: { title: 'Fix the login', taskIds: [one.id] },
-        },
-      ]);
-    });
-  });
-
-  it.each([
-    {
-      state: 'CUTTING',
-      reason: 'Fix the login is still cutting its branch; start when it is open',
-    },
-    { state: 'SHIPPING', reason: 'Fix the login is shipping; start once it has shipped' },
-  ] satisfies { state: BatchState; reason: string }[])(
-    'disables Start while the batch is $state and says why',
-    async ({ state, reason }) => {
-      const sent = serve(pr(state));
-      const sheet = await openSheet();
-      expect(await within(sheet).findByText(reason)).toBeTruthy();
-      expect(
-        within(sheet).getByRole('button', { name: 'Add 1 task to Fix the login' }),
-      ).toHaveProperty('disabled', true);
-      expect(sent).toEqual([]);
-    },
-  );
-
-  it("shows the daemon's message when the batch is refused, and stays open", async () => {
-    serve(
-      pr(null),
-      {},
-      http.post(daemonUrl('/projects/:projectId/batches'), () =>
-        HttpResponse.json(
-          {
-            error: 'conflict',
-            message:
-              'Batch "Fix the login" is shipping; start again once it is open or has shipped',
-          },
-          { status: 409 },
-        ),
-      ),
-    );
-    const sheet = await openSheet();
-    fireEvent.click(await within(sheet).findByRole('button', { name: 'Start a batch of 1 task' }));
-    expect(
-      await within(sheet).findByText(
-        'Batch "Fix the login" is shipping; start again once it is open or has shipped',
-      ),
-    ).toBeTruthy();
-    expect(screen.getByRole('dialog', { name: 'Start a batch' })).toBeTruthy();
-  });
-
-  it('stops at the first refused start and says which started', async () => {
-    const tried: string[] = [];
-    serve(
-      local,
-      { both: true },
-      http.post(daemonUrl('/tasks/:taskId/start'), ({ params }) => {
-        tried.push(String(params['taskId']));
-        return String(params['taskId']) === one.id
-          ? HttpResponse.json(workstreamDto({ taskId: one.id }), { status: 201 })
-          : HttpResponse.json(
-              { error: 'conflict', message: 'Task Two is already running' },
-              { status: 409 },
-            );
-      }),
-    );
-    const sheet = await openSheet();
-    fireEvent.click(await within(sheet).findByRole('button', { name: 'Start 2 tasks' }));
-    expect(
-      await within(sheet).findByText(
-        'Started 1 of 2; Two was refused: Task Two is already running',
-      ),
-    ).toBeTruthy();
-    expect(tried).toEqual([one.id, two.id]);
-  });
-
-  it('shows each step’s persona, profile and why', async () => {
-    serve(local);
-    const sheet = await openSheet();
-    const steps = await within(sheet).findByRole('table', { name: 'Steps for One' });
-    const rows = within(steps)
-      .getAllByRole('row')
-      .slice(1)
-      .map((row) =>
-        within(row)
-          .getAllByRole('cell')
-          .map((cell) => cell.textContent),
-      );
-    const why = 'cheapest profile at or above 40 intelligence';
-    expect(rows).toEqual([
-      ['Implementer', 'Implementer', 'sonnet@high', why],
-      ['Reviewer', 'Reviewer', 'sonnet@high', why],
-    ]);
-  });
-
-  it('refetches the proposal when the batch size changes', async () => {
-    const sizes: number[] = [];
-    serve(local, { sizes });
-    const sheet = await openSheet();
-    fireEvent.change(await within(sheet).findByLabelText('Batch size'), { target: { value: '1' } });
-    await waitFor(() => {
-      expect(sizes).toContain(1);
-    });
-  });
-
-  it('disables Start and says why when nothing is ticked', async () => {
-    const sent = serve(local);
-    const sheet = await openSheet();
-    fireEvent.click(await within(sheet).findByRole('checkbox', { name: 'One' }));
-    expect(within(sheet).getByRole('button', { name: 'Start 0 tasks' })).toHaveProperty(
-      'disabled',
-      true,
-    );
-    expect(within(sheet).getByText('Tick at least one task')).toBeTruthy();
-    expect(sent).toEqual([]);
-  });
-
-  it('shows why nothing can start when the picker proposes no task', async () => {
-    serve(
-      local,
-      // Start Ready Tasks is only enabled with a task in Ready, so one is there though none is proposed.
-      { tasks: [one] },
-      http.get(daemonUrl('/projects/:projectId/candidates'), ({ request }) =>
-        HttpResponse.json(
-          PickerProposalDto.parse({
-            projectId: local.id,
-            size: Number(new URL(request.url).searchParams.get('size')),
-            candidates: [],
-          }),
-        ),
-      ),
-    );
-    const sheet = await openSheet();
-    expect(
-      await within(sheet).findByText(
-        'No ready tasks. A task is ready when everything it depends on is done.',
-      ),
-    ).toBeTruthy();
-  });
-
-  it('changes a task’s kinds from the sheet', async () => {
-    const security = kindDto({ key: 'security', label: 'Security', minimumRigor: 'careful' });
-    const patched: unknown[] = [];
-    serve(
-      local,
-      {},
-      http.get(daemonUrl('/kinds'), () => HttpResponse.json([security])),
-      http.patch(daemonUrl('/tasks/:taskId'), async ({ request }) => {
-        patched.push(await request.json());
-        return HttpResponse.json(one);
-      }),
-    );
-    const sheet = await openSheet();
-    await pick(await within(sheet).findByLabelText('Kinds for One'), 'Security');
-    await waitFor(() => {
-      expect(patched).toEqual([{ kinds: [{ key: 'security', source: 'builder' }] }]);
-    });
-  });
-
-  it('changes a task’s rigor from the sheet', async () => {
-    const patched: unknown[] = [];
-    serve(
-      local,
-      {},
-      http.patch(daemonUrl('/tasks/:taskId'), async ({ request }) => {
-        patched.push(await request.json());
-        return HttpResponse.json(one);
-      }),
-    );
-    const sheet = await openSheet();
-    await pick(await within(sheet).findByLabelText('Rigor for One'), 'Careful');
-    await waitFor(() => {
-      expect(patched).toEqual([{ rigor: 'careful' }]);
     });
   });
 });

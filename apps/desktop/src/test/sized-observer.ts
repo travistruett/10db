@@ -1,9 +1,8 @@
 // jsdom does no layout, so a ResizeObserver never fires. This one reports a width a test chooses for every
-// element it observes, on observing and again when `resizeObservedTo` changes it. A view that measures its
-// own container (`useElementSize`) can then be drawn at a width the window's own width doesn't set.
+// element it observes, on observing. A view that measures its own container (`useElementSize`) can then be
+// drawn at a width the window's own width doesn't set.
 
 let contentWidth = 900;
-const watching = new Set<SizedObserver>();
 const realObserver = window.ResizeObserver;
 
 class SizedObserver implements ResizeObserver {
@@ -14,7 +13,6 @@ class SizedObserver implements ResizeObserver {
   }
   observe(target: Element): void {
     this.targets.add(target);
-    watching.add(this);
     this.report();
   }
   report(): void {
@@ -35,29 +33,15 @@ class SizedObserver implements ResizeObserver {
   }
   disconnect(): void {
     this.targets.clear();
-    watching.delete(this);
   }
 }
 
 /** Every element observed from now on is `width` px wide. Call `resetObservedWidth` after the test. */
 export function observeWidthsOf(width: number): void {
   contentWidth = width;
-  watching.clear();
   window.ResizeObserver = SizedObserver;
 }
 
-/** The width elements are reported at now. */
-export function observedWidth(): number {
-  return contentWidth;
-}
-
-/** Resizes everything already observed, as a window or a panel moving would. */
-export function resizeObservedTo(width: number): void {
-  contentWidth = width;
-  for (const observer of watching) observer.report();
-}
-
 export function resetObservedWidth(): void {
-  watching.clear();
   window.ResizeObserver = realObserver;
 }

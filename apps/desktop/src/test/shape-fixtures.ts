@@ -1,11 +1,10 @@
 import {
   ConversationItemDto,
   mintId,
-  ShapeFindingDto,
   ShapeDto,
   ShapeMessageDto,
-  ShapePreviewDto,
   ShapeProposalDto,
+  type ShapePreviewDto,
   ShapeViewDto,
   type ConversationId,
   type ShapeId,
@@ -136,25 +135,6 @@ export function decisionProposal(
   });
 }
 
-export function principleProposal(
-  key: string,
-  overrides: ProposalOverrides & { readonly statement?: string } = {},
-): ShapeProposalDto {
-  return ShapeProposalDto.parse({
-    ...proposalBase(overrides),
-    key,
-    kind: 'principle',
-    body: {
-      key,
-      kind: 'principle',
-      scope: 'project',
-      statement: overrides.statement ?? 'Never mock the database',
-      rationale: 'Mocks hid a broken migration once.',
-      sourceMessageIds: [SOURCE],
-    },
-  });
-}
-
 export function questionProposal(key: string, text = 'When should this ship?'): ShapeProposalDto {
   return ShapeProposalDto.parse({
     ...proposalBase({}),
@@ -164,43 +144,11 @@ export function questionProposal(key: string, text = 'When should this ship?'): 
   });
 }
 
-export function landingProposal(key: string, keys: readonly string[]): ShapeProposalDto {
-  return ShapeProposalDto.parse({
-    ...proposalBase({}),
-    key,
-    kind: 'landing',
-    body: { key, title: 'Real areas', keys, sourceMessageIds: [SOURCE] },
-  });
-}
-
 /**
  * What each conversation's `/items` answers in a test, keyed by its id. `shapeViewDto` fills it from
  * the Plan rows a test gives, so the base handlers serve a view's transcript as the daemon does.
  */
 const ITEMS = new Map<ConversationId, readonly ConversationItemDto[]>();
-/** Which Plan each fixture's conversation belongs to. */
-const SHAPE_OF = new Map<string, ShapeId>();
-
-/** The Plan a conversation a fixture made belongs to, for a handler that names it by its conversation. */
-export function shapeOfConversation(id: unknown): ShapeId | undefined {
-  return SHAPE_OF.get(String(id));
-}
-
-/** What a send answers: the builder's message, stored. */
-export function sentItemDto(text = 'Sent.'): ConversationItemDto {
-  return ConversationItemDto.parse({
-    id: mintId('ConversationItem'),
-    conversationId: mintId('Conversation'),
-    seq: 1,
-    author: 'builder',
-    partial: false,
-    hasFull: false,
-    deliveredAt: null,
-    createdAt: AT,
-    kind: 'message',
-    text,
-  });
-}
 
 /** The items a test's conversation holds; none for one no fixture made. */
 export const itemsOfConversation = (id: ConversationId): readonly ConversationItemDto[] =>
@@ -313,7 +261,6 @@ export function shapeViewDto(
     tokens: 0,
     ...rest,
   });
-  SHAPE_OF.set(view.conversationId, view.shape.id);
   ITEMS.set(
     view.conversationId,
     items ?? messages.map((m, i) => itemOfMessage(view.conversationId, m, i + 1)),
@@ -333,92 +280,3 @@ export const EMPTY_PREVIEW: ShapePreviewDto = {
   endEstimateHours: 0,
   landings: { pullRequests: 0, pullRequestsAlone: 0, ciRuns: 0, ciRunsAlone: 0 },
 };
-
-/**
- * Two lanes: a task already running holds lane 1 first, the draft's two tasks clash on `desktop` and
- * run one after the other behind it, the critical path; a third draft task runs beside them.
- */
-export function previewDto(): ShapePreviewDto {
-  return ShapePreviewDto.parse({
-    lanes: [
-      {
-        items: [
-          {
-            key: 'tsk_running',
-            title: 'Fix the gate log',
-            startHours: 0,
-            endHours: 1.5,
-            existing: true,
-            critical: true,
-          },
-          {
-            key: 'density',
-            title: 'Compact density',
-            startHours: 1.5,
-            endHours: 3.5,
-            existing: false,
-            critical: true,
-          },
-          {
-            key: 'shape-view',
-            title: 'Shape view',
-            startHours: 3.5,
-            endHours: 5,
-            existing: false,
-            critical: true,
-          },
-        ],
-      },
-      {
-        items: [
-          {
-            key: 'scrollbars',
-            title: 'Thin scrollbars',
-            startHours: 0,
-            endHours: 1,
-            existing: false,
-            critical: false,
-          },
-        ],
-      },
-    ],
-    criticalPath: ['tsk_running', 'density', 'shape-view'],
-    clashes: [
-      {
-        area: 'desktop',
-        titles: ['Compact density', 'Shape view'],
-        text: "Compact density and Shape view both claim `desktop`: they'll run one after the other",
-      },
-    ],
-    tasks: 3,
-    totalLaneHours: 4.5,
-    scheduleHours: 5,
-    nonLaneHoursPerTask: 2,
-    endEstimateHours: 9,
-    landings: { pullRequests: 3, pullRequestsAlone: 3, ciRuns: 3, ciRunsAlone: 3 },
-  });
-}
-
-/** A reviewer's finding or a rehearsal question, open unless the override says otherwise. */
-export function findingDto(
-  shapeId: ShapeId,
-  overrides: Partial<ShapeFindingDto> = {},
-): ShapeFindingDto {
-  return ShapeFindingDto.parse({
-    id: mintId('ShapeFinding'),
-    shapeId,
-    effortKey: 'brainstorm',
-    taskKey: null,
-    reviewer: 'scope',
-    kind: 'finding',
-    severity: 'medium',
-    text: 'Names no migration',
-    state: 'open',
-    how: null,
-    round: 1,
-    taskHash: null,
-    createdAt: AT,
-    updatedAt: AT,
-    ...overrides,
-  });
-}
