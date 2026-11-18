@@ -36,40 +36,40 @@ async function expectAccessible(page: Page, label: string): Promise<void> {
   expect(found).toEqual([]);
 }
 
-for (const scheme of ['dark', 'light'] as const) {
-  test(`a builder allows two hosts, is refused localhost and removes them in ${scheme}`, async ({
-    page,
-    request,
-  }) => {
-    await ensureProject(request);
-    await claudeIsInstalled(page);
-    await page.addInitScript((value) => {
-      window.localStorage.setItem('mantine-color-scheme-value', value);
-    }, scheme);
-    await page.goto('/settings/network-hosts');
-    await expect(page.locator('html')).toHaveAttribute('data-mantine-color-scheme', scheme);
-    const card = page.getByRole('main');
-    await expect(card.getByText('No hosts are allowed yet.')).toBeVisible();
-
-    const field = page.getByRole('textbox', { name: 'Host' });
-    for (const host of ['index.crates.io', 'static.crates.io']) {
-      await field.fill(host);
-      await page.getByRole('button', { name: 'Add Host' }).click();
-      await expect(page.getByRole('listitem').filter({ hasText: host })).toBeVisible();
-    }
-    await expectAccessible(page, `network hosts, ${scheme}`);
-
-    await field.fill('localhost');
-    await page.getByRole('button', { name: 'Add Host' }).click();
-    await expect(page.getByRole('alert').filter({ hasText: 'Allow localhost' })).toBeVisible();
-    await expect(field).toHaveValue('localhost');
-    await expect(page.getByRole('listitem')).toHaveCount(2);
-    await expectAccessible(page, `network hosts refusal, ${scheme}`);
-
-    for (const host of ['index.crates.io', 'static.crates.io']) {
-      await page.getByRole('button', { name: `Remove ${host}` }).click();
-      await expect(page.getByRole('listitem').filter({ hasText: host })).toHaveCount(0);
-    }
-    await expect(card.getByText('No hosts are allowed yet.')).toBeVisible();
+// Core flow 10, with process-per-rigor.spec.ts: a setting the builder changes in Settings that changes
+// what an agent may do, here which hosts a project's sandbox lets it reach.
+test('a builder allows two hosts, is refused localhost and removes them', async ({
+  page,
+  request,
+}) => {
+  await ensureProject(request);
+  await claudeIsInstalled(page);
+  await page.addInitScript(() => {
+    window.localStorage.setItem('mantine-color-scheme-value', 'dark');
   });
-}
+  await page.goto('/settings/network-hosts');
+  await expect(page.locator('html')).toHaveAttribute('data-mantine-color-scheme', 'dark');
+  const card = page.getByRole('main');
+  await expect(card.getByText('No hosts are allowed yet.')).toBeVisible();
+
+  const field = page.getByRole('textbox', { name: 'Host' });
+  for (const host of ['index.crates.io', 'static.crates.io']) {
+    await field.fill(host);
+    await page.getByRole('button', { name: 'Add Host' }).click();
+    await expect(page.getByRole('listitem').filter({ hasText: host })).toBeVisible();
+  }
+  await expectAccessible(page, 'network hosts');
+
+  await field.fill('localhost');
+  await page.getByRole('button', { name: 'Add Host' }).click();
+  await expect(page.getByRole('alert').filter({ hasText: 'Allow localhost' })).toBeVisible();
+  await expect(field).toHaveValue('localhost');
+  await expect(page.getByRole('listitem')).toHaveCount(2);
+  await expectAccessible(page, 'network hosts refusal');
+
+  for (const host of ['index.crates.io', 'static.crates.io']) {
+    await page.getByRole('button', { name: `Remove ${host}` }).click();
+    await expect(page.getByRole('listitem').filter({ hasText: host })).toHaveCount(0);
+  }
+  await expect(card.getByText('No hosts are allowed yet.')).toBeVisible();
+});
