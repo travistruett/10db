@@ -21,7 +21,7 @@ import { ProjectAreas } from './project-areas';
 import { ProjectBilling } from './project-billing';
 import { ProjectGeneralForm } from './project-general-form';
 import { ProjectTrustSection } from './project-trust-section';
-import { sectionByKey, SettingsSectionKey } from './sections';
+import { sectionByKey, SettingsScope, SettingsSectionKey } from './sections';
 import { ProjectPlaybook } from './project-playbook';
 import { SessionsSection } from './sessions-section';
 import { SelfUpdateSection } from './self-update-section';
@@ -39,7 +39,18 @@ export function SectionBody({
   readonly project: ProjectDto | null;
 }) {
   const section = sectionByKey(sectionKey);
-  const heading = <TitleRow title={section.label} />;
+  const heading = (
+    <TitleRow
+      title={section.label}
+      meta={
+        section.scope === SettingsScope.App
+          ? 'All projects'
+          : project === null
+            ? undefined
+            : `This project · ${project.name}`
+      }
+    />
+  );
   switch (sectionKey) {
     case SettingsSectionKey.General:
       return (

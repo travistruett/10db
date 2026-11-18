@@ -303,7 +303,7 @@ export function TaskDrawer({
     <SurfaceDrawer opened onClose={requestClose} label="Task">
       <Stack gap="md">
         <Stack gap={4}>
-          <Title order={3} size="h4" fw={600}>
+          <Title order={3} size={16} fw={600}>
             {hasHeadline ? task.headline : task.title}
           </Title>
           {task.why ? (
