@@ -135,6 +135,7 @@ import { GithubSigninDto, GithubStatusDto } from './github';
 import { DecisionModelListDto } from './decision-models';
 import { DecisionStatsListDto } from './decision-stats';
 import { InboxPageDto, InboxPageQuery } from './inbox-page';
+import { InboxCardContextDto } from './inbox-rows';
 import {
   JudgeCallDto,
   JudgeCallsPageDto,
@@ -399,6 +400,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'project-patch': ProjectPatch,
   'task-patch': TaskPatch,
   'workstream-dto': WorkstreamDto,
+  'inbox-card-context-dto': InboxCardContextDto,
   'inbox-item-dto': InboxItemDto,
   'system-check-dto': SystemCheckDto,
   'keep-awake-status': KeepAwakeStatus,

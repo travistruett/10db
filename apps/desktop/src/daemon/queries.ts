@@ -229,7 +229,7 @@ export function useInboxPage(query: InboxPageQuery) {
         await client.inbox.page.$get({
           query: {
             state: asked.state,
-            page: String(asked.page),
+            ...(asked.page === undefined ? {} : { page: asked.page }),
             pageSize: String(asked.pageSize),
             ...(asked.project === undefined ? {} : { project: asked.project }),
             ...(asked.kind === undefined ? {} : { kind: asked.kind }),

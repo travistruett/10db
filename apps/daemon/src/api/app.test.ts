@@ -660,7 +660,14 @@ describe('API', () => {
     const services = stubServices({
       pageInbox: (q) => {
         seen.push(q);
-        return { items: [], total: 0, page: q.page, pageSize: q.pageSize };
+        return {
+          items: [],
+          total: 0,
+          page: q.page ?? 1,
+          pageSize: q.pageSize,
+          rows: [],
+          next: null,
+        };
       },
     });
     const res = await app(services).request(
@@ -668,7 +675,14 @@ describe('API', () => {
       auth,
     );
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ items: [], total: 0, page: 2, pageSize: 50 });
+    expect(await res.json()).toEqual({
+      items: [],
+      total: 0,
+      page: 2,
+      pageSize: 50,
+      rows: [],
+      next: null,
+    });
     expect(seen).toEqual([
       {
         state: 'resolved',

@@ -1,12 +1,15 @@
 import {
-  InboxKind,
-  PassCheckDetail,
+  inboxRowKey,
+  isDismissable,
+  readyPassOf,
   RoutedBy,
   SendState,
   type InboxItemDto,
   type PassId,
   type SlackConnectionDto,
 } from '@10db/contracts';
+
+export { isDismissable };
 
 /** One row of the inbox: a card, identical flags shown together, or a pass's Ready pages. */
 export interface InboxRow {
@@ -59,21 +62,6 @@ export function openCount(open: readonly InboxItemDto[]): number {
   return inboxRows(open.filter((item) => item.routedBy !== RoutedBy.TriagePending)).length;
 }
 
-/** A flag or a move report with no options closes on any answer, so it can be dismissed without opening it. */
-export function isDismissable(item: InboxItemDto): boolean {
-  return (
-    (item.kind === InboxKind.Flag || item.kind === InboxKind.PlaybookMoveReport) &&
-    item.options.length === 0
-  );
-}
-
-/** The pass of a Ready page's `check` item, or null for any other card. */
-function readyPass(item: InboxItemDto): PassId | null {
-  if (item.kind !== InboxKind.Check) return null;
-  const detail = PassCheckDetail.safeParse(item.detail);
-  return detail.success ? detail.data.passId : null;
-}
-
 interface Row {
   key: string;
   items: [InboxItemDto, ...InboxItemDto[]];
@@ -99,11 +87,8 @@ export function inboxRows(items: readonly InboxItemDto[]): InboxRow[] {
     rows.push(row);
   };
   for (const item of items) {
-    const passId = readyPass(item);
-    if (passId !== null) fold(`pass:${passId}`, item, passId);
-    else if (isDismissable(item))
-      fold(`flags:${JSON.stringify([item.projectId, item.title, item.body])}`, item, null);
-    else rows.push({ key: item.id, items: [item], passId: null });
+    const key = inboxRowKey(item);
+    fold(key, item, readyPassOf(item));
   }
   return rows;
 }

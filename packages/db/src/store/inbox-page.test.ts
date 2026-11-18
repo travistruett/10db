@@ -109,7 +109,15 @@ function send(id: InboxItemId, recipients: PersonId[], returned = false) {
   return draft.id;
 }
 
-const page = (query: Record<string, string>) => pageInbox(store.db, InboxPageQuery.parse(query));
+/** Every answer's rows mirror its items: one row per card, keyed by its id, with no next page. */
+const page = (query: Record<string, string>) => {
+  const answer = pageInbox(store.db, InboxPageQuery.parse(query));
+  expect(answer.rows.map((row) => row.key)).toEqual(answer.items.map((item) => item.id));
+  expect(answer.rows.map((row) => row.ids)).toEqual(answer.items.map((item) => [item.id]));
+  expect(answer.rows.map((row) => row.passId)).toEqual(answer.items.map(() => null));
+  expect(answer.next).toBeNull();
+  return answer;
+};
 const titles = (query: Record<string, string>) => page(query).items.map((i) => i.title);
 
 describe('pageInbox: resolved', () => {

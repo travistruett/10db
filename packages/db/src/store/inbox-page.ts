@@ -3,11 +3,13 @@ import {
   InboxListState,
   InboxOutcome,
   InboxSort,
+  inboxRowSort,
   InboxState,
   SendState,
   SortDirection,
   type InboxPageDto,
   type InboxPageQuery,
+  type InboxRowRef,
 } from '@10db/contracts';
 import { and, asc, count, desc, eq, exists, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
@@ -120,19 +122,21 @@ function orderOf(q: InboxPageQuery): SQL[] {
 export function pageInbox(db: DbReader, q: InboxPageQuery): InboxPageDto {
   const where = whereOf(db, q);
   const total = db.select({ n: count() }).from(items).where(where).get()?.n ?? 0;
-  const page = Math.min(q.page, Math.max(1, Math.ceil(total / q.pageSize)));
-  const rows = db
+  const page = Math.min(q.page ?? 1, Math.max(1, Math.ceil(total / q.pageSize)));
+  const found = db
     .select()
     .from(items)
     .where(where)
     .orderBy(...orderOf(q))
     .limit(q.pageSize)
     .offset((page - 1) * q.pageSize)
-    .all();
-  return {
-    items: rows.map((row) => toInboxItemDto(db, row)),
-    total,
-    page,
-    pageSize: q.pageSize,
-  };
+    .all()
+    .map((row) => toInboxItemDto(db, row));
+  const rows = found.map((item): InboxRowRef => ({
+    key: item.id,
+    sort: inboxRowSort(q.state, { ...item, sentAt: item.send?.sentAt ?? null }),
+    passId: null,
+    ids: [item.id],
+  }));
+  return { items: found, total, page, pageSize: q.pageSize, rows, next: null };
 }
