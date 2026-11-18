@@ -42,7 +42,7 @@ export function CountBadge({
               boxShadow: '0 0 0 2px var(--mantine-color-default)',
             },
           }
-        : { fw: 600, px: 5, miw: 16 })}
+        : { fw: 600, px: 5, miw: 16, style: { flexShrink: 0 } })}
       variant={attention ? 'filled' : 'light'}
       // An attention count takes the theme's primary colour, Badge's own default.
       {...(attention ? {} : { color: 'gray' })}

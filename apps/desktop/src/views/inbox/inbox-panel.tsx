@@ -75,7 +75,9 @@ export function InboxPanel({
                 label: (
                   <Group gap={6} wrap="nowrap" justify="center">
                     Open
-                    {open > 0 ? <CountBadge count={open} tone={CountTone.Attention} /> : null}
+                    {open > 0 ? (
+                      <CountBadge count={open} tone={CountTone.Attention} cap={99} />
+                    ) : null}
                   </Group>
                 ),
               },
@@ -84,7 +86,7 @@ export function InboxPanel({
                 label: (
                   <Group gap={6} wrap="nowrap" justify="center">
                     Waiting
-                    {showWaiting ? <CountBadge count={waiting} /> : null}
+                    {showWaiting ? <CountBadge count={waiting} cap={99} /> : null}
                   </Group>
                 ),
               },

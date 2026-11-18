@@ -74,11 +74,11 @@ export function InboxFilterMenu({
   return (
     <Menu position="bottom-end" width={220} withinPortal>
       <Menu.Target>
-        <Indicator size={7} offset={4} disabled={!filtersSet(search)}>
-          <ActionIcon variant="subtle" color="gray" size={28} aria-label="Filter">
+        <ActionIcon variant="subtle" color="gray" size={28} aria-label="Filter">
+          <Indicator size={7} offset={-2} disabled={!filtersSet(search)}>
             <IconFilter size={16} stroke={1.6} />
-          </ActionIcon>
-        </Indicator>
+          </Indicator>
+        </ActionIcon>
       </Menu.Target>
       <Menu.Dropdown mah={420} style={{ overflowY: 'auto' }}>
         <FilterGroup label="Project">

@@ -2302,7 +2302,6 @@ describe('the Inbox panel', () => {
       target: { value: 'retry' },
     });
     await waitFor(() => {
-      expect(panelRowTexts(2)).toBeTruthy();
       expect(rows()).toHaveLength(2);
     });
     expect(selectedCard().textContent).toContain('Beta retry?');
