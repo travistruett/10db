@@ -106,7 +106,8 @@ test('routes a question to someone outside Slack from its card, and the table sh
   await expectAccessible(page, 'people, dark');
 
   // The question card offers Ask Someone; Priya, Product, on the whole project.
-  await page.goto('/inbox');
+  // Earlier specs leave cards that fill the panel's first page, so the list is narrowed to the question.
+  await page.goto(`/inbox?q=${encodeURIComponent(QUESTION)}`);
   // The question is a row in the panel, and its card is the content once the row is selected.
   const questionRow = page.getByRole('option', { name: new RegExp(QUESTION) });
   await expect(questionRow).toBeVisible();
