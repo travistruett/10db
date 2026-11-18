@@ -275,6 +275,34 @@ describe('the Waiting tab', () => {
     expect(calls).toEqual([]);
   });
 
+  it('shows no Waiting row under Resolved while the Resolved page is on its way', async () => {
+    const waiting = card({});
+    const closed = inboxItemDto({
+      kind: 'question',
+      state: 'RESOLVED',
+      title: 'Closed long ago',
+      answer: { choice: 'Teal' },
+      options: [{ label: 'Teal', description: '' }],
+    });
+    serve([waiting]);
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    serveInboxRows({ waiting: [waiting], resolved: [closed] }, (query) =>
+      query['state'] === 'resolved' && query['pageSize'] === '50' ? held : undefined,
+    );
+    renderApp('/inbox?state=waiting');
+    await findPanelRow('How long should access last?');
+    fireEvent.click(await screen.findByRole('radio', { name: /Resolved/ }));
+    await waitFor(() => {
+      expect(screen.getByRole('radio', { name: /Resolved/ })).toHaveProperty('checked', true);
+    });
+    expect(panelRows().map((row) => row.textContent)).toEqual([]);
+    release();
+    expect(await findPanelRow('Closed long ago')).toBeTruthy();
+  });
+
   it('Answer Myself answers with an option', async () => {
     const calls = serve([card({})]);
     renderApp('/inbox?state=waiting');

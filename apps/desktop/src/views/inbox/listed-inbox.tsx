@@ -164,5 +164,13 @@ export function ListedInbox({
     if (connection.data.state !== 'connected')
       return <Text c="dimmed">Slack isn't connected, so questions sent there wait in Open.</Text>;
   }
-  return <Rows state={state} search={search} listHost={listHost} onClearFilters={onClearFilters} />;
+  return (
+    <Rows
+      key={state}
+      state={state}
+      search={search}
+      listHost={listHost}
+      onClearFilters={onClearFilters}
+    />
+  );
 }
