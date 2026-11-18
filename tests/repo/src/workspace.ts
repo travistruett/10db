@@ -18,6 +18,7 @@ export const Manifest = z.object({
   optionalDependencies: DependencyMap.optional(),
   engines: z.object({ node: z.string() }).optional(),
   packageManager: z.string().optional(),
+  scripts: z.record(z.string(), z.string()).optional(),
 });
 export type Manifest = z.infer<typeof Manifest>;
 
