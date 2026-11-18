@@ -12,39 +12,6 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { daemonUrl, server } from './daemon';
 
-/**
- * Serves `GET /inbox/page`: each state's cards as one page, whatever the filters (the daemon's own test
- * proves those). Returns every query a table asked with, in order (not Open's), so a test can check what reached it.
- */
-export function serveInboxPage(
-  byState: Partial<Record<string, readonly InboxItemDto[]>>,
-  /** How many cards a state holds in all, when more than the one page served. */
-  totals: Partial<Record<string, number>> = {},
-): Record<string, string>[] {
-  const asked: Record<string, string>[] = [];
-  server.use(
-    http.get(daemonUrl('/inbox/page'), ({ request }) => {
-      const params = new URL(request.url).searchParams;
-      const query = Object.fromEntries(params);
-      // Open is read for the panel's rows, and every state for the panel's counts (a page of one row); a table
-      // asks for its own page, which is what is recorded.
-      if (query['state'] !== 'open' && query['pageSize'] !== '1') asked.push(query);
-      const state = query['state'] ?? '';
-      const items = byState[state] ?? [];
-      return HttpResponse.json({
-        items,
-        // The panel reads the same answer as rows, all on one page.
-        rows: rowsOf(state === 'waiting' || state === 'resolved' ? state : 'open', items),
-        next: null,
-        total: totals[state] ?? items.length,
-        page: Number(query['page'] ?? '1'),
-        pageSize: Number(query['pageSize'] ?? '25'),
-      });
-    }),
-  );
-  return asked;
-}
-
 /** SQLite's LIKE folds A-Z only: never `toLowerCase()`, which folds every script. */
 const asciiFold = (text: string): string => text.replace(/[A-Z]/g, (c) => c.toLowerCase());
 
