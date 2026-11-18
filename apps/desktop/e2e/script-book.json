@@ -450,85 +450,61 @@
       }
     ]
   ],
-  "Chat: Tidy the notes": [
+  "Chat: Edit on a branch": [
     [
       { "do": "consume" },
-      {
-        "do": "mcp",
-        "tool": "commit_changes",
-        "args": { "message": "Tidy the notes", "paths": ["notes.md"] }
-      },
-      { "do": "say", "text": "Committed the tidy notes." },
+      { "do": "say", "text": "Reading the notes first." },
+      { "do": "edit", "path": "notes.md", "text": "# Notes\n\nWritten on a branch.\n" },
       { "do": "turn_complete" }
     ],
     [
       { "do": "consume" },
-      {
-        "do": "mcp",
-        "tool": "write_brief",
-        "args": {
-          "title": "Finish the todo notes",
-          "brief": "Finish the todo list the chat started, then keep the notes in step with it.",
-          "acceptanceCriteria": ["The todo list is complete"]
-        }
-      },
-      { "do": "say", "text": "The brief is written." },
+      { "do": "edit", "path": "notes.md", "text": "# Notes\n\nWritten on a branch.\n" },
+      { "do": "say", "text": "Wrote the notes." },
       { "do": "turn_complete" }
     ]
   ],
-  "Chat: Copy the notes": [
+  "Chat: Choose after a reload": [
     [
       { "do": "consume" },
-      { "do": "say", "text": "Looked at the notes." },
+      { "do": "say", "text": "Looking at the notes first." },
+      { "do": "edit", "path": "notes.md", "text": "# Notes\n\nChosen later.\n" },
       { "do": "turn_complete" }
     ],
     [
       { "do": "consume" },
-      {
-        "do": "mcp",
-        "tool": "write_brief",
-        "args": {
-          "title": "Hold the copy",
-          "brief": "Work on the notes in a copy of its own.",
-          "acceptanceCriteria": ["The notes are tidy"]
-        }
-      },
-      { "do": "say", "text": "The brief is written." },
+      { "do": "edit", "path": "notes.md", "text": "# Notes\n\nChosen later.\n" },
+      { "do": "say", "text": "Wrote the later notes." },
       { "do": "turn_complete" }
     ]
   ],
-  "Hold the copy": [[{ "do": "await_message", "contains": "release" }, { "do": "turn_complete" }]],
-  "Finish the todo notes": [
+  "Chat: Edit then archive": [
     [
       { "do": "consume" },
-      {
-        "do": "tool",
-        "toolName": "Write",
-        "input": { "file_path": "todo.md", "content": "# Todo\n\n- done\n" }
-      },
-      {
-        "do": "mcp",
-        "tool": "commit",
-        "args": { "opId": "op-e2e-todo1", "paths": ["todo.md"], "message": "Finish the todo list" }
-      },
-      { "do": "turn_complete", "text": "Finished the todo list." }
-    ]
-  ],
-  "Chat: Fix the notes": [
-    [
-      { "do": "consume" },
-      {
-        "do": "mcp",
-        "tool": "commit_changes",
-        "args": { "message": "Add the notes", "paths": ["notes.md"] }
-      },
-      { "do": "say", "text": "Committed the notes." },
-      { "do": "await_message", "contains": "wrap up" },
-      { "do": "consume" },
-      { "do": "say", "text": "Wrapped up." },
+      { "do": "say", "text": "Reading the notes before editing." },
+      { "do": "edit", "path": "notes.md", "text": "# Notes\n\nDirty.\n" },
       { "do": "turn_complete" }
     ],
-    [{ "do": "consume" }, { "do": "say", "text": "Looked again." }, { "do": "turn_complete" }]
+    [
+      { "do": "consume" },
+      { "do": "edit", "path": "notes.md", "text": "# Notes\n\nDirty.\n" },
+      { "do": "say", "text": "Wrote the dirty notes." },
+      { "do": "turn_complete" }
+    ]
+  ],
+  "Chat: Edit here": [
+    [
+      { "do": "consume" },
+      { "do": "say", "text": "Reading the todo list first." },
+      { "do": "edit", "path": "todo.md", "text": "# Todo\n\n- done\n" },
+      { "do": "turn_complete" }
+    ],
+    [
+      { "do": "consume" },
+      { "do": "edit", "path": "todo.md", "text": "# Todo\n\n- done\n" },
+      { "do": "say", "text": "Wrote the todo list." },
+      { "do": "turn_complete" }
+    ]
   ],
   "Hold the folder": [
     [{ "do": "await_message", "contains": "release" }, { "do": "turn_complete" }]

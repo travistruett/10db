@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { z } from 'zod';
 import { claudeIsInstalled } from './claude-is-installed';
 import { inConversationColumn } from './conversation-column';
@@ -58,6 +58,16 @@ async function scan(
   await page.setViewportSize({ width: 1280, height: 900 });
 }
 
+/** axe over an open modal, dark then light: a modal covers the scheme switch, so the page's own attribute stands in. */
+async function scanModal(page: Page, what: string): Promise<void> {
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.evaluate((value) => {
+      document.documentElement.setAttribute('data-mantine-color-scheme', value);
+    }, scheme);
+    await expectAccessible(page, `${what}, ${scheme}`);
+  }
+}
+
 /** The polite region's messages, as the page recorded them from its first paint. */
 function record(): void {
   const announced: string[] = [];
@@ -68,10 +78,13 @@ function record(): void {
   }).observe(document, { subtree: true, childList: true, characterData: true });
 }
 
+/** A session's row in the panel, by its title. */
+const sessionRow = (page: Page, title: RegExp) => page.getByRole('option', { name: title });
+
 const sessionsBadge = (page: Page) =>
   page.getByRole('navigation').getByRole('link', { name: /^Sessions/ });
 
-test('a chat end to end: a mention, a reply, the tasks it files, a judge’s card in the tab and the Inbox, the keys, a reload and Archive', async ({
+test('a chat end to end: a mention, a reply, the tasks it files, a judge’s card in the panel and the Inbox, the keys, a reload and Archive', async ({
   page,
   request,
 }) => {
@@ -97,7 +110,7 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   }, projectId);
   await page.addInitScript(record);
 
-  // ⌘T from the Board opens Sessions on a fresh tab.
+  // ⌘T from the Board opens Sessions on a fresh session.
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto('/board');
   await expect(page.getByRole('button', { name: /^Project: sessions/ })).toBeVisible();
@@ -106,15 +119,15 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   await expect(page.getByText(/A chat reads sessions/)).toBeVisible();
   await scan(page, [1280, 480], 'a fresh tab');
 
-  // The first line, then an @ file, then Enter: the tab is a chat, named by the agent once it calls set_title (the first-line title is gone before a
-  // browser can look).
+  // The first line, then an @ file, then Enter: the session is a row in the panel, named by the agent once
+  // it calls set_title (the first-line title is gone before a browser can look).
   const composer = page.getByRole('textbox', { name: 'Message' });
   await composer.click();
   await composer.pressSequentially(`${FIRST_LINE} @log`);
   await page.getByRole('option', { name: /login\.ts/ }).click();
   await composer.press('Enter');
-  await expect(page.getByRole('tab', { name: /Login fails after sleep/ })).toBeVisible();
-  await inConversationColumn(page.getByRole('tabpanel'), composer, 'Sessions at 1280');
+  await expect(sessionRow(page, /Login fails after sleep/)).toBeVisible();
+  await inConversationColumn(page.getByRole('main'), composer, 'Sessions at 1280');
 
   // The reply, in an article headed by the agent's label; its settled work is one Worked row that
   // opens to a read row and a search row.
@@ -146,16 +159,16 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   await expect(confirm).toBeHidden();
 
   // File as Tasks: the task row, its start row, then the judge's card for the builder's own task.
-  await page.getByRole('button', { name: 'More ways to hand off' }).click();
+  await page.getByRole('button', { name: 'More session actions' }).click();
   await page.getByRole('menuitem', { name: 'File as Tasks' }).click();
   await expect(page.getByText('Retry login once on a 401').first()).toBeVisible();
   await expect(page.getByText('Added to Ready')).toBeVisible();
   await expect(page.getByText(/Started Retry login once on a 401/)).toBeVisible();
   const card = page.getByRole('region', { name: 'Waiting for your answer' });
   await expect(card).toBeVisible();
-  await expect(page.getByRole('tab', { name: /Login fails after sleep/ })).toHaveAttribute(
+  await expect(sessionRow(page, /Login fails after sleep/)).toHaveAttribute(
     'data-ring',
-    'yellow',
+    'needs_you',
   );
   await expect(sessionsBadge(page)).toContainText('1 session needs you');
   // With a card waiting, the plan and the background tasks fold to their headings, so on a short narrow
@@ -187,14 +200,13 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
     .getByRole('navigation')
     .getByRole('link', { name: /^Sessions/ })
     .click();
+  // Sessions comes back on the fresh session ⌘T opened; the row is the way to the one that waits.
+  await sessionRow(page, /Login fails after sleep/).click();
 
-  // Deny in the tab: the ring and the badge clear, the builder's task stays and the turn ends.
+  // Deny in the session: the ring and the badge clear, the builder's task stays and the turn ends.
   await card.getByRole('radio', { name: /Deny/ }).check();
   await card.getByRole('button', { name: 'Send answer' }).click();
-  await expect(page.getByRole('tab', { name: /Login fails after sleep/ })).not.toHaveAttribute(
-    'data-ring',
-    /.+/,
-  );
+  await expect(sessionRow(page, /Login fails after sleep/)).not.toHaveAttribute('data-ring', /.+/);
   await expect(sessionsBadge(page)).not.toContainText('need');
   await expect(page.getByText('I left the other task alone.')).toBeVisible();
   const listed = Tasks.parse(
@@ -212,6 +224,7 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
     .getByRole('navigation')
     .getByRole('link', { name: /^Sessions/ })
     .click();
+  await sessionRow(page, /Login fails after sleep/).click();
 
   // / lists the session's commands; Esc closes the list.
   const box = page.getByRole('textbox', { name: 'Message' });
@@ -222,24 +235,23 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   await expect(page.getByRole('option', { name: /compact/ })).toHaveCount(0);
   await box.fill('');
 
-  // All Tabs, scanned open; ⌘T, ⌘1, ⌘W and ⌘⇧T.
-  await page.getByRole('button', { name: 'All Tabs' }).click();
+  // The ⌄ switcher, scanned open; ⌘1, ⌘W and ⌘⇧T.
+  await page.getByRole('button', { name: 'Switch session' }).click();
   await expect(page.getByRole('menuitem', { name: /Login fails after sleep/ })).toBeVisible();
   // The menu fades in over 150 ms; axe reads it once it is whole.
-  await expect(page.getByRole('menu', { name: 'All Tabs' })).toHaveCSS('opacity', '1');
+  await expect(page.getByRole('menu')).toHaveCSS('opacity', '1');
   // Mantine wraps a menu's items in a focusable presentation div, which axe's aria-required-children
   // rule does not accept as a menu's child; the menu's own items are named and keyed by the tests above.
-  await scan(page, [1280], 'All Tabs open', ['[data-menu-dropdown]']);
+  await scan(page, [1280], 'the switcher open', ['[data-menu-dropdown]']);
   await page.keyboard.press('Escape');
+  // ⌘1 is the first row of the panel, whichever session that is; the row of ours is then clicked and ⌘W closes it.
   await page.keyboard.press('Meta+1');
-  await expect(page.getByRole('tab', { name: /Login fails after sleep/ })).toHaveAttribute(
-    'aria-selected',
-    'true',
-  );
+  await expect(page.getByRole('option').first()).toHaveAttribute('aria-selected', 'true');
+  await sessionRow(page, /Login fails after sleep/).click();
   await page.keyboard.press('Meta+w');
-  await expect(page.getByRole('tab', { name: /Login fails after sleep/ })).toHaveCount(0);
+  await expect(sessionRow(page, /Login fails after sleep/)).toHaveCount(0);
   await page.keyboard.press('Meta+Shift+t');
-  await expect(page.getByRole('tab', { name: /Login fails after sleep/ })).toBeVisible();
+  await expect(sessionRow(page, /Login fails after sleep/)).toBeVisible();
 
   // What the live region said, read before the reload empties the page's record.
   const saidBeforeReload = await page.evaluate(
@@ -247,22 +259,16 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   );
 
   // A reload restores the tab from the daemon.
-  await page.getByRole('tab', { name: /Login fails after sleep/ }).click();
+  await sessionRow(page, /Login fails after sleep/).click();
   await page.reload();
-  await expect(page.getByRole('tab', { name: /Login fails after sleep/ })).toBeVisible();
-
-  // At 480 one switcher stands for the strip.
-  await page.setViewportSize({ width: 480, height: 900 });
-  await expect(
-    page.getByRole('button', { name: /Login fails after sleep.*All Tabs/ }),
-  ).toBeVisible();
+  await expect(sessionRow(page, /Login fails after sleep/)).toBeVisible();
   await scan(page, [480], 'the conversation at 480');
 
-  // Archive, from the ⋯ menu: the tab is gone, and Recent does not list it on a fresh tab.
+  // Archive, from the ⋯ menu: the row is gone, and Recent does not list it on a fresh tab.
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.getByRole('button', { name: 'More session actions' }).click();
   await page.getByRole('menuitem', { name: 'Archive' }).click();
-  await expect(page.getByRole('tab', { name: /Login fails after sleep/ })).toHaveCount(0);
+  await expect(sessionRow(page, /Login fails after sleep/)).toHaveCount(0);
   await expect(
     page.getByRole('region', { name: 'Recent' }).getByText('Login fails after sleep'),
   ).toHaveCount(0);
@@ -283,109 +289,7 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
     await request.post(`${daemonUrl}/workstreams/${stream.id}/cancel`, { headers: auth });
 });
 
-const WorkstreamNotices = z.array(
-  z.looseObject({
-    id: z.string(),
-    projectId: z.string(),
-    notice: z.looseObject({ key: z.string(), line: z.string() }).nullable().optional(),
-  }),
-);
-
-test('a chat writes in Your folder: an edit and a commit, a task that waits for it, and a message that waits for the task', async ({
-  page,
-  request,
-}) => {
-  test.setTimeout(300_000);
-  const projectId = await createProject(
-    request,
-    'sessions-folder',
-    [{ name: 'repo', globs: ['**'] }],
-    {
-      'src/login.ts': 'export const login = () => null;\n',
-    },
-  );
-  // The e2e daemon runs no sandbox, so a chat cannot write a file here: the edit is the builder's, left
-  // uncommitted in Your folder, and the chat's tool commits it through the daemon's git.
-  const repo = join(E2E_DIR, 'sessions-folder-repo');
-  writeFileSync(join(repo, 'notes.md'), '# Notes\n\nEdited by a chat.\n');
-  await claudeIsInstalled(page);
-  await page.addInitScript((id) => {
-    window.localStorage.setItem('tendb.project', JSON.stringify(id));
-    if (window.localStorage.getItem('mantine-color-scheme-value') === null)
-      window.localStorage.setItem('mantine-color-scheme-value', 'dark');
-  }, projectId);
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await page.goto('/board');
-  await expect(page.getByRole('button', { name: /^Project: sessions-folder/ })).toBeVisible();
-  await page.keyboard.press('Meta+t');
-  await expect(page).toHaveURL(/\/sessions\?fresh=/);
-
-  // The edit and the commit: the agent's rows show, and the bar says the chat is in Your folder.
-  const composer = page.getByRole('textbox', { name: 'Message' });
-  await composer.click();
-  await composer.pressSequentially('Fix the notes');
-  await composer.press('Enter');
-  await expect(page.getByText('Committed the notes.')).toBeVisible();
-  await expect(page.getByText('Chat · Your folder · on main')).toBeVisible();
-  const lastCommit = execFileSync('git', ['log', '-1', '--format=%s|%an'], {
-    cwd: repo,
-    encoding: 'utf8',
-    env: {
-      PATH: process.env['PATH'] ?? '/usr/bin:/bin',
-      GIT_CONFIG_NOSYSTEM: '1',
-      GIT_CONFIG_GLOBAL: '/dev/null',
-    },
-  }).trim();
-  expect(lastCommit).toBe('Add the notes|10db e2e');
-
-  // A task started while the turn holds the folder waits, naming the chat.
-  const made = await request.post(`${daemonUrl}/projects/${projectId}/tasks`, {
-    headers: auth,
-    data: { title: 'Hold the folder', acceptanceCriteria: ['It holds'], areas: ['repo'] },
-  });
-  expect(made.ok()).toBe(true);
-  const taskId = z.looseObject({ id: z.string() }).parse(await made.json()).id;
-  expect((await request.post(`${daemonUrl}/tasks/${taskId}/start`, { headers: auth })).ok()).toBe(
-    true,
-  );
-  const notices = async (): Promise<string[]> =>
-    WorkstreamNotices.parse(
-      await (await request.get(`${daemonUrl}/workstreams?active=true`, { headers: auth })).json(),
-    )
-      .filter((w) => w.projectId === projectId)
-      .flatMap((w) => (w.notice?.key === 'folder-hold' ? [w.notice.line] : []));
-  await expect.poll(notices).toEqual([expect.stringContaining('Fix the notes')]);
-
-  // The turn ends; the task takes the folder and keeps it, so the chat reads only.
-  await composer.click();
-  await composer.pressSequentially('wrap up');
-  await composer.press('Enter');
-  await expect(page.getByRole('article').getByText('Wrapped up.')).toBeVisible();
-  await expect(
-    page.getByText('Chat · reads only: Your folder is in use by the task ‘Hold the folder’'),
-  ).toBeVisible();
-
-  // A message now asks first; Wait for It parks it, and it runs once the task ends.
-  await composer.click();
-  await composer.pressSequentially('Fix the notes again');
-  await composer.press('Enter');
-  const choices = page.getByRole('group', { name: 'Your folder is in use' });
-  await expect(choices).toBeVisible();
-  await scan(page, [1280], 'the held-folder choices');
-  await choices.getByRole('button', { name: 'Wait for It' }).click();
-  await expect(
-    page.getByText('Waits for Your folder: in use by the task ‘Hold the folder’'),
-  ).toBeVisible();
-  const streams = Workstreams.parse(
-    await (await request.get(`${daemonUrl}/workstreams?active=true`, { headers: auth })).json(),
-  ).filter((w) => w.projectId === projectId);
-  for (const stream of streams)
-    await request.post(`${daemonUrl}/workstreams/${stream.id}/cancel`, { headers: auth });
-  await expect(page.getByRole('article').getByText('Looked again.')).toBeVisible();
-  await expect(page.getByText('Chat · Your folder · on main')).toBeVisible();
-});
-
-/** The folder's branch tip, with git's own config kept out. */
+/** Runs git in a repository, with git's own config kept out. */
 function git(repo: string, ...args: string[]): string {
   return execFileSync('git', args, {
     cwd: repo,
@@ -398,19 +302,29 @@ function git(repo: string, ...args: string[]): string {
   }).trim();
 }
 
-test('Do It in Your folder: a chat’s uncommitted file joins a pass of one, which signs off, closes onto main and gives the chat its line back', async ({
-  page,
-  request,
-}) => {
-  test.setTimeout(300_000);
-  const projectId = await createProject(
-    request,
-    'sessions-do-it',
-    [{ name: 'repo', globs: ['**'] }],
-    { 'src/login.ts': 'export const login = () => null;\n' },
+const OpenChats = z.array(
+  z.looseObject({
+    work: z.looseObject({ worktree: z.string().nullable() }).nullable(),
+  }),
+);
+
+/** The worktree a session works in, read from the daemon's open chats; the only one the project has. */
+async function worktreeOf(request: APIRequestContext, project: string): Promise<string> {
+  const chats = OpenChats.parse(
+    await (await request.get(`${daemonUrl}/chats?open=1`, { headers: auth })).json(),
   );
-  const repo = join(E2E_DIR, 'sessions-do-it-repo');
-  writeFileSync(join(repo, 'notes.md'), '# Notes\n\nTidied by a chat.\n');
+  const found = chats.flatMap((chat) =>
+    chat.work?.worktree?.includes(`/${project}-`) ? [chat.work.worktree] : [],
+  );
+  expect(found).toHaveLength(1);
+  return found[0] ?? '';
+}
+
+/** A project of its own, the Board open on it and the window set to dark at 1280. */
+async function openProject(page: Page, request: APIRequestContext, name: string): Promise<string> {
+  const projectId = await createProject(request, name, [{ name: 'repo', globs: ['**'] }], {
+    'notes.md': '# Notes\n',
+  });
   await claudeIsInstalled(page);
   await page.addInitScript((id) => {
     window.localStorage.setItem('tendb.project', JSON.stringify(id));
@@ -419,116 +333,151 @@ test('Do It in Your folder: a chat’s uncommitted file joins a pass of one, whi
   }, projectId);
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto('/board');
-  await expect(page.getByRole('button', { name: /^Project: sessions-do-it/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: new RegExp(`^Project: ${name}`) })).toBeVisible();
+  return projectId;
+}
+
+/** Sends the first line of a fresh session, which the book scripts. */
+async function startSession(page: Page, line: string): Promise<void> {
   await page.keyboard.press('Meta+t');
   await expect(page).toHaveURL(/\/sessions\?fresh=/);
-
-  // The chat's turn commits the notes; the builder's todo list stays uncommitted in the folder.
   const composer = page.getByRole('textbox', { name: 'Message' });
   await composer.click();
-  await composer.pressSequentially('Tidy the notes');
+  await composer.pressSequentially(line);
   await composer.press('Enter');
-  await expect(page.getByRole('article').getByText('Committed the tidy notes.')).toBeVisible();
-  await expect(page.getByText('Chat · Your folder · on main')).toBeVisible();
-  expect(git(repo, 'log', '-1', '--format=%s')).toBe('Tidy the notes');
-  writeFileSync(join(repo, 'todo.md'), '# Todo\n');
+}
 
-  // Do It…: the scripted brief fills in, the sheet lists the file, and Your folder is a pass.
-  await page.getByRole('button', { name: 'Do It…' }).click();
-  const sheet = page.getByRole('dialog', { name: 'Do It' });
-  await expect(sheet.getByRole('textbox', { name: 'Title' })).toHaveValue('Finish the todo notes');
-  await expect(sheet.getByRole('textbox', { name: 'Brief' })).toHaveValue(/Finish the todo list/);
-  await expect(sheet.getByText(/Brief · written by/)).toBeVisible();
-  await sheet.getByText('Your folder, as a pass').click();
-  await expect(sheet.getByText('1 file already changed in your folder:')).toBeVisible();
-  await expect(sheet.getByText('? todo.md')).toBeVisible();
-  await expect(sheet.getByText("These will be part of this task's work.")).toBeVisible();
-  // A modal covers the scheme switch, so the page's own attribute stands in for it while the sheet is open.
-  for (const scheme of ['light', 'dark'] as const) {
-    await page.evaluate((value) => {
-      document.documentElement.setAttribute('data-mantine-color-scheme', value);
-    }, scheme);
-    await expectAccessible(page, `the Do It sheet, ${scheme}`);
-  }
-  await sheet.getByRole('button', { name: 'Do It', exact: true }).click();
+const workBar = (page: Page) => page.getByRole('group', { name: 'Where this work happens' });
 
-  // The pass's tab opens to the right of the chat, and its scripted first turn leaves it Ready.
-  const passTab = page.getByRole('tab', { name: /Finish the todo notes/ });
-  await expect(passTab).toBeVisible();
-  await expect(page.getByText('Task · Your folder · lands on main')).toBeVisible();
-  await expect(page.getByRole('article').getByText('Finished the todo list.')).toBeVisible();
-  await scan(page, [1280], 'the pass of one');
-
-  // Sign Off lands the turn; Close Pass… finishes the pass onto main.
-  await page.getByRole('button', { name: 'Sign Off' }).click();
-  await expect(page.getByText(/Signed off/).first()).toBeVisible();
-  await page.getByRole('button', { name: 'Close Pass…' }).click();
-  const finish = page.getByRole('dialog', { name: 'Finish' });
-  await expect(finish).toBeVisible();
-  await finish.getByRole('button', { name: 'Finish' }).click();
-  await expect(page.getByText(/Done · /).first()).toBeVisible();
-  // main fast-forwards to the pass: its kept turn is on it, and the folder is back on main with the file.
-  await expect
-    .poll(() => git(repo, 'log', 'main', '--format=%s'))
-    .toContain('Finish the todo notes');
-  expect(git(repo, 'branch', '--show-current')).toBe('main');
-  expect(git(repo, 'show', 'main:todo.md')).toBe('# Todo\n\n- done');
-
-  // The chat's line reads as it did before the pass.
-  await page.getByRole('tab', { name: /Tidy the notes/ }).click();
-  await expect(page.getByText('Chat · Your folder · on main')).toBeVisible();
-});
-
-test('Do It in a separate copy on a pull request project: the task opens in a tab of its own and the chat is sealed', async ({
+test('a session on a new branch: the first change asks, the move cuts a worktree, the edit is not in the checkout, then Commit and Merge into main', async ({
   page,
   request,
 }) => {
   test.setTimeout(300_000);
-  const projectId = await createProject(
-    request,
-    'sessions-copy',
-    [{ name: 'repo', globs: ['**'] }],
-    { 'src/login.ts': 'export const login = () => null;\n' },
-    'pull_request',
-  );
-  await claudeIsInstalled(page);
-  await page.addInitScript((id) => {
-    window.localStorage.setItem('tendb.project', JSON.stringify(id));
-    if (window.localStorage.getItem('mantine-color-scheme-value') === null)
-      window.localStorage.setItem('mantine-color-scheme-value', 'dark');
-  }, projectId);
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await page.goto('/board');
-  await expect(page.getByRole('button', { name: /^Project: sessions-copy/ })).toBeVisible();
-  await page.keyboard.press('Meta+t');
-  const composer = page.getByRole('textbox', { name: 'Message' });
-  await composer.click();
-  await composer.pressSequentially('Copy the notes');
-  await composer.press('Enter');
-  await expect(page.getByRole('article').getByText('Looked at the notes.')).toBeVisible();
+  await openProject(page, request, 'sessions-branch');
+  const repo = join(E2E_DIR, 'sessions-branch-repo');
+  await startSession(page, 'Edit on a branch');
 
-  await page.getByRole('button', { name: 'Do It…' }).click();
-  const sheet = page.getByRole('dialog', { name: 'Do It' });
-  await expect(sheet.getByRole('textbox', { name: 'Title' })).toHaveValue('Hold the copy');
-  await expect(sheet.getByText('An ordinary task in its own copy, on a new branch.')).toBeVisible();
-  await expect(
-    sheet.getByText("The task takes this chat's place. The chat becomes read-only."),
-  ).toBeVisible();
-  await sheet.getByRole('button', { name: 'Do It', exact: true }).click();
+  // The session read, then went to change a file: the bar asks, and the row says it needs the builder.
+  await expect(page.getByText('Reading the notes first.')).toBeVisible();
+  await expect(workBar(page)).toBeVisible();
+  await expect(page.getByText(/waiting for your choice/)).toBeVisible();
+  await scan(page, [1280, 900], 'the work bar');
 
-  // The task's tab takes the chat's place, and the chat is sealed behind it.
-  await expect(page.getByRole('tab', { name: /Hold the copy/ })).toBeVisible();
-  await expect(page.getByText(/^Task · Separate copy/)).toBeVisible();
-  await expect(page.getByRole('tab', { name: /Copy the notes/ })).toHaveCount(0);
-  await scan(page, [1280], 'a separate copy’s tab');
+  // On a New Branch: the same conversation carries on in a worktree, which is the root of its edits.
+  await workBar(page).getByRole('button', { name: 'On a New Branch' }).click();
+  await expect(page.getByText('Wrote the notes.')).toBeVisible();
+  await expect(workBar(page)).toHaveCount(0);
+  const worktree = await worktreeOf(request, 'sessions-branch');
+  expect(worktree).not.toBe(repo);
+  expect(git(worktree, 'branch', '--show-current')).toBe('edit-on-a-branch');
+  // The e2e daemon runs no sandbox, so the agent's own write is refused; the builder's stand-in lands in
+  // the worktree and never in the checkout.
+  expect(git(repo, 'status', '--porcelain')).toBe('');
+  writeFileSync(join(worktree, 'notes.md'), '# Notes\n\nWritten on a branch.\n');
+  expect(git(repo, 'status', '--porcelain')).toBe('');
+  expect(readFileSync(join(repo, 'notes.md'), 'utf8')).toBe('# Notes\n');
+  await page.reload();
+  await expect(page.getByText(/on edit-on-a-branch · 1 file changed, not committed/)).toBeVisible();
 
-  // Later specs read Factory across projects: nothing of this task is left running.
-  const streams = Workstreams.parse(
-    await (await request.get(`${daemonUrl}/workstreams?active=true`, { headers: auth })).json(),
-  ).filter((w) => w.projectId === projectId);
-  for (const stream of streams)
-    await request.post(`${daemonUrl}/workstreams/${stream.id}/cancel`, { headers: auth });
+  // Commit… lists the file, unchecked as nothing of the session's tools touched it, and commits it.
+  await page.getByRole('button', { name: 'Commit…' }).click();
+  const modal = page.getByRole('dialog', { name: 'Commit' });
+  await expect(modal.getByRole('textbox', { name: 'Message' })).toHaveValue('Edit on a branch');
+  await modal.getByRole('checkbox', { name: 'notes.md' }).check();
+  await scanModal(page, 'the commit form');
+  await modal.getByRole('button', { name: 'Commit', exact: true }).click();
+  await expect(modal).toBeHidden();
+  expect(git(worktree, 'log', '-1', '--format=%s')).toBe('Edit on a branch');
+  await expect(page.getByText(/1 commit not merged into main/)).toBeVisible();
+
+  // Changes opens as a drawer and Esc closes it.
+  await page.getByRole('button', { name: /^Changes/ }).click();
+  const drawer = page.getByRole('dialog', { name: 'Changes' });
+  await expect(drawer.getByText('notes.md').first()).toBeVisible();
+  await scan(page, [1280], 'the Changes drawer');
+  await page.keyboard.press('Escape');
+  await expect(drawer).toBeHidden();
+
+  // Merge into main: main has the commit and the checkout has the file.
+  await page.getByRole('button', { name: 'Merge into main' }).click();
+  await expect.poll(() => git(repo, 'log', 'main', '--format=%s')).toContain('Edit on a branch');
+  expect(readFileSync(join(repo, 'notes.md'), 'utf8')).toBe('# Notes\n\nWritten on a branch.\n');
+  await expect(page.getByText(/on edit-on-a-branch · nothing ahead of main/)).toBeVisible();
+  await expect(page.getByRole('button', { name: /Merge into main/ })).toHaveCount(0);
 });
+
+test('a session working here: the first change asks, and Here carries on in the checkout', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(300_000);
+  await openProject(page, request, 'sessions-here');
+  await startSession(page, 'Edit here');
+  await expect(page.getByText('Reading the todo list first.')).toBeVisible();
+  await expect(workBar(page)).toBeVisible();
+  await workBar(page).getByRole('button', { name: 'Here, on main' }).click();
+  await expect(page.getByText('Wrote the todo list.')).toBeVisible();
+  await expect(page.getByText(/^on main · /)).toBeVisible();
+  await expect(sessionRow(page, /Edit here/)).toHaveAttribute('data-place', 'here');
+  await scan(page, [1280, 900], 'a session working here');
+});
+
+test('the question survives a reload: the bar and the Inbox card are there again, and 2 answers it', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(300_000);
+  await openProject(page, request, 'sessions-choosing');
+  await startSession(page, 'Choose after a reload');
+  await expect(workBar(page)).toBeVisible();
+  await page.reload();
+  await expect(workBar(page)).toBeVisible();
+  await expect(sessionRow(page, /Choose after a reload/)).toHaveAttribute('data-ring', 'needs_you');
+  // The daemon holds the question, not the page: its restart is the daemon test's, since the e2e daemon
+  // is the runner's to start and stop.
+  await page.keyboard.press('2');
+  await expect(page.getByText('Wrote the later notes.')).toBeVisible();
+  await expect(sessionRow(page, /Choose after a reload/)).not.toHaveAttribute('data-ring', /.+/);
+});
+
+test('Archive on a dirty worktree lists what would be lost, deletes it on the builder’s word, and Reopen brings the session back', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(300_000);
+  await openProject(page, request, 'sessions-archive');
+  await startSession(page, 'Edit then archive');
+  await expect(workBar(page)).toBeVisible();
+  await workBar(page).getByRole('button', { name: 'On a New Branch' }).click();
+  await expect(page.getByText('Wrote the dirty notes.')).toBeVisible();
+  const worktree = await worktreeOf(request, 'sessions-archive');
+  writeFileSync(join(worktree, 'scratch.txt'), 'not committed\n');
+  await page.reload();
+  await page.getByRole('button', { name: 'More session actions' }).click();
+  await page.getByRole('menuitem', { name: 'Archive' }).click();
+  const confirm = page.getByRole('dialog');
+  await expect(confirm.getByText('scratch.txt')).toBeVisible();
+  await scanModal(page, 'the archive question');
+  await confirm.getByRole('button', { name: /Archive and Delete/ }).click();
+  await expect(sessionRow(page, /Edit then archive/)).toHaveCount(0);
+  expect(existsSync(worktree)).toBe(false);
+
+  // Reopen puts the session back on its branch, in a worktree again.
+  await page.keyboard.press('Meta+Shift+t');
+  await expect(sessionRow(page, /Edit then archive/)).toBeVisible();
+  await expect.poll(() => existsSync(worktree)).toBe(true);
+  expect(existsSync(join(worktree, 'scratch.txt'))).toBe(false);
+  await expect(page.getByText(/^on edit-then-archive/)).toBeVisible();
+});
+
+const WorkstreamNotices = z.array(
+  z.looseObject({
+    id: z.string(),
+    projectId: z.string(),
+    notice: z.looseObject({ key: z.string(), line: z.string() }).nullable().optional(),
+  }),
+);
 
 test('a chat goes to the builder’s terminal and back: the banner, a held message, a task that waits for it, Hand Back and the notice', async ({
   page,
@@ -578,7 +527,7 @@ test('a chat goes to the builder’s terminal and back: the banner, a held messa
     await popover.getByRole('button', { name: 'Copy the Command' }).click();
     const banner = page.getByRole('region', { name: 'In your terminal' });
     await expect(banner).toBeVisible();
-    await expect(page.getByText(/^Chat · in your terminal since \d\d:\d\d$/)).toBeVisible();
+    await expect(page.getByText(/^in your terminal since \d\d:\d\d$/)).toBeVisible();
     await expect(banner.getByRole('button', { name: 'Hand Back' })).toBeFocused();
     await scan(page, [1280, 480], 'a chat in the terminal');
 
