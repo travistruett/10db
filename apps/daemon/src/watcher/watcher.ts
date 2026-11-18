@@ -75,7 +75,7 @@ import {
   STRAY_BULK_THRESHOLD,
   strayFoldKey,
 } from './strays';
-import { BY_ANSWER, CardTier } from '../inbox';
+import { BY_ANSWER, CardTier, type CardClosesWhen } from '../inbox';
 
 const WATCH_BATCH_MS = 500;
 /**
@@ -153,6 +153,11 @@ export interface Watcher {
 }
 
 const STRAY_TITLE = 'Write outside every claim';
+/** An ordinary write's card closes itself when a claim comes to cover it; a sensitive one waits for the builder. */
+const COVERED_BY_CLAIM: CardClosesWhen = {
+  by: 'withdrawn',
+  when: 'a claim covers the write (resolveCovered)',
+};
 /** The title of a single stray card, or of a bulk one: "<n> writes outside every claim". */
 const isStrayTitle = (title: string): boolean =>
   title === STRAY_TITLE || /^\d+ writes outside every claim$/.test(title);
@@ -256,8 +261,7 @@ export function createWatcher(deps: {
         workstreamId,
         tier: CardTier.Ask,
         urgency: Urgency.High,
-        // S4: Trust This Version
-        closesWhen: BY_ANSWER,
+        closesWhen: isSensitivePath(rel) ? BY_ANSWER : COVERED_BY_CLAIM,
         title: STRAY_TITLE,
         body: `${labelled(site, rel)}${during}`,
         detail: { path: rel, candidates: [...candidates] },
@@ -272,8 +276,7 @@ export function createWatcher(deps: {
         workstreamId,
         tier: CardTier.Ask,
         urgency: Urgency.High,
-        // S4: Trust This Version
-        closesWhen: BY_ANSWER,
+        closesWhen: COVERED_BY_CLAIM,
         title: `${String(ordinary.length)} writes outside every claim`,
         body: `${listed.map((rel) => labelled(site, rel)).join('\n')}\n…and ${String(ordinary.length - listed.length)} more${during}`,
         detail: { count: ordinary.length, paths: listed, candidates: [...candidates] },

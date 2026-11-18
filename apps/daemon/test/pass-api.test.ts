@@ -1140,7 +1140,11 @@ describe('POST /projects/:projectId/passes while chats hold the folder', () => {
           r.line.includes('did not open'),
         ) ?? undefined,
     );
-    expect(notice).toMatchObject({ key: 'pass-open-failed', tone: 'warning', taskId: null });
+    expect(notice).toMatchObject({
+      key: 'pass-open-failed:Polish pages',
+      tone: 'warning',
+      taskId: null,
+    });
     expect(listInbox(daemon.state.db, {}).filter((i) => i.title.includes('did not open'))).toEqual(
       [],
     );

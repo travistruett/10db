@@ -272,7 +272,7 @@ async function failGate(
       key: gateFailedKey(pass.id),
       tone: 'warning',
       line: `The gate failed as UI Workbench pass "${pass.name}" closed`,
-      body: `The gate ran ${place}.${named} Finish runs it again.`,
+      body: `The gate ran ${place}.${named} Its log: ${ran.logPath}. Finish runs it again.`,
     });
   });
 }

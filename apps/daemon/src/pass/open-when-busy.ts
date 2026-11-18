@@ -25,7 +25,7 @@ export interface OpenWhenBusyDeps {
   /** Whether 10db is draining for an update: nothing then waits to open, as the drain would cancel it. */
   readonly draining: () => boolean;
   /** Tells the builder, in Activity, that a pass they were waiting for did not open. */
-  readonly notify: (projectId: ProjectId, title: string, body: string) => void;
+  readonly notify: (projectId: ProjectId, name: string, title: string, body: string) => void;
 }
 
 /** What the open is for, in the words a refusal and the pending open use. */
@@ -99,7 +99,7 @@ export async function openWhenBusy<T>(
         if (!(error instanceof FolderWaitCancelledError)) {
           const why = error instanceof Error ? error.message : String(error);
           deps.logger.warn({ projectId, err: why }, 'a pass waiting to open was refused');
-          deps.notify(projectId, `Pass ‘${request.name}’ did not open`, why);
+          deps.notify(projectId, request.name, `Pass ‘${request.name}’ did not open`, why);
         }
       },
     );

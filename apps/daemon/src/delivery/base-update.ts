@@ -1058,9 +1058,9 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
   }
 
   /**
-   * Tells the builder, on one card, what kept the generated directories `merged` took from the base
+   * Tells the builder, on one notice, what kept the generated directories `merged` took from the base
    * from being regenerated, unless `card` is false: a caller that puts the merge back has nothing
-   * for that card's instructions to act on, and says so on its own. Resolves with what the gate's
+   * for that notice's instructions to act on, and says so on its own. Resolves with what the gate's
    * note says of it; with `lost` no gate will run, so it says nothing of one.
    */
   function unregenerated(
@@ -1097,7 +1097,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     const said = `10db couldn't regenerate ${named(dirs)} after merging origin/${batch.baseBranch}: ${told.why}.`;
     return lost
       ? said
-      : `${said} This gate may see generated files that don't match their sources; the builder has a card.`;
+      : `${said} This gate may see generated files that don't match their sources; the builder has a notice.`;
   }
 
   /**

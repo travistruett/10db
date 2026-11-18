@@ -2331,12 +2331,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     stopChatForOpen: (chatId) => chat.stopForOpen(chatId),
     logger: logger.child({ component: 'pass-open' }),
     draining: () => updateDrain.draining,
-    notify: (projectId, title, body) => {
+    notify: (projectId, name, title, body) => {
       inbox.notice({
         tier: CardTier.Notice,
         projectId,
         taskId: null,
-        key: 'pass-open-failed',
+        // A pass that waited has no id yet, so its name tells one open from another.
+        key: `pass-open-failed:${name.slice(0, 120)}`,
         tone: 'warning',
         line: title,
         body,
@@ -2669,7 +2670,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
                 tier: CardTier.Notice,
                 projectId,
                 taskId: null,
-                key: 'pass-open-cancelled',
+                key: `pass-open-cancelled:${name.slice(0, 120)}`,
                 tone: 'info',
                 line: `Pass ‘${name}’ was cancelled for 10db’s update`,
                 body: 'It was waiting for chats’ turns to end. Open it again once the update is done.',

@@ -27,7 +27,7 @@ export const NoticePostedData = z.strictObject({
 });
 export type NoticePostedData = z.infer<typeof NoticePostedData>;
 
-/** `GET /activity`: filters and the cursor for one page of notices, newest first. */
+/** `GET /activity/page`: filters and the cursor for one page of notices, newest first. */
 export const ActivityPageQuery = z
   .strictObject({
     project: ProjectId.optional(),

@@ -924,7 +924,7 @@ describe('self-update in the daemon', () => {
     const { rows } = await api.get(`/activity/page?project=${project.id}`, ActivityPageDto);
     expect(rows).toMatchObject([
       {
-        key: 'pass-open-cancelled',
+        key: expect.stringMatching(/^pass-open-cancelled:/) as string,
         tone: 'info',
         taskId: null,
         line: expect.stringContaining('cancelled for 10db’s update') as string,

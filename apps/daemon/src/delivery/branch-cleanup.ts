@@ -47,12 +47,12 @@ export async function removeBranch(
 
 /**
  * After a batch is CLOSED or ABANDONED and nothing runs in its branch's worktree: deletes the
- * branch while it is still at the commit it was cut from; an abandoned batch's raises one card
- * saying so. An abandoned batch whose branch holds
- * commits keeps it and raises one card offering to delete it. A closed batch's branch that moved is
- * kept without a card. `worktreeRemoved` is whether `retireWorktree` just removed the batch's
- * worktree, which the deleted card then says; a shared batch never had one. Safe to repeat; a card is raised again only while the branch still holds the
- * commits and no card for it is open, so answer Keep before the batch is retired again.
+ * branch while it is still at the commit it was cut from; an abandoned batch's posts one notice
+ * saying so. An abandoned batch whose branch holds commits keeps it and raises one card offering to
+ * delete it. A closed batch's branch that moved is kept without a card. `worktreeRemoved` is whether
+ * `retireWorktree` just removed the batch's worktree, which the deleted notice then says; a shared
+ * batch never had one. Safe to repeat; the card is raised again only while the branch still holds
+ * the commits and no card for it is open, so answer Keep before the batch is retired again.
  */
 export async function settleBranch(
   ctx: DeliveryContext,
