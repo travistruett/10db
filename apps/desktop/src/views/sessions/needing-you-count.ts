@@ -1,7 +1,8 @@
 import type { ChatDto } from '@10db/contracts';
 import { useOpenChats } from '../../daemon/chat-queries';
-import { useInbox } from '../../daemon/queries';
+import { useInbox, useProjects } from '../../daemon/queries';
 import { openCardsByConversation } from './needs-you';
+import { panelGroups, panelOrder } from './panel-order';
 import { needsYou } from './tab-state';
 import { chatInfo } from './tab-info';
 
@@ -13,8 +14,10 @@ import { chatInfo } from './tab-info';
 export function useSessionsNeedingYou(): readonly ChatDto[] {
   const chats = useOpenChats().data;
   const inbox = useInbox().data;
+  const projects = useProjects().data;
   const cards = openCardsByConversation(inbox ?? []);
-  return [...(chats ?? [])]
-    .sort((a, b) => (a.tabPosition ?? 0) - (b.tabPosition ?? 0))
+  // The panel's order, by project, which is the one ⌘J walks.
+  return panelOrder(panelGroups(projects ?? [], chats ?? [], []))
+    .flatMap((row) => (row.kind === 'chat' ? [row.chat] : []))
     .filter((chat) => needsYou(chatInfo(chat, cards, {}).state));
 }
