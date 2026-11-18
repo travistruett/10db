@@ -1,4 +1,4 @@
-import type { KnowledgeScope } from '@10db/contracts';
+import { McpToolName, type KnowledgeScope } from '@10db/contracts';
 
 interface Cited {
   readonly id: string;
@@ -54,4 +54,18 @@ export function renderRules(rules: {
 /** The decisions that apply to the task, as the text a session reads. */
 export function renderDecisions(decisions: readonly RenderedDecision[]): string[] {
   return decisions.length > 0 ? ['Recorded decisions:', ...decisions.map(decisionBullet)] : [];
+}
+
+/**
+ * The decisions that apply to the task by their questions only, with where to read each one's choice
+ * and rationale: an indexed brief names a decision and the lane looks it up when it needs it.
+ */
+export function renderDecisionIndex(decisions: readonly RenderedDecision[]): string[] {
+  return decisions.length > 0
+    ? [
+        'Recorded decisions:',
+        ...decisions.map((d) => `- ${oneLine(d.question)} ${cite(d)}`),
+        `Call ${McpToolName.FindKnowledge} with a question's words for its choice and rationale.`,
+      ]
+    : [];
 }

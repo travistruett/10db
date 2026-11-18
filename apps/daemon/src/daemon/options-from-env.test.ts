@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { LaneBrief } from '../briefing';
 import { loadEnv } from '../env';
 import {
   aaKeyReaderFromEnv,
@@ -30,6 +31,14 @@ describe('daemonOptionsFromEnv', () => {
     const options = daemonOptionsFromEnv(loadEnv({ [name]: value }));
     expect(options.sandbox).toEqual({});
     expect(options).not.toHaveProperty('permissionModeOverride');
+  });
+
+  it.each([
+    ['absent', {}, undefined],
+    ['full', { TENDB_LANE_BRIEF: 'full' }, LaneBrief.Full],
+    ['index', { TENDB_LANE_BRIEF: 'index' }, LaneBrief.Index],
+  ])('briefs lanes as TENDB_LANE_BRIEF says when it is %s', (_name, source, expected) => {
+    expect(daemonOptionsFromEnv(loadEnv(source)).laneBrief).toBe(expected);
   });
 
   it.each([

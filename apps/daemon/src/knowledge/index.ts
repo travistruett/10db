@@ -31,4 +31,4 @@ export {
   withdrawDecisionRecord,
   withdrawPrincipleRecord,
 } from './records';
-export { renderDecisions, renderRules } from './render';
+export { renderDecisionIndex, renderDecisions, renderRules } from './render';

@@ -227,6 +227,7 @@ import {
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
 import { protectedPaths } from '../guard';
 import { createBuilderMcpHandler, createBuilderTools } from '../builder';
+import type { LaneBrief } from '../briefing';
 import {
   createExploreEngine,
   createLiveRegistry,
@@ -519,6 +520,8 @@ export interface DaemonOptions {
   readonly slack?: boolean;
   /** `TENDB_JUDGE=off`: the OpenRouter key is never read and no decision calls OpenRouter. */
   readonly judgeOff?: boolean;
+  /** How every lane's brief carries its Plan and knowledge (`TENDB_LANE_BRIEF`); absent pastes them whole. */
+  readonly laneBrief?: LaneBrief;
   /**
    * Read OpenRouter's scores and per-provider speed with the decisions account's key. Off unless given, so a
    * test never reaches the network; the entry point turns it on unless a kill switch is set. Never runs with
@@ -1945,6 +1948,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       ? { afterSession: (id: WorkstreamId) => watcher.stepEnd(id).then(() => undefined) }
       : {}),
     identifyProcess: (pid) => processes.identify(pid),
+    ...(opts.laneBrief === undefined ? {} : { laneBrief: opts.laneBrief }),
   });
   runner = createdRunner;
   const createdScheduler = createScheduler({
