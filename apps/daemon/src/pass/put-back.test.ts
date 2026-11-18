@@ -85,8 +85,9 @@ async function inLaterPass(put: PutBackKeptWork): Promise<void> {
 }
 
 describe('putBackKeptWork', () => {
-  it('gives each file still as the take-out left it the kept version', async () => {
+  it('gives each file still as the take-out left it the kept version, and finds every one on a rerun after a restart cut it short', async () => {
     await takenOut();
+    const saved = getTaskKeptWork(w.h.store.db, w.settings.id);
     expect(await putBack()).toEqual({
       applied: ['src/settings/long.tsx', 'src/settings/new.tsx', 'src/settings/old.tsx'],
       left: [],
@@ -98,12 +99,7 @@ describe('putBackKeptWork', () => {
     expect(getTaskKeptWork(w.h.store.db, w.settings.id)).toBeNull();
     expect(w.h.git$('for-each-ref', keptRef(w.settings.id))).not.toBe('');
     expect(lastNotice()).toBe('Put back its saved UI Workbench work: 3 files.');
-  });
 
-  it('finds every file it already put back on a rerun after a restart cut it short', async () => {
-    await takenOut();
-    const saved = getTaskKeptWork(w.h.store.db, w.settings.id);
-    await putBack();
     // The daemon died before the write that ends the put-back.
     w.h.state.write((ctx) => {
       setTaskKeptWork(ctx, w.settings.id, saved);

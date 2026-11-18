@@ -151,8 +151,19 @@ describe('signOffSteps', () => {
     );
   });
 
-  it('signs off a page with no changed file with no commit', async () => {
+  it('is not taken when the page is no longer Ready, saying so, and signs off a page with no changed file with no commit', async () => {
     w = await openPassWorld();
+    await turn(w.settings, () => {
+      w.write('src/settings/page.tsx', 'tidied\n');
+    });
+
+    expect(await signOff(w.settings)).toMatchObject({ kind: 'not_now' });
+
+    expect(landed()).toEqual([]);
+    expect(listTaskThread(w.h.store.db, w.settings.id).at(-1)?.body).toBe(
+      'Not signed off: the page is no longer Ready.',
+    );
+
     await turn(w.people, () => undefined);
     w.ready(w.people);
 
@@ -165,16 +176,17 @@ describe('signOffSteps', () => {
     );
   });
 
-  it.each([
-    { name: 'makes no second commit', between: null, landed: ['Settings: UI work'] },
-    {
-      name: "lands the next turn's files as a second commit after a message",
-      between: { path: 'src/settings/more.tsx', content: 'more\n' },
-      landed: ['Settings: UI work', 'Settings: UI work'],
-    },
-  ])(
-    '$name when the daemon stops between the commit and the write',
-    async ({ between, landed: subjects }) => {
+  it('lands each turn once when the daemon stops between the commit and the write: no second commit, or the next turn as a second commit after a message', async () => {
+    const rows = [
+      { name: 'makes no second commit', between: null, landed: ['Settings: UI work'] },
+      {
+        name: "lands the next turn's files as a second commit after a message",
+        between: { path: 'src/settings/more.tsx', content: 'more\n' },
+        landed: ['Settings: UI work', 'Settings: UI work'],
+      },
+    ];
+    for (const [at, { name, between, landed: subjects }] of rows.entries()) {
+      if (at > 0) w.close();
       w = await openPassWorld();
       await turn(w.settings, () => {
         w.write('src/settings/page.tsx', 'tidied\n');
@@ -189,8 +201,11 @@ describe('signOffSteps', () => {
       };
       await expect(
         signOff(w.settings, { ...w.deps, git: crashing, stopLane: stopped }),
+        name,
       ).rejects.toThrow('the daemon stopped');
-      expect(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state).toBe('WAITING_HUMAN');
+      expect
+        .soft(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state, name)
+        .toBe('WAITING_HUMAN');
       if (between !== null) {
         await turn(w.settings, () => {
           w.write(between.path, between.content);
@@ -200,61 +215,66 @@ describe('signOffSteps', () => {
 
       const again = await signOff(w.settings, { ...w.restart(), stopLane: stopped });
 
-      expect(again).toMatchObject({
+      expect.soft(again, name).toMatchObject({
         kind: 'signed_off',
         files: [between?.path ?? 'src/settings/page.tsx'],
       });
-      expect(landed()).toEqual(subjects);
-      if (between !== null) expect(onBranch(between.path)).toBe('more');
-      expect(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state).toBe('DONE');
-    },
-  );
+      expect.soft(landed(), name).toEqual(subjects);
+      if (between !== null) expect.soft(onBranch(between.path), name).toBe('more');
+      expect.soft(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state, name).toBe('DONE');
+    }
+  }, 120_000);
 
-  it.each([
-    {
-      name: 'queued its next turn',
-      after: (ctx: WriteContext, ws: WorkstreamId) => queueUntaken(ctx, ws, null, null),
-      state: 'QUEUED',
-    },
-    {
-      name: 'started its next turn',
-      after: (ctx: WriteContext, ws: WorkstreamId) => {
-        transitionWorkstream(ctx, ws, { to: S.Running, fence: null });
+  it('leaves the page unsigned when a message comes as it lands, whatever its next turn does, and lands nothing when one queues the next turn as the session stops', async () => {
+    const rows = [
+      {
+        name: 'queued its next turn',
+        after: (ctx: WriteContext, ws: WorkstreamId) => queueUntaken(ctx, ws, null, null),
+        state: 'QUEUED',
       },
-      state: 'RUNNING',
-    },
-    { name: 'waits for its next turn', after: () => undefined, state: 'WAITING_HUMAN' },
-  ])('leaves the page unsigned when a message as it landed $name', async ({ after, state }) => {
-    w = await openPassWorld();
-    await turn(w.settings, () => {
-      w.write('src/settings/page.tsx', 'tidied\n');
-    });
-    w.ready(w.settings);
-    const ws = w.runOf(w.settings);
-    const messaged: Git = {
-      ...w.deps.git,
-      landPaths: async (input) => {
-        const done = await w.deps.git.landPaths(input);
-        w.h.state.write((ctx) => {
-          insertBuilderMessage(ctx, w.settings.id, { body: 'one more thing', files: [] });
-          after(ctx, ws);
-        });
-        return done;
+      {
+        name: 'started its next turn',
+        after: (ctx: WriteContext, ws: WorkstreamId) => {
+          transitionWorkstream(ctx, ws, { to: S.Running, fence: null });
+        },
+        state: 'RUNNING',
       },
-    };
+      { name: 'waits for its next turn', after: () => undefined, state: 'WAITING_HUMAN' },
+    ];
+    for (const [at, { name, after, state }] of rows.entries()) {
+      if (at > 0) w.close();
+      w = await openPassWorld();
+      await turn(w.settings, () => {
+        w.write('src/settings/page.tsx', 'tidied\n');
+      });
+      w.ready(w.settings);
+      const ws = w.runOf(w.settings);
+      const messaged: Git = {
+        ...w.deps.git,
+        landPaths: async (input) => {
+          const done = await w.deps.git.landPaths(input);
+          w.h.state.write((ctx) => {
+            insertBuilderMessage(ctx, w.settings.id, { body: 'one more thing', files: [] });
+            after(ctx, ws);
+          });
+          return done;
+        },
+      };
 
-    const outcome = await signOff(w.settings, { ...w.deps, git: messaged, stopLane: stopped });
+      const outcome = await signOff(w.settings, { ...w.deps, git: messaged, stopLane: stopped });
 
-    expect(outcome).toMatchObject({ kind: 'not_now' });
-    // The commit stays on the branch; the next sign-off lands what the turn adds.
-    expect(landed()).toEqual(['Settings: UI work']);
-    expect(getWorkstreamRow(w.h.store.db, ws).state).toBe(state);
-    expect(listTaskThread(w.h.store.db, w.settings.id).at(-1)?.body).toMatch(
-      /^Not signed off: the page took a message as it landed/,
-    );
-  });
+      expect.soft(outcome, name).toMatchObject({ kind: 'not_now' });
+      // The commit stays on the branch; the next sign-off lands what the turn adds.
+      expect.soft(landed(), name).toEqual(['Settings: UI work']);
+      expect.soft(getWorkstreamRow(w.h.store.db, ws).state, name).toBe(state);
+      expect
+        .soft(listTaskThread(w.h.store.db, w.settings.id).at(-1)?.body, name)
+        .toMatch(/^Not signed off: the page took a message as it landed/);
+    }
 
-  it('lands nothing when a message queues the next turn as the session stops', async () => {
+    // A message that queues the next turn as the session stops: nothing lands.
+    const label = 'a message as the session stops';
+    w.close();
     w = await openPassWorld();
     await turn(w.settings, () => {
       w.write('src/settings/page.tsx', 'tidied\n');
@@ -273,20 +293,21 @@ describe('signOffSteps', () => {
       },
     });
 
-    expect(outcome).toMatchObject({ kind: 'not_now' });
-    expect(landed()).toEqual([]);
-    expect(getWorkstreamRow(w.h.store.db, ws).state).toBe('QUEUED');
-    expect(listTaskThread(w.h.store.db, w.settings.id).at(-1)?.body).toBe(
-      'Not signed off: the page took a message as its session stopped.',
-    );
-  });
+    expect.soft(outcome, label).toMatchObject({ kind: 'not_now' });
+    expect.soft(landed(), label).toEqual([]);
+    expect.soft(getWorkstreamRow(w.h.store.db, ws).state, label).toBe('QUEUED');
+    expect
+      .soft(listTaskThread(w.h.store.db, w.settings.id).at(-1)?.body, label)
+      .toBe('Not signed off: the page took a message as its session stopped.');
+  }, 240_000);
 
-  it.each([
-    { name: 'a page', from: SignOffFrom.Page, closing: false },
-    { name: "a close's Sign Off Now", from: SignOffFrom.Close, closing: true },
-  ])(
-    'of $name ends no run once an Abandon took the pass as it landed',
-    async ({ from, closing }) => {
+  it("ends no run once an Abandon took the pass as it landed, of a page or of a close's Sign Off Now", async () => {
+    const rows = [
+      { name: 'a page', from: SignOffFrom.Page, closing: false },
+      { name: "a close's Sign Off Now", from: SignOffFrom.Close, closing: true },
+    ];
+    for (const [at, { name, from, closing }] of rows.entries()) {
+      if (at > 0) w.close();
       w = await openPassWorld();
       await turn(w.settings, () => {
         w.write('src/settings/page.tsx', 'tidied\n');
@@ -312,11 +333,13 @@ describe('signOffSteps', () => {
         { taskId: w.settings.id, from },
       );
 
-      if (closing) await expect(signing).rejects.toThrow(ConflictError);
-      else expect(await signing).toMatchObject({ kind: 'not_now' });
-      expect(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state).toBe('WAITING_HUMAN');
-    },
-  );
+      if (closing) await expect.soft(signing, name).rejects.toThrow(ConflictError);
+      else expect.soft(await signing, name).toMatchObject({ kind: 'not_now' });
+      expect
+        .soft(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state, name)
+        .toBe('WAITING_HUMAN');
+    }
+  }, 120_000);
 
   it('lands from the new tip once when a hand-typed git moved the branch as it landed', async () => {
     w = await openPassWorld();
@@ -351,55 +374,64 @@ describe('signOffSteps', () => {
     expect(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state).toBe('DONE');
   });
 
-  it.each([
-    { name: 'the first page first', order: ['settings', 'people'] as const },
-    { name: 'the second page first', order: ['people', 'settings'] as const },
-  ])('keeps both edits of one shared file, signed off with $name', async ({ order }) => {
-    w = await openPassWorld();
-    await turn(
-      w.settings,
-      () => {
-        w.write('src/shared.ts', 'shared\nsettings\n');
-        w.write('src/settings/page.tsx', 'settings page\n');
-      },
-      true,
-    );
-    await turn(
-      w.people,
-      () => {
-        w.write('src/shared.ts', 'shared\nsettings\npeople\n');
-        w.write('src/people/page.tsx', 'people page\n');
-      },
-      true,
-    );
-    w.ready(w.settings);
-    w.ready(w.people);
+  it('keeps both edits of one shared file, signed off with the first page first or the second', async () => {
+    const rows = [
+      { name: 'the first page first', order: ['settings', 'people'] as const },
+      { name: 'the second page first', order: ['people', 'settings'] as const },
+    ];
+    for (const [at, { name, order }] of rows.entries()) {
+      if (at > 0) w.close();
+      w = await openPassWorld();
+      await turn(
+        w.settings,
+        () => {
+          w.write('src/shared.ts', 'shared\nsettings\n');
+          w.write('src/settings/page.tsx', 'settings page\n');
+        },
+        true,
+      );
+      await turn(
+        w.people,
+        () => {
+          w.write('src/shared.ts', 'shared\nsettings\npeople\n');
+          w.write('src/people/page.tsx', 'people page\n');
+        },
+        true,
+      );
+      w.ready(w.settings);
+      w.ready(w.people);
 
-    for (const name of order) await signOff(w[name]);
+      for (const page of order) await signOff(w[page]);
 
-    expect(onBranch('src/shared.ts')).toBe('shared\nsettings\npeople');
-    expect(onBranch('src/settings/page.tsx')).toBe('settings page');
-    expect(onBranch('src/people/page.tsx')).toBe('people page');
-    // Each change once, in chain order, each before the first page that needs it.
-    expect(landed()).toEqual(
-      order[0] === 'settings'
-        ? [
-            'Shared change 1 of Settings: UI work',
-            'Settings: UI work',
-            'Shared change 2 of People: UI work',
-            'People: UI work',
-          ]
-        : [
-            'Shared change 1 of Settings: UI work',
-            'Shared change 2 of People: UI work',
-            'People: UI work',
-            'Settings: UI work',
-          ],
-    );
-    expect(
-      listSharedChanges(w.h.store.db, w.opened.pass.id).every((c) => c.landedSha !== null),
-    ).toBe(true);
-  });
+      expect.soft(onBranch('src/shared.ts'), name).toBe('shared\nsettings\npeople');
+      expect.soft(onBranch('src/settings/page.tsx'), name).toBe('settings page');
+      expect.soft(onBranch('src/people/page.tsx'), name).toBe('people page');
+      // Each change once, in chain order, each before the first page that needs it.
+      expect
+        .soft(landed(), name)
+        .toEqual(
+          order[0] === 'settings'
+            ? [
+                'Shared change 1 of Settings: UI work',
+                'Settings: UI work',
+                'Shared change 2 of People: UI work',
+                'People: UI work',
+              ]
+            : [
+                'Shared change 1 of Settings: UI work',
+                'Shared change 2 of People: UI work',
+                'People: UI work',
+                'Settings: UI work',
+              ],
+        );
+      expect
+        .soft(
+          listSharedChanges(w.h.store.db, w.opened.pass.id).every((c) => c.landedSha !== null),
+          name,
+        )
+        .toBe(true);
+    }
+  }, 120_000);
 
   it('lands each shared change once when the daemon stops between two landings', async () => {
     w = await openPassWorld();
@@ -473,20 +505,6 @@ describe('signOffSteps', () => {
     expect(landed()).toEqual(['Shared change 1 of People: UI work', 'Settings: UI work']);
     expect(listSignOffWaits(w.h.store.db, w.opened.pass.id)).toEqual([]);
   });
-
-  it('is not taken when the page is no longer Ready, and the thread says so', async () => {
-    w = await openPassWorld();
-    await turn(w.settings, () => {
-      w.write('src/settings/page.tsx', 'tidied\n');
-    });
-
-    expect(await signOff(w.settings)).toMatchObject({ kind: 'not_now' });
-
-    expect(landed()).toEqual([]);
-    expect(listTaskThread(w.h.store.db, w.settings.id).at(-1)?.body).toBe(
-      'Not signed off: the page is no longer Ready.',
-    );
-  });
 });
 
 describe('a waiting sign-off', () => {
@@ -495,7 +513,7 @@ describe('a waiting sign-off', () => {
   });
   const takeOutDeps = () => ({ ...w.deps, stopLane: stopped, wrote: stopped });
 
-  it.each([
+  const ENDS = [
     {
       name: 'a take-out of the waiting page',
       end: () => takeOut(takeOutDeps(), { taskId: w.settings.id, within: TakeOutWithin.Alone }),
@@ -516,7 +534,7 @@ describe('a waiting sign-off', () => {
           },
           w.opened.pass.id,
         );
-        expect(waits).toBe(0);
+        expect.soft(waits, "an Abandon from its route, at the Abandon's first step").toBe(0);
       },
     },
     {
@@ -526,22 +544,30 @@ describe('a waiting sign-off', () => {
         return Promise.resolve();
       },
     },
-  ])('ends with $name', async ({ end }) => {
-    w = await openPassWorld();
-    w.startTurn(w.people);
-    const granted = await grantSharedHold(w.deps, { workstreamId: w.runOf(w.people), area: 'src' });
-    if (!granted?.ok) throw new Error('src was not granted');
-    w.write('src/button.ts', 'button\n');
-    await turn(w.settings, () => {
-      w.write('src/settings/page.tsx', 'settings page\n');
-    });
-    w.ready(w.settings);
-    expect(await signOff(w.settings)).toMatchObject({ kind: 'waiting' });
+  ];
 
-    await end();
+  it('ends with a take-out of the waiting page, an Abandon of the pass or from its route, or the builder cancelling it', async () => {
+    for (const [at, { name, end }] of ENDS.entries()) {
+      if (at > 0) w.close();
+      w = await openPassWorld();
+      w.startTurn(w.people);
+      const granted = await grantSharedHold(w.deps, {
+        workstreamId: w.runOf(w.people),
+        area: 'src',
+      });
+      if (!granted?.ok) throw new Error('src was not granted');
+      w.write('src/button.ts', 'button\n');
+      await turn(w.settings, () => {
+        w.write('src/settings/page.tsx', 'settings page\n');
+      });
+      w.ready(w.settings);
+      expect(await signOff(w.settings), name).toMatchObject({ kind: 'waiting' });
 
-    expect(listSignOffWaits(w.h.store.db, w.opened.pass.id)).toEqual([]);
-  });
+      await end();
+
+      expect.soft(listSignOffWaits(w.h.store.db, w.opened.pass.id), name).toEqual([]);
+    }
+  }, 240_000);
 });
 
 describe('a Sign Off from the Ready card that does not land', () => {
@@ -620,31 +646,37 @@ describe('finishSignOff', () => {
     });
   };
 
-  it.each([
-    { from: 'WAITING_HUMAN', path: [S.Starting, S.Running, S.WaitingHuman] },
-    { from: 'QUEUED', path: [] },
-    { from: 'HELD', path: [S.Held] },
-    { from: 'PAUSED_LIMIT', path: [S.Starting, S.PausedLimit] },
-    { from: 'RECOVERING', path: [S.Starting, S.Recovering] },
-    { from: 'STARTING', path: [S.Starting] },
-    { from: 'VERIFYING', path: [S.Starting, S.Verifying] },
-  ])('takes a run in $from to DONE by edges that exist', ({ path }) => {
-    const run = runIn(path);
-    finish(run);
-    expect(getWorkstreamRow(w.h.store.db, run.ws).state).toBe('DONE');
+  it('takes a run in any state a sign-off can end to DONE by edges that exist', () => {
+    for (const { from, path } of [
+      { from: 'WAITING_HUMAN', path: [S.Starting, S.Running, S.WaitingHuman] },
+      { from: 'QUEUED', path: [] },
+      { from: 'HELD', path: [S.Held] },
+      { from: 'PAUSED_LIMIT', path: [S.Starting, S.PausedLimit] },
+      { from: 'RECOVERING', path: [S.Starting, S.Recovering] },
+      { from: 'STARTING', path: [S.Starting] },
+      { from: 'VERIFYING', path: [S.Starting, S.Verifying] },
+    ]) {
+      const run = runIn(path);
+      finish(run);
+      expect.soft(getWorkstreamRow(w.h.store.db, run.ws).state, from).toBe('DONE');
+    }
   });
 
-  it.each([
-    { from: 'RUNNING', path: [S.Starting, S.Running] },
-    { from: 'HANDING_OFF', path: [S.Starting, S.Running, S.HandingOff] },
-    { from: 'TAKEN_OVER', path: [S.Starting, S.Running, S.TakenOver] },
-  ])('refuses a run in $from and writes nothing', ({ from, path }) => {
-    const run = runIn(path);
-    expect(() => {
-      finish(run);
-    }).toThrow(ConflictError);
-    expect(getWorkstreamRow(w.h.store.db, run.ws).state).toBe(from);
-    expect(listTaskThread(w.h.store.db, run.task.id)).toEqual([]);
+  it('refuses a run whose session is live or taken over, and writes nothing', () => {
+    for (const { from, path } of [
+      { from: 'RUNNING', path: [S.Starting, S.Running] },
+      { from: 'HANDING_OFF', path: [S.Starting, S.Running, S.HandingOff] },
+      { from: 'TAKEN_OVER', path: [S.Starting, S.Running, S.TakenOver] },
+    ]) {
+      const run = runIn(path);
+      expect
+        .soft(() => {
+          finish(run);
+        }, from)
+        .toThrow(ConflictError);
+      expect.soft(getWorkstreamRow(w.h.store.db, run.ws).state, from).toBe(from);
+      expect.soft(listTaskThread(w.h.store.db, run.task.id), from).toEqual([]);
+    }
   });
 });
 
@@ -668,7 +700,7 @@ describe('a Sign Off in flight', () => {
   const pageOf = (task: TaskDto) =>
     passView(w.h.store.db, w.opened.pass.id).pages.find((p) => p.taskId === task.id);
 
-  it('reads Signing off on the page, and refuses a second Sign Off until it lands', async () => {
+  it('reads Signing off on the page, refuses a second Sign Off until it lands, and goes on with it after a restart cut it short', async () => {
     w = await openPassWorld();
     await turn(w.settings, () => {
       w.write('src/settings/page.tsx', 'tidied\n');
@@ -680,21 +712,6 @@ describe('a Sign Off in flight', () => {
     expect(askSignOff(deps, w.opened.pass.id, w.settings.id).state).toBe('signing_off');
     expect(pageOf(w.settings)?.signOff).toBe('signing_off');
     expect(() => askSignOff(deps, w.opened.pass.id, w.settings.id)).toThrow(ConflictError);
-    release();
-    await w.h.jobs.idle();
-
-    expect(pageOf(w.settings)?.signOff).toBe('done');
-    expect(landed()).toEqual(['Settings: UI work']);
-  });
-
-  it('goes on with a sign-off a restart cut short', async () => {
-    w = await openPassWorld();
-    await turn(w.settings, () => {
-      w.write('src/settings/page.tsx', 'tidied\n');
-    });
-    w.ready(w.settings);
-    const release = holdQueue();
-    askSignOff({ ...w.deps, stopLane: stopped }, w.opened.pass.id, w.settings.id);
 
     const after = { ...w.restart(), stopLane: stopped };
     resumeSignOffWaits(after);

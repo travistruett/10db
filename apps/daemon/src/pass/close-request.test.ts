@@ -47,7 +47,7 @@ describe('checkCloseRequest', () => {
     { taskId: people, choice: PassClosePageChoice.TakeOut },
   ];
 
-  it.each([
+  const ROWS = [
     {
       name: 'a Drop of a change a page set to Sign Off Now was built with',
       request: {
@@ -102,11 +102,15 @@ describe('checkCloseRequest', () => {
       },
       refused: null,
     },
-  ])('$name', ({ request, refused }) => {
-    const check = () => {
-      checkCloseRequest(preview, { token: 't', ...request }, pages);
-    };
-    if (refused === null) expect(check).not.toThrow();
-    else expect(check).toThrow(refused);
+  ];
+
+  it('refuses a choice its lists and its pages do not allow, and allows the rest', () => {
+    for (const { name, request, refused } of ROWS) {
+      const check = () => {
+        checkCloseRequest(preview, { token: 't', ...request }, pages);
+      };
+      if (refused === null) expect.soft(check, name).not.toThrow();
+      else expect.soft(check, name).toThrow(refused);
+    }
   });
 });

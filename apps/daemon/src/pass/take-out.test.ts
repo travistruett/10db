@@ -95,60 +95,100 @@ async function worked(): Promise<PassWorld> {
 }
 
 /** What a finished take-out of Settings left, the same however many restarts it took. */
-function expectTakenOut(world: PassWorld): void {
+function expectTakenOut(world: PassWorld, label: string): void {
   const db = world.h.store.db;
   const task = getTask(db, world.settings.id);
   // The page's files are as they were before the pass: the earlier edit back, the task's file gone.
-  expect(read(world, 'src/settings/page.tsx')).toBe('edited before the pass\n');
-  expect(read(world, 'src/settings/old.tsx')).toBe('old\n');
-  expect(existsSync(join(world.h.repo, 'src/settings/new.tsx'))).toBe(false);
+  expect.soft(read(world, 'src/settings/page.tsx'), label).toBe('edited before the pass\n');
+  expect.soft(read(world, 'src/settings/old.tsx'), label).toBe('old\n');
+  expect.soft(existsSync(join(world.h.repo, 'src/settings/new.tsx')), label).toBe(false);
   // The folder's own index was refreshed for the file put back as HEAD has it.
-  expect(world.h.git$('diff-files', '--name-only')).not.toContain('src/settings/old.tsx');
+  expect
+    .soft(world.h.git$('diff-files', '--name-only'), label)
+    .not.toContain('src/settings/old.tsx');
   // Its work, the hand edit and the untracked file included, is at its own ref.
   const ref = keptRef(task.id);
-  expect(world.h.git$('show', `${ref}:src/settings/new.tsx`)).toBe(
-    'added in the turn\nand by hand',
-  );
-  expect(world.h.git$('show', `${ref}:src/settings/page.tsx`)).toBe(
-    'edited before the pass\nand in the turn',
-  );
-  expect(world.h.git$('for-each-ref', passKeptRef(world.opened.pass.id, task.id))).toBe('');
-  expect(getTaskKeptWork(db, task.id)).toEqual({
+  expect
+    .soft(world.h.git$('show', `${ref}:src/settings/new.tsx`), label)
+    .toBe('added in the turn\nand by hand');
+  expect
+    .soft(world.h.git$('show', `${ref}:src/settings/page.tsx`), label)
+    .toBe('edited before the pass\nand in the turn');
+  expect
+    .soft(world.h.git$('for-each-ref', passKeptRef(world.opened.pass.id, task.id)), label)
+    .toBe('');
+  expect.soft(getTaskKeptWork(db, task.id), label).toEqual({
     keptSha: world.h.git$('rev-parse', ref),
     keptBaseSha: world.opened.pass.startSha,
   });
   // Back on the Board, open, with its thread and no pass; its run cancelled, its page released.
-  expect(task).toMatchObject({ passId: null, status: 'open' });
+  expect.soft(task, label).toMatchObject({ passId: null, status: 'open' });
   const run = world.runOf(world.settings);
-  expect(getWorkstreamRow(db, run).state).toBe(WorkstreamState.Cancelled);
-  expect(activeClaims(db, run)).toEqual([]);
-  expect(lastTakeOut(db, task.id)).toMatchObject({ step: TakeOutStep.Done, left: [] });
+  expect.soft(getWorkstreamRow(db, run).state, label).toBe(WorkstreamState.Cancelled);
+  expect.soft(activeClaims(db, run), label).toEqual([]);
+  expect.soft(lastTakeOut(db, task.id), label).toMatchObject({ step: TakeOutStep.Done, left: [] });
   // The other page is untouched, and the branch never moved.
-  expect(read(world, 'src/people/page.tsx')).toBe('people\n');
-  expect(world.h.git$('rev-parse', 'HEAD')).toBe(world.opened.pass.startSha);
+  expect.soft(read(world, 'src/people/page.tsx'), label).toBe('people\n');
+  expect.soft(world.h.git$('rev-parse', 'HEAD'), label).toBe(world.opened.pass.startSha);
 }
 
 describe('takeOut', () => {
-  it("keeps the page's work with its task, puts its files back as before the pass, and returns it to the Board", async () => {
-    w = await worked();
-    const result = await takeOut(takeOutDeps(w), {
-      taskId: w.settings.id,
-      within: TakeOutWithin.Alone,
-    });
-    expect(result).toEqual({
-      taskId: w.settings.id,
-      passId: w.opened.pass.id,
-      tookOut: true,
-      keptSha: w.h.git$('rev-parse', keptRef(w.settings.id)),
-      stillChanging: [],
-      left: [],
-    });
-    expect(stopped).toEqual([w.runOf(w.settings)]);
-    expectTakenOut(w);
-    expect(notices(w).at(-1)).toBe(
-      'Taken out of the pass "Polish": its work is kept with the task (3 files).',
-    );
-  });
+  // Two worlds, each taking the page out twice.
+  it(
+    "keeps the page's work with its task, puts its files back as before the pass, returns it to the Board, and takes it out again once Add Page put it back, in one daemon or after a restart",
+    { timeout: 180_000 },
+    async () => {
+      for (const [at, restart] of [false, true].entries()) {
+        if (at > 0) w.close();
+        const label = restart ? 'after a restart' : 'in one daemon';
+        w = await worked();
+        const result = await takeOut(takeOutDeps(w), {
+          taskId: w.settings.id,
+          within: TakeOutWithin.Alone,
+        });
+        expect.soft(result, label).toEqual({
+          taskId: w.settings.id,
+          passId: w.opened.pass.id,
+          tookOut: true,
+          keptSha: w.h.git$('rev-parse', keptRef(w.settings.id)),
+          stillChanging: [],
+          left: [],
+        });
+        expect.soft(stopped, label).toEqual([w.runOf(w.settings)]);
+        expectTakenOut(w, label);
+        expect
+          .soft(notices(w).at(-1), label)
+          .toBe('Taken out of the pass "Polish": its work is kept with the task (3 files).');
+
+        await joinPass(
+          w.h.ctx,
+          w.opened.pass.id,
+          { pages: [], taskIds: [w.settings.id], firstMessage: null },
+          { leaseMs: 60_000, putBack: (input) => putBackKeptWork(w.deps, input) },
+        );
+        expect(read(w, 'src/settings/new.tsx'), label).toBe('added in the turn\nand by hand\n');
+        w.write('src/settings/new.tsx', 'added in the turn\nand by hand\nand after Add Page\n');
+
+        const base = restart ? { ...takeOutDeps(w), ...w.restart() } : takeOutDeps(w);
+        const again = await takeOut(base, { taskId: w.settings.id, within: TakeOutWithin.Alone });
+
+        expect.soft(again.tookOut, label).toBe(true);
+        const db = w.h.store.db;
+        expect
+          .soft(getTask(db, w.settings.id), label)
+          .toMatchObject({ passId: null, status: 'open' });
+        expect.soft(lastTakeOut(db, w.settings.id), label).toMatchObject({
+          passId: w.opened.pass.id,
+          step: TakeOutStep.Done,
+        });
+        expect.soft(read(w, 'src/settings/page.tsx'), label).toBe('edited before the pass\n');
+        expect.soft(existsSync(join(w.h.repo, 'src/settings/new.tsx')), label).toBe(false);
+        expect
+          .soft(w.h.git$('show', `${keptRef(w.settings.id)}:src/settings/new.tsx`), label)
+          .toBe('added in the turn\nand by hand\nand after Add Page');
+      }
+    },
+  );
 
   it('puts a file the pass branch landed on during the pass back to the branch version', async () => {
     stopped = [];
@@ -211,55 +251,7 @@ describe('takeOut', () => {
     }
   });
 
-  it('refuses a take-out asked for alone once the pass is no longer open, writing no row', async () => {
-    stopped = [];
-    w = await openPassWorld();
-    w.h.state.write((ctx) => {
-      setAbandonStep(ctx, w.opened.pass.id, AbandonStep.Abandoning);
-    });
-    await expect(
-      takeOutSteps(takeOutDeps(w), { taskId: w.settings.id, within: TakeOutWithin.Alone }),
-    ).rejects.toThrow(/abandoning/);
-    expect(lastTakeOut(w.h.store.db, w.settings.id)).toBeUndefined();
-    expect(stopped).toEqual([]);
-  });
-
-  it.each([
-    { name: 'in one daemon', restart: false },
-    { name: 'after a restart', restart: true },
-  ])(
-    'takes a page out again once Add Page has put it back in the same pass, $name',
-    async ({ restart }) => {
-      w = await worked();
-      await takeOut(takeOutDeps(w), { taskId: w.settings.id, within: TakeOutWithin.Alone });
-      await joinPass(
-        w.h.ctx,
-        w.opened.pass.id,
-        { pages: [], taskIds: [w.settings.id], firstMessage: null },
-        { leaseMs: 60_000, putBack: (input) => putBackKeptWork(w.deps, input) },
-      );
-      expect(read(w, 'src/settings/new.tsx')).toBe('added in the turn\nand by hand\n');
-      w.write('src/settings/new.tsx', 'added in the turn\nand by hand\nand after Add Page\n');
-
-      const base = restart ? { ...takeOutDeps(w), ...w.restart() } : takeOutDeps(w);
-      const again = await takeOut(base, { taskId: w.settings.id, within: TakeOutWithin.Alone });
-
-      expect(again.tookOut).toBe(true);
-      const db = w.h.store.db;
-      expect(getTask(db, w.settings.id)).toMatchObject({ passId: null, status: 'open' });
-      expect(lastTakeOut(db, w.settings.id)).toMatchObject({
-        passId: w.opened.pass.id,
-        step: TakeOutStep.Done,
-      });
-      expect(read(w, 'src/settings/page.tsx')).toBe('edited before the pass\n');
-      expect(existsSync(join(w.h.repo, 'src/settings/new.tsx'))).toBe(false);
-      expect(w.h.git$('show', `${keptRef(w.settings.id)}:src/settings/new.tsx`)).toBe(
-        'added in the turn\nand by hand\nand after Add Page',
-      );
-    },
-  );
-
-  it('leaves saved work from an earlier take-out as it is when the page made none since', async () => {
+  it('leaves saved work from an earlier take-out as it is when the page made none since, and refuses a take-out asked for alone once the pass is no longer open, writing no row', async () => {
     stopped = [];
     w = await openPassWorld();
     const start = w.opened.pass.startSha;
@@ -274,112 +266,133 @@ describe('takeOut', () => {
 
     expect(getTaskKeptWork(w.h.store.db, w.settings.id)).toEqual(saved);
     expect(w.h.git$('rev-parse', keptRef(w.settings.id))).toBe(earlier);
-  });
 
-  it('leaves no row when a take-out asked for alone fails before it puts files back, so the page goes on', async () => {
-    w = await worked();
-    // The builder moved Your folder off the pass's branch: nothing of the page can be kept.
-    w.h.git$('switch', '-q', 'main');
+    w.h.state.write((ctx) => {
+      setAbandonStep(ctx, w.opened.pass.id, AbandonStep.Abandoning);
+    });
     await expect(
-      takeOut(takeOutDeps(w), { taskId: w.settings.id, within: TakeOutWithin.Alone }),
-    ).rejects.toThrow(/not on the pass's branch/);
-    expect(lastTakeOut(w.h.store.db, w.settings.id)).toBeUndefined();
-    expect(getTask(w.h.store.db, w.settings.id).passId).toBe(w.opened.pass.id);
-    expect(read(w, 'src/settings/new.tsx')).toBe('added in the turn\nand by hand\n');
+      takeOutSteps(takeOutDeps(w), { taskId: w.people.id, within: TakeOutWithin.Alone }),
+    ).rejects.toThrow(/abandoning/);
+    expect(lastTakeOut(w.h.store.db, w.people.id)).toBeUndefined();
+    // Only Settings' take-out stopped a lane: the refused one stopped none.
+    expect(stopped).toEqual([w.runOf(w.settings)]);
   });
 
-  it.each([TakeOutWithin.Close, TakeOutWithin.Abandon])(
-    "inside %s, finishes with Your folder off the pass's branch and a shared hold left open",
-    async (within) => {
-      w = await worked();
-      w.startTurn(w.settings);
-      await grantSharedHold(w.deps, { workstreamId: w.runOf(w.settings), area: 'src' });
-      w.write('src/button.ts', 'a shared button\n');
-      w.h.git$('switch', '-q', 'main');
+  // Two worlds, each with a refused take-out and a finished one.
+  it(
+    "leaves no row when a take-out asked for alone fails off the pass's branch, so the page goes on, and inside a Close or an Abandon finishes there with a shared hold left open",
+    { timeout: 180_000 },
+    async () => {
+      for (const [at, within] of [TakeOutWithin.Close, TakeOutWithin.Abandon].entries()) {
+        if (at > 0) w.close();
+        const label = `inside ${within}`;
+        w = await worked();
+        w.startTurn(w.settings);
+        await grantSharedHold(w.deps, { workstreamId: w.runOf(w.settings), area: 'src' });
+        w.write('src/button.ts', 'a shared button\n');
+        // The builder moved Your folder off the pass's branch: nothing of the page can be kept.
+        w.h.git$('switch', '-q', 'main');
 
-      const out = await takeOutSteps(takeOutDeps(w), { taskId: w.settings.id, within });
+        await expect(
+          takeOut(takeOutDeps(w), { taskId: w.settings.id, within: TakeOutWithin.Alone }),
+          label,
+        ).rejects.toThrow(/not on the pass's branch/);
+        expect.soft(lastTakeOut(w.h.store.db, w.settings.id), label).toBeUndefined();
+        expect.soft(getTask(w.h.store.db, w.settings.id).passId, label).toBe(w.opened.pass.id);
+        expect
+          .soft(read(w, 'src/settings/new.tsx'), label)
+          .toBe('added in the turn\nand by hand\n');
 
-      expect(out.tookOut).toBe(true);
-      expect(getTask(w.h.store.db, w.settings.id).passId ?? null).toBeNull();
-      // Nothing is written on a branch the pass does not own.
-      expect(read(w, 'src/button.ts')).toBe('a shared button\n');
+        const out = await takeOutSteps(takeOutDeps(w), { taskId: w.settings.id, within });
+
+        expect.soft(out.tookOut, label).toBe(true);
+        expect.soft(getTask(w.h.store.db, w.settings.id).passId ?? null, label).toBeNull();
+        // Nothing is written on a branch the pass does not own.
+        expect.soft(read(w, 'src/button.ts'), label).toBe('a shared button\n');
+      }
     },
   );
 
-  describe('a restart after each step goes on from the step it reached', () => {
-    /**
-     * Dies at the `nth` call it is given, as the daemon dying inside that call would: the call never
-     * returns, so nothing after it runs, not even a catch.
-     */
-    type Die = <T>(nth: number, real: () => Promise<T>) => Promise<T>;
-    const crashes: {
-      readonly name: string;
-      readonly step: number;
-      readonly crash: (git: Git, die: Die) => Git;
-    }[] = [
-      {
-        name: 'during the fold of hand edits',
-        step: TakeOutStep.Stopped,
-        crash: (git, die) => ({
-          ...git,
-          pageChanges: (...a) => die(1, () => git.pageChanges(...a)),
-        }),
-      },
-      {
-        // The fold keeps the hand edit first; the second keep is the last kept commit.
-        name: 'during the last kept commit',
-        step: TakeOutStep.HandEditsFolded,
-        crash: (git, die) => ({ ...git, keepWork: (...a) => die(2, () => git.keepWork(...a)) }),
-      },
-      {
-        name: 'during the check',
-        step: TakeOutStep.Kept,
-        crash: (git, die) => ({ ...git, blobAt: (...a) => die(1, () => git.blobAt(...a)) }),
-      },
-      {
-        name: 'during the put-back',
-        step: TakeOutStep.Checked,
-        crash: (git, die) => ({
-          ...git,
-          restoreFiles: (...a) => die(1, () => git.restoreFiles(...a)),
-        }),
-      },
-      {
-        name: 'while the work moves to its ref',
-        step: TakeOutStep.PutBack,
-        crash: (git, die) => ({
-          ...git,
-          moveKeptRef: (...a) => die(1, () => git.moveKeptRef(...a)),
-        }),
-      },
-    ];
-    it.each(crashes)('$name', async ({ crash, step }) => {
-      w = await worked();
-      const calls = new Map<number, number>();
-      let died: () => void = () => undefined;
-      const dead = new Promise<void>((resolve) => {
-        died = resolve;
-      });
-      const die: Die = (nth, real) => {
-        const n = (calls.get(nth) ?? 0) + 1;
-        calls.set(nth, n);
-        if (n !== nth) return real();
-        died();
-        return new Promise(() => undefined);
-      };
-      const crashing = crash(w.h.git, die);
-      const input = { taskId: w.settings.id, within: TakeOutWithin.Alone };
-      void takeOutSteps(takeOutDeps(w, crashing), input);
-      await dead;
-      expect(lastTakeOut(w.h.store.db, w.settings.id)?.step).toBe(step);
+  /**
+   * Dies at the `nth` call it is given, as the daemon dying inside that call would: the call never
+   * returns, so nothing after it runs, not even a catch.
+   */
+  type Die = <T>(nth: number, real: () => Promise<T>) => Promise<T>;
+  const crashes: {
+    readonly name: string;
+    readonly step: number;
+    readonly crash: (git: Git, die: Die) => Git;
+  }[] = [
+    {
+      name: 'during the fold of hand edits',
+      step: TakeOutStep.Stopped,
+      crash: (git, die) => ({
+        ...git,
+        pageChanges: (...a) => die(1, () => git.pageChanges(...a)),
+      }),
+    },
+    {
+      // The fold keeps the hand edit first; the second keep is the last kept commit.
+      name: 'during the last kept commit',
+      step: TakeOutStep.HandEditsFolded,
+      crash: (git, die) => ({ ...git, keepWork: (...a) => die(2, () => git.keepWork(...a)) }),
+    },
+    {
+      name: 'during the check',
+      step: TakeOutStep.Kept,
+      crash: (git, die) => ({ ...git, blobAt: (...a) => die(1, () => git.blobAt(...a)) }),
+    },
+    {
+      name: 'during the put-back',
+      step: TakeOutStep.Checked,
+      crash: (git, die) => ({
+        ...git,
+        restoreFiles: (...a) => die(1, () => git.restoreFiles(...a)),
+      }),
+    },
+    {
+      name: 'while the work moves to its ref',
+      step: TakeOutStep.PutBack,
+      crash: (git, die) => ({
+        ...git,
+        moveKeptRef: (...a) => die(1, () => git.moveKeptRef(...a)),
+      }),
+    },
+  ];
+  // A world per crash point.
+  it(
+    'goes on from the step it reached after a restart, wherever the daemon died',
+    { timeout: 300_000 },
+    async () => {
+      for (const [at, { name, crash, step }] of crashes.entries()) {
+        if (at > 0) w.close();
+        w = await worked();
+        const calls = new Map<number, number>();
+        let died: () => void = () => undefined;
+        const dead = new Promise<void>((resolve) => {
+          died = resolve;
+        });
+        const die: Die = (nth, real) => {
+          const n = (calls.get(nth) ?? 0) + 1;
+          calls.set(nth, n);
+          if (n !== nth) return real();
+          died();
+          return new Promise(() => undefined);
+        };
+        const crashing = crash(w.h.git, die);
+        const input = { taskId: w.settings.id, within: TakeOutWithin.Alone };
+        void takeOutSteps(takeOutDeps(w, crashing), input);
+        await dead;
+        expect.soft(lastTakeOut(w.h.store.db, w.settings.id)?.step, name).toBe(step);
 
-      // A daemon started again reads the step from the database file, holding nothing else.
-      await takeOutSteps({ ...takeOutDeps(w), ...w.restart() }, input);
-      expectTakenOut(w);
-    });
-  });
+        // A daemon started again reads the step from the database file, holding nothing else.
+        await takeOutSteps({ ...takeOutDeps(w), ...w.restart() }, input);
+        expectTakenOut(w, name);
+      }
+    },
+  );
 
-  describe('a page whose files keep changing', () => {
+  it('stops a take-out asked for alone after three tries of a page whose files keep changing, the task staying in the pass, and goes on inside an Abandon, leaving those files as they are', async () => {
     /** A git whose every hash of the folder sees `src/settings/page.tsx` written again just before. */
     function racing(world: PassWorld): Git {
       let n = 0;
@@ -393,55 +406,44 @@ describe('takeOut', () => {
       };
     }
 
-    it('stops a take-out asked for alone after three tries: the task stays in the pass, its thread says why', async () => {
-      w = await worked();
-      const result = await takeOut(takeOutDeps(w, racing(w)), {
-        taskId: w.settings.id,
-        within: TakeOutWithin.Alone,
-      });
-      expect(result).toMatchObject({
-        tookOut: false,
-        stillChanging: ['src/settings/page.tsx'],
-        left: [],
-      });
-      expect(getTask(w.h.store.db, w.settings.id).passId).toBe(w.opened.pass.id);
-      expect(lastTakeOut(w.h.store.db, w.settings.id)).toBeUndefined();
-      expect(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state).not.toBe(
-        WorkstreamState.Cancelled,
-      );
-      expect(notices(w).at(-1)).toBe(
-        "The page's files kept changing while it was being taken out, so it stays in the pass:\n" +
-          '- src/settings/page.tsx',
-      );
+    w = await worked();
+    const result = await takeOut(takeOutDeps(w, racing(w)), {
+      taskId: w.settings.id,
+      within: TakeOutWithin.Alone,
     });
+    expect(result).toMatchObject({
+      tookOut: false,
+      stillChanging: ['src/settings/page.tsx'],
+      left: [],
+    });
+    expect(getTask(w.h.store.db, w.settings.id).passId).toBe(w.opened.pass.id);
+    expect(lastTakeOut(w.h.store.db, w.settings.id)).toBeUndefined();
+    expect(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state).not.toBe(
+      WorkstreamState.Cancelled,
+    );
+    expect(notices(w).at(-1)).toBe(
+      "The page's files kept changing while it was being taken out, so it stays in the pass:\n" +
+        '- src/settings/page.tsx',
+    );
 
-    it('goes on inside an Abandon, leaving the files that still change as they are', async () => {
-      w = await worked();
-      const result = await takeOutSteps(takeOutDeps(w, racing(w)), {
-        taskId: w.settings.id,
-        within: TakeOutWithin.Abandon,
-      });
-      expect(result).toMatchObject({
-        tookOut: true,
-        stillChanging: ['src/settings/page.tsx'],
-        left: ['src/settings/page.tsx'],
-      });
-      expect(read(w, 'src/settings/page.tsx')).toMatch(/^written again/);
-      expect(read(w, 'src/settings/old.tsx')).toBe('old\n');
-      expect(getTask(w.h.store.db, w.settings.id).passId).toBeNull();
+    const inside = await takeOutSteps(takeOutDeps(w, racing(w)), {
+      taskId: w.settings.id,
+      within: TakeOutWithin.Abandon,
     });
+    expect(inside).toMatchObject({
+      tookOut: true,
+      stillChanging: ['src/settings/page.tsx'],
+      left: ['src/settings/page.tsx'],
+    });
+    expect(read(w, 'src/settings/page.tsx')).toMatch(/^written again/);
+    expect(read(w, 'src/settings/old.tsx')).toBe('old\n');
+    expect(getTask(w.h.store.db, w.settings.id).passId).toBeNull();
   });
 });
 
 describe('leavePassForBoard', () => {
-  let store: Store;
-  let close: () => void;
-  afterEach(() => {
-    close();
-  });
-
   /** Moves the workstream from QUEUED to `to` by the shortest run of allowed transitions. */
-  function moveTo(id: WorkstreamId, to: WorkstreamState): void {
+  function moveTo(store: Store, id: WorkstreamId, to: WorkstreamState): void {
     const previous = new Map<WorkstreamState, WorkstreamState>();
     const queue: WorkstreamState[] = [WorkstreamState.Queued];
     for (let s = queue.shift(); s !== undefined && s !== to; s = queue.shift())
@@ -462,53 +464,60 @@ describe('leavePassForBoard', () => {
     });
   }
 
-  const states = Object.values(WorkstreamState).filter((s) => !isTerminal(s));
-  it.each(states)(
-    'cancels a run in %s and takes the task out of its pass in one write',
-    (state) => {
-      ({ store, close } = createTestStore());
-      const project = seedProject(store, { repoPath: '/tmp/none' });
-      const task = store.write((ctx) =>
-        insertTask(ctx, project.id, {
-          title: 'Settings',
-          acceptanceCriteria: ['ok'],
-          areas: ['api'],
-        }),
-      ).value;
-      const run = store.write((ctx) =>
-        insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
-      ).value;
-      const passId = mintId('Pass');
-      store.write((ctx) => {
-        insertPass(ctx, {
-          id: passId,
-          projectId: project.id,
-          name: 'Polish',
-          pageCap: 4,
-          returnBranch: 'main',
-          startSha: 'a'.repeat(40),
-          branch: '10db/polish-abc123',
-          baseBranch: 'main',
-          repo: null,
-          taskIds: [task.id],
-          dirt: [],
+  it('cancels a run in every state that is not terminal and takes the task out of its pass in one write', () => {
+    const states = Object.values(WorkstreamState).filter((s) => !isTerminal(s));
+    for (const state of states) {
+      const { store, close } = createTestStore();
+      try {
+        const project = seedProject(store, { repoPath: '/tmp/none' });
+        const task = store.write((ctx) =>
+          insertTask(ctx, project.id, {
+            title: 'Settings',
+            acceptanceCriteria: ['ok'],
+            areas: ['api'],
+          }),
+        ).value;
+        const run = store.write((ctx) =>
+          insertWorkstream(ctx, task.id, {
+            first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+          }),
+        ).value;
+        const passId = mintId('Pass');
+        store.write((ctx) => {
+          insertPass(ctx, {
+            id: passId,
+            projectId: project.id,
+            name: 'Polish',
+            pageCap: 4,
+            returnBranch: 'main',
+            startSha: 'a'.repeat(40),
+            branch: '10db/polish-abc123',
+            baseBranch: 'main',
+            repo: null,
+            taskIds: [task.id],
+            dirt: [],
+          });
+          insertTakeOut(ctx, { taskId: task.id, passId, drops: [] });
         });
-        insertTakeOut(ctx, { taskId: task.id, passId, drops: [] });
-      });
-      moveTo(run.id, state);
+        moveTo(store, run.id, state);
 
-      store.write((ctx) => {
-        leavePassForBoard(ctx, {
-          taskId: task.id,
-          passId,
-          kept: { keptSha: 'b'.repeat(40), keptBaseSha: 'a'.repeat(40) },
-          files: 1,
+        store.write((ctx) => {
+          leavePassForBoard(ctx, {
+            taskId: task.id,
+            passId,
+            kept: { keptSha: 'b'.repeat(40), keptBaseSha: 'a'.repeat(40) },
+            files: 1,
+          });
         });
-      });
 
-      expect(getWorkstreamRow(store.db, run.id).state).toBe(WorkstreamState.Cancelled);
-      expect(getTask(store.db, task.id).passId).toBeNull();
-      expect(lastTakeOut(store.db, task.id)?.step).toBe(TakeOutStep.Done);
-    },
-  );
+        expect
+          .soft(getWorkstreamRow(store.db, run.id).state, state)
+          .toBe(WorkstreamState.Cancelled);
+        expect.soft(getTask(store.db, task.id).passId, state).toBeNull();
+        expect.soft(lastTakeOut(store.db, task.id)?.step, state).toBe(TakeOutStep.Done);
+      } finally {
+        close();
+      }
+    }
+  });
 });
