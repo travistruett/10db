@@ -7,7 +7,11 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
   bg1, from the window's top to its bottom, carrying the traffic lights) and the content column (bg0, its own title
   row on top). There is no inset card; hairlines divide the columns. The window never scrolls; the content is exactly
   the window's height and scrolls inside it, and it is its own stacking context so a sheet always stands over it.
-  Rail widths (200 labelled, 76 icons only), the panel (260) and the title row's height (44 px) are constants there.
+  Rail widths (200 labelled, 76 icons only) and the title row's height (44 px) are constants there.
+- The panel column and the content are a Mantine `Splitter`: the panel's hairline is the handle, and the builder
+  drags the panel between 240 and 480 px (340 until dragged; `PANEL_WIDTH` and its bounds in `shell-layout.ts`).
+  One width for every section, remembered (`panel-width.ts`, `tendb.shell.panelWidth`); a sheet takes it too.
+  Only a panel column takes the pane's room: otherwise the pane is `display: contents`, and the handle is hidden.
 - What the frame draws is a pure function of the window's width band, whether the section has a panel, whether the
   builder hid it, the labels preference and which sheet is open (`shellLayout` in `shell-layout.ts`; bands at 1000
   and 640 px). The window's width, not a container's, decides it (`useShellBand`), because the frame decides what
