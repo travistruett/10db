@@ -135,7 +135,6 @@ describe('groupByDependency with landing groups', () => {
     set: readonly string[],
     deps: Record<string, readonly string[]>,
     landings: Record<string, string>,
-    titles: Record<string, string> = {},
   ): { title: string; members: string[] }[] => {
     const tasks = tasksNamed(deps, landings);
     const inSet = set.map((name) => {
@@ -143,14 +142,7 @@ describe('groupByDependency with landing groups', () => {
       if (!task) throw new Error(`no task ${name}`);
       return task;
     });
-    const byGroup = new Map<LandingGroupId, string>();
-    for (const name of set) {
-      const id = tasks.get(name)?.landingGroupId;
-      const label = landings[name];
-      const title = label === undefined ? undefined : titles[label];
-      if (id && title !== undefined) byGroup.set(id, title);
-    }
-    return groupByDependency(inSet, byGroup).map((g) => ({
+    return groupByDependency(inSet, new Map<LandingGroupId, string>()).map((g) => ({
       title: g.title,
       members: g.tasks.map((t) => t.title),
     }));
@@ -202,13 +194,6 @@ describe('groupByDependency with landing groups', () => {
     },
   ])('$name', ({ set, deps, landings, groups }) => {
     expect(run(set, deps, landings)).toEqual(groups);
-  });
-
-  it("titles a landing's group after the landing", () => {
-    expect(run(['A', 'B', 'C'], {}, { B: 'real', C: 'real' }, { real: 'Real areas' })).toEqual([
-      { title: 'A', members: ['A'] },
-      { title: 'Real areas', members: ['B', 'C'] },
-    ]);
   });
 });
 

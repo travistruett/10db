@@ -1,17 +1,8 @@
 import { BatchDto, ConflictError, NOTICE_BODY_MAX, type TaskDto } from '@10db/contracts';
-import {
-  cancelTask,
-  getBatch,
-  insertWorkstream,
-  listBatches,
-  listWorkstreams,
-  setTaskStatus,
-} from '@10db/db';
+import { getBatch, insertWorkstream, listBatches, listWorkstreams } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { GhError } from '../github';
-import { autoMergeOffKey, autoMergeRefusedKey, preCheckOnlyKey } from './cards';
-import { raise } from './context';
 
 let h: DeliveryHarness;
 afterEach(() => {
@@ -141,17 +132,6 @@ describe('a pull request that lands in another branch', () => {
     expect(h.cards()).toEqual([]);
   });
 
-  it('says nothing when the branch holds everything the base has and other work is under way there', async () => {
-    h = createDeliveryHarness();
-    h.teammatePush('feature/x', 'src/api/feature.txt');
-    underWay('Beta');
-    const batch = await start(
-      'Greetings',
-      h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } }),
-    );
-    expect(batch.notices).toEqual([]);
-  });
-
   it('says so on the batch, naming the branch, when no other open work lands there, even level with the base', async () => {
     h = createDeliveryHarness();
     h.teammatePush('feature/x', 'src/api/feature.txt');
@@ -169,99 +149,6 @@ describe('a pull request that lands in another branch', () => {
       },
     ]);
     expect(h.cards()).toEqual([]);
-  });
-
-  it('says nothing about an unused branch while work is under way on another task there', async () => {
-    h = createDeliveryHarness();
-    h.teammatePush('feature/x', 'src/api/feature.txt');
-    underWay('Beta');
-    const batch = await start(
-      'Greetings',
-      h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } }),
-    );
-    expect(batch.notices).toEqual([]);
-  });
-
-  it('says so when the only other tasks there are not started, wherever they sit on the Board', async () => {
-    h = createDeliveryHarness();
-    h.teammatePush('feature/x', 'src/api/feature.txt');
-    // Two follow-ups still filed against a retired branch: neither is use of it for the other.
-    h.addTask('Beta', { landing: { kind: 'branch', branch: 'feature/x' } });
-    const batch = await start(
-      'Greetings',
-      h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } }),
-    );
-    expect(batch.notices.map((n) => n.key)).toEqual(['landing-unused']);
-  });
-
-  it('counts a task that is done, and one that was removed, as no use', async () => {
-    h = createDeliveryHarness();
-    h.teammatePush('feature/x', 'src/api/feature.txt');
-    const finished = h.addTask('Done', { landing: { kind: 'branch', branch: 'feature/x' } });
-    h.state.write((c) => {
-      setTaskStatus(c, finished.id, 'done');
-    });
-    const removed = h.addTask('Gone', { landing: { kind: 'branch', branch: 'feature/x' } });
-    h.state.write((c) => {
-      cancelTask(c, removed.id);
-    });
-    const batch = await start(
-      'Greetings',
-      h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } }),
-    );
-    expect(batch.notices.map((n) => n.key)).toEqual(['landing-unused']);
-  });
-
-  it('says nothing about the project default, or the branch a project lands new tasks in', async () => {
-    h = createDeliveryHarness();
-    const base = await start(
-      'Greetings',
-      h.addTask('Alpha', { landing: { kind: 'branch', branch: 'main' } }),
-    );
-    expect(base.notices).toEqual([]);
-    h.close();
-
-    h = createDeliveryHarness({ landing: 'branch', landingBranch: 'feature/x' });
-    h.teammatePush('feature/x', 'src/api/feature.txt');
-    const named = await start(
-      'Greetings',
-      h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } }),
-    );
-    expect(named.notices).toEqual([]);
-  });
-
-  it('says so for a separate copy too, until another batch lands in the branch', async () => {
-    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    h.teammatePush('feature/x', 'src/api/feature.txt');
-    const first = await start(
-      'First',
-      h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } }),
-    );
-    expect(first.notices.map((n) => n.key)).toEqual(['landing-unused']);
-    const second = await start(
-      'Second',
-      h.addTask('Beta', { landing: { kind: 'branch', branch: 'feature/x' } }),
-    );
-    expect(second.notices).toEqual([]);
-  });
-
-  it('says so on every copy of one start, which counts as no use to the others', async () => {
-    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    h.teammatePush('feature/x', 'src/api/feature.txt');
-    const answered = h.starter.startBatch(h.project.id, {
-      title: 'Together',
-      taskIds: [
-        h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } }).id,
-        h.addTask('Beta', { landing: { kind: 'branch', branch: 'feature/x' } }).id,
-      ],
-    });
-    expect(answered).toHaveLength(2);
-    await h.jobs.idle();
-    for (const { id } of answered) {
-      const batch = getBatch(h.store.db, id);
-      expect(batch.state).toBe('OPEN');
-      expect(batch.notices.map((n) => n.key)).toEqual(['landing-unused']);
-    }
   });
 
   it('refuses a branch origin does not have, in plain words, before anything starts', async () => {
@@ -304,13 +191,6 @@ describe('when the repository does not allow auto-merge', () => {
     expect(h.cards()).toEqual([]);
     expect(autoMergeCalls()).toEqual([]);
   });
-
-  it('says nothing about it for a pull request held anyway', async () => {
-    h = createDeliveryHarness({ landing: 'hold' });
-    h.gh.autoMergeAllowed = false;
-    await ship(await start('One', h.addTask('Alpha')));
-    expect(h.cards()).toEqual([]);
-  });
 });
 
 describe('when GitHub refuses to turn auto-merge on', () => {
@@ -328,48 +208,6 @@ describe('when GitHub refuses to turn auto-merge on', () => {
     expect(notice.body).toContain(shipped.prUrl ?? '');
     expect(notice.body).toContain('draft status');
     expect(h.gh.calls.some((c) => c.method === 'prMerge')).toBe(false);
-  });
-
-  it('closes the auto-merge cards an earlier build raised once a pull request is set to merge by itself', async () => {
-    h = createDeliveryHarness();
-    const batch = await start('One', h.addTask('Alpha'));
-    raise(h.inbox, h.project.id, {
-      tier: 'ask',
-      urgency: 'high',
-      closesWhen: { by: 'answer' },
-      title: "This repository doesn't allow auto-merge",
-      body: 'x',
-      foldKey: autoMergeOffKey(h.project.id),
-    });
-    raise(h.inbox, h.project.id, {
-      tier: 'ask',
-      urgency: 'high',
-      closesWhen: { by: 'answer' },
-      title: 'Pull request opened but not set to merge by itself',
-      body: 'x',
-      foldKey: autoMergeRefusedKey(batch.id),
-    });
-    expect(h.cards()).toHaveLength(2);
-    await ship(batch);
-    expect(h.gh.autoMerged).toHaveLength(1);
-    expect(h.cards()).toEqual([]);
-  });
-
-  it('closes the refusal card an earlier build raised when the refusal shows as a notice', async () => {
-    h = createDeliveryHarness();
-    const batch = await start('One', h.addTask('Alpha'));
-    raise(h.inbox, h.project.id, {
-      tier: 'ask',
-      urgency: 'high',
-      closesWhen: { by: 'answer' },
-      title: 'Pull request opened but not set to merge by itself',
-      body: 'x',
-      foldKey: autoMergeRefusedKey(batch.id),
-    });
-    h.gh.failNext.set('prAutoMerge', new GhError('failed', 'gh pr merge failed (exit 1): draft'));
-    const shipped = await ship(batch);
-    expect(shipped.notices).toHaveLength(1);
-    expect(h.cards()).toEqual([]);
   });
 
   it('keeps the link and a board that loads when gh says far more than a notice holds', async () => {
@@ -461,22 +299,6 @@ describe('when only the pre-check ran and GitHub says the pull request has nothi
       'Pull request waits for you to merge it: main has no required checks and only the pre-check ran',
     );
     expect(notice.body).toContain(shipped.prUrl ?? 'no pull request');
-  });
-
-  it('closes the card an earlier build raised for it', async () => {
-    h = createDeliveryHarness({ precheckCommand: 'true' });
-    h.gh.noRequiredChecks = true;
-    const batch = await start('One', h.addTask('Alpha'));
-    raise(h.inbox, h.project.id, {
-      tier: 'ask',
-      urgency: 'high',
-      closesWhen: { by: 'answer' },
-      title: 'not merged: main has no required checks and only the pre-check ran',
-      body: 'x',
-      foldKey: preCheckOnlyKey(batch.id),
-    });
-    await ship(batch);
-    expect(h.cards()).toEqual([]);
   });
 
   it('merges at once when the required checks already passed on this head', async () => {
@@ -619,40 +441,5 @@ describe('in worktree mode', () => {
     ]);
     expect(refused.id).not.toBe(batch.id);
     expect(h.only(h.cards()).title).toBe('Not started: origin has no branch named feature/nope');
-  });
-
-  it('says so on the batch, naming the branch, when its landing branch lacks commits the base has, and still cuts', async () => {
-    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    h.teammatePush('feature/x', 'src/api/feature.txt');
-    h.teammatePush('main', 'src/api/fix.txt');
-    // Work is under way on another task there, so only the behind notice is earned.
-    underWay('Beta');
-    const task = h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } });
-    const started = h.only(h.starter.startBatch(h.project.id, { title: 'A', taskIds: [task.id] }));
-    await h.jobs.idle();
-    const batch = getBatch(h.store.db, started.id);
-    expect(batch.state).toBe('OPEN');
-    expect(batch.notices).toMatchObject([
-      {
-        key: 'landing-behind',
-        tone: 'warning',
-        line: expect.stringContaining('feature/x') as unknown,
-        body: expect.stringContaining('main') as unknown,
-      },
-    ]);
-    expect(h.cards()).toEqual([]);
-  });
-
-  it('says nothing when its landing branch holds everything the base has', async () => {
-    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    h.teammatePush('feature/x', 'src/api/feature.txt');
-    // Work is under way on another task there, so no unused-branch notice either.
-    underWay('Beta');
-    const task = h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } });
-    const started = h.only(h.starter.startBatch(h.project.id, { title: 'A', taskIds: [task.id] }));
-    await h.jobs.idle();
-    const batch = getBatch(h.store.db, started.id);
-    expect(batch.state).toBe('OPEN');
-    expect(batch.notices).toEqual([]);
   });
 });

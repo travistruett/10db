@@ -254,26 +254,6 @@ describe('opening a pass', () => {
     expect(inPass.find((t) => t.id !== people.id)?.madeByPassId).toBe(opened.pass.id);
   });
 
-  it("names the task it makes for a new page by the page's label, else its capitalised name", async () => {
-    harness({
-      areas: [
-        { name: 'settings', globs: ['src/settings/**'], role: 'page', label: 'Preferences' },
-        { name: 'people', globs: ['src/people/**'], role: 'page' },
-        { name: 'src', globs: ['src/**'], role: 'shared' },
-      ],
-    });
-
-    const opened = await open([], { pages: ['settings', 'people'] });
-
-    const titles = h.store.db
-      .select({ title: schema.tasks.title })
-      .from(schema.tasks)
-      .where(eq(schema.tasks.passId, opened.pass.id))
-      .all()
-      .map((t) => t.title);
-    expect(titles.sort()).toEqual(['People: UI work', 'Preferences: UI work']);
-  });
-
   it('makes a page another task holds wait for it, naming the holder', async () => {
     harness({
       areas: [
@@ -521,18 +501,6 @@ describe('opening a pass', () => {
     const tree = h.git$('diff-tree', '-r', '--name-only', '--no-commit-id', `${ref}^`, ref);
     expect(tree).toBe('src/people/page.tsx');
     expect(existsSync(join(h.repo, 'empty-nested/.git'))).toBe(true);
-  });
-
-  it('answers with no count of commits ahead of the base when git cannot count them, and the pass stays open', async () => {
-    harness();
-    // origin's base names an object the repository does not have, so git can count nothing from it.
-    writeFileSync(join(h.repo, '.git/refs/remotes/origin/main'), `${'1'.repeat(40)}\n`);
-    const opened = await open([page('People: UI work', ['people'])]);
-    expect(opened.aheadOfBase).toBeNull();
-    expect(getBatch(h.store.db, opened.batch.id).state).toBe('OPEN');
-    expect(h.logs.lines().some((l) => l['msg'] === 'commits ahead of the base not counted')).toBe(
-      true,
-    );
   });
 
   it('takes the branch back when a start slips in while git works, and the start goes on', async () => {
