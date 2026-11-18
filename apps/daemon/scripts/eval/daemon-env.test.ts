@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { LaneBrief } from '../../src/briefing';
 import { EvalIsolationError, evalDaemonEnv } from './daemon-env';
 
 const builder = {
@@ -47,6 +48,26 @@ describe('evalDaemonEnv', () => {
       'CLAUDE_CODE_USE_BEDROCK',
     ])
       expect(env, name).not.toHaveProperty(name);
+  });
+
+  it.each([
+    ['index', LaneBrief.Index, { TENDB_LANE_BRIEF: 'index' }],
+    ['full', LaneBrief.Full, { TENDB_LANE_BRIEF: 'full' }],
+  ])(
+    "briefs the eval daemon's lanes as the run says (%s), never as the builder's own setting",
+    (_n, brief, want) => {
+      const env = evalDaemonEnv({
+        ...base,
+        brief,
+        inherited: { TENDB_LANE_BRIEF: brief === LaneBrief.Index ? 'full' : 'index' },
+      });
+      expect(env).toMatchObject(want);
+    },
+  );
+
+  it("leaves the brief unset when the run sets none, dropping the builder's own", () => {
+    const env = evalDaemonEnv({ ...base, inherited: { TENDB_LANE_BRIEF: 'index' } });
+    expect(env).not.toHaveProperty('TENDB_LANE_BRIEF');
   });
 
   it('runs the fake agent when given a script book', () => {
