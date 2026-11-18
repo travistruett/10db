@@ -11,7 +11,7 @@ import {
 } from '@10db/contracts';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { lastInboxSearch, rememberScroll, rememberSelected } from './inbox-search';
 import { queryKeys } from '../../daemon/queries';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
@@ -146,6 +146,16 @@ const rejectedCard = inboxItemDto({
       summary: FULL_REVIEW,
     },
   },
+});
+
+// What the Inbox remembers of a visit (its search, each state's row and scroll) outlives a render, so one
+// test's selection would otherwise open the next test on a row its list may not hold.
+beforeEach(() => {
+  lastInboxSearch.set({});
+  for (const state of ['open', 'waiting', 'resolved'] as const) {
+    rememberSelected(state, null);
+    rememberScroll(state, 0);
+  }
 });
 
 describe('InboxView review findings', () => {
