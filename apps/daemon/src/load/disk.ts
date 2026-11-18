@@ -6,8 +6,14 @@ import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { diskCard, DISK_FOLD_KEY } from './card';
 import { projectForMachineCard } from './card-project';
-import { Urgency } from '@10db/contracts';
+import { CARD_OPENS, Urgency } from '@10db/contracts';
 import { CardTier } from '../inbox';
+
+/**
+ * Where the free-disk floor is set. Settings has no Capacity section yet, so the link opens Settings
+ * itself; the floor is read from the `capacity` app setting (`capacity.ts`).
+ */
+const CAPACITY_SETTINGS = { to: 'settings', section: 'overview', label: 'Open Settings' } as const;
 
 /** How far above the floor free disk must climb before a hold ends, so it doesn't flap at the edge. */
 export const CLEAR_MARGIN_BYTES = 5_000_000_000;
@@ -91,7 +97,7 @@ export function createDiskHold(opts: DiskHoldOptions): DiskHold {
         workstreamId: null,
         tier: CardTier.Ask,
         urgency: Urgency.High,
-        // S2: Open Capacity Settings
+        detail: { [CARD_OPENS]: CAPACITY_SETTINGS },
         closesWhen: { by: 'withdrawn', when: 'free disk is above the floor again (disk)' },
         title: content.title,
         body: content.body,

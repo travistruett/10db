@@ -1,4 +1,10 @@
-import { type InboxAnswer, type InboxItemDto, type InboxOption, Urgency } from '@10db/contracts';
+import {
+  CARD_OPENS,
+  type InboxAnswer,
+  type InboxItemDto,
+  type InboxOption,
+  Urgency,
+} from '@10db/contracts';
 import type { DbReader } from '@10db/db';
 import { z } from 'zod';
 import { CheckoutPin, GitTrustError, trustCard, type Git } from '../git';
@@ -41,7 +47,8 @@ export function createGitRefusalHandler(deps: {
     const closesWhen: CardClosesWhen = card.candidate
       ? // Trusting the checkout again, by whichever card, settles every card that offers it.
         { by: 'event', when: { event: 'checkout_trusted', repo: error.repo } }
-      : // S2: the next git call of that kind passes; Open the Checkout
+      : // Each kind of refusal is judged at its own call, so no one check can tell the refusal is over:
+        // the builder fixes the checkout and dismisses the card.
         BY_ANSWER;
     deps.inbox.flag({
       projectId: project.id,
@@ -59,7 +66,11 @@ export function createGitRefusalHandler(deps: {
               [GIT_TRUST_DETAIL]: { repo: error.repo, candidate: { ...card.candidate } },
             },
           }
-        : {}),
+        : {
+            detail: {
+              [CARD_OPENS]: { to: 'path', path: error.repo, label: 'Open the Checkout' },
+            },
+          }),
     });
   };
 }

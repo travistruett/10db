@@ -152,6 +152,7 @@ import {
   DEFAULT_DELIVERY_LIMITS,
   flagWorktreeMissing,
   flagWrongBranch,
+  resolveBranchReadyCards,
   moveRetiredLandings,
   checkPassOpen,
   openPass,
@@ -345,11 +346,13 @@ import {
   type SandboxRuntime,
 } from '../sandbox';
 import { createFolderHold } from '../folder-hold';
+import { createStatusService } from '../status';
 import { createAdmission, createScheduler, type Scheduler } from '../scheduler';
 import {
   createDrain,
   createScriptInstaller,
   createSelfUpdate,
+  createSelfUpdateCardAnswers,
   githubHeadOfMain,
   githubMainIsAhead,
   holdBoth,
@@ -899,6 +902,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerBatchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let answerSelfUpdateCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   // Started once recovery is through; a launch before then waits for no before picture.
   let pictures: Pictures | null = null;
   let preview: Preview | null = null;
@@ -1021,6 +1025,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerBatchCard?.(item, answer);
       answerAccountCard?.(item, answer);
       answerGitCard?.(item, answer);
+      answerSelfUpdateCard?.(item, answer);
       answerBranchCard?.(item, answer);
       answerCiStopCard?.(item, answer);
       answerGhCard?.(item, answer);
@@ -1031,11 +1036,26 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerDeadlockCard(item, answer);
     },
   });
+  // Holds that pause work and end by themselves show as a line in the app's header, not as Inbox cards.
+  const status = createStatusService({
+    clock,
+    onChange: (dto) => {
+      state.write((ctx) => {
+        ctx.emit({
+          type: EventType.StatusChanged,
+          entityType: 'app',
+          entityId: 'status',
+          data: dto,
+        });
+      });
+    },
+  });
   // A lane that finds no model profile for its account waits for the profiles instead of retrying every tick.
   const modelWait = createModelListWait({
     db,
     clock,
     inbox,
+    status,
     logger: logger.child({ component: 'catalogue' }),
     onReleased: () => {
       scheduler?.requestTick();
@@ -1055,11 +1075,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       return listModelProfiles(db).some((p) => p.provider === provider);
     });
   }
-  // Sustained overload holds new lane sessions and gates and raises one card naming what is busy.
+  // Sustained overload holds new lane sessions and gates and shows a status line naming what is busy.
   const laneTempDirs = createLaneTempDirs();
   const loadGuard = createLoadMonitor({
     state,
     inbox,
+    status,
     clock,
     logger: logger.child({ component: 'load' }),
     daemonPid: process.pid,
@@ -1988,6 +2009,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onWrongBranch: (batch, current, checkout) => {
       flagWrongBranch(inbox, batch, current, checkout);
     },
+    onBranchReady: (batch) => {
+      resolveBranchReadyCards({ db, git, inbox }, batch).catch((error: unknown) => {
+        logger.warn({ err: error, batchId: batch.id }, 'could not close a wrong-branch card');
+      });
+    },
     onWorktreeMissing: (batch, path) => {
       flagWorktreeMissing(inbox, batch, path);
     },
@@ -2415,6 +2441,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     keepAwake,
     agentSkill,
     admission,
+    status,
     systemCheck: () =>
       opts.systemCheck
         ? opts.systemCheck({ git: gitBin, gh: ghBin }, () =>
@@ -2648,6 +2675,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       selfUpdate = createSelfUpdate({
         state,
         inbox,
+        status,
         clock,
         logger: updateLogger,
         runningCommit: build.commit,
@@ -2705,6 +2733,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           createdScheduler.requestTick();
         },
       });
+      answerSelfUpdateCard = createSelfUpdateCardAnswers(selfUpdate, updateLogger);
     }
   }
   // What this install can never do, known now; a test's own installer needs no gh.
@@ -2898,6 +2927,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   );
   // How an install that was under way ended is reported before the scheduler can start anything.
   selfUpdate?.settle();
+  selfUpdate?.closeInstalled().catch((error: unknown) => {
+    logger.error({ err: error }, 'could not close the failed-update cards of an update that took');
+  });
   createdScheduler.start();
   createdScheduler.requestTick();
   loadGuard.start();
@@ -2997,6 +3029,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       loadGuard.stop();
       updateDrain.stop();
       installHold.stop();
+      // After every source that holds or releases a line: a pending timer must not write to the closed database.
+      status.stop();
       // After the runner too: what its sessions could not stop stays for the next start.
       ledgerSweep?.stop();
       await preparer.idle();

@@ -29,6 +29,7 @@ export {
   createInboxService,
   flagCard,
   AnsweredAwayError,
+  CardClosesItselfError,
   ParkedError,
   rewordCard,
   withdrawCard,

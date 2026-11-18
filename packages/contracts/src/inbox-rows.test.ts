@@ -109,9 +109,17 @@ describe('isDismissable', () => {
       expected: true,
     },
     { name: 'a question with no options', kind: 'question', options: 0, expected: false },
-  ] as const)('$name: $expected', ({ kind, options, expected }) => {
+    {
+      name: 'a flag with no options that closes itself',
+      kind: 'flag',
+      options: 0,
+      detail: { closesItself: true },
+      expected: false,
+    },
+  ] as const)('$name: $expected', ({ kind, options, expected, ...rest }) => {
     const options_ = Array.from({ length: options }, () => ({ label: 'Go', description: '' }));
-    expect(isDismissable({ kind, options: options_ })).toBe(expected);
+    const detail = 'detail' in rest ? rest.detail : null;
+    expect(isDismissable({ kind, options: options_, detail })).toBe(expected);
   });
 });
 

@@ -17,6 +17,7 @@ import {
   FixBy,
   FIX_ATTEMPT_LIMIT,
   InboxKind,
+  CARD_OPENS,
   RoutedBy,
   isModelTier,
   kindsOfTask,
@@ -1977,7 +1978,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       case 'awaiting_profiles':
         requeue(id, ctl, 'the model catalogue has not been read yet', 'waiting for model profiles');
         // Without this the scheduler would claim the row again on every tick.
-        opts.modelWait?.hold(getAccountRow(db, ctl.accountId), row.projectId);
+        opts.modelWait?.hold(getAccountRow(db, ctl.accountId));
         return;
       case 'unready': {
         requeue(
@@ -2293,8 +2294,11 @@ export function createRunner(opts: RunnerOptions): Runner {
         workstreamId: id,
         tier: CardTier.Ask,
         urgency: Urgency.High,
-        // S2: Choose Another Model
+        // The account's models are in Settings; answering the card closes it.
         closesWhen: BY_ANSWER,
+        detail: {
+          [CARD_OPENS]: { to: 'settings', section: 'accounts', label: 'Choose Another Model' },
+        },
         title,
         body: !retry
           ? `${outcome.message}. ${marked ? `10db marked ${outcome.model} unusable on ${account.label}, but` : `${account.label} lists no models, so 10db cannot mark ${outcome.model} unusable, and`} it would still choose ${outcome.model} for the step, so it stopped the task instead of asking for it again. Name a model for each tier in the account's settings.`
@@ -2625,7 +2629,8 @@ export function createRunner(opts: RunnerOptions): Runner {
     // A stdio server runs only under the lane sandbox; with none, or with a sandbox it can't have,
     // it is left out and named.
     const sandboxFailures = laneSession?.mcpFailures ?? [];
-    for (const failure of sandboxFailures) flagMcpFailure(opts.inbox, project.id, id, failure);
+    for (const failure of sandboxFailures)
+      flagMcpFailure(opts.inbox, project.id, id, failure, project.repoPath);
     const mcpNote = skippedServersNote(
       { ...projectMcp, failures: [...projectMcp.failures, ...sandboxFailures] },
       opts.laneSandbox ? [] : Object.keys(mcpServers.stdio),

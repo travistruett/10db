@@ -1,4 +1,4 @@
-import { BatchId, InboxKind, type InboxItemDto } from '@10db/contracts';
+import { BatchId, CARD_CLOSES_ITSELF, InboxKind, type InboxItemDto } from '@10db/contracts';
 import { Alert, Anchor, Button, Group, Stack } from '@mantine/core';
 import { useAbandonBatch, useShipBatch } from '../../daemon/queries';
 
@@ -25,7 +25,11 @@ function actionBatch(
   return retry || abandon ? { batchId: batchId.data, retry, abandon } : null;
 }
 
-/** A not-shipped card's step log and, when it offers them, Retry and Abandon of its batch; either dismisses the card once done. */
+/**
+ * A not-shipped card's step log and, when it offers them, Retry and Abandon of its batch. Either dismisses
+ * a card that is answered by a dismiss; a card that closes itself leaves by its closer (the batch ships)
+ * or by the withdrawal an abandon makes, and is never dismissed here.
+ */
 export function BatchCardActions({
   item,
   onDone,
@@ -36,6 +40,7 @@ export function BatchCardActions({
   const ship = useShipBatch();
   const abandon = useAbandonBatch();
   const log = stepLog(item);
+  const done = item.detail?.[CARD_CLOSES_ITSELF] === true ? () => undefined : onDone;
   const offer = actionBatch(item);
   if (log === null && offer === null) return null;
   const error = ship.error ?? abandon.error;
@@ -54,7 +59,7 @@ export function BatchCardActions({
               loading={ship.isPending}
               onClick={() => {
                 abandon.reset();
-                ship.mutate(offer.batchId, { onSuccess: onDone });
+                ship.mutate(offer.batchId, { onSuccess: done });
               }}
             >
               Retry
@@ -68,7 +73,7 @@ export function BatchCardActions({
               loading={abandon.isPending}
               onClick={() => {
                 ship.reset();
-                abandon.mutate(offer.batchId, { onSuccess: onDone });
+                abandon.mutate(offer.batchId, { onSuccess: done });
               }}
             >
               Abandon

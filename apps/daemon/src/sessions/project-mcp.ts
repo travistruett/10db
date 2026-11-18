@@ -312,6 +312,26 @@ export function readRepoMcp(repoPath: string): RepoMcp {
   return { servers, warnings: [...warnings, ...strayHosts(hosts, servers)] };
 }
 
+/**
+ * A hash of what the repo's MCP config says: `.mcp.json` and the hosts file beside it, as they read now.
+ * A file that can't be read counts as its reason, so a repaired one changes the hash. The cards about the
+ * config name the hash they were raised on, and close when it differs.
+ */
+export function repoMcpHash(repoPath: string): string {
+  const read = (relative: string): string => {
+    try {
+      return readRepoConfigFileIn(repoPath, relative) ?? '';
+    } catch (error) {
+      return `unreadable: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  };
+  return createHash('sha256')
+    .update(read(PROJECT_MCP_FILE))
+    .update('\0')
+    .update(read(MCP_HOSTS_FILE))
+    .digest('hex');
+}
+
 /** A builder's server references a variable 10db can't expand. Names the variable, never a value. */
 export class YourMcpExpandError extends Error {
   override readonly name = 'YourMcpExpandError';

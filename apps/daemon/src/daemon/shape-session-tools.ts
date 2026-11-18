@@ -375,7 +375,8 @@ export function createShapePreparer(
     const sandboxed = session;
     // Every way out from here leaves the sandbox removed: its sealed files can hold AWS credentials.
     try {
-      for (const failure of sandboxed.mcpFailures) flagMcpFailure(inbox, project.id, null, failure);
+      for (const failure of sandboxed.mcpFailures)
+        flagMcpFailure(inbox, project.id, null, failure, project.repoPath);
       const broker = createPermissionBroker(
         { state, inbox, git: deps.git, logger },
         {
