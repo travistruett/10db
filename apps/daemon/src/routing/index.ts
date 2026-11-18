@@ -7,4 +7,5 @@ export { offeredModels, offeredProfiles } from './offered';
 export { atEffort } from './pools';
 export { costOnAccount } from './cost-on-account';
 export { resolveSteps, rowProcess, type PlaybookScopes } from './playbook';
+export { DEFAULT_ROWS } from './playbook-defaults';
 export { playbookView } from './playbook-view';
