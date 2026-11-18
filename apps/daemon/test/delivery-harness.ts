@@ -13,6 +13,7 @@ import {
   InboxKind,
   WORKSTREAM_TRANSITIONS,
   type InboxItemDto,
+  type NoticePostedData,
   type ProjectDto,
   type ProjectInput,
   type TaskDto,
@@ -63,6 +64,7 @@ import { measureForTests } from './catalogue';
 import { seedProfiles } from './seed-profiles';
 import { putBackKeptWork } from '../src/pass';
 import { FakeGh } from './fake-gh';
+import { noticesPosted } from './notices-posted';
 import { captureLogs, type LogCapture } from './log-capture';
 import {
   createTempClone,
@@ -266,6 +268,8 @@ export interface DeliveryHarness {
   teammatePush(branch: string, path: string, content?: string): string;
   /** Open flag cards, oldest first. */
   cards(): InboxItemDto[];
+  /** Notices posted so far, oldest first. */
+  notices(): NoticePostedData[];
   /** The single element of `items`; throws on none or several. */
   only<T>(items: readonly T[]): T;
   close(): void;
@@ -472,6 +476,7 @@ export function createDeliveryHarness(
         other.cleanup();
       }
     },
+    notices: () => noticesPosted(store.db),
     cards: () => listInbox(store.db, { states: ['OPEN'] }).filter((i) => i.kind === InboxKind.Flag),
     only(items) {
       const [item] = items;

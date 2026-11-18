@@ -2,7 +2,7 @@ import { BRANCH_PREFIX, BatchState, type BatchId } from '@10db/contracts';
 import { getBatch, getProject } from '@10db/db';
 import type { Git } from '../git';
 import { branchCards } from './cards';
-import { raise, type DeliveryContext } from './context';
+import { post, raise, type DeliveryContext } from './context';
 
 /** What `removeBranch` did. */
 export type BranchRemoval =
@@ -71,7 +71,7 @@ export async function settleBranch(
   );
   if (batch.state !== BatchState.Abandoned) return;
   if (removal.kind === 'removed') {
-    raise(ctx.inbox, batch.projectId, branchCards.abandonedBranchDeleted(batch, worktreeRemoved));
+    post(ctx.inbox, batch.projectId, branchCards.abandonedBranchDeleted(batch, worktreeRemoved));
     return;
   }
   if (removal.kind !== 'kept' && removal.kind !== 'checked_out') return;

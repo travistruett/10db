@@ -995,7 +995,10 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     }
     if (left.length === 0) {
       tell(batch, () => {
-        hideNotices(ctx.state, batch.id, [NOTICE_KEY.migrationsUncarried]);
+        hideNotices(ctx.state, batch.id, [
+          NOTICE_KEY.migrationsUncarried,
+          NOTICE_KEY.baseRegenerate,
+        ]);
         withdraw(ctx.state, ctx.inbox, batch.projectId, [baseRegenerateKey(batch.id)]);
       });
       return answer;
@@ -1073,7 +1076,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           };
     if (card)
       tell(batch, () => {
-        raise(ctx.inbox, batch.projectId, baseCards.regenerate(batch, path, dirs, told));
+        showNotice(ctx.state, batch.id, baseNotices.regenerate(batch, path, dirs, told));
       });
     const said = `10db couldn't regenerate ${named(dirs)} after merging origin/${batch.baseBranch}: ${told.why}.`;
     return lost

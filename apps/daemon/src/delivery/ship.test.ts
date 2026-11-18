@@ -1075,17 +1075,18 @@ describe('Ship anyway, Retry and Abandon', () => {
     expect(getBatch(h.store.db, batch.id).state).toBe('ABANDONED');
   });
 
-  it('deletes a shared batch abandoned before any commit, and its card names no worktree', async () => {
+  it('deletes a shared batch abandoned before any commit, and its notice names no worktree', async () => {
     h = createDeliveryHarness();
     const { batch } = await openBatch('Greetings', 'Alpha');
     expect(batch.worktreePath).toBeNull();
     expect(h.shipper.abandon(batch.id).state).toBe('ABANDONED');
     await h.jobs.idle();
     expect(h.git$('branch', '--list', batch.branch ?? '')).toBe('');
-    const card = h.only(h.cards());
-    expect(card.title).toContain(`${batch.branch ?? ''} deleted`);
-    expect(card.body).toContain('held no commits beyond');
-    expect(card.body).not.toMatch(/worktree/i);
+    expect(h.cards()).toEqual([]);
+    const notice = h.only(h.notices());
+    expect(notice.line).toContain(`${batch.branch ?? ''} deleted`);
+    expect(notice.body).toContain('held no commits beyond');
+    expect(notice.body).not.toMatch(/worktree/i);
   });
 
   it.each(['SHIPPED', 'CLOSED', 'ABANDONED'] as const)(

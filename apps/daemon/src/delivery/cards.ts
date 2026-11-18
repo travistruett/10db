@@ -31,7 +31,7 @@ import { batchCardFields } from './batch-card';
 import { maxCiFixes } from './ci-failure-action';
 import type { BlockedTask, UnmergedDependency } from './deps';
 import type { GateStepFailure } from './gate-failures';
-import type { NoticeInput } from '../inbox';
+import { CardTier, type NoticeInput } from '../inbox';
 import { INSTALL_SUMMARY, type DependencyRefresh } from './worktree-dependencies';
 
 /** A notice a delivery step posts; the project is the caller's, passed beside it. */
@@ -442,11 +442,13 @@ export const worktreeCards = {
     ...worktreeOffer(offer),
   }),
   /** A Remove worktree answer on an orphan's card found the path no longer an orphan, so 10db left it. */
-  orphanNotRemoved: (path: string, why: string): Card => ({
-    title: `10db removed nothing at ${path}`,
+  orphanNotRemoved: (path: string, why: string): DeliveryNotice => ({
+    tier: CardTier.Notice,
+    taskId: null,
+    key: keptWorktreeKey.removeFailed(path),
+    tone: 'warning',
+    line: `10db removed nothing at ${path}`,
     body: `You answered Remove worktree, but 10db checked again and ${why}, so it is no longer a worktree no batch uses. Nothing was removed.`,
-    foldKey: keptWorktreeKey.removeFailed(path),
-    refresh: true,
   }),
   inTheWay: (batch: BatchDto, path: string, reason: string): Card => ({
     title: `Batch "${batch.title}" not retried: ${path} is in the way`,
@@ -490,7 +492,7 @@ export const baseKeptKey = (batchId: BatchId): string => `base-kept:${batchId}`;
 export const autoMergeOffKey = (projectId: ProjectId): string => `auto-merge-off:${projectId}`;
 export const autoMergeRefusedKey = (batchId: BatchId): string => `auto-merge-refused:${batchId}`;
 
-/** The fold key of a batch's regeneration-failed card; the builder dismisses it once the files are regenerated. */
+/** The fold key of a batch's lost-unreadable card, which a gate that finds the migrations carried withdraws. */
 export const baseRegenerateKey = (batchId: BatchId): string => `base-regenerate:${batchId}`;
 
 /** The answer of a card about a lost-migrations notice whose list could not be read. */
@@ -522,14 +524,11 @@ export function lostMigrationsOffer(batch: BatchDto): Pick<Card, 'options' | 'de
 export const CHECK_THE_JOURNAL =
   "To check: list the migrations the batch added (`git diff --name-only <base>...<branch>` on the package's drizzle directory, and the commits the notice names), and confirm each one's name is in the journal at the branch's HEAD, under a number after the base's, with its SQL intact. A migration still missing is re-created on the branch (generate --name <name>, or --custom --name <name> with the SQL copied back byte for byte) before the notice is cleared.";
 
-/**
- * What delivery tells the builder when a worktree batch's branch took its base but its generated files
- * could not be made again. A conflict or files in the way are notices instead (`notices.ts`).
- */
+/** What delivery asks of the builder about a worktree batch's lost migrations. */
 export const baseCards = {
   /**
    * The batch's lost-migrations notice has no readable list, so no gate can tell whether the journal
-   * holds the migrations. It folds into `regenerate`'s card, and offers the one answer that ends it.
+   * holds the migrations. It stands alone, and offers the one answer that ends it.
    */
   lostUnreadable: (batch: BatchDto, worktree: string): Card => ({
     title: `Batch "${batch.title}": a merge of ${batch.baseBranch} lost migrations 10db can no longer list`,
@@ -537,23 +536,6 @@ export const baseCards = {
     foldKey: baseRegenerateKey(batch.id),
     refresh: true,
     ...lostMigrationsOffer(batch),
-  }),
-  /**
-   * 10db merged the base, taking its version of the generated directories `dirs`, but couldn't
-   * regenerate them. `why` is the reason; `restored` says it removed what a failed run wrote there.
-   * `worktree` is the batch's worktree.
-   */
-  regenerate: (
-    batch: BatchDto,
-    worktree: string,
-    dirs: readonly string[],
-    problem: { readonly why: string; readonly logPath: string | null; readonly restored: boolean },
-  ): Card => ({
-    title: `Batch "${batch.title}": 10db couldn't regenerate files after merging ${batch.baseBranch}`,
-    body: `10db merged ${batch.baseBranch} into the batch's branch. Both sides changed generated files, which are regenerated from their sources and never merged by hand, so 10db took ${batch.baseBranch}'s version of these directories to regenerate them:\n${listPaths(dirs)}\n\nBut ${problem.why}.${problem.restored ? ` 10db removed what the failed run wrote there, so they hold ${batch.baseBranch}'s version as the merge left them.` : ''}\n\nRegenerate them in the worktree ${worktree} (each package's generate script) and commit the result. Until then the gates see generated files that may not match the sources${problem.logPath === null ? '' : `. The log: ${problem.logPath}`}.`,
-    foldKey: baseRegenerateKey(batch.id),
-    refresh: true,
-    detail: { batchId: batch.id, paths: dirs.slice(0, MAX_LISTED_PATHS) },
   }),
 };
 
@@ -1314,11 +1296,13 @@ export const branchCards = {
    * 10db deleted an abandoned task's branch because it held no commits beyond its base;
    * `withWorktree` when the batch's separate copy was removed with it.
    */
-  abandonedBranchDeleted: (batch: BatchDto, withWorktree: boolean): Card => ({
-    title: `Batch "${batch.title}" abandoned: ${batch.branch ?? 'its branch'} deleted`,
+  abandonedBranchDeleted: (batch: BatchDto, withWorktree: boolean): DeliveryNotice => ({
+    tier: CardTier.Notice,
+    taskId: null,
+    key: branchCardKey.deleted(batch.id),
+    tone: 'info',
+    line: `Batch "${batch.title}" abandoned: ${batch.branch ?? 'its branch'} deleted`,
     body: `The branch ${batch.branch ?? '(none)'} held no commits beyond ${batch.baseBranch}, so 10db deleted it${withWorktree ? " along with the batch's worktree" : ''}. Nothing was lost.`,
-    foldKey: branchCardKey.deleted(batch.id),
-    detail: { batchId: batch.id },
   }),
   /** A Delete Branch answer git can't carry out while the branch is checked out. */
   checkedOut: (batch: BatchDto, path: string): Card => ({

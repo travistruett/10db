@@ -852,8 +852,9 @@ describe('a finished worktree with git-ignored files', () => {
       expect(outcome).toEqual({ kind: 'retired' });
       expect(getBatch(h.store.db, batch.id).worktreePath).toBeNull();
       expect(worktreePaths()).toEqual([realpathSync(h.repo)]);
-      // An abandoned batch's branch, with nothing on it, is deleted and a card says so.
-      expect(h.cards().map((c) => c.title)).toEqual(
+      // An abandoned batch's branch, with nothing on it, is deleted and a notice says so.
+      expect(h.cards()).toEqual([]);
+      expect(h.notices().map((n) => n.line)).toEqual(
         to === 'ABANDONED' && (tracked ?? []).length === 0
           ? [`Batch "${batch.title}" abandoned: ${batch.branch ?? ''} deleted`]
           : [],
@@ -960,8 +961,9 @@ describe('a finished worktree with git-ignored files', () => {
       for (const file of files) rmSync(join(wt, file));
       expect(await retireWorktree(h.ctx, batch.id)).toEqual({ kind: 'retired' });
 
-      // Only the note that an abandoned batch's empty branch was deleted is left.
-      expect(h.cards().map((c) => c.title)).toEqual(
+      // Only the note that an abandoned batch's empty branch was deleted is left, and it is a notice.
+      expect(h.cards()).toEqual([]);
+      expect(h.notices().map((n) => n.line)).toEqual(
         to === 'ABANDONED'
           ? [`Batch "${batch.title}" abandoned: ${batch.branch ?? ''} deleted`]
           : [],

@@ -28,6 +28,8 @@ export const NOTICE_KEY = {
   baseKept: 'base-kept',
   /** A lane launched without the base's newer commits because origin could not be fetched. */
   baseFetch: 'base-fetch',
+  /** The base merged but 10db couldn't regenerate the generated files it took from it. */
+  baseRegenerate: 'base-regenerate',
   /** A lane launched without the base's newer commits because uncommitted changes were in the way. */
   baseUncommitted: 'base-uncommitted',
   /** The pull request waits for the builder to merge it. */
@@ -376,6 +378,22 @@ function shortPaths(paths: readonly string[]): string {
 
 /** What delivery shows on a worktree batch's tasks when its branch can't take its base before a gate. */
 export const baseNotices = {
+  /**
+   * 10db merged the base, taking its version of the generated directories `dirs`, but couldn't
+   * regenerate them. `why` is the reason; `restored` says it removed what a failed run wrote there.
+   * `worktree` is the batch's worktree. It asks nothing, and goes once a gate finds the journal whole.
+   */
+  regenerate: (
+    batch: BatchDto,
+    worktree: string,
+    dirs: readonly string[],
+    problem: { readonly why: string; readonly logPath: string | null; readonly restored: boolean },
+  ): Notice => ({
+    key: NOTICE_KEY.baseRegenerate,
+    tone: 'warning',
+    line: `Batch "${batch.title}": 10db couldn't regenerate files after merging ${batch.baseBranch}`,
+    body: `10db merged ${batch.baseBranch} into the batch's branch. Both sides changed generated files, which are regenerated from their sources and never merged by hand, so 10db took ${batch.baseBranch}'s version of these directories to regenerate them:\n${listPaths(dirs)}\n\nBut ${problem.why}.${problem.restored ? ` 10db removed what the failed run wrote there, so they hold ${batch.baseBranch}'s version as the merge left them.` : ''}\n\nRegenerate them in the worktree ${worktree} (each package's generate script) and commit the result. Until then the gates see generated files that may not match the sources${problem.logPath === null ? '' : `. The log: ${problem.logPath}`}.`,
+  }),
   /**
    * `worktree` is the batch's worktree, where the builder can merge by hand. A conflict that renumbers
    * a migration says how to generate it again instead of how to merge.
