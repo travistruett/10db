@@ -201,7 +201,7 @@ export function OpenInbox({
       for (const item of row.items) {
         try {
           await answer.mutateAsync({ id: item.id, answer: { choice: DISMISS_CHOICE } });
-          dropCard(queryClient, item.id);
+          dropCard(queryClient, client, item.id);
         } catch (failure) {
           if (failure instanceof DaemonRequestError && failure.status === 409) {
             refreshCard(item.id);
@@ -249,7 +249,7 @@ export function OpenInbox({
       { id, answer: body },
       {
         onSuccess: () => {
-          dropCard(queryClient, id);
+          dropCard(queryClient, client, id);
           setDraft((current) => (current?.id === key ? null : current));
         },
         onError: (failure) => {

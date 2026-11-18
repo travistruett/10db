@@ -190,7 +190,7 @@ export function CheckCard({
       { id: item.id, answer: given },
       {
         onSuccess: () => {
-          dropCard(queryClient, item.id);
+          dropCard(queryClient, client, item.id);
           onNote('');
         },
         onError: (failure) => {

@@ -150,9 +150,8 @@ function patch(
   );
 }
 
-function rowHolding(query: Query, cardId: InboxItemId): InboxRow | null {
-  // A validated boundary: only `useInboxRows` fills a list under this key, with its pages.
-  const data = query.state.data as RowsData | undefined;
+function rowHolding(queryClient: QueryClient, query: Query, cardId: InboxItemId): InboxRow | null {
+  const data = queryClient.getQueryData<RowsData>(query.queryKey);
   for (const page of data?.pages ?? [])
     for (const row of page.rows) if (row.items.some((item) => item.id === cardId)) return row;
   return null;
@@ -171,10 +170,22 @@ async function lookUp(
 ): Promise<void> {
   const row = await fetchRowOf(client, list, cardId);
   await whenIdle(queryClient, query);
-  const before = rowHolding(query, cardId);
+  const before = rowHolding(queryClient, query, cardId);
   patch(queryClient, query, list.state, { cardId, row });
   if (before === null || (row !== null && row.key === before.key)) return;
-  const other = before.items.find((item) => item.id !== cardId);
+  await placeRemaining(queryClient, client, query, list, before, cardId);
+}
+
+/** A row that stays behind without `goneId` is looked up by one of its other cards, so it takes its new place. */
+async function placeRemaining(
+  queryClient: QueryClient,
+  client: DaemonClient,
+  query: Query,
+  list: InboxList,
+  before: InboxRow,
+  goneId: InboxItemId,
+): Promise<void> {
+  const other = before.items.find((item) => item.id !== goneId);
   if (other === undefined) return;
   const moved = await fetchRowOf(client, list, other.id);
   await whenIdle(queryClient, query);
@@ -182,13 +193,20 @@ async function lookUp(
 }
 
 /** Takes a card out of every cached list, after what is already queued for it. */
-export function dropCard(queryClient: QueryClient, cardId: InboxItemId): void {
+export function dropCard(
+  queryClient: QueryClient,
+  client: DaemonClient,
+  cardId: InboxItemId,
+): void {
   for (const query of queryClient.getQueryCache().findAll({ queryKey: ROWS_KEY })) {
     const list = listOf(query);
     if (list === null) continue;
     enqueue(queryClient, query, async () => {
       await whenIdle(queryClient, query);
+      const before = rowHolding(queryClient, query, cardId);
       patch(queryClient, query, list.state, { cardId, row: null });
+      // The cards left in its row may now sort elsewhere, and no event for this card will find them.
+      if (before !== null) await placeRemaining(queryClient, client, query, list, before, cardId);
     });
   }
 }

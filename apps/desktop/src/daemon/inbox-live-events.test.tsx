@@ -3,7 +3,15 @@ import { useEffect, type ReactNode } from 'react';
 import { act, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
-import { baseHandlers, daemonUrl, eventStream, renderWithDaemon, server } from '../test/daemon';
+import {
+  baseHandlers,
+  daemonUrl,
+  eventStream,
+  renderWithDaemon,
+  server,
+  TEST_CONNECTION,
+} from '../test/daemon';
+import { createDaemonClient } from './client';
 import { daemonEvent, inboxItemDto } from '../test/fixtures';
 import { serveInboxRows } from '../test/inbox-page-fixtures';
 import { useEventStream } from './events';
@@ -279,6 +287,33 @@ describe('applyInboxEvent', () => {
     expect(lookups(view.asked, view.baseline)).toEqual([f1.id, f2.id]);
   });
 
+  it('moves a grouped row that an answer shrank before the event came, by looking up the next card (row 8)', async () => {
+    const project = mintId('Project');
+    const flag = (n: number) =>
+      inboxItemDto({
+        projectId: project,
+        kind: 'flag',
+        options: [],
+        title: 'Flag',
+        body: 'same',
+        createdAt: T(n),
+      });
+    const [f1, f2] = [flag(1), flag(5)];
+    const middle = inboxItemDto({ projectId: project, createdAt: T(3) });
+    const all = [f1, middle, f2];
+    const view = await mount({ open: all });
+    const flags = view.keys()[0];
+    all.splice(0, 1);
+    // The answer's own success drops the card before the event for it is read.
+    dropCard(view.queryClient, createDaemonClient(TEST_CONNECTION), f1.id);
+    view.send('inbox.changed', f1.id);
+    await waitFor(() => {
+      expect(view.keys()).toEqual([middle.id, flags]);
+    });
+    // The drop looks the card left in the row up; the event for the dropped card is then a no-op lookup.
+    expect(lookups(view.asked, view.baseline)).toEqual([f2.id, f1.id]);
+  });
+
   it('makes no lookup for a list that is not on screen, and reads it fresh when shown again (rows 19, 23)', async () => {
     const all = cards(3);
     const view = await mount({ open: all });
@@ -415,7 +450,11 @@ describe('a fetch in flight', () => {
       expect(view.asked.some((query) => query['after'] !== undefined)).toBe(true);
     });
     const answered = all[51];
-    dropCard(view.queryClient, answered?.id ?? mintId('InboxItem'));
+    dropCard(
+      view.queryClient,
+      createDaemonClient(TEST_CONNECTION),
+      answered?.id ?? mintId('InboxItem'),
+    );
     gate.release();
     await waitFor(() => {
       expect(view.ids()).toHaveLength(51);
