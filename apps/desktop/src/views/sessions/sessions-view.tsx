@@ -22,7 +22,7 @@ import {
 } from './fresh-tabs';
 import { draftKey, sessionDrafts, type SendRequest } from './session-drafts';
 import type { SessionsSearch } from './sessions-search';
-import { useClosedTabs } from './closed-tabs';
+import { closedTabs, useClosedTabs } from './closed-tabs';
 import { useSessionClosing } from './use-session-closing';
 import { openCardsByConversation } from './needs-you';
 import { panelGroups, panelOrder, topPosition, type PanelRow } from './panel-order';
@@ -194,6 +194,8 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
     if (chat.archivedAt !== null) await unarchive.mutateAsync(chat.id);
     if (chat.tabPosition === null || chat.archivedAt !== null)
       await patch.mutateAsync({ chatId: chat.id, tabPosition: topPosition(chats, chat.projectId) });
+    // It is open again, so Recently closed no longer lists it.
+    closedTabs.take(chat.id);
   };
 
   /** A recent session opens in this fresh tab's place. */
@@ -218,6 +220,8 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
 
   const makeTask = (row: PanelRow): void => {
     if (row.kind !== 'chat') return;
+    // The Board files in the selected project, which a right-click on another project's row left alone.
+    select(row.chat.projectId);
     void navigate({ to: '/board', search: { newTask: row.chat.title } });
   };
 

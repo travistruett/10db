@@ -85,6 +85,8 @@ function judgeEdit(
 ): ShapeVerdict {
   if (folder === undefined) return deny(CHAT_WRITES_LATER);
   if (!folder.holds()) return deny(chatFolderInUse(folder.heldBy()));
+  // A branch session with no worktree on disk has only the checkout to write in, and never writes there.
+  if (folder.place === 'branch' && !folder.writable) return deny(CHAT_WRITES_LATER);
   const judge = access.commands?.fileAccess;
   const path = editedPath(call, access);
   if (judge === undefined || path === null) return deny(`${call.toolName} could not be judged.`);

@@ -192,7 +192,7 @@ const FINDER_FILE = '.DS_Store';
  * removal would still take them.
  */
 export async function unseededIgnoredFiles(
-  git: Git,
+  git: Pick<Git, 'worktreeIgnoredFiles'>,
   main: string,
   path: string,
   seed: readonly string[],

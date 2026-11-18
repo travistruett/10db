@@ -48,14 +48,15 @@ import { useHandBack, useTakeover, useTakeoverCommand } from '../../daemon/takeo
 import dayjs from 'dayjs';
 import { chatEntries } from './chat-entries';
 import { FolderWait } from './folder-wait';
-import { keepingWords } from './folder-holders';
+import { keepingHolders } from './folder-holders';
 import { useOpenTask } from './open-session';
 import { useTaskSession } from '../../daemon/task-session-queries';
 import { sessionAnnouncement, type SessionEvent } from './session-announcements';
 import { JudgeLine } from '../../conversation';
 import { SessionTitle } from './session-title';
-import { WorkBar } from './work-bar';
+import { settledWords, WorkBar } from './work-bar';
 import { ChangesDrawer, BESIDE_PX, DRAWER_WIDTH } from './changes-drawer';
+import { barHidden } from './bar-hidden';
 import { changesChoice } from './changes-choice';
 import { changesTotals, withQuote } from './changes-files';
 import { GitStepButton } from './git-step-button';
@@ -133,7 +134,7 @@ function HandedOffLine({ chat }: { readonly chat: ChatDto }) {
 }
 
 /**
- * A chat's tab (sessions UI spec §4, §12): the session bar, then the kit's conversation column: the
+ * A chat's tab (sessions UI spec §4, §12): the title row, then the kit's conversation column: the
  * conversation, the cards it waits on pinned above the composer, and the composer. Each state M5a reaches has its words.
  */
 export function ChatTab({
@@ -190,7 +191,9 @@ export function ChatTab({
   const work = useChatWork(chat.id);
   const choose = useChooseWork();
   // Changes: the button shows once anything changed; the builder's choice to open or close it holds for the session.
-  const changes = useChatChanges(chat.id, true);
+  // A session that has not chosen where to work, or is moving, has no root to read yet: the daemon refuses.
+  const placed = chat.work?.place === WorkPlace.Here || chat.work?.place === WorkPlace.Branch;
+  const changes = useChatChanges(chat.id, placed);
   const totals = changes.data === undefined ? null : changesTotals(changes.data.files);
   const hasChanges = totals !== null && totals.files > 0;
   // A session whose worktree is gone has no diff to read; its pull request has the changes, which the drawer links.
@@ -207,14 +210,24 @@ export function ChatTab({
     return true;
   });
   // Esc hides the bar until a refused change asks again, which changes `askedAt`.
-  const [hiddenFor, setHiddenFor] = useState<string | null | undefined>(undefined);
-  const [settled, setSettled] = useState<ChoseWork['work'] | null>(null);
+  const [hiddenFor, setHiddenFor] = useState<string | null | undefined>(() =>
+    barHidden.get(chat.id),
+  );
+  const [settled, setSettled] = useState<{
+    readonly work: ChoseWork['work'];
+    readonly askedAt: string | null;
+  } | null>(null);
   const place = chat.work?.place ?? null;
   const askedAt = chat.work?.askedAt ?? null;
   const asking = place === WorkPlace.Choosing && hiddenFor !== askedAt;
+  // The branch the checkout is on, as the work state read it; Your folder's read stands in until it arrives.
+  const checkoutBranch = work.data?.branch ?? folder?.branch ?? null;
+  // What a lost choice said is kept until the next question is asked, which the bar's own line cannot do.
+  const shownSettled =
+    settled !== null && (askedAt === null || settled.askedAt === askedAt) ? settled.work : null;
   const movingTo = place === WorkPlace.Moving ? (chat.work?.branch ?? null) : null;
   // Holders that keep this chat's turn from writing: Send asks before a message runs.
-  const keeping = keepingWords(chat, folder);
+  const keeping = keepingHolders(chat, folder);
   // A message that chose to wait is listed by the daemon as this chat waiting, whoever still holds the folder.
   const waiting = (folder?.holders ?? []).some(
     (h) => h.kind === FolderHolderKind.WaitingChat && h.chatId === chat.id,
@@ -274,13 +287,33 @@ export function ChatTab({
   const stopNow = (): void => {
     stop.mutate(chat.conversationId);
   };
-  const latest = useRef({ working, stopNow });
+  const closeChanges = (): void => {
+    changesChoice.set(chat.id, false);
+    setChangesOpen(false);
+  };
+  const latest = useRef({ working, stopNow, changesOpen, closeChanges });
   useEffect(() => {
-    latest.current = { working, stopNow };
+    latest.current = { working, stopNow, changesOpen, closeChanges };
   });
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape' || !latest.current.working) return;
+      if (event.key !== 'Escape') return;
+      // The Changes drawer is a dialog that is not modal: Esc closes it wherever focus is, before it can
+      // read as a layer that owns the key or as a Stop.
+      if (latest.current.changesOpen && !event.defaultPrevented && !escapeHasOwner(event)) {
+        const others = [...document.querySelectorAll('[role="dialog"]')].some(
+          (d) => d.getAttribute('aria-modal') !== 'false',
+        );
+        const popup = document.querySelector(
+          '[role="menu"], [aria-expanded="true"][aria-haspopup]',
+        );
+        if (!others && popup === null) {
+          event.preventDefault();
+          latest.current.closeChanges();
+          return;
+        }
+      }
+      if (!latest.current.working) return;
       if (escapeIsTaken(event) || escapeHasOwner(event)) return;
       event.preventDefault();
       latest.current.stopNow();
@@ -543,22 +576,19 @@ export function ChatTab({
                 />
               ) : null}
               {waiting ? (
-                <FolderWait
-                  holders={keeping}
-                  branch={folder?.branch ?? work.data?.baseBranch ?? null}
-                  onStop={stopNow}
-                />
+                <FolderWait holders={keeping} branch={checkoutBranch} onStop={stopNow} />
               ) : null}
               {asking && !removed && conversation.state !== 'sealed' ? (
                 <WorkBar
                   key={askedAt ?? 'asked'}
                   agentLabel={caps.label}
-                  branch={folder?.branch ?? work.data?.baseBranch ?? 'main'}
+                  branch={checkoutBranch}
                   state={work.data}
                   pending={choose.isPending}
-                  settled={settled}
+                  settled={shownSettled}
                   error={choose.error?.message ?? null}
                   onHide={() => {
+                    barHidden.set(chat.id, askedAt);
                     setHiddenFor(askedAt);
                     input.current?.focus();
                   }}
@@ -567,12 +597,19 @@ export function ChatTab({
                       { chatId: chat.id, place: next },
                       {
                         onSuccess: (answer) => {
-                          setSettled(answer.chosen ? null : answer.work);
+                          setSettled(answer.chosen ? null : { work: answer.work, askedAt });
+                          // The bar goes with the answer, and the focus it held goes to the composer.
+                          input.current?.focus();
                         },
                       },
                     );
                   }}
                 />
+              ) : null}
+              {!asking && shownSettled !== null ? (
+                <Text size="xs" c="dimmed" px="md" role="status">
+                  {settledWords(shownSettled)}
+                </Text>
               ) : null}
               {conversation.state === 'sealed' ? (
                 <HandedOffLine chat={chat} />

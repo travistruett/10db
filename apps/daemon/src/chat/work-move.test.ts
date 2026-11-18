@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConversationItemKind, parseItemBody, WorkPlace } from '@10db/contracts';
 import { getChat, listInbox, listItems, setChatWork } from '@10db/db';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { chatWorld, type ChatWorld } from '../../test/chat-world';
 import { gate } from '../../test/explore-world';
 import {
@@ -80,6 +80,32 @@ describe('a session on its own branch', () => {
     expect(spec?.cwd).toBe(worktree);
     expect(w.folderHold.holdsTurn(chat.id)).toBe(false);
     expect(prepares[0]).toMatchObject({ checkout: worktree, writes: true });
+  });
+
+  it("lets a branch session read and search its own worktree, and not the builder's checkout", async () => {
+    const { chat, worktree } = world();
+    writeFileSync(join(worktree, 'a.ts'), 'x');
+    const verdicts: string[] = [];
+    w.adapter.shapeBehaviour = (turn) => {
+      const asked = (toolName: string, input: Record<string, unknown>) =>
+        verdicts.push(turn.spec.preToolUse({ toolName, input }).decision);
+      asked('Read', { file_path: join(worktree, 'a.ts') });
+      asked('Grep', { pattern: 'x', path: worktree });
+      asked('Read', { file_path: join(repo.path, 'checkout', 'a.ts') });
+      return Promise.resolve({ text: 'Done.' });
+    };
+    w.chat.send(chat.conversationId, { text: 'one', mentions: [], pictures: [] });
+    await waitFor(() => verdicts.length === 3);
+    expect(verdicts).toEqual(['allow', 'allow', 'deny']);
+  });
+
+  it('starts reading the checkout when its worktree folder is gone, instead of failing in a missing cwd', async () => {
+    const { chat, worktree } = world();
+    rmSync(worktree, { recursive: true });
+    w.chat.send(chat.conversationId, { text: 'one', mentions: [], pictures: [] });
+    await waitFor(() => w.adapter.shapeSessions.length === 1);
+    expect(w.adapter.shapeSessions[0]?.spec.cwd).toBe(join(repo.path, 'checkout'));
+    expect(prepares[0]).toMatchObject({ writes: false });
   });
 
   it('opens each session with where it works, and says once that it moved (call 11)', async () => {
@@ -254,6 +280,19 @@ describe('moving a session to a new branch', () => {
     await w.work.moveSettled(chat.id);
     expect(getChat(w.state.db, chat.id).workPlace).toBe('branch');
     expect(w.engine.view(chat.conversationId).state).not.toBe('running');
+  });
+
+  it('goes back to choosing, with the error, when the session cannot be moved into its worktree', async () => {
+    moveWorld();
+    const chat = await choosingAfterARead();
+    vi.spyOn(w.engine, 'relocate').mockRejectedValue(new Error('the old session would not close'));
+    await w.work.choose(chat.id, 'branch');
+    await w.work.moveSettled(chat.id);
+    expect(getChat(w.state.db, chat.id)).toMatchObject({ workPlace: 'choosing', branch: null });
+    expect(w.work.moveFailure(chat.id)).toMatch(/would not close/);
+    // Its starts are released: a message runs.
+    w.chat.send(chat.conversationId, { text: 'still reading', mentions: [], pictures: [] });
+    await waitFor(() => (w.adapter.shapeSessions[0]?.sent.length ?? 0) >= 1);
   });
 
   it('goes back to choosing when the worktree cannot be made, with the error and the card again (row 24)', async () => {

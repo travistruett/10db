@@ -214,6 +214,10 @@ export function createTitleRowGit(deps: TitleRowGitDeps): TitleRowGit {
         throw new ConflictError(
           `Merging ${chat.branch} into ${base} conflicts in ${merged.paths.join(', ')}, so nothing was merged.`,
         );
+      if (merged.kind === 'blocked')
+        throw new ConflictError(
+          `Your checkout has files where the merge writes (${[...merged.changed, ...merged.kept].join(', ')}), so nothing was merged.`,
+        );
     } finally {
       folderHold.releaseGit(token);
     }
@@ -253,12 +257,20 @@ export function createTitleRowGit(deps: TitleRowGitDeps): TitleRowGit {
             'This project merges locally, so there is no pull request to open.',
           );
         const title = chat.title ?? CHAT_DEFAULT_TITLE;
+        const now = await deps.work.state(chatId, signal);
+        if (now.next === null)
+          throw new ConflictError(
+            now.refusal ?? 'This session has nothing to open a pull request for.',
+          );
+        // A branch whose pull request is open only needs its new commits pushed.
+        const pushOnly = now.pullRequest?.merged === false;
         const made: { branch: string | null } = { branch: null };
         try {
           await inFolder(chatId, `opening a pull request for ‘${title}’`, signal, async (site) => {
             const branch = await branchForPullRequest(site, chatId, project.baseBranch);
             made.branch = branch;
             await steps.push(site, branch);
+            if (pushOnly) return;
             await steps.openPullRequest(site, {
               conversationId: chat.conversationId,
               branch,

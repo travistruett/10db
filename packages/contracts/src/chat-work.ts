@@ -27,7 +27,7 @@ export type WorkPlace = ValueOf<typeof WorkPlace>;
 export const ChatWork = z.object({
   place: z.enum(WorkPlace),
   branch: z.string().nullable(),
-  /** The branch the work was cut from. */
+  /** The commit the work was cut from. */
   base: z.string().nullable(),
   /** Null on a branch with no worktree: archived, swept, or one that could not be remade. */
   worktree: z.string().nullable(),

@@ -14,3 +14,4 @@
   and releases the token in a `finally`. A pass of one stacks on a closed pass as Start Pass does, refuses
   `BISECT_LOG`, and `workstream-changes.ts` reads a pass's kept turns by `ChangesScope`.
 - A switch back, a branch cut or a settle that waits for a chat's terminal (`folder-wait.ts`) takes its signal from 10db's shutdown, so quitting never hangs on it, and redoes the wait at the next start; no branch is settled while a terminal holds the folder, and each wait names the chat and keeps the project's delivery slot.
+- A session's worktree is cut by `chat-worktree-cut.ts` (`cutChatWorktree`, idempotent by path, then `seedAndInstall` from `worktree-prepare.ts`, shared with a lane's cut; a failure removes what it made). The startup sweep (`worktree-sweep.ts`) visits every project, local ones too, which have only chat worktrees: it removes a finished chat's and keeps an open or moving one, or one with unsaved files (carded, `chat-worktree-losses.ts`).

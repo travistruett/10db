@@ -1,11 +1,5 @@
 import { Box } from '@mantine/core';
-import {
-  IconAlertTriangle,
-  IconCheck,
-  IconGitPullRequest,
-  IconPlayerPause,
-  IconTerminal2,
-} from '@tabler/icons-react';
+import { IconAlertTriangle, IconPlayerPause, IconTerminal2 } from '@tabler/icons-react';
 import type { TabWords } from './tab-state';
 
 /** The state mark at the tab's right: a dot or a glyph, each with a shape of its own. */
@@ -43,28 +37,6 @@ export function Mark({ mark }: { readonly mark: TabWords['mark'] }) {
           size={12}
           stroke={1.5}
           color="var(--mantine-color-orange-filled)"
-        />
-      );
-    case 'review_dim':
-      return (
-        <IconGitPullRequest
-          data-mark={mark}
-          size={12}
-          stroke={1.5}
-          color="var(--mantine-color-dimmed)"
-        />
-      );
-    case 'check_dim':
-      return (
-        <IconCheck data-mark={mark} size={12} stroke={1.5} color="var(--mantine-color-dimmed)" />
-      );
-    case 'check_green':
-      return (
-        <IconCheck
-          data-mark={mark}
-          size={12}
-          stroke={1.5}
-          color="var(--mantine-color-green-filled)"
         />
       );
     case 'terminal_dim':

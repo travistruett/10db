@@ -1,6 +1,6 @@
 import { ChatWork, ChatWorkStateDto, type ChatId, type WorkPlace } from '@10db/contracts';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { readJson } from './client';
+import { readJson, refuse } from './client';
 import { chatKeys } from './chat-queries';
 import { useDaemon } from './provider';
 
@@ -59,7 +59,13 @@ export function useChooseWork() {
         json: { place },
       });
       // A 409 is an answer, not a failure: it carries the place that had already won.
-      if (res.status === 409) return { chosen: false, work: ChatWork.parse(await res.json()) };
+      if (res.status === 409) {
+        const body: unknown = await res.json().catch(() => null);
+        const settled = ChatWork.safeParse(body);
+        if (settled.success) return { chosen: false, work: settled.data };
+        // Any other 409 is a refusal with the daemon's words.
+        return refuse(409, body);
+      }
       return { chosen: true, work: await readJson(res, ChatWork) };
     },
     onSettled: () => {

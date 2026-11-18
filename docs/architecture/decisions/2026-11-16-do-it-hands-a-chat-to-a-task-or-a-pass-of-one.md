@@ -1,5 +1,7 @@
 # Do It hands a chat's work to a task in a separate copy, or to a pass of one in Your folder
 
+> **Superseded** by `decisions/2026-11-17-a-session-on-a-new-branch-is-the-same-conversation-in-its-own-worktree.md`: Sessions has no Do It, task tab or pass of one.
+
 - **Date:** 2026-11-16
 - **Amends:** `decisions/2026-11-15-a-chat-writes-under-the-folder-hold-and-10dbs-writers-keep-it-alone.md` (the
   hold gains a handover and a signal rule, and Do It is built on it)

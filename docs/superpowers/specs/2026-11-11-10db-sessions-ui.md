@@ -170,6 +170,8 @@ kind line never competes with the buttons for width. It shows:
 
 ## 5. The tab strip
 
+> **Superseded** by `docs/superpowers/specs/2026-11-17-10db-sessions-simplified-design.md` (§6: the panel and the title row replace the strip). Kept as the record of what was built before.
+
 ### 5.1 Where it sits
 
 > The app shell spec (`2026-11-17-10db-app-shell-design.md`) replaces the header with a 44 px title row on the frame; the strip is the title row's switcher and starts after the traffic lights and the sidebar button, not at 88 px.
@@ -707,6 +709,8 @@ stops · / commands · @ files"; it is hidden under 640 px.
   `drafts.ts`).
 
 ## 8. Do It: from a Chat to a Task
+
+> **Superseded** by `docs/superpowers/specs/2026-11-17-10db-sessions-simplified-design.md` (§1: a session moves to a new branch itself). Kept as the record of what was built before.
 
 A Chat does small work itself, in Your folder (§0). Do It is for work that wants its own copy, a brief and the
 project's delivery, or the pass's ceremony.

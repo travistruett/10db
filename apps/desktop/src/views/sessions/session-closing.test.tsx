@@ -132,6 +132,8 @@ describe('Sessions: close, archive and reopen', () => {
       for (const path of [...lost.uncommitted, ...lost.ignored])
         expect(within(dialog).getByText(path)).toBeTruthy();
       expect(dialog.textContent).toContain('Your commits stay on the branch.');
+      // The corner close button is named, or a screen reader reads it as nothing.
+      expect(within(dialog).getByRole('button', { name: 'Close' })).toBeTruthy();
       expect(chat.archived).toEqual([]);
       expect(rowNames()).toHaveLength(3);
       fireEvent.click(
@@ -147,6 +149,22 @@ describe('Sessions: close, archive and reopen', () => {
       await waitFor(() => {
         expect(rowNames()).toEqual(['First, ampsio', 'Third, ampsio']);
       });
+    });
+
+    it('a 409 that is not the files answer shows the daemon’s words, not a parse dump', async () => {
+      const { chat } = open();
+      server.use(
+        http.post(daemonUrl('/chats/:chatId/archive'), () =>
+          HttpResponse.json(
+            { error: 'conflict', message: 'Wait for the move to finish.' },
+            { status: 409 },
+          ),
+        ),
+      );
+      await archiveFromMenu();
+      expect(await screen.findByText('Wait for the move to finish.')).toBeTruthy();
+      expect(chat.archived).toEqual([]);
+      expect(screen.queryByRole('dialog', { name: 'Archive this session?' })).toBeNull();
     });
 
     it('Cancel archives nothing', async () => {

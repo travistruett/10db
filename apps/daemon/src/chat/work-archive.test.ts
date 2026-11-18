@@ -42,7 +42,7 @@ const gitIn = (dir: string, ...args: string[]): string =>
     .trim();
 
 /** A session that has moved to its branch: the worktree is cut and the row is `branch`. */
-async function onABranch() {
+async function onABranch(failRemove = false) {
   checkout = createTempRepo();
   root = tempDir('archive-root');
   const worktreeRoot = join(realpathSync(root.path), 'level');
@@ -62,7 +62,12 @@ async function onABranch() {
           worktreeRoot,
         },
       }),
-    worktrees: ({ state }) => createChatWorktrees({ state, git }),
+    worktrees: ({ state }) => {
+      const real = createChatWorktrees({ state, git });
+      return failRemove
+        ? { ...real, remove: () => Promise.reject(new Error('git could not remove the worktree')) }
+        : real;
+    },
   });
   const chat = w.open();
   w.state.write((ctx) => {
@@ -126,6 +131,15 @@ describe('archiving a session on its own branch', () => {
     expect(existsSync(path)).toBe(false);
   });
 
+  it('stays usable when the worktree cannot be removed: the archive fails and messages still run', async () => {
+    const { chat } = await onABranch(true);
+    const refused = await chatRequest(w, `/chats/${chat.id}/archive`, 'POST');
+    expect(refused.status).toBeGreaterThanOrEqual(500);
+    expect(getChat(w.state.db, chat.id).archivedAt).toBeNull();
+    w.chat.send(chat.conversationId, { text: 'still here', mentions: [], pictures: [] });
+    await waitFor(() => w.adapter.shapeSessions.some((s) => s.spec.prompt.includes('still here')));
+  });
+
   it('archives a session with no worktree as before, with no body', async () => {
     await onABranch();
     const plain = w.open(1);
@@ -177,6 +191,26 @@ describe('reopening a branch session whose worktree was removed', () => {
     await waitFor(() => getChat(w.state.db, chat.id).worktreePath !== null);
     await w.work.moveSettled(chat.id);
     expect(existsSync(getChat(w.state.db, chat.id).worktreePath ?? '')).toBe(true);
+  });
+
+  it('does not try to remake the worktree again when an open tab only moves', async () => {
+    const { chat, branch } = await archived();
+    gitIn(checkout.path, 'branch', '-D', branch);
+    await chatRequest(w, `/chats/${chat.id}/unarchive`, 'POST');
+    await waitFor(() => w.work.moveFailure(chat.id) !== null);
+    await w.work.moveSettled(chat.id);
+    w.state.write((ctx) => {
+      moveChatTab(ctx, chat.id, 0);
+    });
+    const said = () =>
+      listItems(w.state.db, chat.conversationId, {})
+        .map((i) => JSON.stringify(i.body))
+        .join()
+        .split('could not be made again').length - 1;
+    const before = said();
+    await w.chat.patch(chat.id, { tabPosition: 1 });
+    await w.work.moveSettled(chat.id);
+    expect(said()).toBe(before);
   });
 
   it('stays with no worktree, reading only, when the branch is gone, and says why (row 37)', async () => {

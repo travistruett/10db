@@ -84,7 +84,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // A conversation's transcript, proposals, round and turn all change under this one event.
   shape: [shapeKeys.all],
   // An explore conversation stored or changed an item, or moved state: its items and its state.
-  conversation: [conversationKeys.all, chatKeys.all, chatWorkKeys.all],
+  conversation: [conversationKeys.all, chatKeys.all],
   // A chat was created, renamed, moved, archived or touched: the open tabs and Recent.
   chat: [chatKeys.all, chatWorkKeys.all, taskSessionKeys.all],
   // A pass opening, a turn starting or ending, a page Ready or signed off, a close step: each changes
@@ -149,8 +149,9 @@ export const EVENT_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly Qu
   'task.message_added': [passKeys.turnsAll, passKeys.live, liveKeys.all],
   // A picture of a task's page was kept: its thread and its drawer show it.
   'task.screen_added': [screenKeys.all],
-  // A turn began or ended: what streams is read again, so an item that finished leaves it.
-  'conversation.state': [liveKeys.all],
+  // A turn began or ended: what streams is read again, so an item that finished leaves it, and what the turn
+  // changed in the session's worktree is read again.
+  'conversation.state': [liveKeys.all, chatWorkKeys.all],
 };
 
 export function eventStreamUrl(conn: DaemonConnection, after: number): string {

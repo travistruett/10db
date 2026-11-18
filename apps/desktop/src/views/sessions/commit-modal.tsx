@@ -12,6 +12,8 @@ export interface CommitModalProps {
   /** The files are still being read. */
   readonly loading: boolean;
   readonly pending: boolean;
+  /** The commit is sent but waits for the session's own turn to end. */
+  readonly waitsForTurn: boolean;
   readonly error: string | null;
   readonly onCommit: (message: string, paths: readonly string[]) => void;
 }
@@ -25,6 +27,7 @@ export function CommitModal({
   checked,
   loading,
   pending,
+  waitsForTurn,
   error,
   onCommit,
 }: CommitModalProps) {
@@ -34,7 +37,13 @@ export function CommitModal({
   const picked = ticked ?? new Set(checked);
   const paths = files.filter((path) => picked.has(path));
   return (
-    <Modal opened={opened} onClose={onClose} title="Commit" centered>
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      title="Commit"
+      centered
+      closeButtonProps={{ 'aria-label': 'Close' }}
+    >
       <form
         onSubmit={(event) => {
           event.preventDefault();
@@ -80,7 +89,7 @@ export function CommitModal({
               loading={pending}
               disabled={message.trim() === '' || paths.length === 0}
             >
-              Commit
+              {waitsForTurn ? 'Waits for the turn to end' : 'Commit'}
             </Button>
           </Group>
         </Stack>

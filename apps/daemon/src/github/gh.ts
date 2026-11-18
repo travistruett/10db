@@ -62,16 +62,17 @@ export interface PullRequest {
   readonly baseRef: string | null;
 }
 
-/**
- * A pull request's state and checks as GitHub reports them. The checks are `unknown` only when the
- * rollup lists an entry 10db can't read and no other check failed or is still running.
- */
 /** What a pull request's checks add up to: the title row's "3/9". */
 export interface CheckCounts {
   readonly passed: number;
   readonly total: number;
   readonly failing: number;
 }
+
+/**
+ * A pull request's state and checks as GitHub reports them. The checks are `unknown` only when the
+ * rollup lists an entry 10db can't read and no other check failed or is still running.
+ */
 
 export interface PullRequestStatus {
   readonly url: string;
@@ -562,7 +563,9 @@ export function summariseChecks(rollup: readonly CheckRollupEntry[]): {
         break;
     }
   }
-  const counts = { passed, total: rollup.length, failing: failingChecks.length };
+  // An entry 10db can't read is neither passed nor running, so counting it would wait on it forever.
+  const readable = rollup.filter((item) => item.__typename !== 'Unreadable').length;
+  const counts = { passed, total: readable, failing: failingChecks.length };
   if (failingChecks.length > 0) return { checks: 'failing', failingChecks, counts };
   if (pending) return { checks: 'pending', failingChecks, counts };
   if (unreadable) return { checks: 'unknown', failingChecks, counts };

@@ -60,6 +60,8 @@ export interface SessionRowProps {
   /** The tooltip's second line: the project and the agent. */
   readonly detail: string;
   readonly selected: boolean;
+  /** The one row of the list the Tab key reaches; the arrow keys move between the rows from there. */
+  readonly tabbable: boolean;
   /** Whether a drag can move this row. */
   readonly draggable: boolean;
   readonly onSelect: () => void;
@@ -80,6 +82,7 @@ export function SessionRow({
   name,
   detail,
   selected,
+  tabbable,
   draggable,
   onSelect,
   onClose,
@@ -97,6 +100,22 @@ export function SessionRow({
     } else if (event.key === 'Delete') {
       event.preventDefault();
       onClose();
+    } else if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
+      const rows = [
+        ...(event.currentTarget.closest('[role="listbox"]')?.querySelectorAll('[role="option"]') ??
+          []),
+      ];
+      const at = rows.indexOf(event.currentTarget);
+      const target =
+        event.key === 'Home'
+          ? rows[0]
+          : event.key === 'End'
+            ? rows.at(-1)
+            : rows[at + (event.key === 'ArrowDown' ? 1 : -1)];
+      if (target instanceof HTMLElement) {
+        event.preventDefault();
+        target.focus();
+      }
     }
   };
   const ring =
@@ -124,7 +143,7 @@ export function SessionRow({
         role="option"
         aria-label={name}
         aria-selected={selected}
-        tabIndex={0}
+        tabIndex={tabbable ? 0 : -1}
         className={classes['row']}
         data-session-row={rowKey}
         data-selected={selected ? '' : undefined}

@@ -9,8 +9,8 @@ import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
 export interface WorkBarProps {
   /** The agent's name, `capabilities.label`. */
   readonly agentLabel: string;
-  /** The branch the builder's checkout is on, for "Here, on …". */
-  readonly branch: string;
+  /** The branch the builder's checkout is on, for "Here, on …"; null while it is not known. */
+  readonly branch: string | null;
   /** The session's work state, once read; the bar is drawn without it. */
   readonly state: ChatWorkStateDto | undefined;
   /** Esc hid the bar; it stays hidden until a refused change asks again. */
@@ -23,10 +23,13 @@ export interface WorkBarProps {
   readonly error: string | null;
 }
 
+/** The holder's sentence as a clause: the daemon writes it with a backticked branch and a closing period. */
+const holderWords = (holder: string): string => holder.replaceAll('`', '').replace(/\.$/, '');
+
 const files = (n: number): string => `${String(n)} uncommitted ${n === 1 ? 'file' : 'files'}`;
 
 /** What a choice that lost to another says: the place that won. */
-function settledWords(work: ChatWork): string {
+export function settledWords(work: ChatWork): string {
   switch (work.place) {
     case WorkPlace.Here:
       return 'This session already works here, in your checkout.';
@@ -66,9 +69,10 @@ export function WorkBar({
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.metaKey || event.ctrlKey || event.altKey) return;
-    if (event.key === '1') onChoose('here');
-    else if (event.key === '2') onChoose('branch');
-    else if (event.key === 'Escape') onHide();
+    // A choice on its way is not asked twice.
+    if (event.key === '1' || event.key === '2') {
+      if (!pending) onChoose(event.key === '1' ? 'here' : 'branch');
+    } else if (event.key === 'Escape') onHide();
     else return;
     event.preventDefault();
   };
@@ -108,7 +112,7 @@ export function WorkBar({
       )}
       {holder === null ? null : (
         <Text size="xs" c="dimmed">
-          {holder}; this session will wait for it.
+          {holderWords(holder)}; this session will wait for it.
         </Text>
       )}
       {refusal === null ? null : (
@@ -130,7 +134,7 @@ export function WorkBar({
             onChoose('here');
           }}
         >
-          Here, on {branch}
+          {branch === null ? 'Here' : `Here, on ${branch}`}
         </Button>
         <Button
           size="xs"

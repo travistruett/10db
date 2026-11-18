@@ -16,7 +16,7 @@ import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { ActionIcon, Box, Menu, Text, TextInput, Tooltip, UnstyledButton } from '@mantine/core';
 import { IconPlus, IconSearch } from '@tabler/icons-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchChats } from '../../daemon/chat-queries';
 import { Panel } from '../../shell/panel';
 import { ProjectTile } from '../../shell/project-tile';
@@ -81,19 +81,21 @@ function Found({
 }): ReactNode {
   const how = chat.archivedAt !== null ? 'archived' : chat.tabPosition === null ? 'closed' : 'open';
   return (
-    <UnstyledButton
-      className={classes['row']}
-      onClick={onOpen}
-      aria-label={`${chat.title}, ${projectName}, ${how}`}
-    >
-      <ProjectTile name={projectName} size={14} />
-      <span className={classes['title']}>{chat.title}</span>
-      {how === 'open' ? null : (
-        <Text size="xs" c="dimmed">
-          {how}
-        </Text>
-      )}
-    </UnstyledButton>
+    <div role="listitem">
+      <UnstyledButton
+        className={classes['row']}
+        onClick={onOpen}
+        aria-label={`${chat.title}, ${projectName}, ${how}`}
+      >
+        <ProjectTile name={projectName} size={14} />
+        <span className={classes['title']}>{chat.title}</span>
+        {how === 'open' ? null : (
+          <Text size="xs" c="dimmed">
+            {how}
+          </Text>
+        )}
+      </UnstyledButton>
+    </div>
   );
 }
 
@@ -134,6 +136,24 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
     initialRect: { width: 260, height: 600 },
   });
 
+  // Tab reaches the selected row, or the first one while none is selected.
+  const allRows = items.flatMap((i) => (i.kind === 'row' ? [i.row] : []));
+  const tabbableKey = (allRows.find((r) => r.key === selectedKey) ?? allRows[0])?.key ?? null;
+
+  // The selected row stays in view when a key, not a click, selected it.
+  const selectedIndex = items.findIndex((i) => i.kind === 'row' && i.row.key === selectedKey);
+  useEffect(() => {
+    if (selectedIndex < 0) return;
+    if (virtual) virtualizer.scrollToIndex(selectedIndex);
+    else {
+      const row = scroller.current?.querySelector('[role="option"][aria-selected="true"]');
+      if (row instanceof HTMLElement && typeof row.scrollIntoView === 'function')
+        row.scrollIntoView({ block: 'nearest' });
+    }
+    // Only a change of the selected row scrolls; the virtualizer is a new object every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedKey, virtual]);
+
   const renderRow = (row: PanelRow): ReactNode => {
     const project = nameOf(panelRowProject(row));
     if (row.kind === 'fresh') {
@@ -146,6 +166,7 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
           name={sessionName(CHAT_DEFAULT_TITLE, project, '')}
           detail={project}
           selected={row.key === selectedKey}
+          tabbable={row.key === tabbableKey}
           draggable={false}
           onSelect={() => {
             props.onSelect(row);
@@ -172,6 +193,7 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
         name={sessionName(row.chat.title, project, state?.spoken ?? '')}
         detail={[project, label].filter((p) => p !== '').join(' · ')}
         selected={row.key === selectedKey}
+        tabbable={row.key === tabbableKey}
         draggable={!virtual && !searching}
         onSelect={() => {
           props.onSelect(row);
@@ -272,24 +294,26 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
         </Box>
         <div ref={scroller} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingInline: 4 }}>
           {searching ? (
-            <div role="list" aria-label="Search results">
-              {search.rows.map((chat) => (
-                <Found
-                  key={chat.id}
-                  chat={chat}
-                  projectName={nameOf(chat.projectId)}
-                  onOpen={() => {
-                    props.onOpenFound(chat);
-                    setQuery('');
-                  }}
-                />
-              ))}
+            <>
+              <div role="list" aria-label="Search results">
+                {search.rows.map((chat) => (
+                  <Found
+                    key={chat.id}
+                    chat={chat}
+                    projectName={nameOf(chat.projectId)}
+                    onOpen={() => {
+                      props.onOpenFound(chat);
+                      setQuery('');
+                    }}
+                  />
+                ))}
+              </div>
               {search.rows.length === 0 && !search.isFetching ? (
                 <Text size="xs" c="dimmed" px="xs" py="xs">
                   No session matches.
                 </Text>
               ) : null}
-            </div>
+            </>
           ) : virtual ? (
             virtualList
           ) : (

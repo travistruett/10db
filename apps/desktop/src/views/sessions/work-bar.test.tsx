@@ -31,6 +31,7 @@ const choosing = (askedAt: string | null = '2026-11-17T09:00:00.000Z'): ChatWork
 function openChoosing(
   options: {
     readonly work?: ChatWork | null;
+    readonly turn?: ChatDto['conversation']['state'];
     readonly state?: Partial<ChatWorkStateDto>;
     readonly served?: ChatServerOptions;
     readonly extra?: Parameters<typeof server.use>;
@@ -39,7 +40,11 @@ function openChoosing(
   const chat: ChatDto = chatDto({
     projectId: project.id,
     work: options.work === undefined ? choosing() : options.work,
-    conversation: { capabilities: CLAUDE, model: 'claude-opus-5' },
+    conversation: {
+      capabilities: CLAUDE,
+      model: 'claude-opus-5',
+      ...(options.turn === undefined ? {} : { state: options.turn }),
+    },
   });
   let state = chatWorkStateDto({ place: chat.work?.place ?? null, ...options.state });
   const served = chatServer({ chats: [chat], ...options.served });
@@ -86,7 +91,8 @@ describe('the bar that asks where the work happens', () => {
 
   it('says a Board task holds the checkout and follows the holder as it changes', async () => {
     const { setState, queryClient } = openChoosing({
-      state: { holder: 'A Board task is changing files on main' },
+      // The daemon's own sentence: backticked branch, closing period.
+      state: { holder: 'A Board task is changing files on `main`.' },
     });
     expect(
       await screen.findByText(
@@ -121,6 +127,43 @@ describe('the bar that asks where the work happens', () => {
     await waitFor(() => {
       expect(served.chosen).toEqual([{ chatId: chat.id, place }]);
     });
+  });
+
+  it('Esc on the bar hides it and does not stop the turn that runs', async () => {
+    const stops: string[] = [];
+    openChoosing({
+      turn: 'running',
+      extra: [
+        http.post(daemonUrl('/conversations/:conversationId/stop'), ({ params }) => {
+          stops.push(String(params['conversationId']));
+          return HttpResponse.json({}, { status: 500 });
+        }),
+      ],
+    });
+    fireEvent.keyDown(await bar(), { key: 'Escape' });
+    await waitFor(() => {
+      expect(screen.queryByRole('group', { name: 'Where this work happens' })).toBeNull();
+    });
+    expect(stops).toEqual([]);
+  });
+
+  it('Esc on the bar keeps it hidden after switching to another session and back', async () => {
+    const { served, chat, queryClient } = openChoosing();
+    served.chats.push(chatDto({ projectId: project.id, title: 'Other one', tabPosition: 1 }));
+    await queryClient.invalidateQueries({ queryKey: chatKeys.all });
+    fireEvent.keyDown(await bar(), { key: 'Escape' });
+    await waitFor(() => {
+      expect(screen.queryByRole('group', { name: 'Where this work happens' })).toBeNull();
+    });
+    fireEvent.click(await screen.findByRole('option', { name: /Other one/ }));
+    await screen.findByRole('textbox', { name: 'Message' });
+    fireEvent.click(screen.getByRole('option', { name: new RegExp(chat.title) }));
+    await waitFor(() => {
+      expect(
+        screen.getByRole('option', { name: new RegExp(chat.title) }).getAttribute('aria-selected'),
+      ).toBe('true');
+    });
+    expect(screen.queryByRole('group', { name: 'Where this work happens' })).toBeNull();
   });
 
   it('a button sends its choice, and the bar goes once the session has moved', async () => {
@@ -179,6 +222,91 @@ describe('the bar that asks where the work happens', () => {
     expect(
       await screen.findByText('This session already works here, in your checkout.'),
     ).toBeTruthy();
+  });
+
+  it('a 409 that is not a settled place shows the daemon’s words', async () => {
+    openChoosing({
+      extra: [
+        http.post(daemonUrl('/chats/:chatId/work'), () =>
+          HttpResponse.json(
+            { error: 'conflict', message: 'Ask again once the turn has ended.' },
+            { status: 409 },
+          ),
+        ),
+      ],
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'On a New Branch' }));
+    expect(await screen.findByText('Ask again once the turn has ended.')).toBeTruthy();
+  });
+
+  it('the settled words outlast the bar and clear when the next question is asked', async () => {
+    const settledWork: ChatWork = {
+      place: 'here',
+      branch: null,
+      base: null,
+      worktree: null,
+      askedAt: null,
+    };
+    const { chat, served, queryClient } = openChoosing({ served: { settled: settledWork } });
+    fireEvent.click(await screen.findByRole('button', { name: 'On a New Branch' }));
+    const words = 'This session already works here, in your checkout.';
+    expect(await screen.findByText(words)).toBeTruthy();
+    served.chats.splice(0, 1, chatDto({ ...chat, work: settledWork }));
+    await queryClient.invalidateQueries({ queryKey: chatKeys.all });
+    await waitFor(() => {
+      expect(screen.queryByRole('group', { name: 'Where this work happens' })).toBeNull();
+    });
+    expect(screen.getByText(words)).toBeTruthy();
+    served.chats.splice(0, 1, chatDto({ ...chat, work: choosing('2026-11-17T11:00:00.000Z') }));
+    await queryClient.invalidateQueries({ queryKey: chatKeys.all });
+    await bar();
+    expect(screen.queryByText(words)).toBeNull();
+  });
+
+  it('a second 1 or 2 while the choice is on its way does not post again', async () => {
+    let posts = 0;
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    openChoosing({
+      extra: [
+        http.post(daemonUrl('/chats/:chatId/work'), async () => {
+          posts += 1;
+          await gate;
+          return HttpResponse.json(choosing(), { status: 200 });
+        }),
+      ],
+    });
+    const group = await bar();
+    fireEvent.keyDown(group, { key: '1' });
+    await waitFor(() => {
+      expect(posts).toBe(1);
+    });
+    fireEvent.keyDown(group, { key: '2' });
+    fireEvent.keyDown(group, { key: '1' });
+    release();
+    await waitFor(() => {
+      expect(
+        within(group).getByRole<HTMLButtonElement>('button', { name: 'On a New Branch' }).disabled,
+      ).toBe(false);
+    });
+    expect(posts).toBe(1);
+  });
+
+  it('names the branch the work state reads, and none when it reads none', async () => {
+    openChoosing({ state: { branch: 'develop' } });
+    expect(await screen.findByRole('button', { name: 'Here, on develop' })).toBeTruthy();
+  });
+
+  it('returns the focus to the composer once the choice is made and the bar goes', async () => {
+    openChoosing();
+    fireEvent.click(await screen.findByRole('button', { name: 'Here, on main' }));
+    const box = await screen.findByRole('textbox', { name: 'Message' });
+    await waitFor(() => {
+      expect(screen.queryByRole('group', { name: 'Where this work happens' })).toBeNull();
+    });
+    expect(document.activeElement).toBe(box);
   });
 
   it('while moving, the composer says where, and no bar asks', async () => {

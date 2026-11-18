@@ -46,7 +46,8 @@ export function GitStepButton({
   const merge = useMergeChat();
   const changes = useChatChanges(chatId, committing);
   const step = state.next;
-  if (step === null) return null;
+  // The form stays while it is being filled even if the daemon's next step moves on under it.
+  if (step === null && !committing) return null;
 
   const pending = commit.isPending || openPullRequest.isPending || merge.isPending;
   const fail = (error: Error): void => {
@@ -54,13 +55,17 @@ export function GitStepButton({
   };
   const base = state.baseBranch ?? 'the base branch';
 
+  const waitsForTurn = pending && turnRunning;
   const label = (() => {
-    if (pending && turnRunning) return 'Waits for the turn to end';
+    if (waitsForTurn) return 'Waits for the turn to end';
     switch (step) {
+      case null:
+        return '';
       case ChatGitStep.Commit:
         return 'Commit…';
       case ChatGitStep.OpenPullRequest:
-        return 'Open Pull Request';
+        // With a pull request already open the step only pushes the new commits to it.
+        return state.pullRequest === null ? 'Open Pull Request' : 'Push';
       case ChatGitStep.Merge:
         return 'Merge';
       case ChatGitStep.MergeLocal:
@@ -72,6 +77,8 @@ export function GitStepButton({
 
   const run = (): void => {
     switch (step) {
+      case null:
+        return;
       case ChatGitStep.Commit:
         setCommitting(true);
         return;
@@ -89,19 +96,21 @@ export function GitStepButton({
   const { files, checked } = commitFiles(changed, state.touched);
   return (
     <>
-      <Tooltip label={blocked} disabled={blocked === null || pending} openDelay={300}>
-        <Button
-          size="compact-sm"
-          variant={step === ChatGitStep.Commit ? 'default' : 'filled'}
-          // A disabled button is not a tooltip's target, so the reason is also its name.
-          disabled={blocked !== null || pending}
-          loading={pending && !turnRunning}
-          onClick={run}
-        >
-          {shown}
-        </Button>
-      </Tooltip>
-      {step === ChatGitStep.Commit ? (
+      {step === null ? null : (
+        <Tooltip label={blocked} disabled={blocked === null || pending} openDelay={300}>
+          <Button
+            size="compact-sm"
+            variant={step === ChatGitStep.Commit ? 'default' : 'filled'}
+            // A disabled button is not a tooltip's target, so the reason is also its name.
+            disabled={blocked !== null || pending}
+            loading={pending && !turnRunning}
+            onClick={run}
+          >
+            {shown}
+          </Button>
+        </Tooltip>
+      )}
+      {step === ChatGitStep.Commit || committing ? (
         <CommitModal
           key={committing ? 'open' : 'closed'}
           opened={committing}
@@ -114,6 +123,7 @@ export function GitStepButton({
           checked={checked}
           loading={changes.isPending}
           pending={commit.isPending}
+          waitsForTurn={commit.isPending && turnRunning}
           error={commit.error?.message ?? null}
           onCommit={(message, paths) => {
             commit.mutate(

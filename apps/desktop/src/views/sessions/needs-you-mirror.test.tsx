@@ -91,6 +91,34 @@ describe('Sessions: needs you mirrors the Inbox', () => {
     });
   });
 
+  it('the badge walks the sessions in the panel’s order, by project, as ⌘J does', async () => {
+    const billing = projectViewDto({ name: 'billing' });
+    const theirs = chatDto({
+      projectId: billing.id,
+      title: 'Theirs',
+      tabPosition: 0,
+      conversation: { state: 'ended_error' },
+    });
+    const mine = chatDto({
+      projectId: ampsio.id,
+      title: 'Mine',
+      tabPosition: 1,
+      conversation: { state: 'ended_error' },
+    });
+    const served = chatServer({ chats: [theirs, mine] });
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([ampsio, billing])),
+      ...served.handlers,
+      ...baseHandlers(),
+    );
+    const { router } = renderApp('/inbox');
+    fireEvent.click(await screen.findByText('2'));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/sessions');
+    });
+    expect(router.state.location.search).toMatchObject({ chat: mine.id });
+  });
+
   it('shows Open Session on the Inbox card, which lands on the tab; for a closed tab it first reopens it at its place', async () => {
     const [first, second] = ['First', 'Second'].map((title, i) =>
       chatDto({ projectId: ampsio.id, title, tabPosition: i }),

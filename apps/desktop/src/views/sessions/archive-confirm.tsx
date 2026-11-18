@@ -12,7 +12,13 @@ export interface ArchiveConfirmProps {
 /** Archive's warning (sessions spec §4.4): what is lost with the worktree, and that the commits stay. */
 export function ArchiveConfirm({ preview, pending, onCancel, onConfirm }: ArchiveConfirmProps) {
   return (
-    <Modal opened={preview !== null} onClose={onCancel} title="Archive this session?" centered>
+    <Modal
+      opened={preview !== null}
+      onClose={onCancel}
+      title="Archive this session?"
+      centered
+      closeButtonProps={{ 'aria-label': 'Close' }}
+    >
       {preview === null ? null : (
         <>
           <Text size="sm">
