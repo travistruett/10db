@@ -1,4 +1,5 @@
 import type { ShapeProposalDto, ShapeViewDto } from '@10db/contracts';
+import { PlanMeasures } from './plan-measures';
 import { Alert, Box, Button, Group, ScrollArea, Skeleton, Stack, Text } from '@mantine/core';
 import { useEffect, useRef, useState } from 'react';
 import { useConversation, useStopConversation } from '../../daemon/conversation-queries';
@@ -179,7 +180,7 @@ export function ProposedPane({
     >
       <Stack gap={6} px="md" pt="md" pb="xs" style={{ flex: 'none' }}>
         <Group justify="space-between" wrap="nowrap">
-          <Text size="sm" fw={500}>
+          <Text fz={13} fw={600}>
             {view === undefined || view.shape.round === 0
               ? 'Proposed'
               : `Proposed · round ${String(view.shape.round)} · updated ${shortAgo(view.shape.updatedAt, now)}`}
@@ -278,6 +279,8 @@ export function ProposedPane({
           ) : (
             <HeardSoFar heard={view?.heard ?? []} />
           )}
+          {/* How Plan is doing is not part of any conversation: it shows with none open. */}
+          {view === undefined && !loading && error === null ? <PlanMeasures /> : null}
         </Box>
       </ScrollArea>
       {view === undefined ? null : (

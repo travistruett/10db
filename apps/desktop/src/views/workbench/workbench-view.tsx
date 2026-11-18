@@ -57,9 +57,12 @@ import type { WorkbenchSearch } from './workbench-search';
  * opens the setup; it is disabled until the screen can show it.
  */
 function StartPageHeader({
+  project,
   count,
   onOpen,
 }: {
+  /** The project's name, which the icons-only rail does not show. */
+  readonly project?: string;
   readonly count: number;
   readonly onOpen?: () => void;
 }) {
@@ -67,6 +70,7 @@ function StartPageHeader({
     <>
       <TitleRow
         title="UI Workbench"
+        {...(project === undefined ? {} : { meta: project })}
         actions={
           <Button
             variant="default"
@@ -170,7 +174,7 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
   if (live === undefined)
     return (
       <Stack gap="md">
-        <StartPageHeader count={0} />
+        <StartPageHeader project={project.name} count={0} />
         {loading}
       </Stack>
     );
@@ -181,6 +185,7 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
     return (
       <Stack gap="md">
         <StartPageHeader
+          project={project.name}
           count={setupCount}
           onOpen={() => {
             setDialog('setup');
@@ -352,7 +357,7 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
   if (failed !== null)
     return (
       <Stack gap="md">
-        <StartPageHeader count={0} />
+        <StartPageHeader project={project.name} count={0} />
         <Text size="sm" c="red">{`The UI Workbench could not be read: ${failed.message}`}</Text>
       </Stack>
     );

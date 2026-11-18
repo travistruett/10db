@@ -6,7 +6,6 @@ import { useGoals } from '../../daemon/goal-queries';
 import { useLivePass } from '../../daemon/pass-queries';
 import { useInbox } from '../../daemon/queries';
 import { useNow } from '../../shell/relative';
-import { PageIntro } from '../../shell/page-intro';
 import { TitleRow } from '../../shell/title-row';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { ProjectFilter } from '../../shell/project-filter';
@@ -48,7 +47,6 @@ export function FactoryView() {
         meta={<BenchmarkSyncNote />}
         actions={<ProjectFilter projects={all} value={filter ?? null} onChange={setFilter} />}
       />
-      <PageIntro description="Goals 10db is pursuing, by project" />
       <UpdateDrainNote />
       <AdmissionNote />
       {projects.isError ? (
@@ -122,7 +120,7 @@ function ProjectGoals({
         <Group justify="space-between" wrap="nowrap">
           <Group gap="sm" wrap="nowrap">
             <ProjectTile name={project.name} />
-            <Title order={3} size="h4" id={headingId}>
+            <Title order={3} id={headingId}>
               {project.name}
             </Title>
           </Group>

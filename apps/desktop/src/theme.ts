@@ -3,13 +3,16 @@ import {
   defaultVariantColorsResolver,
   MultiSelect,
   NavLink,
+  Input,
   Select,
   Switch,
+  Tabs,
   Tooltip,
   type CSSVariablesResolver,
   type MantineColorsTuple,
   type VariantColorsResolver,
 } from '@mantine/core';
+import tabClasses from './tabs.module.css';
 import {
   SelenizedDark,
   SelenizedLight,
@@ -112,11 +115,26 @@ export const theme = createTheme({
   primaryShade: { light: 7, dark: 5 },
   variantColorResolver,
   defaultRadius: 'md',
+  // One type scale under the page's title (14 / 600): a section's head, a group's head and a card's head
+  // are all 14 / 600, and a drawer's title sets 16 itself. Sizes above h3 belong to the first run.
+  headings: {
+    sizes: {
+      h3: { fontSize: '0.875rem', fontWeight: '600', lineHeight: '1.4' },
+      h4: { fontSize: '0.875rem', fontWeight: '600', lineHeight: '1.4' },
+      h5: { fontSize: '0.875rem', fontWeight: '600', lineHeight: '1.4' },
+      h6: { fontSize: '0.8125rem', fontWeight: '600', lineHeight: '1.4' },
+    },
+  },
   fontFamilyMonospace: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   components: {
     Select: Select.extend({ defaultProps: { checkIconPosition: 'right' } }),
     MultiSelect: MultiSelect.extend({ defaultProps: { checkIconPosition: 'right' } }),
     Switch: Switch.extend({ defaultProps: { withThumbIndicator: false } }),
+    // A control sits on the sidebar's tone in both schemes. Mantine paints a light-scheme input with its
+    // `white`, which this theme maps to the dark scheme's ink, so the fill is set here instead.
+    Input: Input.extend({ styles: { input: { backgroundColor: 'var(--mantine-color-default)' } } }),
+    // The first tab's label sits on the content's edge, where the page's title does.
+    Tabs: Tabs.extend({ classNames: { tab: tabClasses['tab'] } }),
     // A tooltip is the bright ink on the base tone in both schemes, small and tight.
     Tooltip: Tooltip.extend({
       styles: {

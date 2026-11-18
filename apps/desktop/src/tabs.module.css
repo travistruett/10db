@@ -1,0 +1,4 @@
+/* The first tab's label lines up with the content's left edge; the underline still runs the full row. */
+.tab:first-of-type {
+  padding-left: 0;
+}
