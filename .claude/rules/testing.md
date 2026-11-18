@@ -13,7 +13,8 @@ make each one guard something that matters.
 - **A user-visible feature extends a core e2e flow** (`apps/desktop/e2e`) through the real daemon and
   app. It adds no rendered-component test.
 - **Count is a cost. Extend before you add**, and removing a test that guards neither core nor an
-  escaped bug is welcome, in its own commit.
+  escaped bug is welcome, in its own commit. CI caps new unit tests at max(3, one per 200 added code
+  lines); past it, write `Test-budget: <reason>`.
 - **Prove each test goes red first**, and **fix production code, not the test**: assume the code is
   wrong until you have shown the test is.
 - **Take the cheapest rung that fails for the regression:** a pure function; a real SQLite file in a

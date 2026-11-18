@@ -30,4 +30,8 @@ Commit with `mcp__10db__commit`, naming every path. A commit that adds a test ca
 value card, wrapped to fit:
 `Value: protects=<behavior>; fails_when=<regression>; why_new=<core area or escaped bug>; no_claim=<what green does not prove>`.
 
+CI fails a pull request that adds more unit tests than max(3, one per 200 added code lines).
+If yours must, put a line `Test-budget: <reason>` in the commit message; 10db copies it into
+the pull request body.
+
 Never run `git commit`, `git add -A`, `git stash`, `git checkout`, `git reset` or `git push`; 10db denies them and pushes for you.
