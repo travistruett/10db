@@ -48,7 +48,7 @@ import { useHandBack, useTakeover, useTakeoverCommand } from '../../daemon/takeo
 import dayjs from 'dayjs';
 import { chatEntries } from './chat-entries';
 import { FolderWait } from './folder-wait';
-import { keepingWords } from './folder-holders';
+import { keepingHolders } from './folder-holders';
 import { useOpenTask } from './open-session';
 import { useTaskSession } from '../../daemon/task-session-queries';
 import { sessionAnnouncement, type SessionEvent } from './session-announcements';
@@ -134,7 +134,7 @@ function HandedOffLine({ chat }: { readonly chat: ChatDto }) {
 }
 
 /**
- * A chat's tab (sessions UI spec §4, §12): the session bar, then the kit's conversation column: the
+ * A chat's tab (sessions UI spec §4, §12): the title row, then the kit's conversation column: the
  * conversation, the cards it waits on pinned above the composer, and the composer. Each state M5a reaches has its words.
  */
 export function ChatTab({
@@ -227,7 +227,7 @@ export function ChatTab({
     settled !== null && (askedAt === null || settled.askedAt === askedAt) ? settled.work : null;
   const movingTo = place === WorkPlace.Moving ? (chat.work?.branch ?? null) : null;
   // Holders that keep this chat's turn from writing: Send asks before a message runs.
-  const keeping = keepingWords(chat, folder);
+  const keeping = keepingHolders(chat, folder);
   // A message that chose to wait is listed by the daemon as this chat waiting, whoever still holds the folder.
   const waiting = (folder?.holders ?? []).some(
     (h) => h.kind === FolderHolderKind.WaitingChat && h.chatId === chat.id,

@@ -489,11 +489,11 @@ describe('ChatTab: the composer and a held checkout', () => {
   });
 
   describe('a message that waits for the checkout', () => {
-    const waiting = (chat: ChatDto, others = true) =>
+    const waiting = (chat: ChatDto, others: readonly string[] = ['Bump vite']) =>
       folderDto({
         projectId: project.id,
         holders: [
-          ...(others ? [folderHolder(FolderHolderKind.Lane, 'Bump vite')] : []),
+          ...others.map((name) => folderHolder(FolderHolderKind.Lane, name)),
           folderHolder(FolderHolderKind.WaitingChat, chat.title, { chatId: chat.id }),
         ],
       });
@@ -501,12 +501,17 @@ describe('ChatTab: the composer and a held checkout', () => {
     it.each([
       {
         name: 'says who is changing files and on which branch, and offers Stop only',
-        others: true,
+        others: ['Bump vite'],
         text: 'The task ‘Bump vite’ is changing files on main. Your message runs once it’s done.',
       },
       {
+        name: 'with several holders agrees in number',
+        others: ['Bump vite', 'Fix login'],
+        text: 'The task ‘Bump vite’ and the task ‘Fix login’ are changing files on main. Your message runs once they’re done.',
+      },
+      {
         name: 'with nothing still in the way says it runs once the checkout is free',
-        others: false,
+        others: [],
         text: 'Your message runs once the checkout is free.',
       },
     ])('$name', async ({ others, text }) => {
@@ -525,7 +530,7 @@ describe('ChatTab: the composer and a held checkout', () => {
       const chat = chatDto({ projectId: project.id });
       const { served } = openChat({ id: chat.id, conversationId: chat.conversationId }, () => [], [
         http.get(daemonUrl('/projects/:projectId/folder'), () =>
-          HttpResponse.json(waiting(chat, false)),
+          HttpResponse.json(waiting(chat, [])),
         ),
       ]);
       await screen.findByText('Your message runs once the checkout is free.');

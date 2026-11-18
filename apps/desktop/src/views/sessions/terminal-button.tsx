@@ -29,7 +29,7 @@ function copyOrShow(line: string, onUncopied: (line: string) => void): void {
 }
 
 /**
- * The session bar's Open in Terminal (sessions UI spec §10.1): its popover reads what would stop it when it
+ * The title row's Open in Terminal (sessions UI spec §10.1): its popover reads what would stop it when it
  * opens, and confirming opens the chat in the app Settings › Sessions names. With Copy the Command the
  * command goes to the clipboard, and the banner offers it again.
  */
