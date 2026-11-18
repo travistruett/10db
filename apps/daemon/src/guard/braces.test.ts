@@ -116,24 +116,29 @@ const MASKED_ROWS: { name: string; word: string; mask: string; words: string[] |
 ];
 
 describe('expandBraceWord', () => {
-  it.each(ROWS)('expands $name', ({ word, words }) => {
-    expect(expandBraceWord(word)).toEqual(words);
+  it('expands each brace form as bash does, or marks it unread', () => {
+    for (const { name, word, words } of ROWS) {
+      expect.soft(expandBraceWord(word), `${name}: ${word}`).toEqual(words);
+    }
   });
 
-  it.each(MASKED_ROWS)('expands $name by its mask', ({ word, mask, words }) => {
-    expect(expandBraceWord(word, mask)).toEqual(words);
+  it('reads quoted and escaped characters by the mask as literal, never brace syntax', () => {
+    for (const { name, word, mask, words } of MASKED_ROWS) {
+      expect.soft(expandBraceWord(word, mask), `${name}: ${word}`).toEqual(words);
+    }
   });
 
-  it('is uncertain past the list cap', () => {
+  it('is uncertain past the caps, without allocating a huge sequence', () => {
     expect(expandBraceWord('{a,b}{c,d}{e,f}{g,h}{i,j}{k,l}{m,n}')).toBeNull();
-  });
-
-  it.each(['{1..300000000}', '{1..99999999999}', '{1..9007199254740993}', '{-99999999999..0}'])(
-    'is uncertain on %s without allocating the sequence',
-    (word) => {
+    for (const word of [
+      '{1..300000000}',
+      '{1..99999999999}',
+      '{1..9007199254740993}',
+      '{-99999999999..0}',
+    ]) {
       const started = performance.now();
-      expect(expandBraceWord(word)).toBeNull();
-      expect(performance.now() - started).toBeLessThan(100);
-    },
-  );
+      expect.soft(expandBraceWord(word), word).toBeNull();
+      expect.soft(performance.now() - started, word).toBeLessThan(100);
+    }
+  });
 });

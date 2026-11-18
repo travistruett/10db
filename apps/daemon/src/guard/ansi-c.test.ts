@@ -74,19 +74,18 @@ const ROWS: { name: string; body: string; text: string | null }[] = [
 ];
 
 describe('decodeAnsiC', () => {
-  it.each(ROWS)('decodes $name', ({ body, text }) => {
-    const result = decodeAnsiC(body);
-    expect(result.exact).toBe(text !== null);
-    if (text !== null) expect(result.text).toBe(text);
+  it('decodes each escape form exactly, or marks it uncertain', () => {
+    for (const { name, body, text } of ROWS) {
+      const result = decodeAnsiC(body);
+      expect.soft(result.exact, `${name}: ${body}`).toBe(text !== null);
+      if (text !== null) expect.soft(result.text, `${name}: ${body}`).toBe(text);
+    }
   });
 
-  it('marks a word with a real escape, so permission rules keep clear of it', () => {
+  it('marks a word with a real escape and where one decoded to a newline', () => {
     expect(decodeAnsiC('\\x2e').escapes).toBe(true);
     expect(decodeAnsiC("\\'").escapes).toBe(false);
     expect(decodeAnsiC('plain').escapes).toBe(false);
-  });
-
-  it('reports where an escape decoded to a newline', () => {
     expect(decodeAnsiC('a\\nb').newlines).toEqual([1]);
     expect(decodeAnsiC('ab').newlines).toEqual([]);
   });

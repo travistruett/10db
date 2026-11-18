@@ -24,39 +24,34 @@ const areasOf = (path: string, areas: readonly AreaDef[] = PROPOSED) =>
   classifyPath(path, areas, []).areas;
 
 describe('classifyPath with a catch-all area', () => {
-  // The paths an ordinary area already holds are unchanged.
-  it.each([
-    ['apps/api/src/a.ts', ['api']],
-    ['apps/api/.env', ['api']],
-    ['apps/web/src/main.tsx', ['web']],
-    ['apps/web/.env.example', ['web']],
-    ['apps/api/.config/deep/.x', ['api']],
-    ['README.md', ['root']],
-    ['.gitignore', ['root']],
-    ['docs/guide/a.md', ['root']],
-  ])('keeps %s in %j', (path, expected) => {
-    expect(areasOf(path)).toEqual(expected);
+  it('keeps what an ordinary area holds, gives the rest to the catch-all, and never .git', () => {
+    const rows: [string, string[]][] = [
+      // The paths an ordinary area already holds are unchanged.
+      ['apps/api/src/a.ts', ['api']],
+      ['apps/api/.env', ['api']],
+      ['apps/web/src/main.tsx', ['web']],
+      ['apps/web/.env.example', ['web']],
+      ['apps/api/.config/deep/.x', ['api']],
+      ['README.md', ['root']],
+      ['.gitignore', ['root']],
+      ['docs/guide/a.md', ['root']],
+      // The paths no area holds are the catch-all's.
+      ['packages/newpkg/src/index.ts', ['root']],
+      ['apps/newapp/src/main.ts', ['root']],
+      ['apps/newapp/.env.example', ['root']],
+      ['tests/e2e/x.test.ts', ['root']],
+      ['tools/release.ts', ['root']],
+      ['.github/actions/x/.eslintrc.json', ['root']],
+      ['a/.b/.c/d', ['root']],
+      // The catch-all does not reach git internals.
+      ['.git/config', []],
+      ['.git/hooks/pre-commit', []],
+      ['.git', []],
+      ['sub/.git', []],
+      ['a/.git/b', []],
+    ];
+    for (const [path, expected] of rows) expect.soft(areasOf(path), path).toEqual(expected);
   });
-
-  // The paths no area holds are the catch-all's.
-  it.each([
-    'packages/newpkg/src/index.ts',
-    'apps/newapp/src/main.ts',
-    'apps/newapp/.env.example',
-    'tests/e2e/x.test.ts',
-    'tools/release.ts',
-    '.github/actions/x/.eslintrc.json',
-    'a/.b/.c/d',
-  ])('puts %s, which no other area holds, in the catch-all', (path) => {
-    expect(areasOf(path)).toEqual(['root']);
-  });
-
-  it.each(['.git/config', '.git/hooks/pre-commit', '.git', 'sub/.git', 'a/.git/b'])(
-    'keeps %s in no area, as the catch-all does not reach git internals',
-    (path) => {
-      expect(areasOf(path)).toEqual([]);
-    },
-  );
 
   it('never puts a path another area matches in a catch-all whose own globs match it', () => {
     const wide: AreaDef = {
@@ -111,16 +106,21 @@ describe('classifyPath with a catch-all area', () => {
 describe('classifyPath with no catch-all', () => {
   const NONE = [API, WEB, { ...ROOT, catchAll: undefined }];
 
-  it.each([
-    ['apps/api/src/a.ts', ['api']],
-    ['README.md', ['root']],
-    ['tools/release.ts', []],
-    ['packages/newpkg/src/index.ts', []],
-    ['apps/web/.env.example', ['web']],
-    ['.git/config', []],
-  ])('classifies %s as %j, as it always did', (path, expected) => {
-    expect(areasOf(path, NONE)).toEqual(expected);
-    expect(areasOf(path, [API, WEB, { name: 'root', globs: ROOT.globs }])).toEqual(expected);
+  it('classifies each path as it always did', () => {
+    const rows: [string, string[]][] = [
+      ['apps/api/src/a.ts', ['api']],
+      ['README.md', ['root']],
+      ['tools/release.ts', []],
+      ['packages/newpkg/src/index.ts', []],
+      ['apps/web/.env.example', ['web']],
+      ['.git/config', []],
+    ];
+    for (const [path, expected] of rows) {
+      expect.soft(areasOf(path, NONE), path).toEqual(expected);
+      expect
+        .soft(areasOf(path, [API, WEB, { name: 'root', globs: ROOT.globs }]), path)
+        .toEqual(expected);
+    }
   });
 
   it('gives a project of one area over ** the same answers', () => {
@@ -152,34 +152,33 @@ describe('the guard in a project with a catch-all area', () => {
       }),
     });
 
-  it.each(['packages/newpkg/src/index.ts', 'tools/release.ts', 'apps/newapp/.env.example'])(
-    'lets a lane holding only the catch-all edit new %s',
-    (path) => {
-      expect(edit(path, ['root']).decision).toBe('allow');
-    },
-  );
-
-  it.each(['packages/newpkg/src/index.ts', 'tools/release.ts', '.github/x/.eslintrc.json'])(
-    'refuses new %s to a lane holding only another area',
-    (path) => {
-      const verdict = edit(path, ['api']);
-      expect(verdict.decision).toBe('deny');
-      expect(reasonOf(verdict)).toContain('it is in area "root"');
-    },
-  );
-
-  it.each([
-    ['apps/api/src/a.ts', 'api'],
-    ['apps/web/src/main.tsx', 'web'],
-    ['apps/api/.env', 'api'],
-  ])('refuses %s to a lane holding only the catch-all, as %s holds it', (path, owner) => {
-    const verdict = edit(path, ['root']);
-    expect(verdict.decision).toBe('deny');
-    expect(reasonOf(verdict)).toContain(`it is in area "${owner}"`);
+  it('lets a lane edit the files of the area it holds, the catch-all included', () => {
+    for (const path of [
+      'packages/newpkg/src/index.ts',
+      'tools/release.ts',
+      'apps/newapp/.env.example',
+    ]) {
+      expect.soft(edit(path, ['root']).decision, path).toBe('allow');
+    }
+    expect(edit('apps/api/src/a.ts', ['api']).decision).toBe('allow');
   });
 
-  it('lets a lane edit a file in the area it holds', () => {
-    expect(edit('apps/api/src/a.ts', ['api']).decision).toBe('allow');
+  it('refuses a file to a lane that does not hold its area, naming the area', () => {
+    const rows: [string, string, string][] = [
+      // New files are the catch-all's.
+      ['packages/newpkg/src/index.ts', 'api', 'root'],
+      ['tools/release.ts', 'api', 'root'],
+      ['.github/x/.eslintrc.json', 'api', 'root'],
+      // An ordinary area's file is never the catch-all's.
+      ['apps/api/src/a.ts', 'root', 'api'],
+      ['apps/web/src/main.tsx', 'root', 'web'],
+      ['apps/api/.env', 'root', 'api'],
+    ];
+    for (const [path, held, owner] of rows) {
+      const verdict = edit(path, [held]);
+      expect.soft(verdict.decision, `${path} held by ${held}`).toBe('deny');
+      expect.soft(reasonOf(verdict), path).toContain(`it is in area "${owner}"`);
+    }
   });
 
   it('still refuses .git to a lane holding the catch-all', () => {
