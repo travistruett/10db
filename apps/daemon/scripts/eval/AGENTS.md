@@ -38,6 +38,8 @@ with it.
   builder's 10db.
 - Each project is shared mode with local delivery, one lane; the task gets an explicit rigor. The
   runner polls the eval database read-only and answers only plan-approval cards.
+- The eval daemon keeps 10db's overload hold: on a busy Mac its lanes and gates wait, and wall time
+  grows. Compare runs made on an otherwise quiet Mac.
 - The fake agent runs a script book built from the rigor's playbook rows (`fake-book.ts`): reviewers
   approve and the implementer writes and commits `EVAL-FAKE-<id>.md` beside the first reference
   path in the case's areas.
