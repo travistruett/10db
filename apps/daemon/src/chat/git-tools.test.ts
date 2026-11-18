@@ -295,7 +295,7 @@ describe("a chat's git tools", () => {
     expect(rg('show', '--name-only', '--format=', 'HEAD')).toBe('src/a.ts');
     expect(rg('ls-files', '--others', '--exclude-standard')).toBe('src/b.ts');
     await expect(t.commit_changes({ message: 'x', paths: ['../outside.txt'] })).rejects.toThrow(
-      'inside Your folder',
+      'inside your checkout',
     );
   });
 
@@ -346,7 +346,7 @@ describe("a chat's git tools", () => {
             hold.releaseTurn(me.id);
           }),
         ),
-      ).rejects.toThrow(/does not hold Your folder/);
+      ).rejects.toThrow(/does not have your checkout/);
       expect(rg('rev-parse', 'HEAD')).toBe(head);
       expect(rg('branch', '--show-current')).toBe('main');
       expect(rg('branch', '--list', 'topic')).toBe('');

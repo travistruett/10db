@@ -24,7 +24,7 @@ const ALLOW: ShapeVerdict = { decision: 'allow' };
 
 /** What a chat's agent reads when it reaches for a tool that writes with no place to write. */
 export const CHAT_WRITES_LATER =
-  'This chat reads the project and changes nothing in it yet. Say what you would change, and offer to file it as a task.';
+  'This session reads the project and changes nothing in it yet. Say what you would change, and offer to file it as a task.';
 /** What a chat on an account with no judge reads when it reaches for the web. */
 export const CHAT_NO_WEB =
   "The web needs a judge that sees each call, and this project's account has none yet, so this chat reads the project only.";
@@ -60,10 +60,10 @@ export interface ChatPlace {
 
 /** What a chat's agent reads when it calls a tool after its turn ended, or from another session. */
 export const CHAT_TURN_ENDED =
-  'This turn has ended and given Your folder back, so nothing it started may act.';
+  'This turn has ended and given your checkout back, so nothing it started may act.';
 
 /** What a chat's agent reads when it edits while another holder has the builder's checkout. */
-export const chatFolderInUse = (holder: string): string => `Your folder is in use by ${holder}.`;
+export const chatFolderInUse = (holder: string): string => `Your checkout is in use by ${holder}.`;
 
 /** The path a file tool names, with `~` read as the home folder and the rest resolved from the call's directory. */
 function editedPath(call: ChatCall, access: ShapeAccess): string | null {
@@ -102,7 +102,7 @@ function judgeEdit(
         return deny(
           `This session works in ${folder.root} now. The same file is at ${join(folder.root, inCheckout)}.`,
         );
-      return deny(`${path} is outside Your folder.`);
+      return deny(`${path} is outside your checkout.`);
     }
     const verdict = judge.write(path);
     if (verdict !== 'ok') return deny(verdict.refuse);

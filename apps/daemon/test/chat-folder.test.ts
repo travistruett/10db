@@ -4,12 +4,13 @@ import {
   EventType,
   FolderWhileHeld,
   parseItemBody,
+  ChatId,
   PassState,
   WorkstreamState,
   mintId,
   type ChatDto,
 } from '@10db/contracts';
-import { insertPass, insertTask, insertWorkstream, listItems, schema } from '@10db/db';
+import { insertPass, insertTask, insertWorkstream, listItems, schema, setChatWork } from '@10db/db';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -29,6 +30,13 @@ afterEach(async () => {
   await previous?.close();
   previous = undefined;
 });
+
+/** A session working in the checkout: only such a session takes the folder for its turn. */
+function openHere(tabPosition?: number): ChatDto {
+  const chat = w.open(tabPosition);
+  w.state.write((ctx) => setChatWork(ctx, ChatId.parse(chat.id), null, { place: 'here' }));
+  return chat;
+}
 
 const say = (chat: ChatDto, text: string) =>
   w.chat.send(chat.conversationId, { text, mentions: [], pictures: [] });
@@ -64,7 +72,7 @@ function runningTask(title: string): void {
 describe('a chat’s turn and Your folder', () => {
   it('holds the folder while the turn runs and gives it back when it ends', async () => {
     w = chatWorld();
-    const chat = w.open();
+    const chat = openHere();
     say(chat, 'fix it');
     expect(w.folderHold.holdsTurn(chat.id)).toBe(true);
     await w.engine.settled(chat.conversationId);
@@ -75,7 +83,7 @@ describe('a chat’s turn and Your folder', () => {
 
   it('keeps the hold through a chained turn and takes it once', async () => {
     w = chatWorld();
-    const chat = w.open();
+    const chat = openHere();
     let release: () => void = () => undefined;
     const started = new Promise<void>((resolve) => {
       w.adapter.shapeBehaviour = async () => {
@@ -98,7 +106,7 @@ describe('a chat’s turn and Your folder', () => {
 
   it('gives the folder back when the turn ends in error', async () => {
     w = chatWorld();
-    const chat = w.open();
+    const chat = openHere();
     w.adapter.shapeBehaviour = () => Promise.reject(new Error('the agent failed'));
     say(chat, 'fix it');
     await w.engine.settled(chat.conversationId);
@@ -109,7 +117,7 @@ describe('a chat’s turn and Your folder', () => {
 
   it('gives the folder back when the chat is archived in the middle of its turn', async () => {
     w = chatWorld();
-    const chat = w.open();
+    const chat = openHere();
     let release: () => void = () => undefined;
     const started = new Promise<void>((resolve) => {
       w.adapter.shapeBehaviour = async () => {
@@ -132,19 +140,19 @@ describe('a chat’s turn and Your folder', () => {
   it('runs read-only behind a task, with a notice naming it, and still gives nothing back later', async () => {
     w = chatWorld();
     runningTask('Bump vite');
-    const chat = w.open();
+    const chat = openHere();
     say(chat, 'look at it');
     await w.engine.settled(chat.conversationId);
     expect(notices(chat)).toEqual([
-      'Your folder is in use by the task ‘Bump vite’, so this turn reads only.',
+      'Your checkout is in use by the task ‘Bump vite’, so this turn reads only.',
     ]);
     expect(w.folderHold.holdsTurn(chat.id)).toBe(false);
   });
 
   it('shares with another chat, and each knows', async () => {
     w = chatWorld();
-    const first = w.open(0);
-    const second = w.open(1);
+    const first = openHere(0);
+    const second = openHere(1);
     let release: () => void = () => undefined;
     const started = new Promise<void>((resolve) => {
       w.adapter.shapeBehaviour = async () => {
@@ -163,8 +171,8 @@ describe('a chat’s turn and Your folder', () => {
     release();
     await w.engine.settled(first.conversationId);
     await w.engine.settled(second.conversationId);
-    expect(notices(second)).toEqual(['Your folder is also in use by the chat ‘one’.']);
-    expect(notices(first)).toEqual(['Your folder is also in use by the chat ‘two’.']);
+    expect(notices(second)).toEqual(['Your checkout is also in use by the chat ‘one’.']);
+    expect(notices(first)).toEqual(['Your checkout is also in use by the chat ‘two’.']);
     expect(w.folderHold.holders(w.project.id)).toEqual([]);
   });
 });
@@ -192,7 +200,7 @@ describe('a message that waits for Your folder', () => {
   it('parks while a task holds, blocks other starts, and runs holding once the task ends', async () => {
     w = chatWorld();
     runningTask('Bump vite');
-    const chat = w.open();
+    const chat = openHere();
     sayWith(chat, 'edit it', FolderWhileHeld.Wait);
     expect(stateOf(chat)).toBe(ConversationState.IdleCold);
     expect(w.folderHold.waiting(chat.id)).toBe(true);
@@ -207,7 +215,7 @@ describe('a message that waits for Your folder', () => {
   it('keeps a Wait message parked after it stopped a brief turn, until the folder frees', async () => {
     w = chatWorld();
     runningTask('Bump vite');
-    const chat = w.open();
+    const chat = openHere();
     let finish: () => void = () => undefined;
     const started = new Promise<void>((resolve) => {
       w.adapter.shapeBehaviour = async () => {
@@ -238,7 +246,7 @@ describe('a message that waits for Your folder', () => {
 
   it('sends at once when nothing holds the folder', async () => {
     w = chatWorld();
-    const chat = w.open();
+    const chat = openHere();
     sayWith(chat, 'edit it', FolderWhileHeld.Wait);
     expect(w.folderHold.waiting(chat.id)).toBe(false);
     expect(w.folderHold.holdsTurn(chat.id)).toBe(true);
@@ -248,7 +256,7 @@ describe('a message that waits for Your folder', () => {
   it('lets another message join the queue, and the latest send’s choice applies to all of it', async () => {
     w = chatWorld();
     runningTask('Bump vite');
-    const chat = w.open();
+    const chat = openHere();
     sayWith(chat, 'one', FolderWhileHeld.Wait);
     sayWith(chat, 'two', FolderWhileHeld.Wait);
     expect(w.folderHold.waiting(chat.id)).toBe(true);
@@ -256,13 +264,13 @@ describe('a message that waits for Your folder', () => {
     expect(w.folderHold.waiting(chat.id)).toBe(false);
     await w.engine.settled(chat.conversationId);
     expect(notices(chat)).toEqual([
-      'Your folder is in use by the task ‘Bump vite’, so this turn reads only.',
+      'Your checkout is in use by the task ‘Bump vite’, so this turn reads only.',
     ]);
   });
 
   it('runs a message sent reading only without the folder even when it has freed since the choice', async () => {
     w = chatWorld();
-    const chat = w.open();
+    const chat = openHere();
     sayWith(chat, 'look', FolderWhileHeld.ReadOnly);
     expect(w.folderHold.holdsTurn(chat.id)).toBe(false);
     await w.engine.settled(chat.conversationId);
@@ -276,7 +284,7 @@ describe('a message that waits for Your folder', () => {
   it('does not carry a reading-only choice made during a running turn into a later send', async () => {
     w = chatWorld();
     runningTask('Bump vite');
-    const chat = w.open();
+    const chat = openHere();
     let release: () => void = () => undefined;
     const started = new Promise<void>((resolve) => {
       w.adapter.shapeBehaviour = async () => {
@@ -303,7 +311,7 @@ describe('a message that waits for Your folder', () => {
   it('runs reading only under Send Now', async () => {
     w = chatWorld();
     runningTask('Bump vite');
-    const chat = w.open();
+    const chat = openHere();
     sayWith(chat, 'look', FolderWhileHeld.Wait);
     w.chat.sendNow(chat.conversationId);
     await w.engine.settled(chat.conversationId);
@@ -314,7 +322,7 @@ describe('a message that waits for Your folder', () => {
   it('is dropped by Stop, and nothing starts when the task ends', async () => {
     w = chatWorld();
     runningTask('Bump vite');
-    const chat = w.open();
+    const chat = openHere();
     sayWith(chat, 'edit it', FolderWhileHeld.Wait);
     await w.chat.stop(chat.conversationId);
     expect(w.folderHold.waiting(chat.id)).toBe(false);
@@ -331,7 +339,7 @@ describe('a message that waits for Your folder', () => {
   it('is replaced by Redo, which carries its own choice', async () => {
     w = chatWorld();
     runningTask('Bump vite');
-    const chat = w.open();
+    const chat = openHere();
     sayWith(chat, 'edit it', FolderWhileHeld.Wait);
     await w.chat.redo(
       chat.conversationId,
@@ -346,7 +354,7 @@ describe('a message that waits for Your folder', () => {
   it('keeps waiting through a model change', async () => {
     w = chatWorld();
     runningTask('Bump vite');
-    const chat = w.open();
+    const chat = openHere();
     sayWith(chat, 'edit it', FolderWhileHeld.Wait);
     await w.chat.patch(chat.id, { model: 'claude-sonnet-5-5' });
     expect(w.folderHold.waiting(chat.id)).toBe(true);
@@ -359,7 +367,7 @@ describe('a message that waits for Your folder', () => {
   it('is cancelled by archive, with its reservation, so the folder goes to nobody', async () => {
     w = chatWorld();
     runningTask('Bump vite');
-    const chat = w.open();
+    const chat = openHere();
     sayWith(chat, 'edit it', FolderWhileHeld.Wait);
     await w.chat.archive(chat.id);
     expect(w.folderHold.waiting(chat.id)).toBe(false);
@@ -371,7 +379,7 @@ describe('a message that waits for Your folder', () => {
   it('is gone after a restart, and the message waits under Send Now', async () => {
     w = chatWorld();
     runningTask('Bump vite');
-    const chat = w.open();
+    const chat = openHere();
     sayWith(chat, 'edit it', FolderWhileHeld.Wait);
     previous = w;
     await previous.engine.close();
@@ -472,7 +480,7 @@ describe('what lands in a real repository', () => {
     {
       name: 'another chat’s turn holds it',
       holder: () => {
-        const other = w.open();
+        const other = openHere();
         expect(w.folderHold.takeTurn(w.project.id, other.id).taken).toBe(true);
       },
       lands: true,
@@ -483,7 +491,7 @@ describe('what lands in a real repository', () => {
     repo = createTempRepo();
     w = chatWorld({ checkout: repo.path });
     holder?.();
-    const chat = w.open();
+    const chat = openHere();
     const target = join(repo.path, 'notes.md');
     let verdict = '';
     w.adapter.shapeBehaviour = () => {

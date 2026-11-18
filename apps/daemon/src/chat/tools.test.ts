@@ -451,7 +451,7 @@ describe("a chat's git tools through the daemon", () => {
       await client.callTool({ name: 'commit_changes', arguments: { message: 'late' } }),
     );
     await client.close();
-    expect(late.content.map((c) => c.text).join('')).toMatch(/does not hold Your folder/);
+    expect(late.content.map((c) => c.text).join('')).toMatch(/does not have your checkout/);
     expect(gitOf('rev-list', '--count', 'HEAD')).toBe('2');
   });
 });
