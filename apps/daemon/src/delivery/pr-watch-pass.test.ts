@@ -115,12 +115,17 @@ const notices = (passId: PassId) => getPassProgress(h.store.db, passId).notices;
 const batchCount = () => listBatches(h.store.db, { projectId: h.project.id }).length;
 
 describe("the watch on a pass's pull request", () => {
-  it.each([
-    { name: 'on a pull request project, while the pass is open', project: {}, closed: false },
-    { name: 'on a local project, after the close', project: { delivery: 'local' }, closed: true },
-  ] as const)(
-    'turns failing checks into one header notice offered to an agent, and starts no fix: $name',
-    async ({ project, closed }) => {
+  it('turns failing checks into one header notice offered to an agent, and starts no fix or catch-up of a conflict, open or closed locally', async () => {
+    const rows = [
+      { name: 'a pull request project, while the pass is open', project: {}, closed: false },
+      { name: 'a local project, after the close', project: { delivery: 'local' }, closed: true },
+    ] as const;
+    for (const [i, { name, project, closed }] of rows.entries()) {
+      if (i > 0) {
+        await w?.stop();
+        w = null;
+        h.close();
+      }
       const { passId, batchId, url } = await passWithPr(project);
       if (closed) closedLocally(passId, batchId);
       h.gh.setChecks(url, [failedRun('lint')]);
@@ -130,34 +135,27 @@ describe("the watch on a pass's pull request", () => {
         pending: [],
         cancelled: [],
       });
+      // A conflict asks for no catch-up of a pass's pull request either.
+      h.gh.setMergeable(url, PrMergeable.Conflicting);
       const before = batchCount();
       const asked = landing();
 
       await watch(asked);
       await h.jobs.idle();
 
-      expect(notices(passId)).toEqual([
+      expect.soft(notices(passId), name).toEqual([
         expect.objectContaining({
           kind: PassNoticeKind.Checks,
           sendable: true,
           text: expect.stringContaining('lint') as unknown,
         }),
       ]);
-      expect(batchCount()).toBe(before);
-      expect(asked.asked).toEqual([]);
-      expect(h.cards()).toEqual([]);
-      expect(getBatch(h.store.db, batchId).pr).toMatchObject({ state: 'open', checks: 'failing' });
-    },
-  );
-
-  it('asks for no catch-up of a pull request that conflicts', async () => {
-    const { url } = await passWithPr();
-    h.gh.setMergeable(url, PrMergeable.Conflicting);
-    const asked = landing();
-
-    await watch(asked);
-
-    expect(asked.asked).toEqual([]);
-    expect(h.cards()).toEqual([]);
+      expect.soft(batchCount(), name).toBe(before);
+      expect.soft(asked.asked, name).toEqual([]);
+      expect.soft(h.cards(), name).toEqual([]);
+      expect
+        .soft(getBatch(h.store.db, batchId).pr, name)
+        .toMatchObject({ state: 'open', checks: 'failing' });
+    }
   });
 });

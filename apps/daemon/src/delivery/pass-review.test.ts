@@ -44,23 +44,23 @@ describe('findingTargets', () => {
     { taskId: people, areas: ['people'] },
   ];
 
-  it.each([
-    {
-      name: "a file in one page's area goes to that page",
-      location: 'src/settings/a.tsx:3',
-      to: settings,
-    },
-    { name: 'a line range names the same file', location: 'src/people/b.tsx:3-9', to: people },
-    { name: 'a shared file goes to the header', location: 'src/lib/c.ts:1', to: null },
-    { name: 'a file in no area goes to the header', location: 'README.md:1', to: null },
-    { name: 'a finding naming no file goes to the header', location: null, to: null },
-  ])('$name', ({ location, to }) => {
-    expect(findingTargets([finding(location)], pages, AREAS)).toEqual([
-      { finding: finding(location), taskId: to },
-    ]);
-  });
+  it('sends a finding to the page whose area holds its file, else to the header, and every file finding of a pass of one to its one page', () => {
+    for (const { name, location, to } of [
+      {
+        name: "a file in one page's area goes to that page",
+        location: 'src/settings/a.tsx:3',
+        to: settings,
+      },
+      { name: 'a line range names the same file', location: 'src/people/b.tsx:3-9', to: people },
+      { name: 'a shared file goes to the header', location: 'src/lib/c.ts:1', to: null },
+      { name: 'a file in no area goes to the header', location: 'README.md:1', to: null },
+      { name: 'a finding naming no file goes to the header', location: null, to: null },
+    ]) {
+      expect
+        .soft(findingTargets([finding(location)], pages, AREAS), `${name}: ${String(location)}`)
+        .toEqual([{ finding: finding(location), taskId: to }]);
+    }
 
-  it('sends every file finding of a pass of one to its one page', () => {
     const one = mintId('Task');
     expect(
       findingTargets(
@@ -205,44 +205,48 @@ describe('reviewPassTip', () => {
     return tip;
   }
 
-  it.each([
-    { name: 'the same tip', next: () => '' },
-    {
-      name: 'a small commit after it',
-      next: () => h.commit('src/people/page.tsx', 'people, signed\n'),
-    },
-  ])(
-    'reads on from where a cut review stopped, at $name, and says so until all of it is read',
-    async ({ next }) => {
+  it('reads on from where a cut review stopped, at the same tip or a small commit after it, and says so until all of it is read', async () => {
+    // Each case reviews its own pass from the start: one harness each.
+    for (const [i, { name, next }] of [
+      { name: 'the same tip', next: () => '' },
+      {
+        name: 'a small commit after it',
+        next: () => h.commit('src/people/page.tsx', 'people, signed\n'),
+      },
+    ].entries()) {
+      if (i > 0) {
+        h.close();
+        scratch.cleanup();
+      }
       const { deps, asked } = setup('No findings.');
       const { passId } = await openedPass();
       const tip = longPages();
       const cut = () =>
         getPassProgress(h.store.db, passId).notices.filter((n) => n.id === 'review-cut');
 
-      expect(await review(deps, passId, tip)).toBe('reviewed');
-      expect(cut()).toEqual([
+      expect.soft(await review(deps, passId, tip), name).toBe('reviewed');
+      expect.soft(cut(), name).toEqual([
         expect.objectContaining({
           kind: PassNoticeKind.Finding,
           sendable: false,
           text: expect.stringContaining('not reviewed yet') as unknown,
         }),
       ]);
-      expect(asked[0]?.prompt).toContain('+a-end');
-      expect(asked[0]?.prompt).not.toContain('+e-end');
+      expect.soft(asked[0]?.prompt, name).toContain('+a-end');
+      expect.soft(asked[0]?.prompt, name).not.toContain('+e-end');
 
       const later = next() || tip;
-      expect(await review(deps, passId, later)).toBe('reviewed');
+      expect.soft(await review(deps, passId, later), name).toBe('reviewed');
       // The files the cut review read whole are not read again; the rest, and anything new, are.
-      expect(asked[1]?.prompt).not.toContain('+a-end');
-      expect(asked[1]?.prompt).toContain('+d-end');
-      expect(asked[1]?.prompt).toContain('+e-end');
-      if (later !== tip) expect(asked[1]?.prompt).toContain('+people, signed');
-      expect(cut()).toEqual([]);
-      expect(getPassProgress(h.store.db, passId).reviewedSha).toBe(later);
-      expect(await review(deps, passId, later)).toBe('unchanged');
-    },
-  );
+      expect.soft(asked[1]?.prompt, name).not.toContain('+a-end');
+      expect.soft(asked[1]?.prompt, name).toContain('+d-end');
+      expect.soft(asked[1]?.prompt, name).toContain('+e-end');
+      if (later !== tip) expect.soft(asked[1]?.prompt, name).toContain('+people, signed');
+      expect.soft(cut(), name).toEqual([]);
+      expect.soft(getPassProgress(h.store.db, passId).reviewedSha, name).toBe(later);
+      expect.soft(await review(deps, passId, later), name).toBe('unchanged');
+    }
+  });
 
   it('reads one file longer than a review reads as far as it goes, says so, and moves on', async () => {
     const { deps, asked } = setup('No findings.');

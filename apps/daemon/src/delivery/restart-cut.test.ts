@@ -61,7 +61,7 @@ async function startedOver(opts: { refusedCut?: boolean } = {}) {
 }
 
 describe('the batch a task started over from, while its copy is being cut', () => {
-  it('waits for the cut: the attempt stays a member, so the batch is not shipped without it', async () => {
+  it('waits for the cut: the attempt stays a member, so the batch is not shipped without it, then ships its other work once the copy has been cut', async () => {
     const { batchId, fresh, release } = await startedOver();
 
     expect(getBatch(h.store.db, fresh.id).state).toBe('CUTTING');
@@ -69,12 +69,6 @@ describe('the batch a task started over from, while its copy is being cut', () =
     expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
     h.shipper.checkBatch(batchId);
     expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
-    release();
-    await h.jobs.idle();
-  });
-
-  it('lets the batch ship its other work once the copy has been cut', async () => {
-    const { batchId, fresh, release } = await startedOver();
 
     release();
     await h.jobs.idle();

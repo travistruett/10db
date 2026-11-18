@@ -83,45 +83,43 @@ describe('rerunFlaky', () => {
     });
   });
 
-  it.each([
-    ['make check-changed', []],
-    ['make precheck', ['--precheck']],
-  ])("reads what the repository's own %s really leaves", async (_name, flags) => {
+  it("reads what the repository's own make check-changed and make precheck really leave", async () => {
     // The output runs past what 10db keeps of it, so the end of it must name the step by itself.
     const log = `${'noise line\n'.repeat(1000)}${TIMEOUT_LOG}`;
-    const { checkout, exitCode, tail } = failedRepoCheck(log, flags);
-    expect(exitCode).not.toBe(0);
-    const commands: string[] = [];
-    const outcome = await rerunFlaky({
-      checkout,
-      output: tail,
-      run: (command) => {
-        commands.push(command);
-        return Promise.resolve(result(0));
-      },
-    });
-    expect(commands).toEqual(['pnpm exec vitest run src/a.test.ts src/b.test.ts']);
-    expect(outcome.kind).toBe('flaky');
+    for (const [name, flags] of [
+      ['make check-changed', []],
+      ['make precheck', ['--precheck']],
+    ] as const) {
+      const { checkout, exitCode, tail } = failedRepoCheck(log, flags);
+      expect.soft(exitCode, name).not.toBe(0);
+      const commands: string[] = [];
+      const outcome = await rerunFlaky({
+        checkout,
+        output: tail,
+        run: (command) => {
+          commands.push(command);
+          return Promise.resolve(result(0));
+        },
+      });
+      expect.soft(commands, name).toEqual(['pnpm exec vitest run src/a.test.ts src/b.test.ts']);
+      expect.soft(outcome.kind, name).toBe('flaky');
+    }
   });
 
-  it('is a real failure when the rerun fails too', async () => {
+  it('is a real failure when the rerun fails too or times out', async () => {
     const { checkout, tail } = checkoutWith({ test: TIMEOUT_LOG });
-    const outcome = await rerunFlaky({
+    const failed = await rerunFlaky({
       checkout,
       output: tail,
       run: () => Promise.resolve(result(1)),
     });
-    expect(outcome).toEqual({ kind: 'failed', rerun: result(1) });
-  });
-
-  it('is a real failure when the rerun timed out', async () => {
-    const { checkout, tail } = checkoutWith({ test: TIMEOUT_LOG });
-    const outcome = await rerunFlaky({
+    expect.soft(failed, 'rerun fails').toEqual({ kind: 'failed', rerun: result(1) });
+    const timedOut = await rerunFlaky({
       checkout,
       output: tail,
       run: () => Promise.resolve(result(0, { timedOut: true })),
     });
-    expect(outcome.kind).toBe('failed');
+    expect.soft(timedOut.kind, 'rerun timed out').toBe('failed');
   });
 
   it('records nothing when the rerun was stopped or did not run', async () => {
@@ -132,36 +130,39 @@ describe('rerunFlaky', () => {
       ).toEqual({ kind: 'stopped' });
   });
 
-  it.each([
-    [
-      'a failing step that names no test (lint)',
-      { lint: 'error: no-unused-vars', test: TIMEOUT_LOG },
-    ],
-    ['a log that names no test', { test: 'Command failed with exit code 1' }],
-    ['a file name a shell would read as more than a path', { test: ' FAIL  src/$(x).test.ts > t' }],
-    ['a file name that leaves the checkout', { test: ' FAIL  ../../x.test.ts > t' }],
-  ])('does not rerun %s', async (_name, logs) => {
-    const { checkout, tail } = checkoutWith(logs);
-    let ran = false;
-    const outcome = await rerunFlaky({
-      checkout,
-      output: tail,
-      run: () => {
-        ran = true;
-        return Promise.resolve(result(0));
-      },
-    });
-    expect(outcome).toEqual({ kind: 'none' });
-    expect(ran).toBe(false);
-  });
-
-  it('does not rerun output that names no failing step', async () => {
-    const outcome = await rerunFlaky({
+  it('does not rerun a step with no test, a file name that is more than a path in the checkout, or no failing step', async () => {
+    const rows: [string, Record<string, string>][] = [
+      [
+        'a failing step that names no test (lint)',
+        { lint: 'error: no-unused-vars', test: TIMEOUT_LOG },
+      ],
+      ['a log that names no test', { test: 'Command failed with exit code 1' }],
+      [
+        'a file name a shell would read as more than a path',
+        { test: ' FAIL  src/$(x).test.ts > t' },
+      ],
+      ['a file name that leaves the checkout', { test: ' FAIL  ../../x.test.ts > t' }],
+    ];
+    for (const [name, logs] of rows) {
+      const { checkout, tail } = checkoutWith(logs);
+      let ran = false;
+      const outcome = await rerunFlaky({
+        checkout,
+        output: tail,
+        run: () => {
+          ran = true;
+          return Promise.resolve(result(0));
+        },
+      });
+      expect.soft(outcome, name).toEqual({ kind: 'none' });
+      expect.soft(ran, `${name}: ran`).toBe(false);
+    }
+    const noStep = await rerunFlaky({
       checkout: tempDir('flaky-checkout').path,
       output: 'broken\n',
       run: () => Promise.reject(new Error('must not run')),
     });
-    expect(outcome).toEqual({ kind: 'none' });
+    expect.soft(noStep, 'output that names no failing step').toEqual({ kind: 'none' });
   });
 });
 

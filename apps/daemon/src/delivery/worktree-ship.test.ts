@@ -35,6 +35,9 @@ import { baseNotices } from './notices';
 import { raise } from './context';
 import { INSTALL_SUMMARY } from './worktree-dependencies';
 
+/** A test that runs one batch per case in one repository takes as long as its cases together. */
+const LOOP_TIMEOUT = 180_000;
+
 let h: DeliveryHarness;
 /** Where the gate writes the directory it ran in. */
 let gateOut: string;
@@ -72,10 +75,15 @@ function worktreePaths(): string[] {
   ).map((e) => (existsSync(e.path) ? realpathSync(e.path) : e.path));
 }
 
-/** A batch whose work finished and whose gate failed: what Retry starts from. */
-async function failedAfterWork(): Promise<{ batch: BatchDto; ws: WorkstreamDto; head: string }> {
+/**
+ * A batch whose work finished and whose gate failed: what Retry starts from. `content` tells apart
+ * the commits of several such batches in one test.
+ */
+async function failedAfterWork(
+  content?: string,
+): Promise<{ batch: BatchDto; ws: WorkstreamDto; head: string }> {
   const { batch, ws } = await opened(h);
-  const head = await commitIn(h, batch, 'src/api/alpha.txt');
+  const head = await commitIn(h, batch, 'src/api/alpha.txt', content);
   h.settle(ws.id, 'DONE');
   h.state.write((c) =>
     transitionBatch(c, batch.id, { to: 'FAILED', patch: { failure: 'gate_failed' } }),
@@ -94,6 +102,19 @@ function unpinned(): { ctx: DeliveryContext; refusals: GitTrustError[] } {
     onRefused: (error) => refusals.push(error),
   });
   return { ctx: { ...h.ctx, git }, refusals };
+}
+
+/** Ignores these patterns in every worktree of the repository, with nothing to commit. */
+function ignore(...patterns: string[]): void {
+  writeFileSync(join(h.repo, '.git', 'info', 'exclude'), `${patterns.join('\n')}\n`);
+}
+
+/** Writes each file under `dir`, as a builder's hand or a build would. */
+function write(dir: string, files: readonly string[]): void {
+  for (const file of files) {
+    mkdirSync(dirname(join(dir, file)), { recursive: true });
+    writeFileSync(join(dir, file), 'local\n');
+  }
 }
 
 /** What the builder sees of the main checkout. */
@@ -144,18 +165,9 @@ describe('shipping a worktree batch', () => {
     expect(h.cards()).toEqual([]);
   });
 
-  it("drops its tasks' kept starts on the merged base when the batch's worktree goes", async () => {
+  it("closes a worktree batch with no commits, removes the worktree, deletes its branch at the base and drops its tasks' kept starts", async () => {
     const { batch, ws } = await opened(h);
     h.git$('update-ref', `refs/10db/${basename(h.worktreeRoot)}/starts/${ws.id}`, 'HEAD');
-    h.settle(ws.id, 'DONE');
-    h.shipper.checkBatch(batch.id);
-    await h.jobs.idle();
-    expect(getBatch(h.store.db, batch.id)).toMatchObject({ state: 'CLOSED', worktreePath: null });
-    expect(h.git$('for-each-ref', '--format=%(refname)', 'refs/10db/')).toBe('');
-  });
-
-  it('closes a worktree batch with no commits, removes the worktree and deletes its branch at the base', async () => {
-    const { batch, ws } = await opened(h);
     h.settle(ws.id, 'DONE');
     h.shipper.checkBatch(batch.id);
     await h.jobs.idle();
@@ -165,6 +177,7 @@ describe('shipping a worktree batch', () => {
     expect(worktreePaths()).toEqual([realpathSync(h.repo)]);
     expect(h.git$('branch', '--list', batch.branch ?? '')).toBe('');
     expect(h.gh.prCreates()).toEqual([]);
+    expect(h.git$('for-each-ref', '--format=%(refname)', 'refs/10db/')).toBe('');
   });
 
   it("keeps a CLOSED batch's branch that moved", async () => {
@@ -316,7 +329,7 @@ describe("the base, brought into a worktree batch's branch before the shipping g
       return next;
     }
 
-    it('reopens the batch with its last task queued to merge, runs no gate on the branch, pushes nothing and raises no card', async () => {
+    it('reopens the batch with its last task queued to merge, runs no gate on the branch, pushes nothing and raises no card, then ships the resolved branch with the gate run on the merge', async () => {
       const { batch, ws, own, teammate } = await overlapping();
 
       const reopened = await ship(batch, ws);
@@ -338,6 +351,20 @@ describe("the base, brought into a worktree batch's branch before the shipping g
       expect(getWorkstream(h.store.db, ws.id).state).toBe('DONE');
       expect(getTask(h.store.db, ws.taskId).status).toBe('open');
       expect(h.only(reopened.notices)).toMatchObject({ key: 'base-conflict', tone: 'info' });
+
+      // The session resolves the markers and its task is done: the merge ships.
+      await commitIn(h, batch, 'README.md', '# ours and theirs\n');
+      // The worktree goes once the batch ships.
+      const worktree = realpathSync(pathOf(batch));
+      h.settle(next.id, 'DONE');
+      h.shipper.checkBatch(batch.id);
+      await h.jobs.idle();
+
+      expect(getBatch(h.store.db, batch.id).state).toBe('SHIPPED');
+      expect(readFileSync(gateOut, 'utf8').trim()).toBe(worktree);
+      const tip = onOrigin(h, batch.branch) ?? '';
+      expect(h.origin$('show', `${tip}:README.md`)).toBe('# ours and theirs');
+      expect(h.cards()).toEqual([]);
     });
 
     it('does the same for markers an earlier gate left, without merging again, and never runs a gate on them', async () => {
@@ -357,25 +384,6 @@ describe("the base, brought into a worktree batch's branch before the shipping g
         kind: 'merge',
         paths: ['README.md'],
       });
-    });
-
-    it("ships the resolved branch once the session's task is done, with the gate run on the merge", async () => {
-      const { batch, ws } = await overlapping();
-      await ship(batch, ws);
-      const next = queuedBeside(batch, ws);
-      await commitIn(h, batch, 'README.md', '# ours and theirs\n');
-      // The worktree goes once the batch ships.
-      const worktree = realpathSync(pathOf(batch));
-
-      h.settle(next.id, 'DONE');
-      h.shipper.checkBatch(batch.id);
-      await h.jobs.idle();
-
-      expect(getBatch(h.store.db, batch.id).state).toBe('SHIPPED');
-      expect(readFileSync(gateOut, 'utf8').trim()).toBe(worktree);
-      const tip = onOrigin(h, batch.branch) ?? '';
-      expect(h.origin$('show', `${tip}:README.md`)).toBe('# ours and theirs');
-      expect(h.cards()).toEqual([]);
     });
 
     it('raises one card naming the files and why when the last task cannot take the merge', async () => {
@@ -422,12 +430,12 @@ describe('Retry of a FAILED worktree batch', () => {
     writeFileSync(join(h.repo, 'node_modules', 'pkg', 'index.js'), 'module.exports = 1;\n');
   });
 
-  it.each<{
+  const retries: {
     name: string;
     /** What the builder or a crash did to the worktree; returns the gate's extra check. */
     before: (wt: string, gitDir: string) => string;
     shipped: boolean;
-  }>([
+  }[] = [
     {
       name: 'keeps a whole worktree',
       before: (_wt, gitDir) => {
@@ -455,7 +463,7 @@ describe('Retry of a FAILED worktree batch', () => {
     {
       name: 'rebuilds a clean worktree on another branch',
       before: (wt) => {
-        gitIn(wt, 'switch', '-q', '-c', 'other');
+        gitIn(wt, 'switch', '-q', '-c', 'other-clean');
         return 'test -f src/api/alpha.txt';
       },
       shipped: true,
@@ -463,37 +471,51 @@ describe('Retry of a FAILED worktree batch', () => {
     {
       name: 'refuses a worktree on another branch with changes',
       before: (wt) => {
-        gitIn(wt, 'switch', '-q', '-c', 'other');
+        gitIn(wt, 'switch', '-q', '-c', 'other-dirty');
         writeFileSync(join(wt, 'README.md'), '# the builder was here\n');
         return 'true';
       },
       shipped: false,
     },
-  ])('$name', async ({ before, shipped }) => {
-    const { batch, head } = await failedAfterWork();
-    const wt = pathOf(batch);
-    gate(before(wt, gitIn(wt, 'rev-parse', '--absolute-git-dir')));
+  ];
 
-    h.shipper.ship(batch.id);
-    await h.jobs.idle();
+  it(
+    'ships a FAILED batch on Retry from a whole or rebuilt worktree, and refuses one on another branch with changes',
+    async () => {
+      // One batch per case, one after another; the refused one last, as it keeps its worktree.
+      for (const [i, { name, before, shipped }] of retries.entries()) {
+        const { batch, head } = await failedAfterWork(`case ${String(i)}\n`);
+        const wt = pathOf(batch);
+        gate(before(wt, gitIn(wt, 'rev-parse', '--absolute-git-dir')));
+        const prs = h.gh.prCreates().length;
 
-    const now = getBatch(h.store.db, batch.id);
-    if (shipped) {
-      expect(now.state).toBe('SHIPPED');
-      expect(readFileSync(gateOut, 'utf8').trim()).toBe(wt);
-      expect(onOrigin(h, batch.branch)).toBe(head);
-      expect(h.gh.prCreates()).toHaveLength(1);
-      expect(now.worktreePath).toBeNull();
-      expect(worktreePaths()).toEqual([realpathSync(h.repo)]);
-      return;
-    }
-    expect(now).toMatchObject({ state: 'FAILED', failure: 'wrong_branch', worktreePath: wt });
-    expect(h.only(h.cards()).body).toContain(wt);
-    expect(readFileSync(join(wt, 'README.md'), 'utf8')).toBe('# the builder was here\n');
-    expect(gitIn(wt, 'branch', '--show-current')).toBe('other');
-    expect(onOrigin(h, batch.branch)).toBeNull();
-    expect(h.gh.prCreates()).toEqual([]);
-  });
+        h.shipper.ship(batch.id);
+        await h.jobs.idle();
+
+        const now = getBatch(h.store.db, batch.id);
+        if (shipped) {
+          expect.soft(now.state, name).toBe('SHIPPED');
+          expect.soft(readFileSync(gateOut, 'utf8').trim(), name).toBe(wt);
+          expect.soft(onOrigin(h, batch.branch), name).toBe(head);
+          expect.soft(h.gh.prCreates(), name).toHaveLength(prs + 1);
+          expect.soft(now.worktreePath, name).toBeNull();
+          expect.soft(worktreePaths(), name).toEqual([realpathSync(h.repo)]);
+          continue;
+        }
+        expect
+          .soft(now, name)
+          .toMatchObject({ state: 'FAILED', failure: 'wrong_branch', worktreePath: wt });
+        expect.soft(h.only(h.cards()).body, name).toContain(wt);
+        expect
+          .soft(readFileSync(join(wt, 'README.md'), 'utf8'), name)
+          .toBe('# the builder was here\n');
+        expect.soft(gitIn(wt, 'branch', '--show-current'), name).toBe('other-dirty');
+        expect.soft(onOrigin(h, batch.branch), name).toBeNull();
+        expect.soft(h.gh.prCreates(), name).toHaveLength(prs);
+      }
+    },
+    LOOP_TIMEOUT,
+  );
 
   it('refuses a directory git does not list at the worktree path, naming it, and leaves it', async () => {
     const { batch } = await failedAfterWork();
@@ -528,37 +550,19 @@ describe('Retry of a FAILED worktree batch', () => {
     expect(worktreePaths()).toEqual([realpathSync(h.repo), wt]);
   });
 
-  it('refuses a replaced worktree whose dependency install fails, removing it and naming the cause', async () => {
+  it('refuses a replaced worktree whose dependency install fails, removing it and naming the cause, and asks about a host the sandbox blocked the install from', async () => {
     h.commit('pnpm-lock.yaml', 'lockfileVersion: 9\n');
     h.git$('push', '-q', 'origin', 'main');
-    const { batch } = await failedAfterWork();
-    const wt = pathOf(batch);
     // The seed needs a node_modules to refresh.
     writeFileSync(join(h.repo, '.gitignore'), 'node_modules/\n');
     mkdirSync(join(h.repo, 'node_modules'), { recursive: true });
-    rmSync(wt, { recursive: true, force: true });
-    h.pnpm.failWith(1, 'ERR_PNPM_META_FETCH_FAIL');
 
-    const outcome = await ensureWorktreeWhole(h.ctx, batch, new AbortController().signal);
-
-    expect(outcome).toBe('refused');
-    expect(h.only(h.cards()).body).toContain('ERR_PNPM_META_FETCH_FAIL');
-    expect(existsSync(wt)).toBe(false);
-    expect(worktreePaths()).toEqual([realpathSync(h.repo)]);
-  });
-
-  it('asks about a host the sandbox blocked the install of a replaced worktree from', async () => {
-    h.commit('pnpm-lock.yaml', 'lockfileVersion: 9\n');
-    h.git$('push', '-q', 'origin', 'main');
-    const { batch } = await failedAfterWork();
-    writeFileSync(join(h.repo, '.gitignore'), 'node_modules/\n');
-    mkdirSync(join(h.repo, 'node_modules'), { recursive: true });
-    rmSync(pathOf(batch), { recursive: true, force: true });
+    // An install the sandbox blocked from a host.
+    const blocked = (await failedAfterWork('blocked\n')).batch;
+    rmSync(pathOf(blocked), { recursive: true, force: true });
     h.pnpm.blockedFrom('registry.npmjs.org');
 
-    const outcome = await ensureWorktreeWhole(h.ctx, batch, new AbortController().signal);
-
-    expect(outcome).toBe('refused');
+    expect(await ensureWorktreeWhole(h.ctx, blocked, new AbortController().signal)).toBe('refused');
     const host = h.only(
       h.cards().filter((c) => c.title === 'Allow network access to registry.npmjs.org?'),
     );
@@ -569,6 +573,24 @@ describe('Retry of a FAILED worktree batch', () => {
     );
     expect(refused.body).toContain('The install was blocked from reaching registry.npmjs.org');
     expect(refused.body).not.toMatch(/the gate was blocked|run the gate again/i);
+
+    // An install that fails on its own, in another batch.
+    h.pnpm.succeed();
+    const earlier = new Set(h.cards().map((c) => c.id));
+    const { batch } = await failedAfterWork('failed\n');
+    const wt = pathOf(batch);
+    rmSync(wt, { recursive: true, force: true });
+    h.pnpm.failWith(1, 'ERR_PNPM_META_FETCH_FAIL');
+
+    const outcome = await ensureWorktreeWhole(h.ctx, batch, new AbortController().signal);
+
+    expect(outcome).toBe('refused');
+    expect(h.only(h.cards().filter((c) => !earlier.has(c.id))).body).toContain(
+      'ERR_PNPM_META_FETCH_FAIL',
+    );
+    expect(existsSync(wt)).toBe(false);
+    expect(existsSync(pathOf(blocked))).toBe(false);
+    expect(worktreePaths()).toEqual([realpathSync(h.repo)]);
   });
 
   it('refuses, and removes nothing, when git no longer trusts the worktree', async () => {
@@ -586,93 +608,100 @@ describe('Retry of a FAILED worktree batch', () => {
     expect(h.cards()).toEqual([]);
   });
 
-  it('Retry with unfinished work reopens only after the worktree is whole', async () => {
-    const { batch, ws } = await opened(h);
-    const wt = pathOf(batch);
-    h.state.write((c) =>
-      transitionBatch(c, batch.id, { to: 'FAILED', patch: { failure: 'wrong_branch' } }),
-    );
-    rmSync(wt, { recursive: true, force: true });
-    const ticks = h.ticks.count;
+  it(
+    'reopens a FAILED worktree batch only after making its worktree whole: on Retry with unfinished work, when a fix task joins it, and on a workstream Retry through the cut queue',
+    async () => {
+      // Retry of a batch with unfinished work.
+      {
+        const { batch, ws } = await opened(h);
+        const wt = pathOf(batch);
+        h.state.write((c) =>
+          transitionBatch(c, batch.id, { to: 'FAILED', patch: { failure: 'wrong_branch' } }),
+        );
+        rmSync(wt, { recursive: true, force: true });
+        const ticks = h.ticks.count;
 
-    expect(h.shipper.ship(batch.id).state).toBe('FAILED');
-    await h.jobs.idle();
+        expect(h.shipper.ship(batch.id).state).toBe('FAILED');
+        await h.jobs.idle();
 
-    expect(getBatch(h.store.db, batch.id)).toMatchObject({ state: 'OPEN', failure: null });
-    expect(gitIn(wt, 'branch', '--show-current')).toBe(batch.branch);
-    expect(readFileSync(join(wt, 'node_modules', 'pkg', 'index.js'), 'utf8')).toBe(
-      'module.exports = 1;\n',
-    );
-    expect(getWorkstream(h.store.db, ws.id).state).toBe('QUEUED');
-    expect(h.ticks.count).toBeGreaterThan(ticks);
-    expect(h.cards()).toEqual([]);
-  });
+        expect(getBatch(h.store.db, batch.id)).toMatchObject({ state: 'OPEN', failure: null });
+        expect(gitIn(wt, 'branch', '--show-current')).toBe(batch.branch);
+        expect(readFileSync(join(wt, 'node_modules', 'pkg', 'index.js'), 'utf8')).toBe(
+          'module.exports = 1;\n',
+        );
+        expect(getWorkstream(h.store.db, ws.id).state).toBe('QUEUED');
+        expect(h.ticks.count).toBeGreaterThan(ticks);
+        expect(h.cards()).toEqual([]);
+      }
 
-  it('a fix task joins a FAILED worktree batch and reopens it after making its worktree whole', async () => {
-    const { batch, ws } = await failedAfterWork();
-    const wt = pathOf(batch);
-    rmSync(wt, { recursive: true, force: true });
-    const fix = h.addTask('Fix', { areas: ['ui'] });
+      // A fix task joining a batch whose work finished.
+      {
+        const { batch, ws } = await failedAfterWork();
+        const wt = pathOf(batch);
+        rmSync(wt, { recursive: true, force: true });
+        const fix = h.addTask('Fix', { areas: ['ui'] });
 
-    const answered = h.starter.startBatch(h.project.id, {
-      title: 'Fix',
-      taskIds: [fix.id],
-      batchId: batch.id,
-    });
-    expect(answered.map((b) => [b.id, b.state])).toEqual([[batch.id, 'FAILED']]);
-    await h.jobs.idle();
+        const answered = h.starter.startBatch(h.project.id, {
+          title: 'Fix',
+          taskIds: [fix.id],
+          batchId: batch.id,
+        });
+        expect(answered.map((b) => [b.id, b.state])).toEqual([[batch.id, 'FAILED']]);
+        await h.jobs.idle();
 
-    expect(getBatch(h.store.db, batch.id)).toMatchObject({ state: 'OPEN', failure: null });
-    expect(listWorkstreams(h.store.db, { batchId: batch.id }).map((w) => w.taskId)).toEqual([
-      ws.taskId,
-      fix.id,
-    ]);
-    expect(gitIn(wt, 'branch', '--show-current')).toBe(batch.branch);
-    expect(existsSync(join(wt, 'src', 'api', 'alpha.txt'))).toBe(true);
-    expect(h.cards()).toEqual([]);
-  });
+        expect(getBatch(h.store.db, batch.id)).toMatchObject({ state: 'OPEN', failure: null });
+        expect(listWorkstreams(h.store.db, { batchId: batch.id }).map((w) => w.taskId)).toEqual([
+          ws.taskId,
+          fix.id,
+        ]);
+        expect(gitIn(wt, 'branch', '--show-current')).toBe(batch.branch);
+        expect(existsSync(join(wt, 'src', 'api', 'alpha.txt'))).toBe(true);
+        expect(h.cards()).toEqual([]);
+      }
 
-  it('a workstream Retry in a FAILED worktree batch reopens it through the cut queue', async () => {
-    const { batch, ws } = await opened(h);
-    const wt = pathOf(batch);
-    h.settle(ws.id, 'FAILED');
-    h.state.write((c) =>
-      transitionBatch(c, batch.id, { to: 'FAILED', patch: { failure: 'gate_failed' } }),
-    );
-    rmSync(wt, { recursive: true, force: true });
-    const inbox = createInboxService({
-      state: h.state,
-      onParkedAnswer: () => undefined,
-      onFlagAnswer: createBatchCardAnswers({
-        // As the composition root builds it.
-        retry: (id) => {
-          const retried = retryWorkstream(h.state, id);
-          if (retried.batchId !== null) h.starter.reopen(retried.batchId);
-        },
-        shipper: h.shipper,
-      }),
-    });
-    const fields = batchCardFields({ id: ws.id, batchId: batch.id });
-    if (!fields) throw new Error('a batch member gets card actions');
-    const card = inbox.flag({
-      tier: 'ask',
-      urgency: 'high',
-      closesWhen: { by: 'answer' },
-      projectId: h.project.id,
-      workstreamId: ws.id,
-      title: 'Workstream failed: Alpha',
-      body: 'The gate failed',
-      ...fields,
-    });
+      // A workstream's Retry, answered on its card.
+      const { batch, ws } = await opened(h);
+      const wt = pathOf(batch);
+      h.settle(ws.id, 'FAILED');
+      h.state.write((c) =>
+        transitionBatch(c, batch.id, { to: 'FAILED', patch: { failure: 'gate_failed' } }),
+      );
+      rmSync(wt, { recursive: true, force: true });
+      const inbox = createInboxService({
+        state: h.state,
+        onParkedAnswer: () => undefined,
+        onFlagAnswer: createBatchCardAnswers({
+          // As the composition root builds it.
+          retry: (id) => {
+            const retried = retryWorkstream(h.state, id);
+            if (retried.batchId !== null) h.starter.reopen(retried.batchId);
+          },
+          shipper: h.shipper,
+        }),
+      });
+      const fields = batchCardFields({ id: ws.id, batchId: batch.id });
+      if (!fields) throw new Error('a batch member gets card actions');
+      const card = inbox.flag({
+        tier: 'ask',
+        urgency: 'high',
+        closesWhen: { by: 'answer' },
+        projectId: h.project.id,
+        workstreamId: ws.id,
+        title: 'Workstream failed: Alpha',
+        body: 'The gate failed',
+        ...fields,
+      });
 
-    inbox.answer(card.id, { choice: 'Retry' });
-    expect(getWorkstream(h.store.db, ws.id).state).toBe('QUEUED');
-    expect(getBatch(h.store.db, batch.id).state).toBe('FAILED');
-    await h.jobs.idle();
+      inbox.answer(card.id, { choice: 'Retry' });
+      expect(getWorkstream(h.store.db, ws.id).state).toBe('QUEUED');
+      expect(getBatch(h.store.db, batch.id).state).toBe('FAILED');
+      await h.jobs.idle();
 
-    expect(getBatch(h.store.db, batch.id)).toMatchObject({ state: 'OPEN', failure: null });
-    expect(gitIn(wt, 'branch', '--show-current')).toBe(batch.branch);
-  });
+      expect(getBatch(h.store.db, batch.id)).toMatchObject({ state: 'OPEN', failure: null });
+      expect(gitIn(wt, 'branch', '--show-current')).toBe(batch.branch);
+    },
+    LOOP_TIMEOUT,
+  );
 });
 
 describe('Abandon of a worktree batch', () => {
@@ -691,10 +720,12 @@ describe('Abandon of a worktree batch', () => {
     ]);
   });
 
-  it('keeps a dirty worktree, keeps its path and names it with --force --force', async () => {
+  it('keeps a dirty worktree and its path, from Abandon and from retireWorktree itself, and names it with --force --force and every git-ignored file that command removes', async () => {
+    ignore('.env', '*.tsbuildinfo');
     const { batch } = await opened(h);
     const wt = pathOf(batch);
     writeFileSync(join(wt, 'notes.txt'), 'not committed\n');
+    write(wt, ['.env', 'tsconfig.tsbuildinfo']);
     h.shipper.abandon(batch.id);
     await h.jobs.idle();
     expect(getBatch(h.store.db, batch.id)).toMatchObject({
@@ -703,23 +734,19 @@ describe('Abandon of a worktree batch', () => {
     });
     expect(readFileSync(join(wt, 'notes.txt'), 'utf8')).toBe('not committed\n');
     expect(worktreePaths()).toEqual([realpathSync(h.repo), wt]);
-    const kept = h.cards().find((c) => c.title.includes('uncommitted changes kept'));
-    expect(kept?.body).toContain('notes.txt');
-    expect(kept?.body).toContain(`git -C '${h.repo}' worktree remove --force --force '${wt}'`);
-  });
+    const kept = h.only(h.cards());
+    expect(kept.title).toContain('uncommitted changes kept');
+    expect(kept.body).toContain('- notes.txt');
+    expect(kept.body).toContain('- .env');
+    expect(kept.body).toContain('- tsconfig.tsbuildinfo');
+    expect(kept.body).toContain(`git -C '${h.repo}' worktree remove --force --force '${wt}'`);
 
-  it('retireWorktree itself keeps an ABANDONED worktree with uncommitted changes', async () => {
-    const { batch } = await opened(h);
-    const wt = pathOf(batch);
-    writeFileSync(join(wt, 'notes.txt'), 'not committed\n');
-    h.state.write((c) => transitionBatch(c, batch.id, { to: 'ABANDONED' }));
-
+    // retireWorktree itself, asked again, keeps it for the uncommitted change alone.
     expect(await retireWorktree(h.ctx, batch.id)).toEqual({
       kind: 'kept',
       reason: 'changes',
       paths: ['notes.txt'],
     });
-
     expect(getBatch(h.store.db, batch.id).worktreePath).toBe(wt);
     expect(worktreePaths()).toEqual([realpathSync(h.repo), wt]);
     expect(readFileSync(join(wt, 'notes.txt'), 'utf8')).toBe('not committed\n');
@@ -741,20 +768,17 @@ describe('Abandon of a worktree batch', () => {
 });
 
 describe('a finished worktree with git-ignored files', () => {
-  /** Ignores these patterns in every worktree of the repository, with nothing to commit. */
-  const ignore = (...patterns: string[]) => {
-    writeFileSync(join(h.repo, '.git', 'info', 'exclude'), `${patterns.join('\n')}\n`);
-  };
-  const write = (dir: string, files: readonly string[]) => {
-    for (const file of files) {
-      mkdirSync(dirname(join(dir, file)), { recursive: true });
-      writeFileSync(join(dir, file), 'local\n');
-    }
-  };
   const keptTitle = (batch: BatchDto) =>
     `10db kept the worktree of "${batch.title}": it holds git-ignored files`;
 
-  it.each<{
+  /** The open cards and posted notices since `before` was taken. */
+  const since = (before: { cards: Set<string>; notices: number }) => ({
+    cards: h.cards().filter((c) => !before.cards.has(c.id)),
+    notices: h.notices().slice(before.notices),
+  });
+  const mark = () => ({ cards: new Set(h.cards().map((c) => c.id)), notices: h.notices().length });
+
+  const cases: {
     name: string;
     to: 'CLOSED' | 'ABANDONED';
     patterns?: string[];
@@ -763,7 +787,7 @@ describe('a finished worktree with git-ignored files', () => {
     files: string[];
     /** The files the card lists; null when the worktree goes. */
     kept: string[] | null;
-  }>([
+  }[] = [
     { name: 'a hand-made .env', to: 'CLOSED', files: ['.env'], kept: ['.env'] },
     {
       name: 'a local file in a directory git does not track',
@@ -841,43 +865,65 @@ describe('a finished worktree with git-ignored files', () => {
       files: ['debug.log'],
       kept: ['debug.log'],
     },
-  ])('$name: kept $kept', async ({ to, patterns, tracked, files, kept }) => {
-    ignore(...(patterns ?? ['.env', '.env.*', '.DS_Store', 'dist/', 'node_modules/']));
-    const { batch } = await opened(h);
-    const wt = pathOf(batch);
-    for (const file of tracked ?? []) await commitIn(h, batch, file);
-    write(wt, files);
-    h.state.write((c) => {
-      if (to === 'CLOSED') transitionBatch(c, batch.id, { to: 'SHIPPING' });
-      transitionBatch(c, batch.id, { to });
-    });
+  ];
 
-    const outcome = await retireWorktree(h.ctx, batch.id);
+  it(
+    'keeps a finished worktree for the git-ignored files a person made, and removes one that holds only build output',
+    async () => {
+      // One batch per case in one repository; a kept worktree stays beside the next case's.
+      for (const { name, to, patterns, tracked, files, kept } of cases) {
+        ignore(...(patterns ?? ['.env', '.env.*', '.DS_Store', 'dist/', 'node_modules/']));
+        const others = worktreePaths();
+        const before = mark();
+        const { batch } = await opened(h);
+        const wt = pathOf(batch);
+        for (const file of tracked ?? []) await commitIn(h, batch, file);
+        write(wt, files);
+        h.state.write((c) => {
+          if (to === 'CLOSED') transitionBatch(c, batch.id, { to: 'SHIPPING' });
+          transitionBatch(c, batch.id, { to });
+        });
 
-    if (kept === null) {
-      expect(outcome).toEqual({ kind: 'retired' });
-      expect(getBatch(h.store.db, batch.id).worktreePath).toBeNull();
-      expect(worktreePaths()).toEqual([realpathSync(h.repo)]);
-      // An abandoned batch's branch, with nothing on it, is deleted and a notice says so.
-      expect(h.cards()).toEqual([]);
-      expect(h.notices().map((n) => n.line)).toEqual(
-        to === 'ABANDONED' && (tracked ?? []).length === 0
-          ? [`Batch "${batch.title}" abandoned: ${batch.branch ?? ''} deleted`]
-          : [],
-      );
-      return;
-    }
-    expect(outcome).toEqual({ kind: 'kept', reason: 'ignored', paths: kept });
-    expect(getBatch(h.store.db, batch.id).worktreePath).toBe(wt);
-    expect(worktreePaths()).toEqual([realpathSync(h.repo), wt]);
-    for (const file of files) expect(readFileSync(join(wt, file), 'utf8')).toBe('local\n');
-    const card = h.only(h.cards());
-    expect(card.title).toBe(keptTitle(batch));
-    for (const file of files)
-      if (kept.includes(file)) expect(card.body).toContain(`- ${file}`);
-      else expect(card.body).not.toContain(file);
-    expect(card.body).toContain(`git -C '${h.repo}' worktree remove --force --force '${wt}'`);
-  });
+        const outcome = await retireWorktree(h.ctx, batch.id);
+        const now = since(before);
+
+        if (kept === null) {
+          expect.soft(outcome, name).toEqual({ kind: 'retired' });
+          expect.soft(getBatch(h.store.db, batch.id).worktreePath, name).toBeNull();
+          expect.soft(worktreePaths(), name).toEqual(others);
+          // An abandoned batch's branch, with nothing on it, is deleted and a notice says so.
+          expect.soft(now.cards, name).toEqual([]);
+          expect
+            .soft(
+              now.notices.map((n) => n.line),
+              name,
+            )
+            .toEqual(
+              to === 'ABANDONED' && (tracked ?? []).length === 0
+                ? [`Batch "${batch.title}" abandoned: ${batch.branch ?? ''} deleted`]
+                : [],
+            );
+          continue;
+        }
+        expect.soft(outcome, name).toEqual({ kind: 'kept', reason: 'ignored', paths: kept });
+        expect.soft(getBatch(h.store.db, batch.id).worktreePath, name).toBe(wt);
+        expect.soft(worktreePaths().sort(), name).toEqual([...others, wt].sort());
+        for (const file of files)
+          expect.soft(readFileSync(join(wt, file), 'utf8'), `${name}: ${file}`).toBe('local\n');
+        expect.soft(now.cards, name).toHaveLength(1);
+        const card = now.cards[0];
+        expect.soft(card?.title, name).toBe(keptTitle(batch));
+        for (const file of files)
+          if (kept.includes(file))
+            expect.soft(card?.body, `${name}: ${file}`).toContain(`- ${file}`);
+          else expect.soft(card?.body, `${name}: ${file}`).not.toContain(file);
+        expect
+          .soft(card?.body, name)
+          .toContain(`git -C '${h.repo}' worktree remove --force --force '${wt}'`);
+      }
+    },
+    LOOP_TIMEOUT,
+  );
 
   it("keeps a shipped batch's worktree that holds a .env, and raises one card however often it retires", async () => {
     ignore('.env');
@@ -922,38 +968,24 @@ describe('a finished worktree with git-ignored files', () => {
     expect(card.body).toContain(`git -C '${h.repo}' worktree remove --force --force '${wt}'`);
   });
 
-  it('lists every git-ignored file its command removes beside the uncommitted changes', async () => {
-    ignore('.env', '*.tsbuildinfo');
-    const { batch } = await opened(h);
-    const wt = pathOf(batch);
-    write(wt, ['.env', 'notes.txt', 'tsconfig.tsbuildinfo']);
-    h.state.write((c) => transitionBatch(c, batch.id, { to: 'ABANDONED' }));
-
-    expect(await retireWorktree(h.ctx, batch.id)).toMatchObject({
-      kind: 'kept',
-      reason: 'changes',
-      paths: ['notes.txt'],
-    });
-
-    const card = h.only(h.cards());
-    expect(card.title).toContain('uncommitted changes kept');
-    expect(card.body).toContain('- notes.txt');
-    expect(card.body).toContain('- .env');
-    expect(card.body).toContain('- tsconfig.tsbuildinfo');
-  });
-
-  it.each<{ name: string; to: 'CLOSED' | 'ABANDONED'; files: string[]; why: string }>([
-    { name: 'git-ignored files', to: 'CLOSED', files: ['.env'], why: 'it holds git-ignored files' },
-    {
-      name: 'uncommitted changes',
-      to: 'ABANDONED',
-      files: ['notes.txt'],
-      why: 'uncommitted changes kept',
-    },
-  ])(
-    'withdraws the card for a worktree kept for $name once the worktree is removed',
-    async ({ to, files, why }) => {
-      ignore('.env');
+  it('withdraws the card for a worktree kept for git-ignored files or uncommitted changes once the worktree is removed', async () => {
+    ignore('.env');
+    const kinds: { name: string; to: 'CLOSED' | 'ABANDONED'; files: string[]; why: string }[] = [
+      {
+        name: 'git-ignored files',
+        to: 'CLOSED',
+        files: ['.env'],
+        why: 'it holds git-ignored files',
+      },
+      {
+        name: 'uncommitted changes',
+        to: 'ABANDONED',
+        files: ['notes.txt'],
+        why: 'uncommitted changes kept',
+      },
+    ];
+    for (const { name, to, files, why } of kinds) {
+      const before = h.notices().length;
       const { batch } = await opened(h);
       const wt = pathOf(batch);
       write(wt, files);
@@ -961,19 +993,27 @@ describe('a finished worktree with git-ignored files', () => {
         if (to === 'CLOSED') transitionBatch(c, batch.id, { to: 'SHIPPING' });
         transitionBatch(c, batch.id, { to });
       });
-      expect((await retireWorktree(h.ctx, batch.id)).kind).toBe('kept');
-      expect(h.only(h.cards()).title).toContain(why);
+      expect.soft((await retireWorktree(h.ctx, batch.id)).kind, name).toBe('kept');
+      expect.soft(h.only(h.cards()).title, name).toContain(why);
 
       for (const file of files) rmSync(join(wt, file));
-      expect(await retireWorktree(h.ctx, batch.id)).toEqual({ kind: 'retired' });
+      expect.soft(await retireWorktree(h.ctx, batch.id), name).toEqual({ kind: 'retired' });
 
       // Only the note that an abandoned batch's empty branch was deleted is left, and it is a notice.
-      expect(h.cards()).toEqual([]);
-      expect(h.notices().map((n) => n.line)).toEqual(
-        to === 'ABANDONED'
-          ? [`Batch "${batch.title}" abandoned: ${batch.branch ?? ''} deleted`]
-          : [],
-      );
-    },
-  );
+      expect.soft(h.cards(), name).toEqual([]);
+      expect
+        .soft(
+          h
+            .notices()
+            .slice(before)
+            .map((n) => n.line),
+          name,
+        )
+        .toEqual(
+          to === 'ABANDONED'
+            ? [`Batch "${batch.title}" abandoned: ${batch.branch ?? ''} deleted`]
+            : [],
+        );
+    }
+  });
 });

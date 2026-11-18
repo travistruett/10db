@@ -19,22 +19,21 @@ const VITEST_LOG = [
 ].join('\n');
 
 describe('failingTests', () => {
-  it('reads every failing test from a vitest log, its file and its name, once each', () => {
-    expect(failingTests(VITEST_LOG)).toEqual([
+  it('reads every failing test from a vitest log, its file and its name, once each, and none from a log naming none', () => {
+    expect.soft(failingTests(VITEST_LOG), 'vitest log').toEqual([
       { file: 'src/zz/probe.test.ts', name: 'outer > fails here' },
       { file: 'src/zz/probe.test.ts', name: 'top fails' },
       { file: 'src/plain.spec.tsx', name: 'renders' },
       { file: 'src/broken.test.ts', name: null },
     ]);
-  });
-
-  it('finds none in a log that names no failing test file', () => {
-    expect(failingTests('error: lint failed\n FAIL  something else')).toEqual([]);
+    expect
+      .soft(failingTests('error: lint failed\n FAIL  something else'), 'a log naming no test file')
+      .toEqual([]);
   });
 });
 
 describe('readGateFailures', () => {
-  it("names each failing step from the gate's FAILED lines, with its log in the checkout and its tests", async () => {
+  it("names each failing step from the gate's FAILED lines, else its summary line, else none", async () => {
     const checkout = tempDir('gate-checkout').path;
     mkdirSync(join(checkout, '.gate'));
     writeFileSync(join(checkout, '.gate', 'test.log'), VITEST_LOG);
@@ -44,21 +43,26 @@ describe('readGateFailures', () => {
       'GATE FAIL: lint test — logs in .gate/; lint 3s · test 40s (43s)',
     ].join('\n');
     const steps = await readGateFailures(checkout, tail);
-    expect(steps.map((s) => [s.name, s.command, s.logPath, s.tests.length])).toEqual([
-      ['lint', 'pnpm lint', join(checkout, '.gate', 'lint.log'), 0],
-      ['test', 'pnpm test', join(checkout, '.gate', 'test.log'), 4],
-    ]);
-  });
+    expect
+      .soft(
+        steps.map((s) => [s.name, s.command, s.logPath, s.tests.length]),
+        'FAILED lines',
+      )
+      .toEqual([
+        ['lint', 'pnpm lint', join(checkout, '.gate', 'lint.log'), 0],
+        ['test', 'pnpm test', join(checkout, '.gate', 'test.log'), 4],
+      ]);
 
-  it('falls back on the summary line when the output holds no FAILED lines', async () => {
-    const checkout = tempDir('gate-checkout').path;
-    const steps = await readGateFailures(
-      checkout,
-      'GATE FAIL: test — logs in .gate/; test 40s (40s)',
-    );
-    expect(steps).toEqual([
-      { name: 'test', command: null, logPath: join(checkout, '.gate', 'test.log'), tests: [] },
-    ]);
+    const bare = tempDir('gate-checkout').path;
+    expect
+      .soft(
+        await readGateFailures(bare, 'GATE FAIL: test — logs in .gate/; test 40s (40s)'),
+        'summary line only',
+      )
+      .toEqual([
+        { name: 'test', command: null, logPath: join(bare, '.gate', 'test.log'), tests: [] },
+      ]);
+    expect.soft(await readGateFailures(bare, 'broken\n'), 'not 10db-shaped').toEqual([]);
   });
 
   it('never reads a log outside the checkout', async () => {
@@ -68,10 +72,6 @@ describe('readGateFailures', () => {
       'FAILED test: pnpm test (log ../../etc/passwd)\nFAILED lint: pnpm lint (log /etc/hosts)',
     );
     expect(steps.map((s) => s.logPath)).toEqual([null, null]);
-  });
-
-  it('finds no step in output from a gate that is not 10db-shaped', async () => {
-    expect(await readGateFailures(tempDir('gate-checkout').path, 'broken\n')).toEqual([]);
   });
 });
 

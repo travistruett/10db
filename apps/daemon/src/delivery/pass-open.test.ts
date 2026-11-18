@@ -20,10 +20,8 @@ import {
   Rigor,
   TaskKindSource,
   WorkstreamState,
-  type BatchId,
   type ProjectInput,
   type TaskDto,
-  type WorkstreamId,
 } from '@10db/contracts';
 import {
   activeClaims,
@@ -307,139 +305,149 @@ describe('opening a pass', () => {
     expect(activeClaims(h.store.db, held.id).map((c) => c.name)).toEqual(['people']);
   });
 
-  it.each<{
-    name: string;
-    project?: Partial<ProjectInput>;
-    arrange: () => { tasks: TaskDto[]; extra?: Partial<PassOpenInput> };
-    refusal: RegExp;
-  }>([
-    {
-      name: 'a project with no page area',
-      project: { areas: [{ name: 'repo', globs: ['**'] }] },
-      arrange: () => ({ tasks: [page('A', ['repo'])] }),
-      refusal: /has no page area/,
-    },
-    {
-      name: 'a task with no page area',
-      arrange: () => ({ tasks: [page('Shared only', ['src'])] }),
-      refusal: /Shared only names no page area/,
-    },
-    {
-      name: 'two tasks on one page',
-      arrange: () => ({ tasks: [page('A', ['people']), page('B', ['people'])] }),
-      refusal: /"A" and "B" both hold people/,
-    },
-    {
-      name: 'more tasks than the page cap',
-      arrange: () => ({
-        tasks: [page('A', ['people']), page('B', ['settings'])],
-        extra: { pageCap: 1 },
-      }),
-      refusal: /holds 1 pages; 2 tasks/,
-    },
-    {
-      name: 'a page cap over six',
-      arrange: () => ({ tasks: [page('A', ['people'])], extra: { pageCap: 7 } }),
-      refusal: /from 1 to 6 pages/,
-    },
-    {
-      name: 'a parked task',
-      arrange: () => {
-        const task = page('Parked', ['people']);
-        const [column] = listBoardColumns(h.store.db, h.project.id);
-        if (!column) throw new Error('the project has no human column');
-        h.state.write((w) => moveTask(w, task.id, { to: column.id, after: null, before: null }));
-        return { tasks: [task] };
+  it('refuses a pass it cannot open and leaves the folder and the database as they were', async () => {
+    const rows: {
+      name: string;
+      project?: Partial<ProjectInput>;
+      /** Whether the row runs on the harness the row before it left: it only adds its own tasks. */
+      reuse?: true;
+      arrange: () => { tasks: TaskDto[]; extra?: Partial<PassOpenInput> };
+      refusal: RegExp;
+    }[] = [
+      {
+        name: 'a project with no page area',
+        project: { areas: [{ name: 'repo', globs: ['**'] }] },
+        arrange: () => ({ tasks: [page('A', ['repo'])] }),
+        refusal: /has no page area/,
       },
-      refusal: /parked/,
-    },
-    {
-      name: 'an unfinished batch in Your folder',
-      arrange: () => {
-        h.state.write((w) =>
-          insertBatch(w, { projectId: h.project.id, title: 'Earlier', baseBranch: 'main' }),
-        );
-        return { tasks: [page('A', ['people'])] };
+      {
+        name: 'a task with no page area',
+        arrange: () => ({ tasks: [page('Shared only', ['src'])] }),
+        refusal: /Shared only names no page area/,
       },
-      refusal: /Batch "Earlier" in Your folder is still cutting/,
-    },
-    {
-      name: 'a task running in Your folder',
-      arrange: () => {
-        const other = page('Running', ['src']);
-        h.state.write((w) => {
-          const ws = insertWorkstream(w, other.id, {
-            first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      {
+        name: 'two tasks on one page',
+        reuse: true,
+        arrange: () => ({ tasks: [page('A', ['people']), page('B', ['people'])] }),
+        refusal: /"A" and "B" both hold people/,
+      },
+      {
+        name: 'more tasks than the page cap',
+        reuse: true,
+        arrange: () => ({
+          tasks: [page('A', ['people']), page('B', ['settings'])],
+          extra: { pageCap: 1 },
+        }),
+        refusal: /holds 1 pages; 2 tasks/,
+      },
+      {
+        name: 'a page cap over six',
+        reuse: true,
+        arrange: () => ({ tasks: [page('A', ['people'])], extra: { pageCap: 7 } }),
+        refusal: /from 1 to 6 pages/,
+      },
+      {
+        name: 'a parked task',
+        reuse: true,
+        arrange: () => {
+          const task = page('Parked', ['people']);
+          const [column] = listBoardColumns(h.store.db, h.project.id);
+          if (!column) throw new Error('the project has no human column');
+          h.state.write((w) => moveTask(w, task.id, { to: column.id, after: null, before: null }));
+          return { tasks: [task] };
+        },
+        refusal: /parked/,
+      },
+      {
+        name: 'an unfinished batch in Your folder',
+        arrange: () => {
+          h.state.write((w) =>
+            insertBatch(w, { projectId: h.project.id, title: 'Earlier', baseBranch: 'main' }),
+          );
+          return { tasks: [page('A', ['people'])] };
+        },
+        refusal: /Batch "Earlier" in Your folder is still cutting/,
+      },
+      {
+        name: 'a task running in Your folder',
+        arrange: () => {
+          const other = page('Running', ['src']);
+          h.state.write((w) => {
+            const ws = insertWorkstream(w, other.id, {
+              first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+            });
+            transitionWorkstream(w, ws.id, { to: WorkstreamState.Starting, fence: null });
           });
-          transitionWorkstream(w, ws.id, { to: WorkstreamState.Starting, fence: null });
-        });
-        return { tasks: [page('A', ['people'])] };
+          return { tasks: [page('A', ['people'])] };
+        },
+        refusal: /1 task is running in Your folder/,
       },
-      refusal: /1 task is running in Your folder/,
-    },
-    {
-      name: 'a detached HEAD',
-      arrange: () => {
-        h.git$('switch', '-q', '--detach', 'HEAD');
-        return { tasks: [page('A', ['people'])] };
+      {
+        name: 'a detached HEAD',
+        arrange: () => {
+          h.git$('switch', '-q', '--detach', 'HEAD');
+          return { tasks: [page('A', ['people'])] };
+        },
+        refusal: /detached HEAD/,
       },
-      refusal: /detached HEAD/,
-    },
-    {
-      name: 'a folder on a 10db branch no task names',
-      arrange: () => {
-        h.git$('switch', '-q', '-c', '10db/leftover-abc123');
-        return { tasks: [page('A', ['people'])] };
+      {
+        name: 'a folder on a 10db branch no task names',
+        arrange: () => {
+          h.git$('switch', '-q', '-c', '10db/leftover-abc123');
+          return { tasks: [page('A', ['people'])] };
+        },
+        refusal: /Your folder is on 10db\/leftover-abc123, a 10db branch no task names/,
       },
-      refusal: /Your folder is on 10db\/leftover-abc123, a 10db branch no task names/,
-    },
-    {
-      name: 'a merge in progress',
-      arrange: () => {
-        h.commit('src/people/a.ts', 'base\n');
-        sideCommit('other', 'src/people/a.ts', 'theirs\n');
-        h.commit('src/people/a.ts', 'ours\n');
-        stopsOnConflict('merge', '-q', 'other');
-        return { tasks: [page('A', ['people'])] };
+      {
+        name: 'a merge in progress',
+        arrange: () => {
+          h.commit('src/people/a.ts', 'base\n');
+          sideCommit('other', 'src/people/a.ts', 'theirs\n');
+          h.commit('src/people/a.ts', 'ours\n');
+          stopsOnConflict('merge', '-q', 'other');
+          return { tasks: [page('A', ['people'])] };
+        },
+        refusal: /in the middle of a merge/,
       },
-      refusal: /in the middle of a merge/,
-    },
-    {
-      name: 'a cherry-pick in progress',
-      arrange: () => {
-        h.commit('src/people/a.ts', 'base\n');
-        sideCommit('other', 'src/people/a.ts', 'theirs\n');
-        h.commit('src/people/a.ts', 'ours\n');
-        stopsOnConflict('cherry-pick', 'other');
-        return { tasks: [page('A', ['people'])] };
+      {
+        name: 'a cherry-pick in progress',
+        arrange: () => {
+          h.commit('src/people/a.ts', 'base\n');
+          sideCommit('other', 'src/people/a.ts', 'theirs\n');
+          h.commit('src/people/a.ts', 'ours\n');
+          stopsOnConflict('cherry-pick', 'other');
+          return { tasks: [page('A', ['people'])] };
+        },
+        refusal: /in the middle of a cherry-pick/,
       },
-      refusal: /in the middle of a cherry-pick/,
-    },
-    {
-      name: 'a rebase in progress',
-      arrange: () => {
-        h.commit('src/people/a.ts', 'base\n');
-        sideCommit('other', 'src/people/a.ts', 'theirs\n');
-        h.commit('src/people/a.ts', 'ours\n');
-        stopsOnConflict('rebase', '-q', 'other');
-        return { tasks: [page('A', ['people'])] };
+      {
+        name: 'a rebase in progress',
+        arrange: () => {
+          h.commit('src/people/a.ts', 'base\n');
+          sideCommit('other', 'src/people/a.ts', 'theirs\n');
+          h.commit('src/people/a.ts', 'ours\n');
+          stopsOnConflict('rebase', '-q', 'other');
+          return { tasks: [page('A', ['people'])] };
+        },
+        refusal: /in the middle of a rebase/,
       },
-      refusal: /in the middle of a rebase/,
-    },
-  ])(
-    'refuses $name and leaves the folder and the database as they were',
-    async ({ project, arrange, refusal }) => {
-      harness(project);
+    ];
+    // A row that arranges the folder, a batch or a run gets a harness of its own.
+    for (const [i, { name, project, reuse, arrange, refusal }] of rows.entries()) {
+      if (reuse === undefined) {
+        if (i > 0) h.close();
+        harness(project);
+      }
       const { tasks, extra } = arrange();
       const head = h.git$('rev-parse', '--symbolic-full-name', 'HEAD');
       const refs = tenDbRefs();
-      await expect(open(tasks, extra)).rejects.toThrow(refusal);
+      await expect.soft(open(tasks, extra), name).rejects.toThrow(refusal);
       await h.jobs.idle();
-      expect(h.store.db.select().from(schema.passes).all()).toEqual([]);
-      expect(h.git$('rev-parse', '--symbolic-full-name', 'HEAD')).toBe(head);
-      expect(tenDbRefs()).toBe(refs);
-    },
-  );
+      expect.soft(h.store.db.select().from(schema.passes).all(), name).toEqual([]);
+      expect.soft(h.git$('rev-parse', '--symbolic-full-name', 'HEAD'), name).toBe(head);
+      expect.soft(tenDbRefs(), name).toBe(refs);
+    }
+  });
 
   it("refuses a folder left on a finished batch's branch, saying which", async () => {
     harness({}, false);
@@ -521,7 +529,7 @@ describe('opening a pass', () => {
 });
 
 describe("a pass task's plan and its saved work", () => {
-  it("runs only the project's implement step, and puts back each task's saved work once the pass is open", async () => {
+  it("runs only the project's implement step, puts back each task's saved work once the pass is open, and opens even when that put-back fails", async () => {
     harness();
     const criteria = ['one', 'two', 'three', 'four'];
     const settings = h.addTask('Settings: UI work', {
@@ -549,11 +557,14 @@ describe("a pass task's plan and its saved work", () => {
             head: h.git$('symbolic-ref', '--short', 'HEAD'),
             inPass: getTask(h.store.db, taskId).passId != null,
           });
-          return Promise.resolve({ applied: [], left: [] });
+          return Promise.reject(new Error('merge-tree failed'));
         },
       },
     );
 
+    // The put-back failed, and the pass is written all the same.
+    expect(opened.pass.state).toBe('OPEN');
+    expect(getTask(h.store.db, people.id).passId).toBe(opened.pass.id);
     // No plan, plan review, review or QA step: a pass has one review, of its pull request.
     for (const task of [settings, people])
       expect(runOf(task)?.steps.map((step) => step.role)).toEqual(['implement']);
@@ -566,21 +577,6 @@ describe("a pass task's plan and its saved work", () => {
         inPass: true,
       },
     ]);
-  });
-
-  it('opens even when a put-back fails: the pass is written', async () => {
-    harness();
-    const people = page('People: UI work', ['people']);
-    h.state.write((w) => {
-      setTaskKeptWork(w, people.id, { keptSha: 'b'.repeat(40), keptBaseSha: 'a'.repeat(40) });
-    });
-    const opened = await openPass(
-      h.ctx,
-      { projectId: h.project.id, name: 'Polish pages', taskIds: [people.id] },
-      { leaseMs: 60_000, putBack: () => Promise.reject(new Error('merge-tree failed')) },
-    );
-    expect(opened.pass.state).toBe('OPEN');
-    expect(getTask(h.store.db, people.id).passId).toBe(opened.pass.id);
   });
 });
 
@@ -624,27 +620,26 @@ describe("a pass's batch", () => {
     expect(getWorkstream(h.store.db, ws.id).state).toBe('DONE');
   });
 
-  it.each<{ name: string; act: (batchId: BatchId, workstreamId: WorkstreamId) => unknown }>([
-    { name: 'Ship', act: (b) => h.shipper.ship(b) },
-    { name: 'Ship anyway', act: (b) => h.shipper.shipAnyway(b) },
-    { name: 'Ship without it', act: (b, w) => h.shipper.shipWithout(b, w) },
-    { name: 'Abandon', act: (b) => h.shipper.abandon(b) },
-  ])('is refused by $name: only its pass ships or abandons it', async ({ act }) => {
+  it("is refused by Ship, Ship anyway, Ship without it and Abandon, and left to its pass by start-up's recovery when the folder is off its branch", async () => {
     harness({}, false);
     const task = page('People: UI work', ['people']);
     const opened = await open([task]);
     const ws = runOf(task);
     if (!ws) throw new Error('the pass task has no workstream');
     h.settle(ws.id, 'DONE');
-    expect(() => act(opened.batch.id, ws.id)).toThrow(/UI Workbench pass/);
-    await h.jobs.idle();
-    expect(getBatch(h.store.db, opened.batch.id).state).toBe('OPEN');
-    expect(h.git$('symbolic-ref', '--short', 'HEAD')).toBe(opened.batch.branch);
-  });
+    // Only its pass ships or abandons it: each refusal leaves the batch and the folder as they were.
+    for (const { name, act } of [
+      { name: 'Ship', act: () => h.shipper.ship(opened.batch.id) },
+      { name: 'Ship anyway', act: () => h.shipper.shipAnyway(opened.batch.id) },
+      { name: 'Ship without it', act: () => h.shipper.shipWithout(opened.batch.id, ws.id) },
+      { name: 'Abandon', act: () => h.shipper.abandon(opened.batch.id) },
+    ]) {
+      expect.soft(act, name).toThrow(/UI Workbench pass/);
+      await h.jobs.idle();
+      expect.soft(getBatch(h.store.db, opened.batch.id).state, name).toBe('OPEN');
+      expect.soft(h.git$('symbolic-ref', '--short', 'HEAD'), name).toBe(opened.batch.branch);
+    }
 
-  it("is left to its pass by start-up's recovery when the folder is off its branch", async () => {
-    harness({}, false);
-    const opened = await open([page('People: UI work', ['people'])]);
     // The builder switched the folder while the daemon was down.
     h.git$('switch', '-q', 'main');
     const report = await recover();
@@ -678,33 +673,29 @@ describe('a pass a crash left with no row', () => {
     return { branch, dirtRef };
   }
 
-  it('is taken back at start-up: HEAD names its branch again, no file written', async () => {
+  it('is taken back at start-up with no file written, loses its dirt record when the stop came before its branch, and is named on a card when work was committed on its branch', async () => {
     harness({}, false);
     write('src/people/page.tsx', 'edited by hand\n');
     const files = [...snapshot(h.repo)].filter(([path]) => !path.startsWith('.git/'));
-    const { branch } = await orphan();
-    expect(h.git$('symbolic-ref', '--short', 'HEAD')).toBe(branch);
+    // Taken back: HEAD names its branch again, no file written.
+    const first = await orphan();
+    expect(h.git$('symbolic-ref', '--short', 'HEAD')).toBe(first.branch);
     await recover();
     expect(h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
     expect(tenDbRefs()).toBe('');
     expect([...snapshot(h.repo)].filter(([path]) => !path.startsWith('.git/'))).toEqual(files);
     expect(h.cards()).toEqual([]);
-  });
 
-  it('loses its dirt record at start-up when the stop came before its branch was made', async () => {
-    harness({}, false);
-    const { branch } = await orphan();
     // What the stop leaves when it comes between the dirt's ref and the branch.
+    const second = await orphan();
     h.git$('symbolic-ref', 'HEAD', 'refs/heads/main');
-    h.git$('update-ref', '-d', `refs/heads/${branch}`);
+    h.git$('update-ref', '-d', `refs/heads/${second.branch}`);
     await recover();
     expect(h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
     expect(tenDbRefs()).toBe('');
     expect(h.cards()).toEqual([]);
-  });
 
-  it('is named on a card when work was committed on its branch, and left as it is', async () => {
-    harness({}, false);
+    // Work committed on its branch: left as it is, and named on a card.
     const { branch, dirtRef } = await orphan();
     const tip = h.commit('src/people/page.tsx', 'kept\n');
     await recover();
@@ -807,27 +798,7 @@ describe('a pass of one', () => {
     ).toEqual([WHOLE_PROJECT_PAGE.name]);
   });
 
-  it('leaves no task, link or branch when the write is refused (a return branch under 10db/)', async () => {
-    harness();
-    h.git$('switch', '-q', '-c', '10db/stray');
-    const mine = chat();
-
-    await expect(openPass(h.ctx, wholeOf(mine.id), LEASE)).rejects.toThrow(/10db branch/);
-
-    expect(h.store.db.select().from(schema.tasks).all()).toEqual([]);
-    expect(h.store.db.select().from(schema.chatTasks).all()).toEqual([]);
-    expect(getChat(h.store.db, mine.id)).toMatchObject({
-      mode: 'explore',
-      taskId: null,
-      passId: null,
-    });
-    expect(listItems(h.store.db, mine.conversationId)).toEqual([]);
-    expect(h.git$('for-each-ref', '--format=%(refname)', 'refs/heads/10db/')).toBe(
-      'refs/heads/10db/stray',
-    );
-  });
-
-  it('refuses task ids or pages beside the whole project, and a chat of another project', async () => {
+  it('refuses task ids or pages beside the whole project, a chat of another project, a folder mid-bisect or mid-merge (a page pass too), and leaves no task, link or branch when the write is refused', async () => {
     harness();
     const mine = chat();
     const people = page('People: UI work', ['people']);
@@ -859,21 +830,42 @@ describe('a pass of one', () => {
     await expect(openPass(h.ctx, wholeOf(stranger.id), LEASE)).rejects.toThrow(/another project/);
 
     expect(h.store.db.select().from(schema.passes).all()).toEqual([]);
-  });
 
-  it.each([
-    ['a bisect', 'BISECT_LOG'],
-    ['a merge', 'MERGE_HEAD'],
-  ])('is refused mid-%s, and so is a page pass', async (_name, entry) => {
-    harness();
-    writeFileSync(join(h.repo, '.git', entry), 'x\n');
-    const mine = chat();
+    // Mid-bisect or mid-merge, a pass of one is refused, and so is a page pass.
+    for (const [name, entry] of [
+      ['a bisect', 'BISECT_LOG'],
+      ['a merge', 'MERGE_HEAD'],
+    ] as const) {
+      const file = join(h.repo, '.git', entry);
+      writeFileSync(file, 'x\n');
+      await expect
+        .soft(openPass(h.ctx, wholeOf(mine.id), LEASE), name)
+        .rejects.toThrow(/middle of/);
+      await expect.soft(open([people]), name).rejects.toThrow(/middle of/);
+      expect.soft(h.store.db.select().from(schema.passes).all(), name).toEqual([]);
+      unlinkSync(file);
+    }
 
-    await expect(openPass(h.ctx, wholeOf(mine.id), LEASE)).rejects.toThrow(/middle of/);
-    const people = page('People: UI work', ['people']);
-    await expect(open([people])).rejects.toThrow(/middle of/);
-
-    expect(h.store.db.select().from(schema.passes).all()).toEqual([]);
+    // A return branch under 10db/: the write is refused, and leaves no task, link or branch.
+    h.git$('switch', '-q', '-c', '10db/stray');
+    await expect(openPass(h.ctx, wholeOf(mine.id), LEASE)).rejects.toThrow(/10db branch/);
+    expect(
+      h.store.db
+        .select()
+        .from(schema.tasks)
+        .all()
+        .map((t) => t.id),
+    ).toEqual([people.id]);
+    expect(h.store.db.select().from(schema.chatTasks).all()).toEqual([]);
+    expect(getChat(h.store.db, mine.id)).toMatchObject({
+      mode: 'explore',
+      taskId: null,
+      passId: null,
+    });
+    expect(listItems(h.store.db, mine.conversationId)).toEqual([]);
+    expect(h.git$('for-each-ref', '--format=%(refname)', 'refs/heads/10db/')).toBe(
+      'refs/heads/10db/stray',
+    );
   });
 });
 
@@ -918,15 +910,16 @@ describe('a pass that waits to open', () => {
     );
   });
 
-  it.each(['Cancel', 'the job stopping'] as const)(
-    'rejects on %s and leaves no branch and no git holder',
-    async (cause) => {
+  it('rejects on Cancel or the job stopping and leaves no branch and no git holder', async () => {
+    // The job stopping stops the harness's jobs for good: one harness each.
+    for (const [i, cause] of (['Cancel', 'the job stopping'] as const).entries()) {
+      if (i > 0) h.close();
       harness();
       const turn = turnHolds();
       const controller = new AbortController();
       const refs = tenDbRefs();
       const opened = open([people()], { wait: { signal: controller.signal } });
-      const rejected = expect(opened).rejects.toBeInstanceOf(FolderWaitCancelledError);
+      const rejected = expect.soft(opened, cause).rejects.toBeInstanceOf(FolderWaitCancelledError);
       await waitingToOpen();
 
       if (cause === 'Cancel') controller.abort();
@@ -934,13 +927,13 @@ describe('a pass that waits to open', () => {
       await rejected;
       turn.release();
 
-      expect(tenDbRefs()).toBe(refs);
-      expect(h.store.db.select().from(schema.passes).all()).toEqual([]);
-      expect(h.ctx.folderHold.opening(h.project.id)).toBeNull();
+      expect.soft(tenDbRefs(), cause).toBe(refs);
+      expect.soft(h.store.db.select().from(schema.passes).all(), cause).toEqual([]);
+      expect.soft(h.ctx.folderHold.opening(h.project.id), cause).toBeNull();
       const again = h.ctx.folderHold.reserveGit(h.project.id, 'after');
-      expect(again.reserved).toBe(true);
-    },
-  );
+      expect.soft(again.reserved, cause).toBe(true);
+    }
+  });
 
   it('refuses after its wait when a start took the queue meanwhile, and gives its token back', async () => {
     harness();

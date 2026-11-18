@@ -2,14 +2,15 @@ import { describe, expect, it } from 'vitest';
 import { ciFixDescription, ciFixLogName, fenceAround } from './ci-fix-text';
 
 describe('fenceAround', () => {
-  it.each([
-    ['no backticks', 'plain output', '```'],
-    ['a single backtick', 'use `x` here', '```'],
-    ['a run of three', 'a\n```\nb', '````'],
-    ['a longer run', 'a ````` b', '``````'],
-    ['two runs', '`` and ```` apart', '`````'],
-  ])('uses a fence longer than any run in %s', (_name, text, fence) => {
-    expect(fenceAround(text)).toBe(fence);
+  it('uses a fence longer than any run of backticks in the text', () => {
+    const rows = [
+      ['no backticks', 'plain output', '```'],
+      ['a single backtick', 'use `x` here', '```'],
+      ['a run of three', 'a\n```\nb', '````'],
+      ['a longer run', 'a ````` b', '``````'],
+      ['two runs', '`` and ```` apart', '`````'],
+    ] as const;
+    for (const [name, text, fence] of rows) expect.soft(fenceAround(text), name).toBe(fence);
   });
 });
 
@@ -36,16 +37,13 @@ describe('ciFixDescription', () => {
 });
 
 describe('ciFixLogName', () => {
-  it('keeps a job name that holds a slash, spaces or dots inside one file name', () => {
-    const name = ciFixLogName('../../etc/ passwd / x', '77', 'abc123');
-    expect(name).not.toContain('/');
-    expect(name.startsWith('.')).toBe(false);
-    expect(name.endsWith('-77-abc123.log')).toBe(true);
-  });
-
-  it('keeps a job id with odd characters inside one file name', () => {
-    const name = ciFixLogName('test', '../7/7', 'abc');
-    expect(name).not.toContain('/');
-    expect(name).not.toContain('..');
+  it('keeps a job name or job id with slashes, spaces or dots inside one file name', () => {
+    const byName = ciFixLogName('../../etc/ passwd / x', '77', 'abc123');
+    expect.soft(byName, 'job name').not.toContain('/');
+    expect.soft(byName.startsWith('.'), 'job name starts with a dot').toBe(false);
+    expect.soft(byName.endsWith('-77-abc123.log'), 'job name keeps id and head').toBe(true);
+    const byId = ciFixLogName('test', '../7/7', 'abc');
+    expect.soft(byId, 'job id').not.toContain('/');
+    expect.soft(byId, 'job id').not.toContain('..');
   });
 });

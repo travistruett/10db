@@ -65,6 +65,9 @@ async function endLive(batch: BatchDto, end: End): Promise<BatchDto> {
   return getBatch(h.store.db, batch.id);
 }
 
+/** The pull requests endedWhileDown has recorded, so each shipped batch gets its own. */
+let prs = 0;
+
 /** Records the end with no switch back, as a daemon that stopped right after the record leaves it. */
 function endedWhileDown(batch: BatchDto, end: End): void {
   for (const ws of listWorkstreams(h.store.db, { batchId: batch.id })) h.settle(ws.id, 'DONE');
@@ -75,7 +78,7 @@ function endedWhileDown(batch: BatchDto, end: End): void {
       transitionBatch(c, batch.id, {
         to: end,
         ...(end === 'SHIPPED'
-          ? { patch: { prUrl: 'https://github.com/acme/widgets/pull/1' } }
+          ? { patch: { prUrl: `https://github.com/acme/widgets/pull/${String((prs += 1))}` } }
           : {}),
       });
     }
@@ -94,6 +97,27 @@ const recover = () =>
     starter: h.starter,
     logger: silentLogger,
   });
+
+/** A chat of the project the builder has taken to the terminal; returns its conversation. */
+function inTheTerminal() {
+  return h.state.write((ctx) => {
+    const id = mintId('Chat');
+    const conv = insertConversation(ctx, {
+      projectId: h.project.id,
+      owner: { kind: ConversationOwnerKind.Chat, id },
+      profile: ConversationProfile.Explore,
+      state: ConversationState.TakenOver,
+    });
+    insertChat(ctx, {
+      id,
+      projectId: h.project.id,
+      conversationId: conv.id,
+      title: 'In terminal',
+      tabPosition: 0,
+    });
+    return conv.id;
+  });
+}
 
 /** The checkout states a batch can end in, and what 10db then does with it. */
 const CHECKOUTS: readonly {
@@ -132,36 +156,50 @@ const CHECKOUTS: readonly {
   },
 ];
 
-/** Asserts where the checkout ended and which card, if any, said why. */
+/** Asserts, labelled with `label`, where the checkout ended and which card, if any, said why. */
 function expectCheckout(
   batch: BatchDto,
   start: { readonly branch: string; readonly head: string },
   row: (typeof CHECKOUTS)[number],
+  label: string,
 ): void {
   const now = where();
   switch (row.ends) {
     case 'start':
-      expect(now).toEqual({ ...start, status: '' });
+      expect.soft(now, label).toEqual({ ...start, status: '' });
       break;
     case 'batch':
-      expect(now.branch).toBe(batch.branch);
+      expect.soft(now.branch, label).toBe(batch.branch);
       break;
     case 'elsewhere':
-      expect(now.branch).toBe('elsewhere');
+      expect.soft(now.branch, label).toBe('elsewhere');
   }
   const cards = h.cards().filter((card) => card.title.startsWith('Your checkout'));
   if (row.card) {
-    const card = h.only(cards);
-    expect(card.title).toMatch(row.card);
-    expect(card.body).toContain('- notes.txt');
-    expect(card.body).toContain(`git -C '${h.repo}' switch 'main'`);
-  } else expect(cards).toEqual([]);
+    expect.soft(cards, label).toHaveLength(1);
+    for (const card of cards) {
+      expect.soft(card.title, label).toMatch(row.card);
+      expect.soft(card.body, label).toContain('- notes.txt');
+      expect.soft(card.body, label).toContain(`git -C '${h.repo}' switch 'main'`);
+    }
+  } else expect.soft(cards, label).toEqual([]);
   // Done or declined, the place is forgotten, so a restart doesn't switch the checkout again.
-  expect(getBatchRow(h.store.db, batch.id)).toMatchObject({ returnBranch: null, returnSha: null });
+  expect
+    .soft(getBatchRow(h.store.db, batch.id), label)
+    .toMatchObject({ returnBranch: null, returnSha: null });
 }
 
+/** The rows a repository of their own must run: those that leave the checkout off where it started. */
+const leavesTheCheckout = (row: (typeof CHECKOUTS)[number]) => row.ends === 'batch';
+
+/** Rows in the order one repository can run them: those that start from a branch first. */
+const fromABranchFirst = <T extends (typeof CHECKOUTS)[number]>(rows: T[]): T[] => [
+  ...rows.filter((row) => !row.before),
+  ...rows.filter((row) => row.before),
+];
+
 describe('the cut', () => {
-  it('records where it found the checkout: a branch and its commit, or a detached commit', async () => {
+  it('records where it found the checkout, a branch and its commit or a detached commit, and nothing for a worktree batch, which never touches the checkout', async () => {
     h = createDeliveryHarness({}, { trigger: false });
     const main = h.git$('rev-parse', 'HEAD');
     const batch = await openBatch('CLOSED');
@@ -177,17 +215,22 @@ describe('the cut', () => {
       returnBranch: null,
       returnSha: main,
     });
-  });
 
-  it('records nothing for a worktree batch, which never touches the checkout', async () => {
+    h.close();
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    const batch = await openBatch('CLOSED');
-    expect(getBatchRow(h.store.db, batch.id)).toMatchObject({
+    const copy = await openBatch('CLOSED');
+    expect(getBatchRow(h.store.db, copy.id)).toMatchObject({
       returnBranch: null,
       returnSha: null,
     });
   });
 });
+
+/** Moves the checkout back to main after a row that left it on the builder's own branch. */
+function backFromElsewhere(): void {
+  h.git$('switch', '-q', 'main');
+  h.git$('branch', '-D', 'elsewhere');
+}
 
 describe('when a batch ends', () => {
   const live = ENDS.flatMap((end) =>
@@ -198,26 +241,34 @@ describe('when a batch ends', () => {
     ).map((row) => ({ ...row, end, title: `${end}, ${row.name}` })),
   );
 
-  it.each(live)('$title', async (row) => {
+  it('switches the checkout back to where the cut found it when a batch ships, closes or is abandoned, keeping shipped work on its branch and on origin, and leaves it where an abandoned batch finds it dirty or moved', async () => {
+    // Rows that put the checkout back, or leave it on the builder's own branch, share one
+    // repository; a row that leaves it dirty on the batch branch gets its own.
     h = createDeliveryHarness();
-    row.before?.();
-    const start = where();
-    const batch = await openBatch(row.end);
-    expect(where().branch).toBe(batch.branch);
-    row.arrange?.(batch);
-    const ended = await endLive(batch, row.end);
-    expect(ended.state).toBe(row.end);
-    expectCheckout(batch, start, row);
-  });
-
-  it('keeps the shipped work on its branch and on origin after switching back', async () => {
-    h = createDeliveryHarness();
-    const batch = await openBatch('SHIPPED');
-    const tip = h.git$('rev-parse', 'HEAD');
-    await endLive(batch, 'SHIPPED');
-    expect(where().branch).toBe('main');
-    expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(tip);
-    expect(h.origin$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(tip);
+    const shared = fromABranchFirst(live.filter((row) => !leavesTheCheckout(row)));
+    const apart = live.filter(leavesTheCheckout);
+    for (const row of [...shared, ...apart]) {
+      if (apart.includes(row)) {
+        h.close();
+        h = createDeliveryHarness();
+      }
+      row.before?.();
+      const start = where();
+      const batch = await openBatch(row.end);
+      expect.soft(where().branch, row.title).toBe(batch.branch);
+      const tip = h.git$('rev-parse', 'HEAD');
+      row.arrange?.(batch);
+      const ended = await endLive(batch, row.end);
+      expect.soft(ended.state, row.title).toBe(row.end);
+      expectCheckout(batch, start, row, row.title);
+      if (row.end === 'SHIPPED') {
+        expect.soft(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`), row.title).toBe(tip);
+        expect
+          .soft(h.origin$('rev-parse', `refs/heads/${batch.branch ?? ''}`), row.title)
+          .toBe(tip);
+      }
+      if (row.ends === 'elsewhere') backFromElsewhere();
+    }
   });
 
   it('leaves the checkout and says so when the branch it came from was deleted', async () => {
@@ -237,18 +288,40 @@ describe('a batch that ended while the daemon was down', () => {
     CHECKOUTS.map((row) => ({ ...row, end, title: `${end}, ${row.name}` })),
   );
 
-  it.each(matrix)('$title: startup recovery acts as the end would have', async (row) => {
+  it('startup recovery acts as the end would have, for every end and checkout, and unwinds batches that ended one after another back to where the first found the checkout', async () => {
     h = createDeliveryHarness({}, { trigger: false });
-    row.before?.();
-    const start = where();
-    const batch = await openBatch(row.end);
-    row.arrange?.(batch);
-    endedWhileDown(batch, row.end);
-    await recover();
-    expectCheckout(batch, start, row);
-    // A second start finds nothing left to do.
-    await recover();
-    expectCheckout(batch, start, row);
+
+    // Unwinding: the next batch is cut while the checkout is still on the first one's branch.
+    const home = where();
+    const first = await openBatch('CLOSED');
+    endedWhileDown(first, 'CLOSED');
+    const second = await openBatch('CLOSED');
+    expect(getBatchRow(h.store.db, second.id).returnBranch).toBe(first.branch);
+    endedWhileDown(second, 'CLOSED');
+    expect((await recover()).switchedBack).toEqual([second.id, first.id]);
+    expect(where()).toEqual({ ...home, status: '' });
+
+    // Rows that put the checkout back, or leave it on the builder's own branch, share this
+    // repository; a row that leaves it dirty on the batch branch gets its own.
+    const shared = fromABranchFirst(matrix.filter((row) => !leavesTheCheckout(row)));
+    const apart = matrix.filter(leavesTheCheckout);
+    for (const row of [...shared, ...apart]) {
+      if (apart.includes(row)) {
+        h.close();
+        h = createDeliveryHarness({}, { trigger: false });
+      }
+      row.before?.();
+      const start = where();
+      const batch = await openBatch(row.end);
+      row.arrange?.(batch);
+      endedWhileDown(batch, row.end);
+      await recover();
+      expectCheckout(batch, start, row, row.title);
+      // A second start finds nothing left to do.
+      await recover();
+      expectCheckout(batch, start, row, `${row.title}, a second start`);
+      if (row.ends === 'elsewhere') backFromElsewhere();
+    }
   });
 
   it('leaves the checkout with a card when git refuses it, and does not try again', async () => {
@@ -272,28 +345,12 @@ describe('a batch that ended while the daemon was down', () => {
     expect(where().branch).toBe(batch.branch);
   });
 
-  it('does not hold startup for a chat in the terminal, and switches back once it hands back', async () => {
+  it('does not hold startup for a chat in the terminal and switches back once it hands back, and settles no branch while the checkout is held by a terminal and 10db stops', async () => {
     h = createDeliveryHarness({}, { trigger: false });
     const start = where();
     const batch = await openBatch('CLOSED');
     endedWhileDown(batch, 'CLOSED');
-    const terminal = h.state.write((ctx) => {
-      const id = mintId('Chat');
-      const conv = insertConversation(ctx, {
-        projectId: h.project.id,
-        owner: { kind: ConversationOwnerKind.Chat, id },
-        profile: ConversationProfile.Explore,
-        state: ConversationState.TakenOver,
-      });
-      insertChat(ctx, {
-        id,
-        projectId: h.project.id,
-        conversationId: conv.id,
-        title: 'In terminal',
-        tabPosition: 0,
-      });
-      return conv.id;
-    });
+    const terminal = inTheTerminal();
     // Startup returns with the checkout where it was and the place kept.
     expect((await recover()).switchedBack).toEqual([]);
     expect(where().branch).toBe(batch.branch);
@@ -314,33 +371,16 @@ describe('a batch that ended while the daemon was down', () => {
     });
     await h.jobs.idle();
     expect(where()).toEqual({ ...start, status: '' });
-  });
 
-  it('settles no branch while the checkout is held by a terminal and 10db stops', async () => {
-    h = createDeliveryHarness({}, { trigger: false });
-    const batch = await openBatch('SHIPPED');
-    h.state.write((ctx) => {
-      const id = mintId('Chat');
-      const conv = insertConversation(ctx, {
-        projectId: h.project.id,
-        owner: { kind: ConversationOwnerKind.Chat, id },
-        profile: ConversationProfile.Explore,
-        state: ConversationState.TakenOver,
-      });
-      insertChat(ctx, {
-        id,
-        projectId: h.project.id,
-        conversationId: conv.id,
-        title: 'In terminal',
-        tabPosition: 0,
-      });
-    });
-    h.shipper.abandon(batch.id);
+    // A batch with work on its branch, abandoned while another terminal holds the checkout.
+    const held = await openBatch('SHIPPED');
+    inTheTerminal();
+    h.shipper.abandon(held.id);
     // The abandon's ship job waits for the terminal before it moves the checkout.
     await waitForAsync(
       () =>
         Promise.resolve(
-          getBatchRow(h.store.db, batch.id).notices.some((n) => n.key === 'folder-hold') ||
+          getBatchRow(h.store.db, held.id).notices.some((n) => n.key === 'folder-hold') ||
             undefined,
         ),
       30_000,
@@ -348,20 +388,7 @@ describe('a batch that ended while the daemon was down', () => {
     await h.jobs.stop();
     // Nothing ran git in the held folder: no card about the branch the checkout is still on.
     expect(h.cards().filter((card) => card.title.startsWith('Delete '))).toEqual([]);
-    expect(where().branch).toBe(batch.branch);
-  });
-
-  it('unwinds batches that ended one after another back to where the first found the checkout', async () => {
-    h = createDeliveryHarness({}, { trigger: false });
-    const start = where();
-    const first = await openBatch('CLOSED');
-    endedWhileDown(first, 'CLOSED');
-    // The next batch is cut while the checkout is still on the first one's branch.
-    const second = await openBatch('CLOSED');
-    expect(getBatchRow(h.store.db, second.id).returnBranch).toBe(first.branch);
-    endedWhileDown(second, 'CLOSED');
-    expect((await recover()).switchedBack).toEqual([second.id, first.id]);
-    expect(where()).toEqual({ ...start, status: '' });
+    expect(where().branch).toBe(held.branch);
   });
 
   it('leaves the checkout while a lane runs in the project, and says so', async () => {
@@ -383,9 +410,9 @@ describe('a batch that ended while the daemon was down', () => {
 });
 
 describe('what keeps the checkout where it is', () => {
-  it.each(['RUNNING', 'TAKEN_OVER'] as const)(
-    'a workstream %s in the project when the batch is abandoned',
-    async (state) => {
+  it('a workstream RUNNING or TAKEN_OVER in the project when the batch is abandoned', async () => {
+    for (const state of ['RUNNING', 'TAKEN_OVER'] as const) {
+      if (state !== 'RUNNING') h.close();
       h = createDeliveryHarness();
       const batch = await openBatch('ABANDONED');
       const other = h.addTask('Elsewhere', { areas: ['ui'] });
@@ -394,13 +421,20 @@ describe('what keeps the checkout where it is', () => {
       );
       h.settle(ws.id, state);
       await endLive(batch, 'ABANDONED');
-      expect(where().branch).toBe(batch.branch);
-      const card = h.only(h.cards().filter((c) => c.title.startsWith('Your checkout')));
-      expect(card.title).toBe(
-        `Your checkout stays on ${batch.branch ?? ''}: work is running in ${h.project.name}`,
-      );
-    },
-  );
+      expect.soft(where().branch, state).toBe(batch.branch);
+      expect
+        .soft(
+          h
+            .cards()
+            .filter((c) => c.title.startsWith('Your checkout'))
+            .map((c) => c.title),
+          state,
+        )
+        .toEqual([
+          `Your checkout stays on ${batch.branch ?? ''}: work is running in ${h.project.name}`,
+        ]);
+    }
+  });
 
   it('its branch checked out in another worktree, which git would refuse to check out twice', async () => {
     h = createDeliveryHarness();
