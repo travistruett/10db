@@ -98,6 +98,22 @@ export interface ChatGit {
       readonly beforeWrite?: BeforeWrite;
     },
   ): Promise<{ readonly sha: string }>;
+  /**
+   * Moves the commits a base branch is ahead by onto a new branch, in one hold of the repo lock: the branch `name`
+   * is made at HEAD and HEAD switched to it, and only then is `base` put back at `to` by a compare-and-set on
+   * `expectedOld`. The files and the index stay as they are, and a failure after the branch is made leaves the
+   * commits on it, never only on a base that was reset.
+   */
+  moveCommitsToBranch(
+    repo: string,
+    input: {
+      readonly name: string;
+      readonly base: string;
+      readonly to: string;
+      readonly expectedOld: string;
+      readonly beforeWrite?: BeforeWrite;
+    },
+  ): Promise<void>;
   /** Checks out the local branch `name`, keeping changes git can carry, and refusing what it would overwrite. */
   switchBranch(repo: string, name: string, beforeWrite?: BeforeWrite): Promise<void>;
   /** Fetches the branch's upstream and moves the checked-out branch to it when that is a fast-forward. */
@@ -229,6 +245,35 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
           `A branch named ${branch} already exists, or the name is not valid`,
         );
         await ctx.git(c, ['symbolic-ref', 'HEAD', ref]);
+      });
+    },
+
+    moveCommitsToBranch(repo, input) {
+      return ctx.lock(repo, async () => {
+        const c = await ctx.pinned(repo);
+        noOperation(c);
+        const branch = await localBranch(c, input.name);
+        const base = await localBranch(c, input.base);
+        await input.beforeWrite?.();
+        const head = await ctx.revParse(c, 'HEAD^{commit}');
+        if (head === null) throw new InvalidError('Your folder has no commit to branch from');
+        const ref = `refs/heads/${branch}`;
+        await said(
+          () => ctx.git(c, ['update-ref', '--no-deref', ref, head, '0'.repeat(head.length)]),
+          `A branch named ${branch} already exists, or the name is not valid`,
+        );
+        await ctx.git(c, ['symbolic-ref', 'HEAD', ref]);
+        await said(
+          () =>
+            ctx.git(c, [
+              'update-ref',
+              '--no-deref',
+              `refs/heads/${base}`,
+              input.to,
+              input.expectedOld,
+            ]),
+          `${base} is no longer where it was, so it was left alone; your commits are on ${branch}`,
+        );
       });
     },
 

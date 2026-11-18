@@ -7,6 +7,7 @@ import {
   WorkPlace,
   type ChatId,
   type ChatWork,
+  type ChatWorkStateDto,
   type InboxAnswer,
   type InboxItemDto,
   type InboxOption,
@@ -31,7 +32,8 @@ import { flagCard, withdrawCard } from '../inbox';
 import type { Logger } from '../log';
 
 import { chatWorkCardKey, CHAT_WORK_CARD_DETAIL } from './work-card';
-import { takeHereForGitTool } from './work-takes-checkout';
+import type { ChatWorkStateReader } from './work-state';
+import { enterHere, takeHereForGitTool } from './work-takes-checkout';
 import { checkoutBranchNow } from './checkout-branch';
 
 // Where a session's work happens (the place table in the sessions plan): the question a first change asks, and the
@@ -47,6 +49,8 @@ export interface ChatWorkServiceDeps {
   readonly now: () => Date;
   /** What the move to a new branch needs of git and the worktree root. */
   readonly move: ChatMoveDeps;
+  /** The git and GitHub facts the title row reads. */
+  readonly facts: ChatWorkStateReader;
   /** The sessions whose next start says they moved: the move adds a chat, the session's start takes it. */
   readonly firstStartAfterMove: Set<ChatId>;
 }
@@ -79,6 +83,12 @@ export interface ChatWorkService {
   choose(chatId: ChatId, place: 'here' | 'branch'): Promise<ChatWork>;
   /** A push, pull request or merge the judge allowed: Here, and the turn takes the checkout. */
   takeHereForGitTool(chatId: ChatId): void;
+  /** A reading or choosing session works Here from now on, its card withdrawn; any other place is untouched. */
+  enterHere(chatId: ChatId): void;
+  /** The facts the title row and the bar are drawn from, read now from the session's root. */
+  state(chatId: ChatId, signal: AbortSignal): Promise<ChatWorkStateDto>;
+  /** A pull request of the session's branch was opened or merged: its next read asks GitHub afresh. */
+  forgetPullRequest(chatId: ChatId): void;
   /** Why the last move of this session failed, in the bar's words; null once it works or before any move. */
   moveFailure(chatId: ChatId): string | null;
   /** Resolves once the session's move, if one runs, has ended; for a caller that must not act mid-move. */
@@ -381,9 +391,18 @@ export function createChatWorkService(deps: ChatWorkServiceDeps): ChatWorkServic
       for (const chat of moving) await moves.get(chat.id);
     },
 
+    state: (chatId, signal) => deps.facts.read(chatId, signal, failures.get(chatId) ?? null),
+    forgetPullRequest(chatId) {
+      const chat = getChat(state.db, chatId);
+      if (chat.branch !== null) deps.facts.forgetPullRequest(chat.projectId, chat.branch);
+    },
     moveFailure: (chatId) => failures.get(chatId) ?? null,
     moveSettled: async (chatId) => {
       await moves.get(chatId);
+    },
+
+    enterHere: (chatId) => {
+      enterHere(state, chatId);
     },
 
     takeHereForGitTool: (chatId) => {

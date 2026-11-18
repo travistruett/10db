@@ -18,11 +18,13 @@ import {
   ChatWorkConflict,
   type ChatService,
   type ChatWorkService,
+  type TitleRowGit,
   type StartGit,
 } from '../chat';
 import type { StateStore } from '../events';
 import { folderView, type FolderHold } from '../folder-hold';
 import type { Logger } from '../log';
+import type { ChatChanges } from './chat-changes';
 import type { PendingOpens } from '../pass';
 
 // Sessions spec §10: a chat's own routes. Its conversation is served by the conversation routes.
@@ -37,6 +39,9 @@ export type ChatApiServices = Pick<
   | 'archivePreview'
   | 'unarchiveChat'
   | 'chooseChatWork'
+  | 'chatWorkState'
+  | 'chatChanges'
+  | 'chatCommit'
   | 'stopChatWaiting'
   | 'askChatBrief'
   | 'cancelChatBrief'
@@ -63,6 +68,10 @@ export function createChatApiServices(deps: {
   readonly folderHold: FolderHold;
   readonly pendingOpens: Pick<PendingOpens, 'view'>;
   readonly git: StartGit;
+  /** What a session changed, read from its root. */
+  readonly changes: ChatChanges;
+  /** The title row's git steps. */
+  readonly titleRow: TitleRowGit;
   /** What the Do It sheet shows for a chat. */
   readonly doItPreview: (chatId: ChatId) => Promise<DoItPreviewDto>;
   /** Hands the chat's work on, in the place the request names. */
@@ -97,6 +106,9 @@ export function createChatApiServices(deps: {
         throw error;
       }
     },
+    chatWorkState: (id, signal) => deps.work.state(id, signal),
+    chatChanges: (id) => deps.changes(id),
+    chatCommit: (id, request, signal) => deps.titleRow.commit(id, request, signal),
     stopChatWaiting(id) {
       chat.stopWaiting(id);
       return chat.get(id);

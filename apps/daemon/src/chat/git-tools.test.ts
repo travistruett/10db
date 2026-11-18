@@ -13,11 +13,13 @@ import {
 } from '@10db/contracts';
 import {
   createTestStore,
+  getChat,
   insertChat,
   insertConversation,
   insertPass,
   insertTask,
   schema,
+  setChatWork,
   seedProject,
   type Store,
 } from '@10db/db';
@@ -163,6 +165,10 @@ function tools(chat: ReturnType<typeof newChat>, open = true, afterCheck?: () =>
       gh,
       filesDir: () => join(scratch.path, 'files'),
       repoOf: () => repo.path,
+      placeOf: (chatId) => {
+        const row = getChat(state.db, chatId);
+        return { place: row.workPlace, worktree: row.worktreePath };
+      },
       secretFilesOf: secretFilesIn,
       net: () => ({
         env: { ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global },
@@ -350,6 +356,73 @@ describe("a chat's git tools", () => {
     expect(await t.pull({})).toMatchObject({ done: true, kind: 'up_to_date' });
     rg('switch', '-q', '-c', 'loose');
     await expect(t.pull({})).rejects.toThrow('no upstream');
+  });
+});
+
+describe('a session on its own branch', () => {
+  /** A chat whose row says it works in a worktree of the project, cut from main. */
+  let made = 0;
+  function branchChat(place: 'branch' | 'moving' = 'branch', hasWorktree = true) {
+    const me = newChat('Me');
+    made += 1;
+    const worktree = join(scratch.path, `worktree-${String(made)}`);
+    rg('worktree', 'add', '-q', '-b', `fix-${String(made)}`, worktree, 'HEAD');
+    store.write((ctx) =>
+      setChatWork(ctx, me.id, null, {
+        place,
+        branch: `fix-${String(made)}`,
+        worktreePath: hasWorktree ? worktree : null,
+        baseHead: rg('rev-parse', 'HEAD'),
+      }),
+    );
+    return { me, worktree };
+  }
+  const inWorktree = (worktree: string, ...args: string[]) =>
+    execFileSync('git', ['-C', worktree, ...args], { env: isolatedGitEnv(), stdio: 'pipe' })
+      .toString()
+      .trim();
+
+  it('commits in its worktree without holding Your folder, which someone else may have', async () => {
+    const { me, worktree } = branchChat();
+    // 10db's own git work has the checkout: a Here session's tool would be refused.
+    expect(hold.reserveGit(project.id, 'cutting a branch').reserved).toBe(true);
+    writeFileSync(join(worktree, 'a.ts'), 'a\n');
+    write('builders.txt', 'the builder’s\n');
+    const before = rg('rev-parse', 'HEAD');
+    await tools(me).commit_changes({ message: 'Add a' });
+    expect(inWorktree(worktree, 'show', '--name-only', '--format=', 'HEAD')).toBe('a.ts');
+    expect(rg('rev-parse', 'HEAD')).toBe(before);
+    expect(rg('ls-files', '--others', '--exclude-standard')).toBe('builders.txt');
+  });
+
+  it.each([
+    ['commit_changes', (t: Tools) => t.commit_changes({ message: 'x' })],
+    ['push_branch', (t: Tools) => t.push_branch({})],
+    ['make_branch', (t: Tools) => t.make_branch({ name: 'topic' })],
+  ])('%s refuses once its worktree is switched to one of 10db’s branches', async (_name, call) => {
+    const { me, worktree } = branchChat();
+    rg('branch', '10db/batch-abc123');
+    inWorktree(worktree, 'switch', '-q', '10db/batch-abc123');
+    writeFileSync(join(worktree, 'a.ts'), 'a\n');
+    const before = inWorktree(worktree, 'rev-parse', 'HEAD');
+    await expect(call(tools(me))).rejects.toThrow(/10db's own/);
+    expect(inWorktree(worktree, 'rev-parse', 'HEAD')).toBe(before);
+  });
+
+  it('refuses a call from a session that has ended, as a Here session does', async () => {
+    const { me } = branchChat();
+    await expect(tools(me, false).commit_changes({ message: 'x' })).rejects.toThrow(
+      /session has ended/,
+    );
+  });
+
+  it('refuses while it moves, and when its worktree is gone', async () => {
+    const moving = branchChat('moving');
+    await expect(tools(moving.me).commit_changes({ message: 'x' })).rejects.toThrow(
+      'Wait for the move to finish.',
+    );
+    const gone = branchChat('branch', false);
+    await expect(tools(gone.me).commit_changes({ message: 'x' })).rejects.toThrow(/no worktree/);
   });
 });
 

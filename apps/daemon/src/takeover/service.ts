@@ -8,6 +8,7 @@ import {
   FolderHolderKind,
   TerminalApp,
   UpstreamError,
+  WorkPlace,
   type AgentAccountKind,
   type ChatId,
   type ProjectDto,
@@ -23,7 +24,7 @@ import {
   type ChatRow,
   type ConversationRow,
 } from '@10db/db';
-import type { ChatService } from '../chat';
+import { chatRoot, type ChatService, type ChatWorkService } from '../chat';
 import { openTerminalRefusal, type ExploreEngine } from '../conversation';
 import type { StateStore } from '../events';
 import { holderWords, type FolderBlocker, type FolderHold } from '../folder-hold';
@@ -52,6 +53,7 @@ const ARCHIVED = 'This chat is archived';
 const NOT_A_CHAT = 'Only a chat opens in your terminal for now';
 /** A chat in the terminal can't be sealed, so Open waits for a Do It that has stopped the chat. */
 const DOING_IT = 'Do It is under way for this chat';
+const MOVING = 'Wait for the move to finish.';
 const FOLDER_HELD_NOTE = 'Your folder is held until you hand back.';
 const closedPassNote = (name: string): string =>
   `The pass ‘${name}’ is closed and waits for its pull request to merge: a commit made in the terminal makes its settle ask you.`;
@@ -62,6 +64,8 @@ export interface TakeoverServiceDeps {
   readonly folderHold: FolderHold;
   /** Hand Back parks the held messages on the folder through the chat service, which knows a Do It under way. */
   readonly chats: () => Pick<ChatService, 'watchFolder' | 'underWay'>;
+  /** Opening a reading or choosing session in the terminal makes it a Here session, inside the take. */
+  readonly work: () => Pick<ChatWorkService, 'enterHere'>;
   readonly dataDir: string;
   readonly now: () => Date;
   readonly log: Logger;
@@ -137,9 +141,17 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
   const blockedWords = (blockers: readonly FolderBlocker[]): string =>
     `Your folder is in use by ${blockers.map((b) => holderWords(b.holder)).join(' and ')}`;
 
+  /**
+   * Whether the chat's terminal holds the builder's checkout. A session on a branch runs the terminal in its own
+   * worktree, which no other writer shares, so only a branch session with no worktree holds it, like a Here one.
+   */
+  const holdsCheckout = (chat: ChatRow): boolean =>
+    chat.workPlace !== WorkPlace.Branch || chat.worktreePath === null;
+
   /** Why Open can't go ahead now, or null. A chat already in the terminal opens another window. */
   function refusalOf(chat: ChatRow): string | null {
     if (chat.archivedAt !== null) return ARCHIVED;
+    if (chat.workPlace === WorkPlace.Moving) return MOVING;
     if (deps.chats().underWay(chat.id)) return DOING_IT;
     const conv = getConversation(state.db, chat.conversationId);
     if (conv.state === ConversationState.TakenOver) return null;
@@ -148,6 +160,7 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
       conv.providerSessionId !== null,
     );
     if (words !== null) return words;
+    if (!holdsCheckout(chat)) return null;
     const blockers = folderHold.blockers(chat.projectId, {
       kind: FolderAsker.Takeover,
       chatId: chat.id,
@@ -240,18 +253,28 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
     try {
       ({ set, record } = await launch(chat, folder, app, signal));
       signal.throwIfAborted();
-      const taken = folderHold.takeOver(chat.projectId, chat.id, () => {
-        // The archived row is read at the moment of the take: a chat archived before a restart has no
-        // retired flag in the engine.
-        if (getChat(state.db, chat.id).archivedAt !== null) throw new ConflictError(ARCHIVED);
+      const enter = (): { readonly closed: Promise<void> } => {
+        // The row is read at the moment of the take: a chat archived before a restart has no retired flag in
+        // the engine, and a move may have begun while the files were prepared.
+        const row = getChat(state.db, chat.id);
+        if (row.archivedAt !== null) throw new ConflictError(ARCHIVED);
+        if (row.workPlace === WorkPlace.Moving) throw new ConflictError(MOVING);
         // Read at the take too: a Do It may have stopped the chat while the files were prepared.
         if (deps.chats().underWay(chat.id)) throw new ConflictError(DOING_IT);
-        return engine.openTerminal(chat.conversationId);
-      });
-      if (!taken.taken) throw new ConflictError(blockedWords(taken.blockers));
-      // A message waiting for the folder can't run while the chat is in the terminal; Hand Back parks it again.
-      folderHold.cancelWait(chat.id);
-      await taken.value.closed;
+        // The engine refuses first, so a refused open leaves a choosing session choosing.
+        const entered = engine.openTerminal(chat.conversationId);
+        deps.work().enterHere(chat.id);
+        return entered;
+      };
+      if (holdsCheckout(getChat(state.db, chat.id))) {
+        const taken = folderHold.takeOver(chat.projectId, chat.id, enter);
+        if (!taken.taken) throw new ConflictError(blockedWords(taken.blockers));
+        // A message waiting for the folder can't run while the chat is in the terminal; Hand Back parks it again.
+        folderHold.cancelWait(chat.id);
+        await taken.value.closed;
+      } else {
+        await enter().closed;
+      }
     } catch (error) {
       set?.remove();
       removeTakeoverFolder(deps.dataDir, chat.conversationId);
@@ -348,16 +371,18 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
           return Promise.reject(new ConflictError(NOT_IN_TERMINAL));
         // Held first, so a message typed meanwhile waits for the folder instead of running read only, and
         // 10db's git work that waited for the terminal goes first.
-        engine.holdStarts(conversationId);
+        // A session on its own worktree held nothing, so what was typed meanwhile has nothing to wait for.
+        const holds = holdsCheckout(getChat(state.db, chat.id));
+        if (holds) engine.holdStarts(conversationId);
         try {
           folderHold.handBack(chat.projectId, chat.id, () => {
             engine.handBack(conversationId);
           });
         } catch (error) {
-          engine.releaseStarts(conversationId);
+          if (holds) engine.releaseStarts(conversationId);
           return Promise.reject(error instanceof Error ? error : new Error(String(error)));
         }
-        deps.chats().watchFolder(conversationId);
+        if (holds) deps.chats().watchFolder(conversationId);
         release(chat);
         return Promise.resolve();
       });
@@ -367,14 +392,15 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
       const chat = chatOf(conversationId);
       const refusal = refusalOf(chat);
       const project = getProject(state.db, chat.projectId);
-      const notes = [FOLDER_HELD_NOTE];
+      const root = chatRoot(chat, project).root;
+      const notes = holdsCheckout(chat) ? [FOLDER_HELD_NOTE] : [];
       const closed = deps.folderHold
         .holders(chat.projectId)
         .find((holder) => holder.kind === FolderHolderKind.PassClosed);
       if (closed !== undefined) notes.push(closedPassNote(closed.name));
       notes.push(...deps.setupNotes());
       try {
-        const paths = await deps.changedPaths(project.repoPath).catch((error: unknown) => {
+        const paths = await deps.changedPaths(root).catch((error: unknown) => {
           // A git failure costs the list of changed files, not the terminal.
           deps.log.warn({ err: error, chatId: chat.id }, 'the changed files could not be read');
           return null;
@@ -382,7 +408,7 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
         if (paths === null)
           notes.push("Which project files changed couldn't be read, so none are listed here.");
         else {
-          const changed = settingFilesChanged(paths, project.repoPath);
+          const changed = settingFilesChanged(paths, root);
           if (changed.length > 0)
             notes.push(`These project files changed and won't be loaded: ${changed.join(', ')}.`);
         }

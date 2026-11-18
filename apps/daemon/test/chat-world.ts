@@ -4,6 +4,7 @@ import {
   type AgentAccountKind,
   type ChatDto,
   type ChatId,
+  type ConversationId,
   type DaemonEvent,
   type Effort,
   type ProjectDto,
@@ -11,7 +12,13 @@ import {
 } from '@10db/contracts';
 import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
-import { createTestStore, seedProject, setChatWork, type Store } from '@10db/db';
+import {
+  chatOfConversation,
+  createTestStore,
+  seedProject,
+  setChatWork,
+  type Store,
+} from '@10db/db';
 import { ManualClock } from '../src/clock';
 import {
   chatHooks,
@@ -20,10 +27,12 @@ import {
   type Briefs,
   createChatService,
   applyChatWorkAnswer,
+  chatRoot,
   createChatWorkService,
   type ChatMoveDeps,
   type ChatWorktrees,
   type ChatWorkService,
+  type ChatWorkStateReader,
   type ChatHooksDeps,
   type ChatService,
 } from '../src/chat';
@@ -51,6 +60,12 @@ const NO_MOVE: ChatMoveDeps = {
   pick: () => Promise.reject(new Error('This world has no git for a move.')),
   pathFor: () => Promise.reject(new Error('This world has no git for a move.')),
   cut: () => Promise.reject(new Error('This world has no git for a move.')),
+};
+
+/** A world made with no git or GitHub for the title row's facts. */
+const NO_FACTS: ChatWorkStateReader = {
+  read: () => Promise.reject(new Error('This world reads no git state.')),
+  forgetPullRequest: () => undefined,
 };
 
 export interface ChatWorld {
@@ -115,6 +130,12 @@ export function chatWorld(
     readonly project?: Partial<ProjectInput>;
     /** What the move to a new branch uses of git; a world with none refuses it. */
     readonly move?: (world: { readonly state: StateStore }) => ChatMoveDeps;
+    /** What the title row's facts read of git and GitHub; a world with none refuses them. */
+    readonly facts?: (world: {
+      readonly state: StateStore;
+      readonly folderHold: FolderHold;
+      readonly clock: ManualClock;
+    }) => ChatWorkStateReader;
     /** Git's side of Archive for a session on its own branch. */
     readonly worktrees?: (world: { readonly state: StateStore }) => ChatWorktrees;
   } = {},
@@ -205,6 +226,7 @@ export function chatWorld(
     folderHold,
     firstStartAfterMove,
     move: opts.move === undefined ? NO_MOVE : opts.move({ state }),
+    facts: opts.facts === undefined ? NO_FACTS : opts.facts({ state, folderHold, clock }),
     carryOn: (chatId, text) => {
       chatService?.carryOn(chatId, text);
     },
@@ -271,11 +293,17 @@ export function chatWorld(
     setupNotes: [],
   };
   const opened: { app: string; script: string }[] = [];
+  const sourceRoot = (conversationId: ConversationId): string => {
+    const row = chatOfConversation(state.db, conversationId);
+    const checkout = opts.checkout ?? '/repo';
+    return row === null ? checkout : chatRoot(row, { repoPath: checkout }).root;
+  };
   const takeover = createTakeoverService({
     state,
     engine,
     folderHold,
     chats: () => chat,
+    work: () => work,
     dataDir: dir.path,
     now: () => clock.now(),
     log: silentLogger,
@@ -286,8 +314,9 @@ export function chatWorld(
         ? Promise.resolve()
         : Promise.reject(terminal.openerFails);
     },
-    sourceOf: () => ({
-      cwd: opts.checkout ?? '/repo',
+    sourceOf: (conv) => ({
+      // As production's: the session's root, which a branch session's worktree is.
+      cwd: sourceRoot(conv.id),
       kind: launched.kind,
       model: 'claude-opus-5-5',
       effort: 'high',

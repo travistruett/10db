@@ -66,6 +66,13 @@ export interface PullRequest {
  * A pull request's state and checks as GitHub reports them. The checks are `unknown` only when the
  * rollup lists an entry 10db can't read and no other check failed or is still running.
  */
+/** What a pull request's checks add up to: the title row's "3/9". */
+export interface CheckCounts {
+  readonly passed: number;
+  readonly total: number;
+  readonly failing: number;
+}
+
 export interface PullRequestStatus {
   readonly url: string;
   readonly state: PrState;
@@ -75,6 +82,8 @@ export interface PullRequestStatus {
   readonly mergeable: PrMergeable;
   readonly checks: PullRequestChecks;
   readonly failingChecks: FailingCheckDto[];
+  /** How many checks finished without failing, how many exist, and how many failed. */
+  readonly counts: CheckCounts;
   /**
    * Why GitHub will not merge the pull request as it is, from its `mergeStateStatus`: `conflicts` for
    * DIRTY, `behind` for BEHIND, null for anything else (clean, blocked, unknown, a value added later).
@@ -528,31 +537,36 @@ function httpsOrNull(url: string | null | undefined): string | null {
 export function summariseChecks(rollup: readonly CheckRollupEntry[]): {
   checks: PullRequestChecks;
   failingChecks: FailingCheckDto[];
+  counts: CheckCounts;
 } {
   const failingChecks: FailingCheckDto[] = [];
   let pending = false;
   let unreadable = false;
+  let passed = 0;
   for (const item of rollup) {
     switch (item.__typename) {
       case 'CheckRun':
         if (item.status !== 'COMPLETED') pending = true;
         else if (FAILING_CONCLUSIONS.has(item.conclusion ?? ''))
           failingChecks.push({ name: item.name, url: httpsOrNull(item.detailsUrl) });
+        else passed += 1;
         break;
       case 'StatusContext':
         if (FAILING_STATES.has(item.state))
           failingChecks.push({ name: item.context, url: httpsOrNull(item.targetUrl) });
         else if (PENDING_STATES.has(item.state)) pending = true;
+        else passed += 1;
         break;
       case 'Unreadable':
         unreadable = true;
         break;
     }
   }
-  if (failingChecks.length > 0) return { checks: 'failing', failingChecks };
-  if (pending) return { checks: 'pending', failingChecks };
-  if (unreadable) return { checks: 'unknown', failingChecks };
-  return { checks: rollup.length === 0 ? 'none' : 'passing', failingChecks };
+  const counts = { passed, total: rollup.length, failing: failingChecks.length };
+  if (failingChecks.length > 0) return { checks: 'failing', failingChecks, counts };
+  if (pending) return { checks: 'pending', failingChecks, counts };
+  if (unreadable) return { checks: 'unknown', failingChecks, counts };
+  return { checks: rollup.length === 0 ? 'none' : 'passing', failingChecks, counts };
 }
 
 /**
