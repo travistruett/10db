@@ -37,9 +37,13 @@ import { keepTranscripts } from './transcripts';
 /** Each case runs this many times, so a flip between runs shows how steady its outcome is. */
 export const RUNS_PER_CASE = 2;
 
-/** The gate a case-run's project runs: 10db's own changed-package check, or for the fake a clean tree. */
+/**
+ * The gate a case-run's project runs. A real run uses the pre-check 10db's own project runs on a lane's
+ * work: CI runs the tests there. Local delivery ignores a project's precheckCommand, so the eval names
+ * it as the gate command. The fake checks for a clean tree.
+ */
 const GATE = {
-  [EvalAgent.Claude]: 'make check-changed',
+  [EvalAgent.Claude]: 'make precheck',
   [EvalAgent.Fake]: 'git diff --quiet HEAD',
 } as const;
 
@@ -110,7 +114,7 @@ function fakeEditPath(c: EvalCase, opts: EvalOptions): string {
 
 /**
  * The case's base as a fresh repo with no later history, so a lane can't read the merged answer, and
- * a bare origin holding main, which `make check-changed` diffs against and which shows any push.
+ * a bare origin holding main, which `make precheck` diffs against and which shows any push.
  */
 function prepareRepo(
   c: EvalCase,
