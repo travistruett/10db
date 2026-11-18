@@ -46,9 +46,8 @@ const quoted = (text: string): string => `'${text.replaceAll("'", "'\\''")}'`;
 /**
  * Brings a seeded `node_modules` in line with the worktree's own lockfile, with a pnpm the daemon
  * resolved (`pnpm`, an absolute path outside every checkout). The scripts and the pnpmfile are off: a
- * worktree install runs no code from the repository, and the root `prepare` script (`lefthook
- * install`) would otherwise write git hooks into the main checkout's git directory, which every
- * worktree shares. The repository does not choose the program (`packageManager` and corepack are
+ * worktree install runs no code from the repository, so no install script can write into the main
+ * checkout's git directory, which every worktree shares. The repository does not choose the program (`packageManager` and corepack are
  * switched off) or where pnpm writes (`.npmrc` and workspace settings can name a store, a modules
  * directory and a virtual store, so all three are given on the command line).
  */

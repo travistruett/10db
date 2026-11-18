@@ -51,10 +51,13 @@ else
   esac
 fi
 
-mise install node pnpm gitleaks actionlint zizmor cargo-deny
+mise install node pnpm gitleaks actionlint zizmor cargo-deny lefthook
 if [[ "$want_rust" == "yes" ]]; then
   mise install rust
 fi
+# The hooks name the lefthook that installs them. mise's copy lives outside every checkout, so the
+# hooks are the same whichever checkout runs this. pnpm install never touches them.
+mise exec -- lefthook install
 # mise exec puts the pinned pnpm first on PATH, so a Homebrew pnpm is never used.
 mise exec -- pnpm install --frozen-lockfile
 # The e2e gate step drives the UI in Playwright's WebKit; the browser lives in Playwright's own cache.
