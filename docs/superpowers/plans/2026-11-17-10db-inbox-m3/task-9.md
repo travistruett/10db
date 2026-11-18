@@ -9,7 +9,8 @@
   - **Navigation:** the Inbox has a panel now, and the panel examples name it;
   - **Counts:** the Open count is the daemon's, and a filter never changes it;
   - **Primary color:** Open's tags stay yellow, and Waiting's and Resolved's are gray;
-  - a new **Inbox rows** line: two lines, 52 px, the kind tag in uppercase, `×n`, a hover Dismiss, and `e`.
+  - a new **Inbox rows** line: two lines at a fixed height (§4.1 "A row"), the kind tag in uppercase, `×n`, a hover
+    Dismiss, and `e`.
 - **A new decision,** `docs/architecture/decisions/2026-11-17-the-daemon-groups-inbox-rows-in-its-code-and-the-browser-groups-nothing.md`.
   It **amends** `2026-11-16-the-open-inbox-is-paged-by-row-and-the-daemon-groups-the-rows.md` and records:
   - The grouping rule is called by the daemon over the open cards' light columns, not written in SQL. A pass's
@@ -17,6 +18,8 @@
   - The desktop places rows the daemon sends and never groups.
   - Pages are read by keyset (`after`), and the live list is patched one row per event through `card` lookups. A
     whole refetch happens only on reconnect, on a Slack connection change, or after a failed lookup.
+  - A list nobody is looking at is marked stale on an event and reloads when shown. Lookups wait for a fetch in
+    flight, so an event racing a page is never lost.
   - A grouped row matches a search when any of its cards does.
   - No index is added yet.
   - Why: the alternatives turned down were SQL grouping (it drifts from the schema) and refetching every loaded
@@ -32,7 +35,7 @@
 
   Drop the tables, `InboxTable`, `row-keys` and `splitInbox`.
 - `apps/desktop/src/shell/AGENTS.md`: "today only Settings has a panel" becomes "Settings and the Inbox". Add a line
-  that `RenderLayout` has a panel host.
+  that `RenderLayout` has a panel host only while a section registers a panel.
 - `apps/desktop/src/views/settings/AGENTS.md:28`: the `splitInbox` mention now names the daemon's placement rule
   (`InboxPlacement`).
 - `apps/daemon/src/inbox/AGENTS.md`: check it against Task 4's notes.

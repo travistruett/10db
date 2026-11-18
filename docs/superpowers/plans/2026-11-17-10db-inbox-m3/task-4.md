@@ -73,9 +73,13 @@ export const InboxCardContextDto = z.object({
    - `GET /inbox/page?state=open&after=…&page=2` → 400.
 
    `render-access.test.ts`: a screen token may read `/inbox/inbox_…/context`.
-3. **Red.** A services test, on a real store: with the connection's `get()` answering `connected`, an open card
-   with a sent, unreturned send is absent from `pageInbox({ state: 'open' })`. With `refused`, it's present.
-   Extend the existing services test for `pageInbox` if there is one, else add one row beside its neighbours.
+3. **Red.** A services test on a real store, a table ported from the desktop's `splitInbox` connection rows
+   (`apps/desktop/src/views/inbox/inbox-rows.test.ts`). An open card with a sent, unreturned send is:
+   - absent from `pageInbox({ state: 'open' })` when the connection's `get()` answers `connected`;
+   - present when it answers `refused`, `none`, `off` or `unreachable`.
+
+   And it's in `state: 'waiting'` under every connection, as the route has always answered. Extend the existing
+   services test for `pageInbox` if there is one, else add the table beside its neighbours.
 4. Implement, then make it green. Run `pnpm --filter @10db/db exec vitest related src/store/inbox-context.ts --run
    --maxWorkers=2` and `pnpm --filter @10db/daemon exec vitest related src/api/app.ts src/daemon/services.ts
    src/screens/render-access.ts --run --maxWorkers=2`, then typecheck and lint db and daemon.

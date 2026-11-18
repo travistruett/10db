@@ -2,12 +2,12 @@
 
 **Spec:** app shell spec §4.1 Inbox, "The panel's head" (the filter menu: for Resolved, who answered and when) and
 "Performance" ("The route grows a cursor", "Search and filters run on the server").
-**State rows:** 9, 10 and 22 on the daemon's side (the card lookup in Waiting and Resolved).
+**State rows:** 9, 10 and 22 on the daemon's side: the card lookup in Waiting and Resolved, and the Resolved tie.
 
 ## Files
 
 - Modify `packages/db/src/store/inbox-page.ts` (the Waiting and Resolved branch) and
-  `packages/db/src/store/inbox-page.test.ts`.
+  `packages/db/src/store/inbox-page.test.ts`. Use `textMatches` and `SENT_AT` from `inbox-sql.ts` (Task 2).
 
 ## Interfaces
 
@@ -23,6 +23,7 @@ Call these, from Task 1:
 export function inboxRowSort(state: InboxListState, card: SortCard): InboxRowSort;
 //   open [high 0 | normal 1 | low 2, createdAt, id] · waiting [sentAt === null ? 1 : 0, sentAt ?? '', id]
 //   · resolved [0, updatedAt, id]
+// packages/db/src/store/inbox-sql.ts: SQL both page modules share (sendIsOut, textMatches); imports neither
 ```
 
 `InboxPageQuery`'s `after`, `q`, `since` and `card`, and `InboxPageDto`'s `rows` and `next`, as Task 1 wrote
@@ -31,7 +32,7 @@ them.
 ## What changes
 
 - `whereOf` gains three filters:
-  - `q`: the same escaped `LIKE` on title or body as Task 2. Share the helper.
+  - `q`: `textMatches(q)`, the same escaped `LIKE` as Task 2.
   - `since`: `updated_at >= since`.
   - `card`: `id = card`.
 - With `after`, `whereOf` adds the keyset bound in the default order, as an SQLite row-value comparison:
@@ -39,10 +40,10 @@ them.
   - Resolved: `(updated_at, id) < (?, ?)`.
 
   `after` is only valid with the default order (Task 1 refuses the rest).
-- Every answer fills `rows`, one per card, with `{ key: card.id, sort: inboxRowSort(state, …), passId: null, ids:
-  [card.id] }`.
-  - `sentAt` comes from the card's live send (`item.send?.sentAt ?? null`).
-  - `next` is the last row's sort when a row exists after it. Read `pageSize + 1` rows and drop the extra.
+- `rows` are filled since Task 1, one per card. `sentAt` comes from the card's live send (`item.send?.sentAt ??
+  null`).
+- `next` is now the last row's sort when a row exists after it. Read `pageSize + 1` rows and drop the extra.
+- `page` is 1 on a keyset or card answer.
 - `total` stays the filtered count. With `after` it is still the whole list's count.
 - The page-number readers (`page`, `sort`, `dir`) answer exactly as before. Their rows in `inbox-page.test.ts` stay
   as they are.
@@ -54,9 +55,10 @@ them.
      Every card comes once, newest first, and the tie is ordered by id descending;
    - **Waiting seam:** the same, by `sentAt`, the longest out first;
    - **`since`:** cards updated before it are left out;
-   - **search:** `q` matches the title, matches the body, ignores case, and treats `_` literally;
+   - **search:** `q` matches the title, matches the body, ignores ASCII case, and treats `_` literally;
    - **`card`:** a resolved card answers its one row, and an open card asked for in `resolved` answers none;
-   - **`rows` mirror `items`** in every existing table row.
+   - **the tie in both sorts:** for the two tied cards, the SQL order equals `compareRowSort('resolved', …)` on
+     their sorts. The browser's merge then places them as the pages do.
 
    Run. Expected: fails on the missing filters.
 2. Implement, then make it green. Run `pnpm --filter @10db/db exec vitest related src/store/inbox-page.ts --run

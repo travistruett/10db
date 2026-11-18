@@ -38,7 +38,7 @@
 
 ## Interfaces
 
-Call these, from Tasks 5 and 6:
+Call these, from Tasks 5, 6a and 6b:
 
 ```ts
 export interface InboxSearch { readonly state?: InboxListState; readonly q?: string; readonly project?: ProjectId;
@@ -46,11 +46,11 @@ export interface InboxSearch { readonly state?: InboxListState; readonly q?: str
 export function inboxList(search: InboxSearch, now: Date): InboxList;   // since → local midnight, 0, 6 or 29 days back
 export function useInboxRows(list: InboxList): {
   rows: readonly InboxRow[]; hasMore: boolean; loadingMore: boolean; loadMore: () => void;
-  isPending: boolean; error: Error | null };
+  isPending: boolean; error: Error | null; moreError: Error | null };
 export function InboxRowList<T extends { readonly key: string }>(props: {
   readonly label: string; readonly rows: readonly T[]; readonly selected: string | null;
-  readonly hasMore: boolean; readonly loadingMore: boolean; readonly onNearEnd: () => void;
-  readonly renderRow: (row: T, selected: boolean) => ReactNode }): ReactNode;
+  readonly hasMore: boolean; readonly loadingMore: boolean; readonly moreError: Error | null;
+  readonly onNearEnd: () => void; readonly renderRow: (row: T, selected: boolean) => ReactNode }): ReactNode;
 export function nextSelection(keys: readonly string[], selected: string | null, lastIndex: number):
   { readonly key: string | null; readonly index: number };
 ```
@@ -75,7 +75,8 @@ export function nextSelection(keys: readonly string[], selected: string | null, 
   old rows until the first new page arrives. The selection keeps its key if the new rows hold it, else takes the
   first row (`nextSelection` with index 0).
 - **Waiting's rows.**
-  - Line 1: the kind tag (gray), the title, and the age since sent.
+  - Line 1: the kind tag from `KIND_TAGS` (6b; gray outside Open), the title, and the age since sent. The row's look
+    is 6b's `InboxRowItem`, per §4.1 "A row".
   - Line 2: the project and "Waiting on <recipients> · <shortAgo(sentAt)>". The recipients come from `WhoCell`'s
     rule, joined with " + ".
   - Its content (`waiting-content.tsx`): who it waits on and since when, then today's `WaitingDetail`, then a
