@@ -76,12 +76,18 @@ A local macOS control plane that runs Claude Code sessions as a software factory
   minutes and a heavy track can run one implementer per card.
 - **A branch generates its migrations last**, after its final merge of `main`, and only one open pull request
   adds migrations at a time. Two branches that both number migrations renumber each other at every landing.
-- Done means the pull request's CI is green. Before a push, run `make check-changed` (the packages the diff
+- Done means the pull request's CI is green. Before a push outside a coordinated build, run `make check-changed` (the packages the diff
   touches and their dependents); the pre-push hook runs `make precheck`. `make gate` runs every check on the Mac
   and is optional (`docs/architecture/decisions/2026-11-13-ci-is-the-gate-before-a-merge.md`). Docs are part
   of done. An agent in a 10db lane leaves the gate to 10db, which runs it after each implement step: it runs
   only the checks for what it changed (the changed packages' tests, typecheck and lint, or the failing step's
   command) and never the full gate.
+- **An agent in a coordinated build** (a long-lived integration branch that several agents merge into) does not
+  run `make check-changed` before a push: it diffs against `origin/main`, so on that branch it widens to every
+  package's whole suite (18-49 minutes on the Mac against 7-13 in CI's shards) and finds nothing CI would not.
+  While working it runs the tests that relate to its change, typecheck and lint; before a push it runs
+  `make precheck` (format, lint, typecheck and drift, no tests); then it pushes a draft PR and relies on CI for
+  the suite.
 
 ## Git
 

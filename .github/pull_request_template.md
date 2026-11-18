@@ -9,5 +9,5 @@
 ## Checklist
 
 - [ ] The title is a Conventional Commit with a scope from CONTRIBUTING.md.
-- [ ] `make check-changed` passes, and CI is green.
+- [ ] `make check-changed` passes (`make precheck` in a coordinated build), and CI is green.
 - [ ] Docs changed with the code, where they describe it.
