@@ -3,6 +3,7 @@ import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { chatDto, chatServer } from '../../test/chat-fixtures';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
+import { serveOpenRows } from '../../test/inbox-page-fixtures';
 import { inboxItemDto, projectViewDto } from '../../test/fixtures';
 import { closedTabs } from './closed-tabs';
 
@@ -54,6 +55,7 @@ describe('Sessions: needs you mirrors the Inbox', () => {
       ...served.handlers,
       ...baseHandlers(),
     );
+    serveOpenRows(() => (open ? [card] : []));
     renderApp(`/sessions?chat=${chat.id}`);
     await waitFor(() => {
       expect(screen.getByRole('option').getAttribute('data-ring')).toBe('needs_you');
@@ -102,6 +104,7 @@ describe('Sessions: needs you mirrors the Inbox', () => {
       ...served.handlers,
       ...baseHandlers(),
     );
+    serveOpenRows(() => [card]);
     // The second tab was closed at place 1 before the card arrived.
     closedTabs.push({ chatId: second.id, projectId: ampsio.id, title: 'Second', position: 1 });
     served.chats.splice(1, 1, chatDto({ ...second, tabPosition: null }));

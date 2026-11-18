@@ -496,12 +496,9 @@ describe('Slack and the socket', () => {
     const before = view.asked.length;
     holding = true;
     view.sockets[0]?.close();
-    await waitFor(
-      () => {
-        expect(view.asked.length).toBeGreaterThan(before);
-      },
-      { timeout: 4000 },
-    );
+    await waitFor(() => {
+      expect(view.asked.length).toBeGreaterThan(before);
+    });
     expect(view.ids()).toHaveLength(52);
     release();
     await waitFor(() => {
