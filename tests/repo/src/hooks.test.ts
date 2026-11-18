@@ -1,8 +1,21 @@
-import { spawnSync } from 'node:child_process';
-import { cpSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { execFileSync, spawnSync } from 'node:child_process';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { delimiter, join, resolve, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  createBareRepo,
   createThrowawayRepo,
   isolatedGitEnvironment,
   fakeGithubToken,
@@ -44,6 +57,127 @@ describe.skipIf(LEFTHOOK_MISSING)('lefthook.yml', () => {
 it('runs make precheck before a push, not make check', () => {
   expect(readRepoFile('lefthook.yml')).toMatch(/\bmake precheck\n/);
   expect(readRepoFile('lefthook.yml')).not.toMatch(/\bmake check\n/);
+});
+
+// Every checkout shares one .git/hooks, and a hook names the lefthook that installed it. A lefthook
+// inside a checkout would let whatever can write that checkout run as the builder on their next
+// commit, and each install would rewrite the hooks for every other checkout.
+describe.skipIf(LEFTHOOK_MISSING)('installed git hooks', () => {
+  const cleanup: (() => void)[] = [];
+  afterEach(() => {
+    for (const remove of cleanup.splice(0)) remove();
+  });
+
+  const temporaryDir = (prefix: string): string => {
+    const dir = mkdtempSync(join(tmpdir(), `${prefix}-`));
+    cleanup.push(() => {
+      rmSync(dir, { recursive: true, force: true });
+    });
+    return dir;
+  };
+
+  /** A repository holding `config` as its lefthook.yml, and a linked worktree with no node_modules. */
+  function repoWithWorktree(config: string): { repo: ThrowawayRepo; worktree: string } {
+    const repo = createThrowawayRepo('10db-installed-hooks');
+    cleanup.push(() => {
+      repo.remove();
+    });
+    repo.stage('lefthook.yml', config);
+    repo.commit('chore(repo): init');
+    const worktree = temporaryDir('10db-installed-hooks-worktree');
+    rmSync(worktree, { recursive: true });
+    repo.git('worktree', 'add', '-q', '-b', 'feat/y', worktree);
+    return { repo, worktree };
+  }
+
+  function install(cwd: string): void {
+    const result = run(LEFTHOOK, ['install'], cwd);
+    expect(result.status, result.output).toBe(0);
+  }
+
+  /** The hooks lefthook wrote into the shared git directory, by name. */
+  function installedHooks(repo: ThrowawayRepo): Record<string, string> {
+    const hooks = join(repo.dir, '.git', 'hooks');
+    return Object.fromEntries(
+      readdirSync(hooks)
+        .filter((name) => !name.endsWith('.sample'))
+        .sort()
+        .map((name) => [name, readFileSync(join(hooks, name), 'utf8')]),
+    );
+  }
+
+  it('names a lefthook outside every checkout, byte-identical whichever checkout installed it', () => {
+    const { repo, worktree } = repoWithWorktree(readRepoFile('lefthook.yml'));
+    install(repo.dir);
+    const fromMain = installedHooks(repo);
+    expect(Object.keys(fromMain)).toEqual(['commit-msg', 'pre-commit', 'pre-push']);
+    for (const name of Object.keys(fromMain)) rmSync(join(repo.dir, '.git', 'hooks', name));
+
+    install(worktree);
+
+    expect(installedHooks(repo)).toEqual(fromMain);
+    const checkouts = [repoRoot, repo.dir, worktree].flatMap((dir) => [dir, realpathSync(dir)]);
+    for (const [name, hook] of Object.entries(fromMain)) {
+      // The absolute path of the lefthook that ran `install`, which the hook falls back to.
+      const named = /^\s*elif '?(\/[^' ]+)'? -h >\/dev\/null 2>&1$/m.exec(hook)?.[1];
+      expect(named, `${name} names no lefthook:\n${hook}`).toBeDefined();
+      for (const path of [named ?? '', realpathSync(named ?? '')]) {
+        expect(path, name).not.toContain('/node_modules/');
+        const inside = checkouts.filter((checkout) => path.startsWith(`${checkout}${sep}`));
+        expect(inside, `${name} names ${path}`).toEqual([]);
+      }
+    }
+  });
+
+  it('runs pre-commit, commit-msg and pre-push from a worktree with no node_modules and no lefthook on PATH', () => {
+    const records = temporaryDir('10db-installed-hooks-record');
+    const record = join(records, 'hooks');
+    const config = ['pre-commit', 'commit-msg', 'pre-push']
+      .map(
+        (hook) =>
+          `${hook}:\n  jobs:\n    - name: record\n      run: echo ${hook} >> "$HOOK_RECORD"\n`,
+      )
+      .join('\n');
+    const { repo, worktree } = repoWithWorktree(config);
+    const origin = createBareRepo('10db-installed-hooks-origin');
+    cleanup.push(() => {
+      origin.remove();
+    });
+    repo.git('remote', 'add', 'origin', origin.dir);
+    install(repo.dir);
+
+    // A terminal with git and the system's own directories on PATH: no lefthook, no mise, no
+    // node_modules, and no LEFTHOOK_BIN.
+    const bin = join(records, 'bin');
+    mkdirSync(bin);
+    const gitPath = execFileSync('sh', ['-c', 'command -v git'], {
+      env: isolatedGitEnvironment(),
+      encoding: 'utf8',
+    }).trim();
+    symlinkSync(gitPath, join(bin, 'git'));
+    const env = {
+      ...Object.fromEntries(
+        Object.entries(isolatedGitEnvironment()).filter(([name]) => name !== 'LEFTHOOK_BIN'),
+      ),
+      PATH: [bin, '/usr/bin', '/bin'].join(delimiter),
+      LEFTHOOK: '1',
+      NO_COLOR: '1',
+      HOOK_RECORD: record,
+    };
+    expect(spawnSync('sh', ['-c', 'command -v lefthook'], { env }).status).not.toBe(0);
+    const git = (...args: string[]) => {
+      const result = spawnSync('git', args, { cwd: worktree, env, encoding: 'utf8' });
+      expect(result.status, `git ${args.join(' ')}: ${result.stdout}${result.stderr}`).toBe(0);
+    };
+    writeFileSync(join(worktree, 'change.txt'), 'a change\n');
+
+    git('add', 'change.txt');
+    git('commit', '-q', '-m', 'feat(repo): a change');
+    git('push', '-q', 'origin', 'feat/y');
+
+    const ran = existsSync(record) ? readFileSync(record, 'utf8').split('\n').filter(Boolean) : [];
+    expect(ran).toEqual(['pre-commit', 'commit-msg', 'pre-push']);
+  });
 });
 
 describe('commitlint', () => {
