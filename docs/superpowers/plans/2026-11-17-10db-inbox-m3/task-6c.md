@@ -49,8 +49,9 @@ export function Panel({ section, children }: { readonly section: RailSection; re
 ## Steps
 
 1. **Red,** in `inbox-view.test.tsx`:
-   - open Resolved with a search, select the third row and scroll; go to Board, then back through the rail → the
-     same state, search, selected row and scroll (row 23);
+   - open Open with `?project=` (Resolved and the search field come in Task 7), select the third row and scroll; go
+     to Board, then back through the rail → the same state, filter, selected row and scroll (row 23). Task 7 adds a
+     row for Resolved with a search;
    - while on Board, an event resolves a loaded Open card; coming back shows the list without it, and no lookup was
      made while away (row 23);
    - arriving from the rail, the selected row has focus, and `j` moves at once;
