@@ -55,7 +55,9 @@ describe('the rail', () => {
 
   it('keeps a count apart from its name', async () => {
     server.use(
-      http.get(daemonUrl('/inbox'), () => HttpResponse.json([inboxItemDto()])),
+      http.get(daemonUrl('/inbox/page'), () =>
+        HttpResponse.json({ items: [inboxItemDto()], total: 1, page: 1, pageSize: 1 }),
+      ),
       ...baseHandlers(),
     );
     renderApp('/factory');
