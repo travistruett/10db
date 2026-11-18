@@ -1,8 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
-import { expect, test, type APIRequestContext } from '@playwright/test';
+import { expect, type APIRequestContext } from '@playwright/test';
 import { z } from 'zod';
 import { claudeIsInstalled } from './claude-is-installed';
+import { test } from './routed-test';
 import { daemonUrl } from './daemon-url';
 import { expectAccessible } from './expect-accessible';
 import { E2E_DATA, E2E_REPO, E2E_TOKEN } from './paths';

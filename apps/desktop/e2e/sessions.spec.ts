@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { z } from 'zod';
 import { claudeIsInstalled } from './claude-is-installed';
+import { test } from './routed-test';
 import { inConversationColumn } from './conversation-column';
 import { daemonUrl } from './daemon-url';
 import { expectAccessible } from './expect-accessible';
