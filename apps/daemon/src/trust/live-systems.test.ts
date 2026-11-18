@@ -5,30 +5,18 @@ import { ZodError } from 'zod';
 import { projectLiveSystems, setProjectLiveSystems } from './live-systems';
 
 describe('a project’s live systems', () => {
-  it('starts empty', () => {
-    const test = createTestStore();
-    expect(projectLiveSystems(test.store.db, mintId('Project'))).toEqual([]);
-    test.close();
-  });
-
-  it('keeps what the builder sets, trimmed and without duplicates', () => {
+  it('starts empty and keeps what the builder sets for that project alone, trimmed and without duplicates', () => {
     const test = createTestStore();
     const project = mintId('Project');
+    const other = mintId('Project');
+    expect.soft(projectLiveSystems(test.store.db, project), 'at first').toEqual([]);
     test.store.write((ctx) => {
       setProjectLiveSystems(ctx, project, [' api.example.com ', 'prod', 'api.example.com']);
     });
-    expect(projectLiveSystems(test.store.db, project)).toEqual(['api.example.com', 'prod']);
-    test.close();
-  });
-
-  it('a project’s entries are its own', () => {
-    const test = createTestStore();
-    const a = mintId('Project');
-    const b = mintId('Project');
-    test.store.write((ctx) => {
-      setProjectLiveSystems(ctx, a, ['api.example.com']);
-    });
-    expect(projectLiveSystems(test.store.db, b)).toEqual([]);
+    expect
+      .soft(projectLiveSystems(test.store.db, project), 'the project')
+      .toEqual(['api.example.com', 'prod']);
+    expect.soft(projectLiveSystems(test.store.db, other), 'another project').toEqual([]);
     test.close();
   });
 
