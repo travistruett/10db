@@ -111,6 +111,8 @@ export const EventType = {
   FolderHoldChanged: 'folder_hold.changed',
   /** A notice that asks the builder nothing (`NoticePostedData`); filed under its task, else its project, else the app. */
   NoticePosted: 'notice.posted',
+  /** The holds the status line shows changed (`StatusDto`); `entityType: 'app'`. */
+  StatusChanged: 'status.changed',
 } as const;
 export type EventType = (typeof EventType)[keyof typeof EventType];
 

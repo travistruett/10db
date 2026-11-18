@@ -1,6 +1,7 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { z } from 'zod';
 import { claudeIsInstalled } from './claude-is-installed';
+import { test } from './routed-test';
 import { daemonUrl } from './daemon-url';
 import { expectAccessible } from './expect-accessible';
 import { auth, createProject } from './shape-project';

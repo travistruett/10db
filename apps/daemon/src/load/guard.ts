@@ -85,6 +85,11 @@ export interface LoadGuardOptions {
   onOverloaded(report: OverloadReport): void;
   /** The load fell and work may start again. */
   onCleared(): void;
+  /**
+   * After every sample: the load over the overload limit (1 is where an overload starts counting) and
+   * whether new work is held now.
+   */
+  onLevel?(level: number, holding: boolean): void;
   /** How often the load is read. */
   readonly sampleMs?: number;
   /** Overloaded means the load stays above this many times the core count... */
@@ -145,6 +150,11 @@ export function createLoadGuard(opts: LoadGuardOptions): LoadGuard {
 
   async function run(): Promise<void> {
     const { load, cores } = opts.read();
+    await step(load, cores);
+    opts.onLevel?.(load / (overloadFactor * cores), current !== null);
+  }
+
+  async function step(load: number, cores: number): Promise<void> {
     const now = opts.clock.now();
     if (current === null) {
       if (load <= overloadFactor * cores) {

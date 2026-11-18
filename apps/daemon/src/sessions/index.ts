@@ -70,6 +70,7 @@ export {
   HeaderMap,
   ProjectMcpError,
   readRepoMcp,
+  repoMcpHash,
   RemoteUrl,
   TENDB_MCP_SERVER,
   YourMcpExpandError,

@@ -251,11 +251,20 @@ describe('the wrong-branch card of a ship', () => {
     expect(card.detail).toEqual({ batchId: batch.id, actions: ['retry', 'abandon'] });
   });
 
-  it.each(['waits', 'failed', 'not_joined'] as const)(
-    'the %s card names only its batch, as before',
+  it.each(['not_joined'] as const)('the %s card names only its batch, as before', (outcome) => {
+    expect(wrongBranchCard(batch, 'main', '/repo', outcome).detail).toEqual({
+      batchId: batch.id,
+    });
+  });
+
+  it.each(['waits', 'failed'] as const)(
+    'the %s card offers Switch back, which the daemon carries out',
     (outcome) => {
-      expect(wrongBranchCard(batch, 'main', '/repo', outcome).detail).toEqual({
+      const card = wrongBranchCard(batch, 'main', '/repo', outcome);
+      expect(card.options?.map((o) => o.label)).toEqual(['Switch back']);
+      expect(card.detail).toMatchObject({
         batchId: batch.id,
+        worktreeCard: { kind: 'branch', batchId: batch.id },
       });
     },
   );
@@ -320,6 +329,7 @@ describe("every delivery card's tier, urgency and closer", () => {
   const project = { name: 'acme', repoPath: '/repo' };
   const shipped: CardResolvesWhen = { event: 'batch_shipped', batchId: batch.id };
   const started: CardResolvesWhen = { event: 'tasks_started', taskIds: [taskId] };
+  const branchReady: CardResolvesWhen = { event: 'branch_ready', batchId: batch.id };
   const byEvent = (when: CardResolvesWhen): CardClosesWhen => ({ by: 'event', when });
   const answer: CardClosesWhen = { by: 'answer' };
   const withdrawn = (when: string): CardClosesWhen => ({ by: 'withdrawn', when });
@@ -362,8 +372,16 @@ describe("every delivery card's tier, urgency and closer", () => {
       high,
       byEvent(started),
     ),
-    'wrong branch, waits': row(wrongBranchCard(batch, 'main', '/repo', 'waits'), high, answer),
-    'wrong branch, failed': row(wrongBranchCard(batch, 'main', '/repo', 'failed'), high, answer),
+    'wrong branch, waits': row(
+      wrongBranchCard(batch, 'main', '/repo', 'waits'),
+      high,
+      byEvent(branchReady),
+    ),
+    'wrong branch, failed': row(
+      wrongBranchCard(batch, 'main', '/repo', 'failed'),
+      high,
+      byEvent(branchReady),
+    ),
     'wrong branch, not shipped': row(
       wrongBranchCard(batch, 'main', '/repo', 'not_shipped'),
       high,
@@ -398,7 +416,7 @@ describe("every delivery card's tier, urgency and closer", () => {
     'left out, not answerable': row(
       leftOutCards.notStarted(batch, attempt, 'it moved', false),
       normal,
-      answer,
+      byEvent(shipped),
     ),
     'revert kept while shipping': row(
       leftOutCards.revertKept(batch, attempt, 'c'.repeat(40), 'boom', 'SHIPPING'),
@@ -476,12 +494,15 @@ describe("every delivery card's tier, urgency and closer", () => {
       withdrawn('no branch under 10db/ lacks a task (branch-sweep)'),
     ),
     'a pass branch left with no pass': row(
-      passCards.unopened({
-        ref: 'refs/10db/passes/p/dirt',
-        branch: '10db/pass',
-        returnBranch: 'main',
-        startSha: 'd'.repeat(40),
-      }),
+      passCards.unopened(
+        {
+          ref: 'refs/10db/passes/p/dirt',
+          branch: '10db/pass',
+          returnBranch: 'main',
+          startSha: 'd'.repeat(40),
+        },
+        '/repo',
+      ),
       high,
       answer,
     ),

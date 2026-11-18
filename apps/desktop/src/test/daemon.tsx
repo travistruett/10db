@@ -245,6 +245,7 @@ export function baseHandlers(
         }),
       ),
     ),
+    http.get(daemonUrl('/status', base), () => HttpResponse.json({ lines: [], busy: null })),
     http.get(daemonUrl('/admission', base), () =>
       HttpResponse.json(
         AdmissionDto.parse({

@@ -12,9 +12,9 @@ make each one guard something that matters.
     or a review finding. State tables and criteria are design and review tools, not a test list.
 - **A user-visible feature extends a core e2e flow** (`apps/desktop/e2e`) through the real daemon and
   app. It adds no rendered-component test.
-- **Count is a cost. Extend before you add**, and removing a test that guards neither core nor an
-  escaped bug is welcome, in its own commit. CI caps new unit tests at max(3, one per 200 added code
-  lines); past it, write `Test-budget: <reason>`.
+- **Count is a cost. Extend before you add**; removing a test that guards neither core nor an
+  escaped bug is welcome. CI caps new non-core unit tests at max(3, one per 200 added code lines);
+  past it, open the pull request with `Test-budget: <reason>`. The pre-push hook shows the count.
 - **Prove each test goes red first**, and **fix production code, not the test**: assume the code is
   wrong until you have shown the test is.
 - **Take the cheapest rung that fails for the regression:** a pure function; a real SQLite file in a

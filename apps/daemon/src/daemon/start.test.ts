@@ -1215,7 +1215,7 @@ describe('startDaemon', () => {
     }
   });
 
-  it('starts no lane while the Mac is overloaded, raises one card naming what is busy, and starts the lane by itself once the load falls', async () => {
+  it('starts no lane while the Mac is overloaded, raises no card, and starts the lane by itself once the load falls', async () => {
     const repo = createTempRepo();
     let load = 100;
     const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
@@ -1258,9 +1258,10 @@ describe('startDaemon', () => {
         (await api.get('/inbox?state=OPEN', z.array(InboxItemDto))).filter((item) =>
           item.title.startsWith('The Mac is overloaded'),
         );
-      // The card is up once the overload is declared, so the task below starts into a hold.
-      const card = await waitForAsync(async () => (await overloadCards())[0]);
-      expect(card.body).toContain('pid 4242 (sh busy-loop.sh) at 99% of a core: not 10db’s');
+      // The hold is on once the overload is declared, so the task below starts into a hold.
+      await waitForAsync(async () =>
+        (await api.get('/admission', AdmissionDto)).holds.length > 0 ? true : undefined,
+      );
       const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
         title: 'Alpha',
         acceptanceCriteria: ['it works'],
@@ -1270,14 +1271,13 @@ describe('startDaemon', () => {
       expect(await daemon.scheduler.tick()).toBe(0);
       expect(specs).toEqual([]);
       expect(getWorkstream(daemon.state.db, ws.id).state).toBe('QUEUED');
-      expect(await overloadCards()).toHaveLength(1);
+      expect(await overloadCards()).toEqual([]);
       expect((await api.get('/admission', AdmissionDto)).holds.map((h) => h.kind)).toEqual([
         AdmissionHoldKind.Load,
       ]);
 
       load = 1;
       await waitFor(() => specs.length > 0);
-      await waitForAsync(async () => ((await overloadCards()).length === 0 ? true : undefined));
       expect((await api.get('/admission', AdmissionDto)).holds).toEqual([]);
     } finally {
       await daemon?.stop();
@@ -1344,45 +1344,44 @@ describe('startDaemon', () => {
     }
   });
 
-  it('withdraws an overload card left open when 10db restarted mid-overload', async () => {
+  it('withdraws an overload card an earlier version left open when 10db starts', async () => {
     const repo = createTempRepo();
-    const options = (load: number) => ({
-      sandbox: null,
-      dataDir: dir.path,
-      port: 0,
-      adapter: new FakeAdapter({}),
-      logLevel: 'warn' as const,
-      tickMs: 20,
-      ...QUIET,
-      load: {
-        read: () => ({ load, cores: 10 }),
-        processes: {
-          rows: () => Promise.resolve([]),
-          files: () => Promise.resolve(new Map<number, string[]>()),
-        },
-        sampleMs: 20,
-        sustainedMs: 0,
-      },
-    });
-    const overloadCards = async (api: ReturnType<typeof apiClient>) =>
-      (await api.get('/inbox?state=OPEN', z.array(InboxItemDto))).filter((item) =>
-        item.title.startsWith('The Mac is overloaded'),
-      );
+    const seeding = openDatabase(join(dir.path, '10db.sqlite'));
+    migrateDatabase(seeding, DB_MIGRATIONS_DIR);
+    const store = createStore(seeding);
+    const project = seedProject(store, { repoPath: repo.path });
+    store.write((ctx) =>
+      insertInboxItem(ctx, {
+        projectId: project.id,
+        kind: 'flag',
+        title: 'The Mac is overloaded: 10db is holding new lanes and gates',
+        body: 'Left by an earlier version.',
+        options: [{ label: 'Got it', description: '' }],
+        recommendation: null,
+        category: 'other',
+        urgency: 'normal',
+        detail: null,
+        foldKey: 'machine-overloaded',
+        targets: [],
+      }),
+    );
+    seeding.$client.close();
     try {
-      daemon = await startDaemon(options(100));
-      const before = apiClient(daemon.url, daemon.token);
-      await before.post('/projects', ProjectDto, {
-        name: 'demo',
-        repoPath: repo.path,
-        gateCommand: 'true',
-        defaultRigor: 'light',
-        areas: [{ name: 'src', globs: ['src/**'] }],
+      daemon = await startDaemon({
+        sandbox: null,
+        dataDir: dir.path,
+        port: 0,
+        adapter: new FakeAdapter({}),
+        logLevel: 'warn',
+        tickMs: 20,
+        ...QUIET,
       });
-      await waitForAsync(async () => (await overloadCards(before))[0]);
-      await daemon.stop();
-
-      daemon = await startDaemon(options(1));
-      expect(await overloadCards(apiClient(daemon.url, daemon.token))).toEqual([]);
+      const api = apiClient(daemon.url, daemon.token);
+      expect(
+        (await api.get('/inbox?state=OPEN', z.array(InboxItemDto))).filter((item) =>
+          item.title.startsWith('The Mac is overloaded'),
+        ),
+      ).toEqual([]);
     } finally {
       await daemon?.stop();
       daemon = null;

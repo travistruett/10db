@@ -13,6 +13,7 @@ import { createEventBus, createStateStore, type StateStore } from '../events';
 import { GhError, GhFailure } from '../github';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger, type Logger } from '../log';
+import { createStatusService, STATUS_HYSTERESIS_MS, type StatusService } from '../status';
 import {
   createSelfUpdate,
   SELF_UPDATE_APPLYING_KEY,
@@ -38,6 +39,7 @@ let close: () => void;
 let state: StateStore;
 let projectId: ProjectId;
 let clock: ManualClock;
+let statusService: StatusService;
 
 /** Everything the update asks of the outside world, scripted per test. */
 interface World {
@@ -90,6 +92,8 @@ function make(
     enabled?: boolean;
     cardProject?: ProjectId | null;
     headOf?: () => Promise<string>;
+    /** Whether `head` is ahead of `base`; the default answers from `world`. */
+    isAhead?: (repo: string, base: string, head: string) => Promise<boolean>;
     logger?: Logger;
     inbox?: InboxService;
   } = {},
@@ -97,6 +101,7 @@ function make(
   return createSelfUpdate({
     state,
     inbox: overrides.inbox ?? createInboxService({ state, onParkedAnswer: () => undefined }),
+    status: statusService,
     clock,
     logger: overrides.logger ?? silentLogger,
     runningCommit: overrides.runningCommit === undefined ? RUNNING : overrides.runningCommit,
@@ -108,16 +113,18 @@ function make(
       overrides.headOf ??
       (() =>
         world.head instanceof Error ? Promise.reject(world.head) : Promise.resolve(world.head)),
-    isAhead: (_repo, _base, head) => {
-      if (head === world.head) {
-        return world.ahead instanceof Error
-          ? Promise.reject(world.ahead)
-          : Promise.resolve(world.ahead);
-      }
-      return world.stagedAhead instanceof Error
-        ? Promise.reject(world.stagedAhead)
-        : Promise.resolve(world.stagedAhead);
-    },
+    isAhead:
+      overrides.isAhead ??
+      ((_repo, _base, head) => {
+        if (head === world.head) {
+          return world.ahead instanceof Error
+            ? Promise.reject(world.ahead)
+            : Promise.resolve(world.ahead);
+        }
+        return world.stagedAhead instanceof Error
+          ? Promise.reject(world.stagedAhead)
+          : Promise.resolve(world.stagedAhead);
+      }),
     stage: (target, running, skip, keep) => {
       world.calls.push('stage');
       world.stagedFrom.push(target.repo);
@@ -190,6 +197,7 @@ beforeEach(() => {
   state = createStateStore(test.store, createEventBus());
   projectId = seedProject(test.store).id;
   clock = new ManualClock();
+  statusService = createStatusService({ clock, onChange: () => undefined });
   world = {
     head: NEW,
     ahead: true,
@@ -667,6 +675,7 @@ describe('tick', () => {
 
 describe('a drain that only shaping conversations hold', () => {
   const DENSER = { id: mintId('Shape'), title: 'Denser board' };
+  const shapeLines = () => statusService.current().lines;
   const shapeCards = () =>
     listInbox(state.db, {}).filter((item) => item.title.startsWith('A shaping conversation'));
 
@@ -680,55 +689,52 @@ describe('a drain that only shaping conversations hold', () => {
     return update;
   }
 
-  it('raises no card at first: a turn is expected to end on its own', async () => {
+  /** Past the alert, then past the status line's own 2 minutes. */
+  async function shown(update: SelfUpdate) {
+    clock.advance(SHAPE_HOLD_ALERT_MS);
+    await update.tick();
+    clock.advance(STATUS_HYSTERESIS_MS);
+  }
+
+  it('says nothing at first: a turn is expected to end on its own', async () => {
     await (await drainingForShapes(DENSER)).tick();
+    clock.advance(STATUS_HYSTERESIS_MS);
+    expect(shapeLines()).toEqual([]);
+  });
+
+  it('shows one status line, and no card, naming the conversation that keeps lanes paused past the limit', async () => {
+    const update = await drainingForShapes(DENSER);
+    await shown(update);
+    const [line, ...rest] = shapeLines();
+    expect(rest).toEqual([]);
+    expect(line?.kind).toBe('update_hold');
+    expect(line?.line).toContain('“Denser board”');
+    expect(line?.details).toContain('“Denser board”');
+    expect(line?.details).toContain('press Stop');
+    // Stop only interrupts: a session that ignores it needs a way out that does not depend on it.
+    expect(line?.details).toContain(`turn ${SELF_UPDATE_SWITCH} off`);
+    expect(line?.details).toContain('quit 10db');
     expect(shapeCards()).toEqual([]);
   });
 
-  it('tells the builder, once, which conversation keeps lanes paused past the limit', async () => {
-    const update = await drainingForShapes(DENSER);
-    clock.advance(SHAPE_HOLD_ALERT_MS);
-    await update.tick();
-    const [card, ...rest] = shapeCards();
-    expect(rest).toEqual([]);
-    expect(card?.title).toBe('A shaping conversation is holding the update, and lanes are paused');
-    expect(card?.body).toContain('“Denser board”');
-    expect(card?.body).toContain('press Stop');
-    // Stop only interrupts: a session that ignores it needs a way out that does not depend on it.
-    expect(card?.body).toContain(`turn ${SELF_UPDATE_SWITCH} off`);
-    expect(card?.body).toContain('quit 10db');
-    clock.advance(SHAPE_HOLD_ALERT_MS);
-    await update.tick();
-    expect(shapeCards()).toHaveLength(1);
-  });
-
-  it('names every conversation that holds it', async () => {
-    const update = await drainingForShapes(DENSER, { id: mintId('Shape'), title: 'Login flow' });
-    clock.advance(SHAPE_HOLD_ALERT_MS);
-    await update.tick();
-    expect(shapeCards()[0]?.body).toMatch(/“Denser board”.*“Login flow”/);
-  });
-
-  it('names only the conversations still holding it once one of them ends', async () => {
+  it('names every conversation that holds it, then only those still holding it', async () => {
     const login = { id: mintId('Shape'), title: 'Login flow' };
     const update = await drainingForShapes(DENSER, login);
-    clock.advance(SHAPE_HOLD_ALERT_MS);
-    await update.tick();
+    await shown(update);
+    expect(shapeLines()[0]?.details).toMatch(/“Denser board”.*“Login flow”/);
     world.busy = 1;
     world.shapes = [login];
     await update.tick();
-    const open = shapeCards().filter((item) => item.state === InboxState.Open);
-    expect(open).toHaveLength(1);
-    expect(open[0]?.body).toContain('“Login flow”');
-    expect(open[0]?.body).not.toContain('“Denser board”');
+    expect(shapeLines()).toHaveLength(1);
+    expect(shapeLines()[0]?.details).toContain('“Login flow”');
+    expect(shapeLines()[0]?.details).not.toContain('“Denser board”');
   });
 
-  it('raises none while a lane or gate also holds the drain', async () => {
+  it('shows none while a lane or gate also holds the drain', async () => {
     const update = await drainingForShapes(DENSER);
     world.busy = 2;
-    clock.advance(SHAPE_HOLD_ALERT_MS);
-    await update.tick();
-    expect(shapeCards()).toEqual([]);
+    await shown(update);
+    expect(shapeLines()).toEqual([]);
   });
 
   it('does not count the time a lane held it before the conversation was the only holder', async () => {
@@ -737,50 +743,35 @@ describe('a drain that only shaping conversations hold', () => {
     world.waitLimitMs = 0;
     const update = make();
     await update.tick();
-    clock.advance(SHAPE_HOLD_ALERT_MS);
-    await update.tick();
-    expect(shapeCards()).toEqual([]);
+    await shown(update);
+    expect(shapeLines()).toEqual([]);
     world.busy = 1;
     await update.tick();
-    expect(shapeCards()).toEqual([]);
+    clock.advance(STATUS_HYSTERESIS_MS);
+    expect(shapeLines()).toEqual([]);
   });
 
-  it('closes the card once the turn ends and the install can go on', async () => {
+  it('lets the line go once the turn ends and the install can go on', async () => {
     const update = await drainingForShapes(DENSER);
-    clock.advance(SHAPE_HOLD_ALERT_MS);
-    await update.tick();
-    expect(shapeCards()).toHaveLength(1);
+    await shown(update);
+    expect(shapeLines()).toHaveLength(1);
     world.busy = 0;
     world.shapes = [];
     expect(await update.tick()).toBe('applying');
-    expect(shapeCards()[0]?.state).toBe(InboxState.Resolved);
+    clock.advance(STATUS_HYSTERESIS_MS);
+    expect(shapeLines()).toEqual([]);
   });
 
-  it('closes the card when the drain ends for another reason', async () => {
+  it('lets the line go when the drain ends for another reason', async () => {
     const update = await drainingForShapes(DENSER);
-    clock.advance(SHAPE_HOLD_ALERT_MS);
-    await update.tick();
+    await shown(update);
     await update.turnOff();
-    expect(shapeCards()[0]?.state).toBe(InboxState.Resolved);
-  });
-
-  it('raises a card again for a later hold', async () => {
-    const update = await drainingForShapes(DENSER);
-    clock.advance(SHAPE_HOLD_ALERT_MS);
-    await update.tick();
-    world.enabled = false;
-    await update.tick();
-    world.enabled = true;
-    await update.tick();
-    clock.advance(SHAPE_HOLD_ALERT_MS);
-    await update.tick();
-    clock.advance(SHAPE_HOLD_ALERT_MS);
-    await update.tick();
-    expect(shapeCards().filter((item) => item.state === InboxState.Open)).toHaveLength(1);
+    clock.advance(STATUS_HYSTERESIS_MS);
+    expect(shapeLines()).toEqual([]);
   });
 
   describe('after a restart', () => {
-    /** A card a run before this one left open, on `project`: nothing in this run holds it. */
+    /** A card an earlier version left open, on `project`: nothing in this run holds it. */
     function cardLeftOpen(project: ProjectId) {
       createInboxService({ state, onParkedAnswer: () => undefined }).flag({
         tier: 'ask',
@@ -826,15 +817,6 @@ describe('a drain that only shaping conversations hold', () => {
       };
       make({ inbox: refusing }).settle();
       expect(cards()).toHaveLength(1);
-    });
-
-    it('raises a card again if a hold really recurs', async () => {
-      cardLeftOpen(projectId);
-      make().settle();
-      const update = await drainingForShapes(DENSER);
-      clock.advance(SHAPE_HOLD_ALERT_MS);
-      await update.tick();
-      expect(shapeCards().filter((item) => item.state === InboxState.Open)).toHaveLength(1);
     });
   });
 });
@@ -2352,5 +2334,49 @@ describe('why an available update is not installing', () => {
     expect(update.status().notInstalling).toBe('unbuilt');
     finishStage({ ok: true, current: true, commit: RUNNING });
     await tick;
+  });
+});
+
+// Real SQLite: the failed-update card's closer is stored on the row and read back at the next start.
+describe('closeInstalled', () => {
+  const openCards = () => cards().filter((item) => item.state === InboxState.Open);
+
+  /** A failed update of `NEW`, then a start that runs `running`, where GitHub says `ahead` of the card's commit. */
+  async function startAfterFailure(running: string, ahead: boolean | Error): Promise<void> {
+    world.stage = () => Promise.resolve({ ok: false, step: 'download', message: 'offline' });
+    await make().tick();
+    expect(openCards()).toHaveLength(1);
+    await make({
+      runningCommit: running,
+      isAhead: (_repo, base, head) => {
+        expect([base, head]).toEqual([NEW, running]);
+        return ahead instanceof Error ? Promise.reject(ahead) : Promise.resolve(ahead);
+      },
+    }).closeInstalled();
+  }
+
+  it.each([
+    { name: 'the running commit is the failed one', running: NEW, ahead: false, closes: true },
+    {
+      name: 'the running commit is ahead of the failed one',
+      running: NEWER,
+      ahead: true,
+      closes: true,
+    },
+    {
+      name: 'the running commit is behind it, as after a rollback',
+      running: OLD_BUILD,
+      ahead: false,
+      closes: false,
+    },
+    {
+      name: 'GitHub cannot compare them',
+      running: NEWER,
+      ahead: new Error('offline'),
+      closes: false,
+    },
+  ])('$name: closes $closes', async ({ running, ahead, closes }) => {
+    await startAfterFailure(running, ahead);
+    expect(openCards()).toHaveLength(closes ? 0 : 1);
   });
 });

@@ -572,6 +572,12 @@ export interface Git extends ChatGit {
   operation<T>(fn: () => Promise<T>): Promise<T>;
   /** The branch HEAD names; null when HEAD is detached. */
   currentBranch(repo: string): Promise<string | null>;
+  /**
+   * The keys and values of config file text, as `git config --file <copy> --list` reads them, in file
+   * order, from a private copy that is removed after. Includes are not followed. Names are as git prints
+   * them: section and key lowercase.
+   */
+  configText(text: string): Promise<ReadonlyMap<string, readonly string[]>>;
   /** The URL of remote `name`; null when the repository has no such remote. */
   remoteUrl(repo: string, name: string): Promise<string | null>;
   /**
@@ -4252,6 +4258,25 @@ export function createGit(opts: GitOptions = {}): Git {
     },
     async currentBranch(repo) {
       return currentBranch(await pinned(repo));
+    },
+    async configText(text) {
+      const dir = mkdtempSync(join(tmpdir(), '10db-config-'));
+      try {
+        const file = join(dir, 'config');
+        writeFileSync(file, text, { mode: 0o600 });
+        const out = await runGit(dir, ['config', '--file', file, '--list', '-z'], { bin });
+        const values = new Map<string, string[]>();
+        for (const entry of out.split('\0')) {
+          if (entry === '') continue;
+          const newline = entry.indexOf('\n');
+          const name = newline === -1 ? entry : entry.slice(0, newline);
+          const value = newline === -1 ? '' : entry.slice(newline + 1);
+          values.set(name, [...(values.get(name) ?? []), value]);
+        }
+        return values;
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     },
     async remoteUrl(repo, name) {
       const c = await pinned(repo);

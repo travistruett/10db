@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { claudeIsInstalled } from './claude-is-installed';
+import { test } from './routed-test';
 import { daemonUrl } from './daemon-url';
 import { E2E_REPO, E2E_TOKEN } from './paths';
 

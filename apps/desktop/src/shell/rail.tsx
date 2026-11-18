@@ -15,6 +15,7 @@ import type { KeyboardEvent, MouseEvent, ReactElement, ReactNode } from 'react';
 import { useShapes } from '../daemon/shape-queries';
 import { firstAppSection } from '../views/settings/sections';
 import { AgentDownloadStatus } from './agent-download-status';
+import { StatusLineControl } from './status-line';
 import { ColorSchemeToggle } from './color-scheme-toggle';
 import { DaemonStatus } from './daemon-status';
 import { KeepAwakeControl } from './keep-awake-control';
@@ -185,6 +186,8 @@ function SectionLink({
 
 function RailControlView({ control }: { readonly control: RailControl }) {
   switch (control) {
+    case RailControl.Status:
+      return <StatusLineControl />;
     case RailControl.Download:
       return <AgentDownloadStatus />;
     case RailControl.Daemon:
