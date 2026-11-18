@@ -11,6 +11,7 @@ import {
 } from '../../test/chat-fixtures';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { projectViewDto } from '../../test/fixtures';
+import { closedTabs } from './closed-tabs';
 
 // Sessions' first screen: a fresh tab that starts a chat, and Recent and Start from beneath it.
 
@@ -336,6 +337,31 @@ describe('Sessions: the panel', () => {
     await waitFor(() => {
       expect(within(results).getAllByRole('button')).toHaveLength(1);
     });
+  });
+
+  it('a closed session opened from search leaves Recently closed', async () => {
+    const closedOne = chatIn(ampsio, 'Login flow', 0, { tabPosition: null });
+    const chats = [chatIn(ampsio, 'Login fails', 0), closedOne];
+    closedTabs.reset();
+    closedTabs.push({
+      chatId: closedOne.id,
+      projectId: ampsio.id,
+      title: closedOne.title,
+      position: 1,
+    });
+    open(`/sessions?chat=${chats[0]?.id ?? ''}`, { chats }, [
+      http.get(daemonUrl('/chats/search'), () =>
+        HttpResponse.json({ rows: [closedOne], next: null }),
+      ),
+    ]);
+    fireEvent.change(await screen.findByRole('textbox', { name: 'Search sessions' }), {
+      target: { value: 'login flow' },
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Login flow, ampsio, closed' }));
+    await waitFor(() => {
+      expect(closedTabs.list()).toEqual([]);
+    });
+    closedTabs.reset();
   });
 
   it('draws fewer than 250 rows for 1,000 sessions', async () => {
