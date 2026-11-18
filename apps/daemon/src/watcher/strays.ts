@@ -28,6 +28,41 @@ export function isSensitivePath(rel: string): boolean {
   return SENSITIVE_BASENAME.test(rel.slice(rel.lastIndexOf('/') + 1));
 }
 
+/** The file lefthook keeps in `.git/info` to decide whether to reinstall its hooks. */
+export const LEFTHOOK_CHECKSUM_PATH = '.git/info/lefthook.checksum';
+/** What lefthook writes there: a hash and a timestamp, nothing that runs or hides anything. */
+const LEFTHOOK_CHECKSUM_CONTENT = /^[0-9a-f]{32} \d+\s*$/;
+
+/** Whether a write to `rel` holding `content` is lefthook's checksum bookkeeping, which raises no card. */
+export function isLefthookChecksum(rel: string, content: string): boolean {
+  return rel === LEFTHOOK_CHECKSUM_PATH && LEFTHOOK_CHECKSUM_CONTENT.test(content);
+}
+
+/**
+ * The config keys git itself writes for `worktree add`, `push -u`, `branch --set-upstream-to` and
+ * `checkout -b`, as `git config --list` prints them (section and key lowercase): a branch's own section,
+ * the worktree section and the worktree-config extension.
+ */
+function isGitBookkeepingKey(name: string): boolean {
+  return (
+    /^branch\..+\.[^.]+$/.test(name) ||
+    name.startsWith('worktree.') ||
+    name === 'extensions.worktreeconfig'
+  );
+}
+
+/** The keys whose values differ between two parsed configs, git's own bookkeeping keys left out. */
+export function changedConfigKeys(
+  before: ReadonlyMap<string, readonly string[]>,
+  after: ReadonlyMap<string, readonly string[]>,
+): string[] {
+  const same = (a: readonly string[] | undefined, b: readonly string[] | undefined): boolean =>
+    a?.length === b?.length && (a ?? []).every((value, i) => value === b?.[i]);
+  return [...new Set([...before.keys(), ...after.keys()])].filter(
+    (name) => !isGitBookkeepingKey(name) && !same(before.get(name), after.get(name)),
+  );
+}
+
 /** Splits items so sensitive paths can get their own cards and never fold into a bulk card. */
 export function splitSensitive<T>(
   items: readonly T[],
