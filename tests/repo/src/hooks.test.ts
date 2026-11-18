@@ -6,12 +6,14 @@ import {
   createThrowawayRepo,
   isolatedGitEnvironment,
   fakeGithubToken,
+  LEFTHOOK_MISSING,
   SANDBOXED,
   type ThrowawayRepo,
 } from './fixtures';
 import { readRepoFile, repoRoot } from './workspace';
 
-const LEFTHOOK = resolve(repoRoot, 'node_modules/.bin/lefthook');
+// mise's lefthook, from PATH: the one the installed hooks name.
+const LEFTHOOK = 'lefthook';
 const COMMITLINT = resolve(repoRoot, 'node_modules/.bin/commitlint');
 // LEFTHOOK=0 in the caller's shell would silently skip every hook and pass these tests. The
 // isolated git environment keeps a contributor's global git config out of the throwaway repos.
@@ -22,7 +24,7 @@ function run(command: string, args: string[], cwd: string, input = '') {
   return { status: result.status, output: `${result.stdout}${result.stderr}` };
 }
 
-describe('lefthook.yml', () => {
+describe.skipIf(LEFTHOOK_MISSING)('lefthook.yml', () => {
   it('is a valid lefthook config', () => {
     expect(run(LEFTHOOK, ['validate'], repoRoot).status).toBe(0);
   });
@@ -35,10 +37,13 @@ describe('lefthook.yml', () => {
     expect(names('pre-commit')).toEqual(['gitleaks', 'hygiene', 'prettier', 'eslint', 'cargo-fmt']);
     expect(names('commit-msg')).toEqual(['commitlint']);
     expect(names('pre-push')).toEqual(['no-push-to-main', 'check']);
-    // Tests are CI's job: a push is not held for longer than the run it starts.
-    expect(readRepoFile('lefthook.yml')).toMatch(/\bmake precheck\n/);
-    expect(readRepoFile('lefthook.yml')).not.toMatch(/\bmake check\n/);
   });
+});
+
+// Tests are CI's job: a push is not held for longer than the run it starts.
+it('runs make precheck before a push, not make check', () => {
+  expect(readRepoFile('lefthook.yml')).toMatch(/\bmake precheck\n/);
+  expect(readRepoFile('lefthook.yml')).not.toMatch(/\bmake check\n/);
 });
 
 describe('commitlint', () => {
@@ -61,7 +66,7 @@ describe('commitlint', () => {
   });
 });
 
-describe('pre-commit in a throwaway repo', () => {
+describe.skipIf(LEFTHOOK_MISSING)('pre-commit in a throwaway repo', () => {
   let repo: ThrowawayRepo;
   const preCommit = (job: string) =>
     run(LEFTHOOK, ['run', 'pre-commit', '--job', job, '--no-auto-install', '--no-tty'], repo.dir);
