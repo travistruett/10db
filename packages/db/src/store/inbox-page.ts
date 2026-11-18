@@ -28,16 +28,20 @@ const sendIsOut = and(eq(sends.state, SendState.Sent), isNull(sends.returnedAt))
 /** The `$."key"` path of one key of a card's detail. */
 const detailPath = (key: string, field: string) => `$."${key}"."${field}"`;
 
+/** `CardResolution` in SQL: the card carries a resolution by 10db with a reason. */
+export const RESOLVED_BY_TEN_DB = sql`(
+  json_extract(${items.detail}, ${detailPath(CARD_RESOLUTION, 'by')}) = '10db'
+  AND json_type(${items.detail}, ${detailPath(CARD_RESOLUTION, 'reason')}) = 'text'
+  AND length(json_extract(${items.detail}, ${detailPath(CARD_RESOLUTION, 'reason')})) > 0
+)`;
+
 /**
  * `inboxOutcome` in SQL, with the same precedence: a Slack answer, then a resolution `CardResolution`
  * accepts (by 10db, with a reason), then anything else.
  */
 const OUTCOME = sql`CASE
   WHEN json_extract(${items.answer}, '$.via') = 'slack' THEN ${InboxOutcome.Slack}
-  WHEN json_extract(${items.detail}, ${detailPath(CARD_RESOLUTION, 'by')}) = '10db'
-    AND json_type(${items.detail}, ${detailPath(CARD_RESOLUTION, 'reason')}) = 'text'
-    AND length(json_extract(${items.detail}, ${detailPath(CARD_RESOLUTION, 'reason')})) > 0
-    THEN ${InboxOutcome.TenDb}
+  WHEN ${RESOLVED_BY_TEN_DB} THEN ${InboxOutcome.TenDb}
   ELSE ${InboxOutcome.Answered}
 END`;
 

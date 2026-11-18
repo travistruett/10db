@@ -194,6 +194,7 @@ import {
   GoalListDto,
 } from './goals';
 import { HumanTouchDayDto, HumanTouchDto } from './human-touch';
+import { CardTypeDto, CardTypesDto, CardTypeWindowDto } from './inbox-card-types';
 import { RigorFiguresDto, RigorFiguresRowDto } from './rigor-figures';
 import { HandoffInput } from './handoff';
 import { HealthResponse } from './health';
@@ -507,6 +508,9 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'goal-list-dto': GoalListDto,
   'human-touch-day-dto': HumanTouchDayDto,
   'human-touch-dto': HumanTouchDto,
+  'card-type-dto': CardTypeDto,
+  'card-type-window-dto': CardTypeWindowDto,
+  'card-types-dto': CardTypesDto,
   'rigor-figures-dto': RigorFiguresDto,
   'rigor-figures-row-dto': RigorFiguresRowDto,
   'plan-draft': PlanDraft,
