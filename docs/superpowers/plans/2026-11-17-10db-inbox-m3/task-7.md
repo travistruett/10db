@@ -115,6 +115,8 @@ export function nextSelection(keys: readonly string[], selected: string | null, 
    - `q` set and no rows → "No matches", and Clear Filters empties the URL's `q` and filters;
    - ⌘F focuses the search;
    - the URL `/inbox?state=resolved&q=x&kind=flag` opens Resolved with the search field and the menu showing them.
+   - open Resolved with a search, select the third row and scroll; go to Board, then back through the rail → the
+     same state, search, selected row and scroll (row 23; 6c covers Open).
 4. Implement, then make it green. Run `pnpm --filter @10db/desktop exec vitest related src/views/inbox --run
    --maxWorkers=2`. Then typecheck and lint the desktop, and `grep -rn "inbox-table\|row-keys\|ResolvedInbox\|
    WaitingInbox\|tableRows\|openEveryRow" apps/desktop/src` finds nothing.
