@@ -17,6 +17,7 @@ import { taskSessionKeys } from './task-session-queries';
 import { conversationKeys, liveKeys, writeLiveFrame } from './conversation-queries';
 import { githubKeys } from './github-queries';
 import { goalKeys } from './goal-queries';
+import { cardTypesKeys } from './card-types-queries';
 import { humanTouchKeys } from './human-touch-queries';
 import { rigorFiguresKeys } from './rigor-figures-queries';
 import { HAZARD_ASSESSMENT_KEY } from './hazard-queries';
@@ -108,7 +109,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   evidence: WORK,
   // An account pause moves workstreams, which send their own events.
   account: [accountKeys.all, modelKeys.all],
-  inbox: [queryKeys.inbox, ['workstreams'], goalKeys.all, humanTouchKeys.all],
+  inbox: [queryKeys.inbox, ['workstreams'], goalKeys.all, humanTouchKeys.all, cardTypesKeys.all],
   app_setting: [queryKeys.keepAwake, queryKeys.agentSkill],
   // Settings › People lists people and the routes each answers; Who Answers and a task's question routes
   // name them. Step plans, which only the batch sheet shows, are not read from people; they follow personas,

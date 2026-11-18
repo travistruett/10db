@@ -27,6 +27,7 @@ export * from './goals';
 export * from './handoff';
 export * from './hazard-assessment';
 export * from './human-touch';
+export * from './inbox-card-types';
 export * from './inbox-page';
 export { DevUiConnectionDto, HealthResponse } from './health';
 export * from './ids';

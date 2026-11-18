@@ -14,6 +14,7 @@ import { ProjectTile } from '../../shell/project-tile';
 import { useSelectedProject } from '../../shell/selected-project';
 import { BenchmarkSyncNote } from './benchmark-sync-note';
 import { GoalList } from './goal-list';
+import { CardTypesPanel } from './card-types-panel';
 import { HumanTouchPanel } from './human-touch-panel';
 import { RigorPanel } from './rigor-panel';
 import { UpdateDrainNote } from './update-drain-note';
@@ -63,6 +64,7 @@ export function FactoryView() {
         <>
           <RigorPanel projectId={only.id} />
           <HumanTouchPanel projectId={only.id} />
+          <CardTypesPanel projectId={only.id} />
         </>
       ) : shown.length > 1 ? (
         <Text size="sm" c="dimmed">
