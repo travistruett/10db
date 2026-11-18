@@ -30,6 +30,7 @@ import { evalDaemonEnv, type BuilderPlaces } from './daemon-env';
 import { fakeBookFor, type FakeCase } from './fake-book';
 import { checkLaneRules, dependencyFieldsDiffer, gateResultOf, outcomeOf, reviewOf } from './grade';
 import { EvalAgent, renderReport, type CaseReport, type CaseRun, type EvalReport } from './report';
+import { installSnapshotDependencies } from './snapshot-install';
 import { keepTranscripts } from './transcripts';
 
 /** Each case runs this many times, so a flip between runs shows how steady its outcome is. */
@@ -136,11 +137,7 @@ function prepareRepo(
   git(repo, ['commit', '-q', '-m', `Base of ${c.id} (${c.baseCommit})`]);
   git(repo, ['remote', 'add', 'origin', origin]);
   git(repo, ['push', '-q', 'origin', 'main']);
-  if (opts.agent === EvalAgent.Claude)
-    execFileSync('pnpm', ['install', '--frozen-lockfile', '--prefer-offline'], {
-      cwd: repo,
-      stdio: 'ignore',
-    });
+  if (opts.agent === EvalAgent.Claude) installSnapshotDependencies(repo);
   return { repo, origin };
 }
 
