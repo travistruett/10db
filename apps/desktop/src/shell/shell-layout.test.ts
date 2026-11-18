@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ShellBand, shellBand, shellLayout, type ShellLayout } from './shell-layout';
+import { ShellBand, shellBand, shellLayout, SidebarSheet, type ShellLayout } from './shell-layout';
 
 describe('shellBand', () => {
   it.each([
@@ -15,70 +15,98 @@ describe('shellBand', () => {
 });
 
 describe('shellLayout', () => {
+  type Input = Parameters<typeof shellLayout>[0];
+  const base: Input = {
+    band: ShellBand.Wide,
+    hasPanel: true,
+    panelHidden: false,
+    labels: true,
+    sheet: null,
+  };
   const rows: readonly {
     readonly name: string;
-    readonly input: Parameters<typeof shellLayout>[0];
+    readonly input: Input;
     readonly expected: ShellLayout;
   }[] = [
     {
-      name: 'wide with a panel shows both columns',
-      input: { band: ShellBand.Wide, hasPanel: true, panelHidden: false, overlayOpen: false },
-      expected: { rail: 'shown', panel: 'column' },
+      name: 'wide with labels and a panel shows a labelled rail and the panel',
+      input: base,
+      expected: { column: 'labelled', rail: 'column', labels: true, panel: 'column' },
+    },
+    {
+      name: 'wide with labels off shows the icons-only rail',
+      input: { ...base, labels: false },
+      expected: { column: 'icons', rail: 'column', labels: false, panel: 'column' },
     },
     {
       name: 'wide with a panel the builder hid keeps the rail only',
-      input: { band: ShellBand.Wide, hasPanel: true, panelHidden: true, overlayOpen: false },
-      expected: { rail: 'shown', panel: 'hidden' },
+      input: { ...base, panelHidden: true },
+      expected: { column: 'labelled', rail: 'column', labels: true, panel: 'hidden' },
     },
     {
-      name: 'wide ignores a stale overlay request',
-      input: { band: ShellBand.Wide, hasPanel: true, panelHidden: false, overlayOpen: true },
-      expected: { rail: 'shown', panel: 'column' },
-    },
-    {
-      name: 'medium folds the panel',
-      input: { band: ShellBand.Medium, hasPanel: true, panelHidden: false, overlayOpen: false },
-      expected: { rail: 'shown', panel: 'hidden' },
-    },
-    {
-      name: 'medium opens the panel over the content',
-      input: { band: ShellBand.Medium, hasPanel: true, panelHidden: false, overlayOpen: true },
-      expected: { rail: 'shown', panel: 'overlay' },
-    },
-    {
-      name: 'medium ignores the remembered hide',
-      input: { band: ShellBand.Medium, hasPanel: true, panelHidden: true, overlayOpen: true },
-      expected: { rail: 'shown', panel: 'overlay' },
-    },
-    {
-      name: 'narrow folds the rail and the panel',
-      input: { band: ShellBand.Narrow, hasPanel: true, panelHidden: false, overlayOpen: false },
-      expected: { rail: 'hidden', panel: 'hidden' },
-    },
-    {
-      name: 'narrow opens the rail and the panel together',
-      input: { band: ShellBand.Narrow, hasPanel: true, panelHidden: false, overlayOpen: true },
-      expected: { rail: 'overlay', panel: 'overlay' },
+      name: 'wide ignores a stale sheet request',
+      input: { ...base, sheet: SidebarSheet.Sections },
+      expected: { column: 'labelled', rail: 'column', labels: true, panel: 'column' },
     },
     {
       name: 'wide with no panel',
-      input: { band: ShellBand.Wide, hasPanel: false, panelHidden: false, overlayOpen: false },
-      expected: { rail: 'shown', panel: 'none' },
+      input: { ...base, hasPanel: false },
+      expected: { column: 'labelled', rail: 'column', labels: true, panel: 'none' },
     },
     {
-      name: 'medium with no panel',
-      input: { band: ShellBand.Medium, hasPanel: false, panelHidden: false, overlayOpen: true },
-      expected: { rail: 'shown', panel: 'none' },
+      name: 'medium keeps the icons rail whatever the labels preference says, and folds the panel',
+      input: { ...base, band: ShellBand.Medium },
+      expected: { column: 'icons', rail: 'column', labels: false, panel: 'hidden' },
+    },
+    {
+      name: 'medium opens the labelled sidebar as a sheet with the panel beside it',
+      input: { ...base, band: ShellBand.Medium, sheet: SidebarSheet.Sections },
+      expected: { column: 'icons', rail: 'sheet', labels: true, panel: 'sheet' },
+    },
+    {
+      name: 'medium opens the panel alone beside the icons rail',
+      input: { ...base, band: ShellBand.Medium, sheet: SidebarSheet.Panel },
+      expected: { column: 'icons', rail: 'column', labels: false, panel: 'sheet' },
+    },
+    {
+      name: 'medium ignores the remembered hide when a sheet opens',
+      input: { ...base, band: ShellBand.Medium, panelHidden: true, sheet: SidebarSheet.Panel },
+      expected: { column: 'icons', rail: 'column', labels: false, panel: 'sheet' },
+    },
+    {
+      name: 'medium with no panel opens the labelled sidebar alone',
+      input: { ...base, band: ShellBand.Medium, hasPanel: false, sheet: SidebarSheet.Sections },
+      expected: { column: 'icons', rail: 'sheet', labels: true, panel: 'none' },
+    },
+    {
+      name: 'medium with no panel has nothing for the panel key to open',
+      input: { ...base, band: ShellBand.Medium, hasPanel: false, sheet: SidebarSheet.Panel },
+      expected: { column: 'icons', rail: 'column', labels: false, panel: 'none' },
+    },
+    {
+      name: 'narrow folds the sidebar away',
+      input: { ...base, band: ShellBand.Narrow },
+      expected: { column: 'none', rail: 'hidden', labels: false, panel: 'hidden' },
+    },
+    {
+      name: 'narrow opens the icons rail and the panel together for a section with a panel',
+      input: { ...base, band: ShellBand.Narrow, sheet: SidebarSheet.Sections },
+      expected: { column: 'none', rail: 'sheet', labels: false, panel: 'sheet' },
+    },
+    {
+      name: 'narrow opens the panel key the same way',
+      input: { ...base, band: ShellBand.Narrow, sheet: SidebarSheet.Panel },
+      expected: { column: 'none', rail: 'sheet', labels: false, panel: 'sheet' },
     },
     {
       name: 'narrow with no panel folds the rail alone',
-      input: { band: ShellBand.Narrow, hasPanel: false, panelHidden: false, overlayOpen: false },
-      expected: { rail: 'hidden', panel: 'none' },
+      input: { ...base, band: ShellBand.Narrow, hasPanel: false },
+      expected: { column: 'none', rail: 'hidden', labels: false, panel: 'none' },
     },
     {
-      name: 'narrow with no panel opens the rail alone',
-      input: { band: ShellBand.Narrow, hasPanel: false, panelHidden: false, overlayOpen: true },
-      expected: { rail: 'overlay', panel: 'none' },
+      name: 'narrow with no panel opens the labelled rail alone',
+      input: { ...base, band: ShellBand.Narrow, hasPanel: false, sheet: SidebarSheet.Sections },
+      expected: { column: 'none', rail: 'sheet', labels: true, panel: 'none' },
     },
   ];
 
