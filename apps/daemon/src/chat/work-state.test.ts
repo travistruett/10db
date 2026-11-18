@@ -349,6 +349,23 @@ describe('a session on its own branch', () => {
       next: 'commit',
     });
   });
+
+  it('names the branch the worktree is on now, as a push and a pull request use it', async () => {
+    const chat = setup();
+    extra = tempDir('work-state-switched');
+    const path = join(realpathSync(extra.path), 'wt');
+    gitIn(repo.path, 'worktree', 'add', '-q', '-b', 'fix', path, 'HEAD');
+    w.state.write((ctx) =>
+      setChatWork(ctx, chat.id, null, {
+        place: WorkPlace.Branch,
+        branch: 'fix',
+        worktreePath: path,
+        baseHead: gitIn(repo.path, 'rev-parse', 'HEAD'),
+      }),
+    );
+    gitIn(path, 'switch', '-qc', 'other');
+    expect(await read(chat)).toMatchObject({ branch: 'other' });
+  });
 });
 
 describe('GET /chats/:chatId/work', () => {

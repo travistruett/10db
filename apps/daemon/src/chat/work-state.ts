@@ -143,12 +143,16 @@ export function createChatWorkStateReader(deps: ChatWorkStateDeps): ChatWorkStat
       const baseBranch = project.baseBranch;
 
       const checkoutBranch = await orElse(git.currentBranch(checkout), null);
+      // A branch session's worktree is read as it is now: its agent may have switched it, and a push or a pull
+      // request goes from the branch it is on.
       const branch =
-        place === WorkPlace.Branch || place === WorkPlace.Moving
+        place === WorkPlace.Moving
           ? chat.branch
-          : place === WorkPlace.Here && root !== checkout
-            ? await orElse(git.currentBranch(root), null)
-            : checkoutBranch;
+          : place === WorkPlace.Branch
+            ? ((writes ? await orElse(git.currentBranch(root), null) : null) ?? chat.branch)
+            : place === WorkPlace.Here && root !== checkout
+              ? await orElse(git.currentBranch(root), null)
+              : checkoutBranch;
 
       const touched = writes ? touchedBy(db, chat.conversationId, root) : [];
       const rootChanges = writes ? await orElse(git.changedPaths(root), []) : [];
