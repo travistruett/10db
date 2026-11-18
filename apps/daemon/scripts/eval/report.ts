@@ -1,6 +1,12 @@
 import { Rigor, Verdict } from '@10db/contracts';
 import { z } from 'zod';
-import { flipsAgainstBaseline, flipsBetweenRuns, type BaselineFlips } from './compare';
+import {
+  flipsAgainstBaseline,
+  flipsBetweenRuns,
+  keepRule,
+  type BaselineFlips,
+  type KeepRule,
+} from './compare';
 import { GateResult, LaneRule, Outcome } from './grade';
 
 /** Who plays the lanes: real Claude Code on the default account, or the scripted fake. */
@@ -38,6 +44,8 @@ export type CaseReport = z.infer<typeof CaseReport>;
 export const EvalReport = z.object({
   rigor: z.enum(Rigor),
   agent: z.enum(EvalAgent),
+  /** The rigor's plansInBuild setting the run forced; null when it ran on the playbook as it is. */
+  plansInBuild: z.boolean().nullable().default(null),
   startedAt: z.iso.datetime(),
   finishedAt: z.iso.datetime(),
   cases: z.array(CaseReport),
@@ -101,7 +109,21 @@ function row(label: string, runs: readonly CaseRun[], show = listed): string {
   return `| ${cells.join(' | ')} |`;
 }
 
-/** The report as the builder reads it: one row per case over its runs, a total, and what flipped. */
+/** Whether the change is kept against the baseline, and the counts and cases that decide it. */
+function keepLine(keep: KeepRule): string {
+  const counts = `${String(keep.met)} met runs against the baseline’s ${String(keep.baselineMet)}`;
+  if (keep.holds) return `**Holds**: ${counts}, and no case lost.`;
+  const lost =
+    keep.lostCases.length === 0
+      ? ''
+      : ` Lost (met in the baseline, in neither run now): ${keep.lostCases.join(', ')}.`;
+  return `**Fails**: ${counts}.${lost}`;
+}
+
+/**
+ * The report as the builder reads it: one row per case over its runs, a total, what flipped, and whether
+ * the keep rule holds against the baseline.
+ */
 export function renderReport(report: EvalReport, baseline: EvalReport | null): string {
   const flips = reportFlips(report, baseline);
   const allRuns = report.cases.flatMap((c) => c.runs);
@@ -123,8 +145,15 @@ export function renderReport(report: EvalReport, baseline: EvalReport | null): s
       .map((r) => `- ${c.id} run ${String(r.run)}: ${r.missingTranscripts.join(', ')}`),
   );
   const against = flips.againstBaseline;
+  const keep = baseline === null ? null : keepRule(outcomesOf(report), outcomesOf(baseline));
+  const setting =
+    report.plansInBuild === null
+      ? ''
+      : report.plansInBuild
+        ? ', plans in the Build session'
+        : ', plans in a Plan step';
   return [
-    `# Lane-pipeline eval: ${report.rigor}, ${report.agent} agent`,
+    `# Lane-pipeline eval: ${report.rigor}, ${report.agent} agent${setting}`,
     '',
     `Ran ${report.startedAt} to ${report.finishedAt}. Tokens are input / output / cached; a dash is a figure no session recorded.`,
     '',
@@ -150,6 +179,10 @@ export function renderReport(report: EvalReport, baseline: EvalReport | null): s
             ...against.added.map((id) => `- ${id}: not in the baseline`),
             ...against.dropped.map((id) => `- ${id}: in the baseline, not run now`),
           ]),
+    '',
+    '## Keep rule',
+    '',
+    keep === null ? 'No baseline report was given.' : keepLine(keep),
     '',
     '## Lane rules broken',
     '',

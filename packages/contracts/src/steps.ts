@@ -80,6 +80,11 @@ export const WorkstreamStep = z.object({
    */
   fixedPlan: z.literal(true).optional(),
   /**
+   * Set on a build step that writes its own plan before it builds, because its rigor plans in the Build
+   * session: the plan it records is the step's result. Absent otherwise.
+   */
+  plansFirst: z.literal(true).optional(),
+  /**
    * The provider session that last ran this step, so a send-back can resume it. Absent until a session of
    * the step has started.
    */
@@ -112,6 +117,31 @@ export const ROLE_LABEL: Readonly<Record<StepRole, string>> = {
   review: 'Reviewer',
   qa: 'QA',
 };
+
+/** A task's plan as the builder reads it, and the step that wrote it. */
+export interface TaskPlan {
+  readonly role: StepRole;
+  readonly personaName: string;
+  readonly summary: string;
+  /** When the plan was recorded. */
+  readonly at: string;
+}
+
+/** The latest plan a run recorded: a Plan step's result, or the one a build step that plans first wrote. */
+export function planOf(steps: readonly WorkstreamStep[]): TaskPlan | null {
+  const step = steps.findLast(
+    (s) =>
+      s.result !== null &&
+      (s.role === StepRole.Plan || (s.role === StepRole.Implement && s.plansFirst === true)),
+  );
+  if (!step?.result) return null;
+  return {
+    role: step.role,
+    personaName: step.personaName,
+    summary: step.result.summary,
+    at: step.result.at,
+  };
+}
 
 /** A stored plan has no step at the index; falling back would hand a read-only step edit access. */
 export class StepIndexError extends Error {

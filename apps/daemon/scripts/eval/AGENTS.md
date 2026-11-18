@@ -14,10 +14,13 @@ pipeline: change one thing, run the set, keep the change only if it scores the s
 | `make eval RIGOR=standard AGENT=fake`      | the fake agent: proves the plumbing, spends nothing  |
 | `make eval RIGOR=standard CASES=a,b`       | only the named case ids                              |
 | `make eval RIGOR=standard SAVE_BASELINE=1` | also saves the report as the rigor's baseline        |
+| `make eval RIGOR=careful PLANS_IN_BUILD=1` | the rigor plans in its Build session for the run     |
 
 `RIGOR` is `light`, `standard`, `careful` or `critical`. The CLI (`scripts/eval.ts`) also takes
 `--baseline=<report.json>`, `--parallel=<n>` (default 2) and `--case-timeout-minutes=<n>` (default 90).
-`scripts/eval.sh` refuses a real run in CI.
+`scripts/eval.sh` refuses a real run in CI. `PLANS_IN_BUILD=1` (or `0`; `--plans-in-build`) sets the rigor's
+`plansInBuild` on the eval daemon's global playbook once it starts, and the report records it; left out, the
+playbook runs as 10db ships it.
 
 **Recording the real baseline:** from a plain terminal signed in to Claude (not a 10db lane, whose
 sandbox can't read `~/.claude/projects`), run `make eval RIGOR=standard SAVE_BASELINE=1`. It starts
@@ -40,9 +43,10 @@ with it.
   runner polls the eval database read-only and answers only plan-approval cards.
 - The eval daemon keeps 10db's overload hold: on a busy Mac its lanes and gates wait, and wall time
   grows. Compare runs made on an otherwise quiet Mac.
-- The fake agent runs a script book built from the rigor's playbook rows (`fake-book.ts`): reviewers
-  approve and the implementer writes and commits `EVAL-FAKE-<id>.md` beside the first reference
-  path in the case's areas.
+- The fake agent runs a script book built from the steps the rigor resolves to on 10db's default
+  playbook, with `plansInBuild` applied (`fake-book.ts`): reviewers approve, a build that plans first
+  records a plan through `complete_step`, and the implementer writes and commits `EVAL-FAKE-<id>.md`
+  beside the first reference path in the case's areas.
 
 ## Grading
 
@@ -57,6 +61,14 @@ approved where the rigor has one, and all four lane rules held (`grade.ts`):
 Otherwise the outcome is `not_met`, `failed` (not DONE) or `timed_out`. There is no model-graded
 rubric of the diff yet; the reference diff is `git diff <baseCommit> <mergedCommit>` in this
 repository.
+
+## Keep rule
+
+With a baseline, the report's Keep rule section says whether a change is kept (`keepRule` in
+`compare.ts`): over the cases both reports have, the change's met runs are at least the baseline's,
+and no case met in at least one baseline run is met in neither run now. A case only one side has
+decides nothing. It names the counts and the cases lost. A pipeline change's report, with a brief for
+the builder, is kept in `apps/daemon/evals/lane-pipeline/reports/<date>-<change>.md`.
 
 ## Work dir
 

@@ -1274,6 +1274,7 @@ export const playbookRows = sqliteTable(
     reviewRounds: integer('review_rounds'),
     fixBy: text('fix_by').$type<FixBy>(),
     approvesPlan: integer('approves_plan', { mode: 'boolean' }),
+    plansInBuild: integer('plans_in_build', { mode: 'boolean' }),
     ships: text('ships').$type<Ships>(),
     updatedAt: updatedAt(),
   },

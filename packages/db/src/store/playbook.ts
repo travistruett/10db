@@ -26,6 +26,7 @@ export interface PlaybookRowOverride {
   readonly reviewRounds: number | null;
   readonly fixBy: FixBy | null;
   readonly approvesPlan: boolean | null;
+  readonly plansInBuild: boolean | null;
   readonly ships: Ships | null;
 }
 
@@ -55,6 +56,7 @@ export function getPlaybook(db: DbReader, projectId: ProjectId | null): Playbook
       reviewRounds: schema.playbookRows.reviewRounds,
       fixBy: schema.playbookRows.fixBy,
       approvesPlan: schema.playbookRows.approvesPlan,
+      plansInBuild: schema.playbookRows.plansInBuild,
       ships: schema.playbookRows.ships,
     })
     .from(schema.playbookRows)
@@ -107,6 +109,8 @@ export function setPlaybook(
       fixBy: row.fixBy === undefined ? (current?.fixBy ?? null) : row.fixBy,
       approvesPlan:
         row.approvesPlan === undefined ? (current?.approvesPlan ?? null) : row.approvesPlan,
+      plansInBuild:
+        row.plansInBuild === undefined ? (current?.plansInBuild ?? null) : row.plansInBuild,
       ships: row.ships === undefined ? (current?.ships ?? null) : row.ships,
     };
     if (Object.values(merged).every((field) => field === null)) {

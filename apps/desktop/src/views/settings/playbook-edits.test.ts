@@ -183,6 +183,20 @@ describe('processLine', () => {
       want: '2 rounds · fresh fix',
     },
     {
+      name: 'a row that plans in the Build session says so',
+      row: { ...row('careful'), plansInBuild: { value: true, source: 'global' as const } },
+      want: '2 rounds · fresh fix · the build plans first',
+    },
+    {
+      name: 'planning in the Build session is not shown where a plan review keeps the Plan step',
+      row: {
+        ...row('critical'),
+        approvesPlan: { value: false, source: 'global' as const },
+        plansInBuild: { value: true, source: 'global' as const },
+      },
+      want: '2 rounds · fresh fix',
+    },
+    {
       name: 'zero rounds',
       row: { ...row('standard'), reviewRounds: { value: 0, source: 'project' as const } },
       want: '0 rounds · resumed fix',

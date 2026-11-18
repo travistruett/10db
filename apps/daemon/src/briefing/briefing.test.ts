@@ -1159,6 +1159,30 @@ describe('buildSessionPrompt for flow steps', () => {
     expect(prompt).not.toContain('complete_step');
   });
 
+  const PLAN_FIRST =
+    'Plan first: before you edit a file, plan with the planning skill and record the plan with mcp__10db__complete_step (summary only). Then build it. If the plan changes, call it again with the new plan.';
+
+  it.each([
+    { name: 'a build step that plans first is told to', plansFirst: true, told: true },
+    { name: 'any other build step is not', plansFirst: false, told: false },
+  ])('$name plan first', ({ plansFirst, told }) => {
+    const step = plansFirst ? { ...implementStep, plansFirst } : implementStep;
+    const prompt = buildSessionPrompt({ ...base, step, action: { kind: 'start' } });
+    expect(prompt.includes(PLAN_FIRST)).toBe(told);
+    expect(prompt).toContain('When the acceptance criteria are met and committed, end your turn.');
+  });
+
+  it('shows a fix session of a build step that plans first its plan as its own', () => {
+    const prompt = buildSessionPrompt({
+      ...base,
+      step: { ...implementStep, plansFirst: true },
+      previousResult: result('1. Add the badge.', null),
+      action: { kind: 'start' },
+    });
+    expect(prompt).toContain('Your plan:\n1. Add the badge.');
+    expect(prompt).not.toContain('Your previous result');
+  });
+
   it('asks an implement step to run project commands in their plain form', () => {
     const prompt = buildSessionPrompt({ ...base, action: { kind: 'start' } });
     expect(prompt).toContain('Run project commands in their plain form');

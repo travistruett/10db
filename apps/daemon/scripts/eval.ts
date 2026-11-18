@@ -21,6 +21,8 @@ const Args = z.strictObject({
   cases: z.string().min(1).optional(),
   /** Writes the report as the rigor's baseline as well as into the work dir. */
   saveBaseline: z.enum(['0', '1']).default('0'),
+  /** Sets the rigor's plansInBuild for the run: 1 plans in the Build session, 0 in a Plan step. */
+  plansInBuild: z.enum(['0', '1']).optional(),
   /** The report to compare with; absent takes the rigor's saved baseline, if there is one. */
   baseline: z.string().min(1).optional(),
   parallel: z.coerce.number().int().min(1).max(8).default(2),
@@ -70,6 +72,7 @@ const report = await runEval({
   caseTimeoutMs: args.caseTimeoutMinutes * 60_000,
   builder: { dataDir: defaultDataDir(), worktreeBase: DEFAULT_WORKTREE_BASE },
   log: say,
+  ...(args.plansInBuild === undefined ? {} : { plansInBuild: args.plansInBuild === '1' }),
 });
 const { markdown } = writeRun({
   work,

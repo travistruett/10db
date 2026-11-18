@@ -7,6 +7,7 @@ describe('stepSkills', () => {
     name: string;
     persona: readonly string[] | null;
     kinds: readonly (readonly SkillName[])[];
+    plansFirst?: boolean;
     skills: readonly SkillName[];
   }>([
     { name: 'no persona and no kinds', persona: null, kinds: [], skills: [] },
@@ -44,11 +45,26 @@ describe('stepSkills', () => {
       skills: ['test-first'],
     },
     { name: 'a kind with none', persona: ['planning'], kinds: [[]], skills: ['planning'] },
-  ])('$name', ({ persona, kinds, skills }) => {
+    {
+      name: 'a build step that plans first adds planning last',
+      persona: ['test-first', 'handoff'],
+      kinds: [['brainstorming']],
+      plansFirst: true,
+      skills: ['test-first', 'handoff', 'brainstorming', 'planning'],
+    },
+    {
+      name: 'a build step that plans first names planning once',
+      persona: ['planning', 'test-first'],
+      kinds: [],
+      plansFirst: true,
+      skills: ['planning', 'test-first'],
+    },
+  ])('$name', ({ persona, kinds, plansFirst, skills }) => {
     expect(
       stepSkills(
         persona === null ? null : { skills: persona },
         kinds.map((k) => ({ skills: k })),
+        { plansFirst: plansFirst === true },
       ),
     ).toEqual(skills);
   });
