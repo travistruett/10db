@@ -195,7 +195,9 @@ describe('mergeRow', () => {
   });
 
   it('22: resolved inserts at the top, and a tie on the time places by id, descending', () => {
-    const [x, y, z] = [at(5), at(5), at(7)];
+    // Resolved rows sort by the time a card was last updated, so that is what these differ and tie on.
+    const resolvedAt = (n: number) => inboxItemDto({ createdAt: T(1), updatedAt: T(n) });
+    const [x, y, z] = [resolvedAt(5), resolvedAt(5), resolvedAt(7)];
     const [rx, ry, rz] = [x, y, z].map((item) => single(item, 'resolved'));
     if (!rx || !ry || !rz) throw new Error('rows');
     const top = mergeRow([page([rx])], 'resolved', { cardId: z.id, row: rz });

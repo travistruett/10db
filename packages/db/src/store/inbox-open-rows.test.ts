@@ -305,16 +305,44 @@ describe('openRowsPage: filters and search', () => {
     expect(answer.total).toBe(1);
   });
 
+  it('answers a card for its row when only another card of the row matches the search', () => {
+    const w = world();
+    const pass = mintId('Pass');
+    const a = w.ready(pass, 'Ready: retry parser');
+    const b = w.ready(pass, 'Ready: docs');
+    const answer = read({ q: 'retry', card: b });
+    expect(answer.rows.map((row) => row.ids)).toEqual([[a, b]]);
+    expect(read({ q: 'nothing', card: b }).rows).toEqual([]);
+  });
+
+  it('keeps the project and kind filters on the page after a row', () => {
+    const w = world();
+    const mine = [w.card('Mine 1'), w.card('Mine 2'), w.card('Mine 3')];
+    w.card('Elsewhere', { projectId: w.other.id });
+    w.flag('A flag');
+    const first = read({ project: w.project.id, kind: 'question', pageSize: '1' });
+    expect(first.items.map((i) => i.id)).toEqual([mine[0]]);
+    const second = read({
+      project: w.project.id,
+      kind: 'question',
+      pageSize: '5',
+      after: JSON.stringify(first.next),
+    });
+    expect(second.items.map((i) => i.id)).toEqual(mine.slice(1));
+  });
+
   it('matches a literal percent only, and folds ASCII case only', () => {
     const w = world();
     const pct = w.card('Used 50% of quota');
     w.card('Used 50 of quota');
     const retry = w.card('Please retry');
-    const accent = w.card('CafeÉ closed');
+    const accent = w.card('CAFÉ closed');
     expect(read({ q: '%' }).items.map((i) => i.id)).toEqual([pct]);
     expect(read({ q: 'RETRY' }).items.map((i) => i.id)).toEqual([retry]);
+    // Only ASCII letters fold: é does not match É, in either direction, while the same letters match.
     expect(read({ q: 'café' }).items.map((i) => i.id)).toEqual([]);
-    expect(accent).toBeDefined();
+    expect(read({ q: 'CAFé' }).items.map((i) => i.id)).toEqual([]);
+    expect(read({ q: 'cafÉ' }).items.map((i) => i.id)).toEqual([accent]);
   });
 });
 

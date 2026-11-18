@@ -30,7 +30,7 @@ export const RENDER_READS: readonly { readonly route: string }[] = [
   { route: '/conversations/:conversationId/live' },
   { route: '/workstreams' },
   { route: '/inbox' },
-  // The Inbox's Waiting and Resolved tables: one page of cards. A database read.
+  // The Inbox panel's rows and counts for Open, Waiting and Resolved: one page of rows. A database read.
   { route: '/inbox/page' },
   // A selected question's last messages. A database read.
   { route: '/inbox/:id/context' },

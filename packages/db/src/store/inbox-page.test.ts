@@ -87,7 +87,7 @@ function resolve(id: InboxItemId, over: Parameters<typeof updateInboxItem>[2] = 
 }
 
 /** A send to `recipients` that went out; `returned` brings it back. */
-function send(id: InboxItemId, recipients: PersonId[], returned = false) {
+function send(id: InboxItemId, recipients: PersonId[], returned = false, sentAt?: string) {
   const draft = store.write((ctx) =>
     insertDraft(ctx, { inboxItemId: id, recipients, text: 'Hi', hits: [] }),
   ).value;
@@ -100,7 +100,7 @@ function send(id: InboxItemId, recipients: PersonId[], returned = false) {
       threadTs: '100.1',
       messageTs: '100.1',
       permalink: 'https://x/p',
-      at: ctx.now,
+      at: sentAt ?? ctx.now,
     });
   });
   if (returned)
@@ -307,6 +307,28 @@ describe('pageInbox: keyset', () => {
     expect(walked.slice(0, 2).sort()).toEqual(['Tie a', 'Tie b']);
   });
 
+  it('walks cards that tie across a page seam, each once, in the browser merge order', () => {
+    const w = world();
+    const tied = ['Tie a', 'Tie b', 'Tie c'].map((title) => w.card(title));
+    store.write((ctx) => {
+      for (const id of tied) updateInboxItem(ctx, id, { state: 'RESOLVED' });
+    });
+    const byId = new Map(tied.map((id, n) => [id, `Tie ${'abc'[n] ?? ''}`]));
+    const expected = [...tied]
+      .sort()
+      .reverse()
+      .map((id) => byId.get(id));
+    expect(walk({ state: 'resolved', pageSize: '1' })).toEqual(expected);
+  });
+
+  it('walks Waiting cards sent at the same moment across a page seam, each once', () => {
+    const w = world();
+    const at = new Date(Date.UTC(2026, 10, 1, 5)).toISOString();
+    for (const title of ['Out a', 'Out b', 'Out c']) send(w.card(title), [w.mark.id], false, at);
+    const walked = walk({ state: 'waiting', pageSize: '1' });
+    expect(walked.toSorted()).toEqual(['Out a', 'Out b', 'Out c']);
+  });
+
   it('orders two cards that tie as the browser merge does', () => {
     const w = world();
     const a = w.card('Tie a');
@@ -355,6 +377,19 @@ describe('pageInbox: keyset', () => {
     const out = w.card('Waiting deploy');
     send(out, [w.mark.id]);
     expect(titles({ state: 'waiting', q: 'DEPLOY' })).toEqual(['Waiting deploy']);
+  });
+
+  it('answers a Waiting card only when its send went to the person asked', () => {
+    const w = world();
+    const toMark = w.card('To Mark');
+    send(toMark, [w.mark.id]);
+    send(w.card('To Ana'), [w.ana.id]);
+    const ask = (person: PersonId) =>
+      pageInbox(store.db, InboxPageQuery.parse({ state: 'waiting', card: toMark, person }), {
+        waitingOut: false,
+      }).items.map((item) => item.id);
+    expect(ask(w.mark.id)).toEqual([toMark]);
+    expect(ask(w.ana.id)).toEqual([]);
   });
 
   it('answers one row for a card in the list and none for a card in another', () => {
