@@ -88,7 +88,7 @@ export interface ChatWorkService {
   /** The facts the title row and the bar are drawn from, read now from the session's root. */
   state(chatId: ChatId, signal: AbortSignal): Promise<ChatWorkStateDto>;
   /** A pull request of the session's branch was opened or merged: its next read asks GitHub afresh. */
-  forgetPullRequest(chatId: ChatId): void;
+  forgetPullRequest(chatId: ChatId, branch?: string): void;
   /** Why the last move of this session failed, in the bar's words; null once it works or before any move. */
   moveFailure(chatId: ChatId): string | null;
   /** Resolves once the session's move, if one runs, has ended; for a caller that must not act mid-move. */
@@ -392,9 +392,10 @@ export function createChatWorkService(deps: ChatWorkServiceDeps): ChatWorkServic
     },
 
     state: (chatId, signal) => deps.facts.read(chatId, signal, failures.get(chatId) ?? null),
-    forgetPullRequest(chatId) {
+    forgetPullRequest(chatId, branch) {
       const chat = getChat(state.db, chatId);
-      if (chat.branch !== null) deps.facts.forgetPullRequest(chat.projectId, chat.branch);
+      const named = branch ?? chat.branch;
+      if (named !== null) deps.facts.forgetPullRequest(chat.projectId, named);
     },
     moveFailure: (chatId) => failures.get(chatId) ?? null,
     moveSettled: async (chatId) => {

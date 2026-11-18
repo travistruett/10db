@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { basename, isAbsolute, join, normalize, sep } from 'node:path';
-import { InvalidError } from '@10db/contracts';
+import { ConflictError, InvalidError } from '@10db/contracts';
 import { foldPathCase, isSecretFileName } from '../guard';
 import type { NetworkCall, NetworkRun } from './network';
 import { GitError } from './run';
@@ -255,8 +255,20 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
         const branch = await localBranch(c, input.name);
         const base = await localBranch(c, input.base);
         await input.beforeWrite?.();
+        // Nothing is written unless the folder is as the caller saw it: on `base`, at `expectedOld`, with `to` in
+        // that commit's history. Otherwise the new branch would take another branch's commits and `base` lose its own.
+        const found = await ctx.currentBranch(c);
+        if (found !== base)
+          throw new ConflictError(
+            `Your folder is not on ${base} any more (it is on ${found ?? 'no branch'}), so nothing was moved.`,
+          );
         const head = await ctx.revParse(c, 'HEAD^{commit}');
-        if (head === null) throw new InvalidError('Your folder has no commit to branch from');
+        if (head === null || head !== input.expectedOld)
+          throw new ConflictError(`${base} has moved since it was read, so nothing was moved.`);
+        if (!(await ctx.isAncestor(c, input.to, head)))
+          throw new ConflictError(
+            `${input.to} is not an ancestor of ${base}'s commits, so ${base} was not moved.`,
+          );
         const ref = `refs/heads/${branch}`;
         await said(
           () => ctx.git(c, ['update-ref', '--no-deref', ref, head, '0'.repeat(head.length)]),
