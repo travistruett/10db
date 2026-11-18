@@ -274,13 +274,30 @@ export function ChatTab({
   const stopNow = (): void => {
     stop.mutate(chat.conversationId);
   };
-  const latest = useRef({ working, stopNow });
+  const closeChanges = (): void => {
+    changesChoice.set(chat.id, false);
+    setChangesOpen(false);
+  };
+  const latest = useRef({ working, stopNow, changesOpen, closeChanges });
   useEffect(() => {
-    latest.current = { working, stopNow };
+    latest.current = { working, stopNow, changesOpen, closeChanges };
   });
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape' || !latest.current.working) return;
+      if (event.key !== 'Escape') return;
+      // The Changes drawer is a dialog that is not modal: Esc closes it wherever focus is, before it can
+      // read as a layer that owns the key or as a Stop.
+      if (latest.current.changesOpen && !event.defaultPrevented && !escapeHasOwner(event)) {
+        const others = [...document.querySelectorAll('[role="dialog"]')].some(
+          (d) => d.getAttribute('aria-modal') !== 'false',
+        );
+        if (!others && document.querySelector('[role="menu"]') === null) {
+          event.preventDefault();
+          latest.current.closeChanges();
+          return;
+        }
+      }
+      if (!latest.current.working) return;
       if (escapeIsTaken(event) || escapeHasOwner(event)) return;
       event.preventDefault();
       latest.current.stopNow();

@@ -1,4 +1,4 @@
-import { mintId, TaskId } from '@10db/contracts';
+import { mintId, TaskId, type ChatDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -51,10 +51,16 @@ function open(
   options: Omit<ChatServerOptions, 'chats'> = { changes: changed },
   chatCount = 1,
   path?: string,
+  conversation?: Partial<ChatDto['conversation']>,
 ) {
-  const chats = ['Login fails', 'Billing page']
-    .slice(0, chatCount)
-    .map((title, tabPosition) => chatDto({ projectId: project.id, title, tabPosition }));
+  const chats = ['Login fails', 'Billing page'].slice(0, chatCount).map((title, tabPosition) =>
+    chatDto({
+      projectId: project.id,
+      title,
+      tabPosition,
+      ...(conversation === undefined ? {} : { conversation }),
+    }),
+  );
   const served = chatServer({
     chats,
     work: Object.fromEntries(chats.map((c) => [c.id, chatWorkStateDto()])),
@@ -82,6 +88,27 @@ describe('a session’s Changes', () => {
     await waitFor(() => {
       expect(drawer()).toBeNull();
     });
+  });
+
+  it('Esc closes the drawer from the composer, and sends no stop to a running turn', async () => {
+    const stops: string[] = [];
+    server.use(
+      http.post(daemonUrl('/conversations/:conversationId/stop'), ({ params }) => {
+        stops.push(String(params['conversationId']));
+        return HttpResponse.json({}, { status: 500 });
+      }),
+    );
+    open({ changes: changed }, 1, undefined, { state: 'running' });
+    await screen.findByRole('button', { name: /^Changes/ });
+    toggle();
+    await screen.findByRole('dialog', { name: 'Changes' });
+    const box = await screen.findByRole('textbox', { name: 'Message' });
+    box.focus();
+    fireEvent.keyDown(box, { key: 'Escape' });
+    await waitFor(() => {
+      expect(drawer()).toBeNull();
+    });
+    expect(stops).toEqual([]);
   });
 
   it('offers no Changes button while nothing changed', async () => {
