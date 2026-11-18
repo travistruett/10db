@@ -85,6 +85,12 @@ export function chatGitTools(deps: ChatGitToolsDeps, session: ChatGitSession) {
         throw new ConflictError(
           'This session has no worktree now, so it changes no git state until it is reopened.',
         );
+      // The agent can switch its worktree to any branch git lets it, so the branch is read each time.
+      const head = await deps.git.currentBranch(worktree);
+      if (head !== null && isTenDbBranch(head))
+        throw new ConflictError(
+          `This session's worktree is on ${head}, which is 10db's own, so a chat changes no git state there.`,
+        );
       return { repo: worktree, sharedWith: [] };
     }
     if (!deps.folderHold.holdsTurn(chatId)) {

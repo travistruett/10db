@@ -395,6 +395,20 @@ describe('a session on its own branch', () => {
     expect(rg('ls-files', '--others', '--exclude-standard')).toBe('builders.txt');
   });
 
+  it.each([
+    ['commit_changes', (t: Tools) => t.commit_changes({ message: 'x' })],
+    ['push_branch', (t: Tools) => t.push_branch({})],
+    ['make_branch', (t: Tools) => t.make_branch({ name: 'topic' })],
+  ])('%s refuses once its worktree is switched to one of 10db’s branches', async (_name, call) => {
+    const { me, worktree } = branchChat();
+    rg('branch', '10db/batch-abc123');
+    inWorktree(worktree, 'switch', '-q', '10db/batch-abc123');
+    writeFileSync(join(worktree, 'a.ts'), 'a\n');
+    const before = inWorktree(worktree, 'rev-parse', 'HEAD');
+    await expect(call(tools(me))).rejects.toThrow(/10db's own/);
+    expect(inWorktree(worktree, 'rev-parse', 'HEAD')).toBe(before);
+  });
+
   it('refuses a call from a session that has ended, as a Here session does', async () => {
     const { me } = branchChat();
     await expect(tools(me, false).commit_changes({ message: 'x' })).rejects.toThrow(
