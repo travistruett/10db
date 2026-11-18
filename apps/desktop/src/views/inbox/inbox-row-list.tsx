@@ -66,17 +66,16 @@ export function InboxRowList<T extends { readonly key: string }>({
     estimateSize: () => ROW_HEIGHT_PX,
     getItemKey: (index) => rows[index]?.key ?? 'more',
     overscan: OVERSCAN_ROWS,
+    initialOffset: initialScroll,
   });
 
   // Where the builder left the list: restored once there are rows to scroll over, which is the first draw when
   // the list was cached and a later one when it had to load again.
   const hasRows = rows.length > 0;
   const restored = useRef(initialScroll <= 0);
-  const justRestored = useRef(false);
   useLayoutEffect(() => {
     if (restored.current || !hasRows || viewport.current === null) return;
     restored.current = true;
-    justRestored.current = true;
     viewport.current.scrollTop = initialScroll;
     // Only the first rows restore the scroll.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -87,15 +86,19 @@ export function InboxRowList<T extends { readonly key: string }>({
   const arrived = useRef(false);
   // Whether focus is on a row: a row that leaves while focused gives no blur, so this is what remembers it.
   const listHasFocus = useRef(false);
+  // The restored scroll is the position to keep until the selection moves to another row. Comparing the key,
+  // not a flag cleared by an effect, keeps it when React runs a mount's effects twice.
+  const keeping = useRef(initialScroll > 0);
+  const seen = useRef(selected);
   useEffect(() => {
-    // The restored scroll is the position to keep.
-    if (selectedIndex >= 0 && !justRestored.current) virtualizer.scrollToIndex(selectedIndex);
+    if (selectedIndex < 0) return;
+    if (keeping.current && seen.current === selected) return;
+    keeping.current = false;
+    seen.current = selected;
+    virtualizer.scrollToIndex(selectedIndex);
     // The virtualizer is stable; only the selection moving scrolls.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedIndex]);
-  useEffect(() => {
-    justRestored.current = false;
-  });
 
   // Focus moves with the selection only while it is on a row or not yet anywhere in the page's content: a
   // click or a Tab elsewhere is left alone.
