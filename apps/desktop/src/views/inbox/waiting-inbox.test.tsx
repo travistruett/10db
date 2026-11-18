@@ -262,6 +262,19 @@ describe('the Waiting tab', () => {
     });
   });
 
+  it('closes an open Take It Back question when another row is selected, so it never takes back that one', async () => {
+    const calls = serve([card({}), card({}, { title: 'Which date?' })]);
+    renderApp('/inbox?state=waiting');
+    fireEvent.click(await screen.findByRole('button', { name: 'Take It Back' }));
+    await screen.findByRole('dialog');
+    const other = await findPanelRow('Which date?');
+    fireEvent.click(other);
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    expect(calls).toEqual([]);
+  });
+
   it('Answer Myself answers with an option', async () => {
     const calls = serve([card({})]);
     renderApp('/inbox?state=waiting');

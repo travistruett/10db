@@ -42,7 +42,7 @@ export function OpenContent({
       {empty ? (
         <InboxEmpty empty="Nothing needs you" narrowed={narrowed} onClear={onClearFilters} />
       ) : null}
-      {row === null ? null : <Selected row={row} card={card} />}
+      {row === null ? null : <Selected key={row.key} row={row} card={card} />}
     </Stack>
   );
 }

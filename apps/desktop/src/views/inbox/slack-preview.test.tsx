@@ -36,9 +36,15 @@ function card(send: Record<string, unknown>, over: Partial<InboxItemDto> = {}): 
 }
 
 function serve(item: InboxItemDto, builder = BUILDER_PERSON) {
+  return serveAll([item], builder);
+}
+
+function serveAll(items: InboxItemDto[], builder = BUILDER_PERSON) {
+  const [item] = items;
+  if (item === undefined) throw new Error('no card to serve');
   const posted: { path: string; body: unknown }[] = [];
   server.use(
-    http.get(daemonUrl('/inbox'), () => HttpResponse.json([item])),
+    http.get(daemonUrl('/inbox'), () => HttpResponse.json(items)),
     http.get(daemonUrl('/people'), () => HttpResponse.json([builder, mark, ana, priya])),
     http.post(daemonUrl('/inbox/:id/send'), async ({ request }) => {
       posted.push({ path: 'send', body: await request.json() });
@@ -50,7 +56,7 @@ function serve(item: InboxItemDto, builder = BUILDER_PERSON) {
     }),
     ...baseHandlers(),
   );
-  serveOpenRows(() => [item]);
+  serveOpenRows(() => items);
   renderApp('/inbox');
   return posted;
 }
@@ -91,6 +97,24 @@ describe('a card with a draft', () => {
     fireEvent.click(screen.getByRole('button', { name: /Send to Mark/ }));
     await waitFor(() => {
       expect(posted).toEqual([{ path: 'send', body: { text: 'new text' } }]);
+    });
+  });
+
+  it("keeps one card's edited message off the next card, and sends the next card's own text", async () => {
+    const posted = serveAll([
+      card({ text: 'first text' }, { title: 'First question?' }),
+      card({ text: 'second text' }, { title: 'Second question?' }),
+    ]);
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message' }), {
+      target: { value: 'edited first' },
+    });
+    key('j');
+    expect(await findText(/second text/)).toBeTruthy();
+    expect(queryText(/edited first/)).toBeNull();
+    key('Enter', { metaKey: true });
+    await waitFor(() => {
+      expect(posted).toEqual([{ path: 'send', body: {} }]);
     });
   });
 

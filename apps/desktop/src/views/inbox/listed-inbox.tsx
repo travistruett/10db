@@ -134,9 +134,9 @@ function Rows({
           />
         ) : null}
         {item === null ? null : state === InboxListState.Waiting ? (
-          <WaitingContent item={item} />
+          <WaitingContent key={item.id} item={item} />
         ) : (
-          <ResolvedContent item={item} />
+          <ResolvedContent key={item.id} item={item} />
         )}
       </Stack>
     </>
