@@ -60,6 +60,17 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
     fellBack: 'the review ran',
     mode: DecisionMode.Acting,
   },
+  [JudgeDecision.TestValue]: {
+    group: DecisionGroup.Delivery,
+    label: 'Tests a step added',
+    asks: 'For each test a step’s commits added: does it earn its place, or does it duplicate a test that exists, fold into one, or belong at a cheaper level?',
+    onAnswer:
+      'Keep: nothing happens. Anything else: a task with no review gets one follow-up task for each; with a review, the reviewer is told. It never blocks or fails a step.',
+    whenUnsure: 'Counted as Keep.',
+    fellBack: 'nothing was flagged',
+    mode: DecisionMode.Acting,
+    note: 'Each new test goes to the model through OpenRouter with its commit’s value card, the tests next to it and the names of the files it imports.',
+  },
   [JudgeDecision.CrossesLimit]: {
     group: DecisionGroup.Trust,
     label: 'Limits',
