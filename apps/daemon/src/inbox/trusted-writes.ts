@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   InboxKind,
@@ -44,17 +44,66 @@ const TrustedWrites = z.array(TrustedWrite);
 
 const settingKey = (projectId: ProjectId): string => `trusted_writes.${projectId}`;
 
-/** The sha256 of a regular file in a checkout; null for a missing file, a link, a directory or a huge file. */
-export function stampFile(root: string, rel: string): string | null {
-  const path = join(root, rel);
+/** What `readSmallFile` found at a path. */
+export type SmallRead =
+  | { readonly kind: 'file'; readonly bytes: Buffer }
+  | { readonly kind: 'missing' }
+  /** Something is there that is not a regular file within the size limit: a link, a FIFO, a directory, a huge file. */
+  | { readonly kind: 'unreadable' };
+
+/**
+ * A regular file's bytes. The open is non-blocking and refuses a link at the path (O_NOFOLLOW), and the
+ * kind and size come from the open descriptor, so a FIFO or a link swapped in after a look never blocks
+ * the daemon and is never followed. The synchronous twin of the stamp read in `watcher/allowed-writes.ts`,
+ * for callers inside a transaction.
+ */
+export function readSmallFile(path: string, maxBytes: number): SmallRead {
+  let fd: number;
   try {
-    const info = lstatSync(path);
-    if (!info.isFile() || info.size > MAX_STAMPED_BYTES) return null;
-    return createHash('sha256').update(readFileSync(path)).digest('hex');
+    fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? { kind: 'missing' } : { kind: 'unreadable' };
+  }
+  try {
+    const info = fstatSync(fd);
+    if (!info.isFile() || info.size > maxBytes) return { kind: 'unreadable' };
+    const bytes = Buffer.allocUnsafe(info.size);
+    let filled = 0;
+    while (filled < bytes.length) {
+      const read = readSync(fd, bytes, filled, bytes.length - filled, null);
+      if (read === 0) break;
+      filled += read;
+    }
+    return { kind: 'file', bytes: bytes.subarray(0, filled) };
   } catch {
-    return null;
+    return { kind: 'unreadable' };
+  } finally {
+    closeSync(fd);
   }
 }
+
+/** The sha256 of some bytes, as a card's stamp. */
+export const shaOf = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex');
+
+/** The sha256 of a regular file in a checkout; null for a missing file, a link, a directory or a huge file. */
+export function stampFile(root: string, rel: string): string | null {
+  const read = readSmallFile(join(root, rel), MAX_STAMPED_BYTES);
+  return read.kind === 'file' ? shaOf(read.bytes) : null;
+}
+
+/** Whether anything, a link included, is at the path. */
+function existsAsEntry(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The first 12 hex digits of a stamp, as a card shows it. */
+export const shortSha = (sha: string): string => sha.slice(0, 12);
 
 /** What a stray-write card carries so its answer can trust the version it showed. */
 export function stampDetail(root: string, sha256: string, foldKey: string): Record<string, Json> {
@@ -117,8 +166,15 @@ export function applyTrustChoice(
   )
     return null;
   const now = stampFile(root, path);
-  if (now === null) return null;
+  // A file gone has nothing to trust. One that is still there but can't be stamped (swapped for a link, grown
+  // huge) is never closed silently: its card comes back with no trust choice.
+  if (now === null && !existsAsEntry(join(root, path))) return null;
   if (now !== stamped) {
+    const rest = Object.fromEntries(
+      Object.entries(item.detail ?? {}).filter(([key]) => key !== SHA_DETAIL),
+    );
+    // The old body named what the old version changed, so it is not reused: the first line is the path.
+    const body = `${item.body.split('\n')[0] ?? path}\nChanged after this card was raised`;
     return {
       projectId: item.projectId,
       tier: CardTier.Ask,
@@ -126,9 +182,12 @@ export function applyTrustChoice(
       closesWhen: BY_ANSWER,
       workstreamId: item.targets[0]?.workstreamId ?? null,
       title: item.title,
-      body: item.body,
-      detail: { ...item.detail, ...stampDetail(root, now, foldKey) },
-      options: item.options,
+      body: now === null ? body : `${body}\nVersion ${shortSha(now)}`,
+      detail: now === null ? rest : { ...rest, ...stampDetail(root, now, foldKey) },
+      options:
+        now === null
+          ? [{ label: TrustChoice.Dismiss, description: 'Close this card only' }]
+          : item.options,
       foldKey,
     };
   }

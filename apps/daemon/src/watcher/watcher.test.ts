@@ -16,6 +16,7 @@ import { dirname, join } from 'node:path';
 import {
   AbandonStep,
   ClaimKind,
+  ConflictError,
   EventType,
   mintId,
   WHOLE_PROJECT_PAGE,
@@ -179,8 +180,12 @@ function running(title = 'Alpha', areas = ['api']): { task: TaskDto; workstream:
   return seeded;
 }
 
-const flags = (): InboxItemDto[] =>
+const openFlags = (): InboxItemDto[] =>
   listInbox(base.db, { states: ['OPEN'] }).filter((i) => i.kind === 'flag');
+// A stamped card ends its body with the short stamp of the version it shows; most tests are about the rest.
+const VERSION_LINE = /\nVersion [0-9a-f]{12}$/;
+const flags = (): InboxItemDto[] =>
+  openFlags().map((i) => ({ ...i, body: i.body.replace(VERSION_LINE, '') }));
 const emit = (rel: string) => {
   fake.open.get(repo.path)?.onChange(rel);
 };
@@ -1354,7 +1359,7 @@ describe("a pass's shared change, kept as its turn ended", () => {
   const strayBodies = (): string[] =>
     listInbox(w.h.store.db, { states: ['OPEN'] })
       .filter((i) => i.kind === 'flag')
-      .map((i) => i.body);
+      .map((i) => i.body.replace(VERSION_LINE, ''));
 
   /**
    * Settings' turn held shared `src`, wrote `src/button.ts` (dirty before the pass), and ended Ready: its end kept the change on
@@ -3737,6 +3742,9 @@ describe('stray writes in .git', () => {
     await watcher.flush();
     const [card] = flags();
     expect(card?.detail?.['sha256']).toBe(stampFile(repo.path, HOOK));
+    expect(openFlags()[0]?.body).toMatch(
+      new RegExp(`\\nVersion ${String(stampFile(repo.path, HOOK)).slice(0, 12)}$`),
+    );
     expect(card?.options.map((o) => o.label)).toEqual(['Trust This Version', 'Dismiss']);
 
     trust(card?.id ?? ('' as InboxItemDto['id']));
@@ -3749,7 +3757,7 @@ describe('stray writes in .git', () => {
 
     writeHook('#!/bin/sh\necho b\n');
     await watcher.flush();
-    expect(flags().map((f) => f.body)).toEqual([HOOK]);
+    expect(flags().map((f) => f.body.split('\n')[0])).toEqual([HOOK]);
   });
 
   it('does not trust a hook rewritten while its card was open, and shows the new version', async () => {
@@ -3768,7 +3776,7 @@ describe('stray writes in .git', () => {
     expect(open[0]?.id).not.toBe(card?.id);
     expect(open[0]?.detail?.['sha256']).toBe(stampFile(repo.path, HOOK));
 
-    // A rewrite seen by the watcher refreshes the open card's stamp in place.
+    // A rewrite seen by the watcher replaces the open card with one holding the new stamp.
     writeHook('#!/bin/sh\necho c\n');
     await watcher.flush();
     expect(flags()[0]?.detail?.['sha256']).toBe(stampFile(repo.path, HOOK));
@@ -3805,5 +3813,62 @@ describe('stray writes in .git', () => {
     const [card] = flags();
     expect(card?.body).toContain('.git/config');
     expect(card?.body.toLowerCase()).toContain('core.hookspath');
+  });
+
+  it('names the keys of the first config change when a second write refreshes the card', async () => {
+    running();
+    watcher.sync();
+    git(repo.path, 'config', 'core.hooksPath', 'x');
+    emit('.git/config');
+    await watcher.flush();
+    const [first] = flags();
+    git(repo.path, 'config', 'user.name', 'someone');
+    emit('.git/config');
+    await watcher.flush();
+    const open = flags();
+    expect(open).toHaveLength(1);
+    expect(open[0]?.id).not.toBe(first?.id);
+    expect(open[0]?.body.toLowerCase()).toContain('core.hookspath');
+    expect(open[0]?.body.toLowerCase()).toContain('user.name');
+  });
+
+  it('cards a config that is a link, since it can not be read as a file', async () => {
+    running();
+    watcher.sync();
+    const config = join(repo.path, '.git/config');
+    renameSync(config, join(repo.path, '.git/config.real'));
+    symlinkSync(join(repo.path, '.git/config.real'), config);
+    emit('.git/config');
+    await watcher.flush();
+    const [card] = flags();
+    expect(card?.body).toContain('Could not be read');
+    expect(card?.options.map((o) => o.label) ?? []).not.toContain('Trust This Version');
+  });
+
+  it('never closes a card silently when its file became a link before the answer', async () => {
+    running();
+    watcher.sync();
+    writeHook('#!/bin/sh\necho a\n');
+    await watcher.flush();
+    const [card] = flags();
+    rmSync(join(repo.path, HOOK));
+    symlinkSync(join(repo.path, 'README.md'), join(repo.path, HOOK));
+    trust(card?.id ?? ('' as InboxItemDto['id']));
+    expect(trustedWrites(base.db, project.id)).toEqual([]);
+    const open = flags();
+    expect(open).toHaveLength(1);
+    expect(open[0]?.options.map((o) => o.label) ?? []).not.toContain('Trust This Version');
+  });
+
+  it('refuses an answer to a card whose file has since been rewritten and re-carded', async () => {
+    running();
+    watcher.sync();
+    writeHook('#!/bin/sh\necho a\n');
+    await watcher.flush();
+    const [old] = flags();
+    writeHook('#!/bin/sh\necho b\n');
+    await watcher.flush();
+    expect(() => trust(old?.id ?? ('' as InboxItemDto['id']))).toThrow(ConflictError);
+    expect(trustedWrites(base.db, project.id)).toEqual([]);
   });
 });

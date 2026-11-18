@@ -37,6 +37,9 @@ export {
 } from './service';
 export {
   isTrusted,
+  readSmallFile,
+  shaOf,
+  shortSha,
   stampDetail,
   stampFile,
   stampOf,

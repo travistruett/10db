@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, readFileSync, watch as fsWatch } from 'node:fs';
+import { existsSync, lstatSync, watch as fsWatch } from 'node:fs';
 import { join, sep } from 'node:path';
 import {
   ACTIVE_STATES,
@@ -51,6 +51,9 @@ import {
 import type { FlagInput, InboxService } from '../inbox';
 import {
   isTrusted,
+  readSmallFile,
+  shaOf,
+  shortSha,
   stampDetail,
   stampFile,
   stampOf,
@@ -97,22 +100,20 @@ const WATCH_BATCH_MS = 500;
  */
 const TURN_END_SLACK_MS = 5_000;
 const BULK_LISTED = 20;
+/** A stamped card's last line names the version it shows; what the card says about the write is above it. */
+const withoutVersion = (body: string): string => body.replace(/\nVersion [0-9a-f]{12}$/, '');
 const GIT_CONFIG_PATH = '.git/config';
 /** The most a checksum or config file read for these rules may hold; a bigger file is never read. */
 const MAX_BOOKKEEPING_READ = 4 * 1024 * 1024;
 /** The checksum is a hash and a timestamp, so anything bigger is not one. */
 const MAX_CHECKSUM_BYTES = 256;
 
-/** A regular file's text, or null when it is missing, a link, a directory or bigger than `maxBytes`. */
+/** A regular file's text, or null when it is missing, a link, a FIFO, a directory or bigger than `maxBytes`. */
 function readSmallText(path: string, maxBytes: number): string | null {
-  try {
-    const info = lstatSync(path);
-    if (!info.isFile() || info.size > maxBytes) return null;
-    return readFileSync(path, 'utf8');
-  } catch {
-    return null;
-  }
+  const read = readSmallFile(path, maxBytes);
+  return read.kind === 'file' ? read.bytes.toString('utf8') : null;
 }
+
 /** The app setting that holds the writes a permission card excused, so a restart keeps them. */
 const EXCUSED_WRITES_SETTING = 'watcher.excusedWrites';
 /** A write a lane's permission card allowed, as it looked when excused. */
@@ -219,8 +220,14 @@ export function createWatcher(deps: {
     }
   >();
   const pending = new Map<string, Set<string>>();
-  // The last text of each config file (`.git/config`, a worktree's `config.worktree`) seen in each checkout, so a change is told from what git itself writes.
-  const seenConfigs = new Map<string, Map<string, string>>();
+  // Each checkout's config files (`.git/config`, a worktree's `config.worktree`): the text as the builder
+  // last decided it (`baseline`), and the text its open card showed (`carded`), so a change is told from
+  // what git itself writes and a repeat write to a carded config still names the keys of the first.
+  interface SeenConfig {
+    baseline: string;
+    carded: string | null;
+  }
+  const seenConfigs = new Map<string, Map<string, SeenConfig>>();
   let timer: Timer | null = null;
   // Work queued per checkout (`onRoot`), keyed by the checkout's path; a checkout with nothing queued has none.
   const queues = new Map<string, Promise<void>>();
@@ -246,29 +253,65 @@ export function createWatcher(deps: {
   }
 
   /**
-   * The config keys that changed since the checkout's config was last seen, leaving out what git writes
-   * for worktrees, upstreams and branches. A config never seen before changes nothing. A config git
-   * cannot read is reported as one change, so it is still carded.
+   * What a config file's write changed, for its card: the keys that differ from the config as it stood at the
+   * last decision, leaving out what git writes for worktrees, upstreams and branches; the sha256 of the exact
+   * text that was diffed, which the card's Trust answer checks; null when nothing needs a card. A baseline
+   * advances only while no card for the path is open, so a second write to a carded config still names the
+   * first one's keys. A config with no baseline (it appeared later, or could not be read when the checkout was
+   * first watched) is compared with an empty one, so every key in it is named. A config that can't be read as
+   * a small regular file is carded as unreadable, with no sha and so no Trust choice.
    */
-  async function configChanges(root: string, rel: string): Promise<string[]> {
-    const text = configTextOf(root, rel);
-    if (text === null) return [];
-    const seen = seenConfigs.get(root) ?? new Map<string, string>();
-    seenConfigs.set(root, seen);
-    // A worktree's own config file starts empty, so its first write is a change; the repository's config
-    // was read when the checkout was first watched, so one never seen has nothing to compare.
-    const previous = seen.get(rel) ?? (rel === GIT_CONFIG_PATH ? undefined : '');
-    seen.set(rel, text);
-    if (previous === undefined || previous === text) return [];
+  async function configChanges(
+    project: ProjectDto,
+    site: Site,
+    rel: string,
+  ): Promise<{ note: string; sha: string | null } | null> {
+    const read = readSmallFile(join(site.root, rel), MAX_BOOKKEEPING_READ);
+    if (read.kind === 'missing') return null;
+    if (read.kind === 'unreadable')
+      return { note: 'Could not be read: not a small regular file', sha: null };
+    const text = read.bytes.toString('utf8');
+    const sha = shaOf(read.bytes);
+    const seen = seenConfigs.get(site.root) ?? new Map<string, SeenConfig>();
+    seenConfigs.set(site.root, seen);
+    // A worktree's own config file starts empty, and so does one first seen after the checkout was watched.
+    const entry = seen.get(rel) ?? { baseline: '', carded: null };
+    seen.set(rel, entry);
+    if (isTrusted(trustedWrites(db, project.id), rel, sha)) {
+      entry.baseline = text;
+      entry.carded = null;
+      logTrusted(project.id, site.root, rel);
+      return null;
+    }
+    const open = findOpenByFoldKey(db, project.id, strayFoldKey(site.scope, rel));
+    // The card is gone, answered or dismissed: the version it showed is now decided.
+    if (!open && entry.carded !== null) {
+      entry.baseline = entry.carded;
+      entry.carded = null;
+    }
+    let keys: string[];
     try {
       const [before, after] = await Promise.all([
-        deps.git.configText(previous),
+        deps.git.configText(entry.baseline),
         deps.git.configText(text),
       ]);
-      return changedConfigKeys(before, after);
+      keys = changedConfigKeys(before, after);
     } catch {
-      return ['(the config could not be read)'];
+      keys = ['(the config could not be read)'];
     }
+    if (keys.length === 0) {
+      if (!open) entry.baseline = text;
+      return null;
+    }
+    entry.carded = text;
+    return { note: `Changed: ${keys.join(', ')}`, sha };
+  }
+
+  function logTrusted(projectId: ProjectId, root: string, rel: string): void {
+    deps.logger.debug(
+      { projectId, root, path: rel },
+      'a trusted version of a sensitive path raised no card',
+    );
   }
 
   function enqueue(root: string, rel: string): void {
@@ -295,42 +338,61 @@ export function createWatcher(deps: {
       ? { scope: project.id, worktree: null, root }
       : { scope: batchId, worktree: root, root };
 
-  /** The paths among `rels` that are not a write the builder trusted: one holding exactly a trusted content. */
-  function withoutTrusted(project: ProjectDto, site: Site, rels: readonly string[]): string[] {
+  /**
+   * The paths among `rels` that are not a write the builder trusted: one holding exactly a trusted content.
+   * `stamps` holds the content already read for a path, so the file is not read a second time.
+   */
+  function withoutTrusted(
+    project: ProjectDto,
+    site: Site,
+    rels: readonly string[],
+    stamps: ReadonlyMap<string, string | null> = new Map(),
+  ): string[] {
     const trusted = trustedWrites(db, project.id);
     if (trusted.length === 0) return [...rels];
     const names = new Set(trusted.map((t) => t.path));
     return rels.filter((rel) => {
       if (!names.has(rel)) return true;
-      const sha = stampFile(site.root, rel);
-      return sha === null || !isTrusted(trusted, rel, sha);
+      const sha = stamps.has(rel) ? (stamps.get(rel) ?? null) : stampFile(site.root, rel);
+      if (sha === null || !isTrusted(trusted, rel, sha)) return true;
+      if (isSensitivePath(rel)) logTrusted(project.id, site.root, rel);
+      return false;
     });
   }
 
   /**
-   * Raises a card for one file with its current sha256 in the detail and Trust This Version (or Keep It)
-   * beside Dismiss. A card already open for the path is refreshed only when the file's content has
-   * changed since, so its stamp is always the latest and a repeat of the same write stays silent. A file
-   * that can't be stamped (gone, a link, a directory) gets the card with no trust choice.
+   * Raises a card for one file with its sha256 in the detail and Trust This Version (or Keep It) beside
+   * Dismiss. `known` is the sha already read for the file (null: unreadable); without it the file is read
+   * here. A card already open for the path with the same stamp stays as it is. One with another stamp is
+   * withdrawn and a new card raised, so an answer to the old card can never trust the new bytes. A file
+   * that can't be stamped (gone, a link, a directory, too big) gets the card with no trust choice, and a
+   * card that had a stamp is replaced by it.
    */
   function flagStamped(
     site: Site,
     rel: string,
     card: FlagInput & { readonly foldKey: string },
     trust: typeof TrustChoice.Trust | typeof TrustChoice.Keep,
+    known?: string | null,
   ): void {
-    const sha = stampFile(site.root, rel);
+    const sha = known === undefined ? stampFile(site.root, rel) : known;
+    const open = findOpenByFoldKey(db, card.projectId, card.foldKey);
     if (sha === null) {
-      deps.inbox.flag(card);
+      if (open && stampOf(open.detail) !== null) {
+        deps.inbox.withdraw(open.id);
+        deps.inbox.flag(card);
+      } else {
+        deps.inbox.flag(open && open.body !== card.body ? { ...card, refresh: true } : card);
+      }
       return;
     }
-    const open = findOpenByFoldKey(db, card.projectId, card.foldKey);
     if (open && stampOf(open.detail) === sha) return;
+    if (open) deps.inbox.withdraw(open.id);
     deps.inbox.flag({
       ...card,
+      body: `${card.body}\nVersion ${shortSha(sha)}`,
       detail: { ...card.detail, ...stampDetail(site.root, sha, card.foldKey) },
       options: trustOptions(trust),
-      refresh: true,
     });
   }
 
@@ -347,8 +409,10 @@ export function createWatcher(deps: {
     working: readonly PassLane[] = [],
     /** What changed in a path, such as the config keys, shown under its name. */
     notes: ReadonlyMap<string, string> = new Map(),
+    /** The sha256 already read for a path (null: unreadable), so its card stamps the text that was judged. */
+    stamps: ReadonlyMap<string, string | null> = new Map(),
   ): string[] {
-    const raised = withoutTrusted(project, site, strays);
+    const raised = withoutTrusted(project, site, strays, stamps);
     if (raised.length === 0) return raised;
     const workstreamId = owner ?? (candidates.length === 1 ? (candidates[0] ?? null) : null);
     const titles = working.map((lane) => lane.title);
@@ -375,6 +439,7 @@ export function createWatcher(deps: {
           foldKey: strayFoldKey(site.scope, rel),
         },
         TrustChoice.Trust,
+        stamps.get(rel),
       );
     };
     sensitive.forEach(single);
@@ -935,7 +1000,7 @@ export function createWatcher(deps: {
       if (item.title === STRAY_TITLE) {
         const path = item.detail?.['path'];
         if (typeof path !== 'string' || !covered([path])) continue;
-        if (item.body !== labelled(site, path)) continue;
+        if (withoutVersion(item.body) !== labelled(site, path)) continue;
         deps.inbox.resolve(item.id, 'The lane it names now holds a claim covering it.');
         continue;
       }
@@ -1060,6 +1125,7 @@ export function createWatcher(deps: {
     // A sensitive path holding only what 10db's own base merge brought into the copy is no lane's write.
     const hidden: string[] = [];
     const notes = new Map<string, string>();
+    const stamps = new Map<string, string | null>();
     const bases = incomingBases(batchId);
     for (const rel of paths) {
       if (changed.has(rel) && !isSensitivePath(rel)) continue;
@@ -1072,9 +1138,10 @@ export function createWatcher(deps: {
         const checksum = readSmallText(join(entry.root, rel), MAX_CHECKSUM_BYTES);
         if (checksum !== null && isLefthookChecksum(rel, checksum)) continue;
         if (isConfigFile(rel)) {
-          const keys = await configChanges(entry.root, rel);
-          if (keys.length === 0) continue;
-          notes.set(rel, `Changed: ${keys.join(', ')}`);
+          const change = await configChanges(project, site, rel);
+          if (change === null) continue;
+          notes.set(rel, change.note);
+          stamps.set(rel, change.sha);
         }
         hidden.push(rel);
       }
@@ -1117,6 +1184,7 @@ export function createWatcher(deps: {
       null,
       inPass?.working,
       notes,
+      stamps,
     );
     raiseForeign(
       project,
@@ -1222,7 +1290,8 @@ export function createWatcher(deps: {
           watched.set(root, { projectId, batchId, root, handle });
           // Read now, not at the first batch, so the first change to the config is seen as one.
           const config = configTextOf(root, GIT_CONFIG_PATH);
-          if (config !== null) seenConfigs.set(root, new Map([[GIT_CONFIG_PATH, config]]));
+          if (config !== null)
+            seenConfigs.set(root, new Map([[GIT_CONFIG_PATH, { baseline: config, carded: null }]]));
         } catch (error) {
           deps.logger.warn({ projectId, root, err: String(error) }, 'could not watch the checkout');
         }

@@ -8,21 +8,31 @@
 - **Strays in `.git`** stay sensitive but are narrowed, never muted.
   - **Trust This Version.** A single stray-write card (and a single foreign-claim card, where it reads Keep It)
     carries `sha256`, `root` and `foldKey` in its detail, stamped when the watcher raises it (`flagStamped`), with
-    options Trust This Version and Dismiss. A repeat write whose content differs is raised with `refresh`, so the
-    stamp is the latest; the same content stays a silent no-op. Answering restamps the file in the answer's own
+    options Trust This Version and Dismiss. A repeat write whose content differs withdraws the open card and raises a new one (not a refresh in
+    place, which spec §7.2 names), so an answer to the old card is a `ConflictError` and can never trust bytes the
+    builder did not see; the body shows the first 12 hex of the stamp. The same content stays a silent no-op. A file
+    that can no longer be stamped replaces a stamped card with an unstamped one. Answering restamps the file in the answer's own
     transaction (`applyTrustChoice`, `inbox/trusted-writes.ts`): a match stores `{ path, sha256, trustedAt }` in the
     app setting `trusted_writes.<projectId>` (zod-parsed on read, newest 500 kept), and a mismatch trusts nothing,
-    closes the old card and raises a fresh one with the new stamp. A write that leaves a trusted path holding
+    closes the old card and raises a fresh one with the new stamp (its body no longer names the old version's
+    config keys). A file that is still there but can't be stamped (a link, over 32 MiB) comes back as a card with
+    no trust option, never closed silently. Files are read through `readSmallFile` (non-blocking, O_NOFOLLOW,
+    kind and size from the open descriptor), so a FIFO or link swapped in can't hang the daemon or be followed.
+    Trust suppressing a card for a sensitive path is logged at debug. A write that leaves a trusted path holding
     exactly a trusted sha256 raises no card (`withoutTrusted`). Bulk cards, a directory, a link, a deleted file and a
     file over 32 MiB have no stamp and no trust option. There is no Show the Diff: the app has no way to open a
     file's diff from a card.
   - **Checksum.** `.git/info/lefthook.checksum` is excused only at that exact path with content matching
     `^[0-9a-f]{32} \d+\s*$` (`isLefthookChecksum`); any other file in `.git/info` stays sensitive.
-  - **Config.** The watcher keeps each config file's last text per checkout (`.git/config` is read when the
-    checkout starts being watched). A write is diffed key by key with `git config --file <copy> --list` through the
-    git wrapper (`Git.configText`) and `changedConfigKeys`. Only git's own bookkeeping is excused: a branch's
+  - **Config.** The watcher keeps each config file's text as the builder last decided it (`baseline`) per checkout
+    (`.git/config` is read when the checkout starts being watched). A write is diffed key by key with
+    `git config --file <copy> --list` through the git wrapper (`Git.configText`) and `changedConfigKeys`, against
+    that baseline, which does not advance while a card for the path is open: a second write refreshes the card
+    and it still names the first write's keys. The card's stamp is the sha256 of the exact text diffed (one read).
+    A config with no baseline (it appeared later, or could not be read at the start) is diffed against an empty
+    one, so every non-bookkeeping key is named. A config that is a link, a FIFO, a directory or over 4 MiB raises a
+    card saying it could not be read, with no trust option. Only git's own bookkeeping is excused: a branch's
     `merge`, a branch's `remote` when its value names a remote the config defines (a URL or path is carded), and
     `worktree.guessremote`. Every other key, `extensions.worktreeconfig` and the rest of `branch.<name>.*`
     included, raises a card whose body lists the changed keys, lowercase as git prints them. `.git/config.worktree`
-    and `.git/worktrees/*/config.worktree` are sensitive and diffed the same way against an empty start. A repeat
-    write to a config shows only the keys that changed in that write.
+    and `.git/worktrees/*/config.worktree` are sensitive and diffed the same way against an empty start.
