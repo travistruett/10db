@@ -66,7 +66,6 @@ export function PageAsk({ item }: { readonly item: InboxItemDto }) {
         error={draft.error}
         pending={answer.isPending}
         noteRef={noteRef}
-        onSelect={() => undefined}
         onChoose={(value) => {
           patch({ choice: value, error: null });
         }}

@@ -93,6 +93,7 @@ export function RenderLayout() {
         panelHost: null,
         drawerHost: null,
         hidePanel: null,
+        closeSheet: () => undefined,
         registerPanel: () => () => undefined,
       }}
     >

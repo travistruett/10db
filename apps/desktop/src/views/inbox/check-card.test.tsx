@@ -7,9 +7,9 @@ import {
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
-import { queryKeys } from '../../daemon/queries';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
 import { inboxItemDto, taskDto, workstreamDto } from '../../test/fixtures';
+import { findText, getText, queryText, serveOpenRows } from '../../test/inbox-page-fixtures';
 
 const projectId = mintId('Project');
 const workstreamId: WorkstreamId = mintId('Workstream');
@@ -58,6 +58,8 @@ const other: InboxItemDto = inboxItemDto({
 interface Served {
   readonly answers: unknown[];
   readonly inboxReads: () => number;
+  /** How many times a card was looked up in Open's rows, which is how a list learns a card is gone. */
+  readonly rowLookups: () => number;
   /** Replaces the open inbox, as the daemon does when the cards change. */
   readonly setItems: (next: InboxItemDto[]) => void;
 }
@@ -109,9 +111,13 @@ function serve(
     ...baseHandlers(),
     eventStream.addEventListener('connection', () => undefined),
   );
+  const rows = serveOpenRows(() =>
+    answers.length === 0 || options.keepAfterAnswer === true ? items : [],
+  );
   return {
     answers,
     inboxReads: () => reads,
+    rowLookups: () => rows.filter((query) => query['card'] !== undefined).length,
     setItems: (next) => {
       items = next;
     },
@@ -133,26 +139,23 @@ describe('CheckCard', () => {
   it('shows criteria, commits, files with counts and the diff', async () => {
     serve(() => changes());
     renderApp('/inbox');
-    expect(await screen.findByText('hello.txt says hello')).toBeTruthy();
-    expect(screen.getByText('The tests pass')).toBeTruthy();
-    expect(screen.getByText('1111111')).toBeTruthy();
-    expect(screen.getByText('2222222')).toBeTruthy();
-    const file = (await screen.findByText('hello.txt')).closest('li');
+    expect(await findText('hello.txt says hello')).toBeTruthy();
+    expect(getText('The tests pass')).toBeTruthy();
+    expect(getText('1111111')).toBeTruthy();
+    expect(getText('2222222')).toBeTruthy();
+    const file = (await findText('hello.txt')).closest('li');
     expect(within(htmlElement(file)).getByText('+3')).toBeTruthy();
     expect(within(htmlElement(file)).getByText('-1')).toBeTruthy();
-    const binary = screen.getByText('logo.png').closest('li');
+    const binary = getText('logo.png').closest('li');
     expect(within(htmlElement(binary)).queryByText(/^[+-]\d/)).toBeNull();
-    expect(screen.getByText(/\+hello world/)).toBeTruthy();
-    expect(screen.queryByText(/The diff is longer than we show/)).toBeNull();
+    expect(getText(/\+hello world/)).toBeTruthy();
+    expect(queryText(/The diff is longer than we show/)).toBeNull();
   });
 
   it('gives the diff and the commit chips a surface of their own, so they show in the light scheme', async () => {
     serve(() => changes());
     renderApp('/inbox');
-    for (const node of [
-      await screen.findByText('1111111'),
-      await screen.findByText(/\+hello world/),
-    ]) {
+    for (const node of [await findText('1111111'), await findText(/\+hello world/)]) {
       expect(htmlElement(node).style.background).toContain('--mantine-color-default-hover');
     }
   });
@@ -161,7 +164,7 @@ describe('CheckCard', () => {
     serve(() => changes({ truncated: true }));
     renderApp('/inbox');
     expect(
-      await screen.findByText('The diff is longer than we show. The file list above is complete.'),
+      await findText('The diff is longer than we show. The file list above is complete.'),
     ).toBeTruthy();
   });
 
@@ -252,9 +255,9 @@ describe('CheckCard', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'What needs to change' }), {
       target: { value: 'Say hello twice' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /Which badge color/ }));
+    fireEvent.click(await screen.findByRole('option', { name: /Which badge color/ }));
     expect(await screen.findByRole('radio', { name: /Teal/ })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: /Ready for you to check/ }));
+    fireEvent.click(screen.getByRole('option', { name: /Ready for you to check/ }));
     const note = await screen.findByRole('textbox', { name: 'What needs to change' });
     expect(note instanceof HTMLTextAreaElement && note.value).toBe('Say hello twice');
   });
@@ -264,16 +267,16 @@ describe('CheckCard', () => {
     let current = changes();
     const served = serve(() => current);
     const { queryClient } = renderApp('/inbox');
-    expect(await screen.findByText(/\+hello world/)).toBeTruthy();
+    expect(await findText(/\+hello world/)).toBeTruthy();
     current = changes({ head: next, diff: '+second round\n' });
     served.setItems([
       { ...card, detail: { workstreamId, baseHead: BASE, head: next, commits: [] } },
     ]);
-    await queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
+    await queryClient.invalidateQueries({ queryKey: ['inbox-rows'] });
     await waitFor(() => {
-      expect(screen.queryByText(/\+hello world/)).toBeNull();
+      expect(queryText(/\+hello world/)).toBeNull();
     });
-    expect(await screen.findByText(/\+second round/)).toBeTruthy();
+    expect(await findText(/\+second round/)).toBeTruthy();
   });
 
   it('the note is capped and a whitespace-only note leaves Send It Back off', async () => {
@@ -292,7 +295,7 @@ describe('CheckCard', () => {
     serve(() => changes(), { answerStatus: 500 });
     renderApp('/inbox');
     fireEvent.click(await loadedApprove());
-    const alert = await screen.findByText('The daemon said no');
+    const alert = await findText('The daemon said no');
     expect(alert.closest('[role="alert"]')).toBeTruthy();
   });
 
@@ -300,10 +303,9 @@ describe('CheckCard', () => {
     const served = serve(() => changes(), { answerStatus: 409 });
     renderApp('/inbox');
     fireEvent.click(await loadedApprove());
-    const before = served.inboxReads();
-    await screen.findByText('This card was already answered.');
+    await findText('This card was already answered.');
     await waitFor(() => {
-      expect(served.inboxReads()).toBeGreaterThan(before);
+      expect(served.rowLookups()).toBeGreaterThan(0);
     });
   });
 
@@ -326,8 +328,8 @@ describe('CheckCard', () => {
       ),
     );
     renderApp('/inbox');
-    await screen.findByText("Couldn't load the changes");
-    expect(await screen.findByText(/did not load/)).toBeTruthy();
+    await findText("Couldn't load the changes");
+    expect(await findText(/did not load/)).toBeTruthy();
     const approve = screen.getByRole('button', { name: 'Approve' });
     await waitFor(() => {
       expect(approve.hasAttribute('disabled')).toBe(false);
@@ -342,8 +344,8 @@ describe('CheckCard', () => {
     serve(() => changes(), { answerStatus: 409, keepAfterAnswer: true });
     renderApp('/inbox');
     fireEvent.click(await loadedApprove());
-    expect(await screen.findByText('The daemon said no')).toBeTruthy();
-    expect(screen.queryByText('This card was already answered.')).toBeNull();
+    expect(await findText('The daemon said no')).toBeTruthy();
+    expect(queryText('This card was already answered.')).toBeNull();
   });
 
   it('does not take focus when the card mounts with a kept note', async () => {
@@ -353,9 +355,9 @@ describe('CheckCard', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'What needs to change' }), {
       target: { value: 'Say hello twice' },
     });
-    fireEvent.click(screen.getByRole('button', { name: /Which badge color/ }));
+    fireEvent.click(await screen.findByRole('option', { name: /Which badge color/ }));
     await screen.findByRole('radio', { name: /Teal/ });
-    fireEvent.click(screen.getByRole('button', { name: /Ready for you to check/ }));
+    fireEvent.click(screen.getByRole('option', { name: /Ready for you to check/ }));
     const note = await screen.findByRole('textbox', { name: 'What needs to change' });
     expect(document.activeElement).not.toBe(note);
   });
@@ -368,9 +370,9 @@ describe('CheckCard', () => {
       target: { value: 'Say hello twice' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
-    fireEvent.click(screen.getByRole('button', { name: /Which badge color/ }));
+    fireEvent.click(await screen.findByRole('option', { name: /Which badge color/ }));
     await screen.findByRole('radio', { name: /Teal/ });
-    fireEvent.click(screen.getByRole('button', { name: /Ready for you to check/ }));
+    fireEvent.click(screen.getByRole('option', { name: /Ready for you to check/ }));
     await screen.findByRole('button', { name: 'Send Back' });
     expect(screen.queryByRole('textbox', { name: 'What needs to change' })).toBeNull();
   });

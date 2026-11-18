@@ -66,6 +66,16 @@ export function inboxList(search: InboxSearch, now: Date): InboxList {
   return list;
 }
 
+/** The search with another state: Open is the default, so it leaves no key. */
+export function withState(search: InboxSearch, state: InboxListState): InboxSearch {
+  return inboxSearch({ ...search, state: state === InboxListState.Open ? undefined : state });
+}
+
+/** The search narrowed to a project, or to every project when `project` is null. */
+export function withProject(search: InboxSearch, project: ProjectId | null): InboxSearch {
+  return inboxSearch({ ...search, project: project ?? undefined });
+}
+
 let last: InboxSearch = {};
 
 /** The Inbox's search as the builder left it, so the rail's Inbox opens where it was. */

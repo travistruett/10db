@@ -1,6 +1,6 @@
 import { InboxKind, InboxListState, InboxOutcome, PersonId, ProjectId } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { inboxList, inboxSearch, lastInboxSearch } from './inbox-search';
+import { inboxList, inboxSearch, lastInboxSearch, withProject, withState } from './inbox-search';
 
 const PROJECT = ProjectId.parse('prj_01920000-0000-7000-8000-000000000001');
 const PERSON = PersonId.parse('psn_01920000-0000-7000-8000-000000000001');
@@ -59,6 +59,33 @@ describe('inboxList', () => {
       project: PROJECT,
       kind: 'question',
     });
+  });
+});
+
+describe('withState and withProject', () => {
+  it.each([
+    [
+      'Open leaves no state',
+      withState({ state: 'waiting', project: PROJECT }, 'open'),
+      { project: PROJECT },
+    ],
+    [
+      'Waiting sets it',
+      withState({ project: PROJECT }, 'waiting'),
+      { state: 'waiting', project: PROJECT },
+    ],
+    [
+      'a project is set',
+      withProject({ state: 'resolved' }, PROJECT),
+      { state: 'resolved', project: PROJECT },
+    ],
+    [
+      'every project drops it',
+      withProject({ state: 'resolved', project: PROJECT }, null),
+      { state: 'resolved' },
+    ],
+  ])('%s', (_name, actual, expected) => {
+    expect(actual).toEqual(expected);
   });
 });
 

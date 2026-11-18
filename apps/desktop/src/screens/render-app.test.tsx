@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, server, TEST_CONNECTION } from '../test/daemon';
 import { inboxItemDto, projectViewDto, taskDto } from '../test/fixtures';
+import { serveOpenRows } from '../test/inbox-page-fixtures';
 import { shapeDto, shapeMessageDto, shapeViewDto } from '../test/shape-fixtures';
 import { RenderApp } from './render-app';
 import type { RenderParams } from './render-params';
@@ -182,33 +183,30 @@ describe('a frame the window draws a screen in', () => {
 
   it('draws only the conversation’s own project’s cards on the Inbox', async () => {
     const other = projectViewDto({ id: mintId('Project'), name: 'other' });
+    const cards = [
+      inboxItemDto({ projectId: project.id, title: 'A card of this project' }),
+      inboxItemDto({ projectId: other.id, title: 'A card of another project' }),
+    ];
     serve(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project, other])),
-      http.get(daemonUrl('/inbox'), () =>
-        HttpResponse.json([
-          inboxItemDto({ projectId: project.id, title: 'A card of this project' }),
-          inboxItemDto({ projectId: other.id, title: 'A card of another project' }),
-        ]),
-      ),
+      http.get(daemonUrl('/inbox'), () => HttpResponse.json(cards)),
     );
+    serveOpenRows(() => cards);
     render(<RenderApp params={{ ...params, screen: 'inbox', path: '/inbox' }} />);
     expect(await screen.findByText('A card of this project')).toBeTruthy();
     await waitFor(() => {
       expect(heard.map((h) => h.kind)).toEqual(['ready']);
     });
     expect(screen.queryByText('A card of another project')).toBeNull();
-    expect(screen.getByText('Open').parentElement?.textContent).toBe('Open1');
   });
 
   it('reads an Inbox with only another project’s cards as empty', async () => {
     const other = projectViewDto({ id: mintId('Project'), name: 'other' });
-    serve(
-      http.get(daemonUrl('/inbox'), () =>
-        HttpResponse.json([inboxItemDto({ projectId: other.id, title: 'Not this project' })]),
-      ),
-    );
+    const cards = [inboxItemDto({ projectId: other.id, title: 'Not this project' })];
+    serve(http.get(daemonUrl('/inbox'), () => HttpResponse.json(cards)));
+    serveOpenRows(() => cards);
     render(<RenderApp params={{ ...params, screen: 'inbox', path: '/inbox' }} />);
-    expect(await screen.findByText('Nothing needs you right now.')).toBeTruthy();
+    expect(await screen.findByText('Nothing needs you')).toBeTruthy();
     expect(screen.queryByText('Not this project')).toBeNull();
   });
 

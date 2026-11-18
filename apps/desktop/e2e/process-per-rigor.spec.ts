@@ -51,7 +51,7 @@ async function startCritical(
 
 /** The one plan card, opened in the Inbox. */
 async function openPlanCard(page: Page, title: string, planText: string) {
-  const row = page.getByRole('button', {
+  const row = page.getByRole('option', {
     name: new RegExp(`Plan ready for you to approve: ${title}`),
   });
   await row.click();
@@ -114,7 +114,7 @@ test('a Critical task waits for the plan to be approved, then builds and finishe
   // Plan and Plan Review approved; Build has not started, so the plan is the only card for the task.
   const planText = 'PLAN ONE: write notes/pair.txt.';
   await openPlanCard(page, title, planText);
-  await expect(page.getByText(/Plan ready for you to approve/)).toHaveCount(1);
+  await expect(page.getByRole('option', { name: /Plan ready for you to approve/ })).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
   await expectAccessible(page, 'inbox, plan card');
 
@@ -145,7 +145,7 @@ test('Send Back needs a note, and with one plans again', async ({ page, request 
   // row is opened to read it. The first plan's card is gone.
   await openPlanCard(page, title, 'PLAN REVISED: write notes/second.txt with a header.');
   await expect(page.getByText('PLAN FIRST: write notes/second.txt.')).toBeHidden();
-  await expect(page.getByText(/Plan ready for you to approve/)).toHaveCount(1);
+  await expect(page.getByRole('option', { name: /Plan ready for you to approve/ })).toHaveCount(1);
 
   // Finish the task so no card is left for the specs after this one.
   await page.getByRole('button', { name: 'Approve', exact: true }).click();

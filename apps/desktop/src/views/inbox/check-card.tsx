@@ -1,14 +1,18 @@
 import {
   CheckChoice,
+  InboxListState,
   type InboxItemDto,
   type WorkstreamChangesDto,
   type WorkstreamId,
 } from '@10db/contracts';
-import { Alert, Box, Button, Code, Group, List, Paper, Stack, Text, Textarea } from '@mantine/core';
+import { Alert, Box, Button, Code, Group, List, Stack, Text, Textarea } from '@mantine/core';
 import { useQueryClient, type UseQueryResult } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { z } from 'zod';
 import { DaemonRequestError } from '../../daemon/client';
+import { dropCard, refreshCard } from '../../daemon/inbox-live';
+import { fetchRowOf } from '../../daemon/inbox-queries';
+import { useDaemon } from '../../daemon/provider';
 import {
   queryKeys,
   useAnswerInbox,
@@ -16,6 +20,7 @@ import {
   useWorkstreamChanges,
   useWorkstreams,
 } from '../../daemon/queries';
+import { CardSurface } from './card-surface';
 import { KEYS_IGNORE_ATTRIBUTE } from './use-inbox-keys';
 
 const SHORT_SHA = 7;
@@ -36,6 +41,8 @@ export interface CheckCardProps {
   /** The Send Back note, kept by the Inbox so deselecting the card does not lose it. */
   readonly note: string;
   readonly onNote: (note: string) => void;
+  /** Whether the card draws its own border; false where the Inbox's content area already frames it. */
+  readonly framed?: boolean;
 }
 
 /** The criteria the task set, so the builder checks the work against them. */
@@ -141,9 +148,10 @@ function Changes({ changes }: { readonly changes: UseQueryResult<WorkstreamChang
  * Finished work the project has no gate for: the builder checks the changes and either approves
  * them or sends them back with a note saying what to fix.
  */
-export function CheckCard({ item, header, note, onNote }: CheckCardProps) {
+export function CheckCard({ item, header, note, onNote, framed = true }: CheckCardProps) {
   const answer = useAnswerInbox();
   const queryClient = useQueryClient();
+  const { client } = useDaemon();
   const [sendingBack, setSendingBack] = useState(note !== '');
   const [stale, setStale] = useState(false);
   const noteRef = useRef<HTMLTextAreaElement>(null);
@@ -170,17 +178,21 @@ export function CheckCard({ item, header, note, onNote }: CheckCardProps) {
       { id: item.id, answer: given },
       {
         onSuccess: () => {
+          dropCard(queryClient, item.id);
           onNote('');
         },
         onError: (failure) => {
           if (failure instanceof DaemonRequestError && failure.status === 409) {
-            // Only a card that left the refetched inbox was answered elsewhere; any other 409
-            // carries the daemon's own reason, which the error line shows.
-            void queryClient.invalidateQueries({ queryKey: queryKeys.inbox }).then(() => {
-              const open = queryClient.getQueryData<InboxItemDto[]>(queryKeys.inbox);
-              if (open !== undefined && !open.some((candidate) => candidate.id === item.id))
+            // Only a card that left the open list was answered elsewhere; any other 409 carries the
+            // daemon's own reason, which the error line shows.
+            void queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
+            void fetchRowOf(client, { state: InboxListState.Open }, item.id)
+              .then((row) => {
+                if (row !== null) return;
                 setStale(true);
-            });
+                refreshCard(queryClient, client, item.id);
+              })
+              .catch(() => undefined);
           }
         },
       },
@@ -205,7 +217,7 @@ export function CheckCard({ item, header, note, onNote }: CheckCardProps) {
 
   return (
     // Not the Inbox's selected-card scope: a check card is answered by its buttons, not by the Inbox keys.
-    <Paper withBorder p="md" shadow="xs">
+    <CardSurface framed={framed}>
       <Stack gap="sm">
         {header}
         {item.body === '' ? null : <Text size="sm">{item.body}</Text>}
@@ -280,6 +292,6 @@ export function CheckCard({ item, header, note, onNote }: CheckCardProps) {
           </Group>
         </Group>
       </Stack>
-    </Paper>
+    </CardSurface>
   );
 }

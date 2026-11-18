@@ -14,6 +14,8 @@ export interface FrameSlots {
   readonly drawerHost: HTMLElement | null;
   /** Hides the panel when it is a column the builder can fold; null when it is not (a sheet, or none). */
   readonly hidePanel: (() => void) | null;
+  /** Closes whatever sheet is open over the content, such as the panel's; does nothing when none is. */
+  readonly closeSheet: () => void;
   /** Tells the frame a section has a panel while the caller stays mounted; returns the way to withdraw it. */
   readonly registerPanel: (section: RailSection) => () => void;
 }
@@ -28,6 +30,7 @@ export function useFrameSlots(): FrameSlots {
       panelHost: null,
       drawerHost: null,
       hidePanel: null,
+      closeSheet: () => undefined,
       registerPanel: () => () => undefined,
     }
   );

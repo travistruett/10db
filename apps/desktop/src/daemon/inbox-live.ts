@@ -1,5 +1,6 @@
 import {
   compareRowSort,
+  EventType,
   InboxItemId,
   InboxListState,
   type DaemonEvent,
@@ -238,4 +239,23 @@ export function applyInboxEvent(
       }
     });
   }
+}
+
+/**
+ * Looks a card up again in every list, as an event about it would: a card closed elsewhere, which an answer
+ * refused with a 409 shows, leaves each list that no longer holds it.
+ */
+export function refreshCard(
+  queryClient: QueryClient,
+  client: DaemonClient,
+  cardId: InboxItemId,
+): void {
+  applyInboxEvent(queryClient, client, {
+    seq: 1,
+    type: EventType.InboxChanged,
+    entityType: 'inbox',
+    entityId: cardId,
+    data: {},
+    at: new Date().toISOString(),
+  });
 }

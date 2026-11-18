@@ -14,7 +14,7 @@ import { daemonUrl, server } from './daemon';
 
 /**
  * Serves `GET /inbox/page`: each state's cards as one page, whatever the filters (the daemon's own test
- * proves those). Returns every query the view asked with, in order (not the rail's count read), so a test can check what reached it.
+ * proves those). Returns every query a table asked with, in order (not Open's), so a test can check what reached it.
  */
 export function serveInboxPage(
   byState: Partial<Record<string, readonly InboxItemDto[]>>,
@@ -26,12 +26,16 @@ export function serveInboxPage(
     http.get(daemonUrl('/inbox/page'), ({ request }) => {
       const params = new URL(request.url).searchParams;
       const query = Object.fromEntries(params);
-      // The rail's badge counts Open with a page of one row; that read is not the view's.
-      if (!(query['state'] === 'open' && query['pageSize'] === '1')) asked.push(query);
+      // Open is read for the panel's rows, and every state for the panel's counts (a page of one row); a table
+      // asks for its own page, which is what is recorded.
+      if (query['state'] !== 'open' && query['pageSize'] !== '1') asked.push(query);
       const state = query['state'] ?? '';
       const items = byState[state] ?? [];
       return HttpResponse.json({
         items,
+        // The panel reads the same answer as rows, all on one page.
+        rows: rowsOf(state === 'waiting' || state === 'resolved' ? state : 'open', items),
+        next: null,
         total: totals[state] ?? items.length,
         page: Number(query['page'] ?? '1'),
         pageSize: Number(query['pageSize'] ?? '25'),
@@ -114,6 +118,32 @@ export function serveInboxRows(
   );
   return asked;
 }
+
+/**
+ * Serves Open's rows from whatever `open` returns now, read on every request, and an empty context for every
+ * question. A test that serves `GET /inbox` for the other readers calls this beside it. Returns every query asked.
+ */
+export function serveOpenRows(open: () => readonly InboxItemDto[]): Record<string, string>[] {
+  server.use(http.get(daemonUrl('/inbox/:id/context'), () => HttpResponse.json({ messages: [] })));
+  return serveInboxRows({
+    get open() {
+      return [...open()];
+    },
+  });
+}
+
+/**
+ * A card's title is on screen twice in the Inbox: on its row in the panel's listbox, and in the content. These
+ * read the content, so a test that looks for a card's text finds one element.
+ */
+const IN_LIST = '[role="listbox"] *';
+type TextQuery = Parameters<typeof screen.findByText>;
+export const findText = (text: TextQuery[0], options?: TextQuery[1]) =>
+  screen.findByText(text, { ...options, ignore: IN_LIST });
+export const getText = (text: TextQuery[0], options?: TextQuery[1]) =>
+  screen.getByText(text, { ...options, ignore: IN_LIST });
+export const queryText = (text: TextQuery[0], options?: TextQuery[1]) =>
+  screen.queryByText(text, { ...options, ignore: IN_LIST });
 
 /** The record rows of the table named `label`, once it has drawn at least `count`. */
 export async function tableRows(label: string, count = 1): Promise<HTMLElement[]> {

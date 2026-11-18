@@ -3,8 +3,10 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
+import type { QueryClient } from '@tanstack/react-query';
 import { inboxItemDto, taskDto, workstreamDto } from '../../test/fixtures';
 import { pickOption } from '../../test/combobox';
+import { findText, getText, serveOpenRows } from '../../test/inbox-page-fixtures';
 import { BUILDER_PERSON, personDto, slackContact } from '../../test/people-fixtures';
 
 const mark = personDto({ name: 'Mark', handle: 'mark', slack: slackContact('U1') });
@@ -13,6 +15,9 @@ const priya = personDto({ name: 'Priya', handle: 'priya' });
 const goalId = mintId('Goal');
 const task = taskDto({ goalId });
 const workstream = workstreamDto({ taskId: task.id });
+
+/** The app's client, to read Open's rows again where the daemon would have sent an event. */
+let client: QueryClient;
 
 function serve(
   item: InboxItemDto,
@@ -45,7 +50,8 @@ function serve(
     ),
     ...baseHandlers(),
   );
-  renderApp('/inbox');
+  serveOpenRows(() => [current]);
+  client = renderApp('/inbox').queryClient;
   return asked;
 }
 
@@ -137,7 +143,7 @@ describe('Ask Someone', () => {
       ...unrouted(),
       routeSuggestion: { personIds: [sarah.id], confidence: 0.64 },
     });
-    expect(await screen.findByText('Suggested: Sarah (64%)')).toBeTruthy();
+    expect(await findText('Suggested: Sarah (64%)')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Ask Someone' }));
     const popover = await screen.findByRole('dialog');
     await within(popover).findByLabelText('Person', { selector: 'input' });
@@ -161,7 +167,7 @@ describe('a card asked of someone not in Slack', () => {
     const writeText = vi.fn(() => Promise.resolve());
     vi.stubGlobal('navigator', { clipboard: { writeText } });
     // The daemon keeps such a card with the builder and names her in copyFor.
-    serve(unrouted(), { copyForAfterAsk: ['priya'] });
+    const asked = serve(unrouted(), { copyForAfterAsk: ['priya'] });
     fireEvent.click(await screen.findByRole('button', { name: 'Ask Someone' }));
     const popover = await screen.findByRole('dialog');
     await pickOption(
@@ -169,8 +175,12 @@ describe('a card asked of someone not in Slack', () => {
       /Priya/,
     );
     fireEvent.click(await within(popover).findByRole('button', { name: 'Ask Priya' }));
+    await waitFor(() => {
+      expect(asked).toHaveLength(1);
+    });
+    await client.invalidateQueries({ queryKey: ['inbox-rows'] });
     const copy = await screen.findByRole('button', { name: 'Copy for Priya' });
-    expect(screen.getByText('Product question → Priya · chosen by you')).toBeTruthy();
+    expect(getText('Product question → Priya · chosen by you')).toBeTruthy();
     await waitFor(() => {
       expect(copy).toHaveProperty('disabled', false);
     });
@@ -182,7 +192,7 @@ describe('a card asked of someone not in Slack', () => {
     });
     // The card shows the same words the builder pastes.
     await waitFor(() => {
-      expect(screen.getByText(/My 10db build of Demo has a question for you/)).toBeTruthy();
+      expect(getText(/My 10db build of Demo has a question for you/)).toBeTruthy();
     });
     expect(screen.getByRole('radio', { name: /Seven days/ })).toBeTruthy();
   });

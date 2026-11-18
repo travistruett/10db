@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { inboxItemDto } from '../../test/fixtures';
+import { findText, getText, queryText, serveOpenRows } from '../../test/inbox-page-fixtures';
 import { BUILDER_PERSON, personDto, sendDto, slackContact } from '../../test/people-fixtures';
 
 const mark = personDto({ name: 'Mark', handle: 'mark', slack: slackContact('U1') });
@@ -49,6 +50,7 @@ function serve(item: InboxItemDto, builder = BUILDER_PERSON) {
     }),
     ...baseHandlers(),
   );
+  serveOpenRows(() => [item]);
   renderApp('/inbox');
   return posted;
 }
@@ -60,15 +62,15 @@ const key = (k: string, init: { metaKey?: boolean } = {}): void => {
 describe('a card with a draft', () => {
   it('opens on what Mark will get, with the draft text, and not on the options', async () => {
     serve(card({ text: 'Travis asks: how long?' }));
-    expect(await screen.findByText('Mark will get')).toBeTruthy();
-    expect(screen.getByText(/Travis asks: how long\?/)).toBeTruthy();
+    expect(await findText('Mark will get')).toBeTruthy();
+    expect(getText(/Travis asks: how long\?/)).toBeTruthy();
     expect(screen.queryByRole('radio', { name: /Keep access for 7 days/ })).toBeNull();
     expect(screen.getByRole('button', { name: /Send to Mark/ })).toBeTruthy();
   });
 
   it('⌘↵ sends with no text; a bare Enter or a digit does nothing', async () => {
     const posted = serve(card({}));
-    await screen.findByText('Mark will get');
+    await findText('Mark will get');
     key('Enter');
     key('1');
     key('2');
@@ -97,7 +99,7 @@ describe('a card with a draft', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Answer Myself' }));
     expect(await screen.findByRole('radio', { name: /Keep access for 7 days/ })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Send to Mark instead' }));
-    expect(await screen.findByText('Mark will get')).toBeTruthy();
+    expect(await findText('Mark will get')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Answer Myself' }));
     await screen.findByRole('radio', { name: /Keep access for 7 days/ });
     key('1');
@@ -116,7 +118,7 @@ describe('a card with a draft', () => {
     const posted = serve(
       card({ heldBy: 'scan', hits: [{ pattern: 'aws_access_key', line: 3, severity: 'hold' }] }),
     );
-    expect(await screen.findByText(/This looks like an AWS access key \(line 3\)/)).toBeTruthy();
+    expect(await findText(/This looks like an AWS access key \(line 3\)/)).toBeTruthy();
     expect(screen.getByRole('button', { name: /Send to Mark/ })).toHaveProperty('disabled', true);
     key('Enter', { metaKey: true });
     expect(posted).toEqual([]);
@@ -149,7 +151,7 @@ describe('a card with a draft', () => {
 
   it('a limit hold says so and Send Anyway overrides it', async () => {
     const posted = serve(card({ heldBy: 'limit' }));
-    expect(await screen.findByText(/Mark has had 10 new questions today/)).toBeTruthy();
+    expect(await findText(/Mark has had 10 new questions today/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Send Anyway' }));
     await waitFor(() => {
       expect(posted).toEqual([{ path: 'send', body: { overrideLimit: true } }]);
@@ -169,23 +171,23 @@ describe('a card with a draft', () => {
         { assignees: ['mark', 'ana'] },
       ),
     );
-    expect(await screen.findByText(/Mark and Ana have had 10 new questions today/)).toBeTruthy();
+    expect(await findText(/Mark and Ana have had 10 new questions today/)).toBeTruthy();
   });
 
   it('a first send says to check it before it goes', async () => {
     serve(card({ heldBy: 'first_send' }));
-    expect(await screen.findByText('First message to Mark: check it before it goes')).toBeTruthy();
+    expect(await findText('First message to Mark: check it before it goes')).toBeTruthy();
   });
 
   it('a review hold shows the plain preview, no alert', async () => {
     serve(card({ heldBy: 'review' }));
-    await screen.findByText('Mark will get');
+    await findText('Mark will get');
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('a warning dims a line and leaves Send enabled', async () => {
     serve(card({ hits: [{ pattern: 'file_path', line: 2, severity: 'warn' }] }));
-    expect(await screen.findByText(/looks like a file path \(line 2\)/i)).toBeTruthy();
+    expect(await findText(/looks like a file path \(line 2\)/i)).toBeTruthy();
     expect(screen.getByRole('button', { name: /Send to Mark/ })).toHaveProperty('disabled', false);
   });
 
@@ -201,7 +203,7 @@ describe('a card with a draft', () => {
         { assignees: ['mark', 'ana'] },
       ),
     );
-    expect(await screen.findByText('Mark and Ana will get')).toBeTruthy();
+    expect(await findText('Mark and Ana will get')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Send to Mark and Ana' })).toBeTruthy();
   });
 
@@ -214,12 +216,10 @@ describe('a card with a draft', () => {
       ),
     );
     expect(
-      await screen.findByText(
-        'Slack refused: channel_not_found. Mark may have left the workspace.',
-      ),
+      await findText('Slack refused: channel_not_found. Mark may have left the workspace.'),
     ).toBeTruthy();
     // It still names who the message was for, not the builder it fell back to.
-    expect(screen.getByText('Product question → Mark')).toBeTruthy();
+    expect(getText('Product question → Mark')).toBeTruthy();
     expect(screen.queryAllByRole('button', { name: /Ask Someone/ })).toHaveLength(0);
     expect(screen.getAllByRole('button', { name: 'Change' })).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: /Send to Mark/ }));
@@ -230,7 +230,7 @@ describe('a card with a draft', () => {
 
   it('the route line names who and why, and Change is the only way to reroute', async () => {
     serve(card({}));
-    const line = await screen.findByText('Product question → Mark');
+    const line = await findText('Product question → Mark');
     expect(line).toBeTruthy();
     expect(within(document.body).queryAllByRole('button', { name: /Ask Someone/ })).toHaveLength(0);
     expect(screen.getByRole('button', { name: 'Change' })).toBeTruthy();
@@ -243,11 +243,11 @@ describe('a draft while the builder is not yet bound to Slack', () => {
       ...BUILDER_PERSON,
       name: 'You',
     });
-    expect(await screen.findByText(/Finish setting up Slack/)).toBeTruthy();
+    expect(await findText(/Finish setting up Slack/)).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Open Integrations' }).getAttribute('href')).toBe(
       '/settings/integrations',
     );
-    expect(screen.queryByText(/You's/)).toBeNull();
+    expect(queryText(/You's/)).toBeNull();
     expect(screen.queryByRole('button', { name: /Send to Mark/ })).toBeNull();
     // The builder can still answer it themselves.
     expect(screen.getByRole('button', { name: 'Answer Myself' })).toBeTruthy();
@@ -262,8 +262,8 @@ describe('a question nobody was asked about', () => {
     expect(await screen.findByRole('radio', { name: /Keep access for 7 days/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Send answer' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Ask Someone' })).toBeTruthy();
-    expect(screen.queryByText(/will get/)).toBeNull();
-    expect(screen.queryByText(/question →/)).toBeNull();
+    expect(queryText(/will get/)).toBeNull();
+    expect(queryText(/question →/)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Answer Myself' })).toBeNull();
   });
 });
@@ -278,7 +278,7 @@ describe('a card still being triaged', () => {
         assignees: ['travis'],
       }),
     );
-    expect(await screen.findByText('Finding who answers…')).toBeTruthy();
+    expect(await findText('Finding who answers…')).toBeTruthy();
     // The builder need not wait for the judge to ask someone.
     expect(screen.getByRole('button', { name: 'Ask Someone' })).toBeTruthy();
     expect(screen.getByRole('radio', { name: /Keep access for 7 days/ })).toBeTruthy();

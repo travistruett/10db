@@ -17,6 +17,7 @@ export function FrameSlots({ children }: { readonly children: ReactNode }) {
         panelHost,
         drawerHost,
         hidePanel: null,
+        closeSheet: () => undefined,
         registerPanel: () => () => undefined,
       }}
     >

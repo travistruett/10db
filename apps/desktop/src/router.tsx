@@ -11,6 +11,7 @@ import { AppLayout } from './shell/app-layout';
 import { ViewBoundary } from './shell/view-boundary';
 import { BoardView } from './views/board/board-view';
 import { FactoryView } from './views/factory/factory-view';
+import { inboxSearch } from './views/inbox/inbox-search';
 import { InboxView } from './views/inbox/inbox-view';
 import { KnowledgeView } from './views/knowledge/knowledge-view';
 import { recordSearch } from './views/shape/record/record-tabs';
@@ -186,7 +187,7 @@ const recordRoute = createRoute({
 const inboxRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/inbox',
-  validateSearch: projectFilter,
+  validateSearch: inboxSearch,
   component: InboxPage,
 });
 const workbenchRoute = createRoute({

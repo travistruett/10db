@@ -187,8 +187,8 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   // The fake's first probe recorded the default account's identity and said so in a card. That card
   // offers Record again, so it is a question the daemon acts on; it sits above the run's item and is
   // the open row, so the item's row is opened by selecting it.
-  await expect(page.getByText('Claude plan runs as builder@example.com')).toBeVisible();
-  const away = page.getByRole('button', {
+  await expect(page.getByText('Claude plan runs as builder@example.com').first()).toBeVisible();
+  const away = page.getByRole('option', {
     name: new RegExp(`Skipped while you were away: ${TASK}`),
   });
   await away.click();

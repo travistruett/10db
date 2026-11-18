@@ -32,6 +32,8 @@ is mounted:
   `lines` (1 or 2) is how many lines a long title takes before it is cut; two reads whole at a narrow width.
 - `Panel` (`panel.tsx`): a section's list, with a 44 px head (its `title`, `controls` and the hide button) on the
   lights' row. Mounting it is what tells the frame the section has a panel (`registerPanel`); unmounting withdraws it.
+  A pick in a panel's list that changes no route (a row selected, a search change) calls `closeSheet()` from
+  `useFrameSlots()`, since a sheet closes on its own only when the pathname changes.
 - `PageIntro` (`page-intro.tsx`): not a slot, but the top of a view's content: an optional one-line intro (13 px, a
   sentence) and an optional toolbar of tabs and filters. A page has one header, the title row; the content never
   repeats it. Nothing is drawn when both are absent.

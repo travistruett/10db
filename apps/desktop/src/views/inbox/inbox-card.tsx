@@ -16,15 +16,13 @@ import {
   Code,
   Group,
   Kbd,
-  Paper,
   Radio,
   Stack,
   Text,
   Textarea,
-  UnstyledButton,
 } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
-import type { KeyboardEvent, RefObject } from 'react';
+import type { KeyboardEvent, ReactNode, RefObject } from 'react';
 import { z } from 'zod';
 import { CodeSpans } from '../../shell/code-spans';
 import { ProjectLabel } from '../../shell/project-label';
@@ -32,11 +30,10 @@ import { ExternalLink } from '../board/pull-request-link';
 import { BatchCardActions } from './batch-card-actions';
 import { CheckCard } from './check-card';
 import { PlanCard } from './plan-card';
-import { isDismissable } from './inbox-rows';
 import { ReviewRejection, reviewRejection } from '../review/review-rejection';
 import { McpApprovalDetails, mcpReview } from './mcp-approval';
 import { PassCardExtras } from './pass-card-extras';
-import { SELECTED_CARD_ATTRIBUTE } from './use-inbox-keys';
+import { CardSurface } from './card-surface';
 import { KIND_LABELS, optionLabel } from './permission-labels';
 import { usePrincipleOf } from './principle-card';
 import { RecordDecision } from './record-decision';
@@ -72,7 +69,6 @@ export interface InboxCardProps {
   readonly error: string | null;
   readonly pending: boolean;
   readonly noteRef: RefObject<HTMLTextAreaElement | null>;
-  readonly onSelect: () => void;
   readonly onChoose: (choice: string) => void;
   readonly onNote: (note: string) => void;
   readonly onRecord: (recording: DecisionRecording | null) => void;
@@ -83,6 +79,10 @@ export interface InboxCardProps {
   readonly onSubmit: () => void;
   /** Dismisses the row's flags; only offered for a flag with no options. */
   readonly onDismiss: () => void;
+  /** Whether the card draws its own border; false in the Inbox's content area, which frames it. */
+  readonly framed?: boolean;
+  /** What the Inbox adds under the card's body, such as a question's last messages. */
+  readonly context?: ReactNode;
   /** Whether the Inbox's keys answer the card, so each option shows its digit and Send its Enter. */
   readonly shortcuts?: boolean;
   /** Whether the builder chose Answer Myself on a drafted question, which swaps the preview for the options. */
@@ -144,7 +144,6 @@ export function InboxCard({
   error,
   pending,
   noteRef,
-  onSelect,
   onChoose,
   onNote,
   onRecord,
@@ -153,6 +152,8 @@ export function InboxCard({
   onNoteFocus,
   onSubmit,
   onDismiss,
+  framed = true,
+  context = null,
   shortcuts = true,
   answeringMyself = false,
   onAnswerMyself = () => undefined,
@@ -162,7 +163,6 @@ export function InboxCard({
   const review = mcpReview(item);
   const rejection = reviewRejection(item);
   const principle = usePrincipleOf(item, selected);
-  const dismissable = isDismissable(item);
   const session = useSessionOfCard(item);
   const taskOfCard = useTaskOfCard(item);
   // Every card waits on the builder, a flag included: yellow, never the red of a failure.
@@ -182,58 +182,11 @@ export function InboxCard({
   // The row's count in words, so the number in the sidebar has an explanation on screen.
   const identical = count > 1 ? `${String(count)} identical flags` : null;
 
-  if (!selected) {
-    // What a flag is about, such as a path, is its body's first line.
-    const about = item.kind === InboxKind.Flag ? (item.body.split('\n')[0] ?? '') : '';
-    return (
-      <Group
-        gap="xs"
-        wrap="nowrap"
-        pr="xs"
-        style={{
-          borderRadius: 'var(--mantine-radius-md)',
-          border: '1px solid var(--mantine-color-default-border)',
-        }}
-      >
-        <UnstyledButton onClick={onSelect} p="sm" style={{ flex: 1, minWidth: 0 }}>
-          <Group gap="sm" wrap="nowrap">
-            {kind}
-            {where}
-            {times}
-            {session === null ? null : <SessionBadge chat={session} />}
-            <Text size="sm" lineClamp={1} title={item.title} style={{ minWidth: 0 }}>
-              {item.title}
-            </Text>
-            {identical === null ? null : (
-              <Text size="xs" c="dimmed" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
-                {identical}
-              </Text>
-            )}
-            {about === '' ? null : (
-              <Text size="sm" c="dimmed" ff="monospace" lineClamp={1} style={{ minWidth: 0 }}>
-                {about}
-              </Text>
-            )}
-          </Group>
-        </UnstyledButton>
-        {dismissable && error !== null ? (
-          <Text size="xs" c="red" lineClamp={1}>
-            {error}
-          </Text>
-        ) : null}
-        {dismissable ? (
-          <Button size="xs" variant="subtle" loading={pending} onClick={onDismiss}>
-            {count > 1 ? 'Dismiss All' : 'Dismiss'}
-          </Button>
-        ) : null}
-      </Group>
-    );
-  }
-
   if (item.kind === InboxKind.Plan) {
     return (
       <PlanCard
         item={item}
+        framed={framed}
         note={sendBackNote}
         onNote={onSendBackNote}
         header={
@@ -254,6 +207,7 @@ export function InboxCard({
     return (
       <CheckCard
         item={item}
+        framed={framed}
         note={sendBackNote}
         onNote={onSendBackNote}
         header={
@@ -278,6 +232,7 @@ export function InboxCard({
     return (
       <SlackPreview
         item={item}
+        framed={framed}
         send={item.send}
         people={people}
         onAnswerMyself={() => {
@@ -309,7 +264,7 @@ export function InboxCard({
     item.kind === InboxKind.Question && hasOptions && !(choice !== null && isParkChoice(choice));
 
   return (
-    <Paper withBorder p="md" shadow="xs" {...{ [SELECTED_CARD_ATTRIBUTE]: true }}>
+    <CardSurface framed={framed} selected>
       <Stack gap="sm">
         <Group gap="sm" wrap="nowrap">
           {kind}
@@ -339,6 +294,7 @@ export function InboxCard({
         ) : (
           <CardBody item={item} />
         )}
+        {context}
         {rejection ? <ReviewRejection review={rejection} /> : null}
         {link === null ? null : <ExternalLink url={link} label="Open on GitHub" />}
         {needsAccountModels(item) ? (
@@ -457,6 +413,6 @@ export function InboxCard({
           </Button>
         </Group>
       </Stack>
-    </Paper>
+    </CardSurface>
   );
 }

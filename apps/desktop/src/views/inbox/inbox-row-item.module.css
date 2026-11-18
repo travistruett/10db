@@ -1,0 +1,28 @@
+/* The two lines inside a panel row; the row's own box, height and fill come from the list. */
+.item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Dismiss shows on hover and on focus, over the end of the second line. */
+.dismiss {
+  position: absolute;
+  right: 0;
+  bottom: -2px;
+  opacity: 0;
+}
+
+:global([data-inbox-row]):hover .dismiss,
+:global([data-inbox-row]):focus-within .dismiss {
+  opacity: 1;
+}

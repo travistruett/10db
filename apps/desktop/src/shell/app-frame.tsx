@@ -124,10 +124,13 @@ export function AppFrame({
     else setOpened(sheet === null ? { at: pathname, kind: SidebarSheet.Panel } : null);
   };
   const hidePanel = band === ShellBand.Wide && layout.panel === 'column' ? togglePanelHidden : null;
+  const closeSheet = useCallback(() => {
+    setOpened(null);
+  }, []);
 
   const slots = useMemo<FrameSlots>(
-    () => ({ titleHost, panelHost, drawerHost, hidePanel, registerPanel }),
-    [titleHost, panelHost, drawerHost, hidePanel, registerPanel],
+    () => ({ titleHost, panelHost, drawerHost, hidePanel, closeSheet, registerPanel }),
+    [titleHost, panelHost, drawerHost, hidePanel, closeSheet, registerPanel],
   );
 
   const mainRef = useRef<HTMLElement>(null);

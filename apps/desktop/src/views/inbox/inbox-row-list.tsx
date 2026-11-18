@@ -1,6 +1,7 @@
 import { Box, ScrollArea, Skeleton } from '@mantine/core';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useEffect, useRef, type ReactNode } from 'react';
+import { LIST_ATTRIBUTE } from './use-inbox-keys';
 import classes from './inbox-row-list.module.css';
 
 /** Rows are a fixed height, so the list never measures one (spec §4.1 "Performance"). */
@@ -21,6 +22,8 @@ export interface InboxRowListProps<T extends { readonly key: string }> {
   /** The last page's failure; the next near-end retries it. */
   readonly moreError: Error | null;
   readonly onNearEnd: () => void;
+  /** A click on a row. */
+  readonly onPick?: (row: T) => void;
   /** The row's two lines; the list draws the row around them. */
   readonly renderRow: (row: T, selected: boolean) => ReactNode;
 }
@@ -38,6 +41,7 @@ export function InboxRowList<T extends { readonly key: string }>({
   loadingMore,
   moreError,
   onNearEnd,
+  onPick,
   renderRow,
 }: InboxRowListProps<T>) {
   const viewport = useRef<HTMLDivElement>(null);
@@ -51,6 +55,14 @@ export function InboxRowList<T extends { readonly key: string }>({
     getItemKey: (index) => rows[index]?.key ?? 'more',
     overscan: OVERSCAN_ROWS,
   });
+
+  // A row chosen with the keys stays in view.
+  const selectedIndex = selected === null ? -1 : rows.findIndex((row) => row.key === selected);
+  useEffect(() => {
+    if (selectedIndex >= 0) virtualizer.scrollToIndex(selectedIndex);
+    // The virtualizer is stable; only the selection moving scrolls.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIndex]);
 
   const nearEnd = (lastVisible: number): boolean =>
     hasMore && !loadingMore && lastVisible >= rows.length - NEAR_END_ROWS;
@@ -75,7 +87,7 @@ export function InboxRowList<T extends { readonly key: string }>({
       style={{ flex: 1, minHeight: 0 }}
       viewportRef={viewport}
       viewportProps={{ onScroll }}
-      data-inbox-list
+      {...{ [LIST_ATTRIBUTE]: true }}
     >
       <Box
         role="listbox"
@@ -107,6 +119,16 @@ export function InboxRowList<T extends { readonly key: string }>({
               data-inbox-row
               className={classes['row']}
               style={style}
+              // Focusable so the keys can be given from the list; j, k and Enter are the Inbox's, Space picks.
+              tabIndex={-1}
+              onClick={() => {
+                onPick?.(row);
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== ' ' || event.target !== event.currentTarget) return;
+                event.preventDefault();
+                onPick?.(row);
+              }}
             >
               {renderRow(row, isSelected)}
             </div>

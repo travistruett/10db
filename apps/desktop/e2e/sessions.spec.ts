@@ -180,8 +180,10 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   await page.keyboard.press('Meta+j');
   await expect(page).toHaveURL(/\/sessions\?chat=/);
   await page.getByRole('navigation').getByRole('link', { name: 'Inbox' }).click();
-  const inboxCard = page.getByRole('button', { name: /Remove “Hold the line”\?/ });
-  if ((await inboxCard.count()) > 0) await inboxCard.first().click();
+  await page
+    .getByRole('option', { name: /Remove “Hold the line”\?/ })
+    .first()
+    .click();
   await expect(page.getByRole('button', { name: 'Open Session' })).toBeVisible();
   await page
     .getByRole('navigation')
