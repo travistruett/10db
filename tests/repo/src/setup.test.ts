@@ -80,7 +80,8 @@ describe('scripts/setup.sh', () => {
     const { status, calls } = runSetup({ mise: true }, { INSTALL_RUST: 'no' });
     expect(status).toBe(0);
     expect(calls).toEqual([
-      'install node pnpm gitleaks actionlint zizmor cargo-deny',
+      'install node pnpm gitleaks actionlint zizmor cargo-deny lefthook',
+      'exec -- lefthook install',
       'exec -- pnpm install --frozen-lockfile',
       'exec -- pnpm --filter @10db/desktop exec playwright install webkit',
     ]);

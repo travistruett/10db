@@ -15,8 +15,6 @@ strictDepBuilds: true
 allowBuilds:
   # Its install script fetches the platform binary.
   esbuild: true
-  # Its postinstall installs git hooks; the root prepare script does that instead.
-  lefthook: false
 # eslint-plugin-jsx-a11y 6.10.2 declares peer eslint up to ^9. eslint.config.js wraps it with
 # @eslint/compat's fixupPluginRules, which shims the context APIs ESLint 10 removed.
 peerDependencyRules:

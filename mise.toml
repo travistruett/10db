@@ -10,6 +10,8 @@ gitleaks = "8.30.1"
 actionlint = "1.7.12"
 zizmor = "1.31.1"
 cargo-deny = "0.20.2"
+# The git hooks name the lefthook that installed them, so it lives here, outside every checkout.
+lefthook = "2.2.2"
 
 [settings]
 lockfile = true
