@@ -136,6 +136,7 @@ describe('loadEnv', () => {
     ['a fractional gate slot count', { TENDB_GATE_SLOTS: '1.5' }, 'TENDB_GATE_SLOTS'],
     ['a text gate slot count', { TENDB_GATE_SLOTS: 'two' }, 'TENDB_GATE_SLOTS'],
     ['zero transcript days', { TENDB_LANE_TRANSCRIPT_DAYS: '0' }, 'TENDB_LANE_TRANSCRIPT_DAYS'],
+    ['an unknown lane brief', { TENDB_LANE_BRIEF: 'slim' }, 'TENDB_LANE_BRIEF'],
     [
       'a worktree root with a home shorthand',
       { TENDB_WORKTREE_ROOT: '~/wt' },

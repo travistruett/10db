@@ -18,6 +18,7 @@ export type EnvDaemonOptions = Pick<
   | 'disk'
   | 'catalogueSync'
   | 'pictures'
+  | 'laneBrief'
 >;
 
 /**
@@ -59,5 +60,6 @@ export function daemonOptionsFromEnv(env: DaemonEnv): EnvDaemonOptions {
     ...(env.TENDB_DISK === 'off' ? {} : { disk: {} }),
     catalogueSync: env.TENDB_CATALOGUE !== 'off',
     pictures: { kind: 'pinned' },
+    ...(env.TENDB_LANE_BRIEF === undefined ? {} : { laneBrief: env.TENDB_LANE_BRIEF }),
   };
 }

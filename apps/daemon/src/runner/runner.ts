@@ -177,6 +177,7 @@ import {
   HANDOFF_NUDGE_ACCOUNT,
   HANDOFF_NUDGE_ACCOUNT_READ_ONLY,
   HANDOFF_NUDGE_READ_ONLY,
+  LaneBrief,
   PackReason,
   recordPlanPacked,
   RESULT_NUDGE,
@@ -461,6 +462,8 @@ export interface RunnerOptions {
   readonly afterSession?: (workstreamId: WorkstreamId) => Promise<void>;
   /** The OS start time of a pid, stored beside it so recovery can tell a reused PID apart. */
   identifyProcess?(pid: number): Promise<string | null>;
+  /** How each lane's brief and its re-injection after a compaction carry the Plan and knowledge; absent is full. */
+  readonly laneBrief?: LaneBrief;
   /** Runs every lane session under the lane sandbox; null (fake sessions and tests) runs none. */
   readonly laneSandbox: LaneSandbox | null;
   /**
@@ -2736,6 +2739,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           });
     const prompt = buildSessionPrompt({
       provider,
+      brief: opts.laneBrief ?? LaneBrief.Full,
       inPass: pass !== null,
       attended: policy.attended,
       pictures: project.appUrl !== null && takesPictures(project, task),
@@ -3611,10 +3615,15 @@ export function createRunner(opts: RunnerOptions): Runner {
               ctx.emit(contextPackedEvent(session.id, id, pack, PackReason.Compaction));
             });
             handle.send(
-              compactionReinjection(pack, denialsToTell(), {
-                role: step.role,
-                answeredCards: answeredCardsForTask(db, row.taskId),
-              }),
+              compactionReinjection(
+                pack,
+                denialsToTell(),
+                {
+                  role: step.role,
+                  answeredCards: answeredCardsForTask(db, row.taskId),
+                },
+                opts.laneBrief ?? LaneBrief.Full,
+              ),
             );
             break;
           }

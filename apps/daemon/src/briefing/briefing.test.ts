@@ -30,6 +30,7 @@ import {
   HANDOFF_NUDGE_ACCOUNT,
   HANDOFF_NUDGE_ACCOUNT_READ_ONLY,
   HANDOFF_NUDGE_READ_ONLY,
+  LaneBrief,
   PackReason,
   quoteSlackAnswer,
   recordPlanPacked,
@@ -2075,5 +2076,152 @@ describe('the Plan context block', () => {
     } finally {
       done();
     }
+  });
+});
+
+describe('an indexed lane brief', () => {
+  const SECTION_TEXT = '## Task 1: Pair\nPair the device over the local socket.\n';
+  const plan: NonNullable<ContextPack['plan']> = {
+    shapeId: mintId('Shape'),
+    revisionId: mintId('ShapeAttachmentRevision'),
+    title: 'Remote host',
+    document: { key: 'p1', title: 'P1', revision: 1 },
+    goal: null,
+    section: { ref: 'p1#task-1', text: SECTION_TEXT },
+    shared: [],
+    decisions: [
+      { key: 'd1', choice: 'The database', rationale: 'Local only', lasting: true, dropped: null },
+    ],
+    names: [],
+    facts: [],
+    findings: [],
+    intent: [],
+    notIncluded: [],
+    budget: 6000,
+    used: 30,
+  };
+  const pack: ContextPack = { ...packWithDecision, plan };
+  const CLAIMS_BULLET = '- Edit only files inside your claims.';
+  const COMMIT_ONLY_BULLET = '- Commit only through the 10db commit tool';
+  const DEPS_BULLET = '- To add or change a dependency, edit the package.json';
+  const COMMIT_BEFORE_ENDING =
+    '- Before you end your turn, commit every change in your claims through mcp__10db__commit.';
+  const brief = (provider: Provider, laneBrief?: LaneBrief, contextPack: ContextPack = pack) =>
+    buildSessionPrompt({
+      ...base,
+      provider,
+      contextPack,
+      action: { kind: 'start' },
+      ...(laneBrief === undefined ? {} : { brief: laneBrief }),
+    });
+
+  it.each([
+    {
+      name: 'Claude, index: the claims and commit-tool bullets go, the deps bullet stays',
+      provider: Provider.Claude,
+      laneBrief: LaneBrief.Index,
+      absent: [CLAIMS_BULLET, COMMIT_ONLY_BULLET],
+      present: [DEPS_BULLET, COMMIT_BEFORE_ENDING],
+    },
+    {
+      name: 'Codex, index: every bullet stays, since no check shows Codex reads a refusal’s reason',
+      provider: Provider.Codex,
+      laneBrief: LaneBrief.Index,
+      absent: [],
+      present: [CLAIMS_BULLET, COMMIT_ONLY_BULLET, DEPS_BULLET, COMMIT_BEFORE_ENDING],
+    },
+    {
+      name: 'Claude, full: every bullet stays',
+      provider: Provider.Claude,
+      laneBrief: LaneBrief.Full,
+      absent: [],
+      present: [CLAIMS_BULLET, COMMIT_ONLY_BULLET, DEPS_BULLET, COMMIT_BEFORE_ENDING],
+    },
+  ])('$name', ({ provider, laneBrief, absent, present }) => {
+    const prompt = brief(provider, laneBrief);
+    for (const line of absent) expect(prompt).not.toContain(line);
+    for (const line of present) expect(prompt).toContain(line);
+  });
+
+  it.each([Provider.Claude, Provider.Codex])(
+    'a full brief on %s is the brief with no setting',
+    (provider) => {
+      expect(brief(provider, LaneBrief.Full)).toBe(brief(provider));
+    },
+  );
+
+  it.each([Provider.Claude, Provider.Codex])(
+    'an index brief on %s names the section, the entries and the decisions, and pastes none of them',
+    (provider) => {
+      const prompt = brief(provider, LaneBrief.Index);
+      expect(prompt).toContain(
+        'Your section: p1#task-1. Read it with get_plan_section before you start.',
+      );
+      expect(prompt).toContain('Decisions you rely on (read each with get_plan_entry): d1');
+      expect(prompt).toContain(`- Which badge library? {${decisionId}, area:ui}`);
+      expect(prompt).toContain(
+        "Call find_knowledge with a question's words for its choice and rationale.",
+      );
+      expect(prompt).toContain(`- [testing.no-sleeps] Never sleep in tests {${policyId}, project}`);
+      for (const pasted of [
+        'Pair the device',
+        'The database',
+        'Local only',
+        'Mantine Badge',
+        'Already in the stack',
+      ])
+        expect(prompt).not.toContain(pasted);
+    },
+  );
+
+  it('re-injects after a compaction the plan and knowledge text the indexed brief started with', () => {
+    const first = brief(Provider.Claude, LaneBrief.Index);
+    const again = compactionReinjection(pack, [], undefined, LaneBrief.Index);
+    const knowledgeAt = first.indexOf('Policies (you must follow these):');
+    const knowledge = first.slice(knowledgeAt, first.indexOf('\n\n', knowledgeAt));
+    expect(knowledge).toContain('find_knowledge');
+    expect(again).toContain(knowledge);
+    expect(again).toContain('Your section: p1#task-1.');
+    expect(again).not.toContain('Pair the device');
+    expect(again).not.toContain('Already in the stack');
+  });
+
+  it('is smaller than the full brief for a typical task', () => {
+    const paragraph =
+      'The runner reads the pack once per session start and once after a compaction. It never reads the shape again mid-turn, so a revision made while the lane runs reaches it at its next start. Tests cover the pinned revision, the shared sections and a dropped decision. ';
+    const typicalPlan: NonNullable<ContextPack['plan']> = {
+      ...plan,
+      section: {
+        ref: 'p1#task-3',
+        text: `## Task 3: Pack the plan\n\n${paragraph.repeat(12)}`,
+      },
+      shared: [{ ref: 'p1#global-constraints', text: paragraph.repeat(4) }],
+      decisions: ['d1', 'd2', 'd3'].map((key) => ({
+        key,
+        choice: paragraph.slice(0, 120),
+        rationale: paragraph.slice(0, 200),
+        lasting: true,
+        dropped: null,
+      })),
+    };
+    const typicalPack: ContextPack = {
+      ...packWithDecision,
+      plan: typicalPlan,
+      knowledge: {
+        ...packWithDecision.knowledge,
+        decisions: Array.from({ length: 14 }, (_, i) => ({
+          kind: 'decision' as const,
+          id: mintId('Decision'),
+          question: `Where does the pack read revision ${String(i)} from?`,
+          choice: paragraph.slice(0, 160),
+          rationale: paragraph.slice(0, 220),
+          scope: 'project' as const,
+          area: null,
+        })),
+      },
+    };
+    const full = brief(Provider.Claude, LaneBrief.Full, typicalPack);
+    const index = brief(Provider.Claude, LaneBrief.Index, typicalPack);
+    expect(index.length).toBeLessThan(full.length);
   });
 });

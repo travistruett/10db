@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { LaneBrief } from './briefing';
 
 export const LogLevel = {
   Fatal: 'fatal',
@@ -40,6 +41,9 @@ const DaemonEnv = z.object({
   // Set by the lane-pipeline eval runner: the days Claude Code keeps each lane's transcript, set inline
   // over the builder's own cleanupPeriodDays so a run's transcripts are still there for its report.
   TENDB_LANE_TRANSCRIPT_DAYS: z.coerce.number().int().min(1).max(3650).optional(),
+  // How a lane's brief carries its Plan and knowledge: `full` pastes them, `index` names them and points
+  // to the tools that read them. Absent is `full`; the lane-pipeline eval sets it to compare the two.
+  TENDB_LANE_BRIEF: z.enum(LaneBrief).optional(),
   // Set by the desktop shell: the daemon runs its normal shutdown when stdin reaches EOF, which is how
   // it learns the shell died without a clean Quit.
   TENDB_PARENT_STDIN: z.enum(['0', '1']).optional(),
