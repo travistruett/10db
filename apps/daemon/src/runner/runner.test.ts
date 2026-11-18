@@ -7714,20 +7714,25 @@ describe('without a gate command', () => {
     neverDone(workstream.id, task.id);
   });
 
-  it.each([
-    { name: 'a permission card', kind: 'permission' as const, choice: 'allow_once' },
-    { name: 'a question card', kind: 'question' as const, choice: 'Yes' },
-  ])(
-    'an answer to another card targeting a waiting workstream leaves it WAITING_HUMAN with the same next action: $name',
-    async ({ kind, choice }) => {
-      engine = await createTestEngine(
-        { Alpha: [implement('op-nogate-0051')] },
-        { gateCommand: null },
-      );
-      const { task, workstream } = engine.addTask('Alpha');
-      await runToWait(workstream.id);
-      const before = ws(workstream.id);
-      const sessions = engine.adapter.prompts.length;
+  it('an answer to another card targeting a waiting workstream, given live or redelivered by recovery, leaves it WAITING_HUMAN with the same next action', async () => {
+    engine = await createTestEngine({ Alpha: [implement('op-nogate-0051')] }, { gateCommand: null });
+    const { task, workstream } = engine.addTask('Alpha');
+    await runToWait(workstream.id);
+    const before = ws(workstream.id);
+    const sessions = engine.adapter.prompts.length;
+    const stillWaiting = () => {
+      expect(ws(workstream.id)).toMatchObject({
+        state: 'WAITING_HUMAN',
+        nextAction: before.nextAction,
+      });
+      expect(engine.adapter.prompts).toHaveLength(sessions);
+      expect(openChecks()).toHaveLength(1);
+      neverDone(workstream.id, task.id);
+    };
+    for (const { kind, choice } of [
+      { kind: 'permission' as const, choice: 'allow_once' },
+      { kind: 'question' as const, choice: 'Yes' },
+    ]) {
       // The step ended before the builder answered this card, so no waiter is left for it.
       const other = engine.state.write((ctx) =>
         insertInboxItem(ctx, {
@@ -7745,25 +7750,8 @@ describe('without a gate command', () => {
         }),
       );
       engine.inbox.answer(other.id, { choice });
-      expect(ws(workstream.id)).toMatchObject({
-        state: 'WAITING_HUMAN',
-        nextAction: before.nextAction,
-      });
-      expect(engine.adapter.prompts).toHaveLength(sessions);
-      expect(openChecks()).toHaveLength(1);
-      neverDone(workstream.id, task.id);
-    },
-  );
-
-  it('an answer to another card redelivered by recovery leaves a waiting workstream WAITING_HUMAN with the same next action', async () => {
-    engine = await createTestEngine(
-      { Alpha: [implement('op-nogate-0052')] },
-      { gateCommand: null },
-    );
-    const { task, workstream } = engine.addTask('Alpha');
-    await runToWait(workstream.id);
-    const before = ws(workstream.id);
-    const sessions = engine.adapter.prompts.length;
+      stillWaiting();
+    }
     // Answered, but the daemon stopped before the answer reached its target.
     engine.state.write((ctx) => {
       const item = insertInboxItem(ctx, {
@@ -7783,12 +7771,7 @@ describe('without a gate command', () => {
     });
     const report = await recover();
     expect(report.redelivered).toHaveLength(1);
-    expect(ws(workstream.id)).toMatchObject({
-      state: 'WAITING_HUMAN',
-      nextAction: before.nextAction,
-    });
-    expect(engine.adapter.prompts).toHaveLength(sessions);
-    neverDone(workstream.id, task.id);
+    stillWaiting();
   });
 
   it('a restart while waiting keeps one card and the same next action', async () => {
@@ -7872,13 +7855,17 @@ describe('without a gate command', () => {
     neverDone(workstream.id, task.id);
   });
 
-  it('with a gate, a finished task still completes on the gate and raises no check', async () => {
+  it('with a gate, a finished task still completes on the gate and raises no card: the pull request is where it is reviewed', async () => {
     engine = await createTestEngine({ Alpha: [implement('op-nogate-0041')] });
     const { workstream } = engine.addTask('Alpha');
     await runToWait(workstream.id);
     expect(ws(workstream.id).state).toBe('DONE');
     expect(listEvidence(engine.store.db, workstream.id)).toHaveLength(1);
     expect(checkCards()).toEqual([]);
+    expect(
+      listInbox(engine.store.db, {}).filter((i) => i.kind === 'review'),
+    ).toEqual([]);
+    expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
   });
 
   describe('answering the check', () => {
@@ -7891,10 +7878,11 @@ describe('without a gate command', () => {
         ...(withNote === undefined ? {} : { note: withNote }),
       });
     };
-    const waiting = async (op: string) => {
+    const waiting = async (op: string, options: Parameters<typeof createTestEngine>[2] = {}) => {
       engine = await createTestEngine(
         { Alpha: [implement(op), [turn], [turn], [turn], [turn], [turn]] },
         { gateCommand: null },
+        options,
       );
       const added = engine.addTask('Alpha');
       await runToWait(added.workstream.id);
@@ -7911,10 +7899,21 @@ describe('without a gate command', () => {
       engine.state.write((ctx) => engine.runner.sendBack(ctx, id, withNote))();
     };
 
-    it('approve completes with no session started', async () => {
-      const { task, workstream } = await waiting('op-check-0001');
+    it('approve completes with no session started, frees the lane and raises no review card', async () => {
+      let freed = 0;
+      const { task, workstream } = await waiting('op-check-0001', {
+        onLaneFreed: () => {
+          freed += 1;
+        },
+      });
       const sessions = engine.adapter.prompts.length;
+      const freedBefore = freed;
       answerCheck('approve');
+      // Claims are released and the lane freed in the answer itself, before the runner settles.
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(activeClaims(engine.store.db, workstream.id)).toEqual([]);
+      expect(freed).toBe(freedBefore + 1);
+      expect(reviewCards()).toEqual([]);
       await engine.runner.idle();
       expect(ws(workstream.id)).toMatchObject({ state: 'DONE', currentSessionId: null });
       expect(getTask(engine.store.db, task.id).status).toBe('done');
@@ -7929,37 +7928,12 @@ describe('without a gate command', () => {
       expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
     });
 
-    it('approve raises no review card', async () => {
-      const { workstream } = await waiting('op-check-0002');
-      answerCheck('approve');
-      expect(ws(workstream.id).state).toBe('DONE');
-      expect(reviewCards()).toEqual([]);
-    });
-
-    it('with a gate, a finished task raises no card: the pull request is where it is reviewed', async () => {
-      engine = await createTestEngine({ Alpha: [implement('op-check-0003')] });
-      const { workstream } = engine.addTask('Alpha');
-      await runToWait(workstream.id);
-      expect(ws(workstream.id).state).toBe('DONE');
-      expect(reviewCards()).toEqual([]);
-      expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
-    });
-
-    it.each([
-      { name: 'send back', act: () => answerCheck('send_back', note), state: 'QUEUED' },
-      { name: 'an unanswered card', act: () => undefined, state: 'WAITING_HUMAN' },
-    ])('only Approve completes: $name does not', async ({ act, state }) => {
-      const { task, workstream } = await waiting('op-check-0004');
-      act();
-      expect(ws(workstream.id).state).toBe(state);
-      neverDone(workstream.id, task.id);
-      expect(activeClaims(engine.store.db, workstream.id).length).toBeGreaterThan(0);
-    });
-
-    it('send back records builder evidence and queues a fix', async () => {
-      const { workstream } = await waiting('op-check-0005');
+    // Only Approve completes: an unanswered card is covered by the waiting tests above, a send back here.
+    it('send back records builder evidence, queues a fix that carries the note and survives restarts', async () => {
+      const { task, workstream } = await waiting('op-check-0005');
       const before = getWorkstreamRow(engine.store.db, workstream.id);
       answerCheck('send_back', note);
+      neverDone(workstream.id, task.id);
       const [evidence] = listEvidence(engine.store.db, workstream.id);
       expect(evidence).toMatchObject({
         kind: 'builder',
@@ -7976,11 +7950,32 @@ describe('without a gate command', () => {
       expect(checkCards().map((c) => c.state)).toEqual(['RESOLVED']);
       expect(activeClaims(engine.store.db, workstream.id).length).toBeGreaterThan(0);
       expect(getWorkstreamRow(engine.store.db, workstream.id).leaseOwner).toBeNull();
-    });
 
-    it('the fix prompt carries the builder note, and the fixed work comes back for a check', async () => {
-      const { task, workstream } = await waiting('op-check-0006');
-      answerCheck('send_back', note);
+      // Neither answer can be given again to a workstream already queued after a send back.
+      const queued = ws(workstream.id);
+      const events = listEventsAfter(engine.store.db, 0, 1000).length;
+      expect(() => {
+        approveDirect(workstream.id);
+      }).toThrow(ConflictError);
+      expect(() => {
+        sendBackDirect(workstream.id, 'again');
+      }).toThrow(ConflictError);
+      expect(ws(workstream.id)).toEqual(queued);
+      expect(listEvidence(engine.store.db, workstream.id)).toEqual([evidence]);
+      expect(listEventsAfter(engine.store.db, 0, 1000)).toHaveLength(events);
+
+      // A restart keeps the note once and the fix queued.
+      await recover();
+      await recover();
+      expect(listEvidence(engine.store.db, workstream.id)).toHaveLength(1);
+      expect(ws(workstream.id)).toMatchObject({
+        state: 'QUEUED',
+        attempt: 1,
+        nextAction: queued.nextAction,
+      });
+      expect(checkCards().map((c) => c.state)).toEqual(['RESOLVED']);
+
+      // The fix prompt carries the note, and the fixed work comes back for a check.
       await runToWait(workstream.id);
       expect(engine.adapter.prompts.at(-1)?.prompt).toContain(
         `The builder sent the work back: ${note}`,
@@ -8211,7 +8206,7 @@ describe('without a gate command', () => {
       });
     });
 
-    it('send back without a note is refused and changes nothing', async () => {
+    it('send back without a note, or for a workstream no longer waiting, is refused and changes nothing', async () => {
       const { task, workstream } = await waiting('op-check-0008');
       const before = ws(workstream.id);
       expect(() => answerCheck('send_back')).toThrow(InboxAnswerRefused);
@@ -8220,41 +8215,55 @@ describe('without a gate command', () => {
       expect(openChecks()).toHaveLength(1);
       expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
       neverDone(workstream.id, task.id);
+
+      // An answer for a workstream that is no longer waiting is a conflict that leaves the card open.
+      engine.state.write((ctx) =>
+        transitionWorkstream(ctx, workstream.id, {
+          to: 'QUEUED',
+          fence: null,
+          patch: { nextAction: { kind: 'start' } },
+        }),
+      );
+      expect(() => answerCheck('send_back', note)).toThrow(ConflictError);
+      expect(openChecks()).toHaveLength(1);
+      expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
     });
 
-    it('answering the same card twice completes once', async () => {
+    it('answering the same card twice completes once, and a restart closes nothing twice', async () => {
       const { task, workstream } = await waiting('op-check-0009');
+      const sessions = engine.adapter.prompts.length;
       const [card] = openChecks();
       answerCheck('approve');
+      const done = ws(workstream.id);
+      const evidence = listEvidence(engine.store.db, workstream.id);
+      const events = listEventsAfter(engine.store.db, 0, 1000).length;
       expect(() =>
         engine.inbox.answer(card?.id ?? mintId('InboxItem'), { choice: 'approve' }),
       ).toThrow(ConflictError);
       expect(() => {
         approveDirect(workstream.id);
       }).toThrow(ConflictError);
-      expect(doneTransitions(workstream.id)).toHaveLength(1);
-      expect(ws(workstream.id).state).toBe('DONE');
-      expect(getTask(engine.store.db, task.id).status).toBe('done');
-    });
-
-    it.each([
-      { name: 'queued after a send back', setup: 'send_back' },
-      { name: 'done after an approval', setup: 'approve' },
-    ])('approve or send back on a workstream that is $name does nothing', async ({ setup }) => {
-      const { workstream } = await waiting('op-check-0010');
-      answerCheck(setup, setup === 'send_back' ? note : undefined);
-      const before = ws(workstream.id);
-      const evidence = listEvidence(engine.store.db, workstream.id);
-      const events = listEventsAfter(engine.store.db, 0, 1000).length;
-      expect(() => {
-        approveDirect(workstream.id);
-      }).toThrow(ConflictError);
       expect(() => {
         sendBackDirect(workstream.id, 'again');
       }).toThrow(ConflictError);
-      expect(ws(workstream.id)).toEqual(before);
+      expect(ws(workstream.id)).toEqual(done);
       expect(listEvidence(engine.store.db, workstream.id)).toEqual(evidence);
       expect(listEventsAfter(engine.store.db, 0, 1000)).toHaveLength(events);
+      expect(doneTransitions(workstream.id)).toHaveLength(1);
+      expect(getTask(engine.store.db, task.id).status).toBe('done');
+
+      // Restarts leave the approved work done: nothing parked, requeued, started or raised again.
+      for (let i = 0; i < 2; i += 1) {
+        const report = await recover();
+        expect(report.parked).toEqual([]);
+        expect(report.requeued).toEqual([]);
+      }
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(checkCards().map((c) => c.state)).toEqual(['RESOLVED']);
+      expect(doneTransitions(workstream.id)).toHaveLength(1);
+      expect(getTask(engine.store.db, task.id).status).toBe('done');
+      expect(reviewCards()).toEqual([]);
+      expect(engine.adapter.prompts).toHaveLength(sessions);
     });
 
     it('approve and send back on a workstream that never waited do nothing', async () => {
@@ -8274,33 +8283,6 @@ describe('without a gate command', () => {
       expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
     });
 
-    it('a restart after approving closes nothing twice and raises no new card', async () => {
-      const { task, workstream } = await waiting('op-check-0012');
-      answerCheck('approve');
-      await recover();
-      await recover();
-      expect(ws(workstream.id).state).toBe('DONE');
-      expect(checkCards().map((c) => c.state)).toEqual(['RESOLVED']);
-      expect(doneTransitions(workstream.id)).toHaveLength(1);
-      expect(getTask(engine.store.db, task.id).status).toBe('done');
-      expect(reviewCards()).toEqual([]);
-    });
-
-    it('a restart after sending back keeps the note once and the fix queued', async () => {
-      const { workstream } = await waiting('op-check-0013');
-      answerCheck('send_back', note);
-      const queued = ws(workstream.id);
-      await recover();
-      await recover();
-      expect(listEvidence(engine.store.db, workstream.id)).toHaveLength(1);
-      expect(ws(workstream.id)).toMatchObject({
-        state: 'QUEUED',
-        attempt: 1,
-        nextAction: queued.nextAction,
-      });
-      expect(checkCards().map((c) => c.state)).toEqual(['RESOLVED']);
-    });
-
     it('a stale Approve on a card whose work is mid fix is refused and changes nothing', async () => {
       const { task, workstream } = await waiting('op-check-0015');
       // The card is still open although the work was sent back: the state a split write once left.
@@ -8312,39 +8294,6 @@ describe('without a gate command', () => {
       expect(ws(workstream.id)).toEqual(before);
       expect(getTask(engine.store.db, task.id).status).not.toBe('done');
       expect(openChecks().map((c) => c.id)).toEqual([card?.id]);
-    });
-
-    it('an answer for a workstream that is no longer waiting is a conflict that leaves the card open', async () => {
-      const { workstream } = await waiting('op-check-0016');
-      engine.state.write((ctx) =>
-        transitionWorkstream(ctx, workstream.id, {
-          to: 'QUEUED',
-          fence: null,
-          patch: { nextAction: { kind: 'start' } },
-        }),
-      );
-      expect(() => answerCheck('send_back', note)).toThrow(ConflictError);
-      expect(openChecks()).toHaveLength(1);
-      expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
-    });
-
-    it('approve frees the lane after releasing the claims', async () => {
-      let freed = 0;
-      engine = await createTestEngine(
-        { Alpha: [implement('op-check-0017')] },
-        { gateCommand: null },
-        {
-          onLaneFreed: () => {
-            freed += 1;
-          },
-        },
-      );
-      const { workstream } = engine.addTask('Alpha');
-      await runToWait(workstream.id);
-      const before = freed;
-      answerCheck('approve');
-      expect(activeClaims(engine.store.db, workstream.id)).toEqual([]);
-      expect(freed).toBe(before + 1);
     });
 
     it('send back on a review flow reruns the implement step, then returns the work for a check', async () => {
@@ -8521,17 +8470,6 @@ describe('without a gate command', () => {
         await recover();
         expect(ws(workstream.id).nextAction).toEqual({ kind: 'fix', evidenceId: evidence?.id });
       });
-    });
-
-    it('a restart after the answer leaves the approved work done and starts nothing', async () => {
-      const { workstream } = await waiting('op-check-0014');
-      const sessions = engine.adapter.prompts.length;
-      answerCheck('approve');
-      const report = await recover();
-      expect(report.parked).toEqual([]);
-      expect(report.requeued).toEqual([]);
-      expect(ws(workstream.id).state).toBe('DONE');
-      expect(engine.adapter.prompts).toHaveLength(sessions);
     });
   });
 });
