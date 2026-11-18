@@ -390,7 +390,9 @@ describe('Sessions: the panel', () => {
     const { router } = open(`/sessions?chat=${chats[0]?.id ?? ''}`, { chats });
     await screen.findByRole('option', { name: /^First/ });
     scrolled.mockClear();
-    await router.navigate({ to: '/sessions', search: { chat: chats[1]?.id ?? '' } });
+    const second = chats[1];
+    if (second === undefined) throw new Error('fixture');
+    await router.navigate({ to: '/sessions', search: { chat: second.id } });
     await waitFor(() => {
       expect(scrolled).toHaveBeenCalled();
     });
@@ -417,6 +419,50 @@ describe('Sessions: the panel', () => {
       ).toBe(true);
     });
     Reflect.deleteProperty(HTMLElement.prototype, 'scrollTo');
+  });
+
+  it('dragging a row onto another moves it to that place', async () => {
+    const chats = [
+      chatIn(ampsio, 'First', 0),
+      chatIn(ampsio, 'Second', 1),
+      chatIn(ampsio, 'Third', 2),
+    ];
+    const { chat } = open(`/sessions?chat=${chats[0]?.id ?? ''}`, { chats });
+    await screen.findByRole('option', { name: /^Third/ });
+    // jsdom lays nothing out: each row is given a 30 px slot in the order it is drawn.
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      const index = [...document.querySelectorAll('[data-session-row]')].indexOf(this);
+      const top = index < 0 ? 0 : index * 30;
+      return {
+        x: 0,
+        y: top,
+        top,
+        left: 0,
+        right: 200,
+        bottom: top + 30,
+        width: 200,
+        height: 30,
+        toJSON: () => ({}),
+      };
+    });
+    const rows = screen.getAllByRole('option');
+    const third = rows[2];
+    if (third === undefined) throw new Error('rows');
+    fireEvent.pointerDown(third, {
+      button: 0,
+      isPrimary: true,
+      pointerId: 1,
+      clientX: 10,
+      clientY: 75,
+    });
+    fireEvent.pointerMove(document, { isPrimary: true, pointerId: 1, clientX: 10, clientY: 40 });
+    fireEvent.pointerMove(document, { isPrimary: true, pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.pointerUp(document, { isPrimary: true, pointerId: 1, clientX: 10, clientY: 10 });
+    await waitFor(() => {
+      expect(chat.patches).toEqual([{ chatId: chats[2]?.id, body: { tabPosition: 0 } }]);
+    });
   });
 
   it('draws fewer than 250 rows for 1,000 sessions', async () => {

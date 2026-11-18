@@ -31,6 +31,7 @@ const choosing = (askedAt: string | null = '2026-11-17T09:00:00.000Z'): ChatWork
 function openChoosing(
   options: {
     readonly work?: ChatWork | null;
+    readonly turn?: ChatDto['conversation']['state'];
     readonly state?: Partial<ChatWorkStateDto>;
     readonly served?: ChatServerOptions;
     readonly extra?: Parameters<typeof server.use>;
@@ -39,7 +40,11 @@ function openChoosing(
   const chat: ChatDto = chatDto({
     projectId: project.id,
     work: options.work === undefined ? choosing() : options.work,
-    conversation: { capabilities: CLAUDE, model: 'claude-opus-5' },
+    conversation: {
+      capabilities: CLAUDE,
+      model: 'claude-opus-5',
+      ...(options.turn === undefined ? {} : { state: options.turn }),
+    },
   });
   let state = chatWorkStateDto({ place: chat.work?.place ?? null, ...options.state });
   const served = chatServer({ chats: [chat], ...options.served });
@@ -121,6 +126,24 @@ describe('the bar that asks where the work happens', () => {
     await waitFor(() => {
       expect(served.chosen).toEqual([{ chatId: chat.id, place }]);
     });
+  });
+
+  it('Esc on the bar hides it and does not stop the turn that runs', async () => {
+    const stops: string[] = [];
+    openChoosing({
+      turn: 'running',
+      extra: [
+        http.post(daemonUrl('/conversations/:conversationId/stop'), ({ params }) => {
+          stops.push(String(params['conversationId']));
+          return HttpResponse.json({}, { status: 500 });
+        }),
+      ],
+    });
+    fireEvent.keyDown(await bar(), { key: 'Escape' });
+    await waitFor(() => {
+      expect(screen.queryByRole('group', { name: 'Where this work happens' })).toBeNull();
+    });
+    expect(stops).toEqual([]);
   });
 
   it('Esc on the bar keeps it hidden after switching to another session and back', async () => {
