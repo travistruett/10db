@@ -388,6 +388,16 @@ describe('PR title workflow', () => {
   });
 });
 
+describe('CodeQL workflow', () => {
+  it('runs on pushes to main and weekly, never on a pull request', () => {
+    // Advisory and not a required check, and each run takes minutes; main and the weekly run cover it.
+    const parsed = readWorkflow('.github/workflows/codeql.yml');
+    expect(Object.keys(parsed.on)).toEqual(['push', 'schedule']);
+    expect(parsed.on['push']).toEqual({ branches: ['main'] });
+    expect(parsed.on['schedule']).toEqual([{ cron: expect.any(String) }]);
+  });
+});
+
 describe('parseWorkflow', () => {
   const workflow = (job: string) =>
     `on:\n  push: {}\npermissions: {}\njobs:\n  gate:\n    runs-on: ubuntu-24.04\n${job}`;
