@@ -37,7 +37,7 @@ afterEach(() => {
 });
 
 describe('the sandbox roots', () => {
-  it("puts Claude lanes' temp dirs in this user's folder of /Users/Shared, short enough for the limit", () => {
+  it("puts Claude lanes' temp dirs in /Users/Shared within the limit, and a ChatGPT lane's and 10db's files under the home's .10db", () => {
     const uid = String(process.getuid?.());
     expect(laneTempRoot()).toBe(`/Users/Shared/10db-${uid}`);
     // mkdtemp's six characters, and Claude Code's own dir in it: what Claude Code measures.
@@ -47,9 +47,6 @@ describe('the sandbox roots', () => {
     expect(
       Buffer.byteLength(claudeCodeTmpPath(join(laneTempRoot(), 'abcdef'))),
     ).toBeLessThanOrEqual(MAX_SANDBOX_TMP_BYTES);
-  });
-
-  it("puts a ChatGPT lane's temp dir and 10db's sandbox files under the home's .10db", () => {
     expect(codexLaneTempRoot('/Users/me')).toBe('/Users/me/.10db/lanes');
     expect(sandboxFilesRoot('/Users/me')).toBe('/Users/me/.10db/run');
   });
@@ -61,63 +58,57 @@ describe('ensurePrivateRoot', () => {
     root = realpathSync(mkdtempSync(join(tmpdir(), '10db-root-')));
   });
 
-  it('makes a missing root 0700, its missing parents too, and returns its real path', () => {
+  it('makes a missing root and its parents, or an existing root of its own, 0700, keeping what is in it', () => {
     const made = join(root, 'home', '.10db', 'run');
     expect(ensurePrivateRoot(made)).toBe(realpathSync(made));
     expect(lstatSync(made).isDirectory()).toBe(true);
     expect(statSync(made).mode & 0o777).toBe(0o700);
+    const existing = join(root, 'shared');
+    mkdirSync(existing, { mode: 0o755 });
+    chmodSync(existing, 0o755);
+    writeFileSync(join(existing, 'keep'), 'x');
+    expect(ensurePrivateRoot(existing)).toBe(existing);
+    expect(statSync(existing).mode & 0o777).toBe(0o700);
+    expect(readdirSync(existing)).toEqual(['keep']);
   });
 
-  it('makes an existing root of its own 0700, keeping what is in it', () => {
-    const made = join(root, 'shared');
-    mkdirSync(made, { mode: 0o755 });
-    chmodSync(made, 0o755);
-    writeFileSync(join(made, 'keep'), 'x');
-    expect(ensurePrivateRoot(made)).toBe(made);
-    expect(statSync(made).mode & 0o777).toBe(0o700);
-    expect(readdirSync(made)).toEqual(['keep']);
-  });
-
-  it.for<{ name: string; make: (path: string) => void; rootOnly: boolean }>([
-    {
-      name: 'a link',
-      make: (path) => {
-        mkdirSync(join(root, 'elsewhere'));
-        symlinkSync(join(root, 'elsewhere'), path);
+  it("refuses a root that is a link, a file or another user's dir, leaving a linked root's target as it was", () => {
+    const rows: { name: string; make: (path: string) => void; rootOnly: boolean }[] = [
+      {
+        name: 'a link',
+        make: (path) => {
+          const target = join(root, 'elsewhere');
+          mkdirSync(target, { mode: 0o755 });
+          chmodSync(target, 0o755);
+          symlinkSync(target, path);
+        },
+        rootOnly: false,
       },
-      rootOnly: false,
-    },
-    {
-      name: 'a file',
-      make: (path) => {
-        writeFileSync(path, '');
+      {
+        name: 'a file',
+        make: (path) => {
+          writeFileSync(path, '');
+        },
+        rootOnly: false,
       },
-      rootOnly: false,
-    },
-    {
-      name: "another user's dir",
-      make: (path) => {
-        mkdirSync(path, { mode: 0o700 });
-        chownSync(path, 1, 1);
+      {
+        name: "another user's dir",
+        make: (path) => {
+          mkdirSync(path, { mode: 0o700 });
+          chownSync(path, 1, 1);
+        },
+        // Only root can give a dir to another user.
+        rootOnly: true,
       },
-      // Only root can give a dir to another user.
-      rootOnly: true,
-    },
-  ])('refuses a root that is $name', ({ make, rootOnly }, { skip }) => {
-    if (rootOnly && process.getuid?.() !== 0) skip('only root can give a dir to another user');
-    const path = join(root, 'shared');
-    make(path);
-    expect(() => ensurePrivateRoot(path)).toThrow(SandboxTempDirError);
-    expect(() => ensurePrivateRoot(path)).toThrow(path);
-  });
-
-  it("leaves a linked root's target as it was", () => {
-    const target = join(root, 'elsewhere');
-    mkdirSync(target, { mode: 0o755 });
-    chmodSync(target, 0o755);
-    symlinkSync(target, join(root, 'shared'));
-    expect(() => ensurePrivateRoot(join(root, 'shared'))).toThrow(SandboxTempDirError);
-    expect(statSync(target).mode & 0o777).toBe(0o755);
+    ];
+    for (const [i, { name, make, rootOnly }] of rows.entries()) {
+      if (rootOnly && process.getuid?.() !== 0) continue;
+      const path = join(root, `shared-${String(i)}`);
+      make(path);
+      expect.soft(() => ensurePrivateRoot(path), name).toThrow(SandboxTempDirError);
+      expect.soft(() => ensurePrivateRoot(path), name).toThrow(path);
+    }
+    expect(statSync(join(root, 'elsewhere')).mode & 0o777).toBe(0o755);
   });
 });
 
@@ -127,16 +118,6 @@ describe.skipIf(SANDBOXED)('lane temp directory', () => {
   beforeEach(() => {
     // A short root: the limit counts the whole path, and macOS's OS temp dir is longer than it.
     root = realpathSync(mkdtempSync('/tmp/sbx-'));
-  });
-
-  it('creates a short private directory, named by six random characters alone', () => {
-    const shortRoot = join(root, 'r');
-    mkdirSync(shortRoot);
-    const dir = createLaneTempDir(shortRoot);
-    expect(Buffer.byteLength(claudeCodeTmpPath(dir))).toBeLessThanOrEqual(MAX_SANDBOX_TMP_BYTES);
-    expect(statSync(dir).mode & 0o777).toBe(0o700);
-    expect(dir.startsWith(`${shortRoot}/`)).toBe(true);
-    expect(basename(dir)).toMatch(/^[A-Za-z0-9]{6}$/);
   });
 
   /** A root whose temp dirs put Claude Code's own dir at exactly `bytes`, as it measures. */
@@ -149,47 +130,47 @@ describe.skipIf(SANDBOXED)('lane temp directory', () => {
     return made;
   }
 
-  it.for<{ name: string; bytes: number; made: boolean }>([
-    { name: 'at the limit', bytes: MAX_SANDBOX_TMP_BYTES, made: true },
-    { name: 'one byte over it', bytes: MAX_SANDBOX_TMP_BYTES + 1, made: false },
-  ])('measures the dir with Claude Code’s claude-<uid> in it: $name', ({ bytes, made }) => {
-    const at = rootFor(bytes);
-    if (made) {
-      const dir = createLaneTempDir(at);
-      expect(Buffer.byteLength(claudeCodeTmpPath(dir))).toBe(bytes);
+  it('creates a private dir named by six random characters, measured with Claude Code’s claude-<uid> up to the limit, of any length for a ChatGPT lane', () => {
+    const shortRoot = join(root, 'r');
+    mkdirSync(shortRoot);
+    const short = createLaneTempDir(shortRoot);
+    expect(Buffer.byteLength(claudeCodeTmpPath(short))).toBeLessThanOrEqual(MAX_SANDBOX_TMP_BYTES);
+    const atLimit = rootFor(MAX_SANDBOX_TMP_BYTES);
+    const full = createLaneTempDir(atLimit);
+    expect(Buffer.byteLength(claudeCodeTmpPath(full))).toBe(MAX_SANDBOX_TMP_BYTES);
+    // No Claude Code or srt runs in a ChatGPT lane, so no limit applies there.
+    const longRoot = join(root, 'a'.repeat(40));
+    mkdirSync(longRoot);
+    const long = createLaneTempDir(longRoot, null);
+    for (const [at, dir] of [
+      [shortRoot, short],
+      [atLimit, full],
+      [longRoot, long],
+    ] as const) {
+      expect.soft(statSync(dir).mode & 0o777, dir).toBe(0o700);
+      expect.soft(dir.startsWith(`${at}/`), dir).toBe(true);
+      expect.soft(basename(dir), dir).toMatch(/^[A-Za-z0-9]{6}$/);
       removeLaneTempDir(dir, at);
-    } else {
-      // Refused, never handed to Claude Code, which would fall back to /tmp/claude-<uid> unsaid.
-      expect(() => createLaneTempDir(at)).toThrow(SandboxTempDirError);
-      expect(() => createLaneTempDir(at)).toThrow(
-        `The lane temp directory path is over ${String(MAX_SANDBOX_TMP_BYTES)} bytes`,
-      );
+      expect.soft(readdirSync(at), dir).toEqual([]);
     }
-    expect(readdirSync(at)).toEqual([]);
   });
 
-  it('refuses a root that makes the path too long, leaving nothing behind', () => {
+  it('refuses a root one byte over the limit, a longer one, or a missing one, leaving nothing behind', () => {
+    // Refused, never handed to Claude Code, which would fall back to /tmp/claude-<uid> unsaid.
+    const overLimit = rootFor(MAX_SANDBOX_TMP_BYTES + 1);
+    expect(() => createLaneTempDir(overLimit)).toThrow(SandboxTempDirError);
+    expect(() => createLaneTempDir(overLimit)).toThrow(
+      `The lane temp directory path is over ${String(MAX_SANDBOX_TMP_BYTES)} bytes`,
+    );
+    expect(readdirSync(overLimit)).toEqual([]);
     const longRoot = join(root, 'a'.repeat(40));
     mkdirSync(longRoot);
     expect(() => createLaneTempDir(longRoot)).toThrow(SandboxTempDirError);
     expect(readdirSync(longRoot)).toEqual([]);
-  });
-
-  it('makes a dir of any length where no Claude Code or srt runs, a ChatGPT lane’s', () => {
-    const longRoot = join(root, 'a'.repeat(40));
-    mkdirSync(longRoot);
-    const dir = createLaneTempDir(longRoot, null);
-    expect(dir.startsWith(`${longRoot}/`)).toBe(true);
-    expect(basename(dir)).toMatch(/^[A-Za-z0-9]{6}$/);
-    expect(statSync(dir).mode & 0o777).toBe(0o700);
-    removeLaneTempDir(dir, longRoot);
-  });
-
-  it('refuses a root that does not exist', () => {
     expect(() => createLaneTempDir(join(root, 'missing'))).toThrow(SandboxTempDirError);
   });
 
-  it('removes only its own directories', () => {
+  it('removes only its own directories, and a second removal is not an error', () => {
     const dir = createLaneTempDir(root);
     const other = join(root, 'keep');
     mkdirSync(other);
@@ -214,6 +195,9 @@ describe.skipIf(SANDBOXED)('lane temp directory', () => {
     removeLaneTempDir(dir, root);
     expect(existsSync(dir)).toBe(false);
     expect(existsSync(other)).toBe(true);
+    expect(() => {
+      removeLaneTempDir(dir, root);
+    }).not.toThrow();
   });
 
   it('removes only its own directories off the event loop too, read-only ones included', async () => {
@@ -231,39 +215,50 @@ describe.skipIf(SANDBOXED)('lane temp directory', () => {
     expect(existsSync(other)).toBe(true);
   });
 
-  it('removes a directory the lane made read-only, with a file inside', () => {
-    const dir = createLaneTempDir(root);
-    const locked = join(dir, 'locked');
-    mkdirSync(join(locked, 'deeper'), { recursive: true });
-    writeFileSync(join(locked, 'deeper', 'f'), 'x');
-    chmodSync(join(locked, 'deeper'), 0o555);
-    chmodSync(locked, 0o555);
-    removeLaneTempDir(dir, root);
-    expect(existsSync(dir)).toBe(false);
-  });
-
-  it.each<[string, number]>([
-    ['no permissions', 0o000],
-    ['write and search only', 0o300],
-  ])('removes a directory the lane left with %s, holding a file', (_name, mode) => {
-    const dir = createLaneTempDir(root);
-    const locked = join(dir, 'x');
-    mkdirSync(locked);
-    writeFileSync(join(locked, 'f'), 'x');
-    chmodSync(locked, mode);
-    removeLaneTempDir(dir, root);
-    expect(existsSync(dir)).toBe(false);
-  });
-
-  it('removes a lane temp directory that is itself read-only', () => {
-    const dir = createLaneTempDir(root);
-    mkdirSync(join(dir, 'a', 'b'), { recursive: true });
-    writeFileSync(join(dir, 'a', 'b', 'f'), 'x');
-    chmodSync(join(dir, 'a', 'b'), 0o555);
-    chmodSync(join(dir, 'a'), 0o555);
-    chmodSync(dir, 0o555);
-    removeLaneTempDir(dir, root);
-    expect(existsSync(dir)).toBe(false);
+  it('removes a directory however the lane locked the folders in it, or the directory itself', () => {
+    /** Each lays a file in `dir` and locks folders as a lane may leave them. */
+    const layouts: { name: string; lock: (dir: string) => void }[] = [
+      {
+        name: 'read-only folders, with a file inside',
+        lock: (dir) => {
+          const locked = join(dir, 'locked');
+          mkdirSync(join(locked, 'deeper'), { recursive: true });
+          writeFileSync(join(locked, 'deeper', 'f'), 'x');
+          chmodSync(join(locked, 'deeper'), 0o555);
+          chmodSync(locked, 0o555);
+        },
+      },
+      ...(
+        [
+          ['no permissions', 0o000],
+          ['write and search only', 0o300],
+        ] as const
+      ).map(([what, mode]) => ({
+        name: `a folder with ${what}, holding a file`,
+        lock: (dir: string) => {
+          const locked = join(dir, 'x');
+          mkdirSync(locked);
+          writeFileSync(join(locked, 'f'), 'x');
+          chmodSync(locked, mode);
+        },
+      })),
+      {
+        name: 'the temp directory itself read-only',
+        lock: (dir) => {
+          mkdirSync(join(dir, 'a', 'b'), { recursive: true });
+          writeFileSync(join(dir, 'a', 'b', 'f'), 'x');
+          chmodSync(join(dir, 'a', 'b'), 0o555);
+          chmodSync(join(dir, 'a'), 0o555);
+          chmodSync(dir, 0o555);
+        },
+      },
+    ];
+    for (const { name, lock } of layouts) {
+      const dir = createLaneTempDir(root);
+      lock(dir);
+      removeLaneTempDir(dir, root);
+      expect.soft(existsSync(dir), name).toBe(false);
+    }
   });
 
   it('does not follow a link out of the directory while unlocking', () => {
@@ -282,13 +277,5 @@ describe.skipIf(SANDBOXED)('lane temp directory', () => {
     expect(statSync(outside).mode & 0o777).toBe(0o500);
     expect(existsSync(join(outside, 'keep'))).toBe(true);
     chmodSync(outside, 0o700);
-  });
-
-  it('removing a directory that is already gone is not an error', () => {
-    const dir = createLaneTempDir(root);
-    removeLaneTempDir(dir, root);
-    expect(() => {
-      removeLaneTempDir(dir, root);
-    }).not.toThrow();
   });
 });

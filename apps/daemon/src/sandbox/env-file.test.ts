@@ -64,34 +64,38 @@ describe('lane env file', () => {
     for (const [name, value] of Object.entries(LANE_ENV)) expect(vars[name], name).toBe(value);
   });
 
-  it.each([
-    ['a single quote', "it's"],
-    ['quotes of both kinds', `a'b"c'`],
-    ['a dollar sign and braces', '$HOME ${PATH}'],
-    ['backticks and a command substitution', '`id` $(id)'],
-    ['a backslash', 'a\\b\\'],
-    ['spaces and a glob', 'a b *'],
-    ['a semicolon and an ampersand', 'a; b & c'],
-    ['an empty value', ''],
-    ['non-ASCII text', 'café ☕'],
-  ])('carries a value with %s through /bin/sh unchanged', (_name, value) => {
-    const file = createLaneEnvFile({ VALUE: value }, root);
-    expect(sourced(file)['VALUE']).toBe(value);
+  it('carries a value with shell metacharacters through /bin/sh unchanged', () => {
+    for (const [name, value] of [
+      ['a single quote', "it's"],
+      ['quotes of both kinds', `a'b"c'`],
+      ['a dollar sign and braces', '$HOME ${PATH}'],
+      ['backticks and a command substitution', '`id` $(id)'],
+      ['a backslash', 'a\\b\\'],
+      ['spaces and a glob', 'a b *'],
+      ['a semicolon and an ampersand', 'a; b & c'],
+      ['an empty value', ''],
+      ['non-ASCII text', 'café ☕'],
+    ] as const) {
+      const file = createLaneEnvFile({ VALUE: value }, root);
+      expect.soft(sourced(file)['VALUE'], name).toBe(value);
+    }
   });
 
-  it.each([
-    ['a newline', { A: 'a\nexport B=1' }],
-    ['a carriage return', { A: 'a\rb' }],
-    ['a NUL', { A: 'a\0b' }],
-    ['an escape', { A: 'a\u001bb' }],
-    ['a DEL', { A: 'a\u007fb' }],
-    ['a name with a space', { 'A B': 'x' }],
-    ['a name with a quote', { "A'": 'x' }],
-    ['a name that starts with a digit', { '1A': 'x' }],
-    ['an empty name', { '': 'x' }],
-  ])('refuses a variable with %s and writes no file', (_name, env) => {
-    expect(() => createLaneEnvFile(env, root)).toThrow(SandboxProfileError);
-    expect(readdirSync(root)).toEqual([]);
+  it('refuses a variable with a control character or a bad name and writes no file', () => {
+    for (const [name, env] of [
+      ['a newline', { A: 'a\nexport B=1' }],
+      ['a carriage return', { A: 'a\rb' }],
+      ['a NUL', { A: 'a\0b' }],
+      ['an escape', { A: 'a\u001bb' }],
+      ['a DEL', { A: 'a\u007fb' }],
+      ['a name with a space', { 'A B': 'x' }],
+      ['a name with a quote', { "A'": 'x' }],
+      ['a name that starts with a digit', { '1A': 'x' }],
+      ['an empty name', { '': 'x' }],
+    ] as const) {
+      expect.soft(() => createLaneEnvFile(env, root), name).toThrow(SandboxProfileError);
+      expect.soft(readdirSync(root), name).toEqual([]);
+    }
   });
 
   it('names the variable it refuses, never its value', () => {
@@ -112,16 +116,18 @@ describe('lane env file', () => {
     }).not.toThrow();
   });
 
-  it.each([
-    ['a file outside the root', (r: string) => join(r, 'x', '10db-env-a.sh')],
-    ['a file without the prefix', (r: string) => join(r, 'other.sh')],
-  ])('refuses to remove %s', (_name, pathIn) => {
-    const path = pathIn(root);
+  it('refuses to remove a file outside the root or without the prefix', () => {
     writeFileSync(join(root, 'other.sh'), 'x');
-    expect(() => {
-      removeLaneEnvFile(path, root);
-    }).toThrow(SandboxTempDirError);
-    expect(existsSync(join(root, 'other.sh'))).toBe(true);
-    expect(readFileSync(join(root, 'other.sh'), 'utf8')).toBe('x');
+    for (const [name, path] of [
+      ['a file outside the root', join(root, 'x', '10db-env-a.sh')],
+      ['a file without the prefix', join(root, 'other.sh')],
+    ] as const) {
+      expect
+        .soft(() => {
+          removeLaneEnvFile(path, root);
+        }, name)
+        .toThrow(SandboxTempDirError);
+      expect.soft(readFileSync(join(root, 'other.sh'), 'utf8'), name).toBe('x');
+    }
   });
 });

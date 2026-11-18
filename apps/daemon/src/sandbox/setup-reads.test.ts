@@ -42,59 +42,66 @@ describe('setupReadRoots', () => {
 });
 
 describe('setupReadRefusal', () => {
-  it.each([
-    ['a skill folder under ~/.claude/skills', join(home, '.claude/skills/s')],
-    ['a skill folder under ~/.agents/skills', join(home, '.agents/skills/s')],
-    ['~/.claude/skills itself', join(home, '.claude/skills')],
-    [
-      'a plugin install path under ~/.claude/plugins/cache',
-      join(home, '.claude/plugins/cache/m/p/1'),
-    ],
-    ['a folder inside a plugin install path', join(home, '.claude/plugins/cache/m/p/1/skills')],
-    [
-      'a folder two levels down in the home, holding nothing protected',
-      join(home, 'Projects/skills/x'),
-    ],
-    ['a folder outside the home holding nothing protected', '/opt/skills/x'],
-  ])('opens %s', (_name, path) => {
-    expect(setupReadRefusal(path, ctx)).toBeNull();
+  it('opens a skill or plugin folder that holds nothing protected', () => {
+    for (const [name, path] of [
+      ['a skill folder under ~/.claude/skills', join(home, '.claude/skills/s')],
+      ['a skill folder under ~/.agents/skills', join(home, '.agents/skills/s')],
+      ['~/.claude/skills itself', join(home, '.claude/skills')],
+      [
+        'a plugin install path under ~/.claude/plugins/cache',
+        join(home, '.claude/plugins/cache/m/p/1'),
+      ],
+      ['a folder inside a plugin install path', join(home, '.claude/plugins/cache/m/p/1/skills')],
+      [
+        'a folder two levels down in the home, holding nothing protected',
+        join(home, 'Projects/skills/x'),
+      ],
+      ['a folder outside the home holding nothing protected', '/opt/skills/x'],
+    ] as const) {
+      expect.soft(setupReadRefusal(path, ctx), `${name}: ${path}`).toBeNull();
+    }
   });
 
-  it.each([
-    ['the home', home],
-    ['an ancestor of the home', '/Users'],
-    ['/', '/'],
-    ['a top-level home folder', join(home, 'Documents')],
-    ['~/.ssh', join(home, '.ssh')],
-    ['~/.aws/x', join(home, '.aws/x')],
-    ['~/.config/gh', join(home, '.config/gh')],
-    ['~/Library/Application Support/x', join(home, 'Library/Application Support/x')],
-    ['~/.claude itself', join(home, '.claude')],
-    ['~/.claude/projects', join(home, '.claude/projects')],
-    ['the data dir', data],
-    ['a folder holding a protected config dir', '/opt/cfg'],
-    ['a folder inside a protected config dir', '/opt/cfg/claude/skills'],
-    ['a folder inside a checkout', join(checkout, '.claude/skills/s')],
-    ['a folder that holds a checkout', '/work'],
-    ['the worktree root', worktrees],
-    ['a lane temp root', laneTemp],
-    ['a folder holding a sandbox root', '/private/var/folders/x/T'],
-    ['a checkout’s .env file', join(checkout, '.env')],
-    ['~/.claude/plugins itself', join(home, '.claude/plugins')],
-    ['a marketplace’s clone', join(home, '.claude/plugins/marketplaces/m')],
-    ['a plugin’s cache folder above its versions', join(home, '.claude/plugins/cache/m/p')],
-    ['a plugin folder outside the cache', join(home, '.claude/plugins/repos/m/p/1')],
-  ])('refuses %s', (_name, path) => {
-    expect(setupReadRefusal(path, ctx)).toMatch(/^it /);
+  it('refuses a folder that is, holds or lies in something protected or lane-written', () => {
+    for (const [name, path] of [
+      ['the home', home],
+      ['an ancestor of the home', '/Users'],
+      ['/', '/'],
+      ['a top-level home folder', join(home, 'Documents')],
+      ['~/.ssh', join(home, '.ssh')],
+      ['~/.aws/x', join(home, '.aws/x')],
+      ['~/.config/gh', join(home, '.config/gh')],
+      ['~/Library/Application Support/x', join(home, 'Library/Application Support/x')],
+      ['~/.claude itself', join(home, '.claude')],
+      ['~/.claude/projects', join(home, '.claude/projects')],
+      ['the data dir', data],
+      ['a folder holding a protected config dir', '/opt/cfg'],
+      ['a folder inside a protected config dir', '/opt/cfg/claude/skills'],
+      ['a folder inside a checkout', join(checkout, '.claude/skills/s')],
+      ['a folder that holds a checkout', '/work'],
+      ['the worktree root', worktrees],
+      ['a lane temp root', laneTemp],
+      ['a folder holding a sandbox root', '/private/var/folders/x/T'],
+      ['a checkout’s .env file', join(checkout, '.env')],
+      ['~/.claude/plugins itself', join(home, '.claude/plugins')],
+      ['a marketplace’s clone', join(home, '.claude/plugins/marketplaces/m')],
+      ['a plugin’s cache folder above its versions', join(home, '.claude/plugins/cache/m/p')],
+      ['a plugin folder outside the cache', join(home, '.claude/plugins/repos/m/p/1')],
+    ] as const) {
+      expect.soft(setupReadRefusal(path, ctx), `${name}: ${path}`).toMatch(/^it /);
+    }
   });
 });
 
 describe('collapseReads', () => {
-  it.each([
-    ['drops a path under another', ['/a/b/c', '/a/b', '/a/b/d/e'], ['/a/b']],
-    ['keeps siblings', ['/a/c', '/a/b', '/a/bb'], ['/a/b', '/a/bb', '/a/c']],
-    ['deduplicates', ['/a/b', '/a/b', '/x'], ['/a/b', '/x']],
-  ])('%s', (_name, paths, expected) => {
-    expect(collapseReads(paths)).toEqual(expected);
+  it('keeps only the outermost of nested paths, each once', () => {
+    const rows: [string, string[], string[]][] = [
+      ['drops a path under another', ['/a/b/c', '/a/b', '/a/b/d/e'], ['/a/b']],
+      ['keeps siblings', ['/a/c', '/a/b', '/a/bb'], ['/a/b', '/a/bb', '/a/c']],
+      ['deduplicates', ['/a/b', '/a/b', '/x'], ['/a/b', '/x']],
+    ];
+    for (const [name, paths, expected] of rows) {
+      expect.soft(collapseReads(paths), `${name}: ${paths.join(' ')}`).toEqual(expected);
+    }
   });
 });

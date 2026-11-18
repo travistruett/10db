@@ -4,44 +4,49 @@ import { dockerAccess, dockerEnvNames } from './docker-access';
 const HOME = '/Users/builder';
 
 describe('dockerAccess', () => {
-  it('names the sockets Docker Desktop, Colima, OrbStack and Rancher Desktop listen on', () => {
-    const { sockets } = dockerAccess(HOME, {});
-    expect(sockets).toEqual(
-      expect.arrayContaining([
-        '/var/run/docker.sock',
-        `${HOME}/.docker/run/docker.sock`,
-        `${HOME}/.colima/default/docker.sock`,
-        `${HOME}/.orbstack/run/docker.sock`,
-        `${HOME}/.rd/docker.sock`,
-      ]),
-    );
-  });
+  it('opens the engine sockets, the one DOCKER_HOST names, and the CLI files, and nothing else', () => {
+    const { sockets, reads } = dockerAccess(HOME, {});
+    expect
+      .soft(sockets, 'Docker Desktop, Colima, OrbStack and Rancher Desktop sockets')
+      .toEqual(
+        expect.arrayContaining([
+          '/var/run/docker.sock',
+          `${HOME}/.docker/run/docker.sock`,
+          `${HOME}/.colima/default/docker.sock`,
+          `${HOME}/.orbstack/run/docker.sock`,
+          `${HOME}/.rd/docker.sock`,
+        ]),
+      );
+    expect
+      .soft(reads, 'the CLI, its plugins and the contexts it reads')
+      .toEqual(
+        expect.arrayContaining([
+          '/Applications/Docker.app',
+          `${HOME}/.docker/config.json`,
+          `${HOME}/.docker/cli-plugins`,
+          `${HOME}/.docker/contexts`,
+        ]),
+      );
+    expect.soft(reads, 'no other file of ~/.docker').not.toContain(`${HOME}/.docker`);
 
-  it("adds the socket DOCKER_HOST names, and nothing for a host that isn't a socket", () => {
-    expect(dockerAccess(HOME, { DOCKER_HOST: 'unix:///opt/vm/docker.sock' }).sockets).toContain(
-      '/opt/vm/docker.sock',
-    );
-    const tcp = dockerAccess(HOME, { DOCKER_HOST: 'tcp://10.0.0.5:2375' });
-    expect(tcp.sockets).not.toContain('10.0.0.5:2375');
-    expect(tcp.sockets.every((path) => path.startsWith('/'))).toBe(true);
-  });
-
-  it('refuses a DOCKER_HOST socket the profile cannot spell', () => {
-    const { sockets } = dockerAccess(HOME, { DOCKER_HOST: 'unix:///opt/a*b/docker.sock' });
-    expect(sockets.some((path) => path.includes('*'))).toBe(false);
-  });
-
-  it('opens the CLI, its plugins and the contexts it reads, and no other file of ~/.docker', () => {
-    const { reads } = dockerAccess(HOME, {});
-    expect(reads).toEqual(
-      expect.arrayContaining([
-        '/Applications/Docker.app',
-        `${HOME}/.docker/config.json`,
-        `${HOME}/.docker/cli-plugins`,
-        `${HOME}/.docker/contexts`,
-      ]),
-    );
-    expect(reads).not.toContain(`${HOME}/.docker`);
+    expect
+      .soft(dockerAccess(HOME, { DOCKER_HOST: 'unix:///opt/vm/docker.sock' }).sockets, 'unix host')
+      .toContain('/opt/vm/docker.sock');
+    const tcp = dockerAccess(HOME, { DOCKER_HOST: 'tcp://10.0.0.5:2375' }).sockets;
+    expect.soft(tcp, 'tcp host').not.toContain('10.0.0.5:2375');
+    expect
+      .soft(
+        tcp.every((path) => path.startsWith('/')),
+        'tcp host: only paths',
+      )
+      .toBe(true);
+    const unspellable = dockerAccess(HOME, { DOCKER_HOST: 'unix:///opt/a*b/docker.sock' }).sockets;
+    expect
+      .soft(
+        unspellable.some((path) => path.includes('*')),
+        'a socket the profile cannot spell',
+      )
+      .toBe(false);
   });
 });
 

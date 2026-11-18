@@ -51,59 +51,63 @@ describe('laneWritableRoots', () => {
 });
 
 describe('underLaneWritable', () => {
-  it.each<[string, () => string, () => string, LaneWritableKind | null]>([
-    [
-      'a worktree made after the list was built is under the base',
-      () => {
-        mkdirSync(join(worktrees, 'later'));
-        return join(worktrees, 'later', 'x');
-      },
-      () => home,
-      LaneWritableKind.Worktrees,
-    ],
-    [
-      'a path that doesn’t exist yet in a checkout is under it',
-      () => join(checkout, 'dist', 'server.js'),
-      () => home,
-      LaneWritableKind.Project,
-    ],
-    [
-      'a path whose existing ancestor links into a checkout is under it',
-      () => {
-        symlinkSync(checkout, join(home, 'work'));
-        return join(home, 'work', 'not-yet', 'x.js');
-      },
-      () => home,
-      LaneWritableKind.Project,
-    ],
-    [
-      'a dangling link into a checkout is judged by its target',
-      () => {
-        symlinkSync(join(checkout, 'not-yet.js'), join(home, 'dangling'));
-        return join(home, 'dangling');
-      },
-      () => home,
-      LaneWritableKind.Project,
-    ],
-    [
-      'a dangling relative link into a checkout is judged by its target',
-      () => {
-        symlinkSync('../checkout/not-yet.js', join(home, 'dangling-relative'));
-        return join(home, 'dangling-relative');
-      },
-      () => home,
-      LaneWritableKind.Project,
-    ],
-    [
-      'a relative path is judged against its base',
-      () => 'dist/x.js',
-      () => checkout,
-      LaneWritableKind.Project,
-    ],
-    ['/tmp is a temp folder', () => '/tmp/x', () => home, LaneWritableKind.Temp],
-    ['a path in the home is under none', () => join(home, 'bin', 'tool'), () => home, null],
-  ])('%s', (_name, path, at, kind) => {
+  it('names the lane-writable root a path lies under by its real path, or none', () => {
+    const rows: [string, () => string, () => string, LaneWritableKind | null][] = [
+      [
+        'a worktree made after the list was built is under the base',
+        () => {
+          mkdirSync(join(worktrees, 'later'));
+          return join(worktrees, 'later', 'x');
+        },
+        () => home,
+        LaneWritableKind.Worktrees,
+      ],
+      [
+        'a path that doesn’t exist yet in a checkout is under it',
+        () => join(checkout, 'dist', 'server.js'),
+        () => home,
+        LaneWritableKind.Project,
+      ],
+      [
+        'a path whose existing ancestor links into a checkout is under it',
+        () => {
+          symlinkSync(checkout, join(home, 'work'));
+          return join(home, 'work', 'not-yet', 'x.js');
+        },
+        () => home,
+        LaneWritableKind.Project,
+      ],
+      [
+        'a dangling link into a checkout is judged by its target',
+        () => {
+          symlinkSync(join(checkout, 'not-yet.js'), join(home, 'dangling'));
+          return join(home, 'dangling');
+        },
+        () => home,
+        LaneWritableKind.Project,
+      ],
+      [
+        'a dangling relative link into a checkout is judged by its target',
+        () => {
+          symlinkSync('../checkout/not-yet.js', join(home, 'dangling-relative'));
+          return join(home, 'dangling-relative');
+        },
+        () => home,
+        LaneWritableKind.Project,
+      ],
+      [
+        'a relative path is judged against its base',
+        () => 'dist/x.js',
+        () => checkout,
+        LaneWritableKind.Project,
+      ],
+      ['/tmp is a temp folder', () => '/tmp/x', () => home, LaneWritableKind.Temp],
+      ['a path in the home is under none', () => join(home, 'bin', 'tool'), () => home, null],
+    ];
     const list = roots();
-    expect(underLaneWritable(path(), list, at())).toBe(kind);
+    for (const [name, path, at, kind] of rows) {
+      const made = path();
+      expect.soft(underLaneWritable(made, list, at()), `${name}: ${made}`).toBe(kind);
+    }
   });
 });
