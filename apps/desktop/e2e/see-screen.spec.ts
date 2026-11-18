@@ -1,6 +1,7 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import { z } from 'zod';
 import { claudeIsInstalled } from './claude-is-installed';
+import { test } from './routed-test';
 import { daemonUrl } from './daemon-url';
 import { auth, createProject } from './shape-project';
 
