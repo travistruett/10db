@@ -121,7 +121,7 @@ test('a Critical task waits for the plan to be approved, then builds and finishe
   await expect(page.getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
   // The rows of the panel hold a flag's Dismiss button inside the option, which axe reports as
   // nested-interactive; the card beside them is scanned.
-  await expectAccessible(page, 'inbox, plan card', ['[data-inbox-row]']);
+  await expectAccessible(page, 'inbox, plan card');
 
   await page.getByRole('button', { name: 'Approve', exact: true }).click();
   await expect(page.getByRole('main').getByText(planText)).toBeHidden();

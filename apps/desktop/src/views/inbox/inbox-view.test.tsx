@@ -77,6 +77,10 @@ function rowOf(title: string): HTMLElement {
   return row;
 }
 const findRow = (title: string): Promise<HTMLElement> => waitFor(() => rowOf(title));
+/** A row's Dismiss, found by its label: it sits over the row, outside the listbox. */
+function dismissOf(title: string, verb = 'Dismiss'): HTMLElement {
+  return screen.getByRole('button', { name: `${verb}: ${title}` });
+}
 
 const key = (k: string, init: { shiftKey?: boolean } = {}): void => {
   fireEvent.keyDown(document.body, { key: k, ...init });
@@ -781,7 +785,8 @@ describe('InboxView', () => {
       const { answers } = inbox([color, stray]);
       renderApp('/inbox');
       await findText('Which badge color?');
-      const dismiss = within(await findRow('Write outside every claim')).getByRole('button');
+      await findRow('Write outside every claim');
+      const dismiss = dismissOf('Write outside every claim');
       dismiss.focus();
       expect(fireEvent.keyDown(dismiss, { key: 'Enter' })).toBe(true);
       expect(answers).toEqual([]);
@@ -905,11 +910,8 @@ describe('InboxView', () => {
       const { answers } = inbox([color, stray]);
       renderApp('/inbox');
       await findText('Which badge color?');
-      fireEvent.click(
-        within(await findRow('Write outside every claim')).getByRole('button', {
-          name: /^Dismiss/,
-        }),
-      );
+      await findRow('Write outside every claim');
+      fireEvent.click(dismissOf('Write outside every claim'));
       await waitFor(() => {
         expect(answers).toEqual([{ id: stray.id, body: { choice: 'dismissed' } }]);
       });
@@ -917,6 +919,17 @@ describe('InboxView', () => {
       await waitFor(() => {
         expect(rows()).toHaveLength(1);
       });
+    });
+
+    it("keeps a row's Dismiss out of the listbox, so no control nests inside an option", async () => {
+      const stray = flag('Write outside every claim', 'docs/notes.md');
+      inbox([color, stray]);
+      renderApp('/inbox');
+      await findText('Which badge color?');
+      const row = await findRow('Write outside every claim');
+      expect(row.querySelector('button')).toBeNull();
+      const list = screen.getByRole('listbox', { name: 'Inbox' });
+      expect(list.contains(dismissOf('Write outside every claim'))).toBe(false);
     });
 
     it('dismisses the selected flag with e', async () => {
@@ -987,9 +1000,7 @@ describe('InboxView', () => {
       renderApp('/inbox');
       await findText('Which badge color?');
       expect((await findRow('Batch not started')).textContent).toContain('×2');
-      expect(
-        within(rowOf('Batch not started')).getByRole('button', { name: /^Dismiss All/ }),
-      ).toBeTruthy();
+      expect(dismissOf('Batch not started', 'Dismiss All')).toBeTruthy();
       key('j');
       expect(within(selectedCard()).getByText(/2 identical flags are open/)).toBeTruthy();
     });
@@ -1037,7 +1048,7 @@ describe('InboxView', () => {
       fireEvent.change(note, { target: { value: 'half written' } });
 
       const row = await findRow('Write outside every claim');
-      fireEvent.click(within(row).getByRole('button', { name: /^Dismiss/ }));
+      fireEvent.click(dismissOf('Write outside every claim'));
 
       expect(await within(row).findByText('The daemon broke')).toBeTruthy();
       expect(screen.getByRole('radio', { name: /Red/ }).getAttribute('aria-checked')).toBe('true');
@@ -1089,11 +1100,8 @@ describe('InboxView', () => {
       );
       renderApp('/inbox');
       await findText('Write outside every claim');
-      fireEvent.click(
-        within(await findRow('Write outside every claim')).getByRole('button', {
-          name: /^Dismiss/,
-        }),
-      );
+      await findRow('Write outside every claim');
+      fireEvent.click(dismissOf('Write outside every claim'));
       expect(await findText('Nothing needs you')).toBeTruthy();
     });
   });

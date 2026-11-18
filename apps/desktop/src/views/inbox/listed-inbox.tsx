@@ -138,16 +138,7 @@ function Rows({
         // Where the panel is a sheet the pick has been made: show the card it chose.
         closeSheet();
       }}
-      renderRow={(row) => (
-        <InboxRowItem
-          row={row}
-          state={state}
-          now={now}
-          failure={null}
-          pending={false}
-          onDismiss={() => undefined}
-        />
-      )}
+      renderRow={(row) => <InboxRowItem row={row} state={state} now={now} failure={null} />}
     />
   );
 

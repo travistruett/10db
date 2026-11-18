@@ -1,6 +1,6 @@
 import { Box, ScrollArea, Skeleton } from '@mantine/core';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { LIST_ATTRIBUTE } from './use-inbox-keys';
 import classes from './inbox-row-list.module.css';
 
@@ -35,6 +35,12 @@ export interface InboxRowListProps<T extends { readonly key: string }> {
   readonly onPick?: (row: T) => void;
   /** The row's two lines; the list draws the row around them. */
   readonly renderRow: (row: T, selected: boolean) => ReactNode;
+  /**
+   * A control that belongs to the row, drawn over its end but outside the listbox: an option holds no
+   * interactive child, and a listbox owns nothing but options. It shows while the row is hovered or focused,
+   * and while the control itself has focus.
+   */
+  readonly renderAction?: (row: T) => ReactNode;
 }
 
 /**
@@ -55,6 +61,7 @@ export function InboxRowList<T extends { readonly key: string }>({
   focusOnArrival = false,
   onPick,
   renderRow,
+  renderAction,
 }: InboxRowListProps<T>) {
   const viewport = useRef<HTMLDivElement>(null);
   const footer = loadingMore || moreError !== null;
@@ -117,6 +124,10 @@ export function InboxRowList<T extends { readonly key: string }>({
     option.focus({ preventScroll: true });
   }, [selectedIndex, selected, focusOnArrival, rows.length]);
 
+  // The row whose action shows: the one under the pointer, else the one holding focus.
+  const [hovered, setHovered] = useState<string | null>(null);
+  const [focused, setFocused] = useState<string | null>(null);
+
   const nearEnd = (lastVisible: number): boolean =>
     hasMore && !loadingMore && lastVisible >= rows.length - NEAR_END_ROWS;
 
@@ -153,53 +164,90 @@ export function InboxRowList<T extends { readonly key: string }>({
       }}
       {...{ [LIST_ATTRIBUTE]: true }}
     >
-      <Box
-        role="listbox"
-        aria-label={label}
-        style={{ position: 'relative', height: virtualizer.getTotalSize() }}
-      >
-        {virtualizer.getVirtualItems().map((item) => {
-          const row = rows[item.index];
-          const style = { height: item.size, transform: `translateY(${String(item.start)}px)` };
-          if (row === undefined) {
+      <Box style={{ position: 'relative', height: virtualizer.getTotalSize() }}>
+        <Box role="listbox" aria-label={label} style={{ position: 'relative', height: '100%' }}>
+          {virtualizer.getVirtualItems().map((item) => {
+            const row = rows[item.index];
+            const style = { height: item.size, transform: `translateY(${String(item.start)}px)` };
+            if (row === undefined) {
+              return (
+                <div
+                  key={item.key}
+                  role="presentation"
+                  className={[classes['row'], classes['placeholder']].join(' ')}
+                  style={style}
+                >
+                  {moreError === null ? <Skeleton height={12} width="60%" /> : null}
+                  {moreError === null ? 'Loading more' : "Couldn't load more"}
+                </div>
+              );
+            }
+            const isSelected = row.key === selected;
+            // One row is a tab stop, so Tab reaches the list: the selected row, else the first.
+            const isTabStop = selectedIndex >= 0 ? isSelected : item.index === 0;
             return (
               <div
                 key={item.key}
-                role="presentation"
-                className={[classes['row'], classes['placeholder']].join(' ')}
+                role="option"
+                aria-selected={isSelected}
+                data-inbox-row
+                className={classes['row']}
                 style={style}
+                // Focusable so the keys can be given from the list; j, k and Enter are the Inbox's, Space picks.
+                tabIndex={isTabStop ? 0 : -1}
+                onClick={() => {
+                  onPick?.(row);
+                }}
+                onMouseEnter={() => {
+                  setHovered(row.key);
+                }}
+                onMouseLeave={() => {
+                  setHovered(null);
+                }}
+                onFocus={() => {
+                  setFocused(row.key);
+                }}
+                onBlur={() => {
+                  setFocused(null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== ' ' || event.target !== event.currentTarget) return;
+                  event.preventDefault();
+                  onPick?.(row);
+                }}
               >
-                {moreError === null ? <Skeleton height={12} width="60%" /> : null}
-                {moreError === null ? 'Loading more' : "Couldn't load more"}
+                {renderRow(row, isSelected)}
               </div>
             );
-          }
-          const isSelected = row.key === selected;
-          // One row is a tab stop, so Tab reaches the list: the selected row, else the first.
-          const isTabStop = selectedIndex >= 0 ? isSelected : item.index === 0;
-          return (
-            <div
-              key={item.key}
-              role="option"
-              aria-selected={isSelected}
-              data-inbox-row
-              className={classes['row']}
-              style={style}
-              // Focusable so the keys can be given from the list; j, k and Enter are the Inbox's, Space picks.
-              tabIndex={isTabStop ? 0 : -1}
-              onClick={() => {
-                onPick?.(row);
-              }}
-              onKeyDown={(event) => {
-                if (event.key !== ' ' || event.target !== event.currentTarget) return;
-                event.preventDefault();
-                onPick?.(row);
-              }}
-            >
-              {renderRow(row, isSelected)}
-            </div>
-          );
-        })}
+          })}
+        </Box>
+        {renderAction === undefined ? null : (
+          <div className={classes['actions']}>
+            {virtualizer.getVirtualItems().map((item) => {
+              const row = rows[item.index];
+              if (row === undefined) return null;
+              const action = renderAction(row);
+              if (action === null) return null;
+              return (
+                <div
+                  key={item.key}
+                  role="presentation"
+                  className={classes['action']}
+                  data-shown={hovered === row.key || focused === row.key ? '' : undefined}
+                  style={{ height: item.size, transform: `translateY(${String(item.start)}px)` }}
+                  onMouseEnter={() => {
+                    setHovered(row.key);
+                  }}
+                  onMouseLeave={() => {
+                    setHovered(null);
+                  }}
+                >
+                  <div className={classes['control']}>{action}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </Box>
     </ScrollArea>
   );

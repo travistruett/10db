@@ -219,7 +219,8 @@ test('one lookup: a card asks for its row alone and answers fast, and a dismisse
     const query = new URL(response.url());
     return query.pathname === '/inbox/page' && query.searchParams.has('card');
   });
-  await group.getByRole('button', { name: /^Dismiss All/ }).click();
+  // Dismiss lies over the row, outside the listbox.
+  await page.getByRole('button', { name: /^Dismiss All: Open card 0002 repeated/ }).click();
   expect((await lookup).ok()).toBe(true);
   await expect(group).toHaveCount(0);
 });
@@ -239,9 +240,7 @@ for (const mode of ['dark', 'light'] as const) {
     await page.setViewportSize({ width: 1280, height: 900 });
     await firstRowAfterRequest(page, inboxUrl(''));
     await expect(page.locator('html')).toHaveAttribute('data-mantine-color-scheme', mode);
-    // A flag's row holds its Dismiss button inside the option, which axe reports as nested-interactive; the
-    // rows are left out of the scan until the button moves beside the option, and everything else is scanned.
-    await expectAccessible(page, `inbox panel, ${mode}`, ['[data-inbox-row]']);
+    await expectAccessible(page, `inbox panel, ${mode}`);
   });
 }
 

@@ -65,7 +65,6 @@ function Lines({
   age,
   second,
   failure,
-  dismiss,
 }: {
   readonly tag: string;
   readonly tone: 'open' | 'quiet';
@@ -74,7 +73,6 @@ function Lines({
   readonly age: string | null;
   readonly second: ReactNode;
   readonly failure: string | null;
-  readonly dismiss: ReactNode;
 }) {
   return (
     <div className={classes['item']}>
@@ -121,7 +119,6 @@ function Lines({
           </Text>
         )}
       </div>
-      {dismiss}
     </div>
   );
 }
@@ -159,23 +156,19 @@ function SessionLine({ item }: { readonly item: InboxItemDto }) {
 
 /**
  * The two lines of a row in the panel (spec §4.1 "A row"): the kind, the title, how many and how long ago,
- * then the project and what the card is about. A dismissable row offers Dismiss on hover and on focus.
+ * then the project and what the card is about.
  */
 export function InboxRowItem({
   row,
   state,
   now,
   failure,
-  pending,
-  onDismiss,
 }: {
   readonly row: OpenRow;
   readonly state: InboxListState;
   readonly now: number;
   /** Why this row's last dismiss failed, shown on the row. */
   readonly failure: string | null;
-  readonly pending: boolean;
-  readonly onDismiss: (row: InboxRow) => void;
 }) {
   const tone = state === InboxListState.Open ? 'open' : 'quiet';
   if (row.kind === OpenRowKind.System) {
@@ -193,15 +186,12 @@ export function InboxRowItem({
           </Text>
         }
         failure={null}
-        dismiss={null}
       />
     );
   }
   const items = row.row.items;
   const [first] = items;
   const pass = row.row.passId !== null;
-  const dismissable = state === InboxListState.Open && !pass && isDismissable(first);
-  const verb = items.length > 1 ? 'Dismiss All' : 'Dismiss';
   return (
     <Lines
       tag={KIND_TAGS[first.kind]}
@@ -226,23 +216,42 @@ export function InboxRowItem({
         </>
       }
       failure={failure}
-      dismiss={
-        dismissable ? (
-          <Button
-            className={classes['dismiss']}
-            size="compact-xs"
-            variant="default"
-            loading={pending}
-            aria-label={`${verb}: ${first.title}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              onDismiss(row.row);
-            }}
-          >
-            {verb}
-          </Button>
-        ) : null
-      }
     />
+  );
+}
+
+/**
+ * A dismissable row's Dismiss, drawn by the list beside the row's option. It is a flag row of Open that is not a
+ * pass's; any other row has none.
+ */
+export function InboxRowDismiss({
+  row,
+  state,
+  pending,
+  onDismiss,
+}: {
+  readonly row: OpenRow;
+  readonly state: InboxListState;
+  readonly pending: boolean;
+  readonly onDismiss: (row: InboxRow) => void;
+}) {
+  if (row.kind !== OpenRowKind.Inbox) return null;
+  const items = row.row.items;
+  const [first] = items;
+  if (state !== InboxListState.Open || row.row.passId !== null || !isDismissable(first))
+    return null;
+  const verb = items.length > 1 ? 'Dismiss All' : 'Dismiss';
+  return (
+    <Button
+      size="compact-xs"
+      variant="default"
+      loading={pending}
+      aria-label={`${verb}: ${first.title}`}
+      onClick={() => {
+        onDismiss(row.row);
+      }}
+    >
+      {verb}
+    </Button>
   );
 }

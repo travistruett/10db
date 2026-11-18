@@ -32,3 +32,31 @@
 .placeholder:hover {
   background: transparent;
 }
+
+/* The rows' controls lie over the list, outside the listbox. The layer takes no pointer; each control does. */
+.actions {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.action {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 0 8px 6px;
+  opacity: 0;
+}
+
+.action[data-shown],
+.action:focus-within {
+  opacity: 1;
+}
+
+.control {
+  pointer-events: auto;
+}

@@ -20,7 +20,14 @@ import { useFrameSlots } from '../../shell/frame-slots';
 import { useNow } from '../../shell/relative';
 import { cardAnswer, recommended } from './card-answer';
 import { InboxRowList } from './inbox-row-list';
-import { inboxRowOf, InboxRowItem, OpenRowKind, systemRow, type OpenRow } from './inbox-row-item';
+import {
+  inboxRowOf,
+  InboxRowDismiss,
+  InboxRowItem,
+  OpenRowKind,
+  systemRow,
+  type OpenRow,
+} from './inbox-row-item';
 import {
   inboxList,
   inboxStateMemory,
@@ -348,6 +355,12 @@ export function OpenInbox({
           state={InboxListState.Open}
           now={now}
           failure={dismissFailure?.key === row.key ? dismissFailure.message : null}
+        />
+      )}
+      renderAction={(row) => (
+        <InboxRowDismiss
+          row={row}
+          state={InboxListState.Open}
           pending={
             row.kind === OpenRowKind.Inbox && row.row.items.some((item) => item.id === pendingId)
           }

@@ -13,16 +13,3 @@
   gap: 6px;
   min-width: 0;
 }
-
-/* Dismiss shows on hover and on focus, over the end of the second line. */
-.dismiss {
-  position: absolute;
-  right: 0;
-  bottom: -2px;
-  opacity: 0;
-}
-
-:global([data-inbox-row]):hover .dismiss,
-:global([data-inbox-row]):focus-within .dismiss {
-  opacity: 1;
-}
