@@ -154,7 +154,7 @@ describe('summariseChecks', () => {
     expect(summariseChecks(rollup)).toMatchObject({ checks, failingChecks: failing });
   });
 
-  // The counts the title row reads: finished and not failing, still going or unread, and every entry.
+  // The counts the title row reads: finished and not failing, still going, and every entry 10db can read.
   it.each<{
     name: string;
     rollup: CheckRollupEntry[];
@@ -182,9 +182,9 @@ describe('summariseChecks', () => {
       counts: { passed: 1, total: 3, failing: 2 },
     },
     {
-      name: 'an unreadable entry is in the total only',
+      name: 'an unreadable entry is in neither count, so the row never waits on it',
       rollup: [run('a', 'SUCCESS'), UNREADABLE_CHECK],
-      counts: { passed: 1, total: 2, failing: 0 },
+      counts: { passed: 1, total: 1, failing: 0 },
     },
   ])('counts: $name', ({ rollup, counts }) => {
     expect(summariseChecks(rollup).counts).toEqual(counts);

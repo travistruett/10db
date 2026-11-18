@@ -13,13 +13,13 @@ import {
   type ChatDto,
 } from '@10db/contracts';
 import { insertItem, setChatWork } from '@10db/db';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { chatRequest } from '../../test/chat-app';
 import { chatWorld, type ChatWorld } from '../../test/chat-world';
 import { FakeGh } from '../../test/fake-gh';
 import { createTempRepo, isolatedGitEnv, tempDir, type TempDir } from '../../test/fixtures';
 import { createGit } from '../git';
-import type { CheckRollupEntry } from '../github';
+import type { CheckRollupEntry, GhCall } from '../github';
 import {
   createChatWorkStateReader,
   PULL_REQUEST_READ_MS,
@@ -286,6 +286,21 @@ describe('the pull request', () => {
     expect(prViews()).toBe(3);
   });
 
+  it('does not let the reader that started the shared GitHub read abort it for the others', async () => {
+    const { chat } = onTopic();
+    const real = gh.prView.bind(gh);
+    const leaving = new AbortController();
+    const seen: boolean[] = [];
+    vi.spyOn(gh, 'prView').mockImplementation(async (input, call?: GhCall) => {
+      leaving.abort();
+      await Promise.resolve();
+      seen.push(call?.signal?.aborted === true);
+      return real(input);
+    });
+    await reader.read(chat.id, leaving.signal, null);
+    expect(seen).toEqual([false]);
+  });
+
   it('shows a merged pull request as merged, with nothing left to do', async () => {
     const { chat, url } = onTopic();
     gh.merged.push(url);
@@ -333,6 +348,23 @@ describe('a session on its own branch', () => {
       holder: null,
       next: 'commit',
     });
+  });
+
+  it('names the branch the worktree is on now, as a push and a pull request use it', async () => {
+    const chat = setup();
+    extra = tempDir('work-state-switched');
+    const path = join(realpathSync(extra.path), 'wt');
+    gitIn(repo.path, 'worktree', 'add', '-q', '-b', 'fix', path, 'HEAD');
+    w.state.write((ctx) =>
+      setChatWork(ctx, chat.id, null, {
+        place: WorkPlace.Branch,
+        branch: 'fix',
+        worktreePath: path,
+        baseHead: gitIn(repo.path, 'rev-parse', 'HEAD'),
+      }),
+    );
+    gitIn(path, 'switch', '-qc', 'other');
+    expect(await read(chat)).toMatchObject({ branch: 'other' });
   });
 });
 

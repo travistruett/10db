@@ -260,7 +260,7 @@ export function createChatGit<C extends ChatSite>(ctx: ChatGitContext<C>): ChatG
         const found = await ctx.currentBranch(c);
         if (found !== base)
           throw new ConflictError(
-            `Your folder is not on ${base} any more (it is on ${found ?? 'no branch'}), so nothing was moved.`,
+            `Your checkout is not on ${base} any more (it is on ${found ?? 'no branch'}), so nothing was moved.`,
           );
         const head = await ctx.revParse(c, 'HEAD^{commit}');
         if (head === null || head !== input.expectedOld)

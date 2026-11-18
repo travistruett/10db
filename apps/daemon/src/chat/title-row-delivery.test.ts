@@ -135,6 +135,15 @@ describe('Open Pull Request', () => {
     expect(gitIn(repo(), 'branch', '--show-current')).toBe('main');
   });
 
+  it('is refused from main with nothing ahead, and makes no branch', async () => {
+    const chat = setup();
+    const before = gitIn(repo(), 'branch', '--list');
+    await expect(titleRow.openPullRequest(chat.id, signal)).rejects.toThrow();
+    expect(gitIn(repo(), 'branch', '--show-current')).toBe('main');
+    expect(gitIn(repo(), 'branch', '--list')).toBe(before);
+    expect(gh.prCreates()).toEqual([]);
+  });
+
   it('leaves the checkout on the new branch when GitHub fails, and offers Open Pull Request on it again (row 46)', async () => {
     const chat = setup();
     commitFile(repo(), 'a.ts');
@@ -154,6 +163,20 @@ describe('Open Pull Request', () => {
     const chat = setup('local');
     commitFile(repo(), 'a.ts');
     await expect(titleRow.openPullRequest(chat.id, signal)).rejects.toThrow(/merges locally/);
+  });
+
+  it('pushes later commits to the branch of an open pull request without opening another, then offers Merge', async () => {
+    const chat = setup();
+    const path = branchSession(chat);
+    await titleRow.openPullRequest(chat.id, signal);
+    commitFile(path, 'later.ts');
+    expect(ChatWorkStateDto.parse(await w.work.state(chat.id, signal))).toMatchObject({
+      next: 'open_pull_request',
+    });
+    const state = await titleRow.openPullRequest(chat.id, signal);
+    expect(gitIn(pair.origin.path, 'rev-parse', 'fix')).toBe(gitIn(path, 'rev-parse', 'HEAD'));
+    expect(gh.prCreates()).toHaveLength(1);
+    expect(ChatWorkStateDto.parse(state)).toMatchObject({ next: 'merge' });
   });
 
   it('is served by POST /chats/:chatId/pull-request', async () => {
@@ -279,6 +302,21 @@ describe('Merge into main on a local project', () => {
     await expect(titleRow.merge(chat.id, signal)).rejects.toThrow(/conflicts in README.md/);
     expect(gitIn(repo(), 'rev-parse', 'main')).toBe(before);
     expect(gitIn(repo(), 'status', '--porcelain')).toBe('');
+  });
+
+  it('is refused, naming the files, when ignored files of the checkout lie where the merge writes', async () => {
+    const chat = setup('local');
+    writeFileSync(join(repo(), '.gitignore'), 'secret.env\n');
+    gitIn(repo(), 'add', '.gitignore');
+    gitIn(repo(), '-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'ignore');
+    const path = branchSession(chat, 'other.ts');
+    writeFileSync(join(path, 'secret.env'), 'theirs\n');
+    gitIn(path, 'add', '-f', 'secret.env');
+    gitIn(path, '-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'secret');
+    writeFileSync(join(repo(), 'secret.env'), 'mine\n');
+    const before = gitIn(repo(), 'rev-parse', 'main');
+    await expect(titleRow.merge(chat.id, signal)).rejects.toThrow(/secret\.env/);
+    expect(gitIn(repo(), 'rev-parse', 'main')).toBe(before);
   });
 
   it('is served by POST /chats/:chatId/merge', async () => {

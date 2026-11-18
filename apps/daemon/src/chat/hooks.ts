@@ -67,7 +67,7 @@ import {
 import { digestText } from './brief';
 import { judgeChatCall, type ChatPlace } from './confinement';
 import { workNote } from './work-note';
-import { chatRoot } from './work-root';
+import { chatRoot, withWorktreeOnDisk } from './work-root';
 import { JUDGED_CHAT_TOOLS } from './git-rule';
 import type { ChatLiveSessions } from './live-sessions';
 import { chatSystemPrompt } from './prompt';
@@ -274,7 +274,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
   // Whether the chat's session can write now: Here, while its turn holds the checkout; a branch, in its worktree.
   // A branch with no worktree has nowhere to write, and never falls back to the checkout.
   const writesNow = (chat: ChatRow, repoPath: string): boolean =>
-    chatRoot(chat, { repoPath }).writes &&
+    chatRoot(withWorktreeOnDisk(chat), { repoPath }).writes &&
     (chat.workPlace !== WorkPlace.Here || deps.folderHold.holdsTurn(chat.id));
 
   return {
@@ -386,7 +386,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         tendbReady,
       );
       const project = getProject(state.db, conv.projectId);
-      const { root } = chatRoot(chat, { repoPath: launch.cwd });
+      const { root } = chatRoot(withWorktreeOnDisk(chat), { repoPath: launch.cwd });
       const writable = writesNow(chat, launch.cwd);
       const folder: ChatPlace = {
         get place() {
@@ -398,7 +398,9 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           if (place === WorkPlace.Here) return current && deps.folderHold.holdsTurn(chat.id);
           if (place === WorkPlace.Branch)
             return (
-              current && running.has(chat.id) && getChat(state.db, chat.id).worktreePath !== null
+              current &&
+              running.has(chat.id) &&
+              withWorktreeOnDisk(getChat(state.db, chat.id)).worktreePath !== null
             );
           return false;
         },
@@ -461,8 +463,10 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       };
       sessionClosers.set(conv.id, release);
       const setup = ready?.setup ?? null;
+      // A branch session reads and runs in its own worktree, so that is the checkout its reads are judged against.
       const access: ShapeAccess = {
         ...launch.access,
+        checkout: root,
         filesDir: chatFolder(deps.dataDir, conv.id),
         agentModels: launch.agentModels,
         judge,

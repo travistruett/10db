@@ -17,11 +17,6 @@ export async function chatWorktreeLosses(
 ): Promise<{ readonly uncommitted: string[]; readonly ignored: string[] }> {
   if (!existsAsEntry(path)) return { uncommitted: [], ignored: [] };
   const uncommitted = await git.worktreeChanges(project.repoPath, path);
-  const ignored = await unseededIgnoredFiles(
-    git as Git,
-    project.repoPath,
-    path,
-    project.worktreeSeed,
-  );
+  const ignored = await unseededIgnoredFiles(git, project.repoPath, path, project.worktreeSeed);
   return { uncommitted, ignored: ignored === null ? [UNREADABLE] : looseWork(ignored) };
 }

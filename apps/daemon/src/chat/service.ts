@@ -358,12 +358,14 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
           }
         }
       }
+      const wasClosed = getChat(state.db, id).tabPosition === null;
       state.write((ctx) => {
         if (input.title !== undefined) setChatTitle(ctx, id, input.title, ChatTitleSource.Builder);
         if (input.tabPosition !== undefined) moveChatTab(ctx, id, input.tabPosition);
       });
-      // Reopened from Recently closed: a branch session with no worktree gets it back.
-      if (input.tabPosition !== undefined && input.tabPosition !== null) reopen(id);
+      // Reopened from Recently closed: a branch session with no worktree gets it back. A tab that only moves
+      // is already open, and its worktree was tried when it opened.
+      if (wasClosed && input.tabPosition !== undefined && input.tabPosition !== null) reopen(id);
       return dtoOf(id);
     },
 
@@ -397,11 +399,12 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
           // The turn has ended: this is the final list, and a file written since the first check refuses too.
           try {
             await refuseUnwarned(chat, request);
+            await deps.worktrees?.remove(chat);
           } catch (error) {
+            // Nothing was archived, so the session must take messages again.
             engine.unretire(chat.conversationId);
             throw error;
           }
-          await deps.worktrees?.remove(chat);
         }
         state.write((ctx) => {
           if (chat.workPlace === WorkPlace.Choosing) {
