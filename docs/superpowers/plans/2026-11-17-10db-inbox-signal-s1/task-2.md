@@ -99,14 +99,17 @@ notices.
    - 10,000 of them `notice.posted`, spread over 10 projects with 50 tasks each, a third on tasks;
    - the rest `task.changed` and `inbox.changed`.
 
-   Time the median of 20 runs of each:
+   Then a second, sparse database: the same 250,000 events with only 20 of them `notice.posted`, spread through the
+   log. The unfiltered read walks the rowid until it fills a page, so a sparse log is its worst case.
+
+   Time the median of 20 runs of each, on both databases:
    - a first page with no filter;
    - a page from the middle (`after` at seq 125,000);
    - a first page for one project;
    - a first page for one task.
 
    **If any median is over 50 ms, stop.** Report the numbers to the coordinator and don't add an index (that would
-   be a migration). Otherwise put the four medians in the commit body.
+   be a migration). Otherwise put the eight medians in the commit body.
 5. **Green.** Run `pnpm --filter @10db/db exec vitest related src/store/activity-group.ts src/store/activity.ts --run
    --maxWorkers=2`, then typecheck and lint db.
 6. Commit, naming every path. The message is `feat(db): the activity page reads notices by keyset and groups

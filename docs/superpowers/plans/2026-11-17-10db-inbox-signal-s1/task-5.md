@@ -75,7 +75,8 @@ Abbreviations:
 | `worktreeCards.keptDirty`, `keptIgnored` | A | N | wd:"the batch's worktree is removed (worktree-cleanup)" | |
 | `worktreeCards.orphanKept`, `orphanIgnored` | A | N | wd:"the orphan worktree is removed (worktree-sweep)" | |
 | `worktreeCards.leftBehind`, `removeFailed` | A | N | ans | |
-| `baseCards.lostUnreadable`; `shipCards.migrationsLost` unreadable | A | H | ans | Clear the notice acts |
+| `baseCards.lostUnreadable` | A | H | ans | Clear the notice acts |
+| `shipCards.migrationsLost` (both variants) | A | H | ev:batch_shipped | via `shipCard`, as `ship.ts:519` adds today; the unreadable variant's Clear the notice acts too |
 | `wrongBranchCard('waits')`, `('failed')` | A | H | ans | `// S2: branch_ready; Switch Back` |
 | `checkoutCards.*` (Your checkout stays on) | A | N | ans | |
 | `prCards.catchUpStopped` | A | H | wd:"GitHub reads the pull request as mergeable (pr-watch, ship)" | |

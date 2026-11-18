@@ -43,7 +43,12 @@ Quoted in the index: `CardTier`, `StoredTier`, `CardClosesWhen`, `BY_ANSWER`, `N
 
 - **Its event.** It emits one `EventType.NoticePosted` event whose `data` is
   `NoticePostedData.parse({ projectId, taskId, ...fitted })`, where `fitted` is
-  `fitNotice({ key, tone, line, body })`'s shown fields.
+  `fitNotice({ key: fitNoticeKey(key), tone, line, body })`'s shown fields.
+- **Its key fits.** `fitNotice` never cuts `key`, and `Notice.key` is at most 200 characters. A key built from
+  names (`retired-landings:<branches>`) can pass that, and a `ZodError` inside `postIn` would roll back the
+  caller's own write. `fitNoticeKey(key: string): string` (exported from `notice.ts`) returns a key of 200 or fewer
+  characters unchanged. A longer one becomes its first 135 characters, then `…`, then the first 64 hex digits of
+  its sha256 (`node:crypto`), which is 200 in all. Equal long keys stay equal, so grouping at read still works.
 - **The entity:**
   - a `taskId` → `task` and the task id;
   - else a `projectId` → `project` and the project id;
@@ -61,7 +66,9 @@ calls `postNotice(write, { ...notice, projectId })`.
    - with a task and a project → `task`;
    - with a project only → `project`;
    - with neither → `app` / `app`;
-   - a 600-character line → cut to 500, ending in "…".
+   - a 600-character line → cut to 500, ending in "…";
+   - a 201-character key → 200 characters: its first 135, `…`, then 64 hex digits; the same key posted twice gives
+     the same stored key, and a 200-character key is stored unchanged.
 
    Then:
    - **rollback:** a `store.write` that posts a notice and then throws leaves no `notice.posted` row (state row 1);

@@ -11,7 +11,9 @@
     - a notice is a `notice.posted` event (or a batch notice), never an `inbox_items` row;
     - Activity reads the event log;
     - flags have no default urgency;
-    - the three forms of `closesWhen`.
+    - the three forms of `closesWhen`;
+    - a `{ by: 'withdrawn' }` card keeps Dismiss, as a `{ by: 'answer' }` card does. S2's no-Dismiss rule applies
+      only to cards whose `closesWhen` is a `CardResolvesWhen` condition (`{ by: 'event' }`).
   - **Why:**
     - the spec's §1 numbers;
     - the four mechanisms;
@@ -30,7 +32,7 @@
 - Modify `apps/daemon/src/pass/AGENTS.md`: the follow-on notice marks a carry-over done (`hasNoticeKey`), and the
   gate-failed, folder-stays and abandoned-without-Move notices.
 - Modify `apps/daemon/src/mcp/AGENTS.md`: `resize_task` posts a notice. Task 4 may have done this already.
-- Modify `packages/db/AGENTS.md`: `pageActivity` reads `events` by `events_entity_idx` and by rowid. Add the four
+- Modify `packages/db/AGENTS.md`: `pageActivity` reads `events` by `events_entity_idx` and by rowid. Add the eight
   medians from Task 2's commit, and the 50 ms line past which an index (a migration) would be needed.
 
 ## Steps

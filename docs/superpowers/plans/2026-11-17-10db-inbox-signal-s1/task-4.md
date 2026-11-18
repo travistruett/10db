@@ -29,7 +29,9 @@ else the stable key named here. The line is the card's title, and the body is th
   - Check that in `worktree-card.ts`. If an open removeFailed card can remain, withdraw it in the same flow with
     `withdraw(…, [keptWorktreeKey.removeFailed(path)])`.
 - **`retired-landings.ts` `movedCard`** returns a `DeliveryNotice`: key `retired-landings:<sorted branch names>`,
-  tone `info`, `taskId: null`. `raiseIn` at `:101` becomes `postIn`, so the notice commits with the move.
+  tone `info`, `taskId: null`. `raiseIn` at `:101` becomes `postIn`, so the notice commits with the move. The key
+  can pass 200 characters; `postNotice`'s `fitNoticeKey` (Task 3) keeps it valid, so the move never rolls back
+  over a notice. Its test seeds branch names long enough to pass 200 and checks the move and the notice both land.
 - **`baseCards.regenerate`** becomes `baseNotices.regenerate(batch, worktree, dirs, problem): Notice`, a batch
   notice: key `base-regenerate`, tone `warning`, the title as `line`, the body as `body`.
   - `base-update.ts:1076` calls `showNotice(ctx.state, batch.id, …)`.
@@ -126,11 +128,41 @@ For each commit A-D:
    - C: `feat(daemon): run notices post to activity on their task`;
    - D: `feat(daemon): a pass that did not open or was cancelled posts a notice`.
 
-   Each body carries a value card, as in this one for B:
+   Each body carries its value card:
+
+   A:
+
+   ```
+   Value: protects=a deleted branch, a worktree 10db left, and moved landings are notices, and a
+     failed regenerate is a batch notice hidden when the journal is whole; fails_when=any of them
+     is stored as a card, a long landings key rolls back the move, or the regenerate notice
+     outlives its cause; why_new=the delivery tests pinned the cards; no_claim=that cards raised
+     before this build are swept (task 6)
+   ```
+
+   B:
 
    ```
    Value: protects=a merged pass's follow-on is a notice and still marks its carry-over done;
      fails_when=the notice is stored as a card, or a restart carries the pages over twice;
      why_new=merged-open.test.ts pinned the card as the marker; no_claim=that cards raised before
      this build are swept (task 6)
+   ```
+
+   C:
+
+   ```
+   Value: protects=a model retried on another one, changes left in claims, a missing handoff and
+     a resize are notices on their task, while a refused model with nothing to run on stays an
+     ask; fails_when=one is stored as a card, posted without its task, or the held case turns
+     into a notice; why_new=model-start, runner and mcp tests pinned the cards; no_claim=that the
+     drawer shows them (task 8)
+   ```
+
+   D:
+
+   ```
+   Value: protects=a pass that did not open, or was cancelled for an update, posts a notice and
+     raises no card; fails_when=either still raises a card or posts nothing; why_new=the
+     self-update and pass-api tests pinned the cards; no_claim=that Activity shows them (task 8)
    ```

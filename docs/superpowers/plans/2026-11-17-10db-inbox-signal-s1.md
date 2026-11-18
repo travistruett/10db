@@ -111,7 +111,9 @@ migration.
   - normal: something to decide, nothing stopped;
   - low: an undo offer or an optional choice.
   - The questions and permissions that `InboxService.ask` raises keep the urgency they pass today.
-- **Notice text fits `Notice`.** `postNotice` runs `fitNotice` (line ≤ 500, body ≤ 8,000).
+- **Notice text fits `Notice`.** `postNotice` runs `fitNotice` (line ≤ 500, body ≤ 8,000) and `fitNoticeKey`
+  (key ≤ 200: a readable prefix, `…`, and a sha256 for an over-long tail), so a notice never fails to parse inside
+  the caller's write.
 - `PROTOCOL_VERSION` isn't bumped. The new event type, route and DTOs are additive, and an older desktop ignores an
   event it can't parse.
 - **Copy is exact:**
@@ -288,6 +290,7 @@ export interface NoticeInput {
   readonly body: string;
 }
 export function postNotice(ctx: WriteContext, notice: NoticeInput): void;
+export function fitNoticeKey(key: string): string;   // ≤ 200 unchanged; else first 135, '…', 64 hex of sha256
 
 // apps/daemon/src/inbox/service.ts — FlagInput (now exported as a type) gains, required:
   readonly tier: StoredTier;
