@@ -116,6 +116,28 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     expect(getBatch(h.store.db, batch.id).baseSha).toBe(batch.baseSha);
   });
 
+  it('runs no install at a gate when the copy was cloned from a template and its lockfile is unchanged', async () => {
+    h = createDeliveryHarness(
+      { workspaceMode: 'worktree' },
+      { trigger: false, pnpmVersion: '10.0.0' },
+    );
+    h.commit('.gitignore', 'node_modules/\n');
+    h.commit(
+      'pnpm-lock.yaml',
+      'importers:\n  .:\n    dependencies:\n      left-pad:\n        specifier: 1.3.0\n        version: 1.3.0\n',
+    );
+    h.git$('push', '-q', 'origin', 'main');
+    mkdirSync(join(h.repo, 'node_modules'), { recursive: true });
+    h.pnpm.makes({ 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
+    // The first copy makes the template; the second is cloned from it.
+    await opened(h, { sessionStarted: true });
+    const { batch } = await opened(h, { title: 'Beta', sessionStarted: true });
+    expect(h.pnpm.calls()).toHaveLength(1);
+    h.teammatePush('main', 'src/ui/teammate.txt');
+    expect((await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).kind).toBe('merged');
+    expect(h.pnpm.calls()).toHaveLength(1);
+  });
+
   it('runs the install again when the base changed the lockfile', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     h.commit('.gitignore', 'node_modules/\n');
@@ -209,7 +231,9 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       h.commit('pnpm-lock.yaml', NEEDS_LEFT_PAD);
       if (workspace !== undefined) h.commit('pnpm-workspace.yaml', workspace);
       h.git$('push', '-q', 'origin', 'main');
-      mkdirSync(join(h.repo, 'node_modules', 'left-pad'), { recursive: true });
+      mkdirSync(join(h.repo, 'node_modules'), { recursive: true });
+      // The cut's install makes the copy's node_modules; Your folder's is not cloned.
+      h.pnpm.makesOnCall(1, { 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
       const { batch } = await opened(h, { sessionStarted: true });
       await commitOnBatch(batch, 'src/api/alpha.txt');
       const path = pathOf(batch);
@@ -591,7 +615,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     async function toRepair(): Promise<BatchDto> {
       const { batch, path } = await pruned();
       rmSync(path, { recursive: true, force: true });
-      rmSync(join(h.repo, 'node_modules', 'left-pad'), { recursive: true });
+      rmSync(join(h.repo, 'node_modules', 'left-pad'), { recursive: true, force: true });
       mkdirSync(join(h.repo, 'node_modules', 'other'), { recursive: true });
       return batch;
     }

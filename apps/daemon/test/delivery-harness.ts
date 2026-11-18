@@ -38,11 +38,13 @@ import {
   createBaseUpdates,
   createBatchStarter,
   createDeliveryJobs,
+  createNodeModulesTemplates,
   createShipper,
   createWorktreeDependencies,
   createWorktreeGenerators,
   DEFAULT_DELIVERY_LIMITS,
   subscribeShipTrigger,
+  templatesRoot,
   type BaseUpdates,
   type BatchStarter,
   type DeliveryContext,
@@ -96,6 +98,8 @@ function fakePnpm(root: string): FakePnpm {
       `if [ -f '${verdict}.'"$n" ]; then cat '${verdict}.'"$n"; exit 1; fi`,
       `if [ -f '${verdict}.stderr' ]; then cat '${verdict}.stderr' >&2; fi`,
       `if [ -f '${verdict}' ]; then cat '${verdict}'; read -r code < '${verdict}.code'; exit "$code"; fi`,
+      // A passing install always leaves a node_modules, as pnpm does, even with nothing to install.
+      'mkdir -p node_modules',
       '',
     ].join('\n'),
   );
@@ -341,6 +345,10 @@ export function createDeliveryHarness(
     rules: () => [],
     checkouts: () => [remote.repo.path],
     timeoutMs: opts.gateTimeoutMs ?? 20_000,
+    templates: createNodeModulesTemplates({
+      root: templatesRoot(data.path),
+      logger: logs.logger,
+    }),
   };
   const folderHold = createFolderHold({ state, bus });
   const ctx: DeliveryContext = {

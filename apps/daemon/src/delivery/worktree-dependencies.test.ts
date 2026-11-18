@@ -9,7 +9,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join } from 'node:path';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { mintId, type BatchDto, type ProjectDto } from '@10db/contracts';
 import { createTestStore, deleteAppSetting, listInbox, seedProject } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -28,7 +29,7 @@ import { silentLogger } from '../log';
 import { listNetworkHosts } from '../permissions';
 import { createGateRunner, type GateRequest, type GateRunner } from '../verify';
 import { createNodeModulesTemplates, templateKey, templatesRoot } from './node-modules-template';
-import { resolvePnpm } from './pnpm-binary';
+import { readPnpmVersion, resolvePnpm } from './pnpm-binary';
 import {
   createWorktreeDependencies,
   installCommand,
@@ -749,6 +750,76 @@ describe('refreshing a worktree’s dependencies', () => {
     },
     90_000,
   );
+
+  it.skipIf(SANDBOXED || STANDALONE_PNPM === null)(
+    'makes a template of a real pnpm workspace install, and a clone of it resolves in another copy',
+    async () => {
+      const files: Record<string, string> = {
+        'package.json': '{"name":"root","private":true}\n',
+        'pnpm-workspace.yaml': 'packages:\n  - packages/*\n',
+        'packages/lib/package.json': '{"name":"lib","version":"1.0.0","main":"index.js"}\n',
+        'packages/lib/index.js': 'module.exports = 1;\n',
+        'packages/app/package.json': '{"name":"app","dependencies":{"lib":"workspace:*"}}\n',
+        'pnpm-lock.yaml': [
+          "lockfileVersion: '9.0'",
+          '',
+          'importers:',
+          '',
+          '  .: {}',
+          '',
+          '  packages/app:',
+          '    dependencies:',
+          '      lib:',
+          '        specifier: workspace:*',
+          '        version: link:../lib',
+          '',
+          '  packages/lib: {}',
+          '',
+        ].join('\n'),
+      };
+      const other = join(tmp.path, 'other');
+      for (const at of [worktree, other])
+        for (const [relative, content] of Object.entries(files)) {
+          mkdirSync(dirname(join(at, relative)), { recursive: true });
+          writeFileSync(join(at, relative), content);
+        }
+      const env = Object.fromEntries(
+        Object.entries(process.env).flatMap(([k, v]) =>
+          v === undefined || k.startsWith('pnpm_config_') ? [] : [[k, v]],
+        ),
+      );
+      const deps = createWorktreeDependencies({
+        gate: createGateRunner({ sandbox: null, logger: silentLogger }),
+        clock: new ManualClock(),
+        dataDir: join(tmp.path, 'data'),
+        sessionEnv: () => ({ ...env, pnpm_config_store_dir: join(tmp.path, 'store') }),
+        rules: () => [],
+        checkouts: () => [worktree, other],
+        timeoutMs: 60_000,
+        resolvePnpm,
+        pnpmVersion: readPnpmVersion,
+        templates: createNodeModulesTemplates({
+          root: templatesRoot(join(tmp.path, 'data')),
+          logger: silentLogger,
+        }),
+      });
+      const made = await deps.refresh({
+        batch,
+        project,
+        path: worktree,
+        signal,
+        seeded: false,
+        makeTemplate: true,
+      });
+      expect(made.kind, JSON.stringify(made)).toBe('installed');
+      expect(readdirSync(templatesRoot(join(tmp.path, 'data')))).toHaveLength(1);
+      const cloned = await deps.refresh({ batch, project, path: other, signal, seeded: false });
+      expect(cloned).toMatchObject({ kind: 'installed', fromTemplate: true, installs: 0 });
+      const resolved = createRequire(join(other, 'packages/app/package.json')).resolve('lib');
+      expect(realpathSync(resolved)).toBe(realpathSync(join(other, 'packages/lib/index.js')));
+    },
+    90_000,
+  );
 });
 
 describe('a copy’s node_modules from a template', () => {
@@ -816,13 +887,30 @@ describe('a copy’s node_modules from a template', () => {
   });
 
   it.each<[string, (template: string) => void]>([
-    ['there is no template', (template) => { rmSync(template, { recursive: true }); }],
-    ['its marker is missing', (template) => { rmSync(join(template, 'template.json')); }],
+    [
+      'there is no template',
+      (template) => {
+        rmSync(template, { recursive: true });
+      },
+    ],
+    [
+      'its marker is missing',
+      (template) => {
+        rmSync(join(template, 'template.json'));
+      },
+    ],
     [
       'its tree lacks a package',
-      (template) => { rmSync(join(template, 'tree/node_modules/left-pad'), { recursive: true }); },
+      (template) => {
+        rmSync(join(template, 'tree/node_modules/left-pad'), { recursive: true });
+      },
     ],
-    ['its tree is unreadable', (template) => { chmodSync(join(template, 'tree'), 0o000); }],
+    [
+      'its tree is unreadable',
+      (template) => {
+        chmodSync(join(template, 'tree'), 0o000);
+      },
+    ],
   ])('installs as before, and removes the template, when %s', async (_name, damage) => {
     fakePnpm();
     const key = await templateOfLeftPad();

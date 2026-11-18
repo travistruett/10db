@@ -1,8 +1,12 @@
+import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { chmod, lstat, readFile, readdir, rename, rm, mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, normalize } from 'node:path';
+import { promisify } from 'node:util';
 import { z } from 'zod';
+import { existsAsEntry } from '../git';
+import { realPathOf } from '../guard';
 import type { Logger } from '../log';
 import {
   checkInstall,
@@ -11,7 +15,7 @@ import {
   lockfileImporters,
   PNPM_LOCKFILE,
 } from './install-health';
-import { seedWorktree } from './worktree-seed';
+import { isDirectoryInside, seedWorktree } from './worktree-seed';
 
 /** The file a finished template holds beside its tree, written last: a template without it is unfinished. */
 const MARKER = 'template.json';
@@ -95,6 +99,47 @@ export function nodeModulesDirs(path: string): string[] {
     .sort();
 }
 
+const execFileAsync = promisify(execFile);
+
+/**
+ * Clones the directories `dirs` (relative, absent in `to`) from `from` into `to`, links copied as
+ * links and never followed, nothing from the source run. On macOS each is one `cp -c`, which clones
+ * a `node_modules` of some 70,000 files faster than `seedWorktree`'s walk; elsewhere, or when `cp`
+ * fails, `seedWorktree` does it. Like the seed, a directory whose parent is not a directory inside
+ * `to` is skipped, not copied.
+ */
+async function cloneDirs(input: {
+  readonly from: string;
+  readonly to: string;
+  readonly dirs: readonly string[];
+  readonly signal: AbortSignal;
+}): Promise<{ readonly skipped: readonly string[] }> {
+  if (process.platform !== 'darwin') return seedWorktree(input);
+  const realTo = realPathOf(input.to);
+  const skipped: string[] = [];
+  for (const dir of input.dirs) {
+    input.signal.throwIfAborted();
+    const target = join(input.to, dir);
+    if (!(await isDirectoryInside(dirname(target), realTo))) {
+      skipped.push(dir);
+      continue;
+    }
+    // cp would copy into a directory that is there, not as it.
+    if (existsAsEntry(target)) throw new DamagedTemplate(`${dir} is already in ${input.to}`);
+    try {
+      await execFileAsync('/bin/cp', ['-cRP', join(input.from, dir), target], {
+        signal: input.signal,
+      });
+    } catch {
+      input.signal.throwIfAborted();
+      await rm(target, { recursive: true, force: true });
+      const result = await seedWorktree({ ...input, dirs: [dir] });
+      skipped.push(...result.skipped);
+    }
+  }
+  return { skipped };
+}
+
 /** What a clone of a template into a copy came to. */
 export type CloneOutcome =
   /** The copy holds the template's `node_modules`, and every dependency resolves. */
@@ -119,7 +164,7 @@ export interface NodeModulesTemplates {
 
 /**
  * The daemon's `node_modules` templates, one per key, under `root`. Only the daemon writes them: a
- * copy gets a copy-on-write clone (`seedWorktree`), so nothing a lane or gate writes in its copy
+ * copy gets a copy-on-write clone (`cloneDirs`), so nothing a lane or gate writes in its copy
  * reaches a template or another copy.
  */
 export function createNodeModulesTemplates(deps: {
@@ -176,7 +221,7 @@ export function createNodeModulesTemplates(deps: {
         for (const name of nodeModulesDirs(path))
           await rm(join(path, name), { recursive: true, force: true });
         cloned = dirs;
-        const result = await seedWorktree({ from: join(dir, TREE), to: path, dirs, signal });
+        const result = await cloneDirs({ from: join(dir, TREE), to: path, dirs, signal });
         if (result.skipped.length > 0)
           throw new DamagedTemplate(`it could not clone ${result.skipped.join(', ')}`);
         const health = checkInstall(path);
@@ -214,7 +259,7 @@ export function createNodeModulesTemplates(deps: {
         if (dirs.length === 0) return;
         const tree = join(staging, TREE);
         for (const dir of dirs) await mkdir(dirname(join(tree, dir)), { recursive: true });
-        const result = await seedWorktree({
+        const result = await cloneDirs({
           from: path,
           to: tree,
           dirs,

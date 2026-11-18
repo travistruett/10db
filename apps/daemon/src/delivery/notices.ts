@@ -258,8 +258,21 @@ export const leftOutNotices = {
 /** How many unbuilt packages the install-scripts notice names before it counts the rest. */
 const SCRIPTS_SKIPPED_SHOWN = 10;
 
-/** Why a copy holds no built output: its cut skipped the seed, or 10db removed its `node_modules`. */
-export type UnbuiltWhy = 'seed_skipped' | 'started_over';
+/**
+ * Why a copy holds no built output: its cut skipped the seed, 10db removed its `node_modules`, or
+ * 10db made its `node_modules` from its lockfile (an install, or a clone of the template of one).
+ */
+export type UnbuiltWhy = 'seed_skipped' | 'started_over' | 'made_by_install';
+
+/** Where the built output went, for each reason a copy has none. */
+const UNBUILT_CAUSE: Record<UnbuiltWhy, string> = {
+  seed_skipped:
+    'A task in Your folder was unfinished when this copy was made, so 10db cloned nothing into it, and the install that made its node_modules runs no repository code, install scripts included.',
+  started_over:
+    "This copy's node_modules was made by another version of pnpm than the one 10db runs, or had packages missing, so 10db removed it and installed it from nothing, and that install runs no repository code, install scripts included.",
+  made_by_install:
+    "10db made this copy's node_modules from its lockfile, by an install (or a clone of one) that runs no repository code, install scripts included.",
+};
 
 export const seedNotices = {
   skipped: (dirs: readonly string[]): Notice => {
@@ -287,10 +300,7 @@ export const seedNotices = {
       legacyPnpmMajor === undefined
         ? `The project lets ${named} run ${one ? 'its' : 'their'} install script (allowBuilds),`
         : `The copy was installed with pnpm ${String(legacyPnpmMajor)}, which builds every dependency that has an install script unless the project limits it, ${named} included,`;
-    const cause =
-      why === 'seed_skipped'
-        ? 'A task in Your folder was unfinished when this copy was made, so 10db cloned nothing into it, and the install that made its node_modules runs no repository code, install scripts included.'
-        : "This copy's node_modules was made by another version of pnpm than the one 10db runs, or had packages missing, so 10db removed it and installed it from nothing, and that install runs no repository code, install scripts included.";
+    const cause = UNBUILT_CAUSE[why];
     const otherwise =
       why === 'seed_skipped'
         ? ", or abandon this batch and start the task again once Your folder's batch has shipped or been abandoned"
