@@ -39,7 +39,13 @@ function decoySource(): { source: string; base: string; merged: string } {
 }
 
 /** Replays the decoy case on the fake agent at `rigor`, in a work dir of its own. */
-async function runDecoy(rigor: Rigor, plansInBuild?: boolean, fixBy?: FixBy, brief?: LaneBrief) {
+async function runDecoy(
+  rigor: Rigor,
+  plansInBuild?: boolean,
+  fixBy?: FixBy,
+  brief?: LaneBrief,
+  caseTimeoutMs = 60_000,
+) {
   const { source, base, merged } = decoySource();
   const workDir = tempDir('eval-work');
   dirs.push(workDir);
@@ -62,7 +68,7 @@ async function runDecoy(rigor: Rigor, plansInBuild?: boolean, fixBy?: FixBy, bri
     source,
     work,
     parallel: 1,
-    caseTimeoutMs: 60_000,
+    caseTimeoutMs,
     builder: {
       dataDir: '/nonexistent/builder/10db',
       worktreeBase: '/nonexistent/builder/worktrees',
@@ -130,6 +136,31 @@ describe('runEval on the fake agent', () => {
     expect(report.brief).toBe(LaneBrief.Index);
     expect(report.fixBy).toBeNull();
     for (const run of report.cases[0]?.runs ?? []) expect(run.outcome).toBe(Outcome.Met);
+  }, 180_000);
+
+  it('cancels a case-run that times out and waits for its workstream to end before grading', async () => {
+    // A timeout of 1 ms is over before any lane can finish, so every run times out.
+    const { report, work } = await runDecoy(Rigor.Standard, undefined, undefined, undefined, 1);
+    const runs = report.cases[0]?.runs ?? [];
+    expect(runs).toHaveLength(RUNS_PER_CASE);
+    for (const run of runs)
+      expect(run).toMatchObject({
+        outcome: Outcome.TimedOut,
+        workstreamState: WorkstreamState.Cancelled,
+      });
+    // Nothing is left running in the eval daemon once the report is built.
+    const db = new Database(join(work, 'data', '10db.sqlite'), { readonly: true });
+    try {
+      const states = z
+        .array(z.object({ state: z.string() }))
+        .parse(db.prepare('SELECT state FROM workstreams').all())
+        .map((r) => r.state);
+      expect(states).toEqual(
+        Array.from({ length: RUNS_PER_CASE }, () => WorkstreamState.Cancelled),
+      );
+    } finally {
+      db.close();
+    }
   }, 180_000);
 
   it('replays a case twice through a daemon of its own and reports, keeping the transcripts dir', async () => {
