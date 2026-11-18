@@ -193,6 +193,13 @@ describe('Commit…', () => {
     });
   });
 
+  it('names the form’s close button, which a screen reader would otherwise read as nothing', async () => {
+    open({ next: ChatGitStep.Commit, dirtyFiles: 3, touched: ['src/a.ts'] }, { changes });
+    fireEvent.click(await screen.findByRole('button', { name: 'Commit…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Commit' });
+    expect(within(dialog).getByRole('button', { name: 'Close' })).toBeTruthy();
+  });
+
   it('says in the form that the commit waits while the session’s own turn runs', async () => {
     let release: () => void = () => undefined;
     const gate = new Promise<void>((resolve) => {

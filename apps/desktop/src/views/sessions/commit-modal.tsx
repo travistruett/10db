@@ -37,7 +37,13 @@ export function CommitModal({
   const picked = ticked ?? new Set(checked);
   const paths = files.filter((path) => picked.has(path));
   return (
-    <Modal opened={opened} onClose={onClose} title="Commit" centered>
+    <Modal
+      opened={opened}
+      onClose={onClose}
+      title="Commit"
+      centered
+      closeButtonProps={{ 'aria-label': 'Close' }}
+    >
       <form
         onSubmit={(event) => {
           event.preventDefault();
