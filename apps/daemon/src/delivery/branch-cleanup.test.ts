@@ -551,6 +551,36 @@ describe('the sweep at startup', () => {
     expect(exists('10db/stray-two')).toBe(true);
   });
 
+  it('Delete Them deletes exactly the listed branches, and reports one git has checked out', async () => {
+    h.git$('branch', '10db/stray-one');
+    h.git$('branch', '10db/stray-two');
+    h.git$('branch', '10db/stray-held');
+    h.git$('worktree', 'add', '-q', join(h.dataDir, 'held-worktree'), '10db/stray-held');
+    await listStrayBranches(h.ctx);
+    const card = h.only(h.cards());
+    expect(card.options.map((o) => o.label)).toEqual(['Delete Them', 'Keep']);
+    // Made after the card listed its branches: not the builder's answer to delete.
+    h.git$('branch', '10db/stray-late');
+    inbox.answer(card.id, { choice: 'Delete Them' });
+    await h.jobs.idle();
+    expect(exists('10db/stray-one')).toBe(false);
+    expect(exists('10db/stray-two')).toBe(false);
+    expect(exists('10db/stray-held')).toBe(true);
+    expect(exists('10db/stray-late')).toBe(true);
+    expect(exists('main')).toBe(true);
+    const again = h.only(h.cards());
+    expect(again.body).toContain('10db/stray-held (in ');
+    expect(again.body).toContain('git has them checked out');
+  });
+
+  it('Keep leaves every listed branch', async () => {
+    h.git$('branch', '10db/stray-one');
+    await listStrayBranches(h.ctx);
+    inbox.answer(h.only(h.cards()).id, { choice: 'Keep' });
+    await h.jobs.idle();
+    expect(exists('10db/stray-one')).toBe(true);
+  });
+
   it('does not list the branch a batch still being cut has made but not yet recorded', async () => {
     const noJobs: DeliveryJobs = {
       run: () => undefined,

@@ -6,8 +6,10 @@ import {
   PassState,
   PullRequestState,
   type BatchId,
+  type ProjectDto,
+  type ProjectId,
 } from '@10db/contracts';
-import { getPass, hasAnsweredByFoldKey, listBatches, listProjects } from '@10db/db';
+import { getPass, getProject, hasAnsweredByFoldKey, listBatches, listProjects } from '@10db/db';
 import { PrState } from '../github';
 import { removeBranch, settleBranch } from './branch-cleanup';
 import { batchBranchName } from './branch-name';
@@ -155,30 +157,63 @@ export async function settleAbandonedBranches(ctx: DeliveryContext): Promise<voi
   }
 }
 
+/** The local `10db/` branches of `project` that no batch names. */
+async function strayBranchesOf(ctx: DeliveryContext, project: ProjectDto): Promise<string[]> {
+  // A batch being cut records its branch only after making it, and its name is fixed by its
+  // title and id, so the branch such a cut may already have made is named too.
+  const named = new Set(
+    listBatches(ctx.state.db, { projectId: project.id }).map((batch) =>
+      batch.state === BatchState.Cutting ? batchBranchName(batch.title, batch.id) : batch.branch,
+    ),
+  );
+  return (await ctx.git.localBranches(project.repoPath, BRANCH_PREFIX))
+    .map((b) => b.name)
+    .filter((name) => !named.has(name));
+}
+
 /**
  * Lists, in one card per project, the local `10db/` branches no batch names: 10db has no record of
- * making them, so it never deletes them. The card is withdrawn once none is left. It never rejects.
+ * making them, so it deletes them only when the builder answers Delete Them. The card is withdrawn
+ * once none is left. It never rejects.
  */
 export async function listStrayBranches(ctx: DeliveryContext): Promise<void> {
   for (const project of listProjects(ctx.state.db)) {
     if (project.delivery !== Delivery.PullRequest || !existsSync(project.repoPath)) continue;
     try {
-      // A batch being cut records its branch only after making it, and its name is fixed by its
-      // title and id, so the branch such a cut may already have made is named too.
-      const named = new Set(
-        listBatches(ctx.state.db, { projectId: project.id }).map((batch) =>
-          batch.state === BatchState.Cutting
-            ? batchBranchName(batch.title, batch.id)
-            : batch.branch,
-        ),
-      );
-      const stray = (await ctx.git.localBranches(project.repoPath, BRANCH_PREFIX))
-        .map((b) => b.name)
-        .filter((name) => !named.has(name));
+      const stray = await strayBranchesOf(ctx, project);
       if (stray.length > 0) raise(ctx.inbox, project.id, branchCards.withoutBatch(stray));
       else withdraw(ctx.state, ctx.inbox, project.id, [branchCardKey.withoutBatch]);
     } catch (error) {
       ctx.logger.warn({ projectId: project.id, err: detailOf(error) }, 'stray branches not listed');
     }
+  }
+}
+
+/**
+ * Carries out Delete Them: deletes exactly the branches the card `listed`, and of those only ones that
+ * are still local and still name no batch. A branch git has checked out stays and is named on the card
+ * that is raised again for what is left. It never rejects.
+ */
+export async function deleteListedStrayBranches(
+  ctx: DeliveryContext,
+  projectId: ProjectId,
+  listed: readonly string[],
+): Promise<void> {
+  try {
+    const project = getProject(ctx.state.db, projectId);
+    const stray = new Set(await strayBranchesOf(ctx, project));
+    const checkedOut: { branch: string; path: string }[] = [];
+    for (const branch of listed) {
+      if (!stray.has(branch)) continue;
+      const removal = await removeBranch(ctx.git, project.repoPath, branch, () =>
+        Promise.resolve(true),
+      );
+      if (removal.kind === 'checked_out') checkedOut.push({ branch, path: removal.path });
+      else ctx.logger.info({ projectId, branch, removal: removal.kind }, 'stray branch deleted');
+    }
+    const left = await strayBranchesOf(ctx, project);
+    if (left.length > 0) raise(ctx.inbox, projectId, branchCards.withoutBatch(left, checkedOut));
+  } catch (error) {
+    ctx.logger.warn({ projectId, err: detailOf(error) }, 'stray branches not deleted');
   }
 }
