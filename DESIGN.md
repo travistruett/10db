@@ -202,13 +202,14 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   is absent takes no space. The type scale under the title: in-content section heads 14 / 600, card and row titles
   14 / 500, a drawer's title 16 / 600, body 14, meta 12. A split view's pane may have a 13 px / 600 label row with
   its own actions. Workspaces, where the content is the work, keep compact headers of their own: an open Workbench pass.
-  Sessions' title row is the frame's: the session's title and a ⌄ switcher, a dim meta line in git's words
-  ("on `main` · 2 files changed"), then the agent, Changes, the next git step (Commit…, Open Pull Request,
+  Sessions' title row is the frame's: the session's title, which is the switcher (the title and a ⌄ as one quiet
+  button that opens the session menu; rename is in ⋯), a dim meta line in git's words ("on `main` · 2 files
+  changed", or only the project while the session has changed nothing), then the agent, Changes, the next git step (Commit…, Open Pull Request,
   Merge), the terminal button and ⋯. The panel lists sessions by project, one 32 px row each: its title and one
   mark, with no place icon (where it works is the title row's line). A fresh tab reads New Session, with a +, in the
   create button's dashed slot and no ×; a fresh tab whose project is gone is dropped, and a removed project's
   sessions group under "Removed project". A project's label folds its group (the fold is kept per window); a
-  folded group shows its count and still the selected session. The ⌄ switcher lists sessions, not fresh tabs, and
+  folded group shows its count and still the selected session. The switcher lists sessions, not fresh tabs, and
   the title row's ⋯ leaves Open in Terminal to the terminal button beside it; there is no tab strip. A session reads freely, and the
   first time it goes to change files a bar above the composer asks **Here, on `<branch>`** or **On a New
   Branch**; Changes opens as a drawer from the right.

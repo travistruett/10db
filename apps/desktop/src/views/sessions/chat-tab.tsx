@@ -87,7 +87,8 @@ export interface ChatTabProps {
   /** Says something to the screen's one polite live region. */
   readonly onAnnounce?: (message: string) => void;
   /** The ⌄ beside the title. */
-  readonly switcher: ReactNode;
+  /** The title row's title, which is also the session switcher. */
+  readonly switcherFor: (label: string) => ReactNode;
   /** What the title row's ⋯ menu does besides renaming and File as Tasks. */
   readonly actions: Omit<SessionActions, 'onRename' | 'onFileAsTasks' | 'onOpenInTerminal'>;
   readonly renaming?: boolean;
@@ -141,7 +142,7 @@ export function ChatTab({
   chat,
   project,
   onAnnounce,
-  switcher,
+  switcherFor,
   actions,
   renaming,
   onRenamed,
@@ -490,7 +491,7 @@ export function ChatTab({
               )}
             </>
           }
-          switcher={switcher}
+          switcherFor={switcherFor}
           projectPath={project?.repoPath ?? null}
           actions={{
             ...actions,

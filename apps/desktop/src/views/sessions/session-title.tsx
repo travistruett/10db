@@ -17,8 +17,8 @@ export interface SessionTitleProps {
   readonly conversation: ConversationDto;
   /** Where the session works and what changed, in git's words. */
   readonly meta: string | null;
-  /** The ⌄ switcher. */
-  readonly switcher: ReactNode;
+  /** The title as the session switcher: the title and its chevron, one button that opens the session menu. */
+  readonly switcherFor: (label: string) => ReactNode;
   /** The project's folder; null once the project was removed from 10db. */
   readonly projectPath: string | null;
   /** What the menus do; Rename edits the title in place and the terminal opens its popover. */
@@ -35,37 +35,28 @@ export interface SessionTitleProps {
   readonly steps?: ReactNode;
 }
 
-/** The title, edited in place: Enter saves through `usePatchChat`, Esc puts the old one back. */
+/** The title: the session switcher, or, while renaming, a field over it. */
 function Title({
   chat,
   editing,
   onDone,
-  onEdit,
+  switcherFor,
 }: {
   readonly chat: ChatDto;
   readonly editing: boolean;
   readonly onDone: () => void;
-  readonly onEdit: () => void;
+  readonly switcherFor: (label: string) => ReactNode;
 }) {
+  if (!editing) return switcherFor(chat.title);
+  return <TitleEditor chat={chat} onDone={onDone} />;
+}
+
+/** The title, edited in place: Enter saves through `usePatchChat`, Esc puts the old one back. */
+function TitleEditor({ chat, onDone }: { readonly chat: ChatDto; readonly onDone: () => void }) {
   const patch = usePatchChat();
+  // Mounted each time a rename starts, so the field opens on the title as it is now.
   const [draft, setDraft] = useState(chat.title);
   const finished = useRef(false);
-  if (!editing) {
-    return (
-      <Text
-        component="span"
-        inherit
-        title="Double-click to rename"
-        onDoubleClick={() => {
-          setDraft(chat.title);
-          finished.current = false;
-          onEdit();
-        }}
-      >
-        {chat.title}
-      </Text>
-    );
-  }
   const save = (): void => {
     if (finished.current) return;
     finished.current = true;
@@ -111,7 +102,7 @@ export function SessionTitle({
   chat,
   conversation,
   meta,
-  switcher,
+  switcherFor,
   projectPath,
   actions,
   renaming = false,
@@ -134,16 +125,13 @@ export function SessionTitle({
         <Title
           chat={chat}
           editing={editing}
-          onEdit={() => {
-            setEditing(true);
-          }}
+          switcherFor={switcherFor}
           onDone={() => {
             setEditing(false);
             onRenamed?.();
           }}
         />
       }
-      switcher={switcher}
       meta={meta}
       actions={
         <>

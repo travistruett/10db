@@ -1,5 +1,7 @@
 import type { ProjectId, ProjectViewDto } from '@10db/contracts';
-import { ActionIcon, Menu, Text } from '@mantine/core';
+import { ActionIcon, Menu, Text, UnstyledButton } from '@mantine/core';
+import type { ReactNode } from 'react';
+import classes from './session-switcher.module.css';
 import { IconChevronDown } from '@tabler/icons-react';
 import type { ClosedChat } from './closed-tabs';
 import type { PanelGroup, PanelRow } from './panel-order';
@@ -17,6 +19,7 @@ export function SessionSwitcher({
   onSelect,
   onReopen,
   onNew,
+  label,
 }: {
   readonly groups: readonly PanelGroup[];
   readonly projects: readonly ProjectViewDto[];
@@ -25,14 +28,23 @@ export function SessionSwitcher({
   readonly onSelect: (row: PanelRow) => void;
   readonly onReopen: (entry: ClosedChat) => void;
   readonly onNew: () => void;
+  /** The session's title: given, the title and its chevron are one button that opens the menu. */
+  readonly label?: ReactNode;
 }) {
   const nameOf = (id: ProjectId): string => projects.find((p) => p.id === id)?.name ?? '';
   return (
     <Menu position="bottom-start" withinPortal width={280}>
       <Menu.Target>
-        <ActionIcon variant="subtle" size="sm" aria-label="Switch session">
-          <IconChevronDown size={14} stroke={1.5} />
-        </ActionIcon>
+        {label === undefined ? (
+          <ActionIcon variant="subtle" size="sm" aria-label="Switch session">
+            <IconChevronDown size={14} stroke={1.5} />
+          </ActionIcon>
+        ) : (
+          <UnstyledButton className={classes['title']} aria-label="Switch session">
+            <span className={classes['label']}>{label}</span>
+            <IconChevronDown size={14} stroke={1.75} className={classes['chevron']} aria-hidden />
+          </UnstyledButton>
+        )}
       </Menu.Target>
       <Menu.Dropdown>
         {/* A fresh tab is New Session, the menu's last item, so the lists show only sessions. */}

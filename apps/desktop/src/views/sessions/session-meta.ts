@@ -38,7 +38,8 @@ export function sessionMeta(input: SessionMetaInput): string {
   if (place === WorkPlace.Moving)
     return movingTo === null ? 'moving to a new branch' : `moving to ${movingTo}`;
   if (place === WorkPlace.Choosing) return `${projectName} · waiting for your choice`;
-  if (place === null) return `${projectName} · no changes yet`;
+  // A session that has changed nothing says only whose it is: "no changes yet" was filler.
+  if (place === null) return projectName;
   const where = state?.branch ?? state?.baseBranch ?? null;
   const parts: string[] = where === null ? [] : [`on ${where}`];
   if (state === undefined) return parts.join(' · ');
@@ -60,12 +61,8 @@ export function sessionMeta(input: SessionMetaInput): string {
           ? ` not merged into ${state.baseBranch ?? 'the base branch'}`
           : ' not in a pull request'),
     );
-  else if (dirty === 0)
-    // A branch that has been merged looks like one that was just cut, so it says where it stands, not "yet".
-    parts.push(
-      place === WorkPlace.Branch && state.baseBranch !== null
-        ? `nothing ahead of ${state.baseBranch}`
-        : 'no changes yet',
-    );
+  else if (dirty === 0 && place === WorkPlace.Branch && state.baseBranch !== null)
+    // A branch that has been merged looks like one that was just cut, so it says where it stands.
+    parts.push(`nothing ahead of ${state.baseBranch}`);
   return parts.join(' · ');
 }
