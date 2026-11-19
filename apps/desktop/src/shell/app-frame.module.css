@@ -5,6 +5,8 @@
    Three tones step down from the rail to the content: the rail and the bar, the panel half a step darker, then the
    content, so each column reads as its own layer without more lines. */
 .root {
+  /* Where a column's hairline starts in the bar: short of the window's top edge, as a divider in the bar. */
+  --shell-bar-divider-inset: 10px;
   position: relative;
   display: grid;
   height: 100dvh;
@@ -24,14 +26,21 @@
 /* The rail's part of the bar, where the traffic lights sit. The rail's hairline starts under it, so the lights
    and the sidebar button read as one group where the icons-only rail is narrower than them. */
 .railDrag {
+  position: relative;
   flex: none;
   height: 44px;
   border-bottom: 1px solid var(--mantine-color-default-border);
 }
 
 /* A labelled rail is wider than the lights and the button, so its hairline runs up through the bar too. */
-.rail[data-labelled] > .railDrag {
-  border-right: 1px solid var(--mantine-color-default-border);
+.rail[data-labelled] > .railDrag::after {
+  content: '';
+  position: absolute;
+  top: var(--shell-bar-divider-inset);
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--mantine-color-default-border);
 }
 
 .railBody {
@@ -91,7 +100,10 @@
 /* The panel's hairline. Its grab area is wider than the line. */
 .handle {
   z-index: 1;
-  background-color: var(--mantine-color-default-border);
+  background: linear-gradient(
+    transparent var(--shell-bar-divider-inset),
+    var(--mantine-color-default-border) var(--shell-bar-divider-inset)
+  );
 }
 
 .handle::before {
@@ -141,6 +153,14 @@
   min-height: 0;
   overflow: hidden;
   background: var(--mantine-color-body);
+  /* A faint, narrow inner shadow along the top and left, in a darker shade of the content's own tone, so the
+     content reads as set just under the bar and the sidebar. Every view gets it; none draws its own. */
+  --shell-inset-shade: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--mantine-color-body), black 45%) 40%,
+    transparent
+  );
+  box-shadow: inset 1px 1px 3px var(--shell-inset-shade);
 }
 
 /* Inside the column, what a view fills: it holds the scroll, so the window never scrolls. */
