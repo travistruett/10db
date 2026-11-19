@@ -113,10 +113,54 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  width: 100%;
   padding: 12px 12px 6px;
   font-size: var(--mantine-font-size-xs);
   /* 12 + 16 + 6 is the virtual list's group height. */
   line-height: 16px;
   font-weight: 600;
   color: var(--mantine-color-dimmed);
+  border-radius: var(--mantine-radius-md);
+}
+
+.group {
+  cursor: pointer;
+  user-select: none;
+}
+
+.group:hover {
+  color: var(--mantine-color-text);
+}
+
+.groupName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+.groupCount {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The fold's chevron shows under the pointer and while the group is folded, pointing right when it is. */
+.chevron {
+  flex: none;
+  opacity: 0;
+  transform: rotate(-90deg);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.chevron[data-open] {
+  transform: none;
+}
+
+.group:hover .chevron,
+.group:not([data-open]) .chevron {
+  opacity: 1;
 }

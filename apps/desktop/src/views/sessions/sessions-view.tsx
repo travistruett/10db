@@ -76,6 +76,15 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
   }
 
   const list = projects.data ?? [];
+  // A fresh tab holds nothing yet, so one whose project is gone is dropped once the projects are known. It goes
+  // through `dropped`, as a closed one does, so the URL's `?fresh=` cannot restore it from storage again.
+  const orphans = projects.isSuccess
+    ? fresh.filter((tab) => !list.some((p) => p.id === tab.projectId))
+    : [];
+  if (orphans.length > 0) {
+    setDropped((held) => new Set([...held, ...orphans.map((tab) => tab.id)]));
+    setFresh(fresh.filter((tab) => !orphans.includes(tab)));
+  }
   const chats = open.data ?? [];
   const groups = panelGroups(list, chats, fresh);
   const rows = panelOrder(groups);

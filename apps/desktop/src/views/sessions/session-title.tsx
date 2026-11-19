@@ -191,13 +191,7 @@ export function SessionTitle({
                   onRename: () => {
                     setEditing(true);
                   },
-                  ...(offersTerminal
-                    ? {
-                        onOpenInTerminal: () => {
-                          setAskedHere(true);
-                        },
-                      }
-                    : {}),
+                  // Open in Terminal is the terminal button beside this menu, so the menu leaves it out.
                 }}
               />
             </Menu.Dropdown>

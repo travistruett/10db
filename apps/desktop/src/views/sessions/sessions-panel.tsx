@@ -14,7 +14,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { ActionIcon, Box, Menu, Text, Tooltip, UnstyledButton } from '@mantine/core';
-import { IconPlus } from '@tabler/icons-react';
+import { IconChevronDown, IconPlus } from '@tabler/icons-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchChats } from '../../daemon/chat-queries';
@@ -23,6 +23,7 @@ import { PanelSearch } from '../../shell/panel-search';
 import { ProjectTile } from '../../shell/project-tile';
 import { canOpenTerminal } from './can-open-terminal';
 import type { ClosedChat } from './closed-tabs';
+import { readCollapsed, writeCollapsed } from './collapsed-projects';
 import { dropTarget, panelRowProject, type PanelGroup, type PanelRow } from './panel-order';
 import type { RowState } from './row-state';
 import { SessionRow } from './session-row';
@@ -68,15 +69,37 @@ const REMOVED_PROJECT = 'Removed project';
 function Group_({
   name,
   projectsKnown,
+  open,
+  count,
+  onToggle,
 }: {
   readonly name: string;
   /** Whether the project list has arrived; until it has, a group's name is unknown, not removed. */
   readonly projectsKnown: boolean;
+  readonly open: boolean;
+  /** How many sessions it holds, shown while it is folded. */
+  readonly count: number;
+  readonly onToggle: () => void;
 }): ReactNode {
+  const label = name !== '' ? name : projectsKnown ? REMOVED_PROJECT : '';
   return (
-    <div className={classes['group']} role="presentation">
+    // A label of the list, not a control in it: a listbox holds only its options, so the fold is the pointer's.
+    <div
+      role="presentation"
+      className={classes['group']}
+      data-open={open ? '' : undefined}
+      onClick={onToggle}
+    >
       {name === '' ? null : <ProjectTile name={name} size={14} />}
-      <span>{name !== '' ? name : projectsKnown ? REMOVED_PROJECT : ''}</span>
+      <span className={classes['groupName']}>{label}</span>
+      {open ? null : <span className={classes['groupCount']}>{count}</span>}
+      <IconChevronDown
+        size={12}
+        stroke={2}
+        className={classes['chevron']}
+        data-open={open ? '' : undefined}
+        aria-hidden="true"
+      />
     </div>
   );
 }
@@ -124,13 +147,30 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
     readonly y: number;
   } | null>(null);
   const search = useSearchChats(query);
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+  useEffect(() => {
+    writeCollapsed(collapsed);
+  }, [collapsed]);
+  const toggle = (projectId: ProjectId): void => {
+    setCollapsed((now) => {
+      const next = new Set(now);
+      if (next.has(projectId)) next.delete(projectId);
+      else next.add(projectId);
+      return next;
+    });
+  };
+  const isOpen = (g: PanelGroup): boolean => !collapsed.has(g.projectId);
+  // A folded group still shows the selected session, as Slack's folded sections do, so the row the content
+  // shows is always in the list.
+  const shownRows = (g: PanelGroup): readonly PanelRow[] =>
+    isOpen(g) ? g.rows : g.rows.filter((r) => r.key === selectedKey);
   const scroller = useRef<HTMLDivElement | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
   const nameOf = (id: ProjectId): string => projects.find((p) => p.id === id)?.name ?? '';
   const items: Item[] = groups.flatMap((g): Item[] => [
     { kind: 'group', projectId: g.projectId },
-    ...g.rows.map((row): Item => ({ kind: 'row', row })),
+    ...shownRows(g).map((row): Item => ({ kind: 'row', row })),
   ]);
   const rowCount = items.filter((i) => i.kind === 'row').length;
   const virtual = rowCount > VIRTUAL_FROM;
@@ -142,6 +182,12 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
     count: virtual ? items.length : 0,
     getScrollElement: () => scroller.current,
     estimateSize: (i) => (items[i]?.kind === 'group' ? GROUP_HEIGHT : ROW_HEIGHT),
+    // Keyed by what each item is, so a fold that keeps the count still gives a header and a row their own sizes.
+    getItemKey: (i) => {
+      const item = items[i];
+      if (item === undefined) return i;
+      return item.kind === 'group' ? `group:${item.projectId}` : item.row.key;
+    },
     overscan: 12,
     // Until the list is measured, a panel's worth of rows is drawn.
     initialRect: { width: 260, height: 600 },
@@ -233,12 +279,28 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
     if (drop !== null) props.onReorder(drop.chat, drop.position);
   };
 
+  const header = (g: PanelGroup): ReactNode => (
+    <Group_
+      name={nameOf(g.projectId)}
+      projectsKnown={projects.length > 0}
+      open={isOpen(g)}
+      count={g.rows.filter((r) => r.kind === 'chat').length}
+      onToggle={() => {
+        toggle(g.projectId);
+      }}
+    />
+  );
+  const groupHeaderOf = (projectId: ProjectId): ReactNode => {
+    const g = groups.find((group) => group.projectId === projectId);
+    return g === undefined ? null : header(g);
+  };
+
   const list = (
     <div role="listbox" aria-label="Sessions" style={{ outline: 'none' }}>
       {groups.map((g) => (
         <div key={g.projectId} role="presentation">
-          <Group_ name={nameOf(g.projectId)} projectsKnown={projects.length > 0} />
-          {g.rows.map(renderRow)}
+          {header(g)}
+          {shownRows(g).map(renderRow)}
         </div>
       ))}
     </div>
@@ -266,11 +328,7 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
               transform: `translateY(${String(v.start)}px)`,
             }}
           >
-            {item.kind === 'group' ? (
-              <Group_ name={nameOf(item.projectId)} projectsKnown={projects.length > 0} />
-            ) : (
-              renderRow(item.row)
-            )}
+            {item.kind === 'group' ? groupHeaderOf(item.projectId) : renderRow(item.row)}
           </div>
         );
       })}
@@ -336,7 +394,9 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
             <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={dragEnd}>
               <SortableContext
                 items={groups.flatMap((g) =>
-                  g.rows.filter((r) => r.kind === 'chat').map((r) => r.key),
+                  shownRows(g)
+                    .filter((r) => r.kind === 'chat')
+                    .map((r) => r.key),
                 )}
                 strategy={verticalListSortingStrategy}
               >

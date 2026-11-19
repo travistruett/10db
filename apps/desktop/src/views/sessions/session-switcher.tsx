@@ -5,7 +5,8 @@ import type { ClosedChat } from './closed-tabs';
 import type { PanelGroup, PanelRow } from './panel-order';
 
 /**
- * The ⌄ beside the title: every open session by project, then Recently closed and New Session. It is the
+ * The ⌄ beside the title: every open session by project (not the fresh tabs), then Recently closed and New
+ * Session. It is the
  * panel's list for a window too narrow to keep the panel open.
  */
 export function SessionSwitcher({
@@ -34,23 +35,27 @@ export function SessionSwitcher({
         </ActionIcon>
       </Menu.Target>
       <Menu.Dropdown>
-        {groups.map((group) => (
-          <div key={group.projectId}>
-            <Menu.Label>{nameOf(group.projectId)}</Menu.Label>
-            {group.rows.map((row) => (
-              <Menu.Item
-                key={row.key}
-                aria-current={row.key === selectedKey ? 'true' : undefined}
-                fw={row.key === selectedKey ? 600 : 400}
-                onClick={() => {
-                  onSelect(row);
-                }}
-              >
-                {row.kind === 'chat' ? row.chat.title : 'New Session'}
-              </Menu.Item>
-            ))}
-          </div>
-        ))}
+        {/* A fresh tab is New Session, the menu's last item, so the lists show only sessions. */}
+        {groups
+          .map((group) => ({ ...group, rows: group.rows.filter((row) => row.kind === 'chat') }))
+          .filter((group) => group.rows.length > 0)
+          .map((group) => (
+            <div key={group.projectId}>
+              <Menu.Label>{nameOf(group.projectId)}</Menu.Label>
+              {group.rows.map((row) => (
+                <Menu.Item
+                  key={row.key}
+                  aria-current={row.key === selectedKey ? 'true' : undefined}
+                  fw={row.key === selectedKey ? 600 : 400}
+                  onClick={() => {
+                    onSelect(row);
+                  }}
+                >
+                  {row.chat.title}
+                </Menu.Item>
+              ))}
+            </div>
+          ))}
         {closed.length === 0 ? null : (
           <>
             <Menu.Divider />
