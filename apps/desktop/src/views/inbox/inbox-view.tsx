@@ -17,7 +17,7 @@ const STATE_TITLES: Record<InboxListState, string> = {
 };
 
 /**
- * The Inbox: its title row, the panel with Open, Waiting, Resolved and Activity, and the content for the state the URL
+ * The Inbox: its title row, the panel with Open, Waiting and Resolved, and the content for the state the URL
  * names. Each state's content is its own component, so Open's keys are only live while Open is shown.
  */
 export function InboxView() {

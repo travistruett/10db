@@ -168,9 +168,9 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
 - **Inbox rows:** a row is two lines at a fixed height: the kind tag in uppercase, the title, `×n` for rows that
   stand for several cards and the age; then the project and the first line of the body. A flag's row offers
   Dismiss on hover and focus, and `e` dismisses the selected one. The list keeps one row selected and its content
-  is drawn beside the panel. The panel's switch is Open, Waiting, Resolved and Activity; only Open and Waiting
-  carry a count, and Activity never does. An Activity row is the same two lines with a gray `NOTICE` tag (orange for
-  a warning), and its content has no answer and no Dismiss.
+  is drawn beside the panel. The panel's switch is Open, Waiting and Resolved; only Open and Waiting carry a
+  count. A notice, which asks nothing, is not in the Inbox: it is a row of the Factory's Recent activity, the same two
+  lines with a gray `NOTICE` tag (orange for a warning), opening in a drawer with no answer and no Dismiss.
 - **Page header:** a page has one header, the frame's title row (`TitleRow`,
   `apps/desktop/src/shell/title-row.tsx`), at the top of the content column on the content's own tone: the title
   at 14 px / 600, an optional switcher beside it, an optional dim meta line, then the actions at the right (28 px

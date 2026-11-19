@@ -60,7 +60,10 @@ describe('FactoryView goal list', () => {
       rowTitles(['Broken', 'Asking', 'Busy', 'Landing', 'Idle', 'Not in a goal', 'Done']),
     ).toEqual(['Broken', 'Asking', 'Busy', 'Landing', 'Idle', 'Not in a goal', 'Done']);
     expect(screen.queryAllByRole('button', { expanded: true })).toEqual([]);
-    expect(screen.queryAllByRole('region')).toEqual([]);
+    // No goal is open; the page's Recent activity is a region of its own.
+    expect(screen.queryAllByRole('region', { name: (name) => name !== 'Recent activity' })).toEqual(
+      [],
+    );
     // Done goals sit behind one collapsed line and show once it opens.
     expect(screen.queryByRole('button', { name: /^Finished/ })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /^Done/ }));
