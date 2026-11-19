@@ -96,13 +96,14 @@ interface FailedRepoCheck {
  */
 export function failedRepoCheck(testLog: string, flags: readonly string[] = []): FailedRepoCheck {
   const checkout = tempDir('repo-check').path;
-  for (const dir of ['scripts', 'bin', 'apps/x/src', 'docs'])
+  for (const dir of ['scripts', 'bin', 'apps/x/src', 'docs', 'tests/repo'])
     mkdirSync(join(checkout, dir), { recursive: true });
   cpSync(
     join(import.meta.dirname, '../../../scripts/check-changed.mjs'),
     join(checkout, 'scripts/check-changed.mjs'),
   );
   writeFileSync(join(checkout, 'apps/x/package.json'), '{"name":"x"}');
+  writeFileSync(join(checkout, 'tests/repo/package.json'), '{"name":"@10db/repo-checks"}');
   writeFileSync(join(checkout, 'apps/x/src/a.ts'), 'export {};\n');
   writeFileSync(join(checkout, 'docs/a.md'), 'a\n');
   writeFileSync(join(checkout, 'test-output.txt'), testLog);

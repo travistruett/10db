@@ -13,10 +13,10 @@
 // --precheck is the pre-check 10db runs in place of the gate when the pull request's base has
 // required checks on GitHub (`make precheck`): format and lint of the changed files, typecheck of the
 // changed packages and every package depending on one, drift of the changed packages, knip (whole
-// repo, a few seconds) and, for a docs or agent file, the repo rule tests that read those files
-// (architecture-docs, agent-docs), with no other tests, Rust checks or e2e. Where it cannot place a
-// file, or has no base, it runs those steps over every package instead of the gate: it never runs
-// scripts/gate.sh. CI runs every test.
+// repo, a few seconds) and, for a change outside the packages or to a file they read, the repo rule
+// tests (all of tests/repo, about a minute), with no other tests, Rust checks or e2e. A change only
+// in a package's source runs no tests. Where it cannot place a file, or has no base, it runs those
+// steps over every package instead of the gate: it never runs scripts/gate.sh. CI runs every test.
 //
 // Each step's output is printed and goes to .gate/<step>.log, and each failing step gets a line
 // naming the command that reruns it and its log, as the gate's do, which 10db reads to brief a fix
@@ -25,7 +25,7 @@
 //
 // Usage:
 //   node scripts/check-changed.mjs                  run the check
-//   node scripts/check-changed.mjs --precheck       run the pre-check (knip and the docs rule tests; no other tests, Rust or e2e)
+//   node scripts/check-changed.mjs --precheck       run the pre-check (knip and the repo rule tests; no other tests, Rust or e2e)
 //   node scripts/check-changed.mjs --plan [--precheck] [-- file…]
 //                                                    print the plan as JSON and run nothing; the
 //                                                    files replace the git diff
@@ -76,37 +76,22 @@ const READ_BY_REPO_TESTS = [
   /^apps\/desktop\/src-tauri\//,
   /^apps\/[^/]+\/(e2e|scripts)\//,
   /^apps\/daemon\/(test|src\/git|src\/watcher)\//,
+  // agent-docs.test.ts's 'has no grab-bag modules'.
+  /^(apps|packages)\/(.*\/)?(utils|helpers|misc|common)\.tsx?$/,
 ];
 
 /**
- * The repo rule tests the pre-check runs for the docs and agent files they read, by changed path. CI
- * failed on both for a decision file without its `## Decision` / `## Why` layout. The rest of
- * tests/repo takes about 40 s and is not about a docs change, so CI runs it, not the pre-check.
+ * Root files the repo rule tests read and no package builds from; keep in step with tests/repo. A
+ * change to one runs the repo rule tests, not every package. A root file not listed here cannot be
+ * placed, so it runs every package's checks, the repo rule tests among them.
  */
-const ARCHITECTURE_DOCS_TEST = 'tests/repo/src/architecture-docs.test.ts';
-const AGENT_DOCS_TEST = 'tests/repo/src/agent-docs.test.ts';
-/** @type {[RegExp, string][]} */
-const REPO_DOC_TESTS = [
-  [/^docs\/|\.md$/, ARCHITECTURE_DOCS_TEST],
-  [
-    new RegExp(
-      [
-        // The agent instruction files and tooling config the test reads.
-        String.raw`(^|/)AGENTS\.md$|^\.claude/|^\.codex/`,
-        // 'has no CLAUDE.md anywhere'.
-        String.raw`(^|/)CLAUDE\.md$`,
-        // 'never lets a package depend on an app', and a manifest makes a directory an app or
-        // package that needs an AGENTS.md. A directory with no manifest is unplaced: a full run.
-        String.raw`^(apps|packages)/[^/]+/package\.json$`,
-        // 'has no grab-bag modules'.
-        String.raw`^(apps|packages)/(.*/)?(utils|helpers|misc|common)\.tsx?$`,
-      ].join('|'),
-    ),
-    AGENT_DOCS_TEST,
-  ],
+const ROOT_READ_BY_REPO_TESTS = [
+  /^lefthook\.yml$/,
+  /^renovate\.json$/,
+  /^release-please-config\.json$/,
+  /^\.release-please-manifest\.json$/,
+  /^commitlint\.config\.js$/,
 ];
-/** Every repo rule test the pre-check runs, for the runs that cannot narrow. */
-const ALL_REPO_DOC_TESTS = [AGENT_DOCS_TEST, ARCHITECTURE_DOCS_TEST];
 
 /**
  * `.env*` files, which the gate and lane sandboxes deny reading. Prettier stats every path it is
@@ -163,7 +148,7 @@ function withDependents(packages, start) {
  * What to run for these changed files (repo-relative, still present or deleted).
  * @param {string[]} files
  * @param {Pkg[]} packages
- * @param {boolean} [precheck] plan the pre-check: knip and, for a docs or agent file, the architecture-docs and agent-docs rule tests; no other tests and no Rust
+ * @param {boolean} [precheck] plan the pre-check: knip and, for a file the repo rule tests read, tests/repo; no other tests and no Rust
  */
 function planFor(files, packages, precheck = false) {
   /** @type {Set<string>} */
@@ -180,7 +165,11 @@ function planFor(files, packages, precheck = false) {
       changed.add(owner.name);
       if (file.startsWith(RUST_DIR)) rust = true;
       if (READ_BY_REPO_TESTS.some((re) => re.test(file))) readByRepoTests = true;
-    } else if (LIGHT_OUTSIDE.some((re) => re.test(file)) || SCRIPT_OUTSIDE.test(file)) {
+    } else if (
+      LIGHT_OUTSIDE.some((re) => re.test(file)) ||
+      SCRIPT_OUTSIDE.test(file) ||
+      ROOT_READ_BY_REPO_TESTS.some((re) => re.test(file))
+    ) {
       outside.push(file);
     } else {
       unplaced.push(file);
@@ -194,12 +183,14 @@ function planFor(files, packages, precheck = false) {
       ...(precheck ? { precheck } : {}),
     };
   }
-  // The repo-wide rule tests read docs, scripts, the agent files and some package files, so they
-  // run for those.
+  // The repo rule tests read docs, scripts, the agent files, some root files and some package files,
+  // so they run for those, and for a change to themselves.
   const testSeed = new Set(changed);
   const repoChecks = packages.find((p) => p.dir === 'tests/repo');
-  if (!precheck && (outside.length > 0 || readByRepoTests) && repoChecks)
-    testSeed.add(repoChecks.name);
+  const runsRepoTests =
+    repoChecks !== undefined &&
+    (outside.length > 0 || readByRepoTests || changed.has(repoChecks.name));
+  if (!precheck && runsRepoTests && repoChecks) testSeed.add(repoChecks.name);
   const affected = withDependents(packages, new Set([...changed, ...testSeed]));
   const byName = (/** @type {Set<string>} */ set) =>
     packages.filter((p) => set.has(p.name)).map((p) => p.dir);
@@ -216,9 +207,7 @@ function planFor(files, packages, precheck = false) {
           precheck,
           // knip reads the whole repo, so any change can leave an unused export.
           knip: files.length > 0,
-          repoTests: ALL_REPO_DOC_TESTS.filter((test) =>
-            files.some((f) => REPO_DOC_TESTS.some(([re, t]) => t === test && re.test(f))),
-          ),
+          repoTests: runsRepoTests,
         }
       : {}),
     format: files.filter((f) => !SANDBOX_DENIED.test(f)),
@@ -456,15 +445,12 @@ function knipStep() {
   return { name: 'knip', command: 'pnpm', args: ['exec', 'knip'] };
 }
 
-/**
- * @param {string[]} tests repo-relative test files in tests/repo
- * @returns {Step}
- */
-function repoDocTestsStep(tests) {
+/** @returns {Step} the repo rule tests, all of tests/repo */
+function repoTestsStep() {
   return {
     name: 'repo rules',
     command: 'pnpm',
-    args: ['exec', 'vitest', 'run', ...tests],
+    args: ['exec', 'vitest', 'run', 'tests/repo/'],
   };
 }
 
@@ -482,15 +468,16 @@ async function runPrecheckEverywhere(reason) {
     command: 'pnpm',
     args: ['run', name === 'format' ? 'format:check' : name],
   });
-  // The docs rule tests run alone, so their output streams to the log as they run. Drift
-  // regenerates files in the tree, so it runs after the reads of the tree.
+  // The repo rule tests run alone, so their output streams to the log as they run, and their git
+  // fixtures and deadlines are not shared with lint. Drift regenerates files in the tree, so it runs
+  // after the reads of the tree.
   const failed = await runTogether([
     pnpmRun('format'),
     pnpmRun('lint'),
     pnpmRun('typecheck'),
     knipStep(),
   ]);
-  failed.push(...(await runTogether([repoDocTestsStep(ALL_REPO_DOC_TESTS)])));
+  failed.push(...(await runTogether([repoTestsStep()])));
   failed.push(...(await runTogether([pnpmRun('drift')])));
   finish(failed, began);
 }
@@ -613,7 +600,7 @@ async function main() {
   // regenerates files in the tree, and the Rust checks build.
   /** @type {Step[]} */
   const alone = [
-    ...(plan.repoTests?.length ? [repoDocTestsStep(plan.repoTests)] : []),
+    ...(plan.repoTests ? [repoTestsStep()] : []),
     ...(precheck
       ? []
       : [
