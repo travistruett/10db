@@ -18,6 +18,7 @@
     "drift": "pnpm -r --if-present run drift",
     "knip": "knip",
     "dev": "bash scripts/dev.sh",
+    "dev:window": "bash scripts/dev-window.sh",
     "dev:factory": "pnpm --filter @10db/desktop dev:factory",
     "dev:preview": "pnpm --filter @10db/desktop dev:preview",
     "dev:factory:enable": "pnpm --filter @10db/desktop dev:factory:enable",
