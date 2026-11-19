@@ -10,7 +10,9 @@
   icons-only rail's hairline still starts under the bar.
 - Over a labelled rail column the sidebar button ends the rail's part of the bar: its icon ends where the rows'
   counts end. Over the icons-only rail, and when the rail is a sheet, it stays at x 88, beside the lights.
-- The traffic lights sit at `trafficLightPosition` (16, 20), level with the button in the installed app.
+- The traffic lights sit at `trafficLightPosition` (16, 20), level with the button in the installed app. Judge
+  them there: with the same setting the 10db Dev window (`pnpm dev:window`) draws them about 4 pt higher. At
+  (16, 24), centred in the Dev window, they sat about 4 pt low in the installed app.
 - The content column carries one inner shadow along its top and left, 3 px and faint, in a darker shade of its
   own tone. No view draws its own edge shade; the board's 56 px edge fades are gone.
 

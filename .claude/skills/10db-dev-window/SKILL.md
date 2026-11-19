@@ -31,3 +31,6 @@ checkout's Vite server, so a saved edit shows at once. What it does:
 
 Changing `src-tauri/tauri.conf.json` (the traffic lights, the window's size) takes a restart of the window; a
 change to the UI does not.
+
+The Dev window draws the traffic lights about 4 pt higher than the installed app with the same
+`trafficLightPosition`, so judge the lights in the installed app, not here.
