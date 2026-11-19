@@ -55,11 +55,10 @@ const aMenuIsOpen = (): boolean =>
   document.querySelector('[aria-haspopup][aria-expanded="true"]') !== null;
 
 /**
- * The window's frame: two columns. The sidebar (a rail, and the section's panel where it has one) is one
- * tone from the window's top to its bottom and carries the traffic lights; the content column beside it
- * has its own tone and its own title row at the top. Views draw into the title row and the panel through
- * `TitleRow` and `Panel`. The window never scrolls: the content column is exactly as tall as the window and
- * its content scrolls inside it.
+ * The window's frame: the bar across the top and the rail down the left, one surface, round a rounded box that
+ * holds the section's panel (where it has one) and the content. Views draw into the bar's heads and the panel
+ * through `TitleRow` and `Panel`. The window never scrolls: the box is as tall as the window less the bar and the
+ * gutter, and the content scrolls inside it.
  */
 export function AppFrame({
   banner,
@@ -258,6 +257,7 @@ export function AppFrame({
         <Box
           className={classes['root']}
           style={{
+            '--shell-gutter': `${String(GUTTER)}px`,
             gridTemplateColumns: `${String(columnWidth)}px minmax(0, 1fr)`,
           }}
         >
@@ -267,6 +267,10 @@ export function AppFrame({
               layout.rail === 'sheet' ? (layout.panel === 'sheet' ? 'joined' : '') : undefined
             }
             data-labelled={layout.labels ? '' : undefined}
+            // The rail draws its own edge where a panel sheet stands over the box's edge beside it.
+            data-beside-sheet={
+              layout.rail === 'column' && layout.panel === 'sheet' ? '' : undefined
+            }
             ref={railRef}
             style={railStyle}
             inert={layout.rail === 'hidden'}
@@ -314,8 +318,6 @@ export function AppFrame({
             }}
             mod={{ 'panel-column': panelColumn }}
             style={{ paddingLeft: boxLeft - columnWidth }}
-            // Only the gutters are the Splitter's own box; a press on anything inside it targets that thing.
-            data-tauri-drag-region
           >
             {/* Only a panel column takes the pane's room: a sheet stands over the frame, and a hidden or absent
                 panel takes none. */}

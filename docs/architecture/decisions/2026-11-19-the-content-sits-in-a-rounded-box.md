@@ -1,7 +1,8 @@
 # The content sits in a rounded box, inside a frame of the bar, the rail and thin gutters
 
 - **Date:** 2026-11-19
-- **Amends:** `decisions/2026-11-19-the-bar-divides-its-columns-with-short-lines.md`, and
+- **Amends:** `decisions/2026-11-19-the-bar-divides-its-columns-with-short-lines.md`,
+  `decisions/2026-11-18-the-window-has-one-bar-and-one-sidebar-button.md` (the hairline under the bar), and
   `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md` §Brief ("no rounded inset card")
 
 ## Decision
