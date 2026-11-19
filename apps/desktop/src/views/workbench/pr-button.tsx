@@ -103,22 +103,21 @@ function usePullRequestRefusal(view: PassViewDto) {
   };
 }
 
-/** The element that says why Open Pull Request is disabled, which the button names as its description. */
-function reasonId(view: PassViewDto): string {
-  return `pull-request-reason-${view.pass.id}`;
-}
-
 /**
- * Why Open Pull Request is disabled, as a dimmed line of its own under the header's row: beside the
- * button it would crowd the pass's line out of a narrow window.
+ * The signed-off page's foot line: what happens next, or, while no pull request can be opened, why not.
+ * The panel and the header show no pull request control then, so this is where the reason is said.
  */
-export function PrReason({ view }: { readonly view: PassViewDto }) {
+export function PrFoot({ view }: { readonly view: PassViewDto }) {
   const { why } = usePullRequestRefusal(view);
-  if (why === null) return null;
   return (
-    <Text id={reasonId(view)} size="xs" c="dimmed">
-      {why}
-    </Text>
+    <>
+      <Text size="sm" c="dimmed">
+        {why === null
+          ? 'Signed off. CI checks it once it is in the pull request.'
+          : `Signed off. No pull request yet: ${why}`}
+      </Text>
+      <PrButton view={view} />
+    </>
   );
 }
 
@@ -144,10 +143,18 @@ function gateWord(view: PassViewDto): { readonly text: string; readonly color: s
 
 /**
  * The pass's pull request in its header: Open Draft PR until there is one, then its name, whether it is
- * a draft, where its checks are, and Push to PR for what was signed off since.
+ * a draft, where its checks are, and Push to PR for what was signed off since. A button the daemon does not
+ * offer is not drawn (`PrFoot` says why), so with no pull request and nothing to open the control is gone.
  */
-export function PrButton({ view }: { readonly view: PassViewDto }) {
-  const { preview, why } = usePullRequestRefusal(view);
+export function PrButton({
+  view,
+  inset = false,
+}: {
+  readonly view: PassViewDto;
+  /** Padded to the panel's head, where it sits on a line of its own. */
+  readonly inset?: boolean;
+}) {
+  const { preview } = usePullRequestRefusal(view);
   const opening = useOpenPullRequest();
   const [confirming, setConfirming] = useState(false);
   const [posted, setPosted] = useState<string | null>(null);
@@ -155,6 +162,8 @@ export function PrButton({ view }: { readonly view: PassViewDto }) {
   const url = view.pullRequest?.url ?? posted ?? shown?.existing?.url ?? null;
   const draft = view.pullRequest?.draft ?? shown?.existing?.draft ?? null;
   const gate = url === null ? null : gateWord(view);
+  const offered = view.pass.state === PassState.Open && shown?.offered === true;
+  if (url === null && !offered && opening.error === null) return null;
   const push = () => {
     opening
       .mutateAsync(view.pass.id)
@@ -166,7 +175,7 @@ export function PrButton({ view }: { readonly view: PassViewDto }) {
       });
   };
   return (
-    <Group gap="xs" wrap="nowrap">
+    <Group gap="xs" wrap="nowrap" {...(inset ? { px: 'sm', pb: 'xs' } : {})}>
       {url === null ? null : (
         <Group gap={6} wrap="nowrap">
           <ExternalLink url={url} label={prName(url)} />
@@ -187,20 +196,19 @@ export function PrButton({ view }: { readonly view: PassViewDto }) {
           {opening.error.message}
         </Text>
       )}
-      <Button
-        {...(why === null ? {} : { 'aria-describedby': reasonId(view) })}
-        variant={url === null ? 'filled' : 'default'}
-        size="xs"
-        loading={preview.isLoading || opening.isPending}
-        disabled={view.pass.state !== PassState.Open || shown?.offered !== true}
-        onClick={() => {
-          if (shown?.offered !== true) return;
-          if (aheadLine(view.pass.returnBranch, shown) === null) push();
-          else setConfirming(true);
-        }}
-      >
-        {url === null ? 'Open Draft PR' : 'Push to PR'}
-      </Button>
+      {offered ? (
+        <Button
+          variant={url === null ? 'filled' : 'default'}
+          size="xs"
+          loading={opening.isPending}
+          onClick={() => {
+            if (aheadLine(view.pass.returnBranch, shown) === null) push();
+            else setConfirming(true);
+          }}
+        >
+          {url === null ? 'Open Draft PR' : 'Push to PR'}
+        </Button>
+      ) : null}
       {confirming && shown?.offered === true ? (
         <OpenPullRequestConfirm
           view={view}
