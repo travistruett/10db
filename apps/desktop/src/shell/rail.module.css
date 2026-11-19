@@ -136,10 +136,11 @@
   height: 34px;
 }
 
+/* The project select has room on both sides, apart from the sections above it and the project's sections below. */
 .tileHost {
   flex: none;
   display: grid;
-  margin-bottom: 6px;
+  margin: 4px 0 12px;
 }
 
 /* The button is styled from its wrapper: the tooltip and combobox around it replace its own class. */

@@ -37,8 +37,13 @@ const TOGGLE_TIP_DELAY = 300;
 const CONTENT_PADDING = 24;
 /** Where a panel's head starts in its column. */
 const PANEL_HEAD_PADDING = 16;
-/** The sidebar button's place in the bar, right of the traffic lights. It never moves. */
+/** The sidebar button's place in the bar, right of the traffic lights. */
 const TOGGLE_LEFT = 88;
+/**
+ * Over a labelled rail column the button ends the rail's part of the bar instead: its 16 px icon, centred in the
+ * 28 px button, ends where the rows' counts end (the rail's 8 px padding and a row's 8 px).
+ */
+const TOGGLE_LEFT_LABELLED = RAIL_LABELLED_WIDTH - 8 - 8 - 6 - 16;
 const TOGGLE_TOP = 8;
 /** Where the bar's text may start: clear of the traffic lights and the sidebar button. */
 const BAR_START = 128;
@@ -270,7 +275,11 @@ export function AppFrame({
           <Tooltip label={toggleTip} position="bottom" opened={toggleTipShown}>
             <ActionIcon
               className={classes['toggle']}
-              style={{ left: TOGGLE_LEFT, top: TOGGLE_TOP }}
+              style={{
+                left:
+                  layout.rail === 'column' && layout.labels ? TOGGLE_LEFT_LABELLED : TOGGLE_LEFT,
+                top: TOGGLE_TOP,
+              }}
               variant="subtle"
               color="gray"
               size={28}

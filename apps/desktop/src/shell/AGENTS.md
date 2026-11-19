@@ -22,7 +22,7 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
   preference and which sheet is open (`shellLayout` in `shell-layout.ts`; bands at 1000
   and 640 px). The window's width, not a container's, decides it (`useShellBand`), because the frame decides what
   its content gets. The labels preference is remembered (`sidebar-labels.ts`, `tendb.shell.labels`).
-- One sidebar button ("Toggle sidebar", x 88, y 8, on every section, never moved) does what ⇧⌘S does: it flips
+- One sidebar button ("Toggle sidebar", y 8, on every section: x 88 beside the lights, or ending the rail's part of the bar over a labelled rail column, its icon level with the counts) does what ⇧⌘S does: it flips
   labels and icons when wide and opens the whole sidebar as a sheet otherwise. The bar's text starts at 128 px or
   later (`BAR_START`): the title row's padding and the panel head's `--shell-bar-start` clear the lights and the
   button where the rail is narrower than them. A wide window always draws a section's panel as a column, resized
