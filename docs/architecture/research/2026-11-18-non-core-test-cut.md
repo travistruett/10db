@@ -6,7 +6,7 @@ or is one seam test for a module no e2e flow reaches. Everything else is deleted
 
 ## Brief
 
-- **What changes:** the scoped unit tests go from 8,182 to 1,179 in 677 files to 140 (table below); nothing in
+- **What changes:** the scoped unit tests go from 8,182 to 1,224 in 677 files to 161 (table below); nothing in
   production changes except exports and modules that only deleted tests used.
 - **What it buys:** less CI time and less test code to keep in step with each change; the e2e flows are the main check.
 - **What could go wrong:** a deleted test was the only guard on a behavior. A broken e2e flow, or a bug a user hits,
@@ -26,13 +26,13 @@ this table (the kept `inbox.test.ts` runs 346 cases from its permission-broker t
 
 | Area                             | Files before | Files after | Tests before | Tests after |
 | -------------------------------- | -----------: | ----------: | -----------: | ----------: |
-| apps/daemon/src (non-core)       |          441 |          57 |        5,665 |         717 |
+| apps/daemon/src (non-core)       |          441 |          78 |        5,665 |         762 |
 | apps/daemon/test (non-core)      |           47 |          45 |          451 |         114 |
 | packages/contracts               |           56 |           5 |          543 |          21 |
 | packages/db (non-migration)      |           88 |           7 |        1,014 |          88 |
 | packages/agent-skill             |            4 |           2 |           40 |          10 |
 | tests/repo (excluding git-guard) |           41 |          24 |          469 |         229 |
-| Total                            |          677 |         140 |        8,182 |       1,179 |
+| Total                            |          677 |         161 |        8,182 |       1,224 |
 
 ## What stays
 
@@ -44,6 +44,20 @@ this table (the kept `inbox.test.ts` runs 346 cases from its permission-broker t
   refusal, sandbox roots, the instance lock, `sessions/open-in-root`, the OpenRouter key move, the judge, every
   `*.live.test.ts`, and at most 10 token, origin or refused-build tests each from `api/app`, `self-update` and
   `script-installer` (`github/login` had none and went).
+- **Credential and token cases, cut out of files that otherwise went** (45 tests in 21 files, each with only the
+  setup it uses): no account credential in a project, session, Plan or takeover environment
+  (`environment/launch`, `daemon/shape-session-tools`, `sessions/claude-takeover`, `sessions/codex-takeover`,
+  `takeover/render`); the pinned Claude and Codex binaries refused on a wrong checksum, changed files or loose
+  permissions (`environment/pinned-install`); 10db's own skill kept out of a session
+  (`session-setup/builder-skills`); what a render token may read (`screens/render-access`, whole); a repo's or
+  the builder's MCP server given only the variables approved for it, with no secret shown or logged
+  (`sessions/project-mcp`, `inbox/project-mcp-reader`, `session-setup/your-mcp-config`, `plugin-mcp`,
+  `your-mcp-hash`, `your-mcp-dto`); the session token and secret files in a Codex session and its home
+  (`sessions/codex-session`, `sessions/codex-home`); a gateway session that would bill a saved login
+  (`sessions/claude-adapter`); a secret file refused by Commit (`chat/title-row-git`); registry hosts without
+  their tokens (`registries/find-registry-hosts`); the bridge sending no token to an exited pid
+  (`builder-bridge/bridge`); and the unattended permission broker (`inbox/unattended-broker`, whole). The macOS
+  CI step runs `builder-skills` and `pinned-install` again.
 - **Rule tables and parsers:** `routing/choose-model`, `env`, the Claude and Codex mappings and the Codex protocol.
 - **Partial files:** `inbox.test.ts` keeps its six `permission broker` describes; `watcher.test.ts` keeps stray
   writes in `.git`, the real file-system watcher, and the out-of-bounds and refused-write tests.
