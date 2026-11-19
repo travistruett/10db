@@ -24,7 +24,7 @@ export function QueueList({ rows, current, onSelect, onTakeOut }: QueueListProps
       aria-label="Open pages"
       m={0}
       p={0}
-      style={{ listStyle: 'none' }}
+      style={{ listStyle: 'none', display: 'flex', flexDirection: 'column' }}
       {...{ [QUEUE_ATTRIBUTE]: true }}
     >
       {rows.map((row) => (

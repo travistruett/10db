@@ -1,0 +1,63 @@
+/* A page of the queue, drawn as the Inbox's rows are: rounded, half a step up under the pointer, a full step when
+   it is the page shown, and a hairline inset by the row's padding to the next, which goes beside a filled row. */
+.item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: var(--mantine-radius-md);
+}
+
+.item::after {
+  content: '';
+  position: absolute;
+  right: 12px;
+  bottom: 0;
+  left: 12px;
+  height: 1px;
+  background: var(--panel-row-hairline, var(--mantine-color-default-border));
+  pointer-events: none;
+}
+
+.item:hover {
+  background: var(--panel-row-hover, var(--mantine-color-default-hover));
+}
+
+.item[data-current] {
+  background: var(--panel-row-selected, var(--mantine-color-default-hover));
+}
+
+/* Each row is in its own list item, so the row before a filled one is found through the items. */
+.item:hover::after,
+.item[data-current]::after,
+li:has(+ li > .item:hover) > .item::after,
+li:has(+ li > .item[data-current]) > .item::after,
+li:last-child > .item::after {
+  opacity: 0;
+}
+
+.button {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  padding: 10px 4px 10px 12px;
+  border-radius: var(--mantine-radius-md);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: -2px;
+}
+
+/* The row's menu shows where the row is in hand: under the pointer, shown, or holding focus. */
+.menu {
+  flex: none;
+  margin-right: 6px;
+  opacity: 0;
+}
+
+.item:hover .menu,
+.item[data-current] .menu,
+.item:focus-within .menu,
+.menu:has([data-expanded]) {
+  opacity: 1;
+}

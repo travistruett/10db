@@ -377,7 +377,7 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
           });
         }}
       />
-      {selected?.kind === 'fresh' ? <TitleRow title="New session" switcher={switcher} /> : null}
+      {selected?.kind === 'fresh' ? <TitleRow title="New Session" switcher={switcher} /> : null}
       {closing.notice === null ? null : (
         <Paper role="status" withBorder px="sm" py={6} mx="md" mt="xs">
           <Group justify="space-between" wrap="nowrap">

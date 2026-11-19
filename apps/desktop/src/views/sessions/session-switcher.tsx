@@ -46,7 +46,7 @@ export function SessionSwitcher({
                   onSelect(row);
                 }}
               >
-                {row.kind === 'chat' ? row.chat.title : 'New session'}
+                {row.kind === 'chat' ? row.chat.title : 'New Session'}
               </Menu.Item>
             ))}
           </div>

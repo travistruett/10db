@@ -2,17 +2,20 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 30px;
-  padding-inline: 8px;
+  height: 32px;
+  padding-inline: 12px;
   border-radius: var(--mantine-radius-md);
   cursor: pointer;
   user-select: none;
   color: var(--mantine-color-text);
 }
 
-.row:hover,
+.row:hover {
+  background: var(--panel-row-hover, var(--mantine-color-default-hover));
+}
+
 .row[data-selected] {
-  background: var(--mantine-color-default-hover);
+  background: var(--panel-row-selected, var(--mantine-color-default-hover));
 }
 
 .row:focus-visible {
@@ -50,8 +53,11 @@
 }
 
 .title[data-fresh] {
-  font-style: italic;
   color: var(--mantine-color-dimmed);
+}
+
+.row[data-selected] .title[data-fresh] {
+  color: var(--mantine-color-bright);
 }
 
 .end {
@@ -107,7 +113,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 8px 4px;
+  padding: 12px 12px 6px;
   font-size: var(--mantine-font-size-xs);
   font-weight: 600;
   color: var(--mantine-color-dimmed);

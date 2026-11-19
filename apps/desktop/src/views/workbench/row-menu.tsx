@@ -17,7 +17,6 @@ export function RowMenu({ label, onTakeOut }: RowMenuProps) {
           variant="subtle"
           color="gray"
           size="sm"
-          mx={4}
           aria-label={`More actions for ${label}`}
           style={{ flex: 'none' }}
         >

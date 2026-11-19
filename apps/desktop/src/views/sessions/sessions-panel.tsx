@@ -13,12 +13,13 @@ import {
   type DragEndEvent,
 } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
-import { ActionIcon, Box, Menu, Text, TextInput, Tooltip, UnstyledButton } from '@mantine/core';
-import { IconPlus, IconSearch } from '@tabler/icons-react';
+import { ActionIcon, Box, Menu, Text, Tooltip, UnstyledButton } from '@mantine/core';
+import { IconPlus } from '@tabler/icons-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchChats } from '../../daemon/chat-queries';
 import { Panel } from '../../shell/panel';
+import { PanelSearch } from '../../shell/panel-search';
 import { ProjectTile } from '../../shell/project-tile';
 import { canOpenTerminal } from './can-open-terminal';
 import type { ClosedChat } from './closed-tabs';
@@ -32,8 +33,8 @@ import { sessionName } from './tab-info';
 /** Up to this many rows the panel draws every row; past it, only the rows in view. */
 export const VIRTUAL_FROM = 200;
 
-const ROW_HEIGHT = 30;
-const GROUP_HEIGHT = 30;
+const ROW_HEIGHT = 32;
+const GROUP_HEIGHT = 34;
 
 type Item =
   | { readonly kind: 'group'; readonly projectId: ProjectId }
@@ -61,11 +62,14 @@ export interface SessionsPanelProps {
   readonly onOpenFound: (chat: ChatDto) => void;
 }
 
+/** The sessions of a project that is no longer in the list are grouped under these words, with no mark. */
+const REMOVED_PROJECT = 'Removed project';
+
 function Group_({ name }: { readonly name: string }): ReactNode {
   return (
     <div className={classes['group']} role="presentation">
-      <ProjectTile name={name} size={14} />
-      <span>{name}</span>
+      {name === '' ? null : <ProjectTile name={name} size={14} />}
+      <span>{name === '' ? REMOVED_PROJECT : name}</span>
     </div>
   );
 }
@@ -161,7 +165,7 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
         <SessionRow
           key={row.key}
           rowKey={row.key}
-          title="New session"
+          title="New Session"
           fresh
           name={sessionName(CHAT_DEFAULT_TITLE, project, '')}
           detail={project}
@@ -280,19 +284,20 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
         aria-label="Sessions panel"
         component="nav"
       >
-        <Box px="sm" pt={4} pb={6}>
-          <TextInput
-            size="xs"
+        <Box pt={4} pb={12}>
+          <PanelSearch
             aria-label="Search sessions"
             placeholder="Search sessions"
-            leftSection={<IconSearch size={14} stroke={1.5} />}
             value={query}
             onChange={(event) => {
               setQuery(event.currentTarget.value);
             }}
           />
         </Box>
-        <div ref={scroller} style={{ flex: 1, minHeight: 0, overflowY: 'auto', paddingInline: 4 }}>
+        <div
+          ref={scroller}
+          style={{ flex: 1, minHeight: 0, overflowY: 'auto', scrollbarWidth: 'none' }}
+        >
           {searching ? (
             <>
               <div role="list" aria-label="Search results">
@@ -331,11 +336,11 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
         </div>
         {closed.length === 0 ? null : (
           <Box
-            px="xs"
-            py="xs"
+            pt={10}
+            mt={4}
             style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}
           >
-            <Text size="xs" fw={600} c="dimmed" px={8} pb={2}>
+            <Text size="xs" fw={600} c="dimmed" px={12} pb={4}>
               Recently closed
             </Text>
             {closed.map((entry) => (

@@ -1,8 +1,8 @@
 import { PassState, type TaskId } from '@10db/contracts';
-import { Box, Button, Flex, Text } from '@mantine/core';
-import { IconPlus } from '@tabler/icons-react';
+import { Box, Flex, Text } from '@mantine/core';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { markPassNotificationsActed, shownPassNotifications } from '../../desktop/notify-pass';
+import { CreateButton } from '../../shell/create-button';
 import { useFrameSlots } from '../../shell/frame-slots';
 import { Panel } from '../../shell/panel';
 import { useNow } from '../../shell/relative';
@@ -163,20 +163,13 @@ export function PassWorkspace(props: PassWorkspaceProps) {
         onSelect={onSelect}
         onTakeOut={view.pass.state === PassState.Open ? setTakingOut : null}
       />
-      {/* A page is added where the pages are: an outline at the list's foot, quieter than a row. */}
-      <Box p="xs">
-        <Button
-          variant="default"
-          size="xs"
-          fullWidth
-          justify="flex-start"
-          leftSection={<IconPlus size={14} stroke={1.5} />}
+      {/* A page is added where the pages are, at the list's foot. */}
+      <Box pt={8}>
+        <CreateButton
+          label="Add Page"
           disabled={view.pass.state !== PassState.Open}
           onClick={onAddPage}
-          style={{ borderStyle: 'dashed', background: 'transparent', fontWeight: 400 }}
-        >
-          Add Page
-        </Button>
+        />
       </Box>
     </>
   );
