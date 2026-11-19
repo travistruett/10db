@@ -1,8 +1,8 @@
 import type { ActivityRow } from '@10db/contracts';
 import { Text } from '@mantine/core';
 import { ProjectLabel } from '../../shell/project-label';
-import { shortAgo } from '../factory/short-ago';
-import { Lines } from './inbox-row-item';
+import { shortAgo } from './short-ago';
+import { Lines } from '../inbox/inbox-row-item';
 
 /** A row of Activity; `key` is what selection follows, and never collides with a card's id. */
 export interface ActivityListRow {

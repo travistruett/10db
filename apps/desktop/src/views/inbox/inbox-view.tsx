@@ -3,17 +3,9 @@ import { Group } from '@mantine/core';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { TitleRow } from '../../shell/title-row';
-import { ActivityInbox } from './activity-inbox';
 import { InboxPanel } from './inbox-panel';
 import { ListedInbox } from './listed-inbox';
-import {
-  lastInboxSearch,
-  PanelOnlyState,
-  withoutFilters,
-  withoutQuery,
-  withState,
-  type InboxPanelState,
-} from './inbox-search';
+import { lastInboxSearch, withoutFilters, withoutQuery, withState } from './inbox-search';
 import { InboxShortcuts } from './inbox-shortcuts';
 import { OpenInbox } from './open-inbox';
 
@@ -22,11 +14,10 @@ import { OpenInbox } from './open-inbox';
  * names. Each state's content is its own component, so Open's keys are only live while Open is shown.
  */
 /** The content's title: the list the panel shows. */
-const STATE_TITLES: Record<InboxPanelState, string> = {
+const STATE_TITLES: Record<InboxListState, string> = {
   [InboxListState.Open]: 'Open',
   [InboxListState.Waiting]: 'Waiting',
   [InboxListState.Resolved]: 'Resolved',
-  [PanelOnlyState.Activity]: 'Activity',
 };
 
 export function InboxView() {
@@ -57,8 +48,6 @@ export function InboxView() {
             }}
           />
         );
-      case PanelOnlyState.Activity:
-        return <ActivityInbox search={search} listHost={listHost} onClearFilters={clearFilters} />;
       case InboxListState.Waiting:
       case InboxListState.Resolved:
         return (

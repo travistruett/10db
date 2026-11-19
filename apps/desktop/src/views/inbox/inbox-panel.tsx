@@ -1,6 +1,5 @@
 import { InboxListState } from '@10db/contracts';
-import { ActionIcon, Box, Group, SegmentedControl, Tooltip } from '@mantine/core';
-import { IconHistory } from '@tabler/icons-react';
+import { Box, Group, SegmentedControl } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { useInboxCount } from '../../daemon/inbox-queries';
 import { useSlackConnection } from '../../daemon/people';
@@ -8,7 +7,7 @@ import { CountBadge, CountTone } from '../../shell/count-badge';
 import { Panel } from '../../shell/panel';
 import { useOpenInboxCount } from './inbox-count';
 import { InboxFilterMenu } from './inbox-filter-menu';
-import { PanelOnlyState, withFilter, type InboxPanelState, type InboxSearch } from './inbox-search';
+import { withFilter, type InboxSearch } from './inbox-search';
 import { InboxSearchField } from './inbox-search-field';
 
 const LIST_STATES: readonly InboxListState[] = Object.values(InboxListState);
@@ -18,11 +17,10 @@ function stateOf(value: string): InboxListState | null {
 }
 
 /**
- * The Inbox's panel (spec §1.3 "Head", §4.1 "The panel's head"): the section's name with the filter and the
- * Activity button, then a switch between Open, Waiting and Resolved with their counts, then the list under them.
- * Activity is a log of notices, not a state a card is in, so it is a button in the head and never counted, and
- * the switch shows no item while it is open. The list is drawn into
- * `onListHost`'s element by whichever state has rows, so the switch stays mounted as the state changes.
+ * The Inbox's panel (spec §1.3 "Head", §4.1 "The panel's head"): the section's name with the filter, then a
+ * switch between Open, Waiting and Resolved with their counts, then the list under them. The list is drawn into
+ * `onListHost`'s element by whichever state has rows, so the switch stays mounted as the state changes. The
+ * notices that ask nothing are the Factory's Recent activity, not an Inbox list.
  */
 export function InboxPanel({
   state,
@@ -31,9 +29,9 @@ export function InboxPanel({
   onSearch,
   onListHost,
 }: {
-  readonly state: InboxPanelState;
+  readonly state: InboxListState;
   readonly search: InboxSearch;
-  readonly onState: (state: InboxPanelState) => void;
+  readonly onState: (state: InboxListState) => void;
   /** The search changed: its text (the field writes it after a pause) or a filter. */
   readonly onSearch: (next: InboxSearch) => void;
   readonly onListHost: (host: HTMLElement | null) => void;
@@ -43,30 +41,11 @@ export function InboxPanel({
   const slack = useSlackConnection();
   // Nothing in Waiting needs the builder, so its count is neutral, and it is told only while Slack can fill it.
   const showWaiting = slack.data?.state === 'connected' && waiting !== undefined && waiting > 0;
-  const activity = state === PanelOnlyState.Activity;
   return (
     <Panel
       section="inbox"
       title="Inbox"
-      controls={
-        <>
-          <Tooltip label="Activity" position="bottom">
-            <ActionIcon
-              variant={activity ? 'light' : 'subtle'}
-              color="gray"
-              size={28}
-              aria-label="Activity"
-              aria-pressed={activity}
-              onClick={() => {
-                onState(activity ? InboxListState.Open : PanelOnlyState.Activity);
-              }}
-            >
-              <IconHistory size={16} stroke={1.6} />
-            </ActionIcon>
-          </Tooltip>
-          <InboxFilterMenu state={state} search={search} onChange={onSearch} />
-        </>
-      }
+      controls={<InboxFilterMenu state={state} search={search} onChange={onSearch} />}
     >
       <Box
         component="section"
@@ -86,8 +65,7 @@ export function InboxPanel({
             size="xs"
             fullWidth
             aria-label="Inbox state"
-            // No item is picked while Activity is open.
-            value={activity ? '' : state}
+            value={state}
             onChange={(value) => {
               const next = stateOf(value);
               if (next !== null) onState(next);

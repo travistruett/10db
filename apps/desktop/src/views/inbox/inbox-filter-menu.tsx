@@ -8,10 +8,8 @@ import { OUTCOME_LABELS } from './inbox-row-item';
 import {
   filtersSet,
   InboxSince,
-  PanelOnlyState,
   withFilter,
   withoutFilters,
-  type InboxPanelState,
   type InboxSearch,
 } from './inbox-search';
 import { KIND_LABELS } from './permission-labels';
@@ -67,7 +65,7 @@ export function InboxFilterMenu({
   search,
   onChange,
 }: {
-  readonly state: InboxPanelState;
+  readonly state: InboxListState;
   readonly search: InboxSearch;
   readonly onChange: (next: InboxSearch) => void;
 }): ReactNode {
@@ -102,30 +100,26 @@ export function InboxFilterMenu({
             />
           ))}
         </FilterGroup>
-        {state === PanelOnlyState.Activity ? null : (
-          <>
-            <Menu.Divider />
-            <FilterGroup label="Kind">
-              <Choice
-                label="Any Kind"
-                checked={search.kind === undefined}
-                onChoose={() => {
-                  onChange(withFilter(search, 'kind', null));
-                }}
-              />
-              {Object.values(InboxKind).map((kind) => (
-                <Choice
-                  key={kind}
-                  label={KIND_LABELS[kind]}
-                  checked={search.kind === kind}
-                  onChoose={() => {
-                    onChange(withFilter(search, 'kind', kind));
-                  }}
-                />
-              ))}
-            </FilterGroup>
-          </>
-        )}
+        <Menu.Divider />
+        <FilterGroup label="Kind">
+          <Choice
+            label="Any Kind"
+            checked={search.kind === undefined}
+            onChoose={() => {
+              onChange(withFilter(search, 'kind', null));
+            }}
+          />
+          {Object.values(InboxKind).map((kind) => (
+            <Choice
+              key={kind}
+              label={KIND_LABELS[kind]}
+              checked={search.kind === kind}
+              onChoose={() => {
+                onChange(withFilter(search, 'kind', kind));
+              }}
+            />
+          ))}
+        </FilterGroup>
         {state === InboxListState.Waiting ? (
           <>
             <Menu.Divider />
