@@ -28,15 +28,18 @@
 }
 
 .row:hover::after,
+.row[data-hovered]::after,
 .row[aria-selected='true']::after,
 .row:has(+ .row:hover)::after,
+.row:has(+ .row[data-hovered])::after,
 .row:has(+ .row[aria-selected='true'])::after,
 .row:last-child::after,
 .placeholder::after {
   opacity: 0;
 }
 
-.row:hover {
+.row:hover,
+.row[data-hovered] {
   background: color-mix(in srgb, var(--mantine-color-default-hover) 50%, transparent);
 }
 
@@ -51,7 +54,8 @@
   font-size: 12px;
 }
 
-.placeholder:hover {
+.placeholder:hover,
+.placeholder[data-hovered] {
   background: transparent;
 }
 
@@ -89,11 +93,14 @@
 }
 
 /* The control stands on the row's own fill, the row's full height, which fades in over the age and text it
-   covers. */
+   covers. Only the button takes a press: a click beside it still picks the row. */
 .control {
   display: flex;
   align-items: center;
-  pointer-events: auto;
   padding-left: 24px;
   background: linear-gradient(to right, transparent, var(--inbox-row-fill) 20px);
+}
+
+.control > * {
+  pointer-events: auto;
 }

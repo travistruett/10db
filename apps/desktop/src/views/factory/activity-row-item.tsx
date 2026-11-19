@@ -1,6 +1,6 @@
 import type { ActivityRow } from '@10db/contracts';
 import { Text } from '@mantine/core';
-import { IconAlertTriangle, IconInfoCircle } from '@tabler/icons-react';
+import { IconAlertTriangle } from '@tabler/icons-react';
 import { ProjectLabel } from '../../shell/project-label';
 import { shortAgo } from './short-ago';
 import { Lines } from '../inbox/inbox-row-item';
@@ -25,7 +25,7 @@ export function activityRowOf(row: ActivityRow): ActivityListRow {
 const firstLine = (text: string): string => text.split('\n')[0] ?? '';
 
 /**
- * The two lines of an Activity row: a notice's mark (orange for a warning, as a task's notices are), the line,
+ * The two lines of an Activity row: an orange mark for a warning (as a task's notices are), the line,
  * `×n` when grouped and how long ago the newest happened, then the project and the body's first line.
  */
 export function ActivityRowItem({
@@ -38,14 +38,17 @@ export function ActivityRowItem({
   const { row: notice } = row;
   return (
     <Lines
-      icon={notice.tone === 'warning' ? IconAlertTriangle : IconInfoCircle}
-      kind={notice.tone === 'warning' ? 'Warning' : 'Notice'}
-      iconColor={
-        notice.tone === 'warning'
-          ? 'var(--mantine-color-orange-text)'
-          : 'var(--mantine-color-dimmed)'
+      mark={
+        notice.tone === 'warning' ? (
+          <IconAlertTriangle
+            size={14}
+            stroke={1.75}
+            color="var(--mantine-color-orange-text)"
+            aria-label="Warning"
+            style={{ flexShrink: 0 }}
+          />
+        ) : null
       }
-      tone="quiet"
       title={notice.line}
       count={notice.count}
       age={shortAgo(notice.at, now)}

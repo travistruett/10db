@@ -8,25 +8,20 @@ import classes from './card-actions.module.css';
  */
 export function CardActions({
   framed,
-  start = null,
   children,
 }: {
   readonly framed: boolean;
-  /** What sits at the bar's left, such as a failure's words. */
-  readonly start?: ReactNode;
   readonly children: ReactNode;
 }) {
   if (framed)
     return (
-      <Group justify={start === null ? 'flex-end' : 'space-between'} wrap="nowrap">
-        {start}
-        <Group justify="flex-end">{children}</Group>
+      <Group justify="flex-end" mt="sm">
+        {children}
       </Group>
     );
   return (
     <div className={classes['bar']}>
-      <div className={classes['start']}>{start}</div>
-      <Group justify="flex-end" gap="sm" wrap="nowrap">
+      <Group justify="flex-end" gap="sm">
         {children}
       </Group>
     </div>

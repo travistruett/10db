@@ -193,6 +193,8 @@ export function InboxRowList<T extends { readonly key: string }>({
                 role="option"
                 aria-selected={isSelected}
                 data-inbox-row
+                // The row's hover look follows the pointer onto its control too, which lies outside the row.
+                data-hovered={hovered === row.key ? '' : undefined}
                 className={classes['row']}
                 style={style}
                 // Focusable so the keys can be given from the list; j, k and Enter are the Inbox's, Space picks.

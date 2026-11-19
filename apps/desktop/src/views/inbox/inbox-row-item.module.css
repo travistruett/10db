@@ -13,14 +13,3 @@
   gap: 6px;
   min-width: 0;
 }
-
-/* The second line starts under the title, past the kind's mark. */
-.second {
-  padding-left: 20px;
-}
-
-.mark {
-  display: inline-flex;
-  flex-shrink: 0;
-  width: 14px;
-}

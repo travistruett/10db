@@ -6,15 +6,12 @@ import {
   type InboxItemDto,
 } from '@10db/contracts';
 import { Button, Text } from '@mantine/core';
-import { IconAlertTriangle, type Icon } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import type { InboxRow } from '../../daemon/inbox-queries';
 import { ProjectLabel } from '../../shell/project-label';
 import { shortAgo } from '../factory/short-ago';
 import classes from './inbox-row-item.module.css';
-import { KIND_ICONS } from './kind-icons';
 import { passReadyTitle } from './pass-ready-row';
-import { KIND_LABELS } from './permission-labels';
 import { answerWords } from './resolved-detail';
 import { SessionBadge, useSessionOfCard } from './session-card-link';
 import { cardText } from './system-card-list';
@@ -48,23 +45,15 @@ export function inboxRowOf(row: InboxRow): OpenRow {
 const firstLine = (text: string): string => text.split('\n')[0] ?? '';
 
 export function Lines({
-  icon: KindIcon,
-  kind,
-  iconColor,
-  tone,
+  mark = null,
   title,
   count,
   age,
   second,
   failure,
 }: {
-  /** The mark for what the row is, before the title. */
-  readonly icon: Icon;
-  /** What the row is, in words: the mark's name for the pointer and a screen reader. */
-  readonly kind: string;
-  /** The mark's colour in place of the state's own. */
-  readonly iconColor?: string;
-  readonly tone: 'open' | 'quiet';
+  /** A mark before the title, where it tells rows apart (a warning in Activity); most rows have none. */
+  readonly mark?: ReactNode;
   readonly title: string;
   readonly count: number;
   readonly age: string | null;
@@ -74,19 +63,7 @@ export function Lines({
   return (
     <div className={classes['item']}>
       <div className={classes['line']}>
-        <span
-          className={classes['mark']}
-          title={kind}
-          style={{
-            color:
-              iconColor ??
-              (tone === 'open'
-                ? 'var(--mantine-color-yellow-text)'
-                : 'var(--mantine-color-dimmed)'),
-          }}
-        >
-          <KindIcon size={14} stroke={1.75} aria-label={kind} />
-        </span>
+        {mark}
         <Text
           fz={13}
           fw={500}
@@ -112,7 +89,7 @@ export function Lines({
           </Text>
         )}
       </div>
-      <div className={[classes['line'], classes['second']].join(' ')}>
+      <div className={classes['line']}>
         {failure === null ? (
           second
         ) : (
@@ -157,7 +134,7 @@ function SessionLine({ item }: { readonly item: InboxItemDto }) {
 }
 
 /**
- * The two lines of a row in the panel (spec §4.1 "A row"): the kind's mark, the title, how many and how long ago,
+ * The two lines of a row in the panel (spec §4.1 "A row"): the title, how many and how long ago,
  * then the project and what the card is about.
  */
 export function InboxRowItem({
@@ -172,14 +149,10 @@ export function InboxRowItem({
   /** Why this row's last dismiss failed, shown on the row. */
   readonly failure: string | null;
 }) {
-  const tone = state === InboxListState.Open ? 'open' : 'quiet';
   if (row.kind === OpenRowKind.System) {
     const { title, body } = cardText(row.card);
     return (
       <Lines
-        icon={IconAlertTriangle}
-        kind="10db"
-        tone={tone}
         title={title}
         count={1}
         age={null}
@@ -197,9 +170,6 @@ export function InboxRowItem({
   const pass = row.row.passId !== null;
   return (
     <Lines
-      icon={KIND_ICONS[first.kind]}
-      kind={KIND_LABELS[first.kind]}
-      tone={tone}
       title={first.title}
       count={pass ? 1 : items.length}
       age={rowAge(state, first, now)}

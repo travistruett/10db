@@ -4,10 +4,6 @@
   position: sticky;
   bottom: calc(-1 * var(--shell-content-padding-block));
   z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--mantine-spacing-md);
   margin: auto calc(-1 * var(--shell-content-padding-inline))
     calc(-1 * var(--shell-content-padding-block));
   padding: 12px var(--shell-content-padding-inline);
@@ -15,6 +11,7 @@
   background: var(--mantine-color-body);
 }
 
-.start {
-  min-width: 0;
+/* A field taken into view (the note's `n`, a Tab, a growing line) stops above the bar, not under it. */
+main:has(.bar) {
+  scroll-padding-bottom: 72px;
 }
