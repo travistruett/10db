@@ -181,13 +181,15 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
   const closed = useClosedTabs();
 
   const newTab = (): void => {
-    // A new session starts where the builder is reading: the open session's project, else the rail's.
-    const here =
+    // A new session starts where the builder is reading: the open session's project while it still exists,
+    // else the rail's.
+    const reading =
       selected === null
-        ? (selectedProject?.id ?? null)
+        ? null
         : selected.kind === 'chat'
           ? selected.chat.projectId
           : selected.tab.projectId;
+    const here = list.some((p) => p.id === reading) ? reading : (selectedProject?.id ?? null);
     const made = openFreshTab(fresh, list, here, -1);
     if (made === null) return;
     setFresh(made.tabs);

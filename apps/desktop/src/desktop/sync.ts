@@ -113,7 +113,7 @@ export function useDesktopSync(): void {
   const openChat = useRef<(target: ChatTarget) => void>(() => undefined);
   useEffect(() => {
     openChat.current = (target) => {
-      openSession(target.chatId, target.projectId).catch((error: unknown) => {
+      openSession(target.chatId).catch((error: unknown) => {
         console.warn('10db: could not open the session', error);
       });
       bringWindowForward().catch((error: unknown) => {

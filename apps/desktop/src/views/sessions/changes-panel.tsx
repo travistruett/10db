@@ -2,7 +2,7 @@ import type { ChangedFileDto, WorkstreamChangesDto } from '@10db/contracts';
 import { Box, Group, ScrollArea, Stack, Text, UnstyledButton } from '@mantine/core';
 import { IconChevronDown } from '@tabler/icons-react';
 import type { UseQueryResult } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { HunkDiff } from '../../conversation/hunk-diff';
 import type { GutterLine } from '../../conversation/hunk-gutter';
 import { ExternalLink } from '../board/pull-request-link';
@@ -42,6 +42,8 @@ function quoteLabelOf(path: string, line: GutterLine): string {
 function FileFold({
   file,
   view,
+  truncated,
+  bodyId,
   open,
   onToggle,
   onQuote,
@@ -49,11 +51,14 @@ function FileFold({
   readonly file: ChangedFileDto;
   /** Its part of the diff; absent when the diff was cut before it. */
   readonly view: ChangedFileView | undefined;
+  /** Whether the diff was cut at the size cap, so a file with no hunks may be past the cut. */
+  readonly truncated: boolean;
+  /** The body's id; from the file's place, as a path can hold spaces. */
+  readonly bodyId: string;
   readonly open: boolean;
   readonly onToggle: () => void;
   readonly onQuote: (text: string) => void;
 }) {
-  const bodyId = `changes-${file.path}`;
   return (
     <li>
       <UnstyledButton
@@ -75,27 +80,30 @@ function FileFold({
           {file.added === null ? 'binary' : `+${String(file.added)} −${String(file.removed ?? 0)}`}
         </span>
       </UnstyledButton>
-      {open ? (
-        <Stack gap="xs" pt={4} pb="sm" id={bodyId}>
-          {view === undefined || view.hunks.length === 0 ? (
-            <Text size="xs" c="dimmed">
-              {file.added === null ? 'A binary file.' : 'Past the part of the diff we show.'}
-            </Text>
-          ) : (
-            view.hunks.map((hunk, index) => (
-              <HunkDiff
-                key={`${String(hunk.oldStart)}:${String(hunk.newStart)}:${String(index)}`}
-                hunk={hunk}
-                first={index === 0}
-                onQuote={(line) => {
-                  onQuote(quoteOf(file.path, line));
-                }}
-                quoteLabel={(line) => quoteLabelOf(file.path, line)}
-              />
-            ))
-          )}
-        </Stack>
-      ) : null}
+      {/* Folded, the body stays in the page hidden, so the header's aria-controls always names it. */}
+      <Stack gap="xs" pt={4} pb="sm" id={bodyId} hidden={!open} display={open ? undefined : 'none'}>
+        {view === undefined || view.hunks.length === 0 ? (
+          <Text size="xs" c="dimmed">
+            {file.added === null
+              ? 'A binary file.'
+              : truncated
+                ? 'Past the part of the diff we show.'
+                : 'No lines changed (an empty file or a mode change).'}
+          </Text>
+        ) : (
+          view.hunks.map((hunk, index) => (
+            <HunkDiff
+              key={`${String(hunk.oldStart)}:${String(hunk.newStart)}:${String(index)}`}
+              hunk={hunk}
+              first={index === 0}
+              onQuote={(line) => {
+                onQuote(quoteOf(file.path, line));
+              }}
+              quoteLabel={(line) => quoteLabelOf(file.path, line)}
+            />
+          ))
+        )}
+      </Stack>
     </li>
   );
 }
@@ -106,7 +114,14 @@ export function ChangesPanel({ changes, pullRequest, onQuote }: ChangesPanelProp
   const views = new Map(
     (data === undefined ? [] : parseChanges(data.diff)).map((file) => [file.path, file]),
   );
-  const [flipped, setFlipped] = useState<ReadonlySet<string>>(() => new Set());
+  // Each file the builder folded or opened keeps that; the rest follow the default, which opens only the file
+  // that was first when the list first came, so a refetch that reorders the list moves nothing.
+  const foldIds = useId();
+  const [chosen, setChosen] = useState<ReadonlyMap<string, boolean>>(() => new Map());
+  const [first, setFirst] = useState<string | null>(null);
+  const firstNow = data?.files[0]?.path ?? null;
+  if (first === null && firstNow !== null) setFirst(firstNow);
+  const isOpen = (path: string): boolean => chosen.get(path) ?? path === (first ?? firstNow);
   return (
     <Box
       aria-label="Changes"
@@ -162,14 +177,11 @@ export function ChangesPanel({ changes, pullRequest, onQuote }: ChangesPanelProp
                   key={file.path}
                   file={file}
                   view={views.get(file.path)}
-                  // The first file starts open and the rest folded; a click flips one from where it started.
-                  open={(index === 0) !== flipped.has(file.path)}
+                  truncated={data.truncated}
+                  bodyId={`${foldIds}-${String(index)}`}
+                  open={isOpen(file.path)}
                   onToggle={() => {
-                    setFlipped((was) => {
-                      const next = new Set(was);
-                      if (!next.delete(file.path)) next.add(file.path);
-                      return next;
-                    });
+                    setChosen((was) => new Map(was).set(file.path, !isOpen(file.path)));
                   }}
                   onQuote={onQuote}
                 />
