@@ -1,44 +1,54 @@
-import { passHoldsTasks, type GoalId, type ProjectId, type ProjectViewDto } from '@10db/contracts';
-import { Alert, Box, Button, Group, Stack, Text, Title } from '@mantine/core';
+import type { GoalId, ProjectId, ProjectViewDto } from '@10db/contracts';
+import { Alert, Button, Group, SegmentedControl, Stack, Text } from '@mantine/core';
+import { useQueries } from '@tanstack/react-query';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
-import { useId } from 'react';
-import { useGoals } from '../../daemon/goal-queries';
-import { useLivePass } from '../../daemon/pass-queries';
-import { useInbox } from '../../daemon/queries';
-import { useNow } from '../../shell/relative';
-import { TitleRow } from '../../shell/title-row';
-import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
+import { useRef } from 'react';
+import { goalsQueryOptions } from '../../daemon/goal-queries';
+import { useDaemon } from '../../daemon/provider';
 import { ProjectFilter } from '../../shell/project-filter';
 import { ProjectTile } from '../../shell/project-tile';
 import { useSelectedProject } from '../../shell/selected-project';
-import { BenchmarkSyncNote } from './benchmark-sync-note';
-import { GoalList } from './goal-list';
-import { CardTypesPanel } from './card-types-panel';
-import { HumanTouchPanel } from './human-touch-panel';
+import { TitleRow } from '../../shell/title-row';
 import { ActivityButton } from './activity-drawer';
+import { AdmissionNote } from './admission-note';
+import { BenchmarkSyncNote } from './benchmark-sync-note';
+import { CardTypesPanel } from './card-types-panel';
+import { GoalList } from './goal-list';
+import { HumanTouchPanel } from './human-touch-panel';
+import { LiveList, Section } from './live-list';
 import { RigorPanel } from './rigor-panel';
 import { UpdateDrainNote } from './update-drain-note';
-import { AdmissionNote } from './admission-note';
-import { PassLine } from '../workbench/pass-line';
+
+/** What Factory shows: what runs now across projects, or how one project's work has gone. */
+export const FactoryMode = { Live: 'live', Metrics: 'metrics' } as const;
+export type FactoryMode = (typeof FactoryMode)[keyof typeof FactoryMode];
 
 /**
- * Factory: every project's goals, each opening to its digest, sessions and pull requests (goals spec §8),
- * grouped by project and narrowed by the view's own project filter.
+ * Factory: what every project's runs are doing now, by what the builder would do about them (the live
+ * list), then the open goals; or, under Metrics, one project's work per rigor and how often a person
+ * was needed. Narrowed by the view's own project filter.
  */
 export function FactoryView() {
-  const { projects } = useSelectedProject();
-  const { goal: linkedGoalId, project: filter } = useSearch({ from: '/factory' });
+  const { projects, project: railProject } = useSelectedProject();
+  const { goal: linkedGoalId, project: filter, view } = useSearch({ from: '/factory' });
   const navigate = useNavigate({ from: '/factory' });
   const all = projects.data ?? [];
   const shown = filter === undefined ? all : all.filter((p) => p.id === filter);
-  const only = shown.length === 1 ? shown[0] : undefined;
+  const mode = view ?? FactoryMode.Live;
+  // The project Metrics chose by itself, so going back to Live shows every project again.
+  const metricsChose = useRef<ProjectId | null>(null);
 
-  function setFilter(project: ProjectId | null): void {
+  function go(next: { project?: ProjectId | null; view?: FactoryMode }): void {
     void navigate({
-      search: (prev) => ({
-        ...(prev.goal === undefined ? {} : { goal: prev.goal }),
-        ...(project === null ? {} : { project }),
-      }),
+      search: (prev) => {
+        const project = next.project === undefined ? prev.project : (next.project ?? undefined);
+        const shownView = next.view ?? prev.view;
+        return {
+          ...(prev.goal === undefined ? {} : { goal: prev.goal }),
+          ...(project === undefined ? {} : { project }),
+          ...(shownView === undefined || shownView === FactoryMode.Live ? {} : { view: shownView }),
+        };
+      },
     });
   }
 
@@ -50,7 +60,39 @@ export function FactoryView() {
         actions={
           <Group gap="xs" wrap="nowrap">
             <ActivityButton project={filter ?? null} />
-            <ProjectFilter projects={all} value={filter ?? null} onChange={setFilter} />
+            <SegmentedControl
+              size="xs"
+              aria-label="Factory view"
+              value={mode}
+              onChange={(value) => {
+                // Metrics is one project's: with every project shown, it opens on the rail's.
+                if (value === FactoryMode.Metrics) {
+                  metricsChose.current = filter === undefined ? (railProject?.id ?? null) : null;
+                  go({ view: FactoryMode.Metrics, project: filter ?? railProject?.id ?? null });
+                } else {
+                  const chosen = metricsChose.current;
+                  metricsChose.current = null;
+                  go({
+                    view: FactoryMode.Live,
+                    ...(chosen !== null && chosen === filter ? { project: null } : {}),
+                  });
+                }
+              }}
+              data={[
+                { value: FactoryMode.Live, label: 'Live' },
+                { value: FactoryMode.Metrics, label: 'Metrics' },
+              ]}
+            />
+            <ProjectFilter
+              projects={all}
+              value={filter ?? null}
+              onChange={(project) => {
+                go({ project });
+              }}
+            />
+            <Button component={Link} to="/shape" size="xs">
+              Plan Work
+            </Button>
           </Group>
         }
       />
@@ -61,101 +103,82 @@ export function FactoryView() {
           {projects.error.message}
         </Alert>
       ) : null}
-      {shown.map((project) => (
-        <ProjectGoals key={project.id} project={project} linkedGoalId={linkedGoalId} />
-      ))}
-      {only ? (
+      {mode === FactoryMode.Metrics ? (
+        <Metrics shown={shown} />
+      ) : (
         <>
-          <RigorPanel projectId={only.id} />
-          <HumanTouchPanel projectId={only.id} />
-          <CardTypesPanel projectId={only.id} />
+          <LiveList projects={all} filter={filter ?? null} />
+          <Goals shown={shown} linkedGoalId={linkedGoalId} />
         </>
-      ) : shown.length > 1 ? (
-        <Text size="sm" c="dimmed">
-          Choose a project to see its work per rigor and how often a person was needed in it.
-        </Text>
-      ) : null}
+      )}
     </Stack>
   );
 }
 
-/**
- * The project's pass while it holds pages (Workbench spec §4.1): its name and how many pages wait on
- * the builder, opening the Workbench. The group selects the project before the click lands.
- */
-function ProjectPassLine({ projectId }: { readonly projectId: ProjectId }) {
-  const live = useLivePass(projectId).data;
-  const inbox = useInbox().data ?? [];
-  const now = useNow();
-  const navigate = useNavigate();
-  if (live == null || !passHoldsTasks(live.pass.state)) return null;
+/** One project's figures; across every project they would mix rigors and teams, so it asks for one. */
+function Metrics({ shown }: { readonly shown: readonly ProjectViewDto[] }) {
+  const only = shown.length === 1 ? shown[0] : undefined;
+  if (only === undefined) {
+    return (
+      <Text size="sm" c="dimmed">
+        Choose a project to see its work per rigor and how often a person was needed in it.
+      </Text>
+    );
+  }
   return (
-    <PassLine
-      view={live}
-      inbox={inbox}
-      now={now}
-      onOpen={() => {
-        void navigate({ to: '/workbench' });
-      }}
-    />
+    <>
+      <RigorPanel projectId={only.id} />
+      <HumanTouchPanel projectId={only.id} />
+      <CardTypesPanel projectId={only.id} />
+    </>
   );
 }
 
 /**
- * One project's goals under its name. Acting on anything in it makes that project the selected one
- * first, so a link into the Board or Plan opens in the project the goal belongs to.
+ * The goals of the projects shown, under their project's name; nothing at all while no project has one,
+ * so a builder who doesn't use goals never reads about them.
  */
-function ProjectGoals({
-  project,
+function Goals({
+  shown,
   linkedGoalId,
 }: {
-  readonly project: ProjectViewDto;
+  readonly shown: readonly ProjectViewDto[];
   readonly linkedGoalId: GoalId | undefined;
 }) {
+  const { client } = useDaemon();
   const { select } = useSelectedProject();
-  const goals = useGoals(project.id);
-  const headingId = useId();
+  const lists = useQueries({ queries: shown.map((p) => goalsQueryOptions(client, p.id)) });
+  const withGoals = shown.flatMap((project, i) => {
+    const list = lists[i]?.data;
+    return list === undefined || list.goals.length === 0 ? [] : [{ project, list }];
+  });
+  const failed = lists.find((q) => q.isError)?.error;
+  if (withGoals.length === 0 && failed == null) return null;
   return (
-    // Capture runs before the click reaches a link or row, so the project is chosen before it navigates.
-    <Box
-      role="group"
-      aria-labelledby={headingId}
-      onClickCapture={() => {
-        select(project.id);
-      }}
-    >
-      <Stack gap="xs">
-        <Group justify="space-between" wrap="nowrap">
-          <Group gap="sm" wrap="nowrap">
-            <ProjectTile name={project.name} />
-            <Title order={3} id={headingId}>
+    <Section label="Goals" count={withGoals.reduce((n, g) => n + g.list.goals.length, 0)}>
+      {failed == null ? null : (
+        <Alert color="red" title="Couldn't load the goals">
+          {failed.message}
+        </Alert>
+      )}
+      {withGoals.map(({ project, list }) => (
+        // Capture runs before a click reaches a link inside the goal, so its project is chosen first.
+        <Stack
+          key={project.id}
+          gap={4}
+          onClickCapture={() => {
+            select(project.id);
+          }}
+        >
+          <Group gap={6} px={12} wrap="nowrap">
+            <ProjectTile name={project.name} size={14} />
+            <Text size="xs" c="dimmed">
               {project.name}
-            </Title>
+            </Text>
           </Group>
-          {/* Plan Work opens a new conversation in this project (Shape spec §4). */}
-          <Button component={Link} to="/shape" variant="default" size="xs">
-            Plan Work
-          </Button>
-        </Group>
-        <ProjectPassLine projectId={project.id} />
-        {goals.isError ? (
-          <Alert color="red" title="Couldn't load the goals">
-            {goals.error.message}
-          </Alert>
-        ) : null}
-        {goals.isLoading ? (
-          <PageLoading shape={PageLoadingShape.List} rows={2} label="Loading goals" />
-        ) : null}
-        {goals.isSuccess && goals.data.goals.length === 0 ? (
-          <Text size="sm" c="dimmed">
-            Goals are outcomes 10db pursues across many tasks. Plan Work to start one, or ask Claude
-            Code to with the 10db-task skill.
-          </Text>
-        ) : null}
-        {goals.isSuccess ? (
-          <GoalList project={project} list={goals.data} linkedGoalId={linkedGoalId} />
-        ) : null}
-      </Stack>
-    </Box>
+          <GoalList project={project} list={list} linkedGoalId={linkedGoalId} />
+        </Stack>
+      ))}
+    </Section>
   );
 }

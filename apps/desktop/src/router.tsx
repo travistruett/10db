@@ -10,7 +10,7 @@ import { AppError } from './shell/app-error';
 import { AppLayout } from './shell/app-layout';
 import { ViewBoundary } from './shell/view-boundary';
 import { BoardView } from './views/board/board-view';
-import { FactoryView } from './views/factory/factory-view';
+import { FactoryMode, FactoryView } from './views/factory/factory-view';
 import { inboxSearch } from './views/inbox/inbox-search';
 import { InboxView } from './views/inbox/inbox-view';
 import { KnowledgeView } from './views/knowledge/knowledge-view';
@@ -151,9 +151,16 @@ const factoryRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/factory',
   // `goal` opens that goal's row, so the Board's "Open in Factory" lands on the goal expanded.
-  validateSearch: (search: Record<string, unknown>): { goal?: GoalId; project?: ProjectId } => {
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { goal?: GoalId; project?: ProjectId; view?: FactoryMode } => {
     const goal = GoalId.safeParse(search['goal']);
-    return { ...(goal.success ? { goal: goal.data } : {}), ...projectFilter(search) };
+    return {
+      ...(goal.success ? { goal: goal.data } : {}),
+      ...projectFilter(search),
+      // Only Metrics is named in the link; Live is the page without it.
+      ...(search['view'] === FactoryMode.Metrics ? { view: FactoryMode.Metrics } : {}),
+    };
   },
   component: FactoryPage,
 });

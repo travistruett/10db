@@ -1,6 +1,6 @@
 import { GoalDigestDto, GoalListDto, type GoalId, type ProjectId } from '@10db/contracts';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { readJson } from './client';
+import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { readJson, type DaemonClient } from './client';
 import { useDaemon } from './provider';
 
 export const goalKeys = {
@@ -9,9 +9,22 @@ export const goalKeys = {
 } as const;
 
 /**
- * The project's goals with their digests and Not in a goal group. Reading it leaves every "last opened"
- * mark alone, so the list can refresh on each event without closing a goal's window.
+ * One project's goals with their digests, as a query a view can read for several projects at once
+ * (`useQueries`). Reading it leaves every "last opened" mark alone, so the list can refresh on each event
+ * without closing a goal's window.
  */
+export function goalsQueryOptions(client: DaemonClient, projectId: ProjectId) {
+  return queryOptions({
+    queryKey: goalKeys.list(projectId),
+    queryFn: async () =>
+      readJson(
+        await client.projects[':projectId'].goals.$get({ param: { projectId } }),
+        GoalListDto,
+      ),
+  });
+}
+
+/** One project's goals (`goalsQueryOptions`); none while no project is chosen. */
 export function useGoals(projectId: ProjectId | null) {
   const { client } = useDaemon();
   return useQuery({
