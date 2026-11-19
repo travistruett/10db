@@ -1,0 +1,26 @@
+/* The dot's hover area is wider than the dot, so it is easy to rest on. Labelled it ends the row as a count
+   does; icons only it sits on the icon's top-right corner, as the compact counts do. */
+.target {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.target[data-compact] .dot {
+  box-shadow: 0 0 0 2px var(--mantine-color-default);
+}
+
+.dot[data-tone='busy'] {
+  background: var(--mantine-color-yellow-filled);
+}
+
+.dot[data-tone='holding'] {
+  background: var(--mantine-color-orange-filled);
+}
