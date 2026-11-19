@@ -7,9 +7,9 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
   across the window, bg1 with a hairline under it, is the rail's part (the traffic lights), the panel's head and the
   content's title row (`decisions/2026-11-18-the-window-has-one-bar-and-one-sidebar-button.md`). Below it the
   sidebar (a rail and a panel, bg1) and the content (bg0). There is no inset card; hairlines divide the columns. The
-  labelled rail's runs up through the bar, as the panel's does; the icons-only rail's starts under it, since the
+  labelled rail's runs up through the bar, as the panel's does, as a short divider centred in the bar with 12 px above and below (`--shell-bar-divider-inset`), then on under it; the icons-only rail's starts under it, since the
   lights and the sidebar button are wider than that rail. The traffic lights sit at y 20, centred on the bar with
-  the button. Lists in the panel and the rail scroll without a scrollbar. Three tones step down: the bar and the rail bg1, the panel half way to bg0, the
+  the button. Lists in the panel and the rail scroll without a scrollbar. The content has the one inner shadow, faint and 3 px wide, in a darker shade of its own tone; a view never draws its own edge shade. Three tones step down: the bar and the rail bg1, the panel half way to bg0, the
   content bg0. The rail's foot holds the status controls and Settings; the theme and keep-awake are set in Settings ›
   App. The window never scrolls; the content is exactly
   the window's height and scrolls inside it, and it is its own stacking context so a sheet always stands over it.
@@ -22,7 +22,7 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
   preference and which sheet is open (`shellLayout` in `shell-layout.ts`; bands at 1000
   and 640 px). The window's width, not a container's, decides it (`useShellBand`), because the frame decides what
   its content gets. The labels preference is remembered (`sidebar-labels.ts`, `tendb.shell.labels`).
-- One sidebar button ("Toggle sidebar", x 88, y 8, on every section, never moved) does what ⇧⌘S does: it flips
+- One sidebar button ("Toggle sidebar", y 8, on every section: x 88 beside the lights, or ending the rail's part of the bar over a labelled rail column, its icon level with the counts) does what ⇧⌘S does: it flips
   labels and icons when wide and opens the whole sidebar as a sheet otherwise. The bar's text starts at 128 px or
   later (`BAR_START`): the title row's padding and the panel head's `--shell-bar-start` clear the lights and the
   button where the rail is narrower than them. A wide window always draws a section's panel as a column, resized
