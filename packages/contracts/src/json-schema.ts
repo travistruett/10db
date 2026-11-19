@@ -231,6 +231,7 @@ import {
 } from './knowledge-api';
 import { SelfUpdateInput, SelfUpdateStatusDto, SelfUpdateWaitInput } from './self-update';
 import { AdmissionDto, AdmissionHoldDto, CapacitySettingsDto } from './admission';
+import { StatusDto, StatusLine } from './status';
 import { McpToolInputs, McpToolName, McpToolOutputs } from './mcp-tools';
 import { ModelProfileDto, ModelProfilePatch } from './model-profiles';
 import { PickerProposalDto } from './picker';
@@ -405,6 +406,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'self-update-wait-input': SelfUpdateWaitInput,
   'admission-dto': AdmissionDto,
   'admission-hold-dto': AdmissionHoldDto,
+  'status-dto': StatusDto,
+  'status-line': StatusLine,
   'capacity-settings-dto': CapacitySettingsDto,
   'lane-permissions-dto': LanePermissionsDto,
   'trust-switches': TrustSwitches,

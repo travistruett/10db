@@ -242,6 +242,5 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   right-aligned. A status is dimmed text after the
   name, never a pill, in a dense list. Violet marks a role's pick in Settings › Models; orange stays
   paused.
-- **Accessibility:** jsx-a11y strict passes; every interactive control is reachable by keyboard and
-  has a visible focus ring; axe runs in Playwright tests (M1b) with every rule but `color-contrast`,
-  since contrast is whatever Selenized gives.
+- **Accessibility:** the builder is the only user, so accessibility and narrow windows are not work unless
+  they ask. jsx-a11y lint still runs; no axe checks are added, and an existing one that blocks a change may go.

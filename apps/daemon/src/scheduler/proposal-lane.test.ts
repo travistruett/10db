@@ -183,6 +183,9 @@ describe('a lane for a task filed from a proposal', () => {
     write('src/ui/page.ts');
     clock.advance(500);
     await watcher.flush();
-    expect(strays().map((i) => i.body)).toEqual(['src/ui/page.ts']);
+    // A stamped card ends its body with the short stamp of the version it shows.
+    expect(strays().map((i) => i.body.replace(/\nVersion [0-9a-f]{12}$/, ''))).toEqual([
+      'src/ui/page.ts',
+    ]);
   });
 });

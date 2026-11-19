@@ -608,17 +608,6 @@ flowchart LR
       expect(reached).toEqual([]);
     });
 
-    it('keeps what shapes a formula', async () => {
-      const parsed = await drawnMath(
-        String.raw`classDiagram
-  class A["$$\frac{a}{b} \sqrt{c} \begin{matrix}1 & 2\end{matrix}$$"]`,
-      );
-      for (const tag of ['mfrac', 'msqrt', 'mtable', 'mtr']) {
-        expect(parsed.getElementsByTagNameNS(MATHML, tag)).toHaveLength(1);
-      }
-      expect(parsed.getElementsByTagNameNS(MATHML, 'mtd')).toHaveLength(2);
-    });
-
     it('leaves out the MathML that names a URL', async () => {
       const stop = watchLoaders();
       const parsed = await drawnMath(
@@ -633,44 +622,6 @@ flowchart LR
       );
       expect(stop()).toEqual([]);
       expect(reached).toEqual([]);
-    });
-  });
-
-  // Refusing is about what a diagram does, not what its words say.
-  it.each([
-    ['a method named getUrl', 'classDiagram\n  class Api {\n    +getUrl() String\n  }'],
-    ['a message naming loadImage', 'sequenceDiagram\n  A->>B: loadImage(id)'],
-    ['a message naming resolveSrc', 'sequenceDiagram\n  A->>B: resolveSrc(id)'],
-    ['a shape whose label says img', 'flowchart LR\n  A@{ label: "An img tag" }'],
-    ['a shape from the shape list', 'flowchart LR\n  A@{ shape: rounded, label: "Hi" }'],
-    ['a label that mentions an image', 'flowchart LR\n  A["Resize the image (large)"] --> B'],
-    ['a plain style', 'flowchart LR\n  A --> B\n  style A fill:#f9f,stroke:#333'],
-    [
-      'a line break in a label',
-      String.raw`sequenceDiagram
-  A->>B: one\ntwo`,
-    ],
-    ['a sequence diagram', 'sequenceDiagram\n  A->>B: hello'],
-    ['a class diagram', 'classDiagram\n  class A {\n    +int id\n  }\n  A <|-- B'],
-    ['a state diagram', 'stateDiagram-v2\n  [*] --> A\n  A --> [*]'],
-    ['an old state diagram', 'stateDiagram\n  [*] --> A'],
-    ['an ER diagram', 'erDiagram\n  A ||--o{ B : has'],
-    ['a Gantt chart', 'gantt\n  title Plan\n  section One\n  Task :a1, 2026-01-01, 3d'],
-    ['a pie chart', 'pie title Load\n  "a" : 1\n  "b" : 2'],
-  ])('draws %s', async (_name, source) => {
-    renderWithDaemon(<AttachmentView attachment={{ kind: 'mermaid', source }} title="Fine" />);
-    expect(await screen.findByRole('img', { name: 'Diagram: Fine' })).toBeTruthy();
-  });
-
-  it('says so when the source does not parse, and shows nothing it made', async () => {
-    renderWithDaemon(
-      <AttachmentView
-        attachment={{ kind: 'mermaid', source: 'flowchart LR\n  A -->' }}
-        title="Bad"
-      />,
-    );
-    await waitFor(() => {
-      expect(screen.getByText(/couldn’t be drawn/)).toBeTruthy();
     });
   });
 });

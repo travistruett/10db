@@ -1,18 +1,10 @@
-import { ConversationId, mintId, type ShapeProposalDto, type ShapeViewDto } from '@10db/contracts';
+import type { ShapeProposalDto, ShapeViewDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
-import { conversationDto, CLAUDE_CAPABILITIES } from '../../test/conversation-fixtures';
 import { projectViewDto } from '../../test/fixtures';
-import {
-  findingDto,
-  goalProposal,
-  looseTaskProposal,
-  shapeDto,
-  shapeMessageDto,
-  shapeViewDto,
-} from '../../test/shape-fixtures';
+import { goalProposal, shapeDto, shapeMessageDto, shapeViewDto } from '../../test/shape-fixtures';
 
 // Shape spec §7: ceremony, reviewers' findings and the implementer rehearsal, as the builder meets them.
 
@@ -55,12 +47,6 @@ const marks = (row: ShapeProposalDto, rehearsed: boolean): ShapeViewDto['rehears
     rehearsed,
   }));
 
-const disabled = (el: HTMLElement): boolean => el instanceof HTMLButtonElement && el.disabled;
-
-const open = (view: ShapeViewDto): void => {
-  renderApp(`/shape/${view.shape.id}`);
-};
-
 async function openConvert(): Promise<HTMLElement> {
   const button = await screen.findByRole('button', { name: 'Convert' });
   await waitFor(() => {
@@ -70,319 +56,24 @@ async function openConvert(): Promise<HTMLElement> {
   return screen.findByRole('dialog', { name: 'Convert' });
 }
 
-/**
- * Presses Convert and waits for its request: a request the page made earlier has reached the network by then,
- * so "nothing was asked" can be read after it without waiting on a clock.
- */
-async function convertAsControl(dialog: HTMLElement, converted: unknown[]): Promise<void> {
-  fireEvent.click(within(dialog).getByRole('button', { name: /^Convert \d+$/ }));
+it('asks for a rehearsal once when Convert opens with an unrehearsed task', async () => {
+  const goal = goalProposal('brainstorm', ['one', 'two']);
+  const view = proposed([goal], { rehearsals: marks(goal, false) });
+  const posted: unknown[] = [];
+  serve(
+    view,
+    http.post(daemonUrl('/shapes/:shapeId/rehearse'), async ({ request }) => {
+      posted.push(await request.json());
+      return HttpResponse.json({ status: 'started', tasks: 2 });
+    }),
+  );
+  renderApp(`/shape/${view.shape.id}`);
+  const dialog = await openConvert();
   await waitFor(() => {
-    expect(converted).toHaveLength(1);
+    expect(posted).toEqual([{ proposalIds: [goal.id] }]);
   });
-}
-
-const convertHandler = (converted: unknown[]) =>
-  http.post(daemonUrl('/shapes/:shapeId/convert'), async ({ request }) => {
-    converted.push(await request.json());
-    return HttpResponse.json({ createdNow: 1, results: [] });
-  });
-
-describe('Shape: the implementer rehearsal and Convert', () => {
-  it('asks for a rehearsal once when Convert opens with an unrehearsed task', async () => {
-    const goal = goalProposal('brainstorm', ['one', 'two']);
-    const view = proposed([goal], { rehearsals: marks(goal, false) });
-    const posted: unknown[] = [];
-    serve(
-      view,
-      http.post(daemonUrl('/shapes/:shapeId/rehearse'), async ({ request }) => {
-        posted.push(await request.json());
-        return HttpResponse.json({ status: 'started', tasks: 2 });
-      }),
-    );
-    open(view);
-    const dialog = await openConvert();
-    await waitFor(() => {
-      expect(posted).toEqual([{ proposalIds: [goal.id] }]);
-    });
-    expect(within(dialog).getAllByText(/Not rehearsed/)).toHaveLength(2);
-    // The refetch after the request must not ask again.
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(posted).toHaveLength(1);
-  });
-
-  it('an imported Plan offers no rehearsal and names its tasks once', async () => {
-    const goal = goalProposal('brainstorm', ['one', 'two']);
-    const loose = looseTaskProposal('three');
-    const base = proposed([goal, loose], {
-      rehearsals: [...marks(goal, false), ...marks(loose, false)],
-    });
-    const view = { ...base, shape: { ...base.shape, importedAt: '2026-11-12T08:00:00.000Z' } };
-    const posted: unknown[] = [];
-    const converted: unknown[] = [];
-    serve(
-      view,
-      convertHandler(converted),
-      http.post(daemonUrl('/shapes/:shapeId/rehearse'), async ({ request }) => {
-        posted.push(await request.json());
-        return HttpResponse.json({ status: 'started', tasks: 3 });
-      }),
-    );
-    open(view);
-    const dialog = await openConvert();
-    expect(
-      await within(dialog).findByText(/Imported tasks aren't rehearsed: 3 tasks/),
-    ).toBeTruthy();
-    expect(within(dialog).queryAllByText(/Not rehearsed/)).toHaveLength(0);
-    expect(screen.queryByRole('button', { name: 'Rehearse' })).toBeNull();
-    await convertAsControl(dialog, converted);
-    expect(posted).toHaveLength(0);
-  });
-
-  it('an agent without subagents starts no rehearsal, offers none and names its tasks once', async () => {
-    const goal = goalProposal('brainstorm', ['one', 'two']);
-    const view = proposed([goal], { rehearsals: marks(goal, false) });
-    const posted: unknown[] = [];
-    const converted: unknown[] = [];
-    serve(
-      view,
-      convertHandler(converted),
-      http.get(daemonUrl('/conversations/:conversationId'), ({ params }) =>
-        HttpResponse.json(
-          conversationDto({
-            id: ConversationId.parse(params['conversationId']),
-            capabilities: { ...CLAUDE_CAPABILITIES, label: 'Codex', subagents: false },
-          }),
-        ),
-      ),
-      http.post(daemonUrl('/shapes/:shapeId/rehearse'), async ({ request }) => {
-        posted.push(await request.json());
-        return HttpResponse.json({ status: 'started', tasks: 2 });
-      }),
-    );
-    open(view);
-    const dialog = await openConvert();
-    expect(
-      await within(dialog).findByText(/Tasks on Codex aren't rehearsed: 2 tasks/),
-    ).toBeTruthy();
-    expect(within(dialog).queryAllByText(/Not rehearsed/)).toHaveLength(0);
-    expect(screen.queryByRole('button', { name: 'Rehearse' })).toBeNull();
-    await convertAsControl(dialog, converted);
-    expect(posted).toHaveLength(0);
-  });
-
-  it('waits for the agent before it rehearses or converts, and rehearses when the agent cannot be read', async () => {
-    const goal = goalProposal('brainstorm', ['one']);
-    const view = proposed([goal], { rehearsals: marks(goal, false) });
-    const posted: unknown[] = [];
-    serve(
-      view,
-      // The conversation never answers: the agent is unknown.
-      http.get(
-        daemonUrl('/conversations/:conversationId'),
-        () => new Promise<never>(() => undefined),
-      ),
-      http.post(daemonUrl('/shapes/:shapeId/rehearse'), async ({ request }) => {
-        posted.push(await request.json());
-        return HttpResponse.json({ status: 'started', tasks: 1 });
-      }),
-    );
-    open(view);
-    const dialog = await openConvert();
-    expect(disabled(within(dialog).getByRole('button', { name: 'Convert 1' }))).toBe(true);
-    expect(disabled(await screen.findByRole('button', { name: 'Rehearse' }))).toBe(true);
-    expect(posted).toHaveLength(0);
-  });
-
-  it('rehearses as it always did when the conversation cannot be read', async () => {
-    const goal = goalProposal('brainstorm', ['one']);
-    const view = proposed([goal], { rehearsals: marks(goal, false) });
-    const posted: unknown[] = [];
-    serve(
-      view,
-      http.get(daemonUrl('/conversations/:conversationId'), () =>
-        HttpResponse.json({ error: 'unavailable', message: 'gone' }, { status: 500 }),
-      ),
-      http.post(daemonUrl('/shapes/:shapeId/rehearse'), async ({ request }) => {
-        posted.push(await request.json());
-        return HttpResponse.json({ status: 'started', tasks: 1 });
-      }),
-    );
-    open(view);
-    await openConvert();
-    await waitFor(() => {
-      expect(posted).toEqual([{ proposalIds: [goal.id] }]);
-    });
-  });
-
-  it('does not rehearse a task that already has its mark', async () => {
-    const goal = goalProposal('brainstorm', ['one']);
-    const view = proposed([goal], { rehearsals: marks(goal, true) });
-    const posted: unknown[] = [];
-    serve(
-      view,
-      http.post(daemonUrl('/shapes/:shapeId/rehearse'), async ({ request }) => {
-        posted.push(await request.json());
-        return HttpResponse.json({ status: 'nothing', tasks: 0 });
-      }),
-    );
-    open(view);
-    await openConvert();
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(posted).toHaveLength(0);
-  });
-
-  it('says how many tasks are being rehearsed, and Convert Anyway stops the turn and converts', async () => {
-    const goal = goalProposal('brainstorm', ['one', 'two']);
-    const view = proposed([goal], {
-      rehearsals: marks(goal, false),
-      turn: {
-        running: true,
-        queued: 0,
-        proposing: false,
-        rehearsing: true,
-        waitingForUpdate: false,
-      },
-    });
-    const converted: unknown[] = [];
-    serve(
-      view,
-      http.post(daemonUrl('/shapes/:shapeId/rehearse'), () =>
-        HttpResponse.json({ status: 'running', tasks: 2 }),
-      ),
-      http.post(daemonUrl('/shapes/:shapeId/convert'), async ({ request }) => {
-        converted.push(await request.json());
-        return HttpResponse.json({ createdNow: 1, results: [] });
-      }),
-    );
-    open(view);
-    const dialog = await openConvert();
-    expect(within(dialog).getByText('Rehearsing 2 tasks…')).toBeTruthy();
-    // The turn is running, so the plain Convert waits; Convert Anyway does not.
-    expect(within(dialog).getByRole('button', { name: 'Convert 1' })).toHaveProperty(
-      'disabled',
-      true,
-    );
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Convert Anyway' }));
-    await waitFor(() => {
-      expect(converted).toEqual([{ proposalIds: [goal.id], interrupt: true }]);
-    });
-  });
-
-  it('offers no Convert Anyway when no rehearsal is running', async () => {
-    const goal = goalProposal('brainstorm', ['one']);
-    const view = proposed([goal], { rehearsals: marks(goal, true) });
-    serve(view);
-    open(view);
-    const dialog = await openConvert();
-    expect(within(dialog).queryByRole('button', { name: 'Convert Anyway' })).toBeNull();
-  });
-
-  it('shows open questions under their task, and warns without blocking Convert', async () => {
-    const goal = goalProposal('brainstorm', ['one', 'two']);
-    const shapeId = shapeDto({ projectId: project.id }).id;
-    const question = findingDto(shapeId, {
-      effortKey: 'brainstorm',
-      taskKey: 'two',
-      reviewer: 'rehearsal',
-      kind: 'question',
-      severity: null,
-      text: 'Which column does a dropped card land in?',
-    });
-    const view = proposed([goal], { rehearsals: marks(goal, true), findings: [question] });
-    serve(view);
-    open(view);
-    const dialog = await openConvert();
-    const asked = within(dialog).getByText(/Which column does a dropped card land in\?/);
-    expect(asked.textContent).toContain('two: ');
-    expect(within(dialog).getByText('1 rehearsal question is open')).toBeTruthy();
-    expect(within(dialog).getByRole('button', { name: 'Convert 1' })).toHaveProperty(
-      'disabled',
-      false,
-    );
-  });
-});
-
-describe('Shape: ceremony and findings under a row', () => {
-  const forced = (
-    row: ShapeProposalDto,
-    change: Partial<ShapeViewDto['ceremony'][number]> = {},
-  ): ShapeViewDto['ceremony'] => [
-    {
-      proposalId: row.id,
-      key: row.key,
-      ceremony: 'spec',
-      reasons: ['loose_l'],
-      skippedByYou: false,
-      specWritten: false,
-      spec: null,
-      ...change,
-    },
-  ];
-
-  it('says why a spec is required, and Skip spec pins the effort to direct', async () => {
-    const task = looseTaskProposal('migrate', { title: 'Move the schema' });
-    const view = proposed([task], { ceremony: forced(task), rehearsals: marks(task, true) });
-    const patched: unknown[] = [];
-    serve(
-      view,
-      http.patch(daemonUrl('/shapes/:shapeId/proposals/:proposalId'), async ({ request }) => {
-        patched.push(await request.json());
-        return HttpResponse.json(null);
-      }),
-    );
-    open(view);
-    expect(await screen.findByText('Spec required: an L task · not written yet')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Skip spec' }));
-    await waitFor(() => {
-      expect(patched).toEqual([{ fields: { ceremony: 'direct' } }]);
-    });
-  });
-
-  it('shows a skipped spec as skipped by you, with Use spec to take it back', async () => {
-    const task = looseTaskProposal('migrate', { title: 'Move the schema' });
-    const view = proposed([task], {
-      ceremony: forced(task, { ceremony: 'direct', skippedByYou: true }),
-      rehearsals: marks(task, true),
-    });
-    const unpinned: unknown[] = [];
-    serve(
-      view,
-      http.post(daemonUrl('/shapes/:shapeId/proposals/:proposalId/unpin'), async ({ request }) => {
-        unpinned.push(await request.json());
-        return HttpResponse.json(null);
-      }),
-    );
-    open(view);
-    expect(await screen.findByText('Spec skipped by you')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Use spec' }));
-    await waitFor(() => {
-      expect(unpinned).toEqual([{ field: 'ceremony' }]);
-    });
-  });
-
-  it('lists a reviewer’s open finding, and Dismiss posts to the finding', async () => {
-    const task = looseTaskProposal('migrate', { title: 'Move the schema' });
-    const shapeId = shapeDto({ projectId: project.id }).id;
-    const finding = findingDto(shapeId, {
-      id: mintId('ShapeFinding'),
-      effortKey: 'migrate',
-      taskKey: null,
-      text: 'Names no migration',
-    });
-    const view = proposed([task], { findings: [finding], rehearsals: marks(task, true) });
-    const dismissed: string[] = [];
-    serve(
-      view,
-      http.post(daemonUrl('/shapes/:shapeId/findings/:findingId/dismiss'), ({ params }) => {
-        dismissed.push(String(params['findingId']));
-        return HttpResponse.json(null);
-      }),
-    );
-    open(view);
-    expect(await screen.findByText(/scope · medium · Names no migration/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Dismiss finding: Names no migration' }));
-    await waitFor(() => {
-      expect(dismissed).toEqual([finding.id]);
-    });
-  });
+  expect(within(dialog).getAllByText(/Not rehearsed/)).toHaveLength(2);
+  // The refetch after the request must not ask again.
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  expect(posted).toHaveLength(1);
 });

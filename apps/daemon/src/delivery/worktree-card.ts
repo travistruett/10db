@@ -8,6 +8,7 @@ import {
 import { getBatch, getBatchRow, getProject, patchBatch } from '@10db/db';
 import { z } from 'zod';
 import { returnCheckout } from './checkout-return';
+import { switchToBatchBranch } from './checkout-switch';
 import {
   CheckoutChoice,
   keptWorktreeKey,
@@ -36,6 +37,7 @@ const Offer = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('stray'), path: z.string() }),
   z.object({ kind: z.literal('merged-hand-made') }),
   z.object({ kind: z.literal('spotlight'), path: z.string() }),
+  z.object({ kind: z.literal('branch'), batchId: BatchId }),
   z.object({
     kind: z.literal('checkout'),
     batchId: BatchId,
@@ -57,6 +59,8 @@ const message = (error: unknown): string =>
  *   doesn't list as a worktree (only one under the worktree root). Both run in the project's queue; one
  *   that fails raises a new card saying why, with the same offer. An orphan that is no longer one (git
  *   doesn't list it, a batch holds it again, 10db no longer has it locked) is left, and a card says nothing was removed and why.
+ * - Switch back on a wrong-branch card puts the checkout of an open or failed batch on the batch's branch
+ *   (`switchToBatchBranch`).
  * - Switch back, or Switch to the base branch, puts the shared checkout on the place the batch found it
  *   at (or on the batch's base branch) and raises the card for whatever is still in the way.
  *
@@ -178,6 +182,14 @@ export function createWorktreeCardAnswers(
       case 'spotlight': {
         if (answer.choice !== WorktreeChoice.KeepSpotlightOut) return;
         keepHandMadeFolderOutOfSpotlight(ctx, getProject(ctx.state.db, item.projectId));
+        return;
+      }
+      case 'branch': {
+        if (answer.choice !== CheckoutChoice.SwitchBack) return;
+        const batch = getBatch(ctx.state.db, offer.batchId);
+        ctx.jobs.run(jobKey(batch, JobQueue.Ship), (signal) =>
+          switchToBatchBranch(ctx, offer.batchId, { signal }),
+        );
         return;
       }
       case 'checkout': {

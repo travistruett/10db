@@ -1,5 +1,6 @@
 import type {
   AdmissionDto,
+  StatusDto,
   AgentSkillInfo,
   AgentSkillStatus,
   CapacitySettingsDto,
@@ -769,6 +770,8 @@ export interface ApiServices extends PlanRecordServices {
   setCapacitySettings(input: CapacitySettingsDto): CapacitySettingsDto;
   /** What holds new lanes and gates now, for Factory, and the readings behind it. */
   admission(): AdmissionDto;
+  /** The holds the header's status line shows now. */
+  status(): StatusDto;
   /** Whether lanes decide routine permissions with Claude Code's auto mode; read when each session starts. */
   lanePermissions(): LanePermissionsDto;
   setLanePermissions(autoMode: boolean): LanePermissionsDto;

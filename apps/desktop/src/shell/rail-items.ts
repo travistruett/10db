@@ -13,6 +13,7 @@ export type RailSection = (typeof RailSection)[keyof typeof RailSection];
 
 /** The status controls at the rail's foot, which are not sections. */
 export const RailControl = {
+  Status: 'status',
   Download: 'download',
   Daemon: 'daemon',
   KeepAwake: 'keep-awake',
@@ -68,6 +69,7 @@ export const RAIL_ORDER: readonly RailEntry[] = [
   item(RailSection.Workbench),
   item(RailSection.Knowledge),
   { kind: 'spacer' },
+  { kind: 'control', control: RailControl.Status },
   { kind: 'control', control: RailControl.Download },
   { kind: 'control', control: RailControl.Daemon },
   { kind: 'control', control: RailControl.KeepAwake },

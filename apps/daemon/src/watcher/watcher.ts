@@ -6,6 +6,7 @@ import {
   EventType,
   InboxKind,
   InboxState,
+  type InboxItemId,
   LANE_STATES,
   WorkstreamId,
   WorkstreamState,
@@ -22,7 +23,9 @@ import {
   passAreasOf,
   getAppSetting,
   getBatch,
+  getInboxItem,
   getProject,
+  findOpenByFoldKey,
   getWorkstream,
   getWorkstreamRow,
   listInbox,
@@ -47,7 +50,20 @@ import {
   isInsideClaudeCodeBookkeeping,
   type Git,
 } from '../git';
-import type { InboxService } from '../inbox';
+import type { FlagInput, InboxService } from '../inbox';
+import {
+  isTrusted,
+  readSmallFile,
+  sensitiveDetail,
+  shaOf,
+  shortSha,
+  stampDetail,
+  stampFile,
+  stampOf,
+  trustedWrites,
+  TrustChoice,
+  trustOptions,
+} from '../inbox';
 import type { Logger } from '../log';
 import {
   ANSWERED_CARDS_READ,
@@ -65,10 +81,13 @@ import { filesUnderBounded as filesUnder } from './dir-files';
 import { accountedAt, passWrites, type PassLane } from './pass-writes';
 import {
   bulkFoldKey,
+  changedConfigKeys,
   findForeignClaimWrites,
   findStrays,
   foreignBulkFoldKey,
   isAlwaysIgnored,
+  isConfigFile,
+  isLefthookChecksum,
   isSensitivePath,
   splitSensitive,
   type ClaimHolder,
@@ -84,6 +103,20 @@ const WATCH_BATCH_MS = 500;
  */
 const TURN_END_SLACK_MS = 5_000;
 const BULK_LISTED = 20;
+/** A stamped card's last line names the version it shows; what the card says about the write is above it. */
+const withoutVersion = (body: string): string => body.replace(/\nVersion [0-9a-f]{12}$/, '');
+const GIT_CONFIG_PATH = '.git/config';
+/** The most a checksum or config file read for these rules may hold; a bigger file is never read. */
+const MAX_BOOKKEEPING_READ = 4 * 1024 * 1024;
+/** The checksum is a hash and a timestamp, so anything bigger is not one. */
+const MAX_CHECKSUM_BYTES = 256;
+
+/** A regular file's text, or null when it is missing, a link, a FIFO, a directory or bigger than `maxBytes`. */
+function readSmallText(path: string, maxBytes: number): string | null {
+  const read = readSmallFile(path, maxBytes);
+  return read.kind === 'file' ? read.bytes.toString('utf8') : null;
+}
+
 /** The app setting that holds the writes a permission card excused, so a restart keeps them. */
 const EXCUSED_WRITES_SETTING = 'watcher.excusedWrites';
 /** A write a lane's permission card allowed, as it looked when excused. */
@@ -190,6 +223,16 @@ export function createWatcher(deps: {
     }
   >();
   const pending = new Map<string, Set<string>>();
+  // Each checkout's config files (`.git/config`, a worktree's `config.worktree`): the text as the builder
+  // last decided it (`baseline`), and the text its open card showed (`carded`), so a change is told from
+  // what git itself writes and a repeat write to a carded config still names the keys of the first.
+  interface SeenConfig {
+    baseline: string;
+    carded: string | null;
+    /** The open card that showed `carded`, once the batch has raised it. */
+    cardId: InboxItemId | null;
+  }
+  const seenConfigs = new Map<string, Map<string, SeenConfig>>();
   let timer: Timer | null = null;
   // Work queued per checkout (`onRoot`), keyed by the checkout's path; a checkout with nothing queued has none.
   const queues = new Map<string, Promise<void>>();
@@ -207,6 +250,79 @@ export function createWatcher(deps: {
     watched.get(root)?.handle.close();
     watched.delete(root);
     pending.delete(root);
+    seenConfigs.delete(root);
+  }
+
+  function configTextOf(root: string, rel: string): string | null {
+    return readSmallText(join(root, rel), MAX_BOOKKEEPING_READ);
+  }
+
+  /**
+   * What a config file's write changed, for its card: the keys that differ from the config as it stood at the
+   * last decision, leaving out what git writes for worktrees, upstreams and branches; the sha256 of the exact
+   * text that was diffed, which the card's Trust answer checks; null when nothing needs a card. A baseline
+   * advances only while no card for the path is open, so a second write to a carded config still names the
+   * first one's keys. A config with no baseline (it appeared later, or could not be read when the checkout was
+   * first watched) is compared with an empty one, so every key in it is named. A config that can't be read as
+   * a small regular file is carded as unreadable, with no sha and so no Trust choice.
+   */
+  async function configChanges(
+    project: ProjectDto,
+    site: Site,
+    rel: string,
+  ): Promise<{ note: string; sha: string | null } | null> {
+    const read = readSmallFile(join(site.root, rel), MAX_BOOKKEEPING_READ);
+    if (read.kind === 'missing') return null;
+    if (read.kind === 'unreadable')
+      return { note: 'Could not be read: not a small regular file', sha: null };
+    const text = read.bytes.toString('utf8');
+    const sha = shaOf(read.bytes);
+    const seen = seenConfigs.get(site.root) ?? new Map<string, SeenConfig>();
+    seenConfigs.set(site.root, seen);
+    // A worktree's own config file starts empty, and so does one first seen after the checkout was watched.
+    const entry = seen.get(rel) ?? { baseline: '', carded: null, cardId: null };
+    seen.set(rel, entry);
+    if (isTrusted(trustedWrites(db, project.id), rel, sha)) {
+      entry.baseline = text;
+      entry.carded = null;
+      entry.cardId = null;
+      logTrusted(project.id, site.root, rel);
+      return null;
+    }
+    const open = findOpenByFoldKey(db, project.id, strayFoldKey(site.scope, rel));
+    if (open) entry.cardId = open.id;
+    else if (entry.carded !== null) {
+      // The card is gone. Answered by the builder, its version is decided; withdrawn or cancelled, it is
+      // not, so the next write is judged against the old baseline and cards again.
+      const card = entry.cardId === null ? null : getInboxItem(db, entry.cardId);
+      if (card !== null && card.answer !== null && card.state !== InboxState.Cancelled)
+        entry.baseline = entry.carded;
+      entry.carded = null;
+      entry.cardId = null;
+    }
+    let keys: string[];
+    try {
+      const [before, after] = await Promise.all([
+        deps.git.configText(entry.baseline),
+        deps.git.configText(text),
+      ]);
+      keys = changedConfigKeys(before, after);
+    } catch {
+      keys = ['(the config could not be read)'];
+    }
+    if (keys.length === 0) {
+      if (!open) entry.baseline = text;
+      return null;
+    }
+    entry.carded = text;
+    return { note: `Changed: ${keys.join(', ')}`, sha };
+  }
+
+  function logTrusted(projectId: ProjectId, root: string, rel: string): void {
+    deps.logger.debug(
+      { projectId, root, path: rel },
+      'a trusted version of a sensitive path raised no card',
+    );
   }
 
   function enqueue(root: string, rel: string): void {
@@ -224,10 +340,72 @@ export function createWatcher(deps: {
   interface Site {
     readonly scope: string;
     readonly worktree: string | null;
+    /** The checkout the write is in. */
+    readonly root: string;
   }
 
   const siteOf = (project: ProjectDto, batchId: BatchId | null, root: string): Site =>
-    batchId === null ? { scope: project.id, worktree: null } : { scope: batchId, worktree: root };
+    batchId === null
+      ? { scope: project.id, worktree: null, root }
+      : { scope: batchId, worktree: root, root };
+
+  /**
+   * The paths among `rels` that are not a write the builder trusted: one holding exactly a trusted content.
+   * `stamps` holds the content already read for a path, so the file is not read a second time.
+   */
+  function withoutTrusted(
+    project: ProjectDto,
+    site: Site,
+    rels: readonly string[],
+    stamps: ReadonlyMap<string, string | null> = new Map(),
+  ): string[] {
+    const trusted = trustedWrites(db, project.id);
+    if (trusted.length === 0) return [...rels];
+    const names = new Set(trusted.map((t) => t.path));
+    return rels.filter((rel) => {
+      if (!names.has(rel)) return true;
+      const sha = stamps.has(rel) ? (stamps.get(rel) ?? null) : stampFile(site.root, rel);
+      if (sha === null || !isTrusted(trusted, rel, sha)) return true;
+      if (isSensitivePath(rel)) logTrusted(project.id, site.root, rel);
+      return false;
+    });
+  }
+
+  /**
+   * Raises a card for one file with its sha256 in the detail and Trust This Version (or Keep It) beside
+   * Dismiss. `known` is the sha already read for the file (null: unreadable); without it the file is read
+   * here. A card already open for the path with the same stamp stays as it is. One with another stamp is
+   * withdrawn and a new card raised, so an answer to the old card can never trust the new bytes. A file
+   * that can't be stamped (gone, a link, a directory, too big) gets the card with no trust choice, and a
+   * card that had a stamp is replaced by it.
+   */
+  function flagStamped(
+    site: Site,
+    rel: string,
+    card: FlagInput & { readonly foldKey: string },
+    trust: typeof TrustChoice.Trust | typeof TrustChoice.Keep,
+    known?: string | null,
+  ): void {
+    const sha = known === undefined ? stampFile(site.root, rel) : known;
+    const open = findOpenByFoldKey(db, card.projectId, card.foldKey);
+    if (sha === null) {
+      if (open && stampOf(open.detail) !== null) {
+        deps.inbox.withdraw(open.id);
+        deps.inbox.flag(card);
+      } else {
+        deps.inbox.flag(open && open.body !== card.body ? { ...card, refresh: true } : card);
+      }
+      return;
+    }
+    if (open && stampOf(open.detail) === sha) return;
+    if (open) deps.inbox.withdraw(open.id);
+    deps.inbox.flag({
+      ...card,
+      body: `${card.body}\nVersion ${shortSha(sha)}`,
+      detail: { ...card.detail, ...stampDetail(site.root, sha, card.foldKey) },
+      options: trustOptions(trust),
+    });
+  }
 
   const labelled = (site: Site, rel: string): string =>
     site.worktree === null ? rel : `${site.worktree}: ${rel}`;
@@ -240,8 +418,13 @@ export function createWatcher(deps: {
     owner: WorkstreamId | null,
     /** The pass's lanes that were working when the write was seen, which the card names. */
     working: readonly PassLane[] = [],
-  ): void {
-    if (strays.length === 0) return;
+    /** What changed in a path, such as the config keys, shown under its name. */
+    notes: ReadonlyMap<string, string> = new Map(),
+    /** The sha256 already read for a path (null: unreadable), so its card stamps the text that was judged. */
+    stamps: ReadonlyMap<string, string | null> = new Map(),
+  ): string[] {
+    const raised = withoutTrusted(project, site, strays, stamps);
+    if (raised.length === 0) return raised;
     const workstreamId = owner ?? (candidates.length === 1 ? (candidates[0] ?? null) : null);
     const titles = working.map((lane) => lane.title);
     const during =
@@ -249,19 +432,30 @@ export function createWatcher(deps: {
         ? ''
         : `\nWritten while ${titles.join(' and ')} ${titles.length === 1 ? 'was' : 'were'} working`;
     // A write that can change what runs gets its own card, so a bulk card never buries it.
-    const { sensitive, ordinary } = splitSensitive(strays, (rel) => rel);
+    const { sensitive, ordinary } = splitSensitive(raised, (rel) => rel);
     const single = (rel: string): void => {
-      deps.inbox.flag({
-        projectId: project.id,
-        workstreamId,
-        tier: CardTier.Ask,
-        urgency: Urgency.High,
-        closesWhen: BY_ANSWER,
-        title: STRAY_TITLE,
-        body: `${labelled(site, rel)}${during}`,
-        detail: { path: rel, candidates: [...candidates] },
-        foldKey: strayFoldKey(site.scope, rel),
-      });
+      const note = notes.get(rel);
+      flagStamped(
+        site,
+        rel,
+        {
+          projectId: project.id,
+          workstreamId,
+          tier: CardTier.Ask,
+          urgency: Urgency.High,
+          closesWhen: BY_ANSWER,
+          title: STRAY_TITLE,
+          body: `${labelled(site, rel)}${during}${note === undefined ? '' : `\n${note}`}`,
+          detail: {
+            path: rel,
+            candidates: [...candidates],
+            ...(isSensitivePath(rel) ? sensitiveDetail : {}),
+          },
+          foldKey: strayFoldKey(site.scope, rel),
+        },
+        TrustChoice.Trust,
+        stamps.get(rel),
+      );
     };
     sensitive.forEach(single);
     if (ordinary.length > STRAY_BULK_THRESHOLD) {
@@ -277,9 +471,10 @@ export function createWatcher(deps: {
         detail: { count: ordinary.length, paths: listed, candidates: [...candidates] },
         foldKey: bulkFoldKey(site.scope),
       });
-      return;
+      return raised;
     }
     ordinary.forEach(single);
+    return raised;
   }
 
   /**
@@ -429,24 +624,38 @@ export function createWatcher(deps: {
         .filter((c) => !isPerCopy(c) || worktreeBatchOf(ws) === batchId)
         .map((c) => ({ kind: c.kind, name: c.name })),
     }));
-    const foreign = findForeignClaimWrites(paths, project, holders);
+    const untrusted = new Set(withoutTrusted(project, site, paths));
+    const foreign = findForeignClaimWrites(
+      paths.filter((path) => untrusted.has(path)),
+      project,
+      holders,
+    );
     if (foreign.length === 0) return;
     const running = holders.filter((h) => h.running).map((h) => h.id);
     const workstreamId = running.length === 1 ? (running[0] ?? null) : null;
     const { sensitive, ordinary } = splitSensitive(foreign, (f) => f.path);
     const single = ({ path, holders: claimedBy }: (typeof foreign)[number]): void => {
-      deps.inbox.flag({
-        projectId: project.id,
-        workstreamId,
-        tier: CardTier.Ask,
-        urgency: Urgency.High,
-        // S4: Keep It / Show the Diff
-        closesWhen: BY_ANSWER,
-        title: "Write inside another workstream's claim",
-        body: labelled(site, path),
-        detail: { path, candidates: running, claimedBy },
-        foldKey: strayFoldKey(site.scope, path),
-      });
+      flagStamped(
+        site,
+        path,
+        {
+          projectId: project.id,
+          workstreamId,
+          tier: CardTier.Ask,
+          urgency: Urgency.High,
+          closesWhen: BY_ANSWER,
+          title: "Write inside another workstream's claim",
+          body: labelled(site, path),
+          detail: {
+            path,
+            candidates: running,
+            claimedBy,
+            ...(isSensitivePath(path) ? sensitiveDetail : {}),
+          },
+          foldKey: strayFoldKey(site.scope, path),
+        },
+        TrustChoice.Keep,
+      );
     };
     sensitive.forEach(single);
     if (ordinary.length > STRAY_BULK_THRESHOLD) {
@@ -456,7 +665,6 @@ export function createWatcher(deps: {
         workstreamId,
         tier: CardTier.Ask,
         urgency: Urgency.High,
-        // S4: Keep It / Show the Diff
         closesWhen: BY_ANSWER,
         title: `${String(ordinary.length)} writes inside another workstream's claim`,
         body: `${listed.map((rel) => labelled(site, rel)).join('\n')}\n…and ${String(ordinary.length - listed.length)} more`,
@@ -812,7 +1020,7 @@ export function createWatcher(deps: {
       if (item.title === STRAY_TITLE) {
         const path = item.detail?.['path'];
         if (typeof path !== 'string' || !covered([path])) continue;
-        if (item.body !== labelled(site, path)) continue;
+        if (withoutVersion(item.body) !== labelled(site, path)) continue;
         deps.inbox.resolve(item.id, 'The lane it names now holds a claim covering it.');
         continue;
       }
@@ -936,6 +1144,8 @@ export function createWatcher(deps: {
     // session start made for it. Each one dropped as bookkeeping is logged.
     // A sensitive path holding only what 10db's own base merge brought into the copy is no lane's write.
     const hidden: string[] = [];
+    const notes = new Map<string, string>();
+    const stamps = new Map<string, string | null>();
     const bases = incomingBases(batchId);
     for (const rel of paths) {
       if (changed.has(rel) && !isSensitivePath(rel)) continue;
@@ -944,7 +1154,17 @@ export function createWatcher(deps: {
       if (!existsAsEntry(join(entry.root, rel))) continue;
       const bookkeeping = bookkeepingAt(entry.root, rel);
       if (bookkeeping.length > 0) logBookkeeping(projectId, entry.root, rel, bookkeeping);
-      else if (isSensitivePath(rel)) hidden.push(rel);
+      else if (isSensitivePath(rel)) {
+        const checksum = readSmallText(join(entry.root, rel), MAX_CHECKSUM_BYTES);
+        if (checksum !== null && isLefthookChecksum(rel, checksum)) continue;
+        if (isConfigFile(rel)) {
+          const change = await configChanges(project, site, rel);
+          if (change === null) continue;
+          notes.set(rel, change.note);
+          stamps.set(rel, change.sha);
+        }
+        hidden.push(rel);
+      }
     }
     const lanes = passLanes(project, batchId);
     const inPass =
@@ -983,7 +1203,15 @@ export function createWatcher(deps: {
       raisedFor,
       null,
       inPass?.working,
+      notes,
+      stamps,
     );
+    // The card each carded config now has, so its answer can be told from its withdrawal.
+    for (const rel of notes.keys()) {
+      const card = findOpenByFoldKey(db, projectId, strayFoldKey(site.scope, rel));
+      const seen = seenConfigs.get(entry.root)?.get(rel);
+      if (card && seen) seen.cardId = card.id;
+    }
     raiseForeign(
       project,
       site,
@@ -1086,6 +1314,13 @@ export function createWatcher(deps: {
             },
           );
           watched.set(root, { projectId, batchId, root, handle });
+          // Read now, not at the first batch, so the first change to the config is seen as one.
+          const config = configTextOf(root, GIT_CONFIG_PATH);
+          if (config !== null)
+            seenConfigs.set(
+              root,
+              new Map([[GIT_CONFIG_PATH, { baseline: config, carded: null, cardId: null }]]),
+            );
         } catch (error) {
           deps.logger.warn({ projectId, root, err: String(error) }, 'could not watch the checkout');
         }
@@ -1151,7 +1386,7 @@ export function createWatcher(deps: {
         }),
       );
       const flagged = undecided.filter((rel) => !stillOthers.has(rel));
-      raise(
+      return raise(
         project,
         siteOf(project, batchId, root),
         flagged,
@@ -1159,7 +1394,6 @@ export function createWatcher(deps: {
         workstreamId,
         inPass?.working,
       );
-      return flagged;
     },
 
     flush,

@@ -1,9 +1,6 @@
 import {
-  AccountModelDto,
-  CatalogueStatusDto,
   ModelEffortDto,
   ModelMeasuresDto,
-  ModelProfileDto,
   ModelRowDto,
   RolePickDto,
   RolePicksDto,
@@ -66,63 +63,6 @@ export function rolePickDto(over: Partial<RolePickDto> & { role: StepRole }): Ro
 
 export const rolePicksDto = (accountId: AccountId, picks: RolePickDto[]): RolePicksDto =>
   RolePicksDto.parse({ accountId, picks });
-
-export function catalogueStatusDto(over: Partial<CatalogueStatusDto> = {}): CatalogueStatusDto {
-  return CatalogueStatusDto.parse({
-    fetchedAt: '2026-11-06T10:00:00.000Z',
-    source: 'fetched',
-    models: 40,
-    lastAttempt: 'succeeded',
-    ...over,
-  });
-}
-
-export const someAccountId = (): AccountId => mintId('Account');
-
-export function accountModelDto(
-  over: Partial<AccountModelDto> & Pick<AccountModelDto, 'accountId' | 'model'>,
-) {
-  return AccountModelDto.parse({
-    family: null,
-    launchId: over.model,
-    efforts: [],
-    unusable: false,
-    wordingMarkEndsAt: null,
-    inputPrice: null,
-    outputPrice: null,
-    lastSeenAt: AT,
-    ...over,
-  });
-}
-
-export function modelProfileDto(over: Partial<ModelProfileDto> & Pick<ModelProfileDto, 'model'>) {
-  return ModelProfileDto.parse({
-    id: mintId('ModelProfile'),
-    provider: 'claude',
-    effort: 'high',
-    aaSlug: null,
-    scores: { intelligence: null },
-    costPerTaskUsd: null,
-    outputTokensPerSecond: null,
-    source: 'aa',
-    indexVersion: null,
-    measuredAt: null,
-    enabled: false,
-    maker: 'lab-a',
-    family: 'family-a',
-    tier: 'balanced',
-    status: 'current',
-    inputPrice: null,
-    outputPrice: null,
-    releaseDate: null,
-    stepsRun: 0,
-    firstPassSteps: 0,
-    escalations: 0,
-    createdAt: AT,
-    updatedAt: AT,
-    ...over,
-  });
-}
 
 /** What the daemon answers for a model with nothing stored; a test names what it is about. */
 export function modelMeasuresDto(over: Partial<ModelMeasuresDto> = {}): ModelMeasuresDto {

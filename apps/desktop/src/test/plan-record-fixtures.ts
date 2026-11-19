@@ -1,13 +1,8 @@
 import {
   mintId,
-  PlanDecisionRow,
   PlanDocumentRevisionDto,
-  PlanEvidenceRow,
   PlanRecordDto,
-  PlanQuestionRow,
   PlanRecordPage,
-  PlanReviewRow,
-  PlanTaskRow,
   PlanRecordList,
   type ProjectId,
   type ShapeAttachmentId,
@@ -17,8 +12,8 @@ import { http, HttpResponse } from 'msw';
 import { z } from 'zod';
 import { daemonUrl } from './daemon';
 
-// A Plan's record for UI tests: a plan document with two revisions and a spec, and a row factory per
-// list. Each is parsed, so a contract change breaks the fixture first.
+// A Plan's record for UI tests: a plan document with two revisions and a spec. Each is parsed, so a
+// contract change breaks the fixture first.
 
 const AT = '2026-11-12T08:00:00.000Z';
 
@@ -136,94 +131,6 @@ export const REVISION_BODIES: Readonly<Record<string, string>> = {
   [`${P1_DOCUMENT_ID}#2`]: P1_REVISION_2,
   [`${S1_DOCUMENT_ID}#1`]: '# Spec\n',
 };
-
-export function decisionRow(overrides: Partial<PlanDecisionRow> = {}): PlanDecisionRow {
-  return PlanDecisionRow.parse({
-    id: mintId('ShapeProposal'),
-    key: 'd1',
-    question: 'Where does the record live?',
-    choice: 'In the database',
-    rationale: 'Local only',
-    alternatives: [{ option: 'Docs PRs', whyNot: 'They land in the repo' }],
-    quote: 'Plans never go in the repo.',
-    lasting: true,
-    decidedAt: '2026-11-12',
-    state: 'pending',
-    decisionId: null,
-    ...overrides,
-  });
-}
-
-export function evidenceRow(overrides: Partial<PlanEvidenceRow> = {}): PlanEvidenceRow {
-  return PlanEvidenceRow.parse({
-    key: 'f1',
-    kind: 'fact',
-    title: 'The runner packs once',
-    version: 1,
-    body: { claim: 'The runner packs the context once per session.' },
-    anchors: [
-      {
-        kind: 'code',
-        path: 'apps/daemon/src/runner/runner.ts',
-        line: 1976,
-        commit: '818d3644',
-        excerpt: 'const contextPack = buildContextPack(db, getWorkstream(db, id));',
-      },
-    ],
-    sources: ['capture §6a'],
-    verified: true,
-    checkedAt: '2026-11-12',
-    state: 'current',
-    checks: [],
-    ...overrides,
-  });
-}
-
-export function reviewRow(overrides: Partial<PlanReviewRow> = {}): PlanReviewRow {
-  return PlanReviewRow.parse({
-    id: mintId('ShapeFinding'),
-    key: 'p1-r1-1',
-    document: 'p1',
-    revision: 1,
-    section: 'task-1',
-    round: 1,
-    reviewer: 'fable plan reviewer',
-    reviewerKind: 'imported',
-    kind: 'finding',
-    severity: 'high',
-    severityText: 'blocking, security',
-    text: 'Revoked devices keep their session',
-    state: 'resolved',
-    outcomeText: 'partial: revoked-device column is a stub',
-    how: 'Added the column',
-    howDetail: 'The column exists; nothing writes it yet.',
-    ...overrides,
-  });
-}
-
-export function questionRow(overrides: Partial<PlanQuestionRow> = {}): PlanQuestionRow {
-  return PlanQuestionRow.parse({
-    id: mintId('ShapeProposal'),
-    key: 'q1',
-    source: 'question',
-    text: 'Which port?',
-    for: 'designer',
-    about: 't1',
-    blocks: 'P2',
-    state: 'pending',
-    ...overrides,
-  });
-}
-
-export function taskRow(overrides: Partial<PlanTaskRow> = {}): PlanTaskRow {
-  return PlanTaskRow.parse({
-    taskId: mintId('Task'),
-    key: 't1',
-    title: 'Pair a device',
-    planRef: { documentId: P1_DOCUMENT_ID, document: 'p1', revision: 2, section: 'task-12' },
-    ...overrides,
-  });
-}
 
 /** One page of a list holding `rows`, as the daemon answers it. */
 export function recordPage(

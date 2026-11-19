@@ -26,6 +26,10 @@ pre-push:
     - name: no-push-to-main
       run: node scripts/hooks/pre-push.mjs
       use_stdin: true
+    # Prints the branch's unit tests against CI's budget so the pull request opens with its reason;
+    # it never fails a push.
+    - name: test-budget
+      run: node scripts/test-budget.mjs --warn || true
     # Git exports GIT_DIR (an absolute path when pushing from a linked worktree), GIT_PREFIX and,
     # after `git -c`, GIT_CONFIG_PARAMETERS to hooks. make precheck runs git and tests that create throwaway
     # repositories; with these set, their git would write to this checkout instead. These are the

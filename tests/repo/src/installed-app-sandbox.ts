@@ -117,6 +117,8 @@ const STUBS: Record<string, readonly string[]> = {
     '    esac',
     '    printf \'%s\\n%s\\n%s\\n\' "${STUB_RUN_STATUS:-completed}" "${STUB_RUN_CONCLUSION-success}" "$STUB_HEAD_SHA" ;;',
     "  'run download '*)",
+    `    ${count('download')}`,
+    '    if [ "$n" -le "${STUB_DOWNLOAD_FAILS:-0}" ]; then echo "error downloading unsigned-dmg: HTTP 502: Bad Gateway" >&2; exit 1; fi',
     '    while [ "$#" -gt 0 ]; do [ "$1" = --dir ] && dir="$2"; shift; done',
     '    mkdir -p "$dir" && cp -R "$STUB_ARTIFACT/." "$dir" ;;',
     '  *) echo "gh stub: unexpected $*" >&2; exit 3 ;;',

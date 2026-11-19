@@ -1,5 +1,4 @@
 import {
-  AccountIdentityDto,
   AccountPauseDto,
   AccountSignInDto,
   AccountUsageDto,
@@ -44,23 +43,6 @@ export function accountUsageDto(overrides: Partial<AccountUsageDto> = {}): Accou
     total: { tokensIn: 1200, tokensOut: 800, tokensCached: 400, costUsd: null },
     monthlyCapUsd: null,
     byProject: [],
-    ...overrides,
-  });
-}
-
-export function accountIdentityDto(
-  overrides: Partial<AccountIdentityDto> = {},
-): AccountIdentityDto {
-  return AccountIdentityDto.parse({
-    accountId: DEFAULT_ACCOUNT.id,
-    email: 'builder@example.com',
-    organization: null,
-    apiProvider: 'firstParty',
-    apiKeySource: null,
-    tokenSource: null,
-    subscription: true,
-    models: [],
-    refusal: null,
     ...overrides,
   });
 }

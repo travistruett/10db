@@ -27,7 +27,7 @@ interface Plan {
   readonly rust?: boolean;
   readonly precheck?: boolean;
   readonly knip?: boolean;
-  readonly repoTests?: readonly string[];
+  readonly repoTests?: boolean;
 }
 
 /** What `scripts/check-changed.mjs --plan` says it would run for these changed files. */
@@ -82,12 +82,13 @@ describe('scripts/check-changed.mjs', () => {
     expect(planFor('apps/desktop/src-tauri/src/main.rs').rust).toBe(true);
   });
 
-  it('adds the repo rule tests for a docs, script or GitHub template change, and no package', () => {
+  it('adds the repo rule tests for a docs, script, GitHub template or root config change, and no package', () => {
     const plan = planFor(
       'docs/architecture/decisions/README.md',
       'scripts/check.sh',
       '.github/pull_request_template.md',
       '.github/ISSUE_TEMPLATE/bug.yml',
+      'lefthook.yml',
     );
     expect(plan).toMatchObject({
       full: false,
@@ -97,6 +98,7 @@ describe('scripts/check-changed.mjs', () => {
         'scripts/check.sh',
         '.github/pull_request_template.md',
         '.github/ISSUE_TEMPLATE/bug.yml',
+        'lefthook.yml',
       ],
       affected: ['tests/repo'],
     });
@@ -115,6 +117,7 @@ describe('scripts/check-changed.mjs', () => {
     ['the daemon env example', 'apps/daemon/.env.example', 'apps/daemon'],
     ['a daemon git test', 'apps/daemon/src/git/git.ts', 'apps/daemon'],
     ['the daemon test fixtures', 'apps/daemon/test/fixtures.ts', 'apps/daemon'],
+    ['a grab-bag module', 'apps/desktop/src/utils.ts', 'apps/desktop'],
   ])('adds the repo rule tests for %s, which they read', (_name, file, owner) => {
     const plan = planFor(file);
     expect(plan.full).toBe(false);
@@ -158,7 +161,7 @@ describe('scripts/check-changed.mjs', () => {
 });
 
 describe('scripts/check-changed.mjs --precheck', () => {
-  it('plans no tests, no Rust checks and no repo rule tests', () => {
+  it('plans no package tests and no Rust checks, and the repo rule tests for a docs file', () => {
     const plan = precheckPlanFor('apps/desktop/src-tauri/src/main.rs', 'docs/README.md');
     expect(plan).toMatchObject({
       full: false,
@@ -166,7 +169,22 @@ describe('scripts/check-changed.mjs --precheck', () => {
       changed: ['apps/desktop'],
       affected: ['apps/desktop'],
       rust: false,
+      repoTests: true,
     });
+  });
+
+  it.each([
+    'lefthook.yml',
+    'renovate.json',
+    'release-please-config.json',
+    '.release-please-manifest.json',
+    'commitlint.config.js',
+  ])('runs the repo rule tests, not every package, for %s, which they read', (file) => {
+    expect(precheckPlanFor(file)).toMatchObject({ full: false, outside: [file], repoTests: true });
+  });
+
+  it('runs the repo rule tests for a change to the repo rule tests', () => {
+    expect(precheckPlanFor('tests/repo/src/x.test.ts').repoTests).toBe(true);
   });
 
   it('typechecks the changed packages and every dependent, and drifts only the changed ones', () => {
@@ -221,25 +239,17 @@ describe('scripts/check-changed.mjs --precheck', () => {
     expect(precheckPlanFor().knip).toBe(false);
   });
 
-  it('runs the docs rule tests when a decision file is added', () => {
+  it('runs the repo rule tests when a decision file is added', () => {
     const plan = precheckPlanFor('docs/architecture/decisions/2026-11-02-new-thing.md');
-    expect(plan.repoTests).toEqual(['tests/repo/src/architecture-docs.test.ts']);
+    expect(plan.repoTests).toBe(true);
   });
 
-  it('runs the agent file rule tests for an AGENTS.md and an agent rule file', () => {
-    expect(precheckPlanFor('apps/daemon/AGENTS.md').repoTests).toEqual([
-      'tests/repo/src/agent-docs.test.ts',
-      'tests/repo/src/architecture-docs.test.ts',
-    ]);
-    expect(precheckPlanFor('.claude/rules/testing.md').repoTests).toEqual([
-      'tests/repo/src/agent-docs.test.ts',
-      'tests/repo/src/architecture-docs.test.ts',
-    ]);
+  it('runs the repo rule tests for an AGENTS.md and an agent rule file', () => {
+    expect(precheckPlanFor('apps/daemon/AGENTS.md').repoTests).toBe(true);
+    expect(precheckPlanFor('.claude/rules/testing.md').repoTests).toBe(true);
   });
 
   describe('agent-docs.test.ts beyond the agent files', () => {
-    const agentDocs = 'tests/repo/src/agent-docs.test.ts';
-
     it.each([
       ['a CLAUDE.md anywhere', 'apps/daemon/src/CLAUDE.md'],
       ['a root CLAUDE.md', 'CLAUDE.md'],
@@ -247,8 +257,8 @@ describe('scripts/check-changed.mjs --precheck', () => {
       ['an app manifest', 'apps/daemon/package.json'],
       ['a grab-bag module in an app', 'apps/desktop/src/utils.ts'],
       ['a grab-bag module in a package', 'packages/contracts/src/lib/common.tsx'],
-    ])('runs it for %s', (_name, file) => {
-      expect(precheckPlanFor(file).repoTests).toContain(agentDocs);
+    ])('runs the repo rule tests for %s', (_name, file) => {
+      expect(precheckPlanFor(file).repoTests).toBe(true);
     });
 
     it('runs it over every package for a file in a new app or package directory', () => {
@@ -262,15 +272,22 @@ describe('scripts/check-changed.mjs --precheck', () => {
     it.each([
       ['a normal source file', 'apps/daemon/src/runner/runner.ts'],
       ['a utils-like name that is not a grab-bag', 'apps/daemon/src/format-utils.ts'],
-      ['a grab-bag name outside apps and packages', 'scripts/utils.ts'],
-      ['a harness directory with a dot name', 'apps/.claude/.cc-writes/x.json'],
-    ])('does not run it for %s', (_name, file) => {
-      expect(precheckPlanFor(file).repoTests ?? []).not.toContain(agentDocs);
+    ])('does not run them for %s', (_name, file) => {
+      expect(precheckPlanFor(file).repoTests).toBe(false);
+    });
+
+    it('runs them for a grab-bag name outside apps and packages, as for any script', () => {
+      expect(precheckPlanFor('scripts/utils.ts').repoTests).toBe(true);
+    });
+
+    it('cannot place a harness directory with a dot name, so runs every step', () => {
+      expect(precheckPlanFor('apps/.claude/.cc-writes/x.json')).toMatchObject({ full: true });
     });
   });
 
   it('runs no repo rule tests for a package source change: they are not about it', () => {
-    expect(precheckPlanFor('apps/daemon/src/runner/runner.ts').repoTests).toEqual([]);
+    expect(precheckPlanFor('apps/daemon/src/runner/runner.ts').repoTests).toBe(false);
+    expect(precheckPlanFor('packages/db/src/schema.ts').repoTests).toBe(false);
   });
 
   it('keeps the changed packages check without knip or repo rule tests', () => {
@@ -279,11 +296,11 @@ describe('scripts/check-changed.mjs --precheck', () => {
     expect(plan.repoTests).toBeUndefined();
   });
 
-  it('runs knip and the docs rule tests over every package too', () => {
+  it('runs knip and the repo rule tests over every package too', () => {
     const plan = precheckPlanFor('pnpm-lock.yaml');
     expect(plan.full).toBe(true);
     expect(readRepoFile('scripts/check-changed.mjs')).toMatch(
-      /async function runPrecheckEverywhere[\s\S]*?knipStep\(\)[\s\S]*?ALL_REPO_DOC_TESTS/,
+      /async function runPrecheckEverywhere[\s\S]*?knipStep\(\)[\s\S]*?repoTestsStep\(\)/,
     );
   });
 });
@@ -299,9 +316,16 @@ describe('scripts/check-changed.mjs --precheck, run', () => {
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
-  function runWithStubs(args: string[]): { stdout: string; commands: string[] } {
+  function runWithStubs(
+    args: string[],
+    files: Record<string, string> = {},
+  ): { stdout: string; commands: string[] } {
     const dir = mkdtempSync(join(tmpdir(), 'check-changed-'));
     dirs.push(dir);
+    for (const [path, content] of Object.entries(files)) {
+      mkdirSync(join(dir, path, '..'), { recursive: true });
+      writeFileSync(join(dir, path), content);
+    }
     mkdirSync(join(dir, 'scripts'));
     copyFileSync(
       join(repoRoot, 'scripts/check-changed.mjs'),
@@ -330,10 +354,10 @@ describe('scripts/check-changed.mjs --precheck, run', () => {
     return { stdout: result.stdout, commands };
   }
 
-  // The four per-package steps, plus knip and the docs rule tests, which `runPrecheckEverywhere` adds.
+  // The four per-package steps, plus knip and the repo rule tests, which `runPrecheckEverywhere` adds.
   const EVERY_PACKAGE_STEPS = [
     'pnpm exec knip',
-    'pnpm exec vitest run tests/repo/src/agent-docs.test.ts tests/repo/src/architecture-docs.test.ts',
+    'pnpm exec vitest run tests/repo/',
     'pnpm run drift',
     'pnpm run format:check',
     'pnpm run lint',
@@ -497,6 +521,17 @@ describe('scripts/check-changed.mjs --precheck, run', () => {
     expect([...run.commands].sort()).toEqual(EVERY_PACKAGE_STEPS);
     // Drift regenerates files in the tree, so it runs last.
     expect(run.commands.at(-1)).toBe('pnpm run drift');
+  });
+
+  it('runs knip and the repo rule tests, and no package step, for a root file they read', () => {
+    const run = runWithStubs(['--precheck', '--', 'lefthook.yml'], {
+      'lefthook.yml': 'pre-push:\n',
+      'tests/repo/package.json': JSON.stringify({ name: '@10db/repo-checks' }),
+    });
+    expect(run.stdout).toContain('CHECK-CHANGED PASS');
+    expect(run.commands).toContain('pnpm exec knip');
+    expect(run.commands).toContain('pnpm exec vitest run tests/repo/');
+    expect(run.commands.filter((c) => /run (lint|typecheck)|eslint/.test(c))).toEqual([]);
   });
 
   it('runs the four steps over every package, not the gate, when there is no base', () => {

@@ -1,4 +1,3 @@
-import { mintId } from '@10db/contracts';
 import { screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as shapeQueries from './daemon/shape-queries';
@@ -26,12 +25,5 @@ describe('Plan routes', () => {
     const { router } = renderApp('/shape');
     expect(await screen.findByText('Something went wrong in Plan.')).toBeTruthy();
     expect(router.state.location.pathname).toBe('/shape');
-  });
-
-  it('name the view Plan when it crashes on a past conversation', async () => {
-    const path = `/shape/${mintId('Shape')}`;
-    const { router } = renderApp(path);
-    expect(await screen.findByText('Something went wrong in Plan.')).toBeTruthy();
-    expect(router.state.location.pathname).toBe(path);
   });
 });

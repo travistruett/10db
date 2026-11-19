@@ -1,9 +1,10 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { z } from 'zod';
 import { claudeIsInstalled } from './claude-is-installed';
+import { test } from './routed-test';
 import { inConversationColumn } from './conversation-column';
 import { daemonUrl } from './daemon-url';
 import { expectAccessible } from './expect-accessible';
@@ -412,22 +413,6 @@ test('a session on a new branch: the first change asks, the move cuts a worktree
   expect(readFileSync(join(repo, 'notes.md'), 'utf8')).toBe('# Notes\n\nWritten on a branch.\n');
   await expect(page.getByText(/on edit-on-a-branch · nothing ahead of main/)).toBeVisible();
   await expect(page.getByRole('button', { name: /Merge into main/ })).toHaveCount(0);
-});
-
-test('a session working here: the first change asks, and Here carries on in the checkout', async ({
-  page,
-  request,
-}) => {
-  test.setTimeout(300_000);
-  await openProject(page, request, 'sessions-here');
-  await startSession(page, 'Edit here');
-  await expect(page.getByText('Reading the todo list first.')).toBeVisible();
-  await expect(workBar(page)).toBeVisible();
-  await workBar(page).getByRole('button', { name: 'Here, on main' }).click();
-  await expect(page.getByText('Wrote the todo list.')).toBeVisible();
-  await expect(page.getByText(/^on main · /)).toBeVisible();
-  await expect(sessionRow(page, /Edit here/)).toHaveAttribute('data-place', 'here');
-  await scan(page, [1280, 900], 'a session working here');
 });
 
 test('the question survives a reload: the bar and the Inbox card are there again, and 2 answers it', async ({

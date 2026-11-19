@@ -24,7 +24,7 @@ import {
   planForStart,
   retryWorkstream,
 } from '../team';
-import { leftOutCards } from './cards';
+import { leftOutCards, shipCards } from './cards';
 import { raise } from './context';
 import { batchCardFields, createBatchCardAnswers } from './index';
 import { leftOutNotices } from './notices';
@@ -1187,6 +1187,21 @@ describe('the failed workstream card', () => {
             expect.soft(stopped.options, `${name}: options`).toEqual([]);
             expect.soft(stopped.detail, `${name}: detail`).toBeNull();
           }
+        });
+        it('keeps one ship-failure card when the failure repeats, and closes it when the batch is abandoned', async () => {
+          const { batchId } = await failedInBatch('DONE', { 'src/api/alpha.txt': 'a\n' });
+          const batch = getBatch(h.store.db, batchId);
+          const fail = (path: string) => {
+            raise(inbox, h.project.id, shipCards.dirtyCheckout(batch, [path]).card);
+          };
+          fail('a.txt');
+          fail('b.txt');
+          const open = h.only(h.cards().filter((c) => c.title.includes('uncommitted')));
+          expect(open.body).toContain('b.txt');
+
+          h.shipper.abandon(batchId);
+
+          expect(getInboxItem(h.store.db, open.id).state).not.toBe('OPEN');
         });
       });
     });

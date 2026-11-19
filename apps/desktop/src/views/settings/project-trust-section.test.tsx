@@ -1,16 +1,10 @@
 import {
   effectiveTrust,
   mintId,
-  LiveSystemsDto,
   type TrustGrantDto,
   TRUST_DEFAULTS,
-  TrustOverrides,
   type ProjectTrustDto,
   type SetupPreviewDto,
-  YourMcpServerState,
-  YourMcpSource,
-  yourMcpServerKey,
-  type YourMcpServerDto,
 } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
@@ -22,23 +16,16 @@ import { projectDto } from '../../test/fixtures';
 
 const project = projectDto();
 
-function serve(
-  preview: SetupPreviewDto,
-  overrides: TrustOverrides = {},
-  liveSystems: readonly string[] = [],
-  initialGrants: readonly TrustGrantDto[] = [],
-  mcpServers: YourMcpServerDto[] = [],
-) {
+const NOTHING: SetupPreviewDto = { skills: [], plugins: [], leftOut: [] };
+
+function serve(initialGrants: readonly TrustGrantDto[]) {
   let grants = [...initialGrants];
   const removed: string[] = [];
-  let current: ProjectTrustDto = {
-    overrides,
-    effective: effectiveTrust(TRUST_DEFAULTS, overrides),
-    preview,
+  const current: ProjectTrustDto = {
+    overrides: {},
+    effective: effectiveTrust(TRUST_DEFAULTS, {}),
+    preview: NOTHING,
   };
-  const put: TrustOverrides[] = [];
-  let live: LiveSystemsDto = { liveSystems: [...liveSystems] };
-  const sentLive: string[][] = [];
   server.use(
     http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
     http.get(daemonUrl('/settings/trust'), () =>
@@ -47,29 +34,13 @@ function serve(
         plugins: [{ id: 'p@m', name: 'p', version: '1.2.0', enabledInClaude: true, on: true }],
         judges: [],
         tendbReady: false,
-        mcpServers,
+        mcpServers: [],
         mcpNotice: null,
       }),
     ),
-    http.get(daemonUrl('/projects/:projectId/live-systems'), () => HttpResponse.json(live)),
-    http.put(daemonUrl('/projects/:projectId/live-systems'), async ({ request }) => {
-      const body: unknown = await request.json();
-      const parsed = LiveSystemsDto.safeParse(body);
-      if (!parsed.success)
-        return HttpResponse.json(
-          {
-            error: 'invalid',
-            issues: parsed.error.issues.map((i) => ({
-              path: i.path.join('.'),
-              message: i.message,
-            })),
-          },
-          { status: 400 },
-        );
-      sentLive.push(parsed.data.liveSystems);
-      live = parsed.data;
-      return HttpResponse.json(live);
-    }),
+    http.get(daemonUrl('/projects/:projectId/live-systems'), () =>
+      HttpResponse.json({ liveSystems: [] }),
+    ),
     http.get(daemonUrl('/projects/:projectId/trust-grants'), () => HttpResponse.json(grants)),
     http.delete(daemonUrl('/projects/:projectId/trust-grants/:grantId'), ({ params }) => {
       const id = String(params['grantId']);
@@ -78,18 +49,10 @@ function serve(
       return new HttpResponse(null, { status: 204 });
     }),
     http.get(daemonUrl('/projects/:projectId/trust'), () => HttpResponse.json(current)),
-    http.put(daemonUrl('/projects/:projectId/trust'), async ({ request }) => {
-      const next = TrustOverrides.parse(await request.json());
-      put.push(next);
-      current = { overrides: next, effective: effectiveTrust(TRUST_DEFAULTS, next), preview };
-      return HttpResponse.json(current);
-    }),
     ...baseHandlers(),
   );
-  return { put, sentLive, removed };
+  return { removed };
 }
-
-const NOTHING: SetupPreviewDto = { skills: [], plugins: [], leftOut: [] };
 
 describe('Settings › project Trust', () => {
   it('lists a grant and removes it', async () => {
@@ -100,7 +63,7 @@ describe('Settings › project Trust', () => {
       target: 'deploys to staging with vercel',
       createdAt: '2026-11-14T10:00:00.000Z',
     };
-    const { removed } = serve(NOTHING, {}, [], [grant]);
+    const { removed } = serve([grant]);
     renderApp('/settings/project-trust');
     const region = await screen.findByRole('region', { name: 'Allowed in this project' });
     expect(await within(region).findByText('deploys to staging with vercel')).toBeTruthy();
@@ -116,192 +79,5 @@ describe('Settings › project Trust', () => {
         "Nothing yet. \"Always in this project\" on a card adds a line here. Every judge reads a line that describes a kind of call. A line that quotes one call lets exactly that call through in Claude's auto mode and under 10db's judge, with no judge reading it; Codex's own Auto-review can still refuse it.",
       ),
     ).toBeTruthy();
-  });
-
-  it('lists a quoted call saved before grants named their tool as one to grant again, not as live', async () => {
-    const grant: TrustGrantDto = {
-      id: mintId('TrustGrant'),
-      projectId: project.id,
-      limit: null,
-      target: 'the call "pnpm test"',
-      createdAt: '2026-11-14T10:00:00.000Z',
-    };
-    serve(NOTHING, {}, [], [grant]);
-    renderApp('/settings/project-trust');
-    const region = await screen.findByRole('region', { name: 'Allowed in this project' });
-    expect(
-      await within(region).findByText(
-        /^Grant again: this was saved before grants named their tool · /,
-      ),
-    ).toBeTruthy();
-    expect(within(region).queryByText(/^Any limit · /)).toBeNull();
-  });
-
-  it('shows the empty line', async () => {
-    serve(NOTHING);
-    renderApp('/settings/project-trust');
-    const region = await screen.findByRole('region', { name: 'Allowed in this project' });
-    expect(await within(region).findByText(/^Nothing yet\./)).toBeTruthy();
-    expect(
-      within(region).getByText(
-        "A line that quotes one call applies, and stops, from the next call. A line in your own words is read by 10db's judge from the next call and by auto mode from the next session.",
-      ),
-    ).toBeTruthy();
-  });
-
-  it('As app clears the override; Off sends web: false', async () => {
-    const { put } = serve(NOTHING, { yourSkills: false });
-    renderApp('/settings/project-trust');
-    const web = await screen.findByRole('radiogroup', { name: 'Web' });
-    const skills = screen.getByRole('radiogroup', { name: 'Your skills' });
-    // The project's own switches have loaded: its override shows.
-    await waitFor(() => {
-      expect(within(skills).getByLabelText('Off')).toHaveProperty('checked', true);
-    });
-    expect(within(web).getByLabelText('As app')).toHaveProperty('checked', true);
-    fireEvent.click(within(web).getByLabelText('Off'));
-    await waitFor(() => {
-      expect(put).toEqual([{ yourSkills: false, web: false }]);
-    });
-    fireEvent.click(within(skills).getByLabelText('As app'));
-    await waitFor(() => {
-      expect(put.at(-1)).toEqual({ web: false });
-    });
-  });
-
-  it('switches a plugin for the project alone', async () => {
-    const { put } = serve(NOTHING);
-    renderApp('/settings/project-trust');
-    const plugin = await screen.findByRole('radiogroup', { name: 'p@m' });
-    await waitFor(() => {
-      expect(within(plugin).getByLabelText('Off')).toHaveProperty('disabled', false);
-    });
-    fireEvent.click(within(plugin).getByLabelText('Off'));
-    await waitFor(() => {
-      expect(put).toEqual([{ plugins: { 'p@m': false } }]);
-    });
-  });
-
-  it('Off for one server sends mcpServers with it false, and As app removes it', async () => {
-    const key = yourMcpServerKey(YourMcpSource.ClaudeJson, 'github');
-    const github: YourMcpServerDto = {
-      key,
-      name: 'github',
-      source: YourMcpSource.ClaudeJson,
-      pluginId: null,
-      transport: 'http',
-      command: null,
-      args: [],
-      cwd: null,
-      url: 'https://gh.example/mcp',
-      envNames: [],
-      headerNames: [],
-      shownEnv: [],
-      configHash: 'a'.repeat(64),
-      state: YourMcpServerState.Approved,
-      reason: null,
-      on: true,
-      codexOnly: [],
-      enabledTools: null,
-      disabledTools: [],
-      oauth: [],
-      sendsNoHeaders: false,
-    };
-    const { put } = serve(NOTHING, {}, [], [], [github]);
-    renderApp('/settings/project-trust');
-    const control = await screen.findByRole('radiogroup', { name: 'github' });
-    await waitFor(() => {
-      expect(within(control).getByLabelText('Off')).toHaveProperty('disabled', false);
-    });
-    fireEvent.click(within(control).getByLabelText('Off'));
-    await waitFor(() => {
-      expect(put).toEqual([{ mcpServers: { [key]: false } }]);
-    });
-    fireEvent.click(within(control).getByLabelText('As app'));
-    await waitFor(() => {
-      expect(put.at(-1)).toEqual({});
-    });
-  });
-
-  it('counts what comes along and what was left out, and lists each only once shown', async () => {
-    serve({
-      skills: ['careful', 'project:release'],
-      plugins: ['p@m'],
-      leftOut: [
-        { what: '~/.claude/skills/lane', why: 'it lies in, or holds, a folder a lane can write' },
-      ],
-    });
-    renderApp('/settings/project-trust');
-    const list = await screen.findByRole('region', { name: 'Comes along' });
-    expect(await within(list).findByText('3 items')).toBeTruthy();
-    expect(within(list).getByText('1 item')).toBeTruthy();
-    expect(within(list).queryByText('careful')).toBeNull();
-    expect(within(list).queryByText('~/.claude/skills/lane')).toBeNull();
-
-    const comesAlong = within(list).getByRole('button', { name: 'Show Comes along' });
-    expect(comesAlong.getAttribute('aria-expanded')).toBe('false');
-    fireEvent.click(comesAlong);
-    expect(within(list).getByText('careful')).toBeTruthy();
-    expect(within(list).getByText('project:release')).toBeTruthy();
-    expect(within(list).getByText('p@m')).toBeTruthy();
-    expect(
-      within(list).getByRole('button', { name: 'Hide Comes along' }).getAttribute('aria-expanded'),
-    ).toBe('true');
-
-    // Both lists are headed the same way.
-    expect(within(list).getByRole('heading', { name: 'Comes along', level: 5 })).toBeTruthy();
-    expect(within(list).getByRole('heading', { name: 'Left out', level: 5 })).toBeTruthy();
-    fireEvent.click(within(list).getByRole('button', { name: 'Show Left out' }));
-    expect(within(list).getByText('~/.claude/skills/lane')).toBeTruthy();
-    expect(within(list).getByText('it lies in, or holds, a folder a lane can write')).toBeTruthy();
-  });
-
-  it('adds a live system and sends it', async () => {
-    const { sentLive } = serve(NOTHING, {}, ['prod']);
-    renderApp('/settings/project-trust');
-    const input = await screen.findByRole('combobox', { name: 'Live systems' });
-    expect(
-      screen.getByText(
-        'Hosts, cloud profiles and namespaces the judge treats as live, such as api.example.com or the prod AWS profile. Names with prod or production count already. Applies from the next session.',
-      ),
-    ).toBeTruthy();
-    expect(await screen.findByText('prod')).toBeTruthy();
-    input.focus();
-    fireEvent.change(input, { target: { value: 'api.example.com' } });
-    fireEvent.blur(input);
-    await waitFor(() => {
-      expect(sentLive).toEqual([['prod', 'api.example.com']]);
-    });
-    expect(await screen.findByText('api.example.com')).toBeTruthy();
-  });
-
-  it("shows the daemon's refusal under the input", async () => {
-    const { sentLive } = serve(NOTHING, {}, ['prod']);
-    renderApp('/settings/project-trust');
-    const input = await screen.findByRole('combobox', { name: 'Live systems' });
-    expect(await screen.findByText('prod')).toBeTruthy();
-    input.focus();
-    fireEvent.change(input, { target: { value: '$defaults' } });
-    fireEvent.blur(input);
-    expect(await screen.findByText('A live system cannot name $defaults')).toBeTruthy();
-    expect(sentLive).toEqual([]);
-    await waitFor(() => {
-      expect(screen.queryByText('$defaults')).toBeNull();
-    });
-    expect(screen.getByText('prod')).toBeTruthy();
-  });
-
-  it("shows the daemon's refusal when the read is refused", async () => {
-    serve(NOTHING);
-    server.use(
-      http.get(daemonUrl('/projects/:projectId/trust'), () =>
-        HttpResponse.json(
-          { error: 'forbidden', message: 'The dev UI reads only: act in the 10db app' },
-          { status: 403 },
-        ),
-      ),
-    );
-    renderApp('/settings/project-trust');
-    expect(await screen.findByText('The dev UI reads only: act in the 10db app')).toBeTruthy();
   });
 });

@@ -1,13 +1,14 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
+import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { z } from 'zod';
 import { claudeIsInstalled } from './claude-is-installed';
+import { test } from './routed-test';
 import { daemonUrl } from './daemon-url';
 import { expectAccessible } from './expect-accessible';
 import { auth, createProject } from './shape-project';
 
 // Each rigor's process through the real daemon and the fake agent (script-book.json, keyed by task
 // title): the row drawer on Settings › Models, then a Critical task that waits for the builder's
-// approval of its plan, with Send Back. Runs after plan-record.spec.ts; each task has its own project.
+// approval of its plan, with Send Back. Core flows 7 and 10; each task has its own project.
 
 const Id = z.looseObject({ id: z.string() });
 
