@@ -203,7 +203,7 @@ test('a deleted empty branch shows in the Factory Activity drawer, and Open and 
     }, mode);
     // The notice is in the Factory's Activity drawer; the Inbox never lists it.
     await page.goto(`/factory?project=${projectId}`);
-    await page.getByRole('button', { name: 'Activity' }).click();
+    await page.getByRole('button', { name: 'Activity', exact: true }).click();
     const drawer = page.getByRole('dialog', { name: 'Activity' });
     const row = drawer.getByRole('button', { name: new RegExp(NOTICE_LINE) });
     await expect(row).toBeVisible();

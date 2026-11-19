@@ -20,7 +20,7 @@ function stateOf(value: string): InboxListState | null {
  * The Inbox's panel (spec §1.3 "Head", §4.1 "The panel's head"): the section's name with the filter, then a
  * switch between Open, Waiting and Resolved with their counts, then the list under them. The list is drawn into
  * `onListHost`'s element by whichever state has rows, so the switch stays mounted as the state changes. The
- * notices that ask nothing are the Factory's Recent activity, not an Inbox list.
+ * notices that ask nothing are the Factory's Activity drawer, not an Inbox list.
  */
 export function InboxPanel({
   state,

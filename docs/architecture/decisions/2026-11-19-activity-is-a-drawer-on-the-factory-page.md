@@ -8,7 +8,7 @@
 
 The notices that tell the builder something and ask nothing open from an **Activity** button (a history icon) in
 the Factory's title row, in a drawer: newest first, for the project the Factory shows or every project, 20 at first
-with Show More, a row opening its notice in the drawer. The Inbox's panel head has no Activity button, and its switch is Open, Waiting and Resolved, one of
+with Show More and a search field, a row opening its notice in the drawer. The Inbox's panel head has no Activity button, and its switch is Open, Waiting and Resolved, one of
 which is always picked. The notices, their rows and their content are unchanged, and so is how they are read.
 
 ## Why

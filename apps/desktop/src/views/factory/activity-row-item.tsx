@@ -4,7 +4,7 @@ import { ProjectLabel } from '../../shell/project-label';
 import { shortAgo } from './short-ago';
 import { Lines } from '../inbox/inbox-row-item';
 
-/** A row of Activity; `key` is what selection follows, and never collides with a card's id. */
+/** A row of Activity; `key` names its group, so the open notice stays the same group as repeats join it. */
 export interface ActivityListRow {
   readonly key: string;
   readonly row: ActivityRow;
