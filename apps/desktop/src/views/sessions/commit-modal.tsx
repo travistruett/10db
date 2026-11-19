@@ -18,7 +18,7 @@ export interface CommitModalProps {
   readonly onCommit: (message: string, paths: readonly string[]) => void;
 }
 
-/** The message and the files for Commit… (sessions spec §4.6): the files the session touched are checked. */
+/** The message and the files for Commit (sessions spec §4.6): the files the session touched are checked. */
 export function CommitModal({
   opened,
   onClose,

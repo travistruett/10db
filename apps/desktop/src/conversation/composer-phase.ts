@@ -43,16 +43,11 @@ function placeholderOf(input: ComposerPhaseInput, working: boolean): string {
   return input.steer === 'inject' ? 'Add to this turn…' : 'Queue for the next turn…';
 }
 
-function hintOf(input: ComposerPhaseInput, working: boolean): string | null {
+/** Only what the state needs said: the keys are the ones every chat uses, so the composer doesn't list them. */
+function hintOf(input: ComposerPhaseInput): string | null {
   if (input.narrow) return null;
   if (input.state === ConversationState.PausedAccount) return 'Sends when the limit resets';
-  if (input.fresh) return '↵ sends · ⇧↵ new line · @ files';
-  if (input.state === ConversationState.TakenOver) return '↵ holds it · ⇧↵ new line · @ files';
-  if (working && input.steer === 'inject') return '↵ adds to this turn · ⇧↵ new line';
-  const parts = ['↵ sends', '⇧↵ new line', 'Esc stops'];
-  if (input.slashCommands === true) parts.push('/ commands');
-  parts.push('@ files');
-  return parts.join(' · ');
+  return null;
 }
 
 export function composerPhase(input: ComposerPhaseInput): ComposerPhase {
@@ -63,6 +58,6 @@ export function composerPhase(input: ComposerPhaseInput): ComposerPhase {
     stop,
     send,
     placeholder: placeholderOf(input, working),
-    hint: hintOf(input, working),
+    hint: hintOf(input),
   };
 }

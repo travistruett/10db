@@ -32,7 +32,8 @@ Terminal and the folder hold for 10db's own writers.
     untouched, and you can start another session in the meantime.
 
   The bar asks in every session. Settings can come later.
-- **Once a session has changed files, its title row offers the next git step:** **Commit…**, then **Open Pull
+
+- **Once a session has changed files, its title row offers the next git step:** **Commit**, then **Open Pull
   Request**, then **Merge**. On a project that lands locally, the last step is **Merge into `main`**. The agent can
   take the same steps when you ask.
 - **Changes** opens as a slide-out drawer from the right.
@@ -47,16 +48,16 @@ asks is the one that matters: here, or on a branch.
 
 **What could go wrong, and how we'd know.**
 
-- *The agent keeps editing your checkout after the move*, because its history names the old paths.
+- _The agent keeps editing your checkout after the move_, because its history names the old paths.
   - After the move, the sandbox only lets it write in the worktree.
   - A write to your checkout is refused with a message naming the new path.
   - A real-sandbox test and a live check on each provider prove it.
-- *A shell command tries to write before the bar shows.* Until you choose, the sandbox is read-only, so the write
+- _A shell command tries to write before the bar shows._ Until you choose, the sandbox is read-only, so the write
   fails. A first spike checks, per provider, whether 10db can see that refusal and show the bar.
-- *Something interrupts the move:* a second click, a restart, Stop, Archive, or a message sent mid-move.
+- _Something interrupts the move:_ a second click, a restart, Stop, Archive, or a message sent mid-move.
   - Every case has a row in §2's state table.
   - Each row has a test on a real store and a real git repo.
-- *Losing work on Archive.* Archive keeps the branch. It removes only the worktree, after warning about uncommitted
+- _Losing work on Archive._ Archive keeps the branch. It removes only the worktree, after warning about uncommitted
   or ignored files. Reopening the session rebuilds the worktree from the branch.
 
 **Calls you might disagree with.**
@@ -102,7 +103,7 @@ reading ──first change──▶ choosing ──Here──▶ here (your chec
 
 - A new session runs with a read-only sandbox on your checkout. It never takes the folder hold, so nothing waits on
   it and it waits on nothing.
-- Its meta line reads "`<project>` · no changes yet".
+- Its strip reads "`<project>`": a session that has changed nothing says only whose it is.
 
 ### 1.2 The first change
 
@@ -157,31 +158,31 @@ The conversation shows a line: "Moved to a new branch, `<branch>`, from `<base>`
 compare-and-set on the state it expects. The choice route is `POST /chats/:id/work` with `{ place: 'here' |
 'branch' }`, and a repeat of a settled choice answers with the current state.
 
-| State | Event | Result |
-|---|---|---|
-| reading | first change | → choosing. Call denied, turn interrupted, bar shown, Inbox card raised |
-| choosing | Here (bar or Inbox) | → here. Card withdrawn. Next turn takes the hold |
-| choosing | On a New Branch | → moving (CAS). Card withdrawn |
-| choosing | a second choice, any source | 409 with the settled state; the UI shows it |
-| choosing | you send a message | the turn runs reading only; the bar stays |
-| choosing | Esc on the bar | the bar hides; the state stays choosing, and the next first change shows it again |
-| choosing | daemon restart | state kept; bar and card shown again from the row |
-| choosing | Open in Terminal | treated as Here (→ here), then the takeover runs as today |
-| choosing | model or effort change, warm-cap close | no change; the next start reads choosing |
-| moving | you send a message | it waits (the composer says "Moving to `<branch>`…") and runs once branch is recorded |
-| moving | Stop | nothing to stop: no turn runs while moving; the move finishes |
-| moving | Archive | refused: "Wait for the move to finish" |
-| moving | worktree can't be made (filter, path, git error) | → choosing. The bar shows the error; Here still works |
-| moving | daemon restart | recovery finishes the move: makes the worktree if missing (idempotent by path), records branch |
-| branch | Archive | warn (§4.4), remove the worktree, keep the branch |
-| branch (archived) | Reopen | remake the worktree from the branch, re-seed, then start as branch |
-| choosing | Archive | the Inbox card is withdrawn, then Archive runs as for reading |
-| moving | Open in Terminal | refused: "Wait for the move to finish" |
-| moving | daemon restart after the cut, before seed and install finish | recovery reruns the seed and install (both idempotent) before recording branch |
-| branch (archived) | Reopen while its branch is checked out in another worktree | reopens read-only, saying where the branch is checked out |
-| here | a title-row git step while a Board task or pass holds your checkout | refused with the holder's words (§4.6) |
-| here | Open in Terminal | the takeover holds your checkout, as today |
-| branch | Open in Terminal | the takeover runs in the worktree and holds nothing (§4.5) |
+| State             | Event                                                               | Result                                                                                         |
+| ----------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| reading           | first change                                                        | → choosing. Call denied, turn interrupted, bar shown, Inbox card raised                        |
+| choosing          | Here (bar or Inbox)                                                 | → here. Card withdrawn. Next turn takes the hold                                               |
+| choosing          | On a New Branch                                                     | → moving (CAS). Card withdrawn                                                                 |
+| choosing          | a second choice, any source                                         | 409 with the settled state; the UI shows it                                                    |
+| choosing          | you send a message                                                  | the turn runs reading only; the bar stays                                                      |
+| choosing          | Esc on the bar                                                      | the bar hides; the state stays choosing, and the next first change shows it again              |
+| choosing          | daemon restart                                                      | state kept; bar and card shown again from the row                                              |
+| choosing          | Open in Terminal                                                    | treated as Here (→ here), then the takeover runs as today                                      |
+| choosing          | model or effort change, warm-cap close                              | no change; the next start reads choosing                                                       |
+| moving            | you send a message                                                  | it waits (the composer says "Moving to `<branch>`…") and runs once branch is recorded          |
+| moving            | Stop                                                                | nothing to stop: no turn runs while moving; the move finishes                                  |
+| moving            | Archive                                                             | refused: "Wait for the move to finish"                                                         |
+| moving            | worktree can't be made (filter, path, git error)                    | → choosing. The bar shows the error; Here still works                                          |
+| moving            | daemon restart                                                      | recovery finishes the move: makes the worktree if missing (idempotent by path), records branch |
+| branch            | Archive                                                             | warn (§4.4), remove the worktree, keep the branch                                              |
+| branch (archived) | Reopen                                                              | remake the worktree from the branch, re-seed, then start as branch                             |
+| choosing          | Archive                                                             | the Inbox card is withdrawn, then Archive runs as for reading                                  |
+| moving            | Open in Terminal                                                    | refused: "Wait for the move to finish"                                                         |
+| moving            | daemon restart after the cut, before seed and install finish        | recovery reruns the seed and install (both idempotent) before recording branch                 |
+| branch (archived) | Reopen while its branch is checked out in another worktree          | reopens read-only, saying where the branch is checked out                                      |
+| here              | a title-row git step while a Board task or pass holds your checkout | refused with the holder's words (§4.6)                                                         |
+| here              | Open in Terminal                                                    | the takeover holds your checkout, as today                                                     |
+| branch            | Open in Terminal                                                    | the takeover runs in the worktree and holds nothing (§4.5)                                     |
 
 The Inbox card is a stored card: raised on entering `choosing` and withdrawn on leaving it. The counts, the rail
 badge, ⌘J and the needs-you mirror read it as they read any open card, and it fits the paged Open inbox.
@@ -259,6 +260,7 @@ badge, ⌘J and the needs-you mirror read it as they read any open card, and it 
   - `createShapePreparer` (`shape-session-tools.ts`) takes the root, not only the project id.
   - `forSession` gets `projectAtCheckout(project, worktree)` with `writes: true`.
   - `conversation-files.ts` offers @-mentions from the root.
+
 - **The checkout after the move:** the sandbox doesn't let the session write there. Confinement refuses with "This
   session works in `<worktree>` now. The same file is at `<worktree>/<relative path>`."
 
@@ -317,14 +319,14 @@ holder's words ("A Board task is changing files on `main`"), and the button show
 the checkout doesn't block it, but the route waits for that turn's end before switching branches (call 6). A
 **branch** session's routes act on its own worktree and take no hold.
 
-| State | Button | Daemon |
-|---|---|---|
-| uncommitted changes | **Commit…** | a message (from the title) and a file list, **defaulting to the files the session touched**, then `commit_changes` with those paths |
-| commits not on a pull request, remote project | **Open Pull Request** | push the branch, open the PR with the session's title |
-| here on the base branch, remote project | **Open Pull Request** | call 6: branch at `HEAD`, switch to it, push, open the PR, then move local base back to `origin/<base>`. Refused if the checkout is dirty |
-| pull request open | **Merge** when checks pass and it's mergeable; otherwise disabled "Checks running · 3/9" | `merge_pull_request` |
-| merged | none; the meta line reads "merged into `main`" | |
-| local project, commits on the branch | **Merge into `main`** | needs your checkout clean and on base, with a GitWork reservation. Otherwise it says why. A conflict is refused, and the agent can merge base into the branch and resolve it |
+| State                                         | Button                                                                                   | Daemon                                                                                                                                                                       |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| uncommitted changes                           | **Commit**                                                                               | a message (from the title) and a file list, **defaulting to the files the session touched**, then `commit_changes` with those paths                                          |
+| commits not on a pull request, remote project | **Open Pull Request**                                                                    | push the branch, open the PR with the session's title                                                                                                                        |
+| here on the base branch, remote project       | **Open Pull Request**                                                                    | call 6: branch at `HEAD`, switch to it, push, open the PR, then move local base back to `origin/<base>`. Refused if the checkout is dirty                                    |
+| pull request open                             | **Merge** when checks pass and it's mergeable; otherwise disabled "Checks running · 3/9" | `merge_pull_request`                                                                                                                                                         |
+| merged                                        | none; the strip reads "merged into `main`"                                               |                                                                                                                                                                              |
+| local project, commits on the branch          | **Merge into `main`**                                                                    | needs your checkout clean and on base, with a GitWork reservation. Otherwise it says why. A conflict is refused, and the agent can merge base into the branch and resolve it |
 
 **The git tools** (`chat/git-tools.ts`):
 
@@ -382,35 +384,43 @@ the checkout doesn't block it, but the route waits for that turn's end before sw
 
 ### 6.5 Title row
 
-From left to right:
+The title row is almost all title. From left to right:
 
-- **The title.** Double-click renames it.
-- **⌄:** every open session by project, then Recently closed and New Session ⌘T.
-- **The meta line:**
-  - reading: "`10db` · no changes yet"
-  - here: "on `main` · 2 files changed"
-  - on a branch: "on `add-the-qa-notes` · 2 files changed, not committed", or "· pull request #652, checks passing"
+- **The title, which is the switcher:** the title and a ⌄, one button that opens every open session by project,
+  then Recently closed and New Session ⌘T. It takes the row up to the controls; rename is in ⋯.
 - **Then:**
-  - the agent and model (dim)
-  - the context ring (today's session bar's)
-  - **Changes** (⌘⇧D), when anything changed; it opens the drawer
   - the git step (§4.6)
   - the terminal button
   - ⋯
+
+**The strip under the composer** is one dim line: where the session works on the left, and what runs it and what
+it changed on the right.
+
+- **The place**, in git's words:
+  - reading: "`10db`"
+  - here: "`10db` · on `main`"
+  - on a branch: "`10db` · on `add-the-qa-notes` · not committed", or "· pull request #652, checks passing"
+- **Then:**
+  - the agent ("Claude Code", "Codex"), whose tooltip says "Claude Code runs this session"
+  - the context ring
+  - the change count, "+41 −6" (⌘⇧D), when anything changed; it opens the Changes drawer
+
+The composer lists no keys: Enter, Shift+Enter, Esc, `/` and `@` are every chat's. Its only line under the
+frame is a state's ("Sends when the limit resets").
 
 ### 6.6 Keys
 
 They keep their meaning on the panel's order:
 
-| Key | Action |
-|---|---|
-| ⌘T | new session |
-| ⌘W | close |
-| ⌘⇧T | reopen |
-| ⌘J | next session needing you (also the Sessions rail badge's click, from any view) |
-| ⌘1–8, ⌘9 | go to a session; ⌘9 is the last |
-| ⌘⇧[ ] and ⌃Tab | previous and next |
-| ⌘⇧D | Changes |
+| Key            | Action                                                                         |
+| -------------- | ------------------------------------------------------------------------------ |
+| ⌘T             | new session                                                                    |
+| ⌘W             | close                                                                          |
+| ⌘⇧T            | reopen                                                                         |
+| ⌘J             | next session needing you (also the Sessions rail badge's click, from any view) |
+| ⌘1–8, ⌘9       | go to a session; ⌘9 is the last                                                |
+| ⌘⇧[ ] and ⌃Tab | previous and next                                                              |
+| ⌘⇧D            | Changes                                                                        |
 
 ⌘⇧↩ is freed.
 
@@ -444,6 +454,7 @@ together is step 7's e2e, before any review of the view.
    - Do Edit's read-before-edit state and file checkpointing survive the resume?
 
    Each answer picks a branch of §4.3, or adds a line to the continuation note.
+
 2. **Schema and migration.** The columns are generated locally as the branch's migration, so `createTestStore`
    includes them. They're regenerated after the final merge of main, before the pull request (AGENTS.md).
 3. **Daemon: reading without the hold, and choosing.**
@@ -453,6 +464,7 @@ together is step 7's e2e, before any review of the view.
    - the stored Inbox card.
 
    Tests: one row per §2 row on a real store, with the fake adapter for turns, plus a restart while choosing.
+
 4. **Daemon: Here.** Tests reuse M6a's hold tests, plus the shared-with-chats and wait-behind-a-lane rows.
 5. **Daemon: the worktree and the move.**
    - ownership (lock reason, pins, `allCheckouts`, the sweep for local projects);
@@ -469,6 +481,7 @@ together is step 7's e2e, before any review of the view.
      resume;
    - **a real-sandbox test that `forSession(projectAtCheckout(project, worktree), writes)` refuses a write to the
      checkout.**
+
 6. **Daemon: the work read model, Changes, the title-row routes and the git tools' root.**
    - Tests through `app.request` with `test/fake-gh.ts` for push, PR and merge.
    - The reservation rows: each route refused while a lane or a pass holds the checkout, and call 6 waiting for a
@@ -487,6 +500,7 @@ together is step 7's e2e, before any review of the view.
    `FakeStep` can't write:
    - read → first change → On a New Branch → the edit lands in the worktree → Commit → Merge into `main`;
    - read → first change → Here.
+
 8. **Removal.**
    - The Do It and brief routes, with their tests.
    - The pass-of-one page and `finishSeals` are **not** removed in this PR. The Workbench keeps showing and closing
@@ -498,15 +512,15 @@ together is step 7's e2e, before any review of the view.
 
 ## 8. Provider parity
 
-| | Claude plan | Bedrock / API key | Codex |
-|---|---|---|---|
-| First-change bar | edit tools via PreToolUse | same adapter | apply_patch via the guard hook |
-| Move to a new branch | resume with new `cwd` | same | `thread/resume` with `cwd` + rebuilt permissions |
-| Shell-first write seen | per the spike | same as Claude plan | per the spike |
-| Git steps, title row | 10db's routes | same | same |
+|                        | Claude plan               | Bedrock / API key   | Codex                                            |
+| ---------------------- | ------------------------- | ------------------- | ------------------------------------------------ |
+| First-change bar       | edit tools via PreToolUse | same adapter        | apply_patch via the guard hook                   |
+| Move to a new branch   | resume with new `cwd`     | same                | `thread/resume` with `cwd` + rebuilt permissions |
+| Shell-first write seen | per the spike             | same as Claude plan | per the spike                                    |
+| Git steps, title row   | 10db's routes             | same                | same                                             |
 
 All three use Claude Code ≥ 2.1.223 where it applies, since the plan and Bedrock run the same system `claude`. The
-UI names a provider only in the title row's agent label and the bar's sentence.
+UI names a provider only in the strip's agent label and the bar's sentence.
 
 ## 9. Docs
 
@@ -557,6 +571,7 @@ UI names a provider only in the title row's agent label and the bar's sentence.
 - N4, N12 and N13: the shell spec.
 
 **Round 2:**
+
 - Blocking 1 (title-row routes and the hold): §4.6, §2, step 6.
 - Blocking 2 (Inbox paging): shell §4.1.
 - N-a: step 7. N-b: §4.1. N-c: §2. N-d: §4.1, §4.4. N-e: step 8. N-g: §4.2, §1.2.

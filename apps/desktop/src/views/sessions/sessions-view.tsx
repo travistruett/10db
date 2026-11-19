@@ -1,7 +1,7 @@
 import { ConversationState, type ChatDto, type ProjectId } from '@10db/contracts';
 import { useNavigate } from '@tanstack/react-router';
 import { Box, Button, Group, Modal, Paper, Text } from '@mantine/core';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArchiveConfirm } from './archive-confirm';
 import { useOpenChats, usePatchChat, useUnarchiveChat } from '../../daemon/chat-queries';
 import { useChatWork } from '../../daemon/chat-work-queries';
@@ -296,8 +296,9 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
     }
   });
 
-  const switcher = (
+  const switcherFor = (label: string): ReactNode => (
     <SessionSwitcher
+      label={label}
       groups={groups}
       projects={list}
       closed={closed}
@@ -386,7 +387,7 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
           });
         }}
       />
-      {selected?.kind === 'fresh' ? <TitleRow title="New Session" switcher={switcher} /> : null}
+      {selected?.kind === 'fresh' ? <TitleRow title={switcherFor('New Session')} /> : null}
       {closing.notice === null ? null : (
         <Paper role="status" withBorder px="sm" py={6} mx="md" mt="xs">
           <Group justify="space-between" wrap="nowrap">
@@ -430,7 +431,7 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
               chat={selected.chat}
               project={list.find((p) => p.id === selected.chat.projectId)}
               onAnnounce={setAnnouncement}
-              switcher={switcher}
+              switcherFor={switcherFor}
               actions={{
                 onArchive: () => {
                   askArchive(selected);

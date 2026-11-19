@@ -380,7 +380,7 @@ and a title row with a switcher, like any section.
 
 ## 6. Provider parity
 
-The shell shows nothing that depends on a provider. A session's agent and model stay in its title row, as the
+The shell shows nothing that depends on a provider. A session's agent sits in the strip under its composer and its model in the composer, as the
 Sessions spec says, and read the same on a Claude plan, Bedrock, an API key and Codex.
 
 ## 7. Build order

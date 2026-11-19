@@ -1,0 +1,39 @@
+/* The title row's session title, which is also the switcher: one quiet button, a fill under the pointer and while
+   its menu is open, so it reads as the place to change sessions. */
+.title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  /* The fill reaches past the text's left edge so the text lines up with the row's; a margin would take the
+     8 px from the title's own width and cut it short. */
+  translate: -8px 0;
+  padding: 3px 6px 3px 8px;
+  border-radius: var(--mantine-radius-sm);
+  color: inherit;
+  font: inherit;
+  transition: background-color 120ms ease;
+}
+
+.title:hover,
+.title[data-expanded] {
+  background: var(--mantine-color-default-hover);
+}
+
+.title:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: 1px;
+}
+
+.label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chevron {
+  flex: none;
+  color: var(--mantine-color-dimmed);
+}
