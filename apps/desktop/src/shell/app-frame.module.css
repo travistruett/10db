@@ -5,8 +5,10 @@
    Three tones step down from the rail to the content: the rail and the bar, the panel half a step darker, then the
    content, so each column reads as its own layer without more lines. */
 .root {
-  /* Where a column's hairline starts in the bar: short of the window's top edge, as a divider in the bar. */
-  --shell-bar-divider-inset: 10px;
+  /* A column's hairline in the bar is a short divider, centred with this much room above and below it; the
+     line goes on under the bar. */
+  --shell-bar-height: 44px;
+  --shell-bar-divider-inset: 12px;
   position: relative;
   display: grid;
   height: 100dvh;
@@ -38,7 +40,7 @@
   position: absolute;
   top: var(--shell-bar-divider-inset);
   right: 0;
-  bottom: 0;
+  bottom: var(--shell-bar-divider-inset);
   width: 1px;
   background: var(--mantine-color-default-border);
 }
@@ -103,6 +105,10 @@
   background: linear-gradient(
     transparent var(--shell-bar-divider-inset),
     var(--mantine-color-default-border) var(--shell-bar-divider-inset)
+      calc(var(--shell-bar-height) - var(--shell-bar-divider-inset)),
+    transparent calc(var(--shell-bar-height) - var(--shell-bar-divider-inset))
+      var(--shell-bar-height),
+    var(--mantine-color-default-border) var(--shell-bar-height)
   );
 }
 

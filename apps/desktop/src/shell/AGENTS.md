@@ -7,7 +7,7 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
   across the window, bg1 with a hairline under it, is the rail's part (the traffic lights), the panel's head and the
   content's title row (`decisions/2026-11-18-the-window-has-one-bar-and-one-sidebar-button.md`). Below it the
   sidebar (a rail and a panel, bg1) and the content (bg0). There is no inset card; hairlines divide the columns. The
-  labelled rail's runs up through the bar, as the panel's does, from 10 px under the window's top (`--shell-bar-divider-inset`); the icons-only rail's starts under it, since the
+  labelled rail's runs up through the bar, as the panel's does, as a short divider centred in the bar with 12 px above and below (`--shell-bar-divider-inset`), then on under it; the icons-only rail's starts under it, since the
   lights and the sidebar button are wider than that rail. The traffic lights sit at y 20, centred on the bar with
   the button. Lists in the panel and the rail scroll without a scrollbar. The content has the one inner shadow, faint and 3 px wide, in a darker shade of its own tone; a view never draws its own edge shade. Three tones step down: the bar and the rail bg1, the panel half way to bg0, the
   content bg0. The rail's foot holds the status controls and Settings; the theme and keep-awake are set in Settings ›
