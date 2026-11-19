@@ -9,7 +9,7 @@ import { DESKTOP_DIR, E2E_DATA, E2E_DIR } from './paths';
 import { auth } from './shape-project';
 
 // Activity against the real daemon: abandoning a batch whose branch holds nothing makes 10db delete the branch
-// and post one notice. It shows in the Factory's recent activity, and neither Open's count nor the rail's badge moves. It runs in a
+// and post one notice. It shows in the Factory's Activity drawer, and neither Open's count nor the rail's badge moves. It runs in a
 // project of its own, on its own repository, with one batch seeded the way a real start would leave it.
 
 const PROJECT_NAME = 'e2e-activity';
@@ -165,7 +165,7 @@ test.beforeAll(async ({ request }) => {
   projectId = await seedProject(request);
 });
 
-test('a deleted empty branch shows in the Factory recent activity, and Open and the badge do not move', async ({
+test('a deleted empty branch shows in the Factory Activity drawer, and Open and the badge do not move', async ({
   page,
   request,
 }) => {
@@ -201,16 +201,17 @@ test('a deleted empty branch shows in the Factory recent activity, and Open and 
     await page.addInitScript((value: string) => {
       window.localStorage.setItem('mantine-color-scheme-value', value);
     }, mode);
-    // The notice is the Factory's recent activity, opened in a drawer; the Inbox never lists it.
+    // The notice is in the Factory's Activity drawer; the Inbox never lists it.
     await page.goto(`/factory?project=${projectId}`);
-    const recent = page.getByRole('region', { name: 'Recent activity' });
-    const row = recent.getByRole('button', { name: new RegExp(NOTICE_LINE) });
+    await page.getByRole('button', { name: 'Activity' }).click();
+    const drawer = page.getByRole('dialog', { name: 'Activity' });
+    const row = drawer.getByRole('button', { name: new RegExp(NOTICE_LINE) });
     await expect(row).toBeVisible();
     await row.click();
     await expect(page.getByTestId('activity-content')).toContainText(
       `The branch ${BRANCH} held no commits beyond main`,
     );
-    await expectAccessible(page, `recent activity, ${mode}`);
+    await expectAccessible(page, `activity, ${mode}`);
   }
 
   expect(await openTotal(request)).toBe(openBefore);

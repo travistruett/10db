@@ -169,7 +169,7 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   stand for several cards and the age; then the project and the first line of the body. A flag's row offers
   Dismiss on hover and focus, and `e` dismisses the selected one. The list keeps one row selected and its content
   is drawn beside the panel. The panel's switch is Open, Waiting and Resolved; only Open and Waiting carry a
-  count. A notice, which asks nothing, is not in the Inbox: it is a row of the Factory's Recent activity, the same two
+  count. A notice, which asks nothing, is not in the Inbox: it is a row of the Factory's Activity drawer (the history button in its title row), the same two
   lines with a gray `NOTICE` tag (orange for a warning), opening in a drawer with no answer and no Dismiss.
 - **Page header:** a page has one header, the frame's title row (`TitleRow`,
   `apps/desktop/src/shell/title-row.tsx`), at the top of the content column on the content's own tone: the title

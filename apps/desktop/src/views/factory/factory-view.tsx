@@ -15,7 +15,7 @@ import { BenchmarkSyncNote } from './benchmark-sync-note';
 import { GoalList } from './goal-list';
 import { CardTypesPanel } from './card-types-panel';
 import { HumanTouchPanel } from './human-touch-panel';
-import { RecentActivity } from './recent-activity';
+import { ActivityButton } from './activity-drawer';
 import { RigorPanel } from './rigor-panel';
 import { UpdateDrainNote } from './update-drain-note';
 import { AdmissionNote } from './admission-note';
@@ -47,7 +47,12 @@ export function FactoryView() {
       <TitleRow
         title="Factory"
         meta={<BenchmarkSyncNote />}
-        actions={<ProjectFilter projects={all} value={filter ?? null} onChange={setFilter} />}
+        actions={
+          <Group gap="xs" wrap="nowrap">
+            <ActivityButton project={filter ?? null} />
+            <ProjectFilter projects={all} value={filter ?? null} onChange={setFilter} />
+          </Group>
+        }
       />
       <UpdateDrainNote />
       <AdmissionNote />
@@ -59,7 +64,6 @@ export function FactoryView() {
       {shown.map((project) => (
         <ProjectGoals key={project.id} project={project} linkedGoalId={linkedGoalId} />
       ))}
-      <RecentActivity project={filter ?? null} />
       {only ? (
         <>
           <RigorPanel projectId={only.id} />
