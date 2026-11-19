@@ -1,0 +1,11 @@
+/* The search sits on the switch's track tone, so the two controls read as one head over the rows, apart from the
+   selected row's lighter fill. */
+.input {
+  --input-bg: var(--mantine-color-dark-8);
+  --input-bd: transparent;
+}
+
+[data-mantine-color-scheme='light'] .input.input {
+  --input-bg: var(--mantine-color-gray-1);
+  --input-bd: transparent;
+}

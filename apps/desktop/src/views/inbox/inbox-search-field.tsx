@@ -3,6 +3,7 @@ import { useDebouncedCallback } from '@mantine/hooks';
 import { IconSearch } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useFrameSlots } from '../../shell/frame-slots';
+import classes from './inbox-search-field.module.css';
 
 /** How long the field waits after the last keystroke before the search reaches the URL. */
 export const SEARCH_DEBOUNCE_MS = 250;
@@ -66,6 +67,7 @@ export function InboxSearchField({
     <TextInput
       ref={input}
       size="xs"
+      classNames={{ input: classes['input'] }}
       aria-label="Search the Inbox"
       placeholder="Search"
       maxLength={200}
