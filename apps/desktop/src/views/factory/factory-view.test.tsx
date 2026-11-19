@@ -22,7 +22,7 @@ function rowTitles(known: readonly string[]): (string | undefined)[] {
 }
 
 describe('FactoryView goal list', () => {
-  it('orders goals failed, waiting on you, running, not started, Not in a goal, then Done, all collapsed', async () => {
+  it('orders goals failed, waiting on you, running, not started, then Done, all collapsed', async () => {
     const loose = workstreamDto({ taskTitle: 'Loose run', state: 'RUNNING' });
     server.use(
       ...baseHandlers(),
@@ -56,9 +56,14 @@ describe('FactoryView goal list', () => {
     renderApp('/factory');
 
     await screen.findByRole('button', { name: /^Broken/ });
-    expect(
-      rowTitles(['Broken', 'Asking', 'Busy', 'Landing', 'Idle', 'Not in a goal', 'Done']),
-    ).toEqual(['Broken', 'Asking', 'Busy', 'Landing', 'Idle', 'Not in a goal', 'Done']);
+    expect(rowTitles(['Broken', 'Asking', 'Busy', 'Landing', 'Idle', 'Done'])).toEqual([
+      'Broken',
+      'Asking',
+      'Busy',
+      'Landing',
+      'Idle',
+      'Done',
+    ]);
     expect(screen.queryAllByRole('button', { expanded: true })).toEqual([]);
     expect(screen.queryAllByRole('region')).toEqual([]);
     // Done goals sit behind one collapsed line and show once it opens.

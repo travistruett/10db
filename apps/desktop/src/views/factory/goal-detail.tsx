@@ -3,7 +3,6 @@ import {
   type GoalSummaryDto,
   type ProjectViewDto,
   type WorkstreamDto,
-  type WorkstreamId,
 } from '@10db/contracts';
 import { Button, Divider, Group, Stack, Text } from '@mantine/core';
 import { useNavigate } from '@tanstack/react-router';
@@ -25,7 +24,6 @@ import {
   SinceYouLooked,
   type OpenedDigest,
 } from './goal-digest';
-import { GoalSessions } from './goal-sessions';
 import { GoalTasks } from './goal-tasks';
 import { taskRows } from './task-rows';
 
@@ -152,32 +150,5 @@ export function GoalDetail({ project, summary, opened }: GoalDetailProps) {
         />
       ) : null}
     </Stack>
-  );
-}
-
-/** The expanded Not in a goal row: only the sessions of tasks with no goal that are running or failed. */
-export function UngroupedDetail({
-  project,
-  workstreamIds,
-}: {
-  readonly project: ProjectViewDto;
-  readonly workstreamIds: readonly WorkstreamId[];
-}) {
-  const sessions = useSessions((ws) => workstreamIds.includes(ws.id));
-  const tasks = useTasks(project.id);
-  const batches = useBatches(project.id);
-  // A failed run offers Retry only once both are known, so a request that failed says why it does not.
-  const loadError = tasks.isError
-    ? tasks.error.message
-    : (sessions.error ?? (batches.isError ? batches.error.message : null));
-  return (
-    <GoalSessions
-      goalId={null}
-      workstreams={sessions.all}
-      tasks={tasks.data ?? []}
-      batches={batches.data ?? []}
-      loading={sessions.loading}
-      error={loadError}
-    />
   );
 }

@@ -3,7 +3,6 @@ import {
   type GoalDigestDto,
   type GoalStatus as Status,
   type GoalSummaryDto,
-  type UngroupedDigestDto,
 } from '@10db/contracts';
 import { GOAL_STATUS_LOOK } from '../board/goal-status';
 import { elapsedWords } from '../board/task-state';
@@ -69,15 +68,6 @@ export function verdictLine(digest: GoalDigestDto): string {
     case G.NotStarted:
       return `${label} · ${plural(total, 'task')}`;
   }
-}
-
-/** The Not in a goal row's line: "2 running · 1 failed", the statuses it holds. */
-export function ungroupedLine(ungrouped: UngroupedDigestDto): string {
-  const parts = [
-    ungrouped.running > 0 ? `${String(ungrouped.running)} running` : null,
-    ungrouped.failed > 0 ? `${String(ungrouped.failed)} failed` : null,
-  ].filter((part) => part !== null);
-  return parts.join(' · ');
 }
 
 export interface GoalGroups {

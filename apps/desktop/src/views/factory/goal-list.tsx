@@ -9,14 +9,13 @@ import { Box } from '@mantine/core';
 import { useEffect, useRef, useState } from 'react';
 import { useOpenGoal } from '../../daemon/goal-queries';
 import { useNow } from '../../shell/relative';
-import { GoalDetail, UngroupedDetail } from './goal-detail';
+import { GoalDetail } from './goal-detail';
 import { GoalRow } from './goal-row';
 import { GOAL_STATUS_LOOK } from '../board/goal-status';
-import { groupGoals, ungroupedLine, verdictLine } from './goal-status';
+import { groupGoals, verdictLine } from './goal-status';
 import { shortAgo } from './short-ago';
 
 /** The row key of the Not in a goal group, beside the goals' ids. */
-const UNGROUPED = 'ungrouped';
 
 /** "· 3 new since 3h ago": plain text, with no badge, when the goal has items in its window. */
 function newsOf(summary: GoalSummaryDto, now: number): string | undefined {
@@ -28,8 +27,8 @@ function newsOf(summary: GoalSummaryDto, now: number): string | undefined {
 }
 
 /**
- * The project's goals as one list: open goals in status order, Not in a goal, then the done ones
- * behind one collapsed line. Every row starts collapsed and one is open at a time.
+ * The project's goals as one list: open goals in status order, then the done ones behind one collapsed
+ * line. Work in no goal is the Factory's live list. Every row starts collapsed and one is open at a time.
  */
 export function GoalList({
   project,
@@ -96,30 +95,13 @@ export function GoalList({
     );
   }
 
-  const { ungrouped } = list;
   return (
     <Box
       role="group"
-      aria-label="Goals"
+      aria-label={`${project.name} goals`}
       style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}
     >
       {goals.map(goalRow)}
-      {ungrouped ? (
-        <GoalRow
-          title="Not in a goal"
-          line={ungroupedLine(ungrouped)}
-          color={GOAL_STATUS_LOOK[ungrouped.status].color}
-          expanded={openKey === UNGROUPED}
-          onToggle={() => {
-            setOpenKey(openKey === UNGROUPED ? null : UNGROUPED);
-          }}
-        >
-          <UngroupedDetail
-            project={project}
-            workstreamIds={ungrouped.workstreams.map((w) => w.workstreamId)}
-          />
-        </GoalRow>
-      ) : null}
       {done.length > 0 ? (
         <GoalRow
           title="Done"

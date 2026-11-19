@@ -1,0 +1,111 @@
+/* The Factory's live list: sections like the panel's groups, rows like the panel's rows. */
+.list {
+  max-width: 1040px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 6px;
+  font-size: var(--mantine-font-size-xs);
+  font-weight: 600;
+  color: var(--mantine-color-dimmed);
+}
+
+.count {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding-inline: 12px;
+  border-radius: var(--mantine-radius-md);
+}
+
+.row:hover {
+  background: var(--panel-row-hover, var(--mantine-color-default-hover));
+}
+
+/* The row's link fills it, so the whole row opens the task and a Retry beside it stays its own button. */
+.open {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--mantine-font-size-sm);
+  color: var(--mantine-color-text);
+  border-radius: var(--mantine-radius-sm);
+}
+
+.open:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: 2px;
+}
+
+.title {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.icon {
+  flex: none;
+  color: var(--mantine-color-dimmed);
+}
+
+.detail {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--mantine-color-dimmed);
+}
+
+.project {
+  flex: none;
+  width: 132px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--mantine-font-size-xs);
+  color: var(--mantine-color-dimmed);
+}
+
+.when {
+  flex: none;
+  width: 64px;
+  text-align: right;
+  font-size: var(--mantine-font-size-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--mantine-color-dimmed);
+}
+
+.action {
+  flex: none;
+  width: 52px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.empty {
+  padding: 8px 12px;
+}

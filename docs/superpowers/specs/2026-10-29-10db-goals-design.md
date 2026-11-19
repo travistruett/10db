@@ -206,6 +206,10 @@ task under a rule is open (§14).
 
 ## 8. Factory
 
+**Amended** by `docs/architecture/decisions/2026-11-19-factory-is-a-live-list-across-projects.md`: Factory is now
+one live list of every project's runs by what they need, with the goals below it as a section and no Not in a goal
+row; what follows describes the goals within that section.
+
 **Built:** Factory is the project's goals as described below (`apps/desktop/src/views/factory/`): the status-ordered
 list, the Not in a goal and Done (n) rows, each goal's digest, its Sessions and Pull requests, and the header's
 **Adopt a Plan…** with its refusal sheet (§11). The workstream table's columns (task, state, step, context,

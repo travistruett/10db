@@ -212,12 +212,20 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(
     page.getByRole('list', { name: 'Done tasks' }).getByRole('listitem', { name: TASK }),
   ).toBeVisible();
-  // Finished work with no goal is not Factory's: it shows the guide and nothing under Not in a goal.
+  // Factory lists every project's runs by what they need: the finished task is under Done Today, and with
+  // no goals anywhere there is no Goals section to read about.
   await open(page, 'Factory');
-  // inbox.spec.ts runs first and leaves its own project, so each project's goals group says it.
-  await expect(page.getByText(/^Goals are outcomes 10db pursues/).first()).toBeVisible();
-  await expect(page.getByRole('button', { name: /^Not in a goal/ })).toHaveCount(0);
-  await expectAccessible(page, 'factory, no goals, dark');
+  const doneToday = page.getByRole('group', { name: 'Done Today' });
+  await expect(doneToday.getByRole('button', { name: new RegExp(TASK) }).first()).toBeVisible();
+  await expect(page.getByRole('group', { name: 'Goals' })).toHaveCount(0);
+  await expectAccessible(page, 'factory, live list, dark');
+  // A row opens its task on the Board.
+  await doneToday
+    .getByRole('button', { name: new RegExp(TASK) })
+    .first()
+    .click();
+  await expect(page.getByRole('dialog', { name: 'Task' })).toBeVisible();
+  await page.keyboard.press('Escape');
 
   // Knowledge: a decision written through the API (as Claude Code would) appears in the open view
   // without a reload, with where it came from.

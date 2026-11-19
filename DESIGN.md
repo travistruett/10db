@@ -106,11 +106,11 @@ favors legibility and calm over decoration.
   the Board's In review column: a task whose pull request is open is in review, never done. Green is only
   for work that has merged: a goal with open pull requests is Shipping, in blue, never green. A goal's
   Decisions are those its own tasks recorded, not every decision in the project.
-- **Factory is one list per project, not cards:** every project's goals show, each project under its mark and name with its own Plan Work, narrowed by Factory's Project filter (`?project=`); Human touch shows once one project is chosen. Acting in a project's group makes it the selected project first, so its links open there. Within a project, goals are rows of one list separated by hairline dividers, and the open
+- **Factory is one live list, not a section per project:** every project's runs in sections by what they need (Needs You, Failed, Running, Queued, Done Today), each row a dot, the task, what it is doing, its project's tile and name and how long ago, a section with nothing in it left out (`decisions/2026-11-19-factory-is-a-live-list-across-projects.md`). Goals are a section under it, each project's under its name, only while a project has one; Metrics, a switch in the title row, holds Rigor, Human touch and Card types for one project. Within a project, goals are rows of one list separated by hairline dividers, and the open
   goal's area takes the `bg_1` fill. Rows take no borders and no shadows; cards stay the Board's draggable
   things. Each row is a button (`aria-expanded`) over a `role="region"`: title, status dot and one line, collapsed
   until opened, one open at a time. Order: failed, waiting on you, waiting on someone, paused, running,
-  shipping, idle, not started, the Not in a goal row, then done goals under one collapsed "Done (n)". News is plain text ("· 3 new since 3h ago"):
+  shipping, idle, not started, then done goals under one collapsed "Done (n)". News is plain text ("· 3 new since 3h ago"):
   no badge and no color.
 - **An open goal has four zones, ordered by what the builder acts on:** a bar split by state with its counts
   ("0 merged · 4 in review · 1 ready · 3 not started"; green only for merged) and Start Ready Tasks; a
@@ -125,7 +125,7 @@ favors legibility and calm over decoration.
   "Ready · next", and a task that waits says "Waits on 2". Tasks that share a branch each carry a "Shared
   branch" tag and the pull request link shows once, on the first. A row goes to the Board with that task's
   drawer open and the Board filtered to the task's goal; a task not in a goal opens the Board unfiltered
-  (the Not in a goal row still lists sessions).
+  (work in no goal is the Factory's live list).
 - **"Since you last looked"** holds the window's deviations and decisions, one clamped line each: session ids
   are dropped from the line and kept in its tooltip, and Show Earlier adds the rest.
 - **Radius:** `md` everywhere.
