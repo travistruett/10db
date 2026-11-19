@@ -21,7 +21,7 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
   sheet always stands over it.
   Rail widths (200 labelled, 60 icons only) and the title row's height (44 px) are constants there.
 - The panel column and the content are a Mantine `Splitter`: the panel's hairline is the handle, and the builder
-  drags the panel between 260 and 480 px (340 until dragged, and again on a double-click of the handle; `PANEL_WIDTH` and its bounds in `shell-layout.ts`).
+  drags the panel between 200 and 480 px (340 until dragged, and again on a double-click of the handle; `PANEL_WIDTH` and its bounds in `shell-layout.ts`).
   One width for every section, remembered (`panel-width.ts`, `tendb.shell.panelWidth`); a sheet takes it too.
   Only a panel column takes the pane's room: otherwise the pane is `display: contents`, and the handle is hidden.
 - What the frame draws is a pure function of the window's width band, whether the section has a panel, the labels
