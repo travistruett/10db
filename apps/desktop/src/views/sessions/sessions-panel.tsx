@@ -73,7 +73,6 @@ function Group_({
   count,
   onToggle,
 }: {
-  /** The id its rows' group is labelled by. */
   readonly name: string;
   /** Whether the project list has arrived; until it has, a group's name is unknown, not removed. */
   readonly projectsKnown: boolean;
