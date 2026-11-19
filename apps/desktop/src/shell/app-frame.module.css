@@ -29,6 +29,11 @@
   border-bottom: 1px solid var(--mantine-color-default-border);
 }
 
+/* A labelled rail is wider than the lights and the button, so its hairline runs up through the bar too. */
+.rail[data-labelled] > .railDrag {
+  border-right: 1px solid var(--mantine-color-default-border);
+}
+
 .railBody {
   flex: 1;
   min-height: 0;

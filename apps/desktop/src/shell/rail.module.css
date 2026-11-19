@@ -82,7 +82,7 @@
 .divider {
   flex: none;
   height: 1px;
-  margin: 6px 0;
+  margin: 10px 0;
   align-self: stretch;
   background: var(--mantine-color-default-border);
 }
