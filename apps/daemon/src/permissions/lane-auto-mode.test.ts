@@ -17,17 +17,16 @@ describe('laneAutoMode', () => {
     test.close();
   });
 
-  it.each([['"yes"'], [1], [{ on: true }]])(
-    'falls back to default mode, with a warning, for the stored value %j',
-    (value) => {
+  it('falls back to default mode, with a warning, for a stored value that is not a boolean', () => {
+    for (const value of ['"yes"', 1, { on: true }]) {
       const test = createTestStore();
       test.store.write((ctx) => {
         setAppSetting(ctx, 'lane_auto_mode', value);
       });
       const warn = vi.fn();
-      expect(laneAutoMode(test.store.db, warn)).toBe(false);
-      expect(warn).toHaveBeenCalledOnce();
+      expect.soft(laneAutoMode(test.store.db, warn), JSON.stringify(value)).toBe(false);
+      expect.soft(warn, JSON.stringify(value)).toHaveBeenCalledOnce();
       test.close();
-    },
-  );
+    }
+  });
 });

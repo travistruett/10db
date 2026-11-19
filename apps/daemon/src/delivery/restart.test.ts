@@ -26,7 +26,7 @@ import { createFailedRestarts, type FailedRestarts } from './restart';
 
 let h: DeliveryHarness;
 let restarts: FailedRestarts;
-beforeEach(() => {
+function boot(): void {
   // These tests move batches by hand; the ship trigger would race them.
   h = createDeliveryHarness({}, { trigger: false });
   restarts = createFailedRestarts({
@@ -35,7 +35,8 @@ beforeEach(() => {
     shipper: h.shipper,
     inbox: h.inbox,
   });
-});
+}
+beforeEach(boot);
 afterEach(() => {
   h.close();
 });
@@ -51,10 +52,42 @@ async function failedAlone() {
   return { alpha, batchId: batch.id, ws, commit };
 }
 
-describe('a task whose latest run failed in an open batch', () => {
-  it('continues in the batch: the same workstream is queued again and the commits stay', async () => {
-    const { alpha, batchId, ws, commit } = await failedAlone();
+/** Alpha and Beta share a batch; Beta finished and Alpha failed. */
+async function failedBesideOtherWork() {
+  const alpha = h.addTask('Alpha');
+  const beta = h.addTask('Beta', { areas: ['ui'] });
+  const batch = h.only(
+    h.starter.startBatch(h.project.id, { title: 'Both', taskIds: [alpha.id, beta.id] }),
+  );
+  await h.jobs.idle();
+  const [a, b] = listWorkstreams(h.store.db, { batchId: batch.id });
+  if (!a || !b) throw new Error('two workstreams expected');
+  h.settle(b.id, 'DONE');
+  h.settle(a.id, 'FAILED');
+  return { batchId: batch.id, ws: a };
+}
 
+/** The card the runner raises when the workstream fails. */
+function failedCard(ws: { id: WorkstreamId }) {
+  return h.inbox.flag({
+    tier: 'ask',
+    urgency: 'high',
+    closesWhen: { by: 'answer' },
+    projectId: h.project.id,
+    workstreamId: ws.id,
+    title: 'Workstream failed: Alpha',
+    body: 'The gate failed',
+  });
+}
+
+const cardState = (card: ReturnType<typeof failedCard>) => getInboxItem(h.store.db, card.id).state;
+
+describe('a task whose latest run failed in an open batch', () => {
+  it('is not moved while it keeps its placement, and continues in the batch: the same workstream is queued again, the commits stay and its failed card closes', async () => {
+    const { alpha, batchId, ws, commit } = await failedAlone();
+    const card = failedCard(ws);
+
+    expect(restarts.placementMoved(alpha.id)).toBe(false);
     const retried = restarts.continueRun(alpha.id);
 
     expect(retried).toMatchObject({ id: ws.id, state: 'QUEUED', batchId });
@@ -62,14 +95,17 @@ describe('a task whose latest run failed in an open batch', () => {
     expect(batch.state).toBe('OPEN');
     expect(h.git$('log', '--format=%H', batch.branch ?? 'missing')).toContain(commit);
     expect(listWorkstreams(h.store.db, { batchId })).toHaveLength(1);
+    expect(cardState(card)).not.toBe('OPEN');
   });
 
-  it('starts over by ending the batch that holds only that attempt', async () => {
-    const { alpha, batchId } = await failedAlone();
+  it('starts over by ending the batch that holds only that attempt, closing its failed card', async () => {
+    const { alpha, batchId, ws } = await failedAlone();
+    const card = failedCard(ws);
 
     restarts.supersede(alpha.id);
 
     expect(getBatch(h.store.db, batchId).state).toBe('ABANDONED');
+    expect(cardState(card)).not.toBe('OPEN');
     await h.jobs.idle();
     // The task can now start in a batch of its own at the base branch.
     const fresh = h.only(
@@ -80,21 +116,16 @@ describe('a task whose latest run failed in an open batch', () => {
     expect(getBatch(h.store.db, fresh.id).state).toBe('OPEN');
   });
 
-  it('leaves a batch that holds other work as it is when the task starts over', async () => {
-    const alpha = h.addTask('Alpha');
-    const beta = h.addTask('Beta', { areas: ['ui'] });
-    const batch = h.only(
-      h.starter.startBatch(h.project.id, { title: 'Both', taskIds: [alpha.id, beta.id] }),
-    );
-    await h.jobs.idle();
-    const [a, b] = listWorkstreams(h.store.db, { batchId: batch.id });
-    if (!a || !b) throw new Error('two workstreams expected');
-    h.settle(b.id, 'DONE');
-    h.settle(a.id, 'FAILED');
+  it('leaves a batch that holds other work, and the failed card, as they are when the task starts over', async () => {
+    const { batchId, ws } = await failedBesideOtherWork();
+    const card = failedCard(ws);
 
-    restarts.supersede(a.taskId);
+    restarts.supersede(ws.taskId);
 
-    expect(getBatch(h.store.db, batch.id).state).toBe('OPEN');
+    expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
+    // supersede leaves the shared batch alone; the start that follows begins a new run and closes
+    // the card (restart-failed-api.test.ts).
+    expect(cardState(card)).toBe('OPEN');
   });
 
   /**
@@ -160,49 +191,7 @@ describe('a task whose latest run failed in an open batch', () => {
     expect(notice.body).toContain('Ship anyway');
   });
 
-  it('refuses to end the batch while a run in it is live', async () => {
-    const { alpha, ws } = await failedAlone();
-    h.running.add(ws.id);
-
-    expect(() => {
-      restarts.supersede(alpha.id);
-    }).toThrow(ConflictError);
-  });
-});
-
-describe('the failed card of a task that is started again', () => {
-  /** The card the runner raises when the workstream fails. */
-  function failedCard(ws: { id: WorkstreamId }) {
-    return h.inbox.flag({
-      tier: 'ask',
-      urgency: 'high',
-      closesWhen: { by: 'answer' },
-      projectId: h.project.id,
-      workstreamId: ws.id,
-      title: 'Workstream failed: Alpha',
-      body: 'The gate failed',
-    });
-  }
-
-  it('closes when the run continues', async () => {
-    const { alpha, ws } = await failedAlone();
-    const card = failedCard(ws);
-
-    restarts.continueRun(alpha.id);
-
-    expect(getInboxItem(h.store.db, card.id).state).not.toBe('OPEN');
-  });
-
-  it('closes when the task starts over', async () => {
-    const { alpha, ws } = await failedAlone();
-    const card = failedCard(ws);
-
-    restarts.supersede(alpha.id);
-
-    expect(getInboxItem(h.store.db, card.id).state).not.toBe('OPEN');
-  });
-
-  it('stays open when starting over is refused', async () => {
+  it('refuses to end the batch while a run in it is live, and its failed card stays open', async () => {
     const { alpha, ws } = await failedAlone();
     const card = failedCard(ws);
     h.running.add(ws.id);
@@ -211,39 +200,12 @@ describe('the failed card of a task that is started again', () => {
       restarts.supersede(alpha.id);
     }).toThrow(ConflictError);
 
-    expect(getInboxItem(h.store.db, card.id).state).toBe('OPEN');
-  });
-
-  it('stays open when starting over leaves a shared batch as it is', async () => {
-    const alpha = h.addTask('Alpha');
-    const beta = h.addTask('Beta', { areas: ['ui'] });
-    const batch = h.only(
-      h.starter.startBatch(h.project.id, { title: 'Both', taskIds: [alpha.id, beta.id] }),
-    );
-    await h.jobs.idle();
-    const [a, b] = listWorkstreams(h.store.db, { batchId: batch.id });
-    if (!a || !b) throw new Error('two workstreams expected');
-    h.settle(b.id, 'DONE');
-    h.settle(a.id, 'FAILED');
-    const card = failedCard(a);
-
-    restarts.supersede(a.taskId);
-
-    // supersede leaves the shared batch alone; the start that follows begins a new run and closes
-    // the card (restart-failed-api.test.ts).
-    expect(getInboxItem(h.store.db, card.id).state).toBe('OPEN');
+    expect(cardState(card)).toBe('OPEN');
   });
 });
 
 describe('a task whose placement no longer matches the batch its failed run is in', () => {
-  it('is not moved while the task still has the placement its batch works in', async () => {
-    const { alpha } = await failedAlone();
-
-    expect(restarts.placementMoved(alpha.id)).toBe(false);
-    expect(restarts.continueRun(alpha.id)).not.toBeNull();
-  });
-
-  it('is moved once the task is set to a separate copy, and continuing declines', async () => {
+  it('is moved once set to a separate copy: continuing declines, Retry is refused naming both places and Start over, and Retry runs once the task is set back', async () => {
     const { alpha, batchId, ws } = await failedAlone();
     h.state.write((w) => patchTask(w, alpha.id, { workspaceMode: WorkspaceMode.Worktree }));
 
@@ -252,20 +214,6 @@ describe('a task whose placement no longer matches the batch its failed run is i
     expect(restarts.continueRun(alpha.id)).toBeNull();
     expect(getWorkstream(h.store.db, ws.id).state).toBe('FAILED');
     expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
-  });
-
-  it('has nothing to move without a failed run', () => {
-    const alpha = h.addTask('Alpha');
-    h.state.write((w) => patchTask(w, alpha.id, { workspaceMode: WorkspaceMode.Worktree }));
-
-    expect(restarts.placementMoved(alpha.id)).toBe(false);
-  });
-});
-
-describe('a Retry of a task that moved out of the place its batch works in', () => {
-  it('is refused, naming both places and Start over, and leaves the run and batch as they were', async () => {
-    const { alpha, batchId, ws } = await failedAlone();
-    h.state.write((w) => patchTask(w, alpha.id, { workspaceMode: WorkspaceMode.Worktree }));
 
     let refused: unknown;
     try {
@@ -279,11 +227,7 @@ describe('a Retry of a task that moved out of the place its batch works in', () 
     expect(getWorkstream(h.store.db, ws.id).state).toBe('FAILED');
     expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
     expect(getTask(h.store.db, alpha.id).workspaceMode).toBe('worktree');
-  });
 
-  it('runs once the task is set back to the place its batch works in', async () => {
-    const { alpha, batchId, ws } = await failedAlone();
-    h.state.write((w) => patchTask(w, alpha.id, { workspaceMode: WorkspaceMode.Worktree }));
     h.state.write((w) => patchTask(w, alpha.id, { workspaceMode: WorkspaceMode.Shared }));
 
     expect(h.starter.retry(ws.id)).toMatchObject({ id: ws.id, state: 'QUEUED', batchId });
@@ -330,10 +274,14 @@ describe('a Retry of a task that moved out of the place its batch works in', () 
     expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
   });
 
-  it("keeps the store's own refusal for a batch a retry can't run in", async () => {
+  it("is not continued once its batch has ended, and Retry after it moved keeps the store's own refusal", async () => {
     const { alpha, batchId, ws } = await failedAlone();
-    h.state.write((w) => patchTask(w, alpha.id, { workspaceMode: WorkspaceMode.Worktree }));
     h.shipper.abandon(batchId);
+
+    expect(restarts.continueRun(alpha.id)).toBeNull();
+    expect(getWorkstream(h.store.db, ws.id).state).toBe('FAILED');
+
+    h.state.write((w) => patchTask(w, alpha.id, { workspaceMode: WorkspaceMode.Worktree }));
 
     expect(() => h.starter.retry(ws.id)).toThrow(/start the task again/);
   });
@@ -386,54 +334,57 @@ describe('a failed task of a landing that moved', () => {
     h.state.write((w) => patchTask(w, task.id, { workspaceMode: mode }));
   };
 
-  describe.each([
-    {
-      from: WorkspaceMode.Shared,
-      to: WorkspaceMode.Worktree,
-      words: /Alpha.*Real areas.*pull request.*Your folder/,
-    },
-    {
-      from: WorkspaceMode.Worktree,
-      to: WorkspaceMode.Shared,
-      words: /Alpha.*Real areas.*pull request.*a separate copy/,
-    },
-  ])('out of a batch with other work of the landing, from $from', ({ from, to, words }) => {
-    it('is refused by Start, naming the landing, before anything is written', async () => {
-      const { alpha, batchId, ws } = await failedBesideLandingWork(from);
+  it('is refused by Start and by Retry out of a batch with other work of the landing, naming the landing, before anything is written; and once that batch has failed, says the landing holds it', async () => {
+    const rows = [
+      {
+        from: WorkspaceMode.Shared,
+        to: WorkspaceMode.Worktree,
+        words: /Alpha.*Real areas.*pull request.*Your folder/,
+      },
+      {
+        from: WorkspaceMode.Worktree,
+        to: WorkspaceMode.Shared,
+        words: /Alpha.*Real areas.*pull request.*a separate copy/,
+      },
+    ];
+    let last: Awaited<ReturnType<typeof failedBesideLandingWork>> | undefined;
+    for (const [i, { from, to, words }] of rows.entries()) {
+      if (i > 0) {
+        h.close();
+        boot();
+      }
+      const label = `from ${from}`;
+      last = await failedBesideLandingWork(from);
+      const { alpha, batchId, ws } = last;
       move(alpha, to);
 
-      expect(() => restarts.supersede(alpha.id)).toThrow(words);
+      expect.soft(() => restarts.supersede(alpha.id), `${label}: Start`).toThrow(words);
+      expect.soft(getTask(h.store.db, alpha.id).workspaceMode, label).toBe(to);
+      expect.soft(getBatch(h.store.db, batchId).state, label).toBe('OPEN');
+      expect.soft(getWorkstream(h.store.db, ws.id).state, label).toBe('FAILED');
+      expect.soft(listBatches(h.store.db), label).toHaveLength(1);
 
-      expect(getTask(h.store.db, alpha.id).workspaceMode).toBe(to);
-      expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
-      expect(getWorkstream(h.store.db, ws.id).state).toBe('FAILED');
-      expect(listBatches(h.store.db)).toHaveLength(1);
-    });
+      expect.soft(() => h.starter.retry(ws.id), `${label}: Retry`).toThrow(words);
+      expect.soft(getWorkstream(h.store.db, ws.id).state, `${label}: Retry`).toBe('FAILED');
+    }
 
-    it('is refused by Retry the same way', async () => {
-      const { alpha, ws } = await failedBesideLandingWork(from);
-      move(alpha, to);
-
-      expect(() => h.starter.retry(ws.id)).toThrow(words);
-      expect(getWorkstream(h.store.db, ws.id).state).toBe('FAILED');
-    });
-  });
-
-  it('says the landing holds it when that batch has failed, not to wait for it', async () => {
-    const { alpha, batchId } = await failedBesideLandingWork(WorkspaceMode.Worktree);
+    // The last row moved from a separate copy to Your folder: now its batch fails.
+    if (!last) throw new Error('a row is expected');
+    const { alpha, batchId } = last;
     h.state.write((w) =>
       transitionBatch(w, batchId, { to: 'FAILED', patch: { failure: 'gate_failed' } }),
     );
-    move(alpha, WorkspaceMode.Shared);
 
     expect(() => restarts.supersede(alpha.id)).toThrow(/Real areas.*pull request.*a separate copy/);
     expect(getBatch(h.store.db, batchId).state).toBe('FAILED');
-  });
+    // Two boots, each of which had the 60 s test timeout before the fold.
+  }, 120_000);
 
-  it('starts over in the new place when its batch held only its attempt', async () => {
+  it('tells Retry to start over, then starts over in the new place, when its batch held only its attempt', async () => {
     const { alpha, batchId, ws } = await failedAloneInLanding(WorkspaceMode.Shared);
     move(alpha, WorkspaceMode.Worktree);
 
+    expect(() => h.starter.retry(ws.id)).toThrow(/Start over/);
     expect(restarts.placementMoved(alpha.id)).toBe(true);
     restarts.supersede(alpha.id);
     expect(getBatch(h.store.db, batchId).state).toBe('ABANDONED');
@@ -445,13 +396,6 @@ describe('a failed task of a landing that moved', () => {
     expect(getBatch(h.store.db, fresh.id).worktreePath).not.toBeNull();
     expect(getTask(h.store.db, alpha.id).workspaceMode).toBe('worktree');
     expect(getWorkstream(h.store.db, ws.id).state).toBe('FAILED');
-  });
-
-  it('tells Retry to start over when its batch held only its attempt', async () => {
-    const { alpha, ws } = await failedAloneInLanding(WorkspaceMode.Shared);
-    move(alpha, WorkspaceMode.Worktree);
-
-    expect(() => h.starter.retry(ws.id)).toThrow(/Start over/);
   });
 
   it('starts over when its failed batch held only its attempt', async () => {
@@ -488,7 +432,7 @@ describe('a failed task of a landing that moved', () => {
 });
 
 describe('a task with no failed run in an open batch', () => {
-  it('has nothing to continue or end', () => {
+  it('has nothing to move, continue or end', () => {
     const alpha = h.addTask('Alpha');
 
     expect(restarts.continueRun(alpha.id)).toBeNull();
@@ -496,13 +440,9 @@ describe('a task with no failed run in an open batch', () => {
       restarts.supersede(alpha.id);
     }).not.toThrow();
     expect(getTask(h.store.db, alpha.id).workstreamId).toBeNull();
-  });
 
-  it('is not continued once its batch has ended', async () => {
-    const { alpha, batchId, ws } = await failedAlone();
-    h.shipper.abandon(batchId);
+    h.state.write((w) => patchTask(w, alpha.id, { workspaceMode: WorkspaceMode.Worktree }));
 
-    expect(restarts.continueRun(alpha.id)).toBeNull();
-    expect(getWorkstream(h.store.db, ws.id).state).toBe('FAILED');
+    expect(restarts.placementMoved(alpha.id)).toBe(false);
   });
 });

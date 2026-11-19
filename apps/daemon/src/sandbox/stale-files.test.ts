@@ -142,6 +142,9 @@ describe('claimSandboxTempRoot', () => {
       claim.release();
     }
     expect(readdirSync(root).sort()).toEqual(others);
+    const missing = claimSandboxTempRoot(join(base, 'missing'), process.pid);
+    expect(missing).toMatchObject({ removed: 0, failed: 0, sharedWith: null });
+    missing.release();
   });
 
   it('leaves the temp dirs a live takeover names, and removes the others', () => {
@@ -161,87 +164,122 @@ describe('claimSandboxTempRoot', () => {
     }
   });
 
-  it("removes nothing while another daemon's mark names a live process, since its sessions may be running", () => {
-    leaveStaleFiles();
+  it("removes nothing while another daemon's mark names a live process, and sweeps past a dead one's, removing the mark", async () => {
+    const mine = `10db-daemon-${String(process.pid)}`;
+    // A live mark: its sessions may be running.
+    const shared = join(base, 'shared');
+    mkdirSync(shared);
+    leaveStaleFiles(shared);
     const other = liveProcess();
-    writeFileSync(join(root, `10db-daemon-${String(other)}`), '', { mode: 0o400 });
-    const before = readdirSync(root).sort();
-    const claim = claimSandboxTempRoot(root, process.pid);
+    writeFileSync(join(shared, `10db-daemon-${String(other)}`), '', { mode: 0o400 });
+    const before = readdirSync(shared).sort();
+    const held = claimSandboxTempRoot(shared, process.pid);
     try {
-      expect(claim).toMatchObject({ removed: 0, sharedWith: other });
-      expect(readdirSync(root).sort()).toEqual(
-        [...before, `10db-daemon-${String(process.pid)}`].sort(),
-      );
+      expect(held).toMatchObject({ removed: 0, sharedWith: other });
+      expect(readdirSync(shared).sort()).toEqual([...before, mine].sort());
     } finally {
-      claim.release();
+      held.release();
     }
-  });
-
-  it("sweeps past a dead daemon's mark, and removes the mark", async () => {
     leaveStaleFiles();
     const dead = await deadPid();
     writeFileSync(join(root, `10db-daemon-${String(dead)}`), '', { mode: 0o400 });
     const claim = claimSandboxTempRoot(root, process.pid);
     try {
       expect(claim).toMatchObject({ removed: 8, sharedWith: null });
-      expect(readdirSync(root)).toEqual([`10db-daemon-${String(process.pid)}`]);
+      expect(readdirSync(root)).toEqual([mine]);
     } finally {
       claim.release();
     }
-    expect(existsSync(join(root, `10db-daemon-${String(process.pid)}`))).toBe(false);
+    expect(existsSync(join(root, mine))).toBe(false);
   });
 
-  it.each([
-    ['a dead daemon’s is swept from the files root', 'setup', 'dead', 'files', false],
-    ['a live daemon’s is kept', 'setup', 'live', 'files', true],
-    ['one in a temp root, which lanes write, is never touched', 'setup', 'dead', 'temp', true],
-    ['a dead daemon’s secret reads are swept from the files root', 'read', 'dead', 'files', false],
-    ['secret reads in a temp root are never touched', 'read', 'dead', 'temp', true],
-  ] as const)('a 10db session dir: %s', async (_name, prefix, daemon, kind, kept) => {
-    const setup = join(root, `10db-${prefix}-0123456789ab`);
-    mkdirSync(join(setup, 'yours/skills'), { recursive: true });
-    symlinkSync(outside, join(setup, 'yours/skills/s'));
-    const owner = daemon === 'dead' ? await deadPid() : liveProcess();
-    writeFileSync(join(root, `10db-daemon-${String(owner)}`), '', { mode: 0o400 });
-    const claim = claimSandboxTempRoot(root, process.pid, kind);
-    try {
-      expect(existsSync(setup)).toBe(kept);
-      expect(readdirSync(outside)).toEqual(['keep.txt']);
-    } finally {
-      claim.release();
+  it("sweeps a dead daemon's session dirs and env files from the files root only, and leaves its ledgers and a live daemon's dirs", async () => {
+    const rows: {
+      name: string;
+      /** Lays out the entry in `dir` and returns its path. */
+      make: (dir: string) => string;
+      daemon: 'dead' | 'live' | null;
+      kind: 'temp' | 'files';
+      kept: boolean;
+    }[] = [
+      ...(
+        [
+          [
+            'a dead daemon’s setup dir is swept from the files root',
+            'setup',
+            'dead',
+            'files',
+            false,
+          ],
+          ['a live daemon’s setup dir is kept', 'setup', 'live', 'files', true],
+          [
+            'a setup dir in a temp root, which lanes write, is never touched',
+            'setup',
+            'dead',
+            'temp',
+            true,
+          ],
+          [
+            'a dead daemon’s secret reads are swept from the files root',
+            'read',
+            'dead',
+            'files',
+            false,
+          ],
+          ['secret reads in a temp root are never touched', 'read', 'dead', 'temp', true],
+        ] as const
+      ).map(([name, prefix, daemon, kind, kept]) => ({
+        name,
+        make: (dir: string) => {
+          const setup = join(dir, `10db-${prefix}-0123456789ab`);
+          mkdirSync(join(setup, 'yours/skills'), { recursive: true });
+          symlinkSync(outside, join(setup, 'yours/skills/s'));
+          return setup;
+        },
+        daemon,
+        kind,
+        kept,
+      })),
+      {
+        name: 'a dead daemon’s 10db-ymcp env file is swept from the files root',
+        make: (dir) => {
+          const envFile = join(dir, '10db-ymcp-0123456789ab.sh');
+          writeFileSync(envFile, "export TOKEN='x'\n", { mode: 0o400 });
+          return envFile;
+        },
+        daemon: 'dead',
+        kind: 'files',
+        kept: false,
+      },
+      {
+        // `reapLaneProcessLedgers` reads them next, then removes them; the claim must not.
+        name: "a dead daemon's process ledger is left for the sweep that stops its processes",
+        make: (dir) => {
+          const ledger = join(dir, '10db-proc-4321-0123456789ab.json');
+          writeFileSync(ledger, '{"version":1,"members":[]}');
+          return ledger;
+        },
+        daemon: null,
+        kind: 'temp',
+        kept: true,
+      },
+    ];
+    for (const [i, row] of rows.entries()) {
+      const dir = join(base, `row-${String(i)}`);
+      mkdirSync(dir);
+      const entry = row.make(dir);
+      if (row.daemon !== null) {
+        const owner = row.daemon === 'dead' ? await deadPid() : liveProcess();
+        writeFileSync(join(dir, `10db-daemon-${String(owner)}`), '', { mode: 0o400 });
+      }
+      const claim = claimSandboxTempRoot(dir, process.pid, row.kind);
+      try {
+        expect.soft(existsSync(entry), row.name).toBe(row.kept);
+        expect.soft(readdirSync(outside), row.name).toEqual(['keep.txt']);
+      } finally {
+        claim.release();
+      }
     }
-  });
-
-  it('a 10db-ymcp env file of a dead daemon is swept', async () => {
-    const envFile = join(root, '10db-ymcp-0123456789ab.sh');
-    writeFileSync(envFile, "export TOKEN='x'\n", { mode: 0o400 });
-    writeFileSync(join(root, `10db-daemon-${String(await deadPid())}`), '', { mode: 0o400 });
-    const claim = claimSandboxTempRoot(root, process.pid, 'files');
-    try {
-      expect(existsSync(envFile)).toBe(false);
-    } finally {
-      claim.release();
-    }
-  });
-
-  it("leaves a dead daemon's process ledgers for the sweep that stops their processes", () => {
-    // `reapLaneProcessLedgers` reads them next, then removes them; the claim must not.
-    writeFileSync(join(root, '10db-proc-4321-0123456789ab.json'), '{"version":1,"members":[]}');
-    const claim = claimSandboxTempRoot(root, process.pid);
-    try {
-      expect(readdirSync(root).sort()).toEqual([
-        `10db-daemon-${String(process.pid)}`,
-        '10db-proc-4321-0123456789ab.json',
-      ]);
-    } finally {
-      claim.release();
-    }
-  });
-
-  it('claims a missing root without throwing', () => {
-    const claim = claimSandboxTempRoot(join(base, 'missing'), process.pid);
-    expect(claim).toMatchObject({ removed: 0, failed: 0, sharedWith: null });
-    claim.release();
   });
 });
 
@@ -300,8 +338,8 @@ describe('claimSandboxRoots and the system temp sweeps', () => {
 
   // Inside a sandbox `ps` can't run, so every live mark counts there.
   it.skipIf(SANDBOXED)(
-    "removes 10db's sealed files and ledgers from a system temp dir at once, unread, whatever a mark of no 10db daemon says",
-    () => {
+    "removes 10db's sealed files and ledgers from a system temp dir at once, unread, then its temp dirs off the event loop, stopping when aborted, whatever a mark of no 10db daemon says",
+    async () => {
       const { systemTemp } = roots();
       leaveStaleFiles(systemTemp, SYSTEM_DIRS);
       for (const name of LEDGERS)
@@ -309,6 +347,7 @@ describe('claimSandboxRoots and the system temp sweeps', () => {
       // A mark a ChatGPT lane could plant: a running process, but no 10db daemon.
       const planted = liveProcess();
       writeFileSync(join(systemTemp, `10db-daemon-${String(planted)}`), '', { mode: 0o400 });
+      // A dir with a sandbox root's temp dir name is no 10db name in a system temp dir.
       const others = leaveOthers(systemTemp, LANE_DIRS[0]);
       // Six sealed files and the two ledger files; the temp dirs are the later sweep's.
       expect(sweepSystemTempFiles([systemTemp])).toMatchObject({ removed: 8, failed: 0 });
@@ -316,19 +355,6 @@ describe('claimSandboxRoots and the system temp sweeps', () => {
         [...others, ...SYSTEM_DIRS, `10db-daemon-${String(planted)}`].sort(),
       );
       expect(readdirSync(outside)).toEqual(['keep.txt']);
-    },
-  );
-
-  // Inside a sandbox `ps` can't run, so every live mark counts there.
-  it.skipIf(SANDBOXED)(
-    "removes 10db's temp dirs from a system temp dir off the event loop, whatever a mark of no 10db daemon says, and stops when aborted",
-    async () => {
-      const { systemTemp } = roots();
-      leaveStaleFiles(systemTemp, SYSTEM_DIRS);
-      const planted = liveProcess();
-      writeFileSync(join(systemTemp, `10db-daemon-${String(planted)}`), '', { mode: 0o400 });
-      // A dir with a sandbox root's temp dir name is no 10db name in a system temp dir.
-      const others = leaveOthers(systemTemp, LANE_DIRS[0]);
       const aborted = new AbortController();
       aborted.abort();
       expect(await sweepSystemTempDirs([systemTemp], aborted.signal)).toMatchObject({ removed: 0 });

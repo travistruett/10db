@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { withoutStrippedKeys } from './setup-definitions';
 
 describe('withoutStrippedKeys', () => {
-  it.each<[string, string, ReturnType<typeof withoutStrippedKeys>]>([
+  const rows: [string, string, ReturnType<typeof withoutStrippedKeys>][] = [
     ['a file with none is left as it is', '---\nname: s\ndescription: mcp in\n---\nBody\n', null],
     [
       'hooks and allowed-tools stay, as Claude Code reads them',
@@ -36,7 +36,11 @@ describe('withoutStrippedKeys', () => {
       { refused: 'its frontmatter is not YAML 10db reads, and it may hold MCP servers' },
     ],
     ['unreadable frontmatter that could name none', '---\nname: [s\n---\nBody\n', null],
-  ])('%s', (_name, text, expected) => {
-    expect(withoutStrippedKeys(text)).toEqual(expected);
+  ];
+
+  it('strips MCP servers from a definition, refusing frontmatter that could hide them', () => {
+    for (const [name, text, expected] of rows) {
+      expect.soft(withoutStrippedKeys(text), name).toEqual(expected);
+    }
   });
 });

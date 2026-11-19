@@ -14,22 +14,29 @@ describe('the limits', () => {
     for (const name of LIMIT_ORDER) expect(LIMITS[name].text.length).toBeGreaterThan(20);
   });
 
-  it.each([
-    ['null is null', null, null],
-    [
-      "L2's reason, which names no rule, is null",
-      'The server-side auto mode classifier judged this action dangerous (it gave no explanation)',
-      null,
-    ],
-    [
-      'a reason naming Reading Secrets is reads_secrets',
-      'Auto mode: [Reading Secrets]',
-      'reads_secrets',
-    ],
-    ['a reason in another case is writes_live', 'blocked: writing to live systems', 'writes_live'],
-    ["Claude Code's own rule is null", 'Data Exfiltration', null],
-    ['a label inside a longer word is null', 'Reading Secretsauce', null],
-  ])('%s', (_name, reason, limit) => {
-    expect(limitOfDenial(reason)).toBe(limit);
+  it("reads a denial's limit only from a reason that names its label as a whole word", () => {
+    const rows: [string, string | null, string | null][] = [
+      ['null is null', null, null],
+      [
+        "L2's reason, which names no rule, is null",
+        'The server-side auto mode classifier judged this action dangerous (it gave no explanation)',
+        null,
+      ],
+      [
+        'a reason naming Reading Secrets is reads_secrets',
+        'Auto mode: [Reading Secrets]',
+        'reads_secrets',
+      ],
+      [
+        'a reason in another case is writes_live',
+        'blocked: writing to live systems',
+        'writes_live',
+      ],
+      ["Claude Code's own rule is null", 'Data Exfiltration', null],
+      ['a label inside a longer word is null', 'Reading Secretsauce', null],
+    ];
+    for (const [name, reason, limit] of rows) {
+      expect.soft(limitOfDenial(reason), name).toBe(limit);
+    }
   });
 });

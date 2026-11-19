@@ -75,273 +75,276 @@ const SUFFIX =
   ", which an agent can write. Run it from a project's .mcp.json instead, where 10db sandboxes it.";
 
 describe('prepareYourMcpRun', () => {
-  it('npx -y pkg from the home is allowed', () => {
+  it('allows a server that names nothing an agent can write', () => {
     const run = prepare(server());
-    expect(run.refusal).toBeNull();
+    expect(run.refusal, 'npx -y pkg from the home').toBeNull();
     expect(run.env['HOME']).toBe(home);
     expect(run.dropped).toEqual([]);
+    for (const [name, over] of [
+      ['a missing command by its path', { command: join(home, 'bin', 'missing') }],
+      ['a missing command by its name', { command: 'missing' }],
+      ['an argument that only looks like a word', { args: ['run', 'tmp', 'lanes', '--port=3000'] }],
+    ] as const) {
+      expect.soft(refusal(server(over)), name).toBeNull();
+    }
   });
 
-  it.each<[string, () => Partial<UnsandboxedStdioServer>, string]>([
-    [
-      'a command in a checkout is refused',
-      () => ({ command: join(checkout, 'tool') }),
-      `Its command points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'a command linked from the home into a checkout is refused',
-      () => {
-        symlinkSync(join(checkout, 'tool'), join(home, 'bin', 'linked'));
-        return { command: 'linked' };
-      },
-      `Its command points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'node with a script in a checkout is refused',
-      () => ({ command: 'node', args: [join(checkout, 'server.js')] }),
-      `Its argument 1 points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'node with a script not yet built in a checkout is refused',
-      () => ({ command: 'node', args: [join(checkout, 'dist', 'server.js')] }),
-      `Its argument 1 points at a project's folder${SUFFIX}`,
-    ],
-    [
-      '--config=<checkout>/x.json is refused',
-      () => ({ args: ['-y', 'pkg', `--config=${join(checkout, 'x.json')}`] }),
-      `Its argument 3 points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'uv --directory <checkout> run x is refused',
-      () => ({ command: 'uv', args: ['--directory', checkout, 'run', 'x'] }),
-      `Its argument 2 points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'an argument holding a checkout path inside other text is refused',
-      () => ({ args: [`--opt=a,${checkout}/b`] }),
-      `Its argument 1 points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'a cwd in a worktree made after the session started is refused',
-      () => {
-        mkdirSync(join(worktrees, 'later'));
-        return { cwd: join(worktrees, 'later') };
-      },
-      `Its working folder points at the worktree folder${SUFFIX}`,
-    ],
-    [
-      'a declared NODE_OPTIONS=--require <checkout>/x.js is refused',
-      () => ({
-        env: { ...server().env, NODE_OPTIONS: `--require ${checkout}/x.js` },
-        declaredEnv: ['NODE_OPTIONS'],
-      }),
-      `Its NODE_OPTIONS points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'a declared PYTHONPATH with a checkout entry is refused',
-      () => ({
-        env: { ...server().env, PYTHONPATH: `/usr/lib/python:${checkout}/src` },
-        declaredEnv: ['PYTHONPATH'],
-      }),
-      `Its PYTHONPATH points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'a declared DYLD_INSERT_LIBRARIES into a temp root is refused',
-      () => ({
-        env: { ...server().env, DYLD_INSERT_LIBRARIES: '/tmp/x.dylib' },
-        declaredEnv: ['DYLD_INSERT_LIBRARIES'],
-      }),
-      `Its DYLD_INSERT_LIBRARIES points at a temp folder${SUFFIX}`,
-    ],
-    ...[
-      'KUBECONFIG',
-      'AWS_CONFIG_FILE',
-      'DOCKER_CONFIG',
-      'XDG_CONFIG_HOME',
-      'PYTHONUSERBASE',
-      'PYTHONPYCACHEPREFIX',
-      'MISE_CONFIG_DIR',
-    ].map((name): [string, () => Partial<UnsandboxedStdioServer>, string] => [
-      `a declared ${name} into a checkout is refused`,
-      () => ({
-        env: { ...server().env, [name]: `${checkout}/x` },
-        declaredEnv: [name],
-      }),
-      `Its ${name} points at a project's folder${SUFFIX}`,
-    ]),
-    [
-      'a bare relative argument that climbs into a checkout is refused',
-      () => ({ args: ['sub/../../checkout/server.js'] }),
-      `Its argument 1 points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'a bare relative argument through a link in the home into a checkout is refused',
-      () => {
-        symlinkSync(checkout, join(home, 'linked-dir'));
-        return { args: ['linked-dir/server.js'] };
-      },
-      `Its argument 1 points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'a path after a semicolon inside an option is refused',
-      () => ({ args: [`--opt=a;${checkout}/b`] }),
-      `Its argument 1 points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'a quoted path inside an option is refused',
-      () => ({ args: [`--opt="${checkout}/b"`] }),
-      `Its argument 1 points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'a path glued to a flag letter is refused',
-      () => ({ args: [`-I${checkout}/include`] }),
-      `Its argument 1 points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'a path glued to a long flag name is refused',
-      () => ({ args: [`--x${checkout}`] }),
-      `Its argument 1 points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'a path in a list after a comma and a colon is refused',
-      () => ({ args: [`--paths=/usr/lib,/opt:${checkout}/b`] }),
-      `Its argument 1 points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'a declared NODE_OPTIONS with a quoted checkout path is refused',
-      () => ({
-        env: { ...server().env, NODE_OPTIONS: `--require "${checkout}/x.js"` },
-        declaredEnv: ['NODE_OPTIONS'],
-      }),
-      `Its NODE_OPTIONS points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'a declared NODE_OPTIONS with a path after a comma is refused',
-      () => ({
-        env: { ...server().env, NODE_OPTIONS: `--x=a,${checkout}/x.js` },
-        declaredEnv: ['NODE_OPTIONS'],
-      }),
-      `Its NODE_OPTIONS points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'a declared NODE_OPTIONS with a path after a semicolon is refused',
-      () => ({
-        env: { ...server().env, NODE_OPTIONS: `--x=a;${checkout}/x.js` },
-        declaredEnv: ['NODE_OPTIONS'],
-      }),
-      `Its NODE_OPTIONS points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'a declared NODE_OPTIONS with a path glued to a flag is refused',
-      () => ({
-        env: { ...server().env, NODE_OPTIONS: `-r${checkout}/x.js` },
-        declaredEnv: ['NODE_OPTIONS'],
-      }),
-      `Its NODE_OPTIONS points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'a link into a checkout folder followed by .. is judged where the kernel opens it',
-      () => {
-        mkdirSync(join(checkout, 'sub'), { recursive: true });
-        symlinkSync(join(checkout, 'sub'), join(home, 'deep'));
-        return { args: ['deep/../server.js'] };
-      },
-      `Its argument 1 points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'the same through a link inside an option value',
-      () => {
-        mkdirSync(join(checkout, 'sub'), { recursive: true });
-        symlinkSync(join(checkout, 'sub'), join(home, 'deep'));
-        return { args: ['--config=deep/../x.json'] };
-      },
-      `Its argument 1 points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'a flag letter glued to a relative path that climbs into a checkout is refused',
-      () => ({ args: ['-I../checkout'] }),
-      `Its argument 1 points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'a long flag glued to a relative path that climbs into a checkout is refused',
-      () => ({ args: ['--include../checkout/inc'] }),
-      `Its argument 1 points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'a flag letter glued to a relative path through a link into a checkout is refused',
-      () => {
-        symlinkSync(checkout, join(home, 'linked-dir'));
-        return { args: ['-rlinked-dir/x.js'] };
-      },
-      `Its argument 1 points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'a declared NODE_OPTIONS with a flag glued to a relative path is refused',
-      () => ({
-        env: { ...server().env, NODE_OPTIONS: '-r../checkout/x.js' },
-        declaredEnv: ['NODE_OPTIONS'],
-      }),
-      `Its NODE_OPTIONS points at a project's folder${SUFFIX}`,
-    ],
-    [
-      'a declared variable with a newline refuses the server',
-      () => ({ env: { ...server().env, CERT: 'a\nb' }, declaredEnv: ['CERT'] }),
-      "Its env variable CERT can't be passed to it.",
-    ],
-  ])('%s', (_name, over, reason) => {
-    expect(refusal(server(over()))).toBe(reason);
-  });
-
-  it('a login NODE_OPTIONS with a quoted checkout path is dropped and named', () => {
-    const run = prepare(
-      server({ env: { ...server().env, NODE_OPTIONS: `--require "${checkout}/x.js"` } }),
-    );
-    expect(run.refusal).toBeNull();
-    expect(run.dropped).toEqual(['NODE_OPTIONS']);
-  });
-
-  it.skipIf(process.platform !== 'darwin')(
-    'a checkout path spelled in another case is refused where the file system folds case',
-    () => {
-      const shouted = join(checkout.toUpperCase(), 'server.js');
-      expect(refusal(server({ args: [shouted] }))).toBe(
+  it('refuses a server whose command, argument, folder or declared env points where an agent can write', () => {
+    const rows: [string, () => Partial<UnsandboxedStdioServer>, string][] = [
+      [
+        'a command in a checkout is refused',
+        () => ({ command: join(checkout, 'tool') }),
+        `Its command points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'a command linked from the home into a checkout is refused',
+        () => {
+          symlinkSync(join(checkout, 'tool'), join(home, 'bin', 'linked'));
+          return { command: 'linked' };
+        },
+        `Its command points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'node with a script in a checkout is refused',
+        () => ({ command: 'node', args: [join(checkout, 'server.js')] }),
         `Its argument 1 points at a project's folder${SUFFIX}`,
-      );
-      expect(refusal(server({ args: [`--opt=a,${shouted}`] }))).toBe(
+      ],
+      [
+        'node with a script not yet built in a checkout is refused',
+        () => ({ command: 'node', args: [join(checkout, 'dist', 'server.js')] }),
         `Its argument 1 points at a project's folder${SUFFIX}`,
+      ],
+      [
+        '--config=<checkout>/x.json is refused',
+        () => ({ args: ['-y', 'pkg', `--config=${join(checkout, 'x.json')}`] }),
+        `Its argument 3 points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'uv --directory <checkout> run x is refused',
+        () => ({ command: 'uv', args: ['--directory', checkout, 'run', 'x'] }),
+        `Its argument 2 points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'an argument holding a checkout path inside other text is refused',
+        () => ({ args: [`--opt=a,${checkout}/b`] }),
+        `Its argument 1 points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'a cwd in a worktree made after the session started is refused',
+        () => {
+          mkdirSync(join(worktrees, 'later'));
+          return { cwd: join(worktrees, 'later') };
+        },
+        `Its working folder points at the worktree folder${SUFFIX}`,
+      ],
+      [
+        'a declared NODE_OPTIONS=--require <checkout>/x.js is refused',
+        () => ({
+          env: { ...server().env, NODE_OPTIONS: `--require ${checkout}/x.js` },
+          declaredEnv: ['NODE_OPTIONS'],
+        }),
+        `Its NODE_OPTIONS points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'a declared PYTHONPATH with a checkout entry is refused',
+        () => ({
+          env: { ...server().env, PYTHONPATH: `/usr/lib/python:${checkout}/src` },
+          declaredEnv: ['PYTHONPATH'],
+        }),
+        `Its PYTHONPATH points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'a declared DYLD_INSERT_LIBRARIES into a temp root is refused',
+        () => ({
+          env: { ...server().env, DYLD_INSERT_LIBRARIES: '/tmp/x.dylib' },
+          declaredEnv: ['DYLD_INSERT_LIBRARIES'],
+        }),
+        `Its DYLD_INSERT_LIBRARIES points at a temp folder${SUFFIX}`,
+      ],
+      ...[
+        'KUBECONFIG',
+        'AWS_CONFIG_FILE',
+        'DOCKER_CONFIG',
+        'XDG_CONFIG_HOME',
+        'PYTHONUSERBASE',
+        'PYTHONPYCACHEPREFIX',
+        'MISE_CONFIG_DIR',
+      ].map((name): [string, () => Partial<UnsandboxedStdioServer>, string] => [
+        `a declared ${name} into a checkout is refused`,
+        () => ({
+          env: { ...server().env, [name]: `${checkout}/x` },
+          declaredEnv: [name],
+        }),
+        `Its ${name} points at a project's folder${SUFFIX}`,
+      ]),
+      [
+        'a bare relative argument that climbs into a checkout is refused',
+        () => ({ args: ['sub/../../checkout/server.js'] }),
+        `Its argument 1 points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'a bare relative argument through a link in the home into a checkout is refused',
+        () => {
+          symlinkSync(checkout, join(home, 'linked-dir'));
+          return { args: ['linked-dir/server.js'] };
+        },
+        `Its argument 1 points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'a path after a semicolon inside an option is refused',
+        () => ({ args: [`--opt=a;${checkout}/b`] }),
+        `Its argument 1 points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'a quoted path inside an option is refused',
+        () => ({ args: [`--opt="${checkout}/b"`] }),
+        `Its argument 1 points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'a path glued to a flag letter is refused',
+        () => ({ args: [`-I${checkout}/include`] }),
+        `Its argument 1 points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'a path glued to a long flag name is refused',
+        () => ({ args: [`--x${checkout}`] }),
+        `Its argument 1 points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'a path in a list after a comma and a colon is refused',
+        () => ({ args: [`--paths=/usr/lib,/opt:${checkout}/b`] }),
+        `Its argument 1 points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'a declared NODE_OPTIONS with a quoted checkout path is refused',
+        () => ({
+          env: { ...server().env, NODE_OPTIONS: `--require "${checkout}/x.js"` },
+          declaredEnv: ['NODE_OPTIONS'],
+        }),
+        `Its NODE_OPTIONS points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'a declared NODE_OPTIONS with a path after a comma is refused',
+        () => ({
+          env: { ...server().env, NODE_OPTIONS: `--x=a,${checkout}/x.js` },
+          declaredEnv: ['NODE_OPTIONS'],
+        }),
+        `Its NODE_OPTIONS points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'a declared NODE_OPTIONS with a path after a semicolon is refused',
+        () => ({
+          env: { ...server().env, NODE_OPTIONS: `--x=a;${checkout}/x.js` },
+          declaredEnv: ['NODE_OPTIONS'],
+        }),
+        `Its NODE_OPTIONS points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'a declared NODE_OPTIONS with a path glued to a flag is refused',
+        () => ({
+          env: { ...server().env, NODE_OPTIONS: `-r${checkout}/x.js` },
+          declaredEnv: ['NODE_OPTIONS'],
+        }),
+        `Its NODE_OPTIONS points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'a link into a checkout folder followed by .. is judged where the kernel opens it',
+        () => {
+          mkdirSync(join(checkout, 'sub'), { recursive: true });
+          symlinkSync(join(checkout, 'sub'), join(home, 'deep'));
+          return { args: ['deep/../server.js'] };
+        },
+        `Its argument 1 points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'the same through a link inside an option value',
+        () => {
+          mkdirSync(join(checkout, 'sub'), { recursive: true });
+          symlinkSync(join(checkout, 'sub'), join(home, 'deep-2'));
+          return { args: ['--config=deep-2/../x.json'] };
+        },
+        `Its argument 1 points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'a flag letter glued to a relative path that climbs into a checkout is refused',
+        () => ({ args: ['-I../checkout'] }),
+        `Its argument 1 points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'a long flag glued to a relative path that climbs into a checkout is refused',
+        () => ({ args: ['--include../checkout/inc'] }),
+        `Its argument 1 points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'a flag letter glued to a relative path through a link into a checkout is refused',
+        () => {
+          symlinkSync(checkout, join(home, 'linked-dir-2'));
+          return { args: ['-rlinked-dir-2/x.js'] };
+        },
+        `Its argument 1 points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'a declared NODE_OPTIONS with a flag glued to a relative path is refused',
+        () => ({
+          env: { ...server().env, NODE_OPTIONS: '-r../checkout/x.js' },
+          declaredEnv: ['NODE_OPTIONS'],
+        }),
+        `Its NODE_OPTIONS points at a project's folder${SUFFIX}`,
+      ],
+      [
+        'a declared variable with a newline refuses the server',
+        () => ({ env: { ...server().env, CERT: 'a\nb' }, declaredEnv: ['CERT'] }),
+        "Its env variable CERT can't be passed to it.",
+      ],
+    ];
+    // Only where the file system folds case does a checkout path spelled in another case reach it.
+    if (process.platform === 'darwin') {
+      const shouted = (): string => join(checkout.toUpperCase(), 'server.js');
+      rows.push(
+        [
+          'a checkout path spelled in another case is refused',
+          () => ({ args: [shouted()] }),
+          `Its argument 1 points at a project's folder${SUFFIX}`,
+        ],
+        [
+          'a checkout path spelled in another case inside an option is refused',
+          () => ({ args: [`--opt=a,${shouted()}`] }),
+          `Its argument 1 points at a project's folder${SUFFIX}`,
+        ],
       );
-    },
-  );
-
-  it('a login PYTHONPATH into a checkout is dropped and named', () => {
-    const run = prepare(server({ env: { ...server().env, PYTHONPATH: `${checkout}/src` } }));
-    expect(run.refusal).toBeNull();
-    expect(run.env).not.toHaveProperty('PYTHONPATH');
-    expect(run.dropped).toEqual(['PYTHONPATH']);
+    }
+    for (const [name, over, reason] of rows) {
+      expect.soft(refusal(server(over())), name).toBe(reason);
+    }
   });
 
-  it('a login variable with a newline is dropped and named; the server runs', () => {
-    const run = prepare(server({ env: { ...server().env, PEM: 'line1\nline2' } }));
-    expect(run.refusal).toBeNull();
-    expect(run.env).not.toHaveProperty('PEM');
-    expect(run.dropped).toEqual(['PEM']);
+  it("drops and names a login variable that points where an agent can write or can't be passed; the server runs", () => {
+    for (const [name, value] of [
+      ['NODE_OPTIONS', `--require "${checkout}/x.js"`],
+      ['PYTHONPATH', `${checkout}/src`],
+      ['PEM', 'line1\nline2'],
+    ] as const) {
+      const run = prepare(server({ env: { ...server().env, [name]: value } }));
+      expect.soft(run.refusal, name).toBeNull();
+      expect.soft(run.env, name).not.toHaveProperty(name);
+      expect.soft(run.dropped, name).toEqual([name]);
+    }
   });
 
-  it('a PATH entry in a checkout is dropped, existing or not', () => {
-    const path = `${checkout}/node_modules/.bin:${checkout}/not-yet:${loginPath()}`;
-    expect(prepare(server({ env: { PATH: path } })).env['PATH']).toBe(loginPath());
-  });
-
-  it('a relative PATH entry is dropped', () => {
-    const path = `node_modules/.bin:./bin:${loginPath()}`;
-    expect(prepare(server({ env: { PATH: path } })).env['PATH']).toBe(loginPath());
-  });
-
-  it('no PATH is the host PATH', () => {
-    expect(prepare(server({ env: {} })).env['PATH']).toBe('/usr/bin:/bin:/usr/sbin:/sbin');
-  });
-
-  it('a bare name whose only PATH match is in a checkout is not found, not run', () => {
+  it('drops every PATH entry in a checkout or relative, and uses the host PATH when there is none', () => {
+    for (const [name, path, expected] of [
+      [
+        'a checkout entry, existing or not',
+        `${checkout}/node_modules/.bin:${checkout}/not-yet:${loginPath()}`,
+        loginPath(),
+      ],
+      ['a relative entry', `node_modules/.bin:./bin:${loginPath()}`, loginPath()],
+      ['no PATH', undefined, '/usr/bin:/bin:/usr/sbin:/sbin'],
+    ] as const) {
+      const env = path === undefined ? {} : { PATH: path };
+      expect.soft(prepare(server({ env })).env['PATH'], name).toBe(expected);
+    }
+    // A bare name whose only PATH match is in a checkout is not found, not run.
     const run = prepare(
       server({
         command: 'only-here',
@@ -350,15 +353,6 @@ describe('prepareYourMcpRun', () => {
     );
     expect(run.refusal).toBeNull();
     expect(run.env['PATH']).toBe(loginPath());
-  });
-
-  it('a missing command is not refused', () => {
-    expect(refusal(server({ command: join(home, 'bin', 'missing') }))).toBeNull();
-    expect(refusal(server({ command: 'missing' }))).toBeNull();
-  });
-
-  it('an argument that only looks like a word is not a path', () => {
-    expect(refusal(server({ args: ['run', 'tmp', 'lanes', '--port=3000'] }))).toBeNull();
   });
 
   it('no refusal holds an argument’s or a value’s text', () => {
@@ -388,7 +382,7 @@ describe('launchYourMcpServers', () => {
   const launch = (servers: Record<string, UnsandboxedStdioServer>) =>
     launchYourMcpServers({ home, filesRoot, laneWritable, servers });
 
-  it('writes one sealed env file per server, mode 0400, with the cleaned PATH and the home', () => {
+  it('writes one sealed env file per server, mode 0400, with the cleaned PATH and the home, and dispose removes them', () => {
     const launched = launch({
       a: server({
         env: { PATH: `${checkout}/bin:${loginPath()}`, TOKEN: 'sk-canary' },
@@ -408,6 +402,7 @@ describe('launchYourMcpServers', () => {
     expect(content).toContain(`export HOME='${home}'\n`);
     expect(content).toContain("export TOKEN='sk-canary'\n");
     launched.dispose();
+    expect(files.map((f) => join(filesRoot, f)).some(existsSync)).toBe(false);
   });
 
   it('the launch’s argv holds no env value', () => {
@@ -439,34 +434,24 @@ describe('launchYourMcpServers', () => {
     launched.dispose();
   });
 
-  it('a refused server has a left-out item and no file', () => {
-    const launched = launch({ bad: server({ command: join(checkout, 'tool') }) });
-    expect(launched.servers).toEqual({});
+  it('leaves a refused server out with no file, and runs one with a dropped login variable, naming each', () => {
+    const launched = launch({
+      bad: server({ command: join(checkout, 'tool') }),
+      a: server({ env: { PATH: loginPath(), PEM: 'x\ny' } }),
+    });
+    expect(Object.keys(launched.servers)).toEqual(['a']);
     expect(launched.leftOut).toEqual([
       {
         what: 'your MCP server bad',
         why: `Its command points at a project's folder${SUFFIX}`,
       },
-    ]);
-    expect(readdirSync(filesRoot)).toEqual([]);
-  });
-
-  it('a dropped login variable is named in a left-out item, and the server runs', () => {
-    const launched = launch({ a: server({ env: { PATH: loginPath(), PEM: 'x\ny' } }) });
-    expect(Object.keys(launched.servers)).toEqual(['a']);
-    expect(launched.leftOut).toEqual([
       {
         what: 'your MCP server a',
         why: "it runs without PEM from your login environment, which point where an agent can write or can't be passed",
       },
     ]);
+    // Only the server that runs has a file.
+    expect(readdirSync(filesRoot)).toHaveLength(1);
     launched.dispose();
-  });
-
-  it('dispose removes the files', () => {
-    const launched = launch({ a: server(), b: server() });
-    const files = readdirSync(filesRoot).map((f) => join(filesRoot, f));
-    launched.dispose();
-    expect(files.some(existsSync)).toBe(false);
   });
 });

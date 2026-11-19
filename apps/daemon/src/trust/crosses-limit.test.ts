@@ -142,38 +142,49 @@ describe('crossesLimit', () => {
     expect(logged()).toEqual([]);
   });
 
-  it.each<[string, string, number, LimitVerdict, string]>([
-    ['allow above the floor allows', 'allow', 0.95, { kind: 'allow', by: 'model' }, 'acted'],
-    [
-      'allow below the floor is a limit with no name',
-      'allow',
-      0.6,
-      { kind: 'limit', at: { limit: null, reason: "10db's judge wasn't sure this is safe" } },
-      'below_floor',
-    ],
-    [
-      'writes_live is that limit, whatever the confidence',
-      'writes_live',
-      0.41,
-      {
-        kind: 'limit',
-        at: { limit: 'writes_live', reason: "10db's judge: Writing To Live Systems" },
-      },
-      'acted',
-    ],
-    [
-      'unsure is a limit with no name',
-      'unsure',
-      0.9,
-      { kind: 'limit', at: { limit: null, reason: "10db's judge wasn't sure this is safe" } },
-      'acted',
-    ],
-  ])('%s, logged as its outcome', async (_name, choice, p, verdict, outcome) => {
-    reply = () => Promise.resolve(json(answering(choice, p)));
-    expect(await ask()).toEqual(verdict);
-    expect(logged()).toMatchObject([
-      { decision: 'crosses_limit', question: CROSSES_LIMIT_QUESTION, answer: choice, outcome },
-    ]);
+  it("turns the model's answer into a verdict, logged as its outcome", async () => {
+    const rows: [string, string, number, LimitVerdict, string][] = [
+      ['allow above the floor allows', 'allow', 0.95, { kind: 'allow', by: 'model' }, 'acted'],
+      [
+        'allow below the floor is a limit with no name',
+        'allow',
+        0.6,
+        { kind: 'limit', at: { limit: null, reason: "10db's judge wasn't sure this is safe" } },
+        'below_floor',
+      ],
+      [
+        'writes_live is that limit, whatever the confidence',
+        'writes_live',
+        0.41,
+        {
+          kind: 'limit',
+          at: { limit: 'writes_live', reason: "10db's judge: Writing To Live Systems" },
+        },
+        'acted',
+      ],
+      [
+        'unsure is a limit with no name',
+        'unsure',
+        0.9,
+        { kind: 'limit', at: { limit: null, reason: "10db's judge wasn't sure this is safe" } },
+        'acted',
+      ],
+    ];
+    for (const [i, [name, choice, p, verdict, outcome]] of rows.entries()) {
+      reply = () => Promise.resolve(json(answering(choice, p)));
+      expect.soft(await ask(), name).toEqual(verdict);
+      // Each row logs one more call; every row's answer and outcome pair is its own.
+      const log = logged();
+      expect.soft(log, `${name}: one call logged per row`).toHaveLength(i + 1);
+      expect.soft(log, `${name}: logged`).toContainEqual(
+        expect.objectContaining({
+          decision: 'crosses_limit',
+          question: CROSSES_LIMIT_QUESTION,
+          answer: choice,
+          outcome,
+        }),
+      );
+    }
   });
 
   it('no key is the floor', async () => {

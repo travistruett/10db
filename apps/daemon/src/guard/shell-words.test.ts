@@ -20,8 +20,10 @@ describe('a parenthesis where a command starts', () => {
     { name: 'unclosed after do', command: 'for d in a; do (cd $d; done', certain: false },
   ];
 
-  it.each(CASES)('$name: certain=$certain', ({ command, certain }) => {
-    expect(parseShell(command).certain).toBe(certain);
+  it('is certain only where the parenthesis opens a subshell', () => {
+    for (const { name, command, certain } of CASES) {
+      expect.soft(parseShell(command).certain, `${name}: ${command}`).toBe(certain);
+    }
   });
 });
 
@@ -102,10 +104,13 @@ describe('which words the shell passes as exactly one word', () => {
     },
   ];
 
-  it.each(CASES)('$name: $command', ({ command, words, single }) => {
-    const { segments } = parseShell(command);
-    expect(segments).toHaveLength(1);
-    expect(segments[0]?.words).toEqual(words);
-    expect(segments[0]?.singleWords).toEqual(single);
+  it('marks each word the shell passes whole, and each it may split or glob', () => {
+    for (const { name, command, words, single } of CASES) {
+      const label = `${name}: ${command}`;
+      const { segments } = parseShell(command);
+      expect.soft(segments, label).toHaveLength(1);
+      expect.soft(segments[0]?.words, label).toEqual(words);
+      expect.soft(segments[0]?.singleWords, label).toEqual(single);
+    }
   });
 });

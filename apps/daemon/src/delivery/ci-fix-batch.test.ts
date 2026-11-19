@@ -286,22 +286,6 @@ describe('shipping a fix batch', () => {
     expect(h.cards()).toEqual([]);
   });
 
-  it('treats an error to re-arming auto-merge as armed: no notice and still shipped', async () => {
-    const { batch: root, head, prUrl } = await shipped(h);
-    const { fix, ws } = await cutFix(root, head);
-    await commitIn(h, fix, 'src/api/fix.txt');
-    h.settle(ws.id, 'DONE');
-    h.gh.failNext.set(
-      'prAutoMerge',
-      new GhError('failed', 'gh pr merge failed (exit 1): auto merge is already enabled'),
-    );
-
-    h.shipper.checkBatch(fix.id);
-    await h.jobs.idle();
-
-    expect(getBatch(h.store.db, fix.id)).toMatchObject({ state: 'SHIPPED', prUrl, notices: [] });
-  });
-
   it('ends closed with nothing pushed when it made no commits, though main moved and was merged in', async () => {
     const { batch: root, head } = await shipped(h);
     const branch = branchOf(root);

@@ -52,30 +52,33 @@ function pre(
 const bash = (command: string, claims: Claims = AREA) => pre('Bash', { command }, claims);
 
 describe('tools that act outside the sandbox proxy, and the file tools', () => {
-  it.each<[string, string, unknown, 'allow' | 'ask']>([
-    ['a web search', 'WebSearch', { query: 'x' }, 'ask'],
-    ['a repo MCP tool', 'mcp__docs__search', {}, 'ask'],
-    ['listing MCP resources', 'ListMcpResourcesTool', {}, 'ask'],
-    ['reading an MCP resource', 'ReadMcpResourceTool', {}, 'ask'],
-    ["10db's own MCP tool", 'mcp__10db__complete_step', {}, 'allow'],
-    ['a plain file read', 'Read', { file_path: `${repo.path}/a.ts` }, 'allow'],
-  ])('%s -> %s', (_name, tool, input, expected) => {
-    expect(pre(tool, input, ALL_HAZARDS, access)).toBe(expected);
-  });
-
-  it.each<[string, string, unknown, 'allow' | 'ask']>([
-    ['a read outside what lanes may read', 'Read', { file_path: `${repo.path}/outside/x` }, 'ask'],
-    ['a search outside', 'Grep', { pattern: 'x', path: `${repo.path}/outside` }, 'ask'],
-    ['a claude-protected write', 'Edit', { file_path: `${repo.path}/.mcp.json` }, 'ask'],
-    [
-      'a notebook edit of a config path',
-      'NotebookEdit',
-      { notebook_path: `${repo.path}/sub/.mcp.json` },
-      'ask',
-    ],
-    ['an ordinary write', 'Write', { file_path: `${repo.path}/a.ts` }, 'allow'],
-  ])('with a file-access judge: %s -> %s', (_name, tool, input, expected) => {
-    expect(pre(tool, input, ALL_HAZARDS, access)).toBe(expected);
+  it('asks about a tool outside the proxy and a file the file-access judge asks about', () => {
+    const rows: [string, string, unknown, 'allow' | 'ask'][] = [
+      ['a web search', 'WebSearch', { query: 'x' }, 'ask'],
+      ['a repo MCP tool', 'mcp__docs__search', {}, 'ask'],
+      ['listing MCP resources', 'ListMcpResourcesTool', {}, 'ask'],
+      ['reading an MCP resource', 'ReadMcpResourceTool', {}, 'ask'],
+      ["10db's own MCP tool", 'mcp__10db__complete_step', {}, 'allow'],
+      ['a plain file read', 'Read', { file_path: `${repo.path}/a.ts` }, 'allow'],
+      [
+        'a read outside what lanes may read',
+        'Read',
+        { file_path: `${repo.path}/outside/x` },
+        'ask',
+      ],
+      ['a search outside', 'Grep', { pattern: 'x', path: `${repo.path}/outside` }, 'ask'],
+      ['a claude-protected write', 'Edit', { file_path: `${repo.path}/.mcp.json` }, 'ask'],
+      [
+        'a notebook edit of a config path',
+        'NotebookEdit',
+        { notebook_path: `${repo.path}/sub/.mcp.json` },
+        'ask',
+      ],
+      ['an ordinary write', 'Write', { file_path: `${repo.path}/a.ts` }, 'allow'],
+    ];
+    for (const [name, tool, input, expected] of rows) {
+      expect.soft(pre(tool, input, ALL_HAZARDS, access), name).toBe(expected);
+    }
   });
 
   it('asks for nothing about files without a file-access judge', () => {
@@ -84,179 +87,193 @@ describe('tools that act outside the sandbox proxy, and the file tools', () => {
 });
 
 describe('a tool the classifier may not decide is handed to the broker', () => {
-  it.each([
-    'EnterWorktree',
-    'ExitWorktree',
-    'CronCreate',
-    'ScheduleWakeup',
-    'RemoteTrigger',
-    'PushNotification',
-    'SendMessage',
-    'LSP',
-    'SomeToolAddedLater',
-  ])('%s -> ask', (tool) => {
-    expect(pre(tool, {}, ALL_HAZARDS)).toBe('ask');
-  });
-  it.each([
-    ['Task', { description: 'x', prompt: 'y' }],
-    ['Agent', { description: 'x', prompt: 'y' }],
-    ['TodoWrite', { todos: [] }],
-    ['Skill', { skill: 'x' }],
-    ['AskUserQuestion', { questions: [] }],
-    ['BashOutput', { bash_id: '1' }],
-    ['KillShell', { shell_id: '1' }],
-    ['NotebookRead', { notebook_path: 'notebook.ipynb' }],
-    ['mcp__10db__complete_step', {}],
-  ])('%s -> allow, the classifier may decide it', (tool, input) => {
-    expect(pre(tool, input, ALL_HAZARDS)).toBe('allow');
+  it('asks about every tool not reviewed for the classifier, and allows the reviewed ones', () => {
+    for (const tool of [
+      'EnterWorktree',
+      'ExitWorktree',
+      'CronCreate',
+      'ScheduleWakeup',
+      'RemoteTrigger',
+      'PushNotification',
+      'SendMessage',
+      'LSP',
+      'SomeToolAddedLater',
+    ]) {
+      expect.soft(pre(tool, {}, ALL_HAZARDS), tool).toBe('ask');
+    }
+    const reviewed: [string, unknown][] = [
+      ['Task', { description: 'x', prompt: 'y' }],
+      ['Agent', { description: 'x', prompt: 'y' }],
+      ['TodoWrite', { todos: [] }],
+      ['Skill', { skill: 'x' }],
+      ['AskUserQuestion', { questions: [] }],
+      ['BashOutput', { bash_id: '1' }],
+      ['KillShell', { shell_id: '1' }],
+      ['NotebookRead', { notebook_path: 'notebook.ipynb' }],
+      ['mcp__10db__complete_step', {}],
+    ];
+    for (const [tool, input] of reviewed) {
+      expect.soft(pre(tool, input, ALL_HAZARDS), tool).toBe('allow');
+    }
   });
 });
 
 describe('background loops ask whatever the task has claimed', () => {
-  it.each<[string, Record<string, unknown>, 'allow' | 'ask']>([
-    ['a backgrounded busy loop', { command: '(while :; do :; done) &' }, 'ask'],
-    [
-      'yes behind run_in_background',
-      { command: 'yes > /dev/null', run_in_background: true },
-      'ask',
-    ],
-    ['the same loop in the foreground', { command: 'yes > /dev/null' }, 'allow'],
-  ])('%s -> %s', (_name, input, expected) => {
-    expect(pre('Bash', input, ALL_HAZARDS)).toBe(expected);
+  it('asks about a loop the shell or the tool backgrounds, and a Monitor of one', () => {
+    const rows: [string, Record<string, unknown>, 'allow' | 'ask'][] = [
+      ['a backgrounded busy loop', { command: '(while :; do :; done) &' }, 'ask'],
+      [
+        'yes behind run_in_background',
+        { command: 'yes > /dev/null', run_in_background: true },
+        'ask',
+      ],
+      ['the same loop in the foreground', { command: 'yes > /dev/null' }, 'allow'],
+    ];
+    for (const [name, input, expected] of rows) {
+      expect.soft(pre('Bash', input, ALL_HAZARDS), name).toBe(expected);
+    }
+    for (const command of ['yes > /dev/null', 'while :; do :; done', '(while true; do :; done)']) {
+      expect.soft(pre('Monitor', { command }, ALL_HAZARDS), `Monitor of ${command}`).toBe('ask');
+    }
   });
-  it.each(['yes > /dev/null', 'while :; do :; done', '(while true; do :; done)'])(
-    'a Monitor of %s asks',
-    (command) => {
-      expect(pre('Monitor', { command }, ALL_HAZARDS)).toBe('ask');
-    },
-  );
 });
 
 describe('a Monitor command is judged as a Bash command', () => {
-  it.each([
-    'git push --force origin main',
-    'gh pr merge 1 --admin',
-    'npm publish',
-    'git reset --hard HEAD~3',
-    'git commit --no-verify -m x',
-    'pnpm add x',
-  ])('refuses %s through Monitor as through Bash', (command) => {
-    expect(bash(command)).toBe('deny');
-    expect(pre('Monitor', { command })).toBe('deny');
+  it('refuses through Monitor what it refuses through Bash', () => {
+    for (const command of [
+      'git push --force origin main',
+      'gh pr merge 1 --admin',
+      'npm publish',
+      'git reset --hard HEAD~3',
+      'git commit --no-verify -m x',
+      'pnpm add x',
+    ]) {
+      expect.soft(bash(command), `Bash: ${command}`).toBe('deny');
+      expect.soft(pre('Monitor', { command }), `Monitor: ${command}`).toBe('deny');
+    }
   });
   it('lets a plain Monitor command through: it runs inside the sandbox like Bash', () => {
     expect(pre('Monitor', { command: 'tail -f out.log' })).toBe('allow');
   });
-  it.each([
-    ['a socket key', { command: 'tail -f out', ws: 'wss://example.org' }],
-    ['no command', { description: 'x' }],
-    ['a backgrounded loop', { command: '(while :; do :; done) &' }],
-  ])('asks about a Monitor with %s', (_name, input) => {
-    expect(pre('Monitor', input)).toBe('ask');
+  it('asks about a Monitor with a socket, no command or a backgrounded loop', () => {
+    const rows: [string, Record<string, unknown>][] = [
+      ['a socket key', { command: 'tail -f out', ws: 'wss://example.org' }],
+      ['no command', { description: 'x' }],
+      ['a backgrounded loop', { command: '(while :; do :; done) &' }],
+    ];
+    for (const [name, input] of rows) expect.soft(pre('Monitor', input), name).toBe('ask');
   });
 });
 
 describe('a hazard spelled around a redirection or a quote is still that hazard', () => {
-  it.each([
-    'pnpm 2>/dev/null add x',
-    'pnpm >/dev/null add x',
-    'pnpm > /dev/null add x',
-    'pnpm 2>/dev/null db:migrate',
-    "pnpm add '2>/dev/null' x",
-    'pnpm ">" add x',
-    "pnpm '2>/dev/null' add x",
-    'pnpm {fd}>out add x',
-    'pnpm 2 >f add x',
-  ])('%s', (command) => {
-    expect(bash(command)).not.toBe('allow');
-    expect(bash(command, ALL_HAZARDS)).toBe('allow');
+  it('asks or refuses until the hazard is claimed', () => {
+    for (const command of [
+      'pnpm 2>/dev/null add x',
+      'pnpm >/dev/null add x',
+      'pnpm > /dev/null add x',
+      'pnpm 2>/dev/null db:migrate',
+      "pnpm add '2>/dev/null' x",
+      'pnpm ">" add x',
+      "pnpm '2>/dev/null' add x",
+      'pnpm {fd}>out add x',
+      'pnpm 2 >f add x',
+    ]) {
+      expect.soft(bash(command), command).not.toBe('allow');
+      expect.soft(bash(command, ALL_HAZARDS), `claimed: ${command}`).toBe('allow');
+    }
   });
 });
 
 describe('a hazard run through another shell, wrapper or version is still that hazard', () => {
-  it.each([
-    "dash -c 'pnpm add x'",
-    "ksh -c 'pnpm add x'",
-    "csh -c 'pnpm add x'",
-    "tcsh -c 'pnpm add x'",
-    "fish -c 'pnpm add x'",
-    "echo 'pnpm add x' | dash",
-    'coproc pnpm add x',
-    'taskpolicy -b pnpm add x',
-    'xcrun pnpm add x',
-    'npx --yes pnpm@9 add x',
-    'pnpm dlx pnpm@9 add x',
-    'npx npm@10 install',
-    'npm x -- pnpm add x',
-    'watch pnpm add x',
-    'unbuffer pnpm add x',
-    'chronic pnpm add x',
-    'dotenv -- pnpm add x',
-    `xcrun ${'-q '.repeat(20)}pnpm add x`,
-  ])('%s', (command) => {
-    expect(bash(command)).not.toBe('allow');
+  it('is not allowed while the hazard is unclaimed', () => {
+    for (const command of [
+      "dash -c 'pnpm add x'",
+      "ksh -c 'pnpm add x'",
+      "csh -c 'pnpm add x'",
+      "tcsh -c 'pnpm add x'",
+      "fish -c 'pnpm add x'",
+      "echo 'pnpm add x' | dash",
+      'coproc pnpm add x',
+      'taskpolicy -b pnpm add x',
+      'xcrun pnpm add x',
+      'npx --yes pnpm@9 add x',
+      'pnpm dlx pnpm@9 add x',
+      'npx npm@10 install',
+      'npm x -- pnpm add x',
+      'watch pnpm add x',
+      'unbuffer pnpm add x',
+      'chronic pnpm add x',
+      'dotenv -- pnpm add x',
+      `xcrun ${'-q '.repeat(20)}pnpm add x`,
+    ]) {
+      expect.soft(bash(command), command).not.toBe('allow');
+    }
   });
 });
 
 describe('git, gh and publish are refused through wrappers and feeders', () => {
-  it.each([
-    'xcrun git push --force',
-    'echo push --force | xargs git',
-    'echo pr merge 1 --admin | xargs gh',
-    'yarn npm publish',
-    'git ls-files | xargs git log',
-    'echo x | xargs -I{} git log {}',
-    'echo x | parallel git log {}',
-    'echo x | xargs gh api repos/x/y',
-  ])('%s', (command) => {
-    expect(bash(command, ALL_HAZARDS)).toBe('deny');
-  });
-  it.each(['echo git push --force', 'grep -rn "git push" .'])('does not refuse %s', (command) => {
-    expect(bash(command)).toBe('allow');
+  it('refuses them behind a wrapper or a feeder, and not when they are only words', () => {
+    for (const command of [
+      'xcrun git push --force',
+      'echo push --force | xargs git',
+      'echo pr merge 1 --admin | xargs gh',
+      'yarn npm publish',
+      'git ls-files | xargs git log',
+      'echo x | xargs -I{} git log {}',
+      'echo x | parallel git log {}',
+      'echo x | xargs gh api repos/x/y',
+    ]) {
+      expect.soft(bash(command, ALL_HAZARDS), command).toBe('deny');
+    }
+    for (const command of ['echo git push --force', 'grep -rn "git push" .']) {
+      expect.soft(bash(command), command).toBe('allow');
+    }
   });
 });
 
 describe('the hazard matcher reads script runners and aliases', () => {
-  it.each([
-    'pnpm run db:migrate',
-    'pnpm --silent run db:migrate',
-    'pnpm run-script db:migrate',
-    'npm run db:migrate',
-    'pnpm drizzle-kit generate',
-    'npm r x',
-    'npm rm x',
-    'npm remove x',
-    'npm update',
-    'npm up',
-    'npm in x',
-    'npm it',
-    'yarn',
-    'yarn remove x',
-    'yarn workspace a add x',
-    'pnpm it',
-    'pnpm ci',
-    'pnpm install-test',
-    'bun add x',
-    'bun remove x',
-    'bun install',
-    'bun i',
-    'bun update',
-    'npm clean-install',
-    'npm ic',
-    'npm install-clean',
-    'npm isntall-clean',
-    'npm uni x',
-    'npm unlink x',
-    'npm udpate',
-    'bun rm x',
-    'bun a x',
-    'pnpm rum db:migrate',
-    'pnpm urn db:migrate',
-    'npm rum db:migrate',
-    'yarn workspace a run db:migrate',
-  ])('%s', (command) => {
-    expect(bash(command)).toBe('deny');
-    expect(bash(command, ALL_HAZARDS)).toBe('allow');
+  it('refuses each runner or alias of a hazard until it is claimed', () => {
+    for (const command of [
+      'pnpm run db:migrate',
+      'pnpm --silent run db:migrate',
+      'pnpm run-script db:migrate',
+      'npm run db:migrate',
+      'pnpm drizzle-kit generate',
+      'npm r x',
+      'npm rm x',
+      'npm remove x',
+      'npm update',
+      'npm up',
+      'npm in x',
+      'npm it',
+      'yarn',
+      'yarn remove x',
+      'yarn workspace a add x',
+      'pnpm it',
+      'pnpm ci',
+      'pnpm install-test',
+      'bun add x',
+      'bun remove x',
+      'bun install',
+      'bun i',
+      'bun update',
+      'npm clean-install',
+      'npm ic',
+      'npm install-clean',
+      'npm isntall-clean',
+      'npm uni x',
+      'npm unlink x',
+      'npm udpate',
+      'bun rm x',
+      'bun a x',
+      'pnpm rum db:migrate',
+      'pnpm urn db:migrate',
+      'npm rum db:migrate',
+      'yarn workspace a run db:migrate',
+    ]) {
+      expect.soft(bash(command), command).toBe('deny');
+      expect.soft(bash(command, ALL_HAZARDS), `claimed: ${command}`).toBe('allow');
+    }
   });
 });
 
@@ -273,29 +290,31 @@ describe('a deliberately deep chain of script-runner prefixes is still read', ()
 });
 
 describe('a hazard program with a word 10db cannot read asks while a hazard is unclaimed', () => {
-  it.each([
-    'x=add; pnpm $x lodash',
-    'p=pnpm; $p add x',
-    'pnpm ${X:-add} x',
-    'pnpm $((0)) add x',
-    'pnpm `echo add` x',
-    'echo add x | xargs pnpm',
-    'env pnpm $sub x',
-    '$CMD --help',
-    'for d in a b; do (cd $d && pnpm $verb x); done',
-    "sh -c 'pnpm $verb x'",
-    'pnpm {a,b} x',
-    'pnpm {1..3}',
-    'nice xargs pnpm',
-    'timeout 5 xargs pnpm',
-    'env xargs pnpm',
-    'command xargs pnpm',
-    'echo x | parallel pnpm',
-    'parallel pnpm ::: add',
-  ])('%s', (command) => {
-    expect(bash(command)).toBe('ask');
-    expect(pre('Monitor', { command })).toBe('ask');
-    expect(bash(command, ALL_HAZARDS)).toBe('allow');
+  it('asks through Bash and Monitor, and allows once every hazard is claimed', () => {
+    for (const command of [
+      'x=add; pnpm $x lodash',
+      'p=pnpm; $p add x',
+      'pnpm ${X:-add} x',
+      'pnpm $((0)) add x',
+      'pnpm `echo add` x',
+      'echo add x | xargs pnpm',
+      'env pnpm $sub x',
+      '$CMD --help',
+      'for d in a b; do (cd $d && pnpm $verb x); done',
+      "sh -c 'pnpm $verb x'",
+      'pnpm {a,b} x',
+      'pnpm {1..3}',
+      'nice xargs pnpm',
+      'timeout 5 xargs pnpm',
+      'env xargs pnpm',
+      'command xargs pnpm',
+      'echo x | parallel pnpm',
+      'parallel pnpm ::: add',
+    ]) {
+      expect.soft(bash(command), command).toBe('ask');
+      expect.soft(pre('Monitor', { command }), `Monitor: ${command}`).toBe('ask');
+      expect.soft(bash(command, ALL_HAZARDS), `claimed: ${command}`).toBe('allow');
+    }
   });
 });
 
@@ -319,137 +338,150 @@ describe('arithmetic over a name the command can rebind', () => {
 });
 
 describe('a word the shell fills in, only as an argument to a fixed program, is read', () => {
-  it.each([
-    // The three read-only checks lanes ran on 2026-11-01.
-    'for f in packages/contracts/src/entities.ts packages/db/src/x.ts; do uptime | sed \'s/.*load/load/\'; s=$(date +%s); node scripts/check-changed.mjs --precheck -- "$f" > "$TMPDIR/pc.log" 2>&1; rc=$?; e=$(( $(date +%s) - s )); echo "$f rc=$rc e=$e"; done',
-    'cd /work/tree; pnpm exec prettier --check apps/daemon/src/guard/*.ts 2>&1 | tail -5; pnpm exec eslint apps/daemon/src/guard; pnpm exec vitest run --root apps/daemon src/guard 2>&1 | grep x; sed -n 72p apps/daemon/AGENTS.md | cut -c1-900',
-    "F=$(git status --short | awk '{print $2}'); pnpm exec prettier --check $F 2>&1 | tail -5; pnpm exec eslint $F",
-    'pnpm exec prettier --check $F',
-    'pnpm exec prettier --check "$f"',
-    'pnpm exec eslint $F',
-    'pnpm exec vitest run $F',
-    'pnpm exec tsc -p $P',
-    'pnpm exec node scripts/check.mjs $F',
-    'pnpm --filter @10db/daemon test $F',
-    'pnpm --filter @10db/daemon exec vitest run "$f"',
-    'pnpm -r --filter=@10db/daemon lint $F',
-    'env CI=1 pnpm exec prettier --check $F',
-    'pnpm prettier --check $F',
-  ])('%s', (command) => {
-    expect(bash(command)).toBe('allow');
-    expect(pre('Monitor', { command })).toBe('allow');
+  it('allows it through Bash and Monitor', () => {
+    for (const command of [
+      // The three read-only checks lanes ran on 2026-11-01.
+      'for f in packages/contracts/src/entities.ts packages/db/src/x.ts; do uptime | sed \'s/.*load/load/\'; s=$(date +%s); node scripts/check-changed.mjs --precheck -- "$f" > "$TMPDIR/pc.log" 2>&1; rc=$?; e=$(( $(date +%s) - s )); echo "$f rc=$rc e=$e"; done',
+      'cd /work/tree; pnpm exec prettier --check apps/daemon/src/guard/*.ts 2>&1 | tail -5; pnpm exec eslint apps/daemon/src/guard; pnpm exec vitest run --root apps/daemon src/guard 2>&1 | grep x; sed -n 72p apps/daemon/AGENTS.md | cut -c1-900',
+      "F=$(git status --short | awk '{print $2}'); pnpm exec prettier --check $F 2>&1 | tail -5; pnpm exec eslint $F",
+      'pnpm exec prettier --check $F',
+      'pnpm exec prettier --check "$f"',
+      'pnpm exec eslint $F',
+      'pnpm exec vitest run $F',
+      'pnpm exec tsc -p $P',
+      'pnpm exec node scripts/check.mjs $F',
+      'pnpm --filter @10db/daemon test $F',
+      'pnpm --filter @10db/daemon exec vitest run "$f"',
+      'pnpm -r --filter=@10db/daemon lint $F',
+      'env CI=1 pnpm exec prettier --check $F',
+      'pnpm prettier --check $F',
+    ]) {
+      expect.soft(bash(command), command).toBe('allow');
+      expect.soft(pre('Monitor', { command }), `Monitor: ${command}`).toBe('allow');
+    }
   });
 });
 
 describe('a word the shell fills in that can pick the program or the pnpm subcommand still asks', () => {
-  it.each([
-    'pnpm $SUB x',
-    'pnpm exec $X y',
-    '$P add z',
-    'pnpm exec "$X" y',
-    'pnpm exec prettier $F && pnpm $SUB x',
-    'pnpm exec ${X} y',
-    'pnpm exec $(echo prettier) $F',
-    'pnpm exec drizzle-kit $x',
-    'pnpm exec pnpm $x',
-    'pnpm exec sh $F',
-    'pnpm exec env $F',
-    'pnpm exec xargs $F',
-    'pnpm exec node $F',
-    'pnpm exec {prettier,pnpm} $F',
-    'pnpm exec prettier* $F',
-    'pnpm --filter $P test',
-    'pnpm --filter @10db/daemon $SUB x',
-    'pnpm --filter @10db/daemon run $S',
-    'pnpm run $S',
-    'pnpm -r $SUB',
-    'pnpm recursive $SUB',
-    'pnpm dlx $X',
-    'pnpm lint$S',
-    'pnpm te$S',
-    'echo x | xargs pnpm exec prettier $F',
-  ])('%s', (command) => {
-    expect(bash(command)).toBe('ask');
-    expect(bash(command, ALL_HAZARDS)).toBe('allow');
+  it('asks until every hazard is claimed', () => {
+    for (const command of [
+      'pnpm $SUB x',
+      'pnpm exec $X y',
+      '$P add z',
+      'pnpm exec "$X" y',
+      'pnpm exec prettier $F && pnpm $SUB x',
+      'pnpm exec ${X} y',
+      'pnpm exec $(echo prettier) $F',
+      'pnpm exec drizzle-kit $x',
+      'pnpm exec pnpm $x',
+      'pnpm exec sh $F',
+      'pnpm exec env $F',
+      'pnpm exec xargs $F',
+      'pnpm exec node $F',
+      'pnpm exec {prettier,pnpm} $F',
+      'pnpm exec prettier* $F',
+      'pnpm --filter $P test',
+      'pnpm --filter @10db/daemon $SUB x',
+      'pnpm --filter @10db/daemon run $S',
+      'pnpm run $S',
+      'pnpm -r $SUB',
+      'pnpm recursive $SUB',
+      'pnpm dlx $X',
+      'pnpm lint$S',
+      'pnpm te$S',
+      'echo x | xargs pnpm exec prettier $F',
+    ]) {
+      expect.soft(bash(command), command).toBe('ask');
+      expect.soft(bash(command, ALL_HAZARDS), `claimed: ${command}`).toBe('allow');
+    }
   });
 });
 
 describe('a word the shell fills in after a Python, Go or Ruby command that is no hazard is read', () => {
-  it.each([
-    'python -m pytest tests/test_*.py',
-    'uv run pytest -k $NAME',
-    'poetry run pytest tests/*.py',
-    'go test ./... -run $T',
-    'go build -o $OUT ./cmd/x',
-    'bundle exec rspec spec/**/*_spec.rb',
-    'python scripts/gen.py --out $TMPDIR/x',
-    'docker compose exec -T backend python -m pytest tests/*.py',
-  ])('%s', (command) => {
-    expect(bash(command)).toBe('allow');
+  it('allows it', () => {
+    for (const command of [
+      'python -m pytest tests/test_*.py',
+      'uv run pytest -k $NAME',
+      'poetry run pytest tests/*.py',
+      'go test ./... -run $T',
+      'go build -o $OUT ./cmd/x',
+      'bundle exec rspec spec/**/*_spec.rb',
+      'python scripts/gen.py --out $TMPDIR/x',
+      'docker compose exec -T backend python -m pytest tests/*.py',
+    ]) {
+      expect.soft(bash(command), command).toBe('allow');
+    }
   });
 });
 
 describe('a word the shell fills in that can spell a Python, Go or Ruby hazard still asks', () => {
-  it.each([
-    'python manage.py $x',
-    'python $x',
-    'python -c $x',
-    'uv $x',
-    'uv run $x',
-    'uv --directory $D lock',
-    'uv run env $x',
-    'uv run node $F',
-    'uv run sh -c "$x"',
-    'go mod $x',
-    'bundle $x',
-    'pip $x',
-    'docker compose exec -T backend python manage.py $x',
-    'docker compose exec -T backend sh -c "$x"',
-    'watch python -m pytest $x',
-  ])('%s', (command) => {
-    expect(bash(command)).toBe('ask');
-    expect(bash(command, ALL_HAZARDS)).toBe('allow');
+  it('asks until every hazard is claimed', () => {
+    for (const command of [
+      'python manage.py $x',
+      'python $x',
+      'python -c $x',
+      'uv $x',
+      'uv run $x',
+      'uv --directory $D lock',
+      'uv run env $x',
+      'uv run node $F',
+      'uv run sh -c "$x"',
+      'go mod $x',
+      'bundle $x',
+      'pip $x',
+      'docker compose exec -T backend python manage.py $x',
+      'docker compose exec -T backend sh -c "$x"',
+      'watch python -m pytest $x',
+    ]) {
+      expect.soft(bash(command), command).toBe('ask');
+      expect.soft(bash(command, ALL_HAZARDS), `claimed: ${command}`).toBe('allow');
+    }
   });
 });
 
 describe('a command 10db cannot read asks while a hazard is unclaimed', () => {
-  it.each(['~/bin/foo x', 'echo "unclosed'])('%s', (command) => {
-    expect(bash(command)).not.toBe('allow');
-    expect(bash(command, ALL_HAZARDS)).toBe('allow');
+  it('is not allowed until every hazard is claimed', () => {
+    for (const command of ['~/bin/foo x', 'echo "unclosed']) {
+      expect.soft(bash(command), command).not.toBe('allow');
+      expect.soft(bash(command, ALL_HAZARDS), `claimed: ${command}`).toBe('allow');
+    }
   });
 });
 
 describe('eval runs what it is given', () => {
-  it.each([
-    ["eval 'pnpm $X'", 'ask'],
-    ['eval "$CMD"', 'ask'],
-    ['nice eval "$CMD"', 'ask'],
-    ["eval 'pnpm add x'", 'deny'],
-    ['eval echo hi', 'allow'],
-  ] as const)('%s -> %s', (command, expected) => {
-    expect(bash(command)).toBe(expected);
+  it('judges the words eval runs', () => {
+    const rows: [string, 'allow' | 'ask' | 'deny'][] = [
+      ["eval 'pnpm $X'", 'ask'],
+      ['eval "$CMD"', 'ask'],
+      ['nice eval "$CMD"', 'ask'],
+      ["eval 'pnpm add x'", 'deny'],
+      ['eval echo hi', 'allow'],
+    ];
+    for (const [command, expected] of rows) expect.soft(bash(command), command).toBe(expected);
   });
 });
 
 describe('quoted literals and ordinary commands pass', () => {
-  it.each([
-    "pnpm --filter '@10db/*' test",
-    "pnpm vitest run 'src/**/*.test.ts'",
-    "pnpm exec eslint 'apps/**/*.ts'",
-    "pnpm vitest -t 'parses [x]'",
-    "pnpm exec tsx -e 'console.log({a:1})'",
-    'grep -rn pnpm docs/*.md',
-    'rg npm src/*',
-    'echo pnpm add x',
-    'pnpm typecheck && pnpm lint',
-    'yarn --version',
-    'pnpm --filter @10db/daemon exec vitest run src/x.test.ts',
-    'grep -rn "$(pwd)" .',
-    'cd "$DIR" && ls',
-    'pnpm test 2>&1 | grep foo',
-    'git status',
-    'xargs wc -l < files.txt',
-  ])('%s', (command) => {
-    expect(bash(command)).toBe('allow');
+  it('allows them', () => {
+    for (const command of [
+      "pnpm --filter '@10db/*' test",
+      "pnpm vitest run 'src/**/*.test.ts'",
+      "pnpm exec eslint 'apps/**/*.ts'",
+      "pnpm vitest -t 'parses [x]'",
+      "pnpm exec tsx -e 'console.log({a:1})'",
+      'grep -rn pnpm docs/*.md',
+      'rg npm src/*',
+      'echo pnpm add x',
+      'pnpm typecheck && pnpm lint',
+      'yarn --version',
+      'pnpm --filter @10db/daemon exec vitest run src/x.test.ts',
+      'grep -rn "$(pwd)" .',
+      'cd "$DIR" && ls',
+      'pnpm test 2>&1 | grep foo',
+      'git status',
+      'xargs wc -l < files.txt',
+    ]) {
+      expect.soft(bash(command), command).toBe('allow');
+    }
   });
 });

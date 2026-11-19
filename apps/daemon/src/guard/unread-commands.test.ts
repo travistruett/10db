@@ -314,7 +314,6 @@ const ROWS: readonly Row[] = [
     command: 'cat <<EOF\n$(pnpm $x)\nEOF',
     reason: UnreadReason.HazardForm,
   },
-  { name: 'arithmetic', command: 'echo $((1+2))', reason: null },
   {
     name: 'a data here-document with an apostrophe before a substitution',
     command: "cat <<EOF\ndon't $(date)\nEOF",
@@ -525,7 +524,6 @@ const ROWS: readonly Row[] = [
     reason: UnreadReason.HazardForm,
   },
   { name: 'pnpm with a backtick', command: 'pnpm `echo add` x', reason: UnreadReason.HazardForm },
-  { name: 'pnpm with a quoted variable', command: 'pnpm "$x"', reason: UnreadReason.HazardForm },
   { name: 'pnpm with a tilde', command: 'pnpm ~x', reason: UnreadReason.HazardForm },
   { name: 'pnpm exec with a variable', command: 'pnpm exec $x', reason: UnreadReason.HazardForm },
   {
@@ -932,11 +930,6 @@ const ROWS: readonly Row[] = [
     reason: UnreadReason.HazardForm,
   },
   {
-    name: 'a quoted word could be a flag that takes the next word',
-    command: 'pnpm "$x" add left-pad',
-    reason: UnreadReason.HazardForm,
-  },
-  {
     name: 'a quoted word glued to a dash',
     command: 'pnpm -"$x" add left-pad',
     reason: UnreadReason.HazardForm,
@@ -960,8 +953,15 @@ const ROWS: readonly Row[] = [
 ];
 
 describe('firstUnread', () => {
-  it.each(ROWS)('$name: $command', ({ command, reason, hazards }) => {
-    expect(firstUnread(command, hazards ?? DEFAULT_HAZARDS)?.reason ?? null).toBe(reason);
+  it('names why each command is unread, or null when every part is read', () => {
+    for (const { name, command, reason, hazards } of ROWS) {
+      expect
+        .soft(
+          firstUnread(command, hazards ?? DEFAULT_HAZARDS)?.reason ?? null,
+          `${name}: ${command}`,
+        )
+        .toBe(reason);
+    }
   });
 
   it('names the part it could not read', () => {

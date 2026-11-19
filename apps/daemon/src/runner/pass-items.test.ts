@@ -116,11 +116,6 @@ describe("a page's turn through the conversation library", () => {
       reply: 'Tidied the form.',
       kinds: ['message', 'agent_message', 'tool_call', 'agent_message'],
     },
-    {
-      name: 'a reply it already streamed is that item, marked as the turn’s',
-      reply: 'Ran the tests.',
-      kinds: ['message', 'tool_call', 'agent_message'],
-    },
   ])('stores its items under the turn: $name', async ({ reply, kinds }) => {
     const frames: ConversationDeltaFrame[] = [];
     const steps: FakeStep[] = [

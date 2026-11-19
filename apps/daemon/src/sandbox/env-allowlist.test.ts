@@ -23,59 +23,60 @@ describe('deniedEnvNames', () => {
     ]);
   });
 
-  it.each([
-    'NVM_DIR',
-    'NVM_BIN',
-    'NVM_INC',
-    'VOLTA_HOME',
-    'CARGO_HOME',
-    'RUSTUP_HOME',
-    'COREPACK_HOME',
-    'npm_config_devdir',
-  ])('keeps the version-manager variable %s', (name) => {
-    expect(deniedEnvNames({ [name]: '/h/x' })).toEqual([]);
+  it('keeps the version-manager, toolchain and lane variables on the allowlist', () => {
+    const kept = [
+      // Version managers.
+      'NVM_DIR',
+      'NVM_BIN',
+      'NVM_INC',
+      'VOLTA_HOME',
+      'CARGO_HOME',
+      'RUSTUP_HOME',
+      'COREPACK_HOME',
+      'npm_config_devdir',
+      // Allowed prefixes whose names look like no secret.
+      'MISE_SHELL',
+      'pnpm_config_store_dir',
+      'LC_ALL',
+      // What a lane sets for its tools.
+      'CLAUDE_CODE_TMPDIR',
+      'GIT_CONFIG_GLOBAL',
+      'GIT_OPTIONAL_LOCKS',
+      'npm_config_cache',
+      'UV_CACHE_DIR',
+      'UV_TOOL_DIR',
+      'UV_PYTHON_INSTALL_DIR',
+      'TMPDIR',
+      'GOPATH',
+      'TENDB_SANDBOX',
+      'xcrun_db',
+    ];
+    for (const name of kept) expect.soft(deniedEnvNames({ [name]: '/h/x' }), name).toEqual([]);
   });
 
-  it.each([
-    'MISE_GITHUB_TOKEN',
-    'pnpm_config__authToken',
-    'MISE_SECRET',
-    'LC_PASSWORD',
-    'pnpm_config_registry_cookie',
-  ])('denies %s: a secret-looking name is denied even under an allowed prefix', (name) => {
-    expect(deniedEnvNames({ [name]: 'v' })).toEqual([name]);
+  it('denies a secret-looking name even under an allowed prefix', () => {
+    for (const name of [
+      'MISE_GITHUB_TOKEN',
+      'pnpm_config__authToken',
+      'MISE_SECRET',
+      'LC_PASSWORD',
+      'pnpm_config_registry_cookie',
+    ]) {
+      expect.soft(deniedEnvNames({ [name]: 'v' }), name).toEqual([name]);
+    }
   });
 
-  it.each(['MISE_SHELL', 'pnpm_config_store_dir', 'LC_ALL'])('keeps %s', (name) => {
-    expect(deniedEnvNames({ [name]: 'v' })).toEqual([]);
-  });
-
-  it.each([
-    'CLAUDE_CODE_TMPDIR',
-    'GIT_CONFIG_GLOBAL',
-    'GIT_OPTIONAL_LOCKS',
-    'npm_config_cache',
-    'pnpm_config_store_dir',
-    'UV_CACHE_DIR',
-    'UV_TOOL_DIR',
-    'UV_PYTHON_INSTALL_DIR',
-    'TMPDIR',
-    'GOPATH',
-    'TENDB_SANDBOX',
-    'xcrun_db',
-  ])('keeps %s', (name) => {
-    expect(deniedEnvNames({ [name]: 'v' })).toEqual([]);
-  });
-
-  it.each([
-    ...SECRET_VARIABLES,
-    'AWS_ACCESS_KEY_ID',
-    'AWS_PROFILE',
-    'AWS_SECRET_ACCESS_KEY',
-    'ANTHROPIC_BASE_URL',
-    'CLAUDE_CODE_USE_BEDROCK',
-    'CLAUDE_CONFIG_DIR',
-  ])('denies the account variable %s to a sandboxed command', (name) => {
-    expect(deniedEnvNames({ [name]: 'x' })).toEqual([name]);
+  it('denies the account variables to a sandboxed command', () => {
+    for (const name of [
+      ...SECRET_VARIABLES,
+      'AWS_ACCESS_KEY_ID',
+      'AWS_PROFILE',
+      'AWS_SECRET_ACCESS_KEY',
+      'ANTHROPIC_BASE_URL',
+      'CLAUDE_CODE_USE_BEDROCK',
+      'CLAUDE_CONFIG_DIR',
+    ]) {
+      expect.soft(deniedEnvNames({ [name]: 'x' }), name).toEqual([name]);
+    }
   });
 });

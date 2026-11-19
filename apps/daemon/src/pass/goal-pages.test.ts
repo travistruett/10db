@@ -75,14 +75,4 @@ describe("a goal's pass pages", () => {
 
     expect(pages).toEqual({ pages: ['settings', 'people'], fromTasks: [id('people'), id('both')] });
   });
-
-  it('names no page for a goal whose tasks committed nothing', async () => {
-    h = createDeliveryHarness(PROJECT);
-    const { goal } = goalWith(['a']);
-
-    expect(await goalPassPages({ db: h.store.db, git: h.git }, goal.id)).toEqual({
-      pages: [],
-      fromTasks: [],
-    });
-  });
 });

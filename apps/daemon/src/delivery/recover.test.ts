@@ -97,7 +97,7 @@ describe('recoverBatches', () => {
     expect(again.options.map((o) => o.label)).toContain('Ship without it');
   });
 
-  it('deletes a CUTTING row with a card, and leaves the branch a crash left behind; the next cut uses a new name', async () => {
+  it('deletes a CUTTING row with a card, and leaves the branch a crash left behind; the next cut uses a new name, and that batch ships when its last workstream finished while the daemon was down', async () => {
     h = createDeliveryHarness({}, { trigger: false });
     const cutting = h.state.write((c) =>
       insertBatch(c, { projectId: h.project.id, title: 'Greetings', baseBranch: 'main' }),
@@ -117,6 +117,13 @@ describe('recoverBatches', () => {
     expect(next.branch).not.toBe(leftover);
     const batchBranches = h.git$('branch', '--list', '--format=%(refname:short)', '10db/*');
     expect(batchBranches.split('\n').sort()).toEqual([leftover, next.branch].sort());
+
+    // A second restart: the open batch's last workstream finished while the daemon was down.
+    for (const ws of listWorkstreams(h.store.db, { batchId: next.id })) h.settle(ws.id, 'DONE');
+    expect(getBatch(h.store.db, next.id).state).toBe('OPEN');
+    await recover();
+    await h.jobs.idle();
+    expect(getBatch(h.store.db, next.id).state).toBe('SHIPPED');
   });
 
   /** The daemon stopped before the cut ran: the CUTTING row and its task's QUEUED workstream. */
@@ -250,54 +257,62 @@ describe('recoverBatches', () => {
     expect(launched).toEqual([]);
   });
 
-  it.each<{ name: string; crash: (h: DeliveryHarness, batch: BatchDto) => void }>([
-    { name: 'before step 0', crash: () => undefined },
-    {
-      name: 'after the gate passed',
-      crash: (x, batch) => {
-        x.state.write((c) => patchBatch(c, batch.id, { gateExitCode: 0 }));
+  it('finishes a batch left in SHIPPING at any step with one PR and the same pushed SHA', async () => {
+    const rows: { name: string; crash: (h: DeliveryHarness, batch: BatchDto) => void }[] = [
+      { name: 'before step 0', crash: () => undefined },
+      {
+        name: 'after the gate passed',
+        crash: (x, batch) => {
+          x.state.write((c) => patchBatch(c, batch.id, { gateExitCode: 0 }));
+        },
       },
-    },
-    {
-      name: 'after the push',
-      crash: (x, batch) => {
-        x.git$('push', '-q', '-u', 'origin', batch.branch ?? '');
+      {
+        name: 'after the push',
+        crash: (x, batch) => {
+          x.git$('push', '-q', '-u', 'origin', batch.branch ?? '');
+        },
       },
-    },
-    {
-      name: 'after gh pr create, before SHIPPED was written',
-      crash: (x, batch) => {
-        x.git$('push', '-q', '-u', 'origin', batch.branch ?? '');
-        const body = join(x.dataDir, 'body.md');
-        writeFileSync(body, 'from the run that crashed\n');
-        void x.gh.prCreate({
-          repo: 'acme/widgets',
-          base: 'main',
-          head: batch.branch ?? '',
-          title: 'feat(app): greetings',
-          bodyFile: body,
-        });
+      {
+        name: 'after gh pr create, before SHIPPED was written',
+        crash: (x, batch) => {
+          x.git$('push', '-q', '-u', 'origin', batch.branch ?? '');
+          const body = join(x.dataDir, 'body.md');
+          writeFileSync(body, 'from the run that crashed\n');
+          void x.gh.prCreate({
+            repo: 'acme/widgets',
+            base: 'main',
+            head: batch.branch ?? '',
+            title: 'feat(app): greetings',
+            bodyFile: body,
+          });
+        },
       },
-    },
-  ])(
-    'finishes a batch left in SHIPPING $name with one PR and the same pushed SHA',
-    async ({ crash }) => {
+    ];
+    for (const [i, { name, crash }] of rows.entries()) {
+      // Each crash leaves its own repository and origin behind: one harness per row.
+      if (i > 0) h.close();
       h = createDeliveryHarness({}, { trigger: false });
       const batch = await shippingAfterCrash();
       crash(h, batch);
       const report = await recover();
-      expect(report.resumed).toEqual([batch.id]);
+      expect.soft(report.resumed, name).toEqual([batch.id]);
       await h.jobs.idle();
-      expect(getBatch(h.store.db, batch.id)).toMatchObject({
+      expect.soft(getBatch(h.store.db, batch.id), name).toMatchObject({
         state: 'SHIPPED',
         prUrl: 'https://github.com/acme/widgets/pull/1',
       });
-      expect(h.gh.calls.filter((c) => c.method === 'prCreate')).toHaveLength(1);
-      expect(onOrigin(h, batch.branch)).toBe(
-        h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`),
-      );
-    },
-  );
+      expect
+        .soft(
+          h.gh.calls.filter((c) => c.method === 'prCreate'),
+          name,
+        )
+        .toHaveLength(1);
+      expect
+        .soft(onOrigin(h, batch.branch), name)
+        .toBe(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`));
+    }
+    // Four boots and ships, each of which had the 60 s test timeout before the fold.
+  }, 240_000);
 
   // Identifies the process with `ps`, which is setuid: no sandbox can run it.
   it.skipIf(SANDBOXED)('terminates an orphaned shipping gate before re-running', async () => {
@@ -317,16 +332,6 @@ describe('recoverBatches', () => {
       if (alive(gate.grandchildPid)) process.kill(gate.grandchildPid, 'SIGKILL');
       gate.cleanup();
     }
-  });
-
-  it('ships an open batch whose last workstream finished while the daemon was down', async () => {
-    h = createDeliveryHarness({}, { trigger: false });
-    const batch = await openBatch();
-    for (const ws of listWorkstreams(h.store.db, { batchId: batch.id })) h.settle(ws.id, 'DONE');
-    expect(getBatch(h.store.db, batch.id).state).toBe('OPEN');
-    await recover();
-    await h.jobs.idle();
-    expect(getBatch(h.store.db, batch.id).state).toBe('SHIPPED');
   });
 });
 

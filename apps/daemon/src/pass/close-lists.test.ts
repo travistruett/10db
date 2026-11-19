@@ -78,7 +78,7 @@ describe('closePreview', () => {
 });
 
 describe('Close Pass, confirmed', () => {
-  it('refuses a Drop of a change a page set to Sign Off Now was built with, naming the page', async () => {
+  it('refuses a Drop of a change a page set to Sign Off Now was built with, a file placed in a page being taken out, a Drop of no such change and Sign Off Now of a failed run; then shows the lists again when a file changed', async () => {
     w = await openPassWorld();
     const closes = createPassCloses({
       ...w.deps,
@@ -100,60 +100,6 @@ describe('Close Pass, confirmed', () => {
     w.write('src/settings/page.tsx', 'settings work\n');
     w.endTurn(built);
     await keepTurnWork(w.deps, { workstreamId: w.runOf(w.settings), turnId: built.id });
-    const shown = await closes.preview(w.opened.pass.id);
-
-    await expect(
-      closes.close(w.opened.pass.id, {
-        token: shown.token,
-        pages: [
-          { taskId: w.settings.id, choice: PassClosePageChoice.SignOff },
-          { taskId: w.people.id, choice: PassClosePageChoice.TakeOut },
-        ],
-        files: [],
-        shared: [{ seq: 1, choice: SharedChoiceKind.Drop }],
-      }),
-    ).rejects.toThrow(/Settings: UI work is set to Sign Off Now/);
-    expect(getPass(w.h.store.db, w.opened.pass.id).state).toBe('OPEN');
-  });
-
-  it('shows the lists again, with what changed, when a file changed after they were shown', async () => {
-    w = await openPassWorld();
-    const closes = createPassCloses({
-      ...w.deps,
-      stopLane: () => Promise.resolve(),
-      wrote: () => Promise.resolve(),
-      ship: noShip,
-      gateWhere: () => 'none',
-    });
-    const shown = await closes.preview(w.opened.pass.id);
-    w.write('docs/late.md', 'written after the modal opened\n');
-
-    const answer = await closes.close(w.opened.pass.id, {
-      token: shown.token,
-      pages: shown.unfinished.map((p) => ({
-        taskId: p.taskId,
-        choice: PassClosePageChoice.TakeOut,
-      })),
-      files: [],
-      shared: [],
-    });
-
-    expect(answer).toMatchObject({
-      outcome: 'changed',
-      changed: ['docs/late.md changed, and no page owns it'],
-    });
-    expect(getPass(w.h.store.db, w.opened.pass.id).state).toBe('OPEN');
-  });
-
-  it('refuses a file placed in a page that is being taken out, a Drop of a page that signs off, and Sign Off Now of a failed run', async () => {
-    w = await openPassWorld();
-    const closes = createPassCloses({
-      ...w.deps,
-      stopLane: () => Promise.resolve(),
-      wrote: () => Promise.resolve(),
-      ship: noShip,
-      gateWhere: () => 'none',
-    });
     w.write('docs/new.md', 'new\n');
     const shown = await closes.preview(w.opened.pass.id);
     const pages = [
@@ -161,6 +107,14 @@ describe('Close Pass, confirmed', () => {
       { taskId: w.people.id, choice: PassClosePageChoice.TakeOut },
     ];
 
+    await expect(
+      closes.close(w.opened.pass.id, {
+        token: shown.token,
+        pages,
+        files: [],
+        shared: [{ seq: 1, choice: SharedChoiceKind.Drop }],
+      }),
+    ).rejects.toThrow(/Settings: UI work is set to Sign Off Now/);
     await expect(
       closes.close(w.opened.pass.id, {
         token: shown.token,
@@ -174,9 +128,9 @@ describe('Close Pass, confirmed', () => {
         token: shown.token,
         pages,
         files: [],
-        shared: [{ seq: 1, choice: 'drop' }],
+        shared: [{ seq: 9, choice: 'drop' }],
       }),
-    ).rejects.toMatchObject({ name: 'ConflictError' });
+    ).rejects.toThrow(/Shared change 9 is not one of a page set to Remove/);
     w.h.state.write((ctx) => {
       for (const to of [WorkstreamState.Starting, WorkstreamState.Failed])
         transitionWorkstream(ctx, w.runOf(w.people), { to, fence: null });
@@ -189,6 +143,25 @@ describe('Close Pass, confirmed', () => {
         shared: [],
       }),
     ).rejects.toThrow('People: UI work cannot be signed off now: its run failed');
+    expect(getPass(w.h.store.db, w.opened.pass.id).state).toBe('OPEN');
+
+    // A file changed after the lists were shown: the close, answering every list as shown, shows
+    // them again with what changed.
+    w.write('docs/late.md', 'written after the modal opened\n');
+    const answer = await closes.close(w.opened.pass.id, {
+      token: shown.token,
+      pages: shown.unfinished.map((p) => ({
+        taskId: p.taskId,
+        choice: PassClosePageChoice.TakeOut,
+      })),
+      files: [{ path: 'docs/new.md', placeIn: null }],
+      shared: [{ seq: 1, choice: SharedChoiceKind.Keep }],
+    });
+
+    expect(answer).toMatchObject({
+      outcome: 'changed',
+      changed: ['docs/late.md changed, and no page owns it'],
+    });
     expect(getPass(w.h.store.db, w.opened.pass.id).state).toBe('OPEN');
   });
 });

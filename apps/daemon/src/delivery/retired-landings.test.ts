@@ -18,7 +18,7 @@ const run = () => moveRetiredLandings(h.ctx, new AbortController().signal);
 const notices = () => h.notices().filter((n) => n.line.includes('no longer exists'));
 
 describe('a task whose landing names a branch that is gone from origin', () => {
-  it('takes the default landing, started or not, and a notice lists the tasks that moved', async () => {
+  it('takes the default landing, started or not, a notice lists the tasks that moved, it does nothing twice, and the task can then join a batch that merges into main', async () => {
     h = createDeliveryHarness();
     const fresh = h.addTask('Fresh', { landing: NEXT });
     const started = h.addTask('Started', { landing: NEXT });
@@ -26,6 +26,9 @@ describe('a task whose landing names a branch that is gone from origin', () => {
       insertWorkstream(w, started.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } });
     });
     const kept = h.addTask('Kept');
+    expect(() =>
+      h.starter.startBatch(h.project.id, { title: 'Both', taskIds: [fresh.id, kept.id] }),
+    ).toThrow(ConflictError);
 
     const moved = await run();
 
@@ -42,6 +45,15 @@ describe('a task whose landing names a branch that is gone from origin', () => {
     expect(notice?.body).not.toContain('Kept');
     expect(notice?.body).toContain('next');
     expect(notice?.body).toContain('main');
+
+    expect(await run()).toEqual([]);
+    expect(notices()).toHaveLength(1);
+
+    const batch = h.only(
+      h.starter.startBatch(h.project.id, { title: 'Both', taskIds: [fresh.id, kept.id] }),
+    );
+    await h.jobs.idle();
+    expect(batch).toMatchObject({ baseBranch: 'main', autoMerge: true });
   });
 
   it('moves the tasks and posts the notice when the branch names make the key longer than a notice key allows', async () => {
@@ -60,23 +72,6 @@ describe('a task whose landing names a branch that is gone from origin', () => {
     expect(notice.key.length).toBeLessThanOrEqual(200);
   });
 
-  it('can then join a batch that merges into main', async () => {
-    h = createDeliveryHarness();
-    const old = h.addTask('Old', { landing: NEXT });
-    const current = h.addTask('Current');
-    expect(() =>
-      h.starter.startBatch(h.project.id, { title: 'Both', taskIds: [old.id, current.id] }),
-    ).toThrow(ConflictError);
-
-    await run();
-
-    const batch = h.only(
-      h.starter.startBatch(h.project.id, { title: 'Both', taskIds: [old.id, current.id] }),
-    );
-    await h.jobs.idle();
-    expect(batch).toMatchObject({ baseBranch: 'main', autoMerge: true });
-  });
-
   it("takes the project's default when that is to hold", async () => {
     h = createDeliveryHarness({ landing: 'hold' });
     const old = h.addTask('Old', { landing: NEXT });
@@ -84,38 +79,32 @@ describe('a task whose landing names a branch that is gone from origin', () => {
     expect(landingOf(old.id)).toEqual({ kind: 'hold' });
   });
 
-  it('is left alone when the branch is on origin', async () => {
+  it('is left alone when the branch is on origin, while an unfinished batch is based on the branch, or when it is finished', async () => {
     h = createDeliveryHarness();
-    h.teammatePush('next', 'src/api/x.txt');
-    const task = h.addTask('Alive', { landing: NEXT });
-    expect(await run()).toEqual([]);
-    expect(landingOf(task.id)).toEqual(NEXT);
-    expect(notices()).toEqual([]);
-  });
-
-  it('is left alone while an unfinished batch is based on the branch', async () => {
-    h = createDeliveryHarness();
-    const task = h.addTask('Busy', { landing: NEXT });
+    // Each task lands on a branch of its own, so no one reason leaves another task alone.
+    const ALIVE: TaskLanding = { kind: 'branch', branch: 'alive' };
+    const BUSY: TaskLanding = { kind: 'branch', branch: 'busy' };
+    h.teammatePush('alive', 'src/api/x.txt');
+    const alive = h.addTask('Alive', { landing: ALIVE });
+    const busy = h.addTask('Busy', { landing: BUSY });
     h.state.write((w) => {
       insertBatch(w, {
         projectId: h.project.id,
-        title: 'On next',
-        baseBranch: 'next',
+        title: 'On busy',
+        baseBranch: 'busy',
         worktreePath: '/nowhere',
       });
     });
-    expect(await run()).toEqual([]);
-    expect(landingOf(task.id)).toEqual(NEXT);
-  });
-
-  it('is left alone when it is finished', async () => {
-    h = createDeliveryHarness();
-    const task = h.addTask('Done', { landing: NEXT });
+    const done = h.addTask('Done', { landing: NEXT });
     h.state.write((w) => {
-      setTaskStatus(w, task.id, 'done');
+      setTaskStatus(w, done.id, 'done');
     });
+
     expect(await run()).toEqual([]);
-    expect(landingOf(task.id)).toEqual(NEXT);
+    expect.soft(landingOf(alive.id), 'on origin').toEqual(ALIVE);
+    expect.soft(landingOf(busy.id), 'an unfinished batch on it').toEqual(BUSY);
+    expect.soft(landingOf(done.id), 'finished').toEqual(NEXT);
+    expect(notices()).toEqual([]);
   });
 
   it('is left alone when the project default names the same missing branch', async () => {
@@ -142,13 +131,5 @@ describe('a task whose landing names a branch that is gone from origin', () => {
     expect(await run()).toEqual([]);
     expect(landingOf(task.id)).toEqual(NEXT);
     expect(notices()).toEqual([]);
-  });
-
-  it('does nothing twice', async () => {
-    h = createDeliveryHarness();
-    h.addTask('Old', { landing: NEXT });
-    expect(await run()).toHaveLength(1);
-    expect(await run()).toEqual([]);
-    expect(notices()).toHaveLength(1);
   });
 });

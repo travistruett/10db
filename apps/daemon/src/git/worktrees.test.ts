@@ -67,8 +67,14 @@ const add = (
 /** A chat's worktree, locked with its chat's id. */
 const addChat = (name: string) => add(name, `chat/${name}`, 'main', '10db cht_0a1');
 const listed = async () => (await git.listWorktrees(main())).map((e) => e.path);
+/** What `act` threw, or a note that it did not, so a soft check names the row. */
+const caught = (act: Promise<unknown>) =>
+  act.then(
+    () => 'no refusal',
+    (error: unknown) => error,
+  );
 
-beforeEach(() => {
+function setUp(): void {
   fixture = createTempRepoWithOrigin();
   root = tempDir('worktrees');
   elsewhere = tempDir('elsewhere');
@@ -80,23 +86,51 @@ beforeEach(() => {
     onRefused: (error) => refused.push(error),
   });
   before = mainState();
-});
-afterEach(() => {
-  expect(mainState()).toBe(before);
+}
+function tearDown(): void {
   fixture.cleanup();
   root.cleanup();
   elsewhere.cleanup();
+}
+/** A new repository and worktree root for the next row, after checking the last left main alone. */
+function fresh(name: string): void {
+  expect.soft(mainState(), `main untouched: ${name}`).toBe(before);
+  tearDown();
+  setUp();
+}
+
+beforeEach(setUp);
+afterEach(() => {
+  expect(mainState()).toBe(before);
+  tearDown();
 });
 
 describe('addWorktree', () => {
-  it('keeps Spotlight out of the worktree root, with no change in the copy’s git status', async () => {
+  it('makes a locked, pinned worktree on a new or an existing branch, with Spotlight kept out of the root', async () => {
     const marker = join(root.path, '.metadata_never_index');
     expect(existsSync(marker)).toBe(false);
-    await add('spot');
+    const head = await add('a', '10db/a-1');
+    expect(head).toBe(raw(main(), 'rev-parse', 'main'));
+    const entry = (await git.listWorktrees(main())).find((e) => e.path === real(at('a')));
+    expect(entry?.locked).toBe('10db bat_0a1');
+    expect(entry?.branch).toBe('10db/a-1');
+    expect(await git.currentBranch(at('a'))).toBe('10db/a-1');
+    expect(readFileSync(join(at('a'), 'README.md'), 'utf8')).toBe('# fixture\n');
+    expect(existsSync(join((await git.gitDirs(at('a'))).gitDir, 'index'))).toBe(true);
+    // The pin is recorded at creation: another daemon on the same pins reads it.
+    const other = createGit({ worktreeRoot: root.path, pins });
+    const dirs = await other.gitDirs(at('a'));
+    expect(dirs.commonDir).toBe(real(join(main(), '.git')));
+    expect(pins.get(real(at('a')))?.gitDir).toBe(dirs.gitDir);
+    // Spotlight's marker sits in the root, not in the worktree, and git status sees nothing of it.
     expect(existsSync(marker)).toBe(true);
-    expect(existsSync(join(at('spot'), '.metadata_never_index'))).toBe(false);
-    expect(raw(at('spot'), 'status', '--porcelain', '--ignored')).toBe('');
-    await add('spot-2');
+    expect(existsSync(join(at('a'), '.metadata_never_index'))).toBe(false);
+    expect(raw(at('a'), 'status', '--porcelain', '--ignored')).toBe('');
+
+    raw(main(), 'branch', 'feat');
+    await add('b', 'feat', null);
+    expect(await git.currentBranch(at('b'))).toBe('feat');
+    expect(existsSync(join(at('b'), 'README.md'))).toBe(true);
     expect(readFileSync(marker, 'utf8')).toBe('');
   });
 
@@ -107,67 +141,57 @@ describe('addWorktree', () => {
     expect(readFileSync(marker, 'utf8')).toBe('kept');
   });
 
-  it('makes the branch at the start point and a locked worktree on it', async () => {
-    const head = await add('a', '10db/a-1');
-    expect(head).toBe(raw(main(), 'rev-parse', 'main'));
-    const entry = (await git.listWorktrees(main())).find((e) => e.path === real(at('a')));
-    expect(entry?.locked).toBe('10db bat_0a1');
-    expect(entry?.branch).toBe('10db/a-1');
-    expect(await git.currentBranch(at('a'))).toBe('10db/a-1');
-    expect(readFileSync(join(at('a'), 'README.md'), 'utf8')).toBe('# fixture\n');
-    expect(existsSync(join((await git.gitDirs(at('a'))).gitDir, 'index'))).toBe(true);
-  });
-
-  it('adds a worktree on a branch that already exists', async () => {
-    raw(main(), 'branch', 'feat');
-    await add('a', 'feat', null);
-    expect(await git.currentBranch(at('a'))).toBe('feat');
-    expect(existsSync(join(at('a'), 'README.md'))).toBe(true);
-  });
-
-  it('refuses a branch that already exists and makes nothing', async () => {
+  it('refuses a taken branch, a missing one with no start point, a path that exists and one outside the root, making nothing', async () => {
     raw(main(), 'branch', 'dup');
-    await expect(add('a', 'dup')).rejects.toBeInstanceOf(InvalidError);
-    expect(await listed()).toEqual([real(main())]);
-    expect(existsSync(at('a'))).toBe(false);
-  });
-
-  it('creates nothing when the path and its missing parent lie outside the root', async () => {
-    await expect(
-      git.addWorktree({
-        repo: main(),
-        path: join(elsewhere.path, 'missing', 'deeper', 'a'),
-        branch: 'b',
-        startPoint: 'main',
-        lockReason: '10db bat_0a1',
-      }),
-    ).rejects.toBeInstanceOf(InvalidError);
-    expect(existsSync(join(elsewhere.path, 'missing'))).toBe(false);
-  });
-
-  it('refuses a missing branch when no start point is given', async () => {
-    await expect(add('a', 'nope', null)).rejects.toBeInstanceOf(InvalidError);
-    expect(existsSync(at('a'))).toBe(false);
-  });
-
-  it('refuses a path that exists, and makes no branch', async () => {
-    mkdirSync(at('a'));
-    await expect(add('a', 'fresh')).rejects.toBeInstanceOf(InvalidError);
-    expect(raw(main(), 'branch', '--list', 'fresh')).toBe('');
-    expect(await listed()).toEqual([real(main())]);
-  });
-
-  it('refuses a path outside the worktree root', async () => {
-    await expect(
-      git.addWorktree({
-        repo: main(),
+    mkdirSync(at('taken'));
+    const rows: readonly {
+      name: string;
+      act: () => Promise<unknown>;
+      /** A path that must not be there after, and a branch that must not have been made. */
+      path: string | null;
+      branch?: string;
+    }[] = [
+      { name: 'a branch that already exists', act: () => add('a', 'dup'), path: at('a') },
+      {
+        name: 'a missing branch with no start point',
+        act: () => add('b', 'nope', null),
+        path: at('b'),
+      },
+      { name: 'a path that exists', act: () => add('taken', 'fresh'), path: null, branch: 'fresh' },
+      {
+        name: 'a path outside the root',
+        act: () =>
+          git.addWorktree({
+            repo: main(),
+            path: join(elsewhere.path, 'a'),
+            branch: 'out',
+            startPoint: 'main',
+            lockReason: '10db bat_0a1',
+          }),
         path: join(elsewhere.path, 'a'),
-        branch: 'b',
-        startPoint: 'main',
-        lockReason: '10db bat_0a1',
-      }),
-    ).rejects.toBeInstanceOf(InvalidError);
-    expect(raw(main(), 'branch', '--list', 'b')).toBe('');
+        branch: 'out',
+      },
+      {
+        name: 'a path whose missing parent lies outside the root',
+        act: () =>
+          git.addWorktree({
+            repo: main(),
+            path: join(elsewhere.path, 'missing', 'deeper', 'a'),
+            branch: 'deep',
+            startPoint: 'main',
+            lockReason: '10db bat_0a1',
+          }),
+        path: join(elsewhere.path, 'missing'),
+        branch: 'deep',
+      },
+    ];
+    for (const { name, act, path, branch } of rows) {
+      expect.soft(await caught(act()), name).toBeInstanceOf(InvalidError);
+      if (path) expect.soft(existsSync(path), `nothing made: ${name}`).toBe(false);
+      if (branch)
+        expect.soft(raw(main(), 'branch', '--list', branch), `no branch: ${name}`).toBe('');
+    }
+    expect(await listed()).toEqual([real(main())]);
   });
 
   it('leaves nothing behind when checking out the new worktree fails', async () => {
@@ -195,144 +219,163 @@ describe('addWorktree', () => {
     expect(readFileSync(join(at('a'), '.git'), 'utf8')).toMatch(/^gitdir: \//);
     expect(await git.currentBranch(at('a'))).toBe('10db/a');
   });
-
-  it("records the worktree's pin at creation", async () => {
-    await add('a');
-    const other = createGit({ worktreeRoot: root.path, pins });
-    const dirs = await other.gitDirs(at('a'));
-    expect(dirs.commonDir).toBe(real(join(main(), '.git')));
-    expect(pins.get(real(at('a')))?.gitDir).toBe(dirs.gitDir);
-  });
 });
 
 describe('a path under the worktree root', () => {
-  it('is refused when it has no pin', async () => {
+  it('is refused when it has no pin, and as moved when its gitfile is swapped for another worktree', async () => {
     raw(main(), 'worktree', 'add', '-q', '-b', 'foreign', join(root.path, 'foreign'));
     const error = await git.currentBranch(join(root.path, 'foreign')).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(GitTrustError);
     expect(error).toMatchObject({ detail: { kind: GitTrustFailure.Unpinned } });
     expect(refused.map((e) => e.detail.kind)).toEqual([GitTrustFailure.Unpinned]);
-  });
 
-  it('is refused as moved when its gitfile is swapped for another worktree', async () => {
     await add('a');
     await add('b');
     const bGitfile = readFileSync(join(at('b'), '.git'), 'utf8');
     writeFileSync(join(at('a'), '.git'), bGitfile);
-    const error = await git.currentBranch(at('a')).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(GitTrustError);
-    expect(error).toMatchObject({ detail: { kind: GitTrustFailure.Moved } });
+    const moved = await git.currentBranch(at('a')).catch((e: unknown) => e);
+    expect(moved).toBeInstanceOf(GitTrustError);
+    expect(moved).toMatchObject({ detail: { kind: GitTrustFailure.Moved } });
   });
 });
 
 describe('removeWorktree', () => {
-  it('removes a listed 10db worktree, its directory and its pin', async () => {
+  it("removes a batch's or a chat's worktree, or a locked entry whose directory is gone, with its pin, and answers absent after", async () => {
     await add('a');
-    await expect(git.removeWorktree(main(), at('a'))).resolves.toBe('removed');
-    expect(await listed()).toEqual([real(main())]);
-    expect(existsSync(at('a'))).toBe(false);
-    expect(pins.get(real(at('a')))).toBeUndefined();
-  });
-
-  it('removes a chat’s worktree, its directory and its pin', async () => {
     await addChat('c');
-    await expect(git.removeWorktree(main(), at('c'))).resolves.toBe('removed');
-    expect(await listed()).toEqual([real(main())]);
-    expect(pins.get(real(at('c')))).toBeUndefined();
-  });
-
-  it('removes a locked entry whose directory is gone', async () => {
-    await add('a');
-    rmSync(at('a'), { recursive: true, force: true });
+    await add('gone');
+    await add('twice');
+    rmSync(at('gone'), { recursive: true, force: true });
     await expect(git.removeWorktree(main(), at('a'))).resolves.toBe('removed');
-    expect(await listed()).toEqual([real(main())]);
-    expect(pins.get(real(at('a')))).toBeUndefined();
-  });
-
-  it('answers absent to the second of two removals asked at once', async () => {
-    await add('a');
+    expect(existsSync(at('a'))).toBe(false);
+    await expect(git.removeWorktree(main(), at('c'))).resolves.toBe('removed');
+    await expect(git.removeWorktree(main(), at('gone'))).resolves.toBe('removed');
+    // Two removals asked at once: the second finds it gone.
     const both = await Promise.all([
-      git.removeWorktree(main(), at('a')),
-      git.removeWorktree(main(), at('a')),
+      git.removeWorktree(main(), at('twice')),
+      git.removeWorktree(main(), at('twice')),
     ]);
     expect(both).toEqual(['removed', 'absent']);
+    for (const name of ['a', 'c', 'gone', 'twice'])
+      expect.soft(pins.get(real(at(name))), `pin of ${name}`).toBeUndefined();
     expect(await listed()).toEqual([real(main())]);
-  });
-
-  it("answers absent for a path git doesn't list and that is gone", async () => {
+    // A path git doesn't list and that is gone.
     await expect(git.removeWorktree(main(), at('nothing'))).resolves.toBe('absent');
   });
 
-  it("refuses a directory git doesn't list, and keeps it", async () => {
-    mkdirSync(at('plain'));
-    writeFileSync(join(at('plain'), 'x'), 'x');
-    await expect(git.removeWorktree(main(), at('plain'))).rejects.toBeInstanceOf(
-      WorktreeNotOursError,
-    );
-    expect(existsSync(join(at('plain'), 'x'))).toBe(true);
-  });
-
-  it('refuses a path outside the root, and keeps the worktree listed', async () => {
-    const path = join(elsewhere.path, 'theirs');
-    raw(main(), 'worktree', 'add', '-q', '-b', 'theirs', path);
-    await expect(git.removeWorktree(main(), path)).rejects.toBeInstanceOf(WorktreeNotOursError);
-    expect(await listed()).toContain(real(path));
-  });
-
-  it("refuses a worktree under the root that 10db didn't lock", async () => {
-    raw(main(), 'worktree', 'add', '-q', '-b', 'foreign', at('foreign'));
-    await expect(git.removeWorktree(main(), at('foreign'))).rejects.toBeInstanceOf(
-      WorktreeNotOursError,
-    );
-    expect(await listed()).toContain(real(at('foreign')));
-  });
-
-  it('refuses a link to a worktree, and keeps the worktree', async () => {
-    await add('a');
-    symlinkSync(real(at('a')), at('link'));
-    await expect(git.removeWorktree(main(), at('link'))).rejects.toBeInstanceOf(
-      WorktreeNotOursError,
-    );
-    expect(await listed()).toContain(real(at('a')));
-    expect(existsSync(join(at('a'), 'README.md'))).toBe(true);
-  });
-
-  it('refuses the root itself, even when it is a locked worktree and named by its real path', async () => {
-    raw(
-      main(),
-      'worktree',
-      'add',
-      '-q',
-      '--lock',
-      '--reason',
-      '10db bat_root',
-      '-b',
-      'r',
-      root.path,
-    );
-    await expect(git.removeWorktree(main(), real(root.path))).rejects.toBeInstanceOf(
-      WorktreeNotOursError,
-    );
-    expect(await listed()).toContain(real(root.path));
-  });
-
-  it("refuses a lock that isn't a 10db batch's", async () => {
-    raw(main(), 'worktree', 'add', '-q', '--lock', '--reason', '10db nothing', '-b', 'l', at('l'));
-    await expect(git.removeWorktree(main(), at('l'))).rejects.toBeInstanceOf(WorktreeNotOursError);
-    expect(await listed()).toContain(real(at('l')));
-  });
-
-  it('refuses a lock that names neither a batch nor a chat', async () => {
-    raw(main(), 'worktree', 'add', '-q', '--lock', '--reason', '10db cht_', '-b', 'm', at('m'));
-    await expect(git.removeWorktree(main(), at('m'))).rejects.toBeInstanceOf(WorktreeNotOursError);
-  });
-
-  it('refuses when no worktree root is configured', async () => {
-    await add('a');
-    await expect(createGit({ pins }).removeWorktree(main(), at('a'))).rejects.toBeInstanceOf(
-      WorktreeNotOursError,
-    );
-    expect(await listed()).toContain(real(at('a')));
+  it("refuses what isn't a listed worktree 10db locked under its root, and keeps it", async () => {
+    const rows: readonly {
+      name: string;
+      /** Makes the thing to remove; answers its path, the worktree still listed and the file still there after. */
+      make: () => Promise<{ path: string; remover?: Git; listed?: string; file?: string }>;
+    }[] = [
+      {
+        name: "a directory git doesn't list",
+        make: () => {
+          mkdirSync(at('plain'));
+          writeFileSync(join(at('plain'), 'x'), 'x');
+          return Promise.resolve({ path: at('plain'), file: join(at('plain'), 'x') });
+        },
+      },
+      {
+        name: 'a path outside the root',
+        make: () => {
+          const path = join(elsewhere.path, 'theirs');
+          raw(main(), 'worktree', 'add', '-q', '-b', 'theirs', path);
+          return Promise.resolve({ path, listed: real(path) });
+        },
+      },
+      {
+        name: "a worktree under the root that 10db didn't lock",
+        make: () => {
+          raw(main(), 'worktree', 'add', '-q', '-b', 'foreign', at('foreign'));
+          return Promise.resolve({ path: at('foreign'), listed: real(at('foreign')) });
+        },
+      },
+      {
+        name: 'a link to a worktree',
+        make: async () => {
+          await add('a');
+          symlinkSync(real(at('a')), at('link'));
+          return {
+            path: at('link'),
+            listed: real(at('a')),
+            file: join(at('a'), 'README.md'),
+          };
+        },
+      },
+      {
+        name: "a lock that isn't a 10db batch's",
+        make: () => {
+          raw(
+            main(),
+            'worktree',
+            'add',
+            '-q',
+            '--lock',
+            '--reason',
+            '10db nothing',
+            '-b',
+            'l',
+            at('l'),
+          );
+          return Promise.resolve({ path: at('l'), listed: real(at('l')) });
+        },
+      },
+      {
+        name: 'a lock that names neither a batch nor a chat',
+        make: () => {
+          raw(
+            main(),
+            'worktree',
+            'add',
+            '-q',
+            '--lock',
+            '--reason',
+            '10db cht_',
+            '-b',
+            'm',
+            at('m'),
+          );
+          return Promise.resolve({ path: at('m') });
+        },
+      },
+      {
+        name: 'a 10db worktree when no worktree root is configured',
+        make: async () => {
+          await add('b');
+          return { path: at('b'), remover: createGit({ pins }), listed: real(at('b')) };
+        },
+      },
+      {
+        // Last, in a repository of its own: the root must be empty to become a worktree.
+        name: 'the root itself, a locked worktree named by its real path',
+        make: () => {
+          fresh('the rows before the root');
+          raw(
+            main(),
+            'worktree',
+            'add',
+            '-q',
+            '--lock',
+            '--reason',
+            '10db bat_root',
+            '-b',
+            'r',
+            root.path,
+          );
+          return Promise.resolve({ path: real(root.path), listed: real(root.path) });
+        },
+      },
+    ];
+    for (const { name, make } of rows) {
+      const { path, remover, listed: still, file } = await make();
+      expect
+        .soft(await caught((remover ?? git).removeWorktree(main(), path)), name)
+        .toBeInstanceOf(WorktreeNotOursError);
+      if (still) expect.soft(await listed(), `still listed: ${name}`).toContain(still);
+      if (file) expect.soft(existsSync(file), `file kept: ${name}`).toBe(true);
+    }
   });
 });
 
@@ -348,71 +391,75 @@ describe('worktreeChanges', () => {
         .trim(),
     );
 
-  it("lists a worktree's uncommitted changes", async () => {
+  it("lists a batch's or a chat's worktree's uncommitted changes", async () => {
     await add('a');
-    writeFileSync(join(at('a'), 'notes.txt'), 'mine\n');
-    await expect(git.worktreeChanges(main(), at('a'))).resolves.toEqual(['notes.txt']);
-  });
-
-  it("lists a chat's worktree's uncommitted changes", async () => {
     await addChat('c');
-    writeFileSync(join(at('c'), 'notes.txt'), 'mine\n');
-    await expect(git.worktreeChanges(main(), at('c'))).resolves.toEqual(['notes.txt']);
+    writeFileSync(join(at('a'), 'notes.txt'), 'mine\n');
+    writeFileSync(join(at('c'), 'chat.txt'), 'mine\n');
+    await expect(git.worktreeChanges(main(), at('a'))).resolves.toEqual(['notes.txt']);
+    await expect(git.worktreeChanges(main(), at('c'))).resolves.toEqual(['chat.txt']);
   });
 
-  it.each<{ name: string; make: () => Promise<string> }>([
-    {
-      name: "a git dir outside the repository's worktrees",
-      make: async () => {
-        await add('a');
-        const copy = join(elsewhere.path, 'gitdir');
-        execFileSync('cp', ['-R', gitDirOf(at('a')), copy]);
-        writeFileSync(join(at('a'), '.git'), `gitdir: ${copy}\n`);
-        return at('a');
+  it("refuses a git dir that isn't one of the repository's own worktrees, or a worktree 10db didn't lock", async () => {
+    // One repository, a worktree of its own for each row; the row that rewrites a worktree's
+    // commondir comes last.
+    const rows: readonly { name: string; make: () => Promise<string> }[] = [
+      {
+        name: "a worktree 10db didn't lock",
+        make: () => {
+          raw(main(), 'worktree', 'add', '-q', '-b', 'foreign', at('foreign'));
+          return Promise.resolve(at('foreign'));
+        },
       },
-    },
-    {
-      name: "a git dir nested deeper than the repository's worktrees",
-      make: async () => {
-        await add('a');
-        const nested = join(gitDirOf(at('a')), 'nested');
-        execFileSync('cp', ['-R', gitDirOf(at('a')), join(elsewhere.path, 'copy')]);
-        execFileSync('mv', [join(elsewhere.path, 'copy'), nested]);
-        writeFileSync(join(at('a'), '.git'), `gitdir: ${nested}\n`);
-        return at('a');
+      {
+        name: "a directory git doesn't list",
+        make: async () => {
+          await add('a5');
+          mkdirSync(at('copy'));
+          writeFileSync(join(at('copy'), '.git'), readFileSync(join(at('a5'), '.git')));
+          return at('copy');
+        },
       },
-    },
-    {
-      name: 'a git dir whose commondir names another repository',
-      make: async () => {
-        await add('a');
-        const other = createTempRepo();
-        cleanups.push(() => {
-          other.cleanup();
-        });
-        writeFileSync(join(gitDirOf(at('a')), 'commondir'), `${join(other.path, '.git')}\n`);
-        return at('a');
+      {
+        name: "a git dir outside the repository's worktrees",
+        make: async () => {
+          await add('a1');
+          const copy = join(elsewhere.path, 'gitdir');
+          execFileSync('cp', ['-R', gitDirOf(at('a1')), copy]);
+          writeFileSync(join(at('a1'), '.git'), `gitdir: ${copy}\n`);
+          return at('a1');
+        },
       },
-    },
-    {
-      name: "a worktree 10db didn't lock",
-      make: () => {
-        raw(main(), 'worktree', 'add', '-q', '-b', 'foreign', at('foreign'));
-        return Promise.resolve(at('foreign'));
+      {
+        name: "a git dir nested deeper than the repository's worktrees",
+        make: async () => {
+          await add('a2');
+          const nested = join(gitDirOf(at('a2')), 'nested');
+          execFileSync('cp', ['-R', gitDirOf(at('a2')), join(elsewhere.path, 'copy')]);
+          execFileSync('mv', [join(elsewhere.path, 'copy'), nested]);
+          writeFileSync(join(at('a2'), '.git'), `gitdir: ${nested}\n`);
+          return at('a2');
+        },
       },
-    },
-    {
-      name: "a directory git doesn't list",
-      make: async () => {
-        await add('a');
-        mkdirSync(at('copy'));
-        writeFileSync(join(at('copy'), '.git'), readFileSync(join(at('a'), '.git')));
-        return at('copy');
+      {
+        name: 'a git dir whose commondir names another repository',
+        make: async () => {
+          await add('a3');
+          const other = createTempRepo();
+          cleanups.push(() => {
+            other.cleanup();
+          });
+          writeFileSync(join(gitDirOf(at('a3')), 'commondir'), `${join(other.path, '.git')}\n`);
+          return at('a3');
+        },
       },
-    },
-  ])('refuses $name', async ({ make }) => {
-    const path = await make();
-    await expect(git.worktreeChanges(main(), path)).rejects.toBeInstanceOf(WorktreeNotOursError);
+    ];
+    for (const { name, make } of rows) {
+      const path = await make();
+      expect
+        .soft(await caught(git.worktreeChanges(main(), path)), name)
+        .toBeInstanceOf(WorktreeNotOursError);
+    }
   });
 });
 
@@ -422,30 +469,28 @@ describe('worktreeIgnoredFiles', () => {
     writeFileSync(join(main(), '.git', 'info', 'exclude'), `${patterns.join('\n')}\n`);
   };
 
-  it.each<{ name: string; files: string[]; listed: string[] }>([
-    { name: 'an ignored file at the top', files: ['.env'], listed: ['.env'] },
-    {
-      name: 'ignored files in directories git does not track',
-      files: ['apps/web/.env.local', 'src/run.log'],
-      listed: ['apps/web/.env.local', 'src/run.log'],
-    },
-    { name: 'an ignored directory', files: ['dist/out.js', 'node_modules/x/i.js'], listed: [] },
-    { name: 'an untracked file that is not ignored', files: ['notes.txt'], listed: [] },
-  ])('lists $name', async ({ files, listed: expected }) => {
+  it("lists a batch's or a chat's ignored files, but none in an ignored directory and no untracked one", async () => {
     ignore('.env', '.env.*', '*.log', 'dist/', 'node_modules/');
-    await add('a');
-    for (const file of files) {
-      mkdirSync(dirname(join(at('a'), file)), { recursive: true });
-      writeFileSync(join(at('a'), file), 'local\n');
+    const rows: readonly { name: string; files: string[]; listed: string[]; chat?: true }[] = [
+      { name: 'an ignored file at the top', files: ['.env'], listed: ['.env'] },
+      {
+        name: 'ignored files in directories git does not track',
+        files: ['apps/web/.env.local', 'src/run.log'],
+        listed: ['apps/web/.env.local', 'src/run.log'],
+      },
+      { name: 'an ignored directory', files: ['dist/out.js', 'node_modules/x/i.js'], listed: [] },
+      { name: 'an untracked file that is not ignored', files: ['notes.txt'], listed: [] },
+      { name: "a chat's worktree's ignored file", files: ['.env'], listed: ['.env'], chat: true },
+    ];
+    for (const [i, { name, files, listed: expected, chat }] of rows.entries()) {
+      const tree = `w${String(i)}`;
+      await (chat ? addChat(tree) : add(tree));
+      for (const file of files) {
+        mkdirSync(dirname(join(at(tree), file)), { recursive: true });
+        writeFileSync(join(at(tree), file), 'local\n');
+      }
+      expect.soft(await git.worktreeIgnoredFiles(main(), at(tree)), name).toEqual(expected);
     }
-    await expect(git.worktreeIgnoredFiles(main(), at('a'))).resolves.toEqual(expected);
-  });
-
-  it("lists a chat's worktree's ignored files", async () => {
-    ignore('.env');
-    await addChat('c');
-    writeFileSync(join(at('c'), '.env'), 'local\n');
-    await expect(git.worktreeIgnoredFiles(main(), at('c'))).resolves.toEqual(['.env']);
   });
 
   it("refuses a worktree 10db didn't lock", async () => {
@@ -457,22 +502,6 @@ describe('worktreeIgnoredFiles', () => {
 });
 
 describe('deleteBranchIfAt', () => {
-  it('deletes a branch at that sha and keeps one that moved', async () => {
-    const first = raw(main(), 'rev-parse', 'HEAD');
-    raw(main(), 'branch', 'gone');
-    await expect(git.deleteBranchIfAt(main(), 'gone', first)).resolves.toBe(true);
-    expect(raw(main(), 'branch', '--list', 'gone')).toBe('');
-
-    raw(main(), 'branch', 'moved');
-    raw(main(), 'commit', '-q', '--allow-empty', '-m', 'second');
-    const second = raw(main(), 'rev-parse', 'HEAD');
-    raw(main(), 'update-ref', 'refs/heads/moved', second);
-    await expect(git.deleteBranchIfAt(main(), 'moved', first)).resolves.toBe(false);
-    expect(raw(main(), 'rev-parse', 'moved')).toBe(second);
-    await expect(git.deleteBranchIfAt(main(), 'never-was', first)).resolves.toBe(false);
-    before = mainState();
-  });
-
   /** The local config keys of branch `name`'s section, sorted. */
   const branchKeys = (name: string) =>
     raw(main(), 'config', '--local', '--name-only', '--list')
@@ -490,7 +519,27 @@ describe('deleteBranchIfAt', () => {
     raw(main(), 'config', `branch.${name}.merge`, `refs/heads/${name}`);
   };
 
-  it('deletes the remote-tracking ref with the branch, and the branch config, but no neighbour', async () => {
+  it('deletes a branch at that sha and keeps one that moved, and reads the remote-tracking tip', async () => {
+    const first = raw(main(), 'rev-parse', 'HEAD');
+    pushedBranch('10db/t', first);
+    await expect(git.trackingTip(main(), '10db/t')).resolves.toBe(first);
+    await expect(git.trackingTip(main(), '10db/none')).resolves.toBeNull();
+
+    raw(main(), 'branch', 'gone');
+    await expect(git.deleteBranchIfAt(main(), 'gone', first)).resolves.toBe(true);
+    expect(raw(main(), 'branch', '--list', 'gone')).toBe('');
+
+    raw(main(), 'branch', 'moved');
+    raw(main(), 'commit', '-q', '--allow-empty', '-m', 'second');
+    const second = raw(main(), 'rev-parse', 'HEAD');
+    raw(main(), 'update-ref', 'refs/heads/moved', second);
+    await expect(git.deleteBranchIfAt(main(), 'moved', first)).resolves.toBe(false);
+    expect(raw(main(), 'rev-parse', 'moved')).toBe(second);
+    await expect(git.deleteBranchIfAt(main(), 'never-was', first)).resolves.toBe(false);
+    before = mainState();
+  });
+
+  it('deletes the remote-tracking ref and the config with the branch, but no neighbour, and nothing when that ref moved', async () => {
     const first = raw(main(), 'rev-parse', 'HEAD');
     pushedBranch('10db/a.b', first);
     pushedBranch('10db/a.bc', first);
@@ -507,10 +556,8 @@ describe('deleteBranchIfAt', () => {
       'branch.10db/a.b.c.remote',
     ]);
     expect(raw(main(), 'rev-parse', 'refs/remotes/origin/10db/a.bc')).toBe(first);
-  });
 
-  it('changes nothing when the remote-tracking ref moved, and leaves it when not named', async () => {
-    const first = raw(main(), 'rev-parse', 'HEAD');
+    // The remote-tracking ref moved: nothing changes, and a call that names no tip leaves it.
     pushedBranch('10db/x', first);
     raw(main(), 'commit', '-q', '--allow-empty', '-m', 'second');
     const second = raw(main(), 'rev-parse', 'HEAD');
@@ -526,46 +573,32 @@ describe('deleteBranchIfAt', () => {
     expect(branchKeys('10db/x')).toEqual([]);
     before = mainState();
   });
-
-  it('reads the remote-tracking tip, and null when there is none', async () => {
-    const first = raw(main(), 'rev-parse', 'HEAD');
-    pushedBranch('10db/t', first);
-    await expect(git.trackingTip(main(), '10db/t')).resolves.toBe(first);
-    await expect(git.trackingTip(main(), '10db/none')).resolves.toBeNull();
-  });
 });
 
 describe('branchInUse', () => {
-  it('is null for a branch nothing has out', async () => {
+  it('names the checkout or worktree that has the branch out, a rebasing one too, and null for a free branch', async () => {
     raw(main(), 'branch', '10db/free');
     await expect(git.branchInUse(main(), '10db/free')).resolves.toBeNull();
-  });
-
-  it('names the main checkout when the branch is checked out there', async () => {
     await expect(git.branchInUse(main(), 'main')).resolves.toBe(realpathSync(main()));
-  });
 
-  it('names a worktree that has the branch checked out', async () => {
     raw(main(), 'branch', '10db/out');
-    const other = join(elsewhere.path, 'out');
-    raw(main(), 'worktree', 'add', '-q', other, '10db/out');
-    await expect(git.branchInUse(main(), '10db/out')).resolves.toBe(realpathSync(other));
-  });
+    const out = join(elsewhere.path, 'out');
+    raw(main(), 'worktree', 'add', '-q', out, '10db/out');
+    await expect(git.branchInUse(main(), '10db/out')).resolves.toBe(realpathSync(out));
 
-  it('names a worktree that is rebasing the branch, where it shows as detached', async () => {
     raw(main(), 'branch', '10db/rebasing');
-    const other = join(elsewhere.path, 'rebasing');
-    raw(main(), 'worktree', 'add', '-q', other, '10db/rebasing');
-    raw(other, 'commit', '-q', '--allow-empty', '-m', 'on the branch');
+    const rebasing = join(elsewhere.path, 'rebasing');
+    raw(main(), 'worktree', 'add', '-q', rebasing, '10db/rebasing');
+    raw(rebasing, 'commit', '-q', '--allow-empty', '-m', 'on the branch');
     // A rebase that stops after its first pick leaves the worktree detached, mid-rebase.
-    expect(() => raw(other, 'rebase', '-q', '--exec', 'false', 'HEAD~1')).toThrow();
-    expect(raw(other, 'branch', '--show-current')).toBe('');
-    await expect(git.branchInUse(main(), '10db/rebasing')).resolves.toBe(realpathSync(other));
+    expect(() => raw(rebasing, 'rebase', '-q', '--exec', 'false', 'HEAD~1')).toThrow();
+    expect(raw(rebasing, 'branch', '--show-current')).toBe('');
+    await expect(git.branchInUse(main(), '10db/rebasing')).resolves.toBe(realpathSync(rebasing));
   });
 });
 
 describe('localBranches', () => {
-  it('lists the local branches under a prefix with their tips, sorted, and no others', async () => {
+  it('lists the local branches under a prefix with their tips, sorted, and answers one tip or null', async () => {
     const first = raw(main(), 'rev-parse', 'HEAD');
     raw(main(), 'branch', '10db/b');
     raw(main(), 'branch', '10db/a');
@@ -578,11 +611,6 @@ describe('localBranches', () => {
       { name: '10db/b', sha: raw(main(), 'rev-parse', 'HEAD') },
     ]);
     await expect(git.localBranches(main(), 'nothing/')).resolves.toEqual([]);
-    before = mainState();
-  });
-
-  it('answers one branch tip, and null for a branch that is not there', async () => {
-    raw(main(), 'branch', '10db/a');
     await expect(git.branchTip(main(), '10db/a')).resolves.toBe(raw(main(), 'rev-parse', '10db/a'));
     await expect(git.branchTip(main(), '10db/none')).resolves.toBeNull();
     before = mainState();

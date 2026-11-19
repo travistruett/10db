@@ -124,22 +124,20 @@ const rows = [
 ];
 
 describe('parseWorktreeList', () => {
-  it.each(rows)('reads $name', ({ fields, expected, owner }) => {
-    const [entry, ...rest] = parseWorktreeList(record(...fields));
-    expect(rest).toEqual([]);
-    expect(entry).toEqual(expected);
-    if (!entry) throw new Error('no entry');
-    expect(lockedOwner(entry)).toEqual(owner);
+  it("reads each record's fields, and the batch or chat whose 10db lock it carries", () => {
+    for (const { name, fields, expected, owner } of rows) {
+      const [entry, ...rest] = parseWorktreeList(record(...fields));
+      expect.soft(rest, name).toEqual([]);
+      expect.soft(entry, name).toEqual(expected);
+      expect.soft(entry && lockedOwner(entry), name).toEqual(owner);
+    }
   });
 
-  it('reads several records in order', () => {
+  it('reads several records in order, and nothing from empty output', () => {
     const out =
       record('worktree /r', `HEAD ${SHA}`, 'branch refs/heads/main') +
       record('worktree /w/a', `HEAD ${SHA}`, 'detached', 'locked 10db bat_1');
     expect(parseWorktreeList(out).map((e) => e.path)).toEqual(['/r', '/w/a']);
-  });
-
-  it('reads nothing from empty output', () => {
     expect(parseWorktreeList('')).toEqual([]);
   });
 });

@@ -32,6 +32,13 @@ afterEach(() => {
   scratch.cleanup();
 });
 
+/** What `act` threw, or a note that it did not, so a soft check names the row. */
+const caught = (act: Promise<unknown>) =>
+  act.then(
+    () => 'no refusal',
+    (error: unknown) => (error instanceof Error ? error.message : String(error)),
+  );
+
 const raw = (cwd: string, ...args: string[]) =>
   execFileSync('git', ['-C', cwd, ...args], { env: isolatedGitEnv(), stdio: 'pipe' })
     .toString()
@@ -67,32 +74,30 @@ function plantHooks(): string {
 }
 
 describe('makeBranchHere', () => {
-  it('keeps the changes in the folder, staged and not', async () => {
+  it('keeps the changes in the folder, staged and not, and runs no hook', async () => {
     write('README.md', '# changed\n');
     write('staged.txt', 'staged\n');
     rg('add', 'staged.txt');
     write('untracked.txt', 'u\n');
+    const marker = plantHooks();
     await git.makeBranchHere(repo, 'topic');
     expect(rg('branch', '--show-current')).toBe('topic');
     expect(rg('diff', '--name-only')).toBe('README.md');
     expect(rg('diff', '--cached', '--name-only')).toBe('staged.txt');
     expect(rg('ls-files', '--others', '--exclude-standard')).toBe('untracked.txt');
-  });
-
-  it.each([
-    ['an existing name', 'main'],
-    ['a name that reads as an option', '-c'],
-    ['an invalid ref name', 'a..b'],
-    ['a name with a space', 'a b'],
-  ])('refuses %s', async (_what, name) => {
-    await expect(git.makeBranchHere(repo, name)).rejects.toThrow();
-    expect(rg('branch', '--show-current')).toBe('main');
-  });
-
-  it('runs no hook', async () => {
-    const marker = plantHooks();
-    await git.makeBranchHere(repo, 'topic');
     expect(existsSync(marker)).toBe(false);
+  });
+
+  it('refuses a name that exists, reads as an option, is no valid ref or holds a space', async () => {
+    for (const [what, name] of [
+      ['an existing name', 'main'],
+      ['a name that reads as an option', '-c'],
+      ['an invalid ref name', 'a..b'],
+      ['a name with a space', 'a b'],
+    ] as const) {
+      expect.soft(await caught(git.makeBranchHere(repo, name)), what).not.toBe('no refusal');
+      expect.soft(rg('branch', '--show-current'), what).toBe('main');
+    }
   });
 });
 
@@ -108,9 +113,10 @@ describe('moveCommitsToBranch', () => {
     return { origin, tip: rg('rev-parse', 'HEAD') };
   }
 
-  it('makes the branch at HEAD, switches to it and puts main back at the origin, keeping uncommitted work', async () => {
+  it('makes the branch at HEAD, switches to it and puts main back at the origin, keeping uncommitted work and running no hook', async () => {
     const { origin, tip } = twoAhead();
     write('wip.txt', 'wip\n');
+    const marker = plantHooks();
     await git.moveCommitsToBranch(repo, {
       name: 'topic',
       base: 'main',
@@ -122,127 +128,112 @@ describe('moveCommitsToBranch', () => {
     expect(rg('rev-parse', 'main')).toBe(origin);
     expect(rg('ls-files', '--others', '--exclude-standard')).toBe('wip.txt');
     expect(rg('status', '--porcelain')).toBe('?? wip.txt');
+    expect(existsSync(marker)).toBe(false);
   });
 
-  it('writes nothing when main is not where the caller saw it', async () => {
-    const { origin, tip } = twoAhead();
-    await expect(
-      git.moveCommitsToBranch(repo, {
-        name: 'topic',
-        base: 'main',
-        to: origin,
-        expectedOld: origin,
-      }),
-    ).rejects.toThrow(/moved/);
-    expect(rg('rev-parse', 'main')).toBe(tip);
-    expect(rg('branch', '--show-current')).toBe('main');
-    expect(rg('branch', '--list', 'topic')).toBe('');
-  });
-
-  it.each([
-    ['an existing branch name', 'main'],
-    ['a name that reads as an option', '-c'],
-  ])('refuses %s without moving main', async (_what, name) => {
-    const { origin, tip } = twoAhead();
-    await expect(
-      git.moveCommitsToBranch(repo, { name, base: 'main', to: origin, expectedOld: tip }),
-    ).rejects.toThrow();
-    expect(rg('rev-parse', 'main')).toBe(tip);
-    expect(rg('branch', '--show-current')).toBe('main');
-  });
-
-  describe('refuses, writing nothing, unless the checkout is as the caller saw it', () => {
+  it('refuses, writing nothing, a taken or option-like name, or a checkout not as the caller saw it', async () => {
     const snapshot = () => [
       rg('branch', '--show-current'),
       rg('rev-parse', 'HEAD'),
       rg('branch', '--format=%(refname) %(objectname)'),
     ];
-
-    it('the checkout is on another branch', async () => {
-      const { origin, tip } = twoAhead();
-      rg('switch', '-q', '-c', 'other');
-      write('x.txt', 'x\n');
-      rg('add', 'x.txt');
-      rg('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'x');
+    const commit = (file: string) => {
+      write(file, `${file}\n`);
+      rg('add', file);
+      rg('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', file);
+    };
+    // One folder two commits ahead; each row changes it from where the last left it, and only the
+    // condition the row names differs from a call that would go through.
+    const rows: readonly {
+      name: string;
+      /** Sets the checkout up; answers the call's input. */
+      arrange: (seen: { origin: string; tip: string }) => {
+        name?: string;
+        to?: string;
+        expectedOld?: string;
+      };
+      error: RegExp;
+      /** Puts the checkout back for the rows after. */
+      after?: () => void;
+    }[] = [
+      {
+        name: 'main is not where the caller saw it',
+        arrange: ({ origin }) => ({ expectedOld: origin }),
+        error: /moved/,
+      },
+      { name: 'an existing branch name', arrange: () => ({ name: 'main' }), error: /./ },
+      { name: 'a name that reads as an option', arrange: () => ({ name: '-c' }), error: /./ },
+      {
+        name: 'the checkout is on another branch',
+        arrange: () => {
+          rg('switch', '-q', '-c', 'other');
+          commit('x.txt');
+          return {};
+        },
+        error: /not on main/,
+        after: () => {
+          rg('switch', '-q', 'main');
+        },
+      },
+      {
+        name: 'HEAD has moved past the commit the caller saw',
+        arrange: () => {
+          commit('late.txt');
+          return {};
+        },
+        error: /moved/,
+      },
+      {
+        name: 'the target is not an ancestor of the commit the caller saw',
+        arrange: () => {
+          // A commit made on a side branch from the root: unrelated to main's tip.
+          rg('switch', '-q', '--orphan', 'side');
+          rg(
+            '-c',
+            'user.name=t',
+            '-c',
+            'user.email=t@example.com',
+            'commit',
+            '-q',
+            '--allow-empty',
+            '-m',
+            'orphan',
+          );
+          const unrelated = rg('rev-parse', 'HEAD');
+          rg('switch', '-q', 'main');
+          // Main is where the caller saw it: only the target is wrong.
+          return { to: unrelated, expectedOld: rg('rev-parse', 'main') };
+        },
+        error: /ancestor/,
+      },
+    ];
+    const seen = twoAhead();
+    for (const { name, arrange, error, after } of rows) {
+      const input = arrange(seen);
       const before = snapshot();
-      await expect(
-        git.moveCommitsToBranch(repo, {
-          name: 'topic',
-          base: 'main',
-          to: origin,
-          expectedOld: tip,
-        }),
-      ).rejects.toThrow(/not on main/);
-      expect(snapshot()).toEqual(before);
-    });
-
-    it('HEAD has moved past the commit the caller saw', async () => {
-      const { origin, tip } = twoAhead();
-      write('late.txt', 'late\n');
-      rg('add', 'late.txt');
-      rg('-c', 'user.name=t', '-c', 'user.email=t@example.com', 'commit', '-qm', 'late');
-      const before = snapshot();
-      await expect(
-        git.moveCommitsToBranch(repo, {
-          name: 'topic',
-          base: 'main',
-          to: origin,
-          expectedOld: tip,
-        }),
-      ).rejects.toThrow(/moved/);
-      expect(snapshot()).toEqual(before);
-    });
-
-    it('the target is not an ancestor of the commit the caller saw', async () => {
-      const { tip } = twoAhead();
-      // A commit made on a side branch from the root: unrelated to main's tip.
-      rg('switch', '-q', '--orphan', 'side');
-      rg(
-        '-c',
-        'user.name=t',
-        '-c',
-        'user.email=t@example.com',
-        'commit',
-        '-q',
-        '--allow-empty',
-        '-m',
-        'orphan',
-      );
-      const unrelated = rg('rev-parse', 'HEAD');
-      rg('switch', '-q', 'main');
-      const before = snapshot();
-      await expect(
-        git.moveCommitsToBranch(repo, {
-          name: 'topic',
-          base: 'main',
-          to: unrelated,
-          expectedOld: tip,
-        }),
-      ).rejects.toThrow(/ancestor/);
-      expect(snapshot()).toEqual(before);
-    });
-  });
-
-  it('runs no hook', async () => {
-    const { origin, tip } = twoAhead();
-    const marker = plantHooks();
-    await git.moveCommitsToBranch(repo, {
-      name: 'topic',
-      base: 'main',
-      to: origin,
-      expectedOld: tip,
-    });
-    expect(existsSync(marker)).toBe(false);
+      const moved = git.moveCommitsToBranch(repo, {
+        name: input.name ?? 'topic',
+        base: 'main',
+        to: input.to ?? seen.origin,
+        expectedOld: input.expectedOld ?? seen.tip,
+      });
+      const refusal = await caught(moved);
+      expect.soft(refusal, name).not.toBe('no refusal');
+      expect.soft(refusal, name).toMatch(error);
+      expect.soft(snapshot(), `nothing written: ${name}`).toEqual(before);
+      after?.();
+    }
   });
 });
 
 describe('commitInFolder', () => {
-  it('commits the named paths, an untracked one too, and leaves another staged file staged', async () => {
+  it('commits the named paths, an untracked one too, leaves another staged file staged, and runs no hook', async () => {
     write('staged.txt', 'staged\n');
     rg('add', 'staged.txt');
     write('README.md', '# edited\n');
     write('fresh.txt', 'fresh\n');
     write('other.txt', 'other\n');
+    const marker = plantHooks();
     const { sha } = await git.commitInFolder(repo, {
       message: 'Edit the readme',
       paths: ['README.md', 'fresh.txt'],
@@ -257,6 +248,7 @@ describe('commitInFolder', () => {
       'A  staged.txt',
     ]);
     expect(rg('log', '-1', '--format=%an <%ae>')).toBe('10db test <test@10db.invalid>');
+    expect(existsSync(marker)).toBe(false);
   });
 
   it('commits every change when no path is named', async () => {
@@ -282,45 +274,41 @@ describe('commitInFolder', () => {
   // Git's objects stay readable to a sandboxed session though the kernel denies it the file, so a commit of a
   // secret would hand it over.
   describe('with files the session may not read', () => {
-    it.each([
-      ['an env file the folder does not ignore', '.env.local', undefined],
-      ['an env file in a folder', 'app/.env.prod', undefined],
-      ['a file the session lists as secret', 'config/prod.txt', ['config/prod.txt']],
-      ['a file under a folder the session lists as secret', 'vault/deep/a.txt', ['vault']],
-    ])('refuses %s, names it and commits nothing', async (_what, secret, listed) => {
-      write(secret, 'TOKEN=1\n');
-      write('README.md', '# edited\n');
-      const before = rg('rev-parse', 'HEAD');
-      const input = {
-        message: 'x',
-        ...(listed === undefined ? {} : { secretFiles: listed.map((f) => join(repo, f)) }),
-      };
-      await expect(git.commitInFolder(repo, input)).rejects.toThrow(secret);
-      await expect(git.commitInFolder(repo, { ...input, paths: [secret] })).rejects.toThrow(secret);
-      expect(rg('rev-parse', 'HEAD')).toBe(before);
-      expect(rg('diff', '--cached', '--name-only')).toBe('');
-    });
-
-    // The refusal comes before anything is staged: a staged file is an object in .git, which the session reads.
-    it('leaves no object for a refused secret, with a path named or not', async () => {
-      write('.env.local', 'TOKEN=only-here-4f2a\n');
-      const oid = rg('hash-object', '.env.local');
-      await expect(git.commitInFolder(repo, { message: 'x' })).rejects.toThrow('.env.local');
-      await expect(
-        git.commitInFolder(repo, { message: 'x', paths: ['.env.local'] }),
-      ).rejects.toThrow('.env.local');
-      expect(() => rg('cat-file', '-e', oid)).toThrow();
-    });
-
-    it('commits the named files that are not secret even when a secret sits beside them', async () => {
-      write('.env.local', 'TOKEN=1\n');
-      write('README.md', '# edited\n');
-      await git.commitInFolder(repo, { message: 'readme', paths: ['README.md'] });
-      expect(rg('show', '--name-only', '--format=', 'HEAD')).toBe('README.md');
+    // The refusal comes before anything is staged: a staged file is an object in .git, which the
+    // session reads. The named files that are not secret still commit beside one.
+    it('refuses each secret, names it, commits nothing and leaves no object of it, but commits a file beside it', async () => {
+      for (const [what, secret, listed] of [
+        ['an env file the folder does not ignore', '.env.local', undefined],
+        ['an env file in a folder', 'app/.env.prod', undefined],
+        ['a file the session lists as secret', 'config/prod.txt', ['config/prod.txt']],
+        ['a file under a folder the session lists as secret', 'vault/deep/a.txt', ['vault']],
+      ] as const) {
+        write(secret, `TOKEN=only-here-${what}\n`);
+        write('README.md', `# edited beside ${secret}\n`);
+        const oid = rg('hash-object', secret);
+        const before = rg('rev-parse', 'HEAD');
+        const input = {
+          message: 'x',
+          ...(listed === undefined ? {} : { secretFiles: listed.map((f) => join(repo, f)) }),
+        };
+        expect.soft(await caught(git.commitInFolder(repo, input)), what).toContain(secret);
+        expect
+          .soft(await caught(git.commitInFolder(repo, { ...input, paths: [secret] })), what)
+          .toContain(secret);
+        expect.soft(rg('rev-parse', 'HEAD'), `nothing committed: ${what}`).toBe(before);
+        expect.soft(rg('diff', '--cached', '--name-only'), `nothing staged: ${what}`).toBe('');
+        expect.soft(() => rg('cat-file', '-e', oid), `no object: ${what}`).toThrow();
+        await git.commitInFolder(repo, { ...input, message: 'readme', paths: ['README.md'] });
+        expect
+          .soft(rg('show', '--name-only', '--format=', 'HEAD'), `beside: ${what}`)
+          .toBe('README.md');
+        // The next row's secret is the only one in the folder.
+        rmSync(join(repo, secret));
+      }
     });
   });
 
-  it('refuses a path outside the folder, git state, an empty message and nothing changed', async () => {
+  it('refuses a path outside the folder, git state, an empty message, nothing changed, a filter and a merge in progress', async () => {
     write('a.txt', 'a\n');
     for (const paths of [['../outside.txt'], ['/etc/hosts'], ['.git/config'], ['sub/.GIT/x']])
       await expect(git.commitInFolder(repo, { message: 'x', paths })).rejects.toThrow();
@@ -332,9 +320,8 @@ describe('commitInFolder', () => {
     await expect(git.commitInFolder(repo, { message: 'again', paths: ['a.txt'] })).rejects.toThrow(
       'Nothing',
     );
-  });
 
-  it('refuses a path whose attributes ask for a filter, and commits nothing', async () => {
+    // A path whose attributes ask for a filter: nothing is committed.
     write('.gitattributes', '*.bin filter=lfs\n');
     write('big.bin', 'pointer?\n');
     const before = rg('rev-parse', 'HEAD');
@@ -343,19 +330,13 @@ describe('commitInFolder', () => {
       'filter',
     );
     expect(rg('rev-parse', 'HEAD')).toBe(before);
-  });
+    rmSync(join(repo, '.gitattributes'));
+    rmSync(join(repo, 'big.bin'));
 
-  it('runs no hook', async () => {
-    const marker = plantHooks();
-    write('a.txt', 'a\n');
-    await git.commitInFolder(repo, { message: 'a' });
-    expect(existsSync(marker)).toBe(false);
-  });
-
-  it('refuses while a merge is in progress', async () => {
-    write('a.txt', 'a\n');
+    // A merge in progress.
+    write('b.txt', 'b\n');
     writeFileSync(join(repo, '.git', 'MERGE_HEAD'), `${rg('rev-parse', 'HEAD')}\n`);
-    await expect(git.commitInFolder(repo, { message: 'a' })).rejects.toThrow('in progress');
+    await expect(git.commitInFolder(repo, { message: 'b' })).rejects.toThrow('in progress');
   });
 });
 
@@ -409,22 +390,20 @@ describe('a nested repository the agent controls', () => {
     expect(MARKERS.some((name) => existsSync(markers[name]))).toBe(true);
   });
 
-  it('is never asked for its status by a commit, a switch or a branch', async () => {
+  // Naming the gitlink as a path is how an add reaches it: git then reads its status to stage it.
+  it('is never asked for its status by a commit, one that names it too, a switch or a branch', async () => {
     const markers = plantNested();
     rg('branch', 'other');
+    write('named.txt', 'mine\n');
+    await git.commitInFolder(repo, { message: 'Named', paths: ['sub', 'named.txt'] });
+    for (const name of MARKERS)
+      expect.soft(existsSync(markers[name]), `commit naming it: ${name}`).toBe(false);
     write('mine.txt', 'mine\n');
     await git.commitInFolder(repo, { message: 'Mine' });
     await git.switchBranch(repo, 'other');
     await git.makeBranchHere(repo, 'topic');
-    for (const name of MARKERS) expect(existsSync(markers[name])).toBe(false);
-  });
-
-  // Naming the gitlink as a path is how an add reaches it: git then reads its status to stage it.
-  it('is never asked for its status when the commit names it', async () => {
-    const markers = plantNested();
-    write('mine.txt', 'mine\n');
-    await git.commitInFolder(repo, { message: 'Mine', paths: ['sub', 'mine.txt'] });
-    for (const name of MARKERS) expect(existsSync(markers[name])).toBe(false);
+    for (const name of MARKERS)
+      expect.soft(existsSync(markers[name]), `commit, switch, branch: ${name}`).toBe(false);
   });
 });
 
@@ -438,39 +417,36 @@ describe('switchBranch', () => {
     rg('switch', '-q', 'main');
   });
 
-  it('carries changes git can carry', async () => {
+  it('carries changes git can carry, and runs no hook', async () => {
     write('mine.txt', 'mine\n');
+    const marker = plantHooks();
     await git.switchBranch(repo, 'other');
     expect(rg('branch', '--show-current')).toBe('other');
     expect(readFileSync(join(repo, 'mine.txt'), 'utf8')).toBe('mine\n');
+    expect(existsSync(marker)).toBe(false);
   });
 
-  it('refuses a change it would overwrite, in git’s words, and moves nothing', async () => {
+  it('refuses, moving nothing, a missing or option-like name, one git expands, a change it would overwrite and a tree that asks for a filter', async () => {
+    await expect(git.switchBranch(repo, 'nowhere')).rejects.toThrow('no local branch');
+    await expect(git.switchBranch(repo, '--detach')).rejects.toThrow();
+    expect(rg('branch', '--show-current')).toBe('main');
+
+    // `@{-1}` names the branch the folder was on before; a chat's name check reads the text it was
+    // given, so git must not act on what the name expands to.
+    rg('switch', '-q', '-c', '10db/batch-x');
+    rg('switch', '-q', 'main');
+    for (const method of ['makeBranchHere', 'switchBranch'] as const) {
+      expect.soft(await caught(git[method](repo, '@{-1}')), method).toMatch(/@\{/);
+      expect.soft(rg('branch', '--show-current'), method).toBe('main');
+    }
+
+    // A change it would overwrite, refused in git's words.
     write('README.md', '# mine\n');
     await expect(git.switchBranch(repo, 'other')).rejects.toThrow(/overwritten|local changes/);
     expect(rg('branch', '--show-current')).toBe('main');
     expect(readFileSync(join(repo, 'README.md'), 'utf8')).toBe('# mine\n');
-  });
+    rg('checkout', '-q', '--', 'README.md');
 
-  it('refuses a name with no local branch, and one that reads as an option', async () => {
-    await expect(git.switchBranch(repo, 'nowhere')).rejects.toThrow('no local branch');
-    await expect(git.switchBranch(repo, '--detach')).rejects.toThrow();
-    expect(rg('branch', '--show-current')).toBe('main');
-  });
-
-  // `@{-1}` names the branch the folder was on before; a chat's name check reads the text it was given, so git
-  // must not act on what the name expands to.
-  it.each([['makeBranchHere'], ['switchBranch']] as const)(
-    '%s refuses a name that git expands to another branch',
-    async (method) => {
-      rg('switch', '-q', '-c', '10db/batch-x');
-      rg('switch', '-q', 'main');
-      await expect(git[method](repo, '@{-1}')).rejects.toThrow(/@\{/);
-      expect(rg('branch', '--show-current')).toBe('main');
-    },
-  );
-
-  it('refuses a branch whose tree asks for a filter', async () => {
     rg('switch', '-q', 'other');
     write('.gitattributes', '*.bin filter=lfs\n');
     rg('add', '-A');
@@ -478,12 +454,6 @@ describe('switchBranch', () => {
     rg('switch', '-q', 'main');
     await expect(git.switchBranch(repo, 'other')).rejects.toThrow('filter');
     expect(rg('branch', '--show-current')).toBe('main');
-  });
-
-  it('runs no hook', async () => {
-    const marker = plantHooks();
-    await git.switchBranch(repo, 'other');
-    expect(existsSync(marker)).toBe(false);
   });
 
   it('leaves a submodule where it is even when the builder’s config recurses', async () => {
@@ -543,26 +513,23 @@ describe('pullFastForward', () => {
     rmSync(clone, { recursive: true, force: true });
   });
 
-  it('fast-forwards from a differently named upstream', async () => {
+  it('fast-forwards from a differently named upstream, running no hook', async () => {
     advanceOrigin(2);
+    const marker = plantHooks();
     const result = await git.pullFastForward(repo, NET);
     expect(result.kind).toBe('pulled');
     expect(readFileSync(join(repo, 'remote.txt'), 'utf8')).toBe('remote 1\n');
     expect(rg('status', '--porcelain')).toBe('');
     expect(rg('rev-parse', 'topic')).toBe(rg('rev-parse', 'origin/feature'));
+    expect(existsSync(marker)).toBe(false);
   });
 
-  it('says it is up to date, and ahead', async () => {
+  it('says it is up to date, then ahead, and refuses a diverged branch, moving nothing', async () => {
     expect((await git.pullFastForward(repo, NET)).kind).toBe('up_to_date');
     write('a.txt', 'a\n');
     await git.commitInFolder(repo, { message: 'local' });
     expect((await git.pullFastForward(repo, NET)).kind).toBe('ahead');
-  });
-
-  it('refuses a diverged branch and moves nothing', async () => {
     advanceOrigin(1);
-    write('a.txt', 'a\n');
-    await git.commitInFolder(repo, { message: 'local' });
     const before = rg('rev-parse', 'HEAD');
     expect((await git.pullFastForward(repo, NET)).kind).toBe('diverged');
     expect(rg('rev-parse', 'HEAD')).toBe(before);
@@ -591,12 +558,5 @@ describe('pullFastForward', () => {
     raw(clone, 'commit', '-q', '-m', 'Filter');
     raw(clone, 'push', '-q', 'origin', 'feature');
     await expect(git.pullFastForward(repo, NET)).rejects.toThrow('filter');
-  });
-
-  it('runs no hook', async () => {
-    advanceOrigin(1);
-    const marker = plantHooks();
-    await git.pullFastForward(repo, NET);
-    expect(existsSync(marker)).toBe(false);
   });
 });

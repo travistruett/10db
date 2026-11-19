@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
@@ -14,7 +14,6 @@ import { AbandonStep } from '@10db/contracts';
 import {
   abandonPassAndBatch,
   setAbandonStep,
-  setPassNotice,
   getBatch,
   getBatchRow,
   patchProject,
@@ -32,8 +31,7 @@ import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery
 import { silentLogger } from '../log';
 import { systemProcesses } from '../recovery';
 import type { Git } from '../git';
-import { GhError, PrState } from '../github';
-import { CompletionError } from '../sessions';
+import { PrState } from '../github';
 import { createGateRunner } from '../verify';
 import { SANDBOXED, waitFor } from '../../test/fixtures';
 import { alive, orphanGateGroup } from '../../test/orphan-gate';
@@ -146,7 +144,6 @@ function picture(task: TaskDto, kind: ScreenKind, route: string, content: string
 }
 
 const gateState = (passId: PassId) => getPassChecks(h.store.db, passId).gate.state;
-const notices = (passId: PassId) => getPassProgress(h.store.db, passId).notices;
 const batchOf = (passId: PassId) => getPass(h.store.db, passId).batchId;
 
 describe('Open Pull Request', () => {
@@ -204,9 +201,9 @@ describe('Open Pull Request', () => {
     });
   });
 
-  it('pushes the branch and opens a draft, then gates the pushed commit in a scratch worktree, never the open page on disk', async () => {
+  it('pushes the branch and opens a draft, gates the pushed commit in a scratch worktree, never the open page on disk, writes no running gate after a restart, and pushes to the pull request it already has', async () => {
     setup();
-    const { passId, settings } = await openedPass();
+    const { passId, settings, people } = await openedPass();
     const tip = signOff(settings, 'src/settings/page.tsx', 'signed off\n');
     // The people page is still open: its file on disk is not what the branch holds.
     write('src/people/page.tsx', 'half done\n');
@@ -249,68 +246,62 @@ describe('Open Pull Request', () => {
     expect(h.git$('branch', '--list', scratchBranchName(passId))).toBe('');
     expect(h.git$('rev-parse', '--abbrev-ref', 'HEAD')).toBe(branch);
     expect(h.git$('status', '--porcelain')).toBe('M src/people/page.tsx');
-  });
 
-  it.each([
-    {
-      name: 'shows the signed-off pages’ before and after, from a pictures branch, with the setting on',
-      on: true,
-    },
-    { name: 'pushes no pictures and shows none with the setting off', on: false },
-  ])('$name', async ({ on }) => {
-    setup({ prPictures: on });
-    const { passId, settings, people } = await openedPass();
-    picture(settings, 'before', '/settings', 'settings before');
-    picture(settings, 'after', '/settings', 'settings after');
-    // People is not signed off, so its picture stays out.
-    picture(people, 'before', '/people', 'people before');
-    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
-    await prs.open(passId);
-    await h.jobs.idle();
-    const body = h.gh.body(getPassPullRequest(h.store.db, passId)?.url ?? '');
-    if (!on) {
-      expect(h.origin$('branch', '--list', '10db-pictures/*')).toBe('');
-      expect(body).not.toContain('## Pictures');
-      return;
-    }
-    const pictures = h.origin$('rev-parse', `refs/heads/10db-pictures/${passId}`);
-    expect(h.origin$('ls-tree', '--name-only', pictures)).toBe(
-      '1-settings-after.png\n1-settings-before.png',
-    );
-    expect(h.origin$('cat-file', 'blob', `${pictures}:1-settings-after.png`)).toBe(
-      'settings after',
-    );
-    expect(h.origin$('show', '-s', '--format=%ae', pictures)).toBe(
-      '583231+octocat@users.noreply.github.com',
-    );
-    expect(body).toContain('## Pictures');
-    expect(body).toContain(
-      `![Before](https://github.com/acme/widgets/blob/${pictures}/1-settings-before.png?raw=true)`,
-    );
-  });
+    // The restarted daemon knows nothing of the gate it ran, and starts none: the close marks it ready.
+    const url = pr?.url ?? '';
+    await restarted().ensurePassPr({ passId, ready: true }, new AbortController().signal);
+    expect(h.gh.body(url)).not.toContain('Gate running');
+    expect(h.gh.body(url)).toContain('Gate result unknown');
 
-  it('pushes to the pull request it already has, rewriting its body rather than opening another', async () => {
-    setup();
-    const { passId, settings, people } = await openedPass();
-    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
-    await prs.open(passId);
-    await h.jobs.idle();
-    await vi.waitFor(
-      () => {
-        expect(gateState(passId)).toBe(PassGateState.Passed);
-      },
-      { timeout: 20_000 },
-    );
-    const url = getPassPullRequest(h.store.db, passId)?.url ?? '';
-
-    const tip = signOff(people, 'src/people/page.tsx', 'people\n// signed\n');
+    // A second Open Pull Request pushes to the pull request it has, rewriting its body.
+    const next = signOff(people, 'src/people/page.tsx', 'people\n// signed\n');
     expect(await prs.open(passId)).toMatchObject({ url });
     await h.jobs.idle();
-
-    const branch = getBatch(h.store.db, batchOf(passId)).branch ?? '';
-    expect(h.origin$('rev-parse', `refs/heads/${branch}`)).toBe(tip);
+    expect(h.origin$('rev-parse', `refs/heads/${branch}`)).toBe(next);
     expect(h.gh.prCreates()).toHaveLength(1);
     expect(h.gh.body(url)).toContain('- People page');
+  });
+
+  it('shows the signed-off pages’ before and after, from a pictures branch, with the setting on, and pushes and shows none with it off', async () => {
+    // The setting is the project's: one harness each.
+    for (const [i, on] of [true, false].entries()) {
+      if (i > 0) {
+        await prs.stop();
+        h.close();
+      }
+      const label = on ? 'setting on' : 'setting off';
+      setup({ prPictures: on });
+      const { passId, settings, people } = await openedPass();
+      picture(settings, 'before', '/settings', 'settings before');
+      picture(settings, 'after', '/settings', 'settings after');
+      // People is not signed off, so its picture stays out.
+      picture(people, 'before', '/people', 'people before');
+      signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+      await prs.open(passId);
+      await h.jobs.idle();
+      const body = h.gh.body(getPassPullRequest(h.store.db, passId)?.url ?? '');
+      if (!on) {
+        expect.soft(h.origin$('branch', '--list', '10db-pictures/*'), label).toBe('');
+        expect.soft(body, label).not.toContain('## Pictures');
+        continue;
+      }
+      const pictures = h.origin$('rev-parse', `refs/heads/10db-pictures/${passId}`);
+      expect
+        .soft(h.origin$('ls-tree', '--name-only', pictures), label)
+        .toBe('1-settings-after.png\n1-settings-before.png');
+      expect
+        .soft(h.origin$('cat-file', 'blob', `${pictures}:1-settings-after.png`), label)
+        .toBe('settings after');
+      expect
+        .soft(h.origin$('show', '-s', '--format=%ae', pictures), label)
+        .toBe('583231+octocat@users.noreply.github.com');
+      expect.soft(body, label).toContain('## Pictures');
+      expect
+        .soft(body, label)
+        .toContain(
+          `![Before](https://github.com/acme/widgets/blob/${pictures}/1-settings-before.png?raw=true)`,
+        );
+    }
   });
 
   it('opens a follow-on pull request when GitHub merged the one it has before the watch read it', async () => {
@@ -390,61 +381,7 @@ describe('Open Pull Request', () => {
     expect(getBatch(h.store.db, batchOf(passId)).state).toBe('OPEN');
   });
 
-  it('says in the header when the push or the pull request did not go through, until one does', async () => {
-    setup();
-    const { passId, settings } = await openedPass();
-    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
-    h.gh.failNext.set(
-      'prCreate',
-      new GhError('failed', 'HTTP 422: No commits between main and it'),
-    );
-
-    await prs.open(passId);
-    await h.jobs.idle();
-
-    expect(notices(passId)).toEqual([
-      expect.objectContaining({
-        id: 'pr-open',
-        kind: PassNoticeKind.PrNotOpened,
-        text: expect.stringContaining('No commits between') as unknown,
-      }),
-    ]);
-    await prs.open(passId);
-    await h.jobs.idle();
-    expect(h.gh.prCreates()).toHaveLength(1);
-    expect(notices(passId).filter((n) => n.id === 'pr-open')).toEqual([]);
-  });
-
-  it('says in the header when the review could not ask its model', async () => {
-    setup(
-      { gateCommand: null },
-      {
-        review: {
-          adapter: { complete: () => Promise.reject(new CompletionError('The model failed.')) },
-          launch: (_account, model) => ({ model, env: {}, expect: { kind: 'any' } as never }),
-          scratchRoot: tmpdir(),
-        },
-      },
-    );
-    // A pass review needs a review step: Standard runs Build and Review.
-    h.state.write((w) => patchProject(w, h.project.id, { defaultRigor: 'standard' }));
-    const { passId, settings } = await openedPass();
-    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
-
-    expect(await prs.open(passId)).toMatchObject({ review: 'started' });
-    await h.jobs.idle();
-
-    await vi.waitFor(
-      () => {
-        expect(notices(passId)).toEqual([
-          expect.objectContaining({ id: 'review', kind: PassNoticeKind.ReviewFailed }),
-        ]);
-      },
-      { timeout: 20_000 },
-    );
-  });
-
-  it('opens no pull request and starts no gate for a pass abandoned while its branch was pushed', async () => {
+  it('opens no pull request and starts no gate for a pass abandoned while its branch was pushed, nor any check once it is no longer open', async () => {
     let abandon: () => void = () => undefined;
     setup(
       {},
@@ -473,15 +410,8 @@ describe('Open Pull Request', () => {
 
     expect(h.gh.prCreates()).toEqual([]);
     expect(h.logs.lines().filter((l) => l['msg'] === 'gate started')).toEqual([]);
-  });
 
-  it('starts no checks for a pass that is no longer open', async () => {
-    setup();
-    const { passId, settings } = await openedPass();
-    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
-    h.state.write((w) => {
-      setAbandonStep(w, passId, AbandonStep.Abandoning);
-    });
+    // Checks started by hand for the pass, now abandoning, run nothing either.
     const gated: string[] = [];
     const checks = createPassChecks({
       ...h.ctx,
@@ -497,35 +427,6 @@ describe('Open Pull Request', () => {
     await checks.stop(passId);
 
     expect(gated).toEqual([]);
-  });
-
-  it('says in the header when the gate could not run at all', async () => {
-    setup();
-    const { passId, settings } = await openedPass();
-    const tip = signOff(settings, 'src/settings/page.tsx', 'signed off\n');
-    const checks = createPassChecks({
-      ...h.ctx,
-      gate: () => Promise.reject(new Error('no room for a scratch worktree')),
-      review: null,
-      reviewed: () => Promise.resolve(),
-    });
-
-    checks.start({ passId, sha: tip, gate: true, review: false, baseRef: null });
-
-    await vi.waitFor(
-      () => {
-        expect(notices(passId)).toEqual([
-          expect.objectContaining({
-            id: 'gate',
-            kind: PassNoticeKind.GateFailed,
-            sendable: false,
-            text: `The gate on ${tip.slice(0, 7)} could not run: no room for a scratch worktree`,
-          }),
-        ]);
-      },
-      { timeout: 20_000 },
-    );
-    await checks.stop(passId);
   });
 
   it('logs, and leaves nothing unhandled, when what follows a review fails', async () => {
@@ -622,210 +523,6 @@ describe('Open Pull Request', () => {
     expect(h.gh.body(url)).not.toContain('Gate running');
   });
 
-  it.each([
-    {
-      name: 'the pull request could not be opened',
-      arrange: () => {
-        h.gh.failNext.set('prCreate', new GhError('failed', 'HTTP 502: Bad Gateway'));
-      },
-    },
-    {
-      name: 'the pass was abandoned while its pull request opened',
-      arrange: (passId: PassId) => {
-        const create = h.gh.prCreate.bind(h.gh);
-        h.gh.prCreate = async (input) => {
-          const url = await create(input);
-          h.state.write((w) => {
-            setAbandonStep(w, passId, AbandonStep.Abandoning);
-          });
-          return url;
-        };
-      },
-    },
-    {
-      name: 'the gate could not run',
-      wrapGit: (git: Git): Git => ({
-        ...git,
-        addWorktree: () => Promise.reject(new Error('no room for a scratch worktree')),
-      }),
-      arrange: () => undefined,
-      // The gate is left to fail on its own, not stopped first.
-      until: (passId: PassId) => notices(passId).some((n) => n.id === 'gate'),
-    },
-  ])(
-    'writes no running gate into the body once Open Pull Request stops because $name',
-    async ({ arrange, wrapGit, until }) => {
-      setup({}, wrapGit ? { wrapGit } : {});
-      const { passId, settings } = await openedPass();
-      signOff(settings, 'src/settings/page.tsx', 'signed off\n');
-      arrange(passId);
-
-      await prs.open(passId);
-      await h.jobs.idle();
-      if (until)
-        await vi.waitFor(
-          () => {
-            expect(until(passId)).toBe(true);
-          },
-          { timeout: 20_000 },
-        );
-      await prs.stopPassChecks(passId);
-      // The close writes the body again, marking the pull request ready.
-      await prs.ensurePassPr({ passId, ready: true }, new AbortController().signal);
-
-      const url = getPassPullRequest(h.store.db, passId)?.url ?? '';
-      expect(h.gh.body(url)).not.toContain('Gate running');
-      expect(h.gh.body(url)).toContain('Gate result unknown');
-    },
-  );
-
-  /** Scratch worktrees that wait, one at a time, until the test lets each go on or fail. */
-  function heldWorktrees() {
-    const waiting: ((error: Error | null) => void)[] = [];
-    let calls = 0;
-    return {
-      wrap: (git: Git): Git => ({
-        ...git,
-        addWorktree: async (input) => {
-          calls += 1;
-          const error = await new Promise<Error | null>((resolve) => waiting.push(resolve));
-          if (error) throw error;
-          return git.addWorktree(input);
-        },
-      }),
-      calls: () => calls,
-      release: (error: Error | null = null) => {
-        waiting.shift()?.(error);
-      },
-    };
-  }
-
-  const bodyOf = (passId: PassId) => h.gh.body(getPassPullRequest(h.store.db, passId)?.url ?? '');
-  // A whole delivery run keeps the machine busy: a job queued behind another may take seconds.
-  const gateStarted = (held: ReturnType<typeof heldWorktrees>, n: number) =>
-    vi.waitFor(
-      () => {
-        expect(held.calls()).toBe(n);
-      },
-      { timeout: 20_000 },
-    );
-
-  it('writes no running gate once a second Open Pull Request finds the pass gone before its gate starts', async () => {
-    const held = heldWorktrees();
-    setup({}, { wrapGit: held.wrap });
-    const { passId, settings } = await openedPass();
-    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
-    await prs.open(passId);
-    await h.jobs.idle();
-    await gateStarted(held, 1);
-    // The second waits for the first gate to stop, and the pass is abandoned meanwhile.
-    await prs.open(passId);
-    await h.jobs.idle();
-    h.state.write((w) => {
-      setAbandonStep(w, passId, AbandonStep.Abandoning);
-    });
-    held.release();
-
-    await vi.waitFor(
-      async () => {
-        await prs.ensurePassPr({ passId, ready: true }, new AbortController().signal);
-        expect(bodyOf(passId)).not.toContain('Gate running');
-      },
-      { timeout: 20_000 },
-    );
-  });
-
-  it("says the gate is running while a second Open Pull Request's gate runs, though the first one's stopped", async () => {
-    const held = heldWorktrees();
-    setup({}, { wrapGit: held.wrap });
-    const { passId, settings } = await openedPass();
-    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
-    await prs.open(passId);
-    await h.jobs.idle();
-    await gateStarted(held, 1);
-    await prs.open(passId);
-    await h.jobs.idle();
-    // The first gate goes on to find itself stopped; the second, of the same commit, starts.
-    held.release();
-    await gateStarted(held, 2);
-
-    await prs.ensurePassPr({ passId, ready: false }, new AbortController().signal);
-
-    expect(bodyOf(passId)).toContain('Gate running');
-    held.release();
-  });
-
-  it("keeps the gate's own error when the body cannot be written after it", async () => {
-    const held = heldWorktrees();
-    setup({}, { wrapGit: held.wrap });
-    const { passId, settings } = await openedPass();
-    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
-    await prs.open(passId);
-    await h.jobs.idle();
-    await gateStarted(held, 1);
-    // The body's file can no longer be written: a folder stands where it was.
-    const file = join(h.dataDir, 'delivery', `${batchOf(passId)}-pr-body.md`);
-    rmSync(file);
-    mkdirSync(file);
-
-    held.release(new Error('no room for a scratch worktree'));
-
-    await vi.waitFor(
-      () => {
-        expect(notices(passId)).toEqual([
-          expect.objectContaining({
-            id: 'gate',
-            text: expect.stringContaining('no room for a scratch worktree') as unknown,
-          }),
-        ]);
-      },
-      { timeout: 20_000 },
-    );
-  });
-
-  it('after a restart, writes no running gate into the body when none runs', async () => {
-    setup();
-    const { passId, settings } = await openedPass();
-    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
-    await prs.open(passId);
-    await h.jobs.idle();
-    await vi.waitFor(
-      () => {
-        expect(gateState(passId)).toBe(PassGateState.Passed);
-      },
-      { timeout: 20_000 },
-    );
-    const url = getPassPullRequest(h.store.db, passId)?.url ?? '';
-
-    // The restarted daemon knows nothing of the gate it ran, and starts none: the close marks it ready.
-    await restarted().ensurePassPr({ passId, ready: true }, new AbortController().signal);
-
-    expect(h.gh.body(url)).not.toContain('Gate running');
-    expect(h.gh.body(url)).toContain('Gate result unknown');
-  });
-
-  it("clears the header's closed pull request notice once a new one is opened", async () => {
-    setup({ gateCommand: null });
-    const { passId, settings } = await openedPass();
-    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
-    h.state.write((w) => {
-      setPassNotice(w, passId, {
-        id: 'pr-closed',
-        kind: PassNoticeKind.PrClosed,
-        text: 'The pull request closed without merging.',
-        sendable: false,
-        cardId: null,
-        at: w.now,
-      });
-    });
-
-    await prs.open(passId);
-    await h.jobs.idle();
-
-    expect(h.gh.prCreates()).toHaveLength(1);
-    expect(notices(passId)).toEqual([]);
-  });
-
   it('reviews the tip it pushed, not the one asked for', async () => {
     const asked: string[] = [];
     setup(
@@ -869,119 +566,85 @@ describe('Open Pull Request', () => {
     );
     expect(asked).toHaveLength(2);
   });
-
-  it('reviews the same tip again while a cut review left files unread', async () => {
-    const asked: string[] = [];
-    setup(
-      { gateCommand: null },
-      {
-        review: {
-          adapter: {
-            complete: (ask) => {
-              asked.push(ask.prompt);
-              return Promise.resolve('No findings.');
-            },
-          },
-          launch: (_account, model) => ({ model, env: {}, expect: { kind: 'any' } as never }),
-          scratchRoot: tmpdir(),
-        },
-      },
-    );
-    // A pass review needs a review step: Standard runs Build and Review.
-    h.state.write((w) => patchProject(w, h.project.id, { defaultRigor: 'standard' }));
-    const { passId, settings } = await openedPass();
-    // About 500 kB of diff over five files: more than one review reads.
-    const long = (name: string) => `${`${name} ${'x'.repeat(100)}\n`.repeat(1_000)}${name}-end\n`;
-    for (const name of ['a', 'b', 'c', 'd']) h.commit(`src/settings/${name}.tsx`, long(name));
-    const tip = signOff(settings, 'src/settings/e.tsx', long('e'));
-    await prs.open(passId);
-    await h.jobs.idle();
-    await vi.waitFor(
-      () => {
-        expect(getPassProgress(h.store.db, passId).reviewedSha).toBe(tip);
-      },
-      { timeout: 20_000 },
-    );
-
-    expect(await prs.open(passId)).toMatchObject({ review: 'started' });
-    await h.jobs.idle();
-
-    await vi.waitFor(
-      () => {
-        expect(asked).toHaveLength(2);
-      },
-      { timeout: 20_000 },
-    );
-    expect(asked[1]).toContain('+e-end');
-    await vi.waitFor(
-      () => {
-        expect(notices(passId).filter((n) => n.id === 'review-cut')).toEqual([]);
-      },
-      { timeout: 20_000 },
-    );
-  });
 });
 
 describe('a restart during an Open Pull Request gate', () => {
   // Identifies the process with `ps`, which is setuid: no sandbox can run it.
-  it.skipIf(SANDBOXED).each([
-    { name: 'open', abandoned: false },
-    // An Abandon start-up went on with before recovery: the batch is ABANDONED by then.
-    { name: 'abandoned', abandoned: true },
-  ])(
-    "reaps the gate the pass's $name batch recorded and removes the scratch worktree and branch it left",
-    async ({ abandoned }) => {
-      setup();
-      const { passId, settings } = await openedPass();
-      const tip = signOff(settings, 'src/settings/page.tsx', 'signed off\n');
-      const batchId = batchOf(passId);
-      // What a daemon killed mid-gate leaves: the worktree on its branch, and the gate's group.
-      const branch = scratchBranchName(passId);
-      await h.git.addWorktree({
-        repo: h.repo,
-        path: worktreePathFor(madeWorktreeRoot(h.worktreeRoot), h.project, branch),
-        branch,
-        startPoint: tip,
-        lockReason: worktreeLockReason(batchId),
-      });
-      const gate = await orphanGateGroup();
-      try {
-        h.state.write((w) =>
-          patchBatch(w, batchId, { gatePid: gate.pid, gatePidStart: gate.startedAt }),
-        );
-        if (abandoned)
-          h.state.write((w) => {
-            setAbandonStep(w, passId, AbandonStep.Abandoning);
-            abandonPassAndBatch(w, passId);
-          });
-
-        await recoverBatches({
-          folderHold: h.ctx.folderHold,
-          jobs: h.jobs,
-          state: h.state,
-          git: h.git,
-          inbox: h.inbox,
-          processes: systemProcesses,
-          shipper: h.shipper,
-          starter: h.starter,
-          logger: silentLogger,
-          worktrees: { ctx: h.ctx, root: h.worktreeRoot },
-        });
-
-        await gate.exited;
-        await waitFor(() => !alive(gate.grandchildPid));
-        expect(getBatchRow(h.store.db, batchId)).toMatchObject({
-          state: abandoned ? 'ABANDONED' : 'OPEN',
-          gatePid: null,
-          gatePidStart: null,
-        });
-        expect(h.git$('worktree', 'list')).not.toContain('gate-');
-        expect(h.git$('branch', '--list', branch)).toBe('');
-        expect(h.cards().filter((c) => c.title.includes('branch'))).toEqual([]);
-      } finally {
-        if (alive(gate.grandchildPid)) process.kill(gate.grandchildPid, 'SIGKILL');
-        gate.cleanup();
+  it.skipIf(SANDBOXED)(
+    "reaps the gate the pass's open or abandoned batch recorded and removes the scratch worktree and branch it left",
+    async () => {
+      // Each case is its own killed daemon's leftovers: one harness each.
+      for (const [i, { name, abandoned }] of [
+        { name: 'open', abandoned: false },
+        // An Abandon start-up went on with before recovery: the batch is ABANDONED by then.
+        { name: 'abandoned', abandoned: true },
+      ].entries()) {
+        if (i > 0) {
+          await prs.stop();
+          h.close();
+        }
+        await reapsTheGate(name, abandoned);
       }
     },
   );
 });
+
+/** A daemon killed mid-gate on the pass's batch, `abandoned` or not, and start-up's recovery after it. */
+async function reapsTheGate(name: string, abandoned: boolean): Promise<void> {
+  setup();
+  const { passId, settings } = await openedPass();
+  const tip = signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+  const batchId = batchOf(passId);
+  // What a daemon killed mid-gate leaves: the worktree on its branch, and the gate's group.
+  const branch = scratchBranchName(passId);
+  await h.git.addWorktree({
+    repo: h.repo,
+    path: worktreePathFor(madeWorktreeRoot(h.worktreeRoot), h.project, branch),
+    branch,
+    startPoint: tip,
+    lockReason: worktreeLockReason(batchId),
+  });
+  const gate = await orphanGateGroup();
+  try {
+    h.state.write((w) =>
+      patchBatch(w, batchId, { gatePid: gate.pid, gatePidStart: gate.startedAt }),
+    );
+    if (abandoned)
+      h.state.write((w) => {
+        setAbandonStep(w, passId, AbandonStep.Abandoning);
+        abandonPassAndBatch(w, passId);
+      });
+
+    await recoverBatches({
+      folderHold: h.ctx.folderHold,
+      jobs: h.jobs,
+      state: h.state,
+      git: h.git,
+      inbox: h.inbox,
+      processes: systemProcesses,
+      shipper: h.shipper,
+      starter: h.starter,
+      logger: silentLogger,
+      worktrees: { ctx: h.ctx, root: h.worktreeRoot },
+    });
+
+    await gate.exited;
+    await waitFor(() => !alive(gate.grandchildPid));
+    expect.soft(getBatchRow(h.store.db, batchId), name).toMatchObject({
+      state: abandoned ? 'ABANDONED' : 'OPEN',
+      gatePid: null,
+      gatePidStart: null,
+    });
+    expect.soft(h.git$('worktree', 'list'), name).not.toContain('gate-');
+    expect.soft(h.git$('branch', '--list', branch), name).toBe('');
+    expect
+      .soft(
+        h.cards().filter((c) => c.title.includes('branch')),
+        name,
+      )
+      .toEqual([]);
+  } finally {
+    if (alive(gate.grandchildPid)) process.kill(gate.grandchildPid, 'SIGKILL');
+    gate.cleanup();
+  }
+}

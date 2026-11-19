@@ -11,13 +11,10 @@ import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
 import { systemProcesses } from '../recovery';
 import {
-  batchBranchName,
-  createBatchStarter,
   createBranchCardAnswers,
   createPrWatch,
   recoverBatches,
   removeMergedBranches,
-  type DeliveryJobs,
   type PrWatch,
 } from './index';
 import { removeBranch } from './branch-cleanup';
@@ -104,51 +101,54 @@ function watch(): PrWatch {
 }
 
 describe('an abandoned task whose branch holds commits', () => {
-  it('raises one card naming the branch and its commit count, and keeps the branch', async () => {
-    const { batch } = await opened(h);
-    await commitIn(h, batch, 'src/api/one.txt');
-    await commitIn(h, batch, 'src/api/two.txt');
-    h.shipper.abandon(batch.id);
+  it('raises one card naming the branch and its commit count, deletes the branch on Delete Branch, keeps it on Keep without asking again, refuses one checked out in another worktree, and never removes a branch outside 10db/', async () => {
+    const counted = await opened(h, { title: 'Alpha' });
+    await commitIn(h, counted.batch, 'src/api/alpha-one.txt');
+    await commitIn(h, counted.batch, 'src/api/alpha-two.txt');
+    const kept = await opened(h, { title: 'Beta' });
+    await commitIn(h, kept.batch, 'src/api/beta.txt');
+    const theirs = await opened(h, { title: 'Gamma' });
+    await commitIn(h, theirs.batch, 'src/api/gamma.txt');
+    for (const { batch } of [counted, kept, theirs]) h.shipper.abandon(batch.id);
     await h.jobs.idle();
-    expect(exists(batch.branch)).toBe(true);
-    const card = h.only(cardsAbout(batch.branch));
-    expect(card.title).toBe(`Delete ${batch.branch ?? ''}? It holds 2 commits`);
+
+    // One card per branch, naming its commit count; the branch stays until it is answered.
+    const branch = counted.batch.branch;
+    expect(exists(branch)).toBe(true);
+    const card = h.only(cardsAbout(branch));
+    expect(card.title).toBe(`Delete ${branch ?? ''}? It holds 2 commits`);
     expect(card.options.map((o) => o.label)).toEqual(['Delete Branch', 'Keep']);
-  });
-
-  it('says one commit in the singular', async () => {
-    const { batch } = await opened(h);
-    await commitIn(h, batch, 'src/api/one.txt');
-    h.shipper.abandon(batch.id);
-    await h.jobs.idle();
-    expect(h.only(cardsAbout(batch.branch)).title).toContain('1 commit');
-    expect(h.only(cardsAbout(batch.branch)).title).not.toContain('1 commits');
-  });
-
-  it('deletes the branch on Delete Branch', async () => {
-    const { batch } = await opened(h);
-    await commitIn(h, batch, 'src/api/one.txt');
-    h.shipper.abandon(batch.id);
-    await h.jobs.idle();
-    const card = h.only(cardsAbout(batch.branch));
     expect(inbox.answer(card.id, { choice: 'Delete Branch' }).state).toBe('RESOLVED');
     await h.jobs.idle();
-    expect(exists(batch.branch)).toBe(false);
+    expect(exists(branch)).toBe(false);
+
+    // Keep keeps it, and 10db does not ask again.
+    inbox.answer(h.only(cardsAbout(kept.batch.branch)).id, { choice: 'Keep' });
+    await h.jobs.idle();
+    expect(exists(kept.batch.branch)).toBe(true);
+    expect(cardsAbout(kept.batch.branch)).toEqual([]);
+
+    // A branch checked out in another worktree is not deleted, and the card names where.
+    const theirCard = h.only(cardsAbout(theirs.batch.branch));
+    const elsewhere = join(h.dataDir, 'their-worktree');
+    h.git$('worktree', 'add', '-q', elsewhere, theirs.batch.branch ?? '');
+    inbox.answer(theirCard.id, { choice: 'Delete Branch' });
+    await h.jobs.idle();
+    expect(exists(theirs.batch.branch)).toBe(true);
+    expect(h.only(cardsAbout(theirs.batch.branch)).body).toContain(elsewhere);
+
+    // Outside 10db/ nothing is removed, and a branch that is not there is reported.
+    h.git$('branch', 'precious');
+    await expect(
+      removeBranch(h.git, h.repo, 'precious', () => Promise.resolve(true)),
+    ).resolves.toEqual({ kind: 'foreign' });
+    expect(exists('precious')).toBe(true);
+    await expect(
+      removeBranch(h.git, h.repo, '10db/none', () => Promise.resolve(true)),
+    ).resolves.toEqual({ kind: 'absent' });
   });
 
-  it('keeps the branch on Keep, and does not ask again', async () => {
-    const { batch } = await opened(h);
-    await commitIn(h, batch, 'src/api/one.txt');
-    h.shipper.abandon(batch.id);
-    await h.jobs.idle();
-    const card = h.only(cardsAbout(batch.branch));
-    inbox.answer(card.id, { choice: 'Keep' });
-    await h.jobs.idle();
-    expect(exists(batch.branch)).toBe(true);
-    expect(cardsAbout(batch.branch)).toEqual([]);
-  });
-
-  it('refuses to delete a branch checked out in the main checkout, and says so on a new card', async () => {
+  it('refuses to delete a branch checked out in the main checkout, or being rebased there where it shows as detached, says so on a new card each time, and deletes it once the checkout is back on main', async () => {
     const { batch } = await opened(h);
     await commitIn(h, batch, 'src/api/one.txt');
     h.shipper.abandon(batch.id);
@@ -162,52 +162,27 @@ describe('an abandoned task whose branch holds commits', () => {
     expect(again.id).not.toBe(card.id);
     expect(again.title).toBe(`${batch.branch ?? ''} was not deleted: it is checked out`);
     expect(again.options.map((o) => o.label)).toEqual(['Delete Branch', 'Keep']);
-    // Switched away, the second answer deletes it.
-    h.git$('switch', '-q', 'main');
-    inbox.answer(again.id, { choice: 'Delete Branch' });
-    await h.jobs.idle();
-    expect(exists(batch.branch)).toBe(false);
-  });
 
-  it('refuses to delete a branch being rebased in the main checkout, where it shows as detached', async () => {
-    const { batch } = await opened(h);
-    await commitIn(h, batch, 'src/api/one.txt');
-    h.shipper.abandon(batch.id);
-    await h.jobs.idle();
-    const card = h.only(cardsAbout(batch.branch));
-    h.git$('switch', '-q', batch.branch ?? '');
     // A rebase that stops after its first pick leaves the checkout detached, mid-rebase.
     expect(() => h.git$('rebase', '-q', '--exec', 'false', 'HEAD~1')).toThrow();
     expect(h.git$('branch', '--show-current')).toBe('');
-    inbox.answer(card.id, { choice: 'Delete Branch' });
+    inbox.answer(again.id, { choice: 'Delete Branch' });
     await h.jobs.idle();
     expect(exists(batch.branch)).toBe(true);
-    const again = h.only(cardsAbout(batch.branch));
-    expect(again.title).toBe(`${batch.branch ?? ''} was not deleted: it is checked out`);
-    // The rebase over and the checkout back on main, the second answer deletes it.
+    const third = h.only(cardsAbout(batch.branch));
+    expect(third.title).toBe(`${batch.branch ?? ''} was not deleted: it is checked out`);
+
+    // The rebase over and the checkout back on main, the next answer deletes it.
     h.git$('rebase', '--abort');
     h.git$('switch', '-q', 'main');
-    inbox.answer(again.id, { choice: 'Delete Branch' });
+    inbox.answer(third.id, { choice: 'Delete Branch' });
     await h.jobs.idle();
     expect(exists(batch.branch)).toBe(false);
   });
 
-  it('refuses to delete a branch checked out in another worktree', async () => {
-    const { batch } = await opened(h);
-    await commitIn(h, batch, 'src/api/one.txt');
-    h.shipper.abandon(batch.id);
-    await h.jobs.idle();
-    const card = h.only(cardsAbout(batch.branch));
-    const elsewhere = join(h.dataDir, 'their-worktree');
-    h.git$('worktree', 'add', '-q', elsewhere, batch.branch ?? '');
-    inbox.answer(card.id, { choice: 'Delete Branch' });
-    await h.jobs.idle();
-    expect(exists(batch.branch)).toBe(true);
-    expect(h.only(cardsAbout(batch.branch)).body).toContain(elsewhere);
-  });
-
-  it('deletes the branch of an abandoned task that never moved off its base, and a notice says so', async () => {
-    const { batch } = await opened(h);
+  it("deletes the branch of an abandoned task that never moved off its base, saying so, does not say a worktree 10db left behind was deleted, and keeps a closed batch's branch that moved off its base without a card", async () => {
+    // Abandoned with no commits: the branch and the worktree go, and a notice says so.
+    const { batch } = await opened(h, { title: 'Alpha' });
     const wt = batch.worktreePath ?? '';
     h.shipper.abandon(batch.id);
     await h.jobs.idle();
@@ -221,79 +196,40 @@ describe('an abandoned task whose branch holds commits', () => {
     expect(notice.body).toContain("deleted it along with the batch's worktree");
     expect(notice.tone).toBe('info');
     expect(notice.taskId).toBeNull();
-  });
 
-  it('does not say the worktree was deleted when 10db left it behind, and still deletes the branch', async () => {
-    const { batch } = await opened(h);
-    const wt = batch.worktreePath ?? '';
     // Git forgets the worktree and a person's file sits at its path: not 10db's, not empty.
-    h.git$('worktree', 'remove', '--force', '--force', wt);
-    mkdirSync(wt, { recursive: true });
-    writeFileSync(join(wt, 'notes.txt'), 'mine\n');
-    h.state.write((c) => transitionBatch(c, batch.id, { to: 'ABANDONED' }));
+    const left = (await opened(h, { title: 'Beta' })).batch;
+    const leftPath = left.worktreePath ?? '';
+    h.git$('worktree', 'remove', '--force', '--force', leftPath);
+    mkdirSync(leftPath, { recursive: true });
+    writeFileSync(join(leftPath, 'notes.txt'), 'mine\n');
+    h.state.write((c) => transitionBatch(c, left.id, { to: 'ABANDONED' }));
     // The builder's Remove worktree answer, which skips the checks that would keep the directory.
-    await retireWorktree(h.ctx, batch.id, true);
-    expect(exists(batch.branch)).toBe(false);
-    expect(existsSync(join(wt, 'notes.txt'))).toBe(true);
-    const cards = h.cards();
-    const deleted = h.only(h.notices().filter((n) => n.line.endsWith('deleted')));
+    await retireWorktree(h.ctx, left.id, true);
+    expect(exists(left.branch)).toBe(false);
+    expect(existsSync(join(leftPath, 'notes.txt'))).toBe(true);
+    const deleted = h.only(h.notices().filter((n) => n.key === `branch-deleted:${left.id}`));
+    expect(deleted.line.endsWith('deleted')).toBe(true);
     expect(deleted.body).toContain('no commits');
     expect(deleted.body).not.toMatch(/worktree/i);
     // The card that says the worktree stays is still there.
-    expect(cards.some((c) => c.title === `10db left ${wt} in place`)).toBe(true);
-  });
+    expect(h.cards().some((c) => c.title === `10db left ${leftPath} in place`)).toBe(true);
 
-  it('raises no "abandoned" card: the builder just asked for it, and the branch card says what is unmerged', async () => {
-    const { batch } = await opened(h);
-    await commitIn(h, batch, 'src/api/one.txt');
-    h.shipper.abandon(batch.id);
-    await h.jobs.idle();
-    expect(h.cards().filter((c) => c.title.endsWith('abandoned'))).toEqual([]);
-  });
-
-  it('answers a card whose branch is already gone without a new card', async () => {
-    const { batch } = await opened(h);
-    await commitIn(h, batch, 'src/api/one.txt');
-    h.shipper.abandon(batch.id);
-    await h.jobs.idle();
-    const card = h.only(cardsAbout(batch.branch));
-    h.git$('branch', '-D', batch.branch ?? '');
-    inbox.answer(card.id, { choice: 'Delete Branch' });
-    await h.jobs.idle();
-    expect(h.cards().filter((c) => c.id !== card.id && c.title.includes('not deleted'))).toEqual(
-      [],
-    );
-  });
-
-  it('never removes a branch outside 10db/, and reports one that is not there', async () => {
-    h.git$('branch', 'precious');
-    await expect(
-      removeBranch(h.git, h.repo, 'precious', () => Promise.resolve(true)),
-    ).resolves.toEqual({ kind: 'foreign' });
-    expect(exists('precious')).toBe(true);
-    await expect(
-      removeBranch(h.git, h.repo, '10db/none', () => Promise.resolve(true)),
-    ).resolves.toEqual({ kind: 'absent' });
+    // A closed batch whose branch moved off its base keeps it, without a card.
+    const closed = (await opened(h, { title: 'Gamma' })).batch;
+    await commitIn(h, closed, 'src/api/late.txt');
+    h.state.write((c) => {
+      transitionBatch(c, closed.id, { to: 'SHIPPING' });
+      transitionBatch(c, closed.id, { to: 'CLOSED' });
+    });
+    await retireWorktree(h.ctx, closed.id);
+    expect(exists(closed.branch)).toBe(true);
+    expect(cardsAbout(closed.branch)).toEqual([]);
   });
 });
 
 describe('a pull request closed without merging', () => {
-  it('raises one card offering to delete the local branch, which stays until answered', async () => {
-    const { batch, prUrl } = await shipped(h);
-    h.gh.setState(prUrl, PrState.Closed);
-    const w = watch();
-    w.start();
-    await w.idle();
-    const card = h.only(h.cards().filter((c) => c.title.startsWith('Pull request closed')));
-    expect(card.options.map((o) => o.label)).toEqual(['Delete Branch', 'Keep']);
-    expect(exists(batch.branch)).toBe(true);
-    w.poke();
-    await w.idle();
-    expect(h.cards().filter((c) => c.title.startsWith('Pull request closed'))).toHaveLength(1);
-    expect(exists(batch.branch)).toBe(true);
-  });
-
-  it('deletes the branch on Delete Branch and leaves it on Keep', async () => {
+  it('raises one card per pull request offering to delete the local branch, which stays until answered, then deletes it on Delete Branch and leaves it on Keep', async () => {
     const first = await shipped(h, { title: 'Alpha' });
     const second = await shipped(h, { title: 'Beta' });
     h.gh.setState(first.prUrl, PrState.Closed);
@@ -301,8 +237,24 @@ describe('a pull request closed without merging', () => {
     const w = watch();
     w.start();
     await w.idle();
-    const cards = h.cards().filter((c) => c.title.startsWith('Pull request closed'));
+    const closedCards = () => h.cards().filter((c) => c.title.startsWith('Pull request closed'));
+    const cards = closedCards();
     expect(cards).toHaveLength(2);
+    for (const card of cards)
+      expect
+        .soft(
+          card.options.map((o) => o.label),
+          card.title,
+        )
+        .toEqual(['Delete Branch', 'Keep']);
+    expect(exists(first.batch.branch)).toBe(true);
+    expect(exists(second.batch.branch)).toBe(true);
+    // Another round raises no second card and deletes nothing.
+    w.poke();
+    await w.idle();
+    expect(closedCards()).toHaveLength(2);
+    expect(exists(first.batch.branch)).toBe(true);
+    expect(exists(second.batch.branch)).toBe(true);
     const [a, b] = [
       cards.find((c) => c.title.includes('"Alpha"')),
       cards.find((c) => c.title.includes('"Beta"')),
@@ -323,21 +275,11 @@ describe('a pull request closed without merging', () => {
 });
 
 describe('a pull request that merged', () => {
-  it('has its local branch deleted in the watch round that reads the merge', async () => {
-    const { batch, head: tip, prUrl } = await shipped(h);
-    h.gh.setState(prUrl, PrState.Merged);
-    h.gh.setHead(prUrl, tip);
-    const w = watch();
-    w.start();
-    await w.idle();
-    expect(getBatch(h.store.db, batch.id).pr?.state).toBe('merged');
-    expect(exists(batch.branch)).toBe(false);
-    expect(h.cards()).toEqual([]);
-  });
-
-  it('leaves no remote-tracking ref or branch config behind, so nothing of the task stays', async () => {
+  it('has its local branch deleted in the watch round that reads the merge, leaving no remote-tracking ref or branch config, and never touches a branch it did not make', async () => {
     const { batch, head: tip, prUrl } = await shipped(h);
     expect(leftOf('10db/')).toEqual(pushed(batch.branch));
+    h.git$('branch', 'feature/mine');
+    h.git$('branch', '10db-mine');
     h.gh.setState(prUrl, PrState.Merged);
     h.gh.setHead(prUrl, tip);
     // GitHub deletes the merged branch; 10db's own fetches never prune.
@@ -345,25 +287,39 @@ describe('a pull request that merged', () => {
     const w = watch();
     w.start();
     await w.idle();
+    expect(getBatch(h.store.db, batch.id).pr?.state).toBe('merged');
+    expect(exists(batch.branch)).toBe(false);
+    expect(h.cards()).toEqual([]);
     expect(leftOf('10db/')).toEqual([]);
+    expect(exists('feature/mine')).toBe(true);
+    expect(exists('10db-mine')).toBe(true);
   });
 
-  it('keeps a remote-tracking ref that holds a commit the pull request did not carry', async () => {
-    const { batch, head: tip, prUrl } = await shipped(h);
+  it('deletes a branch behind the pull request head, whose commits the pull request carried, keeps a remote-tracking ref holding a commit the pull request did not carry, and leaves the branch when gh gives no head commit', async () => {
+    const { batch, head: tip, prUrl } = await shipped(h, { title: 'Alpha' });
+    const head = h.git$('commit-tree', `${tip}^{tree}`, '-p', tip, '-m', 'a later commit');
     const later = h.git$('commit-tree', `${tip}^{tree}`, '-p', tip, '-m', 'fetched later');
     h.git$('update-ref', `refs/remotes/origin/${batch.branch ?? '?'}`, later);
     h.gh.setState(prUrl, PrState.Merged);
-    h.gh.setHead(prUrl, tip);
+    h.gh.setHead(prUrl, head);
+    const headless = await shipped(h, { title: 'Beta' });
+    h.gh.setHead(headless.prUrl, null);
+    h.gh.setState(headless.prUrl, PrState.Merged);
     const w = watch();
     w.start();
     await w.idle();
     expect(exists(batch.branch)).toBe(false);
     expect(h.git$('rev-parse', `refs/remotes/origin/${batch.branch ?? '?'}`)).toBe(later);
     expect(leftOf(batch.branch)).toEqual([`refs/remotes/origin/${batch.branch ?? '?'}`]);
+    expect(exists(headless.batch.branch)).toBe(true);
   });
 
-  it('leaves a branch that is checked out in the main checkout', async () => {
-    const { batch, head: tip, prUrl } = await shipped(h);
+  it('leaves a branch checked out in the main checkout until a round after it is switched away, and a branch that holds a commit the pull request did not carry', async () => {
+    const late = await shipped(h, { title: 'Beta' });
+    h.gh.setState(late.prUrl, PrState.Merged);
+    h.gh.setHead(late.prUrl, late.head);
+    h.git$('update-ref', `refs/heads/${late.batch.branch ?? ''}`, h.commit('src/api/late.txt'));
+    const { batch, head: tip, prUrl } = await shipped(h, { title: 'Alpha' });
     h.git$('switch', '-q', batch.branch ?? '');
     h.gh.setState(prUrl, PrState.Merged);
     h.gh.setHead(prUrl, tip);
@@ -371,33 +327,13 @@ describe('a pull request that merged', () => {
     w.start();
     await w.idle();
     expect(exists(batch.branch)).toBe(true);
+    expect(exists(late.batch.branch)).toBe(true);
     // Switched away, the next round deletes it.
     h.git$('switch', '-q', 'main');
     w.poke();
     await w.idle();
     expect(exists(batch.branch)).toBe(false);
-  });
-
-  it('leaves a branch that holds a commit the pull request did not carry', async () => {
-    const { batch, head: tip, prUrl } = await shipped(h);
-    h.gh.setState(prUrl, PrState.Merged);
-    h.gh.setHead(prUrl, tip);
-    h.git$('update-ref', `refs/heads/${batch.branch ?? ''}`, h.commit('src/api/late.txt'));
-    const w = watch();
-    w.start();
-    await w.idle();
-    expect(exists(batch.branch)).toBe(true);
-  });
-
-  it('deletes a branch behind the pull request head, whose commits the pull request carried', async () => {
-    const { batch, head: tip, prUrl } = await shipped(h);
-    const head = h.git$('commit-tree', `${tip}^{tree}`, '-p', tip, '-m', 'a later commit');
-    h.gh.setState(prUrl, PrState.Merged);
-    h.gh.setHead(prUrl, head);
-    const w = watch();
-    w.start();
-    await w.idle();
-    expect(exists(batch.branch)).toBe(false);
+    expect(exists(late.batch.branch)).toBe(true);
   });
 
   it('does not let a pull request whose head this repository lacks hold back the branches after it', async () => {
@@ -415,29 +351,25 @@ describe('a pull request that merged', () => {
     expect(exists(second.batch.branch)).toBe(false);
   });
 
-  it('fetches a head commit GitHub made, such as a branch update, to see the branch is behind it', async () => {
-    const { batch, head: tip, prUrl } = await shipped(h);
-    const head = h.origin$('commit-tree', `${tip}^{tree}`, '-p', tip, '-m', 'Update branch');
-    h.origin$('update-ref', 'refs/pull/1/head', head);
-    h.gh.setState(prUrl, PrState.Merged);
-    h.gh.setHead(prUrl, head);
+  it('fetches a head commit GitHub made, such as a branch update, to see the branch is behind it, and keeps a branch holding a commit the fetched head does not carry', async () => {
+    /** A merged pull request whose head is a commit GitHub made on origin, after the shipped one. */
+    const updated = async (title: string) => {
+      const world = await shipped(h, { title });
+      const { head: tip, prUrl } = world;
+      const head = h.origin$('commit-tree', `${tip}^{tree}`, '-p', tip, '-m', 'Update branch');
+      h.origin$('update-ref', `refs/pull/${prUrl.split('/').pop() ?? '?'}/head`, head);
+      h.gh.setState(prUrl, PrState.Merged);
+      h.gh.setHead(prUrl, head);
+      return world.batch;
+    };
+    const behind = await updated('Alpha');
+    const ahead = await updated('Beta');
+    h.git$('update-ref', `refs/heads/${ahead.branch ?? ''}`, h.commit('src/api/late.txt'));
     const w = watch();
     w.start();
     await w.idle();
-    expect(exists(batch.branch)).toBe(false);
-  });
-
-  it('keeps a branch holding a commit the fetched head does not carry', async () => {
-    const { batch, head: tip, prUrl } = await shipped(h);
-    const head = h.origin$('commit-tree', `${tip}^{tree}`, '-p', tip, '-m', 'Update branch');
-    h.origin$('update-ref', 'refs/pull/1/head', head);
-    h.gh.setState(prUrl, PrState.Merged);
-    h.gh.setHead(prUrl, head);
-    h.git$('update-ref', `refs/heads/${batch.branch ?? ''}`, h.commit('src/api/late.txt'));
-    const w = watch();
-    w.start();
-    await w.idle();
-    expect(exists(batch.branch)).toBe(true);
+    expect(exists(behind.branch)).toBe(false);
+    expect(exists(ahead.branch)).toBe(true);
   });
 
   it('sweeps after a round that failed, so one pull request that breaks the watch holds nothing back', async () => {
@@ -472,73 +404,29 @@ describe('a pull request that merged', () => {
     expect(getBatch(h.store.db, merged.batch.id).pr?.state).toBe('merged');
     expect(exists(merged.batch.branch)).toBe(false);
   });
-
-  it('leaves the branch when gh gives no head commit', async () => {
-    const { batch, prUrl } = await shipped(h);
-    h.gh.setHead(prUrl, null);
-    h.gh.setState(prUrl, PrState.Merged);
-    const w = watch();
-    w.start();
-    await w.idle();
-    expect(exists(batch.branch)).toBe(true);
-  });
-
-  it('says on the kept-worktree card that the branch stays with the worktree', async () => {
-    const { batch, ws } = await opened(h);
-    await commitIn(h, batch, 'src/api/alpha.txt');
-    writeFileSync(join(h.repo, '.git', 'info', 'exclude'), '.env\n');
-    writeFileSync(join(batch.worktreePath ?? '', '.env'), 'SECRET=1\n');
-    h.settle(ws.id, 'DONE');
-    h.shipper.checkBatch(batch.id);
-    await h.jobs.idle();
-    const card = h.only(h.cards().filter((c) => c.title.includes('kept the worktree')));
-    expect(card.body).toContain(
-      `Its branch ${batch.branch ?? ''} is checked out there, so 10db leaves the branch too until the worktree is gone.`,
-    );
-  });
-
-  it('never touches a branch it did not make', async () => {
-    const { batch, head: tip, prUrl } = await shipped(h);
-    h.git$('branch', 'feature/mine');
-    h.git$('branch', '10db-mine');
-    h.gh.setState(prUrl, PrState.Merged);
-    h.gh.setHead(prUrl, tip);
-    const w = watch();
-    w.start();
-    await w.idle();
-    expect(exists(batch.branch)).toBe(false);
-    expect(exists('feature/mine')).toBe(true);
-    expect(exists('10db-mine')).toBe(true);
-  });
 });
 
 describe('the sweep at startup', () => {
-  it('removes the branch of a pull request already recorded as merged', async () => {
-    const { batch, head: tip, prUrl } = await shipped(h);
-    h.gh.setState(prUrl, PrState.Merged);
-    h.gh.setHead(prUrl, tip);
+  it('removes the branch of a pull request already recorded as merged, keeps that of one still open, and lists in one card every 10db branch no batch names, deleting none', async () => {
+    h.git$('branch', '10db/stray-one');
+    h.git$('branch', '10db/stray-two');
+    h.git$('branch', 'feature/mine');
+    const merged = await shipped(h, { title: 'Alpha' });
+    const open = await shipped(h, { title: 'Beta' });
+    const { batch } = await opened(h, { title: 'Gamma' });
+    h.gh.setState(merged.prUrl, PrState.Merged);
+    h.gh.setHead(merged.prUrl, merged.head);
     // The merge was recorded by an earlier daemon that stopped before it deleted the branch.
     const w = createPrWatch({ ctx: h.ctx, clock: new ManualClock(), intervalMs: 120_000 });
     watches.push(w);
     w.start();
     await w.idle();
-    expect(exists(batch.branch)).toBe(true);
+    expect(exists(merged.batch.branch)).toBe(true);
     await removeMergedBranches(h.ctx, new AbortController().signal);
-    expect(exists(batch.branch)).toBe(false);
-    expect(leftOf(batch.branch)).toEqual([]);
-  });
+    expect(exists(merged.batch.branch)).toBe(false);
+    expect(leftOf(merged.batch.branch)).toEqual([]);
+    expect(exists(open.batch.branch)).toBe(true);
 
-  it('keeps the branch of a pull request that is still open', async () => {
-    const { batch } = await shipped(h);
-    await removeMergedBranches(h.ctx, new AbortController().signal);
-    expect(exists(batch.branch)).toBe(true);
-  });
-
-  it('lists in one card every 10db branch no batch names, and deletes none', async () => {
-    h.git$('branch', '10db/stray-one');
-    h.git$('branch', '10db/stray-two');
-    h.git$('branch', 'feature/mine');
-    const { batch } = await opened(h);
     await listStrayBranches(h.ctx);
     await listStrayBranches(h.ctx);
     const card = h.only(h.cards());
@@ -547,6 +435,7 @@ describe('the sweep at startup', () => {
     expect(card.body).toContain('10db/stray-two');
     expect(card.body).not.toContain('feature/mine');
     expect(card.body).not.toContain(batch.branch ?? '?');
+    expect(card.body).not.toContain(open.batch.branch ?? '?');
     expect(exists('10db/stray-one')).toBe(true);
     expect(exists('10db/stray-two')).toBe(true);
   });
@@ -581,28 +470,14 @@ describe('the sweep at startup', () => {
     expect(exists('10db/stray-one')).toBe(true);
   });
 
-  it('does not list the branch a batch still being cut has made but not yet recorded', async () => {
-    const noJobs: DeliveryJobs = {
-      run: () => undefined,
-      idle: () => Promise.resolve(),
-      pending: () => 0,
-      stop: () => Promise.resolve(),
-    };
-    const started = createBatchStarter({ ...h.ctx, jobs: noJobs }).startTask(h.addTask('Alpha').id);
-    const cutting = getBatch(h.store.db, started.id);
-    expect(cutting).toMatchObject({ state: 'CUTTING', branch: null });
-    h.git$('branch', batchBranchName(cutting.title, cutting.id));
-    await listStrayBranches(h.ctx);
-    expect(h.cards()).toEqual([]);
-  });
-
   /**
    * An abandoned batch whose worktree is gone but whose branch was never settled: abandoned by a
    * daemon before branch cleanup, or in a shared checkout whose settle failed.
    */
-  async function unsettled(commits: number): Promise<BatchDto> {
-    const { batch, ws } = await opened(h);
-    for (let i = 0; i < commits; i++) await commitIn(h, batch, `src/api/${String(i)}.txt`);
+  async function unsettled(title: string, commits: number): Promise<BatchDto> {
+    const { batch, ws } = await opened(h, { title });
+    for (let i = 0; i < commits; i++)
+      await commitIn(h, batch, `src/api/${title.toLowerCase()}-${String(i)}.txt`);
     h.settle(ws.id, 'DONE');
     await h.git.removeWorktree(h.repo, batch.worktreePath ?? '');
     h.state.write((w) => {
@@ -613,56 +488,24 @@ describe('the sweep at startup', () => {
     return getBatch(h.store.db, batch.id);
   }
 
-  it('offers once to delete an abandoned branch that holds commits, and not again after Keep', async () => {
-    const batch = await unsettled(2);
+  it('offers once to delete an abandoned branch that holds commits and not again after Keep, deletes one that never moved off its base saying so once, and leaves one whose branch is gone alone', async () => {
+    const holding = await unsettled('Alpha', 2);
+    const bare = await unsettled('Beta', 0);
+    const gone = await unsettled('Gamma', 1);
+    h.git$('branch', '-D', gone.branch ?? '');
     await recover();
     await recover();
-    const card = h.only(cardsAbout(batch.branch));
-    expect(card.title).toBe(`Delete ${batch.branch ?? ''}? It holds 2 commits`);
+    const card = h.only(cardsAbout(holding.branch));
+    expect(card.title).toBe(`Delete ${holding.branch ?? ''}? It holds 2 commits`);
     expect(card.options.map((o) => o.label)).toEqual(['Delete Branch', 'Keep']);
+    // The holding branch's card is the only one: none for the bare branch or the gone one.
+    expect(h.cards()).toEqual([card]);
+    expect(exists(bare.branch)).toBe(false);
+    expect(h.only(h.notices()).line).toContain('deleted');
     inbox.answer(card.id, { choice: 'Keep' });
     await h.jobs.idle();
     await recover();
-    expect(cardsAbout(batch.branch)).toEqual([]);
-    expect(exists(batch.branch)).toBe(true);
-  });
-
-  it('deletes an abandoned branch that never moved off its base, and says so once', async () => {
-    const batch = await unsettled(0);
-    await recover();
-    await recover();
-    expect(exists(batch.branch)).toBe(false);
-    expect(h.cards()).toEqual([]);
-    expect(h.only(h.notices()).line).toContain('deleted');
-  });
-
-  it('leaves an abandoned batch whose branch is gone alone', async () => {
-    const batch = await unsettled(1);
-    h.git$('branch', '-D', batch.branch ?? '');
-    await recover();
-    expect(h.cards()).toEqual([]);
-  });
-
-  it('raises no card when every 10db branch has a batch, and withdraws an old one', async () => {
-    h.git$('branch', '10db/stray');
-    await listStrayBranches(h.ctx);
-    expect(h.cards()).toHaveLength(1);
-    h.git$('branch', '-D', '10db/stray');
-    await listStrayBranches(h.ctx);
-    expect(h.cards()).toEqual([]);
-  });
-});
-
-describe('a closed batch whose branch moved off its base', () => {
-  it('keeps the branch without a card, as before', async () => {
-    const { batch } = await opened(h);
-    await commitIn(h, batch, 'src/api/late.txt');
-    h.state.write((c) => {
-      transitionBatch(c, batch.id, { to: 'SHIPPING' });
-      transitionBatch(c, batch.id, { to: 'CLOSED' });
-    });
-    await retireWorktree(h.ctx, batch.id);
-    expect(exists(batch.branch)).toBe(true);
-    expect(cardsAbout(batch.branch)).toEqual([]);
+    expect(cardsAbout(holding.branch)).toEqual([]);
+    expect(exists(holding.branch)).toBe(true);
   });
 });

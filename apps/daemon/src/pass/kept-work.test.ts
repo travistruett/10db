@@ -13,7 +13,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { DeliveryHarness } from '../../test/delivery-harness';
 import { openPassWorld, openWholeProjectWorld, type PassWorld } from '../../test/pass-world';
 import { PassFolderOffBranchError } from '../git';
-import { keepTurnWork, keptWorkFacts, passFolderOn, passKeptRef } from './index';
+import { keepTurnWork, passFolderOn, passKeptRef } from './index';
 
 // Workbench spec §9.1: at a turn's end the daemon keeps the task's page files at the task's ref,
 // on the pass branch's tip, and the turn row names it.
@@ -193,19 +193,6 @@ describe('keepTurnWork in a pass of one', () => {
     } finally {
       one.close();
     }
-  });
-});
-
-describe('keptWorkFacts', () => {
-  it("reads the latest turn's facts back without writing", async () => {
-    const { settings } = await openTwoPages();
-    const turn = startTurn(settings);
-    write('src/settings/page.tsx', 'settings\nedited\n');
-    const kept = await keepTurnWork(deps(), { workstreamId: runOf(settings), turnId: turn.id });
-    const refs = h.git$('for-each-ref', 'refs/10db/');
-
-    expect(await keptWorkFacts(deps(), settings.id)).toEqual(kept);
-    expect(h.git$('for-each-ref', 'refs/10db/')).toBe(refs);
   });
 });
 

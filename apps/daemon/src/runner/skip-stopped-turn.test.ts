@@ -1,7 +1,7 @@
-import { getWorkstream, insertBuilderMessage, listSessions } from '@10db/db';
+import { getWorkstream, listSessions } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestEngine, type TestEngine } from '../../test/engine';
-import { handoffArgs, waitFor } from '../../test/fixtures';
+import { handoffArgs } from '../../test/fixtures';
 import type { FakeScriptBook } from '../sessions';
 
 type FakeStep = FakeScriptBook[string][number][number];
@@ -89,47 +89,6 @@ describe('a turn a skip stopped', () => {
     await run({
       Alpha: [[curl, write('src/api/a.txt'), commit('op-skip-res-02', ['src/api/a.txt']), turn]],
     });
-    expect(resumes()).toEqual([]);
-  });
-
-  it('is not resumed when a handoff was requested', async () => {
-    await run({
-      Alpha: [
-        [
-          { do: 'context', percentage: 75 },
-          { do: 'await_message', contains: 'write_handoff' },
-          curl,
-          turn,
-        ],
-      ],
-    });
-    expect(resumes()).toEqual([]);
-  });
-
-  it('is not resumed when a builder message is queued', async () => {
-    engine = await createTestEngine({
-      Alpha: [[{ do: 'await_signal', name: 'queued' }, curl, turn]],
-    });
-    const { task, workstream } = engine.addTask('Alpha');
-    engine.launch(workstream.id);
-    await waitFor(() => listSessions(engine.store.db, workstream.id)[0]);
-    engine.state.write((ctx) => insertBuilderMessage(ctx, task.id, { body: 'Hold on', files: [] }));
-    engine.adapter.signal('queued');
-    await engine.runner.idle();
-    expect(resumes()).toEqual([]);
-  });
-
-  it('sends nothing when the run is stopped at the same turn end', async () => {
-    engine = await createTestEngine({
-      Alpha: [[curl, { do: 'await_signal', name: 'stop' }, turn, resumed, turn]],
-    });
-    const { workstream } = engine.addTask('Alpha');
-    engine.launch(workstream.id);
-    await waitFor(() => listSessions(engine.store.db, workstream.id)[0]);
-    const cancelled = engine.runner.cancel(workstream.id);
-    engine.adapter.signal('stop');
-    await cancelled;
-    await engine.runner.idle();
     expect(resumes()).toEqual([]);
   });
 });

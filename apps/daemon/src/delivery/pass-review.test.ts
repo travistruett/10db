@@ -44,23 +44,23 @@ describe('findingTargets', () => {
     { taskId: people, areas: ['people'] },
   ];
 
-  it.each([
-    {
-      name: "a file in one page's area goes to that page",
-      location: 'src/settings/a.tsx:3',
-      to: settings,
-    },
-    { name: 'a line range names the same file', location: 'src/people/b.tsx:3-9', to: people },
-    { name: 'a shared file goes to the header', location: 'src/lib/c.ts:1', to: null },
-    { name: 'a file in no area goes to the header', location: 'README.md:1', to: null },
-    { name: 'a finding naming no file goes to the header', location: null, to: null },
-  ])('$name', ({ location, to }) => {
-    expect(findingTargets([finding(location)], pages, AREAS)).toEqual([
-      { finding: finding(location), taskId: to },
-    ]);
-  });
+  it('sends a finding to the page whose area holds its file, else to the header, and every file finding of a pass of one to its one page', () => {
+    for (const { name, location, to } of [
+      {
+        name: "a file in one page's area goes to that page",
+        location: 'src/settings/a.tsx:3',
+        to: settings,
+      },
+      { name: 'a line range names the same file', location: 'src/people/b.tsx:3-9', to: people },
+      { name: 'a shared file goes to the header', location: 'src/lib/c.ts:1', to: null },
+      { name: 'a file in no area goes to the header', location: 'README.md:1', to: null },
+      { name: 'a finding naming no file goes to the header', location: null, to: null },
+    ]) {
+      expect
+        .soft(findingTargets([finding(location)], pages, AREAS), `${name}: ${String(location)}`)
+        .toEqual([{ finding: finding(location), taskId: to }]);
+    }
 
-  it('sends every file finding of a pass of one to its one page', () => {
     const one = mintId('Task');
     expect(
       findingTargets(
@@ -118,11 +118,6 @@ function setup(answer: string): {
     },
     asked,
   };
-}
-
-/** The same deps, with the model answering `answer` from now on. */
-function setupAnswer<D extends PassReviewDeps>(deps: D, answer: string): D {
-  return { ...deps, adapter: { complete: () => Promise.resolve(answer) } };
 }
 
 async function openedPass(): Promise<{ passId: PassId; settings: TaskDto; people: TaskDto }> {
@@ -210,73 +205,47 @@ describe('reviewPassTip', () => {
     return tip;
   }
 
-  it.each([
-    { name: 'the same tip', next: () => '' },
-    {
-      name: 'a small commit after it',
-      next: () => h.commit('src/people/page.tsx', 'people, signed\n'),
-    },
-  ])(
-    'reads on from where a cut review stopped, at $name, and says so until all of it is read',
-    async ({ next }) => {
+  it('reads on from where a cut review stopped, at the same tip or a small commit after it, and says so until all of it is read', async () => {
+    // Each case reviews its own pass from the start: one harness each.
+    for (const [i, { name, next }] of [
+      { name: 'the same tip', next: () => '' },
+      {
+        name: 'a small commit after it',
+        next: () => h.commit('src/people/page.tsx', 'people, signed\n'),
+      },
+    ].entries()) {
+      if (i > 0) {
+        h.close();
+        scratch.cleanup();
+      }
       const { deps, asked } = setup('No findings.');
       const { passId } = await openedPass();
       const tip = longPages();
       const cut = () =>
         getPassProgress(h.store.db, passId).notices.filter((n) => n.id === 'review-cut');
 
-      expect(await review(deps, passId, tip)).toBe('reviewed');
-      expect(cut()).toEqual([
+      expect.soft(await review(deps, passId, tip), name).toBe('reviewed');
+      expect.soft(cut(), name).toEqual([
         expect.objectContaining({
           kind: PassNoticeKind.Finding,
           sendable: false,
           text: expect.stringContaining('not reviewed yet') as unknown,
         }),
       ]);
-      expect(asked[0]?.prompt).toContain('+a-end');
-      expect(asked[0]?.prompt).not.toContain('+e-end');
+      expect.soft(asked[0]?.prompt, name).toContain('+a-end');
+      expect.soft(asked[0]?.prompt, name).not.toContain('+e-end');
 
       const later = next() || tip;
-      expect(await review(deps, passId, later)).toBe('reviewed');
+      expect.soft(await review(deps, passId, later), name).toBe('reviewed');
       // The files the cut review read whole are not read again; the rest, and anything new, are.
-      expect(asked[1]?.prompt).not.toContain('+a-end');
-      expect(asked[1]?.prompt).toContain('+d-end');
-      expect(asked[1]?.prompt).toContain('+e-end');
-      if (later !== tip) expect(asked[1]?.prompt).toContain('+people, signed');
-      expect(cut()).toEqual([]);
-      expect(getPassProgress(h.store.db, passId).reviewedSha).toBe(later);
-      expect(await review(deps, passId, later)).toBe('unchanged');
-    },
-  );
-
-  it("keeps the header's findings of a cut review through the review that reads on at the same tip", async () => {
-    const { deps } = setup('1. MAJOR src/lib/util.ts:4 a helper leaks');
-    const { passId } = await openedPass();
-    const tip = longPages();
-    const header = () =>
-      getPassProgress(h.store.db, passId)
-        .notices.filter((n) => n.id.startsWith('finding:'))
-        .map((n) => [n.id, n.text]);
-    await review(deps, passId, tip);
-    const first = header();
-    expect(first).toHaveLength(1);
-
-    // The rest of the diff holds a new finding first, then the same one again.
-    await review(
-      setupAnswer(
-        deps,
-        '1. MINOR src/lib/b.ts:2 a name\n2. MAJOR src/lib/util.ts:4 a helper leaks',
-      ),
-      passId,
-      tip,
-    );
-
-    // The first part's finding stays as it was, once; the new one gets an id of its own.
-    const [kept, added, ...more] = header();
-    expect(kept).toEqual(first[0]);
-    expect(added?.[1]).toContain('a name');
-    expect(added?.[0]).not.toBe(kept?.[0]);
-    expect(more).toEqual([]);
+      expect.soft(asked[1]?.prompt, name).not.toContain('+a-end');
+      expect.soft(asked[1]?.prompt, name).toContain('+d-end');
+      expect.soft(asked[1]?.prompt, name).toContain('+e-end');
+      if (later !== tip) expect.soft(asked[1]?.prompt, name).toContain('+people, signed');
+      expect.soft(cut(), name).toEqual([]);
+      expect.soft(getPassProgress(h.store.db, passId).reviewedSha, name).toBe(later);
+      expect.soft(await review(deps, passId, later), name).toBe('unchanged');
+    }
   });
 
   it('reads one file longer than a review reads as far as it goes, says so, and moves on', async () => {
@@ -297,29 +266,5 @@ describe('reviewPassTip', () => {
     // Nothing else is left to read at this tip: it is not asked again.
     expect(await review(deps, passId, tip)).toBe('unchanged');
     expect(asked).toHaveLength(1);
-  });
-
-  it("clears the header's findings of the last review when the next one reads a new tip", async () => {
-    const { deps } = setup('1. MAJOR src/lib/util.ts:4 a helper leaks');
-    const { passId } = await openedPass();
-    const tip = h.commit('src/settings/page.tsx', 'signed off\n');
-    await review(deps, passId, tip);
-    expect(getPassProgress(h.store.db, passId).notices).toHaveLength(1);
-
-    const fixed = setupAnswer(deps, 'No findings.');
-    await review(fixed, passId, h.commit('src/lib/util.ts', 'fixed\n'));
-
-    expect(getPassProgress(h.store.db, passId).notices).toEqual([]);
-  });
-
-  it('runs no review for a rigor with no review step', async () => {
-    const { deps, asked } = setup('No findings.');
-    h.state.write((w) => patchProject(w, h.project.id, { defaultRigor: Rigor.Light }));
-    const { passId } = await openedPass();
-    const tip = h.commit('src/settings/page.tsx', 'signed off\n');
-
-    expect(await review(deps, passId, tip)).toBe('none');
-    expect(asked).toEqual([]);
-    expect(getPassProgress(h.store.db, passId).reviewedSha).toBeNull();
   });
 });

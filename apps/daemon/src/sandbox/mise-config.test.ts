@@ -22,52 +22,59 @@ function write(path: string, text: string): string {
 }
 
 describe('miseDirs', () => {
-  it('uses the default dirs under home', () => {
-    expect(miseDirs(home, {})).toEqual({
-      config: join(home, '.config/mise'),
-      globalConfigFile: join(home, '.config/mise/config.toml'),
-      data: join(home, '.local/share/mise'),
-      state: join(home, '.local/state/mise'),
-      cache: [join(home, '.cache/mise'), join(home, 'Library/Caches/mise')],
-    });
-  });
-
-  it('honours the XDG base dirs', () => {
-    const env = {
-      XDG_CONFIG_HOME: join(home, 'cfg'),
-      XDG_DATA_HOME: join(home, 'data'),
-      XDG_STATE_HOME: join(home, 'state'),
-      XDG_CACHE_HOME: join(home, 'cache'),
-    };
-    expect(miseDirs(home, env)).toEqual({
-      config: join(home, 'cfg/mise'),
-      globalConfigFile: join(home, 'cfg/mise/config.toml'),
-      data: join(home, 'data/mise'),
-      state: join(home, 'state/mise'),
-      cache: [join(home, 'cache/mise')],
-    });
-  });
-
-  it("honours mise's own variables over the XDG ones", () => {
-    const env = {
-      XDG_CONFIG_HOME: join(home, 'cfg'),
-      MISE_CONFIG_DIR: join(home, 'm/config'),
-      MISE_GLOBAL_CONFIG_FILE: join(home, 'm/global.toml'),
-      MISE_DATA_DIR: join(home, 'm/data'),
-      MISE_STATE_DIR: join(home, 'm/state'),
-      MISE_CACHE_DIR: join(home, 'm/cache'),
-    };
-    expect(miseDirs(home, env)).toEqual({
-      config: join(home, 'm/config'),
-      globalConfigFile: join(home, 'm/global.toml'),
-      data: join(home, 'm/data'),
-      state: join(home, 'm/state'),
-      cache: [join(home, 'm/cache')],
-    });
-  });
-
-  it('ignores a relative variable', () => {
-    expect(miseDirs(home, { MISE_DATA_DIR: 'data' }).data).toBe(join(home, '.local/share/mise'));
+  it("takes mise's own variables over the XDG ones over the defaults, ignoring a relative one", () => {
+    const rows: [string, Record<string, string>, ReturnType<typeof miseDirs>][] = [
+      [
+        'the default dirs under home',
+        {},
+        {
+          config: join(home, '.config/mise'),
+          globalConfigFile: join(home, '.config/mise/config.toml'),
+          data: join(home, '.local/share/mise'),
+          state: join(home, '.local/state/mise'),
+          cache: [join(home, '.cache/mise'), join(home, 'Library/Caches/mise')],
+        },
+      ],
+      [
+        'the XDG base dirs',
+        {
+          XDG_CONFIG_HOME: join(home, 'cfg'),
+          XDG_DATA_HOME: join(home, 'data'),
+          XDG_STATE_HOME: join(home, 'state'),
+          XDG_CACHE_HOME: join(home, 'cache'),
+        },
+        {
+          config: join(home, 'cfg/mise'),
+          globalConfigFile: join(home, 'cfg/mise/config.toml'),
+          data: join(home, 'data/mise'),
+          state: join(home, 'state/mise'),
+          cache: [join(home, 'cache/mise')],
+        },
+      ],
+      [
+        "mise's own variables over the XDG ones",
+        {
+          XDG_CONFIG_HOME: join(home, 'cfg'),
+          MISE_CONFIG_DIR: join(home, 'm/config'),
+          MISE_GLOBAL_CONFIG_FILE: join(home, 'm/global.toml'),
+          MISE_DATA_DIR: join(home, 'm/data'),
+          MISE_STATE_DIR: join(home, 'm/state'),
+          MISE_CACHE_DIR: join(home, 'm/cache'),
+        },
+        {
+          config: join(home, 'm/config'),
+          globalConfigFile: join(home, 'm/global.toml'),
+          data: join(home, 'm/data'),
+          state: join(home, 'm/state'),
+          cache: [join(home, 'm/cache')],
+        },
+      ],
+    ];
+    for (const [name, env, expected] of rows)
+      expect.soft(miseDirs(home, env), name).toEqual(expected);
+    expect
+      .soft(miseDirs(home, { MISE_DATA_DIR: 'data' }).data, 'a relative MISE_DATA_DIR')
+      .toBe(join(home, '.local/share/mise'));
   });
 });
 
@@ -123,7 +130,11 @@ describe('laneMiseConfig', () => {
     config('config.toml', tools(3, 'config'));
     config('config.ci.toml', tools(4, 'env'));
     config('config.local.toml', tools(5, 'local'));
-    write(join(home, '.tool-versions'), '# pinned\nt6 tool-versions\n');
+    // A .tool-versions line with several versions reads as a list; a trailing comment is dropped.
+    write(
+      join(home, '.tool-versions'),
+      '# pinned\nt6 tool-versions\npython 3.12.1 3.11.7\nnode 26.12.0 # pinned\n',
+    );
     expect(parse(lane({ MISE_ENV: 'ci' }))).toEqual({
       tools: {
         t1: 'conf-a',
@@ -132,24 +143,24 @@ describe('laneMiseConfig', () => {
         t4: 'env',
         t5: 'local',
         t6: 'tool-versions',
+        python: ['3.12.1', '3.11.7'],
+        node: '26.12.0',
       },
     });
     // With no MISE_ENV, config.ci.toml is not read.
     expect(parse(lane())).toMatchObject({ tools: { t4: 'config' } });
   });
 
-  it('reads a .tool-versions line with several versions as a list', () => {
-    write(join(home, '.tool-versions'), 'python 3.12.1 3.11.7\nnode 26.12.0 # pinned\n');
-    expect(parse(lane())).toEqual({ tools: { python: ['3.12.1', '3.11.7'], node: '26.12.0' } });
-  });
-
-  it.each<[string, string | null]>([
-    ['a missing file', null],
-    ['a file that is not TOML', '[tools\nnode ='],
-    ['a file with no tools', '[env]\nX = "1"'],
-  ])('gives an empty config for %s', (_name, text) => {
-    if (text !== null) config('config.toml', text);
-    expect(lane()).toBe('');
+  it('gives an empty config for a missing file, one that is not TOML, or one with no tools', () => {
+    const rows: [string, string | null][] = [
+      ['a missing file', null],
+      ['a file that is not TOML', '[tools\nnode ='],
+      ['a file with no tools', '[env]\nX = "1"'],
+    ];
+    for (const [name, text] of rows) {
+      if (text !== null) config('config.toml', text);
+      expect.soft(lane(), name).toBe('');
+    }
   });
 });
 

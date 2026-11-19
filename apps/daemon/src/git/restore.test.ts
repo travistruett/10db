@@ -53,7 +53,7 @@ const read = (rel: string) => readFileSync(join(repo.path, rel), 'utf8');
 const blobOf = (rel: string) => rawGit('hash-object', rel);
 
 describe('restoreFiles', () => {
-  it('writes each file as its commit has it, removes one the commit lacks, and leaves one that changed since it was hashed', async () => {
+  it('writes each file as its commit has it once, removes one the commit lacks, and leaves one that changed since it was hashed or is now a directory', async () => {
     write('src/a.ts', 'a, by the task\n');
     write('src/new.ts', 'added by the task\n');
     write('src/b.ts', 'b, by the task\n');
@@ -82,60 +82,48 @@ describe('restoreFiles', () => {
     // Nothing but the files: HEAD and the folder's own index are as they were.
     expect(rawGit('rev-parse', 'HEAD')).toBe(start);
     expect(rawGit('diff', '--cached', '--name-only')).toBe('');
-  });
 
-  it('leaves a path that is now a directory, ignored files and all, rather than writing over it', async () => {
-    // The kept commit deleted src/a.ts; the builder has since made a directory there.
+    // It writes nothing twice: a file already as asked is done, whatever it was expected to hold.
+    expect(
+      await git.restoreFiles(
+        repo.path,
+        [{ path: 'src/a.ts', from: start }],
+        [{ path: 'src/a.ts', blob: 'f'.repeat(40) }],
+      ),
+    ).toEqual({ written: ['src/a.ts'], left: [] });
+
+    // It leaves a path that is now a directory, ignored files and all, rather than writing over it:
+    // the kept commit deleted src/a.ts; the builder has since made a directory there.
     write('.gitignore', '.env\n');
     unlinkSync(join(repo.path, 'src/a.ts'));
     write('src/a.ts/.env', 'SECRET=1\n');
-
-    const done = await git.restoreFiles(
-      repo.path,
-      [{ path: 'src/a.ts', from: start }],
-      [{ path: 'src/a.ts', blob: null }],
-    );
-
-    expect(done).toEqual({ written: [], left: ['src/a.ts'] });
+    expect(
+      await git.restoreFiles(
+        repo.path,
+        [{ path: 'src/a.ts', from: start }],
+        [{ path: 'src/a.ts', blob: null }],
+      ),
+    ).toEqual({ written: [], left: ['src/a.ts'] });
     expect(read('src/a.ts/.env')).toBe('SECRET=1\n');
-  });
-
-  it('writes nothing twice: a file already as asked is done, whatever it was expected to hold', async () => {
-    const done = await git.restoreFiles(
-      repo.path,
-      [{ path: 'src/a.ts', from: start }],
-      [{ path: 'src/a.ts', blob: 'f'.repeat(40) }],
-    );
-    expect(done).toEqual({ written: ['src/a.ts'], left: [] });
   });
 });
 
 describe('mergeFileBack', () => {
-  it('merges kept work into a file that changed since, three ways from the commit it was kept on', async () => {
+  it('merges kept work into a file that changed since, three ways from the commit it was kept on, and leaves one that does not merge as it is', async () => {
     write('src/b.ts', 'one\ntwo, kept\nthree\nfour\nfive\n');
     rawGit('add', 'src/b.ts');
     rawGit('commit', '-q', '-m', 'Kept');
     const kept = rawGit('rev-parse', 'HEAD');
     rawGit('reset', '-q', '--hard', start);
+    const mergeBack = () =>
+      git.mergeFileBack({ repo: repo.path, path: 'src/b.ts', base: start, theirs: kept });
+
     write('src/b.ts', 'one\ntwo\nthree\nfour\nfive, on disk\n');
-
-    expect(
-      await git.mergeFileBack({ repo: repo.path, path: 'src/b.ts', base: start, theirs: kept }),
-    ).toBe('merged');
+    expect(await mergeBack()).toBe('merged');
     expect(read('src/b.ts')).toBe('one\ntwo, kept\nthree\nfour\nfive, on disk\n');
-  });
 
-  it('leaves a file whose change does not merge as it is', async () => {
-    write('src/b.ts', 'one\ntwo, kept\nthree\nfour\nfive\n');
-    rawGit('add', 'src/b.ts');
-    rawGit('commit', '-q', '-m', 'Kept');
-    const kept = rawGit('rev-parse', 'HEAD');
-    rawGit('reset', '-q', '--hard', start);
     write('src/b.ts', 'one\ntwo, on disk\nthree\nfour\nfive\n');
-
-    expect(
-      await git.mergeFileBack({ repo: repo.path, path: 'src/b.ts', base: start, theirs: kept }),
-    ).toBe('conflict');
+    expect(await mergeBack()).toBe('conflict');
     expect(read('src/b.ts')).toBe('one\ntwo, on disk\nthree\nfour\nfive\n');
   });
 });

@@ -115,7 +115,11 @@ const ROWS: readonly Row[] = [
 ];
 
 describe('hazardHit', () => {
-  it.each(ROWS)('$name: $command', ({ command, hazard, hazards }) => {
-    expect(hazardHit(command, hazards ?? DEFAULT_HAZARDS)?.name ?? null).toBe(hazard);
+  it('finds the hazard each command form runs, past flag values and look-through runners', () => {
+    for (const { name, command, hazard, hazards } of ROWS) {
+      expect
+        .soft(hazardHit(command, hazards ?? DEFAULT_HAZARDS)?.name ?? null, `${name}: ${command}`)
+        .toBe(hazard);
+    }
   });
 });

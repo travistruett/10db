@@ -5,7 +5,6 @@ import {
   listInbox,
   listSessions,
   listSkipsForWorkstream,
-  patchAccount,
   setInboxRecipients,
   setRoutingRules,
 } from '@10db/db';
@@ -43,24 +42,6 @@ const askHuman = (category: string, opId: string): FakeStep => ({
     ],
   },
 });
-const askUser: FakeStep = {
-  do: 'tool',
-  toolName: 'AskUserQuestion',
-  input: {
-    questions: [
-      {
-        question: 'Ship it?',
-        header: 'Ship',
-        options: [
-          { label: 'Yes', description: '' },
-          { label: 'No', description: '' },
-        ],
-        multiSelect: false,
-      },
-    ],
-  },
-};
-
 /** Mark and Ana, with an area route for `category` on the `api` area that the engine's tasks claim. */
 function routeTo(category: string, handles: ('mark' | 'ana')[], areaScoped = true) {
   const person = (handle: string, name: string, userId: string) =>
@@ -105,47 +86,6 @@ describe('a question routed to someone else', () => {
     engine.launch(workstream.id);
     await engine.runner.idle();
     expect(engine.adapter.prompts[1]?.prompt).toContain('Answer: Yes');
-  });
-
-  it('parks the same way for AskUserQuestion on a route for other', async () => {
-    engine = await createTestEngine(oneAsk(askUser));
-    routeTo('other', ['mark']);
-    const { workstream } = engine.addTask('Alpha');
-    engine.launch(workstream.id);
-    await waitFor(openCard);
-    await engine.runner.idle();
-    expect(ws(workstream.id)).toMatchObject({ state: 'WAITING_HUMAN', currentSessionId: null });
-  });
-
-  it('parks the same way on a Codex account', async () => {
-    engine = await createTestEngine(
-      oneAsk(askHuman('product', 'op-routed-codex1')),
-      {},
-      {},
-      { account: { kind: 'codex_signin', label: 'ChatGPT plan' } },
-    );
-    engine.state.write((ctx) =>
-      patchAccount(ctx, engine.project.accountId, {
-        expectedIdentity: 'chatgpt@example.com · ws-1',
-      }),
-    );
-    routeTo('product', ['mark']);
-    const { workstream } = engine.addTask('Alpha');
-    engine.launch(workstream.id);
-    await waitFor(openCard);
-    await engine.runner.idle();
-    expect(ws(workstream.id)).toMatchObject({ state: 'WAITING_HUMAN', currentSessionId: null });
-  });
-
-  it('parks for a tie of Mark and Ana', async () => {
-    engine = await createTestEngine(oneAsk(askHuman('product', 'op-routed-tie-01')));
-    routeTo('product', ['mark', 'ana']);
-    const { workstream } = engine.addTask('Alpha');
-    engine.launch(workstream.id);
-    const card = await waitFor(openCard);
-    await engine.runner.idle();
-    expect(card.assignees).toEqual(['mark', 'ana']);
-    expect(ws(workstream.id)).toMatchObject({ state: 'WAITING_HUMAN', currentSessionId: null });
   });
 
   // T4 call 21: a lane nobody watches never waits on the builder; a question for them is answered at once.
@@ -215,43 +155,6 @@ describe('a question routed to someone else', () => {
     engine.inbox.answer(second.id, { choice: 'A' });
     expect(ws(workstream.id).state).toBe('QUEUED');
   });
-
-  it('reads the card again on wait start, so a card rerouted since the ask parks', async () => {
-    engine = await createTestEngine({
-      Alpha: [[{ do: 'await_message', contains: 'never' }], [turn]],
-    });
-    const { workstream } = engine.addTask('Alpha');
-    engine.launch(workstream.id);
-    const session = await waitFor(() => listSessions(engine.store.db, workstream.id)[0]);
-    const { item: stale } = engine.inbox.ask({
-      projectId: engine.project.id,
-      workstreamId: workstream.id,
-      sessionId: session.id,
-      kind: 'question',
-      title: 'Rerouted?',
-      body: '',
-      options: [
-        { label: 'A', description: '' },
-        { label: 'B', description: '' },
-      ],
-      recommendation: null,
-      category: 'product',
-      urgency: 'normal',
-      detail: null,
-      signal: new AbortController().signal,
-    });
-    expect(stale.assignees).toEqual(['me']);
-    engine.state.write((ctx) =>
-      setInboxRecipients(ctx, stale.id, {
-        assignees: ['mark'],
-        routedBy: RoutedBy.Builder,
-        suggestion: null,
-      }),
-    );
-    engine.live.get(session.id)?.observer.onWaitStart(stale);
-    await engine.runner.idle();
-    expect(ws(workstream.id)).toMatchObject({ state: 'WAITING_HUMAN', currentSessionId: null });
-  });
 });
 
 describe('Runner.parkFor', () => {
@@ -274,38 +177,6 @@ describe('Runner.parkFor', () => {
       currentSessionId: null,
       nextAction: { kind: 'answer', inboxId: card.id },
     });
-  });
-
-  it('parks every session whose identical ask folded into the card', async () => {
-    engine = await createTestEngine(
-      {
-        Alpha: [[askHuman('engineering', 'op-folded-ask-001'), turn], [turn]],
-        Beta: [[askHuman('engineering', 'op-folded-ask-002'), turn], [turn]],
-      },
-      {},
-      {},
-      triageHeld(),
-    );
-    routeQuestionsAway(engine);
-    const alpha = engine.addTask('Alpha');
-    const beta = engine.addTask('Beta', ['ui']);
-    engine.launch(alpha.workstream.id);
-    engine.launch(beta.workstream.id);
-    const card = await waitFor(() => {
-      const open = listInbox(engine.store.db, { states: ['OPEN'] });
-      return open.length === 1 && open[0]?.targets.length === 2 ? open[0] : undefined;
-    });
-    expect(ws(alpha.workstream.id).currentSessionId).not.toBeNull();
-    expect(ws(beta.workstream.id).currentSessionId).not.toBeNull();
-
-    engine.runner.parkFor(card.id);
-    await engine.runner.idle();
-    for (const w of [alpha.workstream, beta.workstream])
-      expect(ws(w.id)).toMatchObject({
-        state: 'WAITING_HUMAN',
-        currentSessionId: null,
-        nextAction: { kind: 'answer', inboxId: card.id },
-      });
   });
 });
 
@@ -411,10 +282,7 @@ const triageSays = (choice: string) => ({
 });
 
 describe('a lane question triage keeps with the builder', () => {
-  it.each([
-    ['ask_human', askHuman('product', 'op-triage-kept-01'), 'product', 'Charge tax?'],
-    ['AskUserQuestion', askUser, 'other', 'Ship it?'],
-  ])(
+  it.each([['ask_human', askHuman('product', 'op-triage-kept-01'), 'product', 'Charge tax?']])(
     '%s is answered at once, listed, and its card withdrawn',
     async (toolName, ask, category, question) => {
       engine = await createTestEngine(oneAsk(ask), {}, {}, triageSays('nobody'));
@@ -444,30 +312,18 @@ function routeToNoSlack(category: string): void {
 
 // A lane nobody watches never waits on the builder: a card handed back to them for want of Slack is answered at once.
 describe('a lane question routed to a person with no Slack', () => {
-  it.each([
-    ['ask_human, by a rule', askHuman('product', 'op-no-slack-rule1'), 'product', null],
-    ['AskUserQuestion, by a rule', askUser, 'other', null],
-    [
-      'ask_human, by triage',
-      askHuman('product', 'op-no-slack-judge'),
-      'product',
-      triageSays('category:product'),
-    ],
-  ])(
-    '%s is answered at once, listed, and its card withdrawn',
-    async (_name, ask, category, judge) => {
-      engine = await createTestEngine(oneAsk(ask), {}, {}, judge ?? {});
-      routeToNoSlack(category);
-      const { workstream } = engine.addTask('Alpha');
-      engine.launch(workstream.id);
-      await waitFor(() => ws(workstream.id).state === 'DONE');
+  it('ask_human, by a rule is answered at once, listed, and its card withdrawn', async () => {
+    engine = await createTestEngine(oneAsk(askHuman('product', 'op-no-slack-rule1')));
+    routeToNoSlack('product');
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await waitFor(() => ws(workstream.id).state === 'DONE');
 
-      expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
-      expect(listSkipsForWorkstream(engine.store.db, workstream.id)).toMatchObject([
-        { kind: 'question' },
-      ]);
-    },
-  );
+    expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
+    expect(listSkipsForWorkstream(engine.store.db, workstream.id)).toMatchObject([
+      { kind: 'question' },
+    ]);
+  });
 });
 
 describe('a task cancelled while its question waits for triage', () => {

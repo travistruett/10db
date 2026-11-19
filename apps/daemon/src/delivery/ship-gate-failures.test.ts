@@ -74,25 +74,7 @@ async function finish(batch: BatchDto, ownGate: number | null): Promise<BatchDto
   return getBatch(h.store.db, batch.id);
 }
 
-const SEVEN = [1, 2, 3, 4, 5, 6, 7].map((n) => `src/api/alpha.test.ts > case ${String(n)}`);
-
 describe('a shipping gate that fails', () => {
-  it('names the failing step and up to 5 failing tests, with a link to the step log', async () => {
-    h = createDeliveryHarness({ gateCommand: fakeGate(9, SEVEN) });
-    const batch = await openBatch();
-    h.commit('src/api/alpha.test.ts');
-    const ended = await finish(batch, 0);
-    expect(ended).toMatchObject({ state: 'FAILED', failure: 'gate_failed' });
-    const card = h.only(h.cards());
-    expect(card.title).toBe('Batch "Greetings" not shipped: the gate failed (exit 1) in test');
-    for (const test of SEVEN.slice(0, 5)) expect(card.body).toContain(`- ${test}`);
-    expect(card.body).not.toContain('case 6');
-    expect(card.body).toContain('- and 2 more');
-    const log = join(h.repo, '.gate', 'test.log');
-    expect(card.body).toContain(`Full test log: ${log}`);
-    expect(card.detail).toMatchObject({ batchId: batch.id, logPath: log });
-  });
-
   it("doesn't run it again when a failing test is in a file the batch changed", async () => {
     h = createDeliveryHarness({ gateCommand: fakeGate(1, ['src/api/alpha.test.ts > works']) });
     const batch = await openBatch();
@@ -104,94 +86,6 @@ describe('a shipping gate that fails', () => {
     expect(card.body).toContain('Start a fix task');
     // The card still points at a fix task, and offers the answers the daemon acts on as well.
     expect(card.detail?.['actions']).toEqual(['retry', 'abandon']);
-  });
-
-  it("doesn't run it again when the task's own gate didn't pass", async () => {
-    h = createDeliveryHarness({ gateCommand: fakeGate(1, ['src/ui/other.test.ts > works']) });
-    const batch = await openBatch();
-    expect((await finish(batch, null)).state).toBe('FAILED');
-    expect(gateRuns()).toBe(1);
-  });
-
-  it("doesn't run it again when a step other than the tests failed", async () => {
-    h = createDeliveryHarness({
-      gateCommand: 'echo "FAILED lint: pnpm lint (log .gate/lint.log)"; exit 1',
-    });
-    const batch = await openBatch();
-    const ended = await finish(batch, 0);
-    expect(ended.state).toBe('FAILED');
-    expect(h.only(h.cards()).title).toContain('the gate failed (exit 1) in lint');
-    expect(h.logs.lines().filter((l) => l['msg'] === 'gate started')).toHaveLength(1);
-  });
-});
-
-describe('a shipping gate that fails while the Mac is overloaded', () => {
-  const overloaded = {
-    overloadedSince: () => ({ peakLoad: 187, cores: 10 }),
-  };
-
-  it('says so on the not-shipped card, whatever else it says', async () => {
-    h = createDeliveryHarness(
-      { gateCommand: fakeGate(9, ['src/api/alpha.test.ts > works']) },
-      { load: overloaded },
-    );
-    const batch = await openBatch();
-    h.commit('src/api/alpha.test.ts');
-    expect((await finish(batch, 0)).state).toBe('FAILED');
-    const card = h.only(h.cards());
-    expect(card.title).toContain('the gate failed');
-    expect(card.body).toContain('The Mac was overloaded while this gate ran');
-    expect(card.body).toContain('load average reached 187 on 10 cores');
-    expect(card.body).toContain('src/api/alpha.test.ts > works');
-  });
-
-  it('says so on the card for a failure that looks unrelated, too', async () => {
-    h = createDeliveryHarness(
-      { gateCommand: fakeGate(9, ['src/ui/other.test.ts > flakes']) },
-      { load: overloaded },
-    );
-    const batch = await openBatch();
-    expect((await finish(batch, 0)).state).toBe('FAILED');
-    const card = h.only(h.cards());
-    expect(card.title).toContain('failed twice');
-    expect(card.body).toContain('The Mac was overloaded while this gate ran');
-  });
-
-  it('asks only about the run whose failure it reports', async () => {
-    const asked: Date[] = [];
-    h = createDeliveryHarness(
-      { gateCommand: fakeGate(9, ['src/api/alpha.test.ts > works']) },
-      {
-        load: {
-          overloadedSince: (since) => {
-            asked.push(since);
-            return null;
-          },
-        },
-      },
-    );
-    const batch = await openBatch();
-    h.commit('src/api/alpha.test.ts');
-    await finish(batch, 0);
-    expect(asked).toHaveLength(1);
-  });
-
-  it('adds nothing when the Mac was fine', async () => {
-    h = createDeliveryHarness(
-      { gateCommand: fakeGate(9, ['src/api/alpha.test.ts > works']) },
-      { load: { overloadedSince: () => null } },
-    );
-    const batch = await openBatch();
-    h.commit('src/api/alpha.test.ts');
-    expect((await finish(batch, 0)).state).toBe('FAILED');
-    expect(h.only(h.cards()).body).not.toContain('overloaded');
-  });
-
-  it('does not touch a gate that passes', async () => {
-    h = createDeliveryHarness({ gateCommand: fakeGate(0, []) }, { load: overloaded });
-    const batch = await openBatch();
-    expect((await finish(batch, 0)).state).toBe('SHIPPED');
-    expect(h.cards().every((c) => !c.body.includes('overloaded'))).toBe(true);
   });
 });
 

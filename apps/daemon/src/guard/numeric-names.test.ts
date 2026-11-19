@@ -41,8 +41,9 @@ describe('numericNames', () => {
       ['a glob in local', 'touch ./-n; s=1; local ?n r=s; echo $((s))'],
       ['a glob behind command', 'touch ./-n; s=1; command declare ?n r=s; echo $((s))'],
     ];
-    it.each(rows)('%s', (_, command) => {
-      expect(names(command)).toEqual([]);
+    it('finds no number-only name in a command that may rebind one', () => {
+      for (const [name, command] of rows)
+        expect.soft(names(command), `${name}: ${command}`).toEqual([]);
     });
 
     it('does not take a quoted glob character for a glob', () => {
@@ -63,8 +64,9 @@ describe('numericNames', () => {
       ['a function written with a space', 's=1; f () { s=x; }; f; echo $((s))'],
       ['a function on its own lines', 's=1\nf()\n{\n s=x\n}\nf\necho $((s))'],
     ];
-    it.each(rows)('%s', (_, command) => {
-      expect(names(command)).toEqual([]);
+    it('finds no number-only name in a command that may rebind one', () => {
+      for (const [name, command] of rows)
+        expect.soft(names(command), `${name}: ${command}`).toEqual([]);
     });
   });
 
@@ -81,8 +83,9 @@ describe('numericNames', () => {
       ['jobs -x getopts', 'OPTARG=1; jobs -x getopts a: o -a x; echo $((OPTARG))'],
       ['hash', 's=1; hash -p x y; echo $((s))'],
     ];
-    it.each(rows)('%s', (_, command) => {
-      expect(names(command)).toEqual([]);
+    it('finds no number-only name in a command that may rebind one', () => {
+      for (const [name, command] of rows)
+        expect.soft(names(command), `${name}: ${command}`).toEqual([]);
     });
   });
 
@@ -108,8 +111,9 @@ describe('numericNames', () => {
       ['a glob qualifier calls a function', 's=1; echo /*(+f); echo $((s))'],
       ['a glob qualifier with other flags first', 's=1; echo /*(.+f); echo $((s))'],
     ];
-    it.each(rows)('%s', (_, command) => {
-      expect(names(command)).toEqual([]);
+    it('finds no number-only name in a command that may rebind one', () => {
+      for (const [name, command] of rows)
+        expect.soft(names(command), `${name}: ${command}`).toEqual([]);
     });
 
     it('reaches a name from a positional parameter, which no assignment in the command names', () => {
@@ -168,8 +172,9 @@ describe('numericNames', () => {
       ['printf with a flag from a name', 's=1; printf $F s x; echo $((s))'],
       ['print with a flag from backticks', 's=1; print `echo -v` s x; echo $((s))'],
     ];
-    it.each(rows)('%s', (_, command) => {
-      expect(names(command)).toEqual([]);
+    it('finds no number-only name in a command that may rebind one', () => {
+      for (const [name, command] of rows)
+        expect.soft(names(command), `${name}: ${command}`).toEqual([]);
     });
   });
 
@@ -216,8 +221,9 @@ describe('numericNames', () => {
       ['zsh cd sets dirstack', 'dirstack=1; cd x; echo $((dirstack))'],
       ['zsh pushd sets dirstack', 'dirstack=1; pushd x; echo $((dirstack))'],
     ];
-    it.each(rows)('%s', (_, command) => {
-      expect(names(command)).toEqual([]);
+    it('finds no number-only name in a command that may rebind one', () => {
+      for (const [name, command] of rows)
+        expect.soft(names(command), `${name}: ${command}`).toEqual([]);
     });
 
     it('keeps the other names of such a command', () => {

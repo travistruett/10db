@@ -47,44 +47,34 @@ describe('moveBranchCas', () => {
   const move = (expect: string) =>
     git.moveBranchCas({ repo: repo.path, branch: 'main', to: tip, expect });
 
-  it('moves the branch from where it was expected, then answers already on a rerun', async () => {
+  it('moves the branch only from where it was expected, answering already on a rerun and raced once it moved or is gone', async () => {
+    expect(
+      await git.moveBranchCas({ repo: repo.path, branch: 'gone', to: tip, expect: start }),
+    ).toBe('raced');
+
     expect(await move(start)).toBe('moved');
     expect(rawGit('rev-parse', 'refs/heads/main')).toBe(tip);
     expect(await move(start)).toBe('already');
     expect(rawGit('rev-parse', 'refs/heads/main')).toBe(tip);
-  });
 
-  it('answers raced and moves nothing when the branch is no longer where it was expected', async () => {
     const other = rawGit('commit-tree', '-p', start, '-m', 'own', `${start}^{tree}`);
     rawGit('update-ref', 'refs/heads/main', other);
-
     expect(await move(start)).toBe('raced');
     expect(rawGit('rev-parse', 'refs/heads/main')).toBe(other);
   });
 
-  it('answers raced for a branch that is not there', async () => {
-    expect(
-      await git.moveBranchCas({ repo: repo.path, branch: 'gone', to: tip, expect: start }),
-    ).toBe('raced');
-  });
-
-  it('moves the branch HEAD names when the trees match, writing no file', async () => {
+  it('moves the branch HEAD names only when the trees match, writing no file', async () => {
     rawGit('switch', '-q', 'main');
+    await expect(move(start)).rejects.toThrow(/checked out/);
+    expect(rawGit('rev-parse', 'refs/heads/main')).toBe(start);
+
     const same = rawGit('commit-tree', '-p', start, '-m', 'squash', `${start}^{tree}`);
     write('src/a.ts', 'dirt\n');
-
     expect(
       await git.moveBranchCas({ repo: repo.path, branch: 'main', to: same, expect: start }),
     ).toBe('moved');
     expect(rawGit('symbolic-ref', 'HEAD')).toBe('refs/heads/main');
     expect(readFileSync(join(repo.path, 'src/a.ts'), 'utf8')).toBe('dirt\n');
-  });
-
-  it('refuses to move a checked-out branch to a commit with other files', async () => {
-    rawGit('switch', '-q', 'main');
-
-    await expect(move(start)).rejects.toThrow(/checked out/);
-    expect(rawGit('rev-parse', 'refs/heads/main')).toBe(start);
   });
 });
 
@@ -103,25 +93,21 @@ describe('moveCheckedOutBranch', () => {
   const move = (to: string) =>
     git.moveCheckedOutBranch({ repo: repo.path, branch: 'main', from: tip, to });
 
-  it("moves the branch HEAD names and its files to the commit, keeping changes the move doesn't write", async () => {
+  it("refuses, naming them, while uncommitted changes lie where the move writes; then moves the branch and its files, keeping changes it doesn't write", async () => {
     const base = squashedBase();
-    write('notes.md', 'mine\n');
+    write('src/a.ts', 'edited\n');
+    expect(await move(base)).toEqual({ kind: 'dirty', paths: ['src/a.ts'] });
+    expect(rawGit('rev-parse', 'refs/heads/main')).toBe(tip);
+    expect(readFileSync(join(repo.path, 'src/a.ts'), 'utf8')).toBe('edited\n');
 
+    rawGit('checkout', '-q', '--', 'src/a.ts');
+    write('notes.md', 'mine\n');
     expect(await move(base)).toEqual({ kind: 'switched' });
     expect(rawGit('symbolic-ref', 'HEAD')).toBe('refs/heads/main');
     expect(rawGit('rev-parse', 'refs/heads/main')).toBe(base);
     expect(readFileSync(join(repo.path, 'src/b.ts'), 'utf8')).toBe('another pull request\n');
     expect(readFileSync(join(repo.path, 'notes.md'), 'utf8')).toBe('mine\n');
     expect(rawGit('status', '--porcelain')).toBe('?? notes.md');
-  });
-
-  it('refuses, naming them, when uncommitted changes lie where the move writes', async () => {
-    const base = squashedBase();
-    write('src/a.ts', 'edited\n');
-
-    expect(await move(base)).toEqual({ kind: 'dirty', paths: ['src/a.ts'] });
-    expect(rawGit('rev-parse', 'refs/heads/main')).toBe(tip);
-    expect(readFileSync(join(repo.path, 'src/a.ts'), 'utf8')).toBe('edited\n');
   });
 
   it('finishes a move a crash cut short between the files and the branch', async () => {
@@ -184,44 +170,51 @@ describe('branchInUseElsewhere', () => {
       .toString()
       .trim();
 
-  it.each([
-    { name: 'checked out there', busy: (): void => undefined, detached: false },
-    {
-      // A rebase stopped after its first pick leaves the worktree detached: only its git dir names the branch.
-      name: 'being rebased there',
-      busy: (path: string) => {
-        gitIn(path, ['rebase', '-q', '--exec', 'false', 'HEAD~2'], true);
+  it('names a worktree that has the branch checked out, being rebased or bisected, and passes over the checkout itself', async () => {
+    const rows: readonly {
+      name: string;
+      busy: (path: string, branch: string) => void;
+      detached: boolean;
+    }[] = [
+      { name: 'checked out there', busy: (): void => undefined, detached: false },
+      {
+        // A rebase stopped after its first pick leaves the worktree detached: only its git dir names the branch.
+        name: 'being rebased there',
+        busy: (path: string) => {
+          gitIn(path, ['rebase', '-q', '--exec', 'false', 'HEAD~2'], true);
+        },
+        detached: true,
       },
-      detached: true,
-    },
-    {
-      // A bisect checks out a commit between its ends: only BISECT_START names the branch.
-      name: 'being bisected there',
-      busy: (path: string) => {
-        gitIn(path, ['bisect', 'start', 'side', start]);
+      {
+        // A bisect checks out a commit between its ends: only BISECT_START names the branch.
+        name: 'being bisected there',
+        busy: (path: string, branch: string) => {
+          gitIn(path, ['bisect', 'start', branch, start]);
+        },
+        detached: true,
       },
-      detached: true,
-    },
-  ])(
-    'names a worktree that has the branch $name, and passes over the checkout itself',
-    async ({ busy, detached }) => {
+    ];
+    for (const [i, { name, busy, detached }] of rows.entries()) {
+      const branch = `side-${String(i)}`;
       const root = mkdtempSync(join(tmpdir(), 'elsewhere-'));
       try {
-        // `side` is three commits past the start, so a rebase and a bisect each have a middle to stop at.
+        // The branch is three commits past the start, so a rebase and a bisect each have a middle to stop at.
         const one = rawGit('commit-tree', '-p', tip, '-m', 'One', `${tip}^{tree}`);
         const two = rawGit('commit-tree', '-p', one, '-m', 'Two', `${tip}^{tree}`);
-        rawGit('branch', 'side', two);
-        const path = join(root, 'side');
-        rawGit('worktree', 'add', '-q', path, 'side');
-        busy(path);
-        expect(currentIn(path)).toBe(detached ? '' : 'side');
+        rawGit('branch', branch, two);
+        const path = join(root, branch);
+        rawGit('worktree', 'add', '-q', path, branch);
+        busy(path, branch);
+        expect.soft(currentIn(path), name).toBe(detached ? '' : branch);
 
-        expect(await git.branchInUseElsewhere(repo.path, 'side')).toBe(realpathSync(path));
-        expect(await git.branchInUseElsewhere(repo.path, '10db/pass-abc123')).toBeNull();
+        expect
+          .soft(await git.branchInUseElsewhere(repo.path, branch), name)
+          .toBe(realpathSync(path));
+        expect.soft(await git.branchInUseElsewhere(repo.path, '10db/pass-abc123'), name).toBeNull();
         rawGit('worktree', 'remove', '--force', path);
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
-    },
-  );
+    }
+  });
 });
