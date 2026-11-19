@@ -1,13 +1,16 @@
 import type { ChangedFileDto, WorkstreamChangesDto } from '@10db/contracts';
-import { Anchor, Box, Group, ScrollArea, Stack, Text } from '@mantine/core';
+import { Box, Group, ScrollArea, Stack, Text, UnstyledButton } from '@mantine/core';
+import { IconChevronDown } from '@tabler/icons-react';
 import type { UseQueryResult } from '@tanstack/react-query';
+import { useState } from 'react';
 import { HunkDiff } from '../../conversation/hunk-diff';
 import type { GutterLine } from '../../conversation/hunk-gutter';
 import { ExternalLink } from '../board/pull-request-link';
-import { changesTotals, parseChanges } from './changes-files';
+import { changesTotals, parseChanges, type ChangedFileView } from './changes-files';
+import classes from './changes-panel.module.css';
 
-// A session's changes in the Changes drawer: a jump list of files, then every file's diff under a sticky
-// header. A number quotes its line into the composer. The diff is repository text, drawn as text.
+// A session's changes in the Changes drawer: every file as a fold, its header sticky while its diff scrolls,
+// the first open. A number quotes its line into the composer. The diff is repository text, drawn as text.
 
 export interface ChangesPanelProps {
   readonly changes: UseQueryResult<WorkstreamChangesDto>;
@@ -35,57 +38,75 @@ function quoteLabelOf(path: string, line: GutterLine): string {
   return `Quote ${kind}line ${String(line.number)} of ${path}`;
 }
 
-function Files({
-  files,
-  statuses,
+/** One file's fold: its header row (status, path, lines changed) and, while open, its hunks. */
+function FileFold({
+  file,
+  view,
+  open,
+  onToggle,
+  onQuote,
 }: {
-  readonly files: readonly ChangedFileDto[];
-  readonly statuses: ReadonlyMap<string, string>;
+  readonly file: ChangedFileDto;
+  /** Its part of the diff; absent when the diff was cut before it. */
+  readonly view: ChangedFileView | undefined;
+  readonly open: boolean;
+  readonly onToggle: () => void;
+  readonly onQuote: (text: string) => void;
 }) {
+  const bodyId = `changes-${file.path}`;
   return (
-    <Stack
-      gap={0}
-      component="ul"
-      m={0}
-      p={0}
-      style={{ listStyle: 'none' }}
-      aria-label="Changed files"
-    >
-      {files.map((file) => (
-        <li key={file.path}>
-          <Anchor
-            href={`#changes-${file.path}`}
-            underline="never"
-            c="inherit"
-            onClick={(event) => {
-              event.preventDefault();
-              document.getElementById(`changes-${file.path}`)?.scrollIntoView({ block: 'start' });
-            }}
-          >
-            <Group gap="xs" wrap="nowrap" justify="space-between" px="md">
-              <Text size="xs" c="dimmed" ff="monospace" style={{ flex: 'none' }}>
-                {statuses.get(file.path) ?? 'M'}
-              </Text>
-              <Text size="xs" ff="monospace" truncate style={{ minWidth: 0, flex: 1 }}>
-                {file.path}
-              </Text>
-              <Text size="xs" c="dimmed" ff="monospace" style={{ flex: 'none' }}>
-                {file.added === null
-                  ? 'binary'
-                  : `+${String(file.added)} −${String(file.removed ?? 0)}`}
-              </Text>
-            </Group>
-          </Anchor>
-        </li>
-      ))}
-    </Stack>
+    <li>
+      <UnstyledButton
+        className={classes['head']}
+        aria-expanded={open}
+        aria-controls={bodyId}
+        onClick={onToggle}
+      >
+        <IconChevronDown
+          size={12}
+          stroke={2}
+          className={classes['chevron']}
+          data-open={open ? '' : undefined}
+          aria-hidden="true"
+        />
+        <span className={classes['status']}>{view?.status ?? 'M'}</span>
+        <span className={classes['path']}>{file.path}</span>
+        <span className={classes['lines']}>
+          {file.added === null ? 'binary' : `+${String(file.added)} −${String(file.removed ?? 0)}`}
+        </span>
+      </UnstyledButton>
+      {open ? (
+        <Stack gap="xs" pt={4} pb="sm" id={bodyId}>
+          {view === undefined || view.hunks.length === 0 ? (
+            <Text size="xs" c="dimmed">
+              {file.added === null ? 'A binary file.' : 'Past the part of the diff we show.'}
+            </Text>
+          ) : (
+            view.hunks.map((hunk, index) => (
+              <HunkDiff
+                key={`${String(hunk.oldStart)}:${String(hunk.newStart)}:${String(index)}`}
+                hunk={hunk}
+                first={index === 0}
+                onQuote={(line) => {
+                  onQuote(quoteOf(file.path, line));
+                }}
+                quoteLabel={(line) => quoteLabelOf(file.path, line)}
+              />
+            ))
+          )}
+        </Stack>
+      ) : null}
+    </li>
   );
 }
 
 export function ChangesPanel({ changes, pullRequest, onQuote }: ChangesPanelProps) {
   const data = changes.data;
   const totals = data === undefined ? null : changesTotals(data.files);
-  const diffs = data === undefined ? [] : parseChanges(data.diff);
+  const views = new Map(
+    (data === undefined ? [] : parseChanges(data.diff)).map((file) => [file.path, file]),
+  );
+  const [flipped, setFlipped] = useState<ReadonlySet<string>>(() => new Set());
   return (
     <Box
       aria-label="Changes"
@@ -104,16 +125,16 @@ export function ChangesPanel({ changes, pullRequest, onQuote }: ChangesPanelProp
       </Group>
       <ScrollArea style={{ flex: 1, minHeight: 0 }}>
         {changes.isPending ? (
-          <Text size="sm" c="dimmed" px="md" role="status">
+          <Text size="sm" c="dimmed" role="status">
             Reading the changes…
           </Text>
         ) : changes.isError ? (
           pullRequest === null ? (
-            <Text size="sm" c="red" px="md">
+            <Text size="sm" c="red">
               {changes.error.message}
             </Text>
           ) : (
-            <Stack gap="xs" px="md">
+            <Stack gap="xs">
               <Text size="sm">
                 This session’s worktree is gone. Its pull request has the changes.
               </Text>
@@ -123,50 +144,40 @@ export function ChangesPanel({ changes, pullRequest, onQuote }: ChangesPanelProp
             </Stack>
           )
         ) : data?.files.length === 0 ? (
-          <Text size="sm" c="dimmed" px="md">
+          <Text size="sm" c="dimmed">
             No changes yet.
           </Text>
         ) : data === undefined ? null : (
-          <Stack gap="md" pb="md">
-            <Files
-              files={data.files}
-              statuses={new Map(diffs.map((file) => [file.path, file.status]))}
-            />
-            {diffs.map((file) => (
-              <Box key={file.path} id={`changes-${file.path}`}>
-                <Text
-                  size="xs"
-                  ff="monospace"
-                  fw={600}
-                  px="md"
-                  py={4}
-                  style={{
-                    position: 'sticky',
-                    top: 0,
-                    background: 'var(--mantine-color-body)',
-                    zIndex: 1,
+          <Stack gap={0} pb="md">
+            <Stack
+              gap={0}
+              component="ul"
+              m={0}
+              p={0}
+              style={{ listStyle: 'none' }}
+              aria-label="Changed files"
+            >
+              {data.files.map((file, index) => (
+                <FileFold
+                  key={file.path}
+                  file={file}
+                  view={views.get(file.path)}
+                  // The first file starts open and the rest folded; a click flips one from where it started.
+                  open={(index === 0) !== flipped.has(file.path)}
+                  onToggle={() => {
+                    setFlipped((was) => {
+                      const next = new Set(was);
+                      if (!next.delete(file.path)) next.add(file.path);
+                      return next;
+                    });
                   }}
-                >
-                  {`${file.status}  ${file.path}`}
-                </Text>
-                <Stack gap="xs" px="md">
-                  {file.hunks.map((hunk, index) => (
-                    <HunkDiff
-                      key={`${String(hunk.oldStart)}:${String(hunk.newStart)}:${String(index)}`}
-                      hunk={hunk}
-                      first={index === 0}
-                      onQuote={(line) => {
-                        onQuote(quoteOf(file.path, line));
-                      }}
-                      quoteLabel={(line) => quoteLabelOf(file.path, line)}
-                    />
-                  ))}
-                </Stack>
-              </Box>
-            ))}
+                  onQuote={onQuote}
+                />
+              ))}
+            </Stack>
             {data.truncated ? (
-              <Text size="xs" c="dimmed" px="md">
-                The diff is longer than we show. The file list above is complete.
+              <Text size="xs" c="dimmed">
+                The diff is longer than we show. The file list is complete.
               </Text>
             ) : null}
           </Stack>

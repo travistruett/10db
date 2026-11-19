@@ -14,7 +14,7 @@ import {
 } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { ActionIcon, Box, Menu, Text, Tooltip, UnstyledButton } from '@mantine/core';
-import { IconChevronDown, IconPlus } from '@tabler/icons-react';
+import { IconFolder, IconFolderOpen, IconPlus } from '@tabler/icons-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSearchChats } from '../../daemon/chat-queries';
@@ -22,7 +22,6 @@ import { Panel } from '../../shell/panel';
 import { PanelSearch } from '../../shell/panel-search';
 import { ProjectTile } from '../../shell/project-tile';
 import { canOpenTerminal } from './can-open-terminal';
-import type { ClosedChat } from './closed-tabs';
 import { readCollapsed, writeCollapsed } from './collapsed-projects';
 import { dropTarget, panelRowProject, type PanelGroup, type PanelRow } from './panel-order';
 import type { RowState } from './row-state';
@@ -35,7 +34,7 @@ import { sessionName } from './tab-info';
 export const VIRTUAL_FROM = 200;
 
 const ROW_HEIGHT = 32;
-const GROUP_HEIGHT = 34;
+const GROUP_HEIGHT = 32;
 
 type Item =
   | { readonly kind: 'group'; readonly projectId: ProjectId }
@@ -47,8 +46,6 @@ export interface SessionsPanelProps {
   readonly selectedKey: string | null;
   /** What each chat row shows; a fresh row shows none. */
   readonly states: ReadonlyMap<string, RowState>;
-  /** Recently closed sessions, newest first. */
-  readonly closed: readonly ClosedChat[];
   readonly onSelect: (row: PanelRow) => void;
   readonly onClose: (row: PanelRow) => void;
   readonly onNew: () => void;
@@ -58,7 +55,6 @@ export interface SessionsPanelProps {
   readonly onMakeTask: (row: PanelRow) => void;
   /** A session was dragged to the place of another in its project. */
   readonly onReorder: (chat: ChatDto, position: number) => void;
-  readonly onReopen: (entry: ClosedChat) => void;
   /** A session a search found: closed and archived ones come back first. */
   readonly onOpenFound: (chat: ChatDto) => void;
 }
@@ -70,15 +66,12 @@ function Group_({
   name,
   projectsKnown,
   open,
-  count,
   onToggle,
 }: {
   readonly name: string;
   /** Whether the project list has arrived; until it has, a group's name is unknown, not removed. */
   readonly projectsKnown: boolean;
   readonly open: boolean;
-  /** How many sessions it holds, shown while it is folded. */
-  readonly count: number;
   readonly onToggle: () => void;
 }): ReactNode {
   const label = name !== '' ? name : projectsKnown ? REMOVED_PROJECT : '';
@@ -90,16 +83,12 @@ function Group_({
       data-open={open ? '' : undefined}
       onClick={onToggle}
     >
-      {name === '' ? null : <ProjectTile name={name} size={14} />}
+      {open ? (
+        <IconFolderOpen size={16} stroke={1.5} className={classes['folder']} aria-hidden="true" />
+      ) : (
+        <IconFolder size={16} stroke={1.5} className={classes['folder']} aria-hidden="true" />
+      )}
       <span className={classes['groupName']}>{label}</span>
-      {open ? null : <span className={classes['groupCount']}>{count}</span>}
-      <IconChevronDown
-        size={12}
-        stroke={2}
-        className={classes['chevron']}
-        data-open={open ? '' : undefined}
-        aria-hidden="true"
-      />
     </div>
   );
 }
@@ -135,11 +124,11 @@ function Found({
 
 /**
  * The Sessions panel (shell spec §1.3): every open session by project, a search across all of them, a
- * right-click menu, drag to reorder and the last five closed at the foot. Past 200 rows only the rows in
+ * right-click menu and drag to reorder; Recently closed is the title switcher's. Past 200 rows only the rows in
  * view are drawn, and drag is off, since a row that is not drawn cannot be a drop.
  */
 export function SessionsPanel(props: SessionsPanelProps): ReactNode {
-  const { groups, projects, selectedKey, states, closed } = props;
+  const { groups, projects, selectedKey, states } = props;
   const [query, setQuery] = useState('');
   const [menu, setMenu] = useState<{
     readonly row: PanelRow;
@@ -284,7 +273,6 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
       name={nameOf(g.projectId)}
       projectsKnown={projects.length > 0}
       open={isOpen(g)}
-      count={g.rows.filter((r) => r.kind === 'chat').length}
       onToggle={() => {
         toggle(g.projectId);
       }}
@@ -405,30 +393,6 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
             </DndContext>
           )}
         </div>
-        {closed.length === 0 ? null : (
-          <Box
-            pt={10}
-            mt={4}
-            style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}
-          >
-            <Text size="xs" fw={600} c="dimmed" px={12} pb={4}>
-              Recently closed
-            </Text>
-            {closed.map((entry) => (
-              <UnstyledButton
-                key={entry.chatId}
-                className={classes['row']}
-                onClick={() => {
-                  props.onReopen(entry);
-                }}
-                aria-label={`Reopen ${entry.title}`}
-              >
-                <ProjectTile name={nameOf(entry.projectId)} size={14} />
-                <span className={classes['title']}>{entry.title}</span>
-              </UnstyledButton>
-            ))}
-          </Box>
-        )}
       </Box>
       <Menu
         opened={menu !== null}

@@ -114,22 +114,29 @@
   align-items: center;
   gap: 6px;
   width: 100%;
-  padding: 12px 12px 6px;
-  font-size: var(--mantine-font-size-xs);
-  /* 12 + 16 + 6 is the virtual list's group height. */
-  line-height: 16px;
-  font-weight: 600;
+  /* As tall and as wide as a session row, so their fills line up; the virtual list's group height. */
+  height: 32px;
+  padding-inline: 12px;
+  font-size: var(--mantine-font-size-sm);
+  font-weight: 500;
   color: var(--mantine-color-dimmed);
   border-radius: var(--mantine-radius-md);
-}
-
-.group {
   cursor: pointer;
   user-select: none;
 }
 
 .group:hover {
+  background: var(--panel-row-hover, var(--mantine-color-default-hover));
+}
+
+/* An open project reads in the text colour, a folded one stays dim: the folder says which. */
+.group[data-open],
+.group:hover {
   color: var(--mantine-color-text);
+}
+
+.folder {
+  flex: none;
 }
 
 .groupName {
@@ -141,26 +148,7 @@
   text-align: left;
 }
 
-.groupCount {
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-
-/* The fold's chevron shows under the pointer and while the group is folded, pointing right when it is. */
-.chevron {
-  flex: none;
-  opacity: 0;
-  transform: rotate(-90deg);
-  transition:
-    opacity 120ms ease,
-    transform 120ms ease;
-}
-
-.chevron[data-open] {
-  transform: none;
-}
-
-.group:hover .chevron,
-.group:not([data-open]) .chevron {
-  opacity: 1;
+/* A session sits under its project's folder: its text starts where the project's name does (12 + 16 + 6). */
+.nested {
+  padding-left: 34px;
 }

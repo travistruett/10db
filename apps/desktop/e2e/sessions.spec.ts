@@ -401,6 +401,11 @@ test('a session on a new branch: the first change asks, the move cuts a worktree
   await page.getByRole('button', { name: /^Changes/ }).click();
   const drawer = page.getByRole('dialog', { name: 'Changes' });
   await expect(drawer.getByText('notes.md').first()).toBeVisible();
+  // Every file is a fold, and the first starts open.
+  await expect(drawer.getByRole('button', { name: /^[MADR] notes\.md/ })).toHaveAttribute(
+    'aria-expanded',
+    'true',
+  );
   await scan(page, [1280], 'the Changes drawer');
   // Esc closes the drawer while focus is inside it; the scan's last click left it on the rail's toggle.
   await drawer.focus();

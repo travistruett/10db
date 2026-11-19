@@ -1,0 +1,60 @@
+/* A file's fold header: the panel's group label in the diff's type, sticky while its diff scrolls under it. */
+.head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 0;
+  background: var(--mantine-color-body);
+  font-family: var(--mantine-font-family-monospace);
+  font-size: var(--mantine-font-size-xs);
+  line-height: 16px;
+  color: var(--mantine-color-dimmed);
+  transition: color 120ms ease;
+}
+
+.head:hover,
+.head[aria-expanded='true'] {
+  color: var(--mantine-color-text);
+}
+
+.head:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: -2px;
+}
+
+.chevron {
+  flex: none;
+  transform: rotate(-90deg);
+  transition: transform 120ms ease;
+}
+
+.chevron[data-open] {
+  transform: none;
+}
+
+.status {
+  flex: none;
+  color: var(--mantine-color-dimmed);
+}
+
+.path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+.head[aria-expanded='true'] .path {
+  font-weight: 600;
+}
+
+.lines {
+  flex: none;
+  color: var(--mantine-color-dimmed);
+}
