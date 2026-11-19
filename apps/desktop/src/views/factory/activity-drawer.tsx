@@ -79,16 +79,17 @@ function ActivityList({ project }: { readonly project: ProjectId | null }) {
   const all = rows.rows.map(activityRowOf);
   const open = openKey === null ? null : (all.find((row) => row.key === openKey) ?? null);
   // Focus follows the switch between the list and a notice, so it never falls out of the drawer (where Esc
-  // closes it): to the way back when a notice opens, and to the row it came from on the way back.
+  // closes it): to the way back when a notice opens, and to the row it came from on the way back. It runs only
+  // on the switch (the keys are strings), never on a render that keeps the same view.
   useEffect(() => {
     const target =
-      open !== null
+      openKey !== null
         ? root.current?.querySelector<HTMLElement>('[data-activity-back]')
         : backTo === null
           ? null
           : root.current?.querySelector<HTMLElement>(`[data-activity-key="${CSS.escape(backTo)}"]`);
     target?.focus();
-  }, [open, backTo]);
+  }, [openKey, backTo]);
   if (open !== null)
     return (
       <Stack gap="md" ref={root}>
@@ -115,6 +116,8 @@ function ActivityList({ project }: { readonly project: ProjectId | null }) {
         size="xs"
         placeholder="Search"
         aria-label="Search activity"
+        // The daemon takes at most 200 characters of search.
+        maxLength={200}
         leftSection={<IconSearch size={14} stroke={1.6} />}
         value={text}
         onChange={(event) => {
