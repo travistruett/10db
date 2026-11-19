@@ -1,14 +1,22 @@
-/* The window's frame: two columns under one bar. The bar is the top 44 px across the whole window, bg1, with a
-   hairline under it: the traffic lights and the sidebar button at its left, then each column's head (the
-   panel's, then the content's title row) above its column. The rail and panel are bg1 below it, the content
-   bg0. Hairlines divide the columns; there is no inset card. The grid's columns are set inline from the layout.
-   Three tones step down from the rail to the content: the rail and the bar, the panel half a step darker, then the
-   content, so each column reads as its own layer without more lines. */
+/* The window's frame: the bar across the top 44 px and the rail down the left, one tone (bg1), round a rounded
+   content box that holds the panel and the content. The bar carries the traffic lights and the sidebar button,
+   then each column's head (the panel's, then the content's title row) above its column. The box sits a gutter in
+   from the window's right and bottom edges; its edge is one hairline and one faint inner shade. Inside it the
+   panel is half a step darker than the frame and the content is bg0, divided by the panel's hairline. The grid's
+   columns are set inline from the layout. */
 .root {
   /* A column's hairline in the bar is a short divider, centred with this much room above and below it; the
      line goes on under the bar. */
   --shell-bar-height: 44px;
   --shell-bar-divider-inset: 12px;
+  --shell-gutter: 4px;
+  --shell-box-radius: 10px;
+  /* The box's inner shade: a darker shade of the content's own tone, faint and narrow. */
+  --shell-inset-shade: color-mix(
+    in srgb,
+    color-mix(in srgb, var(--mantine-color-body), black 45%) 40%,
+    transparent
+  );
   position: relative;
   display: grid;
   height: 100dvh;
@@ -25,13 +33,12 @@
   background: var(--mantine-color-default);
 }
 
-/* The rail's part of the bar, where the traffic lights sit. The rail's hairline starts under it, so the lights
-   and the sidebar button read as one group where the icons-only rail is narrower than them. */
+/* The rail's part of the bar, where the traffic lights sit. The rail and the bar are one surface: no line
+   divides them, and the box's edge is the rail's right edge below the bar. */
 .railDrag {
   position: relative;
   flex: none;
   height: 44px;
-  border-bottom: 1px solid var(--mantine-color-default-border);
 }
 
 /* A labelled rail is wider than the lights and the button, so its hairline runs up through the bar too. */
@@ -50,6 +57,10 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/* A rail sheet stands over the box, so it draws its own edge. */
+.rail[data-sheet] > .railBody {
   border-right: 1px solid var(--mantine-color-default-border);
 }
 
@@ -65,7 +76,13 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: color-mix(in srgb, var(--mantine-color-default) 50%, var(--mantine-color-body));
+  /* The panel's own tone is on its body, so the box's corner under the head shows the frame round it. */
+  background: var(--mantine-color-default);
+  --shell-panel-tone: color-mix(
+    in srgb,
+    var(--mantine-color-default) 50%,
+    var(--mantine-color-body)
+  );
   /* A selected row on the panel's own tone takes the next tone up, and hover shows in dark. */
   --mantine-primary-color-light: var(--mantine-color-default-hover);
   --mantine-primary-color-light-color: var(--mantine-color-bright);
@@ -81,15 +98,24 @@
   min-width: 0;
   padding-right: 12px;
   background: var(--mantine-color-default);
-  border-bottom: 1px solid var(--mantine-color-default-border);
 }
 
-/* The panel column and the content beside it. Not positioned, so a sheet inside it is placed against the
-   frame. */
+/* A panel column is the box's left part: its corners are the box's, and the box's edge is the line under its
+   head. */
+.panel[data-panel='column'] {
+  border-bottom-left-radius: var(--shell-box-radius);
+  --shell-panel-corner: var(--shell-box-radius);
+  --shell-panel-head-rule: none;
+}
+
+/* The panel column and the content beside it, a gutter in from the window's right and bottom. Not positioned,
+   so a sheet inside it is placed against the frame. */
 .split {
   grid-column: 2;
   min-width: 0;
   min-height: 0;
+  padding-right: var(--shell-gutter);
+  padding-bottom: var(--shell-gutter);
 }
 
 .panelPane {
@@ -159,14 +185,31 @@
   min-height: 0;
   overflow: hidden;
   background: var(--mantine-color-body);
-  /* A faint, narrow inner shadow along the top and left, in a darker shade of the content's own tone, so the
-     content reads as set just under the bar and the sidebar. Every view gets it; none draws its own. */
-  --shell-inset-shade: color-mix(
-    in srgb,
-    color-mix(in srgb, var(--mantine-color-body), black 45%) 40%,
-    transparent
-  );
-  box-shadow: inset 1px 1px 3px var(--shell-inset-shade);
+  border-radius: 0 var(--shell-box-radius) var(--shell-box-radius) var(--shell-box-radius);
+}
+
+/* Beside a panel column the content is the box's right part, so only its right corners are rounded. */
+.split[data-panel-column] .content {
+  border-bottom-left-radius: 0;
+}
+
+.split:not([data-panel-column]) .content {
+  border-top-left-radius: var(--shell-box-radius);
+}
+
+/* Drawn over the box, never taking a press: its hairline lies on the box's outline and its shade inside all four
+   edges. Every view gets it; none draws its own edge shade. Sheets and their backdrop stand over it. */
+.boxEdge {
+  position: absolute;
+  top: var(--shell-bar-height);
+  right: var(--shell-gutter);
+  bottom: var(--shell-gutter);
+  z-index: 18;
+  pointer-events: none;
+  border-radius: var(--shell-box-radius);
+  box-shadow:
+    0 0 0 1px var(--mantine-color-default-border),
+    inset 0 0 3px var(--shell-inset-shade);
 }
 
 /* Inside the column, what a view fills: it holds the scroll, so the window never scrolls. */

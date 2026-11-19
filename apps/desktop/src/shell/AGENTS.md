@@ -3,16 +3,22 @@
 The window's frame and the parts every view shares. Design: `DESIGN.md` (Navigation, Page header, Surfaces,
 Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
 
-- `AppFrame` (`app-frame.tsx`, `app-frame.module.css`) is a CSS grid of two columns under one bar: the top 44 px
-  across the window, bg1 with a hairline under it, is the rail's part (the traffic lights), the panel's head and the
-  content's title row (`decisions/2026-11-18-the-window-has-one-bar-and-one-sidebar-button.md`). Below it the
-  sidebar (a rail and a panel, bg1) and the content (bg0). There is no inset card; hairlines divide the columns. The
-  labelled rail's runs up through the bar, as the panel's does, as a short divider centred in the bar with 12 px above and below (`--shell-bar-divider-inset`), then on under it; the icons-only rail's starts under it, since the
-  lights and the sidebar button are wider than that rail. The traffic lights sit at y 20, centred on the bar with
-  the button. Lists in the panel and the rail scroll without a scrollbar. The content has the one inner shadow, faint and 3 px wide, in a darker shade of its own tone; a view never draws its own edge shade. Three tones step down: the bar and the rail bg1, the panel half way to bg0, the
-  content bg0. The rail's foot holds the status controls and Settings; the theme and keep-awake are set in Settings ›
-  App. The window never scrolls; the content is exactly
-  the window's height and scrolls inside it, and it is its own stacking context so a sheet always stands over it.
+- `AppFrame` (`app-frame.tsx`, `app-frame.module.css`) is the frame: one bar across the top 44 px and the rail down
+  the left, one surface on bg1 with no line between them, round a rounded content box
+  (`decisions/2026-11-19-the-content-sits-in-a-rounded-box.md`). The bar holds the traffic lights, the sidebar
+  button, the panel's head and the content's title row (`decisions/2026-11-18-the-window-has-one-bar-and-one-sidebar-button.md`).
+  The box holds the panel column and the content, starts at the rail column's edge under the bar (a gutter in from
+  the window where there is no rail column) and stops a 4 px gutter (`--shell-gutter`, `GUTTER`) short of the
+  window's right and bottom. Its edge is `.boxEdge`, drawn over it and never taking a press: one hairline on its
+  outline and one faint 3 px inner shade, in a darker shade of the content's tone, inside all four edges. A view
+  never draws its own edge shade. Inside, the panel's body is half way from bg1 to bg0 and the content bg0, divided
+  by the panel's hairline; a column's hairline crosses the bar as a short divider centred in it, 12 px clear above
+  and below (`--shell-bar-divider-inset`), for the labelled rail and the panel. Sheets draw their own edges and
+  stand over the box. The traffic lights sit at y 20, centred on the bar with the button in the installed app.
+  Lists in the panel and the rail scroll without a scrollbar. The rail's foot holds the status controls and
+  Settings; the theme and keep-awake are set in Settings › App. The window never scrolls; the content is exactly
+  the window's height less the bar and the gutter and scrolls inside it, and it is its own stacking context so a
+  sheet always stands over it.
   Rail widths (200 labelled, 60 icons only) and the title row's height (44 px) are constants there.
 - The panel column and the content are a Mantine `Splitter`: the panel's hairline is the handle, and the builder
   drags the panel between 260 and 480 px (340 until dragged, and again on a double-click of the handle; `PANEL_WIDTH` and its bounds in `shell-layout.ts`).

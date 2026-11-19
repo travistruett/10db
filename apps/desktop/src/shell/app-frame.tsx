@@ -47,6 +47,8 @@ const TOGGLE_LEFT_LABELLED = RAIL_LABELLED_WIDTH - 8 - 8 - 6 - 16;
 const TOGGLE_TOP = 8;
 /** Where the bar's text may start: clear of the traffic lights and the sidebar button. */
 const BAR_START = 128;
+/** The frame's margin round the content box, right and bottom (and left, where no rail column is beside it). */
+const GUTTER = 4;
 
 /** An open menu or list of options takes Esc first, so the sheet around it stays open. */
 const aMenuIsOpen = (): boolean =>
@@ -231,9 +233,11 @@ export function AppFrame({
     PANEL_HEAD_PADDING,
     BAR_START - (panelColumn ? columnWidth : panelSheetLeft),
   );
+  // The box starts at the rail column's edge, or a gutter in from the window's where there is none.
+  const boxLeft = columnWidth === 0 ? GUTTER : columnWidth;
   const titleStart = Math.max(
     CONTENT_PADDING,
-    BAR_START - columnWidth - (panelColumn ? panelWidth + HAIRLINE : 0),
+    BAR_START - boxLeft - (panelColumn ? panelWidth + HAIRLINE : 0),
   );
 
   const railStyle: CSSProperties =
@@ -309,6 +313,9 @@ export function AppFrame({
               if (panelSize !== undefined) setPanelWidth(parseFloat(String(panelSize)));
             }}
             mod={{ 'panel-column': panelColumn }}
+            style={{ paddingLeft: boxLeft - columnWidth }}
+            // Only the gutters are the Splitter's own box; a press on anything inside it targets that thing.
+            data-tauri-drag-region
           >
             {/* Only a panel column takes the pane's room: a sheet stands over the frame, and a hidden or absent
                 panel takes none. */}
@@ -344,6 +351,8 @@ export function AppFrame({
               </div>
             </Splitter.Pane>
           </Splitter>
+          {/* The content box's edge: one hairline and one faint inner shade round the panel and the content. */}
+          <div className={classes['boxEdge']} style={{ left: boxLeft }} aria-hidden="true" />
           {sheetOpen ? (
             <div
               className={classes['backdrop']}
