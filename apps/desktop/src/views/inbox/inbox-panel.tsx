@@ -81,7 +81,7 @@ export function InboxPanel({
               {
                 value: InboxListState.Open,
                 label: (
-                  <Group gap={5} wrap="nowrap" justify="center">
+                  <Group gap={5} wrap="nowrap" justify="center" align="baseline">
                     Open
                     {open > 0 ? <SwitchCount count={open} /> : null}
                   </Group>
@@ -90,7 +90,7 @@ export function InboxPanel({
               {
                 value: InboxListState.Waiting,
                 label: (
-                  <Group gap={5} wrap="nowrap" justify="center">
+                  <Group gap={5} wrap="nowrap" justify="center" align="baseline">
                     Waiting
                     {showWaiting ? <SwitchCount count={waiting} /> : null}
                   </Group>
