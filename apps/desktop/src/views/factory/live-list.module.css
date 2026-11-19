@@ -90,6 +90,13 @@
   color: var(--mantine-color-dimmed);
 }
 
+.projectName {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .when {
   flex: none;
   width: 64px;

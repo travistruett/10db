@@ -5,14 +5,22 @@ import {
   type ProjectViewDto,
   type WorkstreamDto,
 } from '@10db/contracts';
-import { Button, Stack, Text, UnstyledButton } from '@mantine/core';
+import { Alert, Button, Stack, Text, UnstyledButton } from '@mantine/core';
 import { IconTools } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import { livePassesOptions } from '../../daemon/pass-queries';
 import { useDaemon } from '../../daemon/provider';
-import { useInbox, useRetryWorkstream, useWorkstreams } from '../../daemon/queries';
+import {
+  useBatchesOfProjects,
+  useInbox,
+  useRetryWorkstream,
+  useTasksOfProjects,
+  useWorkstreams,
+} from '../../daemon/queries';
+import { canRetryRun } from '../board/task-state';
+import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { useNow } from '../../shell/relative';
 import { ProjectTile } from '../../shell/project-tile';
 import { useSelectedProject } from '../../shell/selected-project';
@@ -90,7 +98,7 @@ function Row({
         <span className={classes['detail']}>{detail}</span>
         <span className={classes['project']}>
           <ProjectTile name={project} size={14} />
-          {project}
+          <span className={classes['projectName']}>{project}</span>
         </span>
         <span className={classes['when']}>{when}</span>
       </UnstyledButton>
@@ -136,14 +144,29 @@ export function LiveList({
   const { client } = useDaemon();
   const { select } = useSelectedProject();
   const navigate = useNavigate();
-  const all = useWorkstreams({ active: false }).data ?? [];
-  const passes = useQuery(livePassesOptions(client)).data ?? [];
+  const runs = useWorkstreams({ active: false });
+  const passesRead = useQuery(livePassesOptions(client));
+  const ids = projects.map((p) => p.id);
+  const taskLists = useTasksOfProjects(ids);
+  const batchLists = useBatchesOfProjects(ids);
+  const all = runs.data ?? [];
+  const passes = passesRead.data ?? [];
+  const tasks = new Map(taskLists.flatMap((q) => q.data ?? []).map((t) => [t.id, t]));
+  const batches = new Map(batchLists.flatMap((q) => q.data ?? []).map((b) => [b.id, b]));
+  // A page's run is the pass's row (the Workbench's everywhere else), never a row of its own.
+  const heldByPass = new Set(
+    passes
+      .filter((view) => passHoldsTasks(view.pass.state))
+      .flatMap((view) => view.pages.map((p) => p.taskId)),
+  );
   const inbox = useInbox().data ?? [];
   const retry = useRetryWorkstream();
   const nameOf = (id: ProjectId): string => projects.find((p) => p.id === id)?.name ?? '';
   const inView = (id: ProjectId): boolean => filter === null || id === filter;
   const groups = liveGroups(
     all.filter((ws) => inView(ws.projectId)),
+    tasks,
+    heldByPass,
     now,
   );
   const live = passes.filter(
@@ -159,6 +182,12 @@ export function LiveList({
     );
     return { view, waiting };
   });
+  // Retry shows only where the daemon takes it, as everywhere Retry is offered.
+  const canRetryHere = (ws: WorkstreamDto): boolean => {
+    const task = tasks.get(ws.taskId);
+    const batch = ws.batchId === null ? undefined : batches.get(ws.batchId);
+    return task !== undefined && canRetryRun(task, ws, batch);
+  };
   const open = (ws: WorkstreamDto): void => {
     select(ws.projectId);
     void navigate({ to: '/board', search: { task: ws.taskId } });
@@ -186,6 +215,16 @@ export function LiveList({
     />
   );
 
+  if (runs.isError) {
+    return (
+      <Alert color="red" title="Couldn't load the runs">
+        {runs.error.message}
+      </Alert>
+    );
+  }
+  if (runs.isPending || passesRead.isPending) {
+    return <PageLoading shape={PageLoadingShape.List} rows={4} label="Loading the runs" />;
+  }
   if (groups.length === 0 && passRows.length === 0) {
     return (
       <Stack align="flex-start" gap="xs" className={classes['empty']}>
@@ -216,6 +255,18 @@ export function LiveList({
 
   return (
     <Stack gap="lg" className={classes['list']}>
+      {retry.error === null ? null : (
+        <Alert
+          color="red"
+          title="Couldn't retry the run"
+          withCloseButton
+          onClose={() => {
+            retry.reset();
+          }}
+        >
+          {retry.error.message}
+        </Alert>
+      )}
       {sections.map(({ group, rows }) => {
         const extra =
           group === LiveGroup.NeedsYou
@@ -235,7 +286,7 @@ export function LiveList({
                 detail={doing(ws)}
                 when={shortAgo(lastMoment(ws), now)}
                 action={
-                  ws.state === S.Failed ? (
+                  canRetryHere(ws) ? (
                     <Button
                       size="compact-xs"
                       variant="default"

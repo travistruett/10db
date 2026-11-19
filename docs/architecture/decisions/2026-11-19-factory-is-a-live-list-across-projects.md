@@ -6,14 +6,17 @@
 ## Decision
 
 Factory's page, under **Live**, is one list of every project's runs (narrowed by its Project filter), in
-sections by what the builder would do about them: Needs You, Failed, Running, Queued, Done Today. A section
+sections by what the builder would do about them: Needs You, Failed, Running, In Review, Waiting, Done Today. A section
 with nothing in it is left out, and with nothing going on the page says "Nothing is running" with Plan Work.
 
-- Each task shows its latest run only, so a retried failure leaves Failed. Failed shows for a week and Done
-  Today for 24 hours, both measured from the run's last activity, or its last change when it has none.
+- Each task shows its latest run only (the task's own latest run, else the run made last), so a run started
+  over leaves Failed. Failed shows for a week, unless its task was closed, and Done Today for 24 hours, both
+  from the run's finish. A finished run whose pull request is still open is In Review, never Done (DESIGN.md:
+  green is only for merged work). A question out with someone else is Waiting, not Needs You.
+- Runs of tasks a live UI Workbench pass holds are the pass's row only, never rows of their own.
 - A row reads: status dot, the task, what it is doing (its step, the failure, what it waits for), its
   project's tile and name, and how long ago. It opens the task on its project's Board. A failed row has
-  Retry beside it.
+  Retry beside it where the daemon would take one (`canRetryRun`), and a refused Retry says why.
 - A live UI Workbench pass is a row under Needs You while pages wait on the builder, else under Running.
 - Goals are a **Goals** section under the list, each project's goals under its name, opening their digest as
   before. With no goals anywhere there is no section and no text about goals. The Not in a goal row is gone:

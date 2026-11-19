@@ -128,6 +128,21 @@ export function useTasksOfProjects(projectIds: readonly ProjectId[]) {
   });
 }
 
+/** The batches of several projects at once, in the order given; the entries share the cache of `useBatches`. */
+export function useBatchesOfProjects(projectIds: readonly ProjectId[]) {
+  const { client } = useDaemon();
+  return useQueries({
+    queries: projectIds.map((projectId) => ({
+      queryKey: queryKeys.batches(projectId),
+      queryFn: async () =>
+        readJson(
+          await client.projects[':projectId'].batches.$get({ param: { projectId } }),
+          BatchList,
+        ),
+    })),
+  });
+}
+
 /** Every batch of the project, newest first; the board lists them and finds each shipped pull request. */
 export function useBatches(projectId: ProjectId | null) {
   const { client } = useDaemon();

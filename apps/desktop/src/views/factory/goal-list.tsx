@@ -15,8 +15,6 @@ import { GOAL_STATUS_LOOK } from '../board/goal-status';
 import { groupGoals, verdictLine } from './goal-status';
 import { shortAgo } from './short-ago';
 
-/** The row key of the Not in a goal group, beside the goals' ids. */
-
 /** "· 3 new since 3h ago": plain text, with no badge, when the goal has items in its window. */
 function newsOf(summary: GoalSummaryDto, now: number): string | undefined {
   if (summary.newItems === 0) return undefined;
