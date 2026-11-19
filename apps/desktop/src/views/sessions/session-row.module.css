@@ -115,6 +115,8 @@
   gap: 6px;
   padding: 12px 12px 6px;
   font-size: var(--mantine-font-size-xs);
+  /* 12 + 16 + 6 is the virtual list's group height. */
+  line-height: 16px;
   font-weight: 600;
   color: var(--mantine-color-dimmed);
 }

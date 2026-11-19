@@ -65,11 +65,18 @@ export interface SessionsPanelProps {
 /** The sessions of a project that is no longer in the list are grouped under these words, with no mark. */
 const REMOVED_PROJECT = 'Removed project';
 
-function Group_({ name }: { readonly name: string }): ReactNode {
+function Group_({
+  name,
+  projectsKnown,
+}: {
+  readonly name: string;
+  /** Whether the project list has arrived; until it has, a group's name is unknown, not removed. */
+  readonly projectsKnown: boolean;
+}): ReactNode {
   return (
     <div className={classes['group']} role="presentation">
       {name === '' ? null : <ProjectTile name={name} size={14} />}
-      <span>{name === '' ? REMOVED_PROJECT : name}</span>
+      <span>{name !== '' ? name : projectsKnown ? REMOVED_PROJECT : ''}</span>
     </div>
   );
 }
@@ -230,7 +237,7 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
     <div role="listbox" aria-label="Sessions" style={{ outline: 'none' }}>
       {groups.map((g) => (
         <div key={g.projectId} role="presentation">
-          <Group_ name={nameOf(g.projectId)} />
+          <Group_ name={nameOf(g.projectId)} projectsKnown={projects.length > 0} />
           {g.rows.map(renderRow)}
         </div>
       ))}
@@ -259,7 +266,11 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
               transform: `translateY(${String(v.start)}px)`,
             }}
           >
-            {item.kind === 'group' ? <Group_ name={nameOf(item.projectId)} /> : renderRow(item.row)}
+            {item.kind === 'group' ? (
+              <Group_ name={nameOf(item.projectId)} projectsKnown={projects.length > 0} />
+            ) : (
+              renderRow(item.row)
+            )}
           </div>
         );
       })}

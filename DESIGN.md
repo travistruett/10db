@@ -159,8 +159,7 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   own controls (Dismiss, ⋯) show on hover and on the selected row.
 - **Create buttons:** a button that makes a new thing in a list (Add Page, Add Task) is `CreateButton`
   (`shell/create-button.tsx`): a dashed slot with a + tile and the thing's name. Hovered, it fills, its border
-  firms up and its + turns primary; pressed, it sinks a pixel; a shortcut it has shows while hovered or focused.
-  Never restyle a `Button` with a dashed border by hand.
+  firms up and its + turns primary; pressed, it sinks a pixel. Never restyle a `Button` with a dashed border by hand.
 - **Buttons:** one filled primary per group. A standalone secondary action is `variant="default"`
   (bordered, neutral); `subtle` only inside dense rows and menus; never `outline` beside a filled
   primary, where its colored border competes with it.

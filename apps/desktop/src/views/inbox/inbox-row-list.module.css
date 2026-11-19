@@ -43,7 +43,7 @@
 
 .row:hover,
 .row[data-hovered] {
-  /* Outside a panel (the Activity drawer) the half step is see-through, so it suits any surface. */
+  /* Outside a panel (a screen frame) the half step is see-through, so it suits any surface. */
   background: var(
     --panel-row-hover,
     color-mix(in srgb, var(--mantine-color-default-hover) 50%, transparent)

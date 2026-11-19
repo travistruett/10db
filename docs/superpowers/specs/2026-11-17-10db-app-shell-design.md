@@ -44,16 +44,16 @@ titles where your eye expects them. Sessions stops filling the title bar with ta
 
 **What could go wrong, and how we'd know.**
 
-- *Icons without labels slow you down at first.* Tooltips open after 300 ms, and the badges stay. If you still
+- _Icons without labels slow you down at first._ Tooltips open after 300 ms, and the badges stay. If you still
   hunt for a section after a week, the panel can show the section's name larger, or the rail can grow labels at
   wide widths. That's a follow-up, not this build.
-- *The Workbench beside your browser (420–520 px) gets cramped.* The rail folds under 640 px, so at 480 px the
+- _The Workbench beside your browser (420–520 px) gets cramped._ The rail folds under 640 px, so at 480 px the
   content gets the whole width less a 6 px margin. Its queue strip stays on top, as Workbench §4.3 asks. An e2e
   measures the Workbench at 420, 520, 900 and 1280 px.
-- *Some views lay out by the window's width, not their own.* With a rail and panel, the window no longer says how
+- _Some views lay out by the window's width, not their own._ With a rail and panel, the window no longer says how
   wide the content is. The Workbench and the session composer switch to measuring their container, with a rendered
   test each. Plan already does.
-- *Many tests select today's sidebar, tab strip and header.* About 16 unit files and 5 e2e specs change. Sessions'
+- _Many tests select today's sidebar, tab strip and header._ About 16 unit files and 5 e2e specs change. Sessions'
   tests change most, and change anyway with the simplified sessions.
 
 **Calls you might disagree with.**
@@ -161,33 +161,34 @@ The rest is for the agents building it.
   name (14 px, weight 600), its own controls and, while the panel is a column, a button that hides it. Where a
   section needs one, a second row follows. Sessions has search and New Session in the first row. The Inbox has search and its
   filter menu in the first row, and the `Open · Waiting · Resolved` switch in a second (§4.1).
-- **Rows:** radius `md` and 8 px side padding, at the section's height: one-line rows are 30 px (Sessions, Settings,
-  the Workbench), and the Inbox's two-line rows are 52 px. The selected row takes the `bg2` fill.
+- **Rows:** radius `md` and 12 px side padding, at the section's height: one-line rows are 32 px (Sessions), and
+  two-line rows are 64 px (the Inbox) or as tall as their state line (the Workbench's pages). The selected row takes
+  the `bg2` fill and a hovered one half of it (DESIGN.md, Panel lists).
 - **Group labels:** 11.5 px, weight 600, dim, with an optional 14 px project tile.
 - **Narrow layouts:** the panel's list is the content's own state, not the shell's. The shell asks each view for a
   `panel` element and draws it, in the column or in a sheet (§2). Hiding it at 1000 px and over works three ways:
   ⌘\, a click on the open section's rail item, or the head's button.
 - **Who has a panel:**
 
-| Section | Panel | Content |
-|---|---|---|
-| Inbox (Open, Waiting, Resolved) | the state's rows, email-style, paged (§4.1) | the selected item |
-| Sessions | sessions by project, then Recently closed | the session (Sessions spec) |
-| UI Workbench, a pass open | the pass's pages (today's queue) | the page's thread |
-| UI Workbench, start page | none | today's start page |
-| Settings | today's `SettingsNav` | the section |
-| Factory, Board, Plan, Knowledge | none | full width |
+| Section                         | Panel                                       | Content                     |
+| ------------------------------- | ------------------------------------------- | --------------------------- |
+| Inbox (Open, Waiting, Resolved) | the state's rows, email-style, paged (§4.1) | the selected item           |
+| Sessions                        | sessions by project, then Recently closed   | the session (Sessions spec) |
+| UI Workbench, a pass open       | the pass's pages (today's queue)            | the page's thread           |
+| UI Workbench, start page        | none                                        | today's start page          |
+| Settings                        | today's `SettingsNav`                       | the section                 |
+| Factory, Board, Plan, Knowledge | none                                        | full width                  |
 
 ### 1.4 Panel lists and performance
 
 A panel list that can grow without limit pages and virtualises. A bounded one renders whole.
 
-| Panel | Grows without limit? | How it loads |
-|---|---|---|
-| Inbox, every state | yes | cursor pages of 50, on scroll; virtualised (§4.1) |
-| Sessions | the sessions you keep open: bounded in practice | the open list renders whole up to 200 rows, then virtualises. Search reads every session (open, closed and archived) from the daemon, paged |
-| Workbench pages | no (a pass's pages) | whole |
-| Settings sections | no | whole |
+| Panel              | Grows without limit?                            | How it loads                                                                                                                                |
+| ------------------ | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| Inbox, every state | yes                                             | cursor pages of 50, on scroll; virtualised (§4.1)                                                                                           |
+| Sessions           | the sessions you keep open: bounded in practice | the open list renders whole up to 200 rows, then virtualises. Search reads every session (open, closed and archived) from the daemon, paged |
+| Workbench pages    | no (a pass's pages)                             | whole                                                                                                                                       |
+| Settings sections  | no                                              | whole                                                                                                                                       |
 
 - A list keeps its previous rows on screen while a refetch or filter change is on its way. It never drops to a
   loading state it already left (#651's rule).
@@ -227,11 +228,11 @@ drawer, from the content column's right edge, flush to the window.
 
 These are measured on the window, because the shell decides them:
 
-| Window | Rail (labels on, the default) | Rail (labels off) | Panel | ⇧⌘S does | ⌘\ does |
-|---|---|---|---|---|---|
-| ≥ 1000 px | labelled, 200 | icons, 76 | a column beside the rail, 260, where the section has one | switches labels and icons, remembered in `tendb.shell.labels` | hides or shows the panel (per section) |
-| 640–999 px | icons, 76 (the preference is kept, not applied) | icons, 76 | folded | opens the labelled rail as a sheet over the content, with the panel beside it where the section has one (460 px); Esc, a click outside or picking a row closes it | opens the panel alone as a sheet beside the icons rail |
-| < 640 px | none | none | folded | opens a sheet: the labelled rail (200) for a section with no panel, or the icons rail and its panel (336) for one with a panel | opens the panel sheet, with the icons rail |
+| Window     | Rail (labels on, the default)                   | Rail (labels off) | Panel                                                    | ⇧⌘S does                                                                                                                                                          | ⌘\ does                                                |
+| ---------- | ----------------------------------------------- | ----------------- | -------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| ≥ 1000 px  | labelled, 200                                   | icons, 76         | a column beside the rail, 260, where the section has one | switches labels and icons, remembered in `tendb.shell.labels`                                                                                                     | hides or shows the panel (per section)                 |
+| 640–999 px | icons, 76 (the preference is kept, not applied) | icons, 76         | folded                                                   | opens the labelled rail as a sheet over the content, with the panel beside it where the section has one (460 px); Esc, a click outside or picking a row closes it | opens the panel alone as a sheet beside the icons rail |
+| < 640 px   | none                                            | none              | folded                                                   | opens a sheet: the labelled rail (200) for a section with no panel, or the icons rail and its panel (336) for one with a panel                                    | opens the panel sheet, with the icons rail             |
 
 - A sheet is the sidebar over the content from the window's top to its bottom (the traffic lights and the toggle sit
   on it), bg1 with an `8px 0 24px` shadow and a 1 px right edge; the content dims behind it. Content widths: 1440
@@ -246,6 +247,7 @@ These are measured on the window, because the shell decides them:
   - `task-tab.tsx:60`, where Changes opened by itself, which becomes a drawer in the Sessions spec.
 
   Sessions' narrow rules (`strip-layout.ts`) go with the tab strip.
+
 - **The Workbench's queue strip** shows exactly when the panel isn't shown: folded, or hidden with ⌘\. It never
   depends on a width. The queue is never drawn twice.
 - **The title row** starts at the content's left edge plus 24 px at every width but one: under 640 px the traffic
@@ -274,6 +276,7 @@ These are measured on the window, because the shell decides them:
 One pattern for all three states: the panel lists the state's rows, and the content shows the selected one.
 
 **The panel's head:**
+
 - "Inbox" and a search field (⌘F when the Inbox is shown).
 - A segmented control `Open n · Waiting n · Resolved`, which replaces today's tabs. The counts follow DESIGN.md's
   counts rule. Resolved shows no count.
@@ -282,6 +285,7 @@ One pattern for all three states: the panel lists the state's rows, and the cont
   the same list.
 
 **A row:** two lines, 8 × 10 px padding, radius `md`. The selected row takes `bg2`.
+
 - Line 1: the kind tag (FLAG, ASK, CHECK…, 9.5 px, weight 700, in the kind's colour), the title (weight 500, fg1,
   one line) and the age (dim). A grouped flag shows "×n" after its title.
 - Line 2 depends on the state:
@@ -293,6 +297,7 @@ One pattern for all three states: the panel lists the state's rows, and the cont
 - A dismissable flag can be dismissed from its row: a hover Dismiss, or `e`. So thin items never need the detail.
 
 **The content:**
+
 - Open: the expanded `InboxCard`, without its `Paper` border and shadow, since the surface is the card now.
   Answering or dismissing selects the next row.
 - Open, where it helps: a question's content adds the session's last three messages (read once, on selection). A
@@ -314,6 +319,7 @@ One pattern for all three states: the panel lists the state's rows, and the cont
   Page-number reads stay for anything else that uses them. Open uses rows grouped by the daemon
   (`2026-11-16-the-open-inbox-is-paged-by-row-and-the-daemon-groups-the-rows.md`): that decision is built in this
   step, before the panel. Pages are 50 rows, held by `useInfiniteQuery`.
+
 - **Lazy load on scroll.** The next page loads when the list is within 10 rows of its end, or when j/k moves the
   selection past what is loaded. A row placeholder shows while it loads; the list never jumps.
 - **Virtualised rows.** The list renders only the rows in view plus an overscan of 10, with `@tanstack/react-virtual`

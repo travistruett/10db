@@ -8,21 +8,17 @@ export const CREATE_SLOT_CLASS = classes['slot'] ?? '';
 
 /**
  * The button that makes a new thing in a list (Add Page, Add Task): a dashed slot with a + and the thing's name in
- * Title Case. Hovered it fills and its + takes the primary colour; pressed it sinks a pixel. A shortcut shows at the
- * end while it is hovered or focused.
+ * Title Case. Hovered it fills and its + takes the primary colour; pressed it sinks a pixel.
  */
 export function CreateButton({
   label,
   onClick,
   disabled = false,
-  shortcut,
   hoverTone,
 }: {
   readonly label: string;
   readonly onClick: () => void;
   readonly disabled?: boolean;
-  /** The keys that do the same, such as ⌘T. */
-  readonly shortcut?: string;
   /** The fill under the pointer where the list is not on a panel's tone, such as a board column's card tone. */
   readonly hoverTone?: string;
 }) {
@@ -39,11 +35,6 @@ export function CreateButton({
         <IconPlus size={13} stroke={2} />
       </span>
       <span className={classes['label']}>{label}</span>
-      {shortcut === undefined ? null : (
-        <span className={classes['shortcut']} aria-hidden="true">
-          {shortcut}
-        </span>
-      )}
     </UnstyledButton>
   );
 }

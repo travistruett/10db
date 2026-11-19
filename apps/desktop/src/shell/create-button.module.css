@@ -46,15 +46,6 @@
   text-overflow: ellipsis;
 }
 
-.shortcut {
-  flex: none;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--mantine-color-dimmed);
-  opacity: 0;
-  transition: opacity 120ms ease;
-}
-
 .button:hover:not(:disabled) {
   border-style: solid;
   border-color: color-mix(
@@ -68,12 +59,8 @@
 
 .button:hover:not(:disabled) .plus {
   background: var(--mantine-primary-color-filled);
-  color: var(--mantine-primary-color-contrast);
-}
-
-.button:hover:not(:disabled) .shortcut,
-.button:focus-visible .shortcut {
-  opacity: 1;
+  /* Text on a filled colour is the scheme's body tone (`theme.ts`). */
+  color: var(--mantine-color-body);
 }
 
 .button:active:not(:disabled) {
