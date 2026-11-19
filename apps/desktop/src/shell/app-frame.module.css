@@ -9,7 +9,6 @@
      line goes on under the bar. */
   --shell-bar-height: 44px;
   --shell-bar-divider-inset: 12px;
-  --shell-gutter: 4px;
   --shell-box-radius: 10px;
   /* The box's inner shade: a darker shade of the content's own tone, faint and narrow. */
   --shell-inset-shade: color-mix(
@@ -52,16 +51,20 @@
   background: var(--mantine-color-default-border);
 }
 
+/* The rail column's last pixel is the box's hairline, so the rail's content keeps clear of it. */
 .railBody {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
+  border-right: 1px solid transparent;
 }
 
-/* A rail sheet stands over the box, so it draws its own edge. */
-.rail[data-sheet] > .railBody {
-  border-right: 1px solid var(--mantine-color-default-border);
+/* A rail sheet stands over the box, and a panel sheet over the box's edge beside the rail, so the rail draws
+   its own edge then. */
+.rail[data-sheet] > .railBody,
+.rail[data-beside-sheet] > .railBody {
+  border-right-color: var(--mantine-color-default-border);
 }
 
 .toggle {

@@ -187,14 +187,17 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   icon (reading, here, branch, terminal) and one mark; there is no tab strip. A session reads freely, and the
   first time it goes to change files a bar above the composer asks **Here, on `<branch>`** or **On a New
   Branch**; Changes opens as a drawer from the right.
-- **Surfaces:** the window is two columns divided by 1 px `bg2` hairlines. The sidebar (the rail and the section's
-  panel) is `bg1` from the window's top to its bottom and carries the traffic lights; the content column, its
-  title row included, is `bg0` from top to bottom. There is no header band and no inset card. Nothing on the frame
+- **Surfaces:** the frame is the bar (the top 44 px, carrying the traffic lights, the sidebar button and each
+  column's head) and the rail down the left, one `bg1` surface with no line between them. The section's panel and
+  the content sit together in one rounded box (10 px corners) under the bar, 4 px short of the window's right and
+  bottom edges; its edge is one 1 px `bg2` hairline and one faint 3 px inner shade, and inside it the panel is half
+  way from `bg1` to `bg0` and the content `bg0`, divided by a hairline
+  (`docs/architecture/decisions/2026-11-19-the-content-sits-in-a-rounded-box.md`). Nothing else on the frame
   casts a shadow: sheets (the sidebar over the content in a narrow window) and drawers do, and a conversation's
   header or the title row takes a 1 px hairline while content scrolls under it. Cards on the content do not wear a
   border and a shadow as well. A control sits on `bg1` in both schemes (`theme.ts`).
 - **Drawers:** one slide-out kind, `SurfaceDrawer` (`apps/desktop/src/shell/surface-drawer.tsx`), from the
-  content column's right edge, flush to the window: half the column, 480 to 760 px, all of it under 640 px, in the
+  content's right edge, inside the box: half the column, 480 to 760 px, all of it under 640 px, in the
   content's tone with a 1 px `bg2` left edge, 24 px insets, no eyebrow and a 16 px / 600 title. It slides in over 150 ms (at once with reduced motion), is not modal, and closes with
   Esc inside it or its ×.
 - **Loading:** a page draws its header first, since the title and byline are known before the data. After 300 ms
