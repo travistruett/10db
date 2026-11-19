@@ -5,26 +5,15 @@ import {
   IconAlertCircle,
   IconAlertTriangle,
   IconCheck,
-  IconDeviceLaptop,
-  IconGitBranch,
   IconGitPullRequest,
-  IconMessage,
   IconPlayerPause,
   IconPlus,
-  IconTerminal2,
   IconX,
 } from '@tabler/icons-react';
 import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
 import { CREATE_SLOT_CLASS } from '../../shell/create-button';
-import { RowIcon, RowMark, type RowState } from './row-state';
+import { RowMark, type RowState } from './row-state';
 import classes from './session-row.module.css';
-
-const ICONS: Readonly<Record<RowIcon, ReactNode>> = {
-  [RowIcon.Reading]: <IconMessage size={14} stroke={1.5} />,
-  [RowIcon.Here]: <IconDeviceLaptop size={14} stroke={1.5} />,
-  [RowIcon.Branch]: <IconGitBranch size={14} stroke={1.5} />,
-  [RowIcon.Terminal]: <IconTerminal2 size={14} stroke={1.5} />,
-};
 
 /** The mark at a row's right: a spinner (a still dot under reduced motion) or a glyph, each its own shape. */
 function MarkIcon({ mark }: { readonly mark: RowMark }): ReactNode {
@@ -73,7 +62,7 @@ export interface SessionRowProps {
 }
 
 /**
- * One 32 px row of the panel: where the session works, its title, one state mark. Hovered, × takes the mark's
+ * One 32 px row of the panel: its title and one state mark (where the session works is its title row's line). Hovered, × takes the mark's
  * place. A ring stays around a row that needs the builder; no state is told by colour alone.
  */
 export function SessionRow({
@@ -166,9 +155,12 @@ export function SessionRow({
           opacity: sortable.isDragging ? 0.6 : 1,
         }}
       >
-        <span className={classes['icon']} aria-hidden="true">
-          {fresh ? <IconPlus size={14} stroke={1.5} /> : ICONS[state?.icon ?? RowIcon.Reading]}
-        </span>
+        {/* Where a session works is its title row's line; a fresh tab is a button for a new one, so it has a +. */}
+        {fresh ? (
+          <span className={classes['icon']} aria-hidden="true">
+            <IconPlus size={14} stroke={1.5} />
+          </span>
+        ) : null}
         <span
           className={classes['title']}
           data-fresh={fresh ? '' : undefined}
@@ -189,17 +181,20 @@ export function SessionRow({
               <MarkIcon mark={state.mark} />
             </span>
           )}
-          {/* Delete and the menu's Close are the keyboard's way; this is the pointer's. */}
-          <span
-            aria-hidden="true"
-            className={classes['close']}
-            onClick={(event) => {
-              event.stopPropagation();
-              onClose();
-            }}
-          >
-            <IconX size={12} stroke={1.5} />
-          </span>
+          {/* Delete and the menu's Close are the keyboard's way; this is the pointer's. A fresh tab reads as a
+              button for a new session, so it has none. */}
+          {fresh ? null : (
+            <span
+              aria-hidden="true"
+              className={classes['close']}
+              onClick={(event) => {
+                event.stopPropagation();
+                onClose();
+              }}
+            >
+              <IconX size={12} stroke={1.5} />
+            </span>
+          )}
         </span>
       </div>
     </Tooltip>

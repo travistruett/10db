@@ -76,6 +76,9 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
   }
 
   const list = projects.data ?? [];
+  // A fresh tab holds nothing yet, so one whose project is gone is dropped once the projects are known.
+  if (projects.isSuccess && fresh.some((tab) => !list.some((p) => p.id === tab.projectId)))
+    setFresh(fresh.filter((tab) => list.some((p) => p.id === tab.projectId)));
   const chats = open.data ?? [];
   const groups = panelGroups(list, chats, fresh);
   const rows = panelOrder(groups);
