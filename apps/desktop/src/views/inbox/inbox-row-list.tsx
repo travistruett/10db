@@ -5,7 +5,7 @@ import { LIST_ATTRIBUTE } from './use-inbox-keys';
 import classes from './inbox-row-list.module.css';
 
 /** Rows are a fixed height, so the list never measures one (spec §4.1 "Performance"). */
-export const ROW_HEIGHT_PX = 52;
+export const ROW_HEIGHT_PX = 64;
 /** Rows mounted past each edge of the viewport. */
 const OVERSCAN_ROWS = 10;
 /** The next page loads when the last visible row is this close to the end of what is loaded. */
@@ -37,8 +37,8 @@ export interface InboxRowListProps<T extends { readonly key: string }> {
   readonly renderRow: (row: T, selected: boolean) => ReactNode;
   /**
    * A control that belongs to the row, drawn over its end but outside the listbox: an option holds no
-   * interactive child, and a listbox owns nothing but options. It shows while the row is hovered or focused,
-   * and while the control itself has focus.
+   * interactive child, and a listbox owns nothing but options. It shows while the row is hovered and while
+   * the control itself has focus.
    */
   readonly renderAction?: (row: T) => ReactNode;
 }
@@ -124,9 +124,9 @@ export function InboxRowList<T extends { readonly key: string }>({
     option.focus({ preventScroll: true });
   }, [selectedIndex, selected, focusOnArrival, rows.length]);
 
-  // The row whose action shows: the one under the pointer, else the one holding focus.
+  // The row whose action shows: the one under the pointer. The selected row's card has its own, and focus
+  // follows the selection, so a focused row does not show it; the control shows while it has focus itself.
   const [hovered, setHovered] = useState<string | null>(null);
-  const [focused, setFocused] = useState<string | null>(null);
 
   const nearEnd = (lastVisible: number): boolean =>
     hasMore && !loadingMore && lastVisible >= rows.length - NEAR_END_ROWS;
@@ -150,6 +150,8 @@ export function InboxRowList<T extends { readonly key: string }>({
 
   return (
     <ScrollArea
+      // No scrollbar, as every panel list: it would lie over the rows' ends and their Dismiss.
+      type="never"
       style={{ flex: 1, minHeight: 0 }}
       viewportRef={viewport}
       viewportProps={{
@@ -191,6 +193,8 @@ export function InboxRowList<T extends { readonly key: string }>({
                 role="option"
                 aria-selected={isSelected}
                 data-inbox-row
+                // The row's hover look follows the pointer onto its control too, which lies outside the row.
+                data-hovered={hovered === row.key ? '' : undefined}
                 className={classes['row']}
                 style={style}
                 // Focusable so the keys can be given from the list; j, k and Enter are the Inbox's, Space picks.
@@ -203,12 +207,6 @@ export function InboxRowList<T extends { readonly key: string }>({
                 }}
                 onMouseLeave={() => {
                   setHovered(null);
-                }}
-                onFocus={() => {
-                  setFocused(row.key);
-                }}
-                onBlur={() => {
-                  setFocused(null);
                 }}
                 onKeyDown={(event) => {
                   if (event.key !== ' ' || event.target !== event.currentTarget) return;
@@ -233,7 +231,8 @@ export function InboxRowList<T extends { readonly key: string }>({
                   key={item.key}
                   role="presentation"
                   className={classes['action']}
-                  data-shown={hovered === row.key || focused === row.key ? '' : undefined}
+                  data-shown={hovered === row.key ? '' : undefined}
+                  data-selected={row.key === selected ? '' : undefined}
                   style={{ height: item.size, transform: `translateY(${String(item.start)}px)` }}
                   onMouseEnter={() => {
                     setHovered(row.key);

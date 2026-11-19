@@ -135,7 +135,7 @@ test('routes a question to someone outside Slack from its card, and the table sh
   await expect(page.getByText('Product question → Priya Shah · chosen by you')).toBeVisible();
   await expectAccessible(page, 'inbox, routed to a person not in Slack, dark');
   await page.getByRole('radio', { name: /Seven days/ }).check();
-  await page.getByRole('button', { name: 'Send answer' }).click();
+  await page.getByRole('button', { name: 'Send Answer' }).click();
   // Other cards may be open; this one is gone.
   await expect(page.getByRole('option', { name: new RegExp(QUESTION) })).toHaveCount(0);
 

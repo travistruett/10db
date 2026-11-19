@@ -1,14 +1,28 @@
 import { InboxListState } from '@10db/contracts';
-import { Box, Group, SegmentedControl } from '@mantine/core';
+import { Box, Group, SegmentedControl, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { useInboxCount } from '../../daemon/inbox-queries';
 import { useSlackConnection } from '../../daemon/people';
-import { CountBadge, CountTone } from '../../shell/count-badge';
 import { Panel } from '../../shell/panel';
 import { useOpenInboxCount } from './inbox-count';
 import { InboxFilterMenu } from './inbox-filter-menu';
 import { withFilter, type InboxSearch } from './inbox-search';
 import { InboxSearchField } from './inbox-search-field';
+
+/** The largest count the switch shows whole. */
+const SWITCH_COUNT_CAP = 99;
+
+/**
+ * A state's count in the switch: a plain dim number beside its label, lighter than a pill, since the
+ * segment's own fill already frames it.
+ */
+function SwitchCount({ count }: { readonly count: number }) {
+  return (
+    <Text span fz={11} fw={500} c="dimmed" style={{ fontVariantNumeric: 'tabular-nums' }}>
+      {count > SWITCH_COUNT_CAP ? `${String(SWITCH_COUNT_CAP)}+` : count}
+    </Text>
+  );
+}
 
 const LIST_STATES: readonly InboxListState[] = Object.values(InboxListState);
 
@@ -18,7 +32,8 @@ function stateOf(value: string): InboxListState | null {
 
 /**
  * The Inbox's panel (spec §1.3 "Head", §4.1 "The panel's head"): the section's name with the filter, then a
- * switch between Open, Waiting and Resolved with their counts, then the list under them. The list is drawn into
+ * switch between Open, Waiting and Resolved with their counts, then the search within the state chosen, then the
+ * list under them. The list is drawn into
  * `onListHost`'s element by whichever state has rows, so the switch stays mounted as the state changes. The
  * notices that ask nothing are the Factory's Activity drawer, not an Inbox list.
  */
@@ -53,14 +68,6 @@ export function InboxPanel({
         style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}
       >
         <Box px="xs" pt={4}>
-          <InboxSearchField
-            query={search.q}
-            onQuery={(q) => {
-              onSearch(withFilter(search, 'q', q ?? null));
-            }}
-          />
-        </Box>
-        <Box px="xs" pt={8} pb={8}>
           <SegmentedControl
             size="xs"
             fullWidth
@@ -74,25 +81,31 @@ export function InboxPanel({
               {
                 value: InboxListState.Open,
                 label: (
-                  <Group gap={6} wrap="nowrap" justify="center">
+                  <Group gap={5} wrap="nowrap" justify="center">
                     Open
-                    {open > 0 ? (
-                      <CountBadge count={open} tone={CountTone.Attention} cap={99} />
-                    ) : null}
+                    {open > 0 ? <SwitchCount count={open} /> : null}
                   </Group>
                 ),
               },
               {
                 value: InboxListState.Waiting,
                 label: (
-                  <Group gap={6} wrap="nowrap" justify="center">
+                  <Group gap={5} wrap="nowrap" justify="center">
                     Waiting
-                    {showWaiting ? <CountBadge count={waiting} cap={99} /> : null}
+                    {showWaiting ? <SwitchCount count={waiting} /> : null}
                   </Group>
                 ),
               },
               { value: InboxListState.Resolved, label: 'Resolved' },
             ]}
+          />
+        </Box>
+        <Box px="xs" pt={8} pb={8}>
+          <InboxSearchField
+            query={search.q}
+            onQuery={(q) => {
+              onSearch(withFilter(search, 'q', q ?? null));
+            }}
           />
         </Box>
         <div

@@ -33,7 +33,8 @@ export function OpenContent({
   readonly card: OpenCardProps;
 }) {
   return (
-    <Stack gap="md">
+    // It fills the content's height, so the selected card's action bar sits at the pane's foot.
+    <Stack gap="md" style={{ flex: 1 }}>
       {notice === null ? null : (
         <Alert color="yellow" variant="light" role="status">
           {notice}
@@ -52,7 +53,7 @@ function Selected({ row, card }: { readonly row: OpenRow; readonly card: OpenCar
   if (row.row.passId !== null) return <PassReadyRow items={row.row.items} />;
   const [first] = row.row.items;
   return (
-    <Box>
+    <Box style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
       <InboxCard
         {...card}
         item={first}

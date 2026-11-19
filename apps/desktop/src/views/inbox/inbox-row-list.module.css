@@ -1,5 +1,7 @@
-/* A row of the panel's list (spec §1.3 "Rows"): radius md, 8 px side padding, the selected row on the
-   same fill as the rail's active item. */
+/* A row of the panel's list (spec §1.3 "Rows"): radius md, 12 px side padding, the selected row on the
+   same fill as the rail's active item. A hairline parts each row from the next; it goes beside a filled row,
+   whose fill already parts it. The selected row's fill is its only mark, so focus draws no outline: the focused
+   row is always the selected one. */
 .row {
   position: absolute;
   top: 0;
@@ -8,13 +10,36 @@
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 0 8px;
+  padding: 0 12px;
   border-radius: var(--mantine-radius-md);
   color: var(--mantine-color-text);
   cursor: pointer;
+  outline: none;
 }
 
-.row:hover {
+.row::after {
+  content: '';
+  position: absolute;
+  right: 12px;
+  bottom: 0;
+  left: 12px;
+  height: 1px;
+  background: color-mix(in srgb, var(--mantine-color-default-border) 70%, transparent);
+}
+
+.row:hover::after,
+.row[data-hovered]::after,
+.row[aria-selected='true']::after,
+.row:has(+ .row:hover)::after,
+.row:has(+ .row[data-hovered])::after,
+.row:has(+ .row[aria-selected='true'])::after,
+.row:last-child::after,
+.placeholder::after {
+  opacity: 0;
+}
+
+.row:hover,
+.row[data-hovered] {
   background: color-mix(in srgb, var(--mantine-color-default-hover) 50%, transparent);
 }
 
@@ -29,7 +54,8 @@
   font-size: 12px;
 }
 
-.placeholder:hover {
+.placeholder:hover,
+.placeholder[data-hovered] {
   background: transparent;
 }
 
@@ -46,10 +72,19 @@
   left: 0;
   width: 100%;
   display: flex;
-  align-items: flex-end;
+  align-items: stretch;
   justify-content: flex-end;
-  padding: 0 8px 6px;
+  padding: 0 12px;
   opacity: 0;
+  --inbox-row-fill: color-mix(
+    in srgb,
+    var(--mantine-color-default-hover) 50%,
+    var(--shell-panel-tone)
+  );
+}
+
+.action[data-selected] {
+  --inbox-row-fill: var(--mantine-color-default-hover);
 }
 
 .action[data-shown],
@@ -57,6 +92,15 @@
   opacity: 1;
 }
 
+/* The control stands on the row's own fill, the row's full height, which fades in over the age and text it
+   covers. Only the button takes a press: a click beside it still picks the row. */
 .control {
+  display: flex;
+  align-items: center;
+  padding-left: 24px;
+  background: linear-gradient(to right, transparent, var(--inbox-row-fill) 20px);
+}
+
+.control > * {
   pointer-events: auto;
 }

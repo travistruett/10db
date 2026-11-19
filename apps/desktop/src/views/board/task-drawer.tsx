@@ -945,7 +945,8 @@ function StatusLine({
       ) : null}
       {retryable ? (
         <Textarea
-          label="Note for the next session (optional)"
+          label="Note for the next session"
+          placeholder="Optional"
           description="The session the retry starts gets this note, and the review’s findings too when a review sent the work back."
           size="xs"
           autosize

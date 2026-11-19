@@ -1,0 +1,17 @@
+/* Held at the foot of the content's scroll: it reaches the pane's edges, over its padding, and the card's
+   text scrolls under it. Its card grows to fill the pane, so a short card's bar is still at the foot. */
+.bar {
+  position: sticky;
+  bottom: calc(-1 * var(--shell-content-padding-block));
+  z-index: 1;
+  margin: auto calc(-1 * var(--shell-content-padding-inline))
+    calc(-1 * var(--shell-content-padding-block));
+  padding: 12px var(--shell-content-padding-inline);
+  border-top: 1px solid var(--mantine-color-default-border);
+  background: var(--mantine-color-body);
+}
+
+/* A field taken into view (the note's `n`, a Tab, a growing line) stops above the bar, not under it. */
+main:has(.bar) {
+  scroll-padding-bottom: 72px;
+}
