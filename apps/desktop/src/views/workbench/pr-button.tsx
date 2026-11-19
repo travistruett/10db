@@ -12,7 +12,7 @@ import { FormModal } from '../../shell/form-modal';
 
 // Workbench spec §5.1, §8.3, W6: Open Draft PR pushes the pass's signed-off pages and opens a draft;
 // once the pull request exists the same button reads Push to PR. It reads what it would do first: not
-// offered, it is disabled with the daemon's reason. Pushing is easy to undo, so it asks nothing first,
+// offered, no button is drawn, and the signed-off page's foot (`PrFoot`) says the daemon's reason. Pushing is easy to undo, so it asks nothing first,
 // except when the branch carries commits from before the pass, which the pull request would list too.
 
 /** Where the gate runs, in words. */
@@ -108,13 +108,20 @@ function usePullRequestRefusal(view: PassViewDto) {
  * The panel and the header show no pull request control then, so this is where the reason is said.
  */
 export function PrFoot({ view }: { readonly view: PassViewDto }) {
-  const { why } = usePullRequestRefusal(view);
+  const { preview, why } = usePullRequestRefusal(view);
+  // Until the first preview answers, the line would say one thing and then another, so it waits.
+  if (preview.data === undefined && preview.error === null) return null;
+  const exists = (view.pullRequest ?? preview.data?.existing ?? null) !== null;
+  const line =
+    why === null
+      ? 'Signed off. CI checks it once it is in the pull request.'
+      : exists
+        ? `Signed off. It can't be pushed to the pull request yet: ${why}`
+        : `Signed off. No pull request yet: ${why}`;
   return (
     <>
       <Text size="sm" c="dimmed">
-        {why === null
-          ? 'Signed off. CI checks it once it is in the pull request.'
-          : `Signed off. No pull request yet: ${why}`}
+        {line}
       </Text>
       <PrButton view={view} />
     </>
