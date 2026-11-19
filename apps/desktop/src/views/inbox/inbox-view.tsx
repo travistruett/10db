@@ -9,10 +9,6 @@ import { lastInboxSearch, withoutFilters, withoutQuery, withState } from './inbo
 import { InboxShortcuts } from './inbox-shortcuts';
 import { OpenInbox } from './open-inbox';
 
-/**
- * The Inbox: its title row, the panel with Open, Waiting, Resolved and Activity, and the content for the state the URL
- * names. Each state's content is its own component, so Open's keys are only live while Open is shown.
- */
 /** The content's title: the list the panel shows. */
 const STATE_TITLES: Record<InboxListState, string> = {
   [InboxListState.Open]: 'Open',
@@ -20,6 +16,10 @@ const STATE_TITLES: Record<InboxListState, string> = {
   [InboxListState.Resolved]: 'Resolved',
 };
 
+/**
+ * The Inbox: its title row, the panel with Open, Waiting, Resolved and Activity, and the content for the state the URL
+ * names. Each state's content is its own component, so Open's keys are only live while Open is shown.
+ */
 export function InboxView() {
   const search = useSearch({ from: '/inbox' });
   const navigate = useNavigate({ from: '/inbox' });
