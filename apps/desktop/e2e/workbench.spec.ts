@@ -153,7 +153,8 @@ async function panelHeadFits(page: Page, width: number) {
 /**
  * At `width` with no panel drawn (a window under 1000 px), the pass's line in the title row is drawn (cut
  * with an ellipsis when it must, its whole text in the heading's tooltip), its ⋯ menu (Close Pass, Abandon) is
- * on screen and nothing scrolls sideways; the project has no origin, so Open Draft PR says why beside it.
+ * on screen, the content box stops a gutter short of the window's edge and nothing scrolls sideways; the project
+ * has no origin, so Open Draft PR says why beside it.
  */
 async function headerFits(page: Page, width: number) {
   await page.setViewportSize({ width, height: 900 });
@@ -175,6 +176,14 @@ async function headerFits(page: Page, width: number) {
     expect(menu.x + menu.width, `the ⋯ menu is on screen at ${String(width)}`).toBeLessThanOrEqual(
       width,
     );
+  // The content sits in the frame's rounded box, a gutter in from the window's right edge.
+  const content = await page.locator('main').boundingBox();
+  expect(content, `the content is drawn at ${String(width)}`).not.toBeNull();
+  if (content !== null)
+    expect(
+      width - (content.x + content.width),
+      `the content box stops short of the window's edge at ${String(width)}`,
+    ).toBeGreaterThanOrEqual(4);
   await oneQueue(page, width);
   await expectNoSideways(page, width);
 }

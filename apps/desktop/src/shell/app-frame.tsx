@@ -47,17 +47,18 @@ const TOGGLE_LEFT_LABELLED = RAIL_LABELLED_WIDTH - 8 - 8 - 6 - 16;
 const TOGGLE_TOP = 8;
 /** Where the bar's text may start: clear of the traffic lights and the sidebar button. */
 const BAR_START = 128;
+/** The frame's margin round the content box, right and bottom (and left, where no rail column is beside it). */
+const GUTTER = 4;
 
 /** An open menu or list of options takes Esc first, so the sheet around it stays open. */
 const aMenuIsOpen = (): boolean =>
   document.querySelector('[aria-haspopup][aria-expanded="true"]') !== null;
 
 /**
- * The window's frame: two columns. The sidebar (a rail, and the section's panel where it has one) is one
- * tone from the window's top to its bottom and carries the traffic lights; the content column beside it
- * has its own tone and its own title row at the top. Views draw into the title row and the panel through
- * `TitleRow` and `Panel`. The window never scrolls: the content column is exactly as tall as the window and
- * its content scrolls inside it.
+ * The window's frame: the bar across the top and the rail down the left, one surface, round a rounded box that
+ * holds the section's panel (where it has one) and the content. Views draw into the bar's heads and the panel
+ * through `TitleRow` and `Panel`. The window never scrolls: the box is as tall as the window less the bar and the
+ * gutter, and the content scrolls inside it.
  */
 export function AppFrame({
   banner,
@@ -231,9 +232,11 @@ export function AppFrame({
     PANEL_HEAD_PADDING,
     BAR_START - (panelColumn ? columnWidth : panelSheetLeft),
   );
+  // The box starts at the rail column's edge, or a gutter in from the window's where there is none.
+  const boxLeft = columnWidth === 0 ? GUTTER : columnWidth;
   const titleStart = Math.max(
     CONTENT_PADDING,
-    BAR_START - columnWidth - (panelColumn ? panelWidth + HAIRLINE : 0),
+    BAR_START - boxLeft - (panelColumn ? panelWidth + HAIRLINE : 0),
   );
 
   const railStyle: CSSProperties =
@@ -254,6 +257,7 @@ export function AppFrame({
         <Box
           className={classes['root']}
           style={{
+            '--shell-gutter': `${String(GUTTER)}px`,
             gridTemplateColumns: `${String(columnWidth)}px minmax(0, 1fr)`,
           }}
         >
@@ -263,6 +267,10 @@ export function AppFrame({
               layout.rail === 'sheet' ? (layout.panel === 'sheet' ? 'joined' : '') : undefined
             }
             data-labelled={layout.labels ? '' : undefined}
+            // The rail draws its own edge where a panel sheet stands over the box's edge beside it.
+            data-beside-sheet={
+              layout.rail === 'column' && layout.panel === 'sheet' ? '' : undefined
+            }
             ref={railRef}
             style={railStyle}
             inert={layout.rail === 'hidden'}
@@ -309,6 +317,7 @@ export function AppFrame({
               if (panelSize !== undefined) setPanelWidth(parseFloat(String(panelSize)));
             }}
             mod={{ 'panel-column': panelColumn }}
+            style={{ paddingLeft: boxLeft - columnWidth }}
           >
             {/* Only a panel column takes the pane's room: a sheet stands over the frame, and a hidden or absent
                 panel takes none. */}
@@ -344,6 +353,8 @@ export function AppFrame({
               </div>
             </Splitter.Pane>
           </Splitter>
+          {/* The content box's edge: one hairline and one faint inner shade round the panel and the content. */}
+          <div className={classes['boxEdge']} style={{ left: boxLeft }} aria-hidden="true" />
           {sheetOpen ? (
             <div
               className={classes['backdrop']}

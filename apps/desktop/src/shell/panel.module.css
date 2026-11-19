@@ -7,7 +7,8 @@
   gap: 4px;
   height: 44px;
   padding: 0 10px 0 var(--shell-bar-start, 16px);
-  border-bottom: 1px solid var(--mantine-color-default-border);
+  /* A sheet's head has its own line; a column's is the content box's edge. */
+  border-bottom: var(--shell-panel-head-rule, 1px solid var(--mantine-color-default-border));
   /* The bar keeps one tone across the window; the panel's own, darker tone starts under it. */
   background: var(--mantine-color-default);
 }
@@ -26,4 +27,6 @@
   overflow-y: auto;
   scrollbar-width: none;
   padding: 8px 8px 10px;
+  background: var(--shell-panel-tone);
+  border-top-left-radius: var(--shell-panel-corner, 0);
 }
