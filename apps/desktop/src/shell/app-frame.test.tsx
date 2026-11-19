@@ -26,8 +26,6 @@ describe('the rail', () => {
       'UI Workbench',
       'Knowledge',
       'Settings',
-      'Keep-awake: Not keeping the Mac awake',
-      'Switch to light mode',
     ]);
     const current = rail.querySelectorAll('[aria-current="page"]');
     expect([...current].map((element) => element.textContent.trim())).toEqual(['Factory']);

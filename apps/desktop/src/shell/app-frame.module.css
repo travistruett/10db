@@ -1,7 +1,9 @@
 /* The window's frame: two columns under one bar. The bar is the top 44 px across the whole window, bg1, with a
    hairline under it: the traffic lights and the sidebar button at its left, then each column's head (the
    panel's, then the content's title row) above its column. The rail and panel are bg1 below it, the content
-   bg0. Hairlines divide the columns; there is no inset card. The grid's columns are set inline from the layout. */
+   bg0. Hairlines divide the columns; there is no inset card. The grid's columns are set inline from the layout.
+   Three tones step down from the rail to the content: the rail and the bar, the panel half a step darker, then the
+   content, so each column reads as its own layer without more lines. */
 .root {
   position: relative;
   display: grid;
@@ -41,12 +43,13 @@
 }
 
 .panel {
+  flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  background: var(--mantine-color-default);
+  background: color-mix(in srgb, var(--mantine-color-default) 50%, var(--mantine-color-body));
   /* A selected row on the panel's own tone takes the next tone up, and hover shows in dark. */
   --mantine-primary-color-light: var(--mantine-color-default-hover);
   --mantine-primary-color-light-color: var(--mantine-color-bright);

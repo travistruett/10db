@@ -8,6 +8,8 @@
   height: 44px;
   padding: 0 10px 0 var(--shell-bar-start, 16px);
   border-bottom: 1px solid var(--mantine-color-default-border);
+  /* The bar keeps one tone across the window; the panel's own, darker tone starts under it. */
+  background: var(--mantine-color-default);
 }
 
 .title {
