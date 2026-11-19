@@ -7,7 +7,9 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
   across the window, bg1 with a hairline under it, is the rail's part (the traffic lights), the panel's head and the
   content's title row (`decisions/2026-11-18-the-window-has-one-bar-and-one-sidebar-button.md`). Below it the
   sidebar (a rail and a panel, bg1) and the content (bg0). There is no inset card; hairlines divide the columns, the
-  rail's starting under the bar. The window never scrolls; the content is exactly
+  rail's starting under the bar. Three tones step down: the bar and the rail bg1, the panel half way to bg0, the
+  content bg0. The rail's foot holds the status controls and Settings; the theme and keep-awake are set in Settings ›
+  App. The window never scrolls; the content is exactly
   the window's height and scrolls inside it, and it is its own stacking context so a sheet always stands over it.
   Rail widths (200 labelled, 60 icons only) and the title row's height (44 px) are constants there.
 - The panel column and the content are a Mantine `Splitter`: the panel's hairline is the handle, and the builder

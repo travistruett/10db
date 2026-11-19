@@ -16,9 +16,7 @@ import { useShapes } from '../daemon/shape-queries';
 import { firstAppSection } from '../views/settings/sections';
 import { AgentDownloadStatus } from './agent-download-status';
 import { StatusLineControl } from './status-line';
-import { ColorSchemeToggle } from './color-scheme-toggle';
 import { DaemonStatus } from './daemon-status';
-import { KeepAwakeControl } from './keep-awake-control';
 import { ProjectSwitcher } from './project-switcher';
 import { RailModeContext, useRailMode } from './rail-mode';
 import {
@@ -177,10 +175,6 @@ function RailControlView({ control }: { readonly control: RailControl }) {
       return <AgentDownloadStatus />;
     case RailControl.Daemon:
       return <DaemonStatus />;
-    case RailControl.KeepAwake:
-      return <KeepAwakeControl />;
-    case RailControl.ColorScheme:
-      return <ColorSchemeToggle />;
   }
 }
 

@@ -139,6 +139,7 @@
 .tileHost {
   flex: none;
   display: grid;
+  margin-bottom: 6px;
 }
 
 /* The button is styled from its wrapper: the tooltip and combobox around it replace its own class. */
@@ -153,13 +154,16 @@
   border-radius: var(--mantine-radius-md);
 }
 
+/* The project select reads as a control, filled and outlined, apart from the section rows under it. */
 .tileHost > button[data-labelled] {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
-  height: 32px;
-  padding: 0 8px;
+  height: 36px;
+  padding: 0 8px 0 6px;
+  border: 1px solid var(--mantine-color-default-border);
+  background: color-mix(in srgb, var(--mantine-color-default-hover) 55%, transparent);
   color: var(--mantine-color-bright);
   font-size: 13px;
   font-weight: 600;

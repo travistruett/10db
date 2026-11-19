@@ -16,8 +16,6 @@ export const RailControl = {
   Status: 'status',
   Download: 'download',
   Daemon: 'daemon',
-  KeepAwake: 'keep-awake',
-  ColorScheme: 'color-scheme',
 } as const;
 export type RailControl = (typeof RailControl)[keyof typeof RailControl];
 
@@ -72,8 +70,6 @@ export const RAIL_ORDER: readonly RailEntry[] = [
   { kind: 'control', control: RailControl.Status },
   { kind: 'control', control: RailControl.Download },
   { kind: 'control', control: RailControl.Daemon },
-  { kind: 'control', control: RailControl.KeepAwake },
-  { kind: 'control', control: RailControl.ColorScheme },
   item(RailSection.Settings),
 ];
 

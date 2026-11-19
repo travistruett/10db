@@ -30,17 +30,15 @@ const Workstreams = z.array(z.looseObject({ id: z.string(), projectId: z.string(
 async function setScheme(page: Page, scheme: 'dark' | 'light'): Promise<void> {
   const html = page.locator('html');
   if ((await html.getAttribute('data-mantine-color-scheme')) === scheme) return;
-  const toggle = page.getByRole('button', { name: `Switch to ${scheme} mode` });
-  // Under 640 px the rail, which holds the toggle, is folded behind the sidebar toggle. The frame
-  // follows a resize a moment later, so the rail is waited on until it matches the window's width.
-  const folded = (page.viewportSize()?.width ?? 0) < 640;
-  if (folded) await expect(toggle).toBeHidden();
-  else await expect(toggle).toBeVisible();
-  const sidebar = page.getByRole('button', { name: 'Toggle sidebar' });
-  if (folded) await sidebar.click();
-  await toggle.click();
-  // Not Esc: on Sessions it answers a waiting card.
-  if (folded) await sidebar.click();
+  // The theme is set in Settings › Appearance; here it is written where Mantine keeps it, and the storage
+  // event Mantine listens for applies it without leaving the page under test.
+  await page.evaluate((value) => {
+    const key = 'mantine-color-scheme-value';
+    window.localStorage.setItem(key, value);
+    window.dispatchEvent(
+      new StorageEvent('storage', { key, newValue: value, storageArea: window.localStorage }),
+    );
+  }, scheme);
   await expect(html).toHaveAttribute('data-mantine-color-scheme', scheme);
 }
 
@@ -62,7 +60,7 @@ async function scan(
   await page.setViewportSize({ width: 1280, height: 900 });
 }
 
-/** axe over an open modal, dark then light: a modal covers the scheme switch, so the page's own attribute stands in. */
+/** axe over an open modal, light then dark, set on the page's own attribute so the modal stays open. */
 async function scanModal(page: Page, what: string): Promise<void> {
   for (const scheme of ['light', 'dark'] as const) {
     await page.evaluate((value) => {

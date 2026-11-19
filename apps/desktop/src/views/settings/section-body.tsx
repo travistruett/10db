@@ -7,6 +7,7 @@ import { AgentCopiesSection } from './agent-copies-section';
 import { BoardColumnsSection } from './board-columns-section';
 import { DecisionsSection } from './decisions-section';
 import { IntegrationsSection } from './integrations/integrations-section';
+import { AppearanceSection } from './appearance-section';
 import { KeepAwakeSection } from './keep-awake-section';
 import { LanePermissionsSection } from './lane-permissions-section';
 import { PeopleSection } from './people/people-section';
@@ -147,6 +148,13 @@ export function SectionBody({
           {heading}
           <ScopeLine>For every project.</ScopeLine>
           <SessionsSection />
+        </>
+      );
+    case SettingsSectionKey.Appearance:
+      return (
+        <>
+          {heading}
+          <AppearanceSection />
         </>
       );
     case SettingsSectionKey.KeepAwake:

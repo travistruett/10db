@@ -13,6 +13,7 @@ export const SettingsSectionKey = {
   RoutingRules: 'routing-rules',
   KeepAwake: 'keep-awake',
   AgentSkill: 'agent-skill',
+  Appearance: 'appearance',
   Updates: 'updates',
   LanePermissions: 'lane-permissions',
   Trust: 'trust',
@@ -84,9 +85,10 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   section(SettingsSectionKey.Sessions, App, 'Agents', 'Sessions'),
   section(SettingsSectionKey.Integrations, App, 'Connections', 'Integrations'),
   section(SettingsSectionKey.People, App, 'Connections', 'People'),
-  section(SettingsSectionKey.Updates, App, 'This Mac', 'Updates'),
-  section(SettingsSectionKey.KeepAwake, App, 'This Mac', 'Keep-awake'),
-  section(SettingsSectionKey.AgentSkill, App, 'This Mac', 'Agent skill'),
+  section(SettingsSectionKey.Appearance, App, 'App', 'Appearance'),
+  section(SettingsSectionKey.Updates, App, 'App', 'Updates'),
+  section(SettingsSectionKey.KeepAwake, App, 'App', 'Keep-awake'),
+  section(SettingsSectionKey.AgentSkill, App, 'App', 'Agent skill'),
 ];
 
 const KEYS = new Set<string>(Object.values(SettingsSectionKey));
