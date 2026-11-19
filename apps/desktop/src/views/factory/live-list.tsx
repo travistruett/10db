@@ -166,6 +166,7 @@ export function LiveList({
   const groups = liveGroups(
     all.filter((ws) => inView(ws.projectId)),
     tasks,
+    taskLists.every((q) => q.isSuccess),
     heldByPass,
     now,
   );
@@ -222,7 +223,12 @@ export function LiveList({
       </Alert>
     );
   }
-  if (runs.isPending || passesRead.isPending) {
+  if (
+    runs.isPending ||
+    passesRead.isPending ||
+    taskLists.some((q) => q.isPending) ||
+    batchLists.some((q) => q.isPending)
+  ) {
     return <PageLoading shape={PageLoadingShape.List} rows={4} label="Loading the runs" />;
   }
   if (groups.length === 0 && passRows.length === 0) {
@@ -248,7 +254,10 @@ export function LiveList({
     sections.unshift({ group: LiveGroup.NeedsYou, rows: [] });
   if (busyPasses.length > 0 && !has(LiveGroup.Running)) {
     const at = sections.findIndex(
-      (s) => s.group === LiveGroup.Waiting || s.group === LiveGroup.Done,
+      (s) =>
+        s.group === LiveGroup.InReview ||
+        s.group === LiveGroup.Waiting ||
+        s.group === LiveGroup.Done,
     );
     sections.splice(at === -1 ? sections.length : at, 0, { group: LiveGroup.Running, rows: [] });
   }
@@ -281,9 +290,10 @@ export function LiveList({
               <Row
                 key={ws.id}
                 project={nameOf(ws.projectId)}
-                dot={STATE_COLORS[ws.state]}
+                // A finished run whose pull request is open is in review: blue, never done's green.
+                dot={group === LiveGroup.InReview ? 'blue' : STATE_COLORS[ws.state]}
                 title={ws.taskHeadline === '' ? ws.taskTitle : ws.taskHeadline}
-                detail={doing(ws)}
+                detail={group === LiveGroup.InReview ? 'Pull request open' : doing(ws)}
                 when={shortAgo(lastMoment(ws), now)}
                 action={
                   canRetryHere(ws) ? (

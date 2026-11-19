@@ -2,6 +2,7 @@ import type { GoalId, ProjectId, ProjectViewDto } from '@10db/contracts';
 import { Alert, Button, Group, SegmentedControl, Stack, Text } from '@mantine/core';
 import { useQueries } from '@tanstack/react-query';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
+import { useRef } from 'react';
 import { goalsQueryOptions } from '../../daemon/goal-queries';
 import { useDaemon } from '../../daemon/provider';
 import { ProjectFilter } from '../../shell/project-filter';
@@ -34,6 +35,8 @@ export function FactoryView() {
   const all = projects.data ?? [];
   const shown = filter === undefined ? all : all.filter((p) => p.id === filter);
   const mode = view ?? FactoryMode.Live;
+  // The project Metrics chose by itself, so going back to Live shows every project again.
+  const metricsChose = useRef<ProjectId | null>(null);
 
   function go(next: { project?: ProjectId | null; view?: FactoryMode }): void {
     void navigate({
@@ -64,9 +67,15 @@ export function FactoryView() {
               onChange={(value) => {
                 // Metrics is one project's: with every project shown, it opens on the rail's.
                 if (value === FactoryMode.Metrics) {
+                  metricsChose.current = filter === undefined ? (railProject?.id ?? null) : null;
                   go({ view: FactoryMode.Metrics, project: filter ?? railProject?.id ?? null });
                 } else {
-                  go({ view: FactoryMode.Live });
+                  const chosen = metricsChose.current;
+                  metricsChose.current = null;
+                  go({
+                    view: FactoryMode.Live,
+                    ...(chosen !== null && chosen === filter ? { project: null } : {}),
+                  });
                 }
               }}
               data={[

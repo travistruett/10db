@@ -56,7 +56,14 @@ export function lastMoment(ws: WorkstreamDto): string {
 }
 
 /** Which section a run sits in; null when it shows nowhere (cancelled, closed, or finished too long ago). */
-function groupOf(ws: WorkstreamDto, task: LiveTask | undefined, now: number): LiveGroup | null {
+function groupOf(
+  ws: WorkstreamDto,
+  task: LiveTask | undefined,
+  tasksKnown: boolean,
+  now: number,
+): LiveGroup | null {
+  // The task lists leave closed tasks out, so once they are read a run whose task is missing was closed.
+  if (tasksKnown && task === undefined) return null;
   const age = now - new Date(lastMoment(ws)).getTime();
   switch (ws.state) {
     case S.WaitingHuman:
@@ -95,6 +102,8 @@ function groupOf(ws: WorkstreamDto, task: LiveTask | undefined, now: number): Li
 export function liveGroups(
   workstreams: readonly WorkstreamDto[],
   tasks: ReadonlyMap<TaskId, LiveTask>,
+  /** Every shown project's tasks were read, so a task missing from `tasks` was closed. */
+  tasksKnown: boolean,
   heldByPass: ReadonlySet<TaskId>,
   now: number,
 ): { readonly group: LiveGroup; readonly rows: readonly WorkstreamDto[] }[] {
@@ -116,7 +125,7 @@ export function liveGroups(
   }
   const by = new Map<LiveGroup, WorkstreamDto[]>();
   for (const ws of latest.values()) {
-    const group = groupOf(ws, tasks.get(ws.taskId), now);
+    const group = groupOf(ws, tasks.get(ws.taskId), tasksKnown, now);
     if (group !== null) by.set(group, [...(by.get(group) ?? []), ws]);
   }
   const at = (ws: WorkstreamDto): number => new Date(lastMoment(ws)).getTime();

@@ -20,9 +20,14 @@ describe('liveGroups', () => {
     const tasks = new Map<TaskId, LiveTask>([
       // Started over after a failure: both runs are attempt 0, the newer made last.
       [task(1), { status: 'open', boardStatus: 'in_progress', workstreamId: null }],
-      [task(2), { status: 'cancelled', boardStatus: 'done', workstreamId: run(2) }],
       [task(3), { status: 'open', boardStatus: 'in_review', workstreamId: run(3) }],
       [task(4), { status: 'done', boardStatus: 'done', workstreamId: run(4) }],
+      [task(6), { status: 'open', boardStatus: 'in_progress', workstreamId: null }],
+      [task(7), { status: 'open', boardStatus: 'in_progress', workstreamId: null }],
+      [task(8), { status: 'open', boardStatus: 'in_progress', workstreamId: null }],
+      [task(10), { status: 'open', boardStatus: 'done', workstreamId: null }],
+      [task(11), { status: 'open', boardStatus: 'in_progress', workstreamId: null }],
+      [task(12), { status: 'open', boardStatus: 'in_progress', workstreamId: null }],
     ]);
     const groups = liveGroups(
       [
@@ -63,20 +68,28 @@ describe('liveGroups', () => {
           state: 'DONE',
           ...at(4),
         }),
-        workstreamDto({ taskTitle: 'Broke', state: 'FAILED', ...at(3) }),
-        workstreamDto({ taskTitle: 'Asks', state: 'WAITING_HUMAN', ...at(5) }),
+        workstreamDto({ taskTitle: 'Broke', taskId: task(6), state: 'FAILED', ...at(3) }),
+        workstreamDto({ taskTitle: 'Asks', taskId: task(7), state: 'WAITING_HUMAN', ...at(5) }),
         workstreamDto({
           taskTitle: 'Out with Sam',
+          taskId: task(8),
           state: 'WAITING_HUMAN',
           waitingOn: { names: ['Sam'], since: ago(1) },
           ...at(1),
         }),
         workstreamDto({ taskTitle: 'A page', taskId: task(5), state: 'WAITING_HUMAN', ...at(1) }),
-        workstreamDto({ taskTitle: 'Yesterday', state: 'DONE', ...at(30) }),
-        workstreamDto({ taskTitle: 'Old failure', state: 'FAILED', ...at(24 * 8) }),
-        workstreamDto({ taskTitle: 'Dropped', state: 'CANCELLED', ...at(1) }),
+        workstreamDto({ taskTitle: 'Yesterday', taskId: task(10), state: 'DONE', ...at(30) }),
+        workstreamDto({
+          taskTitle: 'Old failure',
+          taskId: task(11),
+          state: 'FAILED',
+          ...at(24 * 8),
+        }),
+        workstreamDto({ taskTitle: 'Dropped', taskId: task(12), state: 'CANCELLED', ...at(1) }),
       ],
       tasks,
+      // Every task list was read; the closed task (2) is missing from them, as the daemon lists it.
+      true,
       new Set([task(5)]),
       NOW,
     );
