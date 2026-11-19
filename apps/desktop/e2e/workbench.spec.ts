@@ -151,10 +151,9 @@ async function panelHeadFits(page: Page, width: number) {
 }
 
 /**
- * At `width` with no panel drawn (a window under 1000 px, or ⌘\ at a wide one), the pass's line in the title
- * row is drawn (cut with an ellipsis when it must, its whole text in the heading's tooltip), its ⋯ menu
- * (Close Pass, Abandon) is on screen and nothing scrolls sideways; the project has no origin, so Open Draft
- * PR says why beside it.
+ * At `width` with no panel drawn (a window under 1000 px), the pass's line in the title row is drawn (cut
+ * with an ellipsis when it must, its whole text in the heading's tooltip), its ⋯ menu (Close Pass, Abandon) is
+ * on screen and nothing scrolls sideways; the project has no origin, so Open Draft PR says why beside it.
  */
 async function headerFits(page: Page, width: number) {
   await page.setViewportSize({ width, height: 900 });
@@ -380,13 +379,9 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
     .click();
   await expect(page.getByRole('textbox', { name: 'Message to People' })).toBeFocused();
   await oneQueue(page, 900);
-  // ⌘\ hides the panel at 1280: the strip and the pass's line in the title row come back; ⌘\ again
-  // restores the panel.
+  // A wide window always shows the panel: ⌘\ leaves it a column, so it can never be lost.
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(framePanel(page)).toHaveAttribute('data-panel', 'column');
-  await page.keyboard.press('Meta+Backslash');
-  await expect(framePanel(page)).toHaveAttribute('data-panel', 'hidden');
-  await headerFits(page, 1280);
   await page.keyboard.press('Meta+Backslash');
   await expect(framePanel(page)).toHaveAttribute('data-panel', 'column');
   await panelHeadFits(page, 1280);

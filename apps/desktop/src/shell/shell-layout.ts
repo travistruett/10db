@@ -29,7 +29,8 @@ export interface ShellLayout {
   readonly rail: 'column' | 'sheet' | 'hidden';
   /** Whether the rail as drawn carries its labels. */
   readonly labels: boolean;
-  /** A column, a sheet over the content, folded away, or absent because the section has none. */
+  /** A column, a sheet over the content, folded away, or absent because the section has none. A wide window
+   * always draws a section's panel as a column: it is the list half of the view, and is resized, not hidden. */
   readonly panel: 'column' | 'sheet' | 'hidden' | 'none';
 }
 
@@ -37,21 +38,19 @@ export interface ShellLayout {
 export function shellLayout(input: {
   readonly band: ShellBand;
   readonly hasPanel: boolean;
-  /** The builder hid the panel (wide only; remembered per section). */
-  readonly panelHidden: boolean;
   /** The builder's choice of a labelled or an icons-only rail (applies wide only; remembered). */
   readonly labels: boolean;
   /** What the sidebar key or the panel key opened over the content (medium and narrow). */
   readonly sheet: SidebarSheet | null;
 }): ShellLayout {
-  const { band, hasPanel, panelHidden, labels, sheet } = input;
+  const { band, hasPanel, labels, sheet } = input;
   switch (band) {
     case ShellBand.Wide:
       return {
         column: labels ? 'labelled' : 'icons',
         rail: 'column',
         labels,
-        panel: !hasPanel ? 'none' : panelHidden ? 'hidden' : 'column',
+        panel: hasPanel ? 'column' : 'none',
       };
     case ShellBand.Medium: {
       const panel = !hasPanel ? 'none' : sheet === null ? 'hidden' : 'sheet';

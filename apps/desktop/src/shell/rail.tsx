@@ -11,7 +11,7 @@ import {
   type Icon,
 } from '@tabler/icons-react';
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
-import type { KeyboardEvent, MouseEvent, ReactElement, ReactNode } from 'react';
+import type { KeyboardEvent, ReactElement, ReactNode } from 'react';
 import { useShapes } from '../daemon/shape-queries';
 import { firstAppSection } from '../views/settings/sections';
 import { AgentDownloadStatus } from './agent-download-status';
@@ -70,25 +70,13 @@ function RailItemContent({
   );
 }
 
-/**
- * What every rail item's link shares. `claim` is the click on the open section's own row: it shows or hides
- * the section's panel (when it has one) instead of navigating, and says whether it did.
- */
-function useItemProps(active: boolean) {
-  const { labels, onActiveClick } = useRailMode();
+/** What every rail item's link shares. */
+function itemProps(active: boolean, labels: boolean) {
   return {
-    props: {
-      className: classes['item'],
-      'aria-current': active ? ('page' as const) : undefined,
-      'data-rail-item': true,
-      'data-labelled': labels ? '' : undefined,
-    },
-    claim: (event: MouseEvent<HTMLElement>): boolean => {
-      if (!active || onActiveClick === null) return false;
-      event.preventDefault();
-      onActiveClick();
-      return true;
-    },
+    className: classes['item'],
+    'aria-current': active ? ('page' as const) : undefined,
+    'data-rail-item': true,
+    'data-labelled': labels ? '' : undefined,
   };
 }
 
@@ -113,16 +101,15 @@ function PlanLink({ active }: { readonly active: boolean }) {
   const { project } = useSelectedProject();
   const latest = latestOpenShape(useShapes(project?.id ?? null).data);
   const navigate = useNavigate();
-  const { props, claim } = useItemProps(active);
+  const { labels } = useRailMode();
   return (
     <RailTooltip label={RAIL_ITEMS.plan.label}>
       {/* A plain anchor the router navigates, so the conversation's id is typed at this one call site. */}
       <a
-        {...props}
+        {...itemProps(active, labels)}
         href={latest ? `/shape/${latest.id}` : '/shape'}
         onClick={(event) => {
           event.preventDefault();
-          if (claim(event)) return;
           if (latest) void navigate({ to: '/shape/$shapeId', params: { shapeId: latest.id } });
           else void navigate({ to: '/shape' });
         }}
@@ -134,14 +121,13 @@ function PlanLink({ active }: { readonly active: boolean }) {
 }
 
 function SettingsLink({ active }: { readonly active: boolean }) {
-  const { props, claim } = useItemProps(active);
+  const { labels } = useRailMode();
   return (
     <RailTooltip label={RAIL_ITEMS.settings.label}>
       <Link
-        {...props}
+        {...itemProps(active, labels)}
         to="/settings/$section"
         params={{ section: firstAppSection() }}
-        onClick={claim}
       >
         <RailItemContent section={RailSection.Settings} />
       </Link>
@@ -157,7 +143,7 @@ function SectionLink({
   readonly active: boolean;
 }) {
   const { project } = useSelectedProject();
-  const { props, claim } = useItemProps(active);
+  const { labels } = useRailMode();
   const { label, route } = RAIL_ITEMS[section];
   const badge =
     section === RailSection.Inbox ? (
@@ -170,13 +156,12 @@ function SectionLink({
   return (
     <RailTooltip label={label}>
       <Link
-        {...props}
+        {...itemProps(active, labels)}
         to={route}
         {...(section === RailSection.Inbox
           ? // Read when the link is followed: a value read in render is cached by the React Compiler.
             { search: () => lastInboxSearch.get() }
           : {})}
-        onClick={claim}
       >
         <RailItemContent section={section} badge={badge} />
       </Link>
@@ -242,14 +227,7 @@ function moveWithArrows(event: KeyboardEvent<HTMLElement>): void {
  * The rail: global sections, the project, its sections, then the status controls and Settings. Labelled it is
  * 200 px wide and the foot is one row; icons only it is 76 px, every name in a tooltip, and the foot stacks.
  */
-export function Rail({
-  labels,
-  onActiveClick,
-}: {
-  readonly labels: boolean;
-  /** Set when the open section has a panel: a click on its own row shows or hides it. */
-  readonly onActiveClick: (() => void) | null;
-}) {
+export function Rail({ labels }: { readonly labels: boolean }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const current = railSectionForPath(pathname);
   const foot = RAIL_ORDER.findIndex((entry) => entry.kind === 'spacer');
@@ -259,7 +237,7 @@ export function Rail({
   const controls = rest.filter((entry) => entry.kind === 'control');
   const footEntries = labels ? [...settings, ...controls] : [...controls, ...settings];
   return (
-    <RailModeContext value={{ labels, onActiveClick }}>
+    <RailModeContext value={{ labels }}>
       {/* The group shares one delay, so scanning down the icons does not wait at each. */}
       <Tooltip.Group openDelay={300} closeDelay={0}>
         {/* ↑/↓ roving is a pointer-free shortcut on the landmark; the links stay the interactive elements. */}

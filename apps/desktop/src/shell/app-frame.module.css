@@ -1,6 +1,7 @@
-/* The window's frame: two columns. The sidebar (rail and panel) is one tone, bg1, from the window's top to
-   its bottom; the content column beside it is the base tone, bg0, with its own title row. Hairlines divide
-   them; there is no inset card. The grid's columns and rows are set inline from the layout. */
+/* The window's frame: two columns under one bar. The bar is the top 44 px across the whole window, bg1, with a
+   hairline under it: the traffic lights and the sidebar button at its left, then each column's head (the
+   panel's, then the content's title row) above its column. The rail and panel are bg1 below it, the content
+   bg0. Hairlines divide the columns; there is no inset card. The grid's columns are set inline from the layout. */
 .root {
   position: relative;
   display: grid;
@@ -16,13 +17,14 @@
   flex-direction: column;
   min-height: 0;
   background: var(--mantine-color-default);
-  border-right: 1px solid var(--mantine-color-default-border);
 }
 
-/* The traffic lights' row. The toggle and the content's title sit level with it. */
+/* The rail's part of the bar, where the traffic lights sit. The rail's hairline starts under it, so the lights
+   and the sidebar button read as one group where the icons-only rail is narrower than them. */
 .railDrag {
   flex: none;
   height: 44px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
 }
 
 .railBody {
@@ -30,6 +32,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+  border-right: 1px solid var(--mantine-color-default-border);
 }
 
 .toggle {
@@ -58,7 +61,8 @@
   gap: 10px;
   min-width: 0;
   padding-right: 12px;
-  background: var(--mantine-color-body);
+  background: var(--mantine-color-default);
+  border-bottom: 1px solid var(--mantine-color-default-border);
 }
 
 /* The panel column and the content beside it. Not positioned, so a sheet inside it is placed against the
@@ -99,11 +103,6 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-}
-
-/* The title row has no lower edge until the content scrolls under it. */
-.titleRow[data-scrolled] {
-  box-shadow: 0 1px 0 var(--mantine-color-default-border);
 }
 
 /* Controls in the title row are 28 px tall, as the spec has them. Mantine declares each control's size
