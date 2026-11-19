@@ -121,7 +121,10 @@ export function ChangesPanel({ changes, pullRequest, onQuote }: ChangesPanelProp
   const [first, setFirst] = useState<string | null>(null);
   const firstNow = data?.files[0]?.path ?? null;
   if (first === null && firstNow !== null) setFirst(firstNow);
-  const isOpen = (path: string): boolean => chosen.get(path) ?? path === (first ?? firstNow);
+  // Once the first file leaves the list, the new first one takes its place.
+  const opener =
+    first !== null && data?.files.some((f) => f.path === first) === true ? first : firstNow;
+  const isOpen = (path: string): boolean => chosen.get(path) ?? path === opener;
   return (
     <Box
       aria-label="Changes"
