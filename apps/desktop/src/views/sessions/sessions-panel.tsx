@@ -67,7 +67,6 @@ export interface SessionsPanelProps {
 const REMOVED_PROJECT = 'Removed project';
 
 function Group_({
-  id,
   name,
   projectsKnown,
   open,
@@ -75,7 +74,6 @@ function Group_({
   onToggle,
 }: {
   /** The id its rows' group is labelled by. */
-  readonly id: string;
   readonly name: string;
   /** Whether the project list has arrived; until it has, a group's name is unknown, not removed. */
   readonly projectsKnown: boolean;
@@ -88,7 +86,6 @@ function Group_({
   return (
     // A label of the list, not a control in it: a listbox holds only its options, so the fold is the pointer's.
     <div
-      id={id}
       role="presentation"
       className={classes['group']}
       data-open={open ? '' : undefined}
@@ -168,7 +165,6 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
   // shows is always in the list.
   const shownRows = (g: PanelGroup): readonly PanelRow[] =>
     isOpen(g) ? g.rows : g.rows.filter((r) => r.key === selectedKey);
-  const groupId = (projectId: ProjectId): string => `sessions-group-${projectId}`;
   const scroller = useRef<HTMLDivElement | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
@@ -187,6 +183,12 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
     count: virtual ? items.length : 0,
     getScrollElement: () => scroller.current,
     estimateSize: (i) => (items[i]?.kind === 'group' ? GROUP_HEIGHT : ROW_HEIGHT),
+    // Keyed by what each item is, so a fold that keeps the count still gives a header and a row their own sizes.
+    getItemKey: (i) => {
+      const item = items[i];
+      if (item === undefined) return i;
+      return item.kind === 'group' ? `group:${item.projectId}` : item.row.key;
+    },
     overscan: 12,
     // Until the list is measured, a panel's worth of rows is drawn.
     initialRect: { width: 260, height: 600 },
@@ -280,11 +282,10 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
 
   const header = (g: PanelGroup): ReactNode => (
     <Group_
-      id={groupId(g.projectId)}
       name={nameOf(g.projectId)}
       projectsKnown={projects.length > 0}
       open={isOpen(g)}
-      count={g.rows.length}
+      count={g.rows.filter((r) => r.kind === 'chat').length}
       onToggle={() => {
         toggle(g.projectId);
       }}
