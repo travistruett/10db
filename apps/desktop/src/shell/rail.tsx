@@ -225,7 +225,7 @@ function moveWithArrows(event: KeyboardEvent<HTMLElement>): void {
 
 /**
  * The rail: global sections, the project, its sections, then the status controls and Settings. Labelled it is
- * 200 px wide and the foot is one row; icons only it is 76 px, every name in a tooltip, and the foot stacks.
+ * 200 px wide and the foot is one row; icons only it is 60 px, every name in a tooltip, and the foot stacks.
  */
 export function Rail({ labels }: { readonly labels: boolean }) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });

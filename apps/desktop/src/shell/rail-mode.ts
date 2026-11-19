@@ -2,7 +2,7 @@ import { createContext, useContext } from 'react';
 
 /** How the rail draws its rows, shared with the parts inside it (the project row, the status controls). */
 export interface RailMode {
-  /** Rows carry their labels (200 px); otherwise they are icons only (76 px). */
+  /** Rows carry their labels (200 px); otherwise they are icons only (60 px). */
   readonly labels: boolean;
 }
 

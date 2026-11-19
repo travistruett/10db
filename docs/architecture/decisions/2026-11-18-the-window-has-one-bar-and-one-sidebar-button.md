@@ -9,10 +9,12 @@
 
 - The top 44 px of the window is one bar across every column, on the sidebar's tone (bg1) with a hairline
   under it. The rail's part holds the traffic lights; the panel's head and the content's title row are its parts
-  over their columns. The rail's own hairline starts under the bar.
-- One sidebar button, `IconLayoutSidebar` ("Toggle sidebar"), sits at x 80, y 8 in every state and on every
+  over their columns. The rail's own hairline starts under the bar. The traffic lights sit at
+  `trafficLightPosition` (16, 24), on the bar's centre line with the button and the titles; at (16, 22) they sat
+  about 2.5 pt high in the app on macOS 26. The icons-only rail is 60 px, its first icon 8 px under the bar.
+- One sidebar button, `IconLayoutSidebar` ("Toggle sidebar"), sits at x 88, y 8 in every state and on every
   section, and does what ⇧⌘S does: on a wide window it switches the rail between labels and icons only; under
-  1000 px it opens the sidebar over the content. What starts the bar right of the rail starts at 116 px or later,
+  1000 px it opens the sidebar over the content. What starts the bar right of the rail starts at 128 px or later,
   so the button keeps its place where the icons-only rail is narrower than the lights and the button together.
 - On a wide window a section's panel is always a column. It is resized (260 to 480 px, a double-click on its
   edge back to 340), never hidden: ⌘\ does nothing there, its head has no hide button, and no hidden state is

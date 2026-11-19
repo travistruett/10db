@@ -28,7 +28,7 @@ import { useShellBand } from './use-shell-band';
 import classes from './app-frame.module.css';
 
 const RAIL_LABELLED_WIDTH = 200;
-const RAIL_ICONS_WIDTH = 76;
+const RAIL_ICONS_WIDTH = 60;
 /** The hairline that ends a sidebar column, in addition to its width. */
 const HAIRLINE = 1;
 /** How long the pointer rests on the toggle before its tip shows. */
@@ -38,10 +38,10 @@ const CONTENT_PADDING = 24;
 /** Where a panel's head starts in its column. */
 const PANEL_HEAD_PADDING = 16;
 /** The sidebar button's place in the bar, right of the traffic lights. It never moves. */
-const TOGGLE_LEFT = 80;
+const TOGGLE_LEFT = 88;
 const TOGGLE_TOP = 8;
 /** Where the bar's text may start: clear of the traffic lights and the sidebar button. */
-const BAR_START = 116;
+const BAR_START = 128;
 
 /** An open menu or list of options takes Esc first, so the sheet around it stays open. */
 const aMenuIsOpen = (): boolean =>

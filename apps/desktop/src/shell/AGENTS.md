@@ -9,7 +9,7 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
   sidebar (a rail and a panel, bg1) and the content (bg0). There is no inset card; hairlines divide the columns, the
   rail's starting under the bar. The window never scrolls; the content is exactly
   the window's height and scrolls inside it, and it is its own stacking context so a sheet always stands over it.
-  Rail widths (200 labelled, 76 icons only) and the title row's height (44 px) are constants there.
+  Rail widths (200 labelled, 60 icons only) and the title row's height (44 px) are constants there.
 - The panel column and the content are a Mantine `Splitter`: the panel's hairline is the handle, and the builder
   drags the panel between 260 and 480 px (340 until dragged, and again on a double-click of the handle; `PANEL_WIDTH` and its bounds in `shell-layout.ts`).
   One width for every section, remembered (`panel-width.ts`, `tendb.shell.panelWidth`); a sheet takes it too.
@@ -18,8 +18,8 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
   preference and which sheet is open (`shellLayout` in `shell-layout.ts`; bands at 1000
   and 640 px). The window's width, not a container's, decides it (`useShellBand`), because the frame decides what
   its content gets. The labels preference is remembered (`sidebar-labels.ts`, `tendb.shell.labels`).
-- One sidebar button ("Toggle sidebar", x 80, y 8, on every section, never moved) does what ⇧⌘S does: it flips
-  labels and icons when wide and opens the whole sidebar as a sheet otherwise. The bar's text starts at 116 px or
+- One sidebar button ("Toggle sidebar", x 88, y 8, on every section, never moved) does what ⇧⌘S does: it flips
+  labels and icons when wide and opens the whole sidebar as a sheet otherwise. The bar's text starts at 128 px or
   later (`BAR_START`): the title row's padding and the panel head's `--shell-bar-start` clear the lights and the
   button where the rail is narrower than them. A wide window always draws a section's panel as a column, resized
   but never hidden; ⌘\ opens and closes the panel's sheet only where the window is not wide. A rail item is a plain
