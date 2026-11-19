@@ -1,2 +1,2 @@
-export { findRegistryHosts, findRegistryHostsAt } from './find-registry-hosts';
+export { findRegistryHosts } from './find-registry-hosts';
 export { takeFoundHostsReading } from './found-reading';

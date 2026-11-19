@@ -22,8 +22,7 @@
     in Open.
   - `outcome` follows `inboxOutcome` in contracts, in its order: a Slack answer (`answer.via` is `slack`), then
     10db's close (a `detail.resolution` that `CardResolution` accepts), then `answered` for the rest. The SQL
-    is one `CASE` built from `CARD_RESOLUTION`; `inbox-page.test.ts` checks it against `inboxOutcome` row by
-    row, so change both together.
+    is one `CASE` built from `CARD_RESOLUTION`, so change it and `inboxOutcome` together.
   - `person` keeps cards with a send to that person as a recipient; in Waiting, the send that is out now.
   - With no `sort`, Resolved is newest updated first, Waiting the longest out first (a card with no send
     last), and Open most urgent then oldest. Ties go by id. A page past the last answers the last, with its

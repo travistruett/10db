@@ -14,63 +14,35 @@ const RpcLine = z.looseObject({
 });
 
 /** A message the client wrote to the fake server's stdin. */
-export type Rpc = z.infer<typeof RpcLine>;
-
-/**
- * What the fake answers a method with: a result, `{ error }`, or a function of the params returning
- * either, or a promise of one.
- */
-export type ScriptEntry = unknown;
+type Rpc = z.infer<typeof RpcLine>;
 
 /** A script entry that is a function of the params. */
-function isHandler(entry: ScriptEntry): entry is (params: unknown) => unknown {
+function isHandler(entry: unknown): entry is (params: unknown) => unknown {
   return typeof entry === 'function';
 }
 
 export interface FakeAppServer {
-  readonly child: CodexChild;
   readonly spawn: CodexSpawn;
   sent(): Rpc[];
-  /** Pushes a notification from the server. */
-  notify(method: string, params: unknown): void;
-  /** Writes a raw line to stdout, as the server would. */
-  writeLine(line: string): void;
-  /** Writes raw bytes to stdout, for a line split across chunks. */
-  writeBytes(bytes: Uint8Array): void;
-  /** Whether the client has killed the child. */
-  killed(): boolean;
-  /** The signals the client sent the child, in order. */
-  signals(): NodeJS.Signals[];
-  /** Whether the child has exited, by `exit()` or by a signal it does not ignore. */
-  ended(): boolean;
-  /** Writes text to stderr. */
-  writeStderr(text: string): void;
-  exit(code: number | null): void;
 }
 
 /**
  * Stands in for `codex app-server` at the process boundary. A request is answered from `script`
- * by method name; a method the script lacks is answered with -32601, as the server does.
+ * by method name: a result, `{ error }`, or a function of the params returning either, or a promise
+ * of one. A method the script lacks is answered with -32601, as the server does.
  */
-export function fakeAppServer(
-  script: Readonly<Record<string, ScriptEntry>>,
-  /** The signal that ends the child, as a real process ends on SIGTERM; with none it ignores every signal. */
-  opts: { readonly exitsOn?: NodeJS.Signals } = {},
-): FakeAppServer {
+export function fakeAppServer(script: Readonly<Record<string, unknown>>): FakeAppServer {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
   const stderr = new PassThrough();
   const sent: Rpc[] = [];
-  let wasKilled = false;
   let hasEnded = false;
-  const signals: NodeJS.Signals[] = [];
   const exitListeners: ((code: number | null) => void)[] = [];
   const reply = (message: object): void => {
     stdout.write(`${JSON.stringify(message)}\n`);
   };
 
   const requests = createInterface({ input: stdin });
-  // A test may destroy stdin with an error; the interface would otherwise rethrow it.
   requests.on('error', () => undefined);
   /** Answers `id` with `answer`: its error when it is `{ error }`, else as the result. */
   const answer = (id: number | string, answer: unknown): void => {
@@ -99,24 +71,18 @@ export function fakeAppServer(
     });
   });
 
-  const end = (code: number | null): void => {
-    if (hasEnded) return;
-    hasEnded = true;
-    for (const listener of exitListeners) listener(code);
-  };
   const child: CodexChild = {
     pid: 4242,
     stdin,
     stdout,
     stderr,
     kill: (signal = 'SIGTERM') => {
-      wasKilled = true;
-      signals.push(signal);
-      if (signal === opts.exitsOn || signal === 'SIGKILL') {
+      if (signal === 'SIGKILL')
         queueMicrotask(() => {
-          end(null);
+          if (hasEnded) return;
+          hasEnded = true;
+          for (const listener of exitListeners) listener(null);
         });
-      }
       return true;
     },
     once: (_event, listener) => {
@@ -125,25 +91,5 @@ export function fakeAppServer(
     },
   };
 
-  return {
-    child,
-    spawn: () => child,
-    sent: () => [...sent],
-    notify: (method, params) => {
-      reply({ method, params });
-    },
-    writeLine: (line) => {
-      stdout.write(`${line}\n`);
-    },
-    writeBytes: (bytes) => {
-      stdout.write(bytes);
-    },
-    killed: () => wasKilled,
-    writeStderr: (text) => {
-      stderr.write(text);
-    },
-    exit: end,
-    signals: () => [...signals],
-    ended: () => hasEnded,
-  };
+  return { spawn: () => child, sent: () => [...sent] };
 }

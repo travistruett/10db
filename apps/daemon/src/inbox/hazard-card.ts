@@ -23,11 +23,11 @@ import type { FlagInput } from './service';
 const HAZARD_DETAIL = 'hazardRemovals';
 
 /** The answers the card offers; it shows them as written. */
-export const HazardChoice = {
+const HazardChoice = {
   Remove: 'Remove them',
   Keep: 'Keep them',
 } as const;
-export type HazardChoice = (typeof HazardChoice)[keyof typeof HazardChoice];
+type HazardChoice = (typeof HazardChoice)[keyof typeof HazardChoice];
 
 /** The card is one per project: a later look replaces what it lists. */
 export const hazardCardFoldKey = (projectId: ProjectId): string => `hazard-removals:${projectId}`;

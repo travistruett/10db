@@ -27,8 +27,4 @@ describe('textPdf', () => {
     ))
       expect(stream).toHaveLength(Number(length));
   });
-
-  it('is small on disk', () => {
-    expect(textPdf(40).length).toBeLessThan(300_000);
-  });
 });

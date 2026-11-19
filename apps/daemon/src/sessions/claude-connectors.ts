@@ -64,15 +64,6 @@ function readStatus(status: unknown): ReadStatus | null {
   return { connectors, pending };
 }
 
-/**
- * The claude.ai connectors in a probe's server list: entries of the `claudeai` scope whose config is a
- * `claudeai-proxy` with an https url and an id. Null as soon as an entry has any other scope, which a
- * probe on a fresh folder must never load.
- */
-export function connectorsFromStatus(status: unknown): ClaudeConnector[] | null {
-  return readStatus(status)?.connectors ?? null;
-}
-
 /** The connectors a session can take: one whose tool prefix a configured server already holds is left out. */
 export function connectorsForSession(
   connectors: readonly ClaudeConnector[],

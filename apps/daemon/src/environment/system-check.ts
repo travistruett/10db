@@ -106,7 +106,7 @@ const major = (version: string | null): number | null => {
 };
 
 /** A newer major Claude Code may rename the variables or fields the account checks rely on. */
-export function claudeCodeWarning(version: string | null): string | null {
+function claudeCodeWarning(version: string | null): string | null {
   const installed = major(version);
   const verified = major(ACCOUNT_NAMES_VERIFIED_ON);
   if (installed === null || verified === null || installed <= verified) return null;
@@ -114,7 +114,7 @@ export function claudeCodeWarning(version: string | null): string | null {
 }
 
 /** Any Codex version but the verified one may have changed the app-server messages 10db reads. */
-export function codexWarning(version: string | null): string | null {
+function codexWarning(version: string | null): string | null {
   const installed = /\d+\.\d+\.\d+/.exec(version ?? '')?.[0];
   if (installed === undefined || installed === CODEX_VERIFIED_ON) return null;
   return `Codex ${installed} is not ${CODEX_VERIFIED_ON}, the version 10db's ChatGPT-plan checks were verified on. Sessions that fail a start check are refused until the live check is rerun on it.`;

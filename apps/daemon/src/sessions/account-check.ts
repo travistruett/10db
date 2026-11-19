@@ -331,11 +331,6 @@ export function modelRefusalBasis(
     : null;
 }
 
-/** Whether an assistant error at a session's first reply means the account cannot run the model (see `modelRefusalBasis`). */
-export function isModelRefusal(error: string | undefined, text: string, launched: string): boolean {
-  return modelRefusalBasis(error, text, launched) !== null;
-}
-
 /** An assistant error that is the account's, not the work's. */
 export function credentialProblem(error: string | undefined): AccountProblem | null {
   return error === undefined ? null : (CREDENTIAL_ERRORS[error] ?? null);

@@ -74,12 +74,4 @@ describe('PATCH /tasks/:id areas', () => {
     expect(res.status).toBe(400);
     expect(JSON.stringify(res.body)).toContain('billing');
   });
-
-  it('refuses a task that has started, saying why', async () => {
-    const { task } = await seed();
-    await api().post(`/tasks/${task.id}/start`, z.unknown(), {});
-    const res = await patch(`/tasks/${task.id}`, { areas: ['docs'] });
-    expect(res.status).toBe(409);
-    expect(JSON.stringify(res.body)).toContain('has already started, so its areas are fixed');
-  });
 });

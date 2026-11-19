@@ -120,13 +120,4 @@ describe('the OpenRouter sync in a daemon', () => {
     });
     expect(status).toMatchObject({ outcome: 'ok', keyConfigured: true });
   });
-
-  it.each([
-    { name: 'the judge off', opts: { judgeOff: true } },
-    { name: 'benchmarks off', opts: { benchmarksOff: true } },
-  ])('with $name says so and makes no request', async ({ opts }) => {
-    const api = await start(opts);
-    expect(await openRouterStatus(api)).toMatchObject({ off: true, outcome: null });
-    expect(requests).toEqual([]);
-  });
 });

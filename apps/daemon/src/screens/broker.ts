@@ -23,7 +23,7 @@ export interface ScreenSpec {
   readonly height: number;
 }
 
-export type ScreenOutcome =
+type ScreenOutcome =
   | { readonly ok: true; readonly image: ScreenImageInput }
   | { readonly ok: false; readonly reason: string };
 

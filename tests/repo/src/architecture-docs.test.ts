@@ -12,6 +12,7 @@ const PUBLIC_RESEARCH = [
   '2026-11-12-trust-line-research.md',
   '2026-11-14-build-process-audit.md',
   '2026-11-18-core-test-cut.md',
+  '2026-11-18-non-core-test-cut.md',
   '2026-11-18-runner-and-delivery-test-merges.md',
   'delivery-test-timings.md',
   'external-research.md',

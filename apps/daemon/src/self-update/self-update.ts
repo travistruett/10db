@@ -37,7 +37,7 @@ export const SHAPE_HOLD_ALERT_MS = 5 * 60_000;
  * recovery puts each cut-off lane back first in line, from its worktree as it stands, so an update
  * never waits behind one long step while nothing else may start.
  */
-export const DRAIN_LIMIT_MS = 10 * 60_000;
+const DRAIN_LIMIT_MS = 10 * 60_000;
 /** The card an earlier version raised for the shaping hold; one left open is withdrawn at start. */
 export const SHAPE_HOLD_FOLD_KEY = 'self-update-shape-turn';
 const SHAPE_HOLD_STATUS_KEY = 'update-shape-turn';

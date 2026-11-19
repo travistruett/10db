@@ -235,7 +235,7 @@ export function claudeMcpSignInCommand(configDir: string): string {
 }
 
 /** Signs a ChatGPT plan in with the unmodified `codex`; the path is one shell word even with spaces. */
-export function codexSignInCommand(home: string): string {
+function codexSignInCommand(home: string): string {
   return `CODEX_HOME=${quoted(home)} codex login`;
 }
 

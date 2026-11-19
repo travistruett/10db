@@ -1,5 +1,4 @@
 export {
-  DockerNeededChoice,
   DockerWhy,
   dockerNeededFoldKey,
   raiseDockerMayBeNeededNote,
@@ -7,12 +6,7 @@ export {
 } from './docker-card';
 export { leftWithBuilder } from './builder-card';
 export { raiseGateHostCards } from './gate-host-card';
-export {
-  HazardChoice,
-  hazardCardFoldKey,
-  hazardRemovalCard,
-  pendingHazardRemovals,
-} from './hazard-card';
+export { hazardCardFoldKey, hazardRemovalCard, pendingHazardRemovals } from './hazard-card';
 export { earlierMcpApproval, requestMcpApproval } from './mcp-approval';
 export { createProjectMcpReader, flagMcpFailure } from './project-mcp-reader';
 export {
@@ -29,7 +23,6 @@ export {
   createInboxService,
   flagCard,
   AnsweredAwayError,
-  CardClosesItselfError,
   ParkedError,
   rewordCard,
   withdrawCard,

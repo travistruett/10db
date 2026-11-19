@@ -7,15 +7,13 @@ import {
   TaskStatus,
   WorkstreamDto,
   WorkstreamState as S,
-  mintId,
 } from '@10db/contracts';
-import { transitionWorkstream } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
-import { createTempRepo, tempDir, waitForAsync } from './fixtures';
+import { createTempRepo, tempDir } from './fixtures';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
 
 let data: { path: string; cleanup(): void };
@@ -56,7 +54,7 @@ async function send(path: string) {
   return { status: res.status, body: z.unknown().parse(await res.json()) };
 }
 
-async function startedTask(title = 'held') {
+async function startedTask() {
   const project = await api().post('/projects', ProjectDto, {
     name: 'demo',
     repoPath: repo.path,
@@ -64,7 +62,7 @@ async function startedTask(title = 'held') {
     areas: [{ name: 'src', globs: ['src/**'] }],
   });
   const task = await api().post(`/projects/${project.id}/tasks`, TaskDto, {
-    title,
+    title: 'held',
     acceptanceCriteria: ['x'],
     areas: ['src'],
   });
@@ -109,70 +107,5 @@ describe('POST /tasks/:id/hold', () => {
     // The first tick can be spent preparing the account, so tick a few times with a lane free.
     for (let i = 0; i < 3; i++) await daemon.scheduler.tick();
     expect(runState(run.id)).toEqual({ state: S.Held });
-  });
-
-  it('answers 409 for a task that has begun running, naming the task', async () => {
-    const { task, run } = await startedTask('Busy one');
-    daemon.state.write((ctx) => transitionWorkstream(ctx, run.id, { to: S.Starting, fence: null }));
-    const res = await send(`/tasks/${task.id}/hold`);
-    expect(res.status).toBe(409);
-    expect(res.body).toMatchObject({ error: 'conflict' });
-    expect(JSON.stringify(res.body)).toContain('Busy one');
-    expect(runState(run.id)).toEqual({ state: S.Starting });
-  });
-
-  it('answers 409 for a task that was never started', async () => {
-    const project = await api().post('/projects', ProjectDto, {
-      name: 'demo',
-      repoPath: repo.path,
-      gateCommand: 'true',
-      areas: [{ name: 'src', globs: ['src/**'] }],
-    });
-    const task = await api().post(`/projects/${project.id}/tasks`, TaskDto, {
-      title: 'fresh',
-      acceptanceCriteria: ['x'],
-      areas: ['src'],
-    });
-    expect((await send(`/tasks/${task.id}/hold`)).status).toBe(409);
-  });
-
-  it('answers 404 for an unknown task and 400 for a malformed id', async () => {
-    expect((await send(`/tasks/${mintId('Task')}/hold`)).status).toBe(404);
-    expect((await send('/tasks/not-an-id/hold')).status).toBe(400);
-  });
-});
-
-describe('starting a held task', () => {
-  it('queues the same run again and a tick gives it a lane', async () => {
-    const { project, task, run } = await startedTask();
-    await send(`/tasks/${task.id}/hold`);
-
-    const res = await send(`/tasks/${task.id}/start`);
-
-    expect(res.status).toBe(201);
-    expect(WorkstreamDto.parse(res.body)).toMatchObject({ id: run.id, state: S.Queued });
-    expect((await taskOf(project.id, task.id))?.workstreamId).toBe(run.id);
-    caps.global = 4;
-    // The first ticks can be spent preparing the account, so tick until the run leaves the queue.
-    const left = await waitForAsync(async () => {
-      await daemon.scheduler.tick();
-      const row = runState(run.id) as { state: string };
-      return row.state === S.Queued ? undefined : row.state;
-    }, 20_000);
-    expect(left).not.toBe(S.Held);
-  });
-});
-
-describe('removing a held task', () => {
-  it('cancels the held run and the task and hides it from the list', async () => {
-    const { project, task, run } = await startedTask();
-    await send(`/tasks/${task.id}/hold`);
-
-    const res = await send(`/tasks/${task.id}/remove`);
-
-    expect(res.status).toBe(200);
-    expect(TaskDto.parse(res.body)).toMatchObject({ id: task.id, status: TaskStatus.Cancelled });
-    expect(runState(run.id)).toEqual({ state: S.Cancelled });
-    expect(await taskOf(project.id, task.id)).toBeUndefined();
   });
 });

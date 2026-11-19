@@ -12,26 +12,25 @@ export {
 } from './delivery-rules';
 export { BUSY } from './explore-runtime';
 export { openTerminalRefusal } from './explore-state';
-export { createExploreEngine, type ExploreEngine, type ExploreEngineDeps } from './explore-engine';
-export { itemsWithFull, readFullOutput, writeFullOutput } from './full-output';
+export { createExploreEngine, type ExploreEngine } from './explore-engine';
+export { itemsWithFull, readFullOutput } from './full-output';
 export { itemDtoOf } from './item-dto';
 export { createItemRecorder, type ItemRecorder } from './item-recorder';
 export { createLiveRegistry, type LiveRegistry } from './live-registry';
-export type { ExploreOwnerHooks, ExploreStart, TurnEnd } from './explore-hooks';
+export type { ExploreOwnerHooks } from './explore-hooks';
 export { refuseMislabelledBytes, safeFileName } from './file-check';
 export { keepBuilderMessage, type PastedFile } from './intake';
 export { buildThreadDigest, builderMessageText, FRESH_SESSION_NOTICE } from './lane-text';
 export { readConversationPicture } from './pictures';
 export { taskFilesDir } from './task-files';
 export { createTaskThread, type TaskThread } from './task-thread';
-export { readImageHeader, readImageSize } from './image-check';
+export { readImageHeader } from './image-check';
 export {
   FRESH_START_LINE,
   READ_CHARGE_MAX_BYTES,
   carriedTooMuch,
   inlineBytesSpent,
   inlinePictureBytes,
-  largestReadMeasured,
   parseScreenBody,
   readAllowance,
   readBytesSpent,

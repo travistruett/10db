@@ -41,7 +41,7 @@ export interface SignInCandidate {
 }
 
 /** The planned servers a sign-in can matter for: remote ones that send no headers, in plan order. */
-export function signInCandidates(plan: Pick<YourMcpPlan, 'remote'>): SignInCandidate[] {
+function signInCandidates(plan: Pick<YourMcpPlan, 'remote'>): SignInCandidate[] {
   return Object.entries(plan.remote).flatMap(([name, remote]) =>
     remote.headers === null
       ? [

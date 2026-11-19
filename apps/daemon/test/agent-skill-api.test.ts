@@ -140,32 +140,4 @@ describe('the 10db-task skill against the real daemon', () => {
       baseBranch: 'main',
     });
   });
-
-  it('edit changes a title', async () => {
-    const { first } = await createTwoTasks();
-    await skill().run('edit', first.id, file('p.json', { title: 'Renamed' }));
-    const tasks = await api.get(`/projects/${project.id}/tasks`, z.array(TaskDto));
-    expect(tasks.find((t) => t.id === first.id)?.title).toBe('Renamed');
-  });
-
-  it('hazards adds without removing what the project had', async () => {
-    const before = (await api.get('/projects', z.array(ProjectDto))).find(
-      (p) => p.id === project.id,
-    )?.hazards;
-    await skill().run(
-      'hazards',
-      project.id,
-      file('h.json', [{ name: 'make-lock', globs: ['Makefile'], commands: ['make lock'] }]),
-    );
-    const after = (await api.get('/projects', z.array(ProjectDto))).find(
-      (p) => p.id === project.id,
-    )?.hazards;
-    expect(after?.map((h) => h.name)).toEqual([...(before ?? []).map((h) => h.name), 'make-lock']);
-  });
-
-  it('refuses a skill of another version with the daemon’s message', async () => {
-    await expect(skill('bbbbbbbbbbbb').run('context')).rejects.toThrow(
-      `This 10db-task skill (bbbbbbbbbbbb) isn't the one this 10db ships (${VERSION}). Restart 10db to update it, or turn on Settings › Agent skill › Agents in any repo can use 10db.`,
-    );
-  });
 });

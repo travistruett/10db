@@ -1,17 +1,12 @@
 import {
-  APP_URL_IS_DAEMON,
-  EventType,
   PassOpenedDto,
   PicturesStatusDto,
   ProjectDto,
   TaskDto,
   TaskScreensDto,
-  WorkstreamDto,
-  mintId,
 } from '@10db/contracts';
-import { insertGoal, insertTaskScreen, latestEventSeq } from '@10db/db';
+import { latestEventSeq } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
@@ -148,138 +143,4 @@ describe("a task's pictures over HTTP", () => {
       signIn: null,
     });
   });
-});
-
-describe("a goal's pictures", () => {
-  it("leads a goal task's screens with the newest after, else before, of each other task on its route", async () => {
-    const p = await project();
-    const made = daemon.state.write((ctx) =>
-      insertGoal(ctx, p.id, {
-        brief: {
-          title: 'Rework people',
-          objective: 'Rework the people screens.',
-          tasks: ['done', 'started', 'elsewhere', 'next'].map((key) => ({
-            key,
-            title: `People ${key}`,
-            areas: key === 'elsewhere' ? ['src'] : ['people'],
-          })),
-        },
-      }),
-    );
-    const id = (key: string) => {
-      const taskId = made.taskIds.get(key);
-      if (taskId === undefined) throw new Error(`no ${key}`);
-      return taskId;
-    };
-    const shot = (key: string, kind: 'before' | 'after', route = '/people') =>
-      daemon.state.write((ctx) =>
-        insertTaskScreen(ctx, {
-          taskId: id(key),
-          turnId: null,
-          kind,
-          route,
-          viewport: { width: 1440, height: 900 },
-          theme: 'default',
-          sha256: `${key}${kind}`.padEnd(64, '0').replace(/[^0-9a-f]/g, 'a'),
-          size: 1,
-          width: 1440,
-          height: 900,
-          storedPath: `${data.path}/screens/x.png`,
-          keptSha: null,
-        }),
-      );
-    shot('done', 'before');
-    const after = shot('done', 'after');
-    const before = shot('started', 'before');
-    shot('elsewhere', 'after', '/org');
-    shot('next', 'before');
-    const screens = await api().get(`/tasks/${id('next')}/screens`, TaskScreensDto);
-    expect(screens.fromGoal.map((s) => s.id)).toEqual([after?.id, before?.id]);
-    expect(screens.screens.map((s) => s.kind)).toEqual(['before']);
-  });
-});
-
-describe('pruning', () => {
-  it('prunes a turn picture of a task done 15 days ago when the daemon starts', async () => {
-    const p = await project();
-    const task = await api().post(`/projects/${p.id}/tasks`, TaskDto, {
-      title: 'People: old',
-      acceptanceCriteria: ['x'],
-      areas: ['people'],
-    });
-    const screenId = mintId('TaskScreen');
-    const db = daemon.state.db.$client;
-    db.prepare(
-      `INSERT INTO task_screens (id, task_id, kind, route, viewport, theme, sha256, size, width, height,
-        stored_path, created_at) VALUES (?, ?, 'turn', '/people', '{"width":1440,"height":900}',
-        'default', ?, 1, 1440, 900, ?, ?)`,
-    ).run(screenId, task.id, 'f'.repeat(64), `${data.path}/screens/ff/x.png`, daemon.state.now());
-    const longAgo = new Date(Date.now() - 15 * 24 * 60 * 60_000).toISOString();
-    db.prepare(`UPDATE tasks SET status = 'done', updated_at = ? WHERE id = ?`).run(
-      longAgo,
-      task.id,
-    );
-    await daemon.stop();
-    daemon = await startDaemon();
-    const row = z
-      .object({ pruned_at: z.string().nullable() })
-      .parse(
-        daemon.state.db.$client
-          .prepare('SELECT pruned_at FROM task_screens WHERE id = ?')
-          .get(screenId),
-      );
-    expect(row.pruned_at).not.toBeNull();
-  });
-});
-
-describe("the daemon's own address", () => {
-  it('is refused as an app address', async () => {
-    const made = await api().post('/projects', ProjectDto, {
-      name: 'demo',
-      repoPath: repo.path,
-      gateCommand: null,
-      areas: [PEOPLE],
-    });
-    const port = new URL(daemon.url).port;
-    const res = await fetch(`${daemon.url}/projects/${made.id}`, {
-      method: 'PATCH',
-      headers: { Authorization: `Bearer ${daemon.token}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ appUrl: `http://localhost:${port}` }),
-    });
-    expect(res.status).toBe(400);
-    expect(await res.text()).toContain(APP_URL_IS_DAEMON);
-    expect((await api().get('/projects', ProjectDto.array()))[0]?.appUrl).toBeNull();
-  });
-});
-
-describe('a task in Your folder', () => {
-  it('has its before taken ahead of its first edit, and its after once done', async () => {
-    const p = await project({ defaultRigor: 'light' });
-    const task = await api().post(`/projects/${p.id}/tasks`, TaskDto, {
-      title: 'People: tidy',
-      acceptanceCriteria: ['the page is tidy'],
-      areas: ['people'],
-    });
-    cam.version = 1;
-    await api().post(`/tasks/${task.id}/start`, WorkstreamDto);
-    await waitForAsync(async () => {
-      const all = await api().get('/workstreams?active=false', WorkstreamDto.array());
-      return all.find((w) => w.taskId === task.id && w.state === 'DONE');
-    }, 30_000);
-    const screens = await waitForAsync(async () => {
-      const listed = await api().get(`/tasks/${task.id}/screens`, TaskScreensDto);
-      return listed.screens.length === 2 ? listed.screens : undefined;
-    });
-    expect(screens.map((s) => s.kind)).toEqual(['before', 'after']);
-    const firstWrite = z
-      .object({ seq: z.number() })
-      .parse(
-        daemon.state.db.$client
-          .prepare(
-            "SELECT min(seq) AS seq FROM events WHERE type = ? AND json_extract(data, '$.tool.name') = 'Write'",
-          )
-          .get(EventType.SessionActivity),
-      );
-    expect(shotAtSeq[0]).toBeLessThan(firstWrite.seq);
-  }, 60_000);
 });

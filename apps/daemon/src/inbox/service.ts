@@ -105,7 +105,7 @@ export class ParkedError extends Error {
  * A dismiss of a card that closes when its cause clears. The API answers 409: the card leaves by its
  * closer, so a dismissal never hides a later real ask.
  */
-export class CardClosesItselfError extends DomainError {
+class CardClosesItselfError extends DomainError {
   override readonly name = 'CardClosesItselfError';
   constructor() {
     super('conflict', 'This card closes itself when its cause is gone, so it cannot be dismissed');

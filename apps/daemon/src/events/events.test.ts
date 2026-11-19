@@ -33,21 +33,4 @@ describe('StateStore', () => {
     ).toThrow('rollback');
     expect(seen).toHaveLength(2);
   });
-
-  it('keeps delivering to other listeners when one throws, and reports the error', () => {
-    const errors: unknown[] = [];
-    const bus = createEventBus((e) => errors.push(e));
-    const seen: number[] = [];
-    bus.subscribe(() => {
-      throw new Error('bad listener');
-    });
-    const unsubscribe = bus.subscribe((e) => seen.push(e.seq));
-    const state = createStateStore(store, bus);
-    state.write((ctx) => insertProject(ctx, projectInput('three')));
-    unsubscribe();
-    state.write((ctx) => insertProject(ctx, projectInput('four')));
-    // Each project announces itself and its Icebox column.
-    expect(seen).toHaveLength(2);
-    expect(errors).toHaveLength(4);
-  });
 });

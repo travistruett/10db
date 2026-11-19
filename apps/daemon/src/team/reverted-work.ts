@@ -124,17 +124,17 @@ export async function commitResultAsStored<T extends { readonly sha: string }>(
 }
 
 /** Whether a stored commit result resolved conflict markers (`commitResultAsStored`). */
-export function commitResolvedMarkers(result: unknown): boolean {
+function commitResolvedMarkers(result: unknown): boolean {
   return storedMark(result, RESOLVED_MARKERS_KEY);
 }
 
 /** Whether a stored commit result was made fixing a failed gate (`commitResultAsStored`). */
-export function commitGotThroughGate(result: unknown): boolean {
+function commitGotThroughGate(result: unknown): boolean {
   return storedMark(result, THROUGH_GATE_KEY);
 }
 
 /** Whether a stored commit result was made after a resolution, before a gate run (`afterMarkersResolved`). */
-export function commitAfterResolution(result: unknown): boolean {
+function commitAfterResolution(result: unknown): boolean {
   return storedMark(result, AFTER_RESOLUTION_KEY);
 }
 

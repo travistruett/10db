@@ -1,9 +1,4 @@
-export {
-  foundHostFile,
-  readFoundHosts,
-  writeFoundHosts,
-  writeFoundHostsIfNone,
-} from './found-hosts';
+export { foundHostFile, writeFoundHostsIfNone } from './found-hosts';
 export {
   allowFoundHosts,
   allowNetworkHost,
@@ -17,7 +12,6 @@ export {
   allowedWriteFor,
   allowedWriteHash,
   allowedWritesIn,
-  editResult,
   ESCALATED_KEY,
   EXACT_WRITE_KEY,
 } from './expected-write';

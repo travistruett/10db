@@ -35,7 +35,7 @@ import {
 import type { TakeoverCommand, TakeoverSpec } from './takeover-command';
 
 /** The email the fake reports for a subscription that expects none, and for an identity probe. */
-export const FAKE_ACCOUNT_EMAIL = 'builder@example.com';
+const FAKE_ACCOUNT_EMAIL = 'builder@example.com';
 
 /** A book key that scripts a chat by its first message, as `Task: ` names a task. */
 const CHAT_KEY = 'Chat: ';

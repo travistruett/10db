@@ -199,7 +199,7 @@ export interface AgentSessionCore {
 }
 
 /** A task's session: one workstream's sequence-th run. */
-export interface LaneProfile {
+interface LaneProfile {
   readonly kind: typeof AgentProfileKind.Lane;
   readonly workstreamId: WorkstreamId;
   readonly sequence: number;
