@@ -460,7 +460,7 @@ test('Archive on a dirty worktree lists what would be lost, deletes it on the bu
   await expect(sessionRow(page, /Edit then archive/)).toBeVisible();
   await expect.poll(() => existsSync(worktree)).toBe(true);
   expect(existsSync(join(worktree, 'scratch.txt'))).toBe(false);
-  await expect(page.getByText(/^on edit-then-archive/)).toBeVisible();
+  await expect(page.getByText(/ · on edit-then-archive/)).toBeVisible();
 });
 
 const WorkstreamNotices = z.array(
