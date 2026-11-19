@@ -152,10 +152,8 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
   const select_ = (row: PanelRow): void => {
     if (row.kind === 'chat') {
       onSearch({ chat: row.chat.id }, false);
-      select(row.chat.projectId);
     } else {
       onSearch({ fresh: row.tab.id }, false);
-      select(row.tab.projectId);
     }
   };
 
@@ -164,9 +162,8 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
     selected,
     chatCount: chats.length,
     onSelect: select_,
-    onOpenChat: (chatId, projectId) => {
+    onOpenChat: (chatId) => {
       onSearch({ chat: chatId }, false);
-      select(projectId);
     },
     removeFresh: (id) => {
       dropFresh(id);
@@ -184,7 +181,16 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
   const closed = useClosedTabs();
 
   const newTab = (): void => {
-    const made = openFreshTab(fresh, list, selectedProject?.id ?? null, -1);
+    // A new session starts where the builder is reading: the open session's project while it still exists,
+    // else the rail's.
+    const reading =
+      selected === null
+        ? null
+        : selected.kind === 'chat'
+          ? selected.chat.projectId
+          : selected.tab.projectId;
+    const here = list.some((p) => p.id === reading) ? reading : (selectedProject?.id ?? null);
+    const made = openFreshTab(fresh, list, here, -1);
     if (made === null) return;
     setFresh(made.tabs);
     onSearch({ fresh: made.opened.id }, false);
@@ -212,19 +218,16 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
     await bringBack(chat);
     dropFresh(tab.id);
     onSearch({ chat: chat.id }, true);
-    select(chat.projectId);
   };
 
   /** A session the panel's search found opens where it is, whether it was open, closed or archived. */
   const openFound = async (chat: ChatDto): Promise<void> => {
     await bringBack(chat);
     onSearch({ chat: chat.id }, false);
-    select(chat.projectId);
   };
 
   const changeProject = (tab: FreshTabState, projectId: ProjectId): void => {
     setFresh((tabsNow) => setFreshProject(tabsNow, tab.id, projectId));
-    select(projectId);
   };
 
   const makeTask = (row: PanelRow): void => {
@@ -319,7 +322,6 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
         projects={list}
         selectedKey={selected?.key ?? null}
         states={states}
-        closed={closed}
         onSelect={select_}
         onClose={closing.close}
         onNew={newTab}
@@ -335,9 +337,6 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
         onMakeTask={makeTask}
         onReorder={(chat, position) => {
           patch.mutate({ chatId: chat.id, tabPosition: position });
-        }}
-        onReopen={(entry) => {
-          void closing.reopen(entry);
         }}
         onOpenFound={(chat) => {
           void openFound(chat);

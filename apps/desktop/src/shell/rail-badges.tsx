@@ -6,7 +6,6 @@ import { nextNeeding } from '../views/sessions/session-keys';
 import { useWorkbenchWaitingCount } from '../views/workbench/workbench-count';
 import { CountBadge, CountTone } from './count-badge';
 import { useRailMode } from './rail-mode';
-import { useSelectedProject } from './selected-project';
 
 /** A rail badge is small, so a count past this reads "99+". */
 const BADGE_CAP = 99;
@@ -35,7 +34,6 @@ export function SessionsBadge() {
   const needing = useSessionsNeedingYou();
   const compact = !useRailMode().labels;
   const navigate = useNavigate();
-  const { select } = useSelectedProject();
   const current = useRouterState({
     select: (state) => {
       const chat: unknown = state.location.search.chat;
@@ -54,7 +52,6 @@ export function SessionsBadge() {
         ) ?? 0
       ];
     if (next === undefined) return;
-    select(next.projectId);
     void navigate({ to: '/sessions', search: { chat: next.id } });
   };
   return (

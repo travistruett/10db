@@ -373,6 +373,9 @@ the checkout doesn't block it, but the route waits for that turn's end before sw
 
 ### 6.3 A new session (⌘T)
 
+- It starts in the open session's project, or the rail's selected project when none is open.
+- Sessions is global, above the rail's divider: picking a session never changes the rail's project. Only what
+  goes into a project's page (Make a Board Task…) selects that project.
 - It opens in the content as today's fresh tab: project and model picker, composer, Start from, and Recent.
 - Its panel row reads "New session" (dim, italic) at the top of its project until the first message is sent, which
   makes it a chat, or it's closed.
@@ -380,7 +383,8 @@ the checkout doesn't block it, but the route waits for that turn's end before sw
 
 ### 6.4 Recently closed
 
-- Up to five, at the panel's foot (`tendb.sessions.closed`).
+- Up to five, in the title switcher's menu (`tendb.sessions.closed`); ⌘⇧T reopens the newest. The panel keeps no
+  foot for them.
 
 ### 6.5 Title row
 

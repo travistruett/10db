@@ -164,7 +164,8 @@ The rest is for the agents building it.
 - **Rows:** radius `md` and 12 px side padding, at the section's height: one-line rows are 32 px (Sessions), and
   two-line rows are 64 px (the Inbox) or as tall as their state line (the Workbench's pages). The selected row takes
   the `bg2` fill and a hovered one half of it (DESIGN.md, Panel lists).
-- **Group labels:** 11.5 px, weight 600, dim, with an optional 14 px project tile.
+- **Group labels:** 11.5 px, weight 600, dim, with an optional 14 px project tile. Sessions' projects are folder
+  rows instead, as tall as a session row (Sessions spec §6).
 - **Narrow layouts:** the panel's list is the content's own state, not the shell's. The shell asks each view for a
   `panel` element and draws it, in the column or in a sheet (§2). Hiding it at 1000 px and over works three ways:
   ⌘\, a click on the open section's rail item, or the head's button.
@@ -173,7 +174,7 @@ The rest is for the agents building it.
 | Section                         | Panel                                       | Content                     |
 | ------------------------------- | ------------------------------------------- | --------------------------- |
 | Inbox (Open, Waiting, Resolved) | the state's rows, email-style, paged (§4.1) | the selected item           |
-| Sessions                        | sessions by project, then Recently closed   | the session (Sessions spec) |
+| Sessions                        | sessions under project folders              | the session (Sessions spec) |
 | UI Workbench, a pass open       | the pass's pages (today's queue)            | the page's thread           |
 | UI Workbench, start page        | none                                        | today's start page          |
 | Settings                        | today's `SettingsNav`                       | the section                 |

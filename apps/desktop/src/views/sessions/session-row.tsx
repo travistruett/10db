@@ -135,7 +135,7 @@ export function SessionRow({
         aria-label={name}
         aria-selected={selected}
         tabIndex={tabbable ? 0 : -1}
-        className={fresh ? `${classes['row'] ?? ''} ${CREATE_SLOT_CLASS}` : classes['row']}
+        className={`${classes['row'] ?? ''} ${classes['nested'] ?? ''}${fresh ? ` ${CREATE_SLOT_CLASS}` : ''}`}
         data-session-row={rowKey}
         data-selected={selected ? '' : undefined}
         data-ring={ring ?? undefined}

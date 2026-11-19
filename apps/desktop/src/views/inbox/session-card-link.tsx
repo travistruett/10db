@@ -36,7 +36,7 @@ export function OpenSessionLink({ chat }: { readonly chat: ChatDto }) {
       type="button"
       size="sm"
       onClick={() => {
-        void openSession(chat.id, chat.projectId);
+        void openSession(chat.id);
       }}
     >
       Open Session
