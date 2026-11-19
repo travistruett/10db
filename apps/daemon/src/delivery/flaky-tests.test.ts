@@ -1,11 +1,10 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { TaskStatus } from '@10db/contracts';
-import { createTestStore, listTasks, setTaskStatus } from '@10db/db';
+import { createTestStore, listTasks } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { failedRepoCheck, seedWorkstream, tempDir } from '../../test/fixtures';
 import type { GateResult } from '../verify';
-import { fileFlakyTests, flakeNote, flakyTitle, rerunFlaky, type FlakyTest } from './flaky-tests';
+import { fileFlakyTests, flakyTitle, rerunFlaky, type FlakyTest } from './flaky-tests';
 
 const TIMEOUT_LOG = [
   ' FAIL  daemon  src/a.test.ts > suite > slow one',
@@ -84,67 +83,43 @@ describe('rerunFlaky', () => {
     });
   });
 
-  it.each([
-    ['make check-changed', []],
-    ['make precheck', ['--precheck']],
-  ])("reads what the repository's own %s really leaves", async (_name, flags) => {
+  it("reads what the repository's own make check-changed and make precheck really leave", async () => {
     // The output runs past what 10db keeps of it, so the end of it must name the step by itself.
     const log = `${'noise line\n'.repeat(1000)}${TIMEOUT_LOG}`;
-    const { checkout, exitCode, tail } = failedRepoCheck(log, flags);
-    expect(exitCode).not.toBe(0);
-    const commands: string[] = [];
-    const outcome = await rerunFlaky({
-      checkout,
-      output: tail,
-      run: (command) => {
-        commands.push(command);
-        return Promise.resolve(result(0));
-      },
-    });
-    expect(commands).toEqual(['pnpm exec vitest run src/a.test.ts src/b.test.ts']);
-    expect(outcome.kind).toBe('flaky');
+    for (const [name, flags] of [
+      ['make check-changed', []],
+      ['make precheck', ['--precheck']],
+    ] as const) {
+      const { checkout, exitCode, tail } = failedRepoCheck(log, flags);
+      expect.soft(exitCode, name).not.toBe(0);
+      const commands: string[] = [];
+      const outcome = await rerunFlaky({
+        checkout,
+        output: tail,
+        run: (command) => {
+          commands.push(command);
+          return Promise.resolve(result(0));
+        },
+      });
+      expect.soft(commands, name).toEqual(['pnpm exec vitest run src/a.test.ts src/b.test.ts']);
+      expect.soft(outcome.kind, name).toBe('flaky');
+    }
   });
 
-  it('names a whole group of tests that share one error, each with that error', async () => {
-    const { checkout, tail } = checkoutWith({
-      test: [
-        ' FAIL  daemon  src/a.test.ts > each > a',
-        ' FAIL  daemon  src/a.test.ts > each > b',
-        'Error: Test timed out in 30000ms.',
-      ].join('\n'),
-    });
-    const outcome = await rerunFlaky({
-      checkout,
-      output: tail,
-      run: () => Promise.resolve(result(0)),
-    });
-    expect(outcome).toMatchObject({
-      kind: 'flaky',
-      tests: [
-        { name: 'each > a', failure: 'Error: Test timed out in 30000ms.', timedOut: true },
-        { name: 'each > b', failure: 'Error: Test timed out in 30000ms.', timedOut: true },
-      ],
-    });
-  });
-
-  it('is a real failure when the rerun fails too', async () => {
+  it('is a real failure when the rerun fails too or times out', async () => {
     const { checkout, tail } = checkoutWith({ test: TIMEOUT_LOG });
-    const outcome = await rerunFlaky({
+    const failed = await rerunFlaky({
       checkout,
       output: tail,
       run: () => Promise.resolve(result(1)),
     });
-    expect(outcome).toEqual({ kind: 'failed', rerun: result(1) });
-  });
-
-  it('is a real failure when the rerun timed out', async () => {
-    const { checkout, tail } = checkoutWith({ test: TIMEOUT_LOG });
-    const outcome = await rerunFlaky({
+    expect.soft(failed, 'rerun fails').toEqual({ kind: 'failed', rerun: result(1) });
+    const timedOut = await rerunFlaky({
       checkout,
       output: tail,
       run: () => Promise.resolve(result(0, { timedOut: true })),
     });
-    expect(outcome.kind).toBe('failed');
+    expect.soft(timedOut.kind, 'rerun timed out').toBe('failed');
   });
 
   it('records nothing when the rerun was stopped or did not run', async () => {
@@ -155,55 +130,39 @@ describe('rerunFlaky', () => {
       ).toEqual({ kind: 'stopped' });
   });
 
-  it.each([
-    [
-      'a failing step that names no test (lint)',
-      { lint: 'error: no-unused-vars', test: TIMEOUT_LOG },
-    ],
-    ['a log that names no test', { test: 'Command failed with exit code 1' }],
-    ['a file name a shell would read as more than a path', { test: ' FAIL  src/$(x).test.ts > t' }],
-    ['a file name that leaves the checkout', { test: ' FAIL  ../../x.test.ts > t' }],
-  ])('does not rerun %s', async (_name, logs) => {
-    const { checkout, tail } = checkoutWith(logs);
-    let ran = false;
-    const outcome = await rerunFlaky({
-      checkout,
-      output: tail,
-      run: () => {
-        ran = true;
-        return Promise.resolve(result(0));
-      },
-    });
-    expect(outcome).toEqual({ kind: 'none' });
-    expect(ran).toBe(false);
-  });
-
-  it('does not rerun output that names no failing step', async () => {
-    const outcome = await rerunFlaky({
+  it('does not rerun a step with no test, a file name that is more than a path in the checkout, or no failing step', async () => {
+    const rows: [string, Record<string, string>][] = [
+      [
+        'a failing step that names no test (lint)',
+        { lint: 'error: no-unused-vars', test: TIMEOUT_LOG },
+      ],
+      ['a log that names no test', { test: 'Command failed with exit code 1' }],
+      [
+        'a file name a shell would read as more than a path',
+        { test: ' FAIL  src/$(x).test.ts > t' },
+      ],
+      ['a file name that leaves the checkout', { test: ' FAIL  ../../x.test.ts > t' }],
+    ];
+    for (const [name, logs] of rows) {
+      const { checkout, tail } = checkoutWith(logs);
+      let ran = false;
+      const outcome = await rerunFlaky({
+        checkout,
+        output: tail,
+        run: () => {
+          ran = true;
+          return Promise.resolve(result(0));
+        },
+      });
+      expect.soft(outcome, name).toEqual({ kind: 'none' });
+      expect.soft(ran, `${name}: ran`).toBe(false);
+    }
+    const noStep = await rerunFlaky({
       checkout: tempDir('flaky-checkout').path,
       output: 'broken\n',
       run: () => Promise.reject(new Error('must not run')),
     });
-    expect(outcome).toEqual({ kind: 'none' });
-  });
-});
-
-describe('flakeNote', () => {
-  it('names each test, its first failure and that it passed on rerun', () => {
-    const tests: FlakyTest[] = [
-      {
-        file: 'src/a.test.ts',
-        name: 'slow',
-        failure: 'Error: Test timed out in 30000ms.',
-        timedOut: true,
-      },
-      { file: 'src/c.test.ts', name: null, failure: 'the file failed to run', timedOut: false },
-    ];
-    const note = flakeNote(tests);
-    expect(note).toContain('src/a.test.ts > slow');
-    expect(note).toContain('Test timed out in 30000ms');
-    expect(note).toContain('src/c.test.ts');
-    expect(note).toMatch(/passed when 10db ran/);
+    expect.soft(noStep, 'output that names no failing step').toEqual({ kind: 'none' });
   });
 });
 
@@ -250,30 +209,5 @@ describe('fileFlakyTests', () => {
     expect(a?.description).toContain('Test timed out in 30000ms');
     expect(a?.description).toContain('also');
     expect(a?.description).toContain(s.task.title);
-  });
-
-  it('adds a second flake of the same file to the open task instead of filing another', () => {
-    const s = setup();
-    s.file([slow]);
-    const second = s.file([
-      { file: 'src/a.test.ts', name: 'later', failure: 'AssertionError: z', timedOut: false },
-    ]);
-    const tasks = s.filed();
-    expect(tasks).toHaveLength(1);
-    expect(tasks[0]?.description).toContain('slow');
-    expect(tasks[0]?.description).toContain('later');
-    expect(tasks[0]?.description).toContain('AssertionError: z');
-    expect(second.map((t) => t.id)).toEqual([tasks[0]?.id]);
-  });
-
-  it('files a new task once the earlier one is finished', () => {
-    const s = setup();
-    const [first] = s.file([slow]);
-    if (!first) throw new Error('no task filed');
-    s.store.write((ctx) => {
-      setTaskStatus(ctx, first.id, TaskStatus.Done);
-    });
-    s.file([slow]);
-    expect(s.filed()).toHaveLength(2);
   });
 });

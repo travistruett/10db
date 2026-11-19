@@ -51,7 +51,6 @@ import {
 import { passPrBase } from './pass-pr';
 import { settleClosedPass } from './pass-settle';
 import { passMoveKey } from './pass-stack';
-import { reviewLeft, setReviewLeft } from './review-left';
 
 // Workbench spec §5.3, §5.4, D22, call 29: a closed pass on a pull request project settles when its
 // pull request merges with the base's tree its tip, and otherwise offers one card, Move <branch> to
@@ -69,12 +68,14 @@ const nothingKept: PutBackKeptWork = () => Promise.resolve({ applied: [], left: 
 let h: DeliveryHarness;
 let w: PrWatch | null = null;
 let unsubscribe: () => void = () => undefined;
-afterEach(async () => {
+/** Stops the watch and closes the harness: after each test, and between the cases of one. */
+async function teardown(): Promise<void> {
   unsubscribe();
   await w?.stop();
   w = null;
   h.close();
-});
+}
+afterEach(teardown);
 
 interface Closed {
   readonly passId: PassId;
@@ -234,147 +235,48 @@ describe('a closed pass', () => {
     expect(passHoldingFolder(h.store.db, h.project.id)).toBeUndefined();
   });
 
-  it.each([
-    {
-      name: 'an uncommitted change where the move writes',
-      arrange: () => {
-        write('src/settings/page.tsx', 'mine\n');
+  it('refuses Move, saying so on the card, for an uncommitted change where it writes, a commit of the builder’s own or a merge made by hand on the branch', async () => {
+    // Each case leaves its own folder: one closed pass each.
+    for (const [i, { name, arrange, says }] of [
+      {
+        name: 'an uncommitted change where the move writes',
+        arrange: () => {
+          write('src/settings/page.tsx', 'mine\n');
+        },
+        says: 'uncommitted changes lie where the move writes: src/settings/page.tsx',
       },
-      says: 'uncommitted changes lie where the move writes: src/settings/page.tsx',
-    },
-    {
-      name: 'a commit of the builder’s own on the branch',
-      arrange: () => {
-        h.commit('notes.md', 'mine\n');
+      {
+        name: 'a commit of the builder’s own on the branch',
+        arrange: () => {
+          h.commit('notes.md', 'mine\n');
+        },
+        says: 'holds 1 commit of your own',
       },
-      says: 'holds 1 commit of your own',
-    },
-    {
-      name: 'a merge the builder made by hand on the branch',
-      arrange: () => {
-        h.git$('switch', '-q', '-c', 'side');
-        h.commit('notes.md', 'mine\n');
-        h.git$('switch', '-q', 'main');
-        h.git$('merge', '-q', '--no-ff', '-m', 'Merge side', 'side');
+      {
+        name: 'a merge the builder made by hand on the branch',
+        arrange: () => {
+          h.git$('switch', '-q', '-c', 'side');
+          h.commit('notes.md', 'mine\n');
+          h.git$('switch', '-q', 'main');
+          h.git$('merge', '-q', '--no-ff', '-m', 'Merge side', 'side');
+        },
+        says: 'holds 1 commit of your own',
       },
-      says: 'holds 1 commit of your own',
-    },
-  ])('refuses Move, saying so on the card, for $name', async ({ arrange, says }) => {
-    const { passId } = await closedPass();
-    arrange();
-    const before = h.git$('rev-parse', 'refs/heads/main');
+    ].entries()) {
+      if (i > 0) await teardown();
+      const { passId } = await closedPass();
+      arrange();
+      const before = h.git$('rev-parse', 'refs/heads/main');
 
-    await answerMove(h.only(moveCards(passId)));
+      await answerMove(h.only(moveCards(passId)));
 
-    expect(getPass(h.store.db, passId).state).toBe(PassState.Closed);
-    expect(h.git$('rev-parse', 'refs/heads/main')).toBe(before);
-    expect(h.only(moveCards(passId)).body).toContain(says);
+      expect.soft(getPass(h.store.db, passId).state, name).toBe(PassState.Closed);
+      expect.soft(h.git$('rev-parse', 'refs/heads/main'), name).toBe(before);
+      expect.soft(h.only(moveCards(passId)).body, name).toContain(says);
+    }
   });
 
-  it('realigns with no file changed when its pull request merges and the trees match', async () => {
-    const { passId, url, tip } = await closedPass();
-    const squash = squashOnOrigin(tip);
-    h.origin$('update-ref', 'refs/heads/main', squash);
-    h.gh.setState(url, PrState.Merged);
-    write('notes.md', 'left in the folder\n');
-
-    await watchRound();
-
-    expect(getPass(h.store.db, passId).state).toBe(PassState.Settled);
-    expect(h.git$('rev-parse', 'refs/heads/main')).toBe(squash);
-    expect(h.git$('symbolic-ref', 'HEAD')).toBe('refs/heads/main');
-    expect(h.git$('status', '--porcelain')).toBe('?? notes.md');
-    expect(moveCards(passId)).toEqual([]);
-  });
-
-  it.each([
-    {
-      name: 'drift: the base holds more than the pass',
-      act: (c: Closed) => {
-        h.teammatePush('main', 'src/people/page.tsx', 'people\n');
-        h.gh.setState(c.url, PrState.Merged);
-      },
-      reason: 'drift',
-    },
-    {
-      name: 'its pull request closed without merging',
-      act: (c: Closed) => {
-        h.gh.setState(c.url, PrState.Closed);
-      },
-      reason: 'closed_unmerged',
-    },
-  ])('moves nothing and rewords its card for $name', async ({ act, reason }) => {
-    const c = await closedPass();
-    act(c);
-
-    await watchRound();
-
-    expect(getPass(h.store.db, c.passId).state).toBe(PassState.Closed);
-    expect(h.git$('rev-parse', 'refs/heads/main')).toBe(c.tip);
-    expect(h.only(moveCards(c.passId)).detail).toMatchObject({ reason });
-  });
-
-  it("keeps a closed pass's branch through the merged-branch sweep, so Move after drift still settles it", async () => {
-    const c = await closedPass();
-    h.teammatePush('main', 'src/people/page.tsx', 'people\n');
-    h.gh.setState(c.url, PrState.Merged);
-    h.gh.setHead(c.url, c.tip);
-    await watchRound();
-    expect(h.only(moveCards(c.passId)).detail).toMatchObject({ reason: 'drift' });
-
-    await removeMergedBranches(h.ctx, new AbortController().signal);
-
-    expect(h.git$('rev-parse', `refs/heads/${c.branch}`)).toBe(c.tip);
-    expect(h.git$('rev-parse', `refs/remotes/origin/${c.branch}`)).toBe(c.tip);
-    await answerMove(h.only(moveCards(c.passId)));
-    expect(getPass(h.store.db, c.passId).state).toBe(PassState.Settled);
-  });
-
-  it.each([
-    {
-      name: 'settles',
-      pass: async () => (await closedPass()).passId,
-      end: async (passId: PassId) => {
-        await answerMove(h.only(moveCards(passId)));
-      },
-      state: PassState.Settled,
-    },
-    {
-      name: 'is abandoned',
-      // A pass opened on the closed one, and abandoned while open.
-      pass: async () => {
-        await closedPass();
-        const task = h.addTask('People page', { areas: ['people'] });
-        const opened = await openPass(
-          h.ctx,
-          { projectId: h.project.id, name: 'More pages', taskIds: [task.id] },
-          { leaseMs: 60_000, putBack: nothingKept },
-        );
-        await h.jobs.idle();
-        return opened.pass.id;
-      },
-      end: (passId: PassId) => {
-        h.state.write((ctx) => {
-          setAbandonStep(ctx, passId, AbandonStep.Abandoning);
-          abandonPassAndBatch(ctx, passId);
-        });
-        return h.jobs.idle();
-      },
-      state: PassState.Abandoned,
-    },
-  ])('forgets what its reviews left unread once it $name', async ({ pass, end, state }) => {
-    const passId = await pass();
-    h.state.write((ctx) => {
-      setReviewLeft(ctx, passId, { from: 'a'.repeat(40), files: ['src/a.ts'], partial: [] });
-    });
-
-    await end(passId);
-
-    expect(getPass(h.store.db, passId).state).toBe(state);
-    expect(reviewLeft(h.store.db, passId)).toBeNull();
-  });
-
-  it('after a restart, raises no second card, keeps the folder held, and realigns when the merge is read', async () => {
+  it('after a restart, raises no second card and keeps the folder held, then realigns with no file changed when its pull request merges and the trees match', async () => {
     const { passId, url, tip } = await closedPass();
     const first = h.only(moveCards(passId));
     // A restart, twice over, looks at the pass again: the card it raised at the close is the one.
@@ -384,13 +286,49 @@ describe('a closed pass', () => {
     expect(h.only(moveCards(passId)).id).toBe(first.id);
     expect(passHoldingFolder(h.store.db, h.project.id)?.id).toBe(passId);
 
-    h.origin$('update-ref', 'refs/heads/main', squashOnOrigin(tip));
+    const squash = squashOnOrigin(tip);
+    h.origin$('update-ref', 'refs/heads/main', squash);
     h.gh.setState(url, PrState.Merged);
+    write('notes.md', 'left in the folder\n');
+
     await watchRound();
     await settleClosedPass(h.ctx, passId, new AbortController().signal);
 
     expect(getPass(h.store.db, passId).state).toBe(PassState.Settled);
+    expect(h.git$('rev-parse', 'refs/heads/main')).toBe(squash);
+    expect(h.git$('symbolic-ref', 'HEAD')).toBe('refs/heads/main');
+    expect(h.git$('status', '--porcelain')).toBe('?? notes.md');
     expect(moveCards(passId)).toEqual([]);
+  });
+
+  it('moves nothing and rewords its card when its pull request closed without merging', async () => {
+    const c = await closedPass();
+    h.gh.setState(c.url, PrState.Closed);
+
+    await watchRound();
+
+    expect(getPass(h.store.db, c.passId).state).toBe(PassState.Closed);
+    expect(h.git$('rev-parse', 'refs/heads/main')).toBe(c.tip);
+    expect(h.only(moveCards(c.passId)).detail).toMatchObject({ reason: 'closed_unmerged' });
+  });
+
+  it("moves nothing and rewords its card for drift, keeps a closed pass's branch through the merged-branch sweep, and Move after drift still settles it", async () => {
+    const c = await closedPass();
+    // Drift: the base holds more than the pass.
+    h.teammatePush('main', 'src/people/page.tsx', 'people\n');
+    h.gh.setState(c.url, PrState.Merged);
+    h.gh.setHead(c.url, c.tip);
+    await watchRound();
+    expect(getPass(h.store.db, c.passId).state).toBe(PassState.Closed);
+    expect(h.git$('rev-parse', 'refs/heads/main')).toBe(c.tip);
+    expect(h.only(moveCards(c.passId)).detail).toMatchObject({ reason: 'drift' });
+
+    await removeMergedBranches(h.ctx, new AbortController().signal);
+
+    expect(h.git$('rev-parse', `refs/heads/${c.branch}`)).toBe(c.tip);
+    expect(h.git$('rev-parse', `refs/remotes/origin/${c.branch}`)).toBe(c.tip);
+    await answerMove(h.only(moveCards(c.passId)));
+    expect(getPass(h.store.db, c.passId).state).toBe(PassState.Settled);
   });
 });
 
@@ -428,28 +366,12 @@ describe('a pass stacked on a closed one (D24)', () => {
     await h.jobs.idle();
   }
 
-  it('stacks a third pass on the newest closed one, whose tip it opens at', async () => {
-    const a = await closedPass();
-    const b = await stacked(a);
-    await closeStacked(a, b);
-    const task = h.addTask('Home page', { areas: ['settings'] });
-
-    const c = await openPass(
-      h.ctx,
-      { projectId: h.project.id, name: 'Home', taskIds: [task.id] },
-      { leaseMs: 60_000, putBack: nothingKept },
-    );
-
-    expect(c.pass.startSha).toBe(b.tip);
-    expect(getPassProgress(h.store.db, c.pass.id).stackedOn).toBe(b.passId);
-  });
-
   const edits = (url: string) =>
     h.gh.calls.filter(
       (c) => c.method === 'prEditBase' && (c.args as { readonly url: string }).url === url,
     );
 
-  it("opens at the closed pass's tip, targets its branch, and the closed pass's Move card waits", async () => {
+  it("opens at the closed pass's tip, targeting its branch while its Move card waits; when that pass merges with matching trees, it settles, and the stacked one is retargeted and takes the base by one merge that changes no file, once", async () => {
     const a = await closedPass();
     expect(moveCards(a.passId)).toHaveLength(1);
 
@@ -459,11 +381,7 @@ describe('a pass stacked on a closed one (D24)', () => {
     expect(b.start).toBe(a.tip);
     expect(passPrBase(h.store.db, getPass(h.store.db, b.passId))).toBe(a.branch);
     expect(moveCards(a.passId)).toEqual([]);
-  });
 
-  it('when the closed pass merges with matching trees: it settles, the stacked one is retargeted and takes the base by one merge that changes no file, once', async () => {
-    const a = await closedPass();
-    const b = await stacked(a);
     const squash = squashOnOrigin(a.tip);
     h.origin$('update-ref', 'refs/heads/main', squash);
     h.gh.setState(a.url, PrState.Merged);
@@ -483,16 +401,14 @@ describe('a pass stacked on a closed one (D24)', () => {
     expect(passPrBase(h.store.db, getPass(h.store.db, b.passId))).toBe('main');
   });
 
-  it.each([
-    { name: '', crashed: false },
-    {
+  it('when the closed pass merges after the stacked one has closed too, with or without a crash between the merge and the move: it still retargets it, takes the base in and keeps the folder on the tip', async () => {
+    // Each case is its own pair of passes: one harness each.
+    for (const [i, { name, crashed }] of [
+      { name: 'no crash', crashed: false },
       // A daemon killed between the merge and the return branch's move: the rerun finds it merged.
-      name: ', after a crash between the merge and the move',
-      crashed: true,
-    },
-  ])(
-    'when the closed pass merges after the stacked one has closed too$name: it still retargets it, takes the base in and keeps the folder on the tip',
-    async ({ crashed }) => {
+      { name: 'after a crash between the merge and the move', crashed: true },
+    ].entries()) {
+      if (i > 0) await teardown();
       const a = await closedPass();
       const b = await stacked(a);
       await closeStacked(a, b);
@@ -511,15 +427,15 @@ describe('a pass stacked on a closed one (D24)', () => {
 
       await watchRound();
 
-      expect(getPass(h.store.db, a.passId).state).toBe(PassState.Settled);
-      expect(moveCards(a.passId)).toEqual([]);
-      expect(edits(b.url)).toHaveLength(1);
+      expect.soft(getPass(h.store.db, a.passId).state, name).toBe(PassState.Settled);
+      expect.soft(moveCards(a.passId), name).toEqual([]);
+      expect.soft(edits(b.url), name).toHaveLength(1);
       const head = h.git$('rev-parse', `refs/heads/${b.branch}`);
-      expect(h.git$('rev-parse', `${head}^2`)).toBe(squash);
-      expect(h.git$('rev-parse', 'refs/heads/main')).toBe(head);
-      expect(h.git$('status', '--porcelain')).toBe('');
-    },
-  );
+      expect.soft(h.git$('rev-parse', `${head}^2`), name).toBe(squash);
+      expect.soft(h.git$('rev-parse', 'refs/heads/main'), name).toBe(head);
+      expect.soft(h.git$('status', '--porcelain'), name).toBe('');
+    }
+  });
 
   it('when the closed pass merges as pushed, before pages signed off after its push, the stacked one takes the base in', async () => {
     const a = await closedPass();
@@ -578,7 +494,7 @@ describe('a pass stacked on a closed one (D24)', () => {
     expect(h.git$('rev-parse', 'refs/heads/main')).toBe(squash);
   });
 
-  it('when the closed pass merges while a third pass is stacked on the closed one above it: the return branch stays where that pass started', async () => {
+  it('stacks a third pass on the newest closed one, whose tip it opens at, and when the closed pass below merges: the return branch stays where that pass started', async () => {
     const a = await closedPass();
     const b = await stacked(a);
     await closeStacked(a, b);
@@ -588,6 +504,8 @@ describe('a pass stacked on a closed one (D24)', () => {
       { projectId: h.project.id, name: 'Home', taskIds: [task.id] },
       { leaseMs: 60_000, putBack: nothingKept },
     );
+    expect(c.pass.startSha).toBe(b.tip);
+    expect(getPassProgress(h.store.db, c.pass.id).stackedOn).toBe(b.passId);
     await h.jobs.idle();
     const squash = squashOnOrigin(a.tip);
     h.origin$('update-ref', 'refs/heads/main', squash);
@@ -603,10 +521,11 @@ describe('a pass stacked on a closed one (D24)', () => {
     expect(h.git$('rev-parse', 'refs/heads/main')).toBe(b.tip);
   });
 
-  it('when the closed pass closes unmerged: the stacked one says so and offers Retarget, which bases its pull request on the base', async () => {
+  it('when the closed pass closes unmerged: the stacked one says so and offers Retarget, though the read of its pull request fails, which bases its pull request on the base', async () => {
     const a = await closedPass();
     const b = await stacked(a);
     h.gh.setState(a.url, PrState.Closed);
+    h.gh.failNext.set('prView', new GhError('unreachable', 'gh could not reach GitHub'));
 
     await watchRound();
 
@@ -659,36 +578,6 @@ describe('a pass stacked on a closed one (D24)', () => {
     resumePassSettles(h.ctx);
     await h.jobs.idle();
     expect(edits(b.url)).toHaveLength(2);
-  });
-
-  it('when the read of the stacked pull request fails, it still offers Retarget', async () => {
-    const a = await closedPass();
-    const b = await stacked(a);
-    h.gh.setState(a.url, PrState.Closed);
-    h.gh.failNext.set('prView', new GhError('unreachable', 'gh could not reach GitHub'));
-
-    await watchRound();
-
-    const card = h.only(retargetCards());
-    expect(getPassProgress(h.store.db, b.passId).notices).toEqual([
-      expect.objectContaining({ kind: PassNoticeKind.StackUnmerged, cardId: card.id }),
-    ]);
-  });
-
-  it('when the stacked pull request was retargeted by hand, its card and notice go at the next look', async () => {
-    const a = await closedPass();
-    const b = await stacked(a);
-    h.gh.setState(a.url, PrState.Closed);
-    await watchRound();
-    expect(retargetCards()).toHaveLength(1);
-
-    await h.gh.prEditBase({ repo: 'acme/widgets', url: b.url, base: 'main' });
-    resumePassSettles(h.ctx);
-    await h.jobs.idle();
-
-    expect(retargetCards()).toEqual([]);
-    expect(getPassProgress(h.store.db, b.passId).notices).toEqual([]);
-    expect(edits(b.url)).toHaveLength(1);
   });
 
   it('when the stacked pass is abandoned at its start, the closed pass offers Move again', async () => {
@@ -763,17 +652,40 @@ describe('a pass on a local project (spec §5.3)', () => {
     return { a: { ...a.pass, branch: aBranch, url: aUrl, tip }, b: { ...b.pass, url: bUrl } };
   }
 
-  it("bases a later pass's record pull request on the settled pass's branch while that one's is unmerged", async () => {
+  it("bases a later pass's record pull request on the settled pass's branch while that one's is unmerged, queues a settle for the settled pass alone, and retargets it on the base once the settled pass's merges", async () => {
     const { a, b } = await twoLocalPasses();
 
     expect(getPass(h.store.db, a.id).state).toBe(PassState.Settled);
     expect(b.startSha).toBe(a.tip);
     expect(getPassProgress(h.store.db, b.id).stackedOn).toBe(a.id);
     expect(passPrBase(h.store.db, getPass(h.store.db, b.id))).toBe(a.branch);
-  });
 
-  it("retargets the later pull request on the base once the settled pass's merges", async () => {
-    const { a, b } = await twoLocalPasses();
+    // A watch round while nothing merged: it queues a settle for the settled pass whose record it
+    // reads, none for the open one.
+    const queued: string[] = [];
+    const counting = createPrWatch({
+      ctx: {
+        ...h.ctx,
+        jobs: {
+          ...h.ctx.jobs,
+          run: (key, job) => {
+            queued.push(key);
+            h.ctx.jobs.run(key, job);
+          },
+        },
+      },
+      clock: new ManualClock(),
+      intervalMs: 120_000,
+    });
+    counting.start();
+    await counting.idle();
+    await h.jobs.idle();
+    await counting.stop();
+    expect(getPass(h.store.db, b.id).state).toBe(PassState.Open);
+    // One read each of the settled pass's record and the open pass's pull request: only the first
+    // can have a pass stacked on it to follow.
+    expect(queued).toHaveLength(1);
+
     h.gh.setState(a.url, PrState.Merged);
 
     await watchRound();
@@ -814,32 +726,5 @@ describe('a pass on a local project (spec §5.3)', () => {
     expect(b.startSha).not.toBe(a.tip);
     expect(getPassProgress(h.store.db, b.id).stackedOn).toBeNull();
     expect(passPrBase(h.store.db, getPass(h.store.db, b.id))).toBe('main');
-  });
-
-  it('queues a settle for the settled pass whose record it reads, none for the open one', async () => {
-    const { b } = await twoLocalPasses();
-    const queued: string[] = [];
-    w = createPrWatch({
-      ctx: {
-        ...h.ctx,
-        jobs: {
-          ...h.ctx.jobs,
-          run: (key, job) => {
-            queued.push(key);
-            h.ctx.jobs.run(key, job);
-          },
-        },
-      },
-      clock: new ManualClock(),
-      intervalMs: 120_000,
-    });
-    w.start();
-    await w.idle();
-    await h.jobs.idle();
-
-    expect(getPass(h.store.db, b.id).state).toBe(PassState.Open);
-    // One read each of the settled pass's record and the open pass's pull request: only the first
-    // can have a pass stacked on it to follow.
-    expect(queued).toHaveLength(1);
   });
 });

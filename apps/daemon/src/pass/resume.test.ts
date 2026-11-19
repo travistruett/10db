@@ -159,7 +159,7 @@ describe('resumePassWork', () => {
     expect(kept.pageFiles.map((f) => f.path)).toEqual(['src/settings/page.tsx']);
   });
 
-  it('says why when the switch back would write over an uncommitted file, and leaves it', async () => {
+  it("says why when the switch back would write over an uncommitted file, switches nothing for a pass that no longer holds the folder, and says when the pass's branch is gone", async () => {
     w = await openPassWorld();
     w.h.git$('switch', '-q', 'main');
     w.h.commit('src/people/page.tsx', 'committed on main\n');
@@ -176,14 +176,6 @@ describe('resumePassWork', () => {
     expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
     const [again] = folderCards(w);
     expect(again?.body).toContain('src/people/page.tsx');
-  });
-
-  it("switches nothing for a pass that no longer holds the folder, and says when the pass's branch is gone", async () => {
-    w = await openPassWorld();
-    w.h.git$('switch', '-q', 'main');
-    await resumePassWork(deps(w));
-    const [card] = folderCards(w);
-    if (!card) throw new Error('no folder card');
 
     w.h.git$('branch', '-D', w.branch);
     answerPassCard({ ...w.deps, folderHold: w.h.ctx.folderHold }, card, {
@@ -234,32 +226,7 @@ describe('resumePassWork', () => {
     expect(readFileSync(join(w.h.repo, 'src/settings/page.tsx'), 'utf8')).toBe('settings\n');
   });
 
-  it('puts back the saved work of a page Add Page put back into the pass it was taken out of', async () => {
-    w = await openPassWorld();
-    w.write('src/settings/page.tsx', 'the turn\n');
-    await takeOutSteps(deps(w), { taskId: w.settings.id, within: TakeOutWithin.Alone });
-    // The daemon stopped before the join's put-back wrote a file.
-    await joinPass(
-      w.h.ctx,
-      w.opened.pass.id,
-      { pages: [], taskIds: [w.settings.id], firstMessage: null },
-      { leaseMs: 60_000, putBack: () => Promise.reject(new Error('the daemon died')) },
-    );
-    expect(readFileSync(join(w.h.repo, 'src/settings/page.tsx'), 'utf8')).toBe('settings\n');
-
-    const restarted = {
-      ...w.restart(),
-      stopLane: (): Promise<void> => Promise.resolve(),
-      wrote: (): Promise<void> => Promise.resolve(),
-    };
-    await resumePassWork(restarted);
-    await restarted.jobs.idle();
-
-    expect(readFileSync(join(w.h.repo, 'src/settings/page.tsx'), 'utf8')).toBe('the turn\n');
-    expect(getTaskKeptWork(w.h.store.db, w.settings.id)).toBeNull();
-  });
-
-  it("keeps a page's first take-out row when a second one fails, so start-up puts its work back by it", async () => {
+  it('puts back the saved work of a page Add Page put back, keeping its first take-out row when a second one fails', async () => {
     w = await openPassWorld({
       before: ({ write }) => {
         write('src/settings/page.tsx', 'edited before the pass\n');
@@ -276,6 +243,7 @@ describe('resumePassWork', () => {
       { pages: [], taskIds: [w.settings.id], firstMessage: null },
       { leaseMs: 60_000, putBack: () => Promise.reject(new Error('the daemon died')) },
     );
+    expect(read(w, 'src/settings/page.tsx')).toBe('edited before the pass\n');
     // Taken out again, the take-out fails at its first step and leaves the page in the pass.
     await expect(
       takeOutSteps(

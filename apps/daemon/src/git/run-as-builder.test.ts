@@ -97,27 +97,60 @@ const runIn = (checkout: string, command: string, extraEnv: Record<string, strin
   });
 
 describe.skipIf(SANDBOXED)('runPassGit', () => {
-  it('runs no filter or diff driver a .gitattributes in the checkout names', async () => {
+  it('runs a commit inside the sandbox, its hooks with no account credential, and no filter, diff driver or fsmonitor the checkout names', async () => {
     const repo = createTempRepo();
     try {
-      const marker = join(repo.path, '..', `filter-ran-${String(process.pid)}`);
+      const filterRan = join(repo.path, '..', `filter-ran-${String(process.pid)}`);
       // The builder's config names a driver; the attributes file a lane wrote selects it.
-      git(repo.path, 'config', 'filter.planted.clean', `sh -c 'touch "${marker}"; cat'`);
-      git(repo.path, 'config', 'diff.planted.textconv', `sh -c 'touch "${marker}"; cat'`);
+      git(repo.path, 'config', 'filter.planted.clean', `sh -c 'touch "${filterRan}"; cat'`);
+      git(repo.path, 'config', 'diff.planted.textconv', `sh -c 'touch "${filterRan}"; cat'`);
       writeFileSync(join(repo.path, '.gitattributes'), '* filter=planted diff=planted\n');
       writeFileSync(join(repo.path, 'README.md'), '# changed\n');
+      const fsmonitorRan = join(repo.path, '..', `fsmonitor-ran-${String(process.pid)}`);
+      const script = join(repo.path, '.git', 'fsmonitor.sh');
+      writeFileSync(script, `#!/bin/sh\ntouch '${fsmonitorRan}'\n`, { mode: 0o755 });
+      git(repo.path, 'config', 'core.fsmonitor', script);
+      const seen = join(repo.path, 'hook-env.txt');
+      writeFileSync(
+        join(repo.path, '.git', 'hooks', 'pre-commit'),
+        `#!/bin/sh\nenv > '${seen}'\n`,
+        {
+          mode: 0o755,
+        },
+      );
       const ran = await runIn(repo.path, 'git commit -am x');
       expect(ran).toMatchObject({ exitCode: 0 });
-      expect(existsSync(marker)).toBe(false);
+      expect(existsSync(filterRan)).toBe(false);
+      expect(existsSync(fsmonitorRan)).toBe(false);
+      // srt's stand-in says it ran the call: the commit went through the gate's sandbox.
+      expect('output' in ran ? ran.output : '').toContain('fake srt');
+      const hookEnv = readFileSync(seen, 'utf8');
+      // A replace ref a hook wrote changes no object git shows. (Git keeps it from a transport's
+      // command, so a push's is not seen there.)
+      expect(hookEnv.split('\n')).toContain('GIT_NO_REPLACE_OBJECTS=1');
+      expect(hookEnv).not.toContain('sk-canary');
+      expect(hookEnv).not.toContain('bedrock-canary');
     } finally {
       repo.cleanup();
     }
   });
 
-  it("commits in the checkout's own repository, whatever GIT_DIR the session carries", async () => {
+  it("refuses a commit where no sandbox can contain its hooks; with one, commits in the checkout's own repository whatever GIT_DIR the session carries", async () => {
     const repo = createTempRepo();
     const other = createTempRepo();
     try {
+      const head = git(repo.path, 'rev-parse', 'HEAD');
+      const unsandboxed = await runPassGit(callOf('git commit --allow-empty -m x'), {
+        checkout: repo.path,
+        baseBranch: 'main',
+        env,
+        signal,
+        bins,
+        sandbox: null,
+      });
+      expect(unsandboxed).toHaveProperty('refused');
+      expect(git(repo.path, 'rev-parse', 'HEAD')).toBe(head);
+
       writeFileSync(join(repo.path, 'page.ts'), 'export {};\n');
       git(repo.path, 'add', 'page.ts');
       const before = git(other.path, 'rev-parse', 'HEAD');
@@ -133,70 +166,50 @@ describe.skipIf(SANDBOXED)('runPassGit', () => {
     }
   });
 
-  it('runs with fsmonitor off, so no program config names starts', async () => {
-    const repo = createTempRepo();
-    try {
-      const marker = join(repo.path, '..', `fsmonitor-ran-${String(process.pid)}`);
-      const script = join(repo.path, '.git', 'fsmonitor.sh');
-      writeFileSync(script, `#!/bin/sh\ntouch '${marker}'\n`, { mode: 0o755 });
-      git(repo.path, 'config', 'core.fsmonitor', script);
-      const ran = await runIn(repo.path, 'git commit --allow-empty -m x');
-      expect(ran).toMatchObject({ exitCode: 0 });
-      expect(existsSync(marker)).toBe(false);
-    } finally {
-      repo.cleanup();
-    }
-  });
-
-  it('refuses a checkout whose git dir names a common dir elsewhere', async () => {
-    const repo = createTempRepo();
-    const other = createTempRepo();
-    try {
-      writeFileSync(join(repo.path, '.git', 'commondir'), join(other.path, '.git'));
-      const ran = await runIn(repo.path, 'git commit --allow-empty -m x');
-      expect(ran).toEqual({
+  it('refuses a checkout whose git dir names a common dir elsewhere, or whose .git is a file naming one', async () => {
+    const rows = [
+      {
+        name: 'a commondir naming another repository',
+        plant: (repo: string, other: string) => {
+          writeFileSync(join(repo, '.git', 'commondir'), join(other, '.git'));
+        },
         refused:
           "This checkout's git dir shares its history with another one, so 10db won't run it.",
-      });
-    } finally {
-      repo.cleanup();
-      other.cleanup();
+      },
+      {
+        name: 'a gitfile naming another git dir',
+        plant: (repo: string, other: string) => {
+          execFileSync('rm', ['-rf', join(repo, '.git')]);
+          writeFileSync(join(repo, '.git'), `gitdir: ${join(other, '.git')}\n`);
+        },
+        refused: undefined,
+      },
+    ];
+    for (const { name, plant, refused } of rows) {
+      const repo = createTempRepo();
+      const other = createTempRepo();
+      try {
+        plant(repo.path, other.path);
+        const ran = await runIn(repo.path, 'git commit --allow-empty -m x');
+        if (refused) expect.soft(ran, name).toEqual({ refused });
+        else expect.soft(ran, name).toHaveProperty('refused');
+        expect.soft(git(other.path, 'log', '--format=%s'), name).toBe('Initial commit');
+      } finally {
+        repo.cleanup();
+        other.cleanup();
+      }
     }
   });
 
-  it('refuses a checkout whose .git is a file naming a git dir elsewhere', async () => {
-    const repo = createTempRepo();
-    const other = createTempRepo();
-    try {
-      execFileSync('rm', ['-rf', join(repo.path, '.git')]);
-      writeFileSync(join(repo.path, '.git'), `gitdir: ${join(other.path, '.git')}\n`);
-      expect(await runIn(repo.path, 'git commit --allow-empty -m x')).toHaveProperty('refused');
-      expect(git(other.path, 'log', '--format=%s')).toBe('Initial commit');
-    } finally {
-      repo.cleanup();
-      other.cleanup();
-    }
-  });
-
-  it('pushes a branch of its own to a listed remote', async () => {
+  it('refuses a push of HEAD while on main, and to a remote the checkout does not list though a folder of that name is a repository', async () => {
     const remote = createTempRepoWithOrigin();
     try {
-      git(remote.repo.path, 'switch', '-q', '-c', 'feat/page');
-      git(remote.repo.path, 'commit', '--allow-empty', '-q', '-m', 'page');
-      expect(await runIn(remote.repo.path, 'git push origin feat/page')).toMatchObject({
-        exitCode: 0,
-      });
-      expect(git(remote.origin.path, 'rev-parse', 'feat/page')).toBe(
+      git(remote.repo.path, 'commit', '--allow-empty', '-q', '-m', 'local');
+      expect(await runIn(remote.repo.path, 'git push origin HEAD')).toHaveProperty('refused');
+      expect(git(remote.repo.path, 'rev-parse', 'origin/main')).not.toBe(
         git(remote.repo.path, 'rev-parse', 'HEAD'),
       );
-    } finally {
-      remote.cleanup();
-    }
-  });
 
-  it('refuses a remote the checkout does not list, though a folder of that name is a repository', async () => {
-    const remote = createTempRepoWithOrigin();
-    try {
       const planted = join(remote.repo.path, 'evil');
       mkdirSync(planted);
       execFileSync('git', ['init', '-q', '--bare', planted], { env: isolatedGitEnv() });
@@ -214,65 +227,7 @@ describe.skipIf(SANDBOXED)('runPassGit', () => {
     }
   });
 
-  it('refuses a push of HEAD while the current branch is main', async () => {
-    const remote = createTempRepoWithOrigin();
-    try {
-      git(remote.repo.path, 'commit', '--allow-empty', '-q', '-m', 'local');
-      const ran = await runIn(remote.repo.path, 'git push origin HEAD');
-      expect(ran).toHaveProperty('refused');
-      expect(git(remote.repo.path, 'rev-parse', 'origin/main')).not.toBe(
-        git(remote.repo.path, 'rev-parse', 'HEAD'),
-      );
-    } finally {
-      remote.cleanup();
-    }
-  });
-  it('runs a commit inside the sandbox, its hooks with no account credential', async () => {
-    const repo = createTempRepo();
-    try {
-      const seen = join(repo.path, 'hook-env.txt');
-      writeFileSync(
-        join(repo.path, '.git', 'hooks', 'pre-commit'),
-        `#!/bin/sh\nenv > '${seen}'\n`,
-        {
-          mode: 0o755,
-        },
-      );
-      const ran = await runIn(repo.path, 'git commit --allow-empty -m x');
-      expect(ran).toMatchObject({ exitCode: 0 });
-      // srt's stand-in says it ran the call: the commit went through the gate's sandbox.
-      expect('output' in ran ? ran.output : '').toContain('fake srt');
-      const hookEnv = readFileSync(seen, 'utf8');
-      // A replace ref a hook wrote changes no object git shows. (Git keeps it from a transport's
-      // command, so a push's is not seen there.)
-      expect(hookEnv.split('\n')).toContain('GIT_NO_REPLACE_OBJECTS=1');
-      expect(hookEnv).not.toContain('sk-canary');
-      expect(hookEnv).not.toContain('bedrock-canary');
-    } finally {
-      repo.cleanup();
-    }
-  });
-
-  it('refuses a commit where no sandbox can contain its hooks', async () => {
-    const repo = createTempRepo();
-    try {
-      const before = git(repo.path, 'rev-parse', 'HEAD');
-      const ran = await runPassGit(callOf('git commit --allow-empty -m x'), {
-        checkout: repo.path,
-        baseBranch: 'main',
-        env,
-        signal,
-        bins,
-        sandbox: null,
-      });
-      expect(ran).toHaveProperty('refused');
-      expect(git(repo.path, 'rev-parse', 'HEAD')).toBe(before);
-    } finally {
-      repo.cleanup();
-    }
-  });
-
-  it("runs none of the repository's hooks for a push, and hands git no account credential", async () => {
+  it("pushes a branch of its own to a listed remote, running none of the repository's hooks and handing git no account credential", async () => {
     const remote = createTempRepoWithOrigin();
     try {
       const hookRan = join(remote.repo.path, '..', `pre-push-ran-${String(process.pid)}`);
@@ -282,9 +237,13 @@ describe.skipIf(SANDBOXED)('runPassGit', () => {
         { mode: 0o755 },
       );
       git(remote.repo.path, 'switch', '-q', '-c', 'feat/page');
+      git(remote.repo.path, 'commit', '--allow-empty', '-q', '-m', 'page');
       expect(await runIn(remote.repo.path, 'git push origin feat/page')).toMatchObject({
         exitCode: 0,
       });
+      expect(git(remote.origin.path, 'rev-parse', 'feat/page')).toBe(
+        git(remote.repo.path, 'rev-parse', 'HEAD'),
+      );
       expect(existsSync(hookRan)).toBe(false);
       // The builder's own config names a transport command; it sees the push's environment.
       const seen = join(remote.repo.path, '..', `push-env-${String(process.pid)}`);
@@ -304,9 +263,8 @@ describe.skipIf(SANDBOXED)('runPassGit', () => {
   });
   // A call that never ends is stopped with everything it started: its own process group goes,
   // at its deadline or when its session ends.
-  it.each(['the deadline', 'the session ending'] as const)(
-    'stops a call that hangs, and what it started, at %s',
-    async (when) => {
+  it('stops a call that hangs, and what it started, at the deadline or when the session ends', async () => {
+    for (const when of ['the deadline', 'the session ending'] as const) {
       const remote = createTempRepoWithOrigin();
       try {
         const child = join(remote.repo.path, '..', `hung-child-${randomBytes(6).toString('hex')}`);
@@ -338,7 +296,7 @@ describe.skipIf(SANDBOXED)('runPassGit', () => {
         if (when === 'the deadline') clock.advance(10 * 60_000);
         else session.abort();
         const ran = await pending;
-        expect(ran).toMatchObject({ exitCode: 124 });
+        expect.soft(ran, when).toMatchObject({ exitCode: 124 });
         await waitFor(() => {
           try {
             process.kill(pid, 0);
@@ -350,8 +308,8 @@ describe.skipIf(SANDBOXED)('runPassGit', () => {
       } finally {
         remote.cleanup();
       }
-    },
-  );
+    }
+  });
   // Here srt is a stand-in, so a hook can move HEAD; under Seatbelt HEAD is closed to it. Either way
   // a call that moved HEAD stops the next one until HEAD is back.
   it('refuses the next call after one moved HEAD, until HEAD is back', async () => {

@@ -14,7 +14,9 @@ import { InvalidError } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTempRepo, tempDir, type TempDir } from '../../test/fixtures';
 import { isolatedGitEnv } from '../../test/fixtures';
-import { createGit, GitTrustError } from './index';
+import { createGit, GitTrustError, type Git } from './index';
+
+type MergeResolve = NonNullable<Parameters<Git['mergeIntoBranch']>[0]['resolve']>;
 
 const git = createGit();
 let repo: TempDir;
@@ -24,6 +26,13 @@ beforeEach(() => {
 afterEach(() => {
   repo.cleanup();
 });
+
+/** A new repository checked out on a new branch `work`, in place of the one before. */
+function freshWork(): void {
+  repo.cleanup();
+  repo = createTempRepo();
+  rawGit('switch', '-q', '-c', 'work');
+}
 
 const rawGit = (...args: string[]) =>
   execFileSync('git', ['-C', repo.path, ...args], {
@@ -69,12 +78,13 @@ function snapshot() {
   };
 }
 
-const merge = () =>
+const merge = (resolve?: MergeResolve) =>
   git.mergeIntoBranch({
     repo: repo.path,
     branch: 'work',
     from: 'main',
     message: 'Merge main into work',
+    ...(resolve ? { resolve } : {}),
   });
 
 describe('mergeIntoBranch', () => {
@@ -82,7 +92,7 @@ describe('mergeIntoBranch', () => {
     rawGit('switch', '-q', '-c', 'work');
   });
 
-  it('merges a base that moved on: a merge commit with the branch first, both sides in the files, nothing uncommitted', async () => {
+  it('merges a base that moved on: a merge commit with the branch first, both sides in the files, nothing uncommitted; rewindBranch takes it back, keeping a file of the builder', async () => {
     const own = commitFiles({ 'src/own.txt': 'own\n' }, 'own');
     const base = onMain({ 'src/theirs.txt': 'theirs\n' }, 'theirs');
     const merged = await merge();
@@ -100,44 +110,32 @@ describe('mergeIntoBranch', () => {
     expect(read('src/own.txt')).toBe('own\n');
     expect(read('src/theirs.txt')).toBe('theirs\n');
     expect(rawGit('status', '--porcelain', '--untracked-files=all')).toBe('');
+
+    // The branch, the files and the index return; a file of the builder stays.
+    const head = merged.kind === 'merged' ? merged.head : '';
+    write('notes.txt', 'mine\n');
+    await git.rewindBranch(repo.path, 'work', head, own);
+    expect(rawGit('rev-parse', 'refs/heads/work')).toBe(own);
+    expect(existsSync(join(repo.path, 'src/theirs.txt'))).toBe(false);
+    expect(read('src/own.txt')).toBe('own\n');
+    expect(rawGit('status', '--porcelain', '--untracked-files=all')).toBe('?? notes.txt');
   });
 
-  describe('rewindBranch', () => {
-    it('takes a merge back: the branch, the files and the index return, a file of the builder stays', async () => {
-      const own = commitFiles({ 'src/own.txt': 'own\n' }, 'own');
-      onMain({ 'src/theirs.txt': 'theirs\n' }, 'theirs');
-      const merged = await merge();
-      const head = merged.kind === 'merged' ? merged.head : '';
-      write('notes.txt', 'mine\n');
+  it('rewindBranch refuses a branch that moved, or a target the tip does not descend from, and moves a branch that is not checked out by its ref alone', async () => {
+    const own = commitFiles({ 'src/own.txt': 'own\n' }, 'own');
+    const next = commitFiles({ 'src/more.txt': 'more\n' }, 'more');
+    const other = onMain({ 'src/theirs.txt': 'theirs\n' }, 'theirs');
+    await expect(git.rewindBranch(repo.path, 'work', own, own)).rejects.toBeInstanceOf(
+      InvalidError,
+    );
+    await expect(git.rewindBranch(repo.path, 'work', next, other)).rejects.toBeInstanceOf(
+      InvalidError,
+    );
+    expect(rawGit('rev-parse', 'refs/heads/work')).toBe(next);
 
-      await git.rewindBranch(repo.path, 'work', head, own);
-
-      expect(rawGit('rev-parse', 'refs/heads/work')).toBe(own);
-      expect(existsSync(join(repo.path, 'src/theirs.txt'))).toBe(false);
-      expect(read('src/own.txt')).toBe('own\n');
-      expect(rawGit('status', '--porcelain', '--untracked-files=all')).toBe('?? notes.txt');
-    });
-
-    it('moves a branch that is not checked out by its ref alone', async () => {
-      const own = commitFiles({ 'src/own.txt': 'own\n' }, 'own');
-      const next = commitFiles({ 'src/more.txt': 'more\n' }, 'more');
-      rawGit('switch', '-q', 'main');
-      await git.rewindBranch(repo.path, 'work', next, own);
-      expect(rawGit('rev-parse', 'refs/heads/work')).toBe(own);
-    });
-
-    it('refuses a branch that moved, or a target the tip does not descend from, and changes nothing', async () => {
-      const own = commitFiles({ 'src/own.txt': 'own\n' }, 'own');
-      const next = commitFiles({ 'src/more.txt': 'more\n' }, 'more');
-      const other = onMain({ 'src/theirs.txt': 'theirs\n' }, 'theirs');
-      await expect(git.rewindBranch(repo.path, 'work', own, own)).rejects.toBeInstanceOf(
-        InvalidError,
-      );
-      await expect(git.rewindBranch(repo.path, 'work', next, other)).rejects.toBeInstanceOf(
-        InvalidError,
-      );
-      expect(rawGit('rev-parse', 'refs/heads/work')).toBe(next);
-    });
+    rawGit('switch', '-q', 'main');
+    await git.rewindBranch(repo.path, 'work', next, own);
+    expect(rawGit('rev-parse', 'refs/heads/work')).toBe(own);
   });
 
   it('fast-forwards a branch with nothing of its own', async () => {
@@ -154,34 +152,122 @@ describe('mergeIntoBranch', () => {
     expect(rawGit('status', '--porcelain', '--untracked-files=all')).toBe('');
   });
 
-  it('is up to date when the branch already holds the base, and moves nothing', async () => {
-    const base = rawGit('rev-parse', 'main');
-    commitFiles({ 'src/own.txt': 'own\n' }, 'own');
-    const before = snapshot();
-    expect(await merge()).toEqual({ kind: 'up_to_date', from: base });
-    expect(snapshot()).toEqual(before);
-  });
+  describe('writing nothing, naming why', () => {
+    /** A base with `base` committed past `.gitignore`'s rules, and `ignored` written in the checkout. */
+    const ignoredInTheWay = (base: Record<string, string>, ignored: string[], kept: string[]) => ({
+      arrange: () => {
+        onMain({ '.gitignore': 'secret.env\nbuild/\ncache\n' }, 'ignore rules');
+        rawGit('merge', '-q', '--ff-only', 'main');
+        commitFiles({ 'src/own.txt': 'own\n' }, 'own');
+        const from = onMain(base, 'theirs', true);
+        for (const rel of ignored) write(rel, 'the builder keeps this\n');
+        return { kind: 'blocked', from, changed: [], kept };
+      },
+      files: Object.fromEntries(ignored.map((rel) => [rel, 'the builder keeps this\n'])),
+    });
+    const inTheWay = (rel: string) => ({
+      arrange: () => {
+        commitFiles({ 'src/own.txt': 'own\n' }, 'own');
+        const from = onMain({ 'README.md': '# theirs\n', 'src/theirs.txt': 'theirs\n' }, 'theirs');
+        write(rel, 'a lane is still writing this\n');
+        return { kind: 'blocked', from, changed: [rel], kept: [] };
+      },
+      files: { [rel]: 'a lane is still writing this\n' },
+    });
+    interface Row {
+      name: string;
+      /** Makes the history; returns what the merge answers. */
+      arrange: () => unknown;
+      /** Files the merge must leave as they are, or that must not exist (null). */
+      files: Record<string, string | null>;
+    }
+    /** Merges each row's history in a repository of its own, checking it writes nothing. */
+    async function mergesNothing(rows: readonly Row[]): Promise<void> {
+      for (const row of rows) {
+        freshWork();
+        const expected = row.arrange();
+        const before = snapshot();
+        const merged = await merge().catch((error: unknown) =>
+          error instanceof GitTrustError ? { refused: error.detail } : error,
+        );
+        expect.soft(merged, row.name).toEqual(expected);
+        expect.soft(snapshot(), row.name).toEqual(before);
+        for (const [rel, text] of Object.entries(row.files))
+          expect
+            .soft(
+              text === null ? existsSync(join(repo.path, rel)) : read(rel),
+              `${row.name}: ${rel}`,
+            )
+            .toBe(text ?? false);
+      }
+    }
 
-  it('leaves the branch, index and files as they were on a conflict, naming the conflicted files', async () => {
-    commitFiles({ 'README.md': '# ours\n', 'src/own.txt': 'own\n' }, 'own');
-    const base = onMain({ 'README.md': '# theirs\n', 'src/theirs.txt': 'theirs\n' }, 'theirs');
-    const before = snapshot();
-    expect(await merge()).toEqual({ kind: 'conflict', from: base, paths: ['README.md'] });
-    expect(snapshot()).toEqual(before);
-    expect(read('README.md')).toBe('# ours\n');
-    expect(existsSync(join(repo.path, 'src/theirs.txt'))).toBe(false);
+    it('when the branch already holds the base, a file conflicts, or the base asks for a filter', async () => {
+      await mergesNothing([
+        {
+          name: 'the branch already holds the base',
+          arrange: () => {
+            const from = rawGit('rev-parse', 'main');
+            commitFiles({ 'src/own.txt': 'own\n' }, 'own');
+            return { kind: 'up_to_date', from };
+          },
+          files: {},
+        },
+        {
+          name: 'a conflict',
+          arrange: () => {
+            commitFiles({ 'README.md': '# ours\n', 'src/own.txt': 'own\n' }, 'own');
+            const from = onMain(
+              { 'README.md': '# theirs\n', 'src/theirs.txt': 'theirs\n' },
+              'theirs',
+            );
+            return { kind: 'conflict', from, paths: ['README.md'] };
+          },
+          files: { 'README.md': '# ours\n', 'src/theirs.txt': null },
+        },
+        {
+          name: 'a base whose tree asks for a filter',
+          arrange: () => {
+            commitFiles({ 'src/own.txt': 'own\n' }, 'own');
+            onMain({ '.gitattributes': '*.bin filter=lfs\n' }, 'lfs');
+            return {
+              refused: { kind: 'filter', paths: [{ path: '.gitattributes', filter: 'lfs' }] },
+            };
+          },
+          files: {},
+        },
+      ]);
+    });
+
+    it('when an uncommitted change or an untracked file is in the way, naming it', async () => {
+      await mergesNothing([
+        { name: 'an uncommitted change to a file the base changed', ...inTheWay('README.md') },
+        { name: 'an untracked file where the base adds one', ...inTheWay('src/theirs.txt') },
+      ]);
+    });
+
+    it('when an ignored file or directory that read-tree would overwrite or delete is in the way, naming it', async () => {
+      await mergesNothing([
+        {
+          name: 'an ignored file where the base commits one',
+          ...ignoredInTheWay({ 'secret.env': 'theirs\n' }, ['secret.env'], ['secret.env']),
+        },
+        {
+          name: 'an ignored directory where the base commits a file of that name',
+          ...ignoredInTheWay({ build: 'a file now\n' }, ['build/out.js'], ['build/']),
+        },
+        {
+          name: 'an ignored file where the base commits a directory of that name',
+          ...ignoredInTheWay({ 'cache/kept.txt': 'theirs\n' }, ['cache'], ['cache']),
+        },
+      ]);
+    });
   });
 
   describe('resolving conflicts', () => {
     const GENERATED = ['packages/db/drizzle/'] as const;
-    const resolving = () =>
-      git.mergeIntoBranch({
-        repo: repo.path,
-        branch: 'work',
-        from: 'main',
-        message: 'Merge main into work',
-        resolve: { generated: GENERATED },
-      });
+    const RESOLVING: MergeResolve = { generated: GENERATED };
+    const MARKING: MergeResolve = { generated: GENERATED, leaveMarkers: true };
 
     /** A drizzle journal holding `tags`, numbered in order as drizzle-kit writes it. */
     const journal = (...tags: string[]): string =>
@@ -209,7 +295,7 @@ describe('mergeIntoBranch', () => {
       rawGit('merge', '-q', '--ff-only', 'main');
     }
 
-    it('keeps both sides when each only added lines at the same place, and records which files it resolved', async () => {
+    it('keeps both sides when each only added lines at the same place, only when the caller asks, and records which files it resolved', async () => {
       seed({ 'src/index.ts': "import a from './a';\nexport {};\n" });
       const own = commitFiles(
         { 'src/index.ts': "import a from './a';\nimport b from './b';\nexport {};\n" },
@@ -219,7 +305,8 @@ describe('mergeIntoBranch', () => {
         { 'src/index.ts': "import a from './a';\nimport c from './c';\nexport {};\n" },
         'c',
       );
-      const merged = await resolving();
+      expect((await merge()).kind).toBe('conflict');
+      const merged = await merge(RESOLVING);
       expect(merged).toEqual({
         kind: 'merged',
         from: base,
@@ -237,59 +324,190 @@ describe('mergeIntoBranch', () => {
       expect(rawGit('status', '--porcelain', '--untracked-files=all')).toBe('');
     });
 
-    it.each([
-      {
-        name: 'both sides changed the same line',
-        seeded: { 'README.md': 'one\ntwo\n' },
-        ours: { 'README.md': 'one\nours\n' },
-        theirs: { 'README.md': 'one\ntheirs\n' },
-        path: 'README.md',
-        reason: 'both sides changed the same lines',
-      },
-      {
-        name: 'both sides added the same new file',
-        seeded: {},
-        ours: { 'src/new.ts': 'ours\n' },
-        theirs: { 'src/new.ts': 'theirs\n' },
-        path: 'src/new.ts',
-        reason: 'both sides added this file',
-      },
-      {
-        name: 'merged JSON that no longer parses',
-        seeded: { 'package.json': '{\n  "a": 1,\n  "z": 9\n}\n' },
-        ours: { 'package.json': '{\n  "a": 1,\n  "b": 2,\n  "z": 9\n}\n' },
-        theirs: { 'package.json': '{\n  "a": 1,\n  "c": 3\n  "z": 9\n}\n' },
-        path: 'package.json',
-        reason: 'the merged file is not valid JSON',
-      },
-      {
-        // Each side only appended an entry, so a line merge would give two migrations one number.
-        name: 'both sides added a migration to a drizzle journal',
-        seeded: { 'drizzle/meta/_journal.json': journal('0000_init') },
-        ours: { 'drizzle/meta/_journal.json': journal('0000_init', '0001_ours') },
-        theirs: { 'drizzle/meta/_journal.json': journal('0000_init', '0001_theirs') },
-        path: 'drizzle/meta/_journal.json',
-        reason: "drizzle numbers its migrations in order, so its journal isn't merged by line",
-      },
-    ])('leaves a conflict where $name, and writes nothing', async (c) => {
-      if (Object.keys(c.seeded).length > 0) seed(c.seeded);
-      commitFiles(c.ours, 'ours');
-      onMain(c.theirs, 'theirs');
-      const before = snapshot();
-      const merged = await resolving();
-      expect(merged).toMatchObject({
-        kind: 'conflict',
-        paths: [c.path],
-        unresolved: [{ path: c.path, reason: c.reason }],
-      });
-      expect(snapshot()).toEqual(before);
+    /** Seeds `seeded`, then commits `ours` on work and `theirs` on main. */
+    const sides =
+      (
+        seeded: Record<string, string>,
+        ours: Record<string, string>,
+        theirs: Record<string, string>,
+      ) =>
+      () => {
+        if (Object.keys(seeded).length > 0) seed(seeded);
+        commitFiles(ours, 'ours');
+        onMain(theirs, 'theirs');
+      };
+    /**
+     * Merges each row's history in a repository of its own: a conflict, as `result` says, that
+     * writes nothing.
+     */
+    async function leavesConflict(
+      rows: readonly {
+        name: string;
+        arrange: () => void;
+        resolve: MergeResolve;
+        result: Record<string, unknown>;
+      }[],
+    ): Promise<void> {
+      for (const row of rows) {
+        freshWork();
+        row.arrange();
+        const from = rawGit('rev-parse', 'main');
+        const before = snapshot();
+        expect.soft(await merge(row.resolve), row.name).toMatchObject({ ...row.result, from });
+        expect.soft(snapshot(), row.name).toEqual(before);
+      }
+    }
+
+    it('leaves a conflict where both sides changed a line or added the same file, and writes nothing', async () => {
+      await leavesConflict([
+        {
+          name: 'both sides changed the same line',
+          arrange: sides(
+            { 'README.md': 'one\ntwo\n' },
+            { 'README.md': 'one\nours\n' },
+            { 'README.md': 'one\ntheirs\n' },
+          ),
+          resolve: RESOLVING,
+          result: {
+            kind: 'conflict',
+            paths: ['README.md'],
+            unresolved: [{ path: 'README.md', reason: 'both sides changed the same lines' }],
+          },
+        },
+        {
+          name: 'both sides added the same new file',
+          arrange: sides({}, { 'src/new.ts': 'ours\n' }, { 'src/new.ts': 'theirs\n' }),
+          resolve: RESOLVING,
+          result: {
+            kind: 'conflict',
+            paths: ['src/new.ts'],
+            unresolved: [{ path: 'src/new.ts', reason: 'both sides added this file' }],
+          },
+        },
+      ]);
     });
 
-    it('does not resolve lines when the caller did not ask', async () => {
-      seed({ 'src/index.ts': 'a\nz\n' });
-      commitFiles({ 'src/index.ts': 'a\nb\nz\n' }, 'b');
-      onMain({ 'src/index.ts': 'a\nc\nz\n' }, 'c');
-      expect((await merge()).kind).toBe('conflict');
+    it('leaves a conflict where the merged JSON or drizzle journal would be wrong, and writes nothing', async () => {
+      await leavesConflict([
+        {
+          name: 'merged JSON that no longer parses',
+          arrange: sides(
+            { 'package.json': '{\n  "a": 1,\n  "z": 9\n}\n' },
+            { 'package.json': '{\n  "a": 1,\n  "b": 2,\n  "z": 9\n}\n' },
+            { 'package.json': '{\n  "a": 1,\n  "c": 3\n  "z": 9\n}\n' },
+          ),
+          resolve: RESOLVING,
+          result: {
+            kind: 'conflict',
+            paths: ['package.json'],
+            unresolved: [{ path: 'package.json', reason: 'the merged file is not valid JSON' }],
+          },
+        },
+        {
+          // Each side only appended an entry, so a line merge would give two migrations one number.
+          name: 'both sides added a migration to a drizzle journal',
+          arrange: sides(
+            { 'drizzle/meta/_journal.json': journal('0000_init') },
+            { 'drizzle/meta/_journal.json': journal('0000_init', '0001_ours') },
+            { 'drizzle/meta/_journal.json': journal('0000_init', '0001_theirs') },
+          ),
+          resolve: RESOLVING,
+          result: {
+            kind: 'conflict',
+            paths: ['drizzle/meta/_journal.json'],
+            unresolved: [
+              {
+                path: 'drizzle/meta/_journal.json',
+                reason:
+                  "drizzle numbers its migrations in order, so its journal isn't merged by line",
+              },
+            ],
+          },
+        },
+      ]);
+    });
+
+    it('names every conflicted path of a merge it leaves, and leaves every conflict in a generated directory it is told cannot be regenerated now', async () => {
+      await leavesConflict([
+        {
+          // Its conflicts list every conflicted path, those it would have settled included.
+          name: 'a conflict beside a generated journal it would have settled',
+          arrange: sides(
+            {
+              'packages/db/drizzle/meta/_journal.json': journal('0000_init'),
+              'README.md': '# base\n',
+            },
+            {
+              'packages/db/drizzle/meta/_journal.json': journal('0000_init', '0001_mine'),
+              'README.md': '# ours\n',
+            },
+            {
+              'packages/db/drizzle/meta/_journal.json': journal('0000_init', '0001_theirs'),
+              'README.md': '# theirs\n',
+            },
+          ),
+          resolve: RESOLVING,
+          result: {
+            kind: 'conflict',
+            paths: ['README.md'],
+            unresolved: [{ path: 'README.md' }],
+            conflicted: ['README.md', 'packages/db/drizzle/meta/_journal.json'],
+          },
+        },
+        {
+          // Only added lines, but a generated file is never merged by line.
+          name: 'a generated directory the caller says cannot be regenerated now',
+          arrange: sides(
+            { 'packages/db/drizzle/notes.md': 'a\nz\n', 'src/index.ts': 'a\nz\n' },
+            { 'packages/db/drizzle/notes.md': 'a\nb\nz\n', 'src/index.ts': 'a\nb\nz\n' },
+            { 'packages/db/drizzle/notes.md': 'a\nc\nz\n', 'src/index.ts': 'a\nc\nz\n' },
+          ),
+          resolve: { generated: GENERATED, generatedHeld: 'not now' },
+          result: {
+            kind: 'conflict',
+            paths: ['packages/db/drizzle/notes.md'],
+            unresolved: [{ path: 'packages/db/drizzle/notes.md', reason: 'not now' }],
+          },
+        },
+      ]);
+    });
+
+    it("leaves a conflict in a file one side deleted and in pnpm's lockfile, even when it may leave markers", async () => {
+      await leavesConflict([
+        {
+          name: "a file one side deleted, and pnpm's lockfile",
+          arrange: () => {
+            seed({ 'gone.txt': 'a\n', 'pnpm-lock.yaml': 'a\nz\n' });
+            commitFiles({ 'gone.txt': 'changed\n', 'pnpm-lock.yaml': 'a\nb\nz\n' }, 'ours');
+            rawGit('switch', '-q', 'main');
+            rawGit('rm', '-q', 'gone.txt');
+            commitFiles({ 'pnpm-lock.yaml': 'a\nc\nz\n' }, 'theirs');
+            rawGit('switch', '-q', 'work');
+          },
+          resolve: RESOLVING,
+          result: {
+            kind: 'conflict',
+            unresolved: [
+              { path: 'gone.txt', reason: 'one side deleted this file and the other changed it' },
+              {
+                path: 'pnpm-lock.yaml',
+                reason: "pnpm's lockfile is made by pnpm, not merged by line",
+              },
+            ],
+          },
+        },
+        {
+          name: 'a deleted file, left for a session to mark, which markers cannot show',
+          arrange: () => {
+            seed({ 'src/gone.ts': 'one\n', 'src/type.ts': 'a\n' });
+            rawGit('rm', '-q', 'src/gone.ts');
+            commitFiles({ 'src/type.ts': 'b\n' }, 'own');
+            onMain({ 'src/gone.ts': 'two\n', 'src/type.ts': 'c\n' }, 'theirs');
+          },
+          resolve: MARKING,
+          result: { kind: 'conflict' },
+        },
+      ]);
     });
 
     it('resets a generated directory to the base, names what the branch had there that the base lacks, and still resolves other files', async () => {
@@ -314,7 +532,7 @@ describe('mergeIntoBranch', () => {
         },
         'theirs',
       );
-      const merged = await resolving();
+      const merged = await merge(RESOLVING);
       expect(merged).toMatchObject({
         kind: 'merged',
         from: base,
@@ -335,93 +553,8 @@ describe('mergeIntoBranch', () => {
       expect(rawGit('status', '--porcelain', '--untracked-files=all')).toBe('');
     });
 
-    it('names every conflicted path of a merge it leaves, those it would have settled included', async () => {
-      seed({
-        'packages/db/drizzle/meta/_journal.json': journal('0000_init'),
-        'README.md': '# base\n',
-      });
-      commitFiles(
-        {
-          'packages/db/drizzle/meta/_journal.json': journal('0000_init', '0001_mine'),
-          'README.md': '# ours\n',
-        },
-        'mine',
-      );
-      const base = onMain(
-        {
-          'packages/db/drizzle/meta/_journal.json': journal('0000_init', '0001_theirs'),
-          'README.md': '# theirs\n',
-        },
-        'theirs',
-      );
-      const before = snapshot();
-      expect(await resolving()).toMatchObject({
-        kind: 'conflict',
-        from: base,
-        paths: ['README.md'],
-        unresolved: [{ path: 'README.md' }],
-        conflicted: ['README.md', 'packages/db/drizzle/meta/_journal.json'],
-      });
-      expect(snapshot()).toEqual(before);
-    });
-
-    it('leaves every conflict in a generated directory, with the reason given, when told it cannot be regenerated now', async () => {
-      seed({
-        'packages/db/drizzle/notes.md': 'a\nz\n',
-        'src/index.ts': 'a\nz\n',
-      });
-      commitFiles(
-        { 'packages/db/drizzle/notes.md': 'a\nb\nz\n', 'src/index.ts': 'a\nb\nz\n' },
-        'b',
-      );
-      onMain({ 'packages/db/drizzle/notes.md': 'a\nc\nz\n', 'src/index.ts': 'a\nc\nz\n' }, 'c');
-      const before = snapshot();
-      const merged = await git.mergeIntoBranch({
-        repo: repo.path,
-        branch: 'work',
-        from: 'main',
-        message: 'Merge main into work',
-        resolve: { generated: GENERATED, generatedHeld: 'not now' },
-      });
-      // Only added lines, but a generated file is never merged by line.
-      expect(merged).toMatchObject({
-        kind: 'conflict',
-        paths: ['packages/db/drizzle/notes.md'],
-        unresolved: [{ path: 'packages/db/drizzle/notes.md', reason: 'not now' }],
-      });
-      expect(snapshot()).toEqual(before);
-    });
-
-    it("leaves a conflict in a file one side deleted, and in pnpm's lockfile", async () => {
-      seed({ 'gone.txt': 'a\n', 'pnpm-lock.yaml': 'a\nz\n' });
-      commitFiles({ 'gone.txt': 'changed\n', 'pnpm-lock.yaml': 'a\nb\nz\n' }, 'ours');
-      rawGit('switch', '-q', 'main');
-      rawGit('rm', '-q', 'gone.txt');
-      commitFiles({ 'pnpm-lock.yaml': 'a\nc\nz\n' }, 'theirs');
-      rawGit('switch', '-q', 'work');
-      expect(await resolving()).toMatchObject({
-        kind: 'conflict',
-        unresolved: [
-          { path: 'gone.txt', reason: 'one side deleted this file and the other changed it' },
-          {
-            path: 'pnpm-lock.yaml',
-            reason: "pnpm's lockfile is made by pnpm, not merged by line",
-          },
-        ],
-      });
-    });
-
     describe('leaving markers for a session', () => {
-      const marking = () =>
-        git.mergeIntoBranch({
-          repo: repo.path,
-          branch: 'work',
-          from: 'main',
-          message: 'Merge main into work',
-          resolve: { generated: GENERATED, leaveMarkers: true },
-        });
-
-      it('commits the merge with markers where both sides changed the same lines, the base as second parent, and settles the rest', async () => {
+      it('commits the merge with markers where both sides changed the same lines, the base as second parent, settles the rest, and names the files that still hold them', async () => {
         seed({
           'src/type.ts': 'export type T = {\n  id: string;\n};\n',
           'src/index.ts': "import a from './a';\nexport {};\n",
@@ -440,7 +573,7 @@ describe('mergeIntoBranch', () => {
           },
           'theirs',
         );
-        const merged = await marking();
+        const merged = await merge(MARKING);
         expect(merged).toEqual({
           kind: 'merged',
           from: base,
@@ -460,17 +593,13 @@ describe('mergeIntoBranch', () => {
         expect(read('src/index.ts')).toContain("import b from './b';\nimport c from './c';");
         expect(rawGit('status', '--porcelain', '--untracked-files=all')).toBe('');
         expect(rawGit('log', '-1', '--format=%B')).toContain('src/type.ts');
-      });
 
-      it('still stops at a conflict markers cannot show: a deleted file, or a lockfile', async () => {
-        seed({ 'src/gone.ts': 'one\n', 'src/type.ts': 'a\n' });
-        rawGit('rm', '-q', 'src/gone.ts');
-        commitFiles({ 'src/type.ts': 'b\n' }, 'own');
-        onMain({ 'src/gone.ts': 'two\n', 'src/type.ts': 'c\n' }, 'theirs');
-        const before = snapshot();
-        const merged = await marking();
-        expect(merged.kind).toBe('conflict');
-        expect(snapshot()).toEqual(before);
+        // The files that still hold the markers the merge left, and none once they are gone.
+        const files = ['src/type.ts', 'src/index.ts'];
+        expect(await git.conflictMarkers(repo.path, files)).toEqual(['src/type.ts']);
+        commitFiles({ 'src/type.ts': 'export type T = {\n  id: bigint;\n};\n' }, 'resolved');
+        expect(await git.conflictMarkers(repo.path, files)).toEqual([]);
+        expect(await git.conflictMarkers(repo.path, files, 'HEAD^')).toEqual(['src/type.ts']);
       });
 
       it('takes the base whole for a generated directory beside a marked file, leaving its regeneration to the caller', async () => {
@@ -494,7 +623,7 @@ describe('mergeIntoBranch', () => {
           },
           'theirs',
         );
-        const merged = await marking();
+        const merged = await merge(MARKING);
         if (merged.kind !== 'merged') throw new Error(`expected a merge, got ${merged.kind}`);
         expect(merged.marked).toEqual(['src/schema.ts']);
         expect(merged.regenerate).toEqual([
@@ -503,105 +632,50 @@ describe('mergeIntoBranch', () => {
         expect(existsSync(join(repo.path, 'packages/db/drizzle/0001_own.sql'))).toBe(false);
         expect(read('packages/db/drizzle/0001_theirs.sql')).toBe('theirs\n');
       });
-
-      it('names the files that still hold the markers the merge left, and none once they are gone', async () => {
-        seed({ 'src/type.ts': 'a\n', 'src/other.ts': 'x\n' });
-        commitFiles({ 'src/type.ts': 'b\n' }, 'own');
-        onMain({ 'src/type.ts': 'c\n' }, 'theirs');
-        const merged = await marking();
-        if (merged.kind !== 'merged') throw new Error(`expected a merge, got ${merged.kind}`);
-        expect(await git.conflictMarkers(repo.path, ['src/type.ts', 'src/other.ts'])).toEqual([
-          'src/type.ts',
-        ]);
-        commitFiles({ 'src/type.ts': 'b\nc\n' }, 'resolved');
-        expect(await git.conflictMarkers(repo.path, ['src/type.ts', 'src/other.ts'])).toEqual([]);
-        expect(
-          await git.conflictMarkers(repo.path, ['src/type.ts', 'src/other.ts'], 'HEAD^'),
-        ).toEqual(['src/type.ts']);
-      });
     });
-  });
-
-  it.each([
-    ['an uncommitted change to a file the base changed', 'README.md'],
-    ['an untracked file where the base adds one', 'src/theirs.txt'],
-  ])('writes nothing when %s is in the way, naming it', async (_case, rel) => {
-    commitFiles({ 'src/own.txt': 'own\n' }, 'own');
-    const base = onMain({ 'README.md': '# theirs\n', 'src/theirs.txt': 'theirs\n' }, 'theirs');
-    write(rel, 'a lane is still writing this\n');
-    const before = snapshot();
-    expect(await merge()).toEqual({ kind: 'blocked', from: base, changed: [rel], kept: [] });
-    expect(snapshot()).toEqual(before);
-    expect(read(rel)).toBe('a lane is still writing this\n');
   });
 
   describe('ignored files, which read-tree would overwrite or delete', () => {
-    it.each([
-      {
-        name: 'an ignored file where the base commits one',
-        base: { 'secret.env': 'theirs\n' },
-        ignored: ['secret.env'],
-        blocked: ['secret.env'],
-      },
-      {
-        name: 'an ignored directory where the base commits a file of that name',
-        base: { build: 'a file now\n' },
-        ignored: ['build/out.js'],
-        blocked: ['build/'],
-      },
-      {
-        name: 'an ignored file where the base commits a directory of that name',
-        base: { 'cache/kept.txt': 'theirs\n' },
-        ignored: ['cache'],
-        blocked: ['cache'],
-      },
-    ])('writes nothing with $name in the way, naming it', async ({ base, ignored, blocked }) => {
-      onMain({ '.gitignore': 'secret.env\nbuild/\ncache\n' }, 'ignore rules');
-      rawGit('merge', '-q', '--ff-only', 'main');
-      commitFiles({ 'src/own.txt': 'own\n' }, 'own');
-      const from = onMain(base, 'theirs', true);
-      for (const rel of ignored) write(rel, 'the builder keeps this\n');
-      const before = snapshot();
-      expect(await merge()).toEqual({ kind: 'blocked', from, changed: [], kept: blocked });
-      expect(snapshot()).toEqual(before);
-      for (const rel of ignored) expect(read(rel)).toBe('the builder keeps this\n');
+    it('merges past an ignored file or directory the base leaves alone or adds beside, and keeps it', async () => {
+      const rows = [
+        {
+          name: 'an ignored file the base leaves alone',
+          ignore: 'notes.local\n',
+          ignored: ['notes.local'],
+          base: { 'src/theirs.txt': 'theirs\n' },
+        },
+        {
+          name: 'an ignored directory the base adds a new file to',
+          ignore: 'build/\n',
+          ignored: ['build/out.js', 'build/cache/x.bin'],
+          base: { 'build/new.js': 'theirs\n' },
+        },
+        {
+          name: 'packages a seed copied into a directory the base then starts tracking',
+          ignore: 'node_modules/\n',
+          ignored: ['packages/foo/node_modules/pkg/index.js'],
+          base: { 'packages/foo/package.json': '{}\n' },
+        },
+      ];
+      for (const { name, ignore, ignored, base } of rows) {
+        freshWork();
+        onMain({ '.gitignore': ignore }, 'ignore rules');
+        rawGit('merge', '-q', '--ff-only', 'main');
+        commitFiles({ 'src/own.txt': 'own\n' }, 'own');
+        onMain(base, 'theirs', true);
+        for (const rel of ignored) write(rel, 'kept\n');
+        expect.soft((await merge()).kind, name).toBe('merged');
+        for (const rel of ignored) expect.soft(read(rel), `${name}: ${rel}`).toBe('kept\n');
+        for (const [rel, text] of Object.entries(base))
+          expect.soft(read(rel), `${name}: ${rel}`).toBe(text);
+      }
     });
 
-    it.each([
-      {
-        name: 'an ignored file the base leaves alone',
-        ignore: 'notes.local\n',
-        ignored: ['notes.local'],
-        base: { 'src/theirs.txt': 'theirs\n' },
-      },
-      {
-        name: 'an ignored directory the base adds a new file to',
-        ignore: 'build/\n',
-        ignored: ['build/out.js', 'build/cache/x.bin'],
-        base: { 'build/new.js': 'theirs\n' },
-      },
-      {
-        name: 'packages a seed copied into a directory the base then starts tracking',
-        ignore: 'node_modules/\n',
-        ignored: ['packages/foo/node_modules/pkg/index.js'],
-        base: { 'packages/foo/package.json': '{}\n' },
-      },
-    ])('merges past $name, and keeps it', async ({ ignore, ignored, base }) => {
-      onMain({ '.gitignore': ignore }, 'ignore rules');
-      rawGit('merge', '-q', '--ff-only', 'main');
-      commitFiles({ 'src/own.txt': 'own\n' }, 'own');
-      onMain(base, 'theirs', true);
-      for (const rel of ignored) write(rel, 'kept\n');
-      expect((await merge()).kind).toBe('merged');
-      for (const rel of ignored) expect(read(rel)).toBe('kept\n');
-      for (const [rel, text] of Object.entries(base)) expect(read(rel)).toBe(text);
-    });
-
-    it.each([
+    it('merges a base that renames a tracked file by only its case, or turns a tracked file into a directory', async () => {
       // A rename to the decomposed (NFD) spelling passes this check too, but git's own read-tree
       // refuses it on macOS, which folds the two spellings, so it can't be shown merging here.
-      { name: 'only its case', from: 'Guide.md', to: 'GUIDE.md' },
-    ])('merges a base that renames a tracked file by $name', async ({ from, to }) => {
+      const from = 'Guide.md';
+      const to = 'GUIDE.md';
       onMain({ [from]: 'guide\n' }, 'guide');
       rawGit('merge', '-q', '--ff-only', 'main');
       commitFiles({ 'src/own.txt': 'own\n' }, 'own');
@@ -628,9 +702,8 @@ describe('mergeIntoBranch', () => {
       expect((await merge()).kind).toBe('merged');
       expect(rawGit('ls-files', '-z').split('\0')).toContain(to);
       expect(rawGit('status', '--porcelain', '--untracked-files=all')).toBe('');
-    });
 
-    it('merges a base that turns a tracked file into a directory', async () => {
+      freshWork();
       commitFiles({ 'docs/guide': 'a file\n' }, 'a file');
       rawGit('switch', '-q', 'main');
       rawGit('merge', '-q', '--ff-only', 'work');
@@ -678,19 +751,6 @@ describe('mergeIntoBranch', () => {
     }
   });
 
-  it('refuses a base whose tree asks for a filter, writing nothing', async () => {
-    commitFiles({ 'src/own.txt': 'own\n' }, 'own');
-    onMain({ '.gitattributes': '*.bin filter=lfs\n' }, 'lfs');
-    const before = snapshot();
-    const error: unknown = await merge().catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(GitTrustError);
-    expect(error instanceof GitTrustError && error.detail).toEqual({
-      kind: 'filter',
-      paths: [{ path: '.gitattributes', filter: 'lfs' }],
-    });
-    expect(snapshot()).toEqual(before);
-  });
-
   it('refuses a checkout that is not on the branch', async () => {
     onMain({ 'src/theirs.txt': 'theirs\n' }, 'theirs');
     rawGit('switch', '-q', 'main');
@@ -699,31 +759,23 @@ describe('mergeIntoBranch', () => {
   });
 });
 
-describe('commitsSince after a merge', () => {
-  it("lists the branch's own commits since a base, not the commits the merge brought in", async () => {
+describe('after a merge', () => {
+  it("commitsSince lists the branch's own commits, and a retried commit is not mistaken for one on the base that carries the same operation id", async () => {
     rawGit('switch', '-q', '-c', 'work');
     const start = rawGit('rev-parse', 'HEAD');
     const own = commitFiles({ 'src/own.txt': 'own\n' }, 'own');
-    onMain({ 'src/a.txt': 'a\n' }, 'a');
-    onMain({ 'src/b.txt': 'b\n' }, 'b');
-    const merged = await merge();
-    if (merged.kind !== 'merged') throw new Error(`expected a merge, got ${merged.kind}`);
-    expect(await git.commitsSince(repo.path, start)).toEqual([own, merged.head]);
-    expect(await git.commitsSince(repo.path, merged.from)).toEqual([own, merged.head]);
-  });
-});
-
-describe('a retried commit after a merge', () => {
-  it('is not mistaken for a commit on the base that carries the same operation id', async () => {
-    rawGit('switch', '-q', '-c', 'work');
-    commitFiles({ 'src/own.txt': 'own\n' }, 'own');
     // A squash-merged pull request keeps the 10db-Op trailers of the lane commits it folds in.
     rawGit('switch', '-q', 'main');
     write('src/theirs.txt', 'theirs\n');
     rawGit('add', '--', 'src/theirs.txt');
     rawGit('commit', '-q', '-m', 'theirs', '--trailer', '10db-Op: op-merged-1');
     rawGit('switch', '-q', 'work');
-    expect((await merge()).kind).toBe('merged');
+    onMain({ 'src/b.txt': 'b\n' }, 'b');
+    const merged = await merge();
+    if (merged.kind !== 'merged') throw new Error(`expected a merge, got ${merged.kind}`);
+    expect(await git.commitsSince(repo.path, start)).toEqual([own, merged.head]);
+    expect(await git.commitsSince(repo.path, merged.from)).toEqual([own, merged.head]);
+
     write('src/next.txt', 'next\n');
     const next = await git.commit({
       repo: repo.path,
@@ -744,7 +796,7 @@ describe('mergedCommit', () => {
   const mergedCommit = (ours: string, theirs: string, ref = 'refs/10db/starts/ws-1') =>
     git.mergedCommit({ repo: repo.path, ours, theirs, ref, message: 'where it starts' });
 
-  it('records the merge of two commits at a 10db ref, touching no file, index or branch', async () => {
+  it('records the merge of two commits at a 10db ref, touching no file, index or branch; lists and deletes refs under refs/10db/, and refuses any other', async () => {
     const ours = commitFiles({ 'src/own.txt': 'own\n' }, 'own');
     const theirs = onMain({ 'src/theirs.txt': 'theirs\n' }, 'theirs');
     const before = snapshot();
@@ -759,39 +811,50 @@ describe('mergedCommit', () => {
     ]);
     expect(snapshot()).toEqual(before);
     expect(existsSync(join(repo.path, 'src/theirs.txt'))).toBe(false);
+
+    await expect(mergedCommit(ours, theirs, 'refs/heads/main')).rejects.toBeInstanceOf(
+      InvalidError,
+    );
+    expect(rawGit('rev-parse', 'main')).toBe(theirs);
+
+    await mergedCommit(ours, theirs, 'refs/10db/starts/ws-2');
+    expect(await git.keptRefs(repo.path, 'refs/10db/starts/')).toEqual([
+      'refs/10db/starts/ws-1',
+      'refs/10db/starts/ws-2',
+    ]);
+    await git.deleteKeptRef(repo.path, 'refs/10db/starts/ws-1');
+    // Deleting one that is already gone is no error.
+    await git.deleteKeptRef(repo.path, 'refs/10db/starts/ws-1');
+    expect(await git.keptRefs(repo.path, 'refs/10db/starts/')).toEqual(['refs/10db/starts/ws-2']);
+    await expect(git.deleteKeptRef(repo.path, 'refs/heads/main')).rejects.toBeInstanceOf(
+      InvalidError,
+    );
+    await expect(git.keptRefs(repo.path, 'refs/heads/')).rejects.toBeInstanceOf(InvalidError);
+    expect(rawGit('rev-parse', 'main')).toBe(theirs);
   });
 
-  it.each([
-    { name: 'theirs when ours is its ancestor', pick: 'theirs' },
-    { name: 'ours when ours already holds theirs', pick: 'ours' },
-  ])('answers $name, recording nothing', async ({ pick }) => {
+  it('answers theirs when ours is its ancestor, ours when it already holds theirs, and null on a conflict, recording nothing', async () => {
     const older = rawGit('rev-parse', 'HEAD');
     const newer = commitFiles({ 'src/own.txt': 'own\n' }, 'own');
-    const made =
-      pick === 'theirs' ? await mergedCommit(older, newer) : await mergedCommit(newer, older);
-    expect(made).toBe(newer);
-    expect(() => rawGit('rev-parse', '--verify', '-q', 'refs/10db/starts/ws-1')).toThrow();
-  });
+    for (const [name, ours, theirs] of [
+      ['theirs when ours is its ancestor', older, newer],
+      ['ours when ours already holds theirs', newer, older],
+    ] as const) {
+      expect.soft(await mergedCommit(ours, theirs), name).toBe(newer);
+      expect
+        .soft(() => rawGit('rev-parse', '--verify', '-q', 'refs/10db/starts/ws-1'), name)
+        .toThrow();
+    }
 
-  it('answers null on a conflict, recording nothing', async () => {
     const ours = commitFiles({ 'README.md': '# ours\n' }, 'own');
     const theirs = onMain({ 'README.md': '# theirs\n' }, 'theirs');
     expect(await mergedCommit(ours, theirs)).toBeNull();
     expect(() => rawGit('rev-parse', '--verify', '-q', 'refs/10db/starts/ws-1')).toThrow();
   });
-
-  it('refuses a ref outside refs/10db/', async () => {
-    const ours = commitFiles({ 'src/own.txt': 'own\n' }, 'own');
-    const theirs = onMain({ 'src/theirs.txt': 'theirs\n' }, 'theirs');
-    await expect(mergedCommit(ours, theirs, 'refs/heads/main')).rejects.toBeInstanceOf(
-      InvalidError,
-    );
-    expect(rawGit('rev-parse', 'main')).toBe(theirs);
-  });
 });
 
 describe('restoreDirs', () => {
-  it('puts the files under the directories back as HEAD has them, and leaves the rest alone', async () => {
+  it('puts the files under the directories back as HEAD has them, leaves the rest alone, and replaces a symlink a run put where a directory was, writing nothing through it', async () => {
     commitFiles({ '.gitignore': 'cache/\n' }, 'ignore');
     commitFiles(
       { 'gen/a.json': '{"a":1}\n', 'gen/gone.json': '{}\n', 'src/schema.ts': 'one\n' },
@@ -813,12 +876,10 @@ describe('restoreDirs', () => {
     expect(read('gen/cache/kept.bin')).toBe('ignored\n');
     expect(read('src/schema.ts')).toBe('an edit outside\n');
     expect(rawGit('status', '--porcelain', '--untracked-files=all')).toBe('M src/schema.ts');
-  });
 
-  it('replaces a symlink a run put where a directory was, writing nothing through it', async () => {
     const outside = tempDir('restore-outside');
     try {
-      commitFiles({ 'gen/meta/journal.json': '[]\n' }, 'gen');
+      commitFiles({ 'gen/meta/journal.json': '[]\n' }, 'gen meta');
       rmSync(join(repo.path, 'gen/meta'), { recursive: true });
       symlinkSync(outside.path, join(repo.path, 'gen/meta'));
       await git.restoreDirs(repo.path, ['gen/']);
@@ -832,16 +893,12 @@ describe('restoreDirs', () => {
 });
 
 describe('blobAt and isAncestor', () => {
-  it('names the blob of a file in a commit, and null for a path that holds none', async () => {
-    const head = rawGit('rev-parse', 'HEAD');
-    expect(await git.blobAt(repo.path, head, 'README.md')).toBe(
-      rawGit('rev-parse', `${head}:README.md`),
-    );
-    expect(await git.blobAt(repo.path, head, 'pnpm-lock.yaml')).toBeNull();
-  });
-
-  it('tells whether one commit is in the history of another', async () => {
+  it('names the blob of a file in a commit, null for a path that holds none, and tells whether one commit is in the history of another', async () => {
     const older = rawGit('rev-parse', 'HEAD');
+    expect(await git.blobAt(repo.path, older, 'README.md')).toBe(
+      rawGit('rev-parse', `${older}:README.md`),
+    );
+    expect(await git.blobAt(repo.path, older, 'pnpm-lock.yaml')).toBeNull();
     const newer = commitFiles({ 'src/own.txt': 'own\n' }, 'own');
     expect(await git.isAncestor(repo.path, older, newer)).toBe(true);
     expect(await git.isAncestor(repo.path, newer, older)).toBe(false);
@@ -862,34 +919,5 @@ describe('a note 10db keeps at a ref', () => {
     await expect(git.keepNote(repo.path, 'refs/heads/main', 'x')).rejects.toBeInstanceOf(
       InvalidError,
     );
-  });
-});
-
-describe('the refs 10db keeps', () => {
-  it('lists and deletes refs under refs/10db/, and refuses any other', async () => {
-    rawGit('switch', '-q', '-c', 'work');
-    const ours = commitFiles({ 'src/own.txt': 'own\n' }, 'own');
-    const theirs = onMain({ 'src/theirs.txt': 'theirs\n' }, 'theirs');
-    for (const id of ['ws-1', 'ws-2'])
-      await git.mergedCommit({
-        repo: repo.path,
-        ours,
-        theirs,
-        ref: `refs/10db/starts/${id}`,
-        message: 'start',
-      });
-    expect(await git.keptRefs(repo.path, 'refs/10db/starts/')).toEqual([
-      'refs/10db/starts/ws-1',
-      'refs/10db/starts/ws-2',
-    ]);
-    await git.deleteKeptRef(repo.path, 'refs/10db/starts/ws-1');
-    // Deleting one that is already gone is no error.
-    await git.deleteKeptRef(repo.path, 'refs/10db/starts/ws-1');
-    expect(await git.keptRefs(repo.path, 'refs/10db/starts/')).toEqual(['refs/10db/starts/ws-2']);
-    await expect(git.deleteKeptRef(repo.path, 'refs/heads/main')).rejects.toBeInstanceOf(
-      InvalidError,
-    );
-    await expect(git.keptRefs(repo.path, 'refs/heads/')).rejects.toBeInstanceOf(InvalidError);
-    expect(rawGit('rev-parse', 'main')).toBe(theirs);
   });
 });

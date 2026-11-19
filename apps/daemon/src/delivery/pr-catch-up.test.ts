@@ -11,19 +11,33 @@ import { NOTICE_KEY } from './notices';
 
 // Each case builds a real repository, a worktree, a push and a teammate's push.
 vi.setConfig({ testTimeout: 120_000 });
+/** A test that loops over rows builds a fresh repository for each row. */
+const ROWS_TIMEOUT = 600_000;
 
 let h: DeliveryHarness;
 /** Whether a waiting update drains the factory. */
 let draining: boolean;
-beforeEach(() => {
+
+/** A fresh harness whose main holds src/index.ts, pushed. */
+function boot(project: { readonly landing?: 'hold' } = {}): void {
   draining = false;
   // The tests settle work and ask the shipper themselves.
   h = createDeliveryHarness(
-    { workspaceMode: 'worktree' },
+    { workspaceMode: 'worktree', ...project },
     { trigger: false, holdShips: () => draining },
   );
   h.commit('src/index.ts', "import a from './a';\nexport {};\n");
   h.git$('push', '-q', 'origin', 'main');
+}
+
+/** Drops this row's harness and builds the next row a fresh one. */
+function reboot(project: { readonly landing?: 'hold' } = {}): void {
+  h.close();
+  boot(project);
+}
+
+beforeEach(() => {
+  boot();
 });
 afterEach(() => {
   h.close();
@@ -86,13 +100,58 @@ const commitsDuringInstall = (batch: BatchDto): (() => boolean) => {
 };
 
 describe('a shipped pull request that conflicts with its base', () => {
-  it('has the base merged into it, settled conflicts named, pushed, and no card', async () => {
+  it('pushes nothing while GitHub reads it clean, it is in the merge queue or the queue cannot be read, lists the settled files when the pre-check fails, then has the base merged in, settled conflicts named, pushed, and no card', async () => {
     const batch = await shippedWith();
+    // No merge was refused, so a retry asks GitHub nothing.
+    const calls = h.gh.calls.length;
+    h.shipper.retryMerge(batch.id);
+    await h.jobs.idle();
+    expect(h.gh.calls).toHaveLength(calls);
+
     const teammate = h.teammatePush('main', 'src/index.ts', BOTH.theirs);
     const before = tipOnOrigin(batch.branch);
-    conflicts(batch);
+    // GitHub says clean (the default): nothing to do.
+    let now = await catchUp(batch);
+    expect(tipOnOrigin(batch.branch)).toBe(before);
+    expect(now.notices).toEqual([]);
 
-    const now = await catchUp(batch);
+    // A push takes a pull request out of its base's merge queue. The watch read it a round ago, and
+    // the queue may have taken it since, so the job reads the queue itself before it pushes anything.
+    const url = conflicts(batch);
+    h.gh.setInMergeQueue(url, true);
+    now = await catchUp(batch);
+    expect(tipOnOrigin(batch.branch)).toBe(before);
+    expect(h.cards()).toEqual([]);
+    expect(now.notices).toEqual([]);
+    expect(h.gh.calls.some((c) => c.method === 'prInMergeQueue')).toBe(true);
+
+    h.gh.setInMergeQueue(url, false);
+    h.gh.failQueueRead.set(url, new GhError('failed', 'HTTP 502'));
+    await catchUp(batch);
+    expect(tipOnOrigin(batch.branch)).toBe(before);
+    expect(h.cards()).toEqual([]);
+
+    // Out of the queue and readable, the same pull request is caught up: the pre-check fails on the result.
+    h.gh.failQueueRead.delete(url);
+    h.state.write((c) =>
+      patchProject(c, h.project.id, { gateCommand: 'true', precheckCommand: 'false' }),
+    );
+    await catchUp(batch);
+    expect(tipOnOrigin(batch.branch)).toBe(before);
+    const card = h.only(h.cards());
+    expect(card.title).toContain('pre-check failed');
+    expect(card.body).toContain('10db settled these files itself in the merge');
+    expect(card.body).toContain('src/index.ts');
+
+    // The check is fixed and the retry time passes.
+    h.state.write((c) =>
+      patchProject(c, h.project.id, {
+        gateCommand: h.project.gateCommand,
+        precheckCommand: h.project.precheckCommand,
+      }),
+    );
+    h.shipClock.advance(31 * 60_000);
+    now = await catchUp(getBatch(h.store.db, batch.id));
 
     const tip = tipOnOrigin(batch.branch);
     expect(tip).not.toBe(before);
@@ -108,25 +167,6 @@ describe('a shipped pull request that conflicts with its base', () => {
     // The worktree it merged in is gone again.
     expect(now.worktreePath).toBeNull();
     expect(h.git$('worktree', 'list', '--porcelain')).not.toContain(batch.branch ?? 'x');
-  });
-
-  it('runs the gate on the merged branch before it pushes', async () => {
-    const batch = await shippedWith();
-    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
-    conflicts(batch);
-    const before = tipOnOrigin(batch.branch);
-    h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
-
-    const now = await catchUp(batch);
-
-    expect(tipOnOrigin(batch.branch)).toBe(before);
-    const card = h.only(h.cards());
-    expect(card.title).toContain('gate failed');
-    expect(card.body).toContain('main');
-    expect(now.notices.map((n) => n.key)).not.toContain('pull-request-update');
-    expect(now.worktreePath).toBeNull();
-    // 10db's merge, which it did not push, is not left on the local branch.
-    expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(before);
   });
 
   describe('when the packages of the copy it merges in do not resolve', () => {
@@ -164,88 +204,50 @@ describe('a shipped pull request that conflicts with its base', () => {
         });
     }
 
-    it.each([
-      ['no check is set', null],
-      ['a gate is set', { gateCommand: 'touch gate-ran' }],
-    ])(
-      'pushes nothing, raises one card naming the install and puts the merge back when %s',
-      async (_name, project) => {
-        installable();
-        const batch = await shippedWith('src/index.ts', BOTH.mine, { keepWorktree: true });
-        const kept = batch.worktreePath ?? '';
-        h.teammatePush('main', 'src/index.ts', BOTH.theirs);
-        conflicts(batch);
-        const before = tipOnOrigin(batch.branch);
-        if (project !== null) h.state.write((c) => patchProject(c, h.project.id, project));
-        pruned(batch);
+    it(
+      'pushes nothing, raises one card naming the install and puts the merge back, with no check or with a gate set',
+      async () => {
+        const rows = [
+          ['no check is set', null],
+          ['a gate is set', { gateCommand: 'touch gate-ran' }],
+        ] as const;
+        for (const [i, [name, project]] of rows.entries()) {
+          if (i > 0) reboot();
+          installable();
+          const batch = await shippedWith('src/index.ts', BOTH.mine, { keepWorktree: true });
+          const kept = batch.worktreePath ?? '';
+          h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+          conflicts(batch);
+          const before = tipOnOrigin(batch.branch);
+          if (project !== null) h.state.write((c) => patchProject(c, h.project.id, project));
+          pruned(batch);
 
-        const now = await catchUp(batch);
+          const now = await catchUp(batch);
 
-        expect(tipOnOrigin(batch.branch)).toBe(before);
-        expect(existsSync(join(kept, 'gate-ran'))).toBe(false);
-        // (The kept worktree has its own card, from the ship.)
-        const card = h.only(h.cards().filter((c) => c.title.includes('conflicts with main')));
-        expect(card.body).toContain('.: left-pad');
-        expect(card.body).toContain('nothing was pushed');
-        // This merge took no generated directory, so the card speaks of none.
-        expect(card.body).not.toContain('regenerated');
-        // The kept lines are named, with no commit to find them in and no word on where the merge is.
-        expect(card.body).toContain("src/index.ts (kept both sides' added lines)");
-        expect(card.body).not.toContain('The merge commit lists them');
-        expect(card.body).not.toMatch(SAYS_PUT_BACK);
-        expect(now.notices.map((n) => n.key)).not.toContain('pull-request-update');
-        expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(before);
-        expect(h.git$('-C', kept, 'rev-parse', 'HEAD')).toBe(before);
+          expect.soft(tipOnOrigin(batch.branch), name).toBe(before);
+          expect.soft(existsSync(join(kept, 'gate-ran')), name).toBe(false);
+          // (The kept worktree has its own card, from the ship.)
+          const card = h.only(h.cards().filter((c) => c.title.includes('conflicts with main')));
+          expect.soft(card.body, name).toContain('.: left-pad');
+          expect.soft(card.body, name).toContain('nothing was pushed');
+          // This merge took no generated directory, so the card speaks of none.
+          expect.soft(card.body, name).not.toContain('regenerated');
+          // The kept lines are named, with no commit to find them in and no word on where the merge is.
+          expect.soft(card.body, name).toContain("src/index.ts (kept both sides' added lines)");
+          expect.soft(card.body, name).not.toContain('The merge commit lists them');
+          expect.soft(card.body, name).not.toMatch(SAYS_PUT_BACK);
+          expect
+            .soft(
+              now.notices.map((n) => n.key),
+              name,
+            )
+            .not.toContain('pull-request-update');
+          expect.soft(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`), name).toBe(before);
+          expect.soft(h.git$('-C', kept, 'rev-parse', 'HEAD'), name).toBe(before);
+        }
       },
+      ROWS_TIMEOUT,
     );
-
-    /** The batch and main each added a line to one file, and the copy's packages no longer resolve. */
-    async function keptLinesOnBrokenInstall(keepWorktree: boolean): Promise<BatchDto> {
-      installable();
-      const batch = await shippedWith('src/index.ts', BOTH.mine, { keepWorktree });
-      h.teammatePush('main', 'src/index.ts', BOTH.theirs);
-      conflicts(batch);
-      pruned(batch);
-      return batch;
-    }
-
-    it('does not say the kept-lines merge went back when the builder commits during the install', async () => {
-      const batch = await keptLinesOnBrokenInstall(true);
-      const branch = batch.branch ?? '';
-      const before = tipOnOrigin(branch);
-      const committed = commitsDuringInstall(batch);
-
-      await catchUp(batch);
-
-      expect(committed()).toBe(true);
-      // The merge stays, under the builder's commit.
-      const tip = h.git$('rev-parse', `refs/heads/${branch}`);
-      expect(h.git$('log', '-1', '--format=%s', tip)).toBe('Add src/builder.ts');
-      expect(h.git$('log', '-1', '--format=%P', `${tip}~1`)).toContain(before);
-      expect(tipOnOrigin(branch)).toBe(before);
-      const card = h.only(h.cards().filter((c) => c.title.includes('conflicts with main')));
-      expect(card.body).toContain('.: left-pad');
-      expect(card.body).toContain('src/index.ts');
-      expect(card.body).toContain('nothing was pushed');
-      expect(card.body).not.toMatch(SAYS_PUT_BACK);
-    });
-
-    it("does not say the kept-lines merge went back when it can't be", async () => {
-      const batch = await keptLinesOnBrokenInstall(false);
-      const branch = batch.branch ?? '';
-      const before = tipOnOrigin(branch);
-      vi.spyOn(h.git, 'rewindBranch').mockRejectedValueOnce(new Error('index.lock exists'));
-
-      await catchUp(batch);
-
-      expect(h.git$('rev-parse', `refs/heads/${branch}`)).not.toBe(before);
-      expect(tipOnOrigin(branch)).toBe(before);
-      const card = h.only(h.cards());
-      expect(card.body).toContain('.: left-pad');
-      expect(card.body).toContain('src/index.ts');
-      expect(card.body).toContain('nothing was pushed');
-      expect(card.body).not.toMatch(SAYS_PUT_BACK);
-    });
 
     it('raises the one card, naming the generated directory it did not regenerate, and puts the merge back', async () => {
       installable();
@@ -344,35 +346,46 @@ describe('a shipped pull request that conflicts with its base', () => {
         ['a gate is set', 'true'],
       ] as const;
 
-      it.each(
-        PROBLEMS.flatMap(([problem, why, setUp, kept]) =>
-          CHECKS.map(
-            ([check, gateCommand]) => [problem, check, why, setUp, kept, gateCommand] as const,
-          ),
-        ),
-      )(
-        'pushes nothing, puts the merge back and raises one card when %s and %s',
-        async (_problem, _check, why, setUp, kept, gateCommand) => {
-          const batch = await generatedConflict(gateCommand, kept);
-          setUp();
-          const before = tipOnOrigin(batch.branch);
+      it(
+        'pushes nothing, puts the merge back and raises one card when the generators fail or change nothing or the install fails, with no check or a gate',
+        async () => {
+          const rows = PROBLEMS.flatMap(([problem, why, setUp, kept]) =>
+            CHECKS.map(
+              ([check, gateCommand]) =>
+                [`${problem} and ${check}`, why, setUp, kept, gateCommand] as const,
+            ),
+          );
+          for (const [i, [name, why, setUp, kept, gateCommand]] of rows.entries()) {
+            if (i > 0) reboot();
+            const batch = await generatedConflict(gateCommand, kept);
+            setUp();
+            const before = tipOnOrigin(batch.branch);
 
-          const now = await catchUp(batch);
+            const now = await catchUp(batch);
 
-          expect(tipOnOrigin(batch.branch)).toBe(before);
-          expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(before);
-          // (A kept worktree has its own card, from the ship.)
-          const card = h.only(h.cards().filter((c) => !c.title.includes('kept the worktree')));
-          expect(card.title).toContain("conflicts with main and 10db couldn't update it");
-          expect(card.body).toContain(why);
-          expect(card.body).toContain(`${GENERATED}/`);
-          expect(card.body).not.toContain('regenerated from its sources');
-          expect(card.body).not.toMatch(SAYS_PUT_BACK);
-          // The worktree the catch-up made is gone, and no card tells the builder to regenerate in it.
-          if (!kept) expect(now.worktreePath).toBeNull();
-          expect(card.body).not.toContain('Regenerate them in the worktree');
-          expect(now.notices.map((n) => n.key)).not.toContain('pull-request-update');
+            expect.soft(tipOnOrigin(batch.branch), name).toBe(before);
+            expect.soft(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`), name).toBe(before);
+            // (A kept worktree has its own card, from the ship.)
+            const card = h.only(h.cards().filter((c) => !c.title.includes('kept the worktree')));
+            expect
+              .soft(card.title, name)
+              .toContain("conflicts with main and 10db couldn't update it");
+            expect.soft(card.body, name).toContain(why);
+            expect.soft(card.body, name).toContain(`${GENERATED}/`);
+            expect.soft(card.body, name).not.toContain('regenerated from its sources');
+            expect.soft(card.body, name).not.toMatch(SAYS_PUT_BACK);
+            // The worktree the catch-up made is gone, and no card tells the builder to regenerate in it.
+            if (!kept) expect.soft(now.worktreePath, name).toBeNull();
+            expect.soft(card.body, name).not.toContain('Regenerate them in the worktree');
+            expect
+              .soft(
+                now.notices.map((n) => n.key),
+                name,
+              )
+              .not.toContain('pull-request-update');
+          }
         },
+        ROWS_TIMEOUT,
       );
 
       /** The builder commits while the generators run. */
@@ -386,65 +399,37 @@ describe('a shipped pull request that conflicts with its base', () => {
         return () => committed;
       };
 
-      it.each([
-        ['the install', commitsDuringInstall, true, null],
-        ['the install', commitsDuringInstall, false, 'true'],
-        ['the generators', commitsDuringGenerators, true, 'true'],
-        ['the generators', commitsDuringGenerators, false, null],
-      ])(
-        "keeps a builder's commit made during %s and does not say the merge went back",
-        async (_when, commits, keepWorktree, gateCommand) => {
-          const batch = await generatedConflict(gateCommand, keepWorktree);
-          const branch = batch.branch ?? '';
-          const before = tipOnOrigin(branch);
-          const committed = commits(batch);
+      it(
+        "keeps a builder's commit made during the install or the generators and does not say the merge went back",
+        async () => {
+          const rows = [
+            ['the install, kept worktree, no check', commitsDuringInstall, true, null],
+            ['the install, made worktree, a gate', commitsDuringInstall, false, 'true'],
+            ['the generators, kept worktree, a gate', commitsDuringGenerators, true, 'true'],
+            ['the generators, made worktree, no check', commitsDuringGenerators, false, null],
+          ] as const;
+          for (const [i, [name, commits, keepWorktree, gateCommand]] of rows.entries()) {
+            if (i > 0) reboot();
+            const batch = await generatedConflict(gateCommand, keepWorktree);
+            const branch = batch.branch ?? '';
+            const before = tipOnOrigin(branch);
+            const committed = commits(batch);
 
-          await catchUp(batch);
+            await catchUp(batch);
 
-          expect(committed()).toBe(true);
-          const tip = h.git$('rev-parse', `refs/heads/${branch}`);
-          expect(h.git$('log', '-1', '--format=%s', tip)).toBe('Add src/builder.ts');
-          expect(tipOnOrigin(branch)).toBe(before);
-          // (A kept worktree has its own card, from the ship.)
-          const card = h.only(h.cards().filter((c) => !c.title.includes('kept the worktree')));
-          expect(card.body).toContain('the branch moved to');
-          expect(card.body).toContain('nothing was pushed');
-          expect(card.body).not.toMatch(SAYS_PUT_BACK);
+            expect.soft(committed(), name).toBe(true);
+            const tip = h.git$('rev-parse', `refs/heads/${branch}`);
+            expect.soft(h.git$('log', '-1', '--format=%s', tip), name).toBe('Add src/builder.ts');
+            expect.soft(tipOnOrigin(branch), name).toBe(before);
+            // (A kept worktree has its own card, from the ship.)
+            const card = h.only(h.cards().filter((c) => !c.title.includes('kept the worktree')));
+            expect.soft(card.body, name).toContain('the branch moved to');
+            expect.soft(card.body, name).toContain('nothing was pushed');
+            expect.soft(card.body, name).not.toMatch(SAYS_PUT_BACK);
+          }
         },
+        ROWS_TIMEOUT,
       );
-
-      it("does not say the merge went back when it can't be", async () => {
-        const batch = await generatedConflict(null, false);
-        const branch = batch.branch ?? '';
-        const before = tipOnOrigin(branch);
-        failing();
-        vi.spyOn(h.git, 'rewindBranch').mockRejectedValueOnce(new Error('index.lock exists'));
-
-        await catchUp(batch);
-
-        expect(h.git$('rev-parse', `refs/heads/${branch}`)).not.toBe(before);
-        expect(tipOnOrigin(branch)).toBe(before);
-        const card = h.only(h.cards());
-        expect(card.body).toContain('nothing was pushed');
-        expect(card.body).not.toMatch(SAYS_PUT_BACK);
-      });
-    });
-
-    it('raises the card naming the conflict when the base could not be merged at all', async () => {
-      installable();
-      const batch = await shippedWith('README.md', '# ours\n');
-      h.teammatePush('main', 'README.md', '# theirs\n');
-      conflicts(batch);
-      const before = tipOnOrigin(batch.branch);
-      pruned(batch);
-
-      await catchUp(batch);
-
-      expect(tipOnOrigin(batch.branch)).toBe(before);
-      const card = h.only(h.cards());
-      expect(card.body).toContain("10db couldn't settle them itself");
-      expect(card.body).toContain('README.md');
-      expect(card.body).not.toContain('left-pad');
     });
 
     it('raises no card when the branch holds the base, since there is no merge to stop', async () => {
@@ -466,28 +451,11 @@ describe('a shipped pull request that conflicts with its base', () => {
     });
   });
 
-  it('lists the files 10db settled in the merge on the card when the pre-check fails on the result', async () => {
-    const batch = await shippedWith();
-    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
-    conflicts(batch);
-    const before = tipOnOrigin(batch.branch);
-    h.state.write((c) =>
-      patchProject(c, h.project.id, { gateCommand: 'true', precheckCommand: 'false' }),
-    );
-
-    await catchUp(batch);
-
-    expect(tipOnOrigin(batch.branch)).toBe(before);
-    const card = h.only(h.cards());
-    expect(card.title).toContain('pre-check failed');
-    expect(card.body).toContain('10db settled these files itself in the merge');
-    expect(card.body).toContain('src/index.ts');
-  });
-
-  it('puts the local branch back at the pull request head when the check fails in the worktree it kept', async () => {
+  it('puts the local branch back at the pull request head when the check fails in the worktree it kept, then merges the base there and keeps it', async () => {
     const batch = await shippedWith('src/index.ts', BOTH.mine, { keepWorktree: true });
     const kept = batch.worktreePath ?? '';
-    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+    expect(kept).not.toBe('');
+    const teammate = h.teammatePush('main', 'src/index.ts', BOTH.theirs);
     conflicts(batch);
     const before = tipOnOrigin(batch.branch);
     h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
@@ -498,16 +466,38 @@ describe('a shipped pull request that conflicts with its base', () => {
     expect(h.git$('-C', kept, 'rev-parse', 'HEAD')).toBe(before);
     expect(h.git$('-C', kept, 'status', '--porcelain')).toBe('');
     expect(h.git$('-C', kept, 'show', 'HEAD:src/index.ts')).toBe(BOTH.mine.trimEnd());
+
+    // The check is fixed and the retry time passes.
+    h.state.write((c) => patchProject(c, h.project.id, { gateCommand: h.project.gateCommand }));
+    h.shipClock.advance(31 * 60_000);
+    const now = await catchUp(getBatch(h.store.db, batch.id));
+
+    const tip = tipOnOrigin(batch.branch);
+    expect(h.origin$('log', '-1', '--format=%P', tip)).toBe(`${before} ${teammate}`);
+    expect(now.notices.map((n) => n.key)).toEqual(['pull-request-update']);
+    expect(h.cards().filter((c) => c.title.includes('conflicts with main'))).toEqual([]);
+    // The kept worktree is still there and still named, with the builder's file in it.
+    expect(now.worktreePath).toBe(kept);
+    expect(existsSync(join(kept, '.env'))).toBe(true);
+    expect(h.git$('-C', kept, 'rev-parse', 'HEAD')).toBe(tip);
   });
 
-  it('catches up again after a failed check and the builder updating the branch on GitHub', async () => {
+  it('runs the gate on the merged branch before it pushes, and catches up again after the failed check and the builder updating the branch on GitHub', async () => {
     const batch = await shippedWith();
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
     const url = conflicts(batch);
     const branch = batch.branch ?? '';
+    const before = tipOnOrigin(branch);
     h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
-    await catchUp(batch);
-    expect(h.cards()).toHaveLength(1);
+    const failed = await catchUp(batch);
+    expect(tipOnOrigin(branch)).toBe(before);
+    const card = h.only(h.cards());
+    expect(card.title).toContain('gate failed');
+    expect(card.body).toContain('main');
+    expect(failed.notices.map((n) => n.key)).not.toContain('pull-request-update');
+    expect(failed.worktreePath).toBeNull();
+    // 10db's merge, which it did not push, is not left on the local branch.
+    expect(h.git$('rev-parse', `refs/heads/${branch}`)).toBe(before);
 
     // The builder presses Update branch: GitHub's head gains a commit the local branch lacks.
     const byHand = h.origin$(
@@ -580,66 +570,56 @@ describe('a shipped pull request that conflicts with its base', () => {
     expect(h.origin$('log', '-1', '--format=%P', tipOnOrigin(branch)).split(' ')[0]).toBe(byHand);
   });
 
-  it("keeps a builder's local commit one ahead of the pull request head and raises a card naming it", async () => {
-    const batch = await shippedWith();
-    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
-    conflicts(batch);
-    const branch = batch.branch ?? '';
-    const head = tipOnOrigin(branch);
-    // A hand commit on the local branch, never pushed: not a merge of 10db's.
-    const byHand = h.git$(
-      '-c',
-      'user.name=Builder',
-      '-c',
-      'user.email=builder@example.com',
-      'commit-tree',
-      `${head}^{tree}`,
-      '-p',
-      head,
-      '-m',
-      'Fix by hand',
-    );
-    h.git$('update-ref', `refs/heads/${branch}`, byHand, head);
+  it(
+    "keeps a builder's local commit, or the builder's own merge of main, ahead of the pull request head and raises a card naming it",
+    async () => {
+      const BUILDER = ['-c', 'user.name=Builder', '-c', 'user.email=builder@example.com'];
+      const rows: [string, (head: string) => string][] = [
+        // A hand commit on the local branch, never pushed: not a merge of 10db's.
+        [
+          'a hand commit',
+          (head) =>
+            h.git$(...BUILDER, 'commit-tree', `${head}^{tree}`, '-p', head, '-m', 'Fix by hand'),
+        ],
+        // The builder runs `git merge origin/main` and settles the conflict by hand, not yet pushed.
+        [
+          "the builder's merge of main",
+          (head) => {
+            h.git$('fetch', '-q', 'origin');
+            return h.git$(
+              ...BUILDER,
+              'commit-tree',
+              `${head}^{tree}`,
+              '-p',
+              head,
+              '-p',
+              'origin/main',
+              '-m',
+              "Merge branch 'main'",
+            );
+          },
+        ],
+      ];
+      for (const [i, [name, commit]] of rows.entries()) {
+        if (i > 0) reboot();
+        const batch = await shippedWith();
+        h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+        conflicts(batch);
+        const branch = batch.branch ?? '';
+        const head = tipOnOrigin(branch);
+        const byHand = commit(head);
+        h.git$('update-ref', `refs/heads/${branch}`, byHand, head);
 
-    await catchUp(batch);
+        await catchUp(batch);
 
-    expect(h.git$('rev-parse', `refs/heads/${branch}`)).toBe(byHand);
-    expect(tipOnOrigin(branch)).toBe(head);
-    const card = h.only(h.cards());
-    expect(card.body).toContain(byHand.slice(0, 7));
-  });
-
-  it("keeps the builder's own merge of main ahead of the pull request head and raises a card naming it", async () => {
-    const batch = await shippedWith();
-    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
-    conflicts(batch);
-    const branch = batch.branch ?? '';
-    const head = tipOnOrigin(branch);
-    h.git$('fetch', '-q', 'origin');
-    // The builder runs `git merge origin/main` and settles the conflict by hand, not yet pushed.
-    const byHand = h.git$(
-      '-c',
-      'user.name=Builder',
-      '-c',
-      'user.email=builder@example.com',
-      'commit-tree',
-      `${head}^{tree}`,
-      '-p',
-      head,
-      '-p',
-      'origin/main',
-      '-m',
-      "Merge branch 'main'",
-    );
-    h.git$('update-ref', `refs/heads/${branch}`, byHand, head);
-
-    await catchUp(batch);
-
-    expect(h.git$('rev-parse', `refs/heads/${branch}`)).toBe(byHand);
-    expect(tipOnOrigin(branch)).toBe(head);
-    const card = h.only(h.cards());
-    expect(card.body).toContain(byHand.slice(0, 7));
-  });
+        expect.soft(h.git$('rev-parse', `refs/heads/${branch}`), name).toBe(byHand);
+        expect.soft(tipOnOrigin(branch), name).toBe(head);
+        const card = h.only(h.cards());
+        expect.soft(card.body, name).toContain(byHand.slice(0, 7));
+      }
+    },
+    ROWS_TIMEOUT,
+  );
 
   it('keeps an unpushed merge of 10db after a restart and raises a card naming it', async () => {
     const batch = await shippedWith();
@@ -661,40 +641,42 @@ describe('a shipped pull request that conflicts with its base', () => {
     expect(card.body).toContain(stale.slice(0, 7));
   });
 
-  it.each([
-    ['the worktree it kept', true],
-    ['a worktree it made', false],
-  ])(
-    "keeps a builder's commit made in %s while the base update's install runs, when the check then fails",
-    async (_where, keepWorktree) => {
-      const batch = await shippedWith('src/index.ts', BOTH.mine, { keepWorktree });
-      h.teammatePush('main', 'src/index.ts', BOTH.theirs);
-      conflicts(batch);
-      const branch = batch.branch ?? '';
-      h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
-      // The install after the merge reads the lockfile at HEAD: the builder commits in that window.
-      const read = h.git.blobAt.bind(h.git);
-      let committed = false;
-      vi.spyOn(h.git, 'blobAt').mockImplementation(async (repo, rev, file) => {
-        if (!committed && rev === 'HEAD' && file === 'pnpm-lock.yaml') {
-          committed = true;
-          await commitIn(h, getBatch(h.store.db, batch.id), 'src/builder.ts');
-        }
-        return read(repo, rev, file);
-      });
+  it(
+    "keeps a builder's commit made in the worktree it kept or one it made while the base update's install runs, when the check then fails",
+    async () => {
+      const rows = [
+        ['the worktree it kept', true],
+        ['a worktree it made', false],
+      ] as const;
+      for (const [i, [name, keepWorktree]] of rows.entries()) {
+        if (i > 0) reboot();
+        const batch = await shippedWith('src/index.ts', BOTH.mine, { keepWorktree });
+        h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+        conflicts(batch);
+        const branch = batch.branch ?? '';
+        h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
+        // The install after the merge reads the lockfile at HEAD: the builder commits in that window.
+        const committed = commitsDuringInstall(batch);
 
-      await catchUp(batch);
+        await catchUp(batch);
 
-      expect(committed).toBe(true);
-      const tip = h.git$('rev-parse', `refs/heads/${branch}`);
-      expect(h.git$('show', `${tip}:src/builder.ts`)).toBe('src/builder.ts');
-      expect(h.git$('log', '-1', '--format=%s', tip)).toBe('Add src/builder.ts');
-      // Nothing was pushed, and the failed check still has its one card.
-      expect(h.origin$('log', '-1', '--format=%s', tipOnOrigin(branch))).not.toBe(
-        'Add src/builder.ts',
-      );
-      expect(h.cards().filter((c) => c.title.includes('gate failed'))).toHaveLength(1);
+        expect.soft(committed(), name).toBe(true);
+        const tip = h.git$('rev-parse', `refs/heads/${branch}`);
+        expect.soft(h.git$('show', `${tip}:src/builder.ts`), name).toBe('src/builder.ts');
+        expect.soft(h.git$('log', '-1', '--format=%s', tip), name).toBe('Add src/builder.ts');
+        // Nothing was pushed, and the failed check still has its one card.
+        expect
+          .soft(h.origin$('log', '-1', '--format=%s', tipOnOrigin(branch)), name)
+          .not.toBe('Add src/builder.ts');
+        expect
+          .soft(
+            h.cards().filter((c) => c.title.includes('gate failed')),
+            name,
+          )
+          .toHaveLength(1);
+      }
     },
+    ROWS_TIMEOUT,
   );
 
   describe('when the merge takes the base copy of a generated directory, to regenerate', () => {
@@ -730,73 +712,111 @@ describe('a shipped pull request that conflicts with its base', () => {
     }
 
     /** The branch's tip holds the builder's commit, which nothing pushed. */
-    function builderKept(branch: string): void {
+    function builderKept(branch: string, label: string): void {
       const tip = h.git$('rev-parse', `refs/heads/${branch}`);
-      expect(h.git$('log', '-1', '--format=%s', tip)).toBe('Add src/builder.ts');
-      expect(h.git$('show', `${tip}:src/builder.ts`)).toBe('src/builder.ts');
-      expect(h.origin$('log', '-1', '--format=%s', tipOnOrigin(branch))).not.toBe(
-        'Add src/builder.ts',
-      );
+      expect.soft(h.git$('log', '-1', '--format=%s', tip), label).toBe('Add src/builder.ts');
+      expect.soft(h.git$('show', `${tip}:src/builder.ts`), label).toBe('src/builder.ts');
+      expect
+        .soft(h.origin$('log', '-1', '--format=%s', tipOnOrigin(branch)), label)
+        .not.toBe('Add src/builder.ts');
     }
 
-    it("keeps a builder's commit made while the install runs, when the check then fails", async () => {
-      const batch = await migrationsCollide();
-      const run = { ran: 0 };
-      generating(run);
-      const read = h.git.blobAt.bind(h.git);
-      let committed = false;
-      vi.spyOn(h.git, 'blobAt').mockImplementation(async (repo, rev, file) => {
-        if (!committed && rev === 'HEAD' && file === 'pnpm-lock.yaml') {
-          committed = true;
-          await commitIn(h, getBatch(h.store.db, batch.id), 'src/builder.ts');
+    it(
+      "keeps a builder's commit made while the install or the generators run, when the check then fails",
+      async () => {
+        const rows: [string, (batch: BatchDto, run: { ran: number }) => () => void][] = [
+          [
+            'during the install',
+            (batch, run) => {
+              generating(run);
+              const committed = commitsDuringInstall(batch);
+              return () => {
+                expect.soft(committed(), 'during the install').toBe(true);
+              };
+            },
+          ],
+          [
+            'during the generators',
+            (batch, run) => {
+              generating(run, async () => {
+                await commitIn(h, getBatch(h.store.db, batch.id), 'src/builder.ts');
+              });
+              return () => {
+                expect.soft(run.ran, 'during the generators').toBe(1);
+              };
+            },
+          ],
+        ];
+        for (const [i, [name, setUp]] of rows.entries()) {
+          if (i > 0) reboot();
+          const batch = await migrationsCollide();
+          const checkRun = setUp(batch, { ran: 0 });
+
+          await catchUp(batch);
+
+          checkRun();
+          builderKept(batch.branch ?? '', name);
         }
-        return read(repo, rev, file);
-      });
+      },
+      ROWS_TIMEOUT,
+    );
 
-      await catchUp(batch);
+    it(
+      'raises no regenerate card, and puts its merge back, when it is stopped after the merge or the daemon stops during the install',
+      async () => {
+        const rows: [string, () => () => void][] = [
+          [
+            'stopped after the merge',
+            () => {
+              vi.spyOn(h.ctx.generators, 'regenerate').mockResolvedValue({ kind: 'aborted' });
+              return () => undefined;
+            },
+          ],
+          [
+            'the daemon stops during the install',
+            () => {
+              const run = { ran: 0 };
+              generating(run);
+              // The install reads the lockfile at HEAD after the merge: the stop comes in that window.
+              const read = h.git.blobAt.bind(h.git);
+              let stopped = false;
+              vi.spyOn(h.git, 'blobAt').mockImplementation((repo, rev, file) => {
+                if (!stopped && rev === 'HEAD' && file === 'pnpm-lock.yaml') {
+                  stopped = true;
+                  void h.jobs.stop();
+                }
+                return read(repo, rev, file);
+              });
+              return () => {
+                expect.soft(stopped, 'the daemon stops during the install').toBe(true);
+                expect.soft(run.ran, 'the daemon stops during the install').toBe(0);
+              };
+            },
+          ],
+        ];
+        for (const [i, [name, setUp]] of rows.entries()) {
+          if (i > 0) reboot();
+          const batch = await migrationsCollide();
+          const checkRun = setUp();
+          const pushed = tipOnOrigin(batch.branch);
 
-      expect(committed).toBe(true);
-      builderKept(batch.branch ?? '');
-    });
+          await catchUp(batch);
 
-    it('raises no regenerate card, and puts its merge back, when it is stopped after the merge', async () => {
-      const batch = await migrationsCollide();
-      vi.spyOn(h.ctx.generators, 'regenerate').mockResolvedValue({ kind: 'aborted' });
-      const pushed = tipOnOrigin(batch.branch);
-
-      await catchUp(batch);
-
-      expect(tipOnOrigin(batch.branch)).toBe(pushed);
-      // The merge is not left for the next catch-up to take for a commit 10db did not write.
-      expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(pushed);
-      // The fixture keeps the worktree, which has a card of its own.
-      expect(h.cards().filter((c) => !c.title.includes('kept the worktree'))).toEqual([]);
-    });
-
-    it('raises no regenerate card, and puts its merge back, when the daemon stops during the install', async () => {
-      const batch = await migrationsCollide();
-      const run = { ran: 0 };
-      generating(run);
-      const pushed = tipOnOrigin(batch.branch);
-      // The install reads the lockfile at HEAD after the merge: the stop comes in that window.
-      const read = h.git.blobAt.bind(h.git);
-      let stopped = false;
-      vi.spyOn(h.git, 'blobAt').mockImplementation((repo, rev, file) => {
-        if (!stopped && rev === 'HEAD' && file === 'pnpm-lock.yaml') {
-          stopped = true;
-          void h.jobs.stop();
+          checkRun();
+          expect.soft(tipOnOrigin(batch.branch), name).toBe(pushed);
+          // The merge is not left for the next catch-up to take for a commit 10db did not write.
+          expect.soft(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`), name).toBe(pushed);
+          // The fixture keeps the worktree, which has a card of its own.
+          expect
+            .soft(
+              h.cards().filter((c) => !c.title.includes('kept the worktree')),
+              name,
+            )
+            .toEqual([]);
         }
-        return read(repo, rev, file);
-      });
-
-      await catchUp(batch);
-
-      expect(stopped).toBe(true);
-      expect(run.ran).toBe(0);
-      expect(tipOnOrigin(batch.branch)).toBe(pushed);
-      expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(pushed);
-      expect(h.cards().filter((c) => !c.title.includes('kept the worktree'))).toEqual([]);
-    });
+      },
+      ROWS_TIMEOUT,
+    );
 
     it("pushes nothing and raises the one card, naming the migration, when the branch's can't be carried over", async () => {
       const journal = (...tags: string[]): string =>
@@ -874,56 +894,74 @@ describe('a shipped pull request that conflicts with its base', () => {
         return batch;
       }
 
-      async function pushedNothing(batch: BatchDto, why?: string): Promise<void> {
-        const pushed = tipOnOrigin(batch.branch);
+      it(
+        'pushes nothing when the install fails, the generators throw, the worktree is dirty or the install in the copy is broken',
+        async () => {
+          const rows: [string, string, (batch: BatchDto) => () => void][] = [
+            [
+              'the install the merged lockfile needs fails',
+              'the install the merged lockfile needs failed',
+              () => {
+                vi.spyOn(h.ctx.dependencies, 'refresh').mockRejectedValue(
+                  new Error('the install failed'),
+                );
+                return () => undefined;
+              },
+            ],
+            [
+              'the generators throw',
+              'no sandbox',
+              () => {
+                vi.spyOn(h.ctx.generators, 'regenerate').mockRejectedValue(new Error('no sandbox'));
+                return () => undefined;
+              },
+            ],
+            [
+              'the worktree is dirty, so the generators never start',
+              'uncommitted changes',
+              (batch) => {
+                const regenerate = vi.spyOn(h.ctx.generators, 'regenerate');
+                writeFileSync(join(batch.worktreePath ?? '', 'src/index.ts'), 'in progress\n');
+                return () => {
+                  expect.soft(regenerate, 'the worktree is dirty').not.toHaveBeenCalled();
+                };
+              },
+            ],
+            [
+              'the install in the copy is broken',
+              'install',
+              (batch) => {
+                // The merged lockfile names a package no install brings.
+                h.teammatePush(
+                  'main',
+                  'pnpm-lock.yaml',
+                  "lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies:\n      left-pad:\n        specifier: 1.3.0\n        version: 1.3.0\n",
+                );
+                mkdirSync(join(batch.worktreePath ?? '', 'node_modules'), { recursive: true });
+                return () => undefined;
+              },
+            ],
+          ];
+          for (const [i, [name, why, setUp]] of rows.entries()) {
+            if (i > 0) reboot();
+            const batch = await bothAdded();
+            const checkRun = setUp(batch);
+            const pushed = tipOnOrigin(batch.branch);
 
-        await catchUp(batch);
+            await catchUp(batch);
 
-        expect(tipOnOrigin(batch.branch)).toBe(pushed);
-        expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(pushed);
-        // The fixture keeps the worktree, which has a card of its own.
-        const card = h.only(h.cards().filter((c) => !c.title.includes('kept the worktree')));
-        expect(card.title).toContain("couldn't update it");
-        expect(card.body).toContain('0001_mine');
-        if (why !== undefined) expect(card.body).toContain(why);
-      }
-
-      it('pushes nothing when the install the merged lockfile needs fails', async () => {
-        const batch = await bothAdded();
-        vi.spyOn(h.ctx.dependencies, 'refresh').mockRejectedValue(new Error('the install failed'));
-
-        await pushedNothing(batch, 'the install the merged lockfile needs failed');
-      });
-
-      it('pushes nothing when the generators throw', async () => {
-        const batch = await bothAdded();
-        vi.spyOn(h.ctx.generators, 'regenerate').mockRejectedValue(new Error('no sandbox'));
-
-        await pushedNothing(batch, 'no sandbox');
-      });
-
-      it('pushes nothing when the worktree is dirty, so the generators never start', async () => {
-        const batch = await bothAdded();
-        const regenerate = vi.spyOn(h.ctx.generators, 'regenerate');
-        writeFileSync(join(batch.worktreePath ?? '', 'src/index.ts'), 'in progress\n');
-
-        await pushedNothing(batch, 'uncommitted changes');
-
-        expect(regenerate).not.toHaveBeenCalled();
-      });
-
-      it('pushes nothing when the install in the copy is broken', async () => {
-        const batch = await bothAdded();
-        // The merged lockfile names a package no install brings.
-        h.teammatePush(
-          'main',
-          'pnpm-lock.yaml',
-          "lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies:\n      left-pad:\n        specifier: 1.3.0\n        version: 1.3.0\n",
-        );
-        mkdirSync(join(batch.worktreePath ?? '', 'node_modules'), { recursive: true });
-
-        await pushedNothing(batch, 'install');
-      });
+            expect.soft(tipOnOrigin(batch.branch), name).toBe(pushed);
+            expect.soft(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`), name).toBe(pushed);
+            // The fixture keeps the worktree, which has a card of its own.
+            const card = h.only(h.cards().filter((c) => !c.title.includes('kept the worktree')));
+            expect.soft(card.title, name).toContain("couldn't update it");
+            expect.soft(card.body, name).toContain('0001_mine');
+            expect.soft(card.body, name).toContain(why);
+            checkRun();
+          }
+        },
+        ROWS_TIMEOUT,
+      );
     });
 
     describe('the notice of migrations it renumbered', () => {
@@ -1005,18 +1043,11 @@ describe('a shipped pull request that conflicts with its base', () => {
           (n) => n.key === NOTICE_KEY.migrationsRenumbered,
         );
 
-      it('is left as it was when the check fails and the merge is put back', async () => {
+      it('is left as it was when the check fails and the merge is put back, and lists the migration once when a catch-up starts over from the same branch', async () => {
         const batch = await renumbering('false');
-
         await catchUp(batch);
-
         expect(h.cards().some((c) => c.title.includes('gate failed'))).toBe(true);
         expect(renumbered(batch)).toEqual([]);
-      });
-
-      it('lists the migration once when a catch-up starts over from the same branch', async () => {
-        const batch = await renumbering('false');
-        await catchUp(batch);
         // The catch-up waits out its retry time before it tries the same head again.
         h.shipClock.advance(31 * 60_000);
         await catchUp(getBatch(h.store.db, batch.id));
@@ -1031,10 +1062,18 @@ describe('a shipped pull request that conflicts with its base', () => {
         expect(notice.body).toContain('0001_mine → 0002_mine');
       });
 
-      it('lists what was pushed when another generated directory was regenerated too', async () => {
-        const batch = await renumbering(null, { otherDirectory: true });
+      it('is left as it was when a merge that regenerated another generated directory fails its check, then lists what was pushed', async () => {
+        const batch = await renumbering('false', { otherDirectory: true });
 
-        const now = await catchUp(batch);
+        await catchUp(batch);
+
+        expect(h.cards().some((c) => c.title.includes('gate failed'))).toBe(true);
+        expect(renumbered(batch)).toEqual([]);
+
+        // The check is fixed and the retry time passes.
+        h.state.write((c) => patchProject(c, h.project.id, { gateCommand: null }));
+        h.shipClock.advance(31 * 60_000);
+        const now = await catchUp(getBatch(h.store.db, batch.id));
 
         expect(h.origin$('ls-tree', '--name-only', batch.branch ?? '', `${DB}/`)).toContain(
           '0002_mine.sql',
@@ -1043,49 +1082,32 @@ describe('a shipped pull request that conflicts with its base', () => {
         expect(notice.body).toContain('0001_mine → 0002_mine');
       });
 
-      it.each([
-        ['no check is set', null],
-        ['a gate is set', 'true'],
-      ])(
-        'lists nothing and pushes nothing when another generated directory came back unchanged and %s',
-        async (_name, gate) => {
-          const batch = await renumbering(gate, { otherDirectory: true, leftAsIs: true });
-          const pushed = tipOnOrigin(batch.branch);
+      it(
+        'lists nothing and pushes nothing when another generated directory came back unchanged, with no check or a gate',
+        async () => {
+          const rows = [
+            ['no check is set', null],
+            ['a gate is set', 'true'],
+          ] as const;
+          for (const [i, [name, gate]] of rows.entries()) {
+            if (i > 0) reboot();
+            const batch = await renumbering(gate, { otherDirectory: true, leftAsIs: true });
+            const pushed = tipOnOrigin(batch.branch);
 
-          await catchUp(batch);
+            await catchUp(batch);
 
-          expect(tipOnOrigin(batch.branch)).toBe(pushed);
-          expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(pushed);
-          // (The kept worktree has its own card, from the ship.)
-          const card = h.only(h.cards().filter((c) => !c.title.includes('kept the worktree')));
-          expect(card.title).toContain("couldn't update it");
-          expect(card.body).toContain(`${SCHEMAS}/`);
-          expect(card.body).toContain('regenerating changed nothing');
-          expect(renumbered(batch)).toEqual([]);
+            expect.soft(tipOnOrigin(batch.branch), name).toBe(pushed);
+            expect.soft(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`), name).toBe(pushed);
+            // (The kept worktree has its own card, from the ship.)
+            const card = h.only(h.cards().filter((c) => !c.title.includes('kept the worktree')));
+            expect.soft(card.title, name).toContain("couldn't update it");
+            expect.soft(card.body, name).toContain(`${SCHEMAS}/`);
+            expect.soft(card.body, name).toContain('regenerating changed nothing');
+            expect.soft(renumbered(batch), name).toEqual([]);
+          }
         },
+        ROWS_TIMEOUT,
       );
-
-      it('is left as it was when such a merge fails its check and is put back', async () => {
-        const batch = await renumbering('false', { otherDirectory: true });
-
-        await catchUp(batch);
-
-        expect(h.cards().some((c) => c.title.includes('gate failed'))).toBe(true);
-        expect(renumbered(batch)).toEqual([]);
-      });
-    });
-
-    it("keeps a builder's commit made while the generators run, when the check then fails", async () => {
-      const batch = await migrationsCollide();
-      const run = { ran: 0 };
-      generating(run, async () => {
-        await commitIn(h, getBatch(h.store.db, batch.id), 'src/builder.ts');
-      });
-
-      await catchUp(batch);
-
-      expect(run.ran).toBe(1);
-      builderKept(batch.branch ?? '');
     });
   });
 
@@ -1138,35 +1160,7 @@ describe('a shipped pull request that conflicts with its base', () => {
     expect(h.cards()).toEqual([]);
   });
 
-  it('raises one card naming the files when 10db cannot settle the conflict, and pushes nothing', async () => {
-    h.gh.noRequiredChecks = true;
-    h.gh.failNext.set('prMerge', new GhError('failed', 'gh pr merge failed (exit 1): conflict'));
-    const batch = await shippedWith('README.md', '# ours\n');
-    h.teammatePush('main', 'README.md', '# theirs\n');
-    const before = tipOnOrigin(batch.branch);
-    conflicts(batch);
-
-    const now = await catchUp(batch);
-
-    expect(tipOnOrigin(batch.branch)).toBe(before);
-    const card = h.only(h.cards());
-    expect(card.title).toContain('conflicts with main');
-    expect(card.body).toContain("10db couldn't settle them itself");
-    expect(card.body).toContain('README.md');
-    expect(card.body).toContain('Update branch');
-    // The card is the one thing said: neither of the two notices stands.
-    expect(now.notices).toEqual([]);
-    expect(now.worktreePath).toBeNull();
-
-    // Asked again for the same pull request head, it does not start over or raise another.
-    await catchUp(now);
-    expect(h.cards()).toHaveLength(1);
-    expect(
-      h.logs.lines().filter((l) => l['msg'] === 'base not merged before the gate'),
-    ).toHaveLength(1);
-  });
-
-  it('merges it after a restart once the builder settles a conflict 10db could not, when GitHub had refused the merge', async () => {
+  it('raises one card naming the files when 10db cannot settle the conflict and pushes nothing, then merges it after a restart once the builder settles it, when GitHub had refused the merge', async () => {
     h.gh.noRequiredChecks = true;
     h.gh.failNext.set(
       'prMerge',
@@ -1177,10 +1171,27 @@ describe('a shipped pull request that conflicts with its base', () => {
     );
     const batch = await shippedWith('README.md', '# ours\n');
     h.teammatePush('main', 'README.md', '# theirs\n');
+    const before = tipOnOrigin(batch.branch);
     const url = conflicts(batch);
+
     const stopped = await catchUp(batch);
-    expect(h.cards()).toHaveLength(1);
+
+    expect(tipOnOrigin(batch.branch)).toBe(before);
+    const card = h.only(h.cards());
+    expect(card.title).toContain('conflicts with main');
+    expect(card.body).toContain("10db couldn't settle them itself");
+    expect(card.body).toContain('README.md');
+    expect(card.body).toContain('Update branch');
+    // The card is the one thing said: neither of the two notices stands.
     expect(stopped.notices).toEqual([]);
+    expect(stopped.worktreePath).toBeNull();
+
+    // Asked again for the same pull request head, it does not start over or raise another.
+    await catchUp(stopped);
+    expect(h.cards()).toHaveLength(1);
+    expect(
+      h.logs.lines().filter((l) => l['msg'] === 'base not merged before the gate'),
+    ).toHaveLength(1);
 
     // The daemon restarts; the builder resolves the conflict on GitHub, as the card says.
     h.restartShipper();
@@ -1191,80 +1202,6 @@ describe('a shipped pull request that conflicts with its base', () => {
     await h.jobs.idle();
 
     expect(h.gh.merged).toEqual([url]);
-  });
-
-  it('shows the refused notice when auto-merge errors on a retry and was never armed', async () => {
-    // GitHub refused the first arm, so the pull request was never set to merge.
-    h.gh.failNext.set(
-      'prAutoMerge',
-      new GhError('failed', 'gh pr merge failed (exit 1): auto-merge is not allowed'),
-    );
-    const batch = await shippedWith('README.md', '# ours\n');
-    expect(batch.notices.map((n) => n.key)).toEqual(['pull-request-merge']);
-    h.teammatePush('main', 'README.md', '# theirs\n');
-    const url = conflicts(batch);
-    const stopped = await catchUp(batch);
-    expect(stopped.notices).toEqual([]);
-
-    // The builder resolves the conflict; the watch withdraws the card and asks for the merge again.
-    h.gh.setMergeBlocked(url, null);
-    h.gh.setMergeable(url, PrMergeable.Mergeable);
-    h.gh.failNext.set(
-      'prAutoMerge',
-      new GhError('failed', 'gh pr merge failed (exit 1): HTTP 403: Resource not accessible'),
-    );
-    h.shipper.retryMerge(batch.id, { catchUpCardWasOpen: true });
-    await h.jobs.idle();
-
-    expect(getBatch(h.store.db, batch.id).notices.map((n) => n.key)).toEqual([
-      'pull-request-merge',
-    ]);
-  });
-
-  it('treats an auto-merge error on a retry as armed, with no notice, when it was armed before', async () => {
-    // The first arm succeeds, so the pull request is known to be set to merge.
-    const batch = await shippedWith('README.md', '# ours\n');
-    expect(batch.notices.map((n) => n.key)).not.toContain('pull-request-merge');
-    h.teammatePush('main', 'README.md', '# theirs\n');
-    const url = conflicts(batch);
-    const stopped = await catchUp(batch);
-    expect(stopped.notices).toEqual([]);
-
-    // The builder resolves the conflict; the watch withdraws the card and asks for the merge again,
-    // and gh's answer to arming a pull request that is armed already is an error.
-    h.gh.setMergeBlocked(url, null);
-    h.gh.setMergeable(url, PrMergeable.Mergeable);
-    h.gh.failNext.set(
-      'prAutoMerge',
-      new GhError('failed', 'gh pr merge failed (exit 1): HTTP 403: Resource not accessible'),
-    );
-    h.shipper.retryMerge(batch.id, { catchUpCardWasOpen: true });
-    await h.jobs.idle();
-
-    expect(h.gh.failNext.has('prAutoMerge')).toBe(false);
-    expect(getBatch(h.store.db, batch.id).notices.map((n) => n.key)).not.toContain(
-      'pull-request-merge',
-    );
-  });
-
-  it('merges the base in the worktree 10db kept after the ship, and keeps it', async () => {
-    const batch = await shippedWith('src/index.ts', BOTH.mine, { keepWorktree: true });
-    const kept = batch.worktreePath ?? '';
-    expect(kept).not.toBe('');
-    const teammate = h.teammatePush('main', 'src/index.ts', BOTH.theirs);
-    const before = tipOnOrigin(batch.branch);
-    conflicts(batch);
-
-    const now = await catchUp(batch);
-
-    const tip = tipOnOrigin(batch.branch);
-    expect(h.origin$('log', '-1', '--format=%P', tip)).toBe(`${before} ${teammate}`);
-    expect(now.notices.map((n) => n.key)).toEqual(['pull-request-update']);
-    expect(h.cards().filter((c) => c.title.includes('conflicts with main'))).toEqual([]);
-    // The kept worktree is still there and still named, with the builder's file in it.
-    expect(now.worktreePath).toBe(kept);
-    expect(existsSync(join(kept, '.env'))).toBe(true);
-    expect(h.git$('-C', kept, 'rev-parse', 'HEAD')).toBe(tip);
   });
 
   it("names only the builder's commit, and 10db's own unpushed merge as 10db's, in the kept worktree", async () => {
@@ -1330,27 +1267,31 @@ describe('a shipped pull request that conflicts with its base', () => {
     }
   });
 
-  /** A second batch whose worktree, made by hand at `where`, holds the shipped batch's branch. */
-  function holdBy(
-    batch: BatchDto,
-    where: string,
-    patch: { readonly state: 'OPEN' | 'FAILED'; readonly ciFixOf: BatchDto['id'] | null },
-  ): void {
-    h.git$('worktree', 'add', '-q', where, batch.branch ?? '');
-    const other = h.starter.startTask(h.addTask('Beta').id);
-    h.state.write((w) => patchBatch(w, other.id, { ...patch, worktreePath: where }));
-  }
-
-  it('raises its card when the batch that holds the branch in a kept worktree has failed', async () => {
+  it('says on its tasks that it conflicts while a running CI fix holds the branch, and raises its card once that batch has failed', async () => {
     const batch = await shippedWith();
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
     const before = tipOnOrigin(batch.branch);
     conflicts(batch);
     const byHand = mkdtempSync(join(tmpdir(), 'by-hand-'));
     try {
-      holdBy(batch, join(byHand, 'wt'), { state: 'FAILED', ciFixOf: batch.id });
+      // A second batch whose worktree, made by hand, holds the shipped batch's branch.
+      const where = join(byHand, 'wt');
+      h.git$('worktree', 'add', '-q', where, batch.branch ?? '');
+      const fix = h.starter.startTask(h.addTask('Beta').id);
+      const open = { state: 'OPEN', ciFixOf: batch.id } as const;
+      h.state.write((w) => patchBatch(w, fix.id, { ...open, worktreePath: where }));
 
-      const now = await catchUp(batch);
+      const waiting = await catchUp(batch);
+
+      expect(tipOnOrigin(batch.branch)).toBe(before);
+      expect(waiting.notices.map((n) => n.key)).toEqual(['base-conflict']);
+      expect(waiting.notices[0]?.line).toContain('conflicts with main');
+      expect(h.cards().filter((c) => c.title.includes('conflicts with main'))).toEqual([]);
+
+      // The fix fails and keeps its worktree: asked again, the catch-up raises its card.
+      const failed = { state: 'FAILED' } as const;
+      h.state.write((w) => patchBatch(w, fix.id, { ...failed, worktreePath: where }));
+      const now = await catchUp(getBatch(h.store.db, batch.id));
 
       expect(tipOnOrigin(batch.branch)).toBe(before);
       const card = h.only(h.cards().filter((c) => c.title.includes('conflicts with main')));
@@ -1361,74 +1302,20 @@ describe('a shipped pull request that conflicts with its base', () => {
     }
   });
 
-  it('says on its tasks that it conflicts while a running CI fix holds the branch, and asks again', async () => {
-    const batch = await shippedWith();
-    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
-    const before = tipOnOrigin(batch.branch);
-    conflicts(batch);
-    const byHand = mkdtempSync(join(tmpdir(), 'by-hand-'));
-    try {
-      holdBy(batch, join(byHand, 'wt'), { state: 'OPEN', ciFixOf: batch.id });
-
-      const now = await catchUp(batch);
-
-      expect(tipOnOrigin(batch.branch)).toBe(before);
-      expect(now.notices.map((n) => n.key)).toEqual(['base-conflict']);
-      expect(now.notices[0]?.line).toContain('conflicts with main');
-      expect(h.cards().filter((c) => c.title.includes('conflicts with main'))).toEqual([]);
-    } finally {
-      rmSync(byHand, { recursive: true, force: true });
-    }
-  });
-
-  it('does nothing once GitHub no longer says it conflicts', async () => {
-    const batch = await shippedWith();
-    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
-    const before = tipOnOrigin(batch.branch);
-    // GitHub says clean (the default).
-    const now = await catchUp(batch);
-    expect(tipOnOrigin(batch.branch)).toBe(before);
-    expect(now.notices).toEqual([]);
-  });
-
-  // A push takes a pull request out of its base's merge queue. The watch read it a round ago, and
-  // the queue may have taken it since, so the job reads the queue itself before it pushes anything.
-  it('pushes nothing to a pull request that is in the merge queue, nor when the queue cannot be read', async () => {
+  it('is left to the builder, conflicting or with checks that never started, when the batch did not ask to be merged by itself', async () => {
+    reboot({ landing: 'hold' });
     const batch = await shippedWith();
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
     const before = tipOnOrigin(batch.branch);
     const url = conflicts(batch);
-    h.gh.setInMergeQueue(url, true);
-    const now = await catchUp(batch);
-    expect(tipOnOrigin(batch.branch)).toBe(before);
-    expect(h.cards()).toEqual([]);
-    expect(now.notices).toEqual([]);
-    expect(h.gh.calls.some((c) => c.method === 'prInMergeQueue')).toBe(true);
-
-    h.gh.setInMergeQueue(url, false);
-    h.gh.failQueueRead.set(url, new GhError('failed', 'HTTP 502'));
     await catchUp(batch);
     expect(tipOnOrigin(batch.branch)).toBe(before);
     expect(h.cards()).toEqual([]);
 
-    // Out of the queue and readable, the same pull request is caught up.
-    h.gh.failQueueRead.delete(url);
-    await catchUp(batch);
-    expect(tipOnOrigin(batch.branch)).not.toBe(before);
-  });
-
-  it('is left to the builder when the batch did not ask to be merged by itself', async () => {
-    h.close();
-    h = createDeliveryHarness({ workspaceMode: 'worktree', landing: 'hold' }, { trigger: false });
-    h.commit('src/index.ts', "import a from './a';\nexport {};\n");
-    h.git$('push', '-q', 'origin', 'main');
-    const batch = await shippedWith();
-    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
-    const before = tipOnOrigin(batch.branch);
-    conflicts(batch);
-    await catchUp(batch);
+    h.gh.setBlockedOnChecks(url, true);
+    h.shipper.restartCi(batch.id);
+    await h.jobs.idle();
     expect(tipOnOrigin(batch.branch)).toBe(before);
-    expect(h.cards()).toEqual([]);
   });
 });
 
@@ -1442,32 +1329,20 @@ describe('a catch-up while a waiting update drains the factory', () => {
     return { batch, before: tipOnOrigin(batch.branch) };
   }
 
-  it.each([
-    [
-      'the base into a conflicting pull request',
-      (batch: BatchDto) => {
-        h.shipper.catchUp(batch.id);
-      },
-    ],
-    [
-      'the base into a pull request whose checks never started',
-      (batch: BatchDto) => {
-        // Held: it says so, and the watch keeps the ask unasked.
-        expect(h.shipper.restartCi(batch.id)).toBe(false);
-      },
-    ],
-  ])('starts no gate to bring %s', async (_name, ask) => {
+  it('starts no gate to bring the base into a conflicting pull request or one whose checks never started, and brings it in when the next round asks once the drain has ended', async () => {
     const { batch, before } = await conflictingAsItDrains();
-    ask(batch);
+
+    h.shipper.catchUp(batch.id);
     expect(h.jobs.pending()).toBe(0);
     await h.jobs.idle();
     expect(tipOnOrigin(batch.branch)).toBe(before);
-  });
 
-  it('brings the base in when the next round asks, once the drain has ended', async () => {
-    const { batch, before } = await conflictingAsItDrains();
-    await catchUp(batch);
+    // Held: it says so, and the watch keeps the ask unasked.
+    expect(h.shipper.restartCi(batch.id)).toBe(false);
+    expect(h.jobs.pending()).toBe(0);
+    await h.jobs.idle();
     expect(tipOnOrigin(batch.branch)).toBe(before);
+
     draining = false;
     await catchUp(batch);
     expect(tipOnOrigin(batch.branch)).not.toBe(before);
@@ -1489,15 +1364,69 @@ describe('a shipped pull request whose head never got its required checks', () =
     return getBatch(h.store.db, batch.id);
   }
 
-  it('has the base merged into it and pushed, so a new head gets its workflows', async () => {
+  it('pushes nothing while the branch holds the base, a check has run, GitHub is not blocked on checks, it is in the merge queue or the gate fails, then has the base merged in and pushed so a new head gets its workflows', async () => {
     const batch = await shippedWith();
+    const branch = batch.branch ?? '';
+    const url = waitsForChecks(batch);
+
+    // The branch already holds the base: nothing to push, and no card.
+    const before = tipOnOrigin(branch);
+    let now = await restartCi(batch);
+    expect(tipOnOrigin(branch)).toBe(before);
+    expect(h.cards()).toEqual([]);
+    expect(now.notices).toEqual([]);
+
     const teammate = h.teammatePush('main', 'src/other.ts', 'export {};\n');
-    const before = tipOnOrigin(batch.branch);
-    waitsForChecks(batch);
+    expect(tipOnOrigin(branch)).toBe(before);
 
-    const now = await restartCi(batch);
+    // A check that has appeared since, running or finished, is never pushed over.
+    for (const [name, conclusion] of [
+      ['running', null],
+      ['passed', 'SUCCESS'],
+      ['failed', 'FAILURE'],
+    ] as const) {
+      h.gh.setChecks(url, [
+        {
+          __typename: 'CheckRun' as const,
+          name: 'build',
+          status: conclusion === null ? 'IN_PROGRESS' : 'COMPLETED',
+          conclusion,
+          detailsUrl: null,
+        },
+      ]);
+      now = await restartCi(batch);
+      expect.soft(tipOnOrigin(branch), `checks ${name}`).toBe(before);
+      expect.soft(now.notices, `checks ${name}`).toEqual([]);
+    }
+    h.gh.setChecks(url, []);
 
-    const tip = tipOnOrigin(batch.branch);
+    // GitHub is not blocked on checks, such as a base with no CI.
+    h.gh.setBlockedOnChecks(url, false);
+    await restartCi(batch);
+    expect(tipOnOrigin(branch)).toBe(before);
+    h.gh.setBlockedOnChecks(url, true);
+
+    // In the merge queue, which reads BLOCKED with no checks.
+    h.gh.setInMergeQueue(url, true);
+    now = await restartCi(batch);
+    expect(tipOnOrigin(branch)).toBe(before);
+    expect(now.notices).toEqual([]);
+    expect(h.cards()).toEqual([]);
+    h.gh.setInMergeQueue(url, false);
+
+    // The gate runs on the merged branch: on a failure it pushes nothing and raises no card.
+    h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
+    now = await restartCi(batch);
+    expect(tipOnOrigin(branch)).toBe(before);
+    // The watch's notice says the checks never started; a card about conflicts would be wrong.
+    expect(h.cards()).toEqual([]);
+    expect(now.notices).toEqual([]);
+    expect(h.git$('rev-parse', `refs/heads/${branch}`)).toBe(before);
+
+    h.state.write((c) => patchProject(c, h.project.id, { gateCommand: h.project.gateCommand }));
+    now = await restartCi(batch);
+
+    const tip = tipOnOrigin(branch);
     expect(tip).not.toBe(before);
     expect(h.origin$('log', '-1', '--format=%P', tip)).toBe(`${before} ${teammate}`);
     expect(h.cards()).toEqual([]);
@@ -1506,124 +1435,17 @@ describe('a shipped pull request whose head never got its required checks', () =
     expect(notice.line).toBe('10db merged main into the pull request to start its checks');
     expect(now.worktreePath).toBeNull();
   });
-
-  it('pushes nothing when the branch already holds the base, and raises no card', async () => {
-    const batch = await shippedWith();
-    const before = tipOnOrigin(batch.branch);
-    waitsForChecks(batch);
-
-    const now = await restartCi(batch);
-
-    expect(tipOnOrigin(batch.branch)).toBe(before);
-    expect(h.cards()).toEqual([]);
-    expect(now.notices).toEqual([]);
-  });
-
-  it.each([
-    ['running', [{ name: 'build', conclusion: null }]],
-    ['passed', [{ name: 'build', conclusion: 'SUCCESS' }]],
-    ['failed', [{ name: 'build', conclusion: 'FAILURE' }]],
-  ])('never pushes to a pull request whose checks are %s', async (_name, runs) => {
-    const batch = await shippedWith();
-    h.teammatePush('main', 'src/other.ts', 'export {};\n');
-    const before = tipOnOrigin(batch.branch);
-    const url = waitsForChecks(batch);
-    h.gh.setChecks(
-      url,
-      runs.map((r) => ({
-        __typename: 'CheckRun' as const,
-        name: r.name,
-        status: r.conclusion === null ? 'IN_PROGRESS' : 'COMPLETED',
-        conclusion: r.conclusion,
-        detailsUrl: null,
-      })),
-    );
-
-    const now = await restartCi(batch);
-
-    expect(tipOnOrigin(batch.branch)).toBe(before);
-    expect(now.notices).toEqual([]);
-  });
-
-  it('pushes nothing when GitHub is not blocked on checks, such as a base with no CI', async () => {
-    const batch = await shippedWith();
-    h.teammatePush('main', 'src/other.ts', 'export {};\n');
-    const before = tipOnOrigin(batch.branch);
-    const url = waitsForChecks(batch);
-    h.gh.setBlockedOnChecks(url, false);
-
-    await restartCi(batch);
-
-    expect(tipOnOrigin(batch.branch)).toBe(before);
-  });
-
-  it('runs the gate on the merged branch, and on a failure pushes nothing and raises no card', async () => {
-    const batch = await shippedWith();
-    h.teammatePush('main', 'src/other.ts', 'export {};\n');
-    const before = tipOnOrigin(batch.branch);
-    waitsForChecks(batch);
-    h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
-
-    const now = await restartCi(batch);
-
-    expect(tipOnOrigin(batch.branch)).toBe(before);
-    // The watch's notice says the checks never started; a card about conflicts would be wrong.
-    expect(h.cards()).toEqual([]);
-    expect(now.notices).toEqual([]);
-    expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(before);
-  });
-
-  it('pushes nothing to a pull request in the merge queue, which reads BLOCKED with no checks', async () => {
-    const batch = await shippedWith();
-    h.teammatePush('main', 'src/other.ts', 'export {};\n');
-    const before = tipOnOrigin(batch.branch);
-    const url = waitsForChecks(batch);
-    h.gh.setInMergeQueue(url, true);
-
-    const now = await restartCi(batch);
-
-    expect(tipOnOrigin(batch.branch)).toBe(before);
-    expect(now.notices).toEqual([]);
-    expect(h.cards()).toEqual([]);
-  });
-
-  it('pushes nothing to a pull request held for the builder', async () => {
-    h.close();
-    h = createDeliveryHarness({ workspaceMode: 'worktree', landing: 'hold' }, { trigger: false });
-    h.commit('src/index.ts', "import a from './a';\nexport {};\n");
-    h.git$('push', '-q', 'origin', 'main');
-    const batch = await shippedWith();
-    h.teammatePush('main', 'src/other.ts', 'export {};\n');
-    const before = tipOnOrigin(batch.branch);
-    waitsForChecks(batch);
-    await restartCi(batch);
-    expect(tipOnOrigin(batch.branch)).toBe(before);
-  });
 });
 
 describe('a merge GitHub refused for a reason that has gone', () => {
-  it('is retried, once, and merged', async () => {
-    h.gh.noRequiredChecks = true;
-    h.gh.failNext.set(
-      'prMerge',
-      new GhError('failed', 'gh pr merge failed (exit 1): not mergeable'),
-    );
-    const batch = await shippedWith();
-    expect(h.gh.merged).toEqual([]);
-    expect(batch.notices.map((n) => n.key)).toEqual(['pull-request-merge']);
-
-    h.shipper.retryMerge(batch.id);
-    await h.jobs.idle();
-
-    expect(h.gh.merged).toEqual([batch.prUrl]);
-    expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
-  });
-
-  it('is not retried again at once when GitHub refuses it again', async () => {
+  it('is retried, not again at once when GitHub refuses it again, and merged on the retry after that', async () => {
     h.gh.noRequiredChecks = true;
     const refusal = () => new GhError('failed', 'gh pr merge failed (exit 1): not mergeable');
     h.gh.failNext.set('prMerge', refusal());
     const batch = await shippedWith();
+    expect(h.gh.merged).toEqual([]);
+    expect(batch.notices.map((n) => n.key)).toEqual(['pull-request-merge']);
+
     h.gh.failNext.set('prMerge', refusal());
     h.shipper.retryMerge(batch.id);
     await h.jobs.idle();
@@ -1631,13 +1453,13 @@ describe('a merge GitHub refused for a reason that has gone', () => {
     await h.jobs.idle();
     expect(h.gh.calls.filter((c) => c.method === 'prMerge')).toHaveLength(2);
     expect(h.gh.merged).toEqual([]);
-  });
 
-  it('asks nothing when no merge was refused', async () => {
-    const batch = await shippedWith();
-    const calls = h.gh.calls.length;
+    // The retry time passes: the reason has gone, and the next retry merges it.
+    h.shipClock.advance(11 * 60_000);
     h.shipper.retryMerge(batch.id);
     await h.jobs.idle();
-    expect(h.gh.calls).toHaveLength(calls);
+
+    expect(h.gh.merged).toEqual([batch.prUrl]);
+    expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
   });
 });

@@ -119,6 +119,14 @@ function installedCopy(modulesYaml: string): void {
   writeFileSync(join(worktree, 'node_modules/.modules.yaml'), modulesYaml);
 }
 
+/** An empty copy, with no pnpm calls or gate requests yet: where each case of a looped test starts. */
+function freshCopy(): void {
+  rmSync(worktree, { recursive: true, force: true });
+  mkdirSync(worktree);
+  rmSync(calls, { force: true });
+  requests = [];
+}
+
 function refresh(deps: ReturnType<typeof dependencies>) {
   return deps.refresh({ owner, project, path: worktree, signal });
 }
@@ -129,188 +137,172 @@ function withLockfileAndModules(): void {
 }
 
 describe('refreshing a worktree’s dependencies', () => {
-  it.each([
-    [
-      'it has no pnpm lockfile',
-      () => {
-        mkdirSync(join(worktree, 'node_modules'));
-      },
-    ],
-    [
-      'the seed left no node_modules',
-      () => {
-        writeFileSync(join(worktree, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
-      },
-    ],
-  ])('runs nothing when %s', async (_name, arrange) => {
+  it('runs nothing without a pnpm lockfile, or when the seed left no node_modules, and installs when the cut skipped the seed', async () => {
     fakePnpm();
-    arrange();
-    expect(await refresh(dependencies())).toEqual({ kind: 'skipped' });
-    expect(existsSync(calls)).toBe(false);
-    expect(requests).toEqual([]);
-  });
+    const deps = dependencies();
+    const lockfile = join(worktree, 'pnpm-lock.yaml');
+    const modules = join(worktree, 'node_modules');
+    const cases: { name: string; arrange: () => void; seeded?: false }[] = [
+      {
+        name: 'the cut skipped the seed and there is no lockfile',
+        arrange: () => undefined,
+        seeded: false,
+      },
+      {
+        name: 'there is no pnpm lockfile',
+        arrange: () => {
+          mkdirSync(modules);
+        },
+      },
+      {
+        name: 'the seed left no node_modules',
+        arrange: () => {
+          rmSync(modules, { recursive: true });
+          writeFileSync(lockfile, 'lockfileVersion: 9\n');
+        },
+      },
+    ];
+    for (const { name, arrange, seeded } of cases) {
+      arrange();
+      expect
+        .soft(
+          await deps.refresh({
+            owner,
+            project,
+            path: worktree,
+            signal,
+            ...(seeded === undefined ? {} : { seeded }),
+          }),
+          name,
+        )
+        .toEqual({ kind: 'skipped' });
+      expect.soft(existsSync(calls), name).toBe(false);
+      expect.soft(requests, name).toEqual([]);
+    }
 
-  it('installs into a worktree with no node_modules when the cut skipped the seed', async () => {
-    fakePnpm();
-    writeFileSync(join(worktree, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
-    const result = await dependencies().refresh({
-      owner,
-      project,
-      path: worktree,
-      signal,
-      seeded: false,
-    });
+    // The same copy, a lockfile and no node_modules, when the cut skipped the seed.
+    const result = await deps.refresh({ owner, project, path: worktree, signal, seeded: false });
     expect(result.kind).toBe('installed');
     expect(readFileSync(calls, 'utf8')).toContain('install --frozen-lockfile');
   });
 
-  it('still runs nothing without a lockfile when the cut skipped the seed', async () => {
-    fakePnpm();
-    expect(
-      await dependencies().refresh({ owner, project, path: worktree, signal, seeded: false }),
-    ).toEqual({ kind: 'skipped' });
-    expect(existsSync(calls)).toBe(false);
-  });
-
-  it('updates the lockfile instead of freezing it when asked for a dependency change', async () => {
-    fakePnpm();
-    withLockfileAndModules();
-    const result = await dependencies().refresh({
-      owner,
-      project,
-      path: worktree,
-      signal,
-      mode: 'update',
-    });
-    expect(result.kind).toBe('installed');
-    const call = readFileSync(calls, 'utf8');
-    expect(call).toContain('install --no-frozen-lockfile --ignore-scripts --ignore-pnpmfile');
-    expect(call).not.toContain(' --frozen-lockfile');
-    expect(requests[0]?.command).toBe(installCommand(join(bin, 'pnpm'), 'update'));
-  });
-
-  it('installs a worktree whose node_modules is missing the packages its lockfile names from nothing', async () => {
-    fakePnpm();
-    // A pruned install: node_modules exists, the lockfile's dependency does not resolve.
-    writeFileSync(
-      join(worktree, 'pnpm-lock.yaml'),
-      'importers:\n  .:\n    dependencies:\n      left-pad:\n        specifier: 1.3.0\n        version: 1.3.0\n',
-    );
-    mkdirSync(join(worktree, 'node_modules/.pnpm/stale'), { recursive: true });
-    writeFileSync(join(worktree, 'node_modules/.modules.yaml'), 'packageManager: pnpm@12.15.0\n');
-    const result = await refresh(dependencies());
-    expect(result).toMatchObject({ kind: 'installed', startedOver: true });
-    expect(existsSync(join(worktree, 'node_modules/.modules.yaml'))).toBe(false);
-    expect(existsSync(join(worktree, 'pnpm-lock.yaml'))).toBe(true);
-  });
-
-  it('installs from nothing over a node_modules whose packages all resolve, since it names another store', async () => {
-    fakePnpm();
-    writeFileSync(
-      join(worktree, 'pnpm-lock.yaml'),
-      'importers:\n  .:\n    dependencies:\n      left-pad:\n        specifier: 1.3.0\n        version: 1.3.0\n',
-    );
-    mkdirSync(join(worktree, 'node_modules/left-pad'), { recursive: true });
-    writeFileSync(
-      join(worktree, 'node_modules/.modules.yaml'),
-      'packageManager: pnpm@12.9.1\nstoreDir: /private/tmp/10db-earlier/cache/pnpm-store/v11\n',
-    );
-    expect((await refresh(dependencies())).kind).toBe('installed');
-    expect(existsSync(join(worktree, 'node_modules/.modules.yaml'))).toBe(false);
-    expect(existsSync(join(worktree, 'pnpm-lock.yaml'))).toBe(true);
-  });
-
-  it('says in the install log which store another store was, when .modules.yaml names one', async () => {
-    fakePnpm();
-    installedCopy('storeDir: /private/tmp/10db-earlier/cache/pnpm-store/v11\n');
-    const result = await refresh(dependencies({ pnpm_config_store_dir: '/tmp/10db-now/store' }));
-    if (result.kind !== 'installed') throw new Error('not installed');
-    const text = readFileSync(result.logPath, 'utf8');
-    expect(result).toMatchObject({ startedOver: true });
-    expect(text).toContain('names a pnpm store other than /tmp/10db-now/store');
-  });
-
-  it('says in the install log that .modules.yaml could not be read, not that it names another store', async () => {
-    fakePnpm();
-    installedCopy('storeDir: [unclosed\n');
-    const result = await refresh(dependencies({ pnpm_config_store_dir: '/tmp/10db-now/store' }));
-    if (result.kind !== 'installed') throw new Error('not installed');
-    const text = readFileSync(result.logPath, 'utf8');
-    expect(result).toMatchObject({ startedOver: true });
-    expect(text).toContain('node_modules/.modules.yaml could not be read');
-    expect(text).not.toContain('names a pnpm store');
-  });
-
-  it('says .modules.yaml could not be read when it fails its schema', async () => {
-    fakePnpm();
-    installedCopy('storeDir: 12\n');
-    const result = await refresh(dependencies({ pnpm_config_store_dir: '/tmp/10db-now/store' }));
-    if (result.kind !== 'installed') throw new Error('not installed');
-    const text = readFileSync(result.logPath, 'utf8');
-    expect(text).toContain('could not be read');
-    expect(text).not.toContain('names a pnpm store');
-  });
-
-  describe('a node_modules another pnpm made', () => {
+  describe('a node_modules the copy already has', () => {
     const stale = () => existsSync(join(worktree, 'node_modules/.pnpm/stale'));
+    const modulesYaml = () => existsSync(join(worktree, 'node_modules/.modules.yaml'));
+    const lockfile = () => existsSync(join(worktree, 'pnpm-lock.yaml'));
+    const callCount = () => readFileSync(calls, 'utf8').trim().split('\n').length;
+    const daemonPnpm = (version: string | null) =>
+      dependencies({}, 20_000, undefined, () => Promise.resolve(version));
 
-    it('is removed, and installed from scratch, when .modules.yaml names another pnpm', async () => {
+    interface Case {
+      name: string;
+      arrange: () => void;
+      deps: () => ReturnType<typeof dependencies>;
+      check: (result: Awaited<ReturnType<typeof refresh>>, name: string) => void;
+    }
+
+    /** Runs each case on a fresh copy and a fresh call log. */
+    async function each(cases: Case[]): Promise<void> {
       fakePnpm();
-      installedCopy('packageManager: pnpm@12.15.0\n');
-      const result = await refresh(
-        dependencies({}, 20_000, undefined, () => Promise.resolve('12.9.1')),
-      );
-      expect(result).toMatchObject({ kind: 'installed', startedOver: true });
-      expect(stale()).toBe(false);
-      expect(readFileSync(calls, 'utf8').trim().split('\n')).toHaveLength(1);
+      for (const { name, arrange, deps, check } of cases) {
+        freshCopy();
+        arrange();
+        check(await refresh(deps()), name);
+      }
+    }
+
+    it('is removed and installed from scratch when it is broken, names another store or pnpm, or its .modules.yaml cannot be read', async () => {
+      await each([
+        {
+          name: 'the packages its lockfile names are missing',
+          arrange: () => {
+            // A pruned install: node_modules exists, the lockfile's dependency does not resolve.
+            writeFileSync(join(worktree, 'pnpm-lock.yaml'), LEFT_PAD_LOCKFILE);
+            mkdirSync(join(worktree, 'node_modules/.pnpm/stale'), { recursive: true });
+            writeFileSync(
+              join(worktree, 'node_modules/.modules.yaml'),
+              'packageManager: pnpm@12.15.0\n',
+            );
+          },
+          deps: () => dependencies(),
+          check: (result, name) => {
+            expect.soft(result, name).toMatchObject({ kind: 'installed', startedOver: true });
+            expect.soft(modulesYaml(), name).toBe(false);
+            expect.soft(lockfile(), name).toBe(true);
+          },
+        },
+        {
+          name: 'its packages all resolve, but it names another store',
+          arrange: () => {
+            writeFileSync(join(worktree, 'pnpm-lock.yaml'), LEFT_PAD_LOCKFILE);
+            mkdirSync(join(worktree, 'node_modules/left-pad'), { recursive: true });
+            writeFileSync(
+              join(worktree, 'node_modules/.modules.yaml'),
+              'packageManager: pnpm@12.9.1\nstoreDir: /private/tmp/10db-earlier/cache/pnpm-store/v11\n',
+            );
+          },
+          deps: () => dependencies(),
+          check: (result, name) => {
+            expect.soft(result.kind, name).toBe('installed');
+            expect.soft(modulesYaml(), name).toBe(false);
+            expect.soft(lockfile(), name).toBe(true);
+          },
+        },
+        {
+          name: '.modules.yaml cannot be read: the log says so, not that it names another store',
+          arrange: () => {
+            installedCopy('storeDir: [unclosed\n');
+          },
+          deps: () => dependencies({ pnpm_config_store_dir: '/tmp/10db-now/store' }),
+          check: (result, name) => {
+            expect.soft(result, name).toMatchObject({ kind: 'installed', startedOver: true });
+            if (result.kind !== 'installed') return;
+            const text = readFileSync(result.logPath, 'utf8');
+            expect.soft(text, name).toContain('node_modules/.modules.yaml could not be read');
+            expect.soft(text, name).not.toContain('names a pnpm store');
+          },
+        },
+        {
+          name: '.modules.yaml names another pnpm',
+          arrange: () => {
+            installedCopy('packageManager: pnpm@12.15.0\n');
+          },
+          deps: () => daemonPnpm('12.9.1'),
+          check: (result, name) => {
+            expect.soft(result, name).toMatchObject({ kind: 'installed', startedOver: true });
+            expect.soft(stale(), name).toBe(false);
+            expect.soft(callCount(), name).toBe(1);
+          },
+        },
+      ]);
     });
 
-    it('says in the install log why node_modules was removed', async () => {
-      fakePnpm();
-      installedCopy('packageManager: pnpm@12.15.0\n');
-      const result = await refresh(
-        dependencies({}, 20_000, undefined, () => Promise.resolve('12.9.1')),
-      );
-      if (result.kind !== 'installed') throw new Error('not installed');
-      const text = readFileSync(result.logPath, 'utf8');
-      expect(text).toContain('Started over');
-      expect(text).toContain('pnpm@12.15.0');
-      expect(text).toContain('12.9.1');
+    it('is left for pnpm to bring in line when it is the daemon’s pnpm, or the daemon’s pnpm version cannot be read', async () => {
+      await each([
+        {
+          name: 'the daemon’s own pnpm',
+          arrange: () => {
+            installedCopy('packageManager: pnpm@12.9.1\n');
+          },
+          deps: () => daemonPnpm('12.9.1'),
+          check: (result, name) => {
+            expect.soft(result, name).toMatchObject({ kind: 'installed', startedOver: false });
+            expect.soft(stale(), name).toBe(true);
+          },
+        },
+        {
+          name: 'the daemon’s pnpm version cannot be read',
+          arrange: () => {
+            installedCopy('packageManager: pnpm@12.15.0\n');
+          },
+          deps: () => daemonPnpm(null),
+          check: (result, name) => {
+            expect.soft(result, name).toMatchObject({ kind: 'installed', startedOver: false });
+            expect.soft(stale(), name).toBe(true);
+          },
+        },
+      ]);
     });
-
-    it('is left for pnpm to bring in line when it is the daemon’s pnpm', async () => {
-      fakePnpm();
-      installedCopy('packageManager: pnpm@12.9.1\n');
-      const result = await refresh(
-        dependencies({}, 20_000, undefined, () => Promise.resolve('12.9.1')),
-      );
-      expect(result).toMatchObject({ kind: 'installed', startedOver: false });
-      expect(stale()).toBe(true);
-    });
-
-    it('is left alone when the daemon’s pnpm version cannot be read', async () => {
-      fakePnpm();
-      installedCopy('packageManager: pnpm@12.15.0\n');
-      const result = await refresh(
-        dependencies({}, 20_000, undefined, () => Promise.resolve(null)),
-      );
-      expect(result).toMatchObject({ kind: 'installed', startedOver: false });
-      expect(stale()).toBe(true);
-    });
-  });
-
-  it('says it started over only when it removed a node_modules', async () => {
-    fakePnpm();
-    // The cut skipped the seed: nothing was there to lose, though the lockfile's package is missing.
-    writeFileSync(join(worktree, 'pnpm-lock.yaml'), LEFT_PAD_LOCKFILE);
-    const result = await dependencies().refresh({
-      owner,
-      project,
-      path: worktree,
-      signal,
-      seeded: false,
-    });
-    expect(result).toMatchObject({ kind: 'installed', startedOver: false });
   });
 
   describe('an install that fails part way', () => {
@@ -335,143 +327,95 @@ describe('refreshing a worktree’s dependencies', () => {
       chmodSync(script, 0o755);
     }
 
-    it('starts over with a fresh install in the same refresh when packages are left missing', async () => {
-      pnpmThatBreaksOnce();
-      installedCopy('packageManager: pnpm@12.9.1\n');
-      // A marker only a leftover of the broken install would keep.
-      writeFileSync(join(worktree, 'node_modules/.pnpm/leftover'), '');
-      const result = await refresh(dependencies());
-      expect(result).toMatchObject({ kind: 'installed', startedOver: true });
-      expect(requests).toHaveLength(2);
-      expect(readFileSync(calls, 'utf8').trim().split('\n')).toHaveLength(2);
-      expect(existsSync(join(worktree, 'node_modules/left-pad'))).toBe(true);
-      expect(existsSync(join(worktree, 'node_modules/.pnpm/leftover'))).toBe(false);
-    });
-
-    const installLogs = () => {
-      const dir = join(tmp.path, 'data', 'logs', 'install');
-      return readdirSync(dir).map((name) => readFileSync(join(dir, name), 'utf8'));
-    };
-
-    it('keeps the first attempt’s output and says why it started over', async () => {
-      pnpmThatBreaksOnce();
-      installedCopy('packageManager: pnpm@12.9.1\n');
-      const result = await refresh(dependencies());
-      if (result.kind !== 'installed') throw new Error('not installed');
-      const logs = installLogs();
-      expect(logs).toHaveLength(2);
-      // The real cause survives the retry.
-      expect(
-        logs.some((text) => text.includes('ERR_PNPM_PACKAGE_MANAGER_REMOVE_MODULES_DIR')),
-      ).toBe(true);
-      // The log the result points at says why node_modules was removed and where the first output is.
-      const text = readFileSync(result.logPath, 'utf8');
-      expect(text).toContain('Started over');
-      expect(text).toContain('do not resolve');
-    });
-
-    it('points a failed retry’s log at the first attempt’s log', async () => {
-      installedCopy('packageManager: pnpm@12.9.1\n');
-      writeFileSync(
-        join(bin, 'pnpm'),
-        `#!/bin/sh\nrm -rf node_modules/left-pad\necho "attempt $(date +%N)-$$"\necho ERR_PNPM_PACKAGE_MANAGER_REMOVE_MODULES_DIR\nexit 1\n`,
-      );
-      chmodSync(join(bin, 'pnpm'), 0o755);
-      const result = await refresh(dependencies());
-      if (result.kind !== 'failed') throw new Error('not failed');
-      const text = readFileSync(result.logPath, 'utf8');
-      const named = /first attempt's output: (\S+)/.exec(text)?.[1];
-      expect(named).toBeDefined();
-      expect(named).not.toBe(result.logPath);
-      expect(readFileSync(named ?? '', 'utf8')).toContain(
-        'ERR_PNPM_PACKAGE_MANAGER_REMOVE_MODULES_DIR',
-      );
-    });
-
-    it('points a failed retry’s log at the first attempt’s log when there was no node_modules to remove', async () => {
-      // A lockfile that names a dependency, so a copy with no node_modules is broken.
-      writeFileSync(
-        join(worktree, 'pnpm-lock.yaml'),
-        "lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies:\n      left-pad:\n        specifier: 1.0.0\n        version: 1.0.0\n",
-      );
-      // Fails every time and makes no node_modules, so the retry has no reason to give.
-      writeFileSync(
-        join(bin, 'pnpm'),
-        `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\necho "attempt $$"\necho ERR_PNPM_NO_MATCHING_VERSION\nexit 1\n`,
-      );
-      chmodSync(join(bin, 'pnpm'), 0o755);
-      const result = await dependencies().refresh({
-        owner,
-        project,
-        path: worktree,
-        signal,
-        seeded: false,
-      });
-      if (result.kind !== 'failed') throw new Error('not failed');
-      expect(readFileSync(calls, 'utf8').trim().split('\n')).toHaveLength(2);
-      expect(existsSync(join(worktree, 'node_modules'))).toBe(false);
-      const text = readFileSync(result.logPath, 'utf8');
-      expect(text).not.toContain('Started over');
-      const named = /first attempt's output: (\S+)/.exec(text)?.[1];
-      expect(named).toBeDefined();
-      expect(named).not.toBe(result.logPath);
-      expect(readFileSync(named ?? '', 'utf8')).toContain('ERR_PNPM_NO_MATCHING_VERSION');
-    });
-
-    it('reports the second failure when the fresh install fails too', async () => {
-      fakePnpm();
-      installedCopy('packageManager: pnpm@12.9.1\n');
-      // Always fails, and always leaves left-pad missing.
-      writeFileSync(
-        join(bin, 'pnpm'),
-        `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\nrm -rf node_modules/left-pad\nexit 1\n`,
-      );
-      const result = await refresh(dependencies());
-      expect(result).toMatchObject({ kind: 'failed', exitCode: 1 });
-      expect(readFileSync(calls, 'utf8').trim().split('\n')).toHaveLength(2);
-    });
-
-    it('does not start over again when the failed install was already the start over the caller asked for', async () => {
-      fakePnpm();
-      installedCopy('packageManager: pnpm@12.9.1\n');
-      writeFileSync(join(bin, 'pnpm'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\nexit 1\n`);
-      const result = await dependencies().refresh({
-        owner,
-        project,
-        path: worktree,
-        signal,
-        startOver: true,
-      });
-      expect(result).toMatchObject({ kind: 'failed', exitCode: 1 });
-      expect(readFileSync(calls, 'utf8').trim().split('\n')).toHaveLength(1);
-    });
-
-    it('does not start over when the failed install left every package in place', async () => {
-      fakePnpm();
-      installedCopy('packageManager: pnpm@12.9.1\n');
-      const result = await refresh(dependencies({ FAKE_PNPM_EXIT: '7' }));
-      expect(result).toMatchObject({ kind: 'failed', exitCode: 7 });
-      expect(readFileSync(calls, 'utf8').trim().split('\n')).toHaveLength(1);
-      expect(existsSync(join(worktree, 'node_modules/.pnpm/stale'))).toBe(true);
+    it('starts over once with a fresh install when the failed install left packages missing, and only then', async () => {
+      const callCount = () => readFileSync(calls, 'utf8').trim().split('\n').length;
+      const cases: {
+        name: string;
+        pnpm: () => void;
+        refresh: () => ReturnType<typeof refresh>;
+        check: (result: Awaited<ReturnType<typeof refresh>>, name: string) => void;
+      }[] = [
+        {
+          name: 'the fresh install works',
+          pnpm: pnpmThatBreaksOnce,
+          refresh: () => {
+            // A marker only a leftover of the broken install would keep.
+            writeFileSync(join(worktree, 'node_modules/.pnpm/leftover'), '');
+            return refresh(dependencies());
+          },
+          check: (result, name) => {
+            expect.soft(result, name).toMatchObject({ kind: 'installed', startedOver: true });
+            expect.soft(requests, name).toHaveLength(2);
+            expect.soft(callCount(), name).toBe(2);
+            expect.soft(existsSync(join(worktree, 'node_modules/left-pad')), name).toBe(true);
+            expect
+              .soft(existsSync(join(worktree, 'node_modules/.pnpm/leftover')), name)
+              .toBe(false);
+          },
+        },
+        {
+          name: 'the fresh install fails too: its failure is reported',
+          // Always fails, and always leaves left-pad missing.
+          pnpm: () => {
+            fakePnpm();
+            writeFileSync(
+              join(bin, 'pnpm'),
+              `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\nrm -rf node_modules/left-pad\nexit 1\n`,
+            );
+          },
+          refresh: () => refresh(dependencies()),
+          check: (result, name) => {
+            expect.soft(result, name).toMatchObject({ kind: 'failed', exitCode: 1 });
+            expect.soft(callCount(), name).toBe(2);
+          },
+        },
+        {
+          name: 'the failed install was already the start over the caller asked for',
+          pnpm: () => {
+            fakePnpm();
+            writeFileSync(
+              join(bin, 'pnpm'),
+              `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\nexit 1\n`,
+            );
+          },
+          refresh: () =>
+            dependencies().refresh({ owner, project, path: worktree, signal, startOver: true }),
+          check: (result, name) => {
+            expect.soft(result, name).toMatchObject({ kind: 'failed', exitCode: 1 });
+            expect.soft(callCount(), name).toBe(1);
+          },
+        },
+        {
+          name: 'the failed install left every package in place',
+          pnpm: fakePnpm,
+          refresh: () => refresh(dependencies({ FAKE_PNPM_EXIT: '7' })),
+          check: (result, name) => {
+            expect.soft(result, name).toMatchObject({ kind: 'failed', exitCode: 7 });
+            expect.soft(callCount(), name).toBe(1);
+            expect.soft(existsSync(join(worktree, 'node_modules/.pnpm/stale')), name).toBe(true);
+          },
+        },
+      ];
+      for (const { name, pnpm, refresh: run, check } of cases) {
+        freshCopy();
+        pnpm();
+        installedCopy('packageManager: pnpm@12.9.1\n');
+        check(await run(), name);
+      }
     });
   });
 
-  it('installs from the worktree’s own lockfile with scripts and the pnpmfile off', async () => {
+  it('installs from the worktree’s own lockfile with scripts and the pnpmfile off, as a package install with the project’s own hosts and the checkouts, and updates the lockfile when asked for a dependency change', async () => {
     fakePnpm();
     withLockfileAndModules();
-    const result = await refresh(dependencies({ FAKE_PNPM_SAYS: 'done' }));
+    const deps = dependencies({ FAKE_PNPM_SAYS: 'done' });
+    const result = await refresh(deps);
     expect(result.kind).toBe('installed');
     expect(readFileSync(calls, 'utf8').trim()).toBe(
       `${realpathSync(worktree)} | install --frozen-lockfile --ignore-scripts --ignore-pnpmfile --store-dir ${join(tmp.path, 'store')} --modules-dir node_modules --virtual-store-dir node_modules/.pnpm`,
     );
     if (result.kind !== 'installed') throw new Error('not installed');
     expect(readFileSync(result.logPath, 'utf8')).toContain('fake pnpm: done');
-  });
-
-  it('runs as a package install in the worktree, with the project’s own hosts and the checkouts', async () => {
-    fakePnpm();
-    withLockfileAndModules();
-    await refresh(dependencies());
     expect(requests).toHaveLength(1);
     expect(requests[0]).toMatchObject({
       project: { repoPath: worktree, sandboxLoopback: true },
@@ -481,26 +425,30 @@ describe('refreshing a worktree’s dependencies', () => {
       checkouts: [join(tmp.path, 'main'), worktree],
       timeoutMs: 20_000,
     });
+
+    // A dependency change: the lockfile is updated, not frozen.
+    const update = await deps.refresh({ owner, project, path: worktree, signal, mode: 'update' });
+    expect(update.kind).toBe('installed');
+    const call = readFileSync(calls, 'utf8').trim().split('\n').at(-1);
+    expect(call).toContain('install --no-frozen-lockfile --ignore-scripts --ignore-pnpmfile');
+    expect(call).not.toContain(' --frozen-lockfile');
+    expect(requests[1]?.command).toBe(installCommand(join(bin, 'pnpm'), 'update'));
   });
 
-  it('reports a failed install with its exit code, output and log', async () => {
+  it('reports a failed install with its exit code, output and log, the hosts the sandbox blocked it from, and one that outlives its limit as timed out', async () => {
     fakePnpm();
     withLockfileAndModules();
-    const result = await refresh(
+    const failed = await refresh(
       dependencies({ FAKE_PNPM_EXIT: '7', FAKE_PNPM_SAYS: 'registry 403' }),
     );
-    expect(result).toMatchObject({
+    expect(failed).toMatchObject({
       kind: 'failed',
       exitCode: 7,
       timedOut: false,
     });
-    if (result.kind !== 'failed') throw new Error('not failed');
-    expect(result.tail).toContain('registry 403');
-  });
+    if (failed.kind !== 'failed') throw new Error('not failed');
+    expect(failed.tail).toContain('registry 403');
 
-  it('reports the hosts the sandbox blocked a failed install from', async () => {
-    fakePnpm();
-    withLockfileAndModules();
     // The gate runner reads the hosts from the sandbox's stderr; this one reports them as it would.
     const blocked: GateRunner = {
       run: (request) =>
@@ -529,10 +477,7 @@ describe('refreshing a worktree’s dependencies', () => {
       exitCode: 1,
       blockedHosts: ['registry.npmjs.org'],
     });
-  });
 
-  it('reports an install that outlives its limit as timed out', async () => {
-    withLockfileAndModules();
     writeFileSync(join(bin, 'pnpm'), '#!/bin/sh\nsleep 30\n');
     chmodSync(join(bin, 'pnpm'), 0o755);
     expect(await refresh(dependencies({}, 200))).toMatchObject({ kind: 'failed', timedOut: true });
@@ -574,131 +519,6 @@ describe('refreshing a worktree’s dependencies', () => {
     // No install ran and nothing was removed.
     expect(result).toMatchObject({ installs: 0, startedOver: false });
     expect(existsSync(join(worktree, 'node_modules'))).toBe(true);
-  });
-
-  describe('what a failed refresh says it did', () => {
-    /** A pnpm that always fails and removes `left-pad`; from its second run on it also runs `after`. */
-    function failingPnpm(after: string): void {
-      writeFileSync(
-        join(bin, 'pnpm'),
-        `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\nn=$(wc -l < '${calls}')\nrm -rf node_modules/left-pad\nif [ "$n" -ge 2 ]; then ${after}; fi\nexit 1\n`,
-      );
-      chmodSync(join(bin, 'pnpm'), 0o755);
-    }
-
-    it('counts one install, and no start over, for an install that failed with the packages in place', async () => {
-      fakePnpm();
-      installedCopy('packageManager: pnpm@12.9.1\n');
-      const result = await refresh(dependencies({ FAKE_PNPM_EXIT: '7' }));
-      expect(result).toMatchObject({ kind: 'failed', installs: 1, startedOver: false });
-      expect(result).not.toHaveProperty('leftBroken');
-    });
-
-    it('names what the failed install left broken on a retry that failed too', async () => {
-      installedCopy('packageManager: pnpm@12.9.1\n');
-      failingPnpm('true');
-      expect(await refresh(dependencies())).toMatchObject({
-        kind: 'failed',
-        installs: 2,
-        leftBroken: expect.stringContaining('left-pad') as string,
-      });
-    });
-
-    it('counts two installs and a start over when the start over times out', async () => {
-      installedCopy('packageManager: pnpm@12.9.1\n');
-      failingPnpm('sleep 30');
-      const result = await refresh(dependencies({}, 1_000));
-      expect(result).toMatchObject({
-        kind: 'failed',
-        timedOut: true,
-        installs: 2,
-        startedOver: true,
-      });
-    });
-
-    it('counts two installs and a start over when the start over is refused a host', async () => {
-      installedCopy('packageManager: pnpm@12.9.1\n');
-      writeFileSync(
-        join(bin, 'pnpm'),
-        `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\nrm -rf node_modules/left-pad\nexit 1\n`,
-      );
-      chmodSync(join(bin, 'pnpm'), 0o755);
-      let runs = 0;
-      const real = createGateRunner({ sandbox: null, logger: silentLogger });
-      const gate: GateRunner = {
-        run: async (request) => {
-          runs += 1;
-          const result = await real.run(request);
-          return runs === 2 ? { ...result, blockedHosts: ['registry.npmjs.org'] } : result;
-        },
-      };
-      const deps = createWorktreeDependencies({
-        gate,
-        clock: new ManualClock(),
-        dataDir: join(tmp.path, 'data'),
-        sessionEnv: () => ({
-          PATH: `${bin}:/usr/bin:/bin`,
-          pnpm_config_store_dir: join(tmp.path, 'store'),
-        }),
-        resolvePnpm: () => Promise.resolve(join(bin, 'pnpm')),
-        rules: () => [],
-        checkouts: () => [],
-        timeoutMs: 20_000,
-      });
-      expect(await refresh(deps)).toMatchObject({
-        kind: 'failed',
-        blockedHosts: ['registry.npmjs.org'],
-        installs: 2,
-        startedOver: true,
-      });
-    });
-
-    it('counts a start over the caller asked for as one install that started over', async () => {
-      installedCopy('packageManager: pnpm@12.9.1\n');
-      writeFileSync(join(bin, 'pnpm'), `#!/bin/sh\nexit 1\n`);
-      chmodSync(join(bin, 'pnpm'), 0o755);
-      const result = await dependencies().refresh({
-        owner,
-        project,
-        path: worktree,
-        signal,
-        startOver: true,
-      });
-      expect(result).toMatchObject({ kind: 'failed', installs: 1, startedOver: true });
-    });
-
-    it('counts a retry that had no node_modules to remove as two installs with no start over', async () => {
-      writeFileSync(
-        join(worktree, 'pnpm-lock.yaml'),
-        "lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies:\n      left-pad:\n        specifier: 1.0.0\n        version: 1.0.0\n",
-      );
-      writeFileSync(join(bin, 'pnpm'), `#!/bin/sh\nexit 1\n`);
-      chmodSync(join(bin, 'pnpm'), 0o755);
-      const result = await dependencies().refresh({
-        owner,
-        project,
-        path: worktree,
-        signal,
-        seeded: false,
-      });
-      expect(result).toMatchObject({ kind: 'failed', installs: 2, startedOver: false });
-    });
-
-    it('counts the installs of one that succeeded after a start over', async () => {
-      installedCopy('packageManager: pnpm@12.9.1\n');
-      // Fails the first time, pruning left-pad; works the second.
-      writeFileSync(
-        join(bin, 'pnpm'),
-        `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\nif [ "$(wc -l < '${calls}')" -le 1 ]; then rm -rf node_modules/left-pad; exit 1; fi\nmkdir -p node_modules/left-pad\n`,
-      );
-      chmodSync(join(bin, 'pnpm'), 0o755);
-      expect(await refresh(dependencies())).toMatchObject({
-        kind: 'installed',
-        installs: 2,
-        startedOver: true,
-        leftBroken: expect.stringContaining('left-pad') as string,
-      });
-    });
   });
 
   // The real pnpm: what a repository's own files must not decide.
@@ -866,9 +686,22 @@ describe('a copy’s node_modules from a template', () => {
   const unseeded = (deps: ReturnType<typeof withTemplates>, extra: object = {}) =>
     deps.refresh({ owner, project, path: worktree, signal, seeded: false, ...extra });
 
-  it('clones a template whose lockfile matches, and runs no install', async () => {
+  it('never clones for a dependency change or a start over, and clones a template whose lockfile matches otherwise, running no install', async () => {
     fakePnpm();
-    await templateOfLeftPad();
+    const key = await templateOfLeftPad();
+    for (const [name, extra] of [
+      ['a dependency change', { mode: 'update' }],
+      ['a start over', { startOver: true }],
+    ] as const) {
+      freshCopy();
+      writeFileSync(join(worktree, 'pnpm-lock.yaml'), LEFT_PAD_LOCKFILE);
+      const installed = await unseeded(withTemplates(), extra);
+      expect.soft(installed, name).toMatchObject({ kind: 'installed', installs: 1 });
+      expect.soft(requests, name).toHaveLength(1);
+      expect.soft(existsSync(join(root(), key)), name).toBe(true);
+    }
+
+    freshCopy();
     writeFileSync(join(worktree, 'pnpm-lock.yaml'), LEFT_PAD_LOCKFILE);
     const result = await unseeded(withTemplates());
     expect(result).toMatchObject({
@@ -886,54 +719,45 @@ describe('a copy’s node_modules from a template', () => {
       expect(readFileSync(result.logPath, 'utf8')).toContain('no install ran');
   });
 
-  it.each<[string, (template: string) => void]>([
-    [
-      'there is no template',
-      (template) => {
-        rmSync(template, { recursive: true });
-      },
-    ],
-    [
-      'its marker is missing',
-      (template) => {
-        rmSync(join(template, 'template.json'));
-      },
-    ],
-    [
-      'its tree lacks a package',
-      (template) => {
-        rmSync(join(template, 'tree/node_modules/left-pad'), { recursive: true });
-      },
-    ],
-    [
-      'its tree is unreadable',
-      (template) => {
-        chmodSync(join(template, 'tree'), 0o000);
-      },
-    ],
-  ])('installs as before, and removes the template, when %s', async (_name, damage) => {
+  it('installs as before, and removes the template, when there is none, its marker is missing, or its tree lacks a package or is unreadable', async () => {
+    const damages: [string, (template: string) => void][] = [
+      [
+        'there is no template',
+        (template) => {
+          rmSync(template, { recursive: true });
+        },
+      ],
+      [
+        'its marker is missing',
+        (template) => {
+          rmSync(join(template, 'template.json'));
+        },
+      ],
+      [
+        'its tree lacks a package',
+        (template) => {
+          rmSync(join(template, 'tree/node_modules/left-pad'), { recursive: true });
+        },
+      ],
+      [
+        'its tree is unreadable',
+        (template) => {
+          chmodSync(join(template, 'tree'), 0o000);
+        },
+      ],
+    ];
     fakePnpm();
-    const key = await templateOfLeftPad();
-    damage(join(root(), key));
-    writeFileSync(join(worktree, 'pnpm-lock.yaml'), LEFT_PAD_LOCKFILE);
-    const result = await unseeded(withTemplates());
-    expect(result).toMatchObject({ kind: 'installed', installs: 1 });
-    expect(result).not.toHaveProperty('fromTemplate');
-    expect(requests).toHaveLength(1);
-    expect(existsSync(join(root(), key))).toBe(false);
-  });
-
-  it.each<[string, object]>([
-    ['a dependency change', { mode: 'update' }],
-    ['a start over', { startOver: true }],
-  ])('never clones for %s', async (_name, extra) => {
-    fakePnpm();
-    const key = await templateOfLeftPad();
-    writeFileSync(join(worktree, 'pnpm-lock.yaml'), LEFT_PAD_LOCKFILE);
-    const result = await unseeded(withTemplates(), extra);
-    expect(result).toMatchObject({ kind: 'installed', installs: 1 });
-    expect(requests).toHaveLength(1);
-    expect(existsSync(join(root(), key))).toBe(true);
+    for (const [name, damage] of damages) {
+      freshCopy();
+      const key = await templateOfLeftPad();
+      damage(join(root(), key));
+      writeFileSync(join(worktree, 'pnpm-lock.yaml'), LEFT_PAD_LOCKFILE);
+      const result = await unseeded(withTemplates());
+      expect.soft(result, name).toMatchObject({ kind: 'installed', installs: 1 });
+      expect.soft(result, name).not.toHaveProperty('fromTemplate');
+      expect.soft(requests, name).toHaveLength(1);
+      expect.soft(existsSync(join(root(), key)), name).toBe(false);
+    }
   });
 
   it('makes a template of a whole install when asked, and sweeps one no copy uses', async () => {

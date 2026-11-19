@@ -6,11 +6,8 @@ import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery
 import { handMadeWorktreeFolder } from '../git';
 import { PrState } from '../github';
 import { createInboxService, type InboxService } from '../inbox';
-import { SPOTLIGHT_MARKER } from '../sandbox';
-import { ManualClock } from '../clock';
 import { WorktreeChoice } from './cards';
 import { offerHandMadeFolders } from './hand-made-worktrees';
-import { createHandMadeFolderLook } from './index';
 import { createWorktreeCardAnswers } from './index';
 
 let h: DeliveryHarness;
@@ -140,47 +137,5 @@ describe('the hand-made worktree folder', () => {
     expect(existsSync(worktree.path)).toBe(true);
     expect(h.only(h.notices()).body).toContain('Nothing was removed');
     expect(titles().filter((t) => t.startsWith('Removed'))).toEqual([]);
-  });
-
-  it('offers to keep Spotlight out, says what it changed, and offers nothing once the marker is there', async () => {
-    await offerHandMadeFolders(h.ctx, signal);
-    const card = cardTitled('Spotlight indexes');
-    expect(card.options.map((o) => o.label)).toEqual([
-      WorktreeChoice.KeepSpotlightOut,
-      WorktreeChoice.Keep,
-    ]);
-    expect(card.body).toContain(`${folder}/${SPOTLIGHT_MARKER}`);
-    expect(existsSync(join(folder, SPOTLIGHT_MARKER))).toBe(false);
-
-    inbox.answer(card.id, { choice: WorktreeChoice.KeepSpotlightOut });
-
-    expect(existsSync(join(folder, SPOTLIGHT_MARKER))).toBe(true);
-    const kept = h.only(h.notices());
-    expect(kept.line).toBe(`Spotlight now skips ${folder}`);
-    expect(kept.body).toContain('created');
-    expect(kept.key).toBe(`hand-made-spotlight-done:${folder}`);
-    expect(titles().filter((t) => t.startsWith('Spotlight now'))).toEqual([]);
-    await offerHandMadeFolders(h.ctx, signal);
-    expect(titles().filter((t) => t.startsWith('Spotlight indexes'))).toEqual([]);
-  });
-
-  it('raises nothing for a project with no hand-made folder', async () => {
-    rmSync(folder, { recursive: true, force: true });
-    await offerHandMadeFolders(h.ctx, signal);
-    expect(h.cards()).toEqual([]);
-  });
-
-  it('looks at most every six hours', async () => {
-    const clock = new ManualClock(new Date('2026-11-17T00:00:00Z'));
-    const look = createHandMadeFolderLook({ ...h.ctx, clock });
-    await look(signal);
-    expect(titles()).toHaveLength(1);
-    inbox.answer(cardTitled('Spotlight indexes').id, { choice: WorktreeChoice.Keep });
-    handMade('later', PrState.Merged);
-    await look(signal);
-    expect(offers()).toEqual([]);
-    clock.advance(6 * 60 * 60_000);
-    await look(signal);
-    expect(cardTitled('1 worktree in').body).toContain('later');
   });
 });

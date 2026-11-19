@@ -48,6 +48,11 @@ const rawGit = (...args: string[]) =>
     .toString()
     .trim();
 const commitCount = () => Number(rawGit('rev-list', '--count', 'HEAD'));
+/** A new repository, for the next row of a folded table. */
+const fresh = () => {
+  repo.cleanup();
+  repo = createTempRepo();
+};
 
 // A lane can't write refs, but a hook an approved commit starts runs where it may have: a replace
 // ref it left would make the daemon's own git read another object for the one it names.
@@ -70,23 +75,9 @@ describe('replace refs', () => {
 });
 
 describe('commit', () => {
-  it('commits only the named paths and leaves other changes alone', async () => {
+  it('commits only the named paths, returns the original commit when the same operation is retried, and takes another operation id for a new commit', async () => {
     write('a.txt', 'a');
     write('b.txt', 'b');
-    const { sha, alreadyCommitted } = await git.commit({
-      repo: repo.path,
-      paths: ['a.txt'],
-      message: 'Add a',
-      opId: 'op-commit-a1',
-      branch: 'main',
-    });
-    expect(sha).toMatch(/^[0-9a-f]{40}$/);
-    expect(alreadyCommitted).toBe(false);
-    expect(await git.changedPaths(repo.path)).toEqual(['b.txt']);
-  });
-
-  it('returns the original commit when the same operation is retried', async () => {
-    write('a.txt', 'a');
     const first = await git.commit({
       repo: repo.path,
       paths: ['a.txt'],
@@ -94,6 +85,10 @@ describe('commit', () => {
       opId: 'op-retry-001',
       branch: 'main',
     });
+    expect(first.sha).toMatch(/^[0-9a-f]{40}$/);
+    expect(first.alreadyCommitted).toBe(false);
+    expect(await git.changedPaths(repo.path)).toEqual(['b.txt']);
+
     write('a.txt', 'changed after the first commit');
     const retry = await git.commit({
       repo: repo.path,
@@ -104,6 +99,16 @@ describe('commit', () => {
     });
     expect(retry).toEqual({ sha: first.sha, alreadyCommitted: true });
     expect(commitCount()).toBe(2);
+
+    const second = await git.commit({
+      repo: repo.path,
+      paths: ['b.txt'],
+      message: 'Add b',
+      opId: 'op-distinct-2',
+      branch: 'main',
+    });
+    expect(second.alreadyCommitted).toBe(false);
+    expect(second.sha).not.toBe(first.sha);
   });
 
   it('finds a commit made before a crash, with nothing recorded about it', async () => {
@@ -133,31 +138,39 @@ describe('commit', () => {
     };
     const tracked = () => rawGit('ls-tree', '-r', '--name-only', 'HEAD').split('\n');
 
-    it.each([
-      ['named by its folder', ['a.txt', nested]],
-      [
-        'named file by file',
-        ['a.txt', `${nested}/.cc-writes/x.tmp`, `${nested}/scheduled_tasks.lock`],
-      ],
-    ])('is never staged, nested in another .claude, %s', async (_name, paths) => {
-      writeNested();
-      const dropped: string[] = [];
-      const logging = createGit({
-        onBookkeepingDropped: (_repo, left) => dropped.push(...left.map((l) => l.rel)),
-      });
-      await logging.commit({
-        repo: repo.path,
-        paths,
-        message: 'Add a',
-        opId: 'op-bookkeeping-1',
-        branch: 'main',
-      });
-      expect(tracked()).toContain('a.txt');
-      expect(tracked().filter((p) => p.startsWith('.claude'))).toEqual([]);
-      expect(dropped.sort()).toEqual([
-        `${nested}/.cc-writes/x.tmp`,
-        `${nested}/scheduled_tasks.lock`,
-      ]);
+    it('is never staged, nested in another .claude, named by its folder or file by file', async () => {
+      const ROWS = [
+        { name: 'named by its folder', paths: ['a.txt', nested] },
+        {
+          name: 'named file by file',
+          paths: ['a.txt', `${nested}/.cc-writes/x.tmp`, `${nested}/scheduled_tasks.lock`],
+        },
+      ];
+      for (const [i, { name, paths }] of ROWS.entries()) {
+        if (i > 0) fresh();
+        writeNested();
+        const dropped: string[] = [];
+        const logging = createGit({
+          onBookkeepingDropped: (_repo, left) => dropped.push(...left.map((l) => l.rel)),
+        });
+        await logging.commit({
+          repo: repo.path,
+          paths,
+          message: 'Add a',
+          opId: 'op-bookkeeping-1',
+          branch: 'main',
+        });
+        expect.soft(tracked(), name).toContain('a.txt');
+        expect
+          .soft(
+            tracked().filter((p) => p.startsWith('.claude')),
+            name,
+          )
+          .toEqual([]);
+        expect
+          .soft(dropped.sort(), name)
+          .toEqual([`${nested}/.cc-writes/x.tmp`, `${nested}/scheduled_tasks.lock`]);
+      }
     });
 
     describe('when an ignore rule covers it', () => {
@@ -184,13 +197,12 @@ describe('commit', () => {
         expect(dropped).toEqual(expect.arrayContaining([`${nested}/.cc-writes/x.tmp`]));
       };
 
-      it("commits when the repository's .gitignore covers the named bookkeeping", async () => {
+      it("commits when the repository's .gitignore or the user's default excludes file covers the named bookkeeping", async () => {
         writeNested();
         write('.gitignore', '.cc-writes/\nscheduled_tasks.lock\n');
         await expectOnlyAStaged();
-      });
 
-      it("commits when the user's default excludes file covers it", async () => {
+        fresh();
         const config = tempDir('git-xdg');
         try {
           mkdirSync(join(config.path, 'git'));
@@ -219,7 +231,7 @@ describe('commit', () => {
       });
     });
 
-    it('commits nothing when only bookkeeping is named', async () => {
+    it('commits nothing when only bookkeeping is named, and still stages a real file under the nested .claude', async () => {
       writeNested();
       await expect(
         git.commit({
@@ -230,10 +242,6 @@ describe('commit', () => {
           branch: 'main',
         }),
       ).rejects.toThrow(InvalidError);
-    });
-
-    it('still stages a real file under the nested .claude', async () => {
-      writeNested();
       write(`${nested}/settings.json`, '{}');
       await git.commit({
         repo: repo.path,
@@ -246,59 +254,26 @@ describe('commit', () => {
     });
   });
 
-  it('does not mistake another operation id for a retry', async () => {
-    write('a.txt', 'a');
-    const first = await git.commit({
-      repo: repo.path,
-      paths: ['a.txt'],
-      message: 'Add a',
-      opId: 'op-distinct-1',
-      branch: 'main',
-    });
-    write('b.txt', 'b');
-    const second = await git.commit({
-      repo: repo.path,
-      paths: ['b.txt'],
-      message: 'Add b',
-      opId: 'op-distinct-2',
-      branch: 'main',
-    });
-    expect(second.alreadyCommitted).toBe(false);
-    expect(second.sha).not.toBe(first.sha);
-  });
-
-  it.each([['../escape.txt'], ['/etc/hosts'], ['']])('rejects the path %j', async (path) => {
-    await expect(
-      git.commit({
-        repo: repo.path,
-        paths: [path],
-        message: 'x',
-        opId: 'op-badpath-1',
-        branch: 'main',
-      }),
-    ).rejects.toThrow(InvalidError);
-  });
-
-  it('rejects a path through a symlinked parent that leaves the repo', async () => {
+  it('rejects a path that leaves the repo or names nothing, and reports nothing to commit, as an InvalidError', async () => {
     const outside = tempDir('git-outside');
     try {
       writeFileSync(join(outside.path, 'x.ts'), 'x');
       symlinkSync(outside.path, join(repo.path, 'link'));
-      await expect(
-        git.commit({
-          repo: repo.path,
-          paths: ['link/x.ts'],
-          message: 'x',
-          opId: 'op-symlink-1',
-          branch: 'main',
-        }),
-      ).rejects.toThrow(InvalidError);
+      for (const path of ['../escape.txt', '/etc/hosts', '', 'link/x.ts']) {
+        const error: unknown = await git
+          .commit({
+            repo: repo.path,
+            paths: [path],
+            message: 'x',
+            opId: 'op-badpath-1',
+            branch: 'main',
+          })
+          .catch((caught: unknown) => caught);
+        expect.soft(error, JSON.stringify(path)).toBeInstanceOf(InvalidError);
+      }
     } finally {
       outside.cleanup();
     }
-  });
-
-  it('reports nothing to commit as an InvalidError', async () => {
     await expect(
       git.commit({
         repo: repo.path,
@@ -347,22 +322,7 @@ describe('commit', () => {
 });
 
 describe('history queries', () => {
-  it('lists changed files and commits since a base', async () => {
-    const base = await git.head(repo.path);
-    write('a.txt', 'a');
-    const { sha } = await git.commit({
-      repo: repo.path,
-      paths: ['a.txt'],
-      message: 'a',
-      opId: 'op-history-1',
-      branch: 'main',
-    });
-    write('b.txt', 'b');
-    expect(await git.changedFilesSince(repo.path, base)).toEqual(['a.txt', 'b.txt']);
-    expect(await git.commitsSince(repo.path, base)).toEqual([sha]);
-  });
-
-  it('reads each commit since a base with its message and parents, oldest first, merges marked', async () => {
+  it('lists changed files and commits since a base, and reads each commit since it with its message and parents, oldest first, merges marked', async () => {
     const base = await git.head(repo.path);
     write('a.txt', 'a');
     const first = await git.commit({
@@ -373,6 +333,8 @@ describe('history queries', () => {
       branch: 'main',
     });
     write('b.txt', 'b');
+    expect(await git.changedFilesSince(repo.path, base)).toEqual(['a.txt', 'b.txt']);
+    expect(await git.commitsSince(repo.path, base)).toEqual([first.sha]);
     const second = await git.commit({
       repo: repo.path,
       paths: ['b.txt'],
@@ -463,7 +425,7 @@ describe('folderAt', () => {
     write('untracked.txt', 'not committed');
   });
 
-  it('lists only what the root holds directly: regular files and folders, not links or the worktree', async () => {
+  it('lists only what a folder holds directly: regular files and folders, not links, not the worktree, a name read literally; nothing for a missing folder or a link; and rejects a missing branch', async () => {
     expect(await git.folderAt(repo.path, 'refs/heads/main', '')).toEqual({
       files: [
         { name: 'README.md', bytes: 10 },
@@ -471,9 +433,6 @@ describe('folderAt', () => {
       ],
       folders: ['a', 'a*'],
     });
-  });
-
-  it('lists one folder, nothing below it, and reads a folder name literally', async () => {
     expect(await git.folderAt(repo.path, 'refs/heads/main', 'a')).toEqual({
       files: [{ name: 'y.lock', bytes: 2 }],
       folders: ['b'],
@@ -482,39 +441,27 @@ describe('folderAt', () => {
       files: [{ name: 'z.lock', bytes: 1 }],
       folders: [],
     });
-  });
-
-  it('holds nothing for a folder that is not there or is a link', async () => {
     const empty = { files: [], folders: [] };
     expect(await git.folderAt(repo.path, 'refs/heads/main', 'nope')).toEqual(empty);
     expect(await git.folderAt(repo.path, 'refs/heads/main', 'linked')).toEqual(empty);
-  });
-
-  it('rejects a branch that is not there', async () => {
     await expect(git.folderAt(repo.path, 'refs/heads/nope', '')).rejects.toThrow();
   });
 });
 
 describe('commitAt', () => {
-  it('resolves a ref to the commit it names, and a commit to itself', async () => {
+  it('resolves a ref to the commit it names and a commit to itself, and rejects a rev that names no commit', async () => {
     const sha = (await git.head(repo.path)).trim();
     expect(await git.commitAt(repo.path, 'refs/heads/main')).toBe(sha);
     expect(await git.commitAt(repo.path, sha)).toBe(sha);
-  });
-
-  it('rejects a rev that names no commit', async () => {
     await expect(git.commitAt(repo.path, 'refs/heads/nope')).rejects.toThrow();
     await expect(git.commitAt(repo.path, '-h')).rejects.toThrow();
   });
 });
 
 describe('gitDirs', () => {
-  it('names one directory for both in an ordinary checkout', async () => {
+  it("names one directory for both in an ordinary checkout, and a linked worktree's own git dir and the main repository's common dir", async () => {
     const gitDir = join(realpathSync(repo.path), '.git');
     expect(await git.gitDirs(repo.path)).toEqual({ gitDir, commonDir: gitDir });
-  });
-
-  it("names a linked worktree's own git dir and the main repository's common dir", async () => {
     const outside = tempDir('worktree');
     try {
       const checkout = join(outside.path, 'wt');
@@ -546,80 +493,83 @@ describe('untrackedAndIgnored', () => {
 });
 
 describe('changedPaths', () => {
-  it.each([
-    {
-      name: 'a modified file',
-      arrange: () => {
-        write('README.md', 'edited');
+  it('reports each kind of change, nothing for an ignored or only touched file, and only the paths it is asked about', async () => {
+    const ROWS: readonly { name: string; arrange: () => void; expected: string[] }[] = [
+      {
+        name: 'a modified file',
+        arrange: () => {
+          write('README.md', 'edited');
+        },
+        expected: ['README.md'],
       },
-      expected: ['README.md'],
-    },
-    {
-      name: 'an untracked file',
-      arrange: () => {
-        write('new.txt', 'n');
+      {
+        name: 'an untracked file',
+        arrange: () => {
+          write('new.txt', 'n');
+        },
+        expected: ['new.txt'],
       },
-      expected: ['new.txt'],
-    },
-    {
-      name: 'a deleted file',
-      arrange: () => {
-        rmSync(join(repo.path, 'README.md'));
+      {
+        name: 'a deleted file',
+        arrange: () => {
+          rmSync(join(repo.path, 'README.md'));
+        },
+        expected: ['README.md'],
       },
-      expected: ['README.md'],
-    },
-    {
-      name: 'a staged rename, as the old path gone and the new one added',
-      arrange: () => {
-        rawGit('mv', 'README.md', 'DOC.md');
+      {
+        name: 'a staged rename, as the old path gone and the new one added',
+        arrange: () => {
+          rawGit('mv', 'README.md', 'DOC.md');
+        },
+        expected: ['DOC.md', 'README.md'],
       },
-      expected: ['DOC.md', 'README.md'],
-    },
-    {
-      name: 'a file made executable',
-      arrange: () => {
-        chmodSync(join(repo.path, 'README.md'), 0o755);
+      {
+        name: 'a file made executable',
+        arrange: () => {
+          chmodSync(join(repo.path, 'README.md'), 0o755);
+        },
+        expected: ['README.md'],
       },
-      expected: ['README.md'],
-    },
-    {
-      name: 'a file swapped for a link',
-      arrange: () => {
-        rmSync(join(repo.path, 'README.md'));
-        symlinkSync('/etc/hosts', join(repo.path, 'README.md'));
+      {
+        name: 'a file swapped for a link',
+        arrange: () => {
+          rmSync(join(repo.path, 'README.md'));
+          symlinkSync('/etc/hosts', join(repo.path, 'README.md'));
+        },
+        expected: ['README.md'],
       },
-      expected: ['README.md'],
-    },
-    {
-      name: 'a path containing a space',
-      arrange: () => {
-        write('with space.txt', 's');
+      {
+        name: 'a path containing a space',
+        arrange: () => {
+          write('with space.txt', 's');
+        },
+        expected: ['with space.txt'],
       },
-      expected: ['with space.txt'],
-    },
-    {
-      name: 'nothing for an ignored file',
-      arrange: () => {
-        write('.git/info/exclude', 'build/\n');
-        mkdirSync(join(repo.path, 'build'));
-        write('build/out.js', 'x');
+      {
+        name: 'nothing for an ignored file',
+        arrange: () => {
+          write('.git/info/exclude', 'build/\n');
+          mkdirSync(join(repo.path, 'build'));
+          write('build/out.js', 'x');
+        },
+        expected: [],
       },
-      expected: [],
-    },
-    {
-      name: 'nothing for a file only touched',
-      arrange: () => {
-        const later = new Date(Date.now() + 60_000);
-        utimesSync(join(repo.path, 'README.md'), later, later);
+      {
+        name: 'nothing for a file only touched',
+        arrange: () => {
+          const later = new Date(Date.now() + 60_000);
+          utimesSync(join(repo.path, 'README.md'), later, later);
+        },
+        expected: [],
       },
-      expected: [],
-    },
-  ])('reports $name', async ({ arrange, expected }) => {
-    arrange();
-    expect(await git.changedPaths(repo.path)).toEqual(expected);
-  });
+    ];
+    for (const [i, { name, arrange, expected }] of ROWS.entries()) {
+      if (i > 0) fresh();
+      arrange();
+      expect.soft(await git.changedPaths(repo.path), name).toEqual(expected);
+    }
 
-  it('reports only the paths it is asked about', async () => {
+    fresh();
     write('README.md', 'edited');
     write('new.txt', 'n');
     write('other.txt', 'o');
@@ -641,7 +591,7 @@ describe('changedPaths', () => {
 });
 
 describe('changedEntries', () => {
-  it('says how each path differs from HEAD, sorted, and a rename as the old gone and the new untracked', async () => {
+  it('says how each path differs from HEAD, sorted, a rename as the old gone and the new untracked, and cuts at the cap counting the rest', async () => {
     write('old.txt', 'o');
     rawGit('add', 'old.txt');
     rawGit('commit', '-q', '-m', 'old');
@@ -658,9 +608,8 @@ describe('changedEntries', () => {
       ],
       more: 0,
     });
-  });
 
-  it('cuts at the cap and counts the rest', async () => {
+    fresh();
     for (const name of ['a', 'b', 'c', 'd']) write(`${name}.txt`, name);
 
     expect(await git.changedEntries(repo.path, 3)).toEqual({
@@ -675,16 +624,13 @@ describe('changedEntries', () => {
 });
 
 describe('branches and remotes', () => {
-  it('reads the current branch, and null when HEAD is detached', async () => {
-    expect(await git.currentBranch(repo.path)).toBe('main');
-    rawGit('checkout', '-q', '--detach');
-    expect(await git.currentBranch(repo.path)).toBeNull();
-  });
-
-  it("reads a remote's URL, and null when there is no such remote", async () => {
+  it("reads the current branch, null when HEAD is detached, and a remote's URL, null when there is no such remote", async () => {
     expect(await git.remoteUrl(repo.path, 'origin')).toBeNull();
     rawGit('remote', 'add', 'origin', '/nowhere/x.git');
     expect(await git.remoteUrl(repo.path, 'origin')).toBe('/nowhere/x.git');
+    expect(await git.currentBranch(repo.path)).toBe('main');
+    rawGit('checkout', '-q', '--detach');
+    expect(await git.currentBranch(repo.path)).toBeNull();
   });
 
   it('switches to a new branch from a start point, with no upstream', async () => {
@@ -759,7 +705,7 @@ describe('switchBack', () => {
     }
   };
 
-  it.each<{
+  interface Row {
     name: string;
     from: 'main' | 'detached';
     /** On main, before the cut. */
@@ -769,9 +715,10 @@ describe('switchBack', () => {
     outcome: SwitchBack;
     /** Where HEAD ends up: a branch name, or '' when detached. */
     branch: string;
-    /** More to check once it has run. */
-    check?: () => void;
-  }>([
+    /** More to check once it has run, each check labelled `label`. */
+    check?: (label: string) => void;
+  }
+  const ROWS: readonly Row[] = [
     {
       name: 'switches a clean checkout back to its branch',
       from: 'main',
@@ -842,8 +789,8 @@ describe('switchBack', () => {
       },
       outcome: { kind: 'ignored', paths: ['cfg.local'] },
       branch: BATCH,
-      check: () => {
-        expect(readFileSync(join(repo.path, 'cfg.local'), 'utf8')).toBe('mine');
+      check: (label) => {
+        expect.soft(readFileSync(join(repo.path, 'cfg.local'), 'utf8'), label).toBe('mine');
       },
     },
     {
@@ -860,8 +807,8 @@ describe('switchBack', () => {
       },
       outcome: { kind: 'ignored', paths: ['logs/'] },
       branch: BATCH,
-      check: () => {
-        expect(readFileSync(join(repo.path, 'logs', 'keep.txt'), 'utf8')).toBe('mine');
+      check: (label) => {
+        expect.soft(readFileSync(join(repo.path, 'logs', 'keep.txt'), 'utf8'), label).toBe('mine');
       },
     },
     {
@@ -876,8 +823,8 @@ describe('switchBack', () => {
       },
       outcome: { kind: 'switched' },
       branch: 'main',
-      check: () => {
-        expect(readFileSync(join(repo.path, 'build', 'out.txt'), 'utf8')).toBe('built');
+      check: (label) => {
+        expect.soft(readFileSync(join(repo.path, 'build', 'out.txt'), 'utf8'), label).toBe('built');
       },
     },
     {
@@ -889,8 +836,8 @@ describe('switchBack', () => {
       arrange: () => commitWithIndexLocked('a.txt', 'lane'),
       outcome: { kind: 'dirty', paths: ['a.txt'] },
       branch: BATCH,
-      check: () => {
-        expect(readFileSync(join(repo.path, 'a.txt'), 'utf8')).toBe('lane');
+      check: (label) => {
+        expect.soft(readFileSync(join(repo.path, 'a.txt'), 'utf8'), label).toBe('lane');
       },
     },
     {
@@ -899,8 +846,8 @@ describe('switchBack', () => {
       arrange: () => commitWithIndexLocked('b.txt', 'lane'),
       outcome: { kind: 'dirty', paths: ['b.txt'] },
       branch: BATCH,
-      check: () => {
-        expect(readFileSync(join(repo.path, 'b.txt'), 'utf8')).toBe('lane');
+      check: (label) => {
+        expect.soft(readFileSync(join(repo.path, 'b.txt'), 'utf8'), label).toBe('lane');
       },
     },
     {
@@ -919,36 +866,58 @@ describe('switchBack', () => {
       },
       outcome: { kind: 'dirty', paths: ['a.txt', 'plan.md'] },
       branch: BATCH,
-      check: () => {
-        expect(rawGit('show', ':plan.md')).toBe('draft');
-        expect(rawGit('show', ':a.txt')).toBe('v2');
+      check: (label) => {
+        expect.soft(rawGit('show', ':plan.md'), label).toBe('draft');
+        expect.soft(rawGit('show', ':a.txt'), label).toBe('v2');
       },
     },
-  ])('$name', async ({ from, prepare, arrange, outcome, branch, check }) => {
-    prepare?.();
-    const place = await cutFrom(from);
-    await arrange?.();
-    const before = where();
-    expect(await git.switchBack(repo.path, BATCH, place)).toEqual(outcome);
-    const after = where();
-    expect(after.branch).toBe(branch);
-    if (outcome.kind === 'switched') {
-      expect(after.head).toBe(place.sha);
-      expect(after.status).toBe('');
-      expect(existsSync(join(repo.path, 'work.txt'))).toBe(false);
-      // The batch's branch keeps its work.
-      expect(rawGit('show', `${BATCH}:work.txt`)).toBe('work');
-    } else {
-      expect(after).toEqual(before);
+  ];
+  /** Each row whose outcome is one of `kinds`, on a repository of its own. */
+  async function expectSwitchBack(kinds: readonly SwitchBack['kind'][]): Promise<void> {
+    const rows = ROWS.filter((row) => kinds.includes(row.outcome.kind));
+    for (const [i, { name, from, prepare, arrange, outcome, branch, check }] of rows.entries()) {
+      if (i > 0) fresh();
+      prepare?.();
+      const place = await cutFrom(from);
+      await arrange?.();
+      const before = where();
+      expect.soft(await git.switchBack(repo.path, BATCH, place), name).toEqual(outcome);
+      const after = where();
+      expect.soft(after.branch, name).toBe(branch);
+      if (outcome.kind === 'switched') {
+        expect.soft(after.head, name).toBe(place.sha);
+        expect.soft(after.status, name).toBe('');
+        expect.soft(existsSync(join(repo.path, 'work.txt')), name).toBe(false);
+        // The batch's branch keeps its work.
+        expect.soft(rawGit('show', `${BATCH}:work.txt`), name).toBe('work');
+      } else {
+        expect.soft(after, name).toEqual(before);
+      }
+      check?.(name);
     }
-    check?.();
+  }
+
+  it('switches a clean checkout back to its branch or detached commit, past ignored files it does not touch', async () => {
+    await expectSwitchBack(['switched']);
   });
 
-  it('leaves a checkout whose branch is checked out in another worktree, as git would', async () => {
-    const elsewhere = tempDir('main-worktree');
+  it('leaves a checkout with uncommitted, untracked or staged work, or an index a lane commit left behind, losing none of it', async () => {
+    await expectSwitchBack(['dirty']);
+  });
+
+  it('leaves a checkout the builder moved or detached, or whose branch was deleted since', async () => {
+    await expectSwitchBack(['moved', 'gone']);
+  });
+
+  it('leaves an ignored file or directory the switch would overwrite with a tracked one', async () => {
+    await expectSwitchBack(['ignored']);
+  });
+
+  it('leaves a checkout whose branch is checked out in another worktree, or another worktree is rebasing, as git would', async () => {
+    const worktree = tempDir('main-worktree');
     try {
       const place = await cutFrom('main');
-      const other = join(elsewhere.path, 'app-main');
+      const other = join(worktree.path, 'app-main');
       rawGit('worktree', 'add', '-q', other, 'main');
       const before = where();
       expect(await git.switchBack(repo.path, BATCH, place)).toEqual({
@@ -957,11 +926,10 @@ describe('switchBack', () => {
       });
       expect(where()).toEqual(before);
     } finally {
-      elsewhere.cleanup();
+      worktree.cleanup();
     }
-  });
 
-  it('leaves a checkout whose branch another worktree is rebasing, as git would', async () => {
+    fresh();
     const elsewhere = tempDir('rebasing-worktree');
     try {
       commitFiles({ 'second.txt': 'second' });
@@ -1042,21 +1010,18 @@ describe('network calls', () => {
     }
   }
 
-  it('fetches the base branch into origin/<branch> without touching the checkout', async () => {
+  it('fetches the base branch into origin/<branch> without touching the checkout, and fails to fetch a branch origin does not have', async () => {
     const before = local('rev-parse', 'HEAD');
     const upstream = pushFromElsewhere('main', 'upstream.txt');
     await git.fetch(remote.repo.path, 'main', net);
     expect(local('rev-parse', 'origin/main')).toBe(upstream);
     expect(local('rev-parse', 'HEAD')).toBe(before);
-  });
-
-  it('fails to fetch a branch origin does not have', async () => {
     const failure = git.fetch(remote.repo.path, 'develop', net);
     await expect(failure).rejects.toBeInstanceOf(GitNetworkError);
     await expect(failure).rejects.toMatchObject({ kind: 'failed' });
   });
 
-  it('says whether origin has a branch, without fetching it or touching the checkout', async () => {
+  it('says whether origin has a branch, without fetching it or touching the checkout, and fails rather than answering no when origin cannot be asked', async () => {
     pushFromElsewhere('feature/x', 'x.txt');
     const before = local('rev-parse', 'HEAD');
     expect(await git.branchOnOrigin(remote.repo.path, 'main', net)).toBe(true);
@@ -1066,9 +1031,10 @@ describe('network calls', () => {
     expect(await git.branchOnOrigin(remote.repo.path, 'x', net)).toBe(false);
     expect(local('rev-parse', 'HEAD')).toBe(before);
     expect(local('branch', '--list', '-r')).not.toContain('feature/x');
-  });
 
-  it('fails, rather than answering no, when origin cannot be asked', async () => {
+    // A checkout of its own: the daemon pinned this one's origin on its first call.
+    remote.cleanup();
+    remote = createTempRepoWithOrigin();
     local('remote', 'set-url', 'origin', 'git@example.invalid:hang.git');
     const hang = {
       env: { ...NETWORK_ENV, GIT_SSH_COMMAND: 'sleep 5; true', GIT_SSH_VARIANT: 'simple' },
@@ -1079,12 +1045,14 @@ describe('network calls', () => {
     });
   });
 
-  it('pushes a branch and records its upstream, and pushing it again changes nothing', async () => {
+  it('pushes a branch and records its upstream, reporting how long the push ran and what git printed, and pushing it again changes nothing', async () => {
     await git.switchNewBranch(remote.repo.path, '10db/x-0a1b2c3d', 'main');
     writeFileSync(join(remote.repo.path, 'x.txt'), 'x');
     local('add', 'x.txt');
     local('commit', '-q', '-m', 'Add x');
-    await git.push(remote.repo.path, '10db/x-0a1b2c3d', net);
+    const run = await git.push(remote.repo.path, '10db/x-0a1b2c3d', net);
+    expect(run.durationMs).toBeGreaterThanOrEqual(0);
+    expect(run.output).toContain('[new branch]');
     const sha = local('rev-parse', 'HEAD');
     expect(origin('rev-parse', 'refs/heads/10db/x-0a1b2c3d')).toBe(sha);
     expect(local('rev-parse', '--abbrev-ref', '@{u}')).toBe('origin/10db/x-0a1b2c3d');
@@ -1092,14 +1060,19 @@ describe('network calls', () => {
     expect(origin('rev-parse', 'refs/heads/10db/x-0a1b2c3d')).toBe(sha);
   });
 
-  it('reports a rejected push and never forces it', async () => {
+  it('reports a rejected push with its duration and what git printed, and never forces it', async () => {
     const theirs = pushFromElsewhere('10db/x-0a1b2c3d', 'theirs.txt');
     await git.switchNewBranch(remote.repo.path, '10db/x-0a1b2c3d', 'main');
     writeFileSync(join(remote.repo.path, 'ours.txt'), 'ours');
     local('add', 'ours.txt');
     local('commit', '-q', '-m', 'Add ours');
-    const failure = git.push(remote.repo.path, '10db/x-0a1b2c3d', net);
-    await expect(failure).rejects.toMatchObject({ name: 'GitNetworkError', kind: 'rejected' });
+    const error: unknown = await git
+      .push(remote.repo.path, '10db/x-0a1b2c3d', net)
+      .catch((caught: unknown) => caught);
+    if (!(error instanceof GitNetworkError)) throw new Error('expected the push to be refused');
+    expect(error).toMatchObject({ name: 'GitNetworkError', kind: 'rejected' });
+    expect(error.durationMs).toBeGreaterThanOrEqual(0);
+    expect(error.output).toContain('rejected');
     expect(origin('rev-parse', 'refs/heads/10db/x-0a1b2c3d')).toBe(theirs);
   });
 
@@ -1144,29 +1117,7 @@ describe('network calls', () => {
     }
   });
 
-  it('reports how long a push ran and what git printed', async () => {
-    await git.switchNewBranch(remote.repo.path, '10db/x-0a1b2c3d', 'main');
-    const run = await git.push(remote.repo.path, '10db/x-0a1b2c3d', net);
-    expect(run.durationMs).toBeGreaterThanOrEqual(0);
-    expect(run.output).toContain('[new branch]');
-  });
-
-  it('gives a rejected push its duration and what git printed', async () => {
-    pushFromElsewhere('10db/x-0a1b2c3d', 'theirs.txt');
-    await git.switchNewBranch(remote.repo.path, '10db/x-0a1b2c3d', 'main');
-    writeFileSync(join(remote.repo.path, 'ours.txt'), 'ours');
-    local('add', 'ours.txt');
-    local('commit', '-q', '-m', 'Add ours');
-    const error: unknown = await git
-      .push(remote.repo.path, '10db/x-0a1b2c3d', net)
-      .catch((caught: unknown) => caught);
-    if (!(error instanceof GitNetworkError)) throw new Error('expected the push to be refused');
-    expect(error.kind).toBe('rejected');
-    expect(error.durationMs).toBeGreaterThanOrEqual(0);
-    expect(error.output).toContain('rejected');
-  });
-
-  it('times out a fetch that hangs', async () => {
+  it('times out a fetch that hangs, and stops one when its signal aborts', async () => {
     local('remote', 'set-url', 'origin', 'git@example.invalid:hang.git');
     // ssh is replaced by a command that hangs; git appends the host and command as arguments.
     const hang = {
@@ -1176,6 +1127,14 @@ describe('network calls', () => {
     await expect(git.fetch(remote.repo.path, 'main', hang)).rejects.toMatchObject({
       kind: 'timeout',
     });
+    const controller = new AbortController();
+    const pending = git.fetch(remote.repo.path, 'main', {
+      ...hang,
+      timeoutMs: 10_000,
+      signal: controller.signal,
+    });
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ kind: 'aborted' });
   });
 
   it('stops a push that runs past its timeout, with every process its transport started', async () => {
@@ -1231,39 +1190,28 @@ describe('network calls', () => {
     }
   });
 
-  it('stops a fetch when its signal aborts', async () => {
-    local('remote', 'set-url', 'origin', 'git@example.invalid:hang.git');
-    const controller = new AbortController();
-    const call = {
-      env: { ...NETWORK_ENV, GIT_SSH_COMMAND: 'sleep 5; true', GIT_SSH_VARIANT: 'simple' },
-      timeoutMs: 10_000,
-      signal: controller.signal,
-    };
-    const pending = git.fetch(remote.repo.path, 'main', call);
-    controller.abort();
-    await expect(pending).rejects.toMatchObject({ kind: 'aborted' });
-  });
-
-  it.each([
-    {
-      name: 'fetch updates',
-      act: async (env: Readonly<Record<string, string>>) => {
-        const upstream = pushFromElsewhere('main', 'upstream.txt');
-        await git.fetch(remote.repo.path, 'main', { env, timeoutMs: 10_000 });
-        expect(local('rev-parse', 'origin/main')).toBe(upstream);
+  it('fetch updates and push sends from the repository it is given when the network environment carries hook variables', async () => {
+    const ROWS = [
+      {
+        name: 'fetch updates',
+        act: async (env: Readonly<Record<string, string>>) => {
+          const upstream = pushFromElsewhere('main', 'upstream.txt');
+          await git.fetch(remote.repo.path, 'main', { env, timeoutMs: 10_000 });
+          expect(local('rev-parse', 'origin/main')).toBe(upstream);
+        },
       },
-    },
-    {
-      name: 'push sends from',
-      act: async (env: Readonly<Record<string, string>>) => {
-        await git.switchNewBranch(remote.repo.path, '10db/x-0a1b2c3d', 'main');
-        await git.push(remote.repo.path, '10db/x-0a1b2c3d', { env, timeoutMs: 10_000 });
-        expect(origin('rev-parse', 'refs/heads/10db/x-0a1b2c3d')).toBe(local('rev-parse', 'HEAD'));
+      {
+        name: 'push sends from',
+        act: async (env: Readonly<Record<string, string>>) => {
+          await git.switchNewBranch(remote.repo.path, '10db/x-0a1b2c3d', 'main');
+          await git.push(remote.repo.path, '10db/x-0a1b2c3d', { env, timeoutMs: 10_000 });
+          expect(origin('rev-parse', 'refs/heads/10db/x-0a1b2c3d')).toBe(
+            local('rev-parse', 'HEAD'),
+          );
+        },
       },
-    },
-  ])(
-    '$name the repository it is given when the network environment carries hook variables',
-    async ({ act }) => {
+    ];
+    for (const { name, act } of ROWS) {
       // The network environment is the builder's login environment, which a daemon started from a
       // git hook may have captured with GIT_DIR and friends in it.
       const decoy = createDecoyRepo();
@@ -1273,13 +1221,13 @@ describe('network calls', () => {
         await act({ ...NETWORK_ENV, ...decoy.hookVariables }).catch((error: unknown) => {
           failure = error;
         });
-        expect(decoy.snapshot()).toEqual(before);
-        expect(failure).toBeUndefined();
+        expect.soft(decoy.snapshot(), name).toEqual(before);
+        expect.soft(failure, name).toBeUndefined();
       } finally {
         decoy.cleanup();
       }
-    },
-  );
+    }
+  });
 });
 
 describe('git hook variables in the daemon environment', () => {
@@ -1372,7 +1320,12 @@ describe('diffSince', () => {
   };
   const headOf = () => rawGit('rev-parse', 'HEAD');
 
-  it('returns the diff and numstat from the base to HEAD', async () => {
+  it('is empty when nothing changed since the base, and returns the diff and numstat from the base to HEAD', async () => {
+    expect(await git.diffSince(repo.path, headOf(), headOf(), 1024)).toEqual({
+      diff: '',
+      truncated: false,
+      files: [],
+    });
     const base = rawGit('rev-parse', 'HEAD');
     write('a.txt', 'one\ntwo\n');
     writeFileSync(join(repo.path, 'blob.bin'), Buffer.from([0, 1, 2, 3, 0, 255]));
@@ -1389,46 +1342,51 @@ describe('diffSince', () => {
     ]);
   });
 
-  it.each([
-    {
-      name: 'only the paths named',
-      paths: { only: ['a.txt', 'b *.txt'] },
-      has: ['a.txt', 'b *.txt'],
-    },
-    { name: 'every path but those named', paths: { except: ['a.txt'] }, has: ['b *.txt', 'c.txt'] },
-    {
-      // Some 3 MB of names: more than one command line holds, on macOS and Linux alike.
-      name: 'only the paths named, of more than a command line holds',
-      paths: {
-        only: [
-          'a.txt',
-          ...Array.from({ length: 30_000 }, (_, n) => `gone/${'d'.repeat(90)}/${String(n)}.txt`),
-        ],
-      },
-      has: ['a.txt'],
-    },
-    {
-      name: 'every path but those named, of more than a command line holds',
-      paths: {
-        except: [
-          'a.txt',
-          ...Array.from({ length: 30_000 }, (_, n) => `gone/${'d'.repeat(90)}/${String(n)}.txt`),
-        ],
-      },
-      has: ['b *.txt', 'c.txt'],
-    },
-  ])('diffs $name, each path read as it is spelled', async ({ paths, has }) => {
+  it('diffs only the paths named, or every path but those, of any number, each path read as it is spelled', async () => {
     const base = rawGit('rev-parse', 'HEAD');
     write('a.txt', 'a\n');
     // A name that reads as a glob: matched as spelled, never as a pattern.
     write('b *.txt', 'b\n');
     write('c.txt', 'c\n');
     commitAll('three files');
-
-    const changes = await git.diffSince(repo.path, base, headOf(), 512 * 1024, paths);
-
-    expect(changes.files.map((f) => f.path).sort()).toEqual(has);
-    expect(changes.diff.match(/^diff --git /gm)).toHaveLength(has.length);
+    const ROWS = [
+      {
+        name: 'only the paths named',
+        paths: { only: ['a.txt', 'b *.txt'] },
+        has: ['a.txt', 'b *.txt'],
+      },
+      {
+        name: 'every path but those named',
+        paths: { except: ['a.txt'] },
+        has: ['b *.txt', 'c.txt'],
+      },
+      {
+        // Some 3 MB of names: more than one command line holds, on macOS and Linux alike.
+        name: 'only the paths named, of more than a command line holds',
+        paths: {
+          only: [
+            'a.txt',
+            ...Array.from({ length: 30_000 }, (_, n) => `gone/${'d'.repeat(90)}/${String(n)}.txt`),
+          ],
+        },
+        has: ['a.txt'],
+      },
+      {
+        name: 'every path but those named, of more than a command line holds',
+        paths: {
+          except: [
+            'a.txt',
+            ...Array.from({ length: 30_000 }, (_, n) => `gone/${'d'.repeat(90)}/${String(n)}.txt`),
+          ],
+        },
+        has: ['b *.txt', 'c.txt'],
+      },
+    ];
+    for (const { name, paths, has } of ROWS) {
+      const changes = await git.diffSince(repo.path, base, headOf(), 512 * 1024, paths);
+      expect.soft(changes.files.map((f) => f.path).sort(), name).toEqual(has);
+      expect.soft(changes.diff.match(/^diff --git /gm), name).toHaveLength(has.length);
+    }
   });
 
   it('reads named files in the order it counts them, the text cut where the budget runs out', async () => {
@@ -1446,14 +1404,6 @@ describe('diffSince', () => {
     expect(cut.truncated).toBe(true);
     expect(cut.files).toEqual(whole.files);
     expect(whole.diff.startsWith(cut.diff)).toBe(true);
-  });
-
-  it('is empty when nothing changed since the base', async () => {
-    expect(await git.diffSince(repo.path, headOf(), headOf(), 1024)).toEqual({
-      diff: '',
-      truncated: false,
-      files: [],
-    });
   });
 
   it('caps the diff at the byte limit, on a character boundary, and flags it', async () => {
@@ -1521,28 +1471,29 @@ describe('diffSince', () => {
     ]);
   }, 60_000);
 
-  it.each([
-    { name: 'diff.noprefix', key: 'diff.noprefix', value: 'true' },
-    { name: 'diff.mnemonicPrefix', key: 'diff.mnemonicPrefix', value: 'true' },
-    { name: 'diff.srcPrefix', key: 'diff.srcPrefix', value: 'before/' },
-    { name: 'diff.dstPrefix', key: 'diff.dstPrefix', value: 'after/' },
-    { name: 'diff.context', key: 'diff.context', value: '0' },
-  ])('is not changed by the checkout config $name', async ({ key, value }) => {
+  it('is not changed by checkout config: prefixes, context, an order file or core.quotePath', async () => {
     write('c.txt', '1\n2\n3\n4\n5\n6\n7\n');
     commitAll('c');
-    const base = headOf();
+    const changed = headOf();
     write('c.txt', '1\n2\n3\nfour\n5\n6\n7\n');
     commitAll('c2');
-    const plain = await git.diffSince(repo.path, base, headOf(), 512 * 1024);
+    const unconfigured = await git.diffSince(repo.path, changed, headOf(), 512 * 1024);
+    expect(unconfigured.diff).toContain('--- a/c.txt\n+++ b/c.txt');
+    for (const [key, value] of [
+      ['diff.noprefix', 'true'],
+      ['diff.mnemonicPrefix', 'true'],
+      ['diff.srcPrefix', 'before/'],
+      ['diff.dstPrefix', 'after/'],
+      ['diff.context', '0'],
+    ] as const) {
+      rawGit('config', key, value);
+      expect
+        .soft(await git.diffSince(repo.path, changed, headOf(), 512 * 1024), key)
+        .toEqual(unconfigured);
+      rawGit('config', '--unset', key);
+    }
 
-    rawGit('config', key, value);
-    const configured = await git.diffSince(repo.path, base, headOf(), 512 * 1024);
-
-    expect(plain.diff).toContain('--- a/c.txt\n+++ b/c.txt');
-    expect(configured).toEqual(plain);
-  });
-
-  it('is not changed by diff.orderFile', async () => {
+    fresh();
     const base = headOf();
     write('a.txt', 'a\n');
     write('z.txt', 'z\n');
@@ -1551,20 +1502,26 @@ describe('diffSince', () => {
     write('order', 'z.txt\na.txt\n');
     rawGit('config', 'diff.orderFile', join(repo.path, 'order'));
 
-    expect(await git.diffSince(repo.path, base, headOf(), 512 * 1024)).toEqual(plain);
-  });
+    expect
+      .soft(await git.diffSince(repo.path, base, headOf(), 512 * 1024), 'diff.orderFile')
+      .toEqual(plain);
 
-  it('shows a path with a space and a newline the same whatever core.quotePath says', async () => {
-    const base = headOf();
+    // A path with a space and a newline shows the same whatever core.quotePath says.
+    fresh();
+    const before = headOf();
     write('sp ace\nline é.txt', 'x\n');
     commitAll('odd name');
-    const plain = await git.diffSince(repo.path, base, headOf(), 512 * 1024);
+    const quoted = await git.diffSince(repo.path, before, headOf(), 512 * 1024);
     rawGit('config', 'core.quotePath', 'false');
-
-    const configured = await git.diffSince(repo.path, base, headOf(), 512 * 1024);
-
-    expect(configured).toEqual(plain);
-    expect(plain.files.map((f) => f.path)).toEqual(['sp ace\nline é.txt']);
+    expect
+      .soft(await git.diffSince(repo.path, before, headOf(), 512 * 1024), 'core.quotePath')
+      .toEqual(quoted);
+    expect
+      .soft(
+        quoted.files.map((f) => f.path),
+        'core.quotePath',
+      )
+      .toEqual(['sp ace\nline é.txt']);
   });
 
   it('runs no program a submodule names when diff.submodule asks for the submodule diff', async () => {

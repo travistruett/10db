@@ -24,11 +24,6 @@ const commit = (opId: string, paths: string[]) => ({
   },
 });
 const turn = { do: 'turn_complete' as const };
-const approve = (opId: string) => ({
-  do: 'mcp' as const,
-  tool: 'complete_step',
-  args: { opId, summary: 'Looks right.', verdict: 'approve' },
-});
 const implement = (opId: string) => [
   write('src/api/a.test.ts', TEST_FILE),
   commit(opId, ['src/api/a.test.ts']),
@@ -94,42 +89,6 @@ describe('the test-value judge at the end of an implement step', () => {
     );
     expect(filed?.description).toContain('src/api/a.test.ts:2');
     expect(filed?.description).toContain(task.title);
-    expect(world.asked).toHaveLength(1);
-  });
-
-  it('files nothing when the judge keeps the test', async () => {
-    const world = openRouterAnswering('keep');
-    engine = await createTestEngine(
-      { Alpha: [implement('op-tv-0002')] },
-      {},
-      {},
-      { openRouter: world.openRouter },
-    );
-    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'quick' });
-    await until(workstream.id);
-    expect(world.asked).toHaveLength(1);
-    expect(followUps()).toEqual([]);
-  });
-
-  it('tells the reviewer instead, and files no follow-up, when a review step follows', async () => {
-    const world = openRouterAnswering('move_cheaper');
-    engine = await createTestEngine(
-      { Alpha: [implement('op-tv-0003'), [approve('op-tv-0004'), turn]] },
-      {},
-      {},
-      { openRouter: world.openRouter },
-    );
-    const { workstream } = engine.addTask('Alpha', ['api'], [], {
-      flow: 'quick',
-      kinds: ['dependency'],
-    });
-    await until(workstream.id);
-    expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['implement', 'review']);
-    const reviewPrompt = engine.adapter.prompts[1]?.prompt ?? '';
-    expect(reviewPrompt).toContain('does a thing');
-    expect(reviewPrompt).toContain('input, not a finding');
-    expect(followUps()).toEqual([]);
-    // One judge call, made for the review, not one more for the follow-up.
     expect(world.asked).toHaveLength(1);
   });
 

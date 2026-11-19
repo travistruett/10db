@@ -62,13 +62,21 @@ function mainGainsMigration(): string {
 }
 
 describe("bringing main into a task's branch before it takes the migrations hazard", () => {
-  it("merges main as origin has it now, so the next migration is numbered after main's latest", async () => {
+  it("does nothing once its signal has aborted, then merges main as origin has it now, once for asks that overlap, so the next migration is numbered after main's latest", async () => {
     const { batch, ws, checkout, bases } = await opened();
     await commitIn(h, batch, 'src/api/alpha.txt');
     const main = mainGainsMigration();
     expect(tagsIn(checkout)).toEqual(['0000_init']);
 
-    expect(await bases.take(ws.id, signal)).toEqual({ kind: 'ready' });
+    const stop = new AbortController();
+    stop.abort();
+    expect(await bases.take(ws.id, stop.signal)).toEqual({ kind: 'aborted' });
+    expect(tagsIn(checkout)).toEqual(['0000_init']);
+
+    const [one, two] = await Promise.all([bases.take(ws.id, signal), bases.take(ws.id, signal)]);
+    expect([one, two]).toEqual([{ kind: 'ready' }, { kind: 'ready' }]);
+    const merges = h.logs.lines().filter((l) => l['msg'] === 'base merged into the batch branch');
+    expect(merges).toHaveLength(1);
 
     expect(tagsIn(checkout)).toEqual(['0000_init', '0001_track_prs']);
     expect(existsSync(join(checkout, DRIZZLE, '0001_track_prs.sql'))).toBe(true);
@@ -143,26 +151,6 @@ describe("bringing main into a task's branch before it takes the migrations haza
     expect(await bases.take(ws.id, signal)).toEqual({ kind: 'ready' });
 
     expect(gitIn(checkout, 'rev-parse', 'HEAD')).toBe(head);
-    expect(tagsIn(checkout)).toEqual(['0000_init']);
-  });
-
-  it('brings main in once for asks that overlap', async () => {
-    const { batch, ws, bases } = await opened();
-    await commitIn(h, batch, 'src/api/alpha.txt');
-    mainGainsMigration();
-    const [one, two] = await Promise.all([bases.take(ws.id, signal), bases.take(ws.id, signal)]);
-    expect([one, two]).toEqual([{ kind: 'ready' }, { kind: 'ready' }]);
-    const merges = h.logs.lines().filter((l) => l['msg'] === 'base merged into the batch branch');
-    expect(merges).toHaveLength(1);
-  });
-
-  it('does nothing once its signal has aborted', async () => {
-    const { batch, ws, checkout, bases } = await opened();
-    await commitIn(h, batch, 'src/api/alpha.txt');
-    mainGainsMigration();
-    const stop = new AbortController();
-    stop.abort();
-    expect(await bases.take(ws.id, stop.signal)).toEqual({ kind: 'aborted' });
     expect(tagsIn(checkout)).toEqual(['0000_init']);
   });
 });

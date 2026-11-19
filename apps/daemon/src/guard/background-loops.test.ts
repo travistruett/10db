@@ -71,12 +71,13 @@ const ALLOWED: readonly (readonly [string, string])[] = [
 ];
 
 describe('startsEndlessBackgroundLoop', () => {
-  it.each(ENDLESS)('flags %s', (_name, command) => {
-    expect(startsEndlessBackgroundLoop(command)).toBe(true);
-  });
-
-  it.each(ALLOWED)('allows %s', (_name, command) => {
-    expect(startsEndlessBackgroundLoop(command)).toBe(false);
+  it('flags a backgrounded command that never ends, and nothing that ends or runs in front', () => {
+    for (const [name, command] of ENDLESS) {
+      expect.soft(startsEndlessBackgroundLoop(command), `flags ${name}: ${command}`).toBe(true);
+    }
+    for (const [name, command] of ALLOWED) {
+      expect.soft(startsEndlessBackgroundLoop(command), `allows ${name}: ${command}`).toBe(false);
+    }
   });
 
   it('takes time linear in a long command', () => {
@@ -122,13 +123,18 @@ const ENDING_IN_BACKGROUND: readonly (readonly [string, string])[] = [
 ];
 
 describe('startsEndlessBackgroundLoop for a command the Bash tool runs in the background', () => {
-  it.each(ENDLESS_IN_BACKGROUND)('flags %s', (_name, command) => {
-    expect(startsEndlessBackgroundLoop(command)).toBe(false);
-    expect(startsEndlessBackgroundLoop(command, { background: true })).toBe(true);
-  });
-
-  it.each(ENDING_IN_BACKGROUND)('allows %s', (_name, command) => {
-    expect(startsEndlessBackgroundLoop(command, { background: true })).toBe(false);
+  it('flags a command that never ends only when the tool backgrounds it', () => {
+    for (const [name, command] of ENDLESS_IN_BACKGROUND) {
+      expect.soft(startsEndlessBackgroundLoop(command), `in front: ${name}`).toBe(false);
+      expect
+        .soft(startsEndlessBackgroundLoop(command, { background: true }), `flags ${name}`)
+        .toBe(true);
+    }
+    for (const [name, command] of ENDING_IN_BACKGROUND) {
+      expect
+        .soft(startsEndlessBackgroundLoop(command, { background: true }), `allows ${name}`)
+        .toBe(false);
+    }
   });
 
   it('reads a foreground command as before when the flag is off', () => {

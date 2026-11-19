@@ -27,36 +27,29 @@ function runUnderPreload(script: string): { stderr: string; log: string } {
 }
 
 describe("srt's debug log, read for the hosts its proxy refused", () => {
-  it('records each refused host once, whichever way it was refused', () => {
-    const { log } = runUnderPreload(`
+  it('records each refused host once, nothing for a lookalike, and keeps the debug log off stderr', () => {
+    const { log, stderr } = runUnderPreload(`
       console.error('[SandboxDebug] Connection blocked to Billing.us-east-1.api.aws:443');
       console.error('[SandboxDebug] Connection blocked to billing.us-east-1.api.aws:443');
       console.error('[SandboxDebug] HTTP request blocked to plain.example.org:80');
       console.error('[SandboxDebug] Connection blocked to [2001:db8::1]:443');
-    `);
-    expect(log.split('\n').filter(Boolean)).toEqual([
-      'billing.us-east-1.api.aws',
-      'plain.example.org',
-      '2001:db8::1',
-    ]);
-  });
-
-  it("keeps srt's debug log off stderr, and leaves everything else on it", () => {
-    const { stderr } = runUnderPreload(`
+      console.error('Connection blocked to evil.example.org:443');
+      console.error('[SandboxDebug] note: Connection blocked to evil.example.org:443');
       console.error('[SandboxDebug] Connection allowed to a.example.org:443');
       console.warn('[SandboxDebug] something\\nover two lines');
       console.error('the server says', 'hello');
       process.stderr.write('written directly\\n');
     `);
-    expect(stderr).toBe('the server says hello\nwritten directly\n');
-  });
-
-  it('records nothing for a message that merely contains the words', () => {
-    const { log } = runUnderPreload(`
-      console.error('Connection blocked to evil.example.org:443');
-      console.error('[SandboxDebug] note: Connection blocked to evil.example.org:443');
-    `);
-    expect(log).toBe('');
+    // Each refusal once, whichever way it was refused; a message that merely contains the words is none.
+    expect(log.split('\n').filter(Boolean)).toEqual([
+      'billing.us-east-1.api.aws',
+      'plain.example.org',
+      '2001:db8::1',
+    ]);
+    // srt's debug lines leave stderr; everything else, the lookalike without the prefix too, stays.
+    expect(stderr).toBe(
+      'Connection blocked to evil.example.org:443\nthe server says hello\nwritten directly\n',
+    );
   });
 
   it('reads whole lines as hosts and drops what is no host name', () => {
@@ -86,28 +79,20 @@ describe('watching a server’s refusal log', () => {
     appendFileSync(log, 'ple.org\n');
     clock.advance(2000);
     expect(seen).toEqual(['a.example.org', 'b.example.org', 'c.example.org']);
-    stop();
-    expect(clock.pendingTimers()).toBe(0);
-  });
-
-  it('takes a last look when stopped', () => {
-    const clock = new ManualClock();
-    const log = join(dir, 'refused.log');
-    writeFileSync(log, '');
-    const seen: string[] = [];
-    const stop = watchRefusals(log, (host) => seen.push(host), clock);
+    // Stopping takes a last look, then reads no more.
     appendFileSync(log, 'late.example.org\n');
     stop();
-    expect(seen).toEqual(['late.example.org']);
+    expect(seen).toEqual(['a.example.org', 'b.example.org', 'c.example.org', 'late.example.org']);
+    expect(clock.pendingTimers()).toBe(0);
     appendFileSync(log, 'later.example.org\n');
     stop();
     clock.advance(10_000);
-    expect(seen).toEqual(['late.example.org']);
+    expect(seen).toEqual(['a.example.org', 'b.example.org', 'c.example.org', 'late.example.org']);
   });
 
   it('survives a log that is gone', () => {
     const clock = new ManualClock();
-    const stop = watchRefusals(join(dir, 'refused.log'), () => undefined, clock);
+    const stop = watchRefusals(join(dir, 'gone.log'), () => undefined, clock);
     clock.advance(2000);
     expect(() => {
       stop();

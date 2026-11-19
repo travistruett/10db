@@ -180,125 +180,126 @@ describe('the migration that turns three model tiers into four rungs', () => {
     migrateDatabase(db, migrationsBefore(dir, NEXT_MIGRATION));
   });
 
-  it('maps a task’s tier setting and leaves every other kind and none as it was', () => {
-    expect(
-      rows(
-        z.object({ id: z.string(), model_setting: json.nullable() }),
-        'SELECT * FROM tasks ORDER BY id',
-      ).map((r) => [r.id, r.model_setting]),
-    ).toEqual([
-      ['tsk_balanced', { kind: 'tier', tier: 'balanced' }],
-      ['tsk_fast', { kind: 'tier', tier: 'efficient' }],
-      ['tsk_model', { kind: 'model', model: 'fast' }],
-      ['tsk_none', null],
-      ['tsk_strongest', { kind: 'tier', tier: 'capable' }],
-      ['tsk_top', { kind: 'top_of_tier' }],
-    ]);
+  it('maps a task’s, a role’s, a pattern’s and a profile’s tier, and leaves every other kind, none and an unranked profile as it was', () => {
+    expect
+      .soft(
+        rows(
+          z.object({ id: z.string(), model_setting: json.nullable() }),
+          'SELECT * FROM tasks ORDER BY id',
+        ).map((r) => [r.id, r.model_setting]),
+      )
+      .toEqual([
+        ['tsk_balanced', { kind: 'tier', tier: 'balanced' }],
+        ['tsk_fast', { kind: 'tier', tier: 'efficient' }],
+        ['tsk_model', { kind: 'model', model: 'fast' }],
+        ['tsk_none', null],
+        ['tsk_strongest', { kind: 'tier', tier: 'capable' }],
+        ['tsk_top', { kind: 'top_of_tier' }],
+      ]);
+    expect
+      .soft(
+        rows(
+          z.object({ role: z.string(), setting: json }),
+          'SELECT role, setting FROM role_settings ORDER BY role',
+        ).map((r) => [r.role, r.setting]),
+      )
+      .toEqual([
+        ['implement', { kind: 'tier', tier: 'balanced' }],
+        ['plan', { kind: 'tier', tier: 'capable' }],
+        ['qa', { kind: 'tier', tier: 'efficient' }],
+        ['review', { kind: 'model', model: 'strongest' }],
+      ]);
+    expect
+      .soft(
+        rows(
+          z.object({ id: z.string(), setting: json }),
+          'SELECT id, setting FROM patterns ORDER BY position',
+        ).map((r) => [r.id, r.setting]),
+      )
+      .toEqual([
+        ['pat_1', { kind: 'tier', tier: 'efficient' }],
+        ['pat_2', { kind: 'top_of_tier' }],
+        ['pat_3', { kind: 'tier', tier: 'capable' }],
+      ]);
+    expect
+      .soft(
+        rows(
+          z.object({ model: z.string(), tier: z.string().nullable() }),
+          'SELECT model, tier FROM model_profiles ORDER BY id',
+        ).map((r) => [r.model, r.tier]),
+      )
+      .toEqual([
+        ['small', 'efficient'],
+        ['mid', 'balanced'],
+        ['large', 'capable'],
+        ['unranked', null],
+      ]);
   });
 
-  it('maps a role’s and a pattern’s tier setting', () => {
-    expect(
-      rows(
-        z.object({ role: z.string(), setting: json }),
-        'SELECT role, setting FROM role_settings ORDER BY role',
-      ).map((r) => [r.role, r.setting]),
-    ).toEqual([
-      ['implement', { kind: 'tier', tier: 'balanced' }],
-      ['plan', { kind: 'tier', tier: 'capable' }],
-      ['qa', { kind: 'tier', tier: 'efficient' }],
-      ['review', { kind: 'model', model: 'strongest' }],
-    ]);
-    expect(
-      rows(
-        z.object({ id: z.string(), setting: json }),
-        'SELECT id, setting FROM patterns ORDER BY position',
-      ).map((r) => [r.id, r.setting]),
-    ).toEqual([
-      ['pat_1', { kind: 'tier', tier: 'efficient' }],
-      ['pat_2', { kind: 'top_of_tier' }],
-      ['pat_3', { kind: 'tier', tier: 'capable' }],
-    ]);
-  });
-
-  it('maps a profile’s tier and leaves an unranked one empty', () => {
-    expect(
-      rows(
-        z.object({ model: z.string(), tier: z.string().nullable() }),
-        'SELECT model, tier FROM model_profiles ORDER BY id',
-      ).map((r) => [r.model, r.tier]),
-    ).toEqual([
-      ['small', 'efficient'],
-      ['mid', 'balanced'],
-      ['large', 'capable'],
-      ['unranked', null],
-    ]);
-  });
-
-  it('maps each step’s setting and a step whose model is a tier name, in order', () => {
+  it('maps each step’s setting and a step whose model is a tier name, in order, and leaves a workstream on a real model with no steps alone', () => {
     const [stored] = rows(
       z.object({ model: z.string(), steps: json }),
       "SELECT model, steps FROM workstreams WHERE id = 'wst_a'",
     );
-    expect(stored?.model).toBe('capable');
-    expect(stored?.steps).toMatchObject([
+    expect.soft(stored?.model).toBe('capable');
+    expect.soft(stored?.steps).toMatchObject([
       { model: 'large', setting: { kind: 'tier', tier: 'capable' }, reason: 'first' },
       { model: 'efficient', setting: { kind: 'tier', tier: 'efficient' }, reason: 'second' },
       { model: 'mid', setting: null, reason: 'third' },
       { model: 'large', setting: { kind: 'top_of_tier' }, reason: 'fourth' },
       { model: 'mid', setting: { kind: 'tier', tier: 'balanced' }, reason: 'fifth' },
     ]);
+    expect
+      .soft(
+        rows(
+          z.object({ model: z.string(), steps: json }),
+          "SELECT model, steps FROM workstreams WHERE id = 'wst_b'",
+        ),
+      )
+      .toEqual([{ model: 'mid', steps: [] }]);
   });
 
-  it('leaves a workstream on a real model with no steps alone', () => {
-    expect(
-      rows(
-        z.object({ model: z.string(), steps: json }),
-        "SELECT model, steps FROM workstreams WHERE id = 'wst_b'",
-      ),
-    ).toEqual([{ model: 'mid', steps: [] }]);
-  });
-
-  it('moves an account’s overrides: fast to efficient, strongest to both capable and frontier', () => {
-    expect(
-      rows(
-        z.object({ id: z.string(), settings: json }),
-        'SELECT id, settings FROM accounts ORDER BY id',
-      ).map((r) => [r.id, r.settings]),
-    ).toEqual([
-      [
-        'acc_a',
-        {
-          baseUrl: 'https://gw.example/api',
-          tierOverrides: {
-            balanced: 'mid',
-            efficient: 'small',
-            capable: 'large',
-            frontier: 'large',
+  it('moves an account’s overrides: fast to efficient, strongest to both capable and frontier, and leaves every migrated row readable by the code that reads it', () => {
+    expect
+      .soft(
+        rows(
+          z.object({ id: z.string(), settings: json }),
+          'SELECT id, settings FROM accounts ORDER BY id',
+        ).map((r) => [r.id, r.settings]),
+      )
+      .toEqual([
+        [
+          'acc_a',
+          {
+            baseUrl: 'https://gw.example/api',
+            tierOverrides: {
+              balanced: 'mid',
+              efficient: 'small',
+              capable: 'large',
+              frontier: 'large',
+            },
           },
-        },
-      ],
-      ['acc_b', {}],
-      [
-        'acc_c',
-        { baseUrl: 'https://gw.example/api', tierOverrides: { capable: 'only', frontier: 'only' } },
-      ],
-    ]);
-  });
-
-  it('leaves every migrated row readable by the code that reads it', () => {
+        ],
+        ['acc_b', {}],
+        [
+          'acc_c',
+          {
+            baseUrl: 'https://gw.example/api',
+            tierOverrides: { capable: 'only', frontier: 'only' },
+          },
+        ],
+      ]);
     const settings = rows(
       z.object({ settings: json }),
       'SELECT settings FROM accounts ORDER BY id',
     );
-    expect(settings.map((r) => AccountSettings.safeParse(r.settings).success)).toEqual([
-      true,
-      true,
-      true,
-    ]);
+    expect
+      .soft(settings.map((r) => AccountSettings.safeParse(r.settings).success))
+      .toEqual([true, true, true]);
     const [stored] = rows(
       z.object({ steps: json }),
       "SELECT steps FROM workstreams WHERE id = 'wst_a'",
     );
-    expect(WorkstreamStep.array().parse(stored?.steps)).toHaveLength(5);
+    expect.soft(WorkstreamStep.array().parse(stored?.steps)).toHaveLength(5);
   });
 });

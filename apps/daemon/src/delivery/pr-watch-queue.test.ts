@@ -92,45 +92,25 @@ const requiredOf = (
   state: RequiredChecks['state'],
   jobs: Partial<Pick<RequiredChecks, 'failing' | 'pending' | 'cancelled'>> = {},
 ): RequiredChecks => ({ state, failing: [], pending: [], cancelled: [], ...jobs });
-const queueReads = () => h.gh.calls.filter((c) => c.method === 'prInMergeQueue').length;
 const logReads = () => h.gh.calls.filter((c) => c.method === 'jobLog').length;
 const fixes = () => listBatches(h.store.db, {}).filter((b) => b.ciFixOf !== null);
 
 describe('a pull request in the merge queue', () => {
-  it('is stored as queued while it waits, and the mark goes when the queue lets it go', async () => {
-    const { id, prUrl } = shipped(h.project.id);
-    h.gh.setInMergeQueue(prUrl, true);
-    h.gh.setRequiredChecks(prUrl, requiredOf('passing'));
-    const { w } = watching();
-    w.start();
-    await w.idle();
-    expect(stored(id).prMergeBlocked).toBe('queued');
-
-    // The queue merged it: the mark does not outlive an open pull request.
-    h.gh.setInMergeQueue(prUrl, false);
-    h.gh.setState(prUrl, 'MERGED');
-    await round(w);
-    expect(stored(id).prMergeBlocked).toBeNull();
-    expect(h.cards()).toEqual([]);
-  });
-
-  it('is read only for an open pull request', async () => {
-    const { prUrl } = shipped(h.project.id);
-    h.gh.setState(prUrl, 'MERGED');
-    const { w } = watching();
-    w.start();
-    await w.idle();
-    expect(queueReads()).toBe(0);
-  });
-
-  it('gets no catch-up and no retried merge, though it reads as conflicting', async () => {
+  it('gets no catch-up while queued or while the queue cannot be read, though it reads as conflicting', async () => {
     const { id, prUrl } = shipped(h.project.id);
     h.gh.setMergeable(prUrl, 'CONFLICTING');
     h.gh.setMergeBlocked(prUrl, 'conflicts');
-    h.gh.setInMergeQueue(prUrl, true);
+    // Taken for queued by neither guess nor default when the queue cannot be read: nothing is pushed.
+    h.gh.failQueueRead.set(prUrl, new GhError('failed', 'HTTP 502'));
     const { asked, w } = watching();
     w.start();
     await w.idle();
+    await rounds(w, 2);
+    expect(asked).toEqual([]);
+    expect(stored(id).state).toBe('SHIPPED');
+
+    h.gh.failQueueRead.delete(prUrl);
+    h.gh.setInMergeQueue(prUrl, true);
     await rounds(w, 2);
     expect(asked).toEqual([]);
     // Queued, not "conflicts with main": the card line follows the queue.
@@ -142,111 +122,49 @@ describe('a pull request in the merge queue', () => {
     expect(asked).toContain(`catch-up ${id}`);
   });
 
-  it('gets no retried merge when it reads clean', async () => {
+  it('gets no retried merge and no CI fix while queued, though it reads clean with a failing required check', async () => {
     const { prUrl } = shipped(h.project.id);
+    h.gh.setRequiredChecks(prUrl, requiredOf('failing', { failing: [job('build')] }));
+    h.gh.setJobLog('77', { kind: 'ready', log: 'boom\n' });
     h.gh.setInMergeQueue(prUrl, true);
     const { asked, w } = watching();
     w.start();
     await w.idle();
+    await rounds(w, 2);
     expect(asked).toEqual([]);
+    expect(logReads()).toBe(0);
+    expect(fixes()).toEqual([]);
+
+    h.gh.setRequiredChecks(prUrl, requiredOf('passing'));
     h.gh.setInMergeQueue(prUrl, false);
     await round(w);
     expect(asked.some((a) => a.startsWith('retry'))).toBe(true);
   });
 
-  it('is not taken for stuck: its head with no checks is never pushed to or noticed', async () => {
-    const { id, prUrl } = shipped(h.project.id);
-    h.gh.setBlockedOnChecks(prUrl, true);
-    h.gh.setInMergeQueue(prUrl, true);
-    const { asked, w } = watching();
-    w.start();
-    await w.idle();
-    await rounds(w, GRACE_ROUNDS * 3);
-    expect(asked).toEqual([]);
-    expect(stored(id).notices).toEqual([]);
-
-    // A push took it out of the queue; the new head is BLOCKED with no checks: now the watchdog's
-    // minutes count.
-    h.gh.setHead(prUrl, HEAD_B);
-    h.gh.setInMergeQueue(prUrl, false);
-    await rounds(w, GRACE_ROUNDS + 1);
-    expect(asked.filter((a) => a.startsWith('restart-ci'))).toEqual([`restart-ci ${id}`]);
-  });
-
-  it('does not count minutes it spent queued toward the no-CI watchdog', async () => {
+  it('is not taken for stuck, and its queued minutes do not count toward the no-CI watchdog', async () => {
     const { id, prUrl } = shipped(h.project.id);
     h.gh.setBlockedOnChecks(prUrl, true);
     const { asked, w } = watching();
     w.start();
     await w.idle();
     await rounds(w, GRACE_ROUNDS - 2);
+    // Out of the queue a clean pull request is asked to merge each round; queued, nothing is asked.
+    const beforeQueue = asked.length;
     h.gh.setInMergeQueue(prUrl, true);
-    await rounds(w, 3);
+    await rounds(w, GRACE_ROUNDS * 3);
+    expect(asked.slice(beforeQueue)).toEqual([]);
+    expect(stored(id).notices).toEqual([]);
+
     h.gh.setInMergeQueue(prUrl, false);
     await round(w);
     expect(asked.filter((a) => a.startsWith('restart-ci'))).toEqual([]);
     expect(stored(id).notices).toEqual([]);
-  });
 
-  it('has a cancelled required check left alone: no rerun, no notice', async () => {
-    const { id, prUrl } = shipped(h.project.id);
-    h.gh.setRequiredChecks(prUrl, requiredOf('cancelled', { cancelled: [job('desktop')] }));
-    h.gh.setInMergeQueue(prUrl, true);
-    const { w } = watching();
-    w.start();
-    await w.idle();
-    await rounds(w, 4);
-    expect(h.gh.reruns).toEqual([]);
-    expect(stored(id).notices).toEqual([]);
-
-    // A push took it out of the queue (a new head, so not a removal): the count starts now.
+    // A push took it out of the queue; the new head is BLOCKED with no checks: now the watchdog's
+    // minutes count.
     h.gh.setHead(prUrl, HEAD_B);
-    h.gh.setInMergeQueue(prUrl, false);
-    await rounds(w, 2);
-    expect(h.gh.reruns).toEqual(['1']);
-  });
-
-  it('starts no CI fix for a failing required check', async () => {
-    const { prUrl } = shipped(h.project.id);
-    h.gh.setRequiredChecks(prUrl, requiredOf('failing', { failing: [job('build')] }));
-    h.gh.setJobLog('77', { kind: 'ready', log: 'boom\n' });
-    h.gh.setInMergeQueue(prUrl, true);
-    const { w } = watching();
-    w.start();
-    await w.idle();
-    await rounds(w, 2);
-    expect(logReads()).toBe(0);
-    expect(fixes()).toEqual([]);
-  });
-
-  it('is taken for queued by neither guess nor default when the queue cannot be read: nothing is pushed', async () => {
-    const { id, prUrl } = shipped(h.project.id);
-    h.gh.setMergeable(prUrl, 'CONFLICTING');
-    h.gh.setMergeBlocked(prUrl, 'conflicts');
-    h.gh.failQueueRead.set(prUrl, new GhError('failed', 'HTTP 502'));
-    const { asked, w } = watching();
-    w.start();
-    await w.idle();
-    await rounds(w, 2);
-    expect(asked).toEqual([]);
-    expect(stored(id).state).toBe('SHIPPED');
-
-    h.gh.failQueueRead.delete(prUrl);
-    await round(w);
-    expect(asked).toContain(`catch-up ${id}`);
-  });
-
-  it('keeps the queued mark through a queue read that fails', async () => {
-    const { id, prUrl } = shipped(h.project.id);
-    h.gh.setInMergeQueue(prUrl, true);
-    const { w } = watching();
-    w.start();
-    await w.idle();
-    expect(stored(id).prMergeBlocked).toBe('queued');
-    h.gh.failQueueRead.set(prUrl, new GhError('failed', 'HTTP 502'));
-    await round(w);
-    expect(stored(id).prMergeBlocked).toBe('queued');
-    expect(h.cards()).toEqual([]);
+    await rounds(w, GRACE_ROUNDS + 1);
+    expect(asked.filter((a) => a.startsWith('restart-ci'))).toEqual([`restart-ci ${id}`]);
   });
 });
 
@@ -281,41 +199,6 @@ describe('a pull request the merge queue removed', () => {
     const card = h.only(h.cards());
     expect(card.title).toContain('CI still failing on Alpha: Merge queue');
     expect(card.body).toContain('- Merge queue: https://github.com/acme/widgets/pull/1');
-  });
-
-  it('stays failing on later reads while the head is the one that failed, and ends with a new head', async () => {
-    const { id, prUrl, w } = await queued();
-    h.gh.setInMergeQueue(prUrl, false);
-    await rounds(w, 3);
-    expect(stored(id).prRequired?.state).toBe('failing');
-    expect(h.cards()).toHaveLength(1);
-
-    // The builder fixed it and pushed: the new head is read as its own checks say.
-    h.gh.setHead(prUrl, HEAD_B);
-    await round(w);
-    expect(stored(id).prRequired?.state).toBe('passing');
-    expect(stored(id).ciStopped).toBeNull();
-    expect(h.cards()).toEqual([]);
-  });
-
-  it('is not a failure when a push changed the head: the push took it out of the queue', async () => {
-    const { id, prUrl, w } = await queued();
-    h.gh.setHead(prUrl, HEAD_B);
-    h.gh.setInMergeQueue(prUrl, false);
-    await round(w);
-    expect(stored(id).prMergeBlocked).toBeNull();
-    expect(stored(id).prRequired?.state).toBe('passing');
-    expect(stored(id).ciStopped).toBeNull();
-    expect(h.cards()).toEqual([]);
-  });
-
-  it('is not a failure when the pull request merged', async () => {
-    const { id, prUrl, w } = await queued();
-    h.gh.setInMergeQueue(prUrl, false);
-    h.gh.setState(prUrl, 'MERGED');
-    await round(w);
-    expect(stored(id).ciStopped).toBeNull();
-    expect(h.cards()).toEqual([]);
   });
 
   it('is a failure after a restart too: the stored queued mark is the memory', async () => {

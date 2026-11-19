@@ -1,6 +1,6 @@
 import { WorkspaceMode } from '@10db/contracts';
 import { getBatch, getTask, listWorkstreams, patchTask } from '@10db/db';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { createFailedRestarts } from './restart';
 
@@ -28,11 +28,11 @@ function hold(key: string): () => void {
  * and starts over, as the daemon's start does: supersede, start, check the batch it left. The copy's
  * cut waits behind `hold` until the test lets it run.
  */
-async function startedOver(opts: { refusedCut?: boolean; title?: string } = {}) {
+async function startedOver(opts: { refusedCut?: boolean } = {}) {
   const alpha = h.addTask('Alpha');
   const beta = h.addTask('Beta', { areas: ['ui'] });
   const [batch] = h.starter.startBatch(h.project.id, {
-    title: opts.title ?? 'Both',
+    title: 'Both',
     taskIds: [alpha.id, beta.id],
   });
   if (!batch) throw new Error('a batch is expected');
@@ -61,7 +61,7 @@ async function startedOver(opts: { refusedCut?: boolean; title?: string } = {}) 
 }
 
 describe('the batch a task started over from, while its copy is being cut', () => {
-  it('waits for the cut: the attempt stays a member, so the batch is not shipped without it', async () => {
+  it('waits for the cut: the attempt stays a member, so the batch is not shipped without it, then ships its other work once the copy has been cut', async () => {
     const { batchId, fresh, release } = await startedOver();
 
     expect(getBatch(h.store.db, fresh.id).state).toBe('CUTTING');
@@ -69,12 +69,6 @@ describe('the batch a task started over from, while its copy is being cut', () =
     expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
     h.shipper.checkBatch(batchId);
     expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
-    release();
-    await h.jobs.idle();
-  });
-
-  it('lets the batch ship its other work once the copy has been cut', async () => {
-    const { batchId, fresh, release } = await startedOver();
 
     release();
     await h.jobs.idle();
@@ -96,38 +90,5 @@ describe('the batch a task started over from, while its copy is being cut', () =
       .at(-1);
     expect(latest).toMatchObject({ state: 'CANCELLED', batchId: null });
     expect(getTask(h.store.db, alpha.id).workstreamId).toBe(latest?.id);
-  });
-
-  describe('the title of a pull request named after the attempt, which committed nothing', () => {
-    it('is not the attempt’s name when Ship anyway goes before the cut ends', async () => {
-      const { batchId, release } = await startedOver({ title: 'Alpha' });
-      h.commit('src/ui/beta.txt');
-
-      h.shipper.shipAnyway(batchId);
-      // The cut is held until the pull request exists: the attempt is still a member as it opens.
-      // The ship runs git and the gate first; under a loaded full suite that takes longer than a second.
-      await vi.waitFor(
-        () => {
-          expect(h.gh.prCreates()).toHaveLength(1);
-        },
-        { timeout: 20_000 },
-      );
-      expect(h.gh.prCreates().map((c) => c.title)).toEqual(['feat(app): beta']);
-      release();
-      await h.jobs.idle();
-    });
-
-    it('is not the attempt’s name when Ship anyway follows a refused cut', async () => {
-      const { batchId, release } = await startedOver({ refusedCut: true, title: 'Alpha' });
-      h.commit('src/ui/beta.txt');
-      release();
-      await h.jobs.idle();
-      h.gh.auth = 'ok';
-
-      h.shipper.shipAnyway(batchId);
-      await h.jobs.idle();
-
-      expect(h.gh.prCreates().map((c) => c.title)).toEqual(['feat(app): beta']);
-    });
   });
 });

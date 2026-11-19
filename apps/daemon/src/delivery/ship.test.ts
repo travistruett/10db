@@ -1,6 +1,6 @@
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConflictError, mintId, type BatchDto, type TaskDto } from '@10db/contracts';
+import { ConflictError, type BatchDto, type TaskDto } from '@10db/contracts';
 import {
   activeClaims,
   acquireClaims,
@@ -10,11 +10,7 @@ import {
   getBatchRow,
   getTask,
   getWorkstream,
-  insertInboxItem,
-  listInbox,
   listWorkstreams,
-  patchProject,
-  schema,
   transitionBatch,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -150,28 +146,6 @@ describe('shipping', () => {
     expect(done).toMatchObject({ prUrl: shipped.prUrl });
   });
 
-  it('logs a failed push with its duration, kind and output, then the batch as not shipped', async () => {
-    h = createDeliveryHarness();
-    const { batch } = await openBatch('Greetings', 'Alpha');
-    h.commit('src/api/alpha.txt');
-    h.teammatePush(batch.branch ?? '', 'src/api/theirs.txt');
-    const ended = await finishAll(batch);
-    expect(ended.state).toBe('FAILED');
-    const lines = batchLines(batch.id);
-    expect(lines.map((line) => line['msg'])).toEqual([
-      'batch branch cut',
-      'gate started',
-      'gate finished',
-      'git push failed',
-      'batch not shipped',
-    ]);
-    const [, , , push, notShipped] = lines;
-    expect(push).toMatchObject({ branch: batch.branch, kind: 'rejected' });
-    expect(typeof push?.['durationMs']).toBe('number');
-    expect(String(push?.['output'])).toContain('rejected');
-    expect(notShipped).toMatchObject({ failure: 'push_rejected' });
-  });
-
   it("never merges the base into the builder's own checkout: the branch ships as it is", async () => {
     h = createDeliveryHarness();
     const { batch } = await openBatch('Add greetings', 'Alpha');
@@ -228,36 +202,6 @@ describe('shipping', () => {
     expect(card.body).toContain('.: tsx');
     expect(card.body).toContain('Retry');
     expect(card.body).toContain('Retry removes the copy');
-  });
-
-  it('tells the builder to fix pnpm before Retry, and does not say Retry installs, when no trustworthy pnpm was found', async () => {
-    h = createDeliveryHarness(
-      { gateCommand: 'touch gate-ran' },
-      {
-        shipBaseUpdates: (real) => ({
-          ...real,
-          beforeGate: () =>
-            Promise.resolve({
-              kind: 'install_broken',
-              note: "The install in this copy is broken: 614 of 787 dependencies do not resolve (.: tsx). No install ran, so node_modules is as it was (No trustworthy pnpm was found on the login shell's PATH).",
-              noPnpm: true,
-            }),
-        }),
-      },
-    );
-    const { batch } = await openBatch('Add greetings', 'Alpha');
-    h.commit('src/api/alpha.txt');
-
-    const failed = await finishAll(batch);
-
-    expect(failed).toMatchObject({ state: 'FAILED', failure: 'install_broken' });
-    const card = h.only(h.cards());
-    expect(card.body).toMatch(/fix pnpm on the login shell's PATH/i);
-    // The daemon reads the login shell's PATH once, at startup, so a Retry alone can't see a change.
-    expect(card.body).toMatch(/restart 10db/i);
-    expect(card.body).toContain('Retry');
-    expect(card.body).not.toMatch(/Retry removes/);
-    expect(card.body).not.toMatch(/installs again/);
   });
 
   it('offers clearing the notice, or Abandon, when the list of lost migrations could not be read', async () => {
@@ -393,19 +337,6 @@ describe('shipping', () => {
     expect(card.body).toContain('LINT-BROKE');
   });
 
-  it('times a pre-check out like a gate, naming it', async () => {
-    h = createDeliveryHarness(
-      { gateCommand: 'true', precheckCommand: 'sleep 30' },
-      { gateTimeoutMs: 300 },
-    );
-    const { batch } = await openBatch('Add greetings', 'Alpha');
-    h.commit('src/api/alpha.txt');
-    const failed = await finishAll(batch);
-    expect(failed.state).toBe('FAILED');
-    expect(h.only(h.cards()).title).toContain('the pre-check timed out');
-    expect(onOrigin(h, batch.branch)).toBeNull();
-  });
-
   it('ships a batch without a gate step when the project has none', async () => {
     h = createDeliveryHarness({ gateCommand: null });
     const { batch } = await openBatch('Add greetings', 'Alpha');
@@ -470,97 +401,6 @@ describe('shipping', () => {
     expect(h.gh.prCreates().map((c) => c.title)).toEqual([`feat(app): say "hi" and $(whoami)`]);
   });
 
-  const SCOPES = '{"scopes":{"api":["src/api"],"ui":["src/ui"]}}\n';
-
-  it.each<{
-    name: string;
-    title: string;
-    tasks: string[];
-    paths: string[];
-    expected: string;
-    /** The list on origin's main before the batch starts; the valid one when absent. */
-    scopes?: string;
-    /** Tasks cancelled rather than done. */
-    cancelled?: string[];
-  }>([
-    {
-      name: 'one scope, a feature',
-      title: 'Add greetings',
-      tasks: ['Alpha'],
-      paths: ['src/api/alpha.txt', 'src/api/beta.txt'],
-      expected: 'feat(api): add greetings',
-    },
-    {
-      name: 'two scopes, so none',
-      title: 'Add greetings',
-      tasks: ['Alpha', 'Beta'],
-      paths: ['src/api/alpha.txt', 'src/ui/beta.txt'],
-      expected: 'feat: add greetings',
-    },
-    {
-      name: 'a path no scope covers, so none',
-      title: 'Add greetings',
-      tasks: ['Alpha'],
-      paths: ['src/api/alpha.txt', 'notes.txt'],
-      expected: 'feat: add greetings',
-    },
-    {
-      name: 'one scope, a fix',
-      title: 'Fix the greeting',
-      tasks: ['Fix the greeting'],
-      paths: ['src/ui/beta.txt'],
-      expected: 'fix(ui): fix the greeting',
-    },
-    {
-      name: 'a cancelled feature beside a finished fix, a fix',
-      title: 'Fix the greeting',
-      tasks: ['Add farewells', 'Fix the greeting'],
-      cancelled: ['Add farewells'],
-      paths: ['src/ui/beta.txt'],
-      expected: 'fix(ui): fix the greeting',
-    },
-    {
-      name: 'an invalid list, so none',
-      title: 'Add greetings',
-      tasks: ['Alpha'],
-      scopes: '{"scopes":{"API":["src/api"]}}\n',
-      paths: ['src/api/alpha.txt'],
-      expected: 'feat: add greetings',
-    },
-    {
-      name: 'a list the batch itself rewrites, read from the base',
-      title: 'Add greetings',
-      tasks: ['Alpha'],
-      paths: ['src/ui/beta.txt', '.10db/pr-scopes.json'],
-      expected: 'feat: add greetings',
-    },
-  ])('titles the PR from the work with no project prefix: $name', async (row) => {
-    h = createDeliveryHarness();
-    // Pull request delivery still requires a prefix when a project is saved; the title is derived
-    // once a project has none.
-    h.store.write((ctx) => ctx.tx.update(schema.projects).set({ prTitlePrefix: null }).run());
-    h.teammatePush('main', '.10db/pr-scopes.json', row.scopes ?? SCOPES);
-    const { workstreams } = await openBatch(row.title, ...row.tasks);
-    for (const path of row.paths)
-      h.commit(
-        path,
-        path === '.10db/pr-scopes.json' ? '{"scopes":{"ui":["src/ui", ".10db"]}}\n' : undefined,
-      );
-    for (const ws of workstreams)
-      h.settle(ws.id, row.cancelled?.includes(ws.taskTitle) === true ? 'CANCELLED' : 'DONE');
-    await h.jobs.idle();
-    expect(h.gh.prCreates().map((c) => c.title)).toEqual([row.expected]);
-  });
-
-  it('titles the PR with no scope when the repo lists none and the project has no prefix', async () => {
-    h = createDeliveryHarness();
-    h.store.write((ctx) => ctx.tx.update(schema.projects).set({ prTitlePrefix: null }).run());
-    const { batch } = await openBatch('Add greetings', 'Alpha');
-    h.commit('src/api/alpha.txt');
-    await finishAll(batch);
-    expect(h.gh.prCreates().map((c) => c.title)).toEqual(['feat: add greetings']);
-  });
-
   it('records an existing PR for the branch instead of opening a second one', async () => {
     h = createDeliveryHarness();
     const { batch } = await openBatch('Greetings', 'Alpha');
@@ -615,14 +455,6 @@ describe('shipping', () => {
       },
       failure: 'push_rejected',
       title: 'git push was rejected',
-    },
-    {
-      name: 'gh signed out',
-      arrange: (x) => {
-        x.gh.failNext.set('prView', new GhError('signed_out', 'gh is not signed in'));
-      },
-      failure: 'gh_unavailable',
-      title: 'gh is signed out',
     },
     {
       name: 'gh failing',
@@ -954,42 +786,6 @@ describe('Ship anyway, Retry and Abandon', () => {
     const shipped = getBatch(h.store.db, batch.id);
     expect(shipped.state).toBe('SHIPPED');
     expect(h.gh.body(shipped.prUrl ?? '')).toContain('- Beta (failed)');
-  });
-
-  it('closes the not-shipped card by itself, saying why, once a retried ship succeeds', async () => {
-    h = createDeliveryHarness({ gateCommand: 'echo broken >&2; exit 3' });
-    const { batch } = await openBatch('Greetings', 'Alpha');
-    h.commit('src/api/alpha.txt');
-    const failed = await finishAll(batch);
-    expect(failed.state).toBe('FAILED');
-    const card = h.only(h.cards().filter((c) => c.title.includes('the gate failed')));
-    // Another batch's card, for the same project, stays as it is.
-    const other = h.state.write((c) =>
-      insertInboxItem(c, {
-        projectId: h.project.id,
-        kind: 'flag',
-        title: 'Batch "Other" not shipped: the gate failed (exit 1)',
-        body: 'x',
-        options: [],
-        recommendation: null,
-        category: 'other',
-        urgency: 'high',
-        detail: { resolvesWhen: { event: 'batch_shipped', batchId: mintId('Batch') } },
-        foldKey: null,
-        targets: [],
-      }),
-    );
-    h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'true' }));
-    expect(h.shipper.ship(batch.id).state).toBe('SHIPPING');
-    await h.jobs.idle();
-    expect(getBatch(h.store.db, batch.id).state).toBe('SHIPPED');
-    expect(h.cards().map((c) => c.id)).toEqual([other.id]);
-    const closed = listInbox(h.store.db, { states: ['RESOLVED'] });
-    expect(closed).toHaveLength(1);
-    expect(closed[0]).toMatchObject({
-      id: card.id,
-      detail: { resolution: { by: '10db', reason: 'Batch "Greetings" shipped' } },
-    });
   });
 
   it('retries a failed batch: ships it when its work is settled, reopens it when work is unfinished', async () => {

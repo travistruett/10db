@@ -185,37 +185,37 @@ describe('the migration that renames stored model aliases', () => {
   const profile = (model: string, effort: string) =>
     rows(Profile, 'SELECT * FROM model_profiles WHERE model = ? AND effort = ?', model, effort)[0];
 
-  it('renames the four aliases in every column that names the model a row will run on', () => {
-    expect(rows(z.object({ model: z.string() }), 'SELECT model FROM workstreams')).toEqual([
-      { model: 'claude-sonnet-5-5' },
-    ]);
-    expect(storedSteps().map((s) => s.model)).toEqual([
-      'claude-sonnet-5-5',
-      'claude-opus-5-5',
-      'gpt-6.1-sol',
-    ]);
-    expect(
-      rows(
-        z.object({ model_pin: z.string().nullable() }),
-        'SELECT model_pin FROM personas ORDER BY key',
-      ),
-    ).toEqual([
-      { model_pin: JSON.stringify({ model: 'claude-opus-5-5', effort: 'high' }) },
-      { model_pin: null },
-    ]);
+  it('renames the four aliases in every column that names the model a row will run on, keeping each workstream’s steps in order on the merged profile’s row', () => {
+    expect
+      .soft(rows(z.object({ model: z.string() }), 'SELECT model FROM workstreams'))
+      .toEqual([{ model: 'claude-sonnet-5-5' }]);
+    expect
+      .soft(storedSteps().map((s) => s.model))
+      .toEqual(['claude-sonnet-5-5', 'claude-opus-5-5', 'gpt-6.1-sol']);
+    expect.soft(storedSteps().map((s) => s.reason)).toEqual(['step 0', 'step 1', 'step 2']);
+    expect
+      .soft(storedSteps().map((s) => s.profileId))
+      .toEqual(['mpr_sonnet', 'mpr_opus_new', null]);
+    expect
+      .soft(
+        rows(
+          z.object({ model_pin: z.string().nullable() }),
+          'SELECT model_pin FROM personas ORDER BY key',
+        ),
+      )
+      .toEqual([
+        { model_pin: JSON.stringify({ model: 'claude-opus-5-5', effort: 'high' }) },
+        { model_pin: null },
+      ]);
     // The test stops at the next migration, where a shape's model is still on its row; 0076 later moves it to
     // the shape's conversation.
-    expect(rows(z.object({ model: z.string() }), 'SELECT model FROM shapes')).toEqual([
-      { model: 'claude-opus-5-5' },
-    ]);
+    expect
+      .soft(rows(z.object({ model: z.string() }), 'SELECT model FROM shapes'))
+      .toEqual([{ model: 'claude-opus-5-5' }]);
   });
 
-  it('keeps a workstream’s steps in their order', () => {
-    expect(storedSteps().map((s) => s.reason)).toEqual(['step 0', 'step 1', 'step 2']);
-  });
-
-  it('renames a profile and keeps its scores, step counts and slug', () => {
-    expect(profile('claude-sonnet-5-5', 'high')).toMatchObject({
+  it('renames a profile keeping its scores, turns Fable on, and merges into a canonical row: counts add, scores from the row that has them or was measured later', () => {
+    expect.soft(profile('claude-sonnet-5-5', 'high'), 'sonnet renamed').toMatchObject({
       id: 'mpr_sonnet',
       intelligence: 41,
       cost_per_task_usd: 0.75,
@@ -224,15 +224,9 @@ describe('the migration that renames stored model aliases', () => {
       escalations: 2,
       aa_slug: 'slug-sonnet',
     });
-    expect(profile('sonnet', 'high')).toBeUndefined();
-  });
-
-  it('turns Fable on', () => {
-    expect(profile('claude-fable-5-1', 'high')?.enabled).toBe(1);
-  });
-
-  it('merges into a canonical row that exists: counts add, scores come from the row that has them', () => {
-    expect(profile('claude-opus-5-5', 'high')).toMatchObject({
+    expect.soft(profile('sonnet', 'high'), 'sonnet alias gone').toBeUndefined();
+    expect.soft(profile('claude-fable-5-1', 'high')?.enabled, 'fable on').toBe(1);
+    expect.soft(profile('claude-opus-5-5', 'high'), 'opus merged').toMatchObject({
       id: 'mpr_opus_new',
       steps_run: 5,
       first_pass_steps: 4,
@@ -242,11 +236,8 @@ describe('the migration that renames stored model aliases', () => {
       measured_at: AT,
       aa_slug: 'slug-opus',
     });
-    expect(profile('opus', 'high')).toBeUndefined();
-  });
-
-  it('merges into a canonical row measured more recently: its scores stay', () => {
-    expect(profile('claude-haiku-5-5', 'low')).toMatchObject({
+    expect.soft(profile('opus', 'high'), 'opus alias gone').toBeUndefined();
+    expect.soft(profile('claude-haiku-5-5', 'low'), 'haiku merged').toMatchObject({
       id: 'mpr_haiku_new',
       steps_run: 5,
       intelligence: 21,
@@ -255,18 +246,13 @@ describe('the migration that renames stored model aliases', () => {
     });
   });
 
-  it("points a step at the merged profile's row", () => {
-    expect(storedSteps().map((s) => s.profileId)).toEqual(['mpr_sonnet', 'mpr_opus_new', null]);
-  });
-
-  it('leaves what records history as written', () => {
-    expect(rows(z.object({ model: z.string() }), 'SELECT model FROM sessions')).toEqual([
-      { model: 'sonnet' },
-    ]);
-  });
-
-  it('drops the two account settings and keeps the others', () => {
+  it('leaves what records history as written, and drops the two account settings keeping the others', () => {
+    expect
+      .soft(rows(z.object({ model: z.string() }), 'SELECT model FROM sessions'))
+      .toEqual([{ model: 'sonnet' }]);
     const [account] = rows(z.object({ settings: z.string() }), 'SELECT settings FROM accounts');
-    expect(JSON.parse(account?.settings ?? '{}')).toEqual({ baseUrl: 'https://gw.example/api' });
+    expect
+      .soft(JSON.parse(account?.settings ?? '{}'))
+      .toEqual({ baseUrl: 'https://gw.example/api' });
   });
 });

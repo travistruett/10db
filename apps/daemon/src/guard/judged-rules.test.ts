@@ -308,18 +308,19 @@ const OTHER_ROWS: readonly Row[] = [
 
 const ROWS: readonly Row[] = [...SHELL_ROWS, ...MATRIX_ROWS, ...OTHER_ROWS];
 
+/** Each row under each judge: the rules' answer on rules, the judged answer on native and tendb. */
+function expectEachJudge(rows: readonly Row[]): void {
+  for (const row of rows) {
+    for (const judge of Object.values(JudgeKind)) {
+      const expected = judge === JudgeKind.Rules ? row.rules : row.judged;
+      expect.soft(judgeAs(judge, row), `${row.name} (${judge})`).toBe(expected);
+    }
+  }
+}
+
 describe('the guard under each judge', () => {
-  it.each(
-    ROWS.flatMap((row) =>
-      Object.values(JudgeKind).map((judge) => ({
-        judge,
-        row,
-        label: `${row.name} (${judge})`,
-        expected: judge === JudgeKind.Rules ? row.rules : row.judged,
-      })),
-    ),
-  )('$label -> $expected', ({ judge, row, expected }) => {
-    expect(judgeAs(judge, row)).toBe(expected);
+  it('keeps the floor under every judge and hands a judge only what the rules would card', () => {
+    expectEachJudge(ROWS);
   });
 });
 
@@ -441,9 +442,8 @@ const TOOL_ROWS: readonly Row[] = [
 ];
 
 describe('a deploy under an allow rule', () => {
-  it.each(Object.values(JudgeKind))(
-    'the hook settles it under %s, so no classifier or card follows',
-    (judge) => {
+  it('the hook settles it under every judge, so no classifier or card follows', () => {
+    for (const judge of Object.values(JudgeKind)) {
       const verdict = judgePreToolUse({
         judge,
         coveredByAllowRule: true,
@@ -456,55 +456,43 @@ describe('a deploy under an allow rule', () => {
         readOnly: false,
         protectedPaths: [],
       });
-      expect(verdict.decision === 'allow' ? verdict.settled : verdict.reason).toContain(
-        "The builder's allow rule covers this deploy",
-      );
-    },
-  );
+      expect
+        .soft(verdict.decision === 'allow' ? verdict.settled : verdict.reason, judge)
+        .toContain("The builder's allow rule covers this deploy");
+    }
+  });
 });
 
 describe('the tools a judge takes over', () => {
-  it.each(
-    TOOL_ROWS.flatMap((row) =>
-      Object.values(JudgeKind).map((judge) => ({
-        judge,
-        row,
-        label: `${row.name} (${judge})`,
-        expected: judge === JudgeKind.Rules ? row.rules : row.judged,
-      })),
-    ),
-  )('$label -> $expected', ({ judge, row, expected }) => {
-    expect(judgeAs(judge, row)).toBe(expected);
+  it('cards each tool on rules and leaves to a judge only the ones it can judge', () => {
+    expectEachJudge(TOOL_ROWS);
   });
 });
 
 describe('a read-only line under each judge', () => {
-  it.each(
-    ['ls src', 'grep -rn KEY .'].flatMap((command) =>
-      Object.values(JudgeKind).map((judge) => ({
-        judge,
-        command,
-        settled: judge !== JudgeKind.Tendb,
-      })),
-    ),
-  )(
-    'is settled on native and rules, and a bare allow on tendb: $command ($judge)',
-    ({ judge, command, settled }) => {
-      const verdict = judgePreToolUse({
-        judge,
-        coveredByAllowRule: false,
-        toolName: 'Bash',
-        toolInput: { command },
-        repoPath: repo.path,
-        areas: AREAS,
-        hazards: DEFAULT_HAZARDS,
-        claims: EVERY_HAZARD,
-        readOnly: false,
-        protectedPaths: [],
-        fileAccess: access,
-      });
-      expect(verdict.decision).toBe('allow');
-      expect(verdict.decision === 'allow' && verdict.settled !== undefined).toBe(settled);
-    },
-  );
+  it('is settled on native and rules, and a bare allow on tendb', () => {
+    for (const command of ['ls src', 'grep -rn KEY .']) {
+      for (const judge of Object.values(JudgeKind)) {
+        const settled = judge !== JudgeKind.Tendb;
+        const label = `${command} (${judge})`;
+        const verdict = judgePreToolUse({
+          judge,
+          coveredByAllowRule: false,
+          toolName: 'Bash',
+          toolInput: { command },
+          repoPath: repo.path,
+          areas: AREAS,
+          hazards: DEFAULT_HAZARDS,
+          claims: EVERY_HAZARD,
+          readOnly: false,
+          protectedPaths: [],
+          fileAccess: access,
+        });
+        expect.soft(verdict.decision, label).toBe('allow');
+        expect
+          .soft(verdict.decision === 'allow' && verdict.settled !== undefined, label)
+          .toBe(settled);
+      }
+    }
+  });
 });

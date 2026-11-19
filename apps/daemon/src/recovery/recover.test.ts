@@ -46,7 +46,7 @@ import {
 } from '../../test/fixtures';
 import { alive, orphanGateGroup } from '../../test/orphan-gate';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { createGit } from '../git';
+import { createGit, type Git } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { livePlanCard, raiseBuilderCheck, raisePlanApproval } from '../runner';
 import { silentLogger } from '../log';
@@ -59,17 +59,25 @@ let inbox: InboxService;
 let repo: { path: string; cleanup(): void };
 let parked: string[];
 
-beforeEach(() => {
+function setUp(): void {
   ({ store: base, close } = createTestStore());
   state = createStateStore(base, createEventBus());
   parked = [];
   inbox = createInboxService({ state, onParkedAnswer: (t) => parked.push(t.workstreamId) });
   repo = createTempRepo();
-});
-afterEach(() => {
+}
+function tearDown(): void {
   close();
   repo.cleanup();
-});
+}
+beforeEach(setUp);
+afterEach(tearDown);
+
+/** A new store and repository in place of the ones before, so the next case starts clean. */
+function fresh(): void {
+  tearDown();
+  setUp();
+}
 
 /** Moves a fresh workstream through `states` and leaves a live session and a stale lease behind. */
 function inState(
@@ -104,7 +112,7 @@ function inState(
   return { ...seeded, session };
 }
 
-const recover = (extra: { cleanShutdown?: boolean } = {}) =>
+const recover = (extra: { cleanShutdown?: boolean; git?: Git } = {}) =>
   recoverOnStartup({
     state,
     inbox,
@@ -116,6 +124,21 @@ const recover = (extra: { cleanShutdown?: boolean } = {}) =>
     logger: silentLogger,
     ...extra,
   });
+
+/** A real git whose reads of HEAD and of commits since a base are recorded in `reads`. */
+function watchingGit() {
+  const reads: string[] = [];
+  const git = createGit();
+  const watching: Git = {
+    ...git,
+    head: (...args: Parameters<typeof git.head>) => (reads.push('head'), git.head(...args)),
+    commitsSince: (...args: Parameters<typeof git.commitsSince>) => (
+      reads.push('commitsSince'),
+      git.commitsSince(...args)
+    ),
+  };
+  return { git: watching, reads };
+}
 
 const flowStep = (role: 'plan' | 'implement' | 'review', sessionFloor: number): WorkstreamStep => ({
   role,
@@ -216,7 +239,7 @@ function ask(ws: ReturnType<typeof inState>, title: string, signal: AbortSignal)
 describe('recoverOnStartup', () => {
   // Identifies the process with `ps`, which is setuid: no sandbox can run it.
   it.skipIf(SANDBOXED)(
-    'fences a running workstream, kills its orphaned process, and re-queues it to resume',
+    'kills the orphaned process of a running workstream, fencing it and re-queueing it to resume, and of a paused one, keeping it paused',
     async () => {
       const orphan = await orphanProcess();
       const ws = inState(['STARTING', 'RUNNING'], { pid: orphan.pid, pidStart: orphan.startedAt });
@@ -235,12 +258,22 @@ describe('recoverOnStartup', () => {
       expect(listSessions(state.db, ws.workstream.id)[0]?.exitReason).toBe('daemon_restart');
       const steps = listEventsAfter(state.db, 0, 1000).filter((e) => e.type === 'recovery.step');
       expect(steps[0]?.data).toMatchObject({ step: 'reconciled', sessionsEnded: 1 });
+
+      fresh();
+      const pausedOrphan = await orphanProcess();
+      const paused = inState(['STARTING', 'RUNNING', 'PAUSED_LIMIT'], {
+        pid: pausedOrphan.pid,
+        pidStart: pausedOrphan.startedAt,
+      });
+      await recover();
+      await pausedOrphan.exited;
+      expect(getWorkstream(state.db, paused.workstream.id).state).toBe('PAUSED_LIMIT');
     },
   );
 
   // Identifies the process with `ps`, which is setuid: no sandbox can run it.
   it.skipIf(SANDBOXED)(
-    'leaves a live process alone when its pid now belongs to something else',
+    'leaves a live process and a gate group alone when its pid now belongs to something else',
     async () => {
       const stranger = await orphanProcess();
       try {
@@ -252,6 +285,23 @@ describe('recoverOnStartup', () => {
         expect(await systemProcesses.identify(stranger.pid)).toBe(stranger.startedAt);
       } finally {
         stranger.child.kill('SIGKILL');
+      }
+
+      fresh();
+      const groupStranger = await orphanProcess(true);
+      try {
+        const ws = inState(['STARTING', 'RUNNING', 'VERIFYING']);
+        state.write((ctx) => {
+          patchWorkstream(ctx, ws.workstream.id, null, {
+            gatePid: groupStranger.pid,
+            gatePidStart: 'Thu Jan  1 00:00:00 1970',
+          });
+        });
+        await recover();
+        expect(await systemProcesses.identify(groupStranger.pid)).toBe(groupStranger.startedAt);
+        expect(getWorkstreamRow(state.db, ws.workstream.id).gatePid).toBeNull();
+      } finally {
+        groupStranger.child.kill('SIGKILL');
       }
     },
   );
@@ -284,7 +334,7 @@ describe('recoverOnStartup', () => {
     },
   );
 
-  it('puts every re-queued workstream first in line, all with one stamp, and leaves queued work unstamped', async () => {
+  it('puts every re-queued workstream first in line, all with one stamp, and stamps none it leaves queued, fails or parks', async () => {
     const queued = seedWorkstream(base, { title: 'Never started', repoPath: repo.path });
     const running = inState(['STARTING', 'RUNNING'], { title: 'Running', project: queued.project });
     const verifying = inState(['STARTING', 'RUNNING', 'VERIFYING'], {
@@ -298,9 +348,8 @@ describe('recoverOnStartup', () => {
     expect(stamp).not.toBeNull();
     expect(getWorkstream(state.db, verifying.workstream.id).runNextAt).toBe(stamp);
     expect(getWorkstream(state.db, queued.workstream.id).runNextAt).toBeNull();
-  });
 
-  it('does not stamp a workstream that recovery fails or parks', async () => {
+    fresh();
     const failing = inState(['STARTING', 'RUNNING'], { title: 'Failing' });
     state.write((ctx) => {
       patchWorkstream(ctx, failing.workstream.id, null, { recoveryAttempts: 3 });
@@ -310,15 +359,15 @@ describe('recoverOnStartup', () => {
       project: failing.project,
     });
     ask(waiting, 'Which way?', new AbortController().signal);
-    const report = await recover();
+    const second = await recover();
 
-    expect(report.failed).toEqual([failing.workstream.id]);
-    expect(report.parked).toEqual([waiting.workstream.id]);
+    expect(second.failed).toEqual([failing.workstream.id]);
+    expect(second.parked).toEqual([waiting.workstream.id]);
     expect(getWorkstream(state.db, failing.workstream.id).runNextAt).toBeNull();
     expect(getWorkstream(state.db, waiting.workstream.id).runNextAt).toBeNull();
   });
 
-  it('records HEAD, the dirty files and the last acknowledged operation in the recovery event', async () => {
+  it('records HEAD, the dirty files and the last acknowledged operation in the recovery event, from the worktree of a worktree batch', async () => {
     const ws = inState(['STARTING', 'RUNNING']);
     writeFileSync(join(repo.path, 'scratch.txt'), 'uncommitted\n');
     state.write((ctx) => {
@@ -342,9 +391,8 @@ describe('recoverOnStartup', () => {
       dirtyFiles: ['scratch.txt'],
       lastOpId: 'op-last',
     });
-  });
 
-  it('reads head and changes from the worktree of a worktree batch', async () => {
+    fresh();
     const outside = tempDir('recover-worktree');
     try {
       const worktree = join(outside.path, 'wt');
@@ -397,8 +445,8 @@ describe('recoverOnStartup', () => {
       writeFileSync(join(worktree, 'scratch.txt'), 'uncommitted\n');
       writeFileSync(join(repo.path, 'main-only.txt'), 'in the main checkout\n');
       await recover();
-      const step = listEventsAfter(state.db, 0, 1000).find((e) => e.type === 'recovery.step');
-      expect(step?.data).toMatchObject({
+      const batchStep = listEventsAfter(state.db, 0, 1000).find((e) => e.type === 'recovery.step');
+      expect(batchStep?.data).toMatchObject({
         head: wtGit('rev-parse', 'HEAD'),
         dirtyFiles: ['scratch.txt'],
       });
@@ -407,102 +455,120 @@ describe('recoverOnStartup', () => {
     }
   });
 
-  // Identifies the process with `ps`, which is setuid: no sandbox can run it.
-  it.skipIf(SANDBOXED)(
-    'leaves a gate group alone when its pid now belongs to something else',
-    async () => {
-      const stranger = await orphanProcess(true);
-      try {
-        const ws = inState(['STARTING', 'RUNNING', 'VERIFYING']);
-        state.write((ctx) => {
-          patchWorkstream(ctx, ws.workstream.id, null, {
-            gatePid: stranger.pid,
-            gatePidStart: 'Thu Jan  1 00:00:00 1970',
-          });
-        });
-        await recover();
-        expect(await systemProcesses.identify(stranger.pid)).toBe(stranger.startedAt);
-        expect(getWorkstreamRow(state.db, ws.workstream.id).gatePid).toBeNull();
-      } finally {
-        stranger.child.kill('SIGKILL');
-      }
-    },
-  );
-
-  // Identifies the process with `ps`, which is setuid: no sandbox can run it.
-  it.skipIf(SANDBOXED)(
-    'kills the orphaned process of a paused workstream and keeps it paused',
-    async () => {
-      const orphan = await orphanProcess();
-      const ws = inState(['STARTING', 'RUNNING', 'PAUSED_LIMIT'], {
-        pid: orphan.pid,
-        pidStart: orphan.startedAt,
-      });
-      await recover();
-      await orphan.exited;
-      expect(getWorkstream(state.db, ws.workstream.id).state).toBe('PAUSED_LIMIT');
-    },
-  );
-
-  it('does not count a clean shutdown as a failed recovery attempt', async () => {
-    const ws = inState(['STARTING', 'RUNNING']);
-    const report = await recover({ cleanShutdown: true });
-    expect(report.requeued).toEqual([ws.workstream.id]);
-    expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
+  it('counts a restart but not a clean shutdown as a recovery attempt, and fails a workstream that used its attempts, with a flag, except on a clean shutdown', async () => {
+    const clean = inState(['STARTING', 'RUNNING']);
+    const cleanReport = await recover({ cleanShutdown: true });
+    expect(cleanReport.requeued).toEqual([clean.workstream.id]);
+    expect(getWorkstream(state.db, clean.workstream.id)).toMatchObject({
       state: 'QUEUED',
       recoveryAttempts: 0,
       nextAction: { kind: 'resume' },
     });
-  });
 
-  it('does not fail a workstream on a clean shutdown even when its attempts are used up', async () => {
-    const ws = inState(['STARTING', 'RUNNING']);
+    fresh();
+    const usedUpClean = inState(['STARTING', 'RUNNING']);
     state.write((ctx) => {
-      patchWorkstream(ctx, ws.workstream.id, null, { recoveryAttempts: 3 });
+      patchWorkstream(ctx, usedUpClean.workstream.id, null, { recoveryAttempts: 3 });
     });
-    const report = await recover({ cleanShutdown: true });
-    expect(report.requeued).toEqual([ws.workstream.id]);
-    expect(report.failed).toEqual([]);
-    expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
+    const usedUpCleanReport = await recover({ cleanShutdown: true });
+    expect(usedUpCleanReport.requeued).toEqual([usedUpClean.workstream.id]);
+    expect(usedUpCleanReport.failed).toEqual([]);
+    expect(getWorkstream(state.db, usedUpClean.workstream.id)).toMatchObject({
       state: 'QUEUED',
       recoveryAttempts: 3,
     });
-  });
 
-  it.each<[string, readonly number[], 'fix' | 'start']>([
-    ['brings a restarted fix session back as a fix, not from the handoff', [2], 'fix'],
-    ['starts a lane whose failed gate has since passed fresh, not as a fix', [2, 0], 'start'],
-  ])('%s', async (_name, exitCodes, kind) => {
-    const ws = inState(['STARTING', 'RUNNING']);
-    const gates = exitCodes.map((exitCode) =>
-      state.write((ctx) =>
-        insertEvidence(ctx, {
-          workstreamId: ws.workstream.id,
-          kind: 'gate',
-          command: 'make gate',
-          exitCode,
-          summary: exitCode === 0 ? 'PASS' : 'FAIL badge.test.ts',
-          logPath: null,
-          commitShas: [],
-        }),
-      ),
-    );
+    fresh();
+    const usedUp = inState(['STARTING', 'RUNNING']);
     state.write((ctx) => {
-      patchWorkstream(ctx, ws.workstream.id, null, {
-        nextAction: {
-          kind: 'resume',
-          providerSessionId: 'provider-1',
-          reason: 'the account resumed',
-        },
-      });
+      patchWorkstream(ctx, usedUp.workstream.id, null, { recoveryAttempts: 3 });
     });
-    await recover();
-    const { nextAction } = getWorkstream(state.db, ws.workstream.id);
-    expect(nextAction.kind).toBe(kind);
-    if (kind === 'fix') expect(nextAction).toEqual({ kind, evidenceId: gates[0]?.id });
+    const usedUpReport = await recover();
+    expect(usedUpReport.failed).toEqual([usedUp.workstream.id]);
+    expect(getWorkstream(state.db, usedUp.workstream.id)).toMatchObject({
+      state: 'FAILED',
+      failureKind: 'session_failed',
+    });
+    expect(listInbox(state.db, { states: ['OPEN'] }).map((i) => i.kind)).toEqual(['flag']);
   });
 
-  it('parks a workstream that was waiting on an open card', async () => {
+  it('brings back the next action a restart must keep: a fix, an answer, or a fresh start once a failed gate passed', async () => {
+    const gateRows: { name: string; exitCodes: readonly number[]; kind: 'fix' | 'start' }[] = [
+      {
+        name: 'a restarted fix session comes back as a fix, not from the handoff',
+        exitCodes: [2],
+        kind: 'fix',
+      },
+      {
+        name: 'a lane whose failed gate has since passed starts fresh, not as a fix',
+        exitCodes: [2, 0],
+        kind: 'start',
+      },
+    ];
+    for (const row of gateRows) {
+      fresh();
+      const ws = inState(['STARTING', 'RUNNING']);
+      const gates = row.exitCodes.map((exitCode) =>
+        state.write((ctx) =>
+          insertEvidence(ctx, {
+            workstreamId: ws.workstream.id,
+            kind: 'gate',
+            command: 'make gate',
+            exitCode,
+            summary: exitCode === 0 ? 'PASS' : 'FAIL badge.test.ts',
+            logPath: null,
+            commitShas: [],
+          }),
+        ),
+      );
+      state.write((ctx) => {
+        patchWorkstream(ctx, ws.workstream.id, null, {
+          nextAction: {
+            kind: 'resume',
+            providerSessionId: 'provider-1',
+            reason: 'the account resumed',
+          },
+        });
+      });
+      await recover();
+      const { nextAction } = getWorkstream(state.db, ws.workstream.id);
+      expect.soft(nextAction.kind, row.name).toBe(row.kind);
+      if (row.kind === 'fix')
+        expect.soft(nextAction, row.name).toEqual({ kind: 'fix', evidenceId: gates[0]?.id });
+    }
+
+    // A next action that carries builder input is kept.
+    const inboxId = mintId('InboxItem');
+    const evidenceId = mintId('Evidence');
+    const inputRows: { name: string; before: NextAction; expected: NextAction }[] = [
+      {
+        name: 'keeps an answer, resuming the latest provider session',
+        before: { kind: 'answer', inboxId, providerSessionId: null },
+        expected: { kind: 'answer', inboxId, providerSessionId: 'provider-1' },
+      },
+      {
+        name: 'keeps a fix with its gate evidence',
+        before: { kind: 'fix', evidenceId },
+        expected: { kind: 'fix', evidenceId },
+      },
+    ];
+    for (const row of inputRows) {
+      fresh();
+      const ws = inState(['STARTING', 'RUNNING']);
+      state.write((ctx) => {
+        patchWorkstream(ctx, ws.workstream.id, null, { nextAction: row.before });
+      });
+      const report = await recover();
+      expect.soft(report.requeued, row.name).toEqual([ws.workstream.id]);
+      expect.soft(getWorkstream(state.db, ws.workstream.id), row.name).toMatchObject({
+        state: 'QUEUED',
+        recoveryAttempts: 1,
+        nextAction: row.expected,
+      });
+    }
+  });
+
+  it('parks a workstream waiting on an open card, routed to someone else or not, and re-queues one whose card is gone', async () => {
     const ws = inState(['STARTING', 'RUNNING', 'WAITING_HUMAN']);
     const { item } = ask(ws, 'Q?', new AbortController().signal);
     const report = await recover();
@@ -513,74 +579,57 @@ describe('recoverOnStartup', () => {
       nextAction: { kind: 'answer', inboxId: item.id },
     });
     expect(listSessions(state.db, ws.workstream.id)[0]?.exitReason).toBe('daemon_restart');
-  });
 
-  describe('a workstream parked on a question routed to someone else', () => {
-    function routed(states: Parameters<typeof inState>[0]) {
-      const ws = inState(states);
+    // Routed to someone else, it stays parked on its card with its action.
+    for (const name of [
+      'whose session was still live at the restart',
+      'whose session had already parked',
+    ]) {
+      fresh();
+      const routed = inState(['STARTING', 'RUNNING', 'WAITING_HUMAN']);
       const mark = state.write((ctx) => insertPerson(ctx, { handle: 'mark', name: 'Mark' }));
       state.write((ctx) =>
-        setRoutingRules(ctx, ws.project.id, {
+        setRoutingRules(ctx, routed.project.id, {
           rules: [{ category: 'other', area: 'api', personId: mark.id }],
         }),
       );
-      const { item } = ask(ws, 'Q?', new AbortController().signal);
-      expect(item.assignees).toEqual(['mark']);
-      return { ws, item };
-    }
-
-    it.each([
-      ['whose session was still live at the restart', ['STARTING', 'RUNNING', 'WAITING_HUMAN']],
-      ['whose session had already parked', ['STARTING', 'RUNNING', 'WAITING_HUMAN']],
-    ] as const)('stays parked on its card with its action, %s', async (name, states) => {
-      const { ws, item } = routed(states);
+      const { item: card } = ask(routed, 'Q?', new AbortController().signal);
+      expect.soft(card.assignees, name).toEqual(['mark']);
       if (name.includes('already parked'))
         state.write((ctx) => {
-          patchWorkstream(ctx, ws.workstream.id, null, {
+          patchWorkstream(ctx, routed.workstream.id, null, {
             currentSessionId: null,
-            nextAction: { kind: 'answer', inboxId: item.id, providerSessionId: 'provider-1' },
+            nextAction: { kind: 'answer', inboxId: card.id, providerSessionId: 'provider-1' },
           });
         });
-      const report = await recover();
-      expect(report.parked).toEqual([ws.workstream.id]);
-      expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
+      const routedReport = await recover();
+      expect.soft(routedReport.parked, name).toEqual([routed.workstream.id]);
+      expect.soft(getWorkstream(state.db, routed.workstream.id), name).toMatchObject({
         state: 'WAITING_HUMAN',
         currentSessionId: null,
-        nextAction: { kind: 'answer', inboxId: item.id },
+        nextAction: { kind: 'answer', inboxId: card.id },
       });
-      expect(listInbox(state.db, { states: ['OPEN'] }).map((c) => [c.id, c.assignees])).toEqual([
-        [item.id, ['mark']],
-      ]);
-    });
-  });
+      expect
+        .soft(
+          listInbox(state.db, { states: ['OPEN'] }).map((c) => [c.id, c.assignees]),
+          name,
+        )
+        .toEqual([[card.id, ['mark']]]);
+    }
 
-  it('re-queues a waiting workstream whose card is gone', async () => {
-    const ws = inState(['STARTING', 'RUNNING', 'WAITING_HUMAN']);
-    const report = await recover();
-    expect(report.requeued).toEqual([ws.workstream.id]);
-    expect(report.parked).toEqual([]);
-    expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
+    fresh();
+    const gone = inState(['STARTING', 'RUNNING', 'WAITING_HUMAN']);
+    const goneReport = await recover();
+    expect(goneReport.requeued).toEqual([gone.workstream.id]);
+    expect(goneReport.parked).toEqual([]);
+    expect(getWorkstream(state.db, gone.workstream.id)).toMatchObject({
       state: 'QUEUED',
       currentSessionId: null,
       nextAction: { kind: 'resume', providerSessionId: 'provider-1' },
     });
   });
 
-  it('fails a workstream that has used its recovery attempts, with a flag', async () => {
-    const ws = inState(['STARTING', 'RUNNING']);
-    state.write((ctx) => {
-      patchWorkstream(ctx, ws.workstream.id, null, { recoveryAttempts: 3 });
-    });
-    const report = await recover();
-    expect(report.failed).toEqual([ws.workstream.id]);
-    expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
-      state: 'FAILED',
-      failureKind: 'session_failed',
-    });
-    expect(listInbox(state.db, { states: ['OPEN'] }).map((i) => i.kind)).toEqual(['flag']);
-  });
-
-  it('starts a review step that was running when the daemon died fresh, never from the implementer’s handoff', async () => {
+  it('starts a review step that was running when the daemon died fresh, never from the implementer’s handoff, and marks it failed once the flow used its recovery attempts', async () => {
     const id = onReviewStep();
     await recover();
     expect(getWorkstreamRow(state.db, id)).toMatchObject({
@@ -588,15 +637,14 @@ describe('recoverOnStartup', () => {
       stepIndex: 1,
       nextAction: { kind: 'start' },
     });
-  });
 
-  it('marks the step it was on failed when a flow workstream uses its recovery attempts', async () => {
-    const id = onReviewStep();
+    fresh();
+    const usedUp = onReviewStep();
     state.write((ctx) => {
-      patchWorkstream(ctx, id, null, { recoveryAttempts: 3 });
+      patchWorkstream(ctx, usedUp, null, { recoveryAttempts: 3 });
     });
     await recover();
-    const row = getWorkstreamRow(state.db, id);
+    const row = getWorkstreamRow(state.db, usedUp);
     expect(row.state).toBe('FAILED');
     expect(row.steps.map((s) => s.status)).toEqual(['done', 'failed']);
   });
@@ -613,35 +661,6 @@ describe('recoverOnStartup', () => {
     const report = await recover();
     expect(report.redelivered).toEqual([item.id]);
     await waitFor(() => parked.length > 0);
-  });
-
-  describe('a next action that carries builder input', () => {
-    const inboxId = mintId('InboxItem');
-    const evidenceId = mintId('Evidence');
-    it.each<[string, NextAction, NextAction]>([
-      [
-        'keeps an answer, resuming the latest provider session',
-        { kind: 'answer', inboxId, providerSessionId: null },
-        { kind: 'answer', inboxId, providerSessionId: 'provider-1' },
-      ],
-      [
-        'keeps a fix with its gate evidence',
-        { kind: 'fix', evidenceId },
-        { kind: 'fix', evidenceId },
-      ],
-    ])('%s', async (_name, before, expected) => {
-      const ws = inState(['STARTING', 'RUNNING']);
-      state.write((ctx) => {
-        patchWorkstream(ctx, ws.workstream.id, null, { nextAction: before });
-      });
-      const report = await recover();
-      expect(report.requeued).toEqual([ws.workstream.id]);
-      expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
-        state: 'QUEUED',
-        recoveryAttempts: 1,
-        nextAction: expected,
-      });
-    });
   });
 
   describe('each pre-crash state', () => {
@@ -718,25 +737,39 @@ describe('recoverOnStartup', () => {
       },
     ];
 
-    it.each(cases)('$name', async (c) => {
-      const ws = inState(c.path);
-      const report = await recover();
-      expect(report.requeued).toEqual(c.report === 'requeued' ? [ws.workstream.id] : []);
-      expect(report.failed).toEqual([]);
-      expect(report.parked).toEqual([]);
-      const after = getWorkstream(state.db, ws.workstream.id);
-      expect(after.state).toBe(c.state);
-      expect(after.recoveryAttempts).toBe(c.attempts);
-      if (c.nextAction) expect(after.nextAction.kind).toBe(c.nextAction);
-      const terminal = c.state === 'DONE';
-      // Terminal workstreams are not recovery's business: their rows stay as they were.
-      expect(getWorkstreamRow(state.db, ws.workstream.id).leaseOwner).toBe(
-        terminal ? 'dead-daemon' : null,
-      );
-      expect(after.currentSessionId === null).toBe(!terminal);
-      expect(listSessions(state.db, ws.workstream.id)[0]?.exitReason ?? null).toBe(
-        terminal ? null : 'daemon_restart',
-      );
+    /** Recovers a workstream left in each of `rows`, each in a store of its own. */
+    async function recoverEach(rows: typeof cases): Promise<void> {
+      for (const c of rows) {
+        fresh();
+        const ws = inState(c.path);
+        const report = await recover();
+        expect
+          .soft(report.requeued, c.name)
+          .toEqual(c.report === 'requeued' ? [ws.workstream.id] : []);
+        expect.soft(report.failed, c.name).toEqual([]);
+        expect.soft(report.parked, c.name).toEqual([]);
+        const after = getWorkstream(state.db, ws.workstream.id);
+        expect.soft(after.state, c.name).toBe(c.state);
+        expect.soft(after.recoveryAttempts, c.name).toBe(c.attempts);
+        if (c.nextAction) expect.soft(after.nextAction.kind, c.name).toBe(c.nextAction);
+        const terminal = c.state === 'DONE';
+        // Terminal workstreams are not recovery's business: their rows stay as they were.
+        expect
+          .soft(getWorkstreamRow(state.db, ws.workstream.id).leaseOwner, c.name)
+          .toBe(terminal ? 'dead-daemon' : null);
+        expect.soft(after.currentSessionId === null, c.name).toBe(!terminal);
+        expect
+          .soft(listSessions(state.db, ws.workstream.id)[0]?.exitReason ?? null, c.name)
+          .toBe(terminal ? null : 'daemon_restart');
+      }
+    }
+
+    it('re-queues live work, ending its session and clearing its lease', async () => {
+      await recoverEach(cases.filter((c) => c.report === 'requeued'));
+    });
+
+    it('leaves queued, paused and terminal work in its state, counting no attempt', async () => {
+      await recoverEach(cases.filter((c) => c.report === 'none'));
     });
   });
 });
@@ -780,10 +813,11 @@ describe('recoverOnStartup for a project without a gate command', () => {
     return { ...seeded, card };
   }
 
-  it('parks a waiting workstream on an open check card and keeps it across restarts', async () => {
+  it('parks a waiting workstream on an open check card and keeps it across restarts, reading no git', async () => {
     const ws = waitingForCheck('OPEN');
+    const { git, reads } = watchingGit();
     for (let i = 0; i < 2; i += 1) {
-      const report = await recover();
+      const report = await recover({ git });
       expect(report.parked).toEqual([ws.workstream.id]);
       expect(report.requeued).toEqual([]);
       expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
@@ -793,6 +827,7 @@ describe('recoverOnStartup for a project without a gate command', () => {
       });
       expect(checkCards().map((c) => c.id)).toEqual([ws.card?.id]);
     }
+    expect(reads).toEqual([]);
     expect(parked).toEqual([]);
   });
 
@@ -817,7 +852,7 @@ describe('recoverOnStartup for a project without a gate command', () => {
     expect(parked).toEqual([]);
   });
 
-  it('a stale check card never overwrites a later answer action', async () => {
+  it('a stale check card never overwrites a later answer action, and is not raised again', async () => {
     const ws = waitingForCheck('OPEN');
     // The builder's other question moved the work on after the check card was raised.
     const question = state.write((ctx) =>
@@ -845,27 +880,31 @@ describe('recoverOnStartup for a project without a gate command', () => {
       kind: 'answer',
       inboxId: question.id,
     });
-  });
 
-  it('a stale check card beside a workstream waiting on an answer is not raised again', async () => {
-    const ws = waitingForCheck('OPEN');
+    // Beside a workstream waiting on an answer whose card is gone.
+    fresh();
+    const beside = waitingForCheck('OPEN');
     state.write((ctx) => {
-      patchWorkstream(ctx, ws.workstream.id, null, {
+      patchWorkstream(ctx, beside.workstream.id, null, {
         nextAction: { kind: 'answer', inboxId: mintId('InboxItem'), providerSessionId: 'p' },
       });
     });
     const report = await recover();
-    expect(report.parked).not.toContain(ws.workstream.id);
-    expect(getWorkstream(state.db, ws.workstream.id).nextAction.kind).not.toBe('builder_review');
+    expect(report.parked).not.toContain(beside.workstream.id);
+    expect(getWorkstream(state.db, beside.workstream.id).nextAction.kind).not.toBe(
+      'builder_review',
+    );
     expect(checkCards().map((c) => c.state)).toEqual(['OPEN']);
   });
 
-  it('raises the card again, once, when the waiting workstream lost its check card', async () => {
+  it('raises the card again, once, reading git for it, when the waiting workstream lost its check card', async () => {
     const ws = waitingForCheck('CANCELLED');
+    const { git, reads } = watchingGit();
     for (let i = 0; i < 2; i += 1) {
-      const report = await recover();
+      const report = await recover({ git });
       expect(report.parked).toEqual([ws.workstream.id]);
       expect(getWorkstream(state.db, ws.workstream.id).state).toBe('WAITING_HUMAN');
+      if (i === 0) expect(reads).toEqual(['head', 'commitsSince']);
     }
     const live = checkCards().filter((c) => c.state === 'OPEN');
     expect(live).toHaveLength(1);
@@ -874,36 +913,6 @@ describe('recoverOnStartup for a project without a gate command', () => {
       inboxId: live[0]?.id,
     });
     expect(getWorkstream(state.db, ws.workstream.id).state).not.toBe('DONE');
-  });
-
-  it('reads git only when the card has to be raised again', async () => {
-    const reads: string[] = [];
-    const git = createGit();
-    const watching = {
-      ...git,
-      head: (...args: Parameters<typeof git.head>) => (reads.push('head'), git.head(...args)),
-      commitsSince: (...args: Parameters<typeof git.commitsSince>) => (
-        reads.push('commitsSince'),
-        git.commitsSince(...args)
-      ),
-    };
-    const run = () =>
-      recoverOnStartup({
-        state,
-        inbox,
-        git: watching,
-        processes: systemProcesses,
-        jobs: createDeliveryJobs(silentLogger),
-        clock: new ManualClock(),
-        maxRecoveryAttempts: 3,
-        logger: silentLogger,
-      });
-    const kept = waitingForCheck('OPEN');
-    await run();
-    expect(reads).toEqual([]);
-    waitingForCheck('CANCELLED', undefined, kept.project);
-    await run();
-    expect(reads).toEqual(['head', 'commitsSince']);
   });
 });
 
@@ -944,7 +953,7 @@ describe('recoverOnStartup for a workstream waiting for the builder to approve i
     return { ...seeded, card };
   }
 
-  it('keeps the plan card and the parked task across restarts', async () => {
+  it('keeps the plan card and the parked task across restarts, and raises the card again, once, with the plan, when it was lost', async () => {
     const ws = waitingForPlan('OPEN');
     for (let i = 0; i < 2; i += 1) {
       const report = await recover();
@@ -958,20 +967,19 @@ describe('recoverOnStartup for a workstream waiting for the builder to approve i
       expect(planCards().map((c) => c.id)).toEqual([ws.card.id]);
     }
     expect(parked).toEqual([]);
-  });
 
-  it('raises the plan card again, once, with the plan, when the card was lost', async () => {
-    const ws = waitingForPlan('CANCELLED');
+    fresh();
+    const lost = waitingForPlan('CANCELLED');
     for (let i = 0; i < 2; i += 1) {
       const report = await recover();
-      expect(report.parked).toEqual([ws.workstream.id]);
-      expect(getWorkstream(state.db, ws.workstream.id).state).toBe('WAITING_HUMAN');
+      expect(report.parked).toEqual([lost.workstream.id]);
+      expect(getWorkstream(state.db, lost.workstream.id).state).toBe('WAITING_HUMAN');
     }
     const live = planCards().filter((c) => c.state === 'OPEN');
     expect(live).toHaveLength(1);
     expect(live[0]?.body).toContain('PLAN: edit src/api/a.txt.');
-    expect(livePlanCard(state.db, ws.workstream.id)?.id).toBe(live[0]?.id);
-    expect(getWorkstream(state.db, ws.workstream.id).nextAction).toEqual({
+    expect(livePlanCard(state.db, lost.workstream.id)?.id).toBe(live[0]?.id);
+    expect(getWorkstream(state.db, lost.workstream.id).nextAction).toEqual({
       kind: 'plan_approval',
       inboxId: live[0]?.id,
     });

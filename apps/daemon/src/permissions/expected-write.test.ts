@@ -140,21 +140,24 @@ describe('editResult', () => {
     ).toBe('c');
   });
 
-  it.each([
-    ['a NotebookEdit', 'NotebookEdit', { new_source: 'x' }, '{}'],
-    ['an Edit whose text is not there', 'Edit', { old_string: 'z', new_string: 'y' }, 'abc'],
-    ['an Edit whose text is there twice', 'Edit', { old_string: 'a', new_string: 'y' }, 'aa'],
-    ['an Edit of a missing file', 'Edit', { old_string: 'a', new_string: 'y' }, null],
-    [
-      'an Edit that creates a file that has content',
-      'Edit',
-      { old_string: '', new_string: 'y' },
-      'a',
-    ],
-    ['a Write with no content', 'Write', {}, 'a'],
-    ['a MultiEdit with a part that is no edit', 'MultiEdit', { edits: [1] }, 'a'],
-  ])('is unknown for %s', (_name, tool, input, current) => {
-    expect(editResult(tool, input, current)).toBeUndefined();
+  it('is unknown for a call Claude Code would refuse or that it cannot work out', () => {
+    const rows: [string, string, Record<string, unknown>, string | null][] = [
+      ['a NotebookEdit', 'NotebookEdit', { new_source: 'x' }, '{}'],
+      ['an Edit whose text is not there', 'Edit', { old_string: 'z', new_string: 'y' }, 'abc'],
+      ['an Edit whose text is there twice', 'Edit', { old_string: 'a', new_string: 'y' }, 'aa'],
+      ['an Edit of a missing file', 'Edit', { old_string: 'a', new_string: 'y' }, null],
+      [
+        'an Edit that creates a file that has content',
+        'Edit',
+        { old_string: '', new_string: 'y' },
+        'a',
+      ],
+      ['a Write with no content', 'Write', {}, 'a'],
+      ['a MultiEdit with a part that is no edit', 'MultiEdit', { edits: [1] }, 'a'],
+    ];
+    for (const [name, tool, input, current] of rows) {
+      expect.soft(editResult(tool, input, current), name).toBeUndefined();
+    }
   });
 });
 

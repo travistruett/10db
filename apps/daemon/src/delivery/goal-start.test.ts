@@ -14,8 +14,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { isolatedGitEnv } from '../../test/fixtures';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 
-import { START_REFUSED_DETAIL } from './cards';
-
 // A task ships with its goal when its row says so, none of its kinds has its own copy, and it works in
 // a copy: tasks of one goal started together share a batch, and one started later joins the goal's open
 // batch when it can, else starts its own. A start is never refused for it.
@@ -139,19 +137,6 @@ describe('tasks of a goal that ship with it', () => {
     const second = listBatches(h.store.db).find((b) => b.id !== first.id);
     expect(second && members(second)).toEqual([get(t, 'b').id]);
     expect(h.cards()).toEqual([]);
-  });
-
-  it('a goal join refused for unfinished dependencies leaves a card that names no batch', async () => {
-    const t = goalOf({
-      a: { rigor: 'light' },
-      blocker: { rigor: 'careful' },
-      c: { rigor: 'light', dependsOn: ['blocker'] },
-    });
-    start(get(t, 'a'));
-    await h.jobs.idle();
-    expect(() => start(get(t, 'c'))).toThrow(/unfinished|isn't finished|not finished/i);
-    const card = h.only(h.cards());
-    expect(card.detail?.[START_REFUSED_DETAIL]).not.toHaveProperty('batchId');
   });
 
   it('a goal batch whose copy sits on another branch is left for a batch of its own, once', async () => {

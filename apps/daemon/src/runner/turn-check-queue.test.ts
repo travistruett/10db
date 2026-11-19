@@ -25,111 +25,129 @@ const running = (run: number, turns: TurnAsk[], waiting: TurnAsk[] | null): Chec
   waiting,
 });
 
+interface Row {
+  name: string;
+  state: CheckQueueState;
+  event: CheckQueueEvent;
+  then: CheckStep;
+}
+
+function check(rows: readonly Row[]): void {
+  for (const { name, state, event, then } of rows) {
+    expect.soft(step(state, event), name).toEqual(then);
+  }
+}
+
 describe('the turn check queue of one pass', () => {
-  it.each<{
-    name: string;
-    state: CheckQueueState;
-    event: CheckQueueEvent;
-    then: CheckStep;
-  }>([
-    {
-      name: 'a Ready turn on an idle pass starts a check of that turn',
-      state: CHECK_IDLE,
-      event: { kind: 'ready', turn: a, checks: true },
-      then: {
+  it('starts a check of a Ready turn on an idle pass, makes one wait while one runs, and does nothing for a project with no check', () => {
+    check([
+      {
+        name: 'a Ready turn on an idle pass starts a check of that turn',
+        state: CHECK_IDLE,
+        event: { kind: 'ready', turn: a, checks: true },
+        then: {
+          state: running(1, [a], null),
+          effects: [{ kind: 'start', run: 1, turns: [a] }],
+        },
+      },
+      {
+        name: 'a Ready turn while one runs waits',
         state: running(1, [a], null),
-        effects: [{ kind: 'start', run: 1, turns: [a] }],
+        event: { kind: 'ready', turn: b, checks: true },
+        then: { state: running(1, [a], [b]), effects: [] },
       },
-    },
-    {
-      name: 'a Ready turn while one runs waits',
-      state: running(1, [a], null),
-      event: { kind: 'ready', turn: b, checks: true },
-      then: { state: running(1, [a], [b]), effects: [] },
-    },
-    {
-      name: 'a Ready turn while one runs and one waits joins the waiting one',
-      state: running(1, [a], [b]),
-      event: { kind: 'ready', turn: c, checks: true },
-      then: { state: running(1, [a], [b, c]), effects: [] },
-    },
-    {
-      name: 'the same turn asked twice waits once',
-      state: running(1, [a], [b]),
-      event: { kind: 'ready', turn: b, checks: true },
-      then: { state: running(1, [a], [b]), effects: [] },
-    },
-    {
-      name: 'a Ready turn of a project with no changed-files check on an idle pass does nothing',
-      state: CHECK_IDLE,
-      event: { kind: 'ready', turn: a, checks: false },
-      then: { state: CHECK_IDLE, effects: [] },
-    },
-    {
-      name: 'a Ready turn of a project with no changed-files check while one runs does nothing',
-      state: running(1, [a], null),
-      event: { kind: 'ready', turn: b, checks: false },
-      then: { state: running(1, [a], null), effects: [] },
-    },
-    {
-      name: 'a Ready turn of a project with no changed-files check while one waits does nothing',
-      state: running(1, [a], [b]),
-      event: { kind: 'ready', turn: c, checks: false },
-      then: { state: running(1, [a], [b]), effects: [] },
-    },
-    {
-      name: 'the run ending, a thrown run too, with none waiting leaves the pass idle',
-      state: running(1, [a], null),
-      event: { kind: 'ended', run: 1 },
-      then: { state: idle(1), effects: [] },
-    },
-    {
-      name: 'the run ending, a thrown run too, with one waiting starts the waiting one',
-      state: running(1, [a], [b, c]),
-      event: { kind: 'ended', run: 1 },
-      then: {
-        state: running(2, [b, c], null),
-        effects: [{ kind: 'start', run: 2, turns: [b, c] }],
+      {
+        name: 'a Ready turn while one runs and one waits joins the waiting one',
+        state: running(1, [a], [b]),
+        event: { kind: 'ready', turn: c, checks: true },
+        then: { state: running(1, [a], [b, c]), effects: [] },
       },
-    },
-    {
-      name: 'a stopped run that ends after a new one started changes nothing',
-      state: running(2, [b], null),
-      event: { kind: 'ended', run: 1 },
-      then: { state: running(2, [b], null), effects: [] },
-    },
-    {
-      name: 'a stopped run that ends on an idle pass changes nothing',
-      state: idle(1),
-      event: { kind: 'ended', run: 1 },
-      then: { state: idle(1), effects: [] },
-    },
-    {
-      name: 'the next Ready turn after a stop starts a run numbered past the stopped one',
-      state: idle(1),
-      event: { kind: 'ready', turn: b, checks: true },
-      then: { state: running(2, [b], null), effects: [{ kind: 'start', run: 2, turns: [b] }] },
-    },
-    {
-      name: 'a stop on an idle pass does nothing',
-      state: CHECK_IDLE,
-      event: { kind: 'stop' },
-      then: { state: CHECK_IDLE, effects: [] },
-    },
-    {
-      name: 'a stop aborts the running check',
-      state: running(1, [a], null),
-      event: { kind: 'stop' },
-      then: { state: idle(1), effects: [{ kind: 'abort', run: 1 }] },
-    },
-    {
-      name: 'a stop aborts the running check and drops the waiting one',
-      state: running(1, [a], [b]),
-      event: { kind: 'stop' },
-      then: { state: idle(1), effects: [{ kind: 'abort', run: 1 }] },
-    },
-  ])('$name', ({ state, event, then }) => {
-    expect(step(state, event)).toEqual(then);
+      {
+        name: 'the same turn asked twice waits once',
+        state: running(1, [a], [b]),
+        event: { kind: 'ready', turn: b, checks: true },
+        then: { state: running(1, [a], [b]), effects: [] },
+      },
+      {
+        name: 'a Ready turn of a project with no changed-files check on an idle pass does nothing',
+        state: CHECK_IDLE,
+        event: { kind: 'ready', turn: a, checks: false },
+        then: { state: CHECK_IDLE, effects: [] },
+      },
+      {
+        name: 'a Ready turn of a project with no changed-files check while one runs does nothing',
+        state: running(1, [a], null),
+        event: { kind: 'ready', turn: b, checks: false },
+        then: { state: running(1, [a], null), effects: [] },
+      },
+      {
+        name: 'a Ready turn of a project with no changed-files check while one waits does nothing',
+        state: running(1, [a], [b]),
+        event: { kind: 'ready', turn: c, checks: false },
+        then: { state: running(1, [a], [b]), effects: [] },
+      },
+      {
+        name: 'the next Ready turn after a stop starts a run numbered past the stopped one',
+        state: idle(1),
+        event: { kind: 'ready', turn: b, checks: true },
+        then: { state: running(2, [b], null), effects: [{ kind: 'start', run: 2, turns: [b] }] },
+      },
+    ]);
+  });
+
+  it('starts the waiting check when the run ends or leaves the pass idle, and ignores the end of a stopped run', () => {
+    check([
+      {
+        name: 'the run ending, a thrown run too, with none waiting leaves the pass idle',
+        state: running(1, [a], null),
+        event: { kind: 'ended', run: 1 },
+        then: { state: idle(1), effects: [] },
+      },
+      {
+        name: 'the run ending, a thrown run too, with one waiting starts the waiting one',
+        state: running(1, [a], [b, c]),
+        event: { kind: 'ended', run: 1 },
+        then: {
+          state: running(2, [b, c], null),
+          effects: [{ kind: 'start', run: 2, turns: [b, c] }],
+        },
+      },
+      {
+        name: 'a stopped run that ends after a new one started changes nothing',
+        state: running(2, [b], null),
+        event: { kind: 'ended', run: 1 },
+        then: { state: running(2, [b], null), effects: [] },
+      },
+      {
+        name: 'a stopped run that ends on an idle pass changes nothing',
+        state: idle(1),
+        event: { kind: 'ended', run: 1 },
+        then: { state: idle(1), effects: [] },
+      },
+    ]);
+  });
+
+  it('a stop aborts the running check and drops the waiting one, and does nothing on an idle pass', () => {
+    check([
+      {
+        name: 'a stop on an idle pass does nothing',
+        state: CHECK_IDLE,
+        event: { kind: 'stop' },
+        then: { state: CHECK_IDLE, effects: [] },
+      },
+      {
+        name: 'a stop aborts the running check',
+        state: running(1, [a], null),
+        event: { kind: 'stop' },
+        then: { state: idle(1), effects: [{ kind: 'abort', run: 1 }] },
+      },
+      {
+        name: 'a stop aborts the running check and drops the waiting one',
+        state: running(1, [a], [b]),
+        event: { kind: 'stop' },
+        then: { state: idle(1), effects: [{ kind: 'abort', run: 1 }] },
+      },
+    ]);
   });
 
   it('never runs two checks at once and runs every Ready turn, however many end together', () => {

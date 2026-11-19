@@ -46,6 +46,16 @@ function input(overrides: Partial<LaneProfileInput> = {}): LaneProfileInput {
   };
 }
 
+/** What `build` throws, or undefined when it builds. */
+function thrownBy(build: () => unknown): unknown {
+  try {
+    build();
+  } catch (error) {
+    return error;
+  }
+  return undefined;
+}
+
 beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), 'sbx-profile-')));
   home = join(root, 'home');
@@ -59,49 +69,137 @@ afterEach(() => {
 });
 
 describe('buildLaneProfile', () => {
-  it('builds the base fields exactly', () => {
-    const profile = buildLaneProfile(input());
-    expect({
-      enabled: profile.enabled,
-      failIfUnavailable: profile.failIfUnavailable,
-      allowUnsandboxedCommands: profile.allowUnsandboxedCommands,
-      allowAppleEvents: profile.allowAppleEvents,
-      autoAllowBashIfSandboxed: profile.autoAllowBashIfSandboxed,
-    }).toEqual({
-      enabled: true,
-      failIfUnavailable: true,
-      allowUnsandboxedCommands: false,
-      allowAppleEvents: false,
-      autoAllowBashIfSandboxed: false,
-    });
+  it('builds the base, network and credential fields, binding loopback or a Docker socket only when asked', () => {
+    const given = input();
+    const profile = buildLaneProfile(given);
+    expect
+      .soft(
+        {
+          enabled: profile.enabled,
+          failIfUnavailable: profile.failIfUnavailable,
+          allowUnsandboxedCommands: profile.allowUnsandboxedCommands,
+          allowAppleEvents: profile.allowAppleEvents,
+          autoAllowBashIfSandboxed: profile.autoAllowBashIfSandboxed,
+        },
+        'base fields',
+      )
+      .toEqual({
+        enabled: true,
+        failIfUnavailable: true,
+        allowUnsandboxedCommands: false,
+        allowAppleEvents: false,
+        autoAllowBashIfSandboxed: false,
+      });
+    expect
+      .soft(profile.network.allowedDomains, 'allowedDomains')
+      .toEqual(['github.com', '*.npmjs.org']);
+    expect.soft(profile.network.allowMachLookup, 'allowMachLookup').toEqual(['com.apple.FSEvents']);
+    expect.soft(profile.network.allowUnixSockets, 'no Docker socket').toEqual([given.tmpDir]);
+    expect
+      .soft(profile.credentials.envVars, 'envVars')
+      .toEqual([{ name: 'GH_TOKEN', mode: 'deny' }]);
+    expect.soft(profile.network.allowLocalBinding, 'loopback false').toBe(undefined);
+    expect
+      .soft(buildLaneProfile(input({ loopback: true })).network.allowLocalBinding, 'loopback true')
+      .toBe(true);
+    const docker = input({ dockerSockets: ['/var/run/docker.sock'] });
+    expect
+      .soft(buildLaneProfile(docker).network.allowUnixSockets, 'a Docker socket')
+      .toEqual([docker.tmpDir, '/var/run/docker.sock']);
   });
 
-  it('denies slash and every protected read', () => {
-    const given = input();
-    const { denyRead } = buildLaneProfile(given).filesystem;
-    expect(denyRead[0]).toBe('/');
-    for (const path of [...given.protectedReads, ...given.secretFiles]) {
-      expect(denyRead).toContain(path);
+  it('denies slash, every protected read and toolchain secret, and allows back the system paths, the real checkout, the temp dir and the extras', () => {
+    const link = join(root, 'link');
+    symlinkSync(checkout, link);
+    const gitDir = join(root, 'main', '.git', 'worktrees', 'w');
+    const gitdirFile = join(gitDir, 'gitdir');
+    const given = input({ checkout: link, extraReads: [gitDir], extraWrites: [gitDir] });
+    const { allowRead, allowWrite, denyRead, denyWrite } = buildLaneProfile(given).filesystem;
+    expect.soft(denyRead[0], 'first denied read').toBe('/');
+    for (const path of [...given.protectedReads, ...given.secretFiles, ...given.toolchainSecrets])
+      expect.soft(denyRead, `denied read ${path}`).toContain(path);
+    expect
+      .soft(allowRead, 'system reads and temp dir')
+      .toEqual(expect.arrayContaining([...SYSTEM_READS, given.tmpDir]));
+    expect.soft(allowRead, 'the real checkout').toContain(realpathSync(link));
+    expect.soft(allowRead, 'the checkout link').not.toContain(link);
+    expect.soft(allowRead.at(-1), 'last read: the extra read').toBe(gitDir);
+    expect.soft(allowWrite, 'writes').toEqual([given.tmpDir, gitDir]);
+    expect.soft(denyWrite, 'denyWrite with none given').toEqual([]);
+    expect
+      .soft(
+        buildLaneProfile(input({ denyWrites: [gitdirFile] })).filesystem.denyWrite,
+        'denyWrite given',
+      )
+      .toEqual([gitdirFile]);
+  });
+
+  it('drops a read-list, extra-read or extra-write entry under a protected read or that is a secret file', () => {
+    const secret = join(checkout, '.env');
+    const kept = join(root, 'elsewhere');
+    const rows: { name: string; path: string; asExtraRead?: true; darwinOnly?: true }[] = [
+      { name: 'under a protected read', path: join(home, '.claude', 'x'), asExtraRead: true },
+      { name: 'a secret file', path: secret },
+      {
+        name: 'a differently cased protected read',
+        path: join(home, '.CLAUDE', 'y'),
+        darwinOnly: true,
+      },
+    ];
+    for (const row of rows) {
+      if (row.darwinOnly && process.platform !== 'darwin') continue;
+      const { allowRead, allowWrite } = buildLaneProfile(
+        input({
+          secretFiles: [secret],
+          readList: [row.path, kept],
+          extraReads: row.asExtraRead ? [row.path] : [],
+          extraWrites: [row.path],
+        }),
+      ).filesystem;
+      expect.soft(allowRead, `${row.name}: read ${row.path}`).not.toContain(row.path);
+      expect.soft(allowWrite, `${row.name}: write ${row.path}`).not.toContain(row.path);
+      expect.soft(allowRead, `${row.name}: kept ${kept}`).toContain(kept);
     }
   });
 
-  it("allows back the system paths, the checkout's real path and the temp dir", () => {
-    const link = join(root, 'link');
-    symlinkSync(checkout, link);
-    const given = input({ checkout: link });
-    const { allowRead, allowWrite } = buildLaneProfile(given).filesystem;
-    expect(allowRead).toEqual(expect.arrayContaining([...SYSTEM_READS, given.tmpDir]));
-    expect(allowRead).toContain(realpathSync(link));
-    expect(allowRead).not.toContain(link);
-    expect(allowWrite).toEqual([given.tmpDir]);
+  it('opens setup reads read-only, keeping every secret, toolchain secret and sandbox root inside them denied', () => {
+    const skills = join(home, '.claude', 'skills');
+    const opened = buildLaneProfile(input({ setupReads: [skills] })).filesystem;
+    expect.soft(opened.allowRead, 'setup read').toContain(skills);
+    expect.soft(opened.allowWrite, 'setup read written').not.toContain(skills);
+    expect.soft(opened.denyRead, 'the protected read over it').toContain(join(home, '.claude'));
+
+    const skill = join(skills, 's');
+    const secret = join(skill, '.env');
+    const toolchainSecret = join(home, '.cargo', 'credentials.toml');
+    const sandboxRoot = join(root, 'files');
+    const inside = buildLaneProfile(
+      input({
+        secretFiles: [secret],
+        sandboxRoots: [sandboxRoot],
+        setupReads: [skill, secret, toolchainSecret, join(sandboxRoot, 'x')],
+      }),
+    ).filesystem;
+    expect.soft(inside.allowRead, 'skill').toContain(skill);
+    expect.soft(inside.denyRead, 'secret in a setup read').toContain(secret);
+    for (const closed of [secret, toolchainSecret, join(sandboxRoot, 'x')])
+      expect.soft(inside.allowRead, `opened ${closed}`).not.toContain(closed);
   });
 
-  it('drops a read-list entry under a protected read', () => {
-    const under = join(home, '.claude', 'x');
-    const kept = join(root, 'elsewhere');
-    const { allowRead } = buildLaneProfile(input({ readList: [under, kept] })).filesystem;
-    expect(allowRead).not.toContain(under);
-    expect(allowRead).toContain(kept);
+  it('denies a .env folder inside a setup read under /tmp, not refusing the session', () => {
+    // Spelled /tmp, not resolved: the system reads compare as written, and Linux's temp dir is /tmp.
+    const skill = mkdtempSync('/tmp/sbx-setup-');
+    try {
+      const secret = join(skill, '.env');
+      mkdirSync(secret);
+      const { allowRead, denyRead } = buildLaneProfile(
+        input({ setupReads: [skill], setupSecrets: [secret] }),
+      ).filesystem;
+      expect(denyRead).toContain(secret);
+      expect(allowRead).toContain(skill);
+    } finally {
+      rmSync(skill, { recursive: true, force: true });
+    }
   });
 
   /** A lane's sandbox roots as it has them: its temp dir's root, another lanes' root, the files root. */
@@ -130,25 +228,26 @@ describe('buildLaneProfile', () => {
     };
   }
 
-  it('closes every sandbox root but its own temp dir and files, whatever the read list holds', () => {
+  it('closes every sandbox root but its own temp dir and files, leaving out only a built-in read that holds a root', () => {
     const given = withRoots();
     const { allowRead, allowWrite, denyRead, denyWrite } = buildLaneProfile(given).filesystem;
-    expect(denyRead).toEqual(expect.arrayContaining([given.tempRoot, given.lanes, given.files]));
-    expect(allowRead).toEqual(expect.arrayContaining([given.tmpDir, given.envFile]));
-    expect(allowWrite).toEqual([given.tmpDir]);
+    expect
+      .soft(denyRead, 'roots denied')
+      .toEqual(expect.arrayContaining([given.tempRoot, given.lanes, given.files]));
+    expect
+      .soft(allowRead, 'own temp dir and files')
+      .toEqual(expect.arrayContaining([given.tmpDir, given.envFile]));
+    expect.soft(allowWrite, 'writes').toEqual([given.tmpDir]);
     // No read-list entry over, at or in a root survives: none opens another sandbox's files.
-    for (const listed of given.readList) expect(allowRead, listed).not.toContain(listed);
-    expect(denyWrite).toEqual([]);
-  });
+    for (const listed of given.readList) expect.soft(allowRead, listed).not.toContain(listed);
+    expect.soft(denyWrite, 'denyWrite').toEqual([]);
 
-  it.each(SYSTEM_READS.map((entry) => [entry] as const))(
-    'leaves out the built-in read %s when a sandbox root lies under it, keeping the lane own temp dir and files',
-    (entry) => {
+    for (const entry of SYSTEM_READS) {
       const tempRoot = join(entry, 'sbx-shared');
       const files = join(entry, 'sbx-run');
       const envFile = join(files, '10db-env-0123456789ab.sh');
       const tmpDir = join(tempRoot, '10db-abcdef');
-      const { allowRead, denyRead } = buildLaneProfile(
+      const under = buildLaneProfile(
         input({
           tmpDir,
           sandboxRoots: [tempRoot, files],
@@ -156,251 +255,141 @@ describe('buildLaneProfile', () => {
           extraReads: [envFile],
         }),
       ).filesystem;
-      expect(allowRead).not.toContain(entry);
-      expect(allowRead).toEqual(expect.arrayContaining([tmpDir, envFile]));
-      expect(denyRead).toEqual(expect.arrayContaining([tempRoot, files]));
+      expect.soft(under.allowRead, `${entry} left out`).not.toContain(entry);
+      expect
+        .soft(under.allowRead, `${entry}: own temp dir and files`)
+        .toEqual(expect.arrayContaining([tmpDir, envFile]));
+      expect
+        .soft(under.denyRead, `${entry}: roots denied`)
+        .toEqual(expect.arrayContaining([tempRoot, files]));
       // No remaining grant is a root or covers one, so nothing else opens another sandbox's files.
-      for (const granted of allowRead) {
+      for (const granted of under.allowRead) {
         for (const held of [tempRoot, files]) {
-          expect(
-            held === granted || held.startsWith(`${granted}/`),
-            `${granted} covers ${held}`,
-          ).toBe(false);
+          expect
+            .soft(held === granted || held.startsWith(`${granted}/`), `${granted} covers ${held}`)
+            .toBe(false);
         }
       }
-    },
-  );
+    }
 
-  it.each<[string, () => LaneProfileInput]>([
-    // On Linux the test's temp dir lies under `/tmp`, a built-in read, so this row's roots do too.
-    ['roots in the test temp dir', withRoots],
-    // Roots no built-in read holds, on every platform.
-    ['roots no built-in read holds', () => input({ sandboxRoots: ['/10db-nowhere/shared'] })],
-  ])('keeps every built-in read that holds no sandbox root, with %s', (_name, make) => {
-    const given = make();
-    const { allowRead } = buildLaneProfile(given).filesystem;
-    const kept = SYSTEM_READS.filter(
-      (entry) => !given.sandboxRoots.some((sandboxRoot) => isEqualOrUnder(sandboxRoot, entry)),
-    );
-    expect(kept.length).toBeGreaterThan(0);
-    expect(allowRead).toEqual(expect.arrayContaining(kept));
+    const keeps: [string, () => LaneProfileInput][] = [
+      // On Linux the test's temp dir lies under `/tmp`, a built-in read, so this row's roots do too.
+      ['roots in the test temp dir', withRoots],
+      // Roots no built-in read holds, on every platform.
+      ['roots no built-in read holds', () => input({ sandboxRoots: ['/10db-nowhere/shared'] })],
+    ];
+    for (const [name, make] of keeps) {
+      const made = make();
+      const kept = SYSTEM_READS.filter(
+        (entry) => !made.sandboxRoots.some((sandboxRoot) => isEqualOrUnder(sandboxRoot, entry)),
+      );
+      expect.soft(kept.length, `${name}: built-in reads kept`).toBeGreaterThan(0);
+      expect
+        .soft(buildLaneProfile(made).filesystem.allowRead, `${name}: built-in reads`)
+        .toEqual(expect.arrayContaining(kept));
+    }
   });
 
-  it.each<
-    [
-      string,
-      (given: ReturnType<typeof withRoots>) => {
-        readonly writes: Partial<LaneProfileInput>;
-        readonly path: string;
-        readonly root: string;
-      },
-    ]
-  >([
-    // It holds `~/.10db`: other lanes' temp dirs and files there would be the lane's to write.
-    [
-      'the checkout holds the home',
-      (given) => ({ writes: { checkout: home }, path: home, root: given.lanes }),
-    ],
-    // It holds the root of the lane's own temp dir, and every other sandbox's temp dir beside it.
-    [
-      'an extra write holds the temp root',
-      (given) => ({ writes: { extraWrites: [root] }, path: root, root: given.tempRoot }),
-    ],
-    [
-      'an extra write is a sandbox root',
-      (given) => ({ writes: { extraWrites: [given.files] }, path: given.files, root: given.files }),
-    ],
-  ])('refuses the profile when %s, naming both paths', (_name, make) => {
+  it('refuses the profile when a write holds a sandbox root, naming both paths', () => {
     const given = withRoots();
-    const { writes, path, root: held } = make(given);
-    const build = () => buildLaneProfile({ ...given, ...writes });
-    expect(build).toThrow(SandboxProfileError);
-    expect(build).toThrow(
-      `${path} holds ${held}, where 10db keeps every sandbox's temp dirs and files`,
-    );
-  });
-
-  it('appends extra reads and writes, and filters them like the read list', () => {
-    const gitDir = join(root, 'main', '.git', 'worktrees', 'w');
-    const protectedExtra = join(home, '.claude', 'y');
-    const { allowRead, allowWrite } = buildLaneProfile(
-      input({
-        extraReads: [gitDir, protectedExtra],
-        extraWrites: [gitDir, protectedExtra],
-      }),
-    ).filesystem;
-    expect(allowRead.at(-1)).toBe(gitDir);
-    expect(allowWrite.at(-1)).toBe(gitDir);
-    expect(allowRead).not.toContain(protectedExtra);
-    expect(allowWrite).not.toContain(protectedExtra);
-  });
-
-  it('denies writes to exactly the paths it is given', () => {
-    const gitdirFile = join(root, 'main', '.git', 'worktrees', 'w', 'gitdir');
-    expect(buildLaneProfile(input()).filesystem.denyWrite).toEqual([]);
-    expect(buildLaneProfile(input({ denyWrites: [gitdirFile] })).filesystem.denyWrite).toEqual([
-      gitdirFile,
-    ]);
-  });
-
-  it.each([
-    ['false', false, undefined],
-    ['true', true, true],
-  ])('sets local binding only when asked: %s', (_name, loopback, expected) => {
-    expect(buildLaneProfile(input({ loopback })).network.allowLocalBinding).toBe(expected);
-  });
-
-  it('opens a Docker socket only when given one, beside the temp dir', () => {
-    const given = input({ dockerSockets: ['/var/run/docker.sock'] });
-    expect(buildLaneProfile(given).network.allowUnixSockets).toEqual([
-      given.tmpDir,
-      '/var/run/docker.sock',
-    ]);
-    expect(buildLaneProfile(input()).network.allowUnixSockets).toEqual([input().tmpDir]);
-  });
-
-  it('refuses a Docker socket the profile cannot spell', () => {
-    expect(() => buildLaneProfile(input({ dockerSockets: ['/run/a*b.sock'] }))).toThrow(
-      SandboxProfileError,
-    );
-  });
-
-  it('sets the network and credential fields', () => {
-    const given = input();
-    const profile = buildLaneProfile(given);
-    expect(profile.network.allowedDomains).toEqual(['github.com', '*.npmjs.org']);
-    expect(profile.network.allowMachLookup).toEqual(['com.apple.FSEvents']);
-    expect(profile.network.allowUnixSockets).toEqual([given.tmpDir]);
-    expect(profile.credentials.envVars).toEqual([{ name: 'GH_TOKEN', mode: 'deny' }]);
-  });
-
-  it.each<[string, Partial<LaneProfileInput>, string, string]>([
-    [
-      'a glob in a secret file',
-      { secretFiles: ['/r/.env*'] },
-      'filesystem.denyRead',
-      "a path can't be used in the sandbox profile: /r/.env* (glob characters, `\\` or a newline)",
-    ],
-    [
-      'a relative read-list path',
-      { readList: ['rel/x'] },
-      'filesystem.allowRead',
-      "a path can't be used in the sandbox profile: rel/x (not a normalized absolute path)",
-    ],
-    [
-      'a brace in an extra write',
-      { extraWrites: ['/r/{a,b}'] },
-      'filesystem.allowWrite',
-      "a path can't be used in the sandbox profile: /r/{a,b} (glob characters, `\\` or a newline)",
-    ],
-    [
-      'a glob in a denied write',
-      { denyWrites: ['/r/.git/*'] },
-      'filesystem.denyWrite',
-      "a path can't be used in the sandbox profile: /r/.git/* (glob characters, `\\` or a newline)",
-    ],
-    [
-      'a URL as a domain',
-      { allowedDomains: ['https://x'] },
-      'network.allowedDomains',
-      "a host can't be used in the sandbox profile: https://x (not a lower-case host or *. wildcard)",
-    ],
-    [
-      'a bad env name',
-      { deniedEnvNames: ['A=B'] },
-      'credentials.envVars',
-      "an env name can't be used in the sandbox profile: A=B",
-    ],
-  ])('refuses %s, naming the value and the field', (_name, overrides, field, message) => {
-    let thrown: unknown;
-    try {
-      buildLaneProfile(input(overrides));
-    } catch (error) {
-      thrown = error;
-    }
-    expect(thrown).toBeInstanceOf(SandboxProfileError);
-    expect(thrown).toHaveProperty('message', message);
-    expect(thrown).toHaveProperty('field', expect.stringContaining(field));
-  });
-
-  it.each<[string, string]>([
-    ['a dot-dot segment', '/h/x/../.claude/y'],
-    ['a doubled slash', '//h/.claude/y'],
-    ['a dot segment', '/h/.claude/./y'],
-    ['a trailing slash', '/h/.claude/y/'],
-  ])('refuses a read-list path with %s', (_name, path) => {
-    expect(() => buildLaneProfile(input({ readList: [path] }))).toThrow(SandboxProfileError);
-  });
-
-  it.skipIf(process.platform !== 'darwin')(
-    'drops a differently cased spelling of a protected read',
-    () => {
-      const spelled = join(home, '.CLAUDE', 'y');
-      const { allowRead, allowWrite } = buildLaneProfile(
-        input({ readList: [spelled], extraWrites: [spelled] }),
-      ).filesystem;
-      expect(allowRead).not.toContain(spelled);
-      expect(allowWrite).not.toContain(spelled);
-    },
-  );
-
-  it('opens setup reads under a protected read, read-only', () => {
-    const skills = join(home, '.claude', 'skills');
-    const { allowRead, allowWrite, denyRead } = buildLaneProfile(
-      input({ setupReads: [skills] }),
-    ).filesystem;
-    expect(allowRead).toContain(skills);
-    expect(allowWrite).not.toContain(skills);
-    expect(denyRead).toContain(join(home, '.claude'));
-  });
-
-  it('keeps a secret file inside a setup read denied', () => {
-    const skill = join(home, '.claude', 'skills', 's');
-    const secret = join(skill, '.env');
-    const toolchainSecret = join(home, '.cargo', 'credentials.toml');
-    const sandboxRoot = join(root, 'files');
-    const { allowRead, denyRead } = buildLaneProfile(
-      input({
-        secretFiles: [secret],
-        sandboxRoots: [sandboxRoot],
-        setupReads: [skill, secret, toolchainSecret, join(sandboxRoot, 'x')],
-      }),
-    ).filesystem;
-    expect(allowRead).toContain(skill);
-    expect(denyRead).toContain(secret);
-    for (const closed of [secret, toolchainSecret, join(sandboxRoot, 'x')])
-      expect(allowRead).not.toContain(closed);
-  });
-
-  it('denies a .env folder inside a setup read under /tmp, not refusing the session', () => {
-    // Spelled /tmp, not resolved: the system reads compare as written, and Linux's temp dir is /tmp.
-    const skill = mkdtempSync('/tmp/sbx-setup-');
-    try {
-      const secret = join(skill, '.env');
-      mkdirSync(secret);
-      const { allowRead, denyRead } = buildLaneProfile(
-        input({ setupReads: [skill], setupSecrets: [secret] }),
-      ).filesystem;
-      expect(denyRead).toContain(secret);
-      expect(allowRead).toContain(skill);
-    } finally {
-      rmSync(skill, { recursive: true, force: true });
+    const rows: [string, Partial<LaneProfileInput>, string, string][] = [
+      // It holds `~/.10db`: other lanes' temp dirs and files there would be the lane's to write.
+      ['the checkout holds the home', { checkout: home }, home, given.lanes],
+      // It holds the root of the lane's own temp dir, and every other sandbox's temp dir beside it.
+      ['an extra write holds the temp root', { extraWrites: [root] }, root, given.tempRoot],
+      [
+        'an extra write is a sandbox root',
+        { extraWrites: [given.files] },
+        given.files,
+        given.files,
+      ],
+    ];
+    for (const [name, writes, path, held] of rows) {
+      const error = thrownBy(() => buildLaneProfile({ ...given, ...writes }));
+      expect.soft(error, name).toBeInstanceOf(SandboxProfileError);
+      expect
+        .soft((error as Error | undefined)?.message, name)
+        .toContain(`${path} holds ${held}, where 10db keeps every sandbox's temp dirs and files`);
     }
   });
 
-  it('refuses a setup secret that holds what every lane command needs', () => {
-    expect(() => buildLaneProfile(input({ setupSecrets: [checkout] }))).toThrow(
-      /holds .* that every lane command needs/,
-    );
+  it('refuses a value the profile cannot spell, naming the value and the field', () => {
+    const named: [string, Partial<LaneProfileInput>, string, string][] = [
+      [
+        'a glob in a secret file',
+        { secretFiles: ['/r/.env*'] },
+        'filesystem.denyRead',
+        "a path can't be used in the sandbox profile: /r/.env* (glob characters, `\\` or a newline)",
+      ],
+      [
+        'a relative read-list path',
+        { readList: ['rel/x'] },
+        'filesystem.allowRead',
+        "a path can't be used in the sandbox profile: rel/x (not a normalized absolute path)",
+      ],
+      [
+        'a brace in an extra write',
+        { extraWrites: ['/r/{a,b}'] },
+        'filesystem.allowWrite',
+        "a path can't be used in the sandbox profile: /r/{a,b} (glob characters, `\\` or a newline)",
+      ],
+      [
+        'a glob in a denied write',
+        { denyWrites: ['/r/.git/*'] },
+        'filesystem.denyWrite',
+        "a path can't be used in the sandbox profile: /r/.git/* (glob characters, `\\` or a newline)",
+      ],
+      [
+        'a URL as a domain',
+        { allowedDomains: ['https://x'] },
+        'network.allowedDomains',
+        "a host can't be used in the sandbox profile: https://x (not a lower-case host or *. wildcard)",
+      ],
+      [
+        'a bad env name',
+        { deniedEnvNames: ['A=B'] },
+        'credentials.envVars',
+        "an env name can't be used in the sandbox profile: A=B",
+      ],
+    ];
+    for (const [name, overrides, field, message] of named) {
+      const error = thrownBy(() => buildLaneProfile(input(overrides)));
+      expect.soft(error, name).toBeInstanceOf(SandboxProfileError);
+      expect.soft(error, name).toHaveProperty('message', message);
+      expect.soft(error, name).toHaveProperty('field', expect.stringContaining(field));
+    }
+    const refused: [string, Partial<LaneProfileInput>][] = [
+      ['a read-list path with a dot-dot segment', { readList: ['/h/x/../.claude/y'] }],
+      ['a read-list path with a doubled slash', { readList: ['//h/.claude/y'] }],
+      ['a read-list path with a dot segment', { readList: ['/h/.claude/./y'] }],
+      ['a read-list path with a trailing slash', { readList: ['/h/.claude/y/'] }],
+      ['a Docker socket with a glob', { dockerSockets: ['/run/a*b.sock'] }],
+      ['a checkout that does not exist', { checkout: join(root, 'missing') }],
+    ];
+    for (const [name, overrides] of refused)
+      expect
+        .soft(
+          thrownBy(() => buildLaneProfile(input(overrides))),
+          name,
+        )
+        .toBeInstanceOf(SandboxProfileError);
   });
 
-  it('drops a read-list entry that is a secret file', () => {
-    const secret = join(checkout, '.env');
-    const { allowRead, allowWrite } = buildLaneProfile(
-      input({ secretFiles: [secret], readList: [secret], extraWrites: [secret] }),
-    ).filesystem;
-    expect(allowRead).not.toContain(secret);
-    expect(allowWrite).not.toContain(secret);
+  it("refuses a setup or toolchain secret that holds what every lane command needs, with the secret's own message", () => {
+    expect
+      .soft(
+        thrownBy(() => buildLaneProfile(input({ setupSecrets: [checkout] }))),
+        'setup secret',
+      )
+      .toHaveProperty('message', expect.stringMatching(/holds .* that every lane command needs/));
+    const toolchain = thrownBy(() => buildLaneProfile(input({ toolchainSecrets: [checkout] })));
+    expect.soft(toolchain, 'toolchain secret').toBeInstanceOf(SandboxProfileError);
+    expect
+      .soft((toolchain as Error | undefined)?.message, 'toolchain secret')
+      .toMatch(
+        /a toolchain file that can hold a registry token, .*, holds .* every lane command needs/,
+      );
+    expect.soft((toolchain as Error | undefined)?.message, 'toolchain secret').not.toMatch(/\.env/);
   });
 
   describe('toolchain listings', () => {
@@ -429,18 +418,29 @@ describe('buildLaneProfile', () => {
       expect(patterned).toEqual([listingGrant(installs()), childListingGrant(installs())]);
     });
 
-    it.each([
-      ['the root as a child listing', () => '//*'],
-      ['a set with no leading slash', () => '[/]'],
-      ['an empty set', (dir: string) => `${dir.slice(0, -1)}[]`],
-      ['a recursive glob', (dir: string) => `${dir}/**`],
-      ['a wildcard in the middle', (dir: string) => `${dirname(dirname(dir))}/*/installs`],
-      ['a set of several characters', (dir: string) => `${dir}[st]`],
-      ['a brace', (dir: string) => `${dir}{a,b}`],
-      ['a glob with no listing dir', () => '/*'],
-    ])('refuses %s as a listing', (_name, pattern) => {
-      const build = () => buildLaneProfile(input({ toolchainListings: [pattern(installs())] }));
-      expect(build).toThrow(SandboxProfileError);
+    it('refuses any other pattern as a listing, and a pattern in the ordinary read list', () => {
+      const dir = installs();
+      const rows: [string, Partial<LaneProfileInput>][] = [
+        ['the root as a child listing', { toolchainListings: ['//*'] }],
+        ['a set with no leading slash', { toolchainListings: ['[/]'] }],
+        ['an empty set', { toolchainListings: [`${dir.slice(0, -1)}[]`] }],
+        ['a recursive glob', { toolchainListings: [`${dir}/**`] }],
+        [
+          'a wildcard in the middle',
+          { toolchainListings: [`${dirname(dirname(dir))}/*/installs`] },
+        ],
+        ['a set of several characters', { toolchainListings: [`${dir}[st]`] }],
+        ['a brace', { toolchainListings: [`${dir}{a,b}`] }],
+        ['a glob with no listing dir', { toolchainListings: ['/*'] }],
+        ['a pattern in the read list', { readList: [`${dir}/*`] }],
+      ];
+      for (const [name, overrides] of rows)
+        expect
+          .soft(
+            thrownBy(() => buildLaneProfile(input(overrides))),
+            name,
+          )
+          .toBeInstanceOf(SandboxProfileError);
     });
 
     it('drops a listing of a dir that is, or lies under, a secret file or a protected read', () => {
@@ -466,60 +466,25 @@ describe('buildLaneProfile', () => {
       ])
         expect(allowRead).not.toContain(dropped);
     });
-
-    it('refuses a pattern in the ordinary read list as before', () => {
-      expect(() => buildLaneProfile(input({ readList: [`${installs()}/*`] }))).toThrow(
-        SandboxProfileError,
-      );
-    });
-  });
-
-  it('denies the toolchain secrets to the commands', () => {
-    expect(buildLaneProfile(input()).filesystem.denyRead).toContain(
-      join(home, '.cargo', 'credentials.toml'),
-    );
-  });
-
-  it("refuses with a toolchain message, not the .env one, when a toolchain secret holds a lane's path", () => {
-    const build = () => buildLaneProfile(input({ toolchainSecrets: [checkout] }));
-    expect(build).toThrow(SandboxProfileError);
-    expect(build).toThrow(
-      /a toolchain file that can hold a registry token, .*, holds .* every lane command needs/,
-    );
-    expect(build).not.toThrow(/\.env/);
-  });
-
-  it('refuses a checkout that does not exist', () => {
-    expect(() => buildLaneProfile(input({ checkout: join(root, 'missing') }))).toThrow(
-      SandboxProfileError,
-    );
   });
 });
 
 describe('protectedReads', () => {
-  it('lists the data dir, config dirs and credential paths, deduplicated', () => {
-    const list = protectedReads({
-      home: '/h',
-      dataDir: '/d',
-      configDirs: ['/c', '/h/.claude'],
-    });
-    expect(list).toEqual([
-      '/d',
-      '/c',
-      '/h/.claude',
-      '/h/.claude.json',
-      '/h/.codex',
-      '/h/.agents',
-      '/h/Library/Keychains',
-      '/usr/bin/security',
-    ]);
-  });
-});
-
-describe('protectedReads, relative input', () => {
-  it('resolves a relative data or config dir instead of dropping it', () => {
-    const list = protectedReads({ home: '/h', dataDir: 'data', configDirs: ['cfg'] });
-    expect(list).toContain(resolve('data'));
-    expect(list).toContain(resolve('cfg'));
+  it('lists the data dir, config dirs and credential paths, deduplicated, resolving a relative dir', () => {
+    expect
+      .soft(protectedReads({ home: '/h', dataDir: '/d', configDirs: ['/c', '/h/.claude'] }))
+      .toEqual([
+        '/d',
+        '/c',
+        '/h/.claude',
+        '/h/.claude.json',
+        '/h/.codex',
+        '/h/.agents',
+        '/h/Library/Keychains',
+        '/usr/bin/security',
+      ]);
+    const relative = protectedReads({ home: '/h', dataDir: 'data', configDirs: ['cfg'] });
+    expect.soft(relative, 'relative data dir').toContain(resolve('data'));
+    expect.soft(relative, 'relative config dir').toContain(resolve('cfg'));
   });
 });

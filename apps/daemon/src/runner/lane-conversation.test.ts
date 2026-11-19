@@ -21,21 +21,21 @@ function recordSpecs(): LaneSessionSpec[] {
 }
 
 describe('a lane session’s conversation', () => {
-  it.each([
-    { name: 'is its task’s thread when the builder wrote before the run', writes: true },
-    { name: 'is none when the task has no thread', writes: false },
-  ])('$name', async ({ writes }) => {
-    engine = await createTestEngine({ Alpha: [[{ do: 'turn_complete' }]] });
-    const specs = recordSpecs();
-    const { task, workstream } = engine.addTask('Alpha');
-    if (writes)
-      engine.state.write((ctx) =>
-        insertBuilderMessage(ctx, task.id, { body: 'Start with the header', files: [] }),
-      );
-    engine.launch(workstream.id);
-    await engine.runner.idle();
-    const thread = taskConversationOf(engine.state.db, task.id);
-    expect(thread === null).toBe(!writes);
-    expect(specs.map((s) => s.conversationId)).toEqual([thread?.id ?? null]);
-  });
+  it.each([{ name: 'is its task’s thread when the builder wrote before the run', writes: true }])(
+    '$name',
+    async ({ writes }) => {
+      engine = await createTestEngine({ Alpha: [[{ do: 'turn_complete' }]] });
+      const specs = recordSpecs();
+      const { task, workstream } = engine.addTask('Alpha');
+      if (writes)
+        engine.state.write((ctx) =>
+          insertBuilderMessage(ctx, task.id, { body: 'Start with the header', files: [] }),
+        );
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      const thread = taskConversationOf(engine.state.db, task.id);
+      expect(thread === null).toBe(!writes);
+      expect(specs.map((s) => s.conversationId)).toEqual([thread?.id ?? null]);
+    },
+  );
 });

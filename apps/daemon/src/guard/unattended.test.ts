@@ -98,23 +98,26 @@ describe('unattendedOutcome', () => {
     expect(new Set(TABLE.map((r) => r[0]))).toEqual(new Set(Object.values(AskKind)));
   });
 
-  it.each(rows)('$kind on $judge is $outcome', ({ kind, judge, outcome, row }) => {
-    expect(unattendedOutcome(kind, judge)).toBe(outcome);
-    expect(limitOfAsk(kind)).toBe(row[3]);
-    const answer = answerUnattended({
-      verdict: { decision: 'ask', reason: 'asked', kind },
-      judge,
-      callKey: 'k',
-      approvedKeys: [],
-      path: '/home/x',
-      toolName: 'mcp__x__y',
-    });
-    if (outcome === O.Skip) {
-      expect(answer.verdict.decision).toBe('deny');
-      expect(answer.skip).toMatchObject({ kind, limit: row[3] });
-      if (row[4] !== null) expect(answer.skip?.reason).toBe(row[4]);
-    } else {
-      expect(answer).toEqual({ verdict: { decision: 'allow' }, skip: null });
+  it('answers each ask kind on each judge by the table: its outcome, limit and reason', () => {
+    for (const { kind, judge, outcome, row } of rows) {
+      const label = `${kind} on ${judge}`;
+      expect.soft(unattendedOutcome(kind, judge), label).toBe(outcome);
+      expect.soft(limitOfAsk(kind), label).toBe(row[3]);
+      const answer = answerUnattended({
+        verdict: { decision: 'ask', reason: 'asked', kind },
+        judge,
+        callKey: 'k',
+        approvedKeys: [],
+        path: '/home/x',
+        toolName: 'mcp__x__y',
+      });
+      if (outcome === O.Skip) {
+        expect.soft(answer.verdict.decision, label).toBe('deny');
+        expect.soft(answer.skip, label).toMatchObject({ kind, limit: row[3] });
+        if (row[4] !== null) expect.soft(answer.skip?.reason, label).toBe(row[4]);
+      } else {
+        expect.soft(answer, label).toEqual({ verdict: { decision: 'allow' }, skip: null });
+      }
     }
   });
 });
@@ -223,15 +226,6 @@ describe('the guard’s asks, answered for a lane nobody watches', () => {
   }
   const skipOf = (a: ReturnType<typeof unattended>) => a.skip?.kind ?? null;
 
-  it('a write to .claude/settings.json is config_write and allowed', () => {
-    expect(
-      unattended('Write', { file_path: `${repo.path}/.claude/settings.json`, content: '{}' }),
-    ).toEqual({
-      verdict: { decision: 'allow' },
-      skip: null,
-    });
-  });
-
   // Config is the checkout's by where the path resolves, never by how it is spelled.
   describe('a config write, by where it resolves', () => {
     const elsewhere = tempDir('unattended-elsewhere');
@@ -241,23 +235,26 @@ describe('the guard’s asks, answered for a lane nobody watches', () => {
     const alias = join(elsewhere.path, 'alias');
     symlinkSync(repo.path, alias);
     symlinkSync(elsewhere.path, join(repo.path, 'out'));
-    it.each([
-      ['through a link to the checkout is config_write and allowed', () => alias, 'allow'],
-      ['climbing out with .. is never allowed', () => `${repo.path}/../x`, 'deny'],
-      ['through a link out of the checkout is never allowed', () => `${repo.path}/out`, 'deny'],
-    ])('%s', (_name, root, decision) => {
-      const answer = unattended('Write', {
-        file_path: `${root()}/.claude/settings.json`,
-        content: '{}',
+    it('allows .claude/settings.json in the checkout as config_write, and never outside it', () => {
+      expect(
+        unattended('Write', { file_path: `${repo.path}/.claude/settings.json`, content: '{}' }),
+      ).toEqual({
+        verdict: { decision: 'allow' },
+        skip: null,
       });
-      expect(answer.verdict.decision).toBe(decision);
+      const rows: [string, string, 'allow' | 'deny'][] = [
+        ['through a link to the checkout is config_write and allowed', alias, 'allow'],
+        ['climbing out with .. is never allowed', `${repo.path}/../x`, 'deny'],
+        ['through a link out of the checkout is never allowed', `${repo.path}/out`, 'deny'],
+      ];
+      for (const [name, root, decision] of rows) {
+        const answer = unattended('Write', {
+          file_path: `${root}/.claude/settings.json`,
+          content: '{}',
+        });
+        expect.soft(answer.verdict.decision, name).toBe(decision);
+      }
     });
-  });
-
-  it('a write to .vscode/tasks.json is a skip', () => {
-    expect(
-      skipOf(unattended('Write', { file_path: `${repo.path}/.vscode/tasks.json`, content: '{}' })),
-    ).toBe('editor_config_write');
   });
 
   it('a write to ~/.zshrc never waits: the guard refuses a write outside the checkout first', () => {
@@ -265,36 +262,41 @@ describe('the guard’s asks, answered for a lane nobody watches', () => {
     expect(answer.verdict.decision).toBe('deny');
   });
 
-  it('WebFetch on rules is a skip', () => {
-    expect(skipOf(unattended('WebFetch', { url: 'https://example.com', prompt: 'x' }))).toBe(
-      'web_or_mcp',
-    );
+  it('skips each ask by its kind, on native too where the classifier may not judge it', () => {
+    const fetch = { url: 'https://example.com', prompt: 'x' };
+    const unread = { command: 'SUB=add; pnpm $SUB x' };
+    const rows: [string, string, Record<string, unknown>, JudgeKind, string][] = [
+      [
+        'a write to .vscode/tasks.json',
+        'Write',
+        { file_path: `${repo.path}/.vscode/tasks.json`, content: '{}' },
+        JudgeKind.Rules,
+        'editor_config_write',
+      ],
+      ['WebFetch on rules', 'WebFetch', fetch, JudgeKind.Rules, 'web_or_mcp'],
+      [
+        'WebFetch with the Web switch off on native',
+        'WebFetch',
+        fetch,
+        JudgeKind.Native,
+        'web_or_mcp',
+      ],
+      ['a third-party MCP tool on native', 'mcp__docs__search', {}, JudgeKind.Native, 'web_or_mcp'],
+      [
+        'a Read of a home path on native',
+        'Read',
+        { file_path: join(homedir(), 'notes.txt') },
+        JudgeKind.Native,
+        'read_outside',
+      ],
+      ['an unread hazard on native', 'Bash', unread, JudgeKind.Native, 'unread_hazard'],
+      ['an unread hazard on rules', 'Bash', unread, JudgeKind.Rules, 'unread_hazard'],
+      ['an unread hazard on tendb', 'Bash', unread, JudgeKind.Tendb, 'unread_hazard'],
+    ];
+    for (const [name, tool, input, judge, kind] of rows) {
+      expect.soft(skipOf(unattended(tool, input, judge)), name).toBe(kind);
+    }
   });
-
-  it('WebFetch with the Web switch off on native is a skip, not the classifier’s', () => {
-    expect(
-      skipOf(unattended('WebFetch', { url: 'https://example.com', prompt: 'x' }, JudgeKind.Native)),
-    ).toBe('web_or_mcp');
-  });
-
-  it('a third-party MCP tool on native is a skip, not the classifier’s', () => {
-    expect(skipOf(unattended('mcp__docs__search', {}, JudgeKind.Native))).toBe('web_or_mcp');
-  });
-
-  it('a Read of a home path on native is a skip, not the classifier’s', () => {
-    expect(
-      skipOf(unattended('Read', { file_path: join(homedir(), 'notes.txt') }, JudgeKind.Native)),
-    ).toBe('read_outside');
-  });
-
-  it.each([JudgeKind.Native, JudgeKind.Rules, JudgeKind.Tendb])(
-    '"SUB=add; pnpm $SUB x" is a skip on %s',
-    (judge) => {
-      expect(skipOf(unattended('Bash', { command: 'SUB=add; pnpm $SUB x' }, judge))).toBe(
-        'unread_hazard',
-      );
-    },
-  );
 
   it('"while :; do :; done &" goes to the classifier on native and is a skip on rules', () => {
     expect(
@@ -363,8 +365,8 @@ describe('the floor’s refusals, listed for a lane nobody watches', () => {
     });
   }
 
-  it.each([JudgeKind.Rules])('a deploy on %s unattended is a writes_live skip', (judge) => {
-    const answer = run('vercel deploy --prod', { judge });
+  it('a deploy on rules unattended is a writes_live skip', () => {
+    const answer = run('vercel deploy --prod', { judge: JudgeKind.Rules });
     expect(answer.skip).toMatchObject({ kind: 'deploy', limit: 'writes_live' });
     expect(answer.verdict).toEqual({
       decision: 'deny',
@@ -380,19 +382,26 @@ describe('the floor’s refusals, listed for a lane nobody watches', () => {
     });
   });
 
-  it.each([
-    ['beside an unclaimed hazard command', 'vercel deploy --prod && pnpm add left-pad', null],
-    [
-      'inside a nested script, then a refused segment',
-      "sh -c 'echo hi; vercel deploy --prod'; git push",
-      null,
-    ],
-    ['beside a git push', 'vercel deploy --prod && git push', null],
-    ['beside a docker call while Docker is off', 'vercel deploy --prod && docker ps', 'docker_off'],
-  ] as const)('an approved deploy %s is still refused, for the rest', (_name, command, skipped) => {
-    const answer = run(command, { deployApproved: true });
-    expect(answer.verdict.decision).toBe('deny');
-    expect(answer.skip?.kind ?? null).toBe(skipped);
+  it('an approved deploy beside a refused segment is still refused, for the rest', () => {
+    const rows: [string, string, string | null][] = [
+      ['beside an unclaimed hazard command', 'vercel deploy --prod && pnpm add left-pad', null],
+      [
+        'inside a nested script, then a refused segment',
+        "sh -c 'echo hi; vercel deploy --prod'; git push",
+        null,
+      ],
+      ['beside a git push', 'vercel deploy --prod && git push', null],
+      [
+        'beside a docker call while Docker is off',
+        'vercel deploy --prod && docker ps',
+        'docker_off',
+      ],
+    ];
+    for (const [name, command, skipped] of rows) {
+      const answer = run(command, { deployApproved: true });
+      expect.soft(answer.verdict.decision, name).toBe('deny');
+      expect.soft(answer.skip?.kind ?? null, name).toBe(skipped);
+    }
   });
 
   it('a deploy on native passes as T3 left it', () => {
@@ -405,27 +414,25 @@ describe('the floor’s refusals, listed for a lane nobody watches', () => {
     expect(answer.skip).toBeNull();
   });
 
-  it.each([JudgeKind.Native, JudgeKind.Rules, JudgeKind.Tendb])(
-    'git push stays refused under %s',
-    (judge) => {
+  it('git push stays refused under every judge', () => {
+    for (const judge of [JudgeKind.Native, JudgeKind.Rules, JudgeKind.Tendb]) {
       const answer = run('git push origin HEAD', { judge });
-      expect(answer.verdict.decision).toBe('deny');
-      expect(answer.skip).toBeNull();
-    },
-  );
+      expect.soft(answer.verdict.decision, judge).toBe('deny');
+      expect.soft(answer.skip, judge).toBeNull();
+    }
+  });
 
-  it.each(['docker ps', 'podman run alpine', 'FOO=1 docker-compose up'])(
-    '"%s" with Docker off unattended is a skip naming the switch',
-    (command) => {
+  it('a container command with Docker off unattended is a skip naming the switch', () => {
+    for (const command of ['docker ps', 'podman run alpine', 'FOO=1 docker-compose up']) {
       const answer = run(command);
-      expect(answer.skip?.kind).toBe('docker_off');
-      expect(answer.verdict).toEqual({
+      expect.soft(answer.skip?.kind, command).toBe('docker_off');
+      expect.soft(answer.verdict, command).toEqual({
         decision: 'deny',
         reason:
           'Skipped: Docker is off for this project. Turning it on is Settings › Project › Docker. Carry on without it and say in your handoff what you skipped.',
       });
-    },
-  );
+    }
+  });
 
   it('docker ps with Docker on runs', () => {
     expect(run('docker ps', { dockerOn: true }).skip).toBeNull();

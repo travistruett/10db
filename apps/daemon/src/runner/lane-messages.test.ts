@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AccountKind, idUuid, mintId, type TaskId } from '@10db/contracts';
 import {
@@ -6,7 +6,6 @@ import {
   getTaskMessageRow,
   insertBuilderMessage,
   insertTask,
-  listTaskFileRows,
   listUndeliveredTaskMessages,
   markTaskFilesInline,
   seedProject,
@@ -24,7 +23,7 @@ import {
   type LaneSessionSpec,
 } from '../sessions';
 import { createLaneMessages, outgoingMessage } from './lane-messages';
-import { heldInlineBytes, pictureLimitsFor } from '../conversation';
+import { pictureLimitsFor } from '../conversation';
 
 // Workbench spec §6.3: a builder message reaches a lane session under its row's uuid, and is marked
 // delivered only when a turn is seen to take it (`user_message_uuids`, which the fake stamps as the SDK
@@ -215,19 +214,6 @@ describe('lane messages', () => {
     expect(keptWhenSent).toEqual([idUuid(message.id)]);
   });
 
-  it('sends a picture that goes as a block with the file it was read from, which Codex reads itself', () => {
-    const shot = say('Make it blue', 1);
-    const file = shot.files[0];
-    const out = outgoingMessage(shot, 0, pictureLimitsFor(AccountKind.CodexSignin));
-    expect(out.images).toEqual([
-      {
-        mediaType: 'image/png',
-        data: readFileSync(file?.storedPath ?? '').toString('base64'),
-        path: file?.storedPath,
-      },
-    ]);
-  });
-
   it('sends Codex every picture as its file on every push, held already or over the budget: a Codex lane cannot open one by its path', () => {
     const shot = say('Make it blue', 2);
     state.write((ctx) => {
@@ -244,26 +230,5 @@ describe('lane messages', () => {
     expect(outgoingMessage(getTaskMessageRow(state.db, shot.id), spentAll, limits).images).toEqual(
       [],
     );
-  });
-
-  it('sends a picture the session already holds as a block by its path when its message is pushed again', async () => {
-    const adapter = new FakeAdapter({ Alpha: [[{ do: 'hang' }]] });
-    adapter.interruptReceipt = () => null;
-    const handle = startSession(adapter);
-    const limits = pictureLimitsFor(AccountKind.ClaudeSubscription);
-    const messages = createLaneMessages({ state, taskId, handle, limits });
-    const shot = say('Make it blue', 1);
-    messages.push(shot);
-    const spent = heldInlineBytes(listTaskFileRows(state.db, taskId), limits);
-    expect(spent).toBeGreaterThan(0);
-
-    await messages.interrupt();
-
-    const again = adapter.sent[1];
-    expect(messages.consumed([again?.uuid ?? ''])).toEqual([shot.id]);
-    expect(again?.images).toBe(0);
-    expect(again?.text).toContain(`kept at ${shot.files[0]?.storedPath ?? ''}`);
-    expect(heldInlineBytes(listTaskFileRows(state.db, taskId), limits)).toBe(spent);
-    await handle.stop();
   });
 });

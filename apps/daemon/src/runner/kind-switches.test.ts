@@ -23,27 +23,36 @@ const seeded = SEEDED_KINDS.map((kind) => KindInput.parse(kind));
 const gateRun = [{ kind: 'gate', exitCode: 0 }] as const;
 
 describe('the seeded kinds carry the behaviour the risk tags had', () => {
-  it.each(Object.entries(BEFORE))('%s', (key, before) => {
-    const kind = seeded.find((k) => k.key === key);
-    if (kind === undefined) throw new Error(`no seeded kind ${key}`);
-    const task = { kinds: [kind] };
-    expect(forcedReview(task.kinds, { files: [] }, []) !== null).toBe(before.review);
-    expect(
-      shipsAtRetryLimit({ role: StepRole.Review, kinds: task.kinds, evidence: [...gateRun] }),
-    ).toBe(!before.failsAtLimit);
-    const placement = proposePlacement(
-      { delivery: Delivery.PullRequest, workspaceMode: WorkspaceMode.Shared, isolate: [] },
-      { areas: [], kinds: [kind] },
-    );
-    expect(placement.workspaceMode === WorkspaceMode.Worktree).toBe(before.ownCopy);
-    const filing = proposalFiling({
-      kind: 'new_task',
-      title: 'Reword the criterion',
-      body: 'It is unclear.',
-      kinds: [key],
-      known: seeded,
-      limit: 1200,
-    });
-    expect(!filing.file).toBe(before.card);
+  it('forces review, fails at the limit, takes its own copy and raises a card as its risk tag did', () => {
+    for (const [key, before] of Object.entries(BEFORE)) {
+      const kind = seeded.find((k) => k.key === key);
+      if (kind === undefined) throw new Error(`no seeded kind ${key}`);
+      const task = { kinds: [kind] };
+      expect
+        .soft(forcedReview(task.kinds, { files: [] }, []) !== null, `${key}: review`)
+        .toBe(before.review);
+      expect
+        .soft(
+          shipsAtRetryLimit({ role: StepRole.Review, kinds: task.kinds, evidence: [...gateRun] }),
+          `${key}: ships at the limit`,
+        )
+        .toBe(!before.failsAtLimit);
+      const placement = proposePlacement(
+        { delivery: Delivery.PullRequest, workspaceMode: WorkspaceMode.Shared, isolate: [] },
+        { areas: [], kinds: [kind] },
+      );
+      expect
+        .soft(placement.workspaceMode === WorkspaceMode.Worktree, `${key}: own copy`)
+        .toBe(before.ownCopy);
+      const filing = proposalFiling({
+        kind: 'new_task',
+        title: 'Reword the criterion',
+        body: 'It is unclear.',
+        kinds: [key],
+        known: seeded,
+        limit: 1200,
+      });
+      expect.soft(!filing.file, `${key}: card`).toBe(before.card);
+    }
   });
 });

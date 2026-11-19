@@ -140,61 +140,32 @@ function incident(): number[] {
 }
 
 describe('a lane process watch', () => {
-  it('stops everything the session started when it ends, subshells and loops included', async () => {
+  it('stops everything the session started when it ends: subshells, loops whose parents died, what they started later, what ignores SIGTERM; never a reused pid', async () => {
     const loops = incident();
+    world.ignoresTerm.add(405);
     const watch = createLaneProcessWatch({ ...deps(), ledger: null });
     await watch.track(ROOT);
-    await watch.end();
-    for (const pid of [200, 300, ...loops]) expect(world.has(pid)).toBe(false);
-    expect(world.has(DAEMON)).toBe(true);
-    expect(world.has(1)).toBe(true);
-  });
-
-  it('still stops loops whose parents died before the session ended, because it saw them while they ran', async () => {
-    const loops = incident();
-    const watch = createLaneProcessWatch({ ...deps(), ledger: null });
-    await watch.track(ROOT);
-    // The daemon restarts: claude and the command's shell die, and the loops go to launchd.
-    world.die(200);
+    // The command's shell dies and its loops go to launchd: the watch saw them while they ran.
     world.die(300);
     expect(world.rows.filter((r) => loops.includes(r.pid)).every((r) => r.ppid === 1)).toBe(true);
-    await watch.end();
-    for (const pid of loops) expect(world.has(pid)).toBe(false);
-  });
-
-  it('follows what the loops start later, and what escaped to launchd inside a known group', async () => {
-    incident();
-    const watch = createLaneProcessWatch({ ...deps(), ledger: null });
-    await watch.track(ROOT);
     world.add(500, 400, 300); // forked from a loop after the last sample
     world.add(501, 1, 300); // double-forked: launchd is its parent, the group is the command's
+    // A loop ends and an unrelated process takes its pid.
+    world.die(401);
+    world.add(401, 1, 401, 'Thu Oct 30 13:00:00 2026');
     await watch.end();
-    expect(world.has(500)).toBe(false);
-    expect(world.has(501)).toBe(false);
-  });
-
-  it('samples again on its interval, so a loop started after tracking began is known', async () => {
-    world.add(200, DAEMON, 200);
-    const ticks: (() => void)[] = [];
-    const watch = createLaneProcessWatch({
-      ...deps(),
-      ledger: null,
-      timers: {
-        setTimeout(fn) {
-          ticks.push(fn);
-          return { cancel: () => undefined };
-        },
-      },
-    });
-    await watch.track(ROOT);
-    world.add(300, 200, 300);
-    world.add(400, 300, 300);
-    ticks.shift()?.();
-    await new Promise((r) => setImmediate(r));
-    world.die(200);
-    world.die(300);
-    await watch.end();
-    expect(world.has(400)).toBe(false);
+    for (const pid of [200, 300, 500, 501, ...loops.filter((pid) => pid !== 401)]) {
+      expect.soft(world.has(pid), `pid ${String(pid)} stopped`).toBe(false);
+    }
+    expect.soft(world.has(401), 'the reused pid left alone').toBe(true);
+    expect.soft(world.has(DAEMON), 'the daemon left alone').toBe(true);
+    expect.soft(world.has(1), 'launchd left alone').toBe(true);
+    expect
+      .soft(
+        world.signals.some((s) => s.sig === 'SIGKILL'),
+        'SIGKILL sent',
+      )
+      .toBe(true);
   });
 
   it('never signals the daemon, launchd, or the daemon’s own process group', async () => {
@@ -208,26 +179,6 @@ describe('a lane process watch', () => {
     expect(world.has(200)).toBe(false);
     expect(world.has(300)).toBe(false);
     expect(world.signals.every((s) => s.target > 1 && s.target !== -DAEMON_GROUP)).toBe(true);
-  });
-
-  it('leaves alone a process that took a recorded pid after the old one died', async () => {
-    incident();
-    const watch = createLaneProcessWatch({ ...deps(), ledger: null });
-    await watch.track(ROOT);
-    world.die(401);
-    world.add(401, 1, 401, 'Thu Oct 30 13:00:00 2026');
-    await watch.end();
-    expect(world.has(401)).toBe(true);
-  });
-
-  it('sends SIGKILL to what ignores SIGTERM', async () => {
-    incident();
-    world.ignoresTerm.add(405);
-    const watch = createLaneProcessWatch({ ...deps(), ledger: null });
-    await watch.track(ROOT);
-    await watch.end();
-    expect(world.has(405)).toBe(false);
-    expect(world.signals.some((s) => s.sig === 'SIGKILL')).toBe(true);
   });
 
   describe('when the session’s start time could not be read as it started', () => {
@@ -251,9 +202,15 @@ describe('a lane process watch', () => {
     const failingPs = (): Promise<readonly ProcessRow[]> =>
       Promise.reject(new Error('ps: fork failed'));
 
-    it('reads it from its own fresh reading, and still stops everything the session started', async () => {
+    it('reads it and its first sample fresh, not from a shared reading made before the session’s process, and still stops everything the session started', async () => {
+      const before = world.rows.map((r) => ({ ...r }));
       const loops = incident();
-      const watch = createLaneProcessWatch({ ...deps(), ledger: null });
+      const watch = createLaneProcessWatch({
+        ...deps(),
+        // A reading from before claude was spawned, as the shared cache can hand out.
+        sampleTable: () => Promise.resolve(before),
+        ledger: null,
+      });
       expect(await watch.track({ pid: 200, startedAt: null })).toBe(true);
       world.die(200);
       world.die(300);
@@ -313,16 +270,38 @@ describe('a lane process watch', () => {
     expect(world.signals).toEqual([]);
   });
 
-  it('keeps a ledger of what it saw, and empties it once it has stopped everything', async () => {
-    incident();
+  it('samples on its interval into a ledger it replaces whole on each write, and empties it once it has stopped everything', async () => {
+    world.add(200, DAEMON, 200);
     const ledger = createProcessLedger(dir);
-    const watch = createLaneProcessWatch({ ...deps(), ledger });
+    const clock = new ManualClock();
+    const watch = createLaneProcessWatch({ ...deps(), ledger, timers: clock, intervalMs: 1_000 });
     await watch.track(ROOT);
-    const seen = JSON.parse(readFileSync(ledger, 'utf8')) as { members: { pid: number }[] };
-    expect(seen.members.map((m) => m.pid)).toEqual(expect.arrayContaining([200, 300, 400, 411]));
+    const before = readFileSync(ledger, 'utf8');
+    expect(
+      (JSON.parse(before) as { members: { pid: number }[] }).members.map((m) => m.pid),
+    ).toEqual([200]);
+    const held = openSync(ledger, 'r');
+    try {
+      // A loop started after tracking began, under a command's shell.
+      world.add(300, 200, 300);
+      world.add(400, 300, 300);
+      clock.advance(1_000);
+      await new Promise((r) => setImmediate(r));
+      // The file a reader opened is still the whole ledger it was; the name holds the next one.
+      expect(readFileSync(held, 'utf8')).toBe(before);
+      const after = JSON.parse(readFileSync(ledger, 'utf8')) as { members: { pid: number }[] };
+      expect(after.members.map((m) => m.pid).sort()).toEqual([200, 300, 400]);
+      expect(readdirSync(dir)).toEqual([basename(ledger)]);
+    } finally {
+      closeSync(held);
+    }
+    // claude and the shell die; the loop is known from the interval's sample.
+    world.die(200);
+    world.die(300);
     await watch.end();
-    const after = JSON.parse(readFileSync(ledger, 'utf8')) as { members: unknown[] };
-    expect(after.members).toEqual([]);
+    expect(world.has(400)).toBe(false);
+    const emptied = JSON.parse(readFileSync(ledger, 'utf8')) as { members: unknown[] };
+    expect(emptied.members).toEqual([]);
     removeProcessLedger(ledger, dir);
     expect(existsSync(ledger)).toBe(false);
   });
@@ -363,16 +342,7 @@ describe('a lane process watch', () => {
       ledger,
     });
 
-    it('stops it when the session ends, by a file it holds open or its working dir in the lane’s temp dir', async () => {
-      setup();
-      const watch = createLaneProcessWatch(watchDeps());
-      await watch.track(ROOT);
-      await watch.end();
-      for (const pid of [600, 601, 610]) expect(world.has(pid)).toBe(false);
-      for (const pid of [DAEMON, 700, 701, 702]) expect(world.has(pid)).toBe(true);
-    });
-
-    it('never takes a job for working in the checkout alone: it may be another lane’s or the builder’s', async () => {
+    it('stops it by a file it holds open or its working dir in the lane’s temp dir, reading each orphan once, and never takes a job for working in the checkout alone', async () => {
       setup();
       const ledger = createProcessLedger(dir);
       const ticks: (() => void)[] = [];
@@ -386,8 +356,15 @@ describe('a lane process watch', () => {
         },
       });
       await watch.track(ROOT);
+      // Each new orphan's open files are read once, not on every sample.
+      const reads = world.pathReads;
+      for (let n = 0; n < 3; n += 1) {
+        ticks.shift()?.();
+        await new Promise((r) => setImmediate(r));
+      }
+      expect(world.pathReads).toBe(reads);
       // Another lane in the same checkout runs `pnpm dev > dev.log 2>&1 &`, and the builder runs
-      // `nohup pnpm dev &` from a terminal there, after this session began.
+      // `nohup pnpm dev &` from a terminal there, after this session began: either may be theirs.
       world.add(800, 1, 800, T2);
       world.cwd.set(800, CHECKOUT);
       world.files.set(800, [`${CHECKOUT}/dev.log`]);
@@ -401,20 +378,18 @@ describe('a lane process watch', () => {
       const seen = JSON.parse(readFileSync(ledger, 'utf8')) as { members: { pid: number }[] };
       expect(seen.members.map((m) => m.pid)).toEqual(expect.arrayContaining([600, 610]));
       expect(seen.members.filter((m) => [800, 801, 810].includes(m.pid))).toEqual([]);
+      // One that left between the last sample and the end, in a group of its own.
+      world.add(620, 1, 620, T2);
+      world.cwd.set(620, CHECKOUT);
+      world.files.set(620, [OUTPUT]);
       await watch.end();
-      for (const pid of [800, 801, 810]) expect(world.has(pid)).toBe(true);
+      for (const pid of [600, 601, 610, 620]) {
+        expect.soft(world.has(pid), `pid ${String(pid)} stopped`).toBe(false);
+      }
+      for (const pid of [DAEMON, 700, 701, 702, 800, 801, 810]) {
+        expect.soft(world.has(pid), `pid ${String(pid)} left alone`).toBe(true);
+      }
       expect(world.signals.some((s) => [800, 801, 810, -800, -810].includes(s.target))).toBe(false);
-    });
-
-    it('finds one that left between the last sample and the end', async () => {
-      world.add(200, DAEMON, DAEMON_GROUP);
-      const watch = createLaneProcessWatch(watchDeps());
-      await watch.track(ROOT);
-      world.add(600, 1, 300, T2);
-      world.cwd.set(600, CHECKOUT);
-      world.files.set(600, [OUTPUT]);
-      await watch.end();
-      expect(world.has(600)).toBe(false);
     });
 
     it('records it in the ledger, so a daemon that dies before the end still has it stopped', async () => {
@@ -428,48 +403,11 @@ describe('a lane process watch', () => {
       for (const pid of [600, 601, 610]) expect(world.has(pid)).toBe(false);
       expect(world.has(700)).toBe(true);
     });
-
-    it('reads each new orphan’s open files once, not on every sample', async () => {
-      setup();
-      const ticks: (() => void)[] = [];
-      const watch = createLaneProcessWatch({
-        ...watchDeps(),
-        timers: {
-          setTimeout(fn) {
-            ticks.push(fn);
-            return { cancel: () => undefined };
-          },
-        },
-      });
-      await watch.track(ROOT);
-      const after = world.pathReads;
-      for (let n = 0; n < 3; n += 1) {
-        ticks.shift()?.();
-        await new Promise((r) => setImmediate(r));
-      }
-      expect(world.pathReads).toBe(after);
-    });
   });
 
-  it('takes its first sample fresh, not from a shared reading made before the session’s process', async () => {
-    const before = world.rows.map((r) => ({ ...r }));
-    const loops = incident();
-    const watch = createLaneProcessWatch({
-      ...deps(),
-      // A reading from before claude was spawned, as the shared cache can hand out.
-      sampleTable: () => Promise.resolve(before),
-      ledger: null,
-    });
-    await watch.track(ROOT);
-    world.die(200);
-    world.die(300);
-    await watch.end();
-    for (const pid of loops) expect(world.has(pid)).toBe(false);
-  });
-
-  it('says whether it still holds processes it has not stopped', async () => {
+  it('survives a table it cannot read: it stops nothing, says so, and says it still holds what it has not stopped', async () => {
     incident();
-    const failing = { fail: false };
+    const failing = { fail: true };
     const watch = createLaneProcessWatch({
       ...deps({
         table: () => (failing.fail ? Promise.reject(new Error('ps failed')) : world.table()),
@@ -477,14 +415,16 @@ describe('a lane process watch', () => {
       ledger: null,
     });
     expect(watch.pending()).toBe(false);
-    await watch.track(ROOT);
+    // The session's process is known by its start time, so the table is only needed later.
+    await expect(watch.track(ROOT)).resolves.toBe(true);
     expect(watch.pending()).toBe(true);
-    failing.fail = true;
     await expect(watch.end()).rejects.toThrow('ps failed');
+    expect(world.signals).toEqual([]);
     expect(watch.pending()).toBe(true);
     failing.fail = false;
     await watch.end();
     expect(watch.pending()).toBe(false);
+    expect(world.has(200)).toBe(false);
   });
 
   it('still remembers the tree when the open paths cannot be read, and stops it at the end', async () => {
@@ -532,38 +472,6 @@ describe('a lane process watch', () => {
     await new Promise((r) => setImmediate(r));
     expect([...new Set(failures)].sort()).toEqual(['ledger', 'open_paths', 'table']);
   });
-
-  it('replaces its ledger whole on each write, so a reader holding it never sees a part of one', async () => {
-    world.add(200, DAEMON, 200);
-    const ledger = createProcessLedger(dir);
-    const clock = new ManualClock();
-    const watch = createLaneProcessWatch({ ...deps(), ledger, timers: clock, intervalMs: 1_000 });
-    await watch.track(ROOT);
-    const before = readFileSync(ledger, 'utf8');
-    const held = openSync(ledger, 'r');
-    try {
-      world.add(300, 200, 300);
-      clock.advance(1_000);
-      await new Promise((r) => setImmediate(r));
-      // The file a reader opened is still the whole ledger it was; the name holds the next one.
-      expect(readFileSync(held, 'utf8')).toBe(before);
-      const after = JSON.parse(readFileSync(ledger, 'utf8')) as { members: { pid: number }[] };
-      expect(after.members.map((m) => m.pid).sort()).toEqual([200, 300]);
-      expect(readdirSync(dir)).toEqual([basename(ledger)]);
-    } finally {
-      closeSync(held);
-    }
-  });
-
-  it('survives a table it cannot read: it stops nothing and says so', async () => {
-    const watch = createLaneProcessWatch({
-      ...deps({ table: () => Promise.reject(new Error('ps failed')) }),
-      ledger: null,
-    });
-    // The session's process is known by its start time, so the table is only needed later.
-    await expect(watch.track(ROOT)).resolves.toBe(true);
-    await expect(watch.end()).rejects.toThrow('ps failed');
-  });
 });
 
 describe('the jobs a session leaves at the end of a turn', () => {
@@ -581,18 +489,36 @@ describe('the jobs a session leaves at the end of a turn', () => {
     world.add(401, 400, 300, T1, '/usr/bin/node');
   }
 
-  it('stops what a command started, and leaves the agent, its servers and a late server running', async () => {
+  it('stops what a command started, leaves the agent, its servers, a late server and a reused pid running, gives up on what no signal ends, and can end the session afterwards', async () => {
     const watch = session();
     await watch.track(ROOT);
     watch.markOwn();
     command();
     world.add(600, 200, 600, T1, '/usr/local/bin/node'); // a server started later, outside a shell
+    world.add(402, 300, 300, T1, '/usr/bin/node');
+    world.immortal.add(402);
+    // A job ends and an unrelated process takes its pid.
+    world.die(401);
+    world.add(401, 1, 401, 'Thu Oct 30 13:00:00 2026', '/usr/bin/vim');
     await watch.endJobs();
-    for (const pid of [300, 400, 401]) expect(world.has(pid)).toBe(false);
-    for (const pid of [200, 250, 251, 600]) expect(world.has(pid)).toBe(true);
+    for (const pid of [300, 400])
+      expect.soft(world.has(pid), `pid ${String(pid)} stopped`).toBe(false);
+    for (const pid of [200, 250, 251, 600, 401]) {
+      expect.soft(world.has(pid), `pid ${String(pid)} left running`).toBe(true);
+    }
+    expect.soft(world.has(402), 'the process no signal ends').toBe(true);
+    // Four rounds of SIGTERM and SIGKILL, never more.
+    expect
+      .soft(world.signals.filter((s) => s.target === 402).length, 'signals to 402')
+      .toBeLessThanOrEqual(2 * 2 * 4);
+    // Ending the session afterwards stops the agent; nothing already stopped is stopped twice.
+    world.signals.length = 0;
+    await watch.end();
+    expect(world.has(200)).toBe(false);
+    expect(world.signals.every((s) => s.target !== 400)).toBe(true);
   });
 
-  it('stops a job whose shell is gone, found by the group it was started in', async () => {
+  it('stops a job whose shell is gone, found by the group it was started in, and never signals the agent’s group even where a job shares it', async () => {
     const watch = session();
     await watch.track(ROOT);
     watch.markOwn();
@@ -602,10 +528,15 @@ describe('the jobs a session leaves at the end of a turn', () => {
     world.add(300, 200, 300, T1, '/bin/zsh');
     world.add(402, 300, 300, T1, '/usr/bin/node');
     world.add(403, 1, 300, T1, '/usr/bin/node');
+    // No job control: this shell stays in claude's group.
+    world.add(310, 200, 200, T1, '/bin/zsh');
+    world.add(410, 310, 200, T1, '/usr/bin/node');
     await watch.endJobs();
-    expect(world.has(402)).toBe(false);
-    expect(world.has(403)).toBe(false);
+    for (const pid of [402, 403, 410]) {
+      expect.soft(world.has(pid), `pid ${String(pid)} stopped`).toBe(false);
+    }
     expect(world.has(200)).toBe(true);
+    expect(world.signals.some((s) => s.target === -200)).toBe(false);
   });
 
   it('leaves a late server alone when the daemon itself runs under a shell, as `pnpm dev` starts it', async () => {
@@ -619,41 +550,6 @@ describe('the jobs a session leaves at the end of a turn', () => {
     await watch.endJobs();
     for (const pid of [300, 400, 401]) expect(world.has(pid)).toBe(false);
     expect(world.has(600)).toBe(true);
-  });
-
-  it('never signals the agent’s process group, even where a job shares it', async () => {
-    const watch = session();
-    await watch.track(ROOT);
-    watch.markOwn();
-    world.add(300, 200, 200, T1, '/bin/zsh'); // no job control: the shell stays in claude's group
-    world.add(400, 300, 200, T1, '/usr/bin/node');
-    await watch.endJobs();
-    expect(world.has(400)).toBe(false);
-    expect(world.has(200)).toBe(true);
-    expect(world.signals.some((s) => s.target === -200)).toBe(false);
-  });
-
-  it('leaves alone a process that took a job’s pid after the job ended', async () => {
-    const watch = session();
-    await watch.track(ROOT);
-    watch.markOwn();
-    command();
-    world.die(400);
-    world.add(400, 1, 400, 'Thu Oct 30 13:00:00 2026', '/usr/bin/vim');
-    await watch.endJobs();
-    expect(world.has(400)).toBe(true);
-  });
-
-  it('gives up on a process no signal ends, within its rounds', async () => {
-    const watch = session();
-    await watch.track(ROOT);
-    watch.markOwn();
-    command();
-    world.immortal.add(400);
-    await watch.endJobs();
-    expect(world.has(400)).toBe(true);
-    // Four rounds of SIGTERM and SIGKILL, never more.
-    expect(world.signals.filter((s) => s.target === 400).length).toBeLessThanOrEqual(2 * 2 * 4);
   });
 
   it('stops everything started after the mark when the table names no programs', async () => {
@@ -681,22 +577,10 @@ describe('the jobs a session leaves at the end of a turn', () => {
     await expect(broken.endJobs()).rejects.toThrow('ps failed');
     expect(world.signals).toEqual([]);
   });
-
-  it('can end the session afterwards: nothing it stopped is left to stop twice', async () => {
-    const watch = session();
-    await watch.track(ROOT);
-    watch.markOwn();
-    command();
-    await watch.endJobs();
-    world.signals.length = 0;
-    await watch.end();
-    expect(world.has(200)).toBe(false);
-    expect(world.signals.every((s) => s.target !== 400)).toBe(true);
-  });
 });
 
 describe('processes left by a daemon that died', () => {
-  it('stops what a ledger names and removes the ledger, before any new session starts', async () => {
+  it('keeps a ledger it could not act on, then stops what it names and removes it at the next start', async () => {
     const loops = incident();
     const ledger = createProcessLedger(dir);
     await createLaneProcessWatch({ ...deps(), ledger }).track(ROOT);
@@ -704,13 +588,21 @@ describe('processes left by a daemon that died', () => {
     world.die(200);
     world.die(300);
 
+    await expect(
+      reapLaneProcessLedgers(
+        dir,
+        deps({ ownPid: 9999, table: () => Promise.reject(new Error('ps failed')) }),
+      ),
+    ).rejects.toThrow('ps failed');
+    expect(existsSync(ledger)).toBe(true);
+
     const report = await reapLaneProcessLedgers(dir, deps({ ownPid: 9999 }));
     expect(report).toEqual({ ledgers: 1, stopped: loops.length });
     for (const pid of loops) expect(world.has(pid)).toBe(false);
     expect(existsSync(ledger)).toBe(false);
   });
 
-  it('does not read a machine it has no ledger for', async () => {
+  it('reads no machine without a ledger, removes an unreadable one, ignores files that are not ledgers, and names the daemon that owns each', async () => {
     let reads = 0;
     const counting = deps({
       table: () => {
@@ -720,9 +612,7 @@ describe('processes left by a daemon that died', () => {
     });
     expect(await reapLaneProcessLedgers(dir, counting)).toEqual({ ledgers: 0, stopped: 0 });
     expect(reads).toBe(0);
-  });
 
-  it('removes an unreadable ledger, and ignores files that are not ledgers', async () => {
     const owner = String(await deadPid());
     writeFileSync(join(dir, `10db-proc-${owner}-0123456789ab.json`), '{not json');
     writeFileSync(join(dir, `10db-proc-${owner}-notahexid.json`), '{"version":1,"members":[]}');
@@ -733,82 +623,46 @@ describe('processes left by a daemon that died', () => {
     expect(readdirSync(dir).sort()).toEqual(
       ['10db-proc-0123456789ab.json', `10db-proc-${owner}-notahexid.json`, 'unrelated.json'].sort(),
     );
-  });
 
-  it('names the daemon that owns each ledger', () => {
     expect(createProcessLedger(dir, 4321)).toMatch(/\/10db-proc-4321-[0-9a-f]{12}\.json$/);
     expect(createProcessLedger(dir)).toContain(`/10db-proc-${String(process.pid)}-`);
   });
 
-  it('stops a dead daemon’s leftovers while another daemon runs on the same root, and leaves the live one’s alone', async () => {
+  it('stops a dead daemon’s leftovers, owners that run unmarked or are this daemon included, and leaves a live daemon’s and a reused pid alone', async () => {
     // The app daemon restarted for an install; a second daemon on another data dir kept running.
     const other = livePid();
     markDaemon(other);
     const dead = await deadPid();
-    world.add(400, 1, 400); // the dead daemon's lane's loop
-    world.add(500, 1, 500); // the live daemon's lane's dev server, its session still running
-    const deadLedger = createProcessLedger(dir, dead);
-    writeFileSync(
-      deadLedger,
-      JSON.stringify({ version: 1, members: [{ pid: 400, pgid: 400, startedAt: T1 }] }),
-    );
-    const liveLedger = createProcessLedger(dir, other);
-    writeFileSync(
-      liveLedger,
-      JSON.stringify({ version: 1, members: [{ pid: 500, pgid: 500, startedAt: T1 }] }),
-    );
-
-    const report = await reapLaneProcessLedgers(dir, deps({ ownPid: 9999 }));
-    expect(report).toEqual({ ledgers: 1, stopped: 1 });
-    expect(world.has(400)).toBe(false);
-    expect(existsSync(deadLedger)).toBe(false);
-    expect(world.has(500)).toBe(true);
-    expect(existsSync(liveLedger)).toBe(true);
-  });
-
-  it('takes a ledger as a dead daemon’s when its owner runs but keeps no mark, or is this daemon', async () => {
     // A dead daemon's pid now names an unrelated process; or the new daemon got the old one's pid.
     const reused = livePid();
-    world.add(400, 1, 400);
-    world.add(410, 1, 410);
-    writeFileSync(
-      createProcessLedger(dir, reused),
-      JSON.stringify({ version: 1, members: [{ pid: 400, pgid: 400, startedAt: T1 }] }),
-    );
-    writeFileSync(
-      createProcessLedger(dir, 9999),
-      JSON.stringify({ version: 1, members: [{ pid: 410, pgid: 410, startedAt: T1 }] }),
-    );
     markDaemon(9999);
+    world.add(400, 1, 400); // the dead daemon's lane's loop
+    world.add(500, 1, 500); // the live daemon's lane's dev server, its session still running
+    world.add(410, 1, 410);
+    world.add(420, 1, 420);
+    world.add(700, 1, 700, 'Fri Oct 31 09:00:00 2026'); // took the pid a ledger names
+    const ledgerOf = (owner: number, pid: number, startedAt = T1): string => {
+      const file = createProcessLedger(dir, owner);
+      writeFileSync(file, JSON.stringify({ version: 1, members: [{ pid, pgid: pid, startedAt }] }));
+      return file;
+    };
+    const deadLedger = ledgerOf(dead, 400);
+    const liveLedger = ledgerOf(other, 500);
+    const reusedLedger = ledgerOf(reused, 410);
+    const ownLedger = ledgerOf(9999, 420);
+    const staleLedger = ledgerOf(dead, 700, T0);
+
     const report = await reapLaneProcessLedgers(dir, deps({ ownPid: 9999 }));
-    expect(report).toEqual({ ledgers: 2, stopped: 2 });
-    expect(world.has(400)).toBe(false);
-    expect(world.has(410)).toBe(false);
-  });
-
-  it('leaves a process alone when its pid now belongs to another process', async () => {
-    const ledger = createProcessLedger(dir);
-    writeFileSync(
-      ledger,
-      JSON.stringify({ version: 1, members: [{ pid: 700, pgid: 700, startedAt: T0 }] }),
-    );
-    world.add(700, 1, 700, 'Fri Oct 31 09:00:00 2026');
-    const report = await reapLaneProcessLedgers(dir, deps());
-    expect(report.stopped).toBe(0);
+    expect(report).toEqual({ ledgers: 4, stopped: 3 });
+    for (const pid of [400, 410, 420]) {
+      expect.soft(world.has(pid), `pid ${String(pid)} stopped`).toBe(false);
+    }
+    for (const ledger of [deadLedger, reusedLedger, ownLedger, staleLedger]) {
+      expect.soft(existsSync(ledger), `${basename(ledger)} removed`).toBe(false);
+    }
     expect(world.has(700)).toBe(true);
-    expect(existsSync(ledger)).toBe(false);
-  });
-
-  it('keeps a ledger it could not act on, so the next start tries again', async () => {
-    const ledger = createProcessLedger(dir);
-    writeFileSync(
-      ledger,
-      JSON.stringify({ version: 1, members: [{ pid: 700, pgid: 700, startedAt: T0 }] }),
-    );
-    await expect(
-      reapLaneProcessLedgers(dir, deps({ table: () => Promise.reject(new Error('ps failed')) })),
-    ).rejects.toThrow('ps failed');
-    expect(existsSync(ledger)).toBe(true);
+    expect(world.has(500)).toBe(true);
+    expect(existsSync(liveLedger)).toBe(true);
   });
 
   it('stops what shared the dead daemon’s process group by pid alone, and leaves the rest of that group running', async () => {

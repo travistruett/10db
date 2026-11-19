@@ -55,86 +55,73 @@ const root = batch({});
 const fixOf = (head: string, state: BatchDto['state']): BatchDto =>
   batch({ ciFixOf: root.id, ciFixHead: head, state });
 
+interface Row {
+  readonly name: string;
+  readonly batch?: BatchDto;
+  readonly checks?: RequiredChecksDto;
+  readonly fixes?: readonly BatchDto[];
+  readonly head?: string | null;
+}
+
+const decide = (row: Row) =>
+  ciFailureAction(
+    row.batch ?? root,
+    row.checks ?? failing(job('build')),
+    row.fixes ?? [],
+    row.head === undefined ? HEAD : row.head,
+  );
+
+const RUNNING_FIX_STATES = ['CUTTING', 'OPEN', 'SHIPPING', 'FAILED'] as const;
+const QUIET_CHECKS = ['passing', 'pending', 'cancelled', 'none'] as const;
+
 describe('ciFailureAction', () => {
-  it('fixes a failing Actions job on a head nothing has fixed', () => {
-    expect(ciFailureAction(root, failing(job('build')), [], HEAD)).toEqual({ kind: 'fix' });
+  it('fixes a failing Actions job on a head no fix has finished', () => {
+    const rows: Row[] = [
+      { name: 'a head nothing has fixed' },
+      {
+        name: 'one failing check an Actions job, another not',
+        checks: failing(job('lint', null), job('build')),
+      },
+      { name: 'the next head after a finished fix', fixes: [fixOf(HEAD, 'SHIPPED')], head: OTHER },
+    ];
+    for (const row of rows) expect.soft(decide(row), row.name).toEqual({ kind: 'fix' });
   });
 
-  it('fixes when one failing check is an Actions job and another is not', () => {
-    expect(ciFailureAction(root, failing(job('lint', null), job('build')), [], HEAD)).toEqual({
-      kind: 'fix',
-    });
+  it('waits while a fix batch runs, the checks are not failing, or the head is unknown', () => {
+    const rows: Row[] = [
+      ...RUNNING_FIX_STATES.flatMap((state) => [
+        { name: `fix batch ${state} on another head`, fixes: [fixOf(OTHER, state)] },
+        { name: `fix batch ${state} on this head`, fixes: [fixOf(HEAD, state)] },
+      ]),
+      ...QUIET_CHECKS.map((state) => ({
+        name: `required checks ${state}`,
+        checks: { state, failing: [], pending: [], cancelled: [] },
+      })),
+      { name: 'no known head', head: null },
+    ];
+    for (const row of rows) expect.soft(decide(row), row.name).toEqual({ kind: 'wait' });
   });
 
-  it.each(['CUTTING', 'OPEN', 'SHIPPING', 'FAILED'] as const)(
-    'waits while a fix batch is %s, whatever head it fixes',
-    (state) => {
-      expect(ciFailureAction(root, failing(job('build')), [fixOf(OTHER, state)], HEAD)).toEqual({
-        kind: 'wait',
-      });
-      expect(ciFailureAction(root, failing(job('build')), [fixOf(HEAD, state)], HEAD)).toEqual({
-        kind: 'wait',
-      });
-    },
-  );
-
-  it('stops, with no_change, when a finished fix for this head exists', () => {
-    expect(ciFailureAction(root, failing(job('build')), [fixOf(HEAD, 'CLOSED')], HEAD)).toEqual({
-      kind: 'stop',
-      reason: 'no_change',
-    });
-    expect(ciFailureAction(root, failing(job('build')), [fixOf(HEAD, 'SHIPPED')], HEAD)).toEqual({
-      kind: 'stop',
-      reason: 'no_change',
-    });
-  });
-
-  it('fixes the next head after a finished fix', () => {
-    expect(ciFailureAction(root, failing(job('build')), [fixOf(HEAD, 'SHIPPED')], OTHER)).toEqual({
-      kind: 'fix',
-    });
-  });
-
-  it('stops, with limit, once two fixes were made', () => {
+  it('stops with its reason: no change, the limit, no log, or an earlier stop', () => {
     expect(maxCiFixes).toBe(2);
-    expect(
-      ciFailureAction(
-        root,
-        failing(job('build')),
-        [fixOf('1'.repeat(40), 'SHIPPED'), fixOf('2'.repeat(40), 'CLOSED')],
-        HEAD,
-      ),
-    ).toEqual({ kind: 'stop', reason: 'limit' });
-  });
-
-  it('stops, with no_log, when no failing check is an Actions job', () => {
-    expect(ciFailureAction(root, failing(job('ci/circle', null)), [], HEAD)).toEqual({
-      kind: 'stop',
-      reason: 'no_log',
-    });
-    expect(ciFailureAction(root, failing(), [], HEAD)).toEqual({ kind: 'stop', reason: 'no_log' });
-  });
-
-  it('stops for the reason it already stopped, with no second look', () => {
-    const stopped = batch({ ciStopped: 'no_cut' });
-    expect(ciFailureAction(stopped, failing(job('build')), [], HEAD)).toEqual({
-      kind: 'stop',
-      reason: 'no_cut',
-    });
-  });
-
-  it.each(['passing', 'pending', 'cancelled', 'none'] as const)(
-    'waits when the required checks are %s',
-    (state) => {
-      expect(
-        ciFailureAction(root, { state, failing: [], pending: [], cancelled: [] }, [], HEAD),
-      ).toEqual({
-        kind: 'wait',
-      });
-    },
-  );
-
-  it('waits when the pull request has no known head', () => {
-    expect(ciFailureAction(root, failing(job('build')), [], null)).toEqual({ kind: 'wait' });
+    const rows: (Row & { reason: string })[] = [
+      { name: 'a closed fix for this head', fixes: [fixOf(HEAD, 'CLOSED')], reason: 'no_change' },
+      { name: 'a shipped fix for this head', fixes: [fixOf(HEAD, 'SHIPPED')], reason: 'no_change' },
+      {
+        name: 'two fixes made',
+        fixes: [fixOf('1'.repeat(40), 'SHIPPED'), fixOf('2'.repeat(40), 'CLOSED')],
+        reason: 'limit',
+      },
+      {
+        name: 'no failing Actions job',
+        checks: failing(job('ci/circle', null)),
+        reason: 'no_log',
+      },
+      { name: 'no failing job at all', checks: failing(), reason: 'no_log' },
+      { name: 'stopped before', batch: batch({ ciStopped: 'no_cut' }), reason: 'no_cut' },
+    ];
+    for (const row of rows) {
+      expect.soft(decide(row), row.name).toEqual({ kind: 'stop', reason: row.reason });
+    }
   });
 });

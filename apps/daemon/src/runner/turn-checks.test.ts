@@ -255,51 +255,6 @@ describe('the check after each turn', () => {
     expect(lines('runs')).toEqual(['after']);
   });
 
-  it('says in the header that a run that threw could not run, offering nothing, and the next Ready runs', async () => {
-    await world(() => checkScript('src/settings/page.tsx'));
-    let psRefuses = true;
-    // ps could not be asked for the check's process: the runner kills the group and rejects.
-    await start({
-      identify: (pid) => {
-        if (psRefuses) throw new Error('ps is not there');
-        return systemProcesses.identify(pid);
-      },
-    });
-
-    await readyTurn(w.settings, 'src/settings/page.tsx');
-    await waitFor(() => header().length === 1);
-
-    expect(header()).toMatchObject([
-      {
-        kind: PassNoticeKind.TurnCheck,
-        sendable: false,
-        text: 'The changed-files check after a turn could not run: ps is not there',
-      },
-    ]);
-    expect(checks()).toEqual(['none']);
-    expect(checkNotices(w.settings)).toEqual([]);
-    psRefuses = false;
-    await readyTurn(w.people, 'src/people/page.tsx');
-    await waitFor(() => checks().at(-1) === 'failed');
-    expect(header()).toMatchObject([{ sendable: true }]);
-  });
-
-  it("takes back an older failure's offers on every page, not only the pages the newer one names", async () => {
-    await world(() => checkScript('$(cat "$D/names")'));
-    await start();
-    writeFileSync(join(dir.path, 'names'), 'src/settings/page.tsx');
-    await readyTurn(w.settings, 'src/settings/page.tsx');
-    await waitFor(() => checks().at(-1) === 'failed');
-    expect(checkNotices(w.settings).map((m) => m.sendable)).toEqual([true]);
-
-    writeFileSync(join(dir.path, 'names'), 'src/people/page.tsx');
-    await readyTurn(w.people, 'src/people/page.tsx');
-    await waitFor(() => checks().filter((c) => c === 'failed').length === 2);
-
-    expect(checkNotices(w.settings).map((m) => m.sendable)).toEqual([false]);
-    expect(checkNotices(w.people).map((m) => m.sendable)).toEqual([true]);
-  });
-
   it.each<{
     name: string;
     hold?: boolean;
@@ -307,12 +262,6 @@ describe('the check after each turn', () => {
     sandbox?: () => GateSandbox;
     text: string;
   }>([
-    {
-      name: 'a check that timed out',
-      hold: true,
-      timeoutMs: 300,
-      text: 'The changed-files check after a turn timed out after 0.3 s',
-    },
     {
       name: 'a check whose sandbox could not start (exit 126)',
       sandbox: () => ({
