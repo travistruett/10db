@@ -23,7 +23,6 @@ export function FrameSlots({
         panelHost,
         drawerHost,
         panelShown,
-        hidePanel: null,
         showPanel: () => undefined,
         closeSheet: () => undefined,
         registerPanel: () => () => undefined,

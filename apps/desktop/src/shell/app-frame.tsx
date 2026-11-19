@@ -11,7 +11,6 @@ import {
   type ReactNode,
 } from 'react';
 import { FrameSlotsContext, type FrameSlots } from './frame-slots';
-import { usePanelHidden } from './panel-hidden';
 import { px, usePanelWidth } from './panel-width';
 import { Rail } from './rail';
 import { railSectionForPath, type RailSection } from './rail-items';
@@ -29,15 +28,20 @@ import { useShellBand } from './use-shell-band';
 import classes from './app-frame.module.css';
 
 const RAIL_LABELLED_WIDTH = 200;
-const RAIL_ICONS_WIDTH = 76;
+const RAIL_ICONS_WIDTH = 60;
 /** The hairline that ends a sidebar column, in addition to its width. */
 const HAIRLINE = 1;
 /** How long the pointer rests on the toggle before its tip shows. */
 const TOGGLE_TIP_DELAY = 300;
 /** Where a title lines up with the content's padding. */
 const CONTENT_PADDING = 24;
-/** Where the title starts when the traffic lights and the sidebar toggle sit on the content's own tone. */
-const TITLE_START_BESIDE_LIGHTS = 116;
+/** Where a panel's head starts in its column. */
+const PANEL_HEAD_PADDING = 16;
+/** The sidebar button's place in the bar, right of the traffic lights. It never moves. */
+const TOGGLE_LEFT = 88;
+const TOGGLE_TOP = 8;
+/** Where the bar's text may start: clear of the traffic lights and the sidebar button. */
+const BAR_START = 128;
 
 /** An open menu or list of options takes Esc first, so the sheet around it stays open. */
 const aMenuIsOpen = (): boolean =>
@@ -59,10 +63,8 @@ export function AppFrame({
   readonly children: ReactNode;
 }) {
   const band = useShellBand();
-  const location = useRouterState({ select: (state) => state.location.href });
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const section = railSectionForPath(pathname);
-  const { hidden: panelHidden, toggle: togglePanelHidden } = usePanelHidden(section);
   const { labels: labelsPreferred, toggle: toggleLabels } = useSidebarLabels();
   const { width: panelWidth, setWidth: setPanelWidth } = usePanelWidth();
 
@@ -70,10 +72,9 @@ export function AppFrame({
   const [panelHost, setPanelHost] = useState<HTMLElement | null>(null);
   const [drawerHost, setDrawerHost] = useState<HTMLElement | null>(null);
   const [panelSection, setPanelSection] = useState<RailSection | null>(null);
-  const [scrolled, setScrolled] = useState(false);
   // The toggle's tip is held by hand: it opens after a hover delay, and a click (or leaving) closes it,
   // which Mantine's own hover tip does not do on a click.
-  const [toggleTip, setToggleTip] = useState(false);
+  const [toggleTipShown, setToggleTip] = useState(false);
   const toggleTipTimer = useRef<number | undefined>(undefined);
   const showToggleTip = (): void => {
     window.clearTimeout(toggleTipTimer.current);
@@ -103,7 +104,6 @@ export function AppFrame({
   const layout = shellLayout({
     band,
     hasPanel,
-    panelHidden,
     labels: labelsPreferred,
     sheet,
   });
@@ -124,22 +124,19 @@ export function AppFrame({
       );
     }
   };
-  /** ⌘\ and a click on the open section's row: the panel, a column when wide and a sheet otherwise. */
+  /** ⌘\: the panel's sheet where the window is too narrow for its column. A wide window always shows it. */
   const togglePanel = (): void => {
-    if (!hasPanel) return;
-    if (band === ShellBand.Wide) togglePanelHidden();
-    else setOpened(sheet === null ? { at: pathname, kind: SidebarSheet.Panel } : null);
+    if (!hasPanel || band === ShellBand.Wide) return;
+    setOpened(sheet === null ? { at: pathname, kind: SidebarSheet.Panel } : null);
   };
-  const hidePanel = band === ShellBand.Wide && layout.panel === 'column' ? togglePanelHidden : null;
   const closeSheet = useCallback(() => {
     setOpened(null);
   }, []);
   const panelOpen = layout.panel === 'column' || layout.panel === 'sheet';
   const showPanel = useCallback(() => {
     if (!hasPanel || panelOpen) return;
-    if (band === ShellBand.Wide) togglePanelHidden();
-    else setOpened({ at: pathname, kind: SidebarSheet.Panel });
-  }, [hasPanel, panelOpen, band, togglePanelHidden, pathname]);
+    setOpened({ at: pathname, kind: SidebarSheet.Panel });
+  }, [hasPanel, panelOpen, pathname]);
 
   const slots = useMemo<FrameSlots>(
     () => ({
@@ -147,32 +144,15 @@ export function AppFrame({
       panelHost,
       drawerHost,
       panelShown: layout.panel === 'column' || layout.panel === 'sheet',
-      hidePanel,
       showPanel,
       closeSheet,
       registerPanel,
     }),
-    [
-      titleHost,
-      panelHost,
-      drawerHost,
-      layout.panel,
-      hidePanel,
-      showPanel,
-      closeSheet,
-      registerPanel,
-    ],
+    [titleHost, panelHost, drawerHost, layout.panel, showPanel, closeSheet, registerPanel],
   );
 
-  const mainRef = useRef<HTMLElement>(null);
   const toggleRef = useRef<HTMLButtonElement>(null);
   const railRef = useRef<HTMLDivElement>(null);
-  // The page's own scroll position says whether its title carries the hairline: a page that opens at the top
-  // has none, whatever the last page's scroll was.
-  useEffect(() => {
-    setScrolled((mainRef.current?.scrollTop ?? 0) > 0);
-  }, [location]);
-
   // A sheet takes focus when it opens, on the section that is open, and gives it back when it closes, so a
   // keyboard builder is neither left behind the sheet nor dropped on the page.
   const sheetOpen = layout.rail === 'sheet' || layout.panel === 'sheet';
@@ -209,7 +189,7 @@ export function AppFrame({
         event.preventDefault();
         toggleSidebar();
       } else if (!event.shiftKey && event.key === '\\') {
-        if (!hasPanel) return;
+        if (!hasPanel || band === ShellBand.Wide) return;
         event.preventDefault();
         togglePanel();
       }
@@ -230,10 +210,24 @@ export function AppFrame({
         ? RAIL_ICONS_WIDTH + HAIRLINE
         : 0;
   const panelColumn = layout.panel === 'column';
-  const narrow = band === ShellBand.Narrow;
-  // The toggle sits beside the lights where the sidebar is labelled or folded away, and under them in the
-  // icons-only rail, which has no room beside them.
-  const toggleBeside = layout.rail === 'hidden' || layout.labels;
+  const wide = band === ShellBand.Wide;
+  // The sidebar button does what ⇧⌘S does: on a wide window it narrows the rail to icons or widens it to labels,
+  // otherwise it opens the sidebar over the content.
+  const toggleTip = wide
+    ? layout.labels
+      ? 'Icons only ⇧⌘S'
+      : 'Show labels ⇧⌘S'
+    : 'Show the sidebar ⇧⌘S';
+  const panelSheetLeft = layout.rail === 'hidden' ? 0 : railWidth;
+  // What starts the bar right of the rail clears the lights and the button where the rail is narrower than them.
+  const panelHeadStart = Math.max(
+    PANEL_HEAD_PADDING,
+    BAR_START - (panelColumn ? columnWidth : panelSheetLeft),
+  );
+  const titleStart = Math.max(
+    CONTENT_PADDING,
+    BAR_START - columnWidth - (panelColumn ? panelWidth + HAIRLINE : 0),
+  );
 
   const railStyle: CSSProperties =
     layout.rail === 'column'
@@ -245,8 +239,12 @@ export function AppFrame({
     layout.panel === 'column'
       ? {}
       : layout.panel === 'sheet'
-        ? { width: panelWidth + HAIRLINE, left: layout.rail === 'hidden' ? 0 : railWidth }
+        ? { width: panelWidth + HAIRLINE, left: panelSheetLeft }
         : { display: 'none' };
+  const panelHostStyle = {
+    ...panelStyle,
+    '--shell-bar-start': `${String(panelHeadStart)}px`,
+  } as CSSProperties;
 
   return (
     <FrameSlotsContext value={slots}>
@@ -268,24 +266,21 @@ export function AppFrame({
           >
             <div className={classes['railDrag']} data-tauri-drag-region />
             <div className={classes['railBody']}>
-              <Rail
-                labels={layout.labels}
-                onActiveClick={hasPanel && layout.panel !== 'none' ? togglePanel : null}
-              />
+              <Rail labels={layout.labels} />
             </div>
           </div>
-          <Tooltip label="Toggle sidebar ⇧⌘S" position="bottom" opened={toggleTip}>
+          <Tooltip label={toggleTip} position="bottom" opened={toggleTipShown}>
             <ActionIcon
               className={classes['toggle']}
-              style={toggleBeside ? { left: 80, top: 8 } : { left: 24, top: 48 }}
+              style={{ left: TOGGLE_LEFT, top: TOGGLE_TOP }}
               variant="subtle"
               color="gray"
               size={28}
               aria-label="Toggle sidebar"
-              // A wide window's toggle flips labels and discloses nothing; otherwise it opens the sidebar sheet.
               ref={toggleRef}
-              aria-pressed={band === ShellBand.Wide ? !layout.labels : undefined}
-              aria-expanded={band === ShellBand.Wide ? undefined : sheet === SidebarSheet.Sections}
+              // A wide window's button flips labels and discloses nothing; otherwise it opens the sidebar sheet.
+              aria-pressed={wide ? !layout.labels : undefined}
+              aria-expanded={wide ? undefined : sheet === SidebarSheet.Sections}
               onMouseEnter={showToggleTip}
               onMouseLeave={hideToggleTip}
               onClick={() => {
@@ -321,7 +316,7 @@ export function AppFrame({
                 ref={setPanelHost}
                 className={classes['panel']}
                 data-sheet={layout.panel === 'sheet' ? '' : undefined}
-                style={panelStyle}
+                style={panelHostStyle}
                 inert={layout.panel === 'hidden'}
                 data-panel={layout.panel}
               />
@@ -330,23 +325,14 @@ export function AppFrame({
               <div
                 ref={setTitleHost}
                 className={classes['titleRow']}
-                style={{ paddingLeft: narrow ? TITLE_START_BESIDE_LIGHTS : CONTENT_PADDING }}
+                style={{ paddingLeft: titleStart }}
                 data-title-row=""
-                data-scrolled={scrolled ? '' : undefined}
                 data-tauri-drag-region
                 inert={sheetOpen}
               />
               <div className={classes['content']} inert={sheetOpen}>
                 {banner}
-                <main
-                  ref={mainRef}
-                  className={classes['main']}
-                  onScroll={(event) => {
-                    setScrolled(event.currentTarget.scrollTop > 0);
-                  }}
-                >
-                  {children}
-                </main>
+                <main className={classes['main']}>{children}</main>
                 <div ref={setDrawerHost} className={classes['drawerLayer']} />
               </div>
             </Splitter.Pane>

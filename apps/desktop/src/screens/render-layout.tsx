@@ -106,7 +106,6 @@ export function RenderLayout() {
         panelHost: panelSection === null ? null : panelHost,
         drawerHost: null,
         panelShown: panelSection !== null,
-        hidePanel: null,
         showPanel: () => undefined,
         closeSheet: () => undefined,
         registerPanel,
