@@ -26,6 +26,11 @@ async function expectView(page: Page, view: View): Promise<void> {
     await expect(page.getByRole('navigation', { name: 'Settings sections' })).toBeVisible();
     return;
   }
+  if (view === 'Inbox') {
+    // The Inbox's panel head says Inbox; its title names the list it shows.
+    await expect(page.getByRole('region', { name: 'Inbox panel' })).toBeVisible();
+    return;
+  }
   await expect(page.getByRole('heading', { name: view, level: 1 })).toBeVisible();
   // Axe must not scan a list that is still loading.
   if (view === 'Knowledge') await expect(page.getByLabel(/^Loading /)).toHaveCount(0);
@@ -39,7 +44,8 @@ async function chooseScope(page: Page, scope: 'This Project' | 'All Projects'): 
 async function open(page: Page, view: View): Promise<void> {
   await page
     .getByRole('navigation', { name: 'Sections' })
-    .getByRole('link', { name: new RegExp(`^${view}\\s*(\\d+ open cards?)?$`) })
+    // A count or the Factory's status dot follows the name.
+    .getByRole('link', { name: new RegExp(`^${view}(\\s|$)`) })
     .click();
   await expectView(page, view);
 }
