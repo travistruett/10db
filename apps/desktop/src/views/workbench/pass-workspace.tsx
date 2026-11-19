@@ -1,5 +1,5 @@
 import { PassState, type TaskId } from '@10db/contracts';
-import { Box, Flex, Text } from '@mantine/core';
+import { Box, Flex } from '@mantine/core';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { markPassNotificationsActed, shownPassNotifications } from '../../desktop/notify-pass';
 import { CreateButton } from '../../shell/create-button';
@@ -13,9 +13,9 @@ import { draftKey, sessionDrafts, useSessionDraft } from '../sessions/session-dr
 import { focusTarget } from './focus-target';
 import { CodeSpans } from '../../shell/code-spans';
 import { PagePane } from './page-pane';
-import { countsLine, PassMenu } from './pass-header';
+import { PassMenu } from './pass-header';
 import { PageStatus } from './page-status';
-import { PrButton, PrReason } from './pr-button';
+import { PrButton, PrFoot } from './pr-button';
 import { RowMenu } from './row-menu';
 import type { PassWorkspaceProps } from './pass-workspace-props';
 import { QUEUE_ATTRIBUTE, QueueList } from './queue-list';
@@ -173,7 +173,6 @@ export function PassWorkspace(props: PassWorkspaceProps) {
       </Box>
     </>
   );
-  const counts = countsLine(rows.map((row) => row.status));
   const signedOff = rows.some((row) => row.status === PageStatus.SignedOff);
 
   return (
@@ -190,17 +189,8 @@ export function PassWorkspace(props: PassWorkspaceProps) {
       >
         {panelShown ? (
           <div ref={queue}>
-            {counts === '' ? null : (
-              <Text size="xs" c="dimmed" px="sm" pb={6}>
-                {counts}
-              </Text>
-            )}
-            {signedOff ? (
-              <Box px="sm" pb="xs">
-                <PrButton view={view} />
-                <PrReason view={view} />
-              </Box>
-            ) : null}
+            {/* Each row says its own state, so the head holds no counts; the pull request shows only to act on. */}
+            {signedOff ? <PrButton view={view} inset /> : null}
             {queueList}
           </div>
         ) : null}
@@ -249,7 +239,7 @@ export function PassWorkspace(props: PassWorkspaceProps) {
           composerFocus={composerFocus}
           draft={draft}
           onDraft={setDraft}
-          pullRequest={<PrButton view={view} />}
+          pullRequest={<PrFoot view={view} />}
         />
       )}
       {takingOutPage === null ? null : (

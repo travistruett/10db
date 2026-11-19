@@ -62,8 +62,6 @@ export interface PassHeaderProps extends PassActions {
   readonly now: number;
   /** Open Pull Request, shown once a page is signed off; without it there is none. */
   readonly pullRequest?: ReactNode;
-  /** Why Open Pull Request is disabled, a line of its own under the header's row. */
-  readonly pullRequestReason?: ReactNode;
 }
 
 /** When each open question or permission of the pass's pages was raised. */
@@ -134,7 +132,7 @@ export function PassMenu({
  * with no page has none to name, so the row keeps the line.
  */
 export function PassHeader(props: PassHeaderProps) {
-  const { project, view, inbox, now, pullRequest, pullRequestReason } = props;
+  const { project, view, inbox, now, pullRequest } = props;
   const { panelShown } = useFrameSlots();
   const menuActions: PassActions = {
     ...(props.onClose === undefined ? {} : { onClose: props.onClose }),
@@ -167,7 +165,6 @@ export function PassHeader(props: PassHeaderProps) {
               </>
             }
           />
-          {signedOff ? pullRequestReason : null}
         </>
       )}
       <CloseProgress

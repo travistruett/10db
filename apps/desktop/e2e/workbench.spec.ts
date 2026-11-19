@@ -153,8 +153,7 @@ async function panelHeadFits(page: Page, width: number) {
 /**
  * At `width` with no panel drawn (a window under 1000 px), the pass's line in the title row is drawn (cut
  * with an ellipsis when it must, its whole text in the heading's tooltip), its ⋯ menu (Close Pass, Abandon) is
- * on screen, the content box stops a gutter short of the window's edge and nothing scrolls sideways; the project
- * has no origin, so Open Draft PR says why beside it.
+ * on screen, the content box stops a gutter short of the window's edge and nothing scrolls sideways.
  */
 async function headerFits(page: Page, width: number) {
   await page.setViewportSize({ width, height: 900 });
@@ -372,9 +371,10 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   expect(seen.rowLines.some((line) => line.includes('Signing off…'))).toBe(true);
   announced.push(...seen.announced);
 
-  // With a page signed off the header holds Open Draft PR too, and so does the foot of the signed-off
-  // page, where the builder is; the header fits at every width.
-  await expect(page.getByRole('button', { name: 'Open Draft PR' })).toHaveCount(2);
+  // The project has no origin, so no pull request can be opened: no Open Draft PR is drawn anywhere, and
+  // the foot of the signed-off page, where the builder is, says why. The header fits at every width.
+  await expect(page.getByText(/^Signed off\. No pull request yet: /)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open Draft PR' })).toHaveCount(0);
   await panelHeadFits(page, 1280);
   for (const width of [900, 520, 420]) await headerFits(page, width);
   // At 900 the queue is the strip until the sheet opens, and it is drawn once in the sheet too. A page picked

@@ -43,7 +43,7 @@ import { ClosedPassLine } from './closed-pass-line';
 import { HeaderNotices } from './header-notices';
 import { PassHeader } from './pass-header';
 import { PassWorkspace } from './pass-workspace';
-import { PrButton, PrReason } from './pr-button';
+import { PrButton } from './pr-button';
 import { queueRows } from './queue-rows';
 import type { PassWorkspaceProps } from './pass-workspace-props';
 import { RenameModal } from './rename-modal';
@@ -239,7 +239,6 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
         inbox={inbox}
         now={now}
         pullRequest={<PrButton view={live} />}
-        pullRequestReason={<PrReason view={live} />}
         onClose={() => {
           setDialog('close');
         }}

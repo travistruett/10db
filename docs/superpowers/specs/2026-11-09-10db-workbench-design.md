@@ -240,7 +240,8 @@ NARROW (~480 px, beside the browser)      WIDE (900 px and up)
 composer, so the two never share a bar:
 
 - one line: the project, the pass's name and its counts ("ampsio · Settings pass · 2 signed off · 1 ready");
-- **Add Page**; **Open Pull Request** (a `default` button, shown once a page is signed off); a `⋯` menu with
+- **Add Page**; **Open Pull Request** (a `default` button, shown once a page is signed off and only while the daemon offers it or a
+  pull request exists; otherwise the signed-off page's foot says why); a `⋯` menu with
   **Close Pass…** and **Rename**;
 - the timing hint of §4.5 as a dimmed `xs` line under it, shown only when it has something to say.
 

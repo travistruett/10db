@@ -170,9 +170,6 @@ export function PagePane(props: PagePaneProps) {
           {passOpen && status === PageStatus.SignedOff && pullRequest !== undefined ? (
             // The next step sits where the builder signed off, not only in the header above the thread.
             <Group px="md" py="xs" gap="sm" justify="space-between" wrap="wrap">
-              <Text size="sm" c="dimmed">
-                Signed off. CI checks it once it is in the pull request.
-              </Text>
               {pullRequest}
             </Group>
           ) : null}
