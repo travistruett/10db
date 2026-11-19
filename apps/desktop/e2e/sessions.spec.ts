@@ -209,7 +209,7 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
 
   // Deny in the session: the ring and the badge clear, the builder's task stays and the turn ends.
   await card.getByRole('radio', { name: /Deny/ }).check();
-  await card.getByRole('button', { name: 'Send answer' }).click();
+  await card.getByRole('button', { name: 'Send Answer' }).click();
   await expect(sessionRow(page, /Login fails after sleep/)).not.toHaveAttribute('data-ring', /.+/);
   await expect(sessionsBadge(page)).not.toContainText('need');
   await expect(page.getByText('I left the other task alone.')).toBeVisible();

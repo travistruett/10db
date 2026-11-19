@@ -204,7 +204,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(content.getByText(QUESTION)).toBeVisible();
   await expectAccessible(page, 'inbox, skipped while away, dark');
   await page.getByRole('radio', { name: /Dismiss/ }).check();
-  await page.getByRole('button', { name: 'Send answer' }).click();
+  await page.getByRole('button', { name: 'Send Answer' }).click();
   await expect(page.getByText(QUESTION)).toBeHidden();
 
   // The work went on, committed, passed 10db's gate and is DONE.

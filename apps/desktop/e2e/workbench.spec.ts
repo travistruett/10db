@@ -311,7 +311,7 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   const people = page.getByRole('region', { name: 'People' });
   await expect(people.getByText('Which spacing?', { exact: true })).toBeVisible();
   await people.getByRole('radio', { name: /Roomy/ }).check();
-  await people.getByRole('button', { name: 'Send answer' }).click();
+  await people.getByRole('button', { name: 'Send Answer' }).click();
   await expect(row(page, 'People')).toContainText('Ready');
   await expect(row(page, 'Settings')).toContainText('Ready');
 

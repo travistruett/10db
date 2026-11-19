@@ -26,7 +26,6 @@ import { Link } from '@tanstack/react-router';
 import type { KeyboardEvent, ReactNode, RefObject } from 'react';
 import { z } from 'zod';
 import { CodeSpans } from '../../shell/code-spans';
-import { ProjectLabel } from '../../shell/project-label';
 import { ExternalLink } from '../board/pull-request-link';
 import { BatchCardActions } from './batch-card-actions';
 import { CardOpensLink, cardOpens } from './card-opens-link';
@@ -34,7 +33,11 @@ import { CheckCard } from './check-card';
 import { PlanCard } from './plan-card';
 import { ReviewRejection, reviewRejection } from '../review/review-rejection';
 import { McpApprovalDetails, mcpReview } from './mcp-approval';
+import { CardActions } from './card-actions';
+import { CardHeader } from './card-header';
 import { CardSurface } from './card-surface';
+import classes from './inbox-card.module.css';
+import { KIND_ICONS } from './kind-icons';
 import { KIND_LABELS, optionLabel } from './permission-labels';
 import { usePrincipleOf } from './principle-card';
 import { RecordDecision } from './record-decision';
@@ -169,22 +172,17 @@ export function InboxCard({
   const principle = usePrincipleOf(item, selected);
   const session = useSessionOfCard(item);
   const taskOfCard = useTaskOfCard(item);
-  // Every card waits on the builder, a flag included: yellow, never the red of a failure.
-  const kind = (
-    <Badge size="sm" variant="light" color="yellow" style={{ flexShrink: 0 }}>
-      {review ? 'MCP server' : KIND_LABELS[item.kind]}
-    </Badge>
+  const kind = review ? 'MCP server' : KIND_LABELS[item.kind];
+  const header = (extra: ReactNode = null) => (
+    <CardHeader
+      item={item}
+      icon={KIND_ICONS[item.kind]}
+      kind={kind}
+      count={count}
+      framed={framed}
+      extra={extra}
+    />
   );
-  // The Inbox lists every project, so each card says whose it is.
-  const where = <ProjectLabel projectId={item.projectId} />;
-  const times =
-    count > 1 ? (
-      <Badge size="sm" variant="default" style={{ flexShrink: 0 }}>
-        ×{count}
-      </Badge>
-    ) : null;
-  // The row's count in words, so the number in the sidebar has an explanation on screen.
-  const identical = count > 1 ? `${String(count)} identical flags` : null;
 
   if (item.kind === InboxKind.Plan) {
     return (
@@ -194,16 +192,7 @@ export function InboxCard({
         note={sendBackNote}
         onNote={onSendBackNote}
         {...(onAnsweredElsewhere === undefined ? {} : { onAnsweredElsewhere })}
-        header={
-          <Group gap="sm" wrap="nowrap">
-            {kind}
-            {where}
-            {times}
-            <Text fw={600} style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
-              {item.title}
-            </Text>
-          </Group>
-        }
+        header={header()}
       />
     );
   }
@@ -216,16 +205,7 @@ export function InboxCard({
         note={sendBackNote}
         onNote={onSendBackNote}
         {...(onAnsweredElsewhere === undefined ? {} : { onAnsweredElsewhere })}
-        header={
-          <Group gap="sm" wrap="nowrap">
-            {kind}
-            {where}
-            {times}
-            <Text fw={600} style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
-              {item.title}
-            </Text>
-          </Group>
-        }
+        header={header()}
       />
     );
   }
@@ -244,15 +224,7 @@ export function InboxCard({
         onAnswerMyself={() => {
           onAnswerMyself(true);
         }}
-        header={
-          <Group gap="sm" wrap="nowrap">
-            {kind}
-            {where}
-            <Text fw={600} style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
-              {item.title}
-            </Text>
-          </Group>
-        }
+        header={header()}
       />
     );
   }
@@ -274,29 +246,20 @@ export function InboxCard({
 
   return (
     <CardSurface framed={framed} selected>
-      <Stack gap="sm">
-        <Group gap="sm" wrap="nowrap">
-          {kind}
-          {where}
-          {principle ? (
-            <Badge size="sm" variant="outline" style={{ flexShrink: 0 }}>
-              {PRINCIPLE_KIND_LABELS[principle.kind]}
-            </Badge>
-          ) : null}
-          {times}
-          {session === null ? null : <SessionBadge chat={session} />}
-          <Text fw={600} style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
-            {item.title}
-          </Text>
-        </Group>
+      <Stack gap={framed ? 'sm' : 'md'} className={framed ? undefined : classes['content']}>
+        {header(
+          <>
+            {principle ? (
+              <Badge size="xs" variant="outline" style={{ flexShrink: 0 }}>
+                {PRINCIPLE_KIND_LABELS[principle.kind]}
+              </Badge>
+            ) : null}
+            {session === null ? null : <SessionBadge chat={session} />}
+          </>,
+        )}
         {session === null ? null : <OpenSessionLink chat={session} />}
         {taskOfCard === null ? null : (
           <OpenTaskLink taskId={taskOfCard} projectId={item.projectId} />
-        )}
-        {identical === null ? null : (
-          <Text size="sm" c="dimmed">
-            {identical} are open. Dismiss All closes all {count}.
-          </Text>
         )}
         {review ? (
           <McpApprovalDetails review={review} body={item.body} />
@@ -386,9 +349,10 @@ export function InboxCard({
         {hasOptions ? (
           <Textarea
             ref={noteRef}
-            label="Note for the agent (optional)"
+            label="Note"
+            placeholder="Optional. Sent with your answer."
             autosize
-            minRows={1}
+            minRows={2}
             value={note}
             onChange={(e) => {
               onNote(e.currentTarget.value);
@@ -402,28 +366,28 @@ export function InboxCard({
             {error}
           </Alert>
         ) : null}
-        <Group justify="flex-end">
-          {(mode === StakeholderMode.Unrouted || mode === StakeholderMode.Pending) && hasOptions ? (
-            <AskSomeoneFooter item={item} people={people} />
-          ) : null}
-          {hasOptions || !closesItself ? (
-            <Button
-              size="sm"
-              loading={pending}
-              onClick={onSubmit}
-              rightSection={
-                shortcuts ? (
-                  <Kbd size="xs" aria-hidden>
-                    ↵
-                  </Kbd>
-                ) : null
-              }
-            >
-              {hasOptions ? 'Send answer' : count > 1 ? 'Dismiss All' : 'Dismiss'}
-            </Button>
-          ) : null}
-        </Group>
       </Stack>
+      <CardActions framed={framed}>
+        {(mode === StakeholderMode.Unrouted || mode === StakeholderMode.Pending) && hasOptions ? (
+          <AskSomeoneFooter item={item} people={people} />
+        ) : null}
+        {hasOptions || !closesItself ? (
+          <Button
+            size="sm"
+            loading={pending}
+            onClick={onSubmit}
+            rightSection={
+              shortcuts ? (
+                <Kbd size="xs" aria-hidden>
+                  ↵
+                </Kbd>
+              ) : null
+            }
+          >
+            {hasOptions ? 'Send Answer' : count > 1 ? 'Dismiss All' : 'Dismiss'}
+          </Button>
+        ) : null}
+      </CardActions>
     </CardSurface>
   );
 }

@@ -22,5 +22,10 @@ export function CardSurface({
         {children}
       </Paper>
     );
-  return <Box {...marker}>{children}</Box>;
+  // Unframed, it fills the content's height, so a card's action bar can sit at the pane's foot.
+  return (
+    <Box style={{ flex: 1, display: 'flex', flexDirection: 'column' }} {...marker}>
+      {children}
+    </Box>
+  );
 }

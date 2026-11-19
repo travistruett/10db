@@ -1,5 +1,4 @@
 import {
-  InboxKind,
   InboxListState,
   InboxOutcome,
   inboxOutcome,
@@ -7,29 +6,20 @@ import {
   type InboxItemDto,
 } from '@10db/contracts';
 import { Button, Text } from '@mantine/core';
+import { IconAlertTriangle, type Icon } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import type { InboxRow } from '../../daemon/inbox-queries';
 import { ProjectLabel } from '../../shell/project-label';
 import { shortAgo } from '../factory/short-ago';
 import classes from './inbox-row-item.module.css';
+import { KIND_ICONS } from './kind-icons';
 import { passReadyTitle } from './pass-ready-row';
+import { KIND_LABELS } from './permission-labels';
 import { answerWords } from './resolved-detail';
 import { SessionBadge, useSessionOfCard } from './session-card-link';
 import { cardText } from './system-card-list';
 import type { SystemCard } from './system-cards';
 import { recipientsOf } from './waiting-row';
-
-/** The short word a row's first line starts with, by what the card is. */
-export const KIND_TAGS: Record<InboxKind, string> = {
-  [InboxKind.Question]: 'ASK',
-  [InboxKind.Permission]: 'ALLOW',
-  [InboxKind.Proposal]: 'PROPOSAL',
-  [InboxKind.Review]: 'REVIEW',
-  [InboxKind.Flag]: 'FLAG',
-  [InboxKind.Check]: 'CHECK',
-  [InboxKind.Plan]: 'PLAN',
-  [InboxKind.PlaybookMoveReport]: 'SETTINGS',
-};
 
 /** The words for how a resolved card closed, on its row and in the filter. */
 export const OUTCOME_LABELS: Readonly<Record<InboxOutcome, string>> = {
@@ -58,8 +48,9 @@ export function inboxRowOf(row: InboxRow): OpenRow {
 const firstLine = (text: string): string => text.split('\n')[0] ?? '';
 
 export function Lines({
-  tag,
-  tagColor,
+  icon: KindIcon,
+  kind,
+  iconColor,
   tone,
   title,
   count,
@@ -67,9 +58,12 @@ export function Lines({
   second,
   failure,
 }: {
-  readonly tag: string;
-  /** The tag's colour in place of the state's own. */
-  readonly tagColor?: string;
+  /** The mark for what the row is, before the title. */
+  readonly icon: Icon;
+  /** What the row is, in words: the mark's name for the pointer and a screen reader. */
+  readonly kind: string;
+  /** The mark's colour in place of the state's own. */
+  readonly iconColor?: string;
   readonly tone: 'open' | 'quiet';
   readonly title: string;
   readonly count: number;
@@ -80,14 +74,19 @@ export function Lines({
   return (
     <div className={classes['item']}>
       <div className={classes['line']}>
-        <Text
-          fz={10}
-          fw={700}
-          c={tagColor ?? (tone === 'open' ? 'var(--mantine-color-yellow-text)' : 'dimmed')}
-          style={{ flexShrink: 0, letterSpacing: '0.04em' }}
+        <span
+          className={classes['mark']}
+          title={kind}
+          style={{
+            color:
+              iconColor ??
+              (tone === 'open'
+                ? 'var(--mantine-color-yellow-text)'
+                : 'var(--mantine-color-dimmed)'),
+          }}
         >
-          {tag}
-        </Text>
+          <KindIcon size={14} stroke={1.75} aria-label={kind} />
+        </span>
         <Text
           fz={13}
           fw={500}
@@ -113,7 +112,7 @@ export function Lines({
           </Text>
         )}
       </div>
-      <div className={classes['line']}>
+      <div className={[classes['line'], classes['second']].join(' ')}>
         {failure === null ? (
           second
         ) : (
@@ -158,7 +157,7 @@ function SessionLine({ item }: { readonly item: InboxItemDto }) {
 }
 
 /**
- * The two lines of a row in the panel (spec §4.1 "A row"): the kind, the title, how many and how long ago,
+ * The two lines of a row in the panel (spec §4.1 "A row"): the kind's mark, the title, how many and how long ago,
  * then the project and what the card is about.
  */
 export function InboxRowItem({
@@ -178,7 +177,8 @@ export function InboxRowItem({
     const { title, body } = cardText(row.card);
     return (
       <Lines
-        tag="10db"
+        icon={IconAlertTriangle}
+        kind="10db"
         tone={tone}
         title={title}
         count={1}
@@ -197,7 +197,8 @@ export function InboxRowItem({
   const pass = row.row.passId !== null;
   return (
     <Lines
-      tag={KIND_TAGS[first.kind]}
+      icon={KIND_ICONS[first.kind]}
+      kind={KIND_LABELS[first.kind]}
       tone={tone}
       title={first.title}
       count={pass ? 1 : items.length}

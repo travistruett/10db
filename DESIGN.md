@@ -20,8 +20,8 @@ favors legibility and calm over decoration.
   "OK" color for a task or goal; don't use cyan or teal for success there. A connection's status (Overview,
   Integrations, an account's state) is the exception: teal = works, yellow = needs the builder, gray = off, never
   green or red, and its dot always comes with words. Every card in the Inbox's Open state waits on the
-  builder, so its kind tag stays yellow, a flag's too: red there would read as an error. Waiting's and Resolved's
-  tags are gray. Waiting holds what the builder waits on someone else for; waiting on someone shows as a line on
+  builder, so its kind mark stays yellow, a flag's too: red there would read as an error. Waiting's and Resolved's
+  marks are gray. Waiting holds what the builder waits on someone else for; waiting on someone shows as a line on
   the row, not a color. A status is
   never told by color alone: a bare dot means running, a dot with a ring waits on the builder (yellow, or red for
   a failure), and failed, paused and done are icons in their colors. Green on a Sessions row means landed (a pull request merged,
@@ -165,12 +165,19 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   Inbox's Open state, the Sessions and Workbench needs-you counts. The Inbox's Open count is the daemon's (the
   rows `GET /inbox/page` counts with no filter), and a filter or a search on the list never changes it
   (`decisions/2026-11-17-the-daemon-groups-inbox-rows-in-its-code-and-the-browser-groups-nothing.md`).
-- **Inbox rows:** a row is two lines at a fixed height: the kind tag in uppercase, the title, `×n` for rows that
-  stand for several cards and the age; then the project and the first line of the body. A flag's row offers
-  Dismiss on hover and focus, and `e` dismisses the selected one. The list keeps one row selected and its content
-  is drawn beside the panel. The panel's switch is Open, Waiting and Resolved; only Open and Waiting carry a
+- **Inbox rows:** a row is two lines at a fixed height (64 px): the kind's icon (`KIND_ICONS`, named on hover),
+  the title, `×n` for rows that stand for several cards and the age; then, under the title, the project and the
+  first line of the body. A hairline inset by the row's padding parts each row from the next and goes beside the
+  hovered or selected row; there are no stripes, and the list has no scrollbar. The selected row's fill is its
+  only mark: a focused row draws no outline. A flag's row offers Dismiss on hover, over the row's end, and `e`
+  dismisses the selected one. The list keeps one row selected and its content is drawn beside the panel.
+- **Inbox content:** the selected card opens with its title (16 / 600) on a line of its own and one dim meta line
+  under it: the kind's icon and name, the project, how many identical cards and how long ago (`card-header.tsx`).
+  Its text keeps a 760 px measure. Its buttons are a bar held at the foot of the content, a hairline above
+  (`card-actions.tsx`), so Dismiss and Send Answer stay in one place however long the card is. A field's label
+  never says "(optional)": the placeholder says Optional. The panel's switch is Open, Waiting and Resolved; only Open and Waiting carry a
   count. A notice, which asks nothing, is not in the Inbox: it is a row of the Factory's Activity drawer (the history button in its title row), the same two
-  lines with a gray `NOTICE` tag (orange for a warning), opening in a drawer with no answer and no Dismiss.
+  lines with a gray notice icon (an orange warning icon for a warning), opening in a drawer with no answer and no Dismiss.
 - **Page header:** a page has one header, the frame's title row (`TitleRow`,
   `apps/desktop/src/shell/title-row.tsx`), at the top of the content column on the content's own tone: the title
   at 14 px / 600, an optional switcher beside it, an optional dim meta line, then the actions at the right (28 px

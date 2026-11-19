@@ -43,7 +43,7 @@ export function RouteLineRow({
 
 /**
  * The message for people not in Slack, under a line that says what the builder does with it, and the
- * Copy button beside that line; the card's footer keeps Send answer as its one primary.
+ * Copy button beside that line; the card's footer keeps Send Answer as its one primary.
  */
 export function ComposedMessage({
   item,

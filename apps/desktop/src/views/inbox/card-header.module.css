@@ -1,0 +1,38 @@
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.title {
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  font-size: var(--mantine-font-size-xs);
+  color: var(--mantine-color-dimmed);
+  row-gap: 4px;
+}
+
+.kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+/* Every card waits on the builder: its mark is yellow, as the row's is. */
+.icon {
+  color: var(--mantine-color-yellow-text);
+}
+
+.dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.6;
+  flex-shrink: 0;
+}

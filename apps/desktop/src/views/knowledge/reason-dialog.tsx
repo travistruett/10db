@@ -69,7 +69,8 @@ export function ReasonDialog({
           {choice}
           <Text size="sm">{intro}</Text>
           <Textarea
-            label={required ? 'Reason' : 'Note (optional)'}
+            label={required ? 'Reason' : 'Note'}
+            placeholder={required ? undefined : 'Optional'}
             data-autofocus
             autosize
             minRows={2}

@@ -110,7 +110,8 @@ function WaitingPermission({ item }: { readonly item: InboxItemDto }) {
           </Stack>
         </Radio.Group>
         <Textarea
-          label="Note for the agent (optional)"
+          label="Note"
+          placeholder="Optional. Sent with your answer."
           size="xs"
           autosize
           minRows={1}
@@ -127,7 +128,7 @@ function WaitingPermission({ item }: { readonly item: InboxItemDto }) {
         )}
         <Group justify="flex-end">
           <Button size="xs" loading={answer.isPending} onClick={submit}>
-            Send answer
+            Send Answer
           </Button>
         </Group>
       </Stack>

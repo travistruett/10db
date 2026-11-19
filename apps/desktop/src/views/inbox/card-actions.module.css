@@ -1,0 +1,20 @@
+/* Held at the foot of the content's scroll: it reaches the pane's edges, over its padding, and the card's
+   text scrolls under it. Its card grows to fill the pane, so a short card's bar is still at the foot. */
+.bar {
+  position: sticky;
+  bottom: calc(-1 * var(--shell-content-padding-block));
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--mantine-spacing-md);
+  margin: auto calc(-1 * var(--shell-content-padding-inline))
+    calc(-1 * var(--shell-content-padding-block));
+  padding: 12px var(--shell-content-padding-inline);
+  border-top: 1px solid var(--mantine-color-default-border);
+  background: var(--mantine-color-body);
+}
+
+.start {
+  min-width: 0;
+}
