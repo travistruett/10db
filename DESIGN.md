@@ -151,6 +151,15 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   A button or menu item never ends in "…", even when it opens a dialog; "…" is for work in progress
   ("Closing the pass…") and placeholders.
   Say what happened and what to do next.
+- **Panel lists:** every panel's list is drawn alike. Its head is full width, edge to edge with the rows: a
+  search (`PanelSearch`, `shell/panel-search.tsx`) on the switch's darker track tone with no border, 12 px above
+  the first row. Rows are rounded, 12 px in from their edges, half a step up under the pointer and a full step
+  when selected (`--panel-row-hover`, `--panel-row-selected`, set on the panel's body); two-line rows (the Inbox,
+  the Workbench's pages) part with a hairline inset by the row's padding, which goes beside a filled row. A row's
+  own controls (Dismiss, ⋯) show on hover and on the selected row.
+- **Create buttons:** a button that makes a new thing in a list (Add Page, Add Task) is `CreateButton`
+  (`shell/create-button.tsx`): a dashed slot with a + tile and the thing's name. Hovered, it fills, its border
+  firms up and its + turns primary; pressed, it sinks a pixel. Never restyle a `Button` with a dashed border by hand.
 - **Buttons:** one filled primary per group. A standalone secondary action is `variant="default"`
   (bordered, neutral); `subtle` only inside dense rows and menus; never `outline` beside a filled
   primary, where its colored border competes with it.
@@ -195,8 +204,9 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   its own actions. Workspaces, where the content is the work, keep compact headers of their own: an open Workbench pass.
   Sessions' title row is the frame's: the session's title and a ⌄ switcher, a dim meta line in git's words
   ("on `main` · 2 files changed"), then the agent, Changes, the next git step (Commit…, Open Pull Request,
-  Merge), the terminal button and ⋯. The panel lists sessions by project, one 30 px row each with its place
-  icon (reading, here, branch, terminal) and one mark; there is no tab strip. A session reads freely, and the
+  Merge), the terminal button and ⋯. The panel lists sessions by project, one 32 px row each with its place
+  icon (reading, here, branch, terminal) and one mark (a fresh tab reads New Session, with a +, in the create
+  button's dashed slot; a removed project's sessions group under "Removed project"); there is no tab strip. A session reads freely, and the
   first time it goes to change files a bar above the composer asks **Here, on `<branch>`** or **On a New
   Branch**; Changes opens as a drawer from the right.
 - **Surfaces:** the frame is the bar (the top 44 px, carrying the traffic lights, the sidebar button and each

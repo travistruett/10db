@@ -47,7 +47,7 @@ is mounted:
   The row's box and the space between its parts carry `data-tauri-drag-region`; a control a view puts in never
   does. A view with no title passes `title={null}` (Sessions draws its tab strip as the switcher; Settings, the Inbox and the Workbench have a panel; the Workbench's only while a pass is open).
   `lines` (1 or 2) is how many lines a long title takes before it is cut; two reads whole at a narrow width.
-- `Panel` (`panel.tsx`): a section's list, with a 44 px head (its `title` and `controls`), its part of the bar. Mounting it is what tells the frame the section has a panel (`registerPanel`); unmounting withdraws it.
+- `Panel` (`panel.tsx`): a section's list, with a 44 px head (its `title` and `controls`), its part of the bar. Its body sets the rows' tones, `--panel-row-hover`, `--panel-row-selected` and `--panel-row-hairline`, which every panel list reads (with a fallback outside a panel). A panel's search is `PanelSearch` (`panel-search.tsx`), and a list's create button is `CreateButton` (`create-button.tsx`; `CREATE_SLOT_CLASS` gives a row the same dashed slot). Mounting it is what tells the frame the section has a panel (`registerPanel`); unmounting withdraws it.
   A pick in a panel's list that changes no route (a row selected, a search change) calls `closeSheet()` from
   `useFrameSlots()`, since a sheet closes on its own only when the pathname changes.
 - `FrameSlots.panelShown` says whether the frame draws the panel now: a column, or the open sheet. A view that draws

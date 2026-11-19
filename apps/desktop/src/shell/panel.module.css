@@ -29,4 +29,12 @@
   padding: 8px 8px 10px;
   background: var(--shell-panel-tone);
   border-top-left-radius: var(--shell-panel-corner, 0);
+  /* Every panel list's rows take these: a hovered row half a step up, the selected one a full step. */
+  --panel-row-hover: color-mix(
+    in srgb,
+    var(--mantine-color-default-hover) 50%,
+    var(--shell-panel-tone)
+  );
+  --panel-row-selected: var(--mantine-color-default-hover);
+  --panel-row-hairline: color-mix(in srgb, var(--mantine-color-default-border) 70%, transparent);
 }

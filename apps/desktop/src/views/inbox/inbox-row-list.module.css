@@ -24,7 +24,10 @@
   bottom: 0;
   left: 12px;
   height: 1px;
-  background: color-mix(in srgb, var(--mantine-color-default-border) 70%, transparent);
+  background: var(
+    --panel-row-hairline,
+    color-mix(in srgb, var(--mantine-color-default-border) 70%, transparent)
+  );
 }
 
 .row:hover::after,
@@ -40,11 +43,15 @@
 
 .row:hover,
 .row[data-hovered] {
-  background: color-mix(in srgb, var(--mantine-color-default-hover) 50%, transparent);
+  /* Outside a panel (a screen frame) the half step is see-through, so it suits any surface. */
+  background: var(
+    --panel-row-hover,
+    color-mix(in srgb, var(--mantine-color-default-hover) 50%, transparent)
+  );
 }
 
 .row[aria-selected='true'] {
-  background: var(--mantine-color-default-hover);
+  background: var(--panel-row-selected, var(--mantine-color-default-hover));
   color: var(--mantine-color-bright);
 }
 
@@ -76,15 +83,11 @@
   justify-content: flex-end;
   padding: 0 12px;
   opacity: 0;
-  --inbox-row-fill: color-mix(
-    in srgb,
-    var(--mantine-color-default-hover) 50%,
-    var(--shell-panel-tone)
-  );
+  --inbox-row-fill: var(--panel-row-hover);
 }
 
 .action[data-selected] {
-  --inbox-row-fill: var(--mantine-color-default-hover);
+  --inbox-row-fill: var(--panel-row-selected);
 }
 
 .action[data-shown],

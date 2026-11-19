@@ -31,6 +31,7 @@ import {
   useTasks,
   useWorkstreams,
 } from '../../daemon/queries';
+import { CreateButton } from '../../shell/create-button';
 import { PageIntro } from '../../shell/page-intro';
 import { TitleRow } from '../../shell/title-row';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
@@ -309,20 +310,12 @@ function BoardColumns({
                     {`Show all ${String(column.tasks.length)}`}
                   </Button>
                 ) : isReady(column) ? (
-                  <Button
-                    variant="default"
-                    size="xs"
-                    fullWidth
-                    // An unfilled dashed slot, so it never reads as a card; hovered, it takes a card's tone.
-                    style={{
-                      borderStyle: 'dashed',
-                      '--button-bg': 'transparent',
-                      '--button-hover': 'var(--tendb-color-card)',
-                    }}
+                  // Hovered, it takes a card's tone, the column's own step up.
+                  <CreateButton
+                    label="Add Task"
                     onClick={onAddTask}
-                  >
-                    Add Task
-                  </Button>
+                    hoverTone="var(--tendb-color-card)"
+                  />
                 ) : null
               }
             >

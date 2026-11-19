@@ -10,10 +10,12 @@ import {
   IconGitPullRequest,
   IconMessage,
   IconPlayerPause,
+  IconPlus,
   IconTerminal2,
   IconX,
 } from '@tabler/icons-react';
 import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
+import { CREATE_SLOT_CLASS } from '../../shell/create-button';
 import { RowIcon, RowMark, type RowState } from './row-state';
 import classes from './session-row.module.css';
 
@@ -71,7 +73,7 @@ export interface SessionRowProps {
 }
 
 /**
- * One 30 px row of the panel: where the session works, its title, one state mark. Hovered, × takes the mark's
+ * One 32 px row of the panel: where the session works, its title, one state mark. Hovered, × takes the mark's
  * place. A ring stays around a row that needs the builder; no state is told by colour alone.
  */
 export function SessionRow({
@@ -144,7 +146,7 @@ export function SessionRow({
         aria-label={name}
         aria-selected={selected}
         tabIndex={tabbable ? 0 : -1}
-        className={classes['row']}
+        className={fresh ? `${classes['row'] ?? ''} ${CREATE_SLOT_CLASS}` : classes['row']}
         data-session-row={rowKey}
         data-selected={selected ? '' : undefined}
         data-ring={ring ?? undefined}
@@ -165,7 +167,7 @@ export function SessionRow({
         }}
       >
         <span className={classes['icon']} aria-hidden="true">
-          {ICONS[state?.icon ?? RowIcon.Reading]}
+          {fresh ? <IconPlus size={14} stroke={1.5} /> : ICONS[state?.icon ?? RowIcon.Reading]}
         </span>
         <span
           className={classes['title']}

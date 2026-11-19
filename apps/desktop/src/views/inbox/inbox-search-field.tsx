@@ -1,9 +1,7 @@
-import { TextInput } from '@mantine/core';
 import { useDebouncedCallback } from '@mantine/hooks';
-import { IconSearch } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useFrameSlots } from '../../shell/frame-slots';
-import classes from './inbox-search-field.module.css';
+import { PanelSearch } from '../../shell/panel-search';
 
 /** How long the field waits after the last keystroke before the search reaches the URL. */
 export const SEARCH_DEBOUNCE_MS = 250;
@@ -64,14 +62,11 @@ export function InboxSearchField({
   }, [asked, panelShown]);
 
   return (
-    <TextInput
+    <PanelSearch
       ref={input}
-      size="xs"
-      classNames={{ input: classes['input'] }}
       aria-label="Search the Inbox"
       placeholder="Search"
       maxLength={200}
-      leftSection={<IconSearch size={14} />}
       value={text}
       onChange={(event) => {
         setText(event.currentTarget.value);

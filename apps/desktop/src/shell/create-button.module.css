@@ -1,0 +1,83 @@
+/* The one look of a button that makes a new thing in a list: an unfilled dashed slot, quieter than a row, that
+   fills and firms up under the pointer. Its hover tone is `--create-hover`, so a list on another tone (a board
+   column) sets its own. */
+.button {
+  --create-hover: var(--panel-row-hover, var(--mantine-color-default-hover));
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px dashed var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-md);
+  background: transparent;
+  color: var(--mantine-color-dimmed);
+  font-size: var(--mantine-font-size-sm);
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    transform 80ms ease;
+}
+
+.plus {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: var(--mantine-color-default-hover);
+  color: var(--mantine-color-text);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.button:hover:not(:disabled) {
+  border-style: solid;
+  border-color: color-mix(
+    in srgb,
+    var(--mantine-color-default-border) 60%,
+    var(--mantine-color-text)
+  );
+  background: var(--create-hover);
+  color: var(--mantine-color-bright);
+}
+
+.button:hover:not(:disabled) .plus {
+  background: var(--mantine-primary-color-filled);
+  /* Text on a filled colour is the scheme's body tone (`theme.ts`). */
+  color: var(--mantine-color-body);
+}
+
+.button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.button:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: 1px;
+}
+
+.button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+/* A row that stands for a new thing not yet made (Sessions' fresh tab) wears the same slot. */
+.slot {
+  border: 1px dashed var(--mantine-color-default-border);
+}
