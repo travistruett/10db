@@ -21,7 +21,7 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
   sheet always stands over it.
   Rail widths (200 labelled, 60 icons only) and the title row's height (44 px) are constants there.
 - The panel column and the content are a Mantine `Splitter`: the panel's hairline is the handle, and the builder
-  drags the panel between 260 and 480 px (340 until dragged, and again on a double-click of the handle; `PANEL_WIDTH` and its bounds in `shell-layout.ts`).
+  drags the panel between 240 and 480 px (340 until dragged, and again on a double-click of the handle; `PANEL_WIDTH` and its bounds in `shell-layout.ts`).
   One width for every section, remembered (`panel-width.ts`, `tendb.shell.panelWidth`); a sheet takes it too.
   Only a panel column takes the pane's room: otherwise the pane is `display: contents`, and the handle is hidden.
 - What the frame draws is a pure function of the window's width band, whether the section has a panel, the labels
@@ -36,7 +36,7 @@ Drawers), spec `docs/superpowers/specs/2026-11-17-10db-app-shell-design.md`.
   link, the open section's too. Esc, a click on the backdrop, or moving anywhere closes a sheet.
 - The rail is `rail.tsx` over `rail-items.ts` (`RAIL_ITEMS`, one flat list with no group type; a route maps to its
   section with `railSectionForPath`) and draws labelled or icons only from `RailModeContext` (`rail-mode.ts`), which the
-  project row and the status controls read. `rail-badges.tsx` draws the counts. `status-line.tsx` is the foot's status control (`GET /status`, refetched on `status.changed`, never polled): a thin Progress bar for how busy the Mac is (hidden below 0.5, gray from 0.5, full and orange while 10db holds new work, no numbers, icon-wide in the narrow rail) with a HoverCard in plain words ("very busy" from level 1 before a hold starts) and, while holding, the busiest things by name from `busy.busiest`; the holds that are not the load keep their short label, "+N" when more, and a popover of details. It draws nothing while nothing is held or busy.
+  project row and the status controls read. `rail-badges.tsx` draws the counts. `factory-status.tsx` is the Factory row's status dot (`GET /status`, refetched on `status.changed`, never polled), in the row's count slot so nothing moves when it shows: amber from load level 1 (very busy, a hold near), orange while 10db holds new work for the load or any other status line, nothing otherwise. Its hovercard (`role="tooltip"`, so it describes the link) says in plain words what is happening, the busiest things by name where the daemon sends them, and that a hold ends by itself; it asks the builder nothing. The rail's foot has no status bar.
 
 ## Drawing into the frame
 

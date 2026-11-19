@@ -15,7 +15,7 @@ import type { KeyboardEvent, ReactElement, ReactNode } from 'react';
 import { useShapes } from '../daemon/shape-queries';
 import { firstAppSection } from '../views/settings/sections';
 import { AgentDownloadStatus } from './agent-download-status';
-import { StatusLineControl } from './status-line';
+import { FactoryStatusDot } from './factory-status';
 import { DaemonStatus } from './daemon-status';
 import { ProjectSwitcher } from './project-switcher';
 import { RailModeContext, useRailMode } from './rail-mode';
@@ -146,6 +146,8 @@ function SectionLink({
   const badge =
     section === RailSection.Inbox ? (
       <InboxBadge />
+    ) : section === RailSection.Factory ? (
+      <FactoryStatusDot />
     ) : section === RailSection.Sessions ? (
       <SessionsBadge />
     ) : section === RailSection.Workbench && project !== null ? (
@@ -169,8 +171,6 @@ function SectionLink({
 
 function RailControlView({ control }: { readonly control: RailControl }) {
   switch (control) {
-    case RailControl.Status:
-      return <StatusLineControl />;
     case RailControl.Download:
       return <AgentDownloadStatus />;
     case RailControl.Daemon:

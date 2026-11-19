@@ -3,7 +3,6 @@ import { Group } from '@mantine/core';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { TitleRow } from '../../shell/title-row';
-import { useOpenInboxCount } from './inbox-count';
 import { ActivityInbox } from './activity-inbox';
 import { InboxPanel } from './inbox-panel';
 import { ListedInbox } from './listed-inbox';
@@ -13,9 +12,18 @@ import {
   withoutFilters,
   withoutQuery,
   withState,
+  type InboxPanelState,
 } from './inbox-search';
 import { InboxShortcuts } from './inbox-shortcuts';
 import { OpenInbox } from './open-inbox';
+
+/** The content's title: the list the panel shows. */
+const STATE_TITLES: Record<InboxPanelState, string> = {
+  [InboxListState.Open]: 'Open',
+  [InboxListState.Waiting]: 'Waiting',
+  [InboxListState.Resolved]: 'Resolved',
+  [PanelOnlyState.Activity]: 'Activity',
+};
 
 /**
  * The Inbox: its title row, the panel with Open, Waiting, Resolved and Activity, and the content for the state the URL
@@ -24,7 +32,6 @@ import { OpenInbox } from './open-inbox';
 export function InboxView() {
   const search = useSearch({ from: '/inbox' });
   const navigate = useNavigate({ from: '/inbox' });
-  const open = useOpenInboxCount();
   const [helpOpen, setHelpOpen] = useState(false);
   const [listHost, setListHost] = useState<HTMLElement | null>(null);
   const state = search.state ?? InboxListState.Open;
@@ -68,8 +75,8 @@ export function InboxView() {
   return (
     <>
       <TitleRow
-        title="Inbox"
-        {...(open > 0 ? { meta: `${String(open)} open` } : {})}
+        // The panel's head already says Inbox, so the content names the list it shows.
+        title={STATE_TITLES[state]}
         actions={
           <Group gap="sm">
             <InboxShortcuts

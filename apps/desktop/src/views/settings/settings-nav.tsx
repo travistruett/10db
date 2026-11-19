@@ -60,8 +60,8 @@ const SECTION_ICON: Readonly<Record<SettingsSectionKey, typeof IconSettings>> = 
 };
 
 const SCOPE_OPTIONS = [
-  { value: SettingsScope.Project, label: 'This project' },
-  { value: SettingsScope.App, label: 'All projects' },
+  { value: SettingsScope.Project, label: 'This Project' },
+  { value: SettingsScope.App, label: 'All Projects' },
 ];
 
 function isScope(value: string): value is SettingsScope {

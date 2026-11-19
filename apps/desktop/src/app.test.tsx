@@ -8,7 +8,7 @@ describe('App shell', () => {
     const { router } = renderApp('/');
     expect(await screen.findByRole('heading', { name: 'Factory' })).toBeTruthy();
     fireEvent.click(screen.getByRole('link', { name: 'Inbox' }));
-    expect(await screen.findByRole('heading', { name: 'Inbox' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Open' })).toBeTruthy();
     expect(router.state.location.pathname).toBe('/inbox');
   });
 });

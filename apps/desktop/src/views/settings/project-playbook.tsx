@@ -44,7 +44,7 @@ export function ProjectPlaybook({ project }: { readonly project: ProjectDto }) {
         </Title>
         <Text size="xs" c="dimmed">
           Cells show what each step resolves to on this project&apos;s account. A field you set here
-          applies to this project only; Use global follows All projects › Models.
+          applies to this project only; Use global follows All Projects › Models.
         </Text>
         <PlaybookTable projectId={project.id} accountId={project.accountId} />
       </Stack>

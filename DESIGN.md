@@ -221,7 +221,7 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
 - **Navigation:** the sidebar's rail holds the sections, global ones above the project's, with Settings at the
   foot. It is labelled (200 px) and ⇧⌘S switches it to icons only (76 px, each name in a tooltip), remembered. The
   active row fills with `bg2`; hover is half of it. The project is a row of its tile and name (a tile alone when
-  icons only). A section with a list has a 260 px panel beside the rail (Settings' sections, the Inbox's rows and, while a
+  icons only). A section with a list has a panel beside the rail (340 px, dragged between 240 and 480) (Settings' sections, the Inbox's rows and, while a
   pass is open, the Workbench's queue: the Workbench has a panel only then), whose head
   is the sidebar's top row with the section's name and controls. From 1000 px both show and ⌘\, a click on the
   open section's rail item or the head's button hides the panel. From 640 px the rail is icons only and ⇧⌘S opens the
@@ -239,7 +239,7 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   its panel lists sessions across projects, each under its own. The sidebar reads in that order: Inbox, Factory and Sessions; then a "Project" label over the project switcher and that project's Board,
   Plan, Knowledge and Project Settings; then app-wide Settings at the foot. The Settings sidebar keeps the
   same order (Back to Board, the project's sections, then the app-wide ones), one scope at a time: a "This
-  project" / "All projects" switch under Back to Board picks which half the sections list shows, under subheads,
+  Project" / "All Projects" switch under Back to Board picks which half the sections list shows, under subheads,
   so the list fits 1280×720.
 - **Tables:** the identifying column (a name, a title) takes the spare width; numeric columns are
   right-aligned. A status is dimmed text after the

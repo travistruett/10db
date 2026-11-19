@@ -45,10 +45,10 @@ export function SectionBody({
       title={section.label}
       meta={
         section.scope === SettingsScope.App
-          ? 'All projects'
+          ? 'All Projects'
           : project === null
             ? undefined
-            : `This project · ${project.name}`
+            : `This Project · ${project.name}`
       }
     />
   );
@@ -128,7 +128,7 @@ export function SectionBody({
           {heading}
           {project ? (
             <ScopeLine>
-              {`For ${project.name} only. Anything set to As app follows All projects › Trust.`}
+              {`For ${project.name} only. Anything set to As app follows All Projects › Trust.`}
             </ScopeLine>
           ) : null}
           {project ? <ProjectTrustSection key={project.id} project={project} /> : <NoProject />}
@@ -209,7 +209,7 @@ export function SectionBody({
           {heading}
           {project ? (
             <ScopeLine>
-              {`For ${project.name} only. Use global follows All projects › Models.`}
+              {`For ${project.name} only. Use global follows All Projects › Models.`}
             </ScopeLine>
           ) : null}
           {project ? <ProjectPlaybook key={project.id} project={project} /> : <NoProject />}
