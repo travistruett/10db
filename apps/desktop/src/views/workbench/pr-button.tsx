@@ -12,8 +12,9 @@ import { FormModal } from '../../shell/form-modal';
 
 // Workbench spec §5.1, §8.3, W6: Open Draft PR pushes the pass's signed-off pages and opens a draft;
 // once the pull request exists the same button reads Push to PR. It reads what it would do first: not
-// offered, no button is drawn, and the signed-off page's foot (`PrFoot`) says the daemon's reason. Pushing is easy to undo, so it asks nothing first,
-// except when the branch carries commits from before the pass, which the pull request would list too.
+// offered, no button is drawn, and the signed-off page's foot (`PrFoot`) says the daemon's reason.
+// Pushing is easy to undo, so it asks nothing first, except when the branch carries commits from before
+// the pass, which the pull request would list too.
 
 /** Where the gate runs, in words. */
 function gateLine(gate: PassPullRequestGate): string {
