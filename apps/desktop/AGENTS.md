@@ -41,6 +41,8 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
   title row's 44 px height (`trafficLightPosition`), and elements marked
   `data-tauri-drag-region` move the window. The native window's theme follows the app's color scheme
   (`setWindowTheme`), not the system's.
+- `pnpm dev:window` (`scripts/dev-window.sh`, the `10db-dev-window` skill) does all of the below in one command on a
+  worktree's own data, with a demo project, and stops it all when the window closes.
 - `pnpm --filter @10db/desktop dev:shell` runs the Tauri shell against the daemon and Vite server that
   `pnpm dev` already runs. It sets `TENDB_EXTERNAL_DAEMON=1`, which makes the shell skip its sidecar.
   Run `pnpm --filter @10db/desktop sidecar` once first: `tauri-build` checks the sidecar files exist.
