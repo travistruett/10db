@@ -194,7 +194,7 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   never says "(optional)": the placeholder says Optional.
 - **Page header:** a page has one header, the frame's title row (`TitleRow`,
   `apps/desktop/src/shell/title-row.tsx`), at the top of the content column on the content's own tone: the title
-  at 14 px / 600, an optional switcher beside it, an optional dim meta line, then the actions at the right (28 px
+  at 14 px / 600 (a title can itself be the switcher, as a session's is), an optional dim meta line, then the actions at the right (28 px
   controls, `default` or one `primary`, then ⋯). Nothing in the content repeats it: no second title or byline that
   names the same thing and no heading larger than the title. Under it, at the top of the content, `PageIntro`
   (`apps/desktop/src/shell/page-intro.tsx`) holds at most one dim intro line (13 px, a sentence) and one toolbar,

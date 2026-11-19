@@ -47,7 +47,7 @@ export function SessionStrip({
       </Tooltip>
       {context}
       {changes === null ? null : (
-        <Tooltip label={`${changes.open ? 'Hide' : 'Show'} the changes  ⌘⇧D`}>
+        <Tooltip label={`${changes.open ? 'Hide' : 'Show'} the changes · ⌘⇧D`}>
           <UnstyledButton
             className={classes['changes']}
             aria-pressed={changes.open}

@@ -520,7 +520,7 @@ together is step 7's e2e, before any review of the view.
 | Git steps, title row   | 10db's routes             | same                | same                                             |
 
 All three use Claude Code ≥ 2.1.223 where it applies, since the plan and Bedrock run the same system `claude`. The
-UI names a provider only in the title row's agent label and the bar's sentence.
+UI names a provider only in the strip's agent label and the bar's sentence.
 
 ## 9. Docs
 

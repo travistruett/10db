@@ -441,6 +441,42 @@ export function ChatTab({
     );
   };
 
+  // Under the composer, or under the line that stands in for it, so a sealed or removed session keeps it too.
+  const strip = (
+    <SessionStrip
+      place={sessionMeta({
+        projectName: project?.name ?? '',
+        place,
+        movingTo,
+        state: work.data,
+        terminalSince:
+          takeover.data === undefined ? null : dayjs(takeover.data.since).format('HH:mm'),
+        inTerminal,
+      })}
+      agent={caps.label}
+      context={
+        <ContextRing
+          percent={conversation.contextPct}
+          more={[
+            CONTEXT_TIP,
+            ...(conversation.costUsd === null
+              ? []
+              : [`$${conversation.costUsd.toFixed(2)} so far`]),
+          ]}
+        />
+      }
+      changes={
+        offersChanges || changesOpen
+          ? {
+              totals: hasChanges ? totals : null,
+              open: changesOpen,
+              onToggle: toggleChanges,
+            }
+          : null
+      }
+    />
+  );
+
   return (
     <Box
       ref={sizeRef}
@@ -595,11 +631,17 @@ export function ChatTab({
                 </Text>
               ) : null}
               {conversation.state === 'sealed' ? (
-                <HandedOffLine chat={chat} />
+                <>
+                  <HandedOffLine chat={chat} />
+                  <Box px="md">{strip}</Box>
+                </>
               ) : removed ? (
-                <Text size="sm" c="dimmed" px="md" py="md">
-                  This project was removed from 10db.
-                </Text>
+                <>
+                  <Text size="sm" c="dimmed" px="md" py="md">
+                    This project was removed from 10db.
+                  </Text>
+                  <Box px="md">{strip}</Box>
+                </>
               ) : (
                 <Composer
                   draft={draft}
@@ -647,42 +689,7 @@ export function ChatTab({
                   onRedo={async (d) => {
                     await redo.mutateAsync({ conversationId: chat.conversationId, text: d.text });
                   }}
-                  notes={
-                    <SessionStrip
-                      place={sessionMeta({
-                        projectName: project.name,
-                        place,
-                        movingTo,
-                        state: work.data,
-                        terminalSince:
-                          takeover.data === undefined
-                            ? null
-                            : dayjs(takeover.data.since).format('HH:mm'),
-                        inTerminal,
-                      })}
-                      agent={caps.label}
-                      context={
-                        <ContextRing
-                          percent={conversation.contextPct}
-                          more={[
-                            CONTEXT_TIP,
-                            ...(conversation.costUsd === null
-                              ? []
-                              : [`$${conversation.costUsd.toFixed(2)} so far`]),
-                          ]}
-                        />
-                      }
-                      changes={
-                        offersChanges || changesOpen
-                          ? {
-                              totals: hasChanges ? totals : null,
-                              open: changesOpen,
-                              onToggle: toggleChanges,
-                            }
-                          : null
-                      }
-                    />
-                  }
+                  notes={strip}
                 />
               )}
             </>

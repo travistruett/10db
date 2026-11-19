@@ -48,6 +48,8 @@ export function sessionMeta(input: SessionMetaInput): string {
   if (state === undefined) return line();
   const pr = state.pullRequest;
   if (pr?.merged === true) return line(`merged into ${state.baseBranch ?? 'the base branch'}`);
+  // Uncommitted files on a branch are said even beside a pull request: Commit is the next step either way.
+  if (state.dirtyFiles > 0 && place === WorkPlace.Branch) parts.push('not committed');
   if (pr !== null) return line(`pull request #${String(pr.number)}, ${checksWords(pr.checks)}`);
   if (state.ahead > 0)
     // A project that merges locally has no pull request for the commits to be missing from.
@@ -57,8 +59,7 @@ export function sessionMeta(input: SessionMetaInput): string {
           ? ` not merged into ${state.baseBranch ?? 'the base branch'}`
           : ' not in a pull request'),
     );
-  if (state.dirtyFiles > 0 && place === WorkPlace.Branch) return line('not committed');
-  if (place === WorkPlace.Branch && state.baseBranch !== null)
+  if (state.dirtyFiles === 0 && place === WorkPlace.Branch && state.baseBranch !== null)
     // A branch that has been merged looks like one that was just cut, so it says where it stands.
     return line(`nothing ahead of ${state.baseBranch}`);
   return line();
