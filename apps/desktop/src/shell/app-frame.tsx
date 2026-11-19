@@ -217,7 +217,9 @@ export function AppFrame({
     ? layout.labels
       ? 'Icons only ⇧⌘S'
       : 'Show labels ⇧⌘S'
-    : 'Show the sidebar ⇧⌘S';
+    : sheet === SidebarSheet.Sections
+      ? 'Close the sidebar ⇧⌘S'
+      : 'Show the sidebar ⇧⌘S';
   const panelSheetLeft = layout.rail === 'hidden' ? 0 : railWidth;
   // What starts the bar right of the rail clears the lights and the button where the rail is narrower than them.
   const panelHeadStart = Math.max(
@@ -241,11 +243,6 @@ export function AppFrame({
       : layout.panel === 'sheet'
         ? { width: panelWidth + HAIRLINE, left: panelSheetLeft }
         : { display: 'none' };
-  const panelHostStyle = {
-    ...panelStyle,
-    '--shell-bar-start': `${String(panelHeadStart)}px`,
-  } as CSSProperties;
-
   return (
     <FrameSlotsContext value={slots}>
       <UnsavedGuardProvider>
@@ -312,11 +309,11 @@ export function AppFrame({
               className={classes['panelPane']}
               style={panelColumn ? undefined : { display: 'contents' }}
             >
-              <div
+              <Box
                 ref={setPanelHost}
                 className={classes['panel']}
                 data-sheet={layout.panel === 'sheet' ? '' : undefined}
-                style={panelHostStyle}
+                style={{ ...panelStyle, '--shell-bar-start': `${String(panelHeadStart)}px` }}
                 inert={layout.panel === 'hidden'}
                 data-panel={layout.panel}
               />
