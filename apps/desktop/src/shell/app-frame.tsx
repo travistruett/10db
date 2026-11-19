@@ -257,6 +257,7 @@ export function AppFrame({
             data-sheet={
               layout.rail === 'sheet' ? (layout.panel === 'sheet' ? 'joined' : '') : undefined
             }
+            data-labelled={layout.labels ? '' : undefined}
             ref={railRef}
             style={railStyle}
             inert={layout.rail === 'hidden'}
