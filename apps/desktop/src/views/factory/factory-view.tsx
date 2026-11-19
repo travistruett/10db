@@ -28,7 +28,7 @@ export type FactoryMode = (typeof FactoryMode)[keyof typeof FactoryMode];
  * was needed. Narrowed by the view's own project filter.
  */
 export function FactoryView() {
-  const { projects } = useSelectedProject();
+  const { projects, project: railProject } = useSelectedProject();
   const { goal: linkedGoalId, project: filter, view } = useSearch({ from: '/factory' });
   const navigate = useNavigate({ from: '/factory' });
   const all = projects.data ?? [];
@@ -56,21 +56,24 @@ export function FactoryView() {
         meta={<BenchmarkSyncNote />}
         actions={
           <Group gap="xs" wrap="nowrap">
+            <ActivityButton project={filter ?? null} />
             <SegmentedControl
               size="xs"
               aria-label="Factory view"
               value={mode}
               onChange={(value) => {
-                go({
-                  view: value === FactoryMode.Metrics ? FactoryMode.Metrics : FactoryMode.Live,
-                });
+                // Metrics is one project's: with every project shown, it opens on the rail's.
+                if (value === FactoryMode.Metrics) {
+                  go({ view: FactoryMode.Metrics, project: filter ?? railProject?.id ?? null });
+                } else {
+                  go({ view: FactoryMode.Live });
+                }
               }}
               data={[
                 { value: FactoryMode.Live, label: 'Live' },
                 { value: FactoryMode.Metrics, label: 'Metrics' },
               ]}
             />
-            <ActivityButton project={filter ?? null} />
             <ProjectFilter
               projects={all}
               value={filter ?? null}
