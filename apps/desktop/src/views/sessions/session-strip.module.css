@@ -1,0 +1,46 @@
+/* The line under the composer: quiet text at the composer's edges, so it reads as the composer's footing. */
+.strip {
+  min-height: 22px;
+  padding: 0 4px;
+}
+
+.place {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent {
+  flex: none;
+  cursor: default;
+}
+
+.changes {
+  flex: none;
+  display: inline-flex;
+  gap: 4px;
+  margin-right: -6px;
+  padding: 1px 6px;
+  border-radius: var(--mantine-radius-sm);
+  font-size: var(--mantine-font-size-xs);
+  font-family: var(--mantine-font-family-monospace);
+  color: var(--mantine-color-dimmed);
+  transition: background-color 120ms ease;
+}
+
+.changes:hover,
+.changes[aria-pressed='true'] {
+  background: var(--mantine-color-default-hover);
+}
+
+.changes:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: 1px;
+}
+
+.added {
+  color: var(--mantine-color-green-text);
+}
+
+.removed {
+  color: var(--mantine-color-red-text);
+}

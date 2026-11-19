@@ -382,10 +382,12 @@ test('a session on a new branch: the first change asks, the move cuts a worktree
   expect(git(repo, 'status', '--porcelain')).toBe('');
   expect(readFileSync(join(repo, 'notes.md'), 'utf8')).toBe('# Notes\n');
   await page.reload();
-  await expect(page.getByText(/on edit-on-a-branch · 1 file changed, not committed/)).toBeVisible();
+  // The strip under the composer says where the session works, and its count says how much changed.
+  await expect(page.getByText(/on edit-on-a-branch · not committed/)).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Changes: 1 file, 2 added/ })).toBeVisible();
 
-  // Commit… lists the file, unchecked as nothing of the session's tools touched it, and commits it.
-  await page.getByRole('button', { name: 'Commit…' }).click();
+  // Commit lists the file, unchecked as nothing of the session's tools touched it, and commits it.
+  await page.getByRole('button', { name: 'Commit', exact: true }).click();
   const modal = page.getByRole('dialog', { name: 'Commit' });
   await expect(modal.getByRole('textbox', { name: 'Message' })).toHaveValue('Edit on a branch');
   await modal.getByRole('checkbox', { name: 'notes.md' }).check();
@@ -517,7 +519,7 @@ test('a chat goes to the builder’s terminal and back: the banner, a held messa
     await popover.getByRole('button', { name: 'Copy the Command' }).click();
     const banner = page.getByRole('region', { name: 'In your terminal' });
     await expect(banner).toBeVisible();
-    await expect(page.getByText(/^in your terminal since \d\d:\d\d$/)).toBeVisible();
+    await expect(page.getByText(/ · in your terminal since \d\d:\d\d$/)).toBeVisible();
     await expect(banner.getByRole('button', { name: 'Hand Back' })).toBeFocused();
     await scan(page, [1280, 480], 'a chat in the terminal');
 

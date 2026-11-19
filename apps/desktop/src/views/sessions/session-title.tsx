@@ -1,8 +1,7 @@
 import type { ChatDto, ConversationDto } from '@10db/contracts';
-import { ActionIcon, Box, Menu, Text, TextInput } from '@mantine/core';
+import { ActionIcon, Box, Menu, TextInput } from '@mantine/core';
 import { IconDots } from '@tabler/icons-react';
 import { useRef, useState, type ReactNode } from 'react';
-import { ContextRing } from '../../conversation/context-ring';
 import { OWNS_ESCAPE_ATTRIBUTE } from '../../conversation/escape';
 import { usePatchChat } from '../../daemon/chat-queries';
 import { TitleRow } from '../../shell/title-row';
@@ -10,13 +9,9 @@ import { canOpenTerminal } from './can-open-terminal';
 import { SessionMenuItems, type SessionActions } from './session-menu';
 import { TerminalButton } from './terminal-button';
 
-const CONTEXT_TIP = 'Past 70%, the next turn continues in a fresh session with a summary.';
-
 export interface SessionTitleProps {
   readonly chat: ChatDto;
   readonly conversation: ConversationDto;
-  /** Where the session works and what changed, in git's words. */
-  readonly meta: string | null;
   /** The title as the session switcher: the title and its chevron, one button that opens the session menu. */
   readonly switcherFor: (label: string) => ReactNode;
   /** The project's folder; null once the project was removed from 10db. */
@@ -31,7 +26,7 @@ export interface SessionTitleProps {
   readonly onTerminalAsked?: () => void;
   /** The clipboard refused the open's command; the banner shows it. */
   readonly onTerminalUncopied?: (line: string) => void;
-  /** Controls between the context ring and the terminal button: Changes and the git step. */
+  /** Controls before the terminal button: the git step. */
   readonly steps?: ReactNode;
 }
 
@@ -95,13 +90,13 @@ function TitleEditor({ chat, onDone }: { readonly chat: ChatDto; readonly onDone
 }
 
 /**
- * A session's title row (sessions spec §6.5): the title, the ⌄ switcher, the meta line, then the agent and
- * its model, the context ring, Changes and the git step, the terminal button and ⋯.
+ * A session's title row (sessions spec §6.5): the title as the switcher, taking the row up to the git step,
+ * the terminal button and ⋯. Where the session works, its agent, context and changes are the strip under the
+ * composer (`session-strip.tsx`).
  */
 export function SessionTitle({
   chat,
   conversation,
-  meta,
   switcherFor,
   projectPath,
   actions,
@@ -115,7 +110,6 @@ export function SessionTitle({
   const [typing, setEditing] = useState(false);
   const [askedHere, setAskedHere] = useState(false);
   const editing = typing || renaming;
-  const { capabilities } = conversation;
   // Only a session the agent can take to a terminal, and not one in it already or sealed.
   const offersTerminal = projectPath !== null && canOpenTerminal(conversation);
   const terminalOpen = offersTerminal && (askedHere || openingTerminal);
@@ -132,26 +126,8 @@ export function SessionTitle({
           }}
         />
       }
-      meta={meta}
       actions={
         <>
-          <Text size="xs" c="dimmed" component="span" visibleFrom="md">
-            {capabilities.label}
-          </Text>
-          {conversation.model === null ? null : (
-            <Text size="xs" c="dimmed" component="span" visibleFrom="md">
-              {conversation.model}
-            </Text>
-          )}
-          <ContextRing
-            percent={conversation.contextPct}
-            more={[
-              CONTEXT_TIP,
-              ...(conversation.costUsd === null
-                ? []
-                : [`$${conversation.costUsd.toFixed(2)} so far`]),
-            ]}
-          />
           {steps}
           {offersTerminal ? (
             <TerminalButton

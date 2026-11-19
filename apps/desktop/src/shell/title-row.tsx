@@ -34,8 +34,9 @@ export function TitleRow({
           fw={600}
           lh="20px"
           c="var(--mantine-color-bright)"
-          lineClamp={lines}
-          {...(typeof title === 'string' ? { title } : {})}
+          // A title that is a control (the session switcher) cuts its own text: a clamp here would cut
+          // the control as well and add a second ellipsis after it.
+          {...(typeof title === 'string' ? { title, lineClamp: lines } : { display: 'flex' })}
           style={{ minWidth: 0, flex: '0 1 auto' }}
           data-tauri-drag-region
         >

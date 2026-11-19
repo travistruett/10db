@@ -33,7 +33,7 @@ Terminal and the folder hold for 10db's own writers.
 
   The bar asks in every session. Settings can come later.
 
-- **Once a session has changed files, its title row offers the next git step:** **Commit…**, then **Open Pull
+- **Once a session has changed files, its title row offers the next git step:** **Commit**, then **Open Pull
   Request**, then **Merge**. On a project that lands locally, the last step is **Merge into `main`**. The agent can
   take the same steps when you ask.
 - **Changes** opens as a slide-out drawer from the right.
@@ -103,7 +103,7 @@ reading ──first change──▶ choosing ──Here──▶ here (your chec
 
 - A new session runs with a read-only sandbox on your checkout. It never takes the folder hold, so nothing waits on
   it and it waits on nothing.
-- Its meta line reads "`<project>`": a session that has changed nothing says only whose it is.
+- Its strip reads "`<project>`": a session that has changed nothing says only whose it is.
 
 ### 1.2 The first change
 
@@ -321,11 +321,11 @@ the checkout doesn't block it, but the route waits for that turn's end before sw
 
 | State                                         | Button                                                                                   | Daemon                                                                                                                                                                       |
 | --------------------------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| uncommitted changes                           | **Commit…**                                                                              | a message (from the title) and a file list, **defaulting to the files the session touched**, then `commit_changes` with those paths                                          |
+| uncommitted changes                           | **Commit**                                                                               | a message (from the title) and a file list, **defaulting to the files the session touched**, then `commit_changes` with those paths                                          |
 | commits not on a pull request, remote project | **Open Pull Request**                                                                    | push the branch, open the PR with the session's title                                                                                                                        |
 | here on the base branch, remote project       | **Open Pull Request**                                                                    | call 6: branch at `HEAD`, switch to it, push, open the PR, then move local base back to `origin/<base>`. Refused if the checkout is dirty                                    |
 | pull request open                             | **Merge** when checks pass and it's mergeable; otherwise disabled "Checks running · 3/9" | `merge_pull_request`                                                                                                                                                         |
-| merged                                        | none; the meta line reads "merged into `main`"                                           |                                                                                                                                                                              |
+| merged                                        | none; the strip reads "merged into `main`"                                               |                                                                                                                                                                              |
 | local project, commits on the branch          | **Merge into `main`**                                                                    | needs your checkout clean and on base, with a GitWork reservation. Otherwise it says why. A conflict is refused, and the agent can merge base into the branch and resolve it |
 
 **The git tools** (`chat/git-tools.ts`):
@@ -384,21 +384,29 @@ the checkout doesn't block it, but the route waits for that turn's end before sw
 
 ### 6.5 Title row
 
-From left to right:
+The title row is almost all title. From left to right:
 
-- **The title.** Double-click renames it.
-- **⌄:** every open session by project, then Recently closed and New Session ⌘T.
-- **The meta line:**
-  - reading: "`10db`"
-  - here: "on `main` · 2 files changed"
-  - on a branch: "on `add-the-qa-notes` · 2 files changed, not committed", or "· pull request #652, checks passing"
+- **The title, which is the switcher:** the title and a ⌄, one button that opens every open session by project,
+  then Recently closed and New Session ⌘T. It takes the row up to the controls; rename is in ⋯.
 - **Then:**
-  - the agent and model (dim)
-  - the context ring (today's session bar's)
-  - **Changes** (⌘⇧D), when anything changed; it opens the drawer
   - the git step (§4.6)
   - the terminal button
   - ⋯
+
+**The strip under the composer** is one dim line: where the session works on the left, and what runs it and what
+it changed on the right.
+
+- **The place**, in git's words:
+  - reading: "`10db`"
+  - here: "`10db` · on `main`"
+  - on a branch: "`10db` · on `add-the-qa-notes` · not committed", or "· pull request #652, checks passing"
+- **Then:**
+  - the agent ("Claude Code", "Codex"), whose tooltip says "Claude Code runs this session"
+  - the context ring
+  - the change count, "+41 −6" (⌘⇧D), when anything changed; it opens the Changes drawer
+
+The composer lists no keys: Enter, Shift+Enter, Esc, `/` and `@` are every chat's. Its only line under the
+frame is a state's ("Sends when the limit resets").
 
 ### 6.6 Keys
 

@@ -30,7 +30,7 @@ function mergeBlocked(state: ChatWorkStateDto): string | null {
 
 /**
  * The title row's next git step (sessions spec §4.6): one button, whichever step the daemon says is next.
- * Commit… asks for a message and files; the rest run at once. While this session's own turn runs a step
+ * Commit asks for a message and files; the rest run at once. While this session's own turn runs a step
  * waits for it, and says so.
  */
 export function GitStepButton({
@@ -62,7 +62,7 @@ export function GitStepButton({
       case null:
         return '';
       case ChatGitStep.Commit:
-        return 'Commit…';
+        return 'Commit';
       case ChatGitStep.OpenPullRequest:
         // With a pull request already open the step only pushes the new commits to it.
         return state.pullRequest === null ? 'Open Pull Request' : 'Push';
@@ -99,8 +99,8 @@ export function GitStepButton({
       {step === null ? null : (
         <Tooltip label={blocked} disabled={blocked === null || pending} openDelay={300}>
           <Button
-            size="compact-sm"
-            variant={step === ChatGitStep.Commit ? 'default' : 'filled'}
+            // The row's one primary action, at the header's xs size.
+            size="xs"
             // A disabled button is not a tooltip's target, so the reason is also its name.
             disabled={blocked !== null || pending}
             loading={pending && !turnRunning}

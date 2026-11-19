@@ -17,6 +17,7 @@ import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { ConversationList, toolDoing, WorkingLine } from '../../conversation';
 import { Composer } from '../../conversation/composer';
 import { ConversationLayout } from '../../conversation/conversation-layout';
+import { ContextRing } from '../../conversation/context-ring';
 import { composerPhase } from '../../conversation/composer-phase';
 import { afterFailedSend, EMPTY_DRAFT, hasContent, type Draft } from '../../conversation/drafts';
 import { escapeHasOwner, escapeIsTaken } from '../../conversation/escape';
@@ -62,12 +63,14 @@ import { changesTotals, withQuote } from './changes-files';
 import { GitStepButton } from './git-step-button';
 import { useSessionKeys } from './use-session-keys';
 import { sessionMeta } from './session-meta';
+import { SessionStrip } from './session-strip';
 import type { SessionActions } from './session-menu';
 import { TerminalBanner } from './terminal-banner';
 import { draftKey, sessionDrafts, useSessionDraft } from './session-drafts';
 
 /** Under this width of the tab itself the composer drops its long labels. */
 const NARROW_PX = 640;
+const CONTEXT_TIP = 'Past 70%, the next turn continues in a fresh session with a summary.';
 
 /** The message File as Tasks sends, as the builder's own turn (sessions design spec §7.2). */
 export const FILE_AS_TASKS_MESSAGE = 'File the work we agreed on as tasks on the Board.';
@@ -457,29 +460,8 @@ export function ChatTab({
         <SessionTitle
           chat={chat}
           conversation={conversation}
-          meta={sessionMeta({
-            projectName: project?.name ?? '',
-            place,
-            movingTo,
-            state: work.data,
-            terminalSince:
-              takeover.data === undefined ? null : dayjs(takeover.data.since).format('HH:mm'),
-            inTerminal,
-          })}
           steps={
             <>
-              {offersChanges || changesOpen ? (
-                <Button
-                  size="compact-sm"
-                  variant="default"
-                  aria-pressed={changesOpen}
-                  onClick={toggleChanges}
-                >
-                  {totals === null || !hasChanges
-                    ? 'Changes'
-                    : `Changes +${String(totals.added)} −${String(totals.removed)}`}
-                </Button>
-              ) : null}
               {work.data === undefined || removed ? null : (
                 <GitStepButton
                   chatId={chat.id}
@@ -665,6 +647,42 @@ export function ChatTab({
                   onRedo={async (d) => {
                     await redo.mutateAsync({ conversationId: chat.conversationId, text: d.text });
                   }}
+                  notes={
+                    <SessionStrip
+                      place={sessionMeta({
+                        projectName: project.name,
+                        place,
+                        movingTo,
+                        state: work.data,
+                        terminalSince:
+                          takeover.data === undefined
+                            ? null
+                            : dayjs(takeover.data.since).format('HH:mm'),
+                        inTerminal,
+                      })}
+                      agent={caps.label}
+                      context={
+                        <ContextRing
+                          percent={conversation.contextPct}
+                          more={[
+                            CONTEXT_TIP,
+                            ...(conversation.costUsd === null
+                              ? []
+                              : [`$${conversation.costUsd.toFixed(2)} so far`]),
+                          ]}
+                        />
+                      }
+                      changes={
+                        offersChanges || changesOpen
+                          ? {
+                              totals: hasChanges ? totals : null,
+                              open: changesOpen,
+                              onToggle: toggleChanges,
+                            }
+                          : null
+                      }
+                    />
+                  }
                 />
               )}
             </>

@@ -6,7 +6,9 @@
   gap: 6px;
   max-width: 100%;
   min-width: 0;
-  margin-left: -8px;
+  /* The fill reaches past the text's left edge so the text lines up with the row's; a margin would take the
+     8 px from the title's own width and cut it short. */
+  translate: -8px 0;
   padding: 3px 6px 3px 8px;
   border-radius: var(--mantine-radius-sm);
   color: inherit;
