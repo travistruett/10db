@@ -63,6 +63,9 @@ export function runWithFakeGh(
       ...(cwd === undefined ? {} : { cwd }),
       env: {
         PATH: `${dir}${delimiter}${process.env['PATH'] ?? ''}`,
+        // The script's temp files go where the test's do: a sandbox may deny /tmp, tmpdir()'s
+        // fallback.
+        ...(process.env['TMPDIR'] === undefined ? {} : { TMPDIR: process.env['TMPDIR'] }),
         FAKE_GH_LOG: log,
         FAKE_GH_REPLIES: repliesPath,
         ...env,
