@@ -26,7 +26,9 @@
 The builder hid the Inbox's panel and could not get it back: its only visible hide button lived in the panel's
 head, which went with it, and the ways back (⌘\, or a click on the active rail item) showed nowhere. The panel
 is the list half of a list and detail view; hiding it leaves the detail with nothing to move between, as Mail
-never hides its message list. Resizing gives the room hiding was for. With the panel fixed, one thing folds on a
+never hides its message list. Resizing gives most of the room hiding was for. The cost: a wide window can no
+longer give the content the panel's width, so what lays out by the content's width (Sessions' changes drawer
+beside the conversation from 1200 px of session) needs a wider window than before. With the panel fixed, one thing folds on a
 wide window, the rail's labels, so one button serves, as Mail's and Codex's sidebar buttons do. Two buttons side
 by side, one for the rail and one for the panel, were turned down: they look alike and the builder would have to
 learn which is which. The rail's button had lived in the rail, which is too narrow for it beside the lights when
