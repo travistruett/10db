@@ -38,3 +38,9 @@
 [data-mantine-color-scheme='light'] .mantine-Pill-root[data-variant='default'] {
   background-color: var(--mantine-color-default-hover);
 }
+
+/* A switch's chosen segment is the lightest tone, raised off its track by a faint shade of the ink, never black. */
+[data-mantine-color-scheme='light'] .mantine-SegmentedControl-indicator {
+  background-color: var(--mantine-color-body);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--mantine-color-text) 14%, transparent);
+}

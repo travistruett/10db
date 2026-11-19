@@ -67,7 +67,7 @@ export function InboxPanel({
         aria-label="Inbox panel"
         style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}
       >
-        <Box px="xs" pt={4}>
+        <Box pt={4}>
           <SegmentedControl
             size="xs"
             fullWidth
@@ -81,7 +81,7 @@ export function InboxPanel({
               {
                 value: InboxListState.Open,
                 label: (
-                  <Group gap={5} wrap="nowrap" justify="center">
+                  <Group gap={5} wrap="nowrap" justify="center" align="baseline">
                     Open
                     {open > 0 ? <SwitchCount count={open} /> : null}
                   </Group>
@@ -90,7 +90,7 @@ export function InboxPanel({
               {
                 value: InboxListState.Waiting,
                 label: (
-                  <Group gap={5} wrap="nowrap" justify="center">
+                  <Group gap={5} wrap="nowrap" justify="center" align="baseline">
                     Waiting
                     {showWaiting ? <SwitchCount count={waiting} /> : null}
                   </Group>
@@ -100,7 +100,7 @@ export function InboxPanel({
             ]}
           />
         </Box>
-        <Box px="xs" pt={8} pb={8}>
+        <Box pt={8} pb={12}>
           <InboxSearchField
             query={search.q}
             onQuery={(q) => {
