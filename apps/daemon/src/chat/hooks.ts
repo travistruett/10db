@@ -474,12 +474,10 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               observer: start.observer,
               limits: limitNotes,
             });
-      // A session that starts with no plan is owed the planning rules once it has one. So is a Codex thread
-      // resumed with its plan: a resume's developer instructions are not known to replace the thread's own,
-      // which may be the stub's, so the rules ride its first message once.
-      const owesRules =
-        shapeId === null ||
-        (providerOf(launch.account.kind) === Provider.Codex && start.resume !== null);
+      // A session that starts with no plan is owed the planning rules once it has one. A session that has its
+      // plan at start, resumed or not, holds the rules in its system prompt (a resumed Codex thread's
+      // developer instructions are configuration overrides for it), so it is owed nothing.
+      const owesRules = shapeId === null;
       let owed: string | null = null;
       const planRules =
         owesRules && plan !== undefined
