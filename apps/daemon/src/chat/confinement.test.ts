@@ -514,4 +514,15 @@ describe('a chat with a plan', () => {
     expect(read(join(planFolder(), 'notes.txt'))).toBe('allow');
     expect(read(join(dir.path, 'shapes', 'shp_other', 'notes.txt'))).toBe('deny');
   });
+
+  it('reads its plan’s folder where the data directory is protected, and nothing else under it', () => {
+    mkdirSync(join(dir.path, 'accounts'), { recursive: true });
+    writeFileSync(join(dir.path, 'accounts', 'token'), 'x\n');
+    const guarded = (): ShapeAccess => ({ ...withPlan(), protectedReads: [dir.path] });
+    const read = (path: string) =>
+      judgeChatCall({ toolName: 'Read', input: { file_path: path } }, guarded()).decision;
+    expect(read(join(planFolder(), 'notes.txt'))).toBe('allow');
+    expect(read(join(dir.path, 'accounts', 'token'))).toBe('deny');
+    expect(read(join(dir.path, 'shapes', 'shp_other', 'notes.txt'))).toBe('deny');
+  });
 });
