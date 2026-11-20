@@ -475,9 +475,7 @@ function BoardColumns({
             actions.apply({ kind: 'start', taskId: openTask.id }, openTask);
           }}
           onCancelRun={setCancelling}
-          onOpenConversation={(shapeId) => {
-            void navigate({ to: '/shape/$shapeId', params: { shapeId } });
-          }}
+          offersPlanSession
           onOpenWorkbench={() => {
             void navigate({ to: '/workbench' });
           }}

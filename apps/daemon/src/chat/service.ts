@@ -10,6 +10,7 @@ import {
   ConversationOwnerKind,
   ConversationProfile,
   ConversationState,
+  ShapeOrigin,
   cutTitle,
   FolderAsker,
   FolderWhileHeld,
@@ -29,6 +30,7 @@ import {
   type ArchiveRequest,
   type ChatPatchInput,
   type ConversationId,
+  type ConversationItemId,
   type ProjectId,
   type ShapeModelOption,
   WorkPlace,
@@ -48,6 +50,7 @@ import {
   insertConversation,
   insertFiles,
   insertItem,
+  insertPlanSession,
   latestWorkstreamOf,
   moveChatTab,
   openChats,
@@ -60,6 +63,7 @@ import {
   unarchiveChat,
   type ChatRow,
   type ConversationItemRow,
+  planOfChat,
 } from '@10db/db';
 import type { Clock } from '../clock';
 import { keepBuilderMessage, type ExploreEngine, type PastedFile } from '../conversation';
@@ -225,13 +229,19 @@ export interface ChatServiceDeps {
   readonly worktrees?: ChatWorktrees;
   /** Remakes the worktree of a branch session that has none, once it is open again. */
   readonly reopenBranch?: (chatId: ChatId) => Promise<void>;
+  /** Told of each builder message a chat takes, for what listens to a plan's talk (Jev's shadow); it never throws. */
+  readonly planHeard?: (conversationId: ConversationId, itemId: ConversationItemId) => void;
 }
 
 export function createChatService(deps: ChatServiceDeps): ChatService {
   const { state, engine } = deps;
   const dtoOf = (id: ChatId): ChatDto => {
     const view = chatView(state.db, id);
-    return { ...view, conversation: engine.view(view.conversationId) };
+    return {
+      ...view,
+      conversation: engine.view(view.conversationId),
+      planId: planOfChat(state.db, id),
+    };
   };
 
   const offered = (projectId: ProjectId, model: string): void => {
@@ -294,6 +304,20 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     create(input) {
       getProject(state.db, input.projectId);
       if (input.model !== null) offered(input.projectId, input.model);
+      if (input.plan === true) {
+        const planned = state.write(
+          (ctx) =>
+            insertPlanSession(ctx, {
+              projectId: input.projectId,
+              title: null,
+              origin: ShapeOrigin.App,
+              tabPosition: input.tabPosition,
+              model: input.model,
+              effort: input.effort ?? null,
+            }).chat.id,
+        );
+        return dtoOf(planned);
+      }
       const id = state.write((ctx) => {
         const chatId = mintId('Chat');
         const conv = insertConversation(ctx, {
@@ -439,6 +463,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       const item = post(conversationId, input);
       const chat = requireChat(conversationId);
       dispatch(chat, conversationId, folder);
+      deps.planHeard?.(conversationId, item.id);
       return item;
     },
 
@@ -481,6 +506,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       if (wait) engine.holdStarts(conversationId);
       const edit = await engine.redo(conversationId, () => post(conversationId, input));
       if (wait) watchFolder(chat);
+      deps.planHeard?.(conversationId, edit.id);
       return edit;
     },
 

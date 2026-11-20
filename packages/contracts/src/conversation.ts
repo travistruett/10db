@@ -11,7 +11,7 @@ type ValueOf<T> = T[keyof T];
 const Timestamp = z.iso.datetime();
 
 /** What a conversation belongs to. */
-export const ConversationOwnerKind = { Chat: 'chat', Shape: 'shape', Task: 'task' } as const;
+export const ConversationOwnerKind = { Chat: 'chat', Task: 'task' } as const;
 export type ConversationOwnerKind = ValueOf<typeof ConversationOwnerKind>;
 
 /** Which session profile a conversation runs: a read-only explore session, or a task's lane. */

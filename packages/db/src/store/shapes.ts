@@ -1,5 +1,7 @@
 import {
   BundleOrigin,
+  ChatTitleSource,
+  CHAT_DEFAULT_TITLE,
   ConversationOwnerKind,
   ConversationProfile,
   ConversationState,
@@ -7,6 +9,9 @@ import {
   mintId,
   NotFoundError,
   ShapeState,
+  type ChatId,
+  type ConversationId,
+  type Effort,
   type ProjectId,
   type ShapeDto,
   type ShapeId,
@@ -14,28 +19,39 @@ import {
 } from '@10db/contracts';
 import { and, asc, eq, getTableColumns, sql } from 'drizzle-orm';
 import * as schema from '../schema';
-import { conversationOf, insertConversation, type ConversationRow } from './conversations';
+import { getChat, insertChat, setChatTitle, type ChatRow } from './chats';
+import {
+  getConversation,
+  insertConversation,
+  patchConversation,
+  type ConversationRow,
+} from './conversations';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
 
 // Shape spec docs/superpowers/specs/2026-11-02-10db-brainstorm-chat-design.md §13. The daemon's
 // shape module owns the conversation's state; these are its rows.
 
-type ShapeRow = typeof schema.shapes.$inferSelect & { readonly model: string | null };
+type ShapeRow = typeof schema.shapes.$inferSelect & {
+  readonly model: string | null;
+  readonly effort: Effort | null;
+};
 
-/** A shape's row with the model its conversation holds. */
-const shapeColumns = { ...getTableColumns(schema.shapes), model: schema.conversations.model };
+/** A plan's title until its session is named. */
+export const DEFAULT_SHAPE_TITLE = 'New conversation';
+
+/** A shape's row with the model and effort its chat's conversation holds. */
+const shapeColumns = {
+  ...getTableColumns(schema.shapes),
+  model: schema.conversations.model,
+  effort: schema.conversations.effort,
+};
 const selectShapes = (db: DbReader) =>
   db
     .select(shapeColumns)
     .from(schema.shapes)
-    .leftJoin(
-      schema.conversations,
-      and(
-        eq(schema.conversations.ownerKind, ConversationOwnerKind.Shape),
-        eq(schema.conversations.ownerId, schema.shapes.id),
-      ),
-    );
+    .leftJoin(schema.chats, eq(schema.chats.id, schema.shapes.chatId))
+    .leftJoin(schema.conversations, eq(schema.conversations.id, schema.chats.conversationId));
 
 const toShapeDto = (row: ShapeRow): ShapeDto => ({
   id: row.id,
@@ -43,7 +59,6 @@ const toShapeDto = (row: ShapeRow): ShapeDto => ({
   title: row.title,
   state: row.state,
   origin: row.origin,
-  proposeUnlocked: row.proposeUnlocked,
   round: row.round,
   model: row.model,
   effort: row.effort,
@@ -52,14 +67,12 @@ const toShapeDto = (row: ShapeRow): ShapeDto => ({
   updatedAt: row.updatedAt,
 });
 
-/**
- * Writes a conversation that is listening: no proposal yet, Propose still locked, and its conversation
- * row, on the project's account. An imported Plan gives its state, round and bundle.
- */
+/** Writes a plan over its chat: listening, no proposal yet. An imported plan gives its state, round and bundle. */
 export function insertShape(
   ctx: WriteContext,
   projectId: ProjectId,
   input: {
+    readonly chatId: ChatId;
     readonly title: string;
     readonly origin: ShapeOrigin;
     readonly state?: ShapeState;
@@ -76,9 +89,8 @@ export function insertShape(
     title: input.title,
     state: input.state ?? ShapeState.Listening,
     origin: input.origin,
-    proposeUnlocked: false,
     round: input.round ?? 0,
-    effort: null,
+    chatId: input.chatId,
     bundleId: input.bundleId ?? null,
     bundleOrigin: input.bundleOrigin ?? null,
     importedAt: input.importedAt ?? null,
@@ -86,26 +98,108 @@ export function insertShape(
     updatedAt: ctx.now,
   };
   ctx.tx.insert(schema.shapes).values(row).run();
-  insertConversation(ctx, {
-    projectId,
-    owner: { kind: ConversationOwnerKind.Shape, id: row.id },
-    profile: ConversationProfile.Explore,
-    state: ConversationState.IdleCold,
-  });
   ctx.emit({
     type: EventType.ShapeChanged,
     entityType: 'shape',
     entityId: row.id,
     data: { projectId },
   });
-  return toShapeDto({ ...row, model: null });
+  return toShapeDto({ ...row, model: null, effort: null });
 }
 
-/** The conversation a shape owns; every shape has one. */
+/** A new session with its Plan: the conversation, the chat row and the shape, in the caller's write. */
+export function insertPlanSession(
+  ctx: WriteContext,
+  input: {
+    readonly projectId: ProjectId;
+    /** Null: the chat is titled from its first message, and the plan follows it. */
+    readonly title: string | null;
+    readonly origin: ShapeOrigin;
+    readonly tabPosition: number | null;
+    readonly model?: string | null;
+    readonly effort?: Effort | null;
+    readonly state?: ShapeState;
+    readonly round?: number;
+    readonly bundleId?: string | null;
+    readonly bundleOrigin?: BundleOrigin | null;
+    readonly importedAt?: string | null;
+  },
+): { readonly chat: ChatRow; readonly shape: ShapeDto } {
+  const chatId = mintId('Chat');
+  const conversation = insertConversation(ctx, {
+    projectId: input.projectId,
+    owner: { kind: ConversationOwnerKind.Chat, id: chatId },
+    profile: ConversationProfile.Explore,
+    state: ConversationState.IdleCold,
+  });
+  const model = input.model ?? null;
+  const effort = input.effort ?? null;
+  if (model !== null || effort !== null) patchConversation(ctx, conversation.id, { model, effort });
+  insertChat(ctx, {
+    id: chatId,
+    projectId: input.projectId,
+    conversationId: conversation.id,
+    title: input.title ?? CHAT_DEFAULT_TITLE,
+    tabPosition: input.tabPosition,
+  });
+  if (input.title !== null) setChatTitle(ctx, chatId, input.title, ChatTitleSource.Builder);
+  const shape = insertShape(ctx, input.projectId, {
+    chatId,
+    title: input.title ?? DEFAULT_SHAPE_TITLE,
+    origin: input.origin,
+    ...(input.state === undefined ? {} : { state: input.state }),
+    ...(input.round === undefined ? {} : { round: input.round }),
+    ...(input.bundleId === undefined ? {} : { bundleId: input.bundleId }),
+    ...(input.bundleOrigin === undefined ? {} : { bundleOrigin: input.bundleOrigin }),
+    ...(input.importedAt === undefined ? {} : { importedAt: input.importedAt }),
+  });
+  return { chat: getChat(ctx.tx, chatId), shape: { ...shape, model, effort } };
+}
+
+/** The chat a plan belongs to. */
+export function chatOfShape(db: DbReader, id: ShapeId): ChatId {
+  const row = db
+    .select({ chatId: schema.shapes.chatId })
+    .from(schema.shapes)
+    .where(eq(schema.shapes.id, id))
+    .get();
+  if (!row) throw new NotFoundError('shape', id);
+  return row.chatId;
+}
+
+/** The conversation a plan's session holds; every plan has one. */
 export function shapeConversation(db: DbReader, id: ShapeId): ConversationRow {
-  const conversation = conversationOf(db, { kind: ConversationOwnerKind.Shape, id });
-  if (conversation === null) throw new NotFoundError('shape conversation', id);
-  return conversation;
+  const row = db
+    .select({ conversationId: schema.chats.conversationId })
+    .from(schema.shapes)
+    .innerJoin(schema.chats, eq(schema.chats.id, schema.shapes.chatId))
+    .where(eq(schema.shapes.id, id))
+    .get();
+  if (!row) throw new NotFoundError('shape conversation', id);
+  return getConversation(db, row.conversationId);
+}
+
+/** The plan of a chat, or null. */
+export function planOfChat(db: DbReader, id: ChatId): ShapeId | null {
+  return (
+    db
+      .select({ id: schema.shapes.id })
+      .from(schema.shapes)
+      .where(eq(schema.shapes.chatId, id))
+      .get()?.id ?? null
+  );
+}
+
+/** The plan of a conversation's chat, or null. */
+export function planOfConversation(db: DbReader, id: ConversationId): ShapeId | null {
+  return (
+    db
+      .select({ id: schema.shapes.id })
+      .from(schema.shapes)
+      .innerJoin(schema.chats, eq(schema.chats.id, schema.shapes.chatId))
+      .where(eq(schema.chats.conversationId, id))
+      .get()?.id ?? null
+  );
 }
 
 /** The Plan a bundle id was imported into in a project, if any. */
@@ -148,13 +242,9 @@ export function shapeTokens(db: DbReader, id: ShapeId): number {
       total: sql<number>`coalesce(sum(${schema.sessions.inputTokens} + ${schema.sessions.outputTokens}), 0)`,
     })
     .from(schema.sessions)
-    .innerJoin(schema.conversations, eq(schema.conversations.id, schema.sessions.conversationId))
-    .where(
-      and(
-        eq(schema.conversations.ownerKind, ConversationOwnerKind.Shape),
-        eq(schema.conversations.ownerId, id),
-      ),
-    )
+    .innerJoin(schema.chats, eq(schema.chats.conversationId, schema.sessions.conversationId))
+    .innerJoin(schema.shapes, eq(schema.shapes.chatId, schema.chats.id))
+    .where(eq(schema.shapes.id, id))
     .get();
   return row?.total ?? 0;
 }

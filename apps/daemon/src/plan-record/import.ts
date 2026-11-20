@@ -27,7 +27,8 @@ import {
   getAttachmentRevision,
   getShapeEntry,
   insertDocumentAttachment,
-  insertShape,
+  chatOfShape,
+  insertPlanSession,
   insertShapeMessage,
   insertShapeProposal,
   listShapeProposals,
@@ -40,6 +41,7 @@ import {
   type NewShapeEntry,
   type WriteContext,
 } from '@10db/db';
+import { PIN_IMPORTED } from '../shape';
 import {
   canonicalJson,
   findingContent,
@@ -601,22 +603,30 @@ export function importBundle(
   const numbering = numberingOf(stored, bundle);
   const proposalPlan = planProposals(stored, bundle, numbering);
   if (stored !== null && !writesSomething(changes) && proposalPlan.restates.length === 0)
-    return { dryRun: false, shapeId: stored.shapeId, created: false, changes };
+    return {
+      dryRun: false,
+      shapeId: stored.shapeId,
+      chatId: chatOfShape(ctx.tx, stored.shapeId),
+      created: false,
+      changes,
+    };
   const states =
     proposalPlan.writes.length > 0 ||
     bundle.goals.length + bundle.tasks.length + bundle.decisions.length + bundle.questions.length >
       0;
   const shapeId: ShapeId =
     stored?.shapeId ??
-    insertShape(ctx, input.projectId, {
+    insertPlanSession(ctx, {
+      projectId: input.projectId,
       title: bundle.title,
       origin: ShapeOrigin.ClaudeCode,
+      tabPosition: null,
       state: states ? ShapeState.Proposed : ShapeState.Listening,
       round: 1,
       bundleId: bundle.id,
       bundleOrigin: bundle.origin,
       importedAt: ctx.now,
-    }).id;
+    }).shape.id;
   insertShapeMessage(ctx, shapeId, {
     author: ShapeMessageAuthor.Note,
     kind: ShapeMessageKind.Notice,
@@ -707,6 +717,7 @@ export function importBundle(
         state: ShapeProposalState.Pending,
         body,
         round,
+        pinned: [...new Set([...held.pinned, PIN_IMPORTED])],
         ...(held.state === ShapeProposalState.Pending ? {} : { createdRound: round }),
       });
     else
@@ -717,7 +728,7 @@ export function importBundle(
         state: ShapeProposalState.Pending,
         round,
         createdRound: round,
-        pinned: [],
+        pinned: [PIN_IMPORTED],
         body,
         taskHashes: {},
         sourceMessageIds: [],
@@ -741,5 +752,11 @@ export function importBundle(
     if (stored !== null && stored.state !== ShapeState.Proposed)
       patchShape(ctx, shapeId, { state: ShapeState.Proposed });
   }
-  return { dryRun: false, shapeId, created: stored === null, changes };
+  return {
+    dryRun: false,
+    shapeId,
+    chatId: chatOfShape(ctx.tx, shapeId),
+    created: stored === null,
+    changes,
+  };
 }

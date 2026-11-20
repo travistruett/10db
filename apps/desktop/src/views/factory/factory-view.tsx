@@ -1,7 +1,8 @@
 import type { GoalId, ProjectId, ProjectViewDto } from '@10db/contracts';
 import { Alert, Button, Group, SegmentedControl, Stack, Text } from '@mantine/core';
 import { useQueries } from '@tanstack/react-query';
-import { Link, useNavigate, useSearch } from '@tanstack/react-router';
+import { useNavigate, useSearch } from '@tanstack/react-router';
+import { useNewPlan } from '../sessions/start-fresh-tab';
 import { useRef } from 'react';
 import { goalsQueryOptions } from '../../daemon/goal-queries';
 import { useDaemon } from '../../daemon/provider';
@@ -32,6 +33,7 @@ export function FactoryView() {
   const { projects, project: railProject } = useSelectedProject();
   const { goal: linkedGoalId, project: filter, view } = useSearch({ from: '/factory' });
   const navigate = useNavigate({ from: '/factory' });
+  const newPlan = useNewPlan();
   const all = projects.data ?? [];
   const shown = filter === undefined ? all : all.filter((p) => p.id === filter);
   const mode = view ?? FactoryMode.Live;
@@ -90,8 +92,8 @@ export function FactoryView() {
                 go({ project });
               }}
             />
-            <Button component={Link} to="/shape" size="xs">
-              Plan Work
+            <Button onClick={newPlan} size="xs">
+              New Plan
             </Button>
           </Group>
         }

@@ -18,6 +18,7 @@ import {
   type ShapeViewDto,
 } from '@10db/contracts';
 import {
+  chatOfShape,
   decisionSuccessor,
   getDecision,
   getPrinciple,
@@ -243,11 +244,13 @@ export function buildShapeView(
   const links = listShapeLinks(db, shapeId);
   const shape = getShape(db, shapeId);
   const sizes = buildSizes(db, shapeId);
+  const conversationId = shapeConversation(db, shapeId).id;
   const marked = new Set(listRehearsals(db, shapeId).map((m) => `${m.taskKey}\0${m.hash}`));
   return {
     shape,
     models: world.models ?? NO_MODELS,
-    conversationId: shapeConversation(db, shapeId).id,
+    conversationId,
+    chatId: chatOfShape(db, shapeId),
     proposals: listShapeProposals(db, shapeId).map((row) =>
       proposalOf(db, row, links, shape.round),
     ),

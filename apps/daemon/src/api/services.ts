@@ -34,7 +34,6 @@ import type {
   ConversationLiveDto,
   FolderDto,
   FolderWhileHeld,
-  ConversationOwnerKind,
   Effort,
   KindDto,
   KindId,
@@ -192,11 +191,9 @@ import type {
   ShapeJevSettingDto,
   ShapeMeasuresDto,
   ShapeId,
-  ShapeInput,
   ShapeMessageDto,
   ShapeOfDto,
   ShapeProposalId,
-  ShapeProposeResult,
   ShapeRehearseInput,
   ShapeRehearseResult,
   ShapeViewDto,
@@ -521,12 +518,8 @@ export interface ApiServices extends PlanRecordServices {
   openGoalDigest(goalId: GoalId): GoalDigestDto;
   /** The project's Shape conversations, the one touched last first. Throws NotFoundError for an unknown project. */
   listShapes(projectId: ProjectId): ShapeDto[];
-  /** Opens a conversation; with no title it is named by its first message. */
-  createShape(projectId: ProjectId, input: ShapeInput): ShapeDto;
   /** Everything the Shape screen renders for the conversation. Throws NotFoundError for an unknown one. */
   getShapeView(id: ShapeId): ShapeViewDto;
-  /** Queues a Propose turn, or ignores the press while one is queued or running. */
-  proposeShape(id: ShapeId): ShapeProposeResult;
   /**
    * Runs the conversation on `model` from its next turn, or on the `plan` role's with null, at `effort`
    * or, with null, the model's own default. Throws
@@ -535,8 +528,7 @@ export interface ApiServices extends PlanRecordServices {
   chooseShapeModel(id: ShapeId, model: string | null, effort: Effort | null): ShapeDto;
   /**
    * Converts the selected proposals into goals, tasks and decisions and starts nothing. A refusal
-   * lists every error and writes nothing. Throws ConflictError while a turn runs, unless the
-   * caller asks to interrupt it.
+   * lists every error and writes nothing; a turn that runs goes on.
    */
   convertShape(id: ShapeId, input: ShapeConvertInput): Promise<ShapeConvertOutcome>;
   /**
@@ -655,8 +647,8 @@ export interface ApiServices extends PlanRecordServices {
   subscribe(listener: (event: DaemonEvent) => void): () => void;
   /** The live frames of what conversations are streaming; never stored, never in the replay. */
   subscribeLive(listener: (frame: ConversationDeltaFrame) => void): () => void;
-  /** Who owns a conversation, read from its row alone; NotFoundError for one 10db lacks. */
-  conversationOwnerKind(id: ConversationId): ConversationOwnerKind;
+  /** Whether a conversation's chat has a plan, read from its rows alone; NotFoundError for one 10db lacks. */
+  conversationHasPlan(id: ConversationId): boolean;
   /** An explore conversation as the UI reads it (sessions spec §10); NotFoundError for one 10db lacks. */
   getConversation(id: ConversationId): ConversationDto;
   /** A page of its items in `seq` order, after `afterSeq` when given. */

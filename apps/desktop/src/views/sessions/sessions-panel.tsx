@@ -49,6 +49,7 @@ export interface SessionsPanelProps {
   readonly onSelect: (row: PanelRow) => void;
   readonly onClose: (row: PanelRow) => void;
   readonly onNew: () => void;
+  readonly onNewPlan: () => void;
   readonly onRename: (row: PanelRow) => void;
   readonly onArchive: (row: PanelRow) => void;
   readonly onOpenInTerminal: (row: PanelRow) => void;
@@ -329,11 +330,37 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
       section="sessions"
       title="Sessions"
       controls={
-        <Tooltip label="New Session ⌘T" openDelay={500}>
-          <ActionIcon variant="subtle" aria-label="New Session" onClick={props.onNew}>
-            <IconPlus size={16} stroke={1.5} />
-          </ActionIcon>
-        </Tooltip>
+        <Menu position="bottom-end" withinPortal>
+          <Menu.Target>
+            <Tooltip label="New" openDelay={500}>
+              <ActionIcon variant="subtle" aria-label="New">
+                <IconPlus size={16} stroke={1.5} />
+              </ActionIcon>
+            </Tooltip>
+          </Menu.Target>
+          <Menu.Dropdown>
+            <Menu.Item
+              rightSection={
+                <Text size="xs" c="dimmed">
+                  ⌘T
+                </Text>
+              }
+              onClick={props.onNew}
+            >
+              New Session
+            </Menu.Item>
+            <Menu.Item
+              rightSection={
+                <Text size="xs" c="dimmed">
+                  ⌘⇧N
+                </Text>
+              }
+              onClick={props.onNewPlan}
+            >
+              New Plan
+            </Menu.Item>
+          </Menu.Dropdown>
+        </Menu>
       }
     >
       <Box

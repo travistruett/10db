@@ -2,6 +2,7 @@
 
 export type SessionKey =
   | { readonly kind: 'new' }
+  | { readonly kind: 'new_plan' }
   | { readonly kind: 'close' }
   | { readonly kind: 'reopen' }
   | { readonly kind: 'go'; readonly index: number }
@@ -28,13 +29,14 @@ export interface Place {
 
 const DIGIT = /^[1-8]$/;
 
-/** The key a press is on Sessions, or null: ⌘T is the only one that works on every view, and ⌘N is never taken. */
+/** The key a press is on Sessions, or null: ⌘T and ⌘⇧N work on every view, and ⌘N is never taken. */
 export function sessionKey(press: Press, place: Place): SessionKey | null {
   const key = press.key.length === 1 ? press.key.toLowerCase() : press.key;
   if (press.alt) return null;
   if (press.meta && !press.ctrl) {
     if (key === 't') return press.shift ? onSessions(place, { kind: 'reopen' }) : { kind: 'new' };
     if (press.shift) {
+      if (key === 'n') return { kind: 'new_plan' };
       if (key === '[' || key === '{') return onSessions(place, { kind: 'prev' });
       if (key === ']' || key === '}') return onSessions(place, { kind: 'next' });
       if (key === 'd') return onSessions(place, { kind: 'changes' });
@@ -72,6 +74,7 @@ export function targetIndex(key: SessionKey, selected: number, count: number): n
     case 'next':
       return (selected + 1) % count;
     case 'new':
+    case 'new_plan':
     case 'close':
     case 'reopen':
     case 'next_needing':

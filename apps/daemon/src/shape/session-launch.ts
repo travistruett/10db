@@ -55,6 +55,8 @@ export interface ShapePrepareInput {
    * sandbox is read-only, as Plan's always is.
    */
   readonly writes?: boolean;
+  /** The plan's folder: open to the file tools, and a read-only kernel grant of exactly it. */
+  readonly planFiles?: string;
   /**
    * The folder the session works in when it is not the project's checkout (a session's own worktree): the
    * sandbox roots there, and the checkout is denied to it.

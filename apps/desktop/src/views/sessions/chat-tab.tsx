@@ -6,6 +6,7 @@ import {
   WorkPlace,
   InboxListState,
   type ChatDto,
+  type ConversationItemDto,
   type Effort,
   type ProjectViewDto,
   type ToolCallView,
@@ -59,6 +60,13 @@ import { settledWords, WorkBar } from './work-bar';
 import { ChangesDrawer, BESIDE_PX, DRAWER_WIDTH } from './changes-drawer';
 import { barHidden } from './bar-hidden';
 import { changesChoice } from './changes-choice';
+import { ChangesPanel } from './changes-panel';
+import { dropNotes } from './plan/drop-notes';
+import { planChoice, usePlanOpen } from './plan/plan-choice';
+import { planEventEntry } from './plan/plan-entries';
+import { PlanSide, planBeside } from './plan/plan-side';
+import { addFiles, FILE_PICKER_ACCEPT } from '../../conversation/dropped-files';
+import { useShapeView, useUploadShapeFile } from '../../daemon/shape-queries';
 import { changesTotals, withQuote } from './changes-files';
 import { GitStepButton } from './git-step-button';
 import { useSessionKeys } from './use-session-keys';
@@ -204,6 +212,24 @@ export function ChatTab({
   const offersChanges =
     hasChanges || (changes.isError && (work.data?.pullRequest ?? null) !== null);
   const [changesOpen, setChangesOpen] = useState(() => changesChoice.get(chat.id) === true);
+  // The Plan panel: a session with a plan opens it until the builder closes it, as a column beside the
+  // conversation when the tab holds both and a drawer over it when not.
+  const planOpen = usePlanOpen(chat.id, chat.planId !== null);
+  const besidePlan = planBeside(width);
+  const togglePlan = (): void => {
+    planChoice.set(chat.id, !planOpen);
+  };
+  const [why, setWhy] = useState<{
+    readonly ids: readonly string[];
+    readonly nonce: number;
+  } | null>(null);
+  const { planId } = chat;
+  const planView = useShapeView(planId);
+  const uploadFile = useUploadShapeFile();
+  // Reasons files were refused, including those a New Plan tab left for this session.
+  const [refusedFiles, setRefusedFiles] = useState<readonly string[]>(() =>
+    dropNotes.take(chat.id),
+  );
   const toggleChanges = (): void => {
     changesChoice.set(chat.id, !changesOpen);
     setChangesOpen(!changesOpen);
@@ -250,6 +276,17 @@ export function ChatTab({
   const working = WORKING_STATES.has(conversation.state);
   const removed = project === undefined;
 
+  // A plan session's dropped, picked and pasted files are the plan's files, which the agent reads.
+  const dropIntoPlan = async (files: File[]): Promise<void> => {
+    if (planId === null) return;
+    setRefusedFiles(
+      await addFiles(files, planView.data?.files.length ?? 0, {
+        ensureConversation: () => Promise.resolve(),
+        upload: (file) => uploadFile.mutateAsync({ shapeId: planId, file }),
+      }),
+    );
+  };
+
   const post = async (d: Draft): Promise<void> => {
     const chosen = whileWaiting;
     await send.mutateAsync({
@@ -295,13 +332,28 @@ export function ChatTab({
     changesChoice.set(chat.id, false);
     setChangesOpen(false);
   };
-  const latest = useRef({ working, stopNow, changesOpen, closeChanges });
+  // Esc lets go of the highlight Why? left in the conversation, and that is all it does.
+  const highlighted = why !== null;
+  const clearWhy = (): void => {
+    setWhy(null);
+  };
+  const latest = useRef({ working, stopNow, changesOpen, closeChanges, highlighted, clearWhy });
   useEffect(() => {
-    latest.current = { working, stopNow, changesOpen, closeChanges };
+    latest.current = { working, stopNow, changesOpen, closeChanges, highlighted, clearWhy };
   });
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return;
+      if (
+        latest.current.highlighted &&
+        !event.defaultPrevented &&
+        !escapeIsTaken(event) &&
+        !escapeHasOwner(event)
+      ) {
+        event.preventDefault();
+        latest.current.clearWhy();
+        return;
+      }
       // The Changes drawer is a dialog that is not modal: Esc closes it wherever focus is, before it can
       // read as a layer that owns the key or as a Stop.
       if (latest.current.changesOpen && !event.defaultPrevented && !escapeHasOwner(event)) {
@@ -377,6 +429,9 @@ export function ChatTab({
 
   const entries = chatEntries(
     itemEntries(items, live, {
+      ...(planId === null
+        ? {}
+        : { own: (item: ConversationItemDto) => planEventEntry(item, planId) }),
       sendNow: () => {
         sendNow.mutate(chat.conversationId);
       },
@@ -480,7 +535,7 @@ export function ChatTab({
   return (
     <Box
       ref={sizeRef}
-      style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+      style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'row' }}
     >
       {/* The measured box keeps its width; this one gives the drawer's share of the surface up. */}
       <Box
@@ -490,7 +545,7 @@ export function ChatTab({
           minHeight: 0,
           display: 'flex',
           flexDirection: 'column',
-          paddingRight: changesOpen && width >= BESIDE_PX ? DRAWER_WIDTH : 0,
+          paddingRight: changesOpen && !planOpen && width >= BESIDE_PX ? DRAWER_WIDTH : 0,
         }}
       >
         <SessionTitle
@@ -510,6 +565,7 @@ export function ChatTab({
             </>
           }
           switcherFor={switcherFor}
+          {...(planId === null ? {} : { plan: { open: planOpen, onToggle: togglePlan } })}
           projectPath={project?.repoPath ?? null}
           actions={{
             ...actions,
@@ -684,6 +740,20 @@ export function ChatTab({
                       )}
                     </Group>
                   }
+                  {...(planId === null
+                    ? {}
+                    : {
+                        uploads: {
+                          accept: FILE_PICKER_ACCEPT,
+                          onFiles: (files: File[]) => {
+                            void dropIntoPlan(files);
+                          },
+                          refused: refusedFiles,
+                          onDismiss: () => {
+                            setRefusedFiles([]);
+                          },
+                        },
+                      })}
                   onSend={post}
                   onStop={stopNow}
                   onRedo={async (d) => {
@@ -702,7 +772,7 @@ export function ChatTab({
           ) : null}
           <ConversationList
             entries={shown}
-            highlight={null}
+            highlight={why}
             loadFull={loadFull}
             onAllow={allow}
             agentLabel={caps.label}
@@ -710,8 +780,37 @@ export function ChatTab({
           />
         </ConversationLayout>
       </Box>
+      <PlanSide
+        open={planOpen}
+        beside={besidePlan}
+        shapeId={planId}
+        onClose={() => {
+          planChoice.set(chat.id, false);
+        }}
+        onWhy={(row) => {
+          // A drawer would cover the messages it points at.
+          if (!besidePlan) planChoice.set(chat.id, false);
+          setWhy((previous) => ({
+            ids: row.sourceMessageIds,
+            nonce: (previous?.nonce ?? 0) + 1,
+          }));
+        }}
+        {...(changesOpen
+          ? {
+              changes: (
+                <ChangesPanel
+                  changes={changes}
+                  pullRequest={work.data?.pullRequest?.url ?? null}
+                  onQuote={(text) => {
+                    setDraft({ ...draft, text: withQuote(draft.text, text) });
+                  }}
+                />
+              ),
+            }
+          : {})}
+      />
       <ChangesDrawer
-        opened={changesOpen}
+        opened={changesOpen && !planOpen}
         onClose={() => {
           changesChoice.set(chat.id, false);
           setChangesOpen(false);

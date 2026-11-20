@@ -22,14 +22,17 @@ import type { ShapeVerdict } from '../sessions';
 // permission broker (`ask`), as the conversation's calls to the project's MCP servers are. The
 // sandbox, not this judge, keeps every command from writing the checkout.
 
+/** What each of Plan's agents' names starts with; the stored reviewer is the rest. */
+const AGENT_PREFIX = 'tendb-';
+
 /** The reviewers a Shape session may launch with `Agent` (§7). */
-export const SHAPE_REVIEWERS = ['scope', 'engineering', 'rehearsal'] as const;
+export const PLAN_REVIEWERS = ['tendb-scope', 'tendb-engineering', 'tendb-rehearsal'] as const;
 
 /**
  * The agent that reads the code for the session (§5.2): file tools and, in the sandbox, the same
  * commands. It touches neither the web nor an MCP server and launches nothing.
  */
-export const SHAPE_CODE_RESEARCHER = 'code-researcher';
+export const PLAN_CODE_RESEARCHER = 'tendb-code-researcher';
 
 /** The models a session may name for an agent it launches: the Agent tool's own aliases. */
 export const SHAPE_AGENT_MODELS = ['opus', 'fable', 'sonnet', 'haiku'] as const;
@@ -38,7 +41,7 @@ export const SHAPE_AGENT_MODELS = ['opus', 'fable', 'sonnet', 'haiku'] as const;
  * The agent that reaches the web (§5.2). It is not a reviewer: it reports no finding and has no file
  * tool, so the agent holding the project's code is never the one that can send a request.
  */
-export const SHAPE_RESEARCHER = 'researcher';
+export const PLAN_RESEARCHER = 'tendb-researcher';
 
 /** Most characters of the question the session hands the researcher, of a search and of a URL. */
 export const RESEARCH_QUESTION_LIMIT = 1_500;
@@ -58,6 +61,8 @@ export interface ShapeAccess {
   readonly secretFiles?: readonly string[];
   /** The conversation's dropped files (§5.4). */
   readonly filesDir: string;
+  /** A plan's folder, readable as `filesDir` is; absent for a session with no plan. */
+  readonly planFilesDir?: string;
   /**
    * Every root 10db keeps sandboxes' temp dirs and files in: no Shape session reads there, even
    * inside a checkout that holds one.
@@ -105,7 +110,7 @@ const ALLOW: GuardVerdict = { decision: 'allow' };
 
 /** The agents that may run a command: the session itself, and the code researchers it launches. */
 const runsCommands = (call: ShapeCall): boolean =>
-  call.agentId === undefined || call.agentType === SHAPE_CODE_RESEARCHER;
+  call.agentId === undefined || call.agentType === PLAN_CODE_RESEARCHER;
 
 const BACKGROUND_REFUSAL =
   'A planning session runs its commands in the foreground only, so each ends before the turn does. Run it without run_in_background.';
@@ -201,7 +206,10 @@ function fileAccessContext(access: ShapeAccess): FileAccessContext {
     home: access.home,
     protectedReads: access.protectedReads,
     ...(access.secretFiles === undefined ? {} : { secretFiles: access.secretFiles }),
-    readList: [access.filesDir],
+    readList:
+      access.planFilesDir === undefined
+        ? [access.filesDir]
+        : [access.filesDir, access.planFilesDir],
     // Nothing of Claude Code's is readable: a large result is read back through a narrower search.
     configDir: join(NOWHERE, 'no-claude-config'),
     providerSessionId: null,
@@ -241,11 +249,11 @@ function judgeRead(call: ShapeCall, access: ShapeAccess): GuardVerdict {
 function judgeSkill(call: ShapeCall): GuardVerdict {
   if (call.agentId === undefined) return ALLOW;
   const type = call.agentType;
-  return type === SHAPE_CODE_RESEARCHER ||
-    (type !== undefined && (SHAPE_REVIEWERS as readonly string[]).includes(type))
+  return type === PLAN_CODE_RESEARCHER ||
+    (type !== undefined && (PLAN_REVIEWERS as readonly string[]).includes(type))
     ? ALLOW
     : deny(
-        type === SHAPE_RESEARCHER
+        type === PLAN_RESEARCHER
           ? 'The researcher uses no skill: it holds nothing of the project, and a skill is project text.'
           : `Only the session, a code researcher and a reviewer use a skill.`,
       );
@@ -285,8 +293,8 @@ function judgeAgentType(call: ShapeCall, access: ShapeAccess): GuardVerdict {
         ? "An agent runs on the session's model on this project's account; name no model."
         : `An agent runs on a model this project's account offers (${offered.join(', ')}), or on the session's model.`,
     );
-  if (type === SHAPE_CODE_RESEARCHER) return ALLOW;
-  if (type === SHAPE_RESEARCHER) {
+  if (type === PLAN_CODE_RESEARCHER) return ALLOW;
+  if (type === PLAN_RESEARCHER) {
     // The question is the only thing that reaches the researcher, and the researcher can send
     // requests: bounding it bounds what the session can hand across (§5.2).
     const question = stringField(call.toolInput, 'prompt');
@@ -298,15 +306,15 @@ function judgeAgentType(call: ShapeCall, access: ShapeAccess): GuardVerdict {
       );
     return ALLOW;
   }
-  return type !== null && (SHAPE_REVIEWERS as readonly string[]).includes(type)
+  return type !== null && (PLAN_REVIEWERS as readonly string[]).includes(type)
     ? ALLOW
     : deny(
-        `A Shape session launches only its reviewers (${SHAPE_REVIEWERS.join(', ')}), the researcher and the code researcher.`,
+        `A Shape session launches only its reviewers (${PLAN_REVIEWERS.join(', ')}), the researcher and the code researcher.`,
       );
 }
 
 const isResearcher = (call: ShapeCall): boolean =>
-  call.agentId !== undefined && call.agentType === SHAPE_RESEARCHER;
+  call.agentId !== undefined && call.agentType === PLAN_RESEARCHER;
 
 /** Hosts that name a machine of the builder's own network, not the public web. */
 const LOCAL_SUFFIXES = ['.localhost', '.local', '.internal', '.lan', '.home.arpa', '.intranet'];
@@ -362,7 +370,7 @@ const isProjectTool = (toolName: string): boolean =>
 function judgeWeb(call: ShapeCall, judge: JudgeKind | undefined): GuardVerdict {
   if (judge !== JudgeKind.Native && !isResearcher(call))
     return deny(
-      `${call.toolName} is not available here: only the researcher touches the web. Launch it with Agent, subagent_type "${SHAPE_RESEARCHER}", and ask it in words.`,
+      `${call.toolName} is not available here: only the researcher touches the web. Launch it with Agent, subagent_type "${PLAN_RESEARCHER}", and ask it in words.`,
     );
   if (call.toolName === 'WebSearch') {
     const query = stringField(call.toolInput, 'query');
@@ -377,7 +385,8 @@ function judgeWeb(call: ShapeCall, judge: JudgeKind | undefined): GuardVerdict {
   return problem === null ? ALLOW : deny(problem);
 }
 
-function judgeShapeTool(call: ShapeCall): ShapeVerdict {
+/** A Plan tool call from a chat's session: allowed, refused, or report_finding with `reviewer` stamped. */
+export function judgePlanTool(call: ShapeCall): ShapeVerdict {
   const name = call.toolName.slice(MCP_PREFIX.length);
   if (!SHAPE_TOOLS.has(name)) return deny(`${call.toolName} is not a Shape tool.`);
   const isReviewer = call.agentId !== undefined;
@@ -385,15 +394,18 @@ function judgeShapeTool(call: ShapeCall): ShapeVerdict {
     return isReviewer ? deny(`A reviewer cannot call ${name}; it reports findings only.`) : ALLOW;
   if (!isReviewer) return deny('Only a reviewer reports a finding; the main session cannot.');
   const reviewer = call.agentType;
-  if (reviewer === undefined || !(SHAPE_REVIEWERS as readonly string[]).includes(reviewer))
-    return deny(`Only a ${SHAPE_REVIEWERS.join(', ')} reviewer reports a finding.`);
+  if (reviewer === undefined || !(PLAN_REVIEWERS as readonly string[]).includes(reviewer))
+    return deny(`Only a ${PLAN_REVIEWERS.join(', ')} reviewer reports a finding.`);
   // The finding's reviewer is the subagent's type, set here over whatever the model wrote: the MCP
   // handler can't tell a reviewer from the session, since they share a connection.
   const input =
     typeof call.toolInput === 'object' && call.toolInput !== null
       ? (call.toolInput as Record<string, unknown>)
       : {};
-  return { decision: 'allow', updatedInput: { ...input, reviewer } };
+  return {
+    decision: 'allow',
+    updatedInput: { ...input, reviewer: reviewer.slice(AGENT_PREFIX.length) },
+  };
 }
 
 /**
@@ -403,7 +415,7 @@ function judgeShapeTool(call: ShapeCall): ShapeVerdict {
  */
 export function judgeShapeCall(call: ShapeCall, access: ShapeAccess): ShapeVerdict {
   if (READ_TOOLS.has(call.toolName))
-    return call.agentType === SHAPE_RESEARCHER && call.agentId !== undefined
+    return call.agentType === PLAN_RESEARCHER && call.agentId !== undefined
       ? deny(
           'The researcher reads no files: it holds neither the project nor the conversation’s files, and answers from the web.',
         )
@@ -411,7 +423,7 @@ export function judgeShapeCall(call: ShapeCall, access: ShapeAccess): ShapeVerdi
   if (WEB_TOOLS.has(call.toolName)) return judgeWeb(call, access.judge);
   if (call.toolName === 'Skill') return judgeSkill(call);
   if (call.toolName === 'Agent') return judgeAgent(call, access);
-  if (call.toolName.startsWith(MCP_PREFIX)) return judgeShapeTool(call);
+  if (call.toolName.startsWith(MCP_PREFIX)) return judgePlanTool(call);
   if (COMMAND_TOOLS.has(call.toolName)) return judgeCommand(call, access);
   // A server 10db registered, so one the builder approved for the project.
   if (isProjectTool(call.toolName)) return judgeProjectTool(call, access);

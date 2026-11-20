@@ -103,7 +103,11 @@ const REFUSED: readonly (readonly [string, () => ShapeCall])[] = [
   [
     'a reviewer’s Read of a manual page',
     () =>
-      call('Read', { file_path: '/usr/share/man/man1/ps.1' }, { agentId: 'a', agentType: 'scope' }),
+      call(
+        'Read',
+        { file_path: '/usr/share/man/man1/ps.1' },
+        { agentId: 'a', agentType: 'tendb-scope' },
+      ),
   ],
   [
     'a Read through a directory link out',
@@ -147,7 +151,7 @@ const REFUSED: readonly (readonly [string, () => ShapeCall])[] = [
   ['an Agent with no type', () => call('Agent', { prompt: 'x' })],
   // isolation makes a worktree (a write) or runs the agent where this hook never sees its calls.
   ...(['worktree', 'remote'] as const).flatMap((isolation) => [
-    ...['scope', 'engineering', 'rehearsal', 'general-purpose'].map(
+    ...['tendb-scope', 'tendb-engineering', 'tendb-rehearsal', 'general-purpose'].map(
       (type) =>
         [
           `an Agent for ${type} with isolation ${isolation}`,
@@ -156,12 +160,12 @@ const REFUSED: readonly (readonly [string, () => ShapeCall])[] = [
     ),
     [
       `an Agent for the researcher with isolation ${isolation}`,
-      () => call('Agent', { subagent_type: 'researcher', prompt: 'a question', isolation }),
+      () => call('Agent', { subagent_type: 'tendb-researcher', prompt: 'a question', isolation }),
     ] as const,
   ]),
   [
     'an Agent for a reviewer with an unknown isolation',
-    () => call('Agent', { subagent_type: 'scope', prompt: 'x', isolation: 'sandbox' }),
+    () => call('Agent', { subagent_type: 'tendb-scope', prompt: 'x', isolation: 'sandbox' }),
   ],
   ['a lane tool, commit', () => call('mcp__10db__commit', { paths: ['a'] })],
   ['a lane tool, request_claim', () => call('mcp__10db__request_claim', { name: 'api' })],
@@ -179,35 +183,41 @@ const REFUSED: readonly (readonly [string, () => ShapeCall])[] = [
   ],
   [
     'propose_plan from a reviewer',
-    () => call('mcp__10db__propose_plan', {}, { agentId: 'agent-1', agentType: 'scope' }),
+    () => call('mcp__10db__propose_plan', {}, { agentId: 'agent-1', agentType: 'tendb-scope' }),
   ],
   [
     'note_heard from a reviewer',
-    () => call('mcp__10db__note_heard', {}, { agentId: 'agent-1', agentType: 'rehearsal' }),
+    () => call('mcp__10db__note_heard', {}, { agentId: 'agent-1', agentType: 'tendb-rehearsal' }),
   ],
   [
     'a Bash call from a reviewer',
-    () => call('Bash', { command: 'ls' }, { agentId: 'agent-1', agentType: 'scope' }),
+    () => call('Bash', { command: 'ls' }, { agentId: 'agent-1', agentType: 'tendb-scope' }),
   ],
   [
     'a reviewer’s Read outside the checkout',
     () =>
-      call('Read', { file_path: path('outside/notes.txt') }, { agentId: 'a', agentType: 'scope' }),
+      call(
+        'Read',
+        { file_path: path('outside/notes.txt') },
+        { agentId: 'a', agentType: 'tendb-scope' },
+      ),
   ],
   // Research (§5.2): only the researcher touches the network, and it reads nothing.
-  ...(['scope', 'engineering', 'rehearsal', 'general-purpose'] as const).flatMap((agentType) => [
-    [
-      `a WebSearch from the ${agentType} agent`,
-      () => call('WebSearch', { query: 'x' }, { agentId: 'a', agentType }),
-    ] as const,
-    [
-      `a WebFetch from the ${agentType} agent`,
-      () => call('WebFetch', { url: 'https://example.com/' }, { agentId: 'a', agentType }),
-    ] as const,
-  ]),
+  ...(['tendb-scope', 'tendb-engineering', 'tendb-rehearsal', 'general-purpose'] as const).flatMap(
+    (agentType) => [
+      [
+        `a WebSearch from the ${agentType} agent`,
+        () => call('WebSearch', { query: 'x' }, { agentId: 'a', agentType }),
+      ] as const,
+      [
+        `a WebFetch from the ${agentType} agent`,
+        () => call('WebFetch', { url: 'https://example.com/' }, { agentId: 'a', agentType }),
+      ] as const,
+    ],
+  ),
   [
     'a Skill from the web researcher',
-    () => call('Skill', { skill: 'yours:s' }, { agentId: 'a', agentType: 'researcher' }),
+    () => call('Skill', { skill: 'yours:s' }, { agentId: 'a', agentType: 'tendb-researcher' }),
   ],
   [
     'a Skill from an agent Plan does not launch',
@@ -238,39 +248,47 @@ const REFUSED: readonly (readonly [string, () => ShapeCall])[] = [
     ([name, tool, input]) =>
       [
         `${name} from the researcher`,
-        () => call(tool, input(), { agentId: 'a', agentType: 'researcher' }),
+        () => call(tool, input(), { agentId: 'a', agentType: 'tendb-researcher' }),
       ] as const,
   ),
   [
     'a Bash call from the researcher',
-    () => call('Bash', { command: 'curl x' }, { agentId: 'a', agentType: 'researcher' }),
+    () => call('Bash', { command: 'curl x' }, { agentId: 'a', agentType: 'tendb-researcher' }),
   ],
   [
     'an Agent launched by the researcher',
     () =>
       call(
         'Agent',
-        { subagent_type: 'researcher', prompt: 'x' },
-        { agentId: 'a', agentType: 'researcher' },
+        { subagent_type: 'tendb-researcher', prompt: 'x' },
+        { agentId: 'a', agentType: 'tendb-researcher' },
       ),
   ],
   [
     'report_finding from the researcher',
-    () => call('mcp__10db__report_finding', {}, { agentId: 'a', agentType: 'researcher' }),
+    () => call('mcp__10db__report_finding', {}, { agentId: 'a', agentType: 'tendb-researcher' }),
   ],
   [
     'propose_plan from the researcher',
-    () => call('mcp__10db__propose_plan', {}, { agentId: 'a', agentType: 'researcher' }),
+    () => call('mcp__10db__propose_plan', {}, { agentId: 'a', agentType: 'tendb-researcher' }),
   ],
   [
     'see_screen from the researcher',
     () =>
-      call('mcp__10db__see_screen', { screen: 'board' }, { agentId: 'a', agentType: 'researcher' }),
+      call(
+        'mcp__10db__see_screen',
+        { screen: 'board' },
+        { agentId: 'a', agentType: 'tendb-researcher' },
+      ),
   ],
   [
     'see_screen from a reviewer',
     () =>
-      call('mcp__10db__see_screen', { screen: 'board' }, { agentId: 'a', agentType: 'rehearsal' }),
+      call(
+        'mcp__10db__see_screen',
+        { screen: 'board' },
+        { agentId: 'a', agentType: 'tendb-rehearsal' },
+      ),
   ],
   [
     'a browser tool of any kind',
@@ -280,19 +298,23 @@ const REFUSED: readonly (readonly [string, () => ShapeCall])[] = [
   [
     'find_records from the researcher',
     () =>
-      call('mcp__10db__find_records', { query: 'x' }, { agentId: 'a', agentType: 'researcher' }),
+      call(
+        'mcp__10db__find_records',
+        { query: 'x' },
+        { agentId: 'a', agentType: 'tendb-researcher' },
+      ),
   ],
   [
     'an Agent for the researcher with a question over the limit',
     () =>
       call('Agent', {
-        subagent_type: 'researcher',
+        subagent_type: 'tendb-researcher',
         prompt: 'x'.repeat(RESEARCH_QUESTION_LIMIT + 1),
       }),
   ],
   [
     'an Agent for the researcher with no question',
-    () => call('Agent', { subagent_type: 'researcher' }),
+    () => call('Agent', { subagent_type: 'tendb-researcher' }),
   ],
   ...(
     [
@@ -316,16 +338,16 @@ const REFUSED: readonly (readonly [string, () => ShapeCall])[] = [
     ([name, url]) =>
       [
         `the researcher’s WebFetch of ${name}`,
-        () => call('WebFetch', { url }, { agentId: 'a', agentType: 'researcher' }),
+        () => call('WebFetch', { url }, { agentId: 'a', agentType: 'tendb-researcher' }),
       ] as const,
   ),
   [
     'the researcher’s WebFetch with no url',
-    () => call('WebFetch', {}, { agentId: 'a', agentType: 'researcher' }),
+    () => call('WebFetch', {}, { agentId: 'a', agentType: 'tendb-researcher' }),
   ],
   [
     'the researcher’s WebSearch with no query',
-    () => call('WebSearch', { query: '  ' }, { agentId: 'a', agentType: 'researcher' }),
+    () => call('WebSearch', { query: '  ' }, { agentId: 'a', agentType: 'tendb-researcher' }),
   ],
   [
     'the researcher’s WebSearch of a query over the limit',
@@ -333,7 +355,7 @@ const REFUSED: readonly (readonly [string, () => ShapeCall])[] = [
       call(
         'WebSearch',
         { query: 'x'.repeat(RESEARCH_QUERY_LIMIT + 1) },
-        { agentId: 'a', agentType: 'researcher' },
+        { agentId: 'a', agentType: 'tendb-researcher' },
       ),
   ],
 ];
@@ -353,15 +375,19 @@ const ALLOWED: readonly (readonly [string, () => ShapeCall])[] = [
     'a Read of this conversation’s dropped file',
     () => call('Read', { file_path: path('shapes/shp_own/files/brief.md') }),
   ],
-  ['an Agent for a reviewer', () => call('Agent', { subagent_type: 'rehearsal', prompt: 'x' })],
+  [
+    'an Agent for a reviewer',
+    () => call('Agent', { subagent_type: 'tendb-rehearsal', prompt: 'x' }),
+  ],
   ['a Skill in the session', () => call('Skill', { skill: 'yours:s' })],
   [
     'a Skill from a code researcher',
-    () => call('Skill', { skill: 'project:x' }, { agentId: 'a', agentType: 'code-researcher' }),
+    () =>
+      call('Skill', { skill: 'project:x' }, { agentId: 'a', agentType: 'tendb-code-researcher' }),
   ],
   [
     'a Skill from a reviewer',
-    () => call('Skill', { skill: 'yours:s' }, { agentId: 'a', agentType: 'engineering' }),
+    () => call('Skill', { skill: 'yours:s' }, { agentId: 'a', agentType: 'tendb-engineering' }),
   ],
   ['note_heard', () => call('mcp__10db__note_heard', { items: [] })],
   ['propose_plan', () => call('mcp__10db__propose_plan', {})],
@@ -371,11 +397,19 @@ const ALLOWED: readonly (readonly [string, () => ShapeCall])[] = [
   [
     'a reviewer’s Read inside the checkout',
     () =>
-      call('Read', { file_path: path('checkout/src/a.ts') }, { agentId: 'a', agentType: 'scope' }),
+      call(
+        'Read',
+        { file_path: path('checkout/src/a.ts') },
+        { agentId: 'a', agentType: 'tendb-scope' },
+      ),
   ],
   [
     'an Agent for the researcher',
-    () => call('Agent', { subagent_type: 'researcher', prompt: 'How does Vega-Lite handle ties?' }),
+    () =>
+      call('Agent', {
+        subagent_type: 'tendb-researcher',
+        prompt: 'How does Vega-Lite handle ties?',
+      }),
   ],
   [
     'the researcher’s WebSearch',
@@ -383,7 +417,7 @@ const ALLOWED: readonly (readonly [string, () => ShapeCall])[] = [
       call(
         'WebSearch',
         { query: 'vega-lite stack ties', allowed_domains: ['vega.github.io'] },
-        { agentId: 'a', agentType: 'researcher' },
+        { agentId: 'a', agentType: 'tendb-researcher' },
       ),
   ],
   [
@@ -392,7 +426,7 @@ const ALLOWED: readonly (readonly [string, () => ShapeCall])[] = [
       call(
         'WebFetch',
         { url: 'https://vega.github.io/vega-lite/docs/stack.html', prompt: 'ties' },
-        { agentId: 'a', agentType: 'researcher' },
+        { agentId: 'a', agentType: 'tendb-researcher' },
       ),
   ],
   [
@@ -401,7 +435,7 @@ const ALLOWED: readonly (readonly [string, () => ShapeCall])[] = [
       call(
         'WebFetch',
         { url: 'https://example.com:443/a?b=c#d' },
-        { agentId: 'a', agentType: 'researcher' },
+        { agentId: 'a', agentType: 'tendb-researcher' },
       ),
   ],
 ];
@@ -426,7 +460,7 @@ describe('judgeShapeCall', () => {
     );
   });
 
-  it.each(['scope', 'engineering', 'rehearsal'])(
+  it.each(['tendb-scope', 'tendb-engineering', 'tendb-rehearsal'])(
     'lets a %s reviewer report a finding, with the reviewer set from its type over what it wrote',
     (reviewer) => {
       const verdict = judgeShapeCall(
@@ -439,7 +473,11 @@ describe('judgeShapeCall', () => {
       );
       expect(verdict).toEqual({
         decision: 'allow',
-        updatedInput: { effortKey: 'density', reviewer, finding: { kind: 'none' } },
+        updatedInput: {
+          effortKey: 'density',
+          reviewer: reviewer.replace('tendb-', ''),
+          finding: { kind: 'none' },
+        },
       });
     },
   );
@@ -480,7 +518,7 @@ describe('judgeShapeCall', () => {
       call(
         'Read',
         { file_path: path('checkout/src/a.ts') },
-        { agentId: 'a', agentType: 'researcher' },
+        { agentId: 'a', agentType: 'tendb-researcher' },
       ),
       access,
     );
@@ -519,7 +557,7 @@ describe('judgeShapeCall in the read-only sandbox', () => {
     };
   });
 
-  const researcher = { agentId: 'agent-1', agentType: 'code-researcher' };
+  const researcher = { agentId: 'agent-1', agentType: 'tendb-code-researcher' };
   const bash = (command: string, extra: Partial<ShapeCall> = {}, more: object = {}): ShapeCall =>
     call('Bash', { command, ...more }, extra);
 
@@ -568,16 +606,19 @@ describe('judgeShapeCall in the read-only sandbox', () => {
     ['a job disowned', () => bash('node server.js & disown')],
     ['a command that brings its own hosts', () => bash('ls', {}, { allowed_domains: ['x.io'] })],
     ['a Monitor call', () => call('Monitor', { command: 'tail -f x' })],
-    ['Bash from the web researcher', () => bash('ls', { agentId: 'a', agentType: 'researcher' })],
-    ['Bash from a scope reviewer', () => bash('ls', { agentId: 'a', agentType: 'scope' })],
-    ['Bash from a rehearsal', () => bash('ls', { agentId: 'a', agentType: 'rehearsal' })],
+    [
+      'Bash from the web researcher',
+      () => bash('ls', { agentId: 'a', agentType: 'tendb-researcher' }),
+    ],
+    ['Bash from a scope reviewer', () => bash('ls', { agentId: 'a', agentType: 'tendb-scope' })],
+    ['Bash from a rehearsal', () => bash('ls', { agentId: 'a', agentType: 'tendb-rehearsal' })],
     [
       'a project MCP tool from a code researcher',
       () => call('mcp__aws-billing__cost-explorer', {}, researcher),
     ],
     [
       'a project MCP tool from a reviewer',
-      () => call('mcp__aws-billing__cost-explorer', {}, { agentId: 'a', agentType: 'scope' }),
+      () => call('mcp__aws-billing__cost-explorer', {}, { agentId: 'a', agentType: 'tendb-scope' }),
     ],
     [
       "one of the builder's own MCP tools from a code researcher",
@@ -596,15 +637,20 @@ describe('judgeShapeCall in the read-only sandbox', () => {
     ],
     [
       'an Agent from a code researcher',
-      () => call('Agent', { subagent_type: 'code-researcher', prompt: 'x' }, researcher),
+      () => call('Agent', { subagent_type: 'tendb-code-researcher', prompt: 'x' }, researcher),
     ],
     [
       'a code researcher on a model 10db does not know',
-      () => call('Agent', { subagent_type: 'code-researcher', prompt: 'x', model: 'gpt-9' }),
+      () => call('Agent', { subagent_type: 'tendb-code-researcher', prompt: 'x', model: 'gpt-9' }),
     ],
     [
       'a code researcher in a worktree',
-      () => call('Agent', { subagent_type: 'code-researcher', prompt: 'x', isolation: 'worktree' }),
+      () =>
+        call('Agent', {
+          subagent_type: 'tendb-code-researcher',
+          prompt: 'x',
+          isolation: 'worktree',
+        }),
     ],
     [
       'a Read outside the checkout from a code researcher',
@@ -621,13 +667,14 @@ describe('judgeShapeCall in the read-only sandbox', () => {
   const LAUNCHED: readonly (readonly [string, () => ShapeCall])[] = [
     [
       'a code researcher on the session’s model',
-      () => call('Agent', { subagent_type: 'code-researcher', prompt: 'Map the billing code' }),
+      () =>
+        call('Agent', { subagent_type: 'tendb-code-researcher', prompt: 'Map the billing code' }),
     ],
     ...(['opus', 'fable', 'sonnet', 'haiku'] as const).map(
       (model) =>
         [
           `a code researcher on ${model}`,
-          () => call('Agent', { subagent_type: 'code-researcher', prompt: 'x', model }),
+          () => call('Agent', { subagent_type: 'tendb-code-researcher', prompt: 'x', model }),
         ] as const,
     ),
     [
@@ -660,12 +707,20 @@ describe('judgeShapeCall in the read-only sandbox', () => {
 
   it('launches an agent in the foreground whatever the call asks, so none runs past its turn', () => {
     const verdict = judgeShapeCall(
-      call('Agent', { subagent_type: 'code-researcher', prompt: 'x', run_in_background: true }),
+      call('Agent', {
+        subagent_type: 'tendb-code-researcher',
+        prompt: 'x',
+        run_in_background: true,
+      }),
       sandboxed,
     );
     expect(verdict).toEqual({
       decision: 'allow',
-      updatedInput: { subagent_type: 'code-researcher', prompt: 'x', run_in_background: false },
+      updatedInput: {
+        subagent_type: 'tendb-code-researcher',
+        prompt: 'x',
+        run_in_background: false,
+      },
     });
   });
 
@@ -676,7 +731,7 @@ describe('judgeShapeCall in the read-only sandbox', () => {
     const limited: ShapeAccess = { ...sandboxed, agentModels: ['haiku', 'sonnet'] };
     expect(
       judgeShapeCall(
-        call('Agent', { subagent_type: 'code-researcher', prompt: 'x', model }),
+        call('Agent', { subagent_type: 'tendb-code-researcher', prompt: 'x', model }),
         limited,
       ).decision,
     ).toBe(decision);
@@ -685,14 +740,14 @@ describe('judgeShapeCall in the read-only sandbox', () => {
   it('refuses any model named on an agent when the account takes no alias, and says agents use the session’s', () => {
     const none: ShapeAccess = { ...sandboxed, agentModels: [] };
     const named = judgeShapeCall(
-      call('Agent', { subagent_type: 'code-researcher', prompt: 'x', model: 'sonnet' }),
+      call('Agent', { subagent_type: 'tendb-code-researcher', prompt: 'x', model: 'sonnet' }),
       none,
     );
     expect(named.decision).toBe('deny');
     expect(JSON.stringify(named)).toMatch(/session's model/);
     expect(JSON.stringify(named)).not.toMatch(/\(\)/);
     expect(
-      judgeShapeCall(call('Agent', { subagent_type: 'code-researcher', prompt: 'x' }), none)
+      judgeShapeCall(call('Agent', { subagent_type: 'tendb-code-researcher', prompt: 'x' }), none)
         .decision,
     ).toBe('allow');
   });
@@ -713,7 +768,7 @@ describe('judgeShapeCall in the read-only sandbox', () => {
     expect(judgeShapeCall(bash('git log'), access).decision).toBe('deny');
     expect(judgeShapeCall(call('mcp__aws-billing__x', {}), access).decision).toBe('deny');
     expect(
-      judgeShapeCall(call('Agent', { subagent_type: 'code-researcher', prompt: 'x' }), access)
+      judgeShapeCall(call('Agent', { subagent_type: 'tendb-code-researcher', prompt: 'x' }), access)
         .decision,
     ).toBe('allow');
   });
@@ -750,7 +805,7 @@ describe('judgeShapeCall by the session’s judge', () => {
     };
   });
 
-  const RESEARCHER = { agentId: 'r1', agentType: 'researcher' } as const;
+  const RESEARCHER = { agentId: 'r1', agentType: 'tendb-researcher' } as const;
   // Columns: native, 10db's judge, rules. 10db's judge takes the calls auto mode would, but its session keeps
   // the rules' foreground-only commands and researcher-only web: no classifier stands behind them.
   const ROWS: readonly (readonly [string, () => ShapeCall, string, string, string])[] = [

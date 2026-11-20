@@ -66,7 +66,6 @@ is mounted:
 - `CountBadge` (`count-badge.tsx`): a count in the rail and lists; `cap` shows `cap+` above that number.
 - `RenderLayout` (`screens/render-layout.tsx`), the layout a Plan screen frame renders in place of the shell,
   provides title-row slots too, so a view that draws a `TitleRow` still draws it there.
-- `shape-nav.tsx` keeps only `latestOpenShape`, where Plan's rail item opens; the `ShapeNav` component is gone.
 - Settings' scope switch is styled in `views/settings/settings-nav.module.css`.
 - The tooltip theme (bright ink on the base tone, 12 px, tight) is in `theme.ts`, not per use.
 

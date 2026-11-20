@@ -2,7 +2,7 @@ import { ConversationId, type ChatDto, type InboxItemDto, type TaskId } from '@1
 import { Anchor, Badge, Text } from '@mantine/core';
 import { useOpenChats, useRecentChats } from '../../daemon/chat-queries';
 import { useWorkstreams } from '../../daemon/queries';
-import { useOpenSession } from '../sessions/open-session';
+import { useOpenSessionNotice } from '../sessions/open-session';
 
 /** The chat a card was raised by, when its detail names a chat's conversation. */
 export function useSessionOfCard(item: InboxItemDto): ChatDto | null {
@@ -29,18 +29,21 @@ export function SessionBadge({ chat }: { readonly chat: ChatDto }) {
 
 /** Open Session: selects the chat's tab, reopening it where it was when it is closed. */
 export function OpenSessionLink({ chat }: { readonly chat: ChatDto }) {
-  const openSession = useOpenSession();
+  const { open, notice } = useOpenSessionNotice();
   return (
-    <Anchor
-      component="button"
-      type="button"
-      size="sm"
-      onClick={() => {
-        void openSession(chat.id);
-      }}
-    >
-      Open Session
-    </Anchor>
+    <>
+      <Anchor
+        component="button"
+        type="button"
+        size="sm"
+        onClick={() => {
+          open(chat.id);
+        }}
+      >
+        Open Session
+      </Anchor>
+      {notice}
+    </>
   );
 }
 

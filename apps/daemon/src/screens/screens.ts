@@ -13,7 +13,7 @@ import {
   type ScreenMessageBody,
   type SeeScreenInput,
 } from '@10db/contracts';
-import { getShape, getTask, insertShapeMessage, listShapeMessages } from '@10db/db';
+import { chatOfShape, getShape, getTask, insertShapeMessage, listShapeMessages } from '@10db/db';
 import type { StateStore } from '../events';
 import { ToolImages } from '../mcp';
 import type { ScreenBroker } from './broker';
@@ -130,6 +130,9 @@ export function createScreens(deps: ScreenDeps): ScreenService {
         projectId: shape.projectId,
         screen: input.screen,
         ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
+        ...(input.screen === ScreenName.Plan
+          ? { chatId: chatOfShape(deps.state.db, shapeId) }
+          : {}),
         width: input.width,
         height: input.height,
       });

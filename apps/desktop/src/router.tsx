@@ -3,6 +3,7 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  Navigate,
   redirect,
   type RouterHistory,
 } from '@tanstack/react-router';
@@ -14,9 +15,10 @@ import { FactoryMode, FactoryView } from './views/factory/factory-view';
 import { inboxSearch } from './views/inbox/inbox-search';
 import { InboxView } from './views/inbox/inbox-view';
 import { KnowledgeView } from './views/knowledge/knowledge-view';
-import { recordSearch } from './views/shape/record/record-tabs';
-import { RecordView } from './views/shape/record/record-view';
-import { ShapeView } from './views/shape/shape-view';
+import { recordSearch } from './views/sessions/plan/record/record-tabs';
+import { useRenderMode } from './screens/render-context';
+import { PlanScreen } from './views/sessions/plan/plan-screen';
+import { RecordView } from './views/sessions/plan/record/record-view';
 import { SessionsView } from './views/sessions/sessions-view';
 import { sessionsSearch } from './views/sessions/sessions-search';
 import { settingsSearch } from './views/settings/focus-target';
@@ -92,20 +94,17 @@ function SettingsPage() {
   );
 }
 
-function NewShapePage() {
-  return (
-    <ViewBoundary name="Plan">
-      <ShapeView shapeId={null} />
-    </ViewBoundary>
-  );
-}
-
-function ShapePage() {
-  const { shapeId } = shapeRoute.useParams();
+function PlanScreenPage() {
+  const { shapeId } = planScreenRoute.useParams();
   const id = ShapeId.safeParse(shapeId);
+  const render = useRenderMode();
   return (
     <ViewBoundary name="Plan">
-      <ShapeView shapeId={id.success ? id.data : null} />
+      {render !== null && id.success ? (
+        <PlanScreen shapeId={id.data} />
+      ) : (
+        <Navigate to="/sessions" />
+      )}
     </ViewBoundary>
   );
 }
@@ -164,29 +163,13 @@ const factoryRoute = createRoute({
   },
   component: FactoryPage,
 });
-// The new conversation: nothing exists in the daemon until the first message is sent.
-const newShapeRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/shape',
-  component: NewShapePage,
-});
-const shapeRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: '/shape/$shapeId',
-  beforeLoad: ({ params }) => {
-    // A link that isn't a conversation id opens the new conversation instead.
-    // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router redirects by throwing.
-    if (!ShapeId.safeParse(params.shapeId).success) throw redirect({ to: '/shape' });
-  },
-  component: ShapePage,
-});
 // A Plan's record: `tab`, `doc`, `rev` and `section` say what is open, each kept only when it parses.
 const recordRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/shape/$shapeId/record',
+  path: '/sessions/record/$shapeId',
   beforeLoad: ({ params }) => {
     // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router redirects by throwing.
-    if (!ShapeId.safeParse(params.shapeId).success) throw redirect({ to: '/shape' });
+    if (!ShapeId.safeParse(params.shapeId).success) throw redirect({ to: '/sessions' });
   },
   validateSearch: recordSearch,
   component: RecordPage,
@@ -280,12 +263,18 @@ const settingsRoute = createRoute({
   component: SettingsPage,
 });
 
+// The Plan screen a session's see_screen draws. Outside the frame the window draws screens in it has
+// nothing to show, so it leaves for Sessions.
+const planScreenRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/plan-screen/$shapeId',
+  component: PlanScreenPage,
+});
 const routeTree = rootRoute.addChildren([
+  planScreenRoute,
   indexRoute,
   boardRoute,
   factoryRoute,
-  newShapeRoute,
-  shapeRoute,
   recordRoute,
   inboxRoute,
   workbenchRoute,

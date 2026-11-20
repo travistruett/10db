@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import type {
+  ChatId,
   ProjectId,
   ScreenImageInput,
   ScreenName,
@@ -19,6 +20,8 @@ export interface ScreenSpec {
   readonly projectId: ProjectId;
   readonly screen: ScreenName;
   readonly taskId?: TaskId;
+  /** The asking session's chat, for the plan screen. */
+  readonly chatId?: ChatId;
   readonly width: number;
   readonly height: number;
 }
@@ -100,6 +103,7 @@ export function createScreenBroker(options: ScreenBrokerOptions = {}): ScreenBro
         projectId: spec.projectId,
         ...(spec.taskId === undefined ? {} : { taskId: spec.taskId }),
         shapeId: spec.shapeId,
+        ...(spec.chatId === undefined ? {} : { chatId: spec.chatId }),
         width: spec.width,
         height: spec.height,
         token: randomBytes(24).toString('base64url'),

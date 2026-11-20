@@ -11,7 +11,10 @@ export const JudgeDecision = {
    * parse and show, and a stored config that holds it reads with the key dropped.
    */
   ReviewSize: 'review_size',
-  /** Shape (spec §9): has the builder said enough to propose? */
+  /**
+   * Retired: nothing asks it, since a session proposes as things are decided. Its logged calls still parse
+   * and show, and a stored config that holds it reads with the key dropped.
+   */
   ShapeReady: 'shape_ready',
   /** Shape: does this message state a decision or principle worth recording? */
   ShapeRecord: 'shape_record',
@@ -77,7 +80,6 @@ export const JudgeConfig = z.object({
   /** The OpenRouter account decisions run on; null until the builder picks one. */
   accountId: AccountId.nullable().default(null),
   decisions: z.object({
-    [JudgeDecision.ShapeReady]: shapeDecision(),
     [JudgeDecision.ShapeRecord]: shapeDecision(),
     [JudgeDecision.ShapeElsewhere]: shapeDecision(),
     [JudgeDecision.QuestionRoute]: shapeDecision(),
@@ -92,14 +94,13 @@ export const JudgeConfig = z.object({
 });
 export type JudgeConfig = z.infer<typeof JudgeConfig>;
 
-/** A decision 10db still asks a model, and so still configures: every one but the retired `review_size`. */
+/** A decision 10db still asks a model, and so still configures: every one but the retired `review_size` and `shape_ready`. */
 export type AskedDecision = keyof JudgeConfig['decisions'];
 
 export const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
   enabled: true,
   accountId: null,
   decisions: {
-    [JudgeDecision.ShapeReady]: { ...DEFAULT_DECISION },
     [JudgeDecision.ShapeRecord]: { ...DEFAULT_DECISION },
     [JudgeDecision.ShapeElsewhere]: { ...DEFAULT_DECISION },
     [JudgeDecision.QuestionRoute]: { ...DEFAULT_DECISION },
@@ -145,7 +146,6 @@ export const JudgeConfigPatch = z
     accountId: AccountId.nullable(),
     decisions: z
       .object({
-        [JudgeDecision.ShapeReady]: JudgeDecisionConfigPatch,
         [JudgeDecision.ShapeRecord]: JudgeDecisionConfigPatch,
         [JudgeDecision.ShapeElsewhere]: JudgeDecisionConfigPatch,
         [JudgeDecision.QuestionRoute]: JudgeDecisionConfigPatch,

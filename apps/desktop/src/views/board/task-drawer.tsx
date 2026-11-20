@@ -14,7 +14,6 @@ import {
   type ModelSetting,
   type Notice,
   type Rigor,
-  type ShapeId,
   type TaskDto,
   type TaskId,
   type TaskKind,
@@ -41,10 +40,10 @@ import { useState } from 'react';
 import { useTaskNotices } from '../../daemon/activity-queries';
 import { SurfaceDrawer } from '../../shell/surface-drawer';
 import { useReportUnsaved } from '../../shell/unsaved-guard';
-import { OpenConversation } from '../shape/open-conversation';
+import { OpenPlanSession } from '../sessions/plan/open-plan-session';
 import { OpenTaskLink } from '../sessions/open-task-link';
 import { PlanContextDisclosure } from './plan-context-disclosure';
-import { TaskSizeLine } from '../shape/task-size-line';
+import { TaskSizeLine } from '../sessions/plan/task-size-line';
 import {
   useCloseTask,
   useHoldTask,
@@ -146,10 +145,9 @@ export interface TaskDrawerProps {
    */
   readonly areaNames?: readonly string[];
   /**
-   * Opens the conversation that made the task (Shape spec §12). With it, the drawer asks whether one
-   * did and offers Open conversation only then; without it (a drawer outside the router), nothing.
+   * Offers Open Session when a plan's session made the task. Without it, the drawer asks nothing; without it (a drawer outside the router), nothing.
    */
-  readonly onOpenConversation?: (shapeId: ShapeId) => void;
+  readonly offersPlanSession?: boolean;
   /** Opens the Workbench, from a task waiting for the pass that holds Your folder. */
   readonly onOpenWorkbench?: () => void;
   readonly onClose: () => void;
@@ -172,7 +170,7 @@ export function TaskDrawer({
   place,
   pullRequestBase,
   areaNames,
-  onOpenConversation,
+  offersPlanSession,
   onOpenWorkbench,
   onClose,
 }: TaskDrawerProps) {
@@ -448,9 +446,7 @@ export function TaskDrawer({
               <TaskSkips workstreamId={workstream?.id} />
               <TaskSizeLine taskId={task.id} />
               <PlanContextDisclosure taskId={task.id} />
-              {onOpenConversation ? (
-                <OpenConversation target={{ taskId: task.id }} onOpen={onOpenConversation} />
-              ) : null}
+              {offersPlanSession === true ? <OpenPlanSession target={{ taskId: task.id }} /> : null}
               <OpenTaskLink taskId={task.id} projectId={task.projectId} />
               <CopyTaskId id={task.id} />
             </Stack>

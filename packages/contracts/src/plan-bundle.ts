@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { Headline, Title, Why } from './entities';
 import { BriefKey, GoalBriefCriterion } from './goals';
-import { ProjectId, ShapeId } from './ids';
+import { ChatId, ProjectId, ShapeId } from './ids';
 import {
   PlanAlternative,
   PlanAnchor,
@@ -281,6 +281,8 @@ export type PlanImportPreview = z.infer<typeof PlanImportPreview>;
 export const PlanImportResult = z.object({
   dryRun: z.literal(false),
   shapeId: ShapeId,
+  /** The session the Plan lives in: a new import's is in Recently closed. */
+  chatId: ChatId,
   created: z.boolean(),
   changes: PlanImportChanges,
 });

@@ -3,20 +3,19 @@ import { join } from 'node:path';
 import {
   ConflictError,
   ConversationItemKind,
-  ConversationOwnerKind,
   ConversationProfile,
   EventType,
   InvalidError,
   NotFoundError,
   parseItemBody,
   ShapeEventKind,
-  ShapeId,
   ShapeMessageAuthor,
   ShapeMessageKind,
   ShapeOrigin,
   ShapeProposalState,
   type AccountKind,
   type ConversationId,
+  type ConversationItemId,
   type DecisionId,
   type Effort,
   type GoalId,
@@ -25,6 +24,7 @@ import {
   type ShapeDto,
   type ShapeFileDto,
   type ShapeFindingId,
+  type ShapeId,
   type ShapeMessageDto,
   type ShapeModelsDto,
   type MilestoneCut,
@@ -39,9 +39,11 @@ import {
   getProject,
   getShape,
   getShapeFinding,
-  getItem,
   getShapeProposal,
-  insertShape,
+  insertPlanSession,
+  openChats,
+  patchConversation,
+  planOfConversation,
   insertShapeFile,
   insertShapeMessage,
   listConversationsOfProfile,
@@ -52,8 +54,6 @@ import {
   setOneWayPaths as setOneWayPathsRow,
   settleOpenQuestionsOfTask,
   shapeConversation,
-  updateItem,
-  type ConversationItemRow,
   type WriteContext,
 } from '@10db/db';
 import type { Clock } from '../clock';
@@ -79,10 +79,9 @@ import {
 import { convertProposals, type ConvertOutcome, type JoiningProblem } from './convert';
 import { checkDroppedFile, storeFile } from './dropped-files';
 import { dropNote, editNote, restoreNote, rowLabel, unpinNote } from './edit-notes';
-import { createShapeOwner, type ShapeTurnState } from './explore-owner';
-import type { Judge } from '../judge';
+import { createPlanParts, type PlanParts, type PlanTurnState } from './plan-parts';
 import type { ShapeJev } from './jev';
-import { proposeNote, rehearseNote } from './policy';
+import { rehearseNote } from './policy';
 import { dismissFinding as dismissRow, editedTaskKeys, unrehearsedTasks } from './review';
 import {
   dropProposal as dropRow,
@@ -90,7 +89,7 @@ import {
   restoreProposal as restoreRow,
   unpinProposal as unpinRow,
 } from './rounds';
-import type { ShapeLaunch, ShapePrepared, ShapePrepareInput } from './session-launch';
+import type { ShapeLaunch } from './session-launch';
 import { createShapeToolHandlers } from './tools';
 import { removeDraftGoalOf, withdrawConvertedDecision, withdrawConvertedPrinciple } from './undo';
 import { buildShapeView, fileDtoOf, type ViewWorld } from './view';
@@ -109,10 +108,7 @@ export interface ShapeServiceDeps {
    */
   readonly engine?: ExploreEngine;
   readonly clock: Clock;
-  /** 10db's judge, for Plan on an account auto mode doesn't judge; absent, such a session is on the rules. */
-  readonly judge?: Judge;
   readonly log: Logger;
-  readonly mcp: { readonly url: string; readonly toolTimeoutMs: number };
   /**
    * Resolves a project's launch, on `model` (an ID the account lists) or, with null, on the `plan`
    * role's, at the conversation's own `effort` or, with null, the role's; throws when its account can't
@@ -121,19 +117,12 @@ export interface ShapeServiceDeps {
   launch(projectId: ProjectId, model: string | null, effort: Effort | null): ShapeLaunch;
   /** The models a conversation of the project may run on (§5.1); none offered without it. */
   readonly models?: (projectId: ProjectId) => ShapeModelsDto;
-  /**
-   * Prepares a session's commands and project tools (§5.2). Absent (a daemon with no sandbox, tests),
-   * the session runs no command and has 10db's tools only.
-   */
-  readonly prepare?: (input: ShapePrepareInput) => Promise<ShapePrepared>;
-  /** Where each conversation's dropped files are kept: `<filesDir>/<shape>/files/`. */
+  /** Where each conversation's dropped files are kept: `<filesDir>/<shape>`. */
   readonly filesDir: string;
   /** The starter's read of a pending join, which Convert refuses a change of areas over. */
   readonly joiningProblem: JoiningProblem;
   /** How long a session idles before its process closes; 10 minutes. */
   readonly idleMs?: number;
-  /** The share of the context window past which a conversation moves to a fresh session; 70. */
-  readonly contextLimitPct?: number;
   /** Jev's shadow decisions, told of each builder message (§9); it asks only for a project that opted in. */
   readonly jev?: ShapeJev;
   /** The files git tracks in a checkout, for the ceremony rule's one-way paths (§7); `git ls-files` by default. */
@@ -157,7 +146,6 @@ export interface DroppedFile {
 }
 
 export interface ShapeService {
-  create(projectId: ProjectId, input: { title: string; origin: ShapeOrigin }): ShapeDto;
   /**
    * `start_shape` (spec §5.6): a conversation from a terminal session, its summary the builder's first
    * message and its text files kept. Starts no turn.
@@ -180,14 +168,6 @@ export interface ShapeService {
   unpinProposal(shapeId: ShapeId, id: ShapeProposalId, field?: string): void;
   restoreProposal(shapeId: ShapeId, id: ShapeProposalId): void;
   dropProposal(shapeId: ShapeId, id: ShapeProposalId): void;
-  /** Records a builder message and queues its turn. */
-  send(shapeId: ShapeId, text: string): ShapeMessageDto;
-  /** Stop and Redo: the turn stops, and the edited message runs next in place of the one it redoes. */
-  redo(shapeId: ShapeId, text: string): Promise<ConversationItemRow>;
-  /** Sends what waits under the conversation's Send now line. */
-  sendNow(shapeId: ShapeId): void;
-  /** Queues a Propose turn, or ignores the press while a Propose turn is queued or running. */
-  propose(shapeId: ShapeId): { status: 'started' | 'ignored' };
   /**
    * Rehearse (spec §7): queues a turn in which the session has the rehearsal reviewer read each
    * proposed task that has no mark at its current hash, narrowed to `proposalIds` when given. Opening
@@ -238,17 +218,20 @@ export interface ShapeService {
    */
   withdrawPrinciple(shapeId: ShapeId, principleId: PrincipleId, reason: string): void;
   /**
-   * Converts the selected proposals. Refused with a `ConflictError` while a turn runs, unless the
-   * caller asks to interrupt it. Holds the queue while it writes. A Plan with more than five milestones
-   * waiting needs the builder's `cut` of them (`judgeMilestones`).
+   * Converts the selected proposals in one write; a turn that runs goes on. A Plan with more than five
+   * milestones waiting needs the builder's `cut` of them (`judgeMilestones`).
    */
   convert(
     shapeId: ShapeId,
     proposalIds: readonly ShapeProposalId[],
-    options?: { interrupt?: boolean; cut?: readonly MilestoneCut[] },
+    options?: { cut?: readonly MilestoneCut[] },
   ): Promise<ConvertOutcome>;
   /** The handlers the MCP endpoint serves a conversation's session. */
   readonly toolsFor: ShapeToolsFor;
+  /** What a chat with a plan adds to its session, which the chat's hooks compose. */
+  readonly planParts: PlanParts;
+  /** Jev's shadow decisions hear a builder message of a chat with a plan; it never throws. */
+  heard(conversationId: ConversationId, itemId: ConversationItemId): void;
   /** Resolves when no turn is running or queued. */
   settled(shapeId: ShapeId): Promise<void>;
   /**
@@ -266,21 +249,8 @@ export interface ShapeService {
   close(): Promise<void>;
 }
 
-/** A conversation's name until its first message gives it one. */
-export const DEFAULT_SHAPE_TITLE = 'New conversation';
-
-const TITLE_MAX = 60;
-
-/** The first non-empty line of a message, cut to fit a title. */
-function titleFrom(text: string): string {
-  const line = (text.split('\n').find((l) => l.trim() !== '') ?? '').replace(/\s+/g, ' ').trim();
-  return line.length <= TITLE_MAX ? line : `${line.slice(0, TITLE_MAX - 1).trimEnd()}…`;
-}
-
 /** How long a checkout's tracked files are reused before git is asked again. */
 const TRACKED_FILES_TTL_MS = 30_000;
-/** The share of the context window past which a conversation moves to a fresh session. */
-const CONTEXT_LIMIT_PCT = 70;
 /** How long a conversation the service runs waits out a rate limit that names no reset. */
 const DEFAULT_PAUSE_MS = 30 * 60_000;
 
@@ -302,11 +272,11 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       ...(deps.hold === undefined ? {} : { hold: deps.hold }),
       ...(deps.idleMs === undefined ? {} : { idleMs: deps.idleMs }),
     });
-  const turns = new Map<ShapeId, ShapeTurnState>();
-  const turnOf = (shapeId: ShapeId): ShapeTurnState => {
+  const turns = new Map<ShapeId, PlanTurnState>();
+  const turnOf = (shapeId: ShapeId): PlanTurnState => {
     let turn = turns.get(shapeId);
     if (turn === undefined) {
-      turn = { notes: [], proposed: false, emptyPlan: false, refused: 0 };
+      turn = { notes: [] };
       turns.set(shapeId, turn);
     }
     return turn;
@@ -315,11 +285,12 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     shapeConversation(state.db, shapeId).id;
   /** A turn is in progress: the session is starting, running, waiting on a card or stopping. */
   const turnRuns = (conversation: ConversationId): boolean => engine.busy().includes(conversation);
-  /** The explore conversations Plan owns. */
+  /** The explore conversations of the chats that have a plan. */
   const planConversations = () =>
-    listConversationsOfProfile(state.db, ConversationProfile.Explore).filter(
-      (c) => c.ownerKind === ConversationOwnerKind.Shape,
-    );
+    listConversationsOfProfile(state.db, ConversationProfile.Explore).flatMap((c) => {
+      const shapeId = planOfConversation(state.db, c.id);
+      return shapeId === null ? [] : [{ conversation: c, shapeId }];
+    });
   /** A press of `kind` waits or runs: queued, or handed to a session and not taken yet. */
   const pressPending = (shapeId: ShapeId, kind: ShapeEventKind): boolean => {
     const conversation = conversationOf(shapeId);
@@ -332,19 +303,6 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         parseItemBody(item.kind, item.body).kind === kind,
     );
   };
-  /** Queued presses of `kind` stop being turn starters: their notes stay in the transcript. */
-  const dropQueuedPresses = (conversation: ConversationId, kind: ShapeEventKind): void => {
-    state.write((ctx) => {
-      for (const item of listQueuedTurnStarters(ctx.tx, conversation)) {
-        if (item.kind !== ConversationItemKind.ShapeEvent) continue;
-        const press = parseItemBody(item.kind, item.body);
-        // The note stays in the transcript; without its instruction it starts no turn.
-        if (press.kind === kind)
-          updateItem(ctx, item.id, { body: { kind: press.kind, text: press.text } });
-      }
-    });
-  };
-
   const say = (
     shapeId: ShapeId,
     author: ShapeMessageAuthor,
@@ -352,31 +310,6 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     body: string,
   ): ShapeMessageDto =>
     state.write((ctx) => insertShapeMessage(ctx, shapeId, { author, kind, body }));
-  /** Tells the screen the conversation changed, for what no row records (where its session is). */
-  /**
-   * The builder's message, stored queued before anything is sent: it waits for a turn to
-   * take it. The first one titles the conversation.
-   */
-  const postMessage = (shapeId: ShapeId, text: string): ShapeMessageDto => {
-    const message = state.write((ctx) =>
-      insertShapeMessage(ctx, shapeId, {
-        author: ShapeMessageAuthor.Builder,
-        kind: ShapeMessageKind.Text,
-        body: text,
-        queued: true,
-      }),
-    );
-    const title = titleFrom(text);
-    if (title !== '' && getShape(state.db, shapeId).title === DEFAULT_SHAPE_TITLE)
-      state.write((ctx) => {
-        patchShape(ctx, shapeId, { title });
-      });
-    return message;
-  };
-  /** Shadow only: nothing waits on it, and it never throws. */
-  const heard = (shapeId: ShapeId, message: ShapeMessageDto): void => {
-    void deps.jev?.heard(shapeId, message.id);
-  };
 
   const announce = (shapeId: ShapeId): void => {
     state.write((ctx) => {
@@ -450,13 +383,6 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
               },
             }),
         world: worldOfShape,
-        onProposal: (id, accepted, empty = false) => {
-          const rt = turnOf(id);
-          if (accepted) {
-            rt.proposed = true;
-            rt.emptyPlan = empty;
-          } else rt.refused += 1;
-        },
       },
       shapeId,
     );
@@ -485,38 +411,24 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     if (note !== null) turnOf(shapeId).notes.push(note);
   };
 
-  engine.register(
-    ConversationOwnerKind.Shape,
-    createShapeOwner({
-      state,
-      log,
-      mcp: deps.mcp,
-      filesDir: deps.filesDir,
-      launch: (projectId, model, effort) => deps.launch(projectId, model, effort),
-      ...(deps.prepare === undefined ? {} : { prepare: deps.prepare }),
-      limitsFor,
-      judgeOf: (kind, model) => deps.adapter.capabilities({ kind }, model).judge,
-      subagentsOf: (kind, model) => deps.adapter.capabilities({ kind }, model).subagents,
-      ...(deps.judge === undefined ? {} : { judge: deps.judge }),
-      clock: deps.clock,
-      contextLimitPct: deps.contextLimitPct ?? CONTEXT_LIMIT_PCT,
-      turnOf,
-      announce,
-    }),
-  );
+  const planParts = createPlanParts({
+    state,
+    log,
+    filesDir: deps.filesDir,
+    turnOf,
+    announce,
+  });
 
   return {
-    create(projectId, input) {
-      return state.write((ctx) => insertShape(ctx, projectId, input));
-    },
-
     startFromTerminal(input) {
       const made: { id: ShapeId | null } = { id: null };
       try {
         return state.write((ctx) => {
-          const shape = insertShape(ctx, input.projectId, {
+          const { shape } = insertPlanSession(ctx, {
+            projectId: input.projectId,
             title: input.title,
             origin: ShapeOrigin.ClaudeCode,
+            tabPosition: openChats(ctx.tx).length,
           });
           made.id = shape.id;
           insertShapeMessage(ctx, shape.id, {
@@ -611,49 +523,6 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       });
     },
 
-    send(shapeId, text) {
-      const message = postMessage(shapeId, text);
-      engine.queued(conversationOf(shapeId));
-      heard(shapeId, message);
-      return message;
-    },
-
-    redo(shapeId, text) {
-      const posted: { message: ShapeMessageDto | null } = { message: null };
-      return engine
-        .redo(conversationOf(shapeId), () => {
-          const message = postMessage(shapeId, text);
-          posted.message = message;
-          return getItem(state.db, message.id);
-        })
-        .then((edit) => {
-          if (posted.message !== null) heard(shapeId, posted.message);
-          return edit;
-        });
-    },
-
-    sendNow(shapeId) {
-      engine.sendNow(conversationOf(shapeId));
-    },
-
-    propose(shapeId) {
-      if (pressPending(shapeId, ShapeEventKind.Propose)) return { status: 'ignored' };
-      const { note, instruction } = proposeNote(getShape(state.db, shapeId).round > 0);
-      // The press unlocks propose_plan for good and is a row in the transcript, in one write; its
-      // instruction makes it a turn starter, queued.
-      state.write((ctx) => {
-        patchShape(ctx, shapeId, { proposeUnlocked: true });
-        insertShapeMessage(ctx, shapeId, {
-          author: ShapeMessageAuthor.Note,
-          kind: ShapeMessageKind.Propose,
-          body: note,
-          prompt: instruction,
-        });
-      });
-      engine.queued(conversationOf(shapeId));
-      return { status: 'started' };
-    },
-
     rehearse(shapeId, proposalIds) {
       const tasks = unrehearsedTasks(state.db, shapeId, proposalIds);
       if (tasks.length === 0) return { status: 'nothing', tasks: 0 };
@@ -720,7 +589,10 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         throw new ConflictError(
           'The model changes between turns: wait for the turn to end, or stop it, then choose again.',
         );
-      const shape = state.write((ctx) => patchShape(ctx, shapeId, { effort }));
+      const shape = state.write((ctx) => {
+        patchConversation(ctx, shapeConversation(ctx.tx, shapeId).id, { effort });
+        return patchShape(ctx, shapeId, {});
+      });
       // The engine switches a warm session for its next turn, and notes the change once it has.
       void engine
         .modelChanged(conversation, model)
@@ -801,23 +673,10 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       await engine.stop(conversationOf(shapeId));
     },
 
-    async convert(shapeId, proposalIds, options) {
-      const conversation = conversationOf(shapeId);
-      if (options?.interrupt === true) {
-        // Convert Anyway stops the rehearsal (spec §7), queued as well as running: one left queued
-        // would read proposals that are no longer pending once the hold is released.
-        dropQueuedPresses(conversation, ShapeEventKind.Rehearse);
-      }
-      if (turnRuns(conversation)) {
-        if (options?.interrupt !== true)
-          throw new ConflictError('The agent is still answering; Stop or wait');
-        engine.holdStarts(conversation);
-        await engine.stop(conversation);
-        await engine.settled(conversation);
-      }
-      engine.holdStarts(conversation);
-      try {
-        return state.write((ctx) => {
+    convert(shapeId, proposalIds, options) {
+      // One write: a turn that runs goes on, and reads the rows as they stand when it next looks.
+      return Promise.resolve(
+        state.write((ctx) => {
           const outcome = convertProposals(
             ctx,
             shapeId,
@@ -832,29 +691,30 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
               body: `Converted ${String(outcome.createdNow)} ${outcome.createdNow === 1 ? 'proposal' : 'proposals'}`,
             });
           return outcome;
-        });
-      } finally {
-        engine.releaseStarts(conversation);
-      }
+        }),
+      );
     },
 
     toolsFor,
+    planParts,
+    heard(conversationId, itemId) {
+      const shapeId = planOfConversation(state.db, conversationId);
+      if (shapeId !== null) void deps.jev?.heard(shapeId, itemId);
+    },
     settled: (shapeId) => engine.settled(conversationOf(shapeId)),
 
     turnsInProgress() {
       // A conversation counts once: a turn running, or a starter parked behind a drain.
       return planConversations().filter(
-        (c) => turnRuns(c.id) || (engine.parked(c.id) && engine.view(c.id).queued > 0),
+        ({ conversation: c }) =>
+          turnRuns(c.id) || (engine.parked(c.id) && engine.view(c.id).queued > 0),
       ).length;
     },
 
     runningTurns() {
       return planConversations()
-        .filter((c) => turnRuns(c.id))
-        .map((c) => {
-          const id = ShapeId.parse(c.ownerId);
-          return { id, title: getShape(state.db, id).title };
-        });
+        .filter(({ conversation: c }) => turnRuns(c.id))
+        .map(({ shapeId }) => ({ id: shapeId, title: getShape(state.db, shapeId).title }));
     },
 
     async close() {

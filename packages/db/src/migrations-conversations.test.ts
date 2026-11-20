@@ -313,7 +313,8 @@ beforeAll(() => {
   migrateDatabase(db, migrationsBefore(dir, MIGRATION));
   mintRows();
   seed();
-  migrateDatabase(db);
+  // Stops short of the move of plans into sessions, which deletes plans that fed nothing.
+  migrateDatabase(db, migrationsBefore(dir, '0095_round_freak'));
   db.$client.pragma('foreign_keys = ON');
 });
 

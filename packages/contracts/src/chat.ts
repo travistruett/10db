@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ConversationDto } from './conversation-dto';
-import { ChatId, ConversationId, PassId, ProjectId, TaskId } from './ids';
+import { ChatId, ConversationId, PassId, ProjectId, ShapeId, TaskId } from './ids';
 import { ShapeModelOption } from './shape-view';
 import { Effort } from './states';
 import { ChatWork } from './chat-work';
@@ -51,6 +51,8 @@ export const ChatDto = z.object({
   tasksFiled: z.int().nonnegative(),
   /** Where the session works; null while it is only reading. */
   work: ChatWork.nullable(),
+  /** The session's Plan; null while it has none. */
+  planId: ShapeId.nullable(),
 });
 export type ChatDto = z.infer<typeof ChatDto>;
 
@@ -60,6 +62,8 @@ export const ChatCreateInput = z.strictObject({
   model: z.string().min(1).nullable(),
   effort: z.enum(Effort).nullable().optional(),
   tabPosition: z.int().nonnegative(),
+  /** New Plan: the session starts with its Plan. */
+  plan: z.boolean().optional(),
 });
 export type ChatCreateInput = z.infer<typeof ChatCreateInput>;
 

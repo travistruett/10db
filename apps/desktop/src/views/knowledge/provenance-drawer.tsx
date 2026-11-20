@@ -1,5 +1,6 @@
-import type { ProvenanceDto } from '@10db/contracts';
+import type { ChatId, ProvenanceDto } from '@10db/contracts';
 import { Alert, Anchor, Blockquote, Drawer, Loader, Stack, Text } from '@mantine/core';
+import { useOpenSessionNotice } from '../sessions/open-session';
 import { useProvenance, type RecordRef, type TracedRecord } from '../../daemon/knowledge-queries';
 import { STATE_LABELS, dateTimeText, sourceLabel, viaLabel, whoText } from './knowledge-labels';
 
@@ -16,6 +17,32 @@ function ActionLines({ verb, action }: { readonly verb: string; readonly action:
       {action.reason ? <Text size="sm">{action.reason}</Text> : null}
       {action.source?.quote ? <Blockquote>{action.source.quote}</Blockquote> : null}
     </Stack>
+  );
+}
+
+/** "Plan session: <title>", opening the session when it still exists; plain words when it does not. */
+function PlanSessionLink({
+  chatId,
+  title,
+}: {
+  readonly chatId: ChatId | null;
+  readonly title: string;
+}) {
+  const { open, notice } = useOpenSessionNotice();
+  if (chatId === null) return <Text size="sm">{`Plan session: ${title}`}</Text>;
+  return (
+    <>
+      <Anchor
+        component="button"
+        type="button"
+        size="sm"
+        ta="left"
+        onClick={() => {
+          open(chatId);
+        }}
+      >{`Plan session: ${title}`}</Anchor>
+      {notice}
+    </>
   );
 }
 
@@ -98,14 +125,18 @@ export function ProvenanceDrawer({
                 {p.inbox.note ? <Text size="sm">{`Note: ${p.inbox.note}`}</Text> : null}
               </Stack>
             ) : null}
-            {p.session ? (
-              <Text size="sm">
-                {p.session.shapeId === null
-                  ? (p.session.taskTitle ?? p.session.workstreamId)
-                  : `Plan conversation: ${p.session.shapeTitle ?? p.session.shapeId}`}
-              </Text>
+            {p.session?.shapeId === null ? (
+              <Text size="sm">{p.session.taskTitle ?? p.session.workstreamId}</Text>
+            ) : p.session ? (
+              <PlanSessionLink
+                chatId={p.session.chatId}
+                title={p.session.shapeTitle ?? p.session.shapeId}
+              />
             ) : p.conversation ? (
-              <Text size="sm">{`Plan conversation: ${p.conversation.title ?? p.conversation.id}`}</Text>
+              <PlanSessionLink
+                chatId={p.conversation.chatId}
+                title={p.conversation.title ?? p.conversation.id}
+              />
             ) : null}
             {p.quote ? <Blockquote>{p.quote}</Blockquote> : null}
             {p.confirmedBy && p.confirmedAt ? (

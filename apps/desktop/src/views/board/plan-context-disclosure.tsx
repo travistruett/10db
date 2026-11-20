@@ -4,8 +4,8 @@ import { useDisclosure } from '@mantine/hooks';
 import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { useId } from 'react';
 import { useTaskPlanContext } from '../../daemon/plan-record-queries';
-import { AnchorBadge } from '../shape/record/anchor-badge';
-import { resultStatus } from '../shape/record/anchor-status';
+import { AnchorBadge } from '../sessions/plan/record/anchor-badge';
+import { resultStatus } from '../sessions/plan/record/anchor-status';
 
 // A task made from a Plan shows what its lane got of it: the block as it was packed, kept when the
 // lane got it, so a re-import never changes what it says the lane read, and the checks of the anchors

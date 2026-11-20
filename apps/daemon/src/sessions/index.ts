@@ -53,6 +53,7 @@ export type {
   ShapeImage,
   JudgedCallRequest,
   ShapeToolRequest,
+  ShapeToolResult,
   ShapeVerdict,
   ToolCallFull,
   ToolDecision,

@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import type { ShapeId } from '@10db/contracts';
 import {
   ChatToolName,
   FolderAsker,
@@ -12,8 +13,10 @@ import {
   ConversationItemKind,
   DeniedBy,
   parseItemBody,
+  InvalidError,
   Provider,
   providerOf,
+  ShapeToolName,
   TrustSurface,
   AccountKind,
   type Effort,
@@ -31,6 +34,7 @@ import {
   listFiles,
   listItemFiles,
   listItems,
+  planOfConversation,
   touchChat,
   type ConversationItemRow,
   type ChatRow,
@@ -54,7 +58,13 @@ import { principlesBrief } from '../knowledge';
 import type { Logger } from '../log';
 import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
 import type { ExploreProfile, ShapeToolRequest } from '../sessions';
-import type { ShapeAccess, ShapeLaunch, ShapePrepared, ShapePrepareInput } from '../shape';
+import type {
+  PlanParts,
+  ShapeAccess,
+  ShapeLaunch,
+  ShapePrepared,
+  ShapePrepareInput,
+} from '../shape';
 import {
   buildTrustPolicy,
   FloorReason,
@@ -121,6 +131,11 @@ export const CHAT_MCP_TOOLS: readonly string[] = Object.values(ChatToolName).map
   (name) => `mcp__10db__${name}`,
 );
 
+/** Every Plan tool as a session with a plan names it on 10db's own server. */
+const PLAN_MCP_TOOLS: readonly string[] = Object.values(ShapeToolName).map(
+  (name) => `mcp__10db__${name}`,
+);
+
 /**
  * A chat's tools by whether it has a sandbox to run commands in. The web tools stay out of
  * `allowedTools`: an allow rule would approve a call before auto mode's classifier sees it, and with
@@ -128,6 +143,7 @@ export const CHAT_MCP_TOOLS: readonly string[] = Object.values(ChatToolName).map
  */
 export function chatProfile(
   sandboxed: boolean,
+  hasPlan = false,
 ): Omit<ExploreProfile, 'kind' | 'systemPrompt' | 'judge'> {
   return {
     tools: [
@@ -143,6 +159,8 @@ export function chatProfile(
       'Glob',
       'Skill',
       ...CHAT_MCP_TOOLS.filter((tool) => !JUDGED_CHAT_TOOLS.has(tool.slice('mcp__10db__'.length))),
+      // Plan's tools never ask: the confinement judges who calls which.
+      ...(hasPlan ? PLAN_MCP_TOOLS : []),
     ],
     disallowedTools: [...WATCH_TOOLS, ...(sandboxed ? [] : ['Bash', ...EDIT_TOOLS])],
     agents: {},
@@ -172,6 +190,10 @@ export interface ChatHooksDeps {
   /** Resolves a project's launch on `model` or, with null, on the `plan` role's, at `effort` or the model's own. */
   launch(projectId: ProjectId, model: string | null, effort: Effort | null): ShapeLaunch;
   readonly prepare?: (input: ShapePrepareInput) => Promise<ShapePrepared>;
+  /** What a chat with a plan adds to its session: its prompt, agents, intake and read budget. */
+  readonly plan?: PlanParts;
+  /** Whether the agent on an account kind and model runs Plan's agents (`capabilities.subagents`). */
+  readonly subagentsOf: (kind: AgentAccountKind, model: string) => boolean;
   readonly limitsFor: (kind: AccountKind) => PictureLimits;
   /** Who judges a session's calls on an account kind and model (`capabilities.judge`). */
   readonly judgeOf: (kind: AgentAccountKind, model: string) => JudgeKind;
@@ -227,6 +249,8 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
     if (chat === null) throw new Error(`conversation ${conv.id} is no chat's`);
     return chat;
   };
+  /** The plan of a conversation's chat, or null. */
+  const planOf = (conv: ConversationRow): ShapeId | null => planOfConversation(state.db, conv.id);
   const describe = (conv: ConversationRow, model: string | null) => {
     const launch = deps.launch(conv.projectId, model, conv.effort);
     const name = storedModelNames(state.db).find((m) => m.id === launch.modelId)?.name;
@@ -415,6 +439,11 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         checkout: launch.cwd,
         firstChange: () => deps.firstChange?.(chat.id),
       };
+      const shapeId = planOfConversation(state.db, conv.id);
+      // Made before the sandbox, which opens the folder only when it exists: a file dropped later then lands
+      // inside a folder the warm session already has.
+      const plan = shapeId === null ? undefined : deps.plan;
+      const planFiles = shapeId === null ? undefined : plan?.filesDir(shapeId);
       const limitNotes = createLimitNotes();
       const ending = new AbortController();
       const ready =
@@ -428,6 +457,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               env: launch.env,
               resumeProviderSessionId: start.resume,
               writes: writable,
+              ...(planFiles === undefined ? {} : { planFiles }),
               ...(root === launch.cwd ? {} : { checkout: root }),
               signal: ending.signal,
               observer: start.observer,
@@ -468,6 +498,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         ...launch.access,
         checkout: root,
         filesDir: chatFolder(deps.dataDir, conv.id),
+        ...(planFiles === undefined ? {} : { planFilesDir: planFiles }),
         agentModels: launch.agentModels,
         judge,
         ...(setup === null || setup.reads.length === 0
@@ -500,6 +531,16 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       });
       // The thread says once per session that 10db's judge stopped answering.
       let saidUnavailable = false;
+      const webOn =
+        deps.webSearchOf(launch.account.kind, launch.modelId) &&
+        (providerOf(launch.account.kind) === Provider.Claude || switches.web);
+      const subagents = deps.subagentsOf(launch.account.kind, launch.modelId);
+      // The web the session has: the chat's confinement refuses Claude's web tools on any judge but auto
+      // mode's, while Codex's own search needs no tool call and runs under the Web switch.
+      const web =
+        webOn && (judge === JudgeKind.Native || providerOf(launch.account.kind) === Provider.Codex);
+      const reads =
+        plan === undefined || shapeId === null ? undefined : plan.reads(shapeId, access, limits);
       // A session with nothing to resume is told the standing rules, and what it missed as a digest.
       const where =
         chat.workPlace === WorkPlace.Branch
@@ -510,6 +551,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         ...(ready?.note === null || ready?.note === undefined ? [] : [ready.note]),
         ...(start.resume === null ? [principlesBrief(state.db, conv.projectId)] : []),
         ...(start.digest === null ? [] : [start.digest]),
+        ...(plan === undefined || shapeId === null ? [] : plan.opening(shapeId, conv, start)),
         start.first.text,
       ].filter((part) => part !== '');
       return {
@@ -520,11 +562,14 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           profile: {
             kind: 'explore',
             judge,
-            systemPrompt: chatSystemPrompt(
-              deps.webSearchOf(launch.account.kind, launch.modelId) &&
-                (providerOf(launch.account.kind) === Provider.Claude || switches.web),
-            ),
-            ...chatProfile(ready?.commands !== undefined),
+            systemPrompt:
+              plan === undefined || shapeId === null
+                ? chatSystemPrompt(webOn)
+                : `${chatSystemPrompt(webOn)}\n\n${plan.systemPrompt(launch.agentModels, subagents, web)}`,
+            ...chatProfile(ready?.commands !== undefined, shapeId !== null),
+            ...(plan === undefined
+              ? {}
+              : { agents: plan.agents(ready?.commands !== undefined, subagents, web) }),
           },
           cwd: root,
           instructions: ready?.instructions ?? null,
@@ -562,7 +607,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               marked = true;
               ready?.markOwn();
             }
-            return judgeChatCall(
+            const verdict = judgeChatCall(
               chatCallOf(req),
               {
                 ...access,
@@ -570,7 +615,18 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               },
               folder,
             );
+            return reads === undefined ? verdict : reads.preToolUse(req, verdict);
           },
+          ...(reads === undefined
+            ? {}
+            : {
+                postToolUse: (req) => {
+                  reads.postToolUse(req);
+                },
+                toolFailed: (req) => {
+                  reads.toolFailed(req);
+                },
+              }),
           ...(deps.judge === undefined || judge === JudgeKind.Rules
             ? {}
             : {
@@ -637,13 +693,43 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
     },
 
     digest(conv) {
-      return chatDigest(state, conv.id);
+      const shapeId = planOf(conv);
+      const chat = chatDigest(state, conv.id);
+      if (shapeId === null || deps.plan === undefined) return chat;
+      return [chat, deps.plan.digest(shapeId)].filter((part) => part !== '').join('\n\n');
+    },
+
+    keepsResume(conv) {
+      const shapeId = planOf(conv);
+      if (shapeId === null || deps.plan === undefined) return true;
+      // A launch that can't be resolved resumes: the start that follows fails with the reason.
+      let launch: ShapeLaunch;
+      try {
+        launch = deps.launch(conv.projectId, conv.model, conv.effort);
+      } catch (error) {
+        if (error instanceof InvalidError) return true;
+        throw error;
+      }
+      return deps.plan.keepsResume(
+        shapeId,
+        deps.limitsFor(launch.account.kind),
+        launch.account.label,
+      );
+    },
+
+    onParked(conv) {
+      const shapeId = planOf(conv);
+      if (shapeId !== null) deps.plan?.announce(shapeId);
     },
 
     outgoing(conv, item, session) {
+      const shapeId = planOf(conv);
+      // A plan's session counts its screens and Reads too: one budget for everything it carries.
       const spent = session.fresh
         ? 0
-        : heldInlineBytes(listFiles(state.db, conv.id), session.limits);
+        : shapeId !== null && deps.plan !== undefined
+          ? deps.plan.inlineSpent(shapeId, session.limits)
+          : heldInlineBytes(listFiles(state.db, conv.id), session.limits);
       const out = outgoingMessage(
         deliverable(state, item),
         spent,
@@ -652,14 +738,36 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         messageText,
         randomUUID,
       );
-      return { text: out.text, images: out.images, blocks: out.blocks, sent: () => undefined };
+      if (shapeId === null || deps.plan === undefined)
+        return { text: out.text, images: out.images, blocks: out.blocks, sent: () => undefined };
+      // The plan's lines go ahead of the message, and its pictures join the message's under the one budget.
+      const sentAsBlocks = new Set<string>(out.blocks);
+      const carrying = listFiles(state.db, conv.id)
+        .filter((file) => sentAsBlocks.has(file.id))
+        .reduce((sum, file) => sum + file.size, 0);
+      const intake = deps.plan.intake(shapeId, conv, item, {
+        fresh: session.fresh,
+        digest: session.digest,
+        limits: session.limits,
+        carrying,
+      });
+      return {
+        text: intake.lines === '' ? out.text : `${intake.lines}\n\n${out.text}`,
+        images: [...out.images, ...intake.images],
+        blocks: [...out.blocks, ...intake.blocks],
+        sent: (ctx) => {
+          intake.sent(ctx);
+        },
+      };
     },
 
-    onTurnEnded(conv) {
+    onTurnEnded(conv, end) {
       const chat = chatOf(conv);
       state.write((ctx) => {
         touchChat(ctx, chat.id, deps.now().toISOString());
       });
+      const shapeId = planOf(conv);
+      if (shapeId !== null) deps.plan?.onTurnEnded(shapeId, end);
       return Promise.resolve();
     },
 

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { claudeIsInstalled } from './claude-is-installed';
 import { test } from './routed-test';
 import { daemonUrl } from './daemon-url';
+import { openNewPlan } from './new-plan-session';
 import { auth, createProject } from './shape-project';
 
 // Shape spec §5.5: see_screen with nothing played. A session on the fake adapter asks; the app's real
@@ -81,10 +82,10 @@ test('the window draws the Board and Plan for a session, and the conversation sh
     window.localStorage.setItem('tendb.project', JSON.stringify(id));
   }, projectId);
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/shape');
+  await openNewPlan(page);
 
   await ask(page, 'Please see the board at 900');
-  await expect(page.getByText('I saw the board: 1 picture.')).toBeVisible({
+  await expect(page.getByText('I saw the board: 1 picture.', { exact: true })).toBeVisible({
     timeout: CAPTURE_CAPTION_WAIT_MS,
   });
   const board = await pictureOf(page, /The Board at 900×900/);
@@ -95,11 +96,19 @@ test('the window draws the Board and Plan for a session, and the conversation sh
 
   // The conversation now holds a screenshot, which a frame must draw without reading the kept picture.
   await ask(page, 'Now please see the plan at 1000');
-  await expect(page.getByText('I saw the plan: 1 picture.')).toBeVisible({
+  await expect(page.getByText('I saw the plan: 1 picture.', { exact: true })).toBeVisible({
     timeout: CAPTURE_CAPTION_WAIT_MS,
   });
   const plan = await pictureOf(page, /Plan at 1000×900/);
   await keep('plan', plan);
   expect(plan.naturalWidth).toBe(1000);
   expect(plan.colours).toBeGreaterThan(DRAWN_SCREEN_COLOURS);
+
+  // Later specs open Sessions on its first session: the plan session this one made is archived, so it
+  // does not fold their list.
+  const open = z
+    .array(z.looseObject({ id: z.string(), projectId: z.string() }))
+    .parse(await (await request.get(`${daemonUrl}/chats?open=1`, { headers: auth })).json());
+  for (const chat of open.filter((c) => c.projectId === projectId))
+    await request.post(`${daemonUrl}/chats/${chat.id}/archive`, { headers: auth });
 });

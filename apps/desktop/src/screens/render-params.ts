@@ -26,7 +26,7 @@ function pathOf(screen: ScreenName, shapeId: ShapeId | null, taskId: TaskId | nu
     case ScreenName.Inbox:
       return '/inbox';
     case ScreenName.Plan:
-      return shapeId === null ? null : `/shape/${shapeId}`;
+      return shapeId === null ? null : `/plan-screen/${shapeId}`;
     case ScreenName.Task:
       return taskId === null ? null : `/board?task=${taskId}`;
   }

@@ -9,9 +9,10 @@ import { inConversationColumn } from './conversation-column';
 import { daemonUrl } from './daemon-url';
 import { expectAccessible } from './expect-accessible';
 import { E2E_DIR } from './paths';
+import { sendLine } from './new-plan-session';
 import { auth, createProject } from './shape-project';
 
-// Runs after see-screen.spec.ts and before shape.spec.ts (files run in name order with one worker). It
+// Runs after see-screen.spec.ts and before stakeholder-questions.spec.ts (files run in name order with one worker). It
 // adds its own project and drives one chat on the real daemon: the fake adapter answers the first
 // message from script-book.json's "Chat: Why does login fail after sleep?", which reads, runs a
 // command, names the session, replies in markdown, and after "File as Tasks" files a task, starts it,
@@ -576,4 +577,129 @@ test('a chat goes to the builder’s terminal and back: the banner, a held messa
   } finally {
     await setting('terminal');
   }
+});
+
+test('New Plan: a dropped file and a message fill the panel, a pinned row survives a round, Accept writes the Board, Remove Draft Goal takes it back', async ({
+  page,
+  request,
+}) => {
+  const projectId = await createProject(request, 'sessions-plan');
+  const titles = async (): Promise<string[]> =>
+    Tasks.parse(
+      await (
+        await request.get(`${daemonUrl}/projects/${projectId}/tasks`, { headers: auth })
+      ).json(),
+    ).map((t) => t.title);
+  await claudeIsInstalled(page);
+  await page.addInitScript((id) => {
+    window.localStorage.setItem('tendb.project', JSON.stringify(id));
+    window.localStorage.setItem('mantine-color-scheme-value', 'dark');
+  }, projectId);
+  await page.setViewportSize({ width: 1440, height: 900 });
+
+  // ⌘⇧N from the Board opens a New Plan tab in the rail's project, then the title's switcher opens a second one: each is a session tab with the Plan panel open and empty.
+  await page.goto('/board');
+  await expect(page.getByRole('button', { name: /^Project: sessions-plan/ })).toBeVisible();
+  await page.keyboard.press('Meta+Shift+n');
+  await expect(page).toHaveURL(/\/sessions\?fresh=/);
+  const panel = page.getByRole('complementary', { name: 'Plan' });
+  await expect(panel.getByText('Talk it through, or drop a document.')).toBeVisible();
+  await page.getByRole('button', { name: 'Switch session' }).click();
+  await page.getByRole('menuitem', { name: 'New Plan' }).click();
+  await expect(page.getByRole('button', { name: 'Switch session' })).toContainText('New Plan');
+  await expect(panel.getByText('Talk it through, or drop a document.')).toBeVisible();
+
+  // A dropped file and a first message make the session; the reply names the file and Heard so far echoes.
+  await page.locator('input[type=file]').setInputFiles({
+    name: 'notes.md',
+    mimeType: 'text/markdown',
+    buffer: Buffer.from('# Notes\nMake the cards denser\n'),
+  });
+  await sendLine(page, 'Make the cards denser. Thin out the scrollbars');
+  await expect(page).toHaveURL(/\/sessions\?chat=/);
+  await expect(page.getByText('I have notes.md.')).toBeVisible();
+  await expect(panel.getByText('Heard so far')).toBeVisible();
+  // The echo starts with the session's own intake line, then names the dropped file.
+  await expect(panel.getByText('The builder opened this session to plan')).toBeVisible();
+
+  // "propose it": the scripted plan fills the panel, with no Propose press.
+  await sendLine(page, 'propose it');
+  await expect(panel.getByText('Board polish')).toBeVisible();
+  await expect(panel.getByRole('group', { name: 'Summary' })).toHaveText(
+    '1 goal · 2 loose · 1 to record',
+  );
+  await expectAccessible(page, 'the plan beside the conversation');
+
+  // ↑/↓ move between rows and Enter opens one in place.
+  const rows = panel
+    .getByRole('list', { name: 'Plan rows' })
+    .locator('button[data-shape-row][aria-expanded="false"]');
+  await rows.first().focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(rows.nth(1)).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await expect(rows.first()).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(panel.getByText('The board is denser and calmer to scan.')).toBeVisible();
+
+  // Pin a loose task by editing its title; the next round leaves it as it is.
+  await panel.getByRole('button', { name: 'Edit Drop the Abandon strip' }).click();
+  const edit = panel.getByRole('form', { name: 'Edit row' });
+  await edit.getByRole('textbox', { name: 'Title' }).fill('Drop the Abandon strip, keep Retry');
+  await edit.getByRole('button', { name: 'Save' }).click();
+  const pinned = panel
+    .getByRole('list', { name: 'Plan rows' })
+    .getByText('Drop the Abandon strip, keep Retry');
+  await expect(pinned).toBeVisible();
+  await sendLine(page, 'propose it again');
+  await expect(panel.getByRole('status', { name: 'Round summary' })).toHaveText(/^Round 2:/);
+  await expect(pinned).toBeVisible();
+  await expect(panel.getByText('Drop the Abandon strip', { exact: true })).toHaveCount(0);
+
+  // Accept lists the rows, says nothing starts, and writes the ticked ones to the Board.
+  const before = (await titles()).length;
+  await panel.getByRole('button', { name: 'Accept', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'Accept' });
+  await expect(dialog.getByText('Nothing starts. Tasks wait on the Board.')).toBeVisible();
+  await expectAccessible(page, 'accept');
+  await dialog.getByRole('button', { name: 'Accept 4' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(panel.getByText('Accepted · on the Board')).toHaveCount(3);
+  await expect(panel.getByText('Accepted · in Knowledge')).toHaveCount(1);
+  const accepted = await titles();
+  expect(accepted).toHaveLength(before + 4);
+  expect(accepted).toEqual(
+    expect.arrayContaining([
+      'Compact card density',
+      'Thin scrollbars',
+      'Drop the Abandon strip, keep Retry',
+    ]),
+  );
+
+  // Remove Draft Goal takes the goal and its tasks back, and the goal is proposed again.
+  await panel.getByRole('button', { name: 'Actions for Board polish' }).click();
+  await page.getByRole('menuitem', { name: 'Remove Draft Goal' }).click();
+  await page
+    .getByRole('dialog', { name: 'Remove Draft Goal' })
+    .getByRole('button', { name: 'Remove Draft Goal' })
+    .click();
+  await expect(panel.getByText('Accepted · on the Board')).toHaveCount(2);
+  expect(await titles()).toHaveLength(before + 2);
+
+  // Under the side-by-side width the panel is a drawer, which Close Plan closes and the title's Plan reopens.
+  await page.setViewportSize({ width: 900, height: 900 });
+  const drawer = page.getByRole('dialog', { name: 'Plan' });
+  await expect(drawer).toBeVisible();
+  await expectAccessible(page, 'the plan as a drawer');
+  await drawer.getByRole('button', { name: 'Close Plan' }).first().click();
+  await expect(drawer).toBeHidden();
+  await page.getByRole('button', { name: 'Plan', exact: true }).click();
+  await expect(drawer).toBeVisible();
+
+  // A reload reopens the session with its panel open.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.reload();
+  await expect(
+    page.getByRole('complementary', { name: 'Plan' }).getByText('Board polish'),
+  ).toBeVisible();
 });

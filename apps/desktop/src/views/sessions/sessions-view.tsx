@@ -23,6 +23,7 @@ import {
 import { draftKey, sessionDrafts, type SendRequest } from './session-drafts';
 import type { SessionsSearch } from './sessions-search';
 import { closedTabs, useClosedTabs } from './closed-tabs';
+import { usePlanOpen } from './plan/plan-choice';
 import { useSessionClosing } from './use-session-closing';
 import { openCardsByConversation } from './needs-you';
 import { panelGroups, panelOrder, topPosition, type PanelRow } from './panel-order';
@@ -54,6 +55,8 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
   const [fresh, setFresh] = useState<readonly FreshTabState[]>(readFreshTabs);
   // The fresh tabs this screen has let go, which the storage still holds until its next write.
   const [dropped, setDropped] = useState<ReadonlySet<string>>(new Set());
+  // The fresh tabs the builder closed, which a session still being made from one must find when it is done.
+  const closedFresh = useRef(new Set<string>());
   const dropFresh = (id: string): void => {
     setDropped((held) => new Set(held).add(id));
     setFresh((tabsNow) => removeFreshTab(tabsNow, id));
@@ -102,7 +105,17 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
       : search.fresh !== undefined
         ? draftKey.fresh(search.fresh)
         : null;
-  const selected = rows.find((r) => r.key === wanted) ?? rows[0] ?? null;
+  // With no address, Sessions opens on the first session that leaves its list in place: an open Plan panel folds
+  // the list, and a builder coming back to Sessions must find it.
+  const hasPlan = (row: PanelRow): boolean =>
+    row.kind === 'chat' ? row.chat.planId !== null : row.tab.plan;
+  const selected =
+    rows.find((r) => r.key === wanted) ?? rows.find((r) => !hasPlan(r)) ?? rows[0] ?? null;
+  // An open Plan panel folds the sessions list to the rail: the frame draws a panel only while a view gives it one.
+  const planFolded = usePlanOpen(
+    selected === null ? null : selected.kind === 'chat' ? selected.chat.id : selected.tab.id,
+    selected !== null && hasPlan(selected),
+  );
 
   // A session is seen while it is selected and the window has focus.
   const selectedChat = selected?.kind === 'chat' ? selected.chat : null;
@@ -166,6 +179,7 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
       onSearch({ chat: chatId }, false);
     },
     removeFresh: (id) => {
+      closedFresh.current.add(id);
       dropFresh(id);
     },
   });
@@ -180,7 +194,7 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
   };
   const closed = useClosedTabs();
 
-  const newTab = (): void => {
+  const newTab = (plan = false): void => {
     // A new session starts where the builder is reading: the open session's project while it still exists,
     // else the rail's.
     const reading =
@@ -190,7 +204,7 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
           ? selected.chat.projectId
           : selected.tab.projectId;
     const here = list.some((p) => p.id === reading) ? reading : (selectedProject?.id ?? null);
-    const made = openFreshTab(fresh, list, here, -1);
+    const made = openFreshTab(fresh, list, here, -1, undefined, plan);
     if (made === null) return;
     setFresh(made.tabs);
     onSearch({ fresh: made.opened.id }, false);
@@ -198,6 +212,20 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
 
   /** The chat takes the fresh tab's place; its draft, and a send asked for, go with it. */
   const chatMade = (tab: FreshTabState, chat: ChatDto, send: SendRequest | null): void => {
+    if (closedFresh.current.delete(tab.id)) {
+      // The tab was closed while its session was being made: the session finishes, then closes, so
+      // Recently closed holds it.
+      sessionDrafts.move(draftKey.fresh(tab.id), draftKey.chat(chat.id));
+      if (send !== null) sessionDrafts.requestSend(draftKey.chat(chat.id), send);
+      closedTabs.push({
+        chatId: chat.id,
+        projectId: chat.projectId,
+        title: chat.title,
+        position: chat.tabPosition ?? 0,
+      });
+      patch.mutate({ chatId: chat.id, tabPosition: null });
+      return;
+    }
     sessionDrafts.move(draftKey.fresh(tab.id), draftKey.chat(chat.id));
     if (send !== null) sessionDrafts.requestSend(draftKey.chat(chat.id), send);
     dropFresh(tab.id);
@@ -268,6 +296,9 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
       case 'new':
         newTab();
         return true;
+      case 'new_plan':
+        newTab(true);
+        return true;
       case 'close':
         if (selected === null) return false;
         closing.close(selected);
@@ -310,38 +341,50 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
       onReopen={(entry) => {
         void closing.reopen(entry);
       }}
-      onNew={newTab}
+      onNew={() => {
+        newTab();
+      }}
+      onNewPlan={() => {
+        newTab(true);
+      }}
     />
   );
 
   return (
     <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <Announcer message={announcement} label="Sessions announcements" />
-      <SessionsPanel
-        groups={groups}
-        projects={list}
-        selectedKey={selected?.key ?? null}
-        states={states}
-        onSelect={select_}
-        onClose={closing.close}
-        onNew={newTab}
-        onRename={(row) => {
-          select_(row);
-          if (row.kind === 'chat') setRenaming(row.chat.id);
-        }}
-        onArchive={askArchive}
-        onOpenInTerminal={(row) => {
-          select_(row);
-          if (row.kind === 'chat') setTerminalFor(row.chat.id);
-        }}
-        onMakeTask={makeTask}
-        onReorder={(chat, position) => {
-          patch.mutate({ chatId: chat.id, tabPosition: position });
-        }}
-        onOpenFound={(chat) => {
-          void openFound(chat);
-        }}
-      />
+      {planFolded ? null : (
+        <SessionsPanel
+          groups={groups}
+          projects={list}
+          selectedKey={selected?.key ?? null}
+          states={states}
+          onSelect={select_}
+          onClose={closing.close}
+          onNew={() => {
+            newTab();
+          }}
+          onNewPlan={() => {
+            newTab(true);
+          }}
+          onRename={(row) => {
+            select_(row);
+            if (row.kind === 'chat') setRenaming(row.chat.id);
+          }}
+          onArchive={askArchive}
+          onOpenInTerminal={(row) => {
+            select_(row);
+            if (row.kind === 'chat') setTerminalFor(row.chat.id);
+          }}
+          onMakeTask={makeTask}
+          onReorder={(chat, position) => {
+            patch.mutate({ chatId: chat.id, tabPosition: position });
+          }}
+          onOpenFound={(chat) => {
+            void openFound(chat);
+          }}
+        />
+      )}
       <Modal
         opened={endingTakeover !== null}
         onClose={() => {
@@ -386,7 +429,9 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
           });
         }}
       />
-      {selected?.kind === 'fresh' ? <TitleRow title={switcherFor('New Session')} /> : null}
+      {selected?.kind === 'fresh' ? (
+        <TitleRow title={switcherFor(selected.tab.plan ? 'New Plan' : 'New Session')} />
+      ) : null}
       {closing.notice === null ? null : (
         <Paper role="status" withBorder px="sm" py={6} mx="md" mt="xs">
           <Group justify="space-between" wrap="nowrap">

@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AccountKind, mintId, ShapeOrigin } from '@10db/contracts';
-import { createTestStore, insertShape, seedProject, shapeConversation } from '@10db/db';
+import { createTestStore, insertPlanSession, seedProject, shapeConversation } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   createTempRepo,
@@ -97,8 +97,14 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
     const names = [...SECRET_VARIABLES, 'AWS_ACCESS_KEY_ID', 'AWS_PROFILE', 'ANTHROPIC_BASE_URL'];
     writeFileSync(join(checkout, '.mcp.json'), JSON.stringify({ mcpServers: {} }));
     const project = seedProject(base, { repoPath: checkout });
-    const shape = base.write((ctx) =>
-      insertShape(ctx, project.id, { title: 'Audit', origin: ShapeOrigin.App }),
+    const shape = base.write(
+      (ctx) =>
+        insertPlanSession(ctx, {
+          projectId: project.id,
+          title: 'Audit',
+          origin: ShapeOrigin.App,
+          tabPosition: null,
+        }).shape,
     ).value;
     const prepared = await preparer()({
       projectId: project.id,

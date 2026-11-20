@@ -247,6 +247,7 @@ export function chatWorld(
       limitsFor: pictureLimitsFor,
       judgeOf: () => opts.judge ?? JudgeKind.Native,
       webSearchOf: (kind, model) => adapter.capabilities({ kind }, model).webSearch,
+      subagentsOf: (kind, model) => adapter.capabilities({ kind }, model).subagents,
       clock,
       firstChange: (chatId) => {
         work.firstChange(chatId);

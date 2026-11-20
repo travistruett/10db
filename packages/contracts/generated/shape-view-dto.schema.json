@@ -31,9 +31,6 @@
             "claude_code"
           ]
         },
-        "proposeUnlocked": {
-          "type": "boolean"
-        },
         "round": {
           "type": "integer",
           "minimum": 0,
@@ -94,7 +91,6 @@
         "title",
         "state",
         "origin",
-        "proposeUnlocked",
         "round",
         "createdAt",
         "updatedAt"
@@ -153,6 +149,10 @@
     "conversationId": {
       "type": "string",
       "pattern": "^cnv_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "chatId": {
+      "type": "string",
+      "pattern": "^cht_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     },
     "proposals": {
       "type": "array",
@@ -3024,6 +3024,7 @@
   "required": [
     "shape",
     "conversationId",
+    "chatId",
     "proposals",
     "heard",
     "files",

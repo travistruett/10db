@@ -1,9 +1,9 @@
 import { isAbsolute, join, relative, resolve } from 'node:path';
-import { ChatToolName, JudgeKind, type WorkPlace } from '@10db/contracts';
+import { ChatToolName, JudgeKind, ShapeToolName, type WorkPlace } from '@10db/contracts';
 import { isWithinOnEveryReading, stringField } from '../guard';
 import type { ShapeVerdict } from '../sessions';
 import { expandHome } from '../sandbox';
-import { judgeShapeCall, type ShapeAccess } from '../shape';
+import { judgePlanTool, judgeShapeCall, type ShapeAccess } from '../shape';
 import { firstChangeOf } from './first-change';
 import { CHAT_GIT_REFUSAL, JUDGED_CHAT_TOOL_ASK, JUDGED_CHAT_TOOLS } from './git-rule';
 
@@ -18,6 +18,7 @@ const EDIT_TOOLS: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', '
 const AGENT_TOOLS: ReadonlySet<string> = new Set(['Agent', 'Task']);
 const OWN_PREFIX = 'mcp__10db__';
 const CHAT_TOOLS: ReadonlySet<string> = new Set(Object.values(ChatToolName));
+const PLAN_TOOLS: ReadonlySet<string> = new Set(Object.values(ShapeToolName));
 
 const deny = (reason: string): ShapeVerdict => ({ decision: 'deny', reason });
 const ALLOW: ShapeVerdict = { decision: 'allow' };
@@ -25,6 +26,8 @@ const ALLOW: ShapeVerdict = { decision: 'allow' };
 /** What a chat's agent reads when it reaches for a tool that writes with no place to write. */
 export const CHAT_WRITES_LATER =
   'This session reads the project and changes nothing in it yet. Say what you would change, and offer to file it as a task.';
+/** What a session with no plan reads when it calls one of Plan's tools. */
+export const NO_PLAN = 'This session has no Plan.';
 /** What a chat on an account with no judge reads when it reaches for the web. */
 export const CHAT_NO_WEB =
   "The web needs a judge that sees each call, and this project's account has none yet, so this chat reads the project only.";
@@ -172,6 +175,16 @@ export function judgeChatCall(
   }
   if (call.toolName.startsWith(OWN_PREFIX)) {
     const own = call.toolName.slice(OWN_PREFIX.length);
+    // Plan's tools belong to a session whose chat has a plan; who calls which is Plan's judge's.
+    if (PLAN_TOOLS.has(own))
+      return access.planFilesDir === undefined
+        ? deny(NO_PLAN)
+        : judgePlanTool({
+            toolName: call.toolName,
+            toolInput: call.input,
+            agentId: call.agentId,
+            agentType: call.agentType,
+          });
     if (!CHAT_TOOLS.has(own)) return deny(`${call.toolName} is not one of this chat's tools.`);
     // Only 10db's judge settles these. Claude's auto mode lets a push, a pull request and a merge through unasked,
     // so on it, and on the rules floor, the builder is asked.

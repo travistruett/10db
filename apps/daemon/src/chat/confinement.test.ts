@@ -467,3 +467,58 @@ describe('a session on its own branch', () => {
     ).toMatchObject({ decision: 'deny' });
   });
 });
+
+// Plan in sessions §3, §6: a chat with a plan has Plan's tools, its reviewers' stamp is 10db's bookkeeping
+// from the subagent's type, and its folder is read as the chat's is.
+describe('a chat with a plan', () => {
+  const mcp = (tool: string, more: Partial<{ agentId: string; agentType: string }> = {}) => ({
+    toolName: `mcp__10db__${tool}`,
+    input: { effortKey: 'e', reviewer: 'scope' },
+    ...more,
+  });
+  const planFolder = () => join(dir.path, 'shapes', 'shp_mine');
+  const withPlan = (): ShapeAccess => ({ ...access, planFilesDir: planFolder() });
+
+  beforeAll(() => {
+    mkdirSync(planFolder(), { recursive: true });
+    mkdirSync(join(dir.path, 'shapes', 'shp_other'), { recursive: true });
+    writeFileSync(join(planFolder(), 'notes.txt'), 'x\n');
+    writeFileSync(join(dir.path, 'shapes', 'shp_other', 'notes.txt'), 'x\n');
+  });
+
+  it.each([
+    [
+      'a reviewer reports, stamped from its type',
+      mcp('report_finding', { agentId: 'a1', agentType: 'tendb-engineering' }),
+      'allow',
+    ],
+    ['the main session cannot report', mcp('report_finding'), 'deny'],
+    [
+      'the old bare agent name cannot report',
+      mcp('report_finding', { agentId: 'a1', agentType: 'scope' }),
+      'deny',
+    ],
+    ['the main session proposes', mcp('propose_plan'), 'allow'],
+  ] as const)('%s', (_name, call, decision) => {
+    const verdict = judgeChatCall(call, withPlan());
+    expect(verdict.decision).toBe(decision);
+    if (call.agentType === 'tendb-engineering')
+      expect(verdict).toMatchObject({
+        updatedInput: { effortKey: 'e', reviewer: 'engineering' },
+      });
+  });
+
+  it('refuses a Plan tool where the chat has no plan', () => {
+    expect(judgeChatCall(mcp('propose_plan'), access)).toEqual({
+      decision: 'deny',
+      reason: 'This session has no Plan.',
+    });
+  });
+
+  it('reads its own plan’s folder and no other plan’s', () => {
+    const read = (path: string) =>
+      judgeChatCall({ toolName: 'Read', input: { file_path: path } }, withPlan()).decision;
+    expect(read(join(planFolder(), 'notes.txt'))).toBe('allow');
+    expect(read(join(dir.path, 'shapes', 'shp_other', 'notes.txt'))).toBe('deny');
+  });
+});

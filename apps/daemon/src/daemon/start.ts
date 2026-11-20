@@ -599,8 +599,6 @@ export interface RunningDaemon {
 const UI_ORIGINS = ['tauri://localhost', 'http://tauri.localhost'] as const;
 /** Written by stop() after every runner has stopped; its absence at start means the last run crashed. */
 const CLEAN_SHUTDOWN_KEY = 'daemon.clean_shutdown';
-/** How long a Shape tool call may take: propose_plan validates and writes, and answers at once. */
-const SHAPE_TOOL_TIMEOUT_MS = 60_000;
 
 /** The session env when none is wired (tests): enough PATH for a gate to find git and test. */
 const DEFAULT_SESSION_PATH = '/usr/bin:/bin';
@@ -1710,7 +1708,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     adapter,
     engine: exploreEngine,
     clock,
-    judge,
     log: logger.child({ component: 'shape' }),
     filesDir: join(opts.dataDir, 'shapes'),
     joiningProblem: (taskId) => starter.joiningProblem(taskId),
@@ -1721,14 +1718,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       log: logger.child({ component: 'shape-jev' }),
       now: () => clock.now(),
     }),
-    mcp: {
-      get url() {
-        return mcpUrl;
-      },
-      toolTimeoutMs: SHAPE_TOOL_TIMEOUT_MS,
-    },
-    // A Plan conversation runs commands only in a read-only lane sandbox; with none it runs none.
-    ...(conversationPrepare === undefined ? {} : { prepare: conversationPrepare }),
     models: conversationModels,
     launch: conversationLaunch,
   });
@@ -1750,6 +1739,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         null,
       ).webSearch,
     takeover: () => takeoverService,
+    planHeard: (conversationId, itemId) => {
+      shape.heard(conversationId, itemId);
+    },
   });
   // What the chat's session ran with, for the builder's terminal: a launch that names no secret.
   const takeoverSource = (
@@ -1902,9 +1894,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       },
       launch: conversationLaunch,
       ...(conversationPrepare === undefined ? {} : { prepare: conversationPrepare }),
+      plan: shape.planParts,
       limitsFor: pictureLimitsFor,
       judgeOf: (kind, model) => adapter.capabilities({ kind }, model).judge,
       webSearchOf: (kind, model) => adapter.capabilities({ kind }, model).webSearch,
+      subagentsOf: (kind, model) => adapter.capabilities({ kind }, model).subagents,
       clock,
       judge,
       firstChange: (chatId) => {
@@ -2508,7 +2502,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     conversation: createConversationServices({
       state,
       engine: exploreEngine,
-      shape,
       chat,
       files: (id, q) => Promise.resolve(conversationFiles(id, q)),
       dataDir: opts.dataDir,

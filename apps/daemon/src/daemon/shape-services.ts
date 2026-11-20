@@ -1,14 +1,10 @@
-import {
-  ShapeOrigin,
-  type ShapeConvertedRow,
-  type ShapeId,
-  type ShapeOfDto,
-} from '@10db/contracts';
+import type { ShapeConvertedRow, ShapeId, ShapeOfDto } from '@10db/contracts';
 import {
   findShapeLinkOfGoal,
   findShapeLinkOfTask,
   getProject,
   getShape,
+  chatOfShape,
   getShapeJevOptIn,
   questionCardRates,
   setShapeJevOptIn,
@@ -16,15 +12,13 @@ import {
 import type { ApiServices } from '../api';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
-import { DEFAULT_SHAPE_TITLE, shadowAgreement, sizingMeasure, type ShapeService } from '../shape';
+import { shadowAgreement, sizingMeasure, type ShapeService } from '../shape';
 
 /** Shape's side of the HTTP API: conversations, their messages, Propose, Convert and the two undos. */
 export type ShapeApiServices = Pick<
   ApiServices,
   | 'listShapes'
-  | 'createShape'
   | 'getShapeView'
-  | 'proposeShape'
   | 'chooseShapeModel'
   | 'convertShape'
   | 'removeDraftGoal'
@@ -56,22 +50,18 @@ export function createShapeServices(deps: {
   const { shape, state } = deps;
   const shapeOf = (shapeId: ShapeId | undefined): ShapeOfDto =>
     shapeId === undefined
-      ? { shapeId: null, title: null }
-      : { shapeId, title: getShape(state.db, shapeId).title };
+      ? { shapeId: null, title: null, chatId: null }
+      : {
+          shapeId,
+          title: getShape(state.db, shapeId).title,
+          chatId: chatOfShape(state.db, shapeId),
+        };
   return {
     listShapes: (projectId) => shape.list(projectId),
-    // A conversation with no title is named by its first message once there is one.
-    createShape: (projectId, input) =>
-      shape.create(projectId, {
-        title: input.title ?? DEFAULT_SHAPE_TITLE,
-        origin: ShapeOrigin.App,
-      }),
     getShapeView: (id) => shape.view(id),
-    proposeShape: (id) => shape.propose(id),
     chooseShapeModel: (id, model, effort) => shape.chooseModel(id, model, effort),
     async convertShape(id, input) {
       const outcome = await shape.convert(id, input.proposalIds, {
-        ...(input.interrupt === undefined ? {} : { interrupt: input.interrupt }),
         ...(input.cut === undefined ? {} : { cut: input.cut }),
       });
       if (!outcome.ok) return { kind: 'refused', errors: [...outcome.errors] };

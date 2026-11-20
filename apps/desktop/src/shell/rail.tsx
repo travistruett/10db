@@ -5,14 +5,12 @@ import {
   IconInbox,
   IconLayoutKanban,
   IconMessages,
-  IconRoute,
   IconSettings,
   IconTools,
   type Icon,
 } from '@tabler/icons-react';
-import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
+import { Link, useRouterState } from '@tanstack/react-router';
 import type { KeyboardEvent, ReactElement, ReactNode } from 'react';
-import { useShapes } from '../daemon/shape-queries';
 import { firstAppSection } from '../views/settings/sections';
 import { AgentDownloadStatus } from './agent-download-status';
 import { FactoryStatusDot } from './factory-status';
@@ -29,7 +27,6 @@ import {
 } from './rail-items';
 import { InboxBadge, SessionsBadge, WorkbenchBadge } from './rail-badges';
 import { lastInboxSearch } from '../views/inbox/inbox-search';
-import { latestOpenShape } from './shape-nav';
 import { useSelectedProject } from './selected-project';
 import classes from './rail.module.css';
 
@@ -38,7 +35,6 @@ const ICONS: Readonly<Record<RailSection, Icon>> = {
   factory: IconBuildingFactory2,
   sessions: IconMessages,
   board: IconLayoutKanban,
-  plan: IconRoute,
   workbench: IconTools,
   knowledge: IconBulb,
   settings: IconSettings,
@@ -94,30 +90,6 @@ function RailTooltip({
   );
 }
 
-/** Plan opens the project's latest open conversation, or the blank composer when there is none. */
-function PlanLink({ active }: { readonly active: boolean }) {
-  const { project } = useSelectedProject();
-  const latest = latestOpenShape(useShapes(project?.id ?? null).data);
-  const navigate = useNavigate();
-  const { labels } = useRailMode();
-  return (
-    <RailTooltip label={RAIL_ITEMS.plan.label}>
-      {/* A plain anchor the router navigates, so the conversation's id is typed at this one call site. */}
-      <a
-        {...itemProps(active, labels)}
-        href={latest ? `/shape/${latest.id}` : '/shape'}
-        onClick={(event) => {
-          event.preventDefault();
-          if (latest) void navigate({ to: '/shape/$shapeId', params: { shapeId: latest.id } });
-          else void navigate({ to: '/shape' });
-        }}
-      >
-        <RailItemContent section={RailSection.Plan} />
-      </a>
-    </RailTooltip>
-  );
-}
-
 function SettingsLink({ active }: { readonly active: boolean }) {
   const { labels } = useRailMode();
   return (
@@ -137,7 +109,7 @@ function SectionLink({
   section,
   active,
 }: {
-  readonly section: Exclude<RailSection, 'plan' | 'settings'>;
+  readonly section: Exclude<RailSection, 'settings'>;
   readonly active: boolean;
 }) {
   const { project } = useSelectedProject();
@@ -196,7 +168,6 @@ function RailEntryView({
       return <RailControlView control={entry.control} />;
     case 'item': {
       const active = entry.section === current;
-      if (entry.section === RailSection.Plan) return <PlanLink active={active} />;
       if (entry.section === RailSection.Settings) return <SettingsLink active={active} />;
       return <SectionLink section={entry.section} active={active} />;
     }

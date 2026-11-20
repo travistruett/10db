@@ -37,6 +37,7 @@ import {
   type ShapeAttachmentRow,
   type ShapeProposalRow,
 } from '@10db/db';
+import { PIN_IMPORTED } from '../shape';
 import type { PlanRecordForExport } from './export-layout';
 import type { RecordKeyKind, StoredRecord } from './validate-bundle';
 
@@ -245,7 +246,8 @@ export function loadStoredRecord(
     proposals.set(row.key, {
       kind: row.kind,
       state: row.state,
-      pinned: row.pinned.length > 0,
+      // The builder's pins only: an import's own marker does not stop a re-import.
+      pinned: row.pinned.some((pin) => pin !== PIN_IMPORTED),
       body: proposalBodyText(row.kind, row.body),
     });
   }

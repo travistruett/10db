@@ -4,7 +4,6 @@ import {
   ConversationItemKind,
   ConversationOwnerKind,
   NotFoundError,
-  ShapeId,
   TaskId,
   type ConversationFileDto,
   type ConversationId,
@@ -20,6 +19,7 @@ import {
   listItemFiles,
   listItems,
   offeredText,
+  planOfConversation,
   type ConversationItemRow,
   type DbReader,
 } from '@10db/db';
@@ -35,16 +35,15 @@ import {
 import type { ApiServices } from '../api';
 import type { StateStore } from '../events';
 import type { ChatService } from '../chat';
-import type { ShapeService } from '../shape';
 
 // Sessions spec §10: the conversation routes, one set for every owner. A message is taken by its
-// owner (a Plan conversation's by `shape.send`, a chat's by `chat.send`, a task's by its thread, which
+// owner (a chat's by `chat.send`, a plan's chat included, a task's by its thread, which
 // the runner delivers). A task conversation's state is the runner's (spec §6.7): the engine's routes
 // for state, Stop and Send now refuse it, and its page's own routes stop it.
 
 export type ConversationApiServices = Pick<
   ApiServices,
-  | 'conversationOwnerKind'
+  | 'conversationHasPlan'
   | 'getConversation'
   | 'conversationItems'
   | 'conversationLive'
@@ -85,7 +84,6 @@ function offerOf(db: DbReader, row: ConversationItemRow): NoticeOffer | null {
 export function createConversationServices(deps: {
   readonly state: StateStore;
   readonly engine: ExploreEngine;
-  readonly shape: Pick<ShapeService, 'send' | 'redo' | 'sendNow'>;
   readonly chat: Pick<ChatService, 'send' | 'post' | 'sendNow' | 'stop' | 'redo' | 'waiting'>;
   /** The tracked files of the conversation's checkout an `@` query matches. */
   readonly files: (id: ConversationId, q: string) => Promise<ProjectFileMatchDto[]>;
@@ -114,14 +112,11 @@ export function createConversationServices(deps: {
     if (dto === undefined) throw new NotFoundError('conversation item', itemId);
     return dto;
   };
-  type Owner =
-    { kind: 'shape'; shapeId: ShapeId } | { kind: 'chat' } | { kind: 'task'; taskId: TaskId };
+  type Owner = { kind: 'chat' } | { kind: 'task'; taskId: TaskId };
   /** Who takes a message here: a Plan, by its id, a chat, or a task's thread. */
   const ownerOf = (id: ConversationId): Owner => {
     const conv = known(id);
     switch (conv.ownerKind) {
-      case ConversationOwnerKind.Shape:
-        return { kind: 'shape', shapeId: ShapeId.parse(conv.ownerId) };
       case ConversationOwnerKind.Task:
         return { kind: 'task', taskId: TaskId.parse(conv.ownerId) };
       case ConversationOwnerKind.Chat:
@@ -134,7 +129,10 @@ export function createConversationServices(deps: {
     return id;
   };
   return {
-    conversationOwnerKind: (id) => known(id).ownerKind,
+    conversationHasPlan(id) {
+      known(id);
+      return planOfConversation(state.db, id) !== null;
+    },
     getConversation(id) {
       return engine.view(explore(id));
     },
@@ -156,14 +154,12 @@ export function createConversationServices(deps: {
       if (owner.kind === 'task') return deps.laneLive.live(id);
       return {
         ...engine.live(id),
-        waitingForFolder: owner.kind === 'chat' && deps.chat.waiting(id),
+        waitingForFolder: deps.chat.waiting(id),
       };
     },
     async postConversationMessage(id, message) {
       const owner = ownerOf(id);
       switch (owner.kind) {
-        case 'shape':
-          return dtoOf(id, deps.shape.send(owner.shapeId, message.text).id);
         case 'chat':
           return dtoOf(id, deps.chat.send(id, message, message.folder).id);
         case 'task': {
@@ -176,9 +172,7 @@ export function createConversationServices(deps: {
       }
     },
     sendConversationNow(id) {
-      const owner = ownerOf(explore(id));
-      if (owner.kind === 'shape') deps.shape.sendNow(owner.shapeId);
-      else deps.chat.sendNow(id);
+      deps.chat.sendNow(explore(id));
       return engine.view(id);
     },
     async stopConversation(id) {
@@ -189,8 +183,6 @@ export function createConversationServices(deps: {
     async redoConversation(id, message) {
       const owner = ownerOf(id);
       switch (owner.kind) {
-        case 'shape':
-          return dtoOf(id, (await deps.shape.redo(owner.shapeId, message.text)).id);
         case 'chat': {
           const edit = await deps.chat.redo(
             id,

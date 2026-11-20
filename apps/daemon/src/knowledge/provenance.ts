@@ -23,6 +23,7 @@ import {
   getSource,
   getWorkstream,
   sessionShapeId,
+  chatOfShape,
 } from '@10db/db';
 
 type Ref = Record<string, unknown>;
@@ -86,6 +87,7 @@ function describeSource(db: DbReader, a: Attribution): Common {
           id: sessionId.data,
           workstreamId: workstream,
           shapeId: shape,
+          chatId: shape === null ? null : orNull(() => chatOfShape(db, shape)),
           taskTitle:
             workstream === null ? null : orNull(() => getWorkstream(db, workstream).taskTitle),
           shapeTitle: shape === null ? null : orNull(() => getShape(db, shape).title),
@@ -95,7 +97,11 @@ function describeSource(db: DbReader, a: Attribution): Common {
   // A conversion writes its records as the builder's, with the conversation in the ref.
   const shapeId = ShapeId.safeParse(ref['shapeId']);
   const conversation = shapeId.success
-    ? orNull(() => ({ id: shapeId.data, title: getShape(db, shapeId.data).title }))
+    ? orNull(() => ({
+        id: shapeId.data,
+        chatId: chatOfShape(db, shapeId.data),
+        title: getShape(db, shapeId.data).title,
+      }))
     : null;
   return {
     sourceKind: source.kind,

@@ -2,6 +2,7 @@ import { expect } from '@playwright/test';
 import { claudeIsInstalled } from './claude-is-installed';
 import { test } from './routed-test';
 import { daemonUrl } from './daemon-url';
+import { startNewPlan } from './new-plan-session';
 import { createProject } from './shape-project';
 
 // The browser modes (`pnpm dev`, `pnpm dev:factory`) serve the UI from Vite, which has no CSP of its own;
@@ -120,7 +121,8 @@ test('a fence highlights under a script policy with no eval or WebAssembly, and 
   }, projectId);
   await claudeIsInstalled(page);
   await page.setViewportSize({ width: 1440, height: 900 });
-  const response = await page.goto('/shape');
+  const response = await page.goto('/sessions');
+  await startNewPlan(page);
   expect(response?.headers()['content-security-policy']).toContain('script-src');
 
   // zod probes once, at its first parse, whether eval is allowed, which the policy reports; the
@@ -130,7 +132,7 @@ test('a fence highlights under a script policy with no eval or WebAssembly, and 
     (window as unknown as { cspViolations: string[] }).cspViolations.length = 0;
   });
   await page.getByRole('textbox', { name: 'Message' }).fill('Please show a fence');
-  await page.keyboard.press('ControlOrMeta+Enter');
+  await page.keyboard.press('Enter');
   const fence = page.locator('pre').filter({ hasText: 'export const retries' });
   await expect(fence).toBeVisible();
 

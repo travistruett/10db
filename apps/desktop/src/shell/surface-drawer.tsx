@@ -21,12 +21,18 @@ export function SurfaceDrawer({
   opened,
   onClose,
   label,
+  closeLabel = 'Close',
+  widthPx,
   children,
 }: {
   readonly opened: boolean;
   readonly onClose: () => void;
   /** Names the drawer for assistive tech and heads it. */
   readonly label: string;
+  /** The close button's name, when it says more than Close ("Close Plan"). */
+  readonly closeLabel?: string;
+  /** The width it asks for in a surface that has the room, where the default is half the surface. */
+  readonly widthPx?: number;
   readonly children: ReactNode;
 }): ReactNode {
   const { drawerHost } = useFrameSlots();
@@ -56,7 +62,11 @@ export function SurfaceDrawer({
   };
 
   const full = width > 0 && width < FULL_UNDER_PX;
-  const drawerWidth = full ? '100%' : `clamp(${String(MIN_PX)}px, 50%, ${String(MAX_PX)}px)`;
+  const drawerWidth = full
+    ? '100%'
+    : widthPx === undefined
+      ? `clamp(${String(MIN_PX)}px, 50%, ${String(MAX_PX)}px)`
+      : `min(${String(widthPx)}px, 100%)`;
   const layer = (
     <div ref={layerRef} className={classes['layer']}>
       {/* A dialog's own key handling: Esc closes it, while focus is inside. */}
@@ -72,7 +82,7 @@ export function SurfaceDrawer({
         onKeyDown={onKeyDown}
       >
         <div className={classes['head']}>
-          <CloseButton aria-label="Close" onClick={onClose} />
+          <CloseButton aria-label={closeLabel} onClick={onClose} />
         </div>
         <div className={classes['body']}>{children}</div>
       </aside>

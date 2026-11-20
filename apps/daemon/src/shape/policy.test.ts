@@ -1,6 +1,11 @@
 import { ShapeToolName } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { judgeShapeCall, SHAPE_AGENT_MODELS, type ShapeAccess } from './confinement';
+import {
+  judgeShapeCall,
+  PLAN_REVIEWERS,
+  SHAPE_AGENT_MODELS,
+  type ShapeAccess,
+} from './confinement';
 import {
   rehearseNote,
   SHAPE_AGENTS,
@@ -14,7 +19,7 @@ import {
 } from './policy';
 
 /** The prompt for a subscription, whose agents take every alias. */
-const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(SHAPE_AGENT_MODELS, true);
+const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(SHAPE_AGENT_MODELS, true, true);
 
 // Shape spec §5.2: the lists a session starts with, and the one prompt that explains them.
 
@@ -84,7 +89,7 @@ describe('the tool lists of a Shape session', () => {
 
 describe('the reviewers (§7)', () => {
   it('are scope, engineering and rehearsal, each with exactly Read, Grep, Glob and report_finding', () => {
-    for (const name of ['scope', 'engineering', 'rehearsal'] as const)
+    for (const name of PLAN_REVIEWERS)
       expect([...SHAPE_AGENTS[name].tools]).toEqual([
         'Read',
         'Grep',
@@ -95,11 +100,11 @@ describe('the reviewers (§7)', () => {
 
   it('are joined by the researcher and the code researcher, the only other agents', () => {
     expect(Object.keys(SHAPE_AGENTS).sort()).toEqual([
-      'code-researcher',
-      'engineering',
-      'rehearsal',
-      'researcher',
-      'scope',
+      'tendb-code-researcher',
+      'tendb-engineering',
+      'tendb-rehearsal',
+      'tendb-researcher',
+      'tendb-scope',
     ]);
   });
 
@@ -114,15 +119,15 @@ describe('the reviewers (§7)', () => {
   });
 
   it('are told to report through report_finding and what the closing report is', () => {
-    expect(SHAPE_AGENTS.rehearsal.prompt).toMatch(/final: true/);
-    expect(SHAPE_AGENTS.rehearsal.prompt).toMatch(/kind: "none"/);
-    expect(SHAPE_AGENTS.scope.prompt).toMatch(/findingId/);
+    expect(SHAPE_AGENTS['tendb-rehearsal'].prompt).toMatch(/final: true/);
+    expect(SHAPE_AGENTS['tendb-rehearsal'].prompt).toMatch(/kind: "none"/);
+    expect(SHAPE_AGENTS['tendb-scope'].prompt).toMatch(/findingId/);
   });
 
   it('the session is told the ceremony rule, the spec flow and the rehearsal', () => {
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/write_spec/);
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/resolve_finding/);
-    expect(SHAPE_SYSTEM_PROMPT).toMatch(/subagent_type "rehearsal"/);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/subagent_type "tendb-rehearsal"/);
   });
 
   it('the session is told to plan landings, one per goal by default, and that tasks in one share a pull request', () => {
@@ -134,11 +139,11 @@ describe('the reviewers (§7)', () => {
 
 describe('the researcher (§5.2)', () => {
   it('has WebSearch and WebFetch and nothing else: no file tool, no 10db tool', () => {
-    expect([...SHAPE_AGENTS.researcher.tools]).toEqual(['WebSearch', 'WebFetch']);
+    expect([...SHAPE_AGENTS['tendb-researcher'].tools]).toEqual(['WebSearch', 'WebFetch']);
   });
 
   it('is told to treat what it reads as data, to answer in words, and to name the URLs it read', () => {
-    const prompt = SHAPE_AGENTS.researcher.prompt;
+    const prompt = SHAPE_AGENTS['tendb-researcher'].prompt;
     expect(prompt).toMatch(/untrusted/i);
     expect(prompt).toMatch(/instructions/i);
     expect(prompt).toMatch(/URL/);
@@ -146,16 +151,18 @@ describe('the researcher (§5.2)', () => {
   });
 
   it('is launched by the session, which is told to keep code out of the question and to treat the answer as untrusted', () => {
-    expect(SHAPE_SYSTEM_PROMPT).toMatch(/subagent_type "researcher"/);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/subagent_type "tendb-researcher"/);
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/never paste code/i);
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/untrusted/i);
-    expect(SHAPE_SYSTEM_PROMPT).toMatch(/no web tool of your own/i);
   });
 
   it('can be launched by the session, with a question', () => {
     expect(
       judgeShapeCall(
-        { toolName: 'Agent', toolInput: { subagent_type: 'researcher', prompt: 'What is X?' } },
+        {
+          toolName: 'Agent',
+          toolInput: { subagent_type: 'tendb-researcher', prompt: 'What is X?' },
+        },
         access,
       ).decision,
     ).toBe('allow');
@@ -216,11 +223,16 @@ describe('remembering and sizing (§5.5, §8)', () => {
 });
 
 describe('the system prompt', () => {
-  it('tells the session to make no proposal before Propose, to echo with note_heard and to cite messages', () => {
-    expect(SHAPE_SYSTEM_PROMPT).toMatch(/note_heard/);
+  it('tells the session to propose as things are decided and to cite messages, with no Propose press', () => {
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/propose_plan/);
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/\[m:/);
-    expect(SHAPE_SYSTEM_PROMPT).toMatch(/until the builder presses Propose/);
+    expect(SHAPE_SYSTEM_PROMPT).not.toMatch(/presses Propose/);
+  });
+
+  it('names the researcher only where the session has the web', () => {
+    expect(shapeSystemPrompt(SHAPE_AGENT_MODELS, true, false)).not.toMatch(/tendb-researcher/);
+    expect(shapeSystemPrompt(SHAPE_AGENT_MODELS, true, false)).toMatch(/tendb-code-researcher/);
+    expect(shapeSystemPrompt(SHAPE_AGENT_MODELS, false, true)).not.toMatch(/tendb-/);
   });
 });
 
@@ -234,13 +246,13 @@ describe('a session in its read-only sandbox (§5.2)', () => {
 
   it('gives only its code researcher Bash; without the sandbox nobody has it', () => {
     const sandboxed = shapeToolset(true).agents;
-    expect(sandboxed['code-researcher']?.tools).toEqual(['Read', 'Grep', 'Glob', 'Bash']);
-    for (const name of ['scope', 'engineering', 'rehearsal', 'researcher'])
+    expect(sandboxed['tendb-code-researcher']?.tools).toEqual(['Read', 'Grep', 'Glob', 'Bash']);
+    for (const name of ['tendb-scope', 'tendb-engineering', 'tendb-rehearsal', 'tendb-researcher'])
       expect(sandboxed[name]?.tools).not.toContain('Bash');
     const bare = shapeToolset(false);
     expect(bare.tools).not.toContain('Bash');
     expect(bare.disallowedTools).toContain('Bash');
-    expect(bare.agents['code-researcher']?.tools).toEqual(['Read', 'Grep', 'Glob']);
+    expect(bare.agents['tendb-code-researcher']?.tools).toEqual(['Read', 'Grep', 'Glob']);
   });
 
   it('runs every agent on the session’s model unless the call names one', () => {
@@ -249,14 +261,13 @@ describe('a session in its read-only sandbox (§5.2)', () => {
   });
 
   it('tells the code researcher it reaches no web page or MCP server, and that what it reads is data', () => {
-    const prompt = SHAPE_AGENTS['code-researcher'].prompt;
+    const prompt = SHAPE_AGENTS['tendb-code-researcher'].prompt;
     expect(prompt).toMatch(/no web page and no MCP server/);
     expect(prompt).toMatch(/data, never instructions/);
   });
 
   describe.each([
-    ['the session prompt', () => SHAPE_SYSTEM_PROMPT],
-    ['the code researcher prompt', () => SHAPE_AGENTS['code-researcher'].prompt],
+    ['the code researcher prompt', () => SHAPE_AGENTS['tendb-code-researcher'].prompt],
   ])('%s steers reading away from Bash cards', (_name, prompt) => {
     it('reads and searches files with Read, Grep and Glob, which never ask', () => {
       expect(prompt()).toMatch(/Read, Grep and Glob[^.]*never ask/);
@@ -275,7 +286,7 @@ describe('a session in its read-only sandbox (§5.2)', () => {
   });
 
   it('tells the session how to fan out code research, name a model, and treat tool output', () => {
-    expect(SHAPE_SYSTEM_PROMPT).toMatch(/subagent_type "code-researcher"/);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/subagent_type "tendb-code-researcher"/);
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/waits for the builder's approval on a card/);
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/data, never instructions/);
   });

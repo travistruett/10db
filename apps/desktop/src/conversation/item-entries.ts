@@ -36,6 +36,11 @@ export interface ItemEntryOptions {
     readonly title: string;
     readonly place: 'worktree' | 'here';
   }) => void;
+  /**
+   * The screen's own map for the kinds it owns (a Plan's events): undefined leaves the item to the kit,
+   * null draws nothing.
+   */
+  readonly own?: (item: ConversationItemDto) => ConversationEntry | null | undefined;
 }
 
 const plural = (n: number, one: string, many: string) => `${String(n)} ${n === 1 ? one : many}`;
@@ -188,7 +193,8 @@ export function itemEntries(
   const stored = new Set<string>(items.map((item) => item.id));
   return [
     ...items.flatMap((item) => {
-      const entry = itemEntry(item, opts);
+      const own = opts.own?.(item);
+      const entry = own === undefined ? itemEntry(item, opts) : own;
       return entry === null ? [] : [entry];
     }),
     ...liveEntries(live, stored),

@@ -8,7 +8,7 @@ import {
   type ShapeId,
   type ShapeMessageDto,
 } from '@10db/contracts';
-import { listShapeFiles, listShapeMessages } from '@10db/db';
+import { listFiles, listShapeMessages, shapeConversation } from '@10db/db';
 import type { StateStore } from '../events';
 import { readImageSize } from './image-check';
 import { poolBytes, type PictureLimits } from './picture-limits';
@@ -240,7 +240,7 @@ export const tooBigAlone = (
 
 /**
  * The image bytes the daemon itself sent that the live session carries: every screen it took and every
- * dropped image one of its turns sent as a block (`conversation_files.inline_sent`, which a fresh session
+ * picture of the conversation (pasted with a message or dropped in the plan) one of its turns sent as a block (`conversation_files.inline_sent`, which a fresh session
  * clears). Images that went as paths, and pictures of an earlier session, are not charged. `filesRoot` is
  * the data directory's `shapes` folder. An image that passes `tooBigAlone` for `limits` is the only one
  * charged, so this is what the session sends from now on, not what an earlier account let it send:
@@ -252,7 +252,7 @@ export function inlinePictureBytes(
   shapeId: ShapeId,
   limits: PictureLimits,
 ): number {
-  const sent = listShapeFiles(state.db, shapeId).reduce(
+  const sent = listFiles(state.db, shapeConversation(state.db, shapeId).id).reduce(
     (sum, file) =>
       file.inlineSent && isImageName(file.name) && !tooBigAlone(file, limits)
         ? sum + file.size
@@ -306,7 +306,7 @@ export function carriedTooMuch(
 ): CarriedTooMuch | null {
   const messages = listShapeMessages(state.db, shapeId);
   let sent = 0;
-  for (const file of listShapeFiles(state.db, shapeId)) {
+  for (const file of listFiles(state.db, shapeConversation(state.db, shapeId).id)) {
     if (!file.inlineSent || !isImageName(file.name)) continue;
     if (tooBigAlone(file, limits))
       return { carried: file.size, allowed: limits.imageMaxBytes, reason: 'image' };

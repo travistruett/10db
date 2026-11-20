@@ -88,10 +88,7 @@ const COUNTED_UNDER_HOLD: ReadonlySet<ExploreEvent['type']> = new Set([
 ]);
 
 export interface ExploreEngine {
-  register(
-    kind: typeof ConversationOwnerKind.Shape | typeof ConversationOwnerKind.Chat,
-    hooks: ExploreOwnerHooks,
-  ): void;
+  register(kind: typeof ConversationOwnerKind.Chat, hooks: ExploreOwnerHooks): void;
   /** A turn starter was stored; reduces `builder_message`, or parks it behind a hold. */
   queued(id: ConversationId): void;
   stop(id: ConversationId): Promise<void>;

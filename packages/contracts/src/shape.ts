@@ -311,8 +311,6 @@ export const ShapeDto = z.object({
   title: z.string(),
   state: z.enum(ShapeState),
   origin: z.enum(ShapeOrigin),
-  /** Set by the builder's first Propose, for good; `propose_plan` is refused until then. */
-  proposeUnlocked: z.boolean(),
   /** The last reconciled round; 0 before the first proposal. */
   round: z.int().min(0),
   /** The model ID the builder chose for the conversation; null runs it on the `plan` role's. */
