@@ -1552,7 +1552,7 @@ export const conversations = sqliteTable(
       .notNull()
       .references(() => projects.id),
     ownerKind: text('owner_kind').$type<ConversationOwnerKind>().notNull(),
-    /** A ShapeId, TaskId or ChatId, by `owner_kind`. */
+    /** A TaskId or ChatId, by `owner_kind`. */
     ownerId: text('owner_id').notNull(),
     profile: text('profile').$type<ConversationProfile>().notNull(),
     accountId: text('account_id')
@@ -1561,7 +1561,7 @@ export const conversations = sqliteTable(
       .references(() => accounts.id),
     /** The model the builder chose; null runs it on its role's. */
     model: text('model'),
-    /** The effort the builder chose for a chat; null runs the model's own default. A Plan keeps its own on `shapes`. */
+    /** The effort the builder chose for a chat; null runs the model's own default. */
     effort: text('effort').$type<Effort>(),
     /** The agent session the next one resumes; null before the first turn. */
     providerSessionId: text('provider_session_id'),

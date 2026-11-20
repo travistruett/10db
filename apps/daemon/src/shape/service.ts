@@ -117,7 +117,7 @@ export interface ShapeServiceDeps {
   launch(projectId: ProjectId, model: string | null, effort: Effort | null): ShapeLaunch;
   /** The models a conversation of the project may run on (§5.1); none offered without it. */
   readonly models?: (projectId: ProjectId) => ShapeModelsDto;
-  /** Where each conversation's dropped files are kept: `<filesDir>/<shape>/files/`. */
+  /** Where each conversation's dropped files are kept: `<filesDir>/<shape>`. */
   readonly filesDir: string;
   /** The starter's read of a pending join, which Convert refuses a change of areas over. */
   readonly joiningProblem: JoiningProblem;

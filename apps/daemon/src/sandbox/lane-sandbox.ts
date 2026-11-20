@@ -610,7 +610,8 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
             own: tmpDir,
           },
           worktreeRoot: deps.worktreeRoot,
-          setupReads,
+          // The plan's folder is read as the setup's folders are: a command that reads it settles read-only.
+          setupReads: [...setupReads, ...planReads],
           get providerSessionId() {
             return providerSessionId;
           },
