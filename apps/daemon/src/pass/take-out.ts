@@ -114,6 +114,8 @@ export function leavePassForBoard(
     readonly files: number;
     /** The pass is being abandoned, or the page discarded, and the page's changes were deleted. */
     readonly abandoned?: boolean;
+    /** The builder discarded the page alone, the pass going on. */
+    readonly discarded?: boolean;
   },
 ): void {
   const task = getTask(ctx.tx, input.taskId);
@@ -134,7 +136,7 @@ export function leavePassForBoard(
   settleTurnsLeaving(ctx, input.taskId);
   deleteSignOffWait(ctx, input.taskId);
   if (input.abandoned === true) {
-    leaveAbandonedPass(ctx, { ...input, discarded: pass.state === PassState.Open });
+    leaveAbandonedPass(ctx, input);
     advanceTakeOut(ctx, input, { step: TakeOutStep.Done, discarded: true });
     return;
   }
@@ -261,6 +263,12 @@ export async function takeOutSteps(
         throw new ConflictError(
           `Pass "${pass.name}" is ${pass.state.toLowerCase()}: a page is taken out only while it is open`,
         );
+      // A committed page stays: its commit is on the pass's branch and ships in its pull request.
+      if (
+        input.discard === true &&
+        getWorkstreamRow(ctx.tx, workstreamId).state === WorkstreamState.Done
+      )
+        throw new ConflictError(`${task.title} is committed, so it stays in the pass`);
       replaced = findTakeOut(ctx.tx, { taskId: task.id, passId: pass.id }) ?? null;
       return insertTakeOut(ctx, {
         taskId: task.id,
@@ -272,6 +280,9 @@ export async function takeOutSteps(
       });
     });
   const key = { taskId: task.id, passId: row.passId };
+  // A Discard that finds an earlier take-out unfinished goes on from its row, deleting as asked.
+  if (input.discard === true && !row.discarded)
+    row = deps.state.write((ctx) => advanceTakeOut(ctx, key, { step: row.step, discarded: true }));
   const pass = getPass(db, row.passId);
   const advance = (patch: Parameters<typeof advanceTakeOut>[2]): PassTakeOutRow =>
     deps.state.write((ctx) => advanceTakeOut(ctx, key, patch));
@@ -443,6 +454,7 @@ export async function takeOutSteps(
         kept: null,
         files: 0,
         abandoned: true,
+        discarded: input.within !== TakeOutWithin.Abandon,
       });
     });
     row = { ...row, step: TakeOutStep.Done };

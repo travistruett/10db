@@ -111,11 +111,12 @@ export function PagePane(props: PagePaneProps) {
       open={open}
       commit={commitVariant}
       commitDisabled={!passOpen}
-      committing={signOff.isPending}
+      committing={signOff.isPending && signOff.variables.taskId === page.taskId}
       onCommit={() => {
         signOff.mutate({ passId, taskId: page.taskId });
       }}
-      onDiscard={passOpen ? onDiscard : null}
+      // A committed page stays: its work is in the pass's pull request.
+      onDiscard={passOpen && status !== PageStatus.SignedOff ? onDiscard : null}
     />
   );
   useWorkbenchKeys({
@@ -239,7 +240,9 @@ export function PagePane(props: PagePaneProps) {
               draft={draft}
               onDraft={onDraft}
               actions={actions}
-              error={signOff.error?.message ?? null}
+              error={
+                signOff.variables?.taskId === page.taskId ? (signOff.error?.message ?? null) : null
+              }
               inputRef={input}
               disabled={!passOpen}
             />

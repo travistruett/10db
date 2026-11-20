@@ -22,7 +22,7 @@ export function OpenPageButton({ control }: { readonly control: OpenPageControl 
   );
 }
 
-/** A queue row's small link icon: the same as Open in Browser for that page. */
+/** A queue row's small link icon: it always opens the page in the browser, never copies its link. */
 export function OpenPageIcon({
   label,
   control,
@@ -38,7 +38,7 @@ export function OpenPageIcon({
       aria-label={`Open ${label} in Browser`}
       style={{ flex: 'none' }}
       onClick={() => {
-        void control.act();
+        void control.launch();
       }}
     >
       <IconExternalLink size={16} stroke={1.5} />

@@ -2,6 +2,7 @@ import { Box, Group } from '@mantine/core';
 import type { PassId, TaskId } from '@10db/contracts';
 import { useOpenPage } from './open-page';
 import { OpenPageIcon } from './open-page-button';
+import { PageStatus } from './page-status';
 import { QueueRow } from './queue-row';
 import { RowMenu } from './row-menu';
 import type { QueueRow as Row } from './queue-rows';
@@ -56,7 +57,8 @@ export function QueueList({ passId, appUrl, rows, current, onSelect, onDiscard }
             menu={
               <Group gap={2} wrap="nowrap">
                 <RowOpen passId={passId} appUrl={appUrl} row={row} />
-                {onDiscard === null ? null : (
+                {/* A committed page stays: its work is in the pass's pull request. */}
+                {onDiscard === null || row.status === PageStatus.SignedOff ? null : (
                   <RowMenu
                     label={row.page.label}
                     onDiscard={() => {

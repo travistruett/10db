@@ -17,6 +17,8 @@ for Abandon; the daemon's Abandon is unchanged.
   its recorded steps as one asked for alone (stopped by files that keep changing, refused once the pass is not
   open, a refused Drop kept on the chain), and its step 5 is the Abandon's: `deleteAbandonedWork`, then
   `leaveAbandonedPass` in one write. The thread says "Discarded from <pass>; its changes were deleted."
+- **A committed page can't be discarded.** Its commit is on the pass's branch and ships in the pull
+  request, so the menu leaves Discard out and the daemon refuses it (409).
 - **A restart deletes too.** The take-out row is written with `discarded` set, and step 5 reads the row, so a
   take-out that resumes at start-up finishes as a Discard, not a keep. No migration: the column exists.
 - **The confirm says what goes.** It names the shared changes that stay because a later page stands on them,

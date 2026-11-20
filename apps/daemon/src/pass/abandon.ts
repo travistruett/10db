@@ -144,8 +144,9 @@ function pagesLine(db: DbReader, pass: PassDto): string {
     pageLabel(pageOf(areas, task) ?? { name: task.areas[0] ?? task.title });
   // The pages whose changes were deleted, by this Abandon or a Discard before it: not one taken out
   // with its work kept.
+  // A page discarded and then added back is the pass's again: what became of it is said below.
   const discards = takenOut(db, pass)
-    .rows.filter((row) => row.discarded)
+    .rows.filter((row) => row.discarded && getTask(db, row.taskId).passId !== pass.id)
     .map((row) => label(getTask(db, row.taskId)));
   const stays = listPassTasks(db, pass.id).filter((task) => signedOff(db, task));
   return [
