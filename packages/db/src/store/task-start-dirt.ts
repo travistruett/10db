@@ -28,3 +28,18 @@ export function recordTaskStartDirt(
     .onConflictDoNothing()
     .run();
 }
+
+/**
+ * Whether any session has run for the task, in any of its workstreams, a pass page's included: once
+ * one has, what the checkout holds uncommitted may be the task's own work.
+ */
+export function taskHasRunASession(db: DbReader, taskId: TaskId): boolean {
+  const row = db
+    .select({ id: schema.sessions.id })
+    .from(schema.sessions)
+    .innerJoin(schema.workstreams, eq(schema.workstreams.id, schema.sessions.workstreamId))
+    .where(eq(schema.workstreams.taskId, taskId))
+    .limit(1)
+    .get();
+  return row !== undefined;
+}

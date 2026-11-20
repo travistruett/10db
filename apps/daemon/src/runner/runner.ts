@@ -166,6 +166,7 @@ import {
   listSkipsForWorkstream,
   getTaskStartDirt,
   recordTaskStartDirt,
+  taskHasRunASession,
 } from '@10db/db';
 import {
   BACKGROUND_DONE_NUDGE,
@@ -2336,16 +2337,20 @@ export function createRunner(opts: RunnerOptions): Runner {
     const task = getTask(db, row.taskId);
     // A page of a pass (Workbench spec §6.2): its session runs turn after turn, each from a builder message.
     const pass = passOfWorkstream(db, id) ?? null;
-    // What a shared checkout held uncommitted before the task first ran is someone else's work. A
-    // checkout that can't be read records nothing as theirs, so every change stays the task's.
+    // What a shared checkout held uncommitted before the task first ran is someone else's work. Once
+    // any session has run for the task (a pass page's, or one from before the record existed), what
+    // the checkout holds may be the task's own, and a checkout that can't be read is not known to
+    // hold anyone else's: either way nothing is recorded as theirs, so every change stays the task's.
     if (pass === null && getTaskStartDirt(db, task.id) === null) {
-      const entries = await readStartDirt(opts.git, checkout).catch((error: unknown) => {
-        opts.logger.warn(
-          { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
-          "the checkout's uncommitted paths could not be read when the task first launched",
-        );
-        return [];
-      });
+      const entries = taskHasRunASession(db, task.id)
+        ? []
+        : await readStartDirt(opts.git, checkout).catch((error: unknown) => {
+            opts.logger.warn(
+              { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+              "the checkout's uncommitted paths could not be read when the task first launched",
+            );
+            return [];
+          });
       opts.state.write((ctx) => {
         recordTaskStartDirt(ctx, task.id, entries);
       });

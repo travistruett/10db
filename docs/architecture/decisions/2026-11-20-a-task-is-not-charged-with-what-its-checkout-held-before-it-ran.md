@@ -10,7 +10,9 @@ times), in `task_start_dirt`, once per task. A later run of the task keeps that 
 step's end, a changed path in the step's claims whose fingerprint still matches the record is not
 the step's work: the step is not sent back to commit it and the gate does not wait on it. A path
 the task changed since, or one it deleted, is the task's again. A checkout that can't be read when
-the task first launches records nothing, so every change stays the task's.
+the task first launches records nothing, so every change stays the task's, and so does a task
+for which any session has already run (a pass page's, or one from before this record existed):
+what its checkout holds may be its own work, put back from a pass or left by an earlier run.
 
 ## Why
 
