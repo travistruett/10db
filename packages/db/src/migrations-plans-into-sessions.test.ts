@@ -115,12 +115,14 @@ function seed(): void {
     [planB, 'Plan B', null],
   ] as const)
     run(
-      `INSERT INTO shapes (id, project_id, title, state, origin, effort, created_at, updated_at)
-       VALUES (?, ?, ?, 'open', 'new', ?, ?, ?)`,
+      `INSERT INTO shapes (id, project_id, title, state, origin, effort, imported_at, created_at, updated_at)
+       VALUES (?, ?, ?, 'open', 'new', ?, ?, ?, ?)`,
       id,
       PROJ,
       title,
       effort,
+      // Plan A was imported from a bundle; Plan B was not.
+      id === planA ? at(2) : null,
       at(2),
       at(3),
     );
@@ -138,7 +140,7 @@ function seed(): void {
   );
   run(
     `INSERT INTO shape_proposals (id, shape_id, key, kind, state, round, body, created_at, updated_at)
-     VALUES (?, ?, 'k', 'task', 'proposed', 1, '{}', ?, ?)`,
+     VALUES (?, ?, 'k', 'task', 'pending', 1, '{}', ?, ?)`,
     proposalA,
     planA,
     at(4),
@@ -336,6 +338,14 @@ describe('the plans-into-sessions migration', () => {
     expect(count('landing_groups', 'shape_id = ?', planA)).toBe(1);
     expect(count('shape_links', 'shape_id = ?', planA)).toBe(2);
     expect(count('shape_proposals', 'shape_id = ?', planA)).toBe(1);
+    // An imported plan's pending rows carry the import marker, so rounds never rewrite them.
+    expect(
+      rows(
+        z.object({ pinned: z.string() }),
+        'SELECT pinned FROM shape_proposals WHERE id = ?',
+        proposalA,
+      ),
+    ).toEqual([{ pinned: '["import"]' }]);
     expect(count('shape_attachment_revisions', 'id = ?', revisionA)).toBe(1);
     expect(count('shape_findings', 'shape_id = ?', planA)).toBe(1);
     expect(count('conversation_items', 'conversation_id = ?', convA)).toBe(2);

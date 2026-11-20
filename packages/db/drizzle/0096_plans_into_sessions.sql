@@ -27,6 +27,11 @@ WHERE `kind` = 'shape_event' AND `pushed_at` IS NULL AND `delivered_at` IS NULL
   AND `conversation_id` IN (SELECT `conversation_id` FROM `chats`
     WHERE `id` IN (SELECT `chat_id` FROM `shapes` WHERE `chat_id` IS NOT NULL));
 --> statement-breakpoint
+-- An imported plan's pending rows carry the import marker, as a new import writes them, so rounds keep them.
+UPDATE `shape_proposals` SET `pinned` = json_insert(`pinned`, '$[#]', 'import')
+WHERE `state` = 'pending'
+  AND `shape_id` IN (SELECT `id` FROM `shapes` WHERE `chat_id` IS NOT NULL AND `imported_at` IS NOT NULL);
+--> statement-breakpoint
 -- Every other plan goes, its children first.
 DELETE FROM `shape_entry_versions` WHERE `entry_id` IN (SELECT `id` FROM `shape_entries` WHERE `shape_id` IN (SELECT id FROM `shapes` WHERE `chat_id` IS NULL OR `chat_id` NOT IN (SELECT `id` FROM `chats`)));
 --> statement-breakpoint

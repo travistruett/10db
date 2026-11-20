@@ -717,6 +717,7 @@ export function importBundle(
         state: ShapeProposalState.Pending,
         body,
         round,
+        pinned: [...new Set([...held.pinned, PIN_IMPORTED])],
         ...(held.state === ShapeProposalState.Pending ? {} : { createdRound: round }),
       });
     else
