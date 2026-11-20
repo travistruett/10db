@@ -214,9 +214,6 @@ export function PassWorkspace(props: PassWorkspaceProps) {
             )?.openedAt ?? null
           }
           composerFocus={composerFocus}
-          onDiscard={() => {
-            discard(shown.page.taskId);
-          }}
           draft={draft}
           onDraft={setDraft}
           pullRequest={<PrFoot view={view} />}

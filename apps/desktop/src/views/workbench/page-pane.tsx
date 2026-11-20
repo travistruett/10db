@@ -52,8 +52,6 @@ export interface PagePaneProps {
   readonly pullRequest?: ReactNode;
   /** The pane's own header, in place of the page's label. */
   readonly header?: ReactNode;
-  /** Discard on the page's menu; null once the pass is not open. */
-  readonly onDiscard: (() => void) | null;
 }
 
 /**
@@ -63,7 +61,7 @@ export interface PagePaneProps {
 export function PagePane(props: PagePaneProps) {
   const { passId, appUrl, row, passOpen, openedAt, composerFocus, draft, onDraft, pullRequest } =
     props;
-  const { header, onDiscard } = props;
+  const { header } = props;
   const { panelShown } = useFrameSlots();
   const { page, status } = row;
   const actions = usePageActions(page.taskId, page.conversationId);
@@ -107,7 +105,6 @@ export function PagePane(props: PagePaneProps) {
   const signOff = useSignOff();
   const pageActions = (
     <PageTitleActions
-      label={page.label}
       open={open}
       commit={commitVariant}
       commitDisabled={!passOpen}
@@ -115,8 +112,6 @@ export function PagePane(props: PagePaneProps) {
       onCommit={() => {
         signOff.mutate({ passId, taskId: page.taskId });
       }}
-      // A committed page stays: its work is in the pass's pull request.
-      onDiscard={passOpen && status !== PageStatus.SignedOff ? onDiscard : null}
     />
   );
   useWorkbenchKeys({
