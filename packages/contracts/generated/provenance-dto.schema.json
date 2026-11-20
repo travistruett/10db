@@ -371,6 +371,17 @@
                 }
               ]
             },
+            "chatId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^cht_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "taskTitle": {
               "type": [
                 "string",
@@ -388,6 +399,7 @@
             "id",
             "workstreamId",
             "shapeId",
+            "chatId",
             "taskTitle",
             "shapeTitle"
           ]
@@ -406,6 +418,17 @@
               "type": "string",
               "pattern": "^shp_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
             },
+            "chatId": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^cht_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "title": {
               "type": [
                 "string",
@@ -415,6 +438,7 @@
           },
           "required": [
             "id",
+            "chatId",
             "title"
           ]
         },

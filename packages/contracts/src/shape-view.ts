@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { ModelTier } from './catalogue';
 import {
+  ChatId,
   ConversationId,
   DecisionId,
   GoalId,
@@ -174,6 +175,8 @@ export const ShapeViewDto = z.object({
   models: ShapeModelsDto.default({ default: null, offered: [] }),
   /** The conversation the transcript is read from: `/conversations/:id/items`. */
   conversationId: ConversationId,
+  /** The session the Plan belongs to. */
+  chatId: ChatId,
   /** Every proposal row, tombstones and superseded ones included, in the order they were made. */
   proposals: z.array(ShapeProposalDto),
   /** The latest `note_heard` echo, shown before the first Propose. */
@@ -294,6 +297,8 @@ export type ShapeResumeInput = z.infer<typeof ShapeResumeInput>;
 export const ShapeOfDto = z.object({
   shapeId: ShapeId.nullable(),
   title: z.string().nullable().default(null),
+  /** The session that holds that Plan; null when none did. */
+  chatId: ChatId.nullable().default(null),
 });
 export type ShapeOfDto = z.infer<typeof ShapeOfDto>;
 

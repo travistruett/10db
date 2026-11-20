@@ -1,5 +1,6 @@
 import {
   KnowledgeState,
+  NotFoundError,
   ShapeMessageAuthor,
   ShapeMessageKind,
   ShapeProposalBody,
@@ -18,6 +19,7 @@ import {
   type ShapeViewDto,
 } from '@10db/contracts';
 import {
+  chatOfConversation,
   decisionSuccessor,
   getDecision,
   getPrinciple,
@@ -243,11 +245,15 @@ export function buildShapeView(
   const links = listShapeLinks(db, shapeId);
   const shape = getShape(db, shapeId);
   const sizes = buildSizes(db, shapeId);
+  const conversationId = shapeConversation(db, shapeId).id;
+  const chat = chatOfConversation(db, conversationId);
+  if (chat === null) throw new NotFoundError('chat of plan', shapeId);
   const marked = new Set(listRehearsals(db, shapeId).map((m) => `${m.taskKey}\0${m.hash}`));
   return {
     shape,
     models: world.models ?? NO_MODELS,
-    conversationId: shapeConversation(db, shapeId).id,
+    conversationId,
+    chatId: chat.id,
     proposals: listShapeProposals(db, shapeId).map((row) =>
       proposalOf(db, row, links, shape.round),
     ),

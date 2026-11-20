@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AreaName } from './entities';
 import {
+  ChatId,
   DecisionId,
   InboxItemId,
   PrincipleId,
@@ -298,6 +299,7 @@ export const ProvenanceDto = z.object({
       id: SessionId,
       workstreamId: WorkstreamId.nullable(),
       shapeId: ShapeId.nullable(),
+      chatId: ChatId.nullable(),
       taskTitle: z.string().nullable(),
       shapeTitle: z.string().nullable(),
     })
@@ -307,7 +309,9 @@ export const ProvenanceDto = z.object({
    * title. Null when the source names none, or names one that no longer exists. Not a session: the
    * builder's conversion writes the record, so `session` stays null.
    */
-  conversation: z.object({ id: ShapeId, title: z.string().nullable() }).nullable(),
+  conversation: z
+    .object({ id: ShapeId, chatId: ChatId.nullable(), title: z.string().nullable() })
+    .nullable(),
   quote: z.string().nullable(),
   speaker: z.string().nullable(),
   confirmedBy: z.string().nullable(),

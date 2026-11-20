@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { TaskId } from './ids';
+import { ChatId, TaskId } from './ids';
 
 // Shape spec §5.5: see_screen. A session looks at the app through a screenshot the app's own window
 // renders; it never gets a browser, a click or a command. These are the words the tool, the daemon
@@ -82,6 +82,8 @@ export const ScreenRenderRequest = z.object({
   projectId: z.string().min(1),
   taskId: TaskId.optional(),
   shapeId: z.string().min(1),
+  /** The asking session, for the plan screen; absent for every other screen. */
+  chatId: ChatId.optional(),
   width: Width,
   height: Height,
   token: z.string().min(1),

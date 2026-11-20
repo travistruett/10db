@@ -453,6 +453,17 @@
           "type": "null"
         }
       ]
+    },
+    "planId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^shp_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "required": [
@@ -471,6 +482,7 @@
     "archivedAt",
     "lastReplyAt",
     "tasksFiled",
-    "work"
+    "work",
+    "planId"
   ]
 }

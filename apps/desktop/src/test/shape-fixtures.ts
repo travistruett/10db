@@ -232,6 +232,7 @@ export function shapeViewDto(
   const view = ShapeViewDto.parse({
     shape,
     conversationId: mintId('Conversation'),
+    chatId: mintId('Chat'),
     models: {
       default: 'claude-opus-5-5',
       offered: [

@@ -56,8 +56,8 @@ export function createShapeServices(deps: {
   const { shape, state } = deps;
   const shapeOf = (shapeId: ShapeId | undefined): ShapeOfDto =>
     shapeId === undefined
-      ? { shapeId: null, title: null }
-      : { shapeId, title: getShape(state.db, shapeId).title };
+      ? { shapeId: null, title: null, chatId: null }
+      : { shapeId, title: getShape(state.db, shapeId).title, chatId: null };
   return {
     listShapes: (projectId) => shape.list(projectId),
     // A conversation with no title is named by its first message once there is one.

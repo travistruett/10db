@@ -231,7 +231,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
   const { state, engine } = deps;
   const dtoOf = (id: ChatId): ChatDto => {
     const view = chatView(state.db, id);
-    return { ...view, conversation: engine.view(view.conversationId) };
+    return { ...view, conversation: engine.view(view.conversationId), planId: null };
   };
 
   const offered = (projectId: ProjectId, model: string): void => {
