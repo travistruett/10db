@@ -2,6 +2,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { FakeShapeBehaviour } from './fake-session';
 
+/** How the planning rules owed to a session that began without a plan start. */
+const OWED_RULES = '[planning rules]';
 // Anchored to a line start: the planning rules a message may carry ahead of it quote the form "[m:ID] text".
 const BUILDER_MESSAGE_ID = /^\[m:([^\]]+)\]/m;
 /** An intake line naming a file the builder dropped: `[file] <path> (<name>)`, with an optional reason after. */
@@ -124,7 +126,15 @@ export function scriptedShapeBehaviour(): FakeShapeBehaviour {
       // The message's id goes first, so a proposal made in this very turn can cite it.
       const id = BUILDER_MESSAGE_ID.exec(turn.message)?.[1];
       if (id !== undefined) ids.push(id);
-      const text = turn.message.replace(BUILDER_MESSAGE_ID, '');
+      // The planning rules a session owes come first and say "propose" themselves: only what follows them,
+      // from the first dropped file or the message's id, is the builder's.
+      const rulesEnd = turn.message.startsWith(OWED_RULES)
+        ? turn.message.search(/^\[(?:file\] |m:)/m)
+        : 0;
+      const text = (rulesEnd < 0 ? turn.message : turn.message.slice(rulesEnd)).replace(
+        BUILDER_MESSAGE_ID,
+        '',
+      );
       if (ASKS_TO_PROPOSE.test(text)) {
         if (ids.length === 0) return { text: 'There is nothing to propose from yet.' };
         let area = 'repo';
