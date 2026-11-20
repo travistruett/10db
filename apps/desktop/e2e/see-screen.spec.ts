@@ -103,4 +103,12 @@ test('the window draws the Board and Plan for a session, and the conversation sh
   await keep('plan', plan);
   expect(plan.naturalWidth).toBe(1000);
   expect(plan.colours).toBeGreaterThan(DRAWN_SCREEN_COLOURS);
+
+  // Later specs open Sessions on its first session: the plan session this one made is archived, so it
+  // does not fold their list.
+  const open = z
+    .array(z.looseObject({ id: z.string(), projectId: z.string() }))
+    .parse(await (await request.get(`${daemonUrl}/chats?open=1`, { headers: auth })).json());
+  for (const chat of open.filter((c) => c.projectId === projectId))
+    await request.post(`${daemonUrl}/chats/${chat.id}/archive`, { headers: auth });
 });

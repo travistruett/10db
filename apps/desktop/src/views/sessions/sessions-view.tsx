@@ -105,12 +105,16 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
       : search.fresh !== undefined
         ? draftKey.fresh(search.fresh)
         : null;
-  const selected = rows.find((r) => r.key === wanted) ?? rows[0] ?? null;
+  // With no address, Sessions opens on the first session that leaves its list in place: an open Plan panel folds
+  // the list, and a builder coming back to Sessions must find it.
+  const hasPlan = (row: PanelRow): boolean =>
+    row.kind === 'chat' ? row.chat.planId !== null : row.tab.plan;
+  const selected =
+    rows.find((r) => r.key === wanted) ?? rows.find((r) => !hasPlan(r)) ?? rows[0] ?? null;
   // An open Plan panel folds the sessions list to the rail: the frame draws a panel only while a view gives it one.
   const planFolded = usePlanOpen(
     selected === null ? null : selected.kind === 'chat' ? selected.chat.id : selected.tab.id,
-    selected !== null &&
-      (selected.kind === 'chat' ? selected.chat.planId !== null : selected.tab.plan),
+    selected !== null && hasPlan(selected),
   );
 
   // A session is seen while it is selected and the window has focus.
