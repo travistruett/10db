@@ -655,6 +655,8 @@ type Outcome =
       readonly kind: 'refused';
       readonly message: string;
       readonly providerSessionId: string | null;
+      /** What the run fails as; a refusal that names none is a session that failed. */
+      readonly failure?: WorkstreamFailure;
     }
   | {
       /** The account cannot run the model the session launched on; the lane starts over on another. */
@@ -2006,7 +2008,13 @@ export function createRunner(opts: RunnerOptions): Runner {
       case 'refused':
       case 'background_hung':
         // A retry would hang the same way, and the work it left is for the builder to see.
-        fail(id, ctl.fence, { kind: WorkstreamFailure.SessionFailed, reason: outcome.message });
+        fail(id, ctl.fence, {
+          kind:
+            outcome.kind === 'refused'
+              ? (outcome.failure ?? WorkstreamFailure.SessionFailed)
+              : WorkstreamFailure.SessionFailed,
+          reason: outcome.message,
+        });
         return;
       case 'crashed': {
         const attempts = row.recoveryAttempts + 1;
@@ -3835,9 +3843,11 @@ export function createRunner(opts: RunnerOptions): Runner {
               const skipped = listSkipsForWorkstream(db, id)
                 .filter((skip) => skip.kind !== SkipKind.Question)
                 .map((skip) => skip.summary);
+              // The reason is the session's own: a skip let it report, but need not be its cause.
               st.outcome = {
                 kind: 'refused',
-                message: `The ${step.role} step couldn't do its job without a call 10db skipped: ${ctl.blockedReason}. Skipped: ${skipped.join('; ')}`,
+                failure: WorkstreamFailure.Blocked,
+                message: `The ${step.role} step stopped and reported it was blocked: ${ctl.blockedReason.replace(/[\s.]+$/, '')}. Calls 10db skipped in this run: ${skipped.join('; ')}`,
                 providerSessionId: st.providerSessionId,
               };
               await handle.stop();

@@ -100,15 +100,16 @@ describe('a blocked step', () => {
       Alpha: [
         [
           curl,
-          { do: 'mcp', tool: 'report_blocked', args: { reason: 'It needs the network' } },
+          { do: 'mcp', tool: 'report_blocked', args: { reason: 'It needs the network.' } },
           turn,
         ],
       ],
     });
     expect(getWorkstream(engine.store.db, workstream.id)).toMatchObject({
       state: 'FAILED',
+      failureKind: 'blocked',
       failureReason:
-        "The implement step couldn't do its job without a call 10db skipped: It needs the network. Skipped: curl -s https://example.com",
+        'The implement step stopped and reported it was blocked: It needs the network. Calls 10db skipped in this run: curl -s https://example.com',
     });
     expect(resumes()).toEqual([]);
   });
