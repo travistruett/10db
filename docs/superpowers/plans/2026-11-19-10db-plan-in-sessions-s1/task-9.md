@@ -5,7 +5,7 @@ implementer, runs it last.
 
 ## Files
 
-- **`docs/architecture/decisions/2026-11-19-plan-becomes-part-of-sessions.md`**, in the format the folder's README
+- **The decision record** `2026-11-19-plan-becomes-part-of-sessions.md` in `docs/architecture/decisions`,, in the format the folder's README
   gives. It records:
   - the plan points at its chat;
   - the chat's hooks own the conversation, with the plan's parts;
