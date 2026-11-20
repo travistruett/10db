@@ -130,7 +130,6 @@ import {
   type ShapeConvertError,
   type ConversationDeltaFrame,
   ConversationId,
-  ConversationOwnerKind,
   NotFoundError,
   ConversationItemId,
   PostConversationMessage,
@@ -346,8 +345,8 @@ const CONVERSATION_PATH = /^\/conversations\/([^/]+)/;
 export function createApp(deps: ApiDeps) {
   /**
    * A token held by code an agent may edit (a screen's, the dev UI's) reads a conversation only where it
-   * is a Plan's: what Plan's screen read before its transcript moved, never a task's thread, its tool
-   * output or a chat. A path that names no conversation, or one 10db lacks (which answers 404), passes;
+   * has a plan: what Plan's screen read before its transcript moved, never a task's thread, its tool
+   * output or a chat with no plan. A path that names no conversation, or one 10db lacks (which answers 404), passes;
    * an ownership that can't be read refuses.
    */
   const shapeOwnedOrNone = (path: string): boolean => {
@@ -356,7 +355,7 @@ export function createApp(deps: ApiDeps) {
     const id = ConversationId.safeParse(raw);
     if (!id.success) return true;
     try {
-      return deps.services.conversationOwnerKind(id.data) === ConversationOwnerKind.Shape;
+      return deps.services.conversationHasPlan(id.data);
     } catch (error) {
       // Only a conversation 10db lacks passes, so its route answers 404; any other error refuses.
       return error instanceof NotFoundError;
@@ -365,7 +364,7 @@ export function createApp(deps: ApiDeps) {
   /** Whether a conversation is a Plan's; one that can't be read is not. */
   const planConversation = (id: ConversationId): boolean => {
     try {
-      return deps.services.conversationOwnerKind(id) === ConversationOwnerKind.Shape;
+      return deps.services.conversationHasPlan(id);
     } catch {
       return false;
     }

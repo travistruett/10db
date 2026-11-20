@@ -3,6 +3,10 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { FakeShapeBehaviour } from './fake-session';
 
 const BUILDER_MESSAGE_ID = /\[m:([^\]]+)\]/;
+/** An intake line naming a file the builder dropped: `[file] <path> (<name>)`, with an optional reason after. */
+const DROPPED_FILE = /^\[file\] .* \((.+?)\)(?: — .*)?$/gm;
+/** A message that asks for the plan: the scripted agent proposes it as things are decided. */
+const ASKS_TO_PROPOSE = /\bpropose\b/i;
 const MAX_HEARD_ITEMS = 5;
 const MAX_HEARD_CHARS = 80;
 /** What the project's areas are, when a draft names one it hasn't got: "(it has src, ui)". */
@@ -72,8 +76,9 @@ function scriptedDraft(area: string, sources: readonly string[]): Record<string,
 
 /**
  * A Shape session that answers like a small, deterministic Claude, for the e2e and for a daemon on the
- * fake adapter: it echoes what it heard with `note_heard` and replies; on a Propose it states a plan
- * (one goal with two tasks, two loose tasks, one decision) through `propose_plan`, in the project's
+ * fake adapter: it echoes what it heard with `note_heard` and replies, naming each file dropped with
+ * the message; a message that says "propose" gets a plan (one goal with two tasks, two loose tasks,
+ * one decision) through `propose_plan`, in the project's
  * first area, learning the area from the refusal when the draft's first guess is wrong. Asked to
  * "show a fence", it answers with a code fence and a link, for the window's CSP e2e row.
  */
@@ -109,7 +114,11 @@ export function scriptedShapeBehaviour(): FakeShapeBehaviour {
       );
       const ids = heard.get(turn.spec.conversationId ?? turn.spec.sessionId) ?? [];
       heard.set(turn.spec.conversationId ?? turn.spec.sessionId, ids);
-      if (turn.message.includes('pressed Propose')) {
+      // The message's id goes first, so a proposal made in this very turn can cite it.
+      const id = BUILDER_MESSAGE_ID.exec(turn.message)?.[1];
+      if (id !== undefined) ids.push(id);
+      const text = turn.message.replace(BUILDER_MESSAGE_ID, '');
+      if (ASKS_TO_PROPOSE.test(text)) {
         if (ids.length === 0) return { text: 'There is nothing to propose from yet.' };
         let area = 'repo';
         let answer = await call('propose_plan', { draft: scriptedDraft(area, ids) });
@@ -121,9 +130,6 @@ export function scriptedShapeBehaviour(): FakeShapeBehaviour {
         }
         return { text: answer.isError ? 'I could not state a plan.' : 'Here is the plan.' };
       }
-      const id = BUILDER_MESSAGE_ID.exec(turn.message)?.[1];
-      if (id !== undefined) ids.push(id);
-      const text = turn.message.replace(BUILDER_MESSAGE_ID, '');
       // "See the board at 900" asks for a screen, as a session planning UI work would.
       const look = SEE_SCREEN.exec(text);
       if (look !== null) {
@@ -148,7 +154,10 @@ export function scriptedShapeBehaviour(): FakeShapeBehaviour {
         .slice(0, MAX_HEARD_ITEMS)
         .map((s) => s.slice(0, MAX_HEARD_CHARS));
       await call('note_heard', { items });
-      return { text: `Noted ${String(items.length)} ${items.length === 1 ? 'thing' : 'things'}.` };
+      const files = [...turn.message.matchAll(DROPPED_FILE)].map((m) => ` I have ${m[1] ?? ''}.`);
+      return {
+        text: `Noted ${String(items.length)} ${items.length === 1 ? 'thing' : 'things'}.${files.join('')}`,
+      };
     } finally {
       await client.close();
     }

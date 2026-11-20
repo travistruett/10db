@@ -128,7 +128,6 @@ export function serveJudge(initial: {
           enabled: body.enabled ?? status.config.enabled,
           accountId,
           decisions: {
-            shape_ready: merged(JudgeDecision.ShapeReady),
             shape_record: merged(JudgeDecision.ShapeRecord),
             shape_elsewhere: merged(JudgeDecision.ShapeElsewhere),
             question_route: merged(JudgeDecision.QuestionRoute),

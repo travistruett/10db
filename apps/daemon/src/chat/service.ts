@@ -29,6 +29,7 @@ import {
   type ArchiveRequest,
   type ChatPatchInput,
   type ConversationId,
+  type ConversationItemId,
   type ProjectId,
   type ShapeModelOption,
   WorkPlace,
@@ -226,6 +227,8 @@ export interface ChatServiceDeps {
   readonly worktrees?: ChatWorktrees;
   /** Remakes the worktree of a branch session that has none, once it is open again. */
   readonly reopenBranch?: (chatId: ChatId) => Promise<void>;
+  /** Told of each builder message a chat takes, for what listens to a plan's talk (Jev's shadow); it never throws. */
+  readonly planHeard?: (conversationId: ConversationId, itemId: ConversationItemId) => void;
 }
 
 export function createChatService(deps: ChatServiceDeps): ChatService {
@@ -444,6 +447,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       const item = post(conversationId, input);
       const chat = requireChat(conversationId);
       dispatch(chat, conversationId, folder);
+      deps.planHeard?.(conversationId, item.id);
       return item;
     },
 
@@ -486,6 +490,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       if (wait) engine.holdStarts(conversationId);
       const edit = await engine.redo(conversationId, () => post(conversationId, input));
       if (wait) watchFolder(chat);
+      deps.planHeard?.(conversationId, edit.id);
       return edit;
     },
 

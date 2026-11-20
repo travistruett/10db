@@ -38,13 +38,13 @@ import { createGit } from '../src/git';
 import { protectedPaths } from '../src/guard';
 import { createInboxService } from '../src/inbox';
 import { createLogger, silentLogger } from '../src/log';
+import { judgeChatCall } from '../src/chat';
 import { createMcpHandler, mintSessionToken, ToolImages } from '../src/mcp';
 import {
   SHAPE_AGENTS,
   SHAPE_ALLOWED_TOOLS,
   SHAPE_BUILT_IN_TOOLS,
   SHAPE_DISALLOWED_TOOLS,
-  judgeShapeCall,
   shapeAgentModels,
   shapeSystemPrompt,
 } from '../src/shape';
@@ -55,7 +55,7 @@ import { noisePng, pngImage } from './png';
 import { READ_CHARGE_MAX_BYTES } from '../src/conversation';
 
 /** The prompt for a subscription, whose agents take every alias. */
-const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(shapeAgentModels('claude_subscription'), true);
+const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(shapeAgentModels('claude_subscription'), true, true);
 
 // Shape spec §5.2, §15: the confinement holds on the real SDK. Runs on the builder's Max
 // subscription through the logged-in claude; never in CI and never in `make gate`
@@ -139,7 +139,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       prompt: [
         `Do these two things in order, calling the tool each time even if you expect it to fail:`,
         `1. Use the WebSearch tool yourself, not through an agent, to search for "vega-lite".`,
-        `2. Launch the researcher agent to find out what Vega-Lite is, and report its answer and its URLs.`,
+        `2. Launch the tendb-researcher agent to find out what Vega-Lite is, and report its answer and its URLs.`,
       ].join('\n'),
       model: launch.model,
       effort: 'low',
@@ -153,10 +153,10 @@ describe.skipIf(!live)('a Shape session, live', () => {
       canUseTool: () =>
         Promise.resolve({ behavior: 'deny', message: 'no broker here', by: '10db' }),
       preToolUse: (req) => {
-        const verdict = judgeShapeCall(
+        const verdict = judgeChatCall(
           {
             toolName: req.toolName,
-            toolInput: req.input,
+            input: req.input,
             agentId: req.agentId,
             agentType: req.agentType,
           },
@@ -176,18 +176,18 @@ describe.skipIf(!live)('a Shape session, live', () => {
       const web = judged.filter((c) => ['WebSearch', 'WebFetch'].includes(c.req.toolName));
       // The main session's own web call was refused; the researcher, a subagent of that type, reached it.
       for (const call of web) {
-        const decision = call.req.agentType === 'researcher' ? 'allow' : 'deny';
+        const decision = call.req.agentType === 'tendb-researcher' ? 'allow' : 'deny';
         expect(
           call.decision,
           `${call.req.toolName} by ${call.req.agentType ?? 'the session'}`,
         ).toBe(decision);
       }
-      expect(web.some((c) => c.req.agentType === 'researcher' && c.decision === 'allow')).toBe(
-        true,
-      );
+      expect(
+        web.some((c) => c.req.agentType === 'tendb-researcher' && c.decision === 'allow'),
+      ).toBe(true);
       for (const call of judged)
         if (
-          call.req.agentType === 'researcher' &&
+          call.req.agentType === 'tendb-researcher' &&
           ['Read', 'Grep', 'Glob'].includes(call.req.toolName)
         )
           expect(call.decision).toBe('deny');
@@ -328,10 +328,10 @@ describe.skipIf(!live)('a Shape session, live', () => {
       canUseTool: () =>
         Promise.resolve({ behavior: 'deny', message: 'no broker here', by: '10db' }),
       preToolUse: (req) => {
-        const verdict = judgeShapeCall(
+        const verdict = judgeChatCall(
           {
             toolName: req.toolName,
-            toolInput: req.input,
+            input: req.input,
             agentId: req.agentId,
             agentType: req.agentType,
           },
@@ -456,10 +456,10 @@ describe.skipIf(!live)('a Shape session, live', () => {
       canUseTool: () =>
         Promise.resolve({ behavior: 'deny', message: 'no broker here', by: '10db' }),
       preToolUse: (req) => {
-        const verdict = judgeShapeCall(
+        const verdict = judgeChatCall(
           {
             toolName: req.toolName,
-            toolInput: req.input,
+            input: req.input,
             agentId: req.agentId,
             agentType: req.agentType,
           },
@@ -677,10 +677,10 @@ async function readInSession(
     canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'no broker here', by: '10db' }),
     preToolUse: (req) => {
       if (req.toolName === 'Read') reads.push(req);
-      return judgeShapeCall(
+      return judgeChatCall(
         {
           toolName: req.toolName,
-          toolInput: req.input,
+          input: req.input,
           agentId: req.agentId,
           agentType: req.agentType,
         },

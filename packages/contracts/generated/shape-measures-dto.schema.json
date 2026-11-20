@@ -170,7 +170,6 @@
           "decision": {
             "type": "string",
             "enum": [
-              "shape_ready",
               "shape_record",
               "shape_elsewhere"
             ]

@@ -34,7 +34,6 @@ import type {
   ConversationLiveDto,
   FolderDto,
   FolderWhileHeld,
-  ConversationOwnerKind,
   Effort,
   KindDto,
   KindId,
@@ -655,8 +654,8 @@ export interface ApiServices extends PlanRecordServices {
   subscribe(listener: (event: DaemonEvent) => void): () => void;
   /** The live frames of what conversations are streaming; never stored, never in the replay. */
   subscribeLive(listener: (frame: ConversationDeltaFrame) => void): () => void;
-  /** Who owns a conversation, read from its row alone; NotFoundError for one 10db lacks. */
-  conversationOwnerKind(id: ConversationId): ConversationOwnerKind;
+  /** Whether a conversation's chat has a plan, read from its rows alone; NotFoundError for one 10db lacks. */
+  conversationHasPlan(id: ConversationId): boolean;
   /** An explore conversation as the UI reads it (sessions spec §10); NotFoundError for one 10db lacks. */
   getConversation(id: ConversationId): ConversationDto;
   /** A page of its items in `seq` order, after `afterSeq` when given. */

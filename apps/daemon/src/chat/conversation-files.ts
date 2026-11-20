@@ -47,8 +47,6 @@ export function createConversationFiles(deps: {
           query,
         );
       }
-      case ConversationOwnerKind.Shape:
-        return rankFiles(tracked(getProject(deps.state.db, conv.projectId).repoPath), query);
     }
   };
 }

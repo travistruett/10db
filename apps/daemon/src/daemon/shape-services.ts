@@ -72,7 +72,8 @@ export function createShapeServices(deps: {
         origin: ShapeOrigin.App,
       }),
     getShapeView: (id) => shape.view(id),
-    proposeShape: (id) => shape.propose(id),
+    // A Propose press no longer exists: the route answers that nothing started, until it is removed.
+    proposeShape: () => ({ status: 'ignored' }),
     chooseShapeModel: (id, model, effort) => shape.chooseModel(id, model, effort),
     async convertShape(id, input) {
       const outcome = await shape.convert(id, input.proposalIds, {

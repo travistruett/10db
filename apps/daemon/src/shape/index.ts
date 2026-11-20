@@ -23,6 +23,7 @@ export {
   shapeToolset,
 } from './policy';
 export { PIN_IMPORTED } from './rounds';
+export { createPlanParts, type PlanParts, type PlanTurnState } from './plan-parts';
 export { createShapeJev, shadowAgreement } from './jev';
 export {
   createShapeService,

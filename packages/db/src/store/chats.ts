@@ -212,6 +212,25 @@ export function setChatTitle(
     .where(eq(schema.chats.id, chatId))
     .run();
   changed(ctx, row);
+  // A chat's plan is titled as the chat is.
+  const plan = ctx.tx
+    .select({ id: schema.shapes.id, projectId: schema.shapes.projectId })
+    .from(schema.shapes)
+    .where(eq(schema.shapes.chatId, chatId))
+    .get();
+  if (plan !== undefined) {
+    ctx.tx
+      .update(schema.shapes)
+      .set({ title, updatedAt: ctx.now })
+      .where(eq(schema.shapes.id, plan.id))
+      .run();
+    ctx.emit({
+      type: EventType.ShapeChanged,
+      entityType: 'shape',
+      entityId: plan.id,
+      data: { projectId: plan.projectId },
+    });
+  }
   return true;
 }
 

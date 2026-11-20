@@ -24,7 +24,7 @@ export interface Outgoing {
 }
 
 /** What the engine has made of a start before the owner builds its session. */
-interface ExploreStart {
+export interface ExploreStart {
   readonly sessionId: SessionId;
   readonly mcpToken: string;
   /** The agent session to resume; null for a fresh one. */

@@ -49,7 +49,6 @@ export const SizingMeasureDto = Rate.extend({
 export type SizingMeasureDto = z.infer<typeof SizingMeasureDto>;
 
 export const SHAPE_JUDGE_DECISIONS = [
-  JudgeDecision.ShapeReady,
   JudgeDecision.ShapeRecord,
   JudgeDecision.ShapeElsewhere,
 ] as const;

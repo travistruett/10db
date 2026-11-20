@@ -17,7 +17,7 @@ export { itemsWithFull, readFullOutput } from './full-output';
 export { itemDtoOf } from './item-dto';
 export { createItemRecorder, type ItemRecorder } from './item-recorder';
 export { createLiveRegistry, type LiveRegistry } from './live-registry';
-export type { ExploreOwnerHooks } from './explore-hooks';
+export type { ExploreOwnerHooks, ExploreStart, Outgoing, TurnEnd } from './explore-hooks';
 export { refuseMislabelledBytes, safeFileName } from './file-check';
 export { keepBuilderMessage, type PastedFile } from './intake';
 export { buildThreadDigest, builderMessageText, FRESH_SESSION_NOTICE } from './lane-text';

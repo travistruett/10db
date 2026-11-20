@@ -22,6 +22,7 @@ import {
   systemKeychain,
 } from '../src/environment';
 import { createEventBus, createStateStore } from '../src/events';
+import { judgeChatCall } from '../src/chat';
 import { createGit } from '../src/git';
 import { protectedPaths } from '../src/guard';
 import { createInboxService } from '../src/inbox';
@@ -30,7 +31,6 @@ import { resolveSandboxRuntime } from '../src/paths';
 import { claimSandboxRoots, createLaneSandbox } from '../src/sandbox';
 import { createClaudeAdapter, type ShapeToolRequest } from '../src/sessions';
 import {
-  judgeShapeCall,
   SHAPE_ALLOWED_TOOLS,
   shapeAgentModels,
   shapeSystemPrompt,
@@ -39,7 +39,7 @@ import {
 import { createTempRepo, testPolicy } from './fixtures';
 
 /** The prompt for a subscription, whose agents take every alias. */
-const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(shapeAgentModels('claude_subscription'), true);
+const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(shapeAgentModels('claude_subscription'), true, true);
 
 // Shape spec §5.2, §15: a Plan session's commands, in its read-only lane sandbox and through the lanes'
 // broker, on the real SDK and the real srt. Runs on the builder's Max subscription through the
@@ -203,7 +203,7 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
           'This is a check of the sandbox. Do these three things in order, calling the tool each time. Step 2 is expected to be refused: run it anyway, and never skip it because you are read-only.',
           '1. Run `git log --oneline -1` with the Bash tool yourself, from the current directory, with no `git -C` and no path.',
           '2. Run `echo changed > notes.txt` with the Bash tool yourself.',
-          '3. Launch one Agent with subagent_type "code-researcher" and model "haiku", asking it to run `git log --oneline -1` with Bash from its current directory, with no `git -C` and no path, and report the output.',
+          '3. Launch one Agent with subagent_type "tendb-code-researcher" and model "haiku", asking it to run `git log --oneline -1` with Bash from its current directory, with no `git -C` and no path, and report the output.',
           'Then say in one line what each step returned.',
         ].join('\n'),
         model: launch.model,
@@ -217,10 +217,10 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
         yourMcpServers: {},
         canUseTool: (req) => prepared.canUseTool(req),
         preToolUse: (req) => {
-          const verdict = judgeShapeCall(
+          const verdict = judgeChatCall(
             {
               toolName: req.toolName,
-              toolInput: req.input,
+              input: req.input,
               agentId: req.agentId,
               agentType: req.agentType,
               cwd: req.cwd,
@@ -251,10 +251,14 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
     expect(readFileSync(join(checkout, 'notes.txt'), 'utf8')).toBe('original\n');
     const launched = judged.find((j) => j.req.toolName === 'Agent');
     expect(launched?.decision).toBe('allow');
-    expect(launched?.req.input).toMatchObject({ subagent_type: 'code-researcher', model: 'haiku' });
+    expect(launched?.req.input).toMatchObject({
+      subagent_type: 'tendb-code-researcher',
+      model: 'haiku',
+    });
     expect(
       bash.find(
-        (j) => j.req.agentType === 'code-researcher' && commandOf(j.req).startsWith('git log'),
+        (j) =>
+          j.req.agentType === 'tendb-code-researcher' && commandOf(j.req).startsWith('git log'),
       )?.decision,
     ).toBe('allow');
     expect(reply).not.toBe('');

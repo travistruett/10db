@@ -35,7 +35,6 @@ import type { Logger } from '../log';
 // messages to fast models"; with it off there is no call and nothing is logged.
 
 const QUESTIONS: Readonly<Record<ShapeJudgeDecision, string>> = {
-  [JudgeDecision.ShapeReady]: 'Has the builder said enough for a plan to be proposed?',
   [JudgeDecision.ShapeRecord]:
     "Does the builder's last message state a decision or principle worth recording?",
   [JudgeDecision.ShapeElsewhere]:
@@ -111,9 +110,7 @@ export function createShapeJev(deps: ShapeJevDeps): ShapeJev {
         const shape = getShape(db, shapeId);
         // The builder's choice: nothing leaves the machine unless this project opted in.
         if (!getShapeJevOptIn(db, shape.projectId)) return;
-        const decisions = SHAPE_JUDGE_DECISIONS.filter(
-          (d) => d !== JudgeDecision.ShapeReady || !shape.proposeUnlocked,
-        );
+        const decisions = SHAPE_JUDGE_DECISIONS;
         const state = stateOf(db, shapeId, messageId);
         await Promise.all(decisions.map((d) => ask(shapeId, messageId, d, state, judge)));
       } catch (error) {
@@ -131,20 +128,6 @@ interface Conversation {
   readonly closed: boolean;
   readonly messages: ReturnType<typeof listShapeMessages>;
   readonly proposals: ReturnType<typeof listShapeProposals>;
-}
-
-/** Propose pressed within the builder's next two messages. */
-function readyTruth(conv: Conversation, messageId: ConversationItemId): Truth {
-  const at = conv.messages.findIndex((m) => m.id === messageId);
-  let builderMessages = 0;
-  for (const m of conv.messages.slice(at + 1)) {
-    if (m.kind === ShapeMessageKind.Propose) return true;
-    if (m.author === ShapeMessageAuthor.Builder && m.kind === ShapeMessageKind.Text) {
-      builderMessages += 1;
-      if (builderMessages > 2) return false;
-    }
-  }
-  return conv.closed ? false : null;
 }
 
 /**
@@ -174,7 +157,6 @@ const RECORD_KINDS = new Set<string>([ShapeProposalKind.Decision, ShapeProposalK
 const QUESTION_KINDS = new Set<string>([ShapeProposalKind.Question]);
 
 function truthOf(conv: Conversation, row: ShadowAnswerRow): Truth {
-  if (row.decision === JudgeDecision.ShapeReady) return readyTruth(conv, row.messageId);
   if (row.decision === JudgeDecision.ShapeRecord)
     return citedTruth(conv, row.messageId, RECORD_KINDS);
   return citedTruth(conv, row.messageId, QUESTION_KINDS);

@@ -19,7 +19,7 @@ import {
 } from './policy';
 
 /** The prompt for a subscription, whose agents take every alias. */
-const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(SHAPE_AGENT_MODELS, true);
+const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(SHAPE_AGENT_MODELS, true, true);
 
 // Shape spec §5.2: the lists a session starts with, and the one prompt that explains them.
 
@@ -154,7 +154,6 @@ describe('the researcher (§5.2)', () => {
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/subagent_type "tendb-researcher"/);
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/never paste code/i);
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/untrusted/i);
-    expect(SHAPE_SYSTEM_PROMPT).toMatch(/no web tool of your own/i);
   });
 
   it('can be launched by the session, with a question', () => {
@@ -224,11 +223,16 @@ describe('remembering and sizing (§5.5, §8)', () => {
 });
 
 describe('the system prompt', () => {
-  it('tells the session to make no proposal before Propose, to echo with note_heard and to cite messages', () => {
-    expect(SHAPE_SYSTEM_PROMPT).toMatch(/note_heard/);
+  it('tells the session to propose as things are decided and to cite messages, with no Propose press', () => {
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/propose_plan/);
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/\[m:/);
-    expect(SHAPE_SYSTEM_PROMPT).toMatch(/until the builder presses Propose/);
+    expect(SHAPE_SYSTEM_PROMPT).not.toMatch(/presses Propose/);
+  });
+
+  it('names the researcher only where the session has the web', () => {
+    expect(shapeSystemPrompt(SHAPE_AGENT_MODELS, true, false)).not.toMatch(/tendb-researcher/);
+    expect(shapeSystemPrompt(SHAPE_AGENT_MODELS, true, false)).toMatch(/tendb-code-researcher/);
+    expect(shapeSystemPrompt(SHAPE_AGENT_MODELS, false, true)).not.toMatch(/tendb-/);
   });
 });
 
@@ -263,7 +267,6 @@ describe('a session in its read-only sandbox (§5.2)', () => {
   });
 
   describe.each([
-    ['the session prompt', () => SHAPE_SYSTEM_PROMPT],
     ['the code researcher prompt', () => SHAPE_AGENTS['tendb-code-researcher'].prompt],
   ])('%s steers reading away from Bash cards', (_name, prompt) => {
     it('reads and searches files with Read, Grep and Glob, which never ask', () => {
