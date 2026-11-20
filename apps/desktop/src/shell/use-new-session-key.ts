@@ -6,8 +6,8 @@ import { sessionKey } from '../views/sessions/session-keys';
 import { useSelectedProject } from './selected-project';
 
 /**
- * ⌘T from any view other than Sessions opens Sessions on a fresh tab at the end of the strip, in the
- * selected project. On Sessions the screen's own keys take it, beside the tab that is open.
+ * ⌘T (New Session) and ⌘⇧N (New Plan) from any view other than Sessions open Sessions on a fresh tab at the
+ * end of the strip, in the selected project. On Sessions the screen's own keys take them, beside the tab that is open.
  */
 export function useNewSessionKey(): void {
   const navigate = useNavigate();
@@ -34,7 +34,7 @@ export function useNewSessionKey(): void {
         },
         { onSessions: now.onSessions, escapeTaken: false },
       );
-      if (key?.kind !== 'new' || now.onSessions) return;
+      if ((key?.kind !== 'new' && key?.kind !== 'new_plan') || now.onSessions) return;
       event.preventDefault();
       const fresh = readFreshTabs();
       const made = openFreshTab(
@@ -42,6 +42,8 @@ export function useNewSessionKey(): void {
         now.projects,
         now.project?.id ?? null,
         (now.chats?.length ?? 0) + fresh.length - 1,
+        undefined,
+        key.kind === 'new_plan',
       );
       if (made === null) return;
       writeFreshTabs(made.tabs);

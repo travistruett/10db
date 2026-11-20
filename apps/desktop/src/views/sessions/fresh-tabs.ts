@@ -15,6 +15,8 @@ export const FreshTab = z.object({
   effort: z.enum(Effort).nullable().default(null),
   /** Where the tab sits in the strip, which the chat made from it takes. */
   position: z.int().nonnegative(),
+  /** New Plan: the session this tab becomes starts with its Plan. */
+  plan: z.boolean().default(false),
 });
 export type FreshTab = z.infer<typeof FreshTab>;
 
@@ -40,6 +42,7 @@ export function openFreshTab(
   selected: ProjectId | null,
   afterPosition: number,
   id: string = newId(),
+  plan = false,
 ): Opened | null {
   const project = projects.find((p) => p.id === selected) ?? projects[0];
   if (project === undefined) return null;
@@ -49,6 +52,7 @@ export function openFreshTab(
     model: null,
     effort: null,
     position: afterPosition + 1,
+    plan,
   };
   return { tabs: [...tabs, opened], opened };
 }

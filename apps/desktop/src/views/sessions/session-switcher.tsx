@@ -8,7 +8,7 @@ import type { PanelGroup, PanelRow } from './panel-order';
 
 /**
  * The ⌄ beside the title: every open session by project (not the fresh tabs), then Recently closed and New
- * Session. It is the
+ * Session and New Plan. It is the
  * panel's list for a window too narrow to keep the panel open.
  */
 export function SessionSwitcher({
@@ -19,6 +19,7 @@ export function SessionSwitcher({
   onSelect,
   onReopen,
   onNew,
+  onNewPlan,
   label,
 }: {
   readonly groups: readonly PanelGroup[];
@@ -28,6 +29,7 @@ export function SessionSwitcher({
   readonly onSelect: (row: PanelRow) => void;
   readonly onReopen: (entry: ClosedChat) => void;
   readonly onNew: () => void;
+  readonly onNewPlan: () => void;
   /** The session's title: given, the title and its chevron are one button that opens the menu. */
   readonly label?: ReactNode;
 }) {
@@ -94,6 +96,16 @@ export function SessionSwitcher({
           onClick={onNew}
         >
           New Session
+        </Menu.Item>
+        <Menu.Item
+          rightSection={
+            <Text size="xs" c="dimmed">
+              ⌘⇧N
+            </Text>
+          }
+          onClick={onNewPlan}
+        >
+          New Plan
         </Menu.Item>
       </Menu.Dropdown>
     </Menu>
