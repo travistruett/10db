@@ -3,7 +3,6 @@ import {
   ShapeConvertResult,
   ShapeFileDto,
   ShapeOfDto,
-  ShapeRehearseResult,
   ShapeViewDto,
   type DecisionId,
   type PrincipleId,
@@ -83,28 +82,6 @@ export function useShapeOf(target: ShapeOfTarget) {
             await client.tasks[':taskId'].shape.$get({ param: { taskId: target.taskId } }),
             ShapeOfDto,
           ),
-  });
-}
-
-/**
- * Rehearse (§7): the session has the rehearsal reviewer read each proposed task with no mark at its
- * current content. Opening the Convert modal asks for it too, for the proposals about to be converted.
- */
-export function useRehearseShape(shapeId: ShapeId | null) {
-  const { client } = useDaemon();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (proposalIds?: readonly ShapeProposalId[]) => {
-      if (shapeId === null) throw new Error('Open a conversation first.');
-      return readJson(
-        await client.shapes[':shapeId'].rehearse.$post({
-          param: { shapeId },
-          json: proposalIds === undefined ? {} : { proposalIds: [...proposalIds] },
-        }),
-        ShapeRehearseResult,
-      );
-    },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
   });
 }
 
