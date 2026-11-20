@@ -280,6 +280,13 @@ export const McpToolInputs = {
     cause: z.string().min(1),
     severity: z.enum(Severity),
     reason: z.string().min(1),
+    leaveUncommitted: z
+      .array(z.string().min(1))
+      .max(200)
+      .default([])
+      .describe(
+        "Uncommitted paths 10db asked you to commit that are not this task's work, such as another writer's edits in a shared checkout. 10db leaves them uncommitted and stops sending your step back for them. Never name a file this task changed.",
+      ),
   }),
   file_follow_up: RemainingWorkInput.extend({ opId: OpId }),
   request_claim: z.object({
@@ -418,7 +425,11 @@ export const McpToolOutputs = {
     taskId: TaskId.nullable().default(null),
     principleId: PrincipleId.nullable().default(null),
   }),
-  report_deviation: z.object({ deviationId: DeviationId }),
+  report_deviation: z.object({
+    deviationId: DeviationId,
+    /** The paths of `leaveUncommitted` 10db now leaves out of the step's uncommitted changes. */
+    leftUncommitted: z.array(z.string()).default([]),
+  }),
   file_follow_up: z.object({ taskId: TaskId, title: z.string() }),
   request_claim: z.discriminatedUnion('granted', [
     z.object({ granted: z.literal(true), claimId: ClaimId }),

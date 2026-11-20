@@ -7,6 +7,7 @@ import {
   JudgeDecision,
   JudgeOutcome,
   Approval,
+  McpToolName,
   ConflictError,
   currentStep,
   EventType,
@@ -167,6 +168,7 @@ import {
   getTaskStartDirt,
   recordTaskStartDirt,
   taskHasRunASession,
+  listToolOpResults,
 } from '@10db/db';
 import {
   BACKGROUND_DONE_NUDGE,
@@ -4250,6 +4252,27 @@ export function createRunner(opts: RunnerOptions): Runner {
     });
   }
 
+  /**
+   * The run's commits since `base`. The builder's own checkout is shared: the builder and other tools
+   * commit on its branch too, so only the commits the run's sessions made through the commit tool are
+   * named. A worktree's branch holds only 10db's commits, base merges included, so every one is.
+   */
+  async function runCommits(row: WorkstreamRow, checkout: string, base: string): Promise<string[]> {
+    const shas = await opts.git.commitsSince(checkout, base);
+    if (checkout !== getProject(db, row.projectId).repoPath) return shas;
+    const own = new Set(
+      listToolOpResults(db, row.id, McpToolName.Commit).flatMap((result) =>
+        typeof result === 'object' &&
+        result !== null &&
+        !Array.isArray(result) &&
+        typeof result['sha'] === 'string'
+          ? [result['sha']]
+          : [],
+      ),
+    );
+    return shas.filter((sha) => own.has(sha));
+  }
+
   /** The facts the builder checks: where the task began, where it is now, and what it committed. */
   async function checkFacts(row: WorkstreamRow, checkout: string) {
     const head = await opts.git.head(checkout);
@@ -4574,7 +4597,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       hosts: result.blockedHosts,
     });
     const head = await opts.git.head(checkout);
-    const commitShas = await opts.git.commitsSince(checkout, row.baseHead ?? head);
+    const commitShas = await runCommits(row, checkout, row.baseHead ?? head);
     // A cancel that landed while git was read must not be overwritten by the verdict.
     if (stopRequested(ctl) === 'cancelled') {
       cancelNow(id, ctl.fence);

@@ -149,7 +149,13 @@ describe('crossesLimit', () => {
         'allow below the floor is a limit with no name',
         'allow',
         0.6,
-        { kind: 'limit', at: { limit: null, reason: "10db's judge wasn't sure this is safe" } },
+        {
+          kind: 'limit',
+          at: {
+            limit: null,
+            reason: "10db's judge leaned towards allowing this, but only 60% sure (it needs 80%)",
+          },
+        },
         'below_floor',
       ],
       [

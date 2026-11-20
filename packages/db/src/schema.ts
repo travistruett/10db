@@ -2038,17 +2038,26 @@ export const taskContextChecks = sqliteTable(
   ],
 );
 
-/** A path a task's checkout held uncommitted when the task first launched. */
+/**
+ * A path a task's checkout held uncommitted when the task first launched, or one a session of the
+ * task said later is not its work.
+ */
 export interface StartDirtEntry {
   readonly path: string;
   /** Its size, change time and inode then, as `fileFingerprint` reads them; null when it was gone. */
   readonly fingerprint: string | null;
+  /**
+   * The deviation in which a session of the task named the path as someone else's edit made while
+   * the task ran. Such a path is never the task's, whatever the file holds later.
+   */
+  readonly leftBy?: DeviationId;
 }
 
 /**
- * What a task's checkout held uncommitted when the task first launched, written once per task. A
- * path still as it was at a step's end is not the task's work: someone else's edit in a shared
- * checkout, which the step is not sent back to commit.
+ * What a task's checkout held uncommitted that is not the task's work: what it held when the task
+ * first launched, recorded once per task, and the paths a session named since in `report_deviation`.
+ * A path recorded at launch and still as it was at a step's end, or one a session named, is someone
+ * else's edit in a shared checkout, which the step is not sent back to commit.
  */
 export const taskStartDirt = sqliteTable('task_start_dirt', {
   taskId: text('task_id')
