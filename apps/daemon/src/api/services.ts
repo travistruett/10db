@@ -528,8 +528,7 @@ export interface ApiServices extends PlanRecordServices {
   chooseShapeModel(id: ShapeId, model: string | null, effort: Effort | null): ShapeDto;
   /**
    * Converts the selected proposals into goals, tasks and decisions and starts nothing. A refusal
-   * lists every error and writes nothing. Throws ConflictError while a turn runs, unless the
-   * caller asks to interrupt it.
+   * lists every error and writes nothing; a turn that runs goes on.
    */
   convertShape(id: ShapeId, input: ShapeConvertInput): Promise<ShapeConvertOutcome>;
   /**

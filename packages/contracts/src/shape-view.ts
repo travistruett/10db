@@ -232,8 +232,6 @@ export type MilestoneCut = z.infer<typeof MilestoneCut>;
 
 export const ShapeConvertInput = z.object({
   proposalIds: z.array(ShapeProposalId).min(1),
-  /** Stops the turn that is running instead of answering 409. */
-  interrupt: z.boolean().optional(),
   /** One mark per pending milestone; Convert refuses a Plan with more than five of them without it. */
   cut: z.array(MilestoneCut).optional(),
 });

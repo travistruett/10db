@@ -28,9 +28,6 @@
         "claude_code"
       ]
     },
-    "proposeUnlocked": {
-      "type": "boolean"
-    },
     "round": {
       "type": "integer",
       "minimum": 0,
@@ -91,7 +88,6 @@
     "title",
     "state",
     "origin",
-    "proposeUnlocked",
     "round",
     "createdAt",
     "updatedAt"

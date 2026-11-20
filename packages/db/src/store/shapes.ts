@@ -59,8 +59,6 @@ const toShapeDto = (row: ShapeRow): ShapeDto => ({
   title: row.title,
   state: row.state,
   origin: row.origin,
-  // Propose is never locked; the field leaves the contract with the press.
-  proposeUnlocked: true,
   round: row.round,
   model: row.model,
   effort: row.effort,

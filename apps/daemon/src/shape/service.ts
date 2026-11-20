@@ -219,12 +219,12 @@ export interface ShapeService {
   withdrawPrinciple(shapeId: ShapeId, principleId: PrincipleId, reason: string): void;
   /**
    * Converts the selected proposals in one write; a turn that runs goes on. A Plan with more than five
-   * milestones waiting needs the builder's `cut` of them (`judgeMilestones`). `interrupt` is ignored.
+   * milestones waiting needs the builder's `cut` of them (`judgeMilestones`).
    */
   convert(
     shapeId: ShapeId,
     proposalIds: readonly ShapeProposalId[],
-    options?: { interrupt?: boolean; cut?: readonly MilestoneCut[] },
+    options?: { cut?: readonly MilestoneCut[] },
   ): Promise<ConvertOutcome>;
   /** The handlers the MCP endpoint serves a conversation's session. */
   readonly toolsFor: ShapeToolsFor;
