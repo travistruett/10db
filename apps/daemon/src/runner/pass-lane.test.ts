@@ -167,7 +167,9 @@ const working: FakeStep[] = [
 ];
 
 /** What a pass task's turns keep their work with, as the runner's are. */
-const passWork = (): PassWorkDeps => ({
+const passWork = (): PassWorkDeps & { readonly committed: () => void } => ({
+  // These tests watch the lane, not the pull request a commit is pushed to.
+  committed: () => undefined,
   state: engine.state,
   git: createGit(),
   inbox: engine.inbox,

@@ -13,6 +13,7 @@ import { ActionIcon, Menu, Stack, Text } from '@mantine/core';
 import { IconDots } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { CloseProgress } from './close-progress';
+import { useMergeTo } from './pr-button';
 import { PageStatus, pageStatus } from './page-status';
 import { useFrameSlots } from '../../shell/frame-slots';
 import { TitleRow } from '../../shell/title-row';
@@ -77,13 +78,19 @@ function askingSince(view: PassViewDto, inbox: readonly InboxItemDto[]): string[
     .map((item) => item.createdAt);
 }
 
-/** The pass's own menu: Finish and Discard, each enabled by where the pass is. */
+/**
+ * The pass's own menu: Merge to the branch it came from, offered only where the pass lands at its
+ * close (no GitHub remote, or local delivery; elsewhere its pull request merging ends it), and
+ * Discard, each enabled by where the pass is.
+ */
 export function PassMenu({
-  state,
+  view,
   onClose,
   onAbandon,
-}: PassActions & { readonly state: PassState }) {
+}: PassActions & { readonly view: PassViewDto }) {
+  const state = view.pass.state;
   const open = state === PassState.Open;
+  const mergeTo = useMergeTo(view);
   // Discard (the daemon's Abandon) goes on from a close, and from an Abandon that stalled, which the daemon picks up where it
   // stopped.
   const abandonable = open || state === PassState.Closing || state === PassState.Abandoning;
@@ -95,10 +102,10 @@ export function PassMenu({
         </ActionIcon>
       </Menu.Target>
       <Menu.Dropdown>
-        {onClose ? (
+        {onClose && mergeTo !== null ? (
           <MenuAction
-            label="Finish"
-            byline="Ship the signed-off pages as one pull request."
+            label={`Merge to ${mergeTo}`}
+            byline="Land the committed pages there and end the pass."
             disabled={!open}
             onClick={onClose}
           />
@@ -117,7 +124,7 @@ export function PassMenu({
 
 /**
  * The pass's line in the title row (the project, the pass and its counts) with its actions: Open Pull
- * Request once a page is signed off, and a menu with Finish and Discard. Under the row, at the top
+ * Request once a page is signed off, and a menu with Merge to its branch (where it lands at its close) and Discard. Under the row, at the top
  * of the content: why Open Pull Request is missing, the close's progress, and the timing hint, dimmed,
  * when it has something to say. While the pass closes its page actions wait and Abandon stays. While the
  * frame draws the panel, the line, the pull request and the menu are the panel's head (the workspace draws
@@ -153,7 +160,7 @@ export function PassHeader(props: PassHeaderProps) {
             actions={
               <>
                 {signedOff ? pullRequest : null}
-                <PassMenu state={view.pass.state} {...menuActions} />
+                <PassMenu view={view} {...menuActions} />
               </>
             }
           />

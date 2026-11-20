@@ -153,12 +153,14 @@ describe('Open Pull Request', () => {
 
     expect(await prs.preview(passId)).toMatchObject({
       offered: false,
-      reason: expect.stringContaining('Nothing is signed off') as unknown,
+      reason: expect.stringContaining('Commit a page first') as unknown,
       base: 'main',
       existing: null,
       gate: 'scratch',
     });
-    await expect(prs.open(passId)).rejects.toMatchObject({ name: 'ConflictError' });
+    await expect(prs.open(passId, { ready: false })).rejects.toMatchObject({
+      name: 'ConflictError',
+    });
 
     // A page signed off with no change of its own lands no commit: the reason says so, not that
     // nothing is signed off.
@@ -167,23 +169,43 @@ describe('Open Pull Request', () => {
     h.settle(run, 'DONE');
     expect(await prs.preview(passId)).toMatchObject({
       offered: false,
-      reason: 'The signed-off pages changed no file: the pull request holds their changes only',
+      reason: 'The committed pages changed no file, so there is nothing to put in a pull request',
     });
 
     signOff(settings, 'src/settings/page.tsx', 'signed off\n');
     h.git$('remote', 'remove', 'origin');
     expect(await prs.preview(passId)).toMatchObject({
       offered: false,
-      reason: expect.stringContaining('no origin') as unknown,
+      reason: expect.stringContaining('no GitHub remote') as unknown,
     });
     expect(h.gh.calls.filter((c) => c.method === 'prCreate')).toEqual([]);
+  });
+
+  it('pushes a committed page to the pull request once there is one, and opens none by itself', async () => {
+    setup({ gateCommand: null });
+    const { passId, settings, people } = await openedPass();
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+    await prs.pushCommitted(passId);
+    await h.jobs.idle();
+    expect(h.gh.prCreates()).toEqual([]);
+    const branch = getBatch(h.store.db, batchOf(passId)).branch ?? '';
+    expect(h.origin$('for-each-ref', `refs/heads/${branch}`)).toBe('');
+
+    await prs.open(passId, { ready: false });
+    await h.jobs.idle();
+    const tip = signOff(people, 'src/people/page.tsx', 'people, committed\n');
+    await prs.pushCommitted(passId);
+    await h.jobs.idle();
+
+    expect(h.origin$('rev-parse', `refs/heads/${branch}`)).toBe(tip);
+    expect(h.gh.prCreates()).toHaveLength(1);
   });
 
   it("is not offered once the pass's pull request has merged", async () => {
     setup({ gateCommand: null });
     const { passId, settings } = await openedPass();
     signOff(settings, 'src/settings/page.tsx', 'signed off\n');
-    await prs.open(passId);
+    await prs.open(passId, { ready: false });
     await h.jobs.idle();
     h.state.write((w) =>
       recordPullRequestStatus(w, batchOf(passId), {
@@ -210,7 +232,7 @@ describe('Open Pull Request', () => {
 
     const preview = await prs.preview(passId);
     expect(preview).toMatchObject({ offered: true, reason: null, base: 'main', aheadOfBase: 0 });
-    const answer = await prs.open(passId);
+    const answer = await prs.open(passId, { ready: false });
     expect(answer).toEqual({ url: null, base: 'main', gate: 'scratch', review: 'none' });
     await h.jobs.idle();
 
@@ -255,7 +277,7 @@ describe('Open Pull Request', () => {
 
     // A second Open Pull Request pushes to the pull request it has, rewriting its body.
     const next = signOff(people, 'src/people/page.tsx', 'people\n// signed\n');
-    expect(await prs.open(passId)).toMatchObject({ url });
+    expect(await prs.open(passId, { ready: false })).toMatchObject({ url });
     await h.jobs.idle();
     expect(h.origin$('rev-parse', `refs/heads/${branch}`)).toBe(next);
     expect(h.gh.prCreates()).toHaveLength(1);
@@ -277,7 +299,7 @@ describe('Open Pull Request', () => {
       // People is not signed off, so its picture stays out.
       picture(people, 'before', '/people', 'people before');
       signOff(settings, 'src/settings/page.tsx', 'signed off\n');
-      await prs.open(passId);
+      await prs.open(passId, { ready: false });
       await h.jobs.idle();
       const body = h.gh.body(getPassPullRequest(h.store.db, passId)?.url ?? '');
       if (!on) {
@@ -359,7 +381,7 @@ describe('Open Pull Request', () => {
     const { passId, settings } = await openedPass();
     signOff(settings, 'src/settings/page.tsx', 'signed off\n');
 
-    await prs.open(passId);
+    await prs.open(passId, { ready: false });
     await h.jobs.idle();
 
     await vi.waitFor(
@@ -404,7 +426,7 @@ describe('Open Pull Request', () => {
       });
     };
 
-    await prs.open(passId);
+    await prs.open(passId, { ready: false });
     await h.jobs.idle();
     await prs.stopPassChecks(passId);
 
@@ -479,7 +501,7 @@ describe('Open Pull Request', () => {
     const { passId, settings } = await openedPass();
     signOff(settings, 'src/settings/page.tsx', 'signed off\n');
 
-    expect(await prs.open(passId)).toMatchObject({ gate: 'folder_at_close' });
+    expect(await prs.open(passId, { ready: false })).toMatchObject({ gate: 'folder_at_close' });
     await h.jobs.idle();
 
     const url = getPassPullRequest(h.store.db, passId)?.url ?? '';
@@ -493,7 +515,7 @@ describe('Open Pull Request', () => {
     const { passId, settings } = await openedPass();
     signOff(settings, 'src/settings/page.tsx', 'signed off\n');
 
-    await prs.open(passId);
+    await prs.open(passId, { ready: false });
     await h.jobs.idle();
 
     await vi.waitFor(
@@ -544,7 +566,7 @@ describe('Open Pull Request', () => {
     h.state.write((w) => patchProject(w, h.project.id, { defaultRigor: 'standard' }));
     const { passId, settings, people } = await openedPass();
     signOff(settings, 'src/settings/page.tsx', 'signed off\n');
-    await prs.open(passId);
+    await prs.open(passId, { ready: false });
     await h.jobs.idle();
     await vi.waitFor(
       () => {
@@ -554,7 +576,7 @@ describe('Open Pull Request', () => {
     );
 
     // Asked with the tip already reviewed, a page lands before the push: the push's tip is new.
-    expect(await prs.open(passId)).toMatchObject({ review: 'unchanged' });
+    expect(await prs.open(passId, { ready: false })).toMatchObject({ review: 'unchanged' });
     const tip = signOff(people, 'src/people/page.tsx', 'people, signed\n');
     await h.jobs.idle();
 

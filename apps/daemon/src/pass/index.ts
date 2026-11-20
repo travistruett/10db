@@ -44,6 +44,7 @@ export {
   signOffRefusal,
   startSignOff,
   subscribeSignOffWaits,
+  type SignOffDeps,
 } from './sign-off';
 export { closeGateOf } from './close-lists';
 export { createPassCloses, type PassCloses } from './close';

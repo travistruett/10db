@@ -671,7 +671,7 @@ export function createServices(deps: {
       deps.cancelSignOff(passId, taskId);
     },
     passPullRequest: (passId) => deps.passPullRequests.preview(passId),
-    openPassPullRequest: (passId) => deps.passPullRequests.open(passId),
+    openPassPullRequest: (passId, input) => deps.passPullRequests.open(passId, input),
     async sendToAgent(taskId, noticeId) {
       const task = getTask(db, taskId);
       const message = TaskMessageId.safeParse(noticeId);

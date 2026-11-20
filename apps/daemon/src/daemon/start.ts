@@ -274,6 +274,7 @@ import {
   resumePassWork,
   startAbandon,
   startSignOff,
+  type SignOffDeps,
   subscribeMergedPasses,
   subscribeSignOffWaits,
   takeOut,
@@ -2119,10 +2120,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // A pass's take-outs and Abandon stop its lanes through the runner, and tell the watcher which
   // files their put-back wrote.
   const stopLane: StopPassLane = (id) => createdRunner.stopPassLane(id);
-  const passTakeOuts: TakeOutDeps = {
+  const passTakeOuts: TakeOutDeps & SignOffDeps = {
     ...passWork,
     stopLane,
     wrote: (repo, paths) => watcher?.daemonWrote(repo, paths) ?? Promise.resolve(),
+    // Once the pass has a pull request, each page committed is pushed to it.
+    committed: (passId) => {
+      passPullRequests.pushCommitted(passId).catch((error: unknown) => {
+        logger.warn({ passId, err: error }, 'committed page not pushed');
+      });
+    },
   };
   // A Ready page's Sign Off, from its route or its check item; one waiting for another page's hold
   // goes on once that hold closes.

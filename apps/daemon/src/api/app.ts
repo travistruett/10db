@@ -112,6 +112,7 @@ import {
   SystemCheckDto,
   TakeOutRequest,
   PassCloseRequest,
+  PassPullRequestRequest,
   ConversationFileId,
   TaskScreenId,
   TaskId,
@@ -1293,8 +1294,17 @@ export function createApp(deps: ApiDeps) {
     .get('/passes/:passId/pull-request', async (c) =>
       c.json(await deps.services.passPullRequest(PassId.parse(c.req.param('passId')))),
     )
-    .post('/passes/:passId/pull-request', async (c) =>
-      c.json(await deps.services.openPassPullRequest(PassId.parse(c.req.param('passId'))), 202),
+    .post(
+      '/passes/:passId/pull-request',
+      validator('json', (value): PassPullRequestRequest => PassPullRequestRequest.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.openPassPullRequest(
+            PassId.parse(c.req.param('passId')),
+            c.req.valid('json'),
+          ),
+          202,
+        ),
     )
     .post('/tasks/:taskId/thread/:messageId/send-to-agent', async (c) =>
       c.json(

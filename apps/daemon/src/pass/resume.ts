@@ -17,7 +17,7 @@ import { passBranch } from './kept-work';
 import { putBackKeptWork } from './put-back';
 import { keepOrLetGo } from './shared-chain';
 import { holdRef } from './shared-hold';
-import { resumeSignOffWaits } from './sign-off';
+import { resumeSignOffWaits, type SignOffDeps } from './sign-off';
 import { takeOut, TakeOutWithin, type TakeOutDeps } from './take-out';
 
 // Workbench spec §12: at start-up, after the runs' own recovery, each open pass goes on from its rows.
@@ -77,7 +77,7 @@ async function settleHolds(deps: TakeOutDeps, pass: PassDto, repo: string): Prom
  * An Abandon that has not finished goes on as a job from its recorded step, its take-outs inside it;
  * a close's go on with it. Nothing here waits for those jobs.
  */
-export async function resumePassWork(deps: TakeOutDeps): Promise<void> {
+export async function resumePassWork(deps: TakeOutDeps & SignOffDeps): Promise<void> {
   const db = deps.state.db;
   for (const project of listProjects(db)) {
     const pass = findOpenPass(db, project.id);

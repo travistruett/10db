@@ -164,18 +164,24 @@ function pullRequestPreviewKey(passId: PassId) {
   return ['pass-pull-request', passId] as const;
 }
 
-/** Open Pull Request: pushes the signed-off pages and opens a draft, or updates the one open. */
+/**
+ * Open PR: pushes the committed pages and opens the pull request, ready for review or, without
+ * `ready`, as a draft; on one already open it pushes again, and `ready` marks a draft ready.
+ */
 export function useOpenPullRequest() {
   const { client } = useDaemon();
   const refetch = useRefetchPasses();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (passId: PassId) =>
+    mutationFn: async ({ passId, ready }: { passId: PassId; ready: boolean }) =>
       readJson(
-        await client.passes[':passId']['pull-request'].$post({ param: { passId } }),
+        await client.passes[':passId']['pull-request'].$post({
+          param: { passId },
+          json: { ready },
+        }),
         PassPullRequestDto,
       ),
-    onSuccess: (_opened, passId) =>
+    onSuccess: (_opened, { passId }) =>
       Promise.all([
         refetch(),
         queryClient.invalidateQueries({ queryKey: pullRequestPreviewKey(passId) }),

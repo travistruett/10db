@@ -90,8 +90,15 @@ export type SignOffOutcome =
   | { readonly kind: 'waiting'; readonly waitsFor: PassHoldDto }
   | { readonly kind: 'not_now'; readonly reason: string };
 
-/** What a sign-off needs: the pass's work in the folder and the runner's stop. */
-export type SignOffDeps = PassWorkDeps & { readonly stopLane: StopPassLane };
+/**
+ * What a sign-off needs: the pass's work in the folder and the runner's stop, and who hears that it
+ * moved the pass's branch (the pass's open pull request is pushed to; injected, since `pass/` never
+ * imports delivery).
+ */
+export type SignOffDeps = PassWorkDeps & {
+  readonly stopLane: StopPassLane;
+  readonly committed: (passId: PassId) => void;
+};
 
 /**
  * The run's path to DONE once step 0 has stopped it (spec §9.2), by the edges that exist, since none
@@ -542,6 +549,10 @@ export async function signOffSteps(
     });
     return null;
   });
+  // A branch the sign-off moved, its own commit or a shared change, is pushed to the pass's open pull
+  // request whatever became of the sign-off; a close pushes its own.
+  if (input.from !== SignOffFrom.Close && (at !== null || shared.some((s) => s.landedSha !== null)))
+    deps.committed(pass.id);
   if (refused !== null) return { kind: 'not_now', reason: refused };
   // A question the stopped turn left open is about work that is done now.
   deps.inbox.cancelForWorkstream(ws);

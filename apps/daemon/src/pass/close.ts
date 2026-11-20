@@ -335,7 +335,11 @@ export async function closeSteps(
     for (const page of plan.pages) {
       if (page.choice !== PassClosePageChoice.SignOff) continue;
       closing();
-      await signOffSteps(deps, { taskId: page.taskId, from: SignOffFrom.Close });
+      // The close pushes the branch itself, once every page has landed.
+      await signOffSteps(
+        { ...deps, committed: () => undefined },
+        { taskId: page.taskId, from: SignOffFrom.Close },
+      );
     }
     for (const file of plan.files) {
       if (file.placeIn === null) continue;

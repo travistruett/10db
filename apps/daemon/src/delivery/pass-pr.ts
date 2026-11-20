@@ -93,10 +93,18 @@ export interface PassPullRequests extends PassShipDeps {
   /** `GET /passes/:passId/pull-request`. */
   preview(passId: PassId): Promise<PassPullRequestPreviewDto>;
   /**
-   * `POST /passes/:passId/pull-request`: queues the push and the draft in the delivery key, then the
-   * gate and the review outside it, and answers at once. Refused (409) when the preview offers none.
+   * `POST /passes/:passId/pull-request`: queues the push and the pull request in the delivery key,
+   * then the gate and the review outside it, and answers at once. `ready` opens it ready for review,
+   * or marks a draft ready; else a new one is a draft and one already open keeps its state. Refused
+   * (409) when the preview offers none.
    */
-  open(passId: PassId): Promise<PassPullRequestDto>;
+  open(passId: PassId, input: { readonly ready: boolean }): Promise<PassPullRequestDto>;
+  /**
+   * A page was committed: while the pass has an open pull request, what the branch holds now is pushed
+   * to it, as Push Now would. Nothing happens without one, and a push that can't run says so in the
+   * header's notice, as Push Now does.
+   */
+  pushCommitted(passId: PassId): Promise<void>;
   /** Stops every pass's running checks, as the daemon shuts down. */
   stop(): Promise<void>;
 }
@@ -145,7 +153,7 @@ function signedOff(db: DbReader, passId: PassId): string[] {
 
 /** The header notice of a failed gate on the pass's tip, a close's included. */
 export const PASS_GATE_NOTICE = 'gate';
-/** The header notice that says Open Pull Request did not finish. */
+/** The header notice that says a push to the pull request, or its opening, did not finish. */
 const PR_OPEN_NOTICE = 'pr-open';
 
 const message = (error: unknown): string =>
@@ -514,6 +522,13 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
     const pr = getPassPullRequest(db, passId);
     const existing = pr === null ? null : { url: pr.url, draft: pr.draft ?? true };
     const gate = passGateKind(project);
+    const repo = project.repoPath;
+    const origin = await deps.git.remoteUrl(repo, 'origin');
+    // Where nothing waits for a merge, the pass lands at its close (W8).
+    const lands: PassPullRequestPreviewDto['lands'] =
+      project.delivery === Delivery.Local || batch.repo === null || origin === null
+        ? 'close'
+        : 'pull_request';
     const refuse = (reason: string, aheadOfBase: number | null = null) => ({
       offered: false,
       reason,
@@ -521,8 +536,8 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
       base,
       existing,
       gate,
+      lands,
     });
-    const repo = project.repoPath;
     const tip = batch.branch === null ? null : await deps.git.branchTip(repo, batch.branch);
     const tracked = await deps.git.trackingTip(repo, base).catch(() => null);
     const ahead =
@@ -547,15 +562,21 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
       );
       return refuse(
         signedOff
-          ? 'The signed-off pages changed no file: the pull request holds their changes only'
-          : 'Nothing is signed off yet: the pull request holds signed-off pages only',
+          ? 'The committed pages changed no file, so there is nothing to put in a pull request'
+          : 'Commit a page first: the pull request holds committed pages',
         ahead,
       );
     }
-    if ((await deps.git.remoteUrl(repo, 'origin')) === null)
-      return refuse(`${project.name} has no origin, so the pass lands by its close alone`, ahead);
+    if (origin === null)
+      return refuse(
+        `${project.name} has no GitHub remote: Merge to ${pass.returnBranch} lands the pass`,
+        ahead,
+      );
     if (batch.repo === null)
-      return refuse(`origin of ${project.name} is not a GitHub repository`, ahead);
+      return refuse(
+        `${project.name}'s origin is not on GitHub: Merge to ${pass.returnBranch} lands the pass`,
+        ahead,
+      );
     try {
       await deps.gh.authStatus(ghCall(deps, AbortSignal.timeout(deps.limits.networkTimeoutMs)));
     } catch (error) {
@@ -564,7 +585,7 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
         ahead,
       );
     }
-    return { offered: true, reason: null, aheadOfBase: ahead, base, existing, gate };
+    return { offered: true, reason: null, aheadOfBase: ahead, base, existing, gate, lands };
   }
 
   return {
@@ -577,92 +598,115 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
       gating.delete(passId);
     },
     preview,
-    async open(passId) {
-      const shown = await preview(passId);
-      if (!shown.offered)
-        throw new ConflictError(shown.reason ?? 'Open Pull Request is not offered');
-      const { pass, batch, project } = placeOf(passId);
-      const branch = batch.branch;
-      const tip = branch === null ? null : await deps.git.branchTip(project.repoPath, branch);
-      const reviewed = getPassProgress(db, passId).reviewedSha;
-      // A tip read already, with nothing a cut review left unread, is not reviewed again.
-      const unchanged = (sha: string | null): boolean =>
-        getPassProgress(db, passId).reviewedSha === sha && !reviewHasUnread(db, passId);
-      const review =
-        deps.review === null || !passHasReview(db, passId)
-          ? 'none'
-          : reviewed !== null && unchanged(tip)
-            ? 'unchanged'
-            : 'started';
-      const stillOpen = (): boolean => getPass(db, passId).state === PassState.Open;
-      const reviews = review !== 'none';
-      const gates = shown.gate === PassPullRequestGate.Scratch;
-      deps.jobs.run(jobKey(batch, JobQueue.Ship), async (signal) => {
-        if (signal.aborted || getPass(db, passId).state !== PassState.Open || branch === null)
-          return;
-        // This job's mark of the commit about to be gated, and whether the checks took the gate
-        // on, whose end clears the mark.
-        let marked: { readonly sha: string; run: AbortSignal | null } | null = null;
-        let handed = false;
-        try {
-          if ((await pushPassBranch(passId, signal)) === 'no_origin') return;
-          const sha = await deps.git.branchTip(project.repoPath, branch);
-          // An Abandon or a close that took the pass while the branch was pushed: no pull request,
-          // and no gate or review, is started for it.
-          if (sha === null || !stillOpen()) return;
-          // The gate starts once the pull request is there: its body says the gate is running.
-          if (gates) {
-            marked = { sha, run: null };
-            gating.set(passId, marked);
-          }
-          await ensurePassPr({ passId, ready: false }, signal);
-          deps.state.write((w) => clearPassNotice(w, passId, PR_OPEN_NOTICE));
-          if (!stillOpen()) return;
-          const started = checks.start({
-            passId,
-            sha,
-            gate: gates,
-            // Decided on the tip pushed: a page that landed since the request makes it new.
-            review: reviews && !unchanged(sha),
-            baseRef: `refs/remotes/origin/${shown.base}`,
-          });
-          const mark = marked;
-          if (mark !== null) {
-            handed = true;
-            mark.run = started.signal;
-            // Checks that end without running the gate (stopped, or the pass gone meanwhile) leave
-            // no mark behind.
-            void started.done.finally(() => {
-              if (gating.get(passId) === mark) gating.delete(passId);
-            });
-          }
-        } catch (error) {
-          deps.logger.warn(
-            { passId: pass.id, err: message(error) },
-            'pass pull request not opened',
-          );
-          // A function, so the check after the awaits is not narrowed away by the one before them.
-          const stopped = (): boolean => signal.aborted;
-          if (stopped()) return;
-          deps.state.write((w) => {
-            setPassNotice(w, passId, {
-              id: PR_OPEN_NOTICE,
-              kind: PassNoticeKind.PrNotOpened,
-              text: `Open Pull Request did not finish: ${message(error)}`,
-              sendable: false,
-              cardId: null,
-              at: w.now,
-            });
-          });
-        } finally {
-          if (!handed && marked !== null && gating.get(passId) === marked) gating.delete(passId);
-        }
-      });
-      return { url: shown.existing?.url ?? null, base: shown.base, gate: shown.gate, review };
+    open,
+    async pushCommitted(passId) {
+      if (getPass(db, passId).state !== PassState.Open) return;
+      const pr = getPassPullRequest(db, passId);
+      if (
+        pr === null ||
+        pr.state === PullRequestState.Merged ||
+        pr.state === PullRequestState.Closed
+      )
+        return;
+      // A push that can't start (gh signed out or offline, a refused preview) says so, as one that
+      // fails does, so Push Now is offered and the commit is not left off the pull request unseen.
+      try {
+        await open(passId, { ready: false });
+      } catch (error) {
+        deps.logger.warn({ passId, err: message(error) }, 'committed page not pushed');
+        pushFailed(passId, error);
+      }
     },
     async stop() {
       await checks.stopAll();
       gating.clear();
     },
   };
+
+  /** Says in the header that the push did not finish, offering Push Now. */
+  function pushFailed(passId: PassId, error: unknown): void {
+    deps.state.write((w) => {
+      setPassNotice(w, passId, {
+        id: PR_OPEN_NOTICE,
+        kind: PassNoticeKind.PrNotOpened,
+        text: `Pushing to the pull request did not finish: ${message(error)}`,
+        sendable: false,
+        cardId: null,
+        at: w.now,
+      });
+    });
+  }
+
+  async function open(
+    passId: PassId,
+    input: { readonly ready: boolean },
+  ): Promise<PassPullRequestDto> {
+    const shown = await preview(passId);
+    if (!shown.offered) throw new ConflictError(shown.reason ?? 'Open Pull Request is not offered');
+    const { pass, batch, project } = placeOf(passId);
+    const branch = batch.branch;
+    const tip = branch === null ? null : await deps.git.branchTip(project.repoPath, branch);
+    const reviewed = getPassProgress(db, passId).reviewedSha;
+    // A tip read already, with nothing a cut review left unread, is not reviewed again.
+    const unchanged = (sha: string | null): boolean =>
+      getPassProgress(db, passId).reviewedSha === sha && !reviewHasUnread(db, passId);
+    const review =
+      deps.review === null || !passHasReview(db, passId)
+        ? 'none'
+        : reviewed !== null && unchanged(tip)
+          ? 'unchanged'
+          : 'started';
+    const stillOpen = (): boolean => getPass(db, passId).state === PassState.Open;
+    const reviews = review !== 'none';
+    const gates = shown.gate === PassPullRequestGate.Scratch;
+    deps.jobs.run(jobKey(batch, JobQueue.Ship), async (signal) => {
+      if (signal.aborted || getPass(db, passId).state !== PassState.Open || branch === null) return;
+      // This job's mark of the commit about to be gated, and whether the checks took the gate
+      // on, whose end clears the mark.
+      let marked: { readonly sha: string; run: AbortSignal | null } | null = null;
+      let handed = false;
+      try {
+        if ((await pushPassBranch(passId, signal)) === 'no_origin') return;
+        const sha = await deps.git.branchTip(project.repoPath, branch);
+        // An Abandon or a close that took the pass while the branch was pushed: no pull request,
+        // and no gate or review, is started for it.
+        if (sha === null || !stillOpen()) return;
+        // The gate starts once the pull request is there: its body says the gate is running.
+        if (gates) {
+          marked = { sha, run: null };
+          gating.set(passId, marked);
+        }
+        await ensurePassPr({ passId, ready: input.ready }, signal);
+        deps.state.write((w) => clearPassNotice(w, passId, PR_OPEN_NOTICE));
+        if (!stillOpen()) return;
+        const started = checks.start({
+          passId,
+          sha,
+          gate: gates,
+          // Decided on the tip pushed: a page that landed since the request makes it new.
+          review: reviews && !unchanged(sha),
+          baseRef: `refs/remotes/origin/${shown.base}`,
+        });
+        const mark = marked;
+        if (mark !== null) {
+          handed = true;
+          mark.run = started.signal;
+          // Checks that end without running the gate (stopped, or the pass gone meanwhile) leave
+          // no mark behind.
+          void started.done.finally(() => {
+            if (gating.get(passId) === mark) gating.delete(passId);
+          });
+        }
+      } catch (error) {
+        deps.logger.warn({ passId: pass.id, err: message(error) }, 'pass pull request not opened');
+        // A function, so the check after the awaits is not narrowed away by the one before them.
+        const stopped = (): boolean => signal.aborted;
+        if (stopped()) return;
+        pushFailed(passId, error);
+      } finally {
+        if (!handed && marked !== null && gating.get(passId) === marked) gating.delete(passId);
+      }
+    });
+    return { url: shown.existing?.url ?? null, base: shown.base, gate: shown.gate, review };
+  }
 }

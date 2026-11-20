@@ -426,6 +426,8 @@ export async function createTestEngine(
             jobs,
             logger: silentLogger,
             clock,
+            // The test engine has no pull request to push a commit to.
+            committed: () => undefined,
             stopLane: (id) => ready.stopPassLane(id),
           },
           taskId,
