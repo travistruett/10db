@@ -5,7 +5,6 @@ import {
   type WorkstreamDto,
 } from '@10db/contracts';
 import { Button, Divider, Group, Stack, Text } from '@mantine/core';
-import { useOpenSession } from '../sessions/open-session';
 import { useState } from 'react';
 import { useGoalPassPages, useLivePass } from '../../daemon/pass-queries';
 import { useBatches, useTasks, useWorkstreams } from '../../daemon/queries';
@@ -54,7 +53,6 @@ export function GoalDetail({ project, summary, opened }: GoalDetailProps) {
   const { goal, digest } = summary;
   const [starting, setStarting] = useState(false);
   const removal = useRemoveDraftGoalAction(summary);
-  const openSession = useOpenSession();
   const tasks = useTasks(project.id);
   const sessions = useSessions((ws) => goal.taskIds.includes(ws.taskId));
   const batches = useBatches(project.id);
@@ -114,12 +112,7 @@ export function GoalDetail({ project, summary, opened }: GoalDetailProps) {
         <SinceYouLooked opened={opened} />
         <AboutGoal goal={goal} />
         <PlannedIn goalId={goal.id} />
-        <OpenPlanSession
-          target={{ goalId: goal.id }}
-          onOpen={(chatId) => {
-            void openSession(chatId);
-          }}
-        />
+        <OpenPlanSession target={{ goalId: goal.id }} />
         {removal.offer === 'available' ? (
           <Button
             variant="subtle"

@@ -101,7 +101,7 @@ export function sourceLabel(p: Pick<ProvenanceDto, 'sourceKind' | 'sourceRef' | 
     case SourceKind.SlackReply:
       return 'Slack reply';
     case SourceKind.Builder: {
-      if (typeof p.sourceRef['shapeId'] === 'string') return 'Plan conversation';
+      if (typeof p.sourceRef['shapeId'] === 'string') return 'Plan session';
       const via = p.origin?.via;
       if (via === undefined) return 'The app';
       return viaLabel(via);

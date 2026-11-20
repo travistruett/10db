@@ -13,12 +13,10 @@ import {
 import { IconX } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { useConversation } from '../../../daemon/conversation-queries';
 import { useConvertShape, useDismissFinding, useRowChange } from '../../../daemon/shape-queries';
 import { shortAgo } from '../../factory/short-ago';
 import { useNow } from '../../../shell/relative';
 import { ConvertModal, convertibleRows } from './convert-modal';
-import { agentRehearses } from './agent-rehearsal';
 import { AttachmentsContext } from './attachments/row-attachments';
 import { HeardSoFar } from './heard-so-far';
 import { PreviewPanel } from './preview-panel';
@@ -319,9 +317,6 @@ function ConvertPanel({
   readonly onClose: () => void;
 }) {
   const convert = useConvertShape(view.shape.id);
-  // Until the conversation loads the agent is unknown, so Accept waits for it.
-  const conversation = useConversation(view.conversationId);
-  const capabilities = conversation.data?.capabilities;
   const [refusals, setRefusals] = useState<readonly string[]>([]);
   const close = () => {
     setRefusals([]);
@@ -334,8 +329,6 @@ function ConvertPanel({
       onClose={close}
       rows={rows}
       view={view}
-      agentLabel={capabilities?.label ?? 'the agent'}
-      rehearses={agentRehearses(conversation)}
       pending={convert.isPending}
       refusals={refusals}
       failure={convert.error?.message ?? null}

@@ -5,7 +5,7 @@ import dayjs from 'dayjs';
 import type { ReactNode } from 'react';
 import { usePlanRecord } from '../../../../daemon/plan-record-queries';
 import { useShapeView } from '../../../../daemon/shape-queries';
-import { useOpenSession } from '../../open-session';
+import { useOpenSessionNotice } from '../../open-session';
 import { TitleRow } from '../../../../shell/title-row';
 import { DecisionsTab } from './decisions-tab';
 import { DocumentsTab } from './documents-tab';
@@ -144,7 +144,7 @@ export function RecordView({
 }) {
   const record = usePlanRecord(shapeId);
   const chatId = useShapeView(shapeId).data?.chatId ?? null;
-  const openSession = useOpenSession();
+  const { open, notice } = useOpenSessionNotice();
   const tab = search.tab ?? RecordTab.Documents;
   return (
     <Stack
@@ -166,7 +166,7 @@ export function RecordView({
               leftSection={<IconMessages size={14} stroke={1.5} />}
               disabled={chatId === null}
               onClick={() => {
-                if (chatId !== null) void openSession(chatId);
+                if (chatId !== null) open(chatId);
               }}
             >
               Session
@@ -175,6 +175,7 @@ export function RecordView({
           </>
         }
       />
+      {notice}
       {record.data === undefined ? null : (
         <Text size="xs" c="dimmed">
           {importedLine(record.data)}

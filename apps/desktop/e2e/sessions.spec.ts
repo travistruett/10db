@@ -632,7 +632,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
 
   // ↑/↓ move between rows and Enter opens one in place.
   const rows = panel
-    .getByRole('list', { name: 'Proposed rows' })
+    .getByRole('list', { name: 'Plan rows' })
     .locator('button[data-shape-row][aria-expanded="false"]');
   await rows.first().focus();
   await page.keyboard.press('ArrowDown');
@@ -648,7 +648,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await edit.getByRole('textbox', { name: 'Title' }).fill('Drop the Abandon strip, keep Retry');
   await edit.getByRole('button', { name: 'Save' }).click();
   const pinned = panel
-    .getByRole('list', { name: 'Proposed rows' })
+    .getByRole('list', { name: 'Plan rows' })
     .getByText('Drop the Abandon strip, keep Retry');
   await expect(pinned).toBeVisible();
   await sendLine(page, 'propose it again');
@@ -664,8 +664,8 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await expectAccessible(page, 'accept');
   await dialog.getByRole('button', { name: 'Accept 4' }).click();
   await expect(dialog).toBeHidden();
-  await expect(panel.getByText('Converted · on the Board')).toHaveCount(3);
-  await expect(panel.getByText('Converted · in Knowledge')).toHaveCount(1);
+  await expect(panel.getByText('Accepted · on the Board')).toHaveCount(3);
+  await expect(panel.getByText('Accepted · in Knowledge')).toHaveCount(1);
   const accepted = await titles();
   expect(accepted).toHaveLength(before + 4);
   expect(accepted).toEqual(
@@ -683,7 +683,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
     .getByRole('dialog', { name: 'Remove Draft Goal' })
     .getByRole('button', { name: 'Remove Draft Goal' })
     .click();
-  await expect(panel.getByText('Converted · on the Board')).toHaveCount(2);
+  await expect(panel.getByText('Accepted · on the Board')).toHaveCount(2);
   expect(await titles()).toHaveLength(before + 2);
 
   // Under the side-by-side width the panel is a drawer, which Close Plan closes and the title's Plan reopens.

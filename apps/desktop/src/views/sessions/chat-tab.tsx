@@ -324,19 +324,6 @@ export function ChatTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 
-  // Esc lets go of the highlight Why? left in the conversation.
-  const highlighted = why !== null;
-  useEffect(() => {
-    if (!highlighted) return;
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setWhy(null);
-    };
-    document.addEventListener('keydown', onKeyDown);
-    return () => {
-      document.removeEventListener('keydown', onKeyDown);
-    };
-  }, [highlighted]);
-
   // Esc is Stop, unless it belongs to something open on top, a form that keeps it or a waiting card.
   const stopNow = (): void => {
     stop.mutate(chat.conversationId);
@@ -345,13 +332,28 @@ export function ChatTab({
     changesChoice.set(chat.id, false);
     setChangesOpen(false);
   };
-  const latest = useRef({ working, stopNow, changesOpen, closeChanges });
+  // Esc lets go of the highlight Why? left in the conversation, and that is all it does.
+  const highlighted = why !== null;
+  const clearWhy = (): void => {
+    setWhy(null);
+  };
+  const latest = useRef({ working, stopNow, changesOpen, closeChanges, highlighted, clearWhy });
   useEffect(() => {
-    latest.current = { working, stopNow, changesOpen, closeChanges };
+    latest.current = { working, stopNow, changesOpen, closeChanges, highlighted, clearWhy };
   });
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return;
+      if (
+        latest.current.highlighted &&
+        !event.defaultPrevented &&
+        !escapeIsTaken(event) &&
+        !escapeHasOwner(event)
+      ) {
+        event.preventDefault();
+        latest.current.clearWhy();
+        return;
+      }
       // The Changes drawer is a dialog that is not modal: Esc closes it wherever focus is, before it can
       // read as a layer that owns the key or as a Stop.
       if (latest.current.changesOpen && !event.defaultPrevented && !escapeHasOwner(event)) {

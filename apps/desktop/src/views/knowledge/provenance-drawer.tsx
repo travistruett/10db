@@ -1,6 +1,6 @@
 import type { ChatId, ProvenanceDto } from '@10db/contracts';
 import { Alert, Anchor, Blockquote, Drawer, Loader, Stack, Text } from '@mantine/core';
-import { useOpenSession } from '../sessions/open-session';
+import { useOpenSessionNotice } from '../sessions/open-session';
 import { useProvenance, type RecordRef, type TracedRecord } from '../../daemon/knowledge-queries';
 import { STATE_LABELS, dateTimeText, sourceLabel, viaLabel, whoText } from './knowledge-labels';
 
@@ -28,18 +28,21 @@ function PlanSessionLink({
   readonly chatId: ChatId | null;
   readonly title: string;
 }) {
-  const openSession = useOpenSession();
+  const { open, notice } = useOpenSessionNotice();
   if (chatId === null) return <Text size="sm">{`Plan session: ${title}`}</Text>;
   return (
-    <Anchor
-      component="button"
-      type="button"
-      size="sm"
-      ta="left"
-      onClick={() => {
-        void openSession(chatId);
-      }}
-    >{`Plan session: ${title}`}</Anchor>
+    <>
+      <Anchor
+        component="button"
+        type="button"
+        size="sm"
+        ta="left"
+        onClick={() => {
+          open(chatId);
+        }}
+      >{`Plan session: ${title}`}</Anchor>
+      {notice}
+    </>
   );
 }
 

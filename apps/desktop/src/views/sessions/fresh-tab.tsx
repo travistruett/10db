@@ -71,6 +71,7 @@ export function FreshTab({
   const [createError, setCreateError] = useState<string | null>(null);
   // Files dropped before the session exists: kept until it does, and after a failed create.
   const [held, setHeld] = useState<readonly File[]>([]);
+  const heldNow = useRef<File[]>([]);
   const planOpen = usePlanOpen(tab.id, tab.plan);
   const input = useRef<HTMLTextAreaElement | HTMLInputElement>(null);
   // The chat being made, shared by an `@` and a send that come together, so there is only ever one.
@@ -85,13 +86,18 @@ export function FreshTab({
 
   // A second send or drop while the session is being made waits for it, then goes in order: files first
   // (the session's plan exists by then), then the message.
+  // Files not yet in a session stay held, so a create that failed still has them when the next send, drop or
+  // `@` starts one, and none is held twice.
   const ensureChat = (send: SendRequest | null, files: readonly File[] = []): Promise<ChatDto> => {
+    const fresh = files.filter((file) => !heldNow.current.includes(file));
+    heldNow.current.push(...fresh);
+    if (fresh.length > 0) setHeld([...heldNow.current]);
     if (making.current !== null) {
       making.current.want.send ??= send;
-      making.current.want.files.push(...files);
+      making.current.want.files.push(...fresh);
       return making.current.promise;
     }
-    const want = { send, files: [...files] };
+    const want = { send, files: [...heldNow.current] };
     const promise = create
       .mutateAsync({
         projectId: tab.projectId,
@@ -140,7 +146,7 @@ export function FreshTab({
   const tryAgain = (): void => {
     setCreateError(null);
     // The draft stays where it is and moves to the session with the tab; the builder sends it from there.
-    ensureChat(null, held).catch((error: unknown) => {
+    ensureChat(null).catch((error: unknown) => {
       setCreateError(error instanceof Error ? error.message : String(error));
     });
   };
@@ -195,14 +201,15 @@ export function FreshTab({
               capabilities={{ images: [] }}
               phase={phase}
               disabledReason={null}
-              error={createError}
+              error={null}
+              // The alert under the composer says why, once, and offers Try Again.
+              onFailure={setCreateError}
               inputRef={input}
               {...(tab.plan
                 ? {
                     uploads: {
                       accept: FILE_PICKER_ACCEPT,
                       onFiles: (files: File[]) => {
-                        setHeld((now) => [...now, ...files]);
                         setCreateError(null);
                         ensureChat(null, files).catch((error: unknown) => {
                           setCreateError(error instanceof Error ? error.message : String(error));
@@ -227,12 +234,7 @@ export function FreshTab({
                 )
               }
               onSend={async (sent) => {
-                try {
-                  await ensureChat({ draft: sent }, []);
-                } catch (error) {
-                  setCreateError(error instanceof Error ? error.message : String(error));
-                  throw error;
-                }
+                await ensureChat({ draft: sent });
               }}
               onStop={() => undefined}
               onRedo={() => undefined}

@@ -34,8 +34,14 @@ export interface PlanSideProps {
 /** The Plan panel's place beside a conversation, or its drawer; with Changes open it holds either. */
 export function PlanSide({ open, beside, shapeId, onClose, onWhy, changes = null }: PlanSideProps) {
   const [picked, setPicked] = useState<Side>(Side.Plan);
-  if (!open) return null;
   const both = changes !== null;
+  // Opening Changes beside an open Plan shows them: the builder asked for them last.
+  const [hadBoth, setHadBoth] = useState(both);
+  if (both !== hadBoth) {
+    setHadBoth(both);
+    if (both) setPicked(Side.Changes);
+  }
+  if (!open) return null;
   const shown = both ? picked : Side.Plan;
   const head = both ? (
     <Box px="md" pt="xs" style={{ flex: 'none' }}>

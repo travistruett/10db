@@ -61,7 +61,7 @@ export function ProposedList({ groups, sizes, actionsFor, reviewOf, handlers }: 
   );
 
   return (
-    <Box component="ul" aria-label="Proposed rows" m={0} p={0} style={{ listStyle: 'none' }}>
+    <Box component="ul" aria-label="Plan rows" m={0} p={0} style={{ listStyle: 'none' }}>
       {rows.map(({ row, section, label, note }, index) => (
         <ProposalRow
           key={row.id}

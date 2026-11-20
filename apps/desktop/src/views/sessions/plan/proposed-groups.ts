@@ -121,6 +121,6 @@ export function summaryParts(groups: ProposedGroups): SummaryPart[] {
     (sum, rows) => sum + rows.filter(isConverted).length,
     0,
   );
-  add(converted, `${String(converted)} converted`, SectionKey.Converted);
+  add(converted, `${String(converted)} accepted`, SectionKey.Converted);
   return parts;
 }

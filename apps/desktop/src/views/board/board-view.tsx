@@ -18,7 +18,6 @@ import { Alert, Button, Group, Menu, Select, Stack, Text } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconColumns, IconPlayerPlay, IconPlus } from '@tabler/icons-react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { useOpenSession } from '../sessions/open-session';
 import { useEffect, useState } from 'react';
 import { useGoals } from '../../daemon/goal-queries';
 import { useKinds } from '../../daemon/kind-queries';
@@ -187,7 +186,6 @@ function BoardColumns({
   const closeTask = useCloseTask();
   const reopenTask = useReopenTask();
   const navigate = useNavigate();
-  const openSession = useOpenSession();
   const guard = useUnsavedGuard();
   // The run the builder is being asked to confirm cancelling, from a card's menu or the drawer.
   const [cancelling, setCancelling] = useState<WorkstreamDto | null>(null);
@@ -477,9 +475,7 @@ function BoardColumns({
             actions.apply({ kind: 'start', taskId: openTask.id }, openTask);
           }}
           onCancelRun={setCancelling}
-          onOpenConversation={(chatId) => {
-            void openSession(chatId);
-          }}
+          offersPlanSession
           onOpenWorkbench={() => {
             void navigate({ to: '/workbench' });
           }}

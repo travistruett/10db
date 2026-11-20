@@ -77,20 +77,20 @@ export function convertedLine(row: ShapeProposalDto): string | null {
     case 'principle':
       if (row.converted?.retired === true) return 'Retired from Knowledge';
       return row.converted?.superseded === true
-        ? 'Converted · replaced by a later principle'
-        : 'Converted · in Knowledge';
+        ? 'Accepted · replaced by a later principle'
+        : 'Accepted · in Knowledge';
     case 'decision':
       return row.converted?.superseded === true
-        ? 'Converted · replaced by a later decision'
-        : 'Converted · in Knowledge';
+        ? 'Accepted · replaced by a later decision'
+        : 'Accepted · in Knowledge';
     case 'question':
-      return 'Converted · stored, sent when people arrive';
+      return 'Accepted · stored, sent when people arrive';
     case 'goal':
     case 'task':
     case 'change_task':
     case 'remove_task':
     case 'landing':
-      return 'Converted · on the Board';
+      return 'Accepted · on the Board';
   }
 }
 
