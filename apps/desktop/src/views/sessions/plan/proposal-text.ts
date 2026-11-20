@@ -108,6 +108,16 @@ export function markText(row: ShapeProposalDto): string | null {
   }
 }
 
+/** The state dot before a row's title: the first of accepted, the round's mark, pinned, else proposed. */
+export function rowDot(row: ShapeProposalDto): { readonly label: string; readonly color: string } {
+  if (isConverted(row)) return { label: 'Accepted', color: 'teal' };
+  if (row.mark === 'new') return { label: 'New this round', color: 'blue' };
+  if (row.mark === 'changed') return { label: 'Changed this round', color: 'blue' };
+  if (row.mark === 'moved') return { label: 'Moved to Earlier', color: 'gray' };
+  if (row.pinned.length > 0) return { label: 'Pinned', color: 'yellow' };
+  return { label: 'Proposed', color: 'gray' };
+}
+
 /** The short facts shown after a title on a collapsed row. */
 export function rowMeta(row: ShapeProposalDto): string {
   switch (row.kind) {

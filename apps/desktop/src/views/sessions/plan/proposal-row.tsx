@@ -4,12 +4,22 @@ import {
   type ShapeProposalDto,
   type ShapeTaskSizeDto,
 } from '@10db/contracts';
-import { ActionIcon, Box, Button, Group, Menu, Text, UnstyledButton } from '@mantine/core';
+import {
+  ActionIcon,
+  Box,
+  Button,
+  ColorSwatch,
+  Group,
+  Menu,
+  Text,
+  Tooltip,
+  UnstyledButton,
+} from '@mantine/core';
 import { IconDots, IconPencil, IconPin } from '@tabler/icons-react';
 import { useRef, useState, type KeyboardEvent } from 'react';
 import type { RowChange } from '../../../daemon/shape-queries';
 import { RowAttachments } from './attachments/row-attachments';
-import { convertedLine, markText, proposalTitle, rowMeta } from './proposal-text';
+import { convertedLine, markText, proposalTitle, rowDot, rowMeta } from './proposal-text';
 import type { RowReview } from './review-lines';
 import { ReviewLines } from './review-notes';
 import { RowDetails } from './row-details';
@@ -115,6 +125,7 @@ export function ProposalRow({
   const converted = convertedLine(row);
   const meta = rowMeta(row);
   const mark = markText(row);
+  const dot = rowDot(row);
   const regionId = `shape-row-${row.id}`;
   const pinned = row.pinned.length > 0;
   const mutable =
@@ -205,6 +216,16 @@ export function ProposalRow({
         </Text>
         <Box style={{ flex: 1, minWidth: 0 }}>
           <Group wrap="nowrap" align="flex-start" gap="xs">
+            <Tooltip label={dot.label}>
+              <ColorSwatch
+                size={8}
+                color={`var(--mantine-color-${dot.color}-filled)`}
+                aria-label={dot.label}
+                role="img"
+                mt={7}
+                style={{ flex: 'none' }}
+              />
+            </Tooltip>
             <UnstyledButton
               ref={button}
               {...{ [ROW_ATTRIBUTE]: '' }}

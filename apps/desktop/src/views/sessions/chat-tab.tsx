@@ -29,7 +29,12 @@ import { BackgroundTasks } from '../../conversation/background-tasks';
 import { latestTodos, TodoList } from '../../conversation/todo-list';
 import { PermissionRequest, useConversationCards } from '../../conversation/permission-request';
 import type { Streaming } from '../../conversation/working-line';
-import { fetchConversationFiles, useChatModels, usePatchChat } from '../../daemon/chat-queries';
+import {
+  fetchConversationFiles,
+  useChatModels,
+  usePatchChat,
+  useShowPlan,
+} from '../../daemon/chat-queries';
 import { useChatChanges } from '../../daemon/chat-changes-queries';
 import { useChatWork, useChooseWork, type ChoseWork } from '../../daemon/chat-work-queries';
 import {
@@ -80,9 +85,6 @@ import { draftKey, sessionDrafts, useSessionDraft } from './session-drafts';
 const NARROW_PX = 640;
 const CONTEXT_TIP = 'Past 70%, the next turn continues in a fresh session with a summary.';
 
-/** The message File as Tasks sends, as the builder's own turn (sessions design spec §7.2). */
-export const FILE_AS_TASKS_MESSAGE = 'File the work we agreed on as tasks on the Board.';
-
 /** A turn is under way in these states. */
 const WORKING_STATES: ReadonlySet<string> = new Set([
   'starting',
@@ -100,8 +102,11 @@ export interface ChatTabProps {
   /** The ⌄ beside the title. */
   /** The title row's title, which is also the session switcher. */
   readonly switcherFor: (label: string) => ReactNode;
-  /** What the title row's ⋯ menu does besides renaming and File as Tasks. */
-  readonly actions: Omit<SessionActions, 'onRename' | 'onFileAsTasks' | 'onOpenInTerminal'>;
+  /** What the title row's ⋯ menu does besides renaming, Show Plan and Open in Terminal. */
+  readonly actions: Omit<
+    SessionActions,
+    'onRename' | 'onOpenInTerminal' | 'onTogglePlan' | 'planOpen'
+  >;
   readonly renaming?: boolean;
   readonly onRenamed?: () => void;
   /** The builder asked to open the chat in a terminal from the strip. */
@@ -216,8 +221,23 @@ export function ChatTab({
   // conversation when the tab holds both and a drawer over it when not.
   const planOpen = usePlanOpen(chat.id, chat.planId !== null);
   const besidePlan = planBeside(width);
+  const showPlan = useShowPlan();
   const togglePlan = (): void => {
-    planChoice.set(chat.id, !planOpen);
+    if (chat.planId !== null) {
+      planChoice.set(chat.id, !planOpen);
+      return;
+    }
+    if (showPlan.isPending) return;
+    showPlan.mutateAsync(chat.id).then(
+      () => {
+        planChoice.set(chat.id, true);
+      },
+      (error: unknown) => {
+        setGitError(
+          `Couldn't show the Plan: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      },
+    );
   };
   const [why, setWhy] = useState<{
     readonly ids: readonly string[];
@@ -275,6 +295,9 @@ export function ChatTab({
   const caps = conversation.capabilities;
   const working = WORKING_STATES.has(conversation.state);
   const removed = project === undefined;
+  // A session with a plan always has the toggle, since its plan can still be read; one without gets Show Plan
+  // unless its conversation is sealed or its project was removed.
+  const offersPlan = planId !== null || (conversation.state !== 'sealed' && !removed);
 
   // A plan session's dropped, picked and pasted files are the plan's files, which the agent reads.
   const dropIntoPlan = async (files: File[]): Promise<void> => {
@@ -565,21 +588,13 @@ export function ChatTab({
             </>
           }
           switcherFor={switcherFor}
-          {...(planId === null ? {} : { plan: { open: planOpen, onToggle: togglePlan } })}
+          {...(offersPlan
+            ? { plan: { open: planOpen, onToggle: togglePlan, pending: showPlan.isPending } }
+            : {})}
           projectPath={project?.repoPath ?? null}
           actions={{
             ...actions,
-            ...(removed || reconnecting
-              ? {}
-              : {
-                  onFileAsTasks: () => {
-                    void post({ ...EMPTY_DRAFT, text: FILE_AS_TASKS_MESSAGE }).catch(
-                      (error: unknown) => {
-                        setSendError(error instanceof Error ? error.message : String(error));
-                      },
-                    );
-                  },
-                }),
+            ...(offersPlan ? { onTogglePlan: togglePlan, planOpen } : {}),
           }}
           {...(renaming === undefined ? {} : { renaming })}
           {...(onRenamed === undefined ? {} : { onRenamed })}

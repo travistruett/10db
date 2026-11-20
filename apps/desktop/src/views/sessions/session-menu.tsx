@@ -3,8 +3,9 @@ import { Menu } from '@mantine/core';
 /** What a session's menu does; an action left out leaves its item out. */
 export interface SessionActions {
   readonly onRename?: () => void;
-  /** File as Tasks: asks the agent to file what the conversation agreed on. */
-  readonly onFileAsTasks?: () => void;
+  /** Opens or closes the Plan panel; the item reads "Close Plan" while `planOpen`, else "Show Plan". */
+  readonly onTogglePlan?: () => void;
+  readonly planOpen?: boolean;
   /** The agent offers Open in Terminal and the session can go there now. */
   readonly onOpenInTerminal?: () => void;
   readonly onMakeTask?: () => void;
@@ -19,8 +20,10 @@ export function SessionMenuItems({ actions }: { readonly actions: SessionActions
       {actions.onRename === undefined ? null : (
         <Menu.Item onClick={actions.onRename}>Rename</Menu.Item>
       )}
-      {actions.onFileAsTasks === undefined ? null : (
-        <Menu.Item onClick={actions.onFileAsTasks}>File as Tasks</Menu.Item>
+      {actions.onTogglePlan === undefined ? null : (
+        <Menu.Item onClick={actions.onTogglePlan}>
+          {actions.planOpen === true ? 'Close Plan' : 'Show Plan'}
+        </Menu.Item>
       )}
       {actions.onOpenInTerminal === undefined ? null : (
         <Menu.Item onClick={actions.onOpenInTerminal}>Open in Terminal</Menu.Item>
