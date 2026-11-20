@@ -188,6 +188,8 @@ describe('Open Pull Request', () => {
     await prs.pushCommitted(passId);
     await h.jobs.idle();
     expect(h.gh.prCreates()).toEqual([]);
+    const branch = getBatch(h.store.db, batchOf(passId)).branch ?? '';
+    expect(h.origin$('for-each-ref', `refs/heads/${branch}`)).toBe('');
 
     await prs.open(passId, { ready: false });
     await h.jobs.idle();
@@ -195,7 +197,6 @@ describe('Open Pull Request', () => {
     await prs.pushCommitted(passId);
     await h.jobs.idle();
 
-    const branch = getBatch(h.store.db, batchOf(passId)).branch ?? '';
     expect(h.origin$('rev-parse', `refs/heads/${branch}`)).toBe(tip);
     expect(h.gh.prCreates()).toHaveLength(1);
   });

@@ -71,6 +71,7 @@ const read = (rel: string) => readFileSync(join(w.h.repo, rel), 'utf8');
 const deps = (base: PassWorkDeps = w.deps, git: Git = base.git) => ({
   ...base,
   git,
+  committed: w.deps.committed,
   stopLane: (): Promise<void> => Promise.resolve(),
   wrote: (): Promise<void> => Promise.resolve(),
 });

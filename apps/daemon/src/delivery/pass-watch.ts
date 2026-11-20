@@ -64,7 +64,7 @@ export function recordPassPullRequest(
       id: PASS_PR_CLOSED_NOTICE,
       kind: PassNoticeKind.PrClosed,
       text: open
-        ? `The pull request ${url} closed without merging. Open Pull Request opens another.`
+        ? `The pull request ${url} closed without merging. Open PR opens another.`
         : `The pull request ${url} closed without merging.`,
       sendable: false,
       cardId: null,

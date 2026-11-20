@@ -120,6 +120,8 @@ describe('signOffSteps', () => {
 
     expect(done).toMatchObject({ kind: 'signed_off', sharedLanded: [] });
     expect(landed()).toEqual(['Settings: UI work']);
+    // The commit is pushed to the pass's open pull request, if it has one.
+    expect(w.committed).toEqual([w.opened.pass.id]);
     expect(done.kind === 'signed_off' ? [...done.files] : []).toEqual([
       'pnpm-lock.yaml',
       'src/settings/old.tsx',
@@ -170,6 +172,8 @@ describe('signOffSteps', () => {
     expect(await signOff(w.people)).toMatchObject({ kind: 'signed_off', landedSha: null });
 
     expect(landed()).toEqual([]);
+    // Nothing moved the branch, so nothing is pushed.
+    expect(w.committed).toEqual([]);
     expect(getWorkstreamRow(w.h.store.db, w.runOf(w.people)).state).toBe('DONE');
     expect(listTaskThread(w.h.store.db, w.people.id).at(-1)?.body).toBe(
       'Signed off · nothing to land',

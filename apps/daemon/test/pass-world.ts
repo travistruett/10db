@@ -7,6 +7,7 @@ import {
   mintId,
   PASS_SIGN_OFF_CHOICE,
   type ChatId,
+  type PassId,
   WorkstreamState,
   type PassTurnDto,
   type ProjectInput,
@@ -55,6 +56,9 @@ export const PASS_PROJECT: Partial<ProjectInput> = {
 /** A put-back for tasks with no kept work. */
 export const nothingKept: PutBackKeptWork = () => Promise.resolve({ applied: [], left: [] });
 
+/** What a world's work in the folder needs, a sign-off's included. */
+export type WorldDeps = PassWorkDeps & { readonly committed: (passId: PassId) => void };
+
 export interface PassWorld {
   readonly h: DeliveryHarness;
   readonly opened: PassOpened;
@@ -63,7 +67,10 @@ export interface PassWorld {
   /** Names `settings`, the shared `src` and the `deps` hazard. */
   readonly settings: TaskDto;
   readonly people: TaskDto;
-  readonly deps: PassWorkDeps;
+  /** The pass's work in the folder, and a sign-off's `committed`, which records the pass it names. */
+  readonly deps: WorldDeps;
+  /** Each pass a sign-off asked to push, in order. */
+  readonly committed: readonly PassId[];
   /** Writes `content` at `path` in the folder. */
   write(path: string, content: string): void;
   /** The task's run. */
@@ -79,7 +86,7 @@ export interface PassWorld {
    * database file, and a new event bus, inbox, job queue and git, so nothing the last one held in
    * memory carries over. The world's own `h` reads the same file.
    */
-  restart(): PassWorkDeps;
+  restart(): WorldDeps;
   close(): void;
 }
 
@@ -143,6 +150,10 @@ function bindWorld(
   write: (path: string, content: string) => void,
 ): Omit<PassWorld, 'settings' | 'people'> {
   const reopened: (() => void)[] = [];
+  const committed: PassId[] = [];
+  const record = (passId: PassId): void => {
+    committed.push(passId);
+  };
   const runOf = (task: TaskDto): WorkstreamId => {
     const id = getTask(h.store.db, task.id).workstreamId;
     if (id === null) throw new Error(`${task.title} has no run`);
@@ -159,7 +170,9 @@ function bindWorld(
       jobs: h.jobs,
       logger: silentLogger,
       clock: h.ctx.clock,
+      committed: record,
     },
+    committed,
     write,
     runOf,
     startTurn: (task) =>
@@ -218,6 +231,7 @@ function bindWorld(
         jobs: createDeliveryJobs(silentLogger),
         logger: silentLogger,
         clock: h.ctx.clock,
+        committed: record,
       };
     },
     close: () => {

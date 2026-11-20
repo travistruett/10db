@@ -134,7 +134,7 @@ export function PrFoot({ view }: { readonly view: PassViewDto }) {
         : 'Committed. Open PR when you are ready; CI checks it there.'
       : exists
         ? `Committed. It can't be pushed to the pull request yet: ${why}`
-        : `Committed. ${why}.`;
+        : `Committed. ${why.replace(/\.$/, '')}.`;
   return (
     <>
       <Text size="sm" c="dimmed">

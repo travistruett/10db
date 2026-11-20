@@ -153,7 +153,7 @@ function signedOff(db: DbReader, passId: PassId): string[] {
 
 /** The header notice of a failed gate on the pass's tip, a close's included. */
 export const PASS_GATE_NOTICE = 'gate';
-/** The header notice that says Open Pull Request did not finish. */
+/** The header notice that says a push to the pull request, or its opening, did not finish. */
 const PR_OPEN_NOTICE = 'pr-open';
 
 const message = (error: unknown): string =>
@@ -568,10 +568,13 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
       );
     }
     if (origin === null)
-      return refuse(`${project.name} has no GitHub remote: Merge to ${base} lands the pass`, ahead);
+      return refuse(
+        `${project.name} has no GitHub remote: Merge to ${pass.returnBranch} lands the pass`,
+        ahead,
+      );
     if (batch.repo === null)
       return refuse(
-        `${project.name}'s origin is not on GitHub: Merge to ${base} lands the pass`,
+        `${project.name}'s origin is not on GitHub: Merge to ${pass.returnBranch} lands the pass`,
         ahead,
       );
     try {
@@ -597,6 +600,7 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
     preview,
     open,
     async pushCommitted(passId) {
+      if (getPass(db, passId).state !== PassState.Open) return;
       const pr = getPassPullRequest(db, passId);
       if (
         pr === null ||
@@ -604,14 +608,34 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
         pr.state === PullRequestState.Closed
       )
         return;
-      if (!(await preview(passId)).offered) return;
-      await open(passId, { ready: false });
+      // A push that can't start (gh signed out or offline, a refused preview) says so, as one that
+      // fails does, so Push Now is offered and the commit is not left off the pull request unseen.
+      try {
+        await open(passId, { ready: false });
+      } catch (error) {
+        deps.logger.warn({ passId, err: message(error) }, 'committed page not pushed');
+        pushFailed(passId, error);
+      }
     },
     async stop() {
       await checks.stopAll();
       gating.clear();
     },
   };
+
+  /** Says in the header that the push did not finish, offering Push Now. */
+  function pushFailed(passId: PassId, error: unknown): void {
+    deps.state.write((w) => {
+      setPassNotice(w, passId, {
+        id: PR_OPEN_NOTICE,
+        kind: PassNoticeKind.PrNotOpened,
+        text: `Pushing to the pull request did not finish: ${message(error)}`,
+        sendable: false,
+        cardId: null,
+        at: w.now,
+      });
+    });
+  }
 
   async function open(
     passId: PassId,
@@ -678,16 +702,7 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
         // A function, so the check after the awaits is not narrowed away by the one before them.
         const stopped = (): boolean => signal.aborted;
         if (stopped()) return;
-        deps.state.write((w) => {
-          setPassNotice(w, passId, {
-            id: PR_OPEN_NOTICE,
-            kind: PassNoticeKind.PrNotOpened,
-            text: `Pushing to the pull request did not finish: ${message(error)}`,
-            sendable: false,
-            cardId: null,
-            at: w.now,
-          });
-        });
+        pushFailed(passId, error);
       } finally {
         if (!handed && marked !== null && gating.get(passId) === marked) gating.delete(passId);
       }
