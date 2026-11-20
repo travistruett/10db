@@ -36,7 +36,13 @@ const APP: Readonly<Record<string, string>> = {
   'src/ui/button.tsx': 'export const Button = () => null;\n',
 };
 
-const Live = z.array(z.looseObject({ pass: z.looseObject({ projectId: z.string() }) }));
+const Live = z.array(
+  z.looseObject({
+    pass: z.looseObject({ projectId: z.string() }),
+    pages: z.array(z.looseObject({ label: z.string(), taskId: z.string() })),
+  }),
+);
+const TaskIds = z.array(z.looseObject({ id: z.string() }));
 
 /** Where the thread checks save a screenshot per width, when set. */
 const SHOTS = process.env['E2E_SCREENSHOT_DIR'];
@@ -129,8 +135,8 @@ async function expectNoSideways(page: Page, width: number) {
 }
 
 /**
- * At `width` with the panel drawn (a wide window), the panel's head holds the pass's name and its ⋯ menu
- * (Finish, Rename, Abandon) on screen, the title row names the shown page, and nothing scrolls sideways.
+ * At `width` with the panel drawn (a wide window), the panel's head holds the pass's pages and its ⋯ menu
+ * (Finish, Discard) on screen, the title row names the shown page, and nothing scrolls sideways.
  */
 async function panelHeadFits(page: Page, width: number) {
   await page.setViewportSize({ width, height: 900 });
@@ -152,14 +158,14 @@ async function panelHeadFits(page: Page, width: number) {
 
 /**
  * At `width` with no panel drawn (a window under 1000 px), the pass's line in the title row is drawn (cut
- * with an ellipsis when it must, its whole text in the heading's tooltip), its ⋯ menu (Close Pass, Abandon) is
+ * with an ellipsis when it must, its whole text in the heading's tooltip), its ⋯ menu (Finish, Discard) is
  * on screen, the content box stops a gutter short of the window's edge and nothing scrolls sideways.
  */
 async function headerFits(page: Page, width: number) {
   await page.setViewportSize({ width, height: 900 });
-  const title = page.getByRole('heading', { level: 1, name: /· 1 signed off/ });
+  const title = page.getByRole('heading', { level: 1, name: /· 1 committed/ });
   await expect(title).toBeVisible();
-  await expect(title).toHaveAttribute('title', /· 1 signed off/);
+  await expect(title).toHaveAttribute('title', /· 1 committed/);
   const row = await page.locator('[data-title-row]').boundingBox();
   const line = await title.boundingBox();
   expect(row, `the title row is drawn at ${String(width)}`).not.toBeNull();
@@ -360,20 +366,20 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   await page.setViewportSize({ width: 1280, height: 900 });
   await inConversationColumn(settings, message, 'the Workbench at 1280');
 
-  // Sign Off: "Signing off…", then green "Signed off".
-  await settings.getByRole('button', { name: 'Sign Off' }).click();
-  await expect(row(page, 'Settings')).toContainText('Signed off');
+  // Commit, in the page's title row: "Committing…", then green "Committed".
+  await page.locator('[data-title-row]').getByRole('button', { name: 'Commit' }).click();
+  await expect(row(page, 'Settings')).toContainText('Committed');
   await expect(row(page, 'Settings').getByTestId('status-dot')).toHaveAttribute(
     'data-color',
     'green',
   );
   const seen = await recorded(page);
-  expect(seen.rowLines.some((line) => line.includes('Signing off…'))).toBe(true);
+  expect(seen.rowLines.some((line) => line.includes('Committing…'))).toBe(true);
   announced.push(...seen.announced);
 
   // The project has no origin, so no pull request can be opened: no Open Draft PR is drawn anywhere, and
-  // the foot of the signed-off page, where the builder is, says why. The header fits at every width.
-  await expect(page.getByText(/^Signed off\. No pull request yet: /)).toBeVisible();
+  // the foot of the committed page, where the builder is, says why. The header fits at every width.
+  await expect(page.getByText(/^Committed\. No pull request yet: /)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Open Draft PR' })).toHaveCount(0);
   await panelHeadFits(page, 1280);
   for (const width of [900, 520, 420]) await headerFits(page, width);
@@ -398,7 +404,7 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   // A reload keeps the queue as it was.
   const before = await queueOrder(page);
   await page.reload();
-  await expect(row(page, 'Settings')).toContainText('Signed off');
+  await expect(row(page, 'Settings')).toContainText('Committed');
   expect(await queueOrder(page)).toEqual(before);
 
   // The live region said only pages becoming ready and the question.
@@ -408,14 +414,32 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
     said.filter((line) => !/^(Settings|People) (is ready|asks a question)$/.test(line)),
   ).toEqual([]);
 
-  // Abandon ends the pass: its confirm names, by label, the page whose changes it deletes and the one
-  // that stays. Later specs read Factory across projects, so nothing of this pass is left running.
+  // Discard on People's row: its changes are deleted and it leaves the queue; the pass made its task,
+  // so the task leaves the Board too.
+  const passes = await request.get(`${daemonUrl}/passes?live=true`, { headers: auth });
+  const peopleTask = Live.parse(await passes.json())
+    .find((view) => view.pass.projectId === projectId)
+    ?.pages.find((p) => p.label === 'People');
+  expect(peopleTask).toBeDefined();
+  await row(page, 'People').getByRole('button', { name: 'More actions for People' }).click();
+  await page.getByRole('menuitem', { name: 'Discard' }).click();
+  const discardPage = page.getByRole('dialog', { name: 'Discard People' });
+  await discardPage.getByRole('button', { name: 'Discard' }).click();
+  await expect(discardPage).toHaveCount(0);
+  await expect(row(page, 'People')).toHaveCount(0);
+  const board = await request.get(`${daemonUrl}/projects/${projectId}/tasks`, { headers: auth });
+  expect(TaskIds.parse(await board.json()).map((task) => task.id)).not.toContain(
+    peopleTask?.taskId,
+  );
+
+  // Discard ends the pass: its confirm names the committed page, which stays. Later specs read
+  // Factory across projects, so nothing of this pass is left running.
   await page.getByRole('button', { name: 'More actions', exact: true }).click();
-  await page.getByRole('menuitem', { name: 'Abandon' }).click();
-  const abandon = page.getByRole('dialog', { name: 'Abandon' });
-  await expect(abandon.getByText('Discards: People (their changes are deleted).')).toBeVisible();
-  await expect(abandon.getByText('Stays: Settings (signed off).')).toBeVisible();
-  await abandon.getByRole('button', { name: 'Abandon' }).click();
+  await page.getByRole('menuitem', { name: 'Discard' }).click();
+  const discardPass = page.getByRole('dialog', { name: 'Discard Pass' });
+  await expect(discardPass.getByText('Stays: Settings (committed).')).toBeVisible();
+  await expect(discardPass.getByText(/^Discards:/)).toHaveCount(0);
+  await discardPass.getByRole('button', { name: 'Discard' }).click();
   await expect(page.getByRole('button', { name: 'Start Pass', exact: true })).toBeVisible();
   await expect
     .poll(async () => {

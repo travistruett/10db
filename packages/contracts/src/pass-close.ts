@@ -64,8 +64,15 @@ export type SharedUnlandedDto = z.infer<typeof SharedUnlandedDto>;
 export const TakeOutPreviewDto = z.object({ shared: z.array(SharedUnlandedDto) });
 export type TakeOutPreviewDto = z.infer<typeof TakeOutPreviewDto>;
 
-/** `POST /passes/:passId/tasks/:taskId/take-out`: Keep or Drop for each; a change not named is kept. */
-export const TakeOutRequest = z.object({ shared: z.array(SharedChoice).default([]) });
+/**
+ * `POST /passes/:passId/tasks/:taskId/take-out`: Keep or Drop for each; a change not named is kept.
+ * `discard` is the page's Discard: its changes are deleted, not kept with its task, and a task the
+ * pass made for the page leaves the Board.
+ */
+export const TakeOutRequest = z.object({
+  shared: z.array(SharedChoice).default([]),
+  discard: z.boolean().default(false),
+});
 export type TakeOutRequest = z.infer<typeof TakeOutRequest>;
 
 /** Where a close runs its gate, and what a failure there costs (spec §5.4 step 5). */

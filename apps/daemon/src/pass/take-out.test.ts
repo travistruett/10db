@@ -439,6 +439,61 @@ describe('takeOut', () => {
     expect(read(w, 'src/settings/old.tsx')).toBe('old\n');
     expect(getTask(w.h.store.db, w.settings.id).passId).toBeNull();
   });
+
+  it(
+    'discards a page: its changes are deleted, a Board task goes back open and a task the pass made is retired, after a restart too',
+    { timeout: 120_000 },
+    async () => {
+      stopped = [];
+      w = await openPassWorld({ peopleByPass: true });
+      const db = w.h.store.db;
+      const pass = w.opened.pass.id;
+      const settingsTurn = w.startTurn(w.settings);
+      w.write('src/settings/page.tsx', 'settings, by the task\n');
+      w.write('src/settings/new.tsx', 'added by the task\n');
+      await keepTurnWork(w.deps, { workstreamId: w.runOf(w.settings), turnId: settingsTurn.id });
+      w.endTurn(settingsTurn);
+      const peopleTurn = w.startTurn(w.people);
+      w.write('src/people/page.tsx', 'people, by the task\n');
+      await keepTurnWork(w.deps, { workstreamId: w.runOf(w.people), turnId: peopleTurn.id });
+      w.endTurn(peopleTurn);
+
+      // Settings came from the Board: its Discard runs whole in one daemon.
+      const result = await takeOut(takeOutDeps(w), {
+        taskId: w.settings.id,
+        within: TakeOutWithin.Alone,
+        discard: true,
+      });
+      expect.soft(result.tookOut).toBe(true);
+      expect.soft(read(w, 'src/settings/page.tsx')).toBe('settings\n');
+      expect.soft(existsSync(join(w.h.repo, 'src/settings/new.tsx'))).toBe(false);
+      for (const ref of [keptRef(w.settings.id), passKeptRef(pass, w.settings.id)])
+        expect.soft(w.h.git$('for-each-ref', ref), ref).toBe('');
+      expect.soft(getTaskKeptWork(db, w.settings.id)).toBeNull();
+      expect.soft(getTask(db, w.settings.id)).toMatchObject({ passId: null, status: 'open' });
+      expect.soft(notices(w).at(-1)).toBe('Discarded from Polish; its changes were deleted.');
+      expect.soft(lastTakeOut(db, w.settings.id)).toMatchObject({ discarded: true });
+
+      // People, which the pass made, was cut short after its row was written: the restart's
+      // take-out, asked for with no Discard, still deletes, as the row says.
+      w.h.state.write((ctx) =>
+        insertTakeOut(ctx, { taskId: w.people.id, passId: pass, drops: [], discarded: true }),
+      );
+      await takeOut(
+        { ...takeOutDeps(w), ...w.restart() },
+        {
+          taskId: w.people.id,
+          within: TakeOutWithin.Alone,
+        },
+      );
+      expect.soft(read(w, 'src/people/page.tsx')).toBe('people\n');
+      for (const ref of [keptRef(w.people.id), passKeptRef(pass, w.people.id)])
+        expect.soft(w.h.git$('for-each-ref', ref), ref).toBe('');
+      expect.soft(getTask(db, w.people.id)).toMatchObject({ passId: null, status: 'cancelled' });
+      // The branch never moved.
+      expect.soft(w.h.git$('rev-parse', 'HEAD')).toBe(w.opened.pass.startSha);
+    },
+  );
 });
 
 describe('leavePassForBoard', () => {

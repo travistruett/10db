@@ -138,7 +138,7 @@ function PageNotice({
   );
 }
 
-/** Until the builder's first message the thread says where the page is; Open Page is the composer's. */
+/** Until the builder's first message the thread says where the page is; Open in Browser is the title row's. */
 function WherePageIs({ page }: { readonly page: PassPageDto }) {
   if (page.route === null)
     return (

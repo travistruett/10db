@@ -5,18 +5,21 @@ import type { QueueRow as Row } from './queue-rows';
 import { CodeSpans } from '../../shell/code-spans';
 import classes from './queue-row.module.css';
 
+/** Marks a row's own button, which J and K step through; its menu and link are not. */
+export const ROW_ATTRIBUTE = 'data-queue-row';
+
 export interface QueueRowProps {
   readonly row: Row;
   readonly current: boolean;
   readonly onSelect: () => void;
-  /** The row's menu, drawn beside its button; null when the row has none. */
+  /** The row's controls (link and menu), drawn beside its button; null when the row has none. */
   readonly menu: ReactNode;
 }
 
 /**
  * One page of the queue, drawn as an Inbox row: a status dot, the page's name, heavier when it waits on the
  * builder, and its state line under the name. A hairline parts it from the next; the page shown is on the
- * selected fill; its menu shows on hover, on the shown row and with focus; a row that needs nothing is dimmed.
+ * selected fill; its menu and link to the page in the browser show on hover, on the shown row and with focus; a row that needs nothing is dimmed.
  */
 export function QueueRow({ row, current, onSelect, menu }: QueueRowProps) {
   return (
@@ -24,6 +27,7 @@ export function QueueRow({ row, current, onSelect, menu }: QueueRowProps) {
       <UnstyledButton
         className={classes['button']}
         aria-current={current ? 'true' : undefined}
+        {...{ [ROW_ATTRIBUTE]: true }}
         {...(row.dimmed ? { c: 'dimmed' } : {})}
         onClick={(event) => {
           // A pointer click hands the cursor on to the page's composer, as WebKit does by never

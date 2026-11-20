@@ -26,6 +26,7 @@ import { ProjectTile } from '../../shell/project-tile';
 import { useSelectedProject } from '../../shell/selected-project';
 import { pageStatus } from '../workbench/page-status';
 import { waitingCount } from '../workbench/queue-order';
+import { passTitle } from '../workbench/pass-title';
 import { medianTurnMinutes } from '../workbench/timing';
 import { LIVE_GROUP_LABELS, LiveGroup, lastMoment, liveGroups } from './live-groups';
 import classes from './live-list.module.css';
@@ -202,7 +203,7 @@ export function LiveList({
       key={view.pass.id}
       project={nameOf(view.pass.projectId)}
       dot={waiting > 0 ? 'yellow' : 'blue'}
-      title={view.pass.name}
+      title={passTitle(view.pages, view.pass.name)}
       icon={<IconTools size={14} stroke={1.5} className={classes['icon']} aria-hidden />}
       detail={
         waiting > 0

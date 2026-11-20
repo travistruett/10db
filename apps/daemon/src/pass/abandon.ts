@@ -135,21 +135,23 @@ async function droppedShared(deps: TakeOutDeps, pass: PassDto) {
 }
 
 /**
- * The confirm's own words for what an Abandon did to the pages, by label: those whose changes it
+ * The confirm's own words for what an Abandon did to the pages, by label: those whose changes were
  * deleted, then those signed off, which stay.
  */
 function pagesLine(db: DbReader, pass: PassDto): string {
   const areas = passAreasOf(db, pass.id);
   const label = (task: TaskDto): string =>
     pageLabel(pageOf(areas, task) ?? { name: task.areas[0] ?? task.title });
-  // Only the pages this Abandon took out, as its confirm named them: not one taken out before it.
+  // The pages whose changes were deleted, by this Abandon or a Discard before it: not one taken out
+  // with its work kept.
+  // A page discarded and then added back is the pass's again: what became of it is said below.
   const discards = takenOut(db, pass)
-    .rows.filter((row) => row.discarded)
+    .rows.filter((row) => row.discarded && getTask(db, row.taskId).passId !== pass.id)
     .map((row) => label(getTask(db, row.taskId)));
   const stays = listPassTasks(db, pass.id).filter((task) => signedOff(db, task));
   return [
     discards.length > 0 ? `Discards: ${discards.join(', ')} (their changes are deleted).` : '',
-    stays.length > 0 ? `Stays: ${stays.map(label).join(', ')} (signed off).` : '',
+    stays.length > 0 ? `Stays: ${stays.map(label).join(', ')} (committed).` : '',
   ]
     .filter(Boolean)
     .join(' ');

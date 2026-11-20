@@ -10,6 +10,7 @@ import {
 import { Button, Group, Stack, Text } from '@mantine/core';
 import { useAnswerPassCard } from '../../daemon/pass-close-queries';
 import { CodeSpans } from '../../shell/code-spans';
+import { passTitle } from './pass-title';
 import { PullRequestLink } from '../board/pull-request-link';
 
 /** The pass's open Move card (D22), with what it moves; null while none is open. */
@@ -27,7 +28,7 @@ function moveCard(
 
 /** What a closed pass waits for, in words true of its pull request and its Move card's reason. */
 export function closedPassWords(view: PassViewDto, card: PassMoveDetail | null): string {
-  const name = view.pass.name;
+  const name = passTitle(view.pages, view.pass.name);
   switch (card?.reason) {
     case PassMoveReason.ClosedUnmerged:
       return `${name} finished; its pull request closed without merging.`;

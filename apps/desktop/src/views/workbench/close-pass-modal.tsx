@@ -28,7 +28,7 @@ const LEAVE_OUT = 'leave-out';
 
 const PAGE_CHOICES = [
   { value: PassClosePageChoice.TakeOut, label: 'Remove' },
-  { value: PassClosePageChoice.SignOff, label: 'Sign Off Now' },
+  { value: PassClosePageChoice.SignOff, label: 'Commit Now' },
 ];
 
 function Section({ title, children }: { readonly title: string; readonly children: ReactNode }) {
@@ -62,7 +62,7 @@ function CloseLists({ view, preview, choices, onChoices, disabled }: ListsProps)
   return (
     <Stack gap="lg">
       {preview.unfinished.length === 0 ? null : (
-        <Section title="Not signed off">
+        <Section title="Not committed">
           {preview.unfinished.map((page) => {
             const label = labelOf(page.taskId, page.title);
             const choice = pageChoice(choices, page.taskId);

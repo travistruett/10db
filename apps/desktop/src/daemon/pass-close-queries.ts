@@ -64,7 +64,7 @@ export function useTakeOutPreview({ passId, taskId }: PassPage) {
   });
 }
 
-/** Sign Off: the page lands now, or waits for the turn whose shared change it needs. */
+/** Commit (the daemon's sign-off): the page lands now, or waits for the turn whose shared change it needs. */
 export function useSignOff() {
   const { client } = useDaemon();
   const refetch = useRefetchPasses();

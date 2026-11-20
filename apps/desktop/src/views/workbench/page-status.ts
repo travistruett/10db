@@ -182,15 +182,15 @@ type SignOffState = (
  */
 const BY_SIGN_OFF: Readonly<Record<PassSignOff, SignOffState>> = {
   [PassSignOff.None]: unsignedState,
-  [PassSignOff.SigningOff]: () => state(PageStatus.SigningOff, 'Signing off…'),
+  [PassSignOff.SigningOff]: () => state(PageStatus.SigningOff, 'Committing…'),
   [PassSignOff.Waiting]: (page, _items, _clock, pass) =>
     state(
       PageStatus.Waiting,
       page.waitsFor === null
-        ? "Signing off: waiting for another page's turn"
-        : `Signing off: waiting for ${waitedFor(page.waitsFor, pass)}`,
+        ? "Committing: waiting for another page's turn"
+        : `Committing: waiting for ${waitedFor(page.waitsFor, pass)}`,
     ),
-  [PassSignOff.Done]: () => state(PageStatus.SignedOff, 'Signed off'),
+  [PassSignOff.Done]: () => state(PageStatus.SignedOff, 'Committed'),
 };
 
 /**

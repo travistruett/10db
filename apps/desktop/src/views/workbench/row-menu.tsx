@@ -5,11 +5,11 @@ import { MenuAction } from './menu-action';
 export interface RowMenuProps {
   /** The page's name, which names the menu for assistive tech. */
   readonly label: string;
-  readonly onTakeOut: () => void;
+  readonly onDiscard: () => void;
 }
 
 /** A queue row's own menu, beside its button: a button can't hold another control. */
-export function RowMenu({ label, onTakeOut }: RowMenuProps) {
+export function RowMenu({ label, onDiscard }: RowMenuProps) {
   return (
     <Menu position="bottom-end" withinPortal>
       <Menu.Target>
@@ -25,9 +25,10 @@ export function RowMenu({ label, onTakeOut }: RowMenuProps) {
       </Menu.Target>
       <Menu.Dropdown>
         <MenuAction
-          label="Remove"
-          byline="Take it out of this pass. Its changes move to its Board task."
-          onClick={onTakeOut}
+          label="Discard"
+          byline="Delete its changes and take it out of this pass."
+          color="red"
+          onClick={onDiscard}
         />
       </Menu.Dropdown>
     </Menu>

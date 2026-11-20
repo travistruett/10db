@@ -598,7 +598,12 @@ export function createServices(deps: {
             `Shared change ${String(choice.seq)} cannot be dropped: ${refused}`,
           );
       }
-      return deps.takeOut({ taskId, within: TakeOutWithin.Alone, shared: input.shared });
+      return deps.takeOut({
+        taskId,
+        within: TakeOutWithin.Alone,
+        shared: input.shared,
+        discard: input.discard,
+      });
     },
     async takeOutPreview(passId, taskId) {
       const pass = getPass(db, passId);

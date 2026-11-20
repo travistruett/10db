@@ -14,7 +14,7 @@ export interface SignOffLineProps {
 
 /**
  * A page's sign-off under way, at the foot of its thread (Workbench spec §9.2). One that waits for
- * another page's turn offers Cancel Sign-Off, which leaves the page Ready; one landing now has nothing
+ * another page's turn offers Cancel Commit, which leaves the page Ready; one landing now has nothing
  * to cancel.
  */
 export function SignOffLine({ passId, taskId, line, waiting }: SignOffLineProps) {
@@ -32,7 +32,7 @@ export function SignOffLine({ passId, taskId, line, waiting }: SignOffLineProps)
             cancel.mutate({ passId, taskId });
           }}
         >
-          Cancel Sign-Off
+          Cancel Commit
         </Button>
       ) : null}
     </Group>

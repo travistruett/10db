@@ -16,14 +16,15 @@ import { CloseProgress } from './close-progress';
 import { PageStatus, pageStatus } from './page-status';
 import { useFrameSlots } from '../../shell/frame-slots';
 import { TitleRow } from '../../shell/title-row';
+import { passTitle } from './pass-title';
 import { medianTurnMinutes, timingLine } from './timing';
 
-// Workbench spec §4.3: the pass header holds the pass's own actions; a page's actions stay at its
-// composer, so the two never share a bar.
+// Workbench spec §4.3: the pass header holds the pass's own actions; a page's actions are on its own
+// title row (or bar, in a narrow window), so the two never share a bar.
 
 /** What the header counts, in its order, and the statuses each count takes in. */
 const COUNTS: readonly { readonly words: string; readonly of: readonly PageStatus[] }[] = [
-  { words: 'signed off', of: [PageStatus.SignedOff] },
+  { words: 'committed', of: [PageStatus.SignedOff] },
   { words: 'signing off', of: [PageStatus.SigningOff, PageStatus.Waiting] },
   { words: 'ready', of: [PageStatus.Ready] },
   { words: 'asking', of: [PageStatus.Asks] },
@@ -32,7 +33,7 @@ const COUNTS: readonly { readonly words: string; readonly of: readonly PageStatu
   { words: 'working', of: [PageStatus.Working, PageStatus.Paused] },
 ];
 
-/** "2 signed off · 1 ready": zero counts and pages not started left out; empty when nothing counts. */
+/** "2 committed · 1 ready": zero counts and pages not started left out; empty when nothing counts. */
 export function countsLine(statuses: readonly PageStatus[]): string {
   return COUNTS.flatMap(({ words, of }) => {
     const count = statuses.filter((status) => of.includes(status)).length;
@@ -40,7 +41,7 @@ export function countsLine(statuses: readonly PageStatus[]): string {
   }).join(' · ');
 }
 
-/** "ampsio · Settings pass · 2 signed off · 1 ready": zero counts and pages not started left out. */
+/** "ampsio · Settings and People · 2 committed · 1 ready": zero counts and pages not started left out. */
 export function headerLine(project: string, pass: string, statuses: readonly PageStatus[]): string {
   return [project, pass, countsLine(statuses)].filter((part) => part !== '').join(' · ');
 }
@@ -49,7 +50,6 @@ export function headerLine(project: string, pass: string, statuses: readonly Pag
 export interface PassActions {
   /** Without it there is no Close Pass. */
   readonly onClose?: () => void;
-  readonly onRename: () => void;
   readonly onAbandon: () => void;
 }
 
@@ -77,15 +77,14 @@ function askingSince(view: PassViewDto, inbox: readonly InboxItemDto[]): string[
     .map((item) => item.createdAt);
 }
 
-/** The pass's own menu: Finish, Rename and Abandon, each enabled by where the pass is. */
+/** The pass's own menu: Finish and Discard, each enabled by where the pass is. */
 export function PassMenu({
   state,
   onClose,
-  onRename,
   onAbandon,
 }: PassActions & { readonly state: PassState }) {
   const open = state === PassState.Open;
-  // Abandon goes on from a close, and from an Abandon that stalled, which the daemon picks up where it
+  // Discard (the daemon's Abandon) goes on from a close, and from an Abandon that stalled, which the daemon picks up where it
   // stopped.
   const abandonable = open || state === PassState.Closing || state === PassState.Abandoning;
   return (
@@ -105,14 +104,8 @@ export function PassMenu({
           />
         ) : null}
         <MenuAction
-          label="Rename"
-          byline="Change the name at the top."
-          disabled={!open}
-          onClick={onRename}
-        />
-        <MenuAction
-          label="Abandon"
-          byline="Stop here. Unfinished changes leave your folder and wait on their Board tasks."
+          label="Discard"
+          byline="Stop here. Unfinished changes are deleted."
           color="red"
           disabled={!abandonable}
           onClick={onAbandon}
@@ -124,7 +117,7 @@ export function PassMenu({
 
 /**
  * The pass's line in the title row (the project, the pass and its counts) with its actions: Open Pull
- * Request once a page is signed off, and a menu with Finish, Rename and Abandon. Under the row, at the top
+ * Request once a page is signed off, and a menu with Finish and Discard. Under the row, at the top
  * of the content: why Open Pull Request is missing, the close's progress, and the timing hint, dimmed,
  * when it has something to say. While the pass closes its page actions wait and Abandon stays. While the
  * frame draws the panel, the line, the pull request and the menu are the panel's head (the workspace draws
@@ -136,7 +129,6 @@ export function PassHeader(props: PassHeaderProps) {
   const { panelShown } = useFrameSlots();
   const menuActions: PassActions = {
     ...(props.onClose === undefined ? {} : { onClose: props.onClose }),
-    onRename: props.onRename,
     onAbandon: props.onAbandon,
   };
   const clock = { now, medianTurnMinutes: medianTurnMinutes(view.turns) };
@@ -157,7 +149,7 @@ export function PassHeader(props: PassHeaderProps) {
         <>
           <TitleRow
             lines={2}
-            title={headerLine(project.name, view.pass.name, statuses)}
+            title={headerLine(project.name, passTitle(view.pages, view.pass.name), statuses)}
             actions={
               <>
                 {signedOff ? pullRequest : null}

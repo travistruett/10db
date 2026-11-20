@@ -1,24 +1,18 @@
-import type { ConversationId, PassId, TaskId } from '@10db/contracts';
+import type { ConversationId, TaskId } from '@10db/contracts';
 import { useRedoConversation, useSendConversationMessage } from '../../daemon/conversation-queries';
-import { useSignOff } from '../../daemon/pass-close-queries';
 import { usePostTaskMessage, useStopPage } from '../../daemon/pass-queries';
 import type { PageActions } from './page-composer';
 
 /**
  * What a page's composer does: Send posts to the task's conversation, a plain Stop ends its turn, Stop
- * and Redo stops it and sends the draft, and Sign Off signs the page off in its pass. A page whose task
+ * and Redo stops it and sends the draft. A page whose task
  * has no conversation yet sends its first message through the task's own intake, which makes one.
  */
-export function usePageActions(
-  passId: PassId,
-  taskId: TaskId,
-  conversationId: ConversationId | null,
-): PageActions {
+export function usePageActions(taskId: TaskId, conversationId: ConversationId | null): PageActions {
   const post = useSendConversationMessage();
   const first = usePostTaskMessage(taskId);
   const stop = useStopPage(taskId);
   const redo = useRedoConversation();
-  const signOff = useSignOff();
   return {
     send: async ({ text, pictures }) => {
       if (conversationId === null) await first.mutateAsync({ text, pictures });
@@ -31,9 +25,6 @@ export function usePageActions(
       // A turn runs, so the task's conversation is there.
       if (conversationId === null) throw new Error('This page has no turn to redo');
       await redo.mutateAsync({ conversationId, text, pictures: [...pictures] });
-    },
-    signOff: async () => {
-      await signOff.mutateAsync({ passId, taskId });
     },
   };
 }

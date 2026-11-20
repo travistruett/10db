@@ -32,7 +32,7 @@ export function useOpenPassWorkbench(): (projectId: ProjectId, taskId?: TaskId) 
   };
 }
 
-/** One Ready page of the row: its title, which opens it in the Workbench, and Sign Off for it. */
+/** One Ready page of the row: its title, which opens it in the Workbench, and Commit for it. */
 function ReadyPage({
   item,
   onOpen,
@@ -72,7 +72,7 @@ function ReadyPage({
               signOff.mutate({ passId: detail.data.passId, taskId: detail.data.taskId });
             }}
           >
-            Sign Off
+            Commit
           </Button>
         ) : null}
       </Group>
@@ -82,7 +82,7 @@ function ReadyPage({
 
 /**
  * A Workbench pass's Ready pages, shown in the Inbox's content (spec §4.1, §6.1): it opens the Workbench, and
- * names each page, which opens it there, each with Sign Off. A page is never approved or sent back; the
+ * names each page, which opens it there, each with Commit. A page is never approved or sent back; the
  * builder looks at it and writes again, or signs it off.
  */
 export function PassReadyRow({ items }: PassReadyRowProps) {

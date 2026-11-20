@@ -26,6 +26,10 @@
           "choice"
         ]
       }
+    },
+    "discard": {
+      "default": false,
+      "type": "boolean"
     }
   }
 }

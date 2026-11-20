@@ -14,6 +14,11 @@ branch `feat/ui-polish`, not on `main` when this was written). The sidebar place
 merged. It is not cited by its path here because the repo test `cites only decision files that exist`
 (`tests/repo/src/architecture-docs.test.ts:107`) reads this branch.
 
+**Amended 2026-11-19:** a page's actions are Open in Browser, Commit (was Sign Off) and Discard (was Take Out),
+in its title row; the pass's are Finish and Discard (was Abandon); a pass has no name the builder sees or
+edits, and is titled by its pages. Discard deletes the page's changes
+(`decisions/2026-11-19-discard-page-deletes-its-changes.md`). The text below still uses the old words.
+
 **Words:** the **Workbench** is the project view. A **pass** is one sitting in it: a set of pages the builder
 works through with the agents. A **page** is a code area marked as a page (§7). A **pass task** is a task in
 a pass. A **turn** is one run of a pass task's agent, from a message to the moment it stops. **Ready** means a
