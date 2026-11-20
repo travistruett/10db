@@ -11,7 +11,7 @@ import { useGoalPassPages, useLivePass } from '../../daemon/pass-queries';
 import { useBatches, useTasks, useWorkstreams } from '../../daemon/queries';
 import { OpenConversation } from '../shape/open-conversation';
 import { PlannedIn } from './planned-in';
-import { useRemoveDraftGoalAction } from '../shape/remove-draft-goal';
+import { useRemoveDraftGoalAction } from '../sessions/plan/remove-draft-goal';
 import { BatchSheet } from '../board/batch/batch-sheet';
 import { goalReadyForPass } from '../workbench/start-pass-rules';
 import { WorkOnThis } from '../workbench/work-on-this';

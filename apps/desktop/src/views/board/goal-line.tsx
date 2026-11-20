@@ -1,7 +1,7 @@
 import { BoardStatus, TaskStatus, type GoalSummaryDto, type TaskDto } from '@10db/contracts';
 import { ActionIcon, Box, Button, Group, Menu, Text } from '@mantine/core';
 import { IconChevronRight, IconDots, IconTrash } from '@tabler/icons-react';
-import { useRemoveDraftGoalAction } from '../shape/remove-draft-goal';
+import { useRemoveDraftGoalAction } from '../sessions/plan/remove-draft-goal';
 import { GOAL_STATUS_LOOK } from './goal-status';
 
 /** The goal's open tasks sitting in Ready: what Start Ready would propose. */

@@ -44,7 +44,7 @@ import { useReportUnsaved } from '../../shell/unsaved-guard';
 import { OpenConversation } from '../shape/open-conversation';
 import { OpenTaskLink } from '../sessions/open-task-link';
 import { PlanContextDisclosure } from './plan-context-disclosure';
-import { TaskSizeLine } from '../shape/task-size-line';
+import { TaskSizeLine } from '../sessions/plan/task-size-line';
 import {
   useCloseTask,
   useHoldTask,

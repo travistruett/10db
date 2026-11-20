@@ -1,6 +1,6 @@
 import { GoalStatus, type GoalSummaryDto } from '@10db/contracts';
 import { useState, type ReactNode } from 'react';
-import { useShapeOf } from '../../daemon/shape-queries';
+import { useShapeOf } from '../../../daemon/shape-queries';
 import { RemoveDraftGoalModal, type RemoveDraftGoalTarget } from './undo-modals';
 
 // Shape spec §11: Remove Draft Goal is in a goal's menu and drawer, not only on its Shape row. It is

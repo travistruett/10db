@@ -2,7 +2,7 @@ import type { ConversationDto, ConversationItemDto, ShapeId, ToolCallView } from
 import { ConversationList } from '../../conversation';
 import type { LiveItems } from '../../conversation/live-items';
 import { useToolCallFull } from '../../daemon/conversation-queries';
-import { planItemEntries } from './plan-entries';
+import { planItemEntries } from '../sessions/plan/plan-entries';
 
 export interface TranscriptProps {
   readonly shapeId: ShapeId | null;

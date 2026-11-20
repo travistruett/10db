@@ -7,7 +7,7 @@ import {
 import { ActionIcon, Box, Button, Group, Menu, Text, UnstyledButton } from '@mantine/core';
 import { IconDots, IconPencil, IconPin } from '@tabler/icons-react';
 import { useRef, useState, type KeyboardEvent } from 'react';
-import type { RowChange } from '../../daemon/shape-queries';
+import type { RowChange } from '../../../daemon/shape-queries';
 import { RowAttachments } from './attachments/row-attachments';
 import { convertedLine, markText, proposalTitle, rowMeta } from './proposal-text';
 import type { RowReview } from './review-lines';

@@ -6,11 +6,11 @@ import { useEffect, useRef, useState } from 'react';
 import { useShapeView } from '../../daemon/shape-queries';
 import { useSelectedProject } from '../../shell/selected-project';
 import { ConversationPane } from './conversation-pane';
-import { ProposedPane } from './proposed-pane';
-import { groupProposals, type SectionKey } from './proposed-groups';
-import { RoundAnnouncer } from './round-announcer';
+import { ProposedPane } from '../sessions/plan/proposed-pane';
+import { groupProposals, type SectionKey } from '../sessions/plan/proposed-groups';
+import { RoundAnnouncer } from '../sessions/plan/round-announcer';
 import { SplitPane } from './split-pane';
-import { SummaryLine } from './summary-line';
+import { SummaryLine } from '../sessions/plan/summary-line';
 import type { TranscriptProps } from './transcript';
 
 /**

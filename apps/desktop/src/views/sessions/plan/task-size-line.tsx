@@ -1,7 +1,7 @@
 import type { ShapeTaskSizeDto, TaskId } from '@10db/contracts';
 import { Text } from '@mantine/core';
 import { IconClockExclamation } from '@tabler/icons-react';
-import { useShapeOf, useShapeView } from '../../daemon/shape-queries';
+import { useShapeOf, useShapeView } from '../../../daemon/shape-queries';
 import { sizeLine } from './size-line';
 
 // Shape spec §8 Calibration, shown: "Sized M (~2 h) · took 5 h of lane time", with a

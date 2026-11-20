@@ -2,7 +2,7 @@ import type { ShapeProposalDto } from '@10db/contracts';
 import { Button, Group, NativeSelect, Stack, Text, Textarea, TextInput } from '@mantine/core';
 import { useState, type KeyboardEvent } from 'react';
 import { changedFields, editableFields, filledValues } from './row-editing';
-import { OWNS_ESCAPE_ATTRIBUTE } from '../../conversation/escape';
+import { OWNS_ESCAPE_ATTRIBUTE } from '../../../conversation/escape';
 
 export interface RowEditorProps {
   readonly row: ShapeProposalDto;

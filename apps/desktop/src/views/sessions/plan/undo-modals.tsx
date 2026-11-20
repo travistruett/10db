@@ -5,8 +5,8 @@ import {
   useRemoveDraftGoal,
   useWithdrawDecision,
   useWithdrawPrinciple,
-} from '../../daemon/shape-queries';
-import { FormModal } from '../../shell/form-modal';
+} from '../../../daemon/shape-queries';
+import { FormModal } from '../../../shell/form-modal';
 
 export interface RemoveDraftGoalTarget {
   readonly goalId: GoalId;

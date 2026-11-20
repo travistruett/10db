@@ -9,8 +9,8 @@ import {
 import { Button, Checkbox, Group, Radio, ScrollArea, Stack, Text } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
-import type { ConvertShapeResult } from '../../daemon/shape-queries';
-import { FormModal } from '../../shell/form-modal';
+import type { ConvertShapeResult } from '../../../daemon/shape-queries';
+import { FormModal } from '../../../shell/form-modal';
 import { destination, proposalTitle } from './proposal-text';
 import { isConverted } from './proposed-groups';
 import { ReviewLines } from './review-notes';

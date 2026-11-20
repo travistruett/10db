@@ -37,7 +37,7 @@ import { PlanComposer } from './plan-composer';
 import { addFiles } from '../../conversation/dropped-files';
 import { HistoryButton } from './history-button';
 import { PlanModelMenu } from './plan-model-menu';
-import { keepBoth, leaveLate, takeLate, useLate } from './late-outcome';
+import { keepBoth, leaveLate, takeLate, useLate } from '../sessions/plan/late-outcome';
 import { RecentConversations } from './recent-conversations';
 import { Transcript, type TranscriptProps } from './transcript';
 import { useShapeKeys } from './use-shape-keys';

@@ -4,7 +4,7 @@ import { Composer } from '../../conversation/composer';
 import type { ComposerPhase } from '../../conversation/composer-phase';
 import { EMPTY_DRAFT, type Draft } from '../../conversation/drafts';
 import { FILE_PICKER_ACCEPT } from '../../conversation/dropped-files';
-import { keepBoth, type LateOutcome } from './late-outcome';
+import { keepBoth, type LateOutcome } from '../sessions/plan/late-outcome';
 
 export interface PlanComposerProps {
   /** No builder message yet: the input takes focus and the hint says what nothing does until you act. */

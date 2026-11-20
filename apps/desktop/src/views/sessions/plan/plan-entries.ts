@@ -6,9 +6,9 @@ import {
   type ShapeId,
 } from '@10db/contracts';
 import { createElement } from 'react';
-import type { ConversationEntry } from '../../conversation';
-import { itemEntry, liveEntries } from '../../conversation/item-entries';
-import type { LiveItems } from '../../conversation/live-items';
+import type { ConversationEntry } from '../../../conversation';
+import { itemEntry, liveEntries } from '../../../conversation/item-entries';
+import type { LiveItems } from '../../../conversation/live-items';
 import { Screenshot } from './screenshot';
 
 // Plan's conversation items, then what streams now, as the conversation kit's entries.

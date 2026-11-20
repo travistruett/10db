@@ -1,8 +1,8 @@
 import type { ScreenMessageBody } from '@10db/contracts';
 import { Text } from '@mantine/core';
-import { useShapeScreen } from '../../daemon/shape-queries';
-import { SCREEN_LABEL } from '../../screens/draw-screen';
-import { useRenderMode } from '../../screens/render-context';
+import { useShapeScreen } from '../../../daemon/shape-queries';
+import { SCREEN_LABEL } from '../../../screens/draw-screen';
+import { useRenderMode } from '../../../screens/render-context';
 
 interface ScreenshotProps {
   readonly shapeId: Parameters<typeof useShapeScreen>[0];

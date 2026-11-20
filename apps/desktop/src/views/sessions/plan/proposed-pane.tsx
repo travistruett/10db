@@ -1,18 +1,18 @@
 import type { ShapeProposalDto, ShapeViewDto } from '@10db/contracts';
-import { PlanMeasures } from './plan-measures';
+import { PlanMeasures } from '../../shape/plan-measures';
 import { Alert, Box, Button, Group, ScrollArea, Skeleton, Stack, Text } from '@mantine/core';
 import { useEffect, useRef, useState } from 'react';
-import { useConversation, useStopConversation } from '../../daemon/conversation-queries';
+import { useConversation, useStopConversation } from '../../../daemon/conversation-queries';
 import {
   useConvertShape,
   useDismissFinding,
   useRehearseShape,
   useRowChange,
-} from '../../daemon/shape-queries';
-import { shortAgo } from '../factory/short-ago';
-import { useNow } from '../../shell/relative';
+} from '../../../daemon/shape-queries';
+import { shortAgo } from '../../factory/short-ago';
+import { useNow } from '../../../shell/relative';
 import { ConvertModal, convertibleRows } from './convert-modal';
-import { agentRehearses } from './agent-rehearsal';
+import { agentRehearses } from '../../shape/agent-rehearsal';
 import { AttachmentsContext } from './attachments/row-attachments';
 import { HeardSoFar } from './heard-so-far';
 import { PreviewPanel } from './preview-panel';

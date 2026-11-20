@@ -3,8 +3,8 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import type { ComponentProps, ReactElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { server } from '../../../test/daemon';
-import { theme } from '../../../theme';
+import { server } from '../../../../test/daemon';
+import { theme } from '../../../../theme';
 import { AttachmentView } from './attachment-view';
 import { MOCKUP_CSP, refusingLoader } from './safe-render';
 
