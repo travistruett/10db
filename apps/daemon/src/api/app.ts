@@ -835,6 +835,9 @@ export function createApp(deps: ApiDeps) {
     .post('/chats/:chatId/unarchive', (c) =>
       c.json(deps.services.unarchiveChat(ChatId.parse(c.req.param('chatId')))),
     )
+    .post('/chats/:chatId/plan', (c) =>
+      c.json(deps.services.showChatPlan(ChatId.parse(c.req.param('chatId')))),
+    )
     .get('/projects/:projectId/chat-models', (c) =>
       c.json(deps.services.chatModels(ProjectId.parse(c.req.param('projectId')))),
     )

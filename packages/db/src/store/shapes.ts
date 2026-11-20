@@ -6,6 +6,8 @@ import {
   ConversationProfile,
   ConversationState,
   EventType,
+  idOfUuid,
+  idUuid,
   mintId,
   NotFoundError,
   ShapeState,
@@ -67,6 +69,17 @@ const toShapeDto = (row: ShapeRow): ShapeDto => ({
   updatedAt: row.updatedAt,
 });
 
+export class PlanIdError extends Error {
+  override readonly name = 'PlanIdError';
+}
+
+/** A chat's plan id: the chat's uuid under the Shape prefix, so a chat's plan id is known before its row exists. */
+export function planIdOfChat(chatId: ChatId): ShapeId {
+  const id = idOfUuid('Shape', idUuid(chatId));
+  if (id === null) throw new PlanIdError(`Chat ${chatId} has no uuid to derive a plan id from`);
+  return id;
+}
+
 /** Writes a plan over its chat: listening, no proposal yet. An imported plan gives its state, round and bundle. */
 export function insertShape(
   ctx: WriteContext,
@@ -84,7 +97,7 @@ export function insertShape(
 ): ShapeDto {
   getProject(ctx.tx, projectId);
   const row: typeof schema.shapes.$inferSelect = {
-    id: mintId('Shape'),
+    id: planIdOfChat(input.chatId),
     projectId,
     title: input.title,
     state: input.state ?? ShapeState.Listening,
@@ -256,4 +269,28 @@ export function listShapes(db: DbReader, projectId: ProjectId): ShapeDto[] {
     .orderBy(asc(schema.shapes.createdAt), asc(schema.shapes.id))
     .all()
     .map(toShapeDto);
+}
+
+/** The chat's plan, made over the chat when it has none yet. `made` says whether this call wrote it. */
+export function ensurePlanOfChat(
+  ctx: WriteContext,
+  chatId: ChatId,
+  origin: ShapeOrigin,
+): { readonly shapeId: ShapeId; readonly made: boolean } {
+  const existing = planOfChat(ctx.tx, chatId);
+  if (existing !== null) return { shapeId: existing, made: false };
+  const chat = getChat(ctx.tx, chatId);
+  const shape = insertShape(ctx, chat.projectId, {
+    chatId,
+    title:
+      chat.title === null || chat.title === CHAT_DEFAULT_TITLE ? DEFAULT_SHAPE_TITLE : chat.title,
+    origin,
+  });
+  ctx.emit({
+    type: EventType.ChatChanged,
+    entityType: 'chat',
+    entityId: chatId,
+    data: { projectId: chat.projectId },
+  });
+  return { shapeId: shape.id, made: true };
 }

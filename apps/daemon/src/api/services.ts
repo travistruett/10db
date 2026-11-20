@@ -696,6 +696,7 @@ export interface ApiServices extends PlanRecordServices {
     | { readonly archived: false; readonly preview: ArchivePreviewDto }
   >;
   unarchiveChat(id: ChatId): ChatDto;
+  showChatPlan(id: ChatId): ChatDto;
   /** The builder's choice of where a session's work happens; `settled` is false when another choice had won. */
   chooseChatWork(
     id: ChatId,

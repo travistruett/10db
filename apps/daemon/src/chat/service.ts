@@ -57,6 +57,7 @@ import {
   patchConversation,
   recentChats,
   searchChats,
+  ensurePlanOfChat,
   setChatTitle,
   setChatWork,
   touchChat,
@@ -107,6 +108,8 @@ export const PASS_OPENING =
   'A pass is opening and has stopped this chat’s turn; try again once it has opened';
 /** What a send is refused with while Do It hands the chat's work to a task in a separate copy. */
 export const HANDING_OFF = 'This chat is handing its work to a task';
+/** What Show Plan is refused with on a chat whose work moved to a task. */
+export const SEALED_NO_PLAN = 'This session’s work moved to a task, so it has no Plan.';
 /** What Do It and archive are refused with while a pass waits to open for the chat. */
 export const PENDING_OPEN_FOR_CHAT = 'A pass is waiting to open for this chat; Cancel it first';
 /** What archive is refused with while the task a chat was handed to is unfinished. */
@@ -153,6 +156,8 @@ export interface ChatService {
    */
   archive(id: ChatId, request?: ArchiveRequest): Promise<ChatDto>;
   unarchive(id: ChatId): ChatDto;
+  /** Makes the chat's Plan when it has none (nothing is run), and answers the chat with its `planId`. */
+  showPlan(id: ChatId): ChatDto;
   /**
    * The chat branch of the message route: the message stored queued, the chat touched, a turn asked for.
    * With `wait`, a turn Your folder keeps out waits for it to free, ahead of any task that hasn't started;
@@ -456,6 +461,15 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       });
       engine.unretire(getChat(state.db, id).conversationId);
       reopen(id);
+      return dtoOf(id);
+    },
+
+    showPlan(id) {
+      const chat = getChat(state.db, id);
+      if (chat.archivedAt !== null) throw new ConflictError(CHAT_ARCHIVED);
+      if (getConversation(state.db, chat.conversationId).state === ConversationState.Sealed)
+        throw new ConflictError(SEALED_NO_PLAN);
+      state.write((ctx) => ensurePlanOfChat(ctx, id, ShapeOrigin.App));
       return dtoOf(id);
     },
 

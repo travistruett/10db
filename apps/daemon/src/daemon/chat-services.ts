@@ -32,6 +32,7 @@ export type ChatApiServices = Pick<
   | 'patchChat'
   | 'archiveChat'
   | 'unarchiveChat'
+  | 'showChatPlan'
   | 'chooseChatWork'
   | 'chatWorkState'
   | 'chatChanges'
@@ -84,6 +85,7 @@ export function createChatApiServices(deps: {
       }
     },
     unarchiveChat: (id) => chat.unarchive(id),
+    showChatPlan: (id) => chat.showPlan(id),
     async chooseChatWork(id, choice) {
       try {
         return { settled: true, work: await deps.work.choose(id, choice.place) };
