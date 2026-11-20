@@ -267,8 +267,11 @@ WHERE kind = 'shape_event' AND pushed_at IS NULL
 -- 4. Every other plan goes, its children first:
 --    shape_entry_versions, shape_entries, shape_shadow_answers, shape_findings, shape_rehearsals,
 --    shape_attachment_revisions, shape_attachments, shape_links, shape_questions, shape_proposals.
---    Then, of its conversation: conversation_files, conversation_items, and sessions.conversation_id set to NULL
---    (the rows, their cost, skipped_actions and handoffs stay); the conversation; the shape.
+--    Then, of its conversation: conversation_files, conversation_items, and, in ONE UPDATE of sessions,
+--    conversation_id = NULL, ended_at = coalesce(ended_at, <now>), exit_reason = coalesce(exit_reason, <the
+--    enum's "interrupted"/"stopped" value; check the column>) — a Plan session left open by a crash or an update
+--    has ended_at NULL, and the relaxed check would refuse it (the rows, their cost, skipped_actions and handoffs
+--    stay); the conversation; the shape.
 --    "Other" is `chat_id IS NULL OR chat_id NOT IN (SELECT id FROM chats)`.
 DELETE FROM … WHERE shape_id IN (SELECT id FROM shapes WHERE chat_id IS NULL OR chat_id NOT IN (SELECT id FROM chats));
 -- 5. Anything still owned by 'shape' (a conversation without its shape) goes the same way.

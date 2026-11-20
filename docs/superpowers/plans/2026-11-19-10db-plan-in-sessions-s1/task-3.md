@@ -24,7 +24,7 @@ once, and keep notes.
   keeps a row that carries it as a whole, as it does `*`.
 - **`apps/daemon/src/plan-record/import.ts`:**
   - an imported proposal is written with `pinned: [PIN_IMPORTED]` (around line 720);
-  - a re-import's `held.pinned` (around line 316) counts only the builder's pins (any entry but `PIN_IMPORTED`).
+  - a re-import's `held.pinned` (computed in `plan-record/lookup.ts:248`, read at `import.ts` around line 316) counts only the builder's pins (any entry but `PIN_IMPORTED`).
     So a re-import may replace an import-pinned row, and keeps one the builder pinned.
 - **Unpin and Restore:** the builder's Unpin and Restore on an import-pinned row clear the marker, as they clear `*`.
 

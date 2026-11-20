@@ -109,7 +109,11 @@ Migrate forward with the shipped folder, then assert:
   - its queued starter has no `$.prompt` left, and is still in the transcript.
 - **Plan B is gone:** its shape, every row under it, its conversation and its items. Of what it touched:
   - its session survives, with `conversation_id` null and `cost_usd = 1.25`;
+  - a second Plan B session seeded with `ended_at` NULL (left open by a crash) survives, now ended;
   - `accountSpendUsd` for its account, over a window that holds the session, is the same before and after;
+  - `accountUsage`'s total is the same before and after: a session with neither workstream nor conversation is
+    counted in the account's total (`usage.ts` `byProject` inner-joins projects; give such a session its own
+    "no project" bucket or count it outside the join);
   - the decision it linked to stays.
 - **The rest:** the ordinary chat, its picture, the task, the decision and the principle are unchanged.
 - **Integrity:** `PRAGMA foreign_key_check` returns no row, and no conversation has `owner_kind = 'shape'`.
