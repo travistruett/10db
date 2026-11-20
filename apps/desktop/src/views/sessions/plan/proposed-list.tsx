@@ -1,4 +1,4 @@
-import type { ShapeProposalDto, ShapeTaskSizeDto } from '@10db/contracts';
+import type { ProjectId, ShapeProposalDto, ShapeTaskSizeDto } from '@10db/contracts';
 import { Box, Text, UnstyledButton } from '@mantine/core';
 import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { useState } from 'react';
@@ -31,6 +31,7 @@ function blocksOf(groups: ProposedGroups): Block[] {
 }
 
 export interface ProposedListProps {
+  readonly projectId: ProjectId;
   readonly groups: ProposedGroups;
   /** Each proposed task's derived size, and its actual once converted and finished (§8). */
   readonly sizes: readonly ShapeTaskSizeDto[];
@@ -46,7 +47,14 @@ export interface ProposedListProps {
  * The rows of the sidebar as one hairline-divided list, each kind labelled in a narrow left column.
  * A list, not cards (DESIGN.md); ↑/↓ move between the rows, and Earlier holds the superseded ones.
  */
-export function ProposedList({ groups, sizes, actionsFor, reviewOf, handlers }: ProposedListProps) {
+export function ProposedList({
+  projectId,
+  groups,
+  sizes,
+  actionsFor,
+  reviewOf,
+  handlers,
+}: ProposedListProps) {
   const sizesOf = (row: ShapeProposalDto) => sizes.filter((s) => s.proposalId === row.id);
   const [earlierOpen, setEarlierOpen] = useState(false);
   const rows = blocksOf(groups).flatMap((block) =>
@@ -64,6 +72,7 @@ export function ProposedList({ groups, sizes, actionsFor, reviewOf, handlers }: 
     <Box component="ul" aria-label="Plan rows" m={0} p={0} style={{ listStyle: 'none' }}>
       {rows.map(({ row, section, label, note }, index) => (
         <ProposalRow
+          projectId={projectId}
           key={row.id}
           row={row}
           label={label}
@@ -100,6 +109,7 @@ export function ProposedList({ groups, sizes, actionsFor, reviewOf, handlers }: 
           {earlierOpen
             ? groups.earlier.map((row) => (
                 <ProposalRow
+                  projectId={projectId}
                   key={row.id}
                   row={row}
                   label={kindLabel(row)}

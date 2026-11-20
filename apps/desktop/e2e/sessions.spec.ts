@@ -663,7 +663,8 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await expectAccessible(page, 'accept');
   await dialog.getByRole('button', { name: 'Accept 4' }).click();
   await expect(dialog).toBeHidden();
-  await expect(panel.getByText('Accepted · on the Board')).toHaveCount(3);
+  await expect(panel.getByText('On the Board · 2 ready', { exact: true })).toHaveCount(1);
+  await expect(panel.getByText('On the Board · Ready', { exact: true })).toHaveCount(2);
   await expect(panel.getByText('Accepted · in Knowledge')).toHaveCount(1);
   const accepted = await titles();
   expect(accepted).toHaveLength(before + 4);
@@ -682,7 +683,8 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
     .getByRole('dialog', { name: 'Remove Draft Goal' })
     .getByRole('button', { name: 'Remove Draft Goal' })
     .click();
-  await expect(panel.getByText('Accepted · on the Board')).toHaveCount(2);
+  await expect(panel.getByText('On the Board · Ready', { exact: true })).toHaveCount(2);
+  await expect(panel.getByText('On the Board · 2 ready', { exact: true })).toHaveCount(0);
   expect(await titles()).toHaveLength(before + 2);
 
   // Under the side-by-side width the panel is a drawer, which Close Plan closes and the title's Plan reopens.

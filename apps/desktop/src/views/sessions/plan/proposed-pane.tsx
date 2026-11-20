@@ -256,6 +256,7 @@ export function ProposedPane({
           ) : view !== undefined && hasProposals ? (
             <AttachmentsContext value={view.attachments}>
               <ProposedList
+                projectId={view.shape.projectId}
                 groups={groups}
                 sizes={view.sizes}
                 actionsFor={actionsFor}
