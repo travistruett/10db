@@ -72,7 +72,7 @@ Add `ShapeAccept` beside `ShapeLink`, with the prefix `'sac'`, in both the schem
   - If drizzle-kit writes a table rebuild that also adds a column, split it as `packages/db/AGENTS.md` says: one
     migration that adds the column, a second that rebuilds.
   - Never edit the generated SQL.
-  - Save a copy of the SQL to your scratch folder (`task-1/migration.sql`): Task 7 regenerates the migration
+  - Save a copy of the SQL to your scratch folder (`~/Agents/scratch/10db/2026-11-20/plan-s23/s3-task-1/migration.sql`): Task 7 regenerates the migration
     after the final merge of `main` and diffs against it.
 
 ### `packages/db/src/store/shape-accepts.ts` (new), exported through the package's entry point

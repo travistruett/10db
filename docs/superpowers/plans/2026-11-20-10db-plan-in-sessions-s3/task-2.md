@@ -55,14 +55,54 @@ export function deleteLandingGroupOf(ctx: WriteContext, id: LandingGroupId): voi
 export function leaveLandingGroup(ctx: WriteContext, taskId: TaskId): void;
 ```
 
-**Implements:**
-- `undoAccept` and `UndoneAccept`;
-- `releaseShapeQuestion`;
-- `ShapeService.undoAccept`;
-- `ApiServices.undoShapeAccept`;
-- `ShapeAcceptDto`, `ShapeViewDto.lastAccept` and `ShapeUndoAcceptResult`.
+**Implements (quoted):**
 
-All are as the index's Interfaces (New) quote them.
+```ts
+// apps/daemon/src/shape/undo.ts
+export interface UndoneAccept {
+  readonly goals: number;
+  readonly tasks: number;
+  readonly decisions: number;
+  readonly principles: number;
+  readonly questions: number;
+  /** What this Accept wrote that Undo leaves: changes and removals of Board tasks, a decision superseded or a
+   *  principle replaced since, a landing group holding a task with a run or one it didn't make. */
+  readonly kept: number;
+}
+export function undoAccept(ctx: WriteContext, shapeId: ShapeId, acceptId: ShapeAcceptId): UndoneAccept;
+
+// packages/db/src/store/shape-state.ts
+/** Deletes a question Convert stored, and its link; its proposal is the caller's to reset. */
+export function releaseShapeQuestion(ctx: WriteContext, questionId: ShapeQuestionId): void;
+
+// apps/daemon/src/shape/service.ts (ShapeService)
+undoAccept(shapeId: ShapeId, acceptId: ShapeAcceptId): UndoneAccept;
+// apps/daemon/src/api/services.ts (ApiServices), and ShapeApiServices
+undoShapeAccept(shapeId: ShapeId, acceptId: ShapeAcceptId): ShapeUndoAcceptResult;
+
+// packages/contracts/src/shape-view.ts
+export const ShapeAcceptDto = z.object({
+  id: ShapeAcceptId,
+  at: Timestamp,
+  goals: z.int().min(0),
+  /** Every task it made: a goal's tasks and loose tasks alike, so a goal-only Accept reads "1 goal, 2 tasks". */
+  tasks: z.int().min(0),
+  records: z.int().min(0),
+  /** What Undo would leave, counted as undoAccept counts `kept`. */
+  kept: z.int().min(0),
+  /** Every task it made, so the app can tell from its cached runs whether Undo would be refused. */
+  taskIds: z.array(TaskId),
+});
+// ShapeViewDto gains `lastAccept: ShapeAcceptDto.nullable()`: the newest Accept not undone.
+export const ShapeUndoAcceptResult = z.object({
+  goals: z.int().min(0),
+  tasks: z.int().min(0),
+  decisions: z.int().min(0),
+  principles: z.int().min(0),
+  questions: z.int().min(0),
+  kept: z.int().min(0),
+});
+```
 
 ## What Undo may remove: exactly this, nothing else
 
@@ -78,11 +118,14 @@ caller's write, so the whole Undo rolls back.
 2. It is `latestShapeAccept(ctx.tx, shapeId)`. Otherwise `InvalidError` "Undo the later Accept first".
 3. **No task it would remove has any workstream row**, of any state: queued, held, or cancelled before a session
    included. The check reads `workstreams` by `task_id`, for every task linked under its goal and task proposals
-   that is not already cancelled. Otherwise `ConflictError` "<title> has started; cancel its run on the Board
-   first". This is stricter than `cancelNeverStartedTask`'s `startedRun`, on purpose: Undo never cancels a run,
+   that is not already cancelled. Otherwise `ConflictError` "<title> has started; cancel its run and remove it
+   from the Board first". This is stricter than `cancelNeverStartedTask`'s `startedRun`, on purpose: Undo never cancels a run,
    so it never leaves a branch, batch or worktree behind.
-4. **No goal it would remove holds a task not linked under this Accept's proposals.** That means a pass's page,
-   or a task added on the Board. Otherwise `ConflictError` "<goal> holds <task>, which this Accept didn't make".
+4. **No goal it would remove holds a task, other than a cancelled one, that isn't linked under this Accept's
+   proposals.** That means a pass's page, or a task added on the Board. Cancelled tasks are ignored, as
+   `removeDraftGoal` ignores them (`goal-removal.ts:33`). Otherwise, for example, Accept 1 makes a goal, Accept 2
+   adds T to it, and undoing Accept 2 cancels T but keeps its `goal_id`, so Undo 1 would be refused for ever.
+   The refusal is `ConflictError` "<goal> holds <task>, which this Accept didn't make".
 
 **Then, per proposal kind:**
 
@@ -98,7 +141,7 @@ caller's write, so the whole Undo rolls back.
 | `principle`, withdrawn or retired since | taken back already: delete its links | — |
 | `principle`, replaced since (`supersededById` non-null) | **leave it** as for a superseded decision, add to `kept` | — |
 | `question` | `releaseShapeQuestion(ctx, questionId)` | — |
-| `landing` | for each group with this `accept_id`: when every member is a task this Undo cancels, `deleteLandingGroupOf`. Otherwise `leaveLandingGroup` for each member this Undo cancels, and the group stays, added to `kept` (a member with a run, or one not made here) | — |
+| `landing` | for each group with this `accept_id`: when every member is a task this Undo cancels, `deleteLandingGroupOf`, and the proposal goes back to pending. Otherwise `leaveLandingGroup` for each member this Undo cancels, the group stays, and **its proposal stays accepted under the Accept**, added to `kept` (a member with a run, or one not made here) | — |
 | `change_task`, `remove_task` | **nothing**: the change to the Board task stays, and the proposal stays accepted under the Accept. Added to `kept`. | — |
 
 Read the decision and principle states before calling the withdraw functions, so neither one's "already
@@ -111,7 +154,8 @@ withdrawn" or "superseded" `ConflictError` is ever reached. Those refusals would
 - end with a `ConflictError` rather than loop.
 
 **Rewrapped store refusals:**
-- a `TaskStartedError` from the store becomes "<title> has started; cancel its run on the Board first";
+- a `TaskStartedError` from the store becomes "<title> has started; cancel its run and remove it from the Board
+  first";
 - the store's "Batch "<title>" is being cut" `ConflictError` becomes "A batch is being cut; try Undo Accept again
   once it has started".
 
@@ -151,9 +195,13 @@ Add `releaseShapeQuestion(ctx, questionId)`: it deletes the question's link and 
 
 - `buildShapeView` adds `lastAccept`, the newest Accept not undone, or null. It counts the Accept's links:
   - `goals` are the goal links;
-  - `tasks` are the task links not under a goal proposal;
-  - `records` are the decision and principle links;
-  - `kept` is the number of `change_task` and `remove_task` proposals it accepted;
+  - `tasks` are every task link under its goal and task proposals, a goal's tasks included, so a goal-only Accept
+    reads "1 goal, 2 tasks";
+  - `records` are the decision and principle links that Undo would withdraw;
+  - **`kept` is counted as `undoAccept` counts it:** the `change_task` and `remove_task` proposals, the decisions
+    superseded and principles replaced since, and the landing groups that hold a task with a run or one it
+    didn't make. Put the rule in one function that `undoAccept` and the view both call, so the confirm's
+    "N stay" and Undo's result agree;
   - `taskIds` is every task linked under it.
 
 ### `packages/contracts/src/shape-view.ts`

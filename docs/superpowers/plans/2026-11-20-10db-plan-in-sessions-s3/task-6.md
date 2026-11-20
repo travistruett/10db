@@ -27,7 +27,8 @@ then takes the goal back:
    - Press "Accept and Start 1". The goal row's line shows a started word: `/queued|running|needs you|in review|done/i`,
      not Queued or Running alone, since the fake lane may finish fast.
 3. **Undo is disabled.**
-   - Open ⋯. Undo Accept is disabled, and its reason reads "has started". Close the menu.
+   - Open ⋯. Undo Accept is disabled, and its reason reads "has started; cancel its run and remove it from the
+     Board first". Close the menu.
 4. **Clean up, where the test already ends the New Plan session** (before the existing `archive()` at about
    line 727; add no earlier archive):
    - for each run this test started (`GET /workstreams?active=true` filtered to the goal's tasks), call `POST

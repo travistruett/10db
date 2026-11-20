@@ -15,7 +15,8 @@ Accepted and Running states), §1.1 (the rows for Accept and Start and Undo Acce
   and the row's dot moves from Accepted to Running to Done. A click opens the task on the Board.
 - The panel's ⋯ gains **Undo Accept**. It takes back the last Accept's new goals and tasks, withdraws its
   decisions and principles, and makes those rows proposed again, while none of its tasks has a run. Once one
-  has, the item is shown disabled with the reason ("Drop the Abandon strip has started").
+  has, the item is shown disabled with the reason ("Drop the Abandon strip has started; cancel its run and
+  remove it from the Board first").
 
 **What it buys.** You plan, accept and start in one place, and watch the work run from the conversation that
 planned it. An Accept you regret costs one click instead of removing each goal and record by hand.
@@ -40,8 +41,9 @@ planned it. An Accept you regret costs one click instead of removing each goal a
    wrong: one more click per Accept to reach an older one.
 2. **Any run blocks Undo**, a queued, held or refused one included. Undo checks this before the store's own
    rule, so it never cancels a run and never leaves a branch, batch or worktree behind. Undo after Accept and
-   Start therefore waits until those runs are cancelled on the Board, or their tasks removed. Cost if wrong: you
-   cancel queued runs before you can undo.
+   Start therefore waits until each such task's run is cancelled and the task removed from the Board ("<title>
+   has started; cancel its run and remove it from the Board first"); Undo then skips the removed task. Cost if
+   wrong: you cancel and remove those tasks before you can undo.
 3. **Some tasks aren't started, and stay on the Board:** any task the starter would refuse, rather than refusing
    the whole start. That covers:
    - a task waiting on unfinished work outside this start (`unfinishedDependencies`);
@@ -348,8 +350,12 @@ shapeStartCounts(shapeId: ShapeId, proposalIds: readonly ShapeProposalId[]): Sha
 export const ShapeAcceptDto = z.object({
   id: ShapeAcceptId,
   at: Timestamp,
-  goals: z.int().min(0), tasks: z.int().min(0), records: z.int().min(0),
-  /** Changes and removals of Board tasks it made, which Undo leaves. */
+  goals: z.int().min(0),
+  /** Every task it made: a goal's tasks and loose tasks alike, so a goal-only Accept reads "1 goal, 2 tasks". */
+  tasks: z.int().min(0),
+  records: z.int().min(0),
+  /** What Undo would leave, counted as undoAccept counts `kept`: change and remove_task proposals, superseded or
+   *  replaced records, landing groups holding a task with a run or one it didn't make. */
   kept: z.int().min(0),
   /** Every task it made, so the app can tell from its cached runs whether Undo would be refused. */
   taskIds: z.array(TaskId),
@@ -476,12 +482,12 @@ Design, not a test list: only the core cards' named tests cover rows.
 
 | State | Event | Outcome | Owner |
 | --- | --- | --- | --- |
-| `lastAccept` present, none of its tasks has a run in the cache | ⋯ | Undo Accept is enabled. The confirm lists what goes ("1 goal, 2 tasks; withdraws 1 decision") and what stays ("1 change to a Board task stays"). | 4 |
-| `lastAccept` present, one of its tasks has a run | ⋯ | Undo Accept is shown disabled, with "<title> has started" as its reason. | 4 |
+| `lastAccept` present, none of its tasks has a run in the cache | ⋯ | Undo Accept is enabled. The confirm lists what goes ("1 goal, 2 tasks; withdraws 1 decision"), counting a goal's tasks, and what stays ("1 stays"). | 4 |
+| `lastAccept` present, one of its tasks has a run | ⋯ | Undo Accept is shown disabled, with "<title> has started; cancel its run and remove it from the Board first" as its reason. | 4 |
 | Undo pressed | Nothing it made has a run | In one write: goals and tasks removed, decisions and principles withdrawn, questions released. The proposals are pending again with `accept_id` cleared, the plan is Proposed, the Accept is marked undone, and the transcript gets a note. | 2 |
-| Undo pressed | One of its tasks has any workstream row (queued, held, or cancelled before a session) | 409 "<title> has started; cancel its run on the Board first". Undo checks this itself, before the store's own rule, so no run is ever cancelled. Nothing changes. | 2 |
+| Undo pressed | One of its tasks has any workstream row (queued, held, or cancelled before a session) | 409 "<title> has started; cancel its run and remove it from the Board first". Undo checks this itself, before the store's own rule, so no run is ever cancelled. Nothing changes. | 2 |
 | Undo pressed | An open task outside this Accept waits on one of its tasks | 409 naming the dependent. Nothing changes. | 2 |
-| Undo pressed | One of its goals holds a task not linked under this Accept's proposals (a pass's page, a task added on the Board) | 409 "<goal> holds <task>, which this Accept didn't make". Nothing changes. | 2 |
+| Undo pressed | One of its goals holds a task, not cancelled, that isn't linked under this Accept's proposals (a pass's page, a task added on the Board) | 409 "<goal> holds <task>, which this Accept didn't make". Nothing changes. | 2 |
 | Undo pressed | A decision it wrote was withdrawn since, or a principle withdrawn or retired | Counted as taken back: skipped, with its links deleted. | 2 |
 | Undo pressed | A decision it wrote was superseded since, or a principle replaced | Left as it is and counted in `kept`. Never a refusal, so earlier Accepts are never locked behind it. | 2 |
 | Undo pressed | A landing group it made holds a task with a run, or one not made by this Accept | The group stays and is counted in `kept`. This Accept's cancelled tasks leave it (`leaveLandingGroup`). | 2 |
@@ -491,7 +497,7 @@ Design, not a test list: only the core cards' named tests cover rows.
 | Undo pressed | The Accept also changed or removed Board tasks | Those changes stay, and their proposals stay accepted under the Accept, which is still marked undone. `kept` counts them. | 2 |
 | Undo pressed | An unrelated batch is being cut | The store refuses removing a task during a cut. Undo says "A batch is being cut; try Undo Accept again once it has started". Nothing changes. | 2 |
 | Undo pressed | Accept and Start is waiting in `settleSizing`, before its start | Undo has nothing to refuse, so it removes the tasks. The start's `checkStartable` then refuses "Task <title> is cancelled", which becomes `start.refused`. | 2, 3 |
-| Undo pressed | Its tasks' cut was refused earlier (runs cancelled before a session, a start-refused card open) | Refused by the workstream check, "<title> has started; cancel its run on the Board first". The card's Cancel task removes the task, and then Undo skips it. The card is not changed. | 2 |
+| Undo pressed | Its tasks' cut was refused earlier (runs cancelled before a session, a start-refused card open) | Refused by the workstream check, "<title> has started; cancel its run and remove it from the Board first". The card's Cancel task removes the task, and then Undo skips it. The card is not changed. | 2 |
 | Undo pressed | The scheduler or a Board start runs at the same time | Writes are serialized and each start checks and writes in one synchronous step. Either the task already has its run, and Undo refuses, or Undo cancels it first, and the start refuses the cancelled task. | 2 |
 | Undo pressed | A turn is running | It goes ahead, as Accept does. The next round sees the rows pending. | 2 |
 | Undone | Accept again | New tasks and a new Accept record. Undo applies to the new one. | 1 |

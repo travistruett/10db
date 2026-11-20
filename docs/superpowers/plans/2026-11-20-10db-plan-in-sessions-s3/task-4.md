@@ -25,7 +25,16 @@ export const ShapeUndoAcceptResult = z.object({
   goals: z.int().min(0), tasks: z.int().min(0), decisions: z.int().min(0),
   principles: z.int().min(0), questions: z.int().min(0), kept: z.int().min(0),
 });
-// ShapeAcceptDto: { id, at, goals, tasks, records, kept, taskIds }; ShapeViewDto.lastAccept: ShapeAcceptDto | null
+export const ShapeAcceptDto = z.object({
+  id: ShapeAcceptId,
+  at: Timestamp,
+  goals: z.int().min(0),
+  tasks: z.int().min(0), // a goal's tasks included
+  records: z.int().min(0),
+  kept: z.int().min(0), // what Undo would leave
+  taskIds: z.array(TaskId),
+});
+// ShapeViewDto.lastAccept: ShapeAcceptDto | null
 // ShapeConvertInput.start?: boolean; ShapeConvertResult.start?: ShapeStartOutcome
 
 // apps/desktop/src/daemon/shape-queries.ts (this card)
@@ -101,16 +110,17 @@ export function useTasks(projectId: ProjectId | null);
 - The panel's ⋯ `Menu` gets **Undo Accept**, shown when `view.lastAccept !== null`.
   - **Disabled with its reason** when any of `lastAccept.taskIds` has a run in the app's cache. A run means
     `task.workstreamId !== null` in `useTasks(projectId)`, which task and run events keep fresh.
-  - The reason shows as the item's description or tooltip: "<title> has started". The daemon still refuses on
-    its own, so the cache is only a hint.
+  - The reason shows as the item's description or tooltip: "<title> has started; cancel its run and remove it
+    from the Board first". The daemon still refuses on its own, so the cache is only a hint.
 - The item opens `UndoAcceptModal`, in `undo-modals.tsx` beside the Withdraws:
   - title "Undo Accept";
   - body "Takes back what the Accept of <shortAgo(at)> put on the Board: 1 goal, 2 tasks; withdraws 1 record.", a
     zero part dropped;
-  - when `kept > 0`, "<kept> changes to Board tasks stay.";
+  - when `kept > 0`, "<kept> stay." (the daemon counts `kept` as Undo will: changes to Board tasks, records
+    superseded or replaced since, landing groups it can't take back);
   - primary **Undo Accept**, danger color, as Remove Draft Goal's is.
 - A refusal shows in the modal's alert in the daemon's words, for example "Drop the Abandon strip has started;
-  cancel its run on the Board first"; the modal stays open. Success closes it.
+  cancel its run and remove it from the Board first"; the modal stays open. Success closes it.
 
 ## UI calls (yours, cheap to change)
 

@@ -47,7 +47,7 @@ merge of `main`.
    - restore `meta/_journal.json` from `origin/main` with `git show origin/main:packages/db/drizzle/meta/_journal.json
      > packages/db/drizzle/meta/_journal.json`;
    - run `pnpm --filter @10db/db generate`;
-   - diff the new SQL against Task 1's copy (`~/Agents/scratch/10db/2026-11-20/plan-s23/task-1/migration.sql`),
+   - diff the new SQL against Task 1's copy (`~/Agents/scratch/10db/2026-11-20/plan-s23/s3-task-1/migration.sql`),
      ignoring the file name. They must match statement for statement. Report the diff.
 3. `gh pr list --state open --json number,title,files`: still no other open pull request adding a file under
    `packages/db/drizzle/`.

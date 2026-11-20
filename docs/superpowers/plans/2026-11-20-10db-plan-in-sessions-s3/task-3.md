@@ -48,12 +48,69 @@ export function createShapeServices(deps: {
 export function listAcceptedProposals(db: DbReader, id: ShapeAcceptId): ShapeProposalRow[];
 ```
 
-**Implements**, as the index's Interfaces (New) quote them:
-- `startCounts`, `StartCountTask` and `buildStartCounts`;
-- `ShapeService.startCounts`;
-- `ApiServices.shapeStartCounts`;
-- `ShapeConvertInput.start`, `ShapeStartOutcome`, `ShapeConvertResult.start` and `ShapeStartCountsDto`;
-- `createShapeServices`'s `startTasks` dep.
+**Implements (quoted):**
+
+```ts
+// apps/daemon/src/shape/start-counts.ts (pure)
+export interface StartCountTask {
+  readonly key: string;
+  readonly title: string;
+  /** Where it will run: WorkspaceMode, from its placement (or proposePlacement before Accept). */
+  readonly place: WorkspaceMode;
+  /** Keys of other tasks in this start it waits on. */
+  readonly waitsOnStart: readonly string[];
+  /** Titles of unfinished tasks outside this start it waits on. */
+  readonly waitsOutside: readonly string[];
+}
+export function startCounts(input: {
+  readonly tasks: readonly StartCountTask[];
+  /** Draft keys the lane simulation starts at hour 0. */
+  readonly startsAtOnce: ReadonlySet<string>;
+  readonly local: boolean;
+  readonly cap: number; // 50
+}): ShapeStartCountsDto & { readonly startKeys: readonly string[] };
+
+// apps/daemon/src/shape/preview.ts
+export function buildStartCounts(
+  db: DbReader,
+  shapeId: ShapeId,
+  proposalIds: readonly ShapeProposalId[],
+  now: Date,
+): ShapeStartCountsDto;
+
+// apps/daemon/src/shape/service.ts (ShapeService)
+startCounts(shapeId: ShapeId, proposalIds: readonly ShapeProposalId[]): ShapeStartCountsDto;
+// apps/daemon/src/api/services.ts (ApiServices), and ShapeApiServices
+shapeStartCounts(shapeId: ShapeId, proposalIds: readonly ShapeProposalId[]): ShapeStartCountsDto;
+
+// packages/contracts/src/shape-view.ts
+// ShapeConvertInput gains `start: z.boolean().optional()`.
+export const ShapeStartOutcome = z.object({
+  /** Tasks that got a run from this start; their runs queue through the scheduler. */
+  started: z.array(TaskId),
+  /** Tasks left on the Board, with why: "waits for <title>", "waits for <title>, which runs in another place",
+   *  "a start takes at most 50". */
+  left: z.array(z.object({ taskId: TaskId, title: z.string(), why: z.string() })),
+  /** Why the start stopped, when it did: a DomainError's message, or a plain line (the cause is logged).
+   *  The Accept stands either way. */
+  refused: z.string().nullable(),
+});
+// ShapeConvertResult gains `start: ShapeStartOutcome.optional()` (present when `start` was asked).
+export const ShapeStartCountsDto = z.object({
+  now: z.int().min(0),
+  forLane: z.int().min(0),
+  forOthers: z.int().min(0),
+  /** Tasks this start leaves on the Board, with why, as `ShapeStartOutcome.left` will say. */
+  stay: z.array(z.object({ title: z.string(), why: z.string() })),
+});
+
+// apps/daemon/src/daemon/shape-services.ts: createShapeServices's deps gain
+readonly startTasks: (
+  projectId: ProjectId,
+  title: string,
+  taskIds: readonly TaskId[],
+) => Promise<void>;
+```
 
 ## Which tasks start
 
