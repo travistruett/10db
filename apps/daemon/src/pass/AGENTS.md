@@ -18,3 +18,4 @@
   `pass-abandon:<pass>`), posted with `postNotice` in the write that records the step (`decisions/2026-11-17-every-card-has-a-tier.md`).
   The follow-on notice is the carry-over's marker: `carryOverDue` reads `hasNoticeKey` (`packages/db`), and still
   reads a card an earlier build raised. An abandon whose Move is gone withdraws the open card in the same write.
+- A sign-off that lands a commit calls `SignOffDeps.committed`, which `start.ts` points at `delivery/pass-pr.ts`'s `pushCommitted`: while the pass has an open pull request, the commit is pushed to it. `POST /passes/:passId/pull-request` takes `ready` (open ready for review, or mark a draft ready), and its preview's `lands` says `close` where the pass lands at its close (local delivery, no origin, or one not on GitHub), the only place the Workbench offers Merge (`decisions/2026-11-19-a-pass-ships-through-its-pull-request.md`).
