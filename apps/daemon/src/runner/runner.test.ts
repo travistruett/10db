@@ -3065,6 +3065,31 @@ describe('a step that ends with changes in its claims', () => {
     expect(gateEvidence(workstream.id)).toHaveLength(1);
   });
 
+  it("leaves what the checkout held before the task first ran, naming only the task's own change", async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [write('src/api/a.txt'), turn],
+        [commit('op-uncom-0002', ['src/api/a.txt']), turn],
+      ],
+    });
+    // The builder's edit in a shared checkout, inside the task's claims and older than the task.
+    mkdirSync(join(engine.repoPath, 'src/api'), { recursive: true });
+    writeFileSync(join(engine.repoPath, 'src/api/builder.txt'), 'theirs');
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      nextAction: { kind: 'uncommitted', paths: ['src/api/a.txt'] },
+    });
+
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(gateEvidence(workstream.id)).toHaveLength(1);
+  });
+
   it('fails the step once it has been sent back as many times as the fix limit allows', async () => {
     const uncommitted = [write('src/api/a.txt'), turn];
     engine = await createTestEngine({

@@ -164,6 +164,8 @@ import {
   approvedCallKeys,
   approvedSkipsForTask,
   listSkipsForWorkstream,
+  getTaskStartDirt,
+  recordTaskStartDirt,
 } from '@10db/db';
 import {
   BACKGROUND_DONE_NUDGE,
@@ -224,6 +226,7 @@ import {
   type SessionLaunch,
 } from '../environment';
 import { createPassGitSession, type Git } from '../git';
+import { readStartDirt, withoutStartDirt } from './start-dirt';
 import {
   answerUnattended,
   judgePreToolUse,
@@ -2333,6 +2336,20 @@ export function createRunner(opts: RunnerOptions): Runner {
     const task = getTask(db, row.taskId);
     // A page of a pass (Workbench spec §6.2): its session runs turn after turn, each from a builder message.
     const pass = passOfWorkstream(db, id) ?? null;
+    // What a shared checkout held uncommitted before the task first ran is someone else's work. A
+    // checkout that can't be read records nothing as theirs, so every change stays the task's.
+    if (pass === null && getTaskStartDirt(db, task.id) === null) {
+      const entries = await readStartDirt(opts.git, checkout).catch((error: unknown) => {
+        opts.logger.warn(
+          { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+          "the checkout's uncommitted paths could not be read when the task first launched",
+        );
+        return [];
+      });
+      opts.state.write((ctx) => {
+        recordTaskStartDirt(ctx, task.id, entries);
+      });
+    }
     const fresh = actionOnAnotherAccount(id, ctl, row) ?? reviseAfterModelDrift(id, ctl, row);
     // A Codex thread the lane resumes with a builder message pushed to it and never seen taken is read
     // back first (Workbench spec §12): what it took is delivered, never sent again, and a thread that
@@ -4133,15 +4150,21 @@ export function createRunner(opts: RunnerOptions): Runner {
     return outcome;
   }
 
-  /** The paths in the claims the workstream holds right now that git reports as changed. */
+  /**
+   * The paths in the claims the workstream holds right now that git reports as changed, less those
+   * still exactly as the checkout held them when the task first launched.
+   */
   async function claimedChanges(row: WorkstreamRow): Promise<string[]> {
     const project = getProject(db, row.projectId);
-    const changed = await opts.git.changedPaths(checkoutOf(db, row));
+    const checkout = checkoutOf(db, row);
+    const changed = await opts.git.changedPaths(checkout);
     const claims = activeClaims(db, row.id).map((c) => ({ kind: c.kind, name: c.name }));
     // A pass lane's claims name the pass's own areas: the whole-project page for a pass of one.
     const pass = passHoldingTask(db, getTask(db, row.taskId));
     const areas = pass ? [...passAreasOf(db, pass.id)] : project.areas;
-    return findClaimed(changed, { areas, hazards: project.hazards }, claims).sort();
+    const claimed = findClaimed(changed, { areas, hazards: project.hazards }, claims);
+    const start = pass ? null : getTaskStartDirt(db, row.taskId);
+    return withoutStartDirt(claimed, checkout, start).sort();
   }
 
   /**
