@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import type { ShapeId } from '@10db/contracts';
 import {
   ChatToolName,
   FolderAsker,
@@ -13,9 +13,9 @@ import {
   ConversationItemKind,
   DeniedBy,
   parseItemBody,
+  InvalidError,
   Provider,
   providerOf,
-  ShapeId,
   ShapeToolName,
   TrustSurface,
   AccountKind,
@@ -172,11 +172,6 @@ export function chatProfile(
 /** Where a chat's pictures and full outputs are kept: a path made only from its id. */
 export function chatFolder(dataDir: string, conversationId: ConversationId): string {
   return join(dataDir, 'conversations', ConversationId.parse(conversationId));
-}
-
-/** A plan's folder, which its session reads as it reads its chat's and which Archive never deletes. */
-export function planFolder(dataDir: string, shapeId: ShapeId): string {
-  return join(dataDir, 'shapes', ShapeId.parse(shapeId));
 }
 
 export interface ChatHooksDeps {
@@ -448,11 +443,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       // Made before the sandbox, which opens the folder only when it exists: a file dropped later then lands
       // inside a folder the warm session already has.
       const plan = shapeId === null ? undefined : deps.plan;
-      const planFiles =
-        shapeId === null
-          ? undefined
-          : (plan?.filesDir(shapeId) ?? planFolder(deps.dataDir, shapeId));
-      if (planFiles !== undefined) mkdirSync(planFiles, { recursive: true });
+      const planFiles = shapeId === null ? undefined : plan?.filesDir(shapeId);
       const limitNotes = createLimitNotes();
       const ending = new AbortController();
       const ready =
@@ -544,8 +535,10 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         deps.webSearchOf(launch.account.kind, launch.modelId) &&
         (providerOf(launch.account.kind) === Provider.Claude || switches.web);
       const subagents = deps.subagentsOf(launch.account.kind, launch.modelId);
-      // The chat's confinement refuses the web tools on any judge but auto mode, so Plan's researcher has none.
-      const web = webOn && judge === JudgeKind.Native;
+      // The web the session has: the chat's confinement refuses Claude's web tools on any judge but auto
+      // mode's, while Codex's own search needs no tool call and runs under the Web switch.
+      const web =
+        webOn && (judge === JudgeKind.Native || providerOf(launch.account.kind) === Provider.Codex);
       const reads =
         plan === undefined || shapeId === null ? undefined : plan.reads(shapeId, access, limits);
       // A session with nothing to resume is told the standing rules, and what it missed as a digest.
@@ -713,8 +706,9 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       let launch: ShapeLaunch;
       try {
         launch = deps.launch(conv.projectId, conv.model, conv.effort);
-      } catch {
-        return true;
+      } catch (error) {
+        if (error instanceof InvalidError) return true;
+        throw error;
       }
       return deps.plan.keepsResume(
         shapeId,
@@ -729,9 +723,13 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
     },
 
     outgoing(conv, item, session) {
+      const shapeId = planOf(conv);
+      // A plan's session counts its screens and Reads too: one budget for everything it carries.
       const spent = session.fresh
         ? 0
-        : heldInlineBytes(listFiles(state.db, conv.id), session.limits);
+        : shapeId !== null && deps.plan !== undefined
+          ? deps.plan.inlineSpent(shapeId, session.limits)
+          : heldInlineBytes(listFiles(state.db, conv.id), session.limits);
       const out = outgoingMessage(
         deliverable(state, item),
         spent,
@@ -740,7 +738,6 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         messageText,
         randomUUID,
       );
-      const shapeId = planOf(conv);
       if (shapeId === null || deps.plan === undefined)
         return { text: out.text, images: out.images, blocks: out.blocks, sent: () => undefined };
       // The plan's lines go ahead of the message, and its pictures join the message's under the one budget.

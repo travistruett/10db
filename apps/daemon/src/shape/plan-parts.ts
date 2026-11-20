@@ -98,7 +98,7 @@ export interface PlanTurnState {
 export interface PlanPartsDeps {
   readonly state: StateStore;
   readonly log: Logger;
-  /** Where each plan's dropped files are kept: `<filesDir>/<shape>/files/`. */
+  /** Where each plan's dropped files are kept: `<filesDir>/<shape>`. */
   readonly filesDir: string;
   readonly turnOf: (shapeId: ShapeId) => PlanTurnState;
   /** Tells the screen the plan changed, for what no row records. */
@@ -110,7 +110,7 @@ export interface PlanIntake {
   readonly lines: string;
   readonly images: Outgoing['images'];
   readonly blocks: readonly ConversationFileId[];
-  /** Runs in the write that marks the turn's first message pushed. */
+  /** Runs in the write that marks the message's pictures sent. */
   sent(ctx: WriteContext): void;
 }
 
@@ -155,6 +155,12 @@ export interface PlanParts {
     postToolUse(req: ShapeToolResult): void;
     toolFailed(req: ShapeToolRequest): void;
   };
+  /**
+   * What the live session already carries toward the account's picture pool: every inline picture of the
+   * conversation, the plan's screens, and its Reads beyond their reserve. The one budget a turn's pictures
+   * are fitted into, the chat's own message included.
+   */
+  inlineSpent(shapeId: ShapeId, limits: PictureLimits): number;
   /** False when resuming would resend more pictures than this account takes (carriedTooMuch). */
   keepsResume(shapeId: ShapeId, limits: PictureLimits, accountLabel: string): boolean;
   /** The plan's checks at a turn's end: a turn that failed, a rehearsal that didn't read every task. */
@@ -175,6 +181,8 @@ interface Intake {
 interface Budget {
   readonly limits: PictureLimits;
   readonly spent: number;
+  /** Picture bytes the turn's own message sends as blocks, which the plan's pictures are fitted after. */
+  readonly carrying: number;
 }
 
 /** The images a Read would refuse, and whether Reading any one of them first would be let in. */
@@ -232,7 +240,7 @@ export function createPlanParts(deps: PlanPartsDeps): PlanParts {
     fresh: boolean,
   ): Unreadable => {
     const { limits } = budget;
-    const byPath = pathImageReasons(shown, intake.files, fresh ? 0 : budget.spent, limits);
+    const byPath = pathImageReasons(shown, intake.files, budget.spent, limits);
     const leftOut = shown
       .filter((file) => byPath.get(file.id) === 'conversation-full')
       .map(noticeName);
@@ -240,6 +248,7 @@ export function createPlanParts(deps: PlanPartsDeps): PlanParts {
     if (paths.length === 0) return { files: [], readFirst: false, leftOut, limits };
     const inline =
       (fresh ? 0 : inlinePictureBytes(state, deps.filesDir, shapeId, limits)) +
+      budget.carrying +
       intake.files.reduce((sum, file) => sum + (sentInline.has(file.id) ? file.size : 0), 0);
     const messages = fresh ? [] : listShapeMessages(state.db, shapeId);
     const room = readCeiling(inline, limits) - readBytesSpent(messages);
@@ -436,6 +445,7 @@ export function createPlanParts(deps: PlanPartsDeps): PlanParts {
         spent:
           (session.fresh ? 0 : inlineBytesSpent(state, deps.filesDir, shapeId, session.limits)) +
           (session.carrying ?? 0),
+        carrying: session.carrying ?? 0,
       };
       // A session that never heard the conversation is told about every file; the digest already
       // names every mis-sized task and converted row.
@@ -519,6 +529,8 @@ export function createPlanParts(deps: PlanPartsDeps): PlanParts {
         },
       };
     },
+
+    inlineSpent: (shapeId, limits) => inlineBytesSpent(state, deps.filesDir, shapeId, limits),
 
     keepsResume(shapeId, limits, accountLabel) {
       // A resumed session resends every earlier picture to the account that resumes it, which is not
