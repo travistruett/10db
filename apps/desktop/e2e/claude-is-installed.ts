@@ -15,7 +15,12 @@ const SystemAnswer = z.looseObject({
 /** The Playwright image may have no Claude Code, so the check is answered as if it were found. */
 export async function claudeIsInstalled(page: Page): Promise<void> {
   await page.route(`${daemonUrl}/system*`, async (route) => {
-    const response = await route.fetch();
+    // A reload cuts off the poll in flight: it is tried once more, else dropped, and the app polls again.
+    const response = await route.fetch().catch(() => route.fetch().catch(() => null));
+    if (response === null) {
+      await route.abort().catch(() => undefined);
+      return;
+    }
     const body = SystemAnswer.parse(await response.json());
     for (const tool of body.tools) {
       if (tool.name === 'claude') {
