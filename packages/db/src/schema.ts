@@ -2249,7 +2249,7 @@ export const passTakeOuts = sqliteTable(
       .$type<number[]>()
       .notNull()
       .default(sql`'[]'`),
-    /** The take-out ran inside an Abandon, which deleted the page's changes rather than keeping them. */
+    /** The take-out ran inside an Abandon or was a Discard, which deletes the page's changes rather than keeping them. */
     discarded: integer('discarded', { mode: 'boolean' }).notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

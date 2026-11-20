@@ -7,7 +7,6 @@ import {
   type PassJoinRequest,
   type PassDto,
   type PassOpenRequest,
-  type PassRename,
   type PassStartDto,
   type PassViewDto,
   type ProjectViewDto,
@@ -26,7 +25,6 @@ import {
   useOpenPass,
   usePassStart,
   useWorkbenchSetup,
-  useRenamePass,
 } from '../../daemon/pass-queries';
 import { useProjectFolder } from '../../daemon/project-folder-queries';
 import { useInbox, useTasks } from '../../daemon/queries';
@@ -46,7 +44,6 @@ import { PassWorkspace } from './pass-workspace';
 import { PrButton } from './pr-button';
 import { queueRows } from './queue-rows';
 import type { PassWorkspaceProps } from './pass-workspace-props';
-import { RenameModal } from './rename-modal';
 import { WorkbenchSetup } from './setup/workbench-setup';
 import { newPagesOf, setUpCount } from './setup/setup-rules';
 import { StartPass } from './start-pass';
@@ -93,8 +90,6 @@ export interface WorkbenchActions {
   readonly start: (request: PassOpenRequest) => Promise<unknown>;
   /** Adds pages to the open pass: `POST /passes/:passId/pages`. */
   readonly addPages: (request: PassJoinRequest) => Promise<unknown>;
-  /** Renames the open pass: `PATCH /passes/:passId`. */
-  readonly rename: (body: PassRename) => Promise<unknown>;
   /** Abandons the open pass. */
   readonly abandon: () => Promise<unknown>;
 }
@@ -126,7 +121,7 @@ export interface WorkbenchScreenProps {
 }
 
 /** Which dialog the screen holds open. */
-type Dialog = 'setup' | 'add-page' | 'close' | 'rename' | 'abandon' | null;
+type Dialog = 'setup' | 'add-page' | 'close' | 'abandon' | null;
 
 /**
  * The pass whose close finished between two reads of the live pass: it was closing or closed, and now
@@ -242,9 +237,6 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
         onClose={() => {
           setDialog('close');
         }}
-        onRename={() => {
-          setDialog('rename');
-        }}
         onAbandon={() => {
           setDialog('abandon');
         }}
@@ -263,9 +255,6 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
           onClose: () => {
             setDialog('close');
           },
-          onRename: () => {
-            setDialog('rename');
-          },
           onAbandon: () => {
             setDialog('abandon');
           },
@@ -283,9 +272,6 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
         />
       ) : null}
       {dialog === 'close' ? <ClosePassModal view={live} onClose={closeDialog} /> : null}
-      {dialog === 'rename' ? (
-        <RenameModal pass={live.pass} onClose={closeDialog} rename={actions.rename} />
-      ) : null}
       {dialog === 'abandon' ? (
         <AbandonModal
           view={live}
@@ -325,7 +311,6 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
     live.data === null || (live.data !== undefined && !passHoldsTasks(live.data.pass.state));
   const setup = useWorkbenchSetup(project.id, hasPages && noPassOpen);
   const adding = useAddPages();
-  const renaming = useRenamePass();
   const abandoning = useAbandonPass();
   const passId = (): PassViewDto['pass']['id'] => {
     const view = live.data;
@@ -350,7 +335,6 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
   const actions: WorkbenchActions = {
     start: (request) => opening.mutateAsync(request),
     addPages: (request) => adding.mutateAsync({ passId: passId(), request }),
-    rename: (body) => renaming.mutateAsync({ passId: passId(), body }),
     abandon: () => abandoning.mutateAsync(passId()),
   };
   // A read that failed with nothing read before says why; a refetch that fails keeps what was read, so

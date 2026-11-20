@@ -43,7 +43,7 @@ function getTakeOut(db: DbReader, key: TakeOutKey): PassTakeOutRow {
  */
 export function insertTakeOut(
   ctx: WriteContext,
-  input: TakeOutKey & { readonly drops: readonly number[] },
+  input: TakeOutKey & { readonly drops: readonly number[]; readonly discarded?: boolean },
 ): PassTakeOutRow {
   const earlier = findTakeOut(ctx.tx, input);
   if (earlier && earlier.step < TakeOutStep.Done)
@@ -58,7 +58,7 @@ export function insertTakeOut(
     keptBaseSha: null,
     left: [],
     drops: [...input.drops],
-    discarded: false,
+    discarded: input.discarded === true,
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };

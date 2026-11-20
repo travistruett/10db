@@ -3,6 +3,7 @@ import { Button, Stack, Text } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
 import { FormModal } from '../../shell/form-modal';
 import { PageStatus, pageStatus } from './page-status';
+import { passTitle } from './pass-title';
 import { medianTurnMinutes } from './timing';
 
 export interface AbandonModalProps {
@@ -25,14 +26,14 @@ function closingLine(
 ): { readonly line: string; readonly refused: boolean } | null {
   if (view.pass.state !== PassState.Closing) return null;
   return view.closeStep !== null && view.closeStep >= CloseStep.FastForwarded
-    ? { line: 'It is landing now, so it can no longer be abandoned.', refused: true }
+    ? { line: 'It is landing now, so it can no longer be discarded.', refused: true }
     : { line: 'Finishing stops where it is; what has landed stays.', refused: false };
 }
 
 /**
- * Abandon Pass's confirm (Workbench spec §5.4): names, by label, every page whose changes it deletes,
- * its files going back to how they were before the pass, and every signed-off page, which stays. From
- * a close, it says the close stops, and refuses once the close is landing.
+ * Discard Pass's confirm, the daemon's Abandon (Workbench spec §5.4): names, by label, every page whose
+ * changes it deletes, its files going back to how they were before the pass, and every committed page,
+ * which stays. From a close, it says the close stops, and refuses once the close is landing.
  */
 export function AbandonModal({ view, inbox, now, onClose, abandon }: AbandonModalProps) {
   const leaving = useMutation({ mutationFn: () => abandon(), onSuccess: onClose });
@@ -46,7 +47,7 @@ export function AbandonModal({ view, inbox, now, onClose, abandon }: AbandonModa
     <FormModal
       opened
       onClose={onClose}
-      title="Abandon"
+      title="Discard Pass"
       size="md"
       error={leaving.error?.message ?? null}
       actions={
@@ -62,23 +63,29 @@ export function AbandonModal({ view, inbox, now, onClose, abandon }: AbandonModa
               leaving.mutate();
             }}
           >
-            Abandon
+            Discard
           </Button>
         </>
       }
     >
       <Stack gap="md">
-        <Text size="sm">{`Abandon ${view.pass.name}? Turns that are working stop.`}</Text>
+        <Text size="sm">{`Discard ${passTitle(view.pages, view.pass.name)}? Turns that are working stop.`}</Text>
         {closing === null ? null : (
           <Text size="sm" {...(closing.refused ? { c: 'red' } : {})}>
             {closing.line}
           </Text>
         )}
         {discards.length > 0 ? (
-          <Text size="sm">{`Discards: ${discards.join(', ')} (their changes are deleted).`}</Text>
+          <>
+            <Text size="sm">{`Discards: ${discards.join(', ')} (their changes are deleted).`}</Text>
+            <Text size="sm" c="dimmed">
+              Tasks 10db made for these pages are removed; tasks you brought in from the Board go
+              back there.
+            </Text>
+          </>
         ) : null}
         {stays.length > 0 ? (
-          <Text size="sm">{`Stays: ${stays.join(', ')} (signed off).`}</Text>
+          <Text size="sm">{`Stays: ${stays.join(', ')} (committed).`}</Text>
         ) : null}
       </Stack>
     </FormModal>

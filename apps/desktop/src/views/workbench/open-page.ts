@@ -4,7 +4,7 @@ import { readJson } from '../../daemon/client';
 import { useDaemon, useDaemonStatus } from '../../daemon/provider';
 import { appPageUrl, openAppPage } from '../../desktop/tauri';
 
-// Workbench spec §4.3, design review D18: Open Page's first click for a page in a pass opens the page
+// Workbench spec §4.3, design review D18: Open in Browser's first click for a page in a pass opens it
 // in the builder's browser; after that it reads Copy Link, because the builder's tab is open already and
 // hot reload keeps it current. What was opened is kept per pass in this browser; when the browser keeps
 // nothing, the button still turns for as long as the view is open.
@@ -25,6 +25,8 @@ export interface OpenPageControl {
   readonly refusal: string | null;
   /** Opens the page, or copies its link once it has been opened. */
   readonly act: () => Promise<void>;
+  /** Opens the page whether or not it was opened before. */
+  readonly launch: () => Promise<void>;
   /** Copies the page's link (⌘L), opened or not. */
   readonly copy: () => Promise<void>;
 }
@@ -67,7 +69,7 @@ function originOf(appUrl: string | null): string | null {
   return appUrl === null ? null : (URL.parse(appUrl)?.origin ?? null);
 }
 
-/** Open Page, then Copy Link, for one page of a pass. */
+/** Open in Browser, then Copy Link, for one page of a pass. */
 export function useOpenPage(target: OpenPageTarget): OpenPageControl {
   const [openedHere, setOpenedHere] = useState<ReadonlySet<string>>(new Set());
   const [refused, setRefused] = useState<{ readonly key: string; readonly reason: string } | null>(
@@ -92,9 +94,8 @@ export function useOpenPage(target: OpenPageTarget): OpenPageControl {
   };
   const copy = ({ appUrl, route }: Address) =>
     navigator.clipboard.writeText(appPageUrl(appUrl, route));
-  const act = () =>
+  const launch = () =>
     attempt(async (address) => {
-      if (opened) return copy(address);
       // 10db's own dev UI gets the daemon's read-only dev UI token in the fragment, never the app's
       // own; a copied link carries neither.
       const handed = devUi
@@ -108,10 +109,12 @@ export function useOpenPage(target: OpenPageTarget): OpenPageControl {
       rememberOpened(target.passId, target.taskId);
       setOpenedHere((held) => new Set(held).add(key));
     });
+  const act = () => (opened ? attempt(copy) : launch());
   return {
     opened,
     refusal: refused?.key === key ? refused.reason : null,
     act,
+    launch,
     copy: () => attempt(copy),
   };
 }

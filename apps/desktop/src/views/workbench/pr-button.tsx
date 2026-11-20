@@ -115,10 +115,10 @@ export function PrFoot({ view }: { readonly view: PassViewDto }) {
   const exists = (view.pullRequest ?? preview.data?.existing ?? null) !== null;
   const line =
     why === null
-      ? 'Signed off. CI checks it once it is in the pull request.'
+      ? 'Committed. CI checks it once it is in the pull request.'
       : exists
-        ? `Signed off. It can't be pushed to the pull request yet: ${why}`
-        : `Signed off. No pull request yet: ${why}`;
+        ? `Committed. It can't be pushed to the pull request yet: ${why}`
+        : `Committed. No pull request yet: ${why}`;
   return (
     <>
       <Text size="sm" c="dimmed">

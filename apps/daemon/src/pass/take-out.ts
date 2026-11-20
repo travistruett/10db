@@ -84,6 +84,11 @@ export interface TakeOutInput {
   readonly within: TakeOutWithin;
   /** What becomes of each shared change of the page that has not landed; Keep by default. */
   readonly shared?: readonly SharedChoice[];
+  /**
+   * The page's Discard: its changes are deleted as an Abandon deletes them. Recorded on the take-out's
+   * row, so a restart deletes too.
+   */
+  readonly discard?: boolean;
 }
 
 /** How many times steps 1 to 3 run before the files that keep changing decide. */
@@ -107,7 +112,7 @@ export function leavePassForBoard(
     readonly kept: TaskKeptWork | null;
     /** How many files the kept work holds. */
     readonly files: number;
-    /** The pass is being abandoned, and the page's changes were deleted. */
+    /** The pass is being abandoned, or the page discarded, and the page's changes were deleted. */
     readonly abandoned?: boolean;
   },
 ): void {
@@ -129,7 +134,7 @@ export function leavePassForBoard(
   settleTurnsLeaving(ctx, input.taskId);
   deleteSignOffWait(ctx, input.taskId);
   if (input.abandoned === true) {
-    leaveAbandonedPass(ctx, input);
+    leaveAbandonedPass(ctx, { ...input, discarded: pass.state === PassState.Open });
     advanceTakeOut(ctx, input, { step: TakeOutStep.Done, discarded: true });
     return;
   }
@@ -160,13 +165,19 @@ export async function deleteAbandonedWork(
 }
 
 /**
- * A task leaves an abandoned pass, in the caller's write, once `deleteAbandonedWork` has run: it keeps
- * no work; a task the pass made for its page is retired, so it leaves the Board, and any other goes
- * back to the Board open, its thread saying its changes were deleted.
+ * A task leaves an abandoned pass, or its page is discarded from an open one, in the caller's write,
+ * once `deleteAbandonedWork` has run: it keeps no work; a task the pass made for its page is retired,
+ * so it leaves the Board, and any other goes back to the Board open, its thread saying its changes
+ * were deleted.
  */
 export function leaveAbandonedPass(
   ctx: WriteContext,
-  input: { readonly taskId: TaskId; readonly passId: PassId },
+  input: {
+    readonly taskId: TaskId;
+    readonly passId: PassId;
+    /** The builder discarded the page alone, the pass going on. */
+    readonly discarded?: boolean;
+  },
 ): void {
   const task = getTask(ctx.tx, input.taskId);
   const pass = getPass(ctx.tx, input.passId);
@@ -174,7 +185,13 @@ export function leaveAbandonedPass(
   setTaskKeptWork(ctx, input.taskId, null);
   if (madeByPass(ctx.tx, input.passId, input.taskId)) retireTaskUnconditionally(ctx, input.taskId);
   else if (task.status !== TaskStatus.Open) setTaskStatus(ctx, input.taskId, TaskStatus.Open);
-  insertSystemNotice(ctx, input.taskId, `Abandoned with ${pass.name}; its changes were deleted.`);
+  insertSystemNotice(
+    ctx,
+    input.taskId,
+    input.discarded === true
+      ? `Discarded from ${pass.name}; its changes were deleted.`
+      : `Abandoned with ${pass.name}; its changes were deleted.`,
+  );
 }
 
 /** The page files whose content on disk is not what `kept` holds: something wrote after the keep. */
@@ -251,6 +268,7 @@ export async function takeOutSteps(
         drops: (input.shared ?? [])
           .filter((c) => c.choice === SharedChoiceKind.Drop)
           .map((c) => c.seq),
+        discarded: input.discard === true,
       });
     });
   const key = { taskId: task.id, passId: row.passId };
@@ -412,9 +430,9 @@ export async function takeOutSteps(
     });
   }
 
-  if (row.step < TakeOutStep.Done && input.within === TakeOutWithin.Abandon) {
+  if (row.step < TakeOutStep.Done && (input.within === TakeOutWithin.Abandon || row.discarded)) {
     deps.inbox.cancelForWorkstream(workstreamId);
-    // An Abandon deletes the page's changes: the pass's kept ref and any saved work the task carried
+    // An Abandon or a Discard deletes the page's changes: the pass's kept ref and any saved work the task carried
     // in go before the row forgets them, so a restart between the two deletes nothing more and
     // writes the same row.
     await deleteAbandonedWork(deps, { repo, taskId: task.id, passId: pass.id });

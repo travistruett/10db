@@ -16,11 +16,11 @@ export type ConnectionResolver = () => Promise<DaemonConnection>;
 const DaemonConnectionSchema = z.object({ url: z.url(), token: z.string().min(1) });
 
 const DEV_DAEMON_URL = 'http://127.0.0.1:4317';
-/** Where a dev UI tab keeps the connection Open Page handed it, for its reloads. */
+/** Where a dev UI tab keeps the connection Open in Browser handed it, for its reloads. */
 const HANDED_KEY = 'tendb.connection';
 
 /**
- * The connection Open Page hands in this load's fragment: kept in the tab's session storage, for
+ * The connection Open in Browser hands in this load's fragment: kept in the tab's session storage, for
  * its reloads, and removed from the address bar. Null when the fragment carries none.
  */
 function takeHandOff(): DaemonConnection | null {
@@ -66,6 +66,6 @@ export const resolveConnection: ConnectionResolver = async () => {
   const kept = keptHandOff();
   if (kept !== null) return kept;
   throw new Error(
-    "Open this page from the UI Workbench's Open Page in 10db, or set VITE_DAEMON_TOKEN to the daemon UI token (TENDB_DEV_UI_TOKEN)",
+    "Open this page from the UI Workbench's Open in Browser in 10db, or set VITE_DAEMON_TOKEN to the daemon UI token (TENDB_DEV_UI_TOKEN)",
   );
 };

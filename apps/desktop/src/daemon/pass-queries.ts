@@ -2,7 +2,6 @@ import {
   GoalPassPagesDto,
   PASS_RETRY_TURN_CHOICE,
   PassAbandonedDto,
-  PassDto,
   passHoldsTasks,
   PassOpenResponse,
   PassStartDto,
@@ -19,7 +18,6 @@ import {
   type PassId,
   type PassJoinRequest,
   type PassOpenRequest,
-  type PassRename,
   type PassTurnId,
   type ProjectId,
   type SharedChoice,
@@ -254,22 +252,6 @@ export function useAddPages() {
   });
 }
 
-export function useRenamePass() {
-  const { client } = useDaemon();
-  const refetch = useRefetchAfter();
-  return useMutation({
-    mutationFn: async ({ passId, body }: { passId: PassId; body: PassRename }) =>
-      readJson(
-        await client.passes[':passId'].$patch({
-          param: { passId },
-          json: body,
-        }),
-        PassDto,
-      ),
-    onSuccess: refetch,
-  });
-}
-
 /** Abandon Pass: every unsigned page goes back and its changes are deleted. */
 export function useAbandonPass() {
   const { client } = useDaemon();
@@ -296,15 +278,18 @@ export function useTakeOutPage() {
       passId,
       taskId,
       shared,
+      discard,
     }: {
       passId: PassId;
       taskId: TaskId;
       shared: readonly SharedChoice[];
+      /** Delete the page's changes rather than keep them with its task. */
+      discard: boolean;
     }) =>
       readJson(
         await client.passes[':passId'].tasks[':taskId']['take-out'].$post({
           param: { passId, taskId },
-          json: { shared: [...shared] },
+          json: { shared: [...shared], discard },
         }),
         TakeOutResultDto,
       ),
