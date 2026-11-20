@@ -8,7 +8,7 @@ import {
 } from '@10db/contracts';
 import { Button, Checkbox, Group, Radio, ScrollArea, Stack, Text } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import type { ConvertShapeResult } from '../../../daemon/shape-queries';
 import { FormModal } from '../../../shell/form-modal';
 import { destination, proposalTitle } from './proposal-text';
@@ -27,23 +27,12 @@ export function convertibleRows(proposals: readonly ShapeProposalDto[]): ShapePr
   return proposals.filter((p) => p.state === 'pending' && !isConverted(p));
 }
 
-/** The rows with a task the rehearsal has not read at its current content (spec §7). */
-export function unrehearsedRows(
-  view: ShapeViewDto,
-  rows: readonly ShapeProposalDto[],
-): ShapeProposalId[] {
-  const unread = new Set(view.rehearsals.filter((r) => !r.rehearsed).map((r) => r.proposalId));
-  return rows.filter((r) => unread.has(r.id)).map((r) => r.id);
-}
-
 export interface ConvertModalProps {
   readonly opened: boolean;
   readonly onClose: () => void;
   readonly rows: readonly ShapeProposalDto[];
   /** What the review has to say: ceremony, findings and the rehearsal's marks and questions. */
   readonly view: ShapeViewDto;
-  /** A turn is running: opening the modal starts no rehearsal, and Accept never touches the turn. */
-  readonly answering: boolean;
   /** The agent's name as the UI shows it. */
   readonly agentLabel: string;
   /**
@@ -60,14 +49,11 @@ export interface ConvertModalProps {
     ids: readonly ShapeProposalId[],
     options?: { readonly cut?: readonly MilestoneCut[] },
   ) => Promise<ConvertShapeResult | undefined>;
-  /** Opening the modal with a task nobody has rehearsed asks for it (spec §7). */
-  readonly onRehearse: (ids: readonly ShapeProposalId[]) => void;
 }
 
 /**
  * A form modal with a checkbox per pending proposal and where it goes, the line that says nothing
- * starts, and the primary Accept n. Opening it with an unrehearsed task starts a rehearsal turn when none is running.
- * Accept never stops a turn. Open questions and findings warn and never block.
+ * starts, and the primary Accept n. Accept never starts or stops a turn. Open questions and findings warn and never block.
  */
 export function ConvertModal(props: ConvertModalProps) {
   // Keyed on the rows, so a new round starts from "everything ticked" again.
@@ -80,14 +66,12 @@ function ConvertForm({
   onClose,
   rows,
   view,
-  answering,
   agentLabel,
   rehearses,
   pending,
   refusals,
   failure,
   onConvert,
-  onRehearse,
 }: ConvertModalProps) {
   const [unticked, setUnticked] = useState<ReadonlySet<ShapeProposalId>>(new Set());
   const [marks, setMarks] = useState<ReadonlyMap<ShapeProposalId, MilestoneMark>>(new Map());
@@ -118,27 +102,6 @@ function ConvertForm({
         ]),
     ...convertWarnings(view, chosen, rehearsing),
   ];
-
-  // Once per opening: a task with no mark at its current content gets a rehearsal turn.
-  const asked = useRef(false);
-  const unread = unrehearsedRows(view, rows);
-  useEffect(() => {
-    if (!opened) {
-      asked.current = false;
-      return;
-    }
-    if (
-      rehearses === null ||
-      unrehearsed ||
-      asked.current ||
-      rehearsing ||
-      answering ||
-      unread.length === 0
-    )
-      return;
-    asked.current = true;
-    onRehearse(unread);
-  }, [opened, rehearses, unrehearsed, rehearsing, answering, unread, onRehearse]);
 
   const convert = async (): Promise<void> => {
     const ids = chosen.map((r) => r.id);

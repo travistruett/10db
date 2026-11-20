@@ -425,7 +425,9 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
           });
         }}
       />
-      {selected?.kind === 'fresh' ? <TitleRow title={switcherFor('New Session')} /> : null}
+      {selected?.kind === 'fresh' ? (
+        <TitleRow title={switcherFor(selected.tab.plan ? 'New Plan' : 'New Session')} />
+      ) : null}
       {closing.notice === null ? null : (
         <Paper role="status" withBorder px="sm" py={6} mx="md" mt="xs">
           <Group justify="space-between" wrap="nowrap">

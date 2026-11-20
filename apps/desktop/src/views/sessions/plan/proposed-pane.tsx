@@ -14,12 +14,7 @@ import { IconX } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { useConversation } from '../../../daemon/conversation-queries';
-import {
-  useConvertShape,
-  useDismissFinding,
-  useRehearseShape,
-  useRowChange,
-} from '../../../daemon/shape-queries';
+import { useConvertShape, useDismissFinding, useRowChange } from '../../../daemon/shape-queries';
 import { shortAgo } from '../../factory/short-ago';
 import { useNow } from '../../../shell/relative';
 import { ConvertModal, convertibleRows } from './convert-modal';
@@ -324,11 +319,9 @@ function ConvertPanel({
   readonly onClose: () => void;
 }) {
   const convert = useConvertShape(view.shape.id);
-  const rehearse = useRehearseShape(view.shape.id);
-  // Until the conversation loads the agent is unknown, so no rehearsal starts yet.
+  // Until the conversation loads the agent is unknown, so Accept waits for it.
   const conversation = useConversation(view.conversationId);
   const capabilities = conversation.data?.capabilities;
-  const { mutate: startRehearsal } = rehearse;
   const [refusals, setRefusals] = useState<readonly string[]>([]);
   const close = () => {
     setRefusals([]);
@@ -341,7 +334,6 @@ function ConvertPanel({
       onClose={close}
       rows={rows}
       view={view}
-      answering={view.turn.running}
       agentLabel={capabilities?.label ?? 'the agent'}
       rehearses={agentRehearses(conversation)}
       pending={convert.isPending}
@@ -357,9 +349,6 @@ function ConvertPanel({
           .catch(() => undefined);
         if (result?.kind === 'refused') setRefusals(result.errors);
         return result;
-      }}
-      onRehearse={(ids) => {
-        startRehearsal(ids);
       }}
     />
   );
