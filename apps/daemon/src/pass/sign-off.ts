@@ -90,8 +90,15 @@ export type SignOffOutcome =
   | { readonly kind: 'waiting'; readonly waitsFor: PassHoldDto }
   | { readonly kind: 'not_now'; readonly reason: string };
 
-/** What a sign-off needs: the pass's work in the folder and the runner's stop. */
-export type SignOffDeps = PassWorkDeps & { readonly stopLane: StopPassLane };
+/**
+ * What a sign-off needs: the pass's work in the folder and the runner's stop, and who hears of a
+ * commit that landed (the pass's open pull request is pushed to; injected, since `pass/` never
+ * imports delivery).
+ */
+export type SignOffDeps = PassWorkDeps & {
+  readonly stopLane: StopPassLane;
+  readonly committed?: (passId: PassId) => void;
+};
 
 /**
  * The run's path to DONE once step 0 has stopped it (spec §9.2), by the edges that exist, since none
@@ -561,7 +568,10 @@ export function signOff(deps: SignOffDeps, input: SignOffInput): Promise<SignOff
       jobKey({ projectId: task.projectId, worktreePath: null }, JobQueue.Cut),
       async () => {
         try {
-          resolve(await signOffSteps(deps, input));
+          const outcome = await signOffSteps(deps, input);
+          if (outcome.kind === 'signed_off' && outcome.landedSha !== null && task.passId != null)
+            deps.committed?.(task.passId);
+          resolve(outcome);
         } catch (error) {
           reject(error instanceof Error ? error : new Error(String(error)));
         }

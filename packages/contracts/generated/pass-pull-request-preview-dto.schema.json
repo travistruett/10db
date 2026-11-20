@@ -55,6 +55,13 @@
         "folder_at_close",
         "none"
       ]
+    },
+    "lands": {
+      "type": "string",
+      "enum": [
+        "pull_request",
+        "close"
+      ]
     }
   },
   "required": [
@@ -63,6 +70,7 @@
     "aheadOfBase",
     "base",
     "existing",
-    "gate"
+    "gate",
+    "lands"
   ]
 }

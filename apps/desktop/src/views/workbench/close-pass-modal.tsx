@@ -202,7 +202,7 @@ export function ClosePassModal({ view, onClose }: ClosePassModalProps) {
     <FormModal
       opened
       onClose={onClose}
-      title="Finish"
+      title={`Merge to ${view.pass.returnBranch}`}
       size="lg"
       // What changed goes beside Close Pass, where the next click lands, and is announced there.
       error={closing.error?.message ?? read.error?.message ?? changedLine(again?.changed ?? [])}
@@ -227,7 +227,7 @@ export function ClosePassModal({ view, onClose }: ClosePassModalProps) {
               );
             }}
           >
-            Finish
+            Merge
           </Button>
         </>
       }

@@ -35,8 +35,20 @@ export const PassPullRequestPreviewDto = z.object({
   base: z.string(),
   existing: z.object({ url: z.string(), draft: z.boolean() }).nullable(),
   gate: z.enum(PassPullRequestGate),
+  /**
+   * How the pass lands: `pull_request`, its pull request merging, which ends the pass by itself; or
+   * `close`, Merge to the base in the folder, for a project with no GitHub origin or on local delivery.
+   */
+  lands: z.enum(['pull_request', 'close']),
 });
 export type PassPullRequestPreviewDto = z.infer<typeof PassPullRequestPreviewDto>;
+
+/**
+ * `POST /passes/:passId/pull-request`: `ready` opens the pull request ready for review, or marks a
+ * draft one ready; without it a new one opens as a draft and an existing one keeps its state.
+ */
+export const PassPullRequestRequest = z.object({ ready: z.boolean().default(false) });
+export type PassPullRequestRequest = z.infer<typeof PassPullRequestRequest>;
 
 /** `POST /passes/:passId/pull-request` answers 202 with what it started. */
 export const PassPullRequestDto = z.object({

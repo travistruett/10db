@@ -153,6 +153,7 @@ import type {
   PassJoinRequest,
   PassOpenRequest,
   PassPullRequestDto,
+  PassPullRequestRequest,
   PassPullRequestPreviewDto,
   PassRename,
   PassSignOffDto,
@@ -486,7 +487,7 @@ export interface ApiServices extends PlanRecordServices {
    * reviews what it pushed. Refused (409) when it is not offered: nothing signed off, no origin or gh,
    * or the pass not open.
    */
-  openPassPullRequest(passId: PassId): Promise<PassPullRequestDto>;
+  openPassPullRequest(passId: PassId, input: PassPullRequestRequest): Promise<PassPullRequestDto>;
   /**
    * Send to Agent (D19): sends the text a notice offers as the builder's message to the task: a notice
    * on its thread, or one in the header of the pass holding it, by id. Refused (409) for a notice that

@@ -377,10 +377,13 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   expect(seen.rowLines.some((line) => line.includes('Committing…'))).toBe(true);
   announced.push(...seen.announced);
 
-  // The project has no origin, so no pull request can be opened: no Open Draft PR is drawn anywhere, and
-  // the foot of the committed page, where the builder is, says why. The header fits at every width.
-  await expect(page.getByText(/^Committed\. No pull request yet: /)).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Open Draft PR' })).toHaveCount(0);
+  // The project has no origin, so no pull request can be opened: no Open PR is drawn anywhere, and
+  // the foot of the committed page, where the builder is, says how the pass lands instead. The header
+  // fits at every width.
+  await expect(
+    page.getByText(/^Committed\. .+ has no GitHub remote: Merge to main lands the pass\.$/),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Open PR' })).toHaveCount(0);
   await panelHeadFits(page, 1280);
   for (const width of [900, 520, 420]) await headerFits(page, width);
   // At 900 the queue is the strip until the sheet opens, and it is drawn once in the sheet too. A page picked
@@ -432,9 +435,11 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
     peopleTask?.taskId,
   );
 
-  // Discard ends the pass: its confirm names the committed page, which stays. Later specs read
-  // Factory across projects, so nothing of this pass is left running.
+  // With no pull request to merge, the pass menu offers Merge to main. Discard ends the pass: its
+  // confirm names the committed page, which stays. Later specs read Factory across projects, so
+  // nothing of this pass is left running.
   await page.getByRole('button', { name: 'More actions', exact: true }).click();
+  await expect(page.getByRole('menuitem', { name: /^Merge to main/ })).toBeVisible();
   await page.getByRole('menuitem', { name: 'Discard' }).click();
   const discardPass = page.getByRole('dialog', { name: 'Discard Pass' });
   await expect(discardPass.getByText('Stays: Settings (committed).')).toBeVisible();
