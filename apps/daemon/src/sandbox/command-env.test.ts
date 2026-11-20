@@ -61,6 +61,7 @@ describe('withoutTempDirPaths', () => {
     ])
       expect(Object.keys(kept), name).not.toContain(name);
     expect(kept).toEqual({
+      pnpm_config_manage_package_manager_versions: 'false',
       MISE_LOG_LEVEL: 'error',
       GIT_CONFIG_GLOBAL: '/dev/null',
       GIT_OPTIONAL_LOCKS: '0',
