@@ -42,13 +42,13 @@ export interface ConvertModalProps {
   readonly rows: readonly ShapeProposalDto[];
   /** What the review has to say: ceremony, findings and the rehearsal's marks and questions. */
   readonly view: ShapeViewDto;
-  /** The agent is answering now: Convert waits, or the builder stops the turn. */
+  /** A turn is running: opening the modal starts no rehearsal, and Accept never touches the turn. */
   readonly answering: boolean;
   /** The agent's name as the UI shows it. */
   readonly agentLabel: string;
   /**
    * The agent can run the rehearsal's implementer; without it no rehearsal starts and none is offered.
-   * Null while that is not known yet: nothing starts and Convert waits.
+   * Null while that is not known yet: nothing starts and Accept waits.
    */
   readonly rehearses: boolean | null;
   readonly pending: boolean;
@@ -58,17 +58,16 @@ export interface ConvertModalProps {
   readonly failure: string | null;
   readonly onConvert: (
     ids: readonly ShapeProposalId[],
-    options?: { readonly interrupt?: true; readonly cut?: readonly MilestoneCut[] },
+    options?: { readonly cut?: readonly MilestoneCut[] },
   ) => Promise<ConvertShapeResult | undefined>;
-  readonly onStop: () => void;
   /** Opening the modal with a task nobody has rehearsed asks for it (spec §7). */
   readonly onRehearse: (ids: readonly ShapeProposalId[]) => void;
 }
 
 /**
  * A form modal with a checkbox per pending proposal and where it goes, the line that says nothing
- * starts, and the primary Convert n. Opening it with an unrehearsed task starts a rehearsal turn;
- * Convert Anyway stops that turn and converts. Open questions and findings warn and never block.
+ * starts, and the primary Accept n. Opening it with an unrehearsed task starts a rehearsal turn when none is running.
+ * Accept never stops a turn. Open questions and findings warn and never block.
  */
 export function ConvertModal(props: ConvertModalProps) {
   // Keyed on the rows, so a new round starts from "everything ticked" again.
@@ -88,7 +87,6 @@ function ConvertForm({
   refusals,
   failure,
   onConvert,
-  onStop,
   onRehearse,
 }: ConvertModalProps) {
   const [unticked, setUnticked] = useState<ReadonlySet<ShapeProposalId>>(new Set());
@@ -129,23 +127,25 @@ function ConvertForm({
       asked.current = false;
       return;
     }
-    if (rehearses === null || unrehearsed || asked.current || rehearsing || unread.length === 0)
+    if (
+      rehearses === null ||
+      unrehearsed ||
+      asked.current ||
+      rehearsing ||
+      answering ||
+      unread.length === 0
+    )
       return;
     asked.current = true;
     onRehearse(unread);
-  }, [opened, rehearses, unrehearsed, rehearsing, unread, onRehearse]);
+  }, [opened, rehearses, unrehearsed, rehearsing, answering, unread, onRehearse]);
 
-  const convert = async (interrupt: boolean): Promise<void> => {
+  const convert = async (): Promise<void> => {
     const ids = chosen.map((r) => r.id);
     const cut = cutting
       ? [...marks].map(([proposalId, mark]): MilestoneCut => ({ proposalId, mark }))
       : undefined;
-    const result = await (!interrupt && cut === undefined
-      ? onConvert(ids)
-      : onConvert(ids, {
-          ...(interrupt ? { interrupt: true as const } : {}),
-          ...(cut === undefined ? {} : { cut }),
-        }));
+    const result = await (cut === undefined ? onConvert(ids) : onConvert(ids, { cut }));
     if (result?.kind === 'converted') onClose();
   };
 
@@ -153,7 +153,7 @@ function ConvertForm({
     <FormModal
       opened={opened}
       onClose={onClose}
-      title="Convert"
+      title="Accept"
       size="lg"
       actions={
         <>
@@ -171,31 +171,16 @@ function ConvertForm({
           <Button variant="default" onClick={onClose}>
             Cancel
           </Button>
-          {rehearsing ? (
-            <Button
-              variant="default"
-              loading={pending}
-              disabled={chosen.length === 0 || unmarked.length > 0}
-              onClick={() => {
-                void convert(true);
-              }}
-            >
-              Convert Anyway
-            </Button>
-          ) : null}
           <Button
             loading={pending}
             disabled={
-              chosen.length === 0 ||
-              answering ||
-              unmarked.length > 0 ||
-              (rehearses === null && !imported)
+              chosen.length === 0 || unmarked.length > 0 || (rehearses === null && !imported)
             }
             onClick={() => {
-              void convert(false);
+              void convert();
             }}
           >
-            {`Convert ${String(chosen.length)}`}
+            {`Accept ${String(chosen.length)}`}
           </Button>
         </>
       }
@@ -206,18 +191,9 @@ function ConvertForm({
           <Text size="sm" c="dimmed" role="status">
             {`Rehearsing ${String(rehearsingCount)} ${rehearsingCount === 1 ? 'task' : 'tasks'}…`}
           </Text>
-        ) : answering ? (
-          <Group gap="sm" wrap="nowrap">
-            <Text size="sm" c="dimmed">
-              {`${agentLabel} is still answering. Stop it, or wait for it to finish.`}
-            </Text>
-            <Button variant="default" size="xs" onClick={onStop}>
-              Stop
-            </Button>
-          </Group>
         ) : null}
         {warnings.length === 0 ? null : (
-          <Stack gap={2} aria-label="Before you convert">
+          <Stack gap={2} aria-label="Before you accept">
             {warnings.map((line) => (
               <Text key={line} size="xs" c="dimmed">
                 <IconAlertTriangle
@@ -263,7 +239,7 @@ function ConvertForm({
         ) : null}
         {rows.length === 0 ? (
           <Text size="sm" c="dimmed">
-            Nothing is waiting to be converted.
+            Nothing is waiting to be accepted.
           </Text>
         ) : (
           <Stack gap="xs">

@@ -18,7 +18,11 @@ export interface RowEditorProps {
 export function RowEditor({ row, onSave, onCancel }: RowEditorProps) {
   const fields = editableFields(row);
   const [values, setValues] = useState<Record<string, string>>(() => filledValues(row));
-  const changed = changedFields(row, values);
+  // The row as the editor opened on it: the builder's edits are measured against it, and a round that
+  // lands under the editor moves the row but never the builder's text.
+  const [opened] = useState(() => ({ round: row.round, values: filledValues(row) }));
+  const agentChanged = row.round !== opened.round;
+  const changed = changedFields(row, values, opened.values);
   const dirty = Object.keys(changed).length > 0;
 
   const set = (name: string, value: string): void => {
@@ -89,6 +93,11 @@ export function RowEditor({ row, onSave, onCancel }: RowEditorProps) {
             />
           );
         })}
+        {agentChanged ? (
+          <Text size="xs" c="dimmed" role="status">
+            The agent changed this. Save keeps your version of what you edited.
+          </Text>
+        ) : null}
         <Group justify="space-between" wrap="nowrap">
           <Text size="xs" c="dimmed">
             An edited field is pinned: the next round leaves it as you set it.

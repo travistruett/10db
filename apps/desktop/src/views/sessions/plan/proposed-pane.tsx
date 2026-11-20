@@ -1,8 +1,19 @@
 import type { ShapeProposalDto, ShapeViewDto } from '@10db/contracts';
-import { PlanMeasures } from '../../shape/plan-measures';
-import { Alert, Box, Button, Group, ScrollArea, Skeleton, Stack, Text } from '@mantine/core';
+import {
+  ActionIcon,
+  Alert,
+  Box,
+  Button,
+  Group,
+  ScrollArea,
+  Skeleton,
+  Stack,
+  Text,
+} from '@mantine/core';
+import { IconX } from '@tabler/icons-react';
+import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { useConversation, useStopConversation } from '../../../daemon/conversation-queries';
+import { useConversation } from '../../../daemon/conversation-queries';
 import {
   useConvertShape,
   useDismissFinding,
@@ -36,6 +47,10 @@ export interface ProposedPaneProps {
   readonly error: string | null;
   /** Whether the summary line sits here; in the drawer layout the view keeps it always on screen. */
   readonly summaryHere: boolean;
+  /** The head's controls after Accept: the panel's ⋯ menu. */
+  readonly menu?: ReactNode;
+  /** Closes the panel; absent when the drawer around it has its own close. */
+  readonly onClose?: () => void;
   /** Why?: scrolls the conversation to the messages a row came from and highlights them. */
   readonly onWhy: (row: ShapeProposalDto) => void;
   /**
@@ -53,6 +68,8 @@ export function ProposedPane({
   loading,
   error,
   summaryHere,
+  menu,
+  onClose,
   onWhy,
   jumpRequest = null,
   onJumped,
@@ -75,9 +92,6 @@ export function ProposedPane({
   const rows = convertibleRows(view?.proposals ?? []);
   const hasProposals = (view?.proposals.length ?? 0) > 0;
   const dismiss = useDismissFinding(view?.shape.id ?? null);
-  const rehearse = useRehearseShape(view?.shape.id ?? null);
-  // An agent without subagents can't run the rehearsal's implementer.
-  const rehearses = agentRehearses(useConversation(view?.conversationId ?? null));
   const handlers: RowHandlers = {
     onChange: (row, action) => {
       change.mutate({ id: row.id, action });
@@ -92,7 +106,6 @@ export function ProposedPane({
     view !== undefined && row.state === 'pending' && (row.kind === 'goal' || row.kind === 'task')
       ? rowReview(view, row)
       : undefined;
-  const unread = view?.rehearsals.some((r) => !r.rehearsed) ?? false;
 
   const focusSection = (section: SectionKey): boolean => {
     const target = listRef.current?.querySelector<HTMLElement>(`[data-section="${section}"]`);
@@ -174,7 +187,7 @@ export function ProposedPane({
   return (
     <Box
       component="section"
-      aria-label="Proposed"
+      aria-label="Plan"
       h="100%"
       style={{ display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 }}
     >
@@ -182,29 +195,10 @@ export function ProposedPane({
         <Group justify="space-between" wrap="nowrap">
           <Text fz={13} fw={600}>
             {view === undefined || view.shape.round === 0
-              ? 'Proposed'
-              : `Proposed · round ${String(view.shape.round)} · updated ${shortAgo(view.shape.updatedAt, now)}`}
+              ? 'Plan'
+              : `Plan · round ${String(view.shape.round)} · updated ${shortAgo(view.shape.updatedAt, now)}`}
           </Text>
           <Group gap="xs" wrap="nowrap">
-            {/* An imported Plan's tasks were planned elsewhere, and a rehearsal can't read them or run without subagents. */}
-            {view?.shape.importedAt == null && rehearses !== false ? (
-              <Button
-                variant="default"
-                size="xs"
-                disabled={
-                  view === undefined ||
-                  rehearses === null ||
-                  !unread ||
-                  view.turn.rehearsing ||
-                  rehearse.isPending
-                }
-                onClick={() => {
-                  rehearse.mutate(undefined);
-                }}
-              >
-                {view?.turn.rehearsing === true ? 'Rehearsing…' : 'Rehearse'}
-              </Button>
-            ) : null}
             <Button
               variant="default"
               size="xs"
@@ -213,8 +207,14 @@ export function ProposedPane({
                 setConverting(true);
               }}
             >
-              Convert
+              Accept
             </Button>
+            {menu}
+            {onClose === undefined ? null : (
+              <ActionIcon variant="subtle" aria-label="Close Plan" onClick={onClose}>
+                <IconX size={16} stroke={1.5} />
+              </ActionIcon>
+            )}
           </Group>
         </Group>
         {summaryHere ? (
@@ -243,15 +243,10 @@ export function ProposedPane({
             {dismiss.error.message}
           </Alert>
         ) : null}
-        {rehearse.isError ? (
-          <Alert color="red" title="Couldn't start the rehearsal">
-            {rehearse.error.message}
-          </Alert>
-        ) : null}
       </Stack>
       <ScrollArea
         style={{ flex: 1, minHeight: 0 }}
-        viewportProps={{ tabIndex: 0, role: 'group', 'aria-label': 'Proposed list' }}
+        viewportProps={{ tabIndex: 0, role: 'group', 'aria-label': 'Plan rows' }}
         viewportRef={listRef}
       >
         <Box px="md" pb="md">
@@ -279,8 +274,6 @@ export function ProposedPane({
           ) : (
             <HeardSoFar heard={view?.heard ?? []} />
           )}
-          {/* How Plan is doing is not part of any conversation: it shows with none open. */}
-          {view === undefined && !loading && error === null ? <PlanMeasures /> : null}
         </Box>
       </ScrollArea>
       {view === undefined ? null : (
@@ -331,7 +324,6 @@ function ConvertPanel({
   readonly onClose: () => void;
 }) {
   const convert = useConvertShape(view.shape.id);
-  const stop = useStopConversation();
   const rehearse = useRehearseShape(view.shape.id);
   // Until the conversation loads the agent is unknown, so no rehearsal starts yet.
   const conversation = useConversation(view.conversationId);
@@ -360,15 +352,11 @@ function ConvertPanel({
         const result = await convert
           .mutateAsync({
             proposalIds: ids,
-            ...(options?.interrupt === true ? { interrupt: true } : {}),
             ...(options?.cut === undefined ? {} : { cut: options.cut }),
           })
           .catch(() => undefined);
         if (result?.kind === 'refused') setRefusals(result.errors);
         return result;
-      }}
-      onStop={() => {
-        stop.mutate(view.conversationId);
       }}
       onRehearse={(ids) => {
         startRehearsal(ids);

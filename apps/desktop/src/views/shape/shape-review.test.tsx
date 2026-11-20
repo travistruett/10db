@@ -48,15 +48,15 @@ const marks = (row: ShapeProposalDto, rehearsed: boolean): ShapeViewDto['rehears
   }));
 
 async function openConvert(): Promise<HTMLElement> {
-  const button = await screen.findByRole('button', { name: 'Convert' });
+  const button = await screen.findByRole('button', { name: 'Accept' });
   await waitFor(() => {
     expect((button as HTMLButtonElement).disabled).toBe(false);
   });
   fireEvent.click(button);
-  return screen.findByRole('dialog', { name: 'Convert' });
+  return screen.findByRole('dialog', { name: 'Accept' });
 }
 
-it('asks for a rehearsal once when Convert opens with an unrehearsed task', async () => {
+it('asks for a rehearsal once when Accept opens with an unrehearsed task', async () => {
   const goal = goalProposal('brainstorm', ['one', 'two']);
   const view = proposed([goal], { rehearsals: marks(goal, false) });
   const posted: unknown[] = [];

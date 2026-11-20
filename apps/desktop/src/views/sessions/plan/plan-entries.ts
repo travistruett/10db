@@ -75,6 +75,17 @@ function shapeEventEntry(item: Item<'shape_event'>, shapeId: ShapeId): Conversat
   }
 }
 
+/**
+ * A session with a plan draws its `shape_event` items through this map, and leaves every other kind
+ * to the kit's: undefined for an item that is not Plan's.
+ */
+export function planEventEntry(
+  item: ConversationItemDto,
+  shapeId: ShapeId,
+): ConversationEntry | null | undefined {
+  return item.kind === 'shape_event' ? shapeEventEntry(item, shapeId) : undefined;
+}
+
 /** Plan's own items first; the kinds every conversation has go to the kit's map. */
 function entryOf(
   item: ConversationItemDto,

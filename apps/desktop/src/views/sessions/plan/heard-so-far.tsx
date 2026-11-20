@@ -1,8 +1,8 @@
 import { List, Stack, Text } from '@mantine/core';
 
 /**
- * Before the first proposal the sidebar has only what has been heard so far, and the one line
- * that says what Propose will do.
+ * Before the first row the panel has only what has been heard so far, and the line that says how
+ * it fills.
  */
 export function HeardSoFar({ heard }: { readonly heard: readonly string[] }) {
   return (
@@ -20,8 +20,7 @@ export function HeardSoFar({ heard }: { readonly heard: readonly string[] }) {
         </Stack>
       )}
       <Text size="sm" c="dimmed">
-        Press Propose when you&apos;ve said enough. Propose splits what you said into goals and
-        loose tasks.
+        Talk it through, or drop a document. The agent fills this in as things are decided.
       </Text>
     </Stack>
   );

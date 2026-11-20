@@ -91,17 +91,22 @@ export function filledValues(row: ShapeProposalDto): Record<string, string> {
   return Object.fromEntries(editableFields(row).map((f) => [f.name, f.value]));
 }
 
-/** What an edit sends: the fields whose trimmed value differs from the row's, and none that is empty yet required. */
+/**
+ * What an edit sends: the fields whose trimmed value differs from `from`, and none that is empty yet
+ * required. `from` is the row as the editor opened on it, so a field the builder left alone is never
+ * pinned to a value a later round has since changed.
+ */
 export function changedFields(
   row: ShapeProposalDto,
   values: Readonly<Record<string, string>>,
+  from: Readonly<Record<string, string>> = filledValues(row),
 ): Record<string, string> {
   const changed: Record<string, string> = {};
   for (const field of editableFields(row)) {
     const given = values[field.name];
     if (given === undefined) continue;
     const next = given.trim();
-    if (next === field.value || (next === '' && field.required)) continue;
+    if (next === (from[field.name] ?? field.value) || (next === '' && field.required)) continue;
     changed[field.name] = next;
   }
   return changed;
