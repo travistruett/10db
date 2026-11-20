@@ -207,7 +207,7 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   propose:
     'Propose a new task, a task change, or a principle (with the principle field: statement, kind, topicKey, scope). Proposals go to the builder; nothing changes until accepted, and you never confirm a principle yourself. Exception: a small new-task proposal whose kinds ask for no card is filed to the Icebox by 10db itself, naming your task, with no Inbox card. Set kinds (the keys of what the work touches: security, auth, migration, dependency, schema, infra, ui, docs, or another the builder made) when the work has them, and joinsRunningBatch when it must join a batch that is running; a kind that asks for a card (security, auth, migration and dependency do) or a batch request raises the card. A step can have at most 10 tasks filed without a person, between this and file_follow_up; past that, a proposal raises the card. The followUps of complete_step (review roles) are a separate allowance: they do not count toward the 10 and the 10 does not block them.',
   report_deviation:
-    "Report a departure from the plan or a principle, with your signed reason. When 10db asks you to commit uncommitted paths that are not this task's work (another writer's edits in a shared checkout), name them in leaveUncommitted instead of committing them: 10db leaves them and stops sending your step back for them.",
+    "Report a departure from the plan or a principle, with your signed reason. When 10db asks you to commit uncommitted paths that are not this task's work (another writer's edits in a shared checkout), name them in leaveUncommitted instead of committing them: 10db leaves them and stops sending your step back for them; it does so only in the builder's own checkout, outside a Workbench pass, and leftUncommitted says which it left.",
   file_follow_up:
     'File work that does not fit this task as a separate task in the Icebox column, naming this task in its description. Use it when a design or docs change would grow past about 300 lines: stop at a coherent point and file each remaining section. One call per task; the builder decides when it starts. A step can file at most 10 (MAX_FOLLOW_UPS), counting small proposals 10db files by itself; after that the call is refused. The followUps of complete_step are not counted and are not refused by it.',
   request_claim:
@@ -643,7 +643,12 @@ export function createToolHandlers(
       const done = prior(input.opId, McpToolName.ReportDeviation);
       if (done !== undefined) return Promise.resolve(McpToolOutputs.report_deviation.parse(done));
       const { project, task } = context();
-      const leftUncommitted = [...new Set(input.leaveUncommitted)].sort();
+      // Only the builder's own checkout has other writers; a worktree's dirt is 10db's, and a pass
+      // charges its page with its own record.
+      const leaves =
+        checkoutOf(db, getWorkstreamRow(db, workstreamId)) === project.repoPath &&
+        !passHoldingTask(db, task);
+      const leftUncommitted = leaves ? [...new Set(input.leaveUncommitted)].sort() : [];
       return Promise.resolve(
         deps.state.write((ctx) => {
           const sourceId = insertSource(ctx, 'agent', { sessionId, workstreamId });

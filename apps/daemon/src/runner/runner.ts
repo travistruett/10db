@@ -8,6 +8,7 @@ import {
   JudgeOutcome,
   Approval,
   McpToolName,
+  McpToolOutputs,
   ConflictError,
   currentStep,
   EventType,
@@ -4261,14 +4262,10 @@ export function createRunner(opts: RunnerOptions): Runner {
     const shas = await opts.git.commitsSince(checkout, base);
     if (checkout !== getProject(db, row.projectId).repoPath) return shas;
     const own = new Set(
-      listToolOpResults(db, row.id, McpToolName.Commit).flatMap((result) =>
-        typeof result === 'object' &&
-        result !== null &&
-        !Array.isArray(result) &&
-        typeof result['sha'] === 'string'
-          ? [result['sha']]
-          : [],
-      ),
+      listToolOpResults(db, row.id, McpToolName.Commit).flatMap((result) => {
+        const parsed = McpToolOutputs.commit.safeParse(result);
+        return parsed.success ? [parsed.data.sha] : [];
+      }),
     );
     return shas.filter((sha) => own.has(sha));
   }

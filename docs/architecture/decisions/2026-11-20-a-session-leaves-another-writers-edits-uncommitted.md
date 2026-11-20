@@ -1,11 +1,12 @@
 # A session leaves another writer's edits uncommitted, and a shared checkout's gate names only the task's commits
 
 - **Date:** 2026-11-20
+- **Amends:** `2026-11-20-a-task-is-not-charged-with-what-its-checkout-held-before-it-ran.md` (the record also holds paths a session named later)
 
 ## Decision
 
-When a step is sent back to commit uncommitted paths in its claims, its session may name any that
-are not the task's work in `report_deviation`'s `leaveUncommitted`, with its signed reason. 10db
+When a step in the builder's own checkout, outside a Workbench pass, is sent back to commit
+uncommitted paths in its claims, its session may name any that are not the task's work in `report_deviation`'s `leaveUncommitted`, with its signed reason. 10db
 adds each to the task's `task_start_dirt` record with `leftBy` set to the deviation, and
 `claimedChanges` leaves that path out from then on, whatever the file holds later. The deviation's
 signed reason lists the paths, so the builder sees them with the run.
