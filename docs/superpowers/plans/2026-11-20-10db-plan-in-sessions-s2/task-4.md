@@ -9,12 +9,16 @@ click-through waits for Task 3.
 
 ### Show Plan
 
-- **`apps/desktop/src/daemon/chat-queries.ts`:** add `useShowPlan()` beside `useUnarchiveChat` (line 222). Its
-  mutation is `readJson(await client.chats[':chatId'].plan.$post({ param: { chatId } }), ChatDto)`, invalidating
-  `chatKeys.all` on settle.
+- **`apps/desktop/src/daemon/chat-queries.ts`:** add `useShowPlan()` beside `useUnarchiveChat` (line 222).
+  - Its mutation is `readJson(await client.chats[':chatId'].plan.$post({ param: { chatId } }), ChatDto)`.
+  - `onSuccess` writes the returned `ChatDto` into the chat caches with `setQueryData`: replace the row in
+    `chatKeys.open`, as `useCreateChat` writes that list (line 150). So the tab has `planId` before the panel opens.
+  - Then invalidate `chatKeys.all`.
 - **`apps/desktop/src/views/sessions/chat-tab.tsx`:**
-  - The title row's `plan` prop (line 568) is given for every session, except one whose conversation is `sealed`
-    (the `HandedOffLine` case) or whose project was removed (`removed`).
+  - The title row's `plan` prop (line 568):
+    - a session with a plan always has it, sealed or removed project included, since its plan can still be read;
+    - a session with no plan has it (as Show Plan) unless its conversation is `sealed` (the `HandedOffLine` case)
+      or its project was removed (`removed`).
   - `togglePlan` (line 219):
     - with `planId` set, flip `planChoice` as today;
     - with `planId` null, call `showPlan.mutateAsync(chat.id)`, then `planChoice.set(chat.id, true)`. While pending,
@@ -32,7 +36,8 @@ click-through waits for Task 3.
 ### File as Tasks retired
 
 - **`chat-tab.tsx`:** remove `FILE_AS_TASKS_MESSAGE` (line 84) and the `onFileAsTasks` action (lines 572-583). In its
-  place, give `onTogglePlan: togglePlan` and `planOpen` under the same conditions as the toggle. `ChatTabProps.actions`'
+  place, give `onTogglePlan: togglePlan` and `planOpen` under the same conditions as the toggle: always with a plan,
+  and Show Plan only where the chat isn't sealed and its project isn't removed. `ChatTabProps.actions`'
   `Omit` (line 104) names `onTogglePlan` and `planOpen` in place of `onFileAsTasks`, and its comment follows.
 - **`apps/desktop/src/views/sessions/session-menu.tsx`:**
   - `SessionActions.onFileAsTasks` goes; add `onTogglePlan` and `planOpen` (index Interfaces);
@@ -75,7 +80,8 @@ Called: `POST /chats/:chatId/plan` (Task 1).
 - **Show Plan pressed twice quickly:** the second press sees `pending` and does nothing.
 - **A plain session × `propose_plan` passes:** `planId` arrives, and the panel opens (no choice was made).
 - **The builder closed the panel × a round lands:** it stays closed. The tooltip and ⋯ read "Show Plan".
-- **A sealed chat or a removed project:** no toggle, no ⋯ item.
+- **A sealed chat or a removed project:** with a plan, the toggle and ⋯ item stay; with none, no Show Plan.
+- **Show Plan answers:** the cache holds the chat with its `planId` at once, then refetches.
 
 ## Tests
 

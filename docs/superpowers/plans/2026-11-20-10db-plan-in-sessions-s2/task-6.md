@@ -11,12 +11,15 @@ rounds. Read `docs/architecture/decisions/README.md` once.
   - why: every chat's session opens its plan's folder before the plan exists, so a plan made mid-session is
     readable on Claude and Codex without a restart;
   - that slice 1's minted ids keep working through `planOfChat`;
-  - the cost: an empty folder per session.
+  - the cost: an empty folder per session, which Archive removes from a chat with no plan.
 
   Cite the spec and this plan by path. Other decision records are named without a `decisions/` path until they exist.
 - **Module notes** (each `AGENTS.md` beside the code). Say what is built now:
   - `apps/daemon/src/chat/AGENTS.md`, the paragraph at line 71:
-    - every chat's session gets Plan's prompt, agents, allowed tools and folder;
+    - every chat's session gets Plan's agents, allowed tools and folder;
+    - its prompt is the full rules with a plan at start, else `PLANNING_STUB`;
+    - a plan that starts mid-session owes the rules once, taken by `propose_plan`'s answer or the next `outgoing`;
+    - Task 2's Codex resume finding;
     - the folder is its plan's, or `planIdOfChat`'s before it has one;
     - the read budget resolves the plan per call;
     - "This session has no Plan." is gone;
@@ -31,6 +34,8 @@ rounds. Read `docs/architecture/decisions/README.md` once.
   - `apps/desktop/src/views/sessions/plan/AGENTS.md`:
     - the title row's Plan toggle is on every session (`useShowPlan`), and its tooltip;
     - the row's state dot (`rowDot`).
+  - `apps/desktop/AGENTS.md`, the `e2e/sessions.spec.ts` entry (around line 112): the File as Tasks step is typed
+    words now, and the New Plan flow adds a plain session that grows a plan by Show Plan and by proposing.
   - `apps/desktop/src/conversation/AGENTS.md`, line 20: the `held` composer shows Wait for It and Send Reading Only.
     "File as Tasks" there is stale; remove it.
 - **The spec** `docs/superpowers/specs/2026-11-19-10db-plan-in-sessions-design.md`: its Status line says slices 1-2

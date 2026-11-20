@@ -27,7 +27,8 @@ a plan by Show Plan or by proposing". Steps:
    through, or drop a document.".
 3. Set a `notes.md` on `input[type=file]`, then send "Thin out the scrollbars". Expect "I have notes.md." and
    "Heard so far" in the panel. The session was warm before its plan existed, so this is the row "a file dropped
-   after Show Plan on a warm session".
+   after Show Plan on a warm session". The fake says "I have" only when the session's own hook allows the Read
+   (Task 3), so this checks the folder opened at start.
 4. Send "propose it". Expect "Board polish" in the panel, and a row's dot labelled "New this round" (by its
    `aria-label`).
 5. Close the panel with Close Plan, then send "propose it again". The panel stays closed, and More session actions
@@ -65,8 +66,13 @@ This is the e2e extension the feature owes (`.claude/rules/testing.md`). No new 
 ## Done when
 
 - Run only the New Plan and chat end-to-end tests against the real daemon, through the repo's e2e entry
-  (`apps/desktop/e2e/AGENTS.md` says how; `--grep` on their titles). Both are green, and you've proved step 4 goes
-  red with Task 3's `propose_plan` change reverted locally (don't commit the revert).
+  (`apps/desktop/e2e/AGENTS.md` says how; `--grep` on their titles). Both are green, and you've proved each check goes
+  red where it can go red. Revert each locally, never committed:
+  - **Step 6** (the first message's "propose it", no Show Plan): goes red with `ensurePlanOfChat` taken out of
+    `propose_plan` (Task 3). Step 4 can't prove this, since Show Plan already made the plan in step 2.
+  - **Step 4's "New this round" dot:** goes red with `rowDot` taken out of `proposal-row.tsx` (Task 4).
+  - **Step 3's "I have notes.md.":** goes red with `planIdOfChat`'s folder left out of `spec()` (Task 2), since the
+    fake's Read is then refused.
 - Commit with the Value card, wrapped under 100 characters a line:
   `Value: protects=a plain session grows its plan by Show Plan or by proposing; fails_when=a session can't plan
   or plans unasked; why_new=feature e2e (sessions spec §10 item 2); no_claim=Codex's kernel grant of the folder`.
