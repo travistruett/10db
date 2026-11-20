@@ -230,7 +230,8 @@ export function useShowPlan() {
       queryClient.setQueryData<readonly ChatDto[]>(chatKeys.open, (held) =>
         held?.map((row) => (row.id === chat.id ? chat : row)),
       );
-      return queryClient.invalidateQueries({ queryKey: chatKeys.all });
+      // Not awaited: the cache already holds the plan, so the toggle is done once the answer is in.
+      void queryClient.invalidateQueries({ queryKey: chatKeys.all });
     },
   });
 }

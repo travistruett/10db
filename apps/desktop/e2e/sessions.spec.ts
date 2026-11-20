@@ -740,6 +740,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   );
   const plain = page.getByRole('complementary', { name: 'Plan' });
   await expect(plain.getByText('Talk it through, or drop a document.')).toBeVisible();
+  await expectAccessible(page, 'a plain session with Show Plan just pressed');
   await page.locator('input[type=file]').setInputFiles({
     name: 'notes.md',
     mimeType: 'text/markdown',

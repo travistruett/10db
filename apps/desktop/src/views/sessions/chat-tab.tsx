@@ -201,7 +201,7 @@ export function ChatTab({
   const [uncopied, setUncopied] = useState<string | null>(null);
   const [lastCommand, setLastCommand] = useState<string | null>(null);
   const [modelRefusal, setModelRefusal] = useState<string | null>(null);
-  // A git step the daemon refused or that failed, until the builder dismisses it.
+  // A git step or Show Plan the daemon refused or that failed, until the builder dismisses it.
   const [gitError, setGitError] = useState<string | null>(null);
   const models = useChatModels(chat.projectId);
   const folder = useProjectFolder(chat.projectId);
@@ -228,16 +228,15 @@ export function ChatTab({
       return;
     }
     if (showPlan.isPending) return;
-    showPlan.mutateAsync(chat.id).then(
-      () => {
-        planChoice.set(chat.id, true);
-      },
-      (error: unknown) => {
+    // The answer's chat goes into the cache, and a session with a plan opens its panel by default; setting the
+    // choice once the refetch ends would reopen a panel the builder closed meanwhile.
+    showPlan.mutate(chat.id, {
+      onError: (error: unknown) => {
         setGitError(
           `Couldn't show the Plan: ${error instanceof Error ? error.message : String(error)}`,
         );
       },
-    );
+    });
   };
   const [why, setWhy] = useState<{
     readonly ids: readonly string[];
@@ -296,8 +295,10 @@ export function ChatTab({
   const working = WORKING_STATES.has(conversation.state);
   const removed = project === undefined;
   // A session with a plan always has the toggle, since its plan can still be read; one without gets Show Plan
-  // unless its conversation is sealed or its project was removed.
-  const offersPlan = planId !== null || (conversation.state !== 'sealed' && !removed);
+  // unless its conversation is sealed, its project was removed or the daemon is out of reach.
+  const offersPlan =
+    planId !== null ||
+    (conversation.state !== 'sealed' && !removed && daemon.kind !== 'reconnecting');
 
   // A plan session's dropped, picked and pasted files are the plan's files, which the agent reads.
   const dropIntoPlan = async (files: File[]): Promise<void> => {
