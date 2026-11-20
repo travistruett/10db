@@ -10,6 +10,41 @@ Plan entries of `docs/architecture/db-storage.md` once, and keep notes. Starts f
 `gh pr list --state open --json number,title,files` must show no other open pull request with a file under
 `packages/db/drizzle/`. If one exists, stop and report it: only one open pull request adds migrations at a time.
 
+## Interfaces it implements or calls (quoted)
+
+```ts
+export function convertProposals(
+  ctx: WriteContext,
+  shapeId: ShapeId,
+  proposalIds: readonly ShapeProposalId[],
+  joiningProblem: JoiningProblem = () => null,
+  cut?: readonly MilestoneCut[],
+): ConvertOutcome;
+export function removeDraftGoalOf(ctx: WriteContext, shapeId: ShapeId, goalId: GoalId): void;
+export function insertLandingGroup(
+  ctx: WriteContext,
+  input: {
+    readonly projectId: ProjectId;
+    readonly title: string;
+    readonly taskIds: readonly TaskId[];
+    readonly shapeId?: ShapeId;
+  },
+): LandingGroupDto;
+export type ShapeProposalPatch = Partial<
+  Pick<
+    ShapeProposalRow,
+    'state' | 'round' | 'createdRound' | 'pinned' | 'body' | 'taskHashes' | 'sourceMessageIds'
+  >
+>;
+export function patchShapeProposal(
+  ctx: WriteContext,
+  id: ShapeProposalId,
+  patch: ShapeProposalPatch,
+): void;
+```
+
+The new store functions and the outcome's `acceptId` are quoted in the index's Interfaces, under New.
+
 ## Files
 
 ### `packages/contracts/src/ids.ts`
@@ -27,8 +62,9 @@ Add `ShapeAccept` beside `ShapeLink`, with the prefix `'sac'`, in both the schem
   - an index `shape_accepts_shape_idx` on `shape_id`.
   - Doc comment: "An Accept of a plan (spec §5): which proposals it accepted and which landing groups it made, so
     Undo Accept takes back exactly what it wrote."
-- **`shape_proposals.accept_id`** → `shape_accepts.id`, nullable: "The Accept that accepted it; null while pending,
-  and for a row accepted before Accepts were recorded."
+- **`shape_proposals.accept_id`** → `shape_accepts.id`, nullable: "The Accept that accepted it. Meaningful only on
+  a row whose state is accepted: every path that makes a row pending again clears it, and readers filter by state.
+  Null for a row accepted before Accepts were recorded."
 - **`landing_groups.accept_id`** → `shape_accepts.id`, nullable: "The Accept that made it; null for a group made
   another way."
 - Then run `pnpm --filter @10db/db generate` and read the SQL it writes.
@@ -36,6 +72,8 @@ Add `ShapeAccept` beside `ShapeLink`, with the prefix `'sac'`, in both the schem
   - If drizzle-kit writes a table rebuild that also adds a column, split it as `packages/db/AGENTS.md` says: one
     migration that adds the column, a second that rebuilds.
   - Never edit the generated SQL.
+  - Save a copy of the SQL to your scratch folder (`task-1/migration.sql`): Task 7 regenerates the migration
+    after the final merge of `main` and diffs against it.
 
 ### `packages/db/src/store/shape-accepts.ts` (new), exported through the package's entry point
 
@@ -61,9 +99,16 @@ export function listAcceptedProposals(db: DbReader, id: ShapeAcceptId): ShapePro
 ### `packages/db/src/store/landing-groups.ts`
 
 - `insertLandingGroup`'s input gains `readonly acceptId?: ShapeAcceptId`, written as `accept_id`.
-- Add `deleteLandingGroupOf(ctx: WriteContext, id: LandingGroupId): void`. It clears `tasks.landing_group_id` on
-  the group's tasks and then deletes the row. Task 2 calls it on groups whose tasks it has cancelled. Check first
-  whether such a function exists, and use it if so.
+- Add both, checking first whether such functions exist and using them if so:
+
+  ```ts
+  /** Clears the group's tasks' landing_group_id, then deletes the group. */
+  export function deleteLandingGroupOf(ctx: WriteContext, id: LandingGroupId): void;
+  /** Takes one task out of its group (landing_group_id null); the group stays. */
+  export function leaveLandingGroup(ctx: WriteContext, taskId: TaskId): void;
+  ```
+
+  Task 2 calls them.
 
 ### `apps/daemon/src/shape/convert.ts`
 
@@ -101,7 +146,8 @@ recording is exercised by Task 2's core tests, which accept through `convertProp
 
 ## Transitional exports
 
-`latestShapeAccept`, `markShapeAcceptUndone`, `listAcceptedProposals` and `deleteLandingGroupOf` are used first by
+`latestShapeAccept`, `markShapeAcceptUndone`, `listAcceptedProposals`, `deleteLandingGroupOf` and
+`leaveLandingGroup` are used first by
 Task 2. Either Task 1 and Task 2 push together, or Task 1 pushes and Task 2 starts at once. Knip reads exports
 from a package's entry point as used, so check `make precheck` before the push. If it flags them, say so in the
 report and push with Task 2.
