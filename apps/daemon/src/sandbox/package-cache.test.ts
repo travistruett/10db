@@ -10,6 +10,7 @@ describe('packageCacheEnv', () => {
       pnpm_config_store_dir: '/c/pnpm-store',
       pnpm_config_state_dir: '/c/pnpm-state',
       pnpm_config_cache_dir: '/c/pnpm-cache',
+      pnpm_config_manage_package_manager_versions: 'false',
       CARGO_HOME: '/c/cargo',
       UV_CACHE_DIR: '/c/uv',
       UV_TOOL_DIR: '/c/uv-tools',

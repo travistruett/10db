@@ -363,6 +363,7 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
         pnpm_config_store_dir: join(cache, 'pnpm-store'),
         pnpm_config_state_dir: join(cache, 'pnpm-state'),
         pnpm_config_cache_dir: join(cache, 'pnpm-cache'),
+        pnpm_config_manage_package_manager_versions: 'false',
         CARGO_HOME: join(cache, 'cargo'),
         UV_CACHE_DIR: join(cache, 'uv'),
         UV_TOOL_DIR: join(cache, 'uv-tools'),

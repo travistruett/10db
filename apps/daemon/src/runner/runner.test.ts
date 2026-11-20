@@ -3065,6 +3065,50 @@ describe('a step that ends with changes in its claims', () => {
     expect(gateEvidence(workstream.id)).toHaveLength(1);
   });
 
+  it("leaves what the checkout held before the task first ran, naming only the task's own change", async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [write('src/api/a.txt'), turn],
+        [commit('op-uncom-0002', ['src/api/a.txt']), turn],
+      ],
+    });
+    // The builder's edit in a shared checkout, inside the task's claims and older than the task.
+    mkdirSync(join(engine.repoPath, 'src/api'), { recursive: true });
+    writeFileSync(join(engine.repoPath, 'src/api/builder.txt'), 'theirs');
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      nextAction: { kind: 'uncommitted', paths: ['src/api/a.txt'] },
+    });
+
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(gateEvidence(workstream.id)).toHaveLength(1);
+  });
+
+  it('keeps charging a task with its own uncommitted change when it ran before its start was recorded', async () => {
+    engine = await createTestEngine({
+      Alpha: [[write('src/api/a.txt'), turn], [turn]],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).nextAction).toEqual({ kind: 'uncommitted', paths: ['src/api/a.txt'] });
+
+    // As for a task that ran before 10db recorded what a checkout held, or one taken out of a pass.
+    engine.store.db.delete(schema.taskStartDirt).run();
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      nextAction: { kind: 'uncommitted', paths: ['src/api/a.txt'] },
+    });
+  });
+
   it('fails the step once it has been sent back as many times as the fix limit allows', async () => {
     const uncommitted = [write('src/api/a.txt'), turn];
     engine = await createTestEngine({

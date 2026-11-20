@@ -2038,6 +2038,27 @@ export const taskContextChecks = sqliteTable(
   ],
 );
 
+/** A path a task's checkout held uncommitted when the task first launched. */
+export interface StartDirtEntry {
+  readonly path: string;
+  /** Its size, change time and inode then, as `fileFingerprint` reads them; null when it was gone. */
+  readonly fingerprint: string | null;
+}
+
+/**
+ * What a task's checkout held uncommitted when the task first launched, written once per task. A
+ * path still as it was at a step's end is not the task's work: someone else's edit in a shared
+ * checkout, which the step is not sent back to commit.
+ */
+export const taskStartDirt = sqliteTable('task_start_dirt', {
+  taskId: text('task_id')
+    .$type<TaskId>()
+    .primaryKey()
+    .references(() => tasks.id),
+  entries: text('entries', { mode: 'json' }).$type<StartDirtEntry[]>().notNull(),
+  createdAt: createdAt(),
+});
+
 /**
  * A finished workstream's lane time (Shape spec §8): its session spans plus its gate spans, not time
  * queued for a lane or a gate slot. Written once when the workstream finishes; migration 0032
