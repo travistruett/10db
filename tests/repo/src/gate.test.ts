@@ -79,13 +79,18 @@ function slowPnpmDir(): string {
  * The checkout's `.gate/` logs with their modification times. `make gate` writes `test.log` while
  * this file runs, so that one log is left out.
  */
-function checkoutGateLogs(): Record<string, number> {
+/**
+ * When each of `names` in the checkout's .gate/ was last written, null for one that is not there. Only
+ * the logs a run would write are read: a gate or precheck running this test writes its own logs
+ * there meanwhile.
+ */
+function checkoutGateLogs(names: readonly string[]): Record<string, number | null> {
   const dir = resolve(repoRoot, '.gate');
-  if (!existsSync(dir)) return {};
   return Object.fromEntries(
-    readdirSync(dir)
-      .filter((name) => name !== 'test.log')
-      .map((name) => [name, statSync(resolve(dir, name)).mtimeMs]),
+    names.map((name) => {
+      const path = resolve(dir, name);
+      return [name, existsSync(path) ? statSync(path).mtimeMs : null];
+    }),
   );
 }
 
@@ -288,9 +293,10 @@ describe('scripts/gate.sh', () => {
   }, 60_000);
 
   it("writes nothing under the checkout's .gate/", () => {
-    const before = checkoutGateLogs();
+    const logs = ['format.log', 'fail-probe.log'];
+    const before = checkoutGateLogs(logs);
     runGate(sandbox, { GATE_STEPS: 'format fail-probe' });
-    expect(checkoutGateLogs()).toEqual(before);
+    expect(checkoutGateLogs(logs)).toEqual(before);
   }, 60_000);
 
   it('leaves only the logs of its own run in .gate/', () => {

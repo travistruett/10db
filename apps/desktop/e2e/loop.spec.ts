@@ -129,8 +129,13 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   const card = ready.getByRole('button', { name: TASK, exact: true });
   await card.focus();
   await expect(card).toBeFocused();
+  // Each key waits for the drag to take the last one: an arrow before the pick-up lands is lost.
   await page.keyboard.press('Space');
+  await expect(ready.getByRole('listitem').nth(1)).toHaveCSS('opacity', '0.3');
   await page.keyboard.press('ArrowUp');
+  await expect(
+    page.getByRole('status').filter({ hasText: `${TASK} is over ${OTHER}.` }),
+  ).toHaveCount(1);
   await page.keyboard.press('Space');
   await expect(ready.getByRole('listitem').nth(0)).toHaveAccessibleName(TASK);
   await page.reload();
