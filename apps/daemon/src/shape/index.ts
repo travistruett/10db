@@ -3,15 +3,7 @@
 // joins the composition root with the HTTP routes (daemon/shape-services.ts).
 
 export { shapeAgentModels } from './agent-models';
-export {
-  judgePlanTool,
-  judgeShapeCall,
-  PLAN_CODE_RESEARCHER,
-  PLAN_RESEARCHER,
-  PLAN_REVIEWERS,
-  privateHostProblem,
-  type ShapeAccess,
-} from './confinement';
+export { judgePlanTool, judgeShapeCall, privateHostProblem, type ShapeAccess } from './confinement';
 export type { ShapeLaunch } from './session-launch';
 export { gitTrackedFiles } from './ceremony';
 export {
@@ -23,7 +15,7 @@ export {
   shapeToolset,
 } from './policy';
 export { PIN_IMPORTED } from './rounds';
-export { createPlanParts, type PlanParts, type PlanTurnState } from './plan-parts';
+export type { PlanParts } from './plan-parts';
 export { createShapeJev, shadowAgreement } from './jev';
 export {
   createShapeService,
@@ -31,5 +23,4 @@ export {
   type ShapePrepareInput,
   type ShapeService,
 } from './service';
-export { DEFAULT_SHAPE_TITLE } from '@10db/db';
 export { sizingMeasure } from './sizing';

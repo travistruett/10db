@@ -100,7 +100,6 @@ import {
   ShapeEditInput,
   ShapeFindingId,
   ShapeId,
-  ShapeInput,
   ShapeProposalId,
   ShapeModelInput,
   ShapeRehearseInput,
@@ -487,15 +486,6 @@ export function createApp(deps: ApiDeps) {
     .get('/projects/:projectId/shapes', (c) =>
       c.json(deps.services.listShapes(ProjectId.parse(c.req.param('projectId')))),
     )
-    .post(
-      '/projects/:projectId/shapes',
-      validator('json', (value): ShapeInput => ShapeInput.parse(value)),
-      (c) =>
-        c.json(
-          deps.services.createShape(ProjectId.parse(c.req.param('projectId')), c.req.valid('json')),
-          201,
-        ),
-    )
     .get('/projects/:projectId/shape-jev', (c) =>
       c.json(deps.services.getShapeJev(ProjectId.parse(c.req.param('projectId')))),
     )
@@ -881,9 +871,6 @@ export function createApp(deps: ApiDeps) {
     )
     .get('/shapes/:shapeId', (c) =>
       c.json(deps.services.getShapeView(ShapeId.parse(c.req.param('shapeId')))),
-    )
-    .post('/shapes/:shapeId/propose', (c) =>
-      c.json(deps.services.proposeShape(ShapeId.parse(c.req.param('shapeId'))), 202),
     )
     .post(
       '/shapes/:shapeId/rehearse',

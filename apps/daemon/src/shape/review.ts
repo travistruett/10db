@@ -197,6 +197,18 @@ export function reportFinding(
   const reviewer = input.reviewer;
   if (reviewer === undefined)
     throw new InvalidError('Only a reviewer reports a finding; the main session cannot.');
+  // A rehearsal's effort that is no longer pending was converted or dropped while it read: the task changed.
+  if (
+    reviewer === ShapeReviewer.Rehearsal &&
+    !efforts(ctx.tx, shapeId).some((r) => r.key === input.effortKey)
+  ) {
+    const task = input.taskKey ?? input.effortKey;
+    line(ctx, shapeId, `report_finding · rehearsal · ${task} · discarded, the task changed`);
+    return {
+      discarded: true,
+      why: `${task} changed while you read it; this report is for an earlier version and was not kept.`,
+    };
+  }
   const effort = effortOf(ctx, shapeId, input.effortKey);
   const taskKeys = taskKeysOf(effort);
   const round = getShape(ctx.tx, shapeId).round;

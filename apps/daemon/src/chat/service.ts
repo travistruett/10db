@@ -10,6 +10,7 @@ import {
   ConversationOwnerKind,
   ConversationProfile,
   ConversationState,
+  ShapeOrigin,
   cutTitle,
   FolderAsker,
   FolderWhileHeld,
@@ -49,6 +50,7 @@ import {
   insertConversation,
   insertFiles,
   insertItem,
+  insertPlanSession,
   latestWorkstreamOf,
   moveChatTab,
   openChats,
@@ -302,6 +304,20 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
     create(input) {
       getProject(state.db, input.projectId);
       if (input.model !== null) offered(input.projectId, input.model);
+      if (input.plan === true) {
+        const planned = state.write(
+          (ctx) =>
+            insertPlanSession(ctx, {
+              projectId: input.projectId,
+              title: null,
+              origin: ShapeOrigin.App,
+              tabPosition: input.tabPosition,
+              model: input.model,
+              effort: input.effort ?? null,
+            }).chat.id,
+        );
+        return dtoOf(planned);
+      }
       const id = state.write((ctx) => {
         const chatId = mintId('Chat');
         const conv = insertConversation(ctx, {

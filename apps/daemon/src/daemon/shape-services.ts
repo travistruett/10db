@@ -1,9 +1,4 @@
-import {
-  ShapeOrigin,
-  type ShapeConvertedRow,
-  type ShapeId,
-  type ShapeOfDto,
-} from '@10db/contracts';
+import type { ShapeConvertedRow, ShapeId, ShapeOfDto } from '@10db/contracts';
 import {
   findShapeLinkOfGoal,
   findShapeLinkOfTask,
@@ -17,15 +12,13 @@ import {
 import type { ApiServices } from '../api';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
-import { DEFAULT_SHAPE_TITLE, shadowAgreement, sizingMeasure, type ShapeService } from '../shape';
+import { shadowAgreement, sizingMeasure, type ShapeService } from '../shape';
 
 /** Shape's side of the HTTP API: conversations, their messages, Propose, Convert and the two undos. */
 export type ShapeApiServices = Pick<
   ApiServices,
   | 'listShapes'
-  | 'createShape'
   | 'getShapeView'
-  | 'proposeShape'
   | 'chooseShapeModel'
   | 'convertShape'
   | 'removeDraftGoal'
@@ -65,15 +58,7 @@ export function createShapeServices(deps: {
         };
   return {
     listShapes: (projectId) => shape.list(projectId),
-    // A conversation with no title is named by its first message once there is one.
-    createShape: (projectId, input) =>
-      shape.create(projectId, {
-        title: input.title ?? DEFAULT_SHAPE_TITLE,
-        origin: ShapeOrigin.App,
-      }),
     getShapeView: (id) => shape.view(id),
-    // A Propose press no longer exists: the route answers that nothing started, until it is removed.
-    proposeShape: () => ({ status: 'ignored' }),
     chooseShapeModel: (id, model, effort) => shape.chooseModel(id, model, effort),
     async convertShape(id, input) {
       const outcome = await shape.convert(id, input.proposalIds, {

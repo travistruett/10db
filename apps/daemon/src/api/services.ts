@@ -191,11 +191,9 @@ import type {
   ShapeJevSettingDto,
   ShapeMeasuresDto,
   ShapeId,
-  ShapeInput,
   ShapeMessageDto,
   ShapeOfDto,
   ShapeProposalId,
-  ShapeProposeResult,
   ShapeRehearseInput,
   ShapeRehearseResult,
   ShapeViewDto,
@@ -520,12 +518,8 @@ export interface ApiServices extends PlanRecordServices {
   openGoalDigest(goalId: GoalId): GoalDigestDto;
   /** The project's Shape conversations, the one touched last first. Throws NotFoundError for an unknown project. */
   listShapes(projectId: ProjectId): ShapeDto[];
-  /** Opens a conversation; with no title it is named by its first message. */
-  createShape(projectId: ProjectId, input: ShapeInput): ShapeDto;
   /** Everything the Shape screen renders for the conversation. Throws NotFoundError for an unknown one. */
   getShapeView(id: ShapeId): ShapeViewDto;
-  /** Queues a Propose turn, or ignores the press while one is queued or running. */
-  proposeShape(id: ShapeId): ShapeProposeResult;
   /**
    * Runs the conversation on `model` from its next turn, or on the `plan` role's with null, at `effort`
    * or, with null, the model's own default. Throws

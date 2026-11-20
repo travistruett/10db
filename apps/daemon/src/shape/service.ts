@@ -40,8 +40,8 @@ import {
   getShape,
   getShapeFinding,
   getShapeProposal,
-  DEFAULT_SHAPE_TITLE,
   insertPlanSession,
+  openChats,
   patchConversation,
   planOfConversation,
   insertShapeFile,
@@ -54,7 +54,6 @@ import {
   setOneWayPaths as setOneWayPathsRow,
   settleOpenQuestionsOfTask,
   shapeConversation,
-  updateItem,
   type WriteContext,
 } from '@10db/db';
 import type { Clock } from '../clock';
@@ -147,7 +146,6 @@ export interface DroppedFile {
 }
 
 export interface ShapeService {
-  create(projectId: ProjectId, input: { title: string; origin: ShapeOrigin }): ShapeDto;
   /**
    * `start_shape` (spec §5.6): a conversation from a terminal session, its summary the builder's first
    * message and its text files kept. Starts no turn.
@@ -220,9 +218,8 @@ export interface ShapeService {
    */
   withdrawPrinciple(shapeId: ShapeId, principleId: PrincipleId, reason: string): void;
   /**
-   * Converts the selected proposals. Refused with a `ConflictError` while a turn runs, unless the
-   * caller asks to interrupt it. Holds the queue while it writes. A Plan with more than five milestones
-   * waiting needs the builder's `cut` of them (`judgeMilestones`).
+   * Converts the selected proposals in one write; a turn that runs goes on. A Plan with more than five
+   * milestones waiting needs the builder's `cut` of them (`judgeMilestones`). `interrupt` is ignored.
    */
   convert(
     shapeId: ShapeId,
@@ -306,19 +303,6 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         parseItemBody(item.kind, item.body).kind === kind,
     );
   };
-  /** Queued presses of `kind` stop being turn starters: their notes stay in the transcript. */
-  const dropQueuedPresses = (conversation: ConversationId, kind: ShapeEventKind): void => {
-    state.write((ctx) => {
-      for (const item of listQueuedTurnStarters(ctx.tx, conversation)) {
-        if (item.kind !== ConversationItemKind.ShapeEvent) continue;
-        const press = parseItemBody(item.kind, item.body);
-        // The note stays in the transcript; without its instruction it starts no turn.
-        if (press.kind === kind)
-          updateItem(ctx, item.id, { body: { kind: press.kind, text: press.text } });
-      }
-    });
-  };
-
   const say = (
     shapeId: ShapeId,
     author: ShapeMessageAuthor,
@@ -436,18 +420,6 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   });
 
   return {
-    create(projectId, input) {
-      return state.write(
-        (ctx) =>
-          insertPlanSession(ctx, {
-            projectId,
-            title: input.title === DEFAULT_SHAPE_TITLE ? null : input.title,
-            origin: input.origin,
-            tabPosition: null,
-          }).shape,
-      );
-    },
-
     startFromTerminal(input) {
       const made: { id: ShapeId | null } = { id: null };
       try {
@@ -456,7 +428,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
             projectId: input.projectId,
             title: input.title,
             origin: ShapeOrigin.ClaudeCode,
-            tabPosition: null,
+            tabPosition: openChats(ctx.tx).length,
           });
           made.id = shape.id;
           insertShapeMessage(ctx, shape.id, {
@@ -701,23 +673,10 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       await engine.stop(conversationOf(shapeId));
     },
 
-    async convert(shapeId, proposalIds, options) {
-      const conversation = conversationOf(shapeId);
-      if (options?.interrupt === true) {
-        // Convert Anyway stops the rehearsal (spec §7), queued as well as running: one left queued
-        // would read proposals that are no longer pending once the hold is released.
-        dropQueuedPresses(conversation, ShapeEventKind.Rehearse);
-      }
-      if (turnRuns(conversation)) {
-        if (options?.interrupt !== true)
-          throw new ConflictError('The agent is still answering; Stop or wait');
-        engine.holdStarts(conversation);
-        await engine.stop(conversation);
-        await engine.settled(conversation);
-      }
-      engine.holdStarts(conversation);
-      try {
-        return state.write((ctx) => {
+    convert(shapeId, proposalIds, options) {
+      // One write: a turn that runs goes on, and reads the rows as they stand when it next looks.
+      return Promise.resolve(
+        state.write((ctx) => {
           const outcome = convertProposals(
             ctx,
             shapeId,
@@ -732,10 +691,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
               body: `Converted ${String(outcome.createdNow)} ${outcome.createdNow === 1 ? 'proposal' : 'proposals'}`,
             });
           return outcome;
-        });
-      } finally {
-        engine.releaseStarts(conversation);
-      }
+        }),
+      );
     },
 
     toolsFor,

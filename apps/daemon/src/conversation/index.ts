@@ -31,7 +31,6 @@ export {
   carriedTooMuch,
   inlineBytesSpent,
   inlinePictureBytes,
-  parseScreenBody,
   readAllowance,
   readBytesSpent,
   readCountedLine,

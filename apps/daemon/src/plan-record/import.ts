@@ -27,6 +27,7 @@ import {
   getAttachmentRevision,
   getShapeEntry,
   insertDocumentAttachment,
+  chatOfShape,
   insertPlanSession,
   insertShapeMessage,
   insertShapeProposal,
@@ -602,7 +603,13 @@ export function importBundle(
   const numbering = numberingOf(stored, bundle);
   const proposalPlan = planProposals(stored, bundle, numbering);
   if (stored !== null && !writesSomething(changes) && proposalPlan.restates.length === 0)
-    return { dryRun: false, shapeId: stored.shapeId, created: false, changes };
+    return {
+      dryRun: false,
+      shapeId: stored.shapeId,
+      chatId: chatOfShape(ctx.tx, stored.shapeId),
+      created: false,
+      changes,
+    };
   const states =
     proposalPlan.writes.length > 0 ||
     bundle.goals.length + bundle.tasks.length + bundle.decisions.length + bundle.questions.length >
@@ -744,5 +751,11 @@ export function importBundle(
     if (stored !== null && stored.state !== ShapeState.Proposed)
       patchShape(ctx, shapeId, { state: ShapeState.Proposed });
   }
-  return { dryRun: false, shapeId, created: stored === null, changes };
+  return {
+    dryRun: false,
+    shapeId,
+    chatId: chatOfShape(ctx.tx, shapeId),
+    created: stored === null,
+    changes,
+  };
 }
