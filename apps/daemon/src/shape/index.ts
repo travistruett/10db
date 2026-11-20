@@ -17,9 +17,9 @@ export {
 export { createShapeJev, shadowAgreement } from './jev';
 export {
   createShapeService,
-  DEFAULT_SHAPE_TITLE,
   type ShapePrepared,
   type ShapePrepareInput,
   type ShapeService,
 } from './service';
+export { DEFAULT_SHAPE_TITLE } from '@10db/db';
 export { sizingMeasure } from './sizing';

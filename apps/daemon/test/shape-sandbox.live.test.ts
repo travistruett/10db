@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { agentKind, mintId, PermissionChoice, ShapeOrigin } from '@10db/contracts';
 import {
   createTestStore,
-  insertShape,
+  insertPlanSession,
   seedProject,
   shapeConversation,
   type AccountRow,
@@ -109,8 +109,14 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
     const state = createStateStore(test.store, createEventBus());
     const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
     const project = seedProject(test.store, { repoPath: checkout });
-    const shape = test.store.write((ctx) =>
-      insertShape(ctx, project.id, { title: 'Live', origin: ShapeOrigin.App }),
+    const shape = test.store.write(
+      (ctx) =>
+        insertPlanSession(ctx, {
+          projectId: project.id,
+          title: 'Live',
+          origin: ShapeOrigin.App,
+          tabPosition: null,
+        }).shape,
     ).value;
     const guarded = protectedPaths({
       dataDir,

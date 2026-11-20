@@ -17,7 +17,7 @@ import { agentKind, mintId } from '@10db/contracts';
 import {
   createTestStore,
   insertSession,
-  insertShape,
+  insertPlanSession,
   seedProject,
   type AccountRow,
   shapeConversation,
@@ -207,8 +207,14 @@ describe.skipIf(!live)('a Shape session, live', () => {
     const test = createTestStore();
     const state = createStateStore(test.store, createEventBus());
     const project = seedProject(test.store, { repoPath: checkout });
-    const shape = state.write((ctx) =>
-      insertShape(ctx, project.id, { title: 'A look', origin: 'app' }),
+    const shape = state.write(
+      (ctx) =>
+        insertPlanSession(ctx, {
+          projectId: project.id,
+          title: 'A look',
+          origin: 'app',
+          tabPosition: null,
+        }).shape,
     );
     const { token, hash } = mintSessionToken();
     state.write((ctx) =>

@@ -41,7 +41,9 @@ import {
   getShapeFinding,
   getItem,
   getShapeProposal,
-  insertShape,
+  DEFAULT_SHAPE_TITLE,
+  insertPlanSession,
+  patchConversation,
   insertShapeFile,
   insertShapeMessage,
   listConversationsOfProfile,
@@ -265,9 +267,6 @@ export interface ShapeService {
   /** Stops every session; what was queued waits under Send now at the next start. */
   close(): Promise<void>;
 }
-
-/** A conversation's name until its first message gives it one. */
-export const DEFAULT_SHAPE_TITLE = 'New conversation';
 
 const TITLE_MAX = 60;
 
@@ -507,16 +506,26 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
 
   return {
     create(projectId, input) {
-      return state.write((ctx) => insertShape(ctx, projectId, input));
+      return state.write(
+        (ctx) =>
+          insertPlanSession(ctx, {
+            projectId,
+            title: input.title === DEFAULT_SHAPE_TITLE ? null : input.title,
+            origin: input.origin,
+            tabPosition: null,
+          }).shape,
+      );
     },
 
     startFromTerminal(input) {
       const made: { id: ShapeId | null } = { id: null };
       try {
         return state.write((ctx) => {
-          const shape = insertShape(ctx, input.projectId, {
+          const { shape } = insertPlanSession(ctx, {
+            projectId: input.projectId,
             title: input.title,
             origin: ShapeOrigin.ClaudeCode,
+            tabPosition: null,
           });
           made.id = shape.id;
           insertShapeMessage(ctx, shape.id, {
@@ -639,10 +648,9 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     propose(shapeId) {
       if (pressPending(shapeId, ShapeEventKind.Propose)) return { status: 'ignored' };
       const { note, instruction } = proposeNote(getShape(state.db, shapeId).round > 0);
-      // The press unlocks propose_plan for good and is a row in the transcript, in one write; its
+      // The press is a row in the transcript; its
       // instruction makes it a turn starter, queued.
       state.write((ctx) => {
-        patchShape(ctx, shapeId, { proposeUnlocked: true });
         insertShapeMessage(ctx, shapeId, {
           author: ShapeMessageAuthor.Note,
           kind: ShapeMessageKind.Propose,
@@ -720,7 +728,10 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         throw new ConflictError(
           'The model changes between turns: wait for the turn to end, or stop it, then choose again.',
         );
-      const shape = state.write((ctx) => patchShape(ctx, shapeId, { effort }));
+      const shape = state.write((ctx) => {
+        patchConversation(ctx, shapeConversation(ctx.tx, shapeId).id, { effort });
+        return patchShape(ctx, shapeId, {});
+      });
       // The engine switches a warm session for its next turn, and notes the change once it has.
       void engine
         .modelChanged(conversation, model)

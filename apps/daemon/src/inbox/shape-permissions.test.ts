@@ -15,7 +15,7 @@ import {
 import {
   createTestStore,
   getInboxItem,
-  insertShape,
+  insertPlanSession,
   listInbox,
   listPermissionRules,
   seedProject,
@@ -79,8 +79,14 @@ function conversation(project = seedProject(base)): {
   shapeId: ShapeId;
   conversationId: ConversationId;
 } {
-  const shape = base.write((ctx) =>
-    insertShape(ctx, project.id, { title: 'Audit', origin: ShapeOrigin.App }),
+  const shape = base.write(
+    (ctx) =>
+      insertPlanSession(ctx, {
+        projectId: project.id,
+        title: 'Audit',
+        origin: ShapeOrigin.App,
+        tabPosition: null,
+      }).shape,
   );
   return {
     projectId: project.id,

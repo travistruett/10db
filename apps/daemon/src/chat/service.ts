@@ -60,6 +60,7 @@ import {
   unarchiveChat,
   type ChatRow,
   type ConversationItemRow,
+  planOfChat,
 } from '@10db/db';
 import type { Clock } from '../clock';
 import { keepBuilderMessage, type ExploreEngine, type PastedFile } from '../conversation';
@@ -231,7 +232,11 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
   const { state, engine } = deps;
   const dtoOf = (id: ChatId): ChatDto => {
     const view = chatView(state.db, id);
-    return { ...view, conversation: engine.view(view.conversationId), planId: null };
+    return {
+      ...view,
+      conversation: engine.view(view.conversationId),
+      planId: planOfChat(state.db, id),
+    };
   };
 
   const offered = (projectId: ProjectId, model: string): void => {

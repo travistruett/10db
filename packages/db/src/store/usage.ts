@@ -5,7 +5,7 @@ import {
   type AccountUsageDto,
   type UsageTotals,
 } from '@10db/contracts';
-import { and, asc, eq, gte, lt, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, isNull, lt, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getAccountRow } from './accounts';
 import { getJudgeConfig } from './judge-config';
@@ -105,7 +105,28 @@ export function accountUsage(db: DbReader, id: AccountId, window: UsageWindow): 
     tokensCached: 0,
     costUsd: metered ? 0 : null,
   };
-  const total = byProject.reduce<UsageTotals>(
+  // A session whose plan was deleted has neither a workstream nor a conversation, so no project; it
+  // still counts in the account's total, which is the sum of the projects' rows and this one.
+  const unplaced = db
+    .select({
+      tokensIn: sql<number>`coalesce(sum(${schema.sessions.inputTokens}), 0)`,
+      tokensOut: sql<number>`coalesce(sum(${schema.sessions.outputTokens}), 0)`,
+      tokensCached: sql<number>`coalesce(sum(${schema.sessions.cachedTokens}), 0)`,
+      costUsd: sql<number | null>`sum(${schema.sessions.costUsd})`,
+    })
+    .from(schema.sessions)
+    .where(
+      and(
+        inWindow(id, window),
+        isNull(schema.sessions.workstreamId),
+        isNull(schema.sessions.conversationId),
+      ),
+    )
+    .get();
+  const total = [
+    ...byProject,
+    ...(unplaced ? [{ ...unplaced, costUsd: metered ? (unplaced.costUsd ?? 0) : null }] : []),
+  ].reduce<UsageTotals>(
     (sum, r) => ({
       tokensIn: sum.tokensIn + r.tokensIn,
       tokensOut: sum.tokensOut + r.tokensOut,

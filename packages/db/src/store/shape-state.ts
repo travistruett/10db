@@ -1,11 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import type { ShapeId } from '@10db/contracts';
 import {
   ConversationItemKind,
-  ConversationOwnerKind,
   EventType,
   mintId,
   NotFoundError,
-  ShapeId,
   ShapeMessageAuthor,
   ShapeMessageKind,
   ShapeProposalBody,
@@ -20,7 +19,6 @@ import {
   type ConversationItemId,
   type ShapeProposalId,
   type ShapeProposalKind,
-  type Effort,
   type ShapeQuestionId,
   type ShapeState,
   type TaskId,
@@ -45,8 +43,8 @@ import {
   listItems,
   type ConversationItemRow,
 } from './conversation-items';
-import { getConversation, patchConversation } from './conversations';
-import { getShape, shapeConversation } from './shapes';
+import { patchConversation } from './conversations';
+import { getShape, planOfConversation, shapeConversation } from './shapes';
 import type { DbReader, WriteContext } from './store';
 import { shapeItemOf, shapeMessageOf } from './transcript-kinds';
 
@@ -60,13 +58,9 @@ export interface ShapePatch {
   readonly state?: ShapeState;
   /** The Claude Code session the conversation resumes; null forgets it. */
   readonly sdkSessionId?: string | null;
-  /** Set for good by the builder's first Propose. */
-  readonly proposeUnlocked?: true;
   readonly round?: number;
   /** The model alias the builder chose; null goes back to the `plan` role's. */
   readonly model?: string | null;
-  /** The effort the builder chose; null follows the model's own default. */
-  readonly effort?: Effort | null;
 }
 
 /** Changes a conversation and announces it; its session and model are kept on its conversation row. */
@@ -308,25 +302,29 @@ export function insertShapeFile(
   return toShapeFile(shapeId, row);
 }
 
+/** A plan's file is one of its conversation's with no item; a pasted picture belongs to a message. */
+const isPlanFile = (row: ConversationFileRow): boolean => row.itemId === null;
+
 export function getShapeFile(db: DbReader, id: ConversationFileId): ShapeFileRow {
   const row = getFile(db, id);
-  const conversation = getConversation(db, row.conversationId);
-  if (conversation.ownerKind !== ConversationOwnerKind.Shape)
-    throw new NotFoundError('shape file', id);
-  // A shape's conversation names the shape as its owner; parsed, as text read from the database.
-  return toShapeFile(ShapeId.parse(conversation.ownerId), row);
+  // A picture pasted with a message carries its item and is no plan file.
+  const shapeId = row.itemId === null ? planOfConversation(db, row.conversationId) : null;
+  if (shapeId === null) throw new NotFoundError('shape file', id);
+  return toShapeFile(shapeId, row);
 }
 
 /** The conversation's files, oldest first. */
 export function listShapeFiles(db: DbReader, shapeId: ShapeId): ShapeFileRow[] {
-  return listFiles(db, shapeConversation(db, shapeId).id).map((row) => toShapeFile(shapeId, row));
+  return listFiles(db, shapeConversation(db, shapeId).id)
+    .filter(isPlanFile)
+    .map((row) => toShapeFile(shapeId, row));
 }
 
 /** The conversation's files no turn has carried to Claude yet, oldest first. */
 export function listUntoldShapeFiles(db: DbReader, shapeId: ShapeId): ShapeFileRow[] {
-  return listUntoldFiles(db, shapeConversation(db, shapeId).id).map((row) =>
-    toShapeFile(shapeId, row),
-  );
+  return listUntoldFiles(db, shapeConversation(db, shapeId).id)
+    .filter(isPlanFile)
+    .map((row) => toShapeFile(shapeId, row));
 }
 
 /** Records that a turn carried these files to Claude; one already told keeps its first time. */

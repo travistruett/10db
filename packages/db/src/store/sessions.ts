@@ -9,14 +9,14 @@ import {
   type SessionId,
   type SessionMode,
   ConversationOwnerKind,
-  ShapeId,
   type ConversationId,
+  type ShapeId,
   type WorkstreamId,
 } from '@10db/contracts';
 import { and, asc, count, desc, eq, isNull, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getAccountRow } from './accounts';
-import { getConversation } from './conversations';
+import { planOfConversation } from './shapes';
 import type { DbReader, WriteContext } from './store';
 
 export type SessionRow = typeof schema.sessions.$inferSelect;
@@ -80,14 +80,9 @@ function projectOwner(ctx: WriteContext, input: SessionOwner) {
   return owner;
 }
 
-/** The shape whose conversation the session runs; null for a session of no Plan conversation. */
+/** The plan whose chat's conversation the session runs; null for a session of no plan, or of no conversation. */
 export function sessionShapeId(db: DbReader, row: SessionRow): ShapeId | null {
-  if (row.conversationId === null) return null;
-  const conversation = getConversation(db, row.conversationId);
-  // The owner id of a shape's conversation is a ShapeId; parsed, as text read from the database.
-  return conversation.ownerKind === ConversationOwnerKind.Shape
-    ? ShapeId.parse(conversation.ownerId)
-    : null;
+  return row.conversationId === null ? null : planOfConversation(db, row.conversationId);
 }
 
 /** The conversation of the workstream's task's thread, which its lane session runs; null for none. */

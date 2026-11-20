@@ -27,7 +27,7 @@ import {
   getAttachmentRevision,
   getShapeEntry,
   insertDocumentAttachment,
-  insertShape,
+  insertPlanSession,
   insertShapeMessage,
   insertShapeProposal,
   listShapeProposals,
@@ -608,15 +608,17 @@ export function importBundle(
       0;
   const shapeId: ShapeId =
     stored?.shapeId ??
-    insertShape(ctx, input.projectId, {
+    insertPlanSession(ctx, {
+      projectId: input.projectId,
       title: bundle.title,
       origin: ShapeOrigin.ClaudeCode,
+      tabPosition: null,
       state: states ? ShapeState.Proposed : ShapeState.Listening,
       round: 1,
       bundleId: bundle.id,
       bundleOrigin: bundle.origin,
       importedAt: ctx.now,
-    }).id;
+    }).shape.id;
   insertShapeMessage(ctx, shapeId, {
     author: ShapeMessageAuthor.Note,
     kind: ShapeMessageKind.Notice,

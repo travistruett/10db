@@ -160,7 +160,8 @@ export function insertChat(
     readonly projectId: ProjectId;
     readonly conversationId: ConversationId;
     readonly title: string;
-    readonly tabPosition: number;
+    /** Null writes a closed tab. */
+    readonly tabPosition: number | null;
   },
 ): ChatRow {
   const row: ChatRow = {

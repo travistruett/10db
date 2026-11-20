@@ -704,7 +704,7 @@ export const sessions = sqliteTable(
     index('sessions_account_started_idx').on(t.accountId, t.startedAt),
     check(
       'sessions_has_owner',
-      sql`${t.conversationId} IS NOT NULL OR ${t.workstreamId} IS NOT NULL`,
+      sql`${t.conversationId} IS NOT NULL OR ${t.workstreamId} IS NOT NULL OR ${t.endedAt} IS NOT NULL`,
     ),
   ],
 );
@@ -1470,21 +1470,23 @@ export const shapes = sqliteTable(
     title: text('title').notNull(),
     state: text('state').$type<ShapeState>().notNull(),
     origin: text('origin').$type<ShapeOrigin>().notNull(),
-    /** Set by the builder's first Propose, for good. */
-    proposeUnlocked: integer('propose_unlocked', { mode: 'boolean' }).notNull().default(false),
     /** The last reconciled round; 0 before the first proposal. */
     round: integer('round').notNull().default(0),
-    /** The effort the builder chose for the conversation; null follows the model's own default. */
-    effort: text('effort').$type<Effort>(),
     /** The bundle id an imported Plan came from; importing it again into the project updates this Plan. */
     bundleId: text('bundle_id'),
     bundleOrigin: text('bundle_origin', { mode: 'json' }).$type<BundleOrigin>(),
     importedAt: text('imported_at'),
+    /** The session the plan lives in; one plan per chat. */
+    chatId: text('chat_id')
+      .$type<ChatId>()
+      .notNull()
+      .references((): AnySQLiteColumn => chats.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     index('shapes_project_idx').on(t.projectId),
+    uniqueIndex('shapes_chat_unique').on(t.chatId),
     uniqueIndex('shapes_bundle_unique')
       .on(t.projectId, t.bundleId)
       .where(sql`${t.bundleId} IS NOT NULL`),
