@@ -15,7 +15,7 @@ import { auth, createProject } from './shape-project';
 // Runs after see-screen.spec.ts and before stakeholder-questions.spec.ts (files run in name order with one worker). It
 // adds its own project and drives one chat on the real daemon: the fake adapter answers the first
 // message from script-book.json's "Chat: Why does login fail after sleep?", which reads, runs a
-// command, names the session, replies in markdown, and after "File as Tasks" files a task, starts it,
+// command, names the session, replies in markdown, and after the builder asks for the work as tasks it files a task, starts it,
 // and asks to remove the builder's own task, which waits on a card.
 
 const FIRST_LINE = 'Why does login fail after sleep?';
@@ -161,9 +161,8 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   await confirm.getByRole('button', { name: 'Cancel' }).click();
   await expect(confirm).toBeHidden();
 
-  // File as Tasks: the task row, its start row, then the judge's card for the builder's own task.
-  await page.getByRole('button', { name: 'More session actions' }).click();
-  await page.getByRole('menuitem', { name: 'File as Tasks' }).click();
+  // The builder asks for the tasks in words: the task row, its start row, then the judge's card for the builder's own task.
+  await sendLine(page, 'File the work we agreed on as tasks on the Board.');
   await expect(page.getByText('Retry login once on a 401').first()).toBeVisible();
   await expect(page.getByText('Added to Ready')).toBeVisible();
   await expect(page.getByText(/Started Retry login once on a 401/)).toBeVisible();
@@ -579,7 +578,7 @@ test('a chat goes to the builder’s terminal and back: the banner, a held messa
   }
 });
 
-test('New Plan: a dropped file and a message fill the panel, a pinned row survives a round, Accept writes the Board, Remove Draft Goal takes it back', async ({
+test('New Plan: a dropped file and a message fill the panel, a pinned row survives a round, Accept writes the Board, Remove Draft Goal takes it back, and a plain session grows a plan by Show Plan or by proposing', async ({
   page,
   request,
 }) => {
@@ -702,4 +701,75 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await expect(
     page.getByRole('complementary', { name: 'Plan' }).getByText('Board polish'),
   ).toBeVisible();
+
+  // A plain session has no plan until Show Plan or a proposal makes one. ⌘T opens a fresh tab in the project.
+  const archive = async (): Promise<void> => {
+    await page.getByRole('button', { name: 'More session actions' }).click();
+    await page.getByRole('menuitem', { name: 'Archive' }).click();
+  };
+  const newTab = async (): Promise<void> => {
+    const was = page.url();
+    await expect(async () => {
+      await page.keyboard.press('Meta+t');
+      await expect(page).not.toHaveURL(was, { timeout: 2000 });
+    }).toPass();
+    await expect(page).toHaveURL(/\/sessions\?fresh=/);
+  };
+  const chatId = (): string => new URL(page.url()).searchParams.get('chat') ?? '';
+  const plan = async (): Promise<string | null | undefined> =>
+    z
+      .array(z.looseObject({ id: z.string(), planId: z.string().nullable() }))
+      .parse(await (await request.get(`${daemonUrl}/chats?open=1`, { headers: auth })).json())
+      .find((chat) => chat.id === chatId())?.planId;
+  await archive();
+  // The unused New Plan tab from the start of the test is what the screen falls to; ⌘T opens another beside it.
+  await expect(page).toHaveURL(/\/sessions\?fresh=/);
+  await newTab();
+  await sendLine(page, 'Make the cards denser');
+  await expect(page.getByText('Noted 1 thing.', { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/sessions\?chat=/);
+  expect(await plan()).toBeNull();
+  await expect(page.getByRole('complementary', { name: 'Plan' })).toHaveCount(0);
+
+  // Show Plan opens the empty panel; a file dropped on the warm session is read from the folder opened at start.
+  await page.getByRole('button', { name: 'Plan', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Plan', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  const plain = page.getByRole('complementary', { name: 'Plan' });
+  await expect(plain.getByText('Talk it through, or drop a document.')).toBeVisible();
+  await page.locator('input[type=file]').setInputFiles({
+    name: 'notes.md',
+    mimeType: 'text/markdown',
+    buffer: Buffer.from('# Notes\nMake the cards denser\n'),
+  });
+  await sendLine(page, 'Thin out the scrollbars');
+  await expect(page.getByText(/^Noted \d+ things?\. I have notes\.md\.$/)).toBeVisible();
+  await expect(plain.getByText('Heard so far')).toBeVisible();
+
+  // A proposal fills the panel, and its rows are dotted as new.
+  await sendLine(page, 'propose it');
+  await expect(plain.getByText('Board polish')).toBeVisible();
+  await expect(plain.getByRole('img', { name: 'New this round' }).first()).toBeVisible();
+
+  // The builder closed the panel: a round that lands leaves it closed, and the menu offers Show Plan.
+  await page.getByRole('button', { name: 'More session actions' }).click();
+  await page.getByRole('menuitem', { name: 'Close Plan' }).click();
+  await expect(plain).toHaveCount(0);
+  await sendLine(page, 'propose it again');
+  await expect(page.getByText('Here is the plan.', { exact: true })).toHaveCount(2);
+  await expect(plain).toHaveCount(0);
+  await page.getByRole('button', { name: 'More session actions' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Show Plan' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await archive();
+
+  // A first message that proposes starts the plan with no Show Plan.
+  await newTab();
+  await sendLine(page, 'propose it');
+  await expect(
+    page.getByRole('complementary', { name: 'Plan' }).getByText('Board polish'),
+  ).toBeVisible();
+  await archive();
 });
