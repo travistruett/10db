@@ -26,8 +26,6 @@ const ALLOW: ShapeVerdict = { decision: 'allow' };
 /** What a chat's agent reads when it reaches for a tool that writes with no place to write. */
 export const CHAT_WRITES_LATER =
   'This session reads the project and changes nothing in it yet. Say what you would change, and offer to file it as a task.';
-/** What a session with no plan reads when it calls one of Plan's tools. */
-export const NO_PLAN = 'This session has no Plan.';
 /** What a chat on an account with no judge reads when it reaches for the web. */
 export const CHAT_NO_WEB =
   "The web needs a judge that sees each call, and this project's account has none yet, so this chat reads the project only.";
@@ -175,16 +173,14 @@ export function judgeChatCall(
   }
   if (call.toolName.startsWith(OWN_PREFIX)) {
     const own = call.toolName.slice(OWN_PREFIX.length);
-    // Plan's tools belong to a session whose chat has a plan; who calls which is Plan's judge's.
+    // Every session has Plan's tools; who calls which is Plan's judge's (`report_finding` only from a reviewer).
     if (PLAN_TOOLS.has(own))
-      return access.planFilesDir === undefined
-        ? deny(NO_PLAN)
-        : judgePlanTool({
-            toolName: call.toolName,
-            toolInput: call.input,
-            agentId: call.agentId,
-            agentType: call.agentType,
-          });
+      return judgePlanTool({
+        toolName: call.toolName,
+        toolInput: call.input,
+        agentId: call.agentId,
+        agentType: call.agentType,
+      });
     if (!CHAT_TOOLS.has(own)) return deny(`${call.toolName} is not one of this chat's tools.`);
     // Only 10db's judge settles these. Claude's auto mode lets a push, a pull request and a merge through unasked,
     // so on it, and on the rules floor, the builder is asked.

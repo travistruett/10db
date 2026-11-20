@@ -508,13 +508,6 @@ describe('a chat with a plan', () => {
       });
   });
 
-  it('refuses a Plan tool where the chat has no plan', () => {
-    expect(judgeChatCall(mcp('propose_plan'), access)).toEqual({
-      decision: 'deny',
-      reason: 'This session has no Plan.',
-    });
-  });
-
   it('reads its own plan’s folder and no other plan’s', () => {
     const read = (path: string) =>
       judgeChatCall({ toolName: 'Read', input: { file_path: path } }, withPlan()).decision;

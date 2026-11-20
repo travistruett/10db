@@ -1,4 +1,4 @@
-import { rmSync } from 'node:fs';
+import { rmdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ACTIVE_STATES,
@@ -64,6 +64,7 @@ import {
   unarchiveChat,
   type ChatRow,
   type ConversationItemRow,
+  planIdOfChat,
   planOfChat,
 } from '@10db/db';
 import type { Clock } from '../clock';
@@ -118,6 +119,16 @@ export const HANDED_TASK_RUNNING = 'The task this session was handed to is still
 export const CHANGE_MODEL_BETWEEN_TURNS = 'Change the model between turns.';
 /** What a model the account doesn't offer is refused with. */
 export const MODEL_NOT_OFFERED = 'Not available on this account';
+
+/** Removes a folder only while it is empty; one that is missing or holds files stays as it is. */
+function removeEmptyFolder(path: string): void {
+  try {
+    rmdirSync(path);
+  } catch (error) {
+    const code = error instanceof Error && 'code' in error ? error.code : null;
+    if (code !== 'ENOENT' && code !== 'ENOTEMPTY') throw error;
+  }
+}
 
 /** Matches a panel search returns at a time. */
 const CHAT_SEARCH_PAGE = 30;
@@ -450,6 +461,10 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
         // A chat in the builder's terminal gives the folder back and its files go.
         takeover?.ended(id);
         rmSync(chatFolder(deps.dataDir, chat.conversationId), { recursive: true, force: true });
+        // A chat with no plan has nothing in its derived plan folder (uploads and screens need a plan), so it is
+        // empty; the next session of a reopened chat makes it again.
+        if (planOfChat(state.db, id) === null)
+          removeEmptyFolder(join(deps.dataDir, 'shapes', planIdOfChat(id)));
         return dtoOf(id);
       };
       return takeover === null ? archive() : takeover.serialized(id, archive);

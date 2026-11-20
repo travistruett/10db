@@ -11,6 +11,8 @@ export {
   SHAPE_ALLOWED_TOOLS,
   SHAPE_BUILT_IN_TOOLS,
   SHAPE_DISALLOWED_TOOLS,
+  PLANNING_STUB,
+  owedPlanningRules,
   shapeSystemPrompt,
   shapeToolset,
 } from './policy';
