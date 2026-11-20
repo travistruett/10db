@@ -201,6 +201,12 @@ export interface LaneSessionInput {
    */
   readonly taskFiles?: string;
   /**
+   * The plan's folder, for a session whose chat has a plan: open to the file tools and a read-only kernel
+   * grant of exactly it, never a write and never its parent, so a Codex session reads its files too. Opened
+   * only when it exists, so the caller makes it before the session starts.
+   */
+  readonly planFiles?: string;
+  /**
    * The builder's skills and plugins and the project's cleaned definitions to bring along. Each real
    * path is judged before it opens read-only to the session; none is given to the gate or a repo server.
    */
@@ -432,6 +438,10 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           (read) => !setupSecrets.some((secret) => isEqualOrUnder(read, secret)),
         );
         const ownSetupDir = setup.reads[0];
+        // The plan's folder is read-only here and only when it exists, so a file dropped into the folder
+        // later lands inside what the warm session already has.
+        const planReads =
+          input.planFiles !== undefined && existsSync(input.planFiles) ? [input.planFiles] : [];
         // Outside every lane-writable dir: it names the processes to stop after a daemon restart.
         // Named for this daemon, so a later one leaves it alone while this one runs, and held, so
         // this one's sweep does too until the session is gone.
@@ -510,7 +520,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           ],
           sandboxRoots,
           ownFiles: [envFile, ...(ownSetupDir === undefined ? [] : [ownSetupDir])],
-          setupReads,
+          setupReads: [...setupReads, ...planReads],
           loopback: input.project.sandboxLoopback,
           dockerSockets: docker?.sockets ?? [],
           deniedEnvNames: deniedEnvNames({ ...input.env, ...env }, dockerNames),
@@ -522,7 +532,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
         // folder among it, is left to the guard and the file tools' judge, which refuse it.
         const pictures =
           input.taskFiles !== undefined && existsSync(input.taskFiles) ? input.taskFiles : null;
-        const openInside = [...(pictures === null ? [] : [pictures]), ...setupReads];
+        const openInside = [...(pictures === null ? [] : [pictures]), ...setupReads, ...planReads];
         const deniedToFileTools = protectedList
           .filter((path) => !isEqualOrUnder(input.configDir, path))
           .flatMap((path) => {

@@ -80,12 +80,6 @@ function planIsEmpty(ctx: WriteContext, shapeId: ShapeId): boolean {
   );
 }
 
-/** Why a session can't rewrite an imported Plan's record: the bundle is its source. */
-const IMPORTED = 'This Plan was imported. Re-import to change it.';
-
-const BEFORE_PROPOSE =
-  'propose_plan is refused until the builder presses Propose. Keep listening: answer from the code, ask questions, and echo what you have heard with note_heard.';
-
 export function createShapeToolHandlers(deps: ShapeToolDeps, shapeId: ShapeId): ShapeToolHandlers {
   const { screens } = deps;
   const line = (body: string): void => {
@@ -96,12 +90,6 @@ export function createShapeToolHandlers(deps: ShapeToolDeps, shapeId: ShapeId): 
         body,
       });
     });
-  };
-  /** Refuses a tool that would rewrite an imported Plan's record, naming the tool in the transcript. */
-  const refusedOnImport = (tool: string): Promise<never> | null => {
-    if (getShape(deps.state.db, shapeId).importedAt === null) return null;
-    line(`${tool} · refused`);
-    return Promise.reject(new InvalidError(IMPORTED));
   };
   return {
     note_heard: (input) => {
@@ -146,24 +134,12 @@ export function createShapeToolHandlers(deps: ShapeToolDeps, shapeId: ShapeId): 
     attach: (input) =>
       Promise.resolve().then(() => deps.state.write((ctx) => attach(ctx, shapeId, input))),
     write_spec: (input) =>
-      refusedOnImport('write_spec') ??
       Promise.resolve().then(() => deps.state.write((ctx) => writeSpec(ctx, shapeId, input))),
     report_finding: (input) =>
       Promise.resolve().then(() => deps.state.write((ctx) => reportFinding(ctx, shapeId, input))),
     resolve_finding: (input) =>
-      refusedOnImport('resolve_finding') ??
       Promise.resolve().then(() => deps.state.write((ctx) => resolveFinding(ctx, shapeId, input))),
     propose_plan: (input) => {
-      const imported = refusedOnImport('propose_plan');
-      if (imported) {
-        deps.onProposal?.(shapeId, false);
-        return imported;
-      }
-      if (!getShape(deps.state.db, shapeId).proposeUnlocked) {
-        line('propose_plan · refused');
-        deps.onProposal?.(shapeId, false);
-        return Promise.reject(new InvalidError(BEFORE_PROPOSE));
-      }
       // The reconcile and its transcript line are one write: the line never disagrees with the rows.
       const { outcome, empty } = deps.state.write((ctx) => {
         const result = reconcileDraft(ctx, shapeId, input.draft);

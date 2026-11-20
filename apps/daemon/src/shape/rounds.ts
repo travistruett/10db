@@ -33,6 +33,9 @@ type Marks = ShapeProposalRow['taskHashes'];
 /** The pin that holds a row as a whole (Restore). */
 export const PIN_WHOLE_ROW = '*';
 
+/** An imported row: rounds keep it as a whole, and a re-import may still replace it. */
+export const PIN_IMPORTED = 'import';
+
 /** One row of a draft, ready to be stored. */
 interface Unit {
   readonly key: string;
@@ -167,7 +170,8 @@ function withPins(
   stored: Record<string, unknown>,
   pinned: readonly string[],
 ): { readonly body: Record<string, unknown>; readonly keptTasks: readonly string[] } {
-  if (pinned.includes(PIN_WHOLE_ROW)) return { body: stored, keptTasks: [] };
+  if (pinned.includes(PIN_WHOLE_ROW) || pinned.includes(PIN_IMPORTED))
+    return { body: stored, keptTasks: [] };
   const merged: Record<string, unknown> = { ...draft };
   const keptTasks: string[] = [];
   for (const pin of pinned) {
@@ -457,7 +461,7 @@ export function restoreProposal(ctx: WriteContext, id: ShapeProposalId): void {
   const row = liveRow(ctx, id);
   patchShapeProposal(ctx, id, {
     ...comesBack(row),
-    pinned: [...new Set([...row.pinned, PIN_WHOLE_ROW])],
+    pinned: [...new Set([...row.pinned.filter((p) => p !== PIN_IMPORTED), PIN_WHOLE_ROW])],
   });
 }
 
@@ -468,8 +472,12 @@ export function unpinProposal(ctx: WriteContext, id: ShapeProposalId, field?: st
     patchShapeProposal(ctx, id, { pinned: [] });
     return;
   }
-  if (!row.pinned.includes(field)) throw new InvalidError(`${field} is not pinned`);
-  patchShapeProposal(ctx, id, { pinned: row.pinned.filter((p) => p !== field) });
+  // An import-pinned row holds as a whole, so unpinning any field of it clears the marker too.
+  if (!row.pinned.includes(field) && !row.pinned.includes(PIN_IMPORTED))
+    throw new InvalidError(`${field} is not pinned`);
+  patchShapeProposal(ctx, id, {
+    pinned: row.pinned.filter((p) => p !== field && p !== PIN_IMPORTED),
+  });
 }
 
 /** Drop: the row is rejected and stays as a tombstone, so a draft reusing its key is refused. */

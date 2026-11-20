@@ -117,6 +117,18 @@ function chatTools(deps: McpDeps, session: SessionRow): RegisteredTool[] | null 
   }));
 }
 
+/** A conversation's session's tools: the chat's, plus Plan's when the chat has a plan; null when it has neither. */
+function conversationTools(
+  deps: McpDeps,
+  session: SessionRow,
+  shapeId: ShapeId | null,
+): RegisteredTool[] | null {
+  const chat = chatTools(deps, session);
+  const plan = shapeId === null ? null : shapeTools(deps, session.id, shapeId);
+  if (chat === null && plan === null) return null;
+  return [...(chat ?? []), ...(plan ?? [])];
+}
+
 /** Stateless streamable-HTTP MCP endpoint; the bearer token identifies the calling session. */
 export function createMcpHandler(deps: McpDeps): (req: Request) => Promise<Response> {
   // Every session's claim waits in one place, so a deadlock check sees the waits of all of them.
@@ -126,16 +138,13 @@ export function createMcpHandler(deps: McpDeps): (req: Request) => Promise<Respo
     const session = token ? getLiveSessionByTokenHash(deps.state.db, hashToken(token)) : undefined;
     if (!session) return Response.json({ error: 'unauthorized' }, { status: 401 });
 
-    // A session's tool set comes from its row: a lane's tools for a workstream, Plan's for a shape's
-    // conversation, a chat's for a chat's. A Plan or chat session holds no lane, claim or area, so it
-    // never gets a lane's tools.
-    // A chat's session gets the builder's tools held to its project, and no lane or Plan tool.
+    // A session's tool set comes from its row: a lane's tools for a workstream. Any other session is a
+    // conversation's: a chat's tools held to its project, and, when the chat has a plan, Plan's tools beside
+    // them. A conversation's session holds no lane, claim or area, so it never gets a lane's tool.
     const shapeId = isLaneSession(session) ? null : sessionShapeId(deps.state.db, session);
     const tools = isLaneSession(session)
       ? laneTools(deps, session.id, session.workstreamId, claimWaits)
-      : shapeId !== null
-        ? shapeTools(deps, session.id, shapeId)
-        : chatTools(deps, session);
+      : conversationTools(deps, session, shapeId);
     if (tools === null) return Response.json({ error: 'unauthorized' }, { status: 401 });
 
     const server = new McpServer({ name: '10db', version: '0.1.0' });

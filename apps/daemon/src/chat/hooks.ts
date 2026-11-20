@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ChatToolName,
@@ -14,6 +15,8 @@ import {
   parseItemBody,
   Provider,
   providerOf,
+  ShapeId,
+  ShapeToolName,
   TrustSurface,
   AccountKind,
   type Effort,
@@ -31,6 +34,7 @@ import {
   listFiles,
   listItemFiles,
   listItems,
+  planOfConversation,
   touchChat,
   type ConversationItemRow,
   type ChatRow,
@@ -121,6 +125,11 @@ export const CHAT_MCP_TOOLS: readonly string[] = Object.values(ChatToolName).map
   (name) => `mcp__10db__${name}`,
 );
 
+/** Every Plan tool as a session with a plan names it on 10db's own server. */
+const PLAN_MCP_TOOLS: readonly string[] = Object.values(ShapeToolName).map(
+  (name) => `mcp__10db__${name}`,
+);
+
 /**
  * A chat's tools by whether it has a sandbox to run commands in. The web tools stay out of
  * `allowedTools`: an allow rule would approve a call before auto mode's classifier sees it, and with
@@ -128,6 +137,7 @@ export const CHAT_MCP_TOOLS: readonly string[] = Object.values(ChatToolName).map
  */
 export function chatProfile(
   sandboxed: boolean,
+  hasPlan = false,
 ): Omit<ExploreProfile, 'kind' | 'systemPrompt' | 'judge'> {
   return {
     tools: [
@@ -143,6 +153,8 @@ export function chatProfile(
       'Glob',
       'Skill',
       ...CHAT_MCP_TOOLS.filter((tool) => !JUDGED_CHAT_TOOLS.has(tool.slice('mcp__10db__'.length))),
+      // Plan's tools never ask: the confinement judges who calls which.
+      ...(hasPlan ? PLAN_MCP_TOOLS : []),
     ],
     disallowedTools: [...WATCH_TOOLS, ...(sandboxed ? [] : ['Bash', ...EDIT_TOOLS])],
     agents: {},
@@ -154,6 +166,11 @@ export function chatProfile(
 /** Where a chat's pictures and full outputs are kept: a path made only from its id. */
 export function chatFolder(dataDir: string, conversationId: ConversationId): string {
   return join(dataDir, 'conversations', ConversationId.parse(conversationId));
+}
+
+/** A plan's folder, which its session reads as it reads its chat's and which Archive never deletes. */
+export function planFolder(dataDir: string, shapeId: ShapeId): string {
+  return join(dataDir, 'shapes', ShapeId.parse(shapeId));
 }
 
 export interface ChatHooksDeps {
@@ -415,6 +432,11 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         checkout: launch.cwd,
         firstChange: () => deps.firstChange?.(chat.id),
       };
+      const shapeId = planOfConversation(state.db, conv.id);
+      // Made before the sandbox, which opens the folder only when it exists: a file dropped later then lands
+      // inside a folder the warm session already has.
+      const planFiles = shapeId === null ? undefined : planFolder(deps.dataDir, shapeId);
+      if (planFiles !== undefined) mkdirSync(planFiles, { recursive: true });
       const limitNotes = createLimitNotes();
       const ending = new AbortController();
       const ready =
@@ -428,6 +450,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               env: launch.env,
               resumeProviderSessionId: start.resume,
               writes: writable,
+              ...(planFiles === undefined ? {} : { planFiles }),
               ...(root === launch.cwd ? {} : { checkout: root }),
               signal: ending.signal,
               observer: start.observer,
@@ -468,6 +491,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         ...launch.access,
         checkout: root,
         filesDir: chatFolder(deps.dataDir, conv.id),
+        ...(planFiles === undefined ? {} : { planFilesDir: planFiles }),
         agentModels: launch.agentModels,
         judge,
         ...(setup === null || setup.reads.length === 0
@@ -524,7 +548,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               deps.webSearchOf(launch.account.kind, launch.modelId) &&
                 (providerOf(launch.account.kind) === Provider.Claude || switches.web),
             ),
-            ...chatProfile(ready?.commands !== undefined),
+            ...chatProfile(ready?.commands !== undefined, shapeId !== null),
           },
           cwd: root,
           instructions: ready?.instructions ?? null,

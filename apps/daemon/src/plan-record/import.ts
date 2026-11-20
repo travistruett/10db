@@ -40,6 +40,7 @@ import {
   type NewShapeEntry,
   type WriteContext,
 } from '@10db/db';
+import { PIN_IMPORTED } from '../shape';
 import {
   canonicalJson,
   findingContent,
@@ -719,7 +720,7 @@ export function importBundle(
         state: ShapeProposalState.Pending,
         round,
         createdRound: round,
-        pinned: [],
+        pinned: [PIN_IMPORTED],
         body,
         taskHashes: {},
         sourceMessageIds: [],
