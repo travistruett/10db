@@ -111,8 +111,8 @@ export function PassMenu({
           />
         ) : null}
         <MenuAction
-          label="Discard"
-          byline="Stop here. Unfinished changes are deleted."
+          label="Discard Pass"
+          byline="The whole pass ends: every page not committed has its changes deleted."
           color="red"
           disabled={!abandonable}
           onClick={onAbandon}

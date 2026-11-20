@@ -425,9 +425,9 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
     ?.pages.find((p) => p.label === 'People');
   expect(peopleTask).toBeDefined();
   await row(page, 'People').getByRole('button', { name: 'More actions for People' }).click();
-  await page.getByRole('menuitem', { name: 'Discard' }).click();
-  const discardPage = page.getByRole('dialog', { name: 'Discard People' });
-  await discardPage.getByRole('button', { name: 'Discard' }).click();
+  await page.getByRole('menuitem', { name: /^Discard Page/ }).click();
+  const discardPage = page.getByRole('dialog', { name: 'Discard Page' });
+  await discardPage.getByRole('button', { name: 'Discard Page' }).click();
   await expect(discardPage).toHaveCount(0);
   await expect(row(page, 'People')).toHaveCount(0);
   const board = await request.get(`${daemonUrl}/projects/${projectId}/tasks`, { headers: auth });
@@ -440,11 +440,11 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   // nothing of this pass is left running.
   await page.getByRole('button', { name: 'More actions', exact: true }).click();
   await expect(page.getByRole('menuitem', { name: /^Merge to main/ })).toBeVisible();
-  await page.getByRole('menuitem', { name: 'Discard' }).click();
+  await page.getByRole('menuitem', { name: /^Discard Pass/ }).click();
   const discardPass = page.getByRole('dialog', { name: 'Discard Pass' });
   await expect(discardPass.getByText('Stays: Settings (committed).')).toBeVisible();
   await expect(discardPass.getByText(/^Discards:/)).toHaveCount(0);
-  await discardPass.getByRole('button', { name: 'Discard' }).click();
+  await discardPass.getByRole('button', { name: 'Discard Pass' }).click();
   await expect(page.getByRole('button', { name: 'Start Pass', exact: true })).toBeVisible();
   await expect
     .poll(async () => {

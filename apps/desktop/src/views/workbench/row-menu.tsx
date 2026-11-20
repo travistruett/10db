@@ -25,8 +25,8 @@ export function RowMenu({ label, onDiscard }: RowMenuProps) {
       </Menu.Target>
       <Menu.Dropdown>
         <MenuAction
-          label="Discard"
-          byline="Delete its changes and take it out of this pass."
+          label="Discard Page"
+          byline="Only this page: its changes are deleted, and the rest of the pass goes on."
           color="red"
           onClick={onDiscard}
         />

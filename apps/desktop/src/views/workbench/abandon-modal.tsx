@@ -63,13 +63,13 @@ export function AbandonModal({ view, inbox, now, onClose, abandon }: AbandonModa
               leaving.mutate();
             }}
           >
-            Discard
+            Discard Pass
           </Button>
         </>
       }
     >
       <Stack gap="md">
-        <Text size="sm">{`Discard ${passTitle(view.pages, view.pass.name)}? Turns that are working stop.`}</Text>
+        <Text size="sm">{`Discard the whole pass (${passTitle(view.pages, view.pass.name)})? It ends, and turns that are working stop.`}</Text>
         {closing === null ? null : (
           <Text size="sm" {...(closing.refused ? { c: 'red' } : {})}>
             {closing.line}
