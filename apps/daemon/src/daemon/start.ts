@@ -1621,10 +1621,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // `see_screen` (§5.5): the window draws a screen on the daemon's request, held to reads by a token
   // that belongs to that one request.
   const screenBroker = createScreenBroker();
+  // Where each plan's folder lives: `<data>/shapes/<plan>`.
+  const shapesDir = join(opts.dataDir, 'shapes');
   const screens = createScreens({
     state,
     broker: screenBroker,
-    filesDir: join(opts.dataDir, 'shapes'),
+    filesDir: shapesDir,
   });
   const laneSandbox = sandboxes?.lane ?? null;
   // One engine runs every explore conversation's session (sessions spec §6.1); Plan registers on it.
@@ -1713,7 +1715,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     engine: exploreEngine,
     clock,
     log: logger.child({ component: 'shape' }),
-    filesDir: join(opts.dataDir, 'shapes'),
+    filesDir: shapesDir,
     joiningProblem: (taskId) => starter.joiningProblem(taskId),
     screens,
     jev: createShapeJev({
@@ -1734,6 +1736,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     pendingOpens,
     clock,
     dataDir: opts.dataDir,
+    shapesDir,
     log: logger.child({ component: 'chat-service' }),
     now: () => clock.now(),
     modelsOf: conversationModels,

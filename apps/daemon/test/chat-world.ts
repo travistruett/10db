@@ -263,6 +263,7 @@ export function chatWorld(
     pendingOpens: createPendingOpens({ state }),
     clock,
     dataDir: dir.path,
+    shapesDir: join(dir.path, 'shapes'),
     log: silentLogger,
     now: () => clock.now(),
     modelsOf: () => ({

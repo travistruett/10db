@@ -120,13 +120,17 @@ export const CHANGE_MODEL_BETWEEN_TURNS = 'Change the model between turns.';
 /** What a model the account doesn't offer is refused with. */
 export const MODEL_NOT_OFFERED = 'Not available on this account';
 
-/** Removes a folder only while it is empty; one that is missing or holds files stays as it is. */
-function removeEmptyFolder(path: string): void {
+/**
+ * Removes a folder only while it is empty; one that is missing or holds files stays as it is. Any other
+ * failure is logged, not thrown: the folder is housekeeping and the archive it follows has committed.
+ */
+function removeEmptyFolder(path: string, log: Logger): void {
   try {
     rmdirSync(path);
   } catch (error) {
     const code = error instanceof Error && 'code' in error ? error.code : null;
-    if (code !== 'ENOENT' && code !== 'ENOTEMPTY') throw error;
+    if (code !== 'ENOENT' && code !== 'ENOTEMPTY')
+      log.warn({ err: error, path }, 'an archived chat’s empty plan folder could not be removed');
   }
 }
 
@@ -233,6 +237,8 @@ export interface ChatServiceDeps {
   readonly pendingOpens: Pick<PendingOpens, 'get'>;
   readonly clock: Pick<Clock, 'now'>;
   readonly dataDir: string;
+  /** Where each plan's folder lives, `<shapesDir>/<plan>`. */
+  readonly shapesDir: string;
   readonly log: Logger;
   readonly now: () => Date;
   /** The models a project's account offers for a conversation, and its default. */
@@ -464,7 +470,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
         // A chat with no plan has nothing in its derived plan folder (uploads and screens need a plan), so it is
         // empty; the next session of a reopened chat makes it again.
         if (planOfChat(state.db, id) === null)
-          removeEmptyFolder(join(deps.dataDir, 'shapes', planIdOfChat(id)));
+          removeEmptyFolder(join(deps.shapesDir, planIdOfChat(id)), deps.log);
         return dtoOf(id);
       };
       return takeover === null ? archive() : takeover.serialized(id, archive);
