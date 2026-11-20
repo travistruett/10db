@@ -147,6 +147,7 @@ import type {
   ShapeFindingSeverity,
   ShapeFindingState,
   ShapeId,
+  ShapeAcceptId,
   ShapeLinkId,
   ShapeQuestionId,
   ShapeOrigin,
@@ -531,6 +532,10 @@ export const landingGroups = sqliteTable(
     shapeId: text('shape_id')
       .$type<ShapeId>()
       .references((): AnySQLiteColumn => shapes.id),
+    /** The Accept that made it; null for a group made another way. */
+    acceptId: text('accept_id')
+      .$type<ShapeAcceptId>()
+      .references((): AnySQLiteColumn => shapeAccepts.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -1500,6 +1505,25 @@ export interface ShapeTaskMark {
 }
 
 /**
+ * An Accept of a plan (spec §5): which proposals it accepted and which landing groups it made, so
+ * Undo Accept takes back exactly what it wrote.
+ */
+export const shapeAccepts = sqliteTable(
+  'shape_accepts',
+  {
+    id: text('id').$type<ShapeAcceptId>().primaryKey(),
+    shapeId: text('shape_id')
+      .$type<ShapeId>()
+      .notNull()
+      .references(() => shapes.id),
+    undoneAt: text('undone_at'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('shape_accepts_shape_idx').on(t.shapeId)],
+);
+
+/**
  * Shape's own proposals (§6 Rows), apart from `proposals`, which agents' `propose` tool writes.
  * One row per key in a conversation: a superseded or rejected key keeps its row as a tombstone.
  */
@@ -1533,6 +1557,14 @@ export const shapeProposals = sqliteTable(
       .$type<ConversationItemId[]>()
       .notNull()
       .default(sql`'[]'`),
+    /**
+     * The Accept that accepted it. Meaningful only on a row whose state is accepted: every path that
+     * makes a row pending again clears it, and readers filter by state. Null for a row accepted
+     * before Accepts were recorded.
+     */
+    acceptId: text('accept_id')
+      .$type<ShapeAcceptId>()
+      .references((): AnySQLiteColumn => shapeAccepts.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

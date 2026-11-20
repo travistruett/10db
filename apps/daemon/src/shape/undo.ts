@@ -50,7 +50,10 @@ export function removeDraftGoalOf(ctx: WriteContext, shapeId: ShapeId, goalId: G
   // The links name the goal, so they go first; a refusal below rolls the whole write back.
   deleteShapeLinksOf(ctx, link.proposalId);
   removeDraftGoal(ctx, goalId);
-  patchShapeProposal(ctx, link.proposalId, { state: ShapeProposalState.Pending });
+  patchShapeProposal(ctx, link.proposalId, {
+    state: ShapeProposalState.Pending,
+    acceptId: null,
+  });
   patchShape(ctx, shapeId, { state: ShapeState.Proposed });
 }
 

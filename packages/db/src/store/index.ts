@@ -53,6 +53,7 @@ export * from './projects';
 export * from './question-routes';
 export * from './routing-rules';
 export * from './sessions';
+export * from './shape-accepts';
 export * from './shape-state';
 export * from './shapes';
 export * from './store';

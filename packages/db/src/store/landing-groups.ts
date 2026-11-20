@@ -6,6 +6,7 @@ import {
   type LandingGroupDto,
   type LandingGroupId,
   type ProjectId,
+  type ShapeAcceptId,
   type ShapeId,
   type TaskId,
 } from '@10db/contracts';
@@ -56,6 +57,7 @@ export function insertLandingGroup(
     readonly title: string;
     readonly taskIds: readonly TaskId[];
     readonly shapeId?: ShapeId;
+    readonly acceptId?: ShapeAcceptId;
   },
 ): LandingGroupDto {
   const tasks =
@@ -84,6 +86,7 @@ export function insertLandingGroup(
     projectId: input.projectId,
     title: input.title,
     shapeId: input.shapeId ?? null,
+    acceptId: input.acceptId ?? null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };
@@ -102,4 +105,42 @@ export function insertLandingGroup(
       data: { landingGroupId: row.id },
     });
   return toDto(row);
+}
+
+/** Clears the group's tasks' landing_group_id, then deletes the group. */
+export function deleteLandingGroupOf(ctx: WriteContext, id: LandingGroupId): void {
+  const members = ctx.tx
+    .select({ id: schema.tasks.id })
+    .from(schema.tasks)
+    .where(eq(schema.tasks.landingGroupId, id))
+    .all();
+  if (members.length > 0)
+    ctx.tx
+      .update(schema.tasks)
+      .set({ landingGroupId: null, updatedAt: ctx.now })
+      .where(eq(schema.tasks.landingGroupId, id))
+      .run();
+  ctx.tx.delete(schema.landingGroups).where(eq(schema.landingGroups.id, id)).run();
+  for (const task of members)
+    ctx.emit({
+      type: EventType.TaskChanged,
+      entityType: 'task',
+      entityId: task.id,
+      data: { landingGroupId: null },
+    });
+}
+
+/** Takes one task out of its group (landing_group_id null); the group stays. */
+export function leaveLandingGroup(ctx: WriteContext, taskId: TaskId): void {
+  ctx.tx
+    .update(schema.tasks)
+    .set({ landingGroupId: null, updatedAt: ctx.now })
+    .where(eq(schema.tasks.id, taskId))
+    .run();
+  ctx.emit({
+    type: EventType.TaskChanged,
+    entityType: 'task',
+    entityId: taskId,
+    data: { landingGroupId: null },
+  });
 }

@@ -47,6 +47,7 @@ const ID_SCHEMAS = {
   JudgeCall: idSchema(['jdg'], 'JudgeCallId'),
   Shape: idSchema(['shp'], 'ShapeId'),
   ShapeProposal: idSchema(['spp'], 'ShapeProposalId'),
+  ShapeAccept: idSchema(['sac'], 'ShapeAcceptId'),
   ShapeLink: idSchema(['slk'], 'ShapeLinkId'),
   ShapeFinding: idSchema(['shf'], 'ShapeFindingId'),
   ShapeQuestion: idSchema(['sqn'], 'ShapeQuestionId'),
@@ -102,6 +103,7 @@ const ID_PREFIX = {
   JudgeCall: 'jdg',
   Shape: 'shp',
   ShapeProposal: 'spp',
+  ShapeAccept: 'sac',
   ShapeLink: 'slk',
   ShapeFinding: 'shf',
   ShapeQuestion: 'sqn',
@@ -207,6 +209,8 @@ export const ShapeId = ID_SCHEMAS.Shape;
 export type ShapeId = IdOf<'Shape'>;
 export const ShapeProposalId = ID_SCHEMAS.ShapeProposal;
 export type ShapeProposalId = IdOf<'ShapeProposal'>;
+export const ShapeAcceptId = ID_SCHEMAS.ShapeAccept;
+export type ShapeAcceptId = IdOf<'ShapeAccept'>;
 export const ShapeLinkId = ID_SCHEMAS.ShapeLink;
 export type ShapeLinkId = IdOf<'ShapeLink'>;
 export const ShapeFindingId = ID_SCHEMAS.ShapeFinding;

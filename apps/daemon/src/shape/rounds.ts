@@ -328,6 +328,7 @@ export function reconcileDraft(
     const changed = revived || row.state !== ShapeProposalState.Pending || !same(previous, body);
     patchShapeProposal(ctx, row.id, {
       state: ShapeProposalState.Pending,
+      acceptId: null,
       ...(changed ? { round } : {}),
       ...(revived ? { createdRound: round, pinned: [] } : {}),
       body: body as Json,
