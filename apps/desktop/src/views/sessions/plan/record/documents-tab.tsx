@@ -8,8 +8,8 @@ import type {
 import { Alert, Box, Group, Loader, NavLink, ScrollArea, Select, Stack, Text } from '@mantine/core';
 import dayjs from 'dayjs';
 import { useEffect, useRef } from 'react';
-import { Markdown } from '../../../conversation';
-import { usePlanRevision } from '../../../daemon/plan-record-queries';
+import { Markdown } from '../../../../conversation';
+import { usePlanRevision } from '../../../../daemon/plan-record-queries';
 import { RecordTab, type RecordSearch } from './record-tabs';
 
 // Documents: pick a document and a revision, read its outline, and read it whole. The body is drawn

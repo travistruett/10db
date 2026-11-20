@@ -4,7 +4,6 @@ export const RailSection = {
   Factory: 'factory',
   Sessions: 'sessions',
   Board: 'board',
-  Plan: 'plan',
   Workbench: 'workbench',
   Knowledge: 'knowledge',
   Settings: 'settings',
@@ -31,7 +30,6 @@ export const RAIL_ITEMS: Readonly<Record<RailSection, RailItem>> = {
   factory: { section: 'factory', label: 'Factory', route: '/factory' },
   sessions: { section: 'sessions', label: 'Sessions', route: '/sessions' },
   board: { section: 'board', label: 'Board', route: '/board' },
-  plan: { section: 'plan', label: 'Plan', route: '/shape' },
   workbench: {
     section: 'workbench',
     label: 'UI Workbench',
@@ -62,7 +60,6 @@ export const RAIL_ORDER: readonly RailEntry[] = [
   { kind: 'divider' },
   { kind: 'project-tile' },
   item(RailSection.Board),
-  item(RailSection.Plan),
   item(RailSection.Workbench),
   item(RailSection.Knowledge),
   { kind: 'spacer' },

@@ -23,7 +23,7 @@ import {
 import { shortAgo } from '../../factory/short-ago';
 import { useNow } from '../../../shell/relative';
 import { ConvertModal, convertibleRows } from './convert-modal';
-import { agentRehearses } from '../../shape/agent-rehearsal';
+import { agentRehearses } from './agent-rehearsal';
 import { AttachmentsContext } from './attachments/row-attachments';
 import { HeardSoFar } from './heard-so-far';
 import { PreviewPanel } from './preview-panel';

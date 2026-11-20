@@ -8,7 +8,8 @@ import {
 import { Alert, Button, Stack, Text, UnstyledButton } from '@mantine/core';
 import { IconTools } from '@tabler/icons-react';
 import { useQuery } from '@tanstack/react-query';
-import { Link, useNavigate } from '@tanstack/react-router';
+import { useNavigate } from '@tanstack/react-router';
+import { useNewPlan } from '../sessions/start-fresh-tab';
 import type { ReactNode } from 'react';
 import { livePassesOptions } from '../../daemon/pass-queries';
 import { useDaemon } from '../../daemon/provider';
@@ -145,6 +146,7 @@ export function LiveList({
   const { client } = useDaemon();
   const { select } = useSelectedProject();
   const navigate = useNavigate();
+  const newPlan = useNewPlan();
   const runs = useWorkstreams({ active: false });
   const passesRead = useQuery(livePassesOptions(client));
   const ids = projects.map((p) => p.id);
@@ -239,8 +241,8 @@ export function LiveList({
         <Text size="sm" c="dimmed">
           Start ready tasks from the Board, or plan new work.
         </Text>
-        <Button component={Link} to="/shape" size="xs" mt={4}>
-          Plan Work
+        <Button onClick={newPlan} size="xs" mt={4}>
+          New Plan
         </Button>
       </Stack>
     );

@@ -1,5 +1,6 @@
 import type { ProjectDto } from '@10db/contracts';
 import { Stack, Text } from '@mantine/core';
+import { PlanMeasures } from './plan-measures';
 import { OneWayPathsSetting } from './one-way-paths-setting';
 import { ShapeJevSetting } from './shape-jev-setting';
 import { SmallProposalLimitSetting } from './small-proposal-limit-setting';
@@ -14,6 +15,7 @@ export function PlanningSection({ project }: { readonly project: ProjectDto }) {
       <ShapeJevSetting project={project} />
       <OneWayPathsSetting project={project} />
       <SmallProposalLimitSetting project={project} />
+      <PlanMeasures />
     </Stack>
   );
 }

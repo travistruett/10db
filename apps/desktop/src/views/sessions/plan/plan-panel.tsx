@@ -4,7 +4,7 @@ import { IconBooks, IconDots, IconFileExport } from '@tabler/icons-react';
 import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useShapeView } from '../../../daemon/shape-queries';
-import { ExportButton } from '../../shape/record/export-button';
+import { ExportButton } from './record/export-button';
 import { ProposedPane } from './proposed-pane';
 import { RoundAnnouncer } from './round-announcer';
 
@@ -52,7 +52,7 @@ function PlanMenu({ shapeId }: { readonly shapeId: ShapeId }) {
           <Menu.Item
             leftSection={<IconBooks size={14} stroke={1.5} />}
             onClick={() => {
-              void navigate({ to: '/shape/$shapeId/record', params: { shapeId } });
+              void navigate({ to: '/sessions/record/$shapeId', params: { shapeId } });
             }}
           >
             Record

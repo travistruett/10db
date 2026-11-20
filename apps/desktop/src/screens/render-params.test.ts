@@ -46,7 +46,7 @@ describe('the frame’s URL', () => {
   it('opens each screen at its route: Plan as this conversation, a task’s drawer on the Board', () => {
     expect(roundTrip({ screen: 'factory' })?.path).toBe('/factory');
     expect(roundTrip({ screen: 'inbox' })?.path).toBe('/inbox');
-    expect(roundTrip({ screen: 'plan' })?.path).toBe(`/shape/${shapeId}`);
+    expect(roundTrip({ screen: 'plan' })?.path).toBe(`/plan-screen/${shapeId}`);
     expect(roundTrip({ screen: 'task', taskId })?.path).toBe(`/board?task=${taskId}`);
   });
 });

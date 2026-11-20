@@ -22,7 +22,6 @@ describe('the rail', () => {
       'Sessions',
       'project tile',
       'Board',
-      'Plan',
       'UI Workbench',
       'Knowledge',
       'Settings',

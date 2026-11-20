@@ -5,11 +5,11 @@ import {
   type WorkstreamDto,
 } from '@10db/contracts';
 import { Button, Divider, Group, Stack, Text } from '@mantine/core';
-import { useNavigate } from '@tanstack/react-router';
+import { useOpenSession } from '../sessions/open-session';
 import { useState } from 'react';
 import { useGoalPassPages, useLivePass } from '../../daemon/pass-queries';
 import { useBatches, useTasks, useWorkstreams } from '../../daemon/queries';
-import { OpenConversation } from '../shape/open-conversation';
+import { OpenPlanSession } from '../sessions/plan/open-plan-session';
 import { PlannedIn } from './planned-in';
 import { useRemoveDraftGoalAction } from '../sessions/plan/remove-draft-goal';
 import { BatchSheet } from '../board/batch/batch-sheet';
@@ -54,7 +54,7 @@ export function GoalDetail({ project, summary, opened }: GoalDetailProps) {
   const { goal, digest } = summary;
   const [starting, setStarting] = useState(false);
   const removal = useRemoveDraftGoalAction(summary);
-  const navigate = useNavigate();
+  const openSession = useOpenSession();
   const tasks = useTasks(project.id);
   const sessions = useSessions((ws) => goal.taskIds.includes(ws.taskId));
   const batches = useBatches(project.id);
@@ -114,10 +114,10 @@ export function GoalDetail({ project, summary, opened }: GoalDetailProps) {
         <SinceYouLooked opened={opened} />
         <AboutGoal goal={goal} />
         <PlannedIn goalId={goal.id} />
-        <OpenConversation
+        <OpenPlanSession
           target={{ goalId: goal.id }}
-          onOpen={(shapeId) => {
-            void navigate({ to: '/shape/$shapeId', params: { shapeId } });
+          onOpen={(chatId) => {
+            void openSession(chatId);
           }}
         />
         {removal.offer === 'available' ? (

@@ -2,7 +2,7 @@ import type { PlanQuestionRow, ShapeId } from '@10db/contracts';
 import { Stack, Text } from '@mantine/core';
 import type { DataTableColumn } from 'mantine-datatable';
 import { useState } from 'react';
-import { KnowledgeTable } from '../../knowledge/knowledge-table';
+import { KnowledgeTable } from '../../../knowledge/knowledge-table';
 import { PROPOSAL_STATE_LABELS } from './decisions-tab';
 import { SearchFilter } from './record-filters';
 import { NOT_NARROWED, useRecordPage } from './record-paging';

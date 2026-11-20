@@ -1,9 +1,9 @@
 import { screen } from '@testing-library/react';
 import { useState } from 'react';
 import { expect, it } from 'vitest';
-import { baseHandlers, renderWithDaemonAndRouter, server } from '../../../test/daemon';
-import { FrameSlots } from '../../../test/frame';
-import { planRecordHandlers, RECORD_SHAPE_ID } from '../../../test/plan-record-fixtures';
+import { baseHandlers, renderWithDaemonAndRouter, server } from '../../../../test/daemon';
+import { FrameSlots } from '../../../../test/frame';
+import { planRecordHandlers, RECORD_SHAPE_ID } from '../../../../test/plan-record-fixtures';
 import type { RecordSearch } from './record-tabs';
 import { RecordView } from './record-view';
 

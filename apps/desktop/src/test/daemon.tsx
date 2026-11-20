@@ -41,7 +41,6 @@ import { playbookDto } from './playbook-fixtures';
 import { projectViewDto } from './fixtures';
 import { conversationDto } from './conversation-fixtures';
 import { BUILDER_PERSON, slackConnection } from './people-fixtures';
-import { itemsOfConversation } from './shape-fixtures';
 
 /** The daemon every UI test talks to, through MSW. */
 export const TEST_CONNECTION: DaemonConnection = {
@@ -173,11 +172,8 @@ export function baseHandlers(
     http.get(daemonUrl('/conversations/:conversationId', base), ({ params }) =>
       HttpResponse.json(conversationDto({ id: ConversationId.parse(params['conversationId']) })),
     ),
-    http.get(daemonUrl('/conversations/:conversationId/items', base), ({ params }) =>
-      HttpResponse.json({
-        items: itemsOfConversation(ConversationId.parse(params['conversationId'])),
-        nextAfterSeq: null,
-      }),
+    http.get(daemonUrl('/conversations/:conversationId/items', base), () =>
+      HttpResponse.json({ items: [], nextAfterSeq: null }),
     ),
     http.get(daemonUrl('/conversations/:conversationId/live', base), ({ params }) =>
       HttpResponse.json({

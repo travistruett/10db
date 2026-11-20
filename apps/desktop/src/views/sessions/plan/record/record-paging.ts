@@ -8,8 +8,8 @@ import {
 } from '@10db/contracts';
 import { useDebouncedValue } from '@mantine/hooks';
 import type { UseQueryResult } from '@tanstack/react-query';
-import { usePlanRecordPage } from '../../../daemon/plan-record-queries';
-import { usePaging, type TablePage } from '../../../shell/table-pager';
+import { usePlanRecordPage } from '../../../../daemon/plan-record-queries';
+import { usePaging, type TablePage } from '../../../../shell/table-pager';
 import { ANY } from './record-filters';
 
 // One list of the Record a page at a time: the filters and search go to the daemon, and the page goes

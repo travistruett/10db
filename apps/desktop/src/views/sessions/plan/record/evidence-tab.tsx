@@ -8,7 +8,7 @@ import {
 import { Stack, Text } from '@mantine/core';
 import type { DataTableColumn } from 'mantine-datatable';
 import { useState } from 'react';
-import { KnowledgeTable } from '../../knowledge/knowledge-table';
+import { KnowledgeTable } from '../../../knowledge/knowledge-table';
 import { AnchorBadge } from './anchor-badge';
 import { anchorPlace, anchorStatuses } from './anchor-status';
 import { ANY, ChoiceFilter, SearchFilter } from './record-filters';

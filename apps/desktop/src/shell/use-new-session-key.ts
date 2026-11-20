@@ -1,7 +1,7 @@
 import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { useEffect, useRef } from 'react';
 import { useOpenChats } from '../daemon/chat-queries';
-import { openFreshTab, readFreshTabs, writeFreshTabs } from '../views/sessions/fresh-tabs';
+import { startFreshTab } from '../views/sessions/start-fresh-tab';
 import { sessionKey } from '../views/sessions/session-keys';
 import { useSelectedProject } from './selected-project';
 
@@ -14,8 +14,7 @@ export function useNewSessionKey(): void {
   const { projects, project } = useSelectedProject();
   const open = useOpenChats();
   const onSessions = useRouterState({
-    select: (state) =>
-      state.location.pathname === '/sessions' || state.location.pathname.startsWith('/sessions/'),
+    select: (state) => state.location.pathname === '/sessions',
   });
   const latest = useRef({ onSessions, projects: projects.data ?? [], project, chats: open.data });
   useEffect(() => {
@@ -36,18 +35,14 @@ export function useNewSessionKey(): void {
       );
       if ((key?.kind !== 'new' && key?.kind !== 'new_plan') || now.onSessions) return;
       event.preventDefault();
-      const fresh = readFreshTabs();
-      const made = openFreshTab(
-        fresh,
+      const id = startFreshTab(
         now.projects,
         now.project?.id ?? null,
-        (now.chats?.length ?? 0) + fresh.length - 1,
-        undefined,
+        now.chats?.length ?? 0,
         key.kind === 'new_plan',
       );
-      if (made === null) return;
-      writeFreshTabs(made.tabs);
-      void navigate({ to: '/sessions', search: { fresh: made.opened.id } });
+      if (id === null) return;
+      void navigate({ to: '/sessions', search: { fresh: id } });
     };
     document.addEventListener('keydown', onKeyDown);
     return () => {

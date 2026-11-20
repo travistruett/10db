@@ -1,20 +1,16 @@
 import {
   ShapeConvertError,
   ShapeConvertResult,
-  ShapeDto,
   ShapeFileDto,
   ShapeOfDto,
-  ShapeProposeResult,
   ShapeRehearseResult,
   ShapeViewDto,
-  type ConversationId,
   type DecisionId,
   type PrincipleId,
   type GoalId,
   type MilestoneCut,
   type ProjectId,
   type ShapeFindingId,
-  type Effort,
   type ShapeId,
   type ShapeProposalId,
   type TaskId,
@@ -31,22 +27,6 @@ export const shapeKeys = {
   list: (projectId: ProjectId) => ['shapes', 'list', projectId] as const,
   view: (shapeId: ShapeId) => ['shapes', 'view', shapeId] as const,
 } as const;
-
-/** The project's conversations, the most recently updated first. */
-export function useShapes(projectId: ProjectId | null) {
-  const { client } = useDaemon();
-  return useQuery({
-    queryKey: projectId ? shapeKeys.list(projectId) : ['shapes', 'none'],
-    queryFn: async () =>
-      projectId
-        ? readJson(
-            await client.projects[':projectId'].shapes.$get({ param: { projectId } }),
-            z.array(ShapeDto),
-          )
-        : [],
-    enabled: projectId !== null,
-  });
-}
 
 /** One conversation as the screen renders it: transcript, proposals, the heard echo and the turn. */
 export function useShapeView(shapeId: ShapeId | null) {
@@ -106,77 +86,6 @@ export function useShapeOf(target: ShapeOfTarget) {
   });
 }
 
-/** Opens a conversation. The title is the daemon's to set from the first message. */
-export function useCreateShape(projectId: ProjectId | null) {
-  const { client } = useDaemon();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (): Promise<ShapeDto> => {
-      if (!projectId) throw new Error('Choose a project first.');
-      return readJson(
-        await client.projects[':projectId'].shapes.$post({ param: { projectId }, json: {} }),
-        ShapeDto,
-      );
-    },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
-  });
-}
-
-/**
- * The conversation a Plan's transcript is read from and messages go to, from its view: the cached
- * one, else read now, as for a conversation the first send just made.
- */
-export function useShapeConversation(): (shapeId: ShapeId) => Promise<ConversationId> {
-  const { client } = useDaemon();
-  const queryClient = useQueryClient();
-  return async (shapeId) => {
-    const view = await queryClient.query({
-      queryKey: shapeKeys.view(shapeId),
-      queryFn: async () =>
-        readJson(await client.shapes[':shapeId'].$get({ param: { shapeId } }), ShapeViewDto),
-    });
-    return view.conversationId;
-  };
-}
-
-/** Propose, or Propose Again: a press while a Propose turn is queued or running is ignored. */
-export function useProposeShape() {
-  const { client } = useDaemon();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (shapeId: ShapeId) =>
-      readJson(
-        await client.shapes[':shapeId'].propose.$post({ param: { shapeId } }),
-        ShapeProposeResult,
-      ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
-  });
-}
-
-/**
- * Sets the model the conversation's next turn runs on, null for the `plan` role's, and the effort it runs
- * at, null (or none given) for the model's own default.
- */
-export function useChooseShapeModel() {
-  const { client } = useDaemon();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (input: {
-      readonly shapeId: ShapeId;
-      readonly model: string | null;
-      readonly effort?: Effort | null;
-    }) =>
-      readJson(
-        await client.shapes[':shapeId'].model.$put({
-          param: { shapeId: input.shapeId },
-          json: { model: input.model, effort: input.effort ?? null },
-        }),
-        ShapeDto,
-      ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
-  });
-}
-
 /**
  * Rehearse (§7): the session has the rehearsal reviewer read each proposed task with no mark at its
  * current content. Opening the Convert modal asks for it too, for the proposals about to be converted.
@@ -231,10 +140,8 @@ export function useConvertShape(shapeId: ShapeId) {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
-    // `interrupt` is Convert Anyway: it stops the turn that is running instead of answering 409 (§7).
     mutationFn: async (input: {
       readonly proposalIds: readonly ShapeProposalId[];
-      readonly interrupt?: boolean;
       /** The builder's cut of a Plan with many milestones. */
       readonly cut?: readonly MilestoneCut[];
     }): Promise<ConvertShapeResult> => {
@@ -242,7 +149,6 @@ export function useConvertShape(shapeId: ShapeId) {
         param: { shapeId },
         json: {
           proposalIds: [...input.proposalIds],
-          ...(input.interrupt === true ? { interrupt: true } : {}),
           ...(input.cut === undefined ? {} : { cut: [...input.cut] }),
         },
       });

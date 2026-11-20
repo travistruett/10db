@@ -1,11 +1,12 @@
 import type { PlanRecordDto, ShapeId } from '@10db/contracts';
 import { Alert, Badge, Button, Loader, Stack, Tabs, Text, VisuallyHidden } from '@mantine/core';
 import { IconMessages } from '@tabler/icons-react';
-import { useNavigate } from '@tanstack/react-router';
 import dayjs from 'dayjs';
 import type { ReactNode } from 'react';
-import { usePlanRecord } from '../../../daemon/plan-record-queries';
-import { TitleRow } from '../../../shell/title-row';
+import { usePlanRecord } from '../../../../daemon/plan-record-queries';
+import { useShapeView } from '../../../../daemon/shape-queries';
+import { useOpenSession } from '../../open-session';
+import { TitleRow } from '../../../../shell/title-row';
 import { DecisionsTab } from './decisions-tab';
 import { DocumentsTab } from './documents-tab';
 import { EvidenceTab } from './evidence-tab';
@@ -142,7 +143,8 @@ export function RecordView({
   readonly onSearch: (next: RecordSearch) => void;
 }) {
   const record = usePlanRecord(shapeId);
-  const navigate = useNavigate();
+  const chatId = useShapeView(shapeId).data?.chatId ?? null;
+  const openSession = useOpenSession();
   const tab = search.tab ?? RecordTab.Documents;
   return (
     <Stack
@@ -162,11 +164,12 @@ export function RecordView({
               variant="default"
               size="xs"
               leftSection={<IconMessages size={14} stroke={1.5} />}
+              disabled={chatId === null}
               onClick={() => {
-                void navigate({ to: '/shape/$shapeId', params: { shapeId } });
+                if (chatId !== null) void openSession(chatId);
               }}
             >
-              Conversation
+              Session
             </Button>
             <ExportButton shapeId={shapeId} />
           </>

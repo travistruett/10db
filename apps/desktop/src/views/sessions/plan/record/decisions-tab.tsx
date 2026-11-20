@@ -2,7 +2,7 @@ import { ShapeProposalState, type PlanDecisionRow, type ShapeId } from '@10db/co
 import { Drawer, List, Stack, Text } from '@mantine/core';
 import type { DataTableColumn } from 'mantine-datatable';
 import { useState } from 'react';
-import { KnowledgeTable } from '../../knowledge/knowledge-table';
+import { KnowledgeTable } from '../../../knowledge/knowledge-table';
 import { ANY, ChoiceFilter, SearchFilter } from './record-filters';
 import { NOT_NARROWED, useRecordPage } from './record-paging';
 import { emptyLine, RecordListStates } from './record-states';

@@ -2,8 +2,8 @@ import type { ShapeId } from '@10db/contracts';
 import { Button, Group, Popover, Stack, Text, TextInput } from '@mantine/core';
 import { IconFileExport } from '@tabler/icons-react';
 import { useState } from 'react';
-import { useExportPlan } from '../../../daemon/plan-record-queries';
-import { canChooseFolder, chooseFolder } from '../../../desktop/choose-folder';
+import { useExportPlan } from '../../../../daemon/plan-record-queries';
+import { canChooseFolder, chooseFolder } from '../../../../desktop/choose-folder';
 
 // Export as Markdown: the builder picks a folder (the native panel in the app, a typed path in a
 // browser) and the daemon writes the record there, or says why it won't.

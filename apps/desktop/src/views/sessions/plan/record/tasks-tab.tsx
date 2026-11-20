@@ -2,9 +2,9 @@ import { TaskStatus, type PlanTaskRow, type ProjectId, type ShapeId } from '@10d
 import { Anchor, Group, Text } from '@mantine/core';
 import type { DataTableColumn } from 'mantine-datatable';
 import { useState } from 'react';
-import { useBatches, useProjects, useTasks, useWorkstreams } from '../../../daemon/queries';
-import { taskRows } from '../../factory/task-rows';
-import { KnowledgeTable } from '../../knowledge/knowledge-table';
+import { useBatches, useProjects, useTasks, useWorkstreams } from '../../../../daemon/queries';
+import { taskRows } from '../../../factory/task-rows';
+import { KnowledgeTable } from '../../../knowledge/knowledge-table';
 import { SearchFilter } from './record-filters';
 import { NOT_NARROWED, useRecordPage } from './record-paging';
 import { emptyLine, RecordListStates } from './record-states';

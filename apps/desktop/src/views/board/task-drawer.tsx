@@ -14,7 +14,7 @@ import {
   type ModelSetting,
   type Notice,
   type Rigor,
-  type ShapeId,
+  type ChatId,
   type TaskDto,
   type TaskId,
   type TaskKind,
@@ -41,7 +41,7 @@ import { useState } from 'react';
 import { useTaskNotices } from '../../daemon/activity-queries';
 import { SurfaceDrawer } from '../../shell/surface-drawer';
 import { useReportUnsaved } from '../../shell/unsaved-guard';
-import { OpenConversation } from '../shape/open-conversation';
+import { OpenPlanSession } from '../sessions/plan/open-plan-session';
 import { OpenTaskLink } from '../sessions/open-task-link';
 import { PlanContextDisclosure } from './plan-context-disclosure';
 import { TaskSizeLine } from '../sessions/plan/task-size-line';
@@ -146,10 +146,10 @@ export interface TaskDrawerProps {
    */
   readonly areaNames?: readonly string[];
   /**
-   * Opens the conversation that made the task (Shape spec §12). With it, the drawer asks whether one
-   * did and offers Open conversation only then; without it (a drawer outside the router), nothing.
+   * Opens the plan's session that made the task. With it, the drawer asks whether one did and offers
+   * Open Session only then; without it (a drawer outside the router), nothing.
    */
-  readonly onOpenConversation?: (shapeId: ShapeId) => void;
+  readonly onOpenConversation?: (chatId: ChatId) => void;
   /** Opens the Workbench, from a task waiting for the pass that holds Your folder. */
   readonly onOpenWorkbench?: () => void;
   readonly onClose: () => void;
@@ -449,7 +449,7 @@ export function TaskDrawer({
               <TaskSizeLine taskId={task.id} />
               <PlanContextDisclosure taskId={task.id} />
               {onOpenConversation ? (
-                <OpenConversation target={{ taskId: task.id }} onOpen={onOpenConversation} />
+                <OpenPlanSession target={{ taskId: task.id }} onOpen={onOpenConversation} />
               ) : null}
               <OpenTaskLink taskId={task.id} projectId={task.projectId} />
               <CopyTaskId id={task.id} />
