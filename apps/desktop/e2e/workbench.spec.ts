@@ -9,7 +9,7 @@ import { daemonUrl } from './daemon-url';
 import { expectAccessible } from './expect-accessible';
 import { auth, createProject } from './shape-project';
 
-// Runs after shape.spec.ts (files run in name order with one worker); it adds its own project, on its
+// Runs after window-csp.spec.ts (files run in name order with one worker); it adds its own project, on its
 // own repository, and selects it. The fake adapter answers the two pages from script-book.json:
 // Settings is Ready after its first turn and works on the builder's message until a second one adds to
 // its turn; People asks a question first.
