@@ -30,7 +30,7 @@ the index's call 2; §1.1 (the row "A turn runs | Builder opens the panel").
 
 ### `apps/daemon/src/chat/live-sessions.ts`
 
-`ChatLive` gains `planRules: { take(): string | null } | null` (index Interfaces).
+`ChatLive` gains `planRules: { peek(): string | null; take(): string | null } | null` (index Interfaces).
 
 ### `apps/daemon/src/chat/hooks.ts`
 
@@ -50,7 +50,7 @@ the index's call 2; §1.1 (the row "A turn runs | Builder opens the panel").
   - **The owed rules.** Without a plan at start:
     - compute `owedPlanningRules(plan.systemPrompt(launch.agentModels, subagents, web))` with the session's own
       values;
-    - keep it in a hooks-level `Map<ConversationId, { sessionId: SessionId; take(): string | null }>` (one live
+    - keep it in a hooks-level `Map<ConversationId, { sessionId: SessionId; peek(): string | null; take(): string | null }>` (one live
       session per conversation, as `holdingSession` is). `take()` answers the rules once, then null;
     - pass the same `take` as `deps.live.open(conv.id, { …, planRules })`;
     - `release` deletes the entry when it is still this session's.
@@ -62,8 +62,10 @@ the index's call 2; §1.1 (the row "A turn runs | Builder opens the panel").
     - `preToolUse`: with `planOf(conv)` null, the chat's verdict as is; else that id's `reads.preToolUse(req, verdict)`;
     - `postToolUse` and `toolFailed` likewise, a no-op with no plan;
     - give these hooks whenever `deps.plan` is given.
-- **`outgoing`** (line 725): with a plan, `owed.get(conv.id)?.take()`, and the rules go first, ahead of the plan's
-  intake lines.
+- **`outgoing`** (line 725): with a plan, `owed.get(conv.id)?.peek()`, and the rules go first, ahead of the plan's
+  intake lines; its `sent(ctx)` then calls `take()`. So a send that throws (`explore-turns.ts:86-95`) leaves the
+  rules owed for the next message. `planRules` therefore has `peek()` (the text or null, owing it still) and
+  `take()` (the text or null, owed no longer); `propose_plan` uses `take()` on a pass.
   - The engine passes no session id, and needn't: the map is keyed by conversation.
   - This is the per-turn path both providers send through (`explore-starts.ts:128`, `explore-turns.ts:79`), so it
     works the same on Claude and Codex.
@@ -89,8 +91,15 @@ the index's call 2; §1.1 (the row "A turn runs | Builder opens the panel").
 ### Codex resume
 
 Check `apps/daemon/src/sessions/codex-generated/` for whether `thread/resume`'s `developerInstructions` replaces the
-thread's. Say in your report which holds. If it doesn't, nothing changes: the owed rules are already in the thread's
-history. Task 6 writes it into `chat/AGENTS.md` from your report.
+thread's. Say in your report which holds.
+
+- If it replaces them, nothing more: a resumed thread with a plan gets the full rules as developer instructions.
+- If it doesn't, a Codex session that resumes a thread with a plan at its start gets a `planRules` entry, so the full
+  rules ride its first `outgoing` once. Without it, a plan made while the session was closed (Show Plan on a cold
+  session, Hand Back after Show Plan in the terminal, a daemon restart) would leave the thread planning on the stub.
+  Claude needs none of this (`claude-session.ts:367` passes `systemPrompt` on resume).
+
+Task 6 writes which holds into `chat/AGENTS.md` from your report.
 
 ## Interfaces (implement, exactly)
 

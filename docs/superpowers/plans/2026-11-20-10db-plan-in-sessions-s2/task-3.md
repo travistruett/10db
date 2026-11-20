@@ -37,7 +37,9 @@ notes. Needs Tasks 1 and 2.
   - `const { shapeId } = ensurePlanOfChat(ctx, chat.chatId, ShapeOrigin.App)`, then `reconcileDraft`;
   - on a pass, the line as today, and the answer adds `rules: deps.owedRules?.(chat.conversationId, chat.sessionId)`
     when that is non-null. So the first passing round of a plan that started mid-session hands the agent the full
-    rules, once (Task 2's `take`); a refusal takes nothing;
+    rules, once (Task 2's `take`); a refusal takes nothing. The `rules` text opens with "10db's planning rules for
+    this session's Plan, from the builder's app: follow them from now on.", so the agent reads them as instructions
+    rather than as a tool's data;
   - on a refusal, throw a named error carrying `result.errors` from inside the write, so a plan this call made rolls
     back with it. Catch it outside and reject with today's `InvalidError` text.
   - A refused call on a session that already had a plan still writes its `propose_plan · refused` line. So in that
@@ -69,6 +71,10 @@ the plan through the same handler. One change, so the e2e's file check proves th
   - For each match, call `turn.guard({ toolName: 'Read', input: { file_path: <path> } })`, the session's own
     PreToolUse hook (`fake-session.ts` around lines 692 and 733).
   - Answer " I have <name>." when its decision is `allow`, else " I could not read <name>.".
+- **The builder's message id:** `BUILDER_MESSAGE_ID` (line 5) is anchored to a line start, `/^\[m:([^\]]+)\]/m`,
+  and lines 118-120 strip only that match. The owed rules that `outgoing` puts first contain the literal
+  `"[m:ID] text"` (`policy.ts:243`), so an unanchored match records `"ID"` and the e2e's "propose it" fails. Never
+  fix this by dropping the rules from `outgoing`.
 - Update the doc comment above `scriptedShapeBehaviour` to say so.
 
 Then check that no e2e sends "propose" in a session that expects no plan:

@@ -208,7 +208,7 @@ export function owedPlanningRules(rules: string): string;
 
 // apps/daemon/src/chat/live-sessions.ts — ChatLive gains
   /** The planning rules this session is owed, taken once; null when its prompt already had them. */
-  readonly planRules: { take(): string | null } | null;
+  readonly planRules: { peek(): string | null; take(): string | null } | null;
 
 // apps/daemon/src/chat/hooks.ts — chatProfile loses its second parameter: Plan's tools are always allowed.
 export function chatProfile(
@@ -224,7 +224,7 @@ export function chatProfile(
     `owedPlanningRules(plan.systemPrompt(…))`, computed with the session's own `agentModels`, `subagents` and `web`.
 - `agents` is always `plan.agents(…)`.
 - `reads` resolves the plan per call (Task 2's card).
-- `outgoing` with a plan takes `planRules` and puts it first.
+- `outgoing` with a plan peeks `planRules`, puts it first, and takes it in `sent`.
 - `apps/daemon/src/chat/confinement.ts`: `NO_PLAN` and its branch go. A Plan tool is always judged by
   `judgePlanTool`.
 - `ChatService.archive` removes `<data>/shapes/<planIdOfChat(id)>` when the chat has no plan and the folder is empty.
