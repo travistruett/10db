@@ -703,9 +703,12 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   ).toBeVisible();
 
   // A plain session has no plan until Show Plan or a proposal makes one. ⌘T opens a fresh tab in the project.
+  // Archive returns once the screen has left the session; where it falls depends on what earlier specs left open.
   const archive = async (): Promise<void> => {
+    const was = page.url();
     await page.getByRole('button', { name: 'More session actions' }).click();
     await page.getByRole('menuitem', { name: 'Archive' }).click();
+    await expect(page).not.toHaveURL(was);
   };
   const newTab = async (): Promise<void> => {
     const was = page.url();
@@ -722,8 +725,6 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
       .parse(await (await request.get(`${daemonUrl}/chats?open=1`, { headers: auth })).json())
       .find((chat) => chat.id === chatId())?.planId;
   await archive();
-  // The unused New Plan tab from the start of the test is what the screen falls to; ⌘T opens another beside it.
-  await expect(page).toHaveURL(/\/sessions\?fresh=/);
   await newTab();
   await sendLine(page, 'Make the cards denser');
   await expect(page.getByText('Noted 1 thing.', { exact: true })).toBeVisible();
