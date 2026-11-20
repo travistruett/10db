@@ -10,15 +10,15 @@ import {
   McpToolName,
   ShapeToolInputs,
   ShapeToolName,
+  type ConversationId,
+  type ProjectId,
   type SessionId,
-  type ShapeId,
   type WorkstreamId,
 } from '@10db/contracts';
 import {
   getConversation,
   getLiveSessionByTokenHash,
   isLaneSession,
-  sessionShapeId,
   type SessionRow,
 } from '@10db/db';
 import { z } from 'zod';
@@ -73,14 +73,21 @@ function laneTools(
   }));
 }
 
-/** The tools of a conversation's session, or null when 10db was given none to offer. */
+/** The chat a conversation's session belongs to. */
+interface ChatSession {
+  readonly chatId: ChatId;
+  readonly conversationId: ConversationId;
+  readonly projectId: ProjectId;
+}
+
+/** Plan's tools, offered to every chat's session: a chat with no plan yet makes one by `propose_plan`. */
 function shapeTools(
   deps: McpDeps,
   sessionId: SessionId,
-  shapeId: ShapeId,
+  chat: ChatSession,
 ): RegisteredTool[] | null {
   if (!deps.shapeTools) return null;
-  const handlers = deps.shapeTools({ sessionId, shapeId });
+  const handlers = deps.shapeTools({ sessionId, ...chat });
   const tools = Object.values(ShapeToolName).flatMap((name) => {
     const handler = handlers[name] as ((input: unknown) => Promise<unknown>) | undefined;
     return handler
@@ -97,18 +104,10 @@ function shapeTools(
   return tools.length > 0 ? tools : null;
 }
 
-/** The tools of a chat's session, or null when it is no chat's or 10db was given none to offer. */
-function chatTools(deps: McpDeps, session: SessionRow): RegisteredTool[] | null {
-  if (!deps.chatTools || session.conversationId === null) return null;
-  const conv = getConversation(deps.state.db, session.conversationId);
-  if (conv.ownerKind !== ConversationOwnerKind.Chat) return null;
-  const handlers = deps.chatTools({
-    sessionId: session.id,
-    conversationId: conv.id,
-    // The owner id of a chat's conversation is a ChatId; parsed, as text read from the database.
-    chatId: ChatId.parse(conv.ownerId),
-    projectId: conv.projectId,
-  });
+/** The tools of a chat's session, or null when 10db was given none to offer. */
+function chatTools(deps: McpDeps, session: SessionRow, chat: ChatSession): RegisteredTool[] | null {
+  if (!deps.chatTools) return null;
+  const handlers = deps.chatTools({ sessionId: session.id, ...chat });
   return Object.values(ChatToolName).map((name) => ({
     name,
     description: CHAT_TOOL_DESCRIPTIONS[name],
@@ -117,16 +116,20 @@ function chatTools(deps: McpDeps, session: SessionRow): RegisteredTool[] | null 
   }));
 }
 
-/** A conversation's session's tools: the chat's, plus Plan's when the chat has a plan; null when it has neither. */
-function conversationTools(
-  deps: McpDeps,
-  session: SessionRow,
-  shapeId: ShapeId | null,
-): RegisteredTool[] | null {
-  const chat = chatTools(deps, session);
-  const plan = shapeId === null ? null : shapeTools(deps, session.id, shapeId);
-  if (chat === null && plan === null) return null;
-  return [...(chat ?? []), ...(plan ?? [])];
+/** A chat's session's tools: the chat's, and Plan's beside them whether or not the chat has a plan yet. */
+function conversationTools(deps: McpDeps, session: SessionRow): RegisteredTool[] | null {
+  if (session.conversationId === null) return null;
+  const conv = getConversation(deps.state.db, session.conversationId);
+  if (conv.ownerKind !== ConversationOwnerKind.Chat) return null;
+  const chat: ChatSession = {
+    // The owner id of a chat's conversation is a ChatId; parsed, as text read from the database.
+    chatId: ChatId.parse(conv.ownerId),
+    conversationId: conv.id,
+    projectId: conv.projectId,
+  };
+  const own = chatTools(deps, session, chat);
+  if (own === null) return null;
+  return [...own, ...(shapeTools(deps, session.id, chat) ?? [])];
 }
 
 /** Stateless streamable-HTTP MCP endpoint; the bearer token identifies the calling session. */
@@ -139,12 +142,12 @@ export function createMcpHandler(deps: McpDeps): (req: Request) => Promise<Respo
     if (!session) return Response.json({ error: 'unauthorized' }, { status: 401 });
 
     // A session's tool set comes from its row: a lane's tools for a workstream. Any other session is a
-    // conversation's: a chat's tools held to its project, and, when the chat has a plan, Plan's tools beside
-    // them. A conversation's session holds no lane, claim or area, so it never gets a lane's tool.
-    const shapeId = isLaneSession(session) ? null : sessionShapeId(deps.state.db, session);
+    // chat's: the chat's tools held to its project, and Plan's tools beside them, plan or not (a chat with
+    // none is refused the tools that need rows). A chat's session holds no lane, claim or area, so it never
+    // gets a lane's tool.
     const tools = isLaneSession(session)
       ? laneTools(deps, session.id, session.workstreamId, claimWaits)
-      : conversationTools(deps, session, shapeId);
+      : conversationTools(deps, session);
     if (tools === null) return Response.json({ error: 'unauthorized' }, { status: 401 });
 
     const server = new McpServer({ name: '10db', version: '0.1.0' });

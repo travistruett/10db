@@ -90,7 +90,7 @@ import {
   unpinProposal as unpinRow,
 } from './rounds';
 import type { ShapeLaunch } from './session-launch';
-import { createShapeToolHandlers } from './tools';
+import { createShapeToolHandlers, type ShapeToolDeps } from './tools';
 import { removeDraftGoalOf, withdrawConvertedDecision, withdrawConvertedPrinciple } from './undo';
 import { buildShapeView, fileDtoOf, type ViewWorld } from './view';
 
@@ -109,6 +109,8 @@ export interface ShapeServiceDeps {
   readonly engine?: ExploreEngine;
   readonly clock: Clock;
   readonly log: Logger;
+  /** Takes the planning rules a chat's session is owed, once; see `ShapeToolDeps.owedRules`. */
+  readonly owedRules?: ShapeToolDeps['owedRules'];
   /**
    * Resolves a project's launch, on `model` (an ID the account lists) or, with null, on the `plan`
    * role's, at the conversation's own `effort` or, with null, the role's; throws when its account can't
@@ -370,7 +372,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     }
   };
   const { screens } = deps;
-  const toolsFor: ShapeToolsFor = ({ shapeId }) =>
+  const toolsFor: ShapeToolsFor = (chat) =>
     createShapeToolHandlers(
       {
         state,
@@ -383,8 +385,9 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
               },
             }),
         world: worldOfShape,
+        ...(deps.owedRules === undefined ? {} : { owedRules: deps.owedRules }),
       },
-      shapeId,
+      chat,
     );
 
   /**

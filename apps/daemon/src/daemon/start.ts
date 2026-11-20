@@ -1703,9 +1703,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           worktreeBase: worktreeRoot,
           codexLaneTempRoot: (sandboxRoots ?? namedSandboxRoots({}, homedir())).codexLanes,
         });
+  // The chat's open sessions: the shape service takes a session's owed planning rules from them.
+  const chatLive = createChatLiveSessions();
   const shape = createShapeService({
     state,
     adapter,
+    owedRules: (conversationId, sessionId) =>
+      chatLive.get(conversationId, sessionId)?.planRules?.take() ?? null,
     engine: exploreEngine,
     clock,
     log: logger.child({ component: 'shape' }),
@@ -1850,7 +1854,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     changedPaths: (checkout) => git.changedPaths(checkout),
   });
   takeoverService = takeover;
-  const chatLive = createChatLiveSessions();
   const firstStartAfterMove = new Set<ChatId>();
   const chatMovesAbort = new AbortController();
   const chatWork = createChatWorkService({
