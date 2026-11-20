@@ -26,7 +26,7 @@ export function DiscardPageModal({ passId, taskId, label, onClose }: DiscardPage
     <FormModal
       opened
       onClose={onClose}
-      title={`Discard ${label}`}
+      title="Discard Page"
       size="md"
       error={discard.error?.message ?? preview.error?.message ?? null}
       actions={
@@ -48,14 +48,14 @@ export function DiscardPageModal({ passId, taskId, label, onClose }: DiscardPage
               });
             }}
           >
-            Discard
+            Discard Page
           </Button>
         </>
       }
     >
       <Stack gap="sm">
         <Text size="sm">
-          {`Discard ${label}? Its changes are deleted and its files go back to how they were before this pass. A turn that is working stops.`}
+          {`Discard the ${label} page? Only this page: its changes are deleted and its files go back to how they were before this pass, and the rest of the pass goes on. A turn that is working stops.`}
         </Text>
         <Text size="sm" c="dimmed">
           If 10db made its Board task for this pass, the task is removed; a task you brought in from
