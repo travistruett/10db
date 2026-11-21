@@ -681,7 +681,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
 
   // A mock-up the session drew is approved from its row.
   await sendLine(page, 'mock it up');
-  await expect(page.getByText('Here is a mock-up.')).toBeVisible();
+  await expect(page.getByText('Here is a mock-up.', { exact: true })).toBeVisible();
   await panel.getByRole('button', { name: /^Approve mock-up/ }).click();
   await expect(panel.getByRole('button', { name: /^Unapprove mock-up/ })).toBeVisible();
   // Ask for Changes puts a draft naming the task in the composer and sends nothing.
