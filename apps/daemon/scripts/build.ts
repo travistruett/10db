@@ -37,9 +37,10 @@ const bundle = {
   platform: 'node',
   format: 'esm',
   target: 'node26',
-  // CommonJS dependencies inside an ESM bundle call require().
+  // CommonJS dependencies inside an ESM bundle call require(). The import is aliased because a
+  // dependency's own top-level `import { createRequire }` (fflate's) lands in the same scope.
   banner: {
-    js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
+    js: "import { createRequire as tendbCreateRequire } from 'node:module'; const require = tendbCreateRequire(import.meta.url);",
   },
 } as const;
 await build({
