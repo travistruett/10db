@@ -3215,10 +3215,15 @@ describe('a step that ends with changes in its claims', () => {
     const deviations = () => engine.store.db.select().from(schema.deviations).all().length;
     engine.launch(workstream.id);
     // Each round the builder adds a file after the session has dealt with the last one.
+    // The session waits on its signal once it has committed (the first) or named the last file.
+    const paused = (n: number) =>
+      n === 1
+        ? engine.adapter.observations.some(
+            (o) => o.kind === 'mcp_result' && o.detail['tool'] === 'commit',
+          )
+        : deviations() === n - 1 && engine.adapter.prompts.length === n;
     for (let n = 1; n <= 4; n += 1) {
-      await waitFor(
-        () => (deviations() === n - 1 && engine.adapter.prompts.length === n) || undefined,
-      );
+      await waitFor(() => paused(n) || undefined);
       writeFileSync(join(engine.repoPath, `src/api/builder-${String(n)}.txt`), 'theirs');
       engine.adapter.signal(`left-${String(n - 1)}`);
       await engine.runner.idle();
@@ -3230,7 +3235,7 @@ describe('a step that ends with changes in its claims', () => {
       expect(ws(workstream.id).attempt).toBe(1);
       engine.launch(workstream.id);
     }
-    await waitFor(() => (deviations() === 4 && engine.adapter.prompts.length === 5) || undefined);
+    await waitFor(() => paused(5) || undefined);
     engine.adapter.signal('left-4');
     await engine.runner.idle();
     expect(ws(workstream.id).state).toBe('DONE');
