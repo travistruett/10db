@@ -610,14 +610,27 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await expect(panel.getByText('Talk it through, or drop a document.')).toBeVisible();
 
   // A dropped file and a first message make the session; the reply names the file and Heard so far echoes.
-  await page.locator('input[type=file]').setInputFiles({
-    name: 'notes.md',
-    mimeType: 'text/markdown',
-    buffer: Buffer.from('# Notes\nMake the cards denser\n'),
-  });
+  // Any file whose bytes are text is taken, whatever its name; a binary is refused in the daemon's words.
+  await page.locator('input[type=file]').setInputFiles([
+    {
+      name: 'notes.md',
+      mimeType: 'text/markdown',
+      buffer: Buffer.from('# Notes\nMake the cards denser\n'),
+    },
+    { name: 'scores.csv', mimeType: 'text/csv', buffer: Buffer.from('card,density\nboard,high\n') },
+    {
+      name: 'blob.bin',
+      mimeType: 'application/octet-stream',
+      buffer: Buffer.from([0x62, 0x6c, 0x00, 0x62, 0xff]),
+    },
+  ]);
+  await expect(
+    page.getByText("blob.bin can't be added: drop a text file, PDF, image, .docx or .pptx"),
+  ).toBeVisible();
   await sendLine(page, 'Make the cards denser. Thin out the scrollbars');
   await expect(page).toHaveURL(/\/sessions\?chat=/);
   await expect(page.getByText('I have notes.md.')).toBeVisible();
+  await expect(page.getByText('I have scores.csv.')).toBeVisible();
   await expect(panel.getByText('Heard so far')).toBeVisible();
   // The echo starts with the session's own intake line, then names the dropped file.
   await expect(panel.getByText('The builder opened this session to plan')).toBeVisible();
@@ -669,6 +682,12 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await expect(page.getByText('Here is a mock-up.')).toBeVisible();
   await panel.getByRole('button', { name: /^Approve mock-up/ }).click();
   await expect(panel.getByRole('button', { name: /^Unapprove mock-up/ })).toBeVisible();
+  // Ask for Changes puts a draft naming the task in the composer and sends nothing.
+  await panel.getByRole('button', { name: /^Ask for changes to mock-up/ }).click();
+  const composer = page.getByRole('textbox', { name: 'Message' });
+  await expect(composer).toHaveValue(/^Change the mock-up for ".+": $/);
+  await expect(composer).toBeFocused();
+  await composer.fill('');
 
   // Accept lists the rows, says nothing starts, and writes the ticked ones to the Board.
   const before = (await titles()).length;

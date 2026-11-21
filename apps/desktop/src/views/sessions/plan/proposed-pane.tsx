@@ -52,6 +52,8 @@ export interface ProposedPaneProps {
   readonly onClose?: () => void;
   /** Why?: scrolls the conversation to the messages a row came from and highlights them. */
   readonly onWhy: (row: ShapeProposalDto) => void;
+  /** Ask for Changes on a mock-up: the session's composer takes the words. */
+  readonly onAskForChanges: (text: string) => void;
   /**
    * A count in the bar's summary line asked for this section while the pane was a drawer. The pane
    * focuses the section's first row once it has the rows (a drawer mounts it on open) and calls
@@ -70,6 +72,7 @@ export function ProposedPane({
   menu,
   onClose,
   onWhy,
+  onAskForChanges,
   jumpRequest = null,
   onJumped,
 }: ProposedPaneProps) {
@@ -328,7 +331,9 @@ export function ProposedPane({
               <Skeleton height={14} width="80%" />
             </Stack>
           ) : view !== undefined && hasProposals ? (
-            <AttachmentsContext value={{ shapeId: view.shape.id, attachments: view.attachments }}>
+            <AttachmentsContext
+              value={{ shapeId: view.shape.id, attachments: view.attachments, onAskForChanges }}
+            >
               <ProposedList
                 projectId={view.shape.projectId}
                 groups={groups}

@@ -41,7 +41,6 @@ export async function addFiles(
     const refusal = shapeFileRefusal({
       name: file.name,
       size: file.size,
-      mediaType: file.type,
       held: count,
     });
     if (refusal !== null) {

@@ -11,7 +11,13 @@ import { AttachmentView } from './attachment-view';
 export const AttachmentsContext = createContext<{
   readonly shapeId: ShapeId | null;
   readonly attachments: readonly ShapeAttachmentDto[];
-}>({ shapeId: null, attachments: [] });
+  /** Puts words in the session's composer draft and focuses it; nothing is sent. */
+  readonly onAskForChanges: (text: string) => void;
+}>({
+  shapeId: null,
+  attachments: [],
+  onAskForChanges: () => undefined,
+});
 
 const KIND_LABEL = { mermaid: 'Diagram', chart: 'Chart', mockup: 'Mockup' } as const;
 
@@ -39,7 +45,7 @@ export function RowAttachments({
   readonly row: ShapeProposalDto;
   readonly title: string;
 }) {
-  const { shapeId, attachments } = use(AttachmentsContext);
+  const { shapeId, attachments, onAskForChanges } = use(AttachmentsContext);
   const mine = attachmentsOf(row, attachments);
   if (mine.length === 0 || shapeId === null) return null;
   return (
@@ -54,7 +60,19 @@ export function RowAttachments({
             {a.attachment.kind === 'mockup' &&
             a.goalId === null &&
             !(row.kind === 'goal' && a.key === row.key) ? (
-              <ApproveButton shapeId={shapeId} attachment={a} title={title} />
+              <>
+                <ApproveButton shapeId={shapeId} attachment={a} title={title} />
+                <Button
+                  variant="subtle"
+                  size="compact-xs"
+                  aria-label={`Ask for changes to mock-up: ${title}`}
+                  onClick={() => {
+                    onAskForChanges(`Change the mock-up for "${title}": `);
+                  }}
+                >
+                  Ask for Changes
+                </Button>
+              </>
             ) : null}
           </Group>
           <AttachmentView attachment={a.attachment} title={title} />

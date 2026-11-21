@@ -23,7 +23,13 @@
   temporary name and renamed, its row written with the message; a write that fails removes the
   pictures that call wrote, never one an earlier message holds. `GET /conversations/:id/files/:fileId`
   serves a picture sent with one of the conversation's messages, and 404 for any other file or one whose
-  bytes are gone (`readConversationPicture`). `lane-text.ts` is how the thread reads to a lane session:
+  bytes are gone (`readConversationPicture`). What a file dropped into a plan is comes from its bytes
+  (`file-kind.ts` `classifyBytes`: PNG, JPEG, WebP or PDF by magic number, a ZIP holding `word/document.xml` a docx and
+  one holding `ppt/slides/` a pptx, else text when the bytes are UTF-8 with no NUL; anything else is refused), never
+  from its name or declared type; the row's `mediaType` is what the budgets and the intake line read (`isImageFile`).
+  `office-text.ts` turns a docx or pptx into Markdown at upload (50 MB inflated cap, `fflate`), and `pdf-text.ts`
+  writes a PDF's text beside it as `<stored>.txt` (`unpdf`, 30 s and 2 MB caps; a failure or a scan writes nothing
+  and logs). `unpdf` is bundled into `daemon.mjs`; do not make it external. `lane-text.ts` is how the thread reads to a lane session:
   `builderMessageText` (a message under its id, each picture attached or named by its stored path) and
   `buildThreadDigest` (the brief, then the builder's messages and the agent's replies before the
   message a fresh session acts on, from the latest handoff on). It holds the explore engine (sessions spec

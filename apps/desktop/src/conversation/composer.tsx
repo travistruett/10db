@@ -36,8 +36,6 @@ import { pickerAccept, withPictures } from './pictures';
  * draft as pictures. The screen uploads them and keeps the reasons it refused any.
  */
 export interface ComposerUploads {
-  /** What the file picker offers; a drop or paste skips it, so the screen checks each file again. */
-  readonly accept: string;
   readonly onFiles: (files: File[]) => void;
   /** Why files were refused, shown above the input until dismissed. */
   readonly refused: readonly string[];
@@ -382,7 +380,7 @@ export function Composer({
             type="file"
             multiple
             hidden
-            accept={uploads?.accept ?? pickerAccept(capabilities.images)}
+            accept={uploads === undefined ? pickerAccept(capabilities.images) : undefined}
             aria-label={uploads === undefined ? 'Choose pictures' : 'Choose files'}
             onChange={(event) => {
               addFiles([...(event.currentTarget.files ?? [])]);
