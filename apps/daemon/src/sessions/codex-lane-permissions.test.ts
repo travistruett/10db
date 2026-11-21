@@ -1,4 +1,4 @@
-import { mkdirSync, realpathSync } from 'node:fs';
+import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir, type TempDir } from '../../test/fixtures';
@@ -99,5 +99,41 @@ describe('lanePermissions and the setup reads', () => {
   ])('maps $name', ({ denyWrite, expected }) => {
     mkdirSync(join(checkout, '.git'));
     expect(filesystem([], denyWrite())).toMatchObject(expected());
+  });
+});
+
+describe('lanePermissions and the toolchain listings', () => {
+  // Escaped bug: every mise shim in a Codex lane failed with `Operation not permitted`, since the
+  // profile dropped the listing patterns and mise lists its installs dir on every command.
+  it('opens a listed dir and denies what under it the Claude profile keeps closed', () => {
+    const installs = join(home, '.local', 'share', 'mise', 'installs');
+    const tool = join(installs, 'node');
+    const version = join(tool, '26.13.0');
+    for (const dir of ['bin', 'etc', 'lib']) mkdirSync(join(version, dir), { recursive: true });
+    mkdirSync(join(installs, 'stray', 'inside'), { recursive: true });
+    writeFileSync(join(installs, '.mise-installs.toml'), '');
+    writeFileSync(join(tool, '.mise.backend.toml'), '');
+    writeFileSync(join(version, 'notes.txt'), '');
+    symlinkSync(join(home, '.rustup'), join(tool, 'linked'));
+    // The two patterns the lane profile lists a dir with (`listingGrant`, `childListingGrant`).
+    const listings = [installs, tool].flatMap((dir) => [
+      `${dir.slice(0, -1)}[${dir.slice(-1)}]`,
+      `${dir}/*`,
+    ]);
+    const reads = [join(version, 'bin'), join(version, 'lib')];
+
+    const entries = filesystem([...listings, ...reads]);
+
+    expect(entries).toMatchObject({
+      [installs]: 'read',
+      [tool]: 'read',
+      [join(version, 'bin')]: 'read',
+      [join(version, 'etc')]: 'deny',
+      [join(version, 'notes.txt')]: 'deny',
+      [join(installs, 'stray')]: 'deny',
+    });
+    for (const open of [join(installs, '.mise-installs.toml'), version, join(tool, 'linked')])
+      expect(entries).not.toHaveProperty([open]);
+    expect(Object.keys(entries).some((key) => key.includes('*') || key.includes('['))).toBe(false);
   });
 });

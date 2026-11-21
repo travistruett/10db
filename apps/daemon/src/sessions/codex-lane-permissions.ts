@@ -1,6 +1,6 @@
-import { lstatSync } from 'node:fs';
+import { lstatSync, readdirSync, type Dirent } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { isEqualOrUnder, realOrSelf, type LaneSandboxSpec } from '../sandbox';
+import { isEqualOrUnder, listingDir, realOrSelf, type LaneSandboxSpec } from '../sandbox';
 
 /**
  * What a path may do. On one path the map keeps deny over write over read; across paths Codex
@@ -14,6 +14,41 @@ const MINIMAL = ':minimal';
 
 /** A pattern the profile holds for Claude Code's sandbox, such as a listing grant; Codex has no match. */
 const isPattern = (path: string): boolean => path.includes('*') || path.includes('[');
+
+function entriesOf(dir: string): Dirent[] {
+  try {
+    return readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The entries a listed dir needs in Codex, which takes a glob only to deny. The Claude profile lets a
+ * command list such a dir (mise's `installs` and each tool dir in it, which mise lists on every
+ * command, and a shim fails without) and read each file directly in it, and nothing else in it that no
+ * read grants. Codex gets the dir as a `read` and a `deny` on each entry under it that the Claude
+ * profile keeps closed, as it is now: a dir that holds no read is denied whole, and a link is skipped,
+ * since Codex would apply its entry to the target, which its own entries judge. What appears under the
+ * dir after the session starts is readable to Codex, where the Claude profile keeps it closed.
+ */
+function listedDirEntries(
+  dir: string,
+  listed: ReadonlySet<string>,
+  opened: readonly string[],
+): [string, Access][] {
+  const holdsRead = (path: string): boolean =>
+    listed.has(path) || [...listed, ...opened].some((other) => isEqualOrUnder(other, path));
+  const walk = (at: string, isListed: boolean): [string, Access][] =>
+    entriesOf(at).flatMap((entry): [string, Access][] => {
+      const path = join(at, entry.name);
+      if (entry.isSymbolicLink() || opened.some((root) => isEqualOrUnder(path, root))) return [];
+      if (entry.isDirectory() && holdsRead(path)) return walk(path, listed.has(path));
+      if (isListed && !entry.isDirectory()) return [];
+      return [[path, 'deny']];
+    });
+  return [[dir, 'read'], ...walk(dir, true)];
+}
 
 function isLink(path: string): boolean {
   try {
@@ -76,6 +111,18 @@ function filesystemOf(sandbox: LaneSandboxSpec): Record<string, Access> {
   const realWritable = writable.map(realOrSelf);
   for (const path of writable) grant(path, 'write');
   for (const path of denyRead) if (path !== '/') grant(path, 'deny');
+  const listed = new Set(
+    allowRead.flatMap((pattern) => {
+      const dir = listingDir(pattern);
+      if (dir === null) return [];
+      const real = realOrSelf(dir);
+      // A listed dir in a denied tree stays closed, as a read there would reopen the tree.
+      return realDenyRoots.some((root) => isEqualOrUnder(real, root)) ? [] : [real];
+    }),
+  );
+  const opened = [...entries].flatMap(([key, access]) => (access === 'deny' ? [] : [key]));
+  for (const dir of listed)
+    for (const [path, access] of listedDirEntries(dir, listed, opened)) put(path, access);
   /** Narrows a writable path to read: never a path outside the writable roots, and never a deny. */
   const narrow = (key: string, roots: readonly string[], denied: readonly string[]): void => {
     if (!roots.some((root) => isEqualOrUnder(key, root))) return;
