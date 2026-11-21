@@ -49,3 +49,27 @@ export function withoutStartDirt(
     return now === UNREADABLE || entry.fingerprint !== now;
   });
 }
+
+/** How many times a task's sessions can name another writer's edits and have the send-back after it not count. */
+export const FREE_LEFT_ROUNDS = 5;
+
+/**
+ * Whether a send-back of `paths` is another writer's new edits, which the step's retry limit does not
+ * count: the session just sent back for `previous` committed or named every one of them, named some
+ * as someone else's, and every path now is new. A task's sessions get `FREE_LEFT_ROUNDS` such rounds.
+ */
+export function anotherWritersRound(input: {
+  readonly previous: readonly string[] | null;
+  readonly paths: readonly string[];
+  readonly record: readonly StartDirtEntry[] | null;
+  readonly lastSession: string | null;
+}): boolean {
+  const { previous, paths, record, lastSession } = input;
+  if (previous === null || lastSession === null || record === null) return false;
+  if (paths.some((path) => previous.includes(path))) return false;
+  const rounds = new Set(
+    record.flatMap((entry) => (entry.leftBy === undefined ? [] : [entry.leftBy])),
+  );
+  if (rounds.size > FREE_LEFT_ROUNDS) return false;
+  return record.some((entry) => entry.leftIn === lastSession);
+}

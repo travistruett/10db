@@ -230,6 +230,13 @@
             "kind": {
               "type": "string",
               "const": "verify"
+            },
+            "sentBack": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
             }
           },
           "required": [

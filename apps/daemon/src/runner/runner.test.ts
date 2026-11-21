@@ -1,4 +1,4 @@
-import { createDeliveryJobs } from '../delivery';
+import { createDeliveryJobs, workstreamChanges } from '../delivery';
 import { execFileSync } from 'node:child_process';
 import {
   cpSync,
@@ -3181,6 +3181,61 @@ describe('a step that ends with changes in its claims', () => {
     expect(gateEvidence(workstream.id).map((e) => e.commitShas)).toEqual([[own]]);
   });
 
+  it('keeps its retry limit while the builder keeps adding files its sessions leave', async () => {
+    const leave = (n: number) => [
+      {
+        do: 'mcp' as const,
+        tool: 'report_deviation',
+        args: {
+          opId: `op-uncom-left-${String(n)}`,
+          cause: 'Another writer is editing this checkout.',
+          severity: 'warn',
+          reason: 'This task never changed it.',
+          leaveUncommitted: [`src/api/builder-${String(n)}.txt`],
+        },
+      },
+      { do: 'await_signal' as const, name: `left-${String(n)}` },
+      turn,
+    ];
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          write('src/api/a.txt'),
+          commit('op-uncom-left-0', ['src/api/a.txt']),
+          { do: 'await_signal', name: 'left-0' },
+          turn,
+        ],
+        leave(1),
+        leave(2),
+        leave(3),
+        leave(4),
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    const deviations = () => engine.store.db.select().from(schema.deviations).all().length;
+    engine.launch(workstream.id);
+    // Each round the builder adds a file after the session has dealt with the last one.
+    for (let n = 1; n <= 4; n += 1) {
+      await waitFor(
+        () => (deviations() === n - 1 && engine.adapter.prompts.length === n) || undefined,
+      );
+      writeFileSync(join(engine.repoPath, `src/api/builder-${String(n)}.txt`), 'theirs');
+      engine.adapter.signal(`left-${String(n - 1)}`);
+      await engine.runner.idle();
+      expect(ws(workstream.id).nextAction).toEqual({
+        kind: 'uncommitted',
+        paths: [`src/api/builder-${String(n)}.txt`],
+      });
+      // Only the first send-back, which nobody had answered yet, counts.
+      expect(ws(workstream.id).attempt).toBe(1);
+      engine.launch(workstream.id);
+    }
+    await waitFor(() => (deviations() === 4 && engine.adapter.prompts.length === 5) || undefined);
+    engine.adapter.signal('left-4');
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+  });
+
   it('keeps charging a task with its own uncommitted change when it ran before its start was recorded', async () => {
     engine = await createTestEngine({
       Alpha: [[write('src/api/a.txt'), turn], [turn]],
@@ -6161,6 +6216,57 @@ describe("a Light task's review safety net", () => {
           r.includes('next: review'),
       ),
     ).toBe(true);
+  });
+
+  it("judges only the task's own commits when the builder commits a migration between them", async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          write('src/api/a.txt'),
+          commit('op-net-own-01', ['src/api/a.txt']),
+          { do: 'await_signal', name: 'builder-committed' },
+          write('src/api/b.txt'),
+          commit('op-net-own-02', ['src/api/b.txt']),
+          turn,
+        ],
+      ],
+    });
+    const repoGit = (...args: string[]) =>
+      execFileSync('git', ['-C', engine.repoPath, ...args], {
+        env: isolatedGitEnv(),
+        encoding: 'utf8',
+      }).trim();
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'quick' });
+    engine.launch(workstream.id);
+    // The builder commits a migration on the shared branch between the task's two commits.
+    // Once the commit tool has answered, so the builder's commit does not race it.
+    await waitFor(
+      () =>
+        engine.adapter.observations.find(
+          (o) => o.kind === 'mcp_result' && o.detail['tool'] === 'commit',
+        ) ?? undefined,
+    );
+    mkdirSync(join(engine.repoPath, 'db/migrations'), { recursive: true });
+    writeFileSync(join(engine.repoPath, 'db/migrations/0001_theirs.sql'), 'select 1;');
+    repoGit('add', 'db/migrations/0001_theirs.sql');
+    repoGit('commit', '-q', '-m', 'Builder migration');
+    engine.adapter.signal('builder-committed');
+    await engine.runner.idle();
+
+    const [first, builders, second] = repoGit('rev-list', '--reverse', 'HEAD~3..HEAD').split('\n');
+    expect(repoGit('log', '-1', '--format=%s', builders ?? '')).toBe('Builder migration');
+    // The builder's migration forces no review of the task's work.
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['implement']);
+    const gate = listEvidence(engine.store.db, workstream.id).filter((e) => e.kind === 'gate');
+    expect(gate.map((e) => e.commitShas)).toEqual([[first, second]]);
+    const changes = await workstreamChanges(
+      { db: engine.store.db, git: createGit() },
+      workstream.id,
+    );
+    expect(changes.commits).toEqual([first, second]);
+    expect(changes.files.map((f) => f.path)).toEqual(['src/api/a.txt', 'src/api/b.txt']);
+    expect(changes.diff).not.toContain('0001_theirs.sql');
   });
 
   it('ends cancelled, and adds no review, when a cancel lands while the safety net reads the change', async () => {

@@ -663,7 +663,7 @@ export function createToolHandlers(
                 : `${input.reason} Left uncommitted as not this task's: ${leftUncommitted.join(', ')}. (agent:${sessionId})`,
             sourceId,
           });
-          leaveTaskPaths(ctx, task.id, leftUncommitted, deviationId);
+          leaveTaskPaths(ctx, task.id, leftUncommitted, { by: deviationId, in: sessionId });
           return record('report_deviation', input.opId, { deviationId, leftUncommitted }, ctx);
         }),
       );

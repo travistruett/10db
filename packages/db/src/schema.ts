@@ -2051,6 +2051,8 @@ export interface StartDirtEntry {
    * the task ran. Such a path is never the task's, whatever the file holds later.
    */
   readonly leftBy?: DeviationId;
+  /** The session that named it, with `leftBy`. */
+  readonly leftIn?: SessionId;
 }
 
 /**

@@ -1,4 +1,4 @@
-import type { DeviationId, TaskId } from '@10db/contracts';
+import type { DeviationId, SessionId, TaskId } from '@10db/contracts';
 import { eq } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { StartDirtEntry } from '../schema';
@@ -30,21 +30,22 @@ export function recordTaskStartDirt(
 }
 
 /**
- * Adds `paths` to the task's record as named by `deviationId`, keeping every other entry. A path
- * the record already holds is named again; a task with no record gets one holding only these.
+ * Adds `paths` to the task's record as named in deviation `left.by` by session `left.in`, keeping
+ * every other entry. A path the record already holds is named again; a task with no record gets one
+ * holding only these.
  */
 export function leaveTaskPaths(
   ctx: WriteContext,
   taskId: TaskId,
   paths: readonly string[],
-  deviationId: DeviationId,
+  left: { readonly by: DeviationId; readonly in: SessionId },
 ): void {
   if (paths.length === 0) return;
   const named = new Set(paths);
   const kept = (getTaskStartDirt(ctx.tx, taskId) ?? []).filter((entry) => !named.has(entry.path));
   const entries = [
     ...kept,
-    ...[...named].map((path) => ({ path, fingerprint: null, leftBy: deviationId })),
+    ...[...named].map((path) => ({ path, fingerprint: null, leftBy: left.by, leftIn: left.in })),
   ];
   ctx.tx
     .insert(schema.taskStartDirt)

@@ -7,8 +7,6 @@ import {
   JudgeDecision,
   JudgeOutcome,
   Approval,
-  McpToolName,
-  McpToolOutputs,
   ConflictError,
   currentStep,
   EventType,
@@ -169,7 +167,6 @@ import {
   getTaskStartDirt,
   recordTaskStartDirt,
   taskHasRunASession,
-  listToolOpResults,
 } from '@10db/db';
 import {
   BACKGROUND_DONE_NUDGE,
@@ -206,6 +203,8 @@ import {
   allCheckouts,
   batchCardFields,
   checkoutOf,
+  diffOfRanges,
+  runCommits,
   fileFlakyTests,
   flakeNote,
   gateNote,
@@ -230,7 +229,7 @@ import {
   type SessionLaunch,
 } from '../environment';
 import { createPassGitSession, type Git } from '../git';
-import { readStartDirt, withoutStartDirt } from './start-dirt';
+import { anotherWritersRound, readStartDirt, withoutStartDirt } from './start-dirt';
 import {
   answerUnattended,
   judgePreToolUse,
@@ -1303,18 +1302,17 @@ export function createRunner(opts: RunnerOptions): Runner {
   }
 
   /**
-   * Whether the commits since the batch's base touch Markdown files and nothing else. A git failure
+   * Whether the run's commits since the batch's base touch Markdown files and nothing else. A git failure
    * (checkout gone, index locked) answers false: QA stays in the plan rather than the error ending
    * the workstream.
    */
   async function changesOnlyMarkdown(row: WorkstreamRow, checkout: string): Promise<boolean> {
     if (row.baseHead === null) return false;
     try {
-      const files = await opts.git.filesChangedBetween(
-        checkout,
-        row.baseHead,
-        await opts.git.head(checkout),
-      );
+      const { ranges } = await ownWork(row, checkout, row.baseHead);
+      const files = (
+        await Promise.all(ranges.map((r) => opts.git.filesChangedBetween(checkout, r.base, r.head)))
+      ).flat();
       return files.length > 0 && files.every((f) => f.endsWith('.md'));
     } catch (err) {
       opts.logger.warn(
@@ -1407,13 +1405,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       return null;
     if (row.baseHead === null) return 'the changes could not be read';
     try {
-      const head = await opts.git.head(checkout);
-      const changes = await opts.git.diffSince(
-        checkout,
-        row.baseHead,
-        head,
-        FORCED_REVIEW_DIFF_BYTES,
-      );
+      const { ranges } = await ownWork(row, checkout, row.baseHead);
+      const changes = await diffOfRanges(opts.git, checkout, ranges, FORCED_REVIEW_DIFF_BYTES);
       return forcedReview(
         kindsOfTask(getTask(db, row.taskId).kinds, listKinds(db)),
         changes,
@@ -1440,6 +1433,7 @@ export function createRunner(opts: RunnerOptions): Runner {
   ): Promise<TestValueFlag[]> {
     if (row.baseHead === null) return [];
     try {
+      const { head, commits } = await ownWork(row, checkout, row.baseHead);
       return await judgeNewTests(
         {
           git: opts.git,
@@ -1450,7 +1444,8 @@ export function createRunner(opts: RunnerOptions): Runner {
         {
           checkout,
           base: row.baseHead,
-          head: await opts.git.head(checkout),
+          head,
+          commits: new Set(commits),
           taskId: row.taskId,
           ...(signal === undefined ? {} : { signal }),
         },
@@ -4177,7 +4172,8 @@ export function createRunner(opts: RunnerOptions): Runner {
 
   /**
    * A write step that ends with changes in its claims uncommitted goes back to the same step, which
-   * commits them. The gate tests what is committed, so it does not run on this attempt.
+   * commits them. The gate tests what is committed, so it does not run on this attempt. A send-back of
+   * only another writer's new edits (`anotherWritersRound`) does not count toward the retry limit.
    */
   function sendBackUncommitted(
     id: WorkstreamId,
@@ -4185,7 +4181,14 @@ export function createRunner(opts: RunnerOptions): Runner {
     row: WorkstreamRow,
     paths: readonly string[],
   ): void {
-    const attempt = row.attempt + 1;
+    // Another writer's new edits in a shared checkout are no failed attempt of the step's.
+    const free = anotherWritersRound({
+      previous: row.nextAction.kind === 'verify' ? (row.nextAction.sentBack ?? null) : null,
+      paths,
+      record: getTaskStartDirt(db, row.taskId),
+      lastSession: listSessions(db, id).at(-1)?.id ?? null,
+    });
+    const attempt = free ? row.attempt : row.attempt + 1;
     if (attempt > opts.limits.maxFixAttempts) {
       fail(id, ctl.fence, {
         kind: WorkstreamFailure.RetryLimit,
@@ -4253,28 +4256,18 @@ export function createRunner(opts: RunnerOptions): Runner {
     });
   }
 
-  /**
-   * The run's commits since `base`. The builder's own checkout is shared: the builder and other tools
-   * commit on its branch too, so only the commits the run's sessions made through the commit tool are
-   * named. A worktree's branch holds only 10db's commits, base merges included, so every one is.
-   */
-  async function runCommits(row: WorkstreamRow, checkout: string, base: string): Promise<string[]> {
-    const shas = await opts.git.commitsSince(checkout, base);
-    if (checkout !== getProject(db, row.projectId).repoPath) return shas;
-    const own = new Set(
-      listToolOpResults(db, row.id, McpToolName.Commit).flatMap((result) => {
-        const parsed = McpToolOutputs.commit.safeParse(result);
-        return parsed.success ? [parsed.data.sha] : [];
-      }),
-    );
-    return shas.filter((sha) => own.has(sha));
+  /** The run's own commits from `base` to the checkout's head, and the ranges of history they make up. */
+  async function ownWork(row: WorkstreamRow, checkout: string, base: string) {
+    const head = await opts.git.head(checkout);
+    return { head, ...(await runCommits({ db, git: opts.git }, row, checkout, base, head)) };
   }
 
   /** The facts the builder checks: where the task began, where it is now, and what it committed. */
   async function checkFacts(row: WorkstreamRow, checkout: string) {
     const head = await opts.git.head(checkout);
     const baseHead = row.baseHead ?? head;
-    return { baseHead, head, commits: await opts.git.commitsSince(checkout, baseHead) };
+    const { commits } = await ownWork(row, checkout, baseHead);
+    return { baseHead, head, commits: [...commits] };
   }
 
   /**
@@ -4594,7 +4587,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       hosts: result.blockedHosts,
     });
     const head = await opts.git.head(checkout);
-    const commitShas = await runCommits(row, checkout, row.baseHead ?? head);
+    const commitShas = [...(await ownWork(row, checkout, row.baseHead ?? head)).commits];
     // A cancel that landed while git was read must not be overwritten by the verdict.
     if (stopRequested(ctl) === 'cancelled') {
       cancelNow(id, ctl.fence);
@@ -4875,11 +4868,18 @@ export function createRunner(opts: RunnerOptions): Runner {
               body: 'The agent ended its turn twice after being asked for a handoff; 10db is verifying the work as it stands.',
             });
           }
+          // The paths a sent-back session was asked to commit, so the send-back after it can tell new ones.
+          const sent = getWorkstreamRow(db, id).nextAction;
           opts.state.write((ctx) =>
             transitionWorkstream(ctx, id, {
               to: S.Verifying,
               fence: ctl.fence,
-              patch: { nextAction: { kind: 'verify' } },
+              patch: {
+                nextAction:
+                  sent.kind === 'uncommitted'
+                    ? { kind: 'verify', sentBack: [...sent.paths] }
+                    : { kind: 'verify' },
+              },
               reason: outcome.withoutHandoff
                 ? 'turn ended without the requested handoff'
                 : outcome.unaskedRun !== null
