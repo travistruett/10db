@@ -63,3 +63,19 @@ describe('a question in a task nobody watches', () => {
     expect(prompt).not.toContain(ASK_LINE);
   });
 });
+
+// AMP-144: a Codex lane nobody watched never read the skipped-call rule, routed around a refused
+// test run and then reported itself blocked.
+describe('a skipped call in a Codex lane nobody watches', () => {
+  it('is told to carry on, and that a test it cannot run is no reason to stop', () => {
+    const prompt = buildSessionPrompt({
+      ...base,
+      provider: Provider.Codex,
+      action: { kind: 'start' },
+      sandboxed: true,
+      attended: false,
+    });
+    expect(prompt).toContain('is left out on purpose: carry on without it');
+    expect(prompt).toContain('A test or check that a refusal or the sandbox keeps from running');
+  });
+});
