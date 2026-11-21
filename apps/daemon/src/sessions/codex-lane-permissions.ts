@@ -131,7 +131,6 @@ function filesystemOf(sandbox: LaneSandboxSpec): Record<string, Access> {
     if (denied.some((root) => isEqualOrUnder(key, root)) || entries.get(key) === 'deny') return;
     entries.set(key, 'read');
   };
-  /** Whether an entry already lets the lane read `real`, by real path. */
   /** Whether the lane may read `real`, by real path: the most specific entry over it decides. */
   const readable = (real: string): boolean => {
     let decides: [string, Access] | null = null;
