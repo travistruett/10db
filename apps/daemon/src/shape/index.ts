@@ -4,7 +4,12 @@
 
 export { shapeAgentModels } from './agent-models';
 export { judgePlanTool, judgeShapeCall, privateHostProblem, type ShapeAccess } from './confinement';
-export { ReviewTurnKind, stampReview, type ShapeReviewTurn } from './review-turn';
+export {
+  ReviewTurnKind,
+  reviewsAfterTurnEnd,
+  stampReview,
+  type ShapeReviewTurn,
+} from './review-turn';
 export type { ShapeLaunch } from './session-launch';
 export { gitTrackedFiles } from './ceremony';
 export {

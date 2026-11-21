@@ -1716,7 +1716,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     reviewOf: (conversationId, sessionId) =>
       chatLive.get(conversationId, sessionId)?.review() ?? [],
     noSubagents: (conversationId, sessionId) =>
-      chatLive.get(conversationId, sessionId)?.inSession() ?? false,
+      chatLive.get(conversationId, sessionId)?.inSession() ?? true,
     reviewBusy: (conversationId) => {
       const live = chatLive.current(conversationId);
       return live?.inSession() === true ? live.review().length > 0 : null;

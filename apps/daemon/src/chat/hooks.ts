@@ -31,6 +31,7 @@ import {
   getChat,
   getConversation,
   getProject,
+  getItem,
   insertItem,
   listFiles,
   listItemFiles,
@@ -64,6 +65,7 @@ import {
   owedPlanningRules,
   PLANNING_STUB,
   ReviewTurnKind,
+  reviewsAfterTurnEnd,
   type ShapeReviewTurn,
   type PlanParts,
   type ShapeAccess,
@@ -330,16 +332,16 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
     { readonly sessionId: SessionId; peek(): string | null; take(): string | null }
   >();
   // Each conversation's open session: whether it runs no subagents, so does Plan's reviews itself, and the
-  // reviews it has been sent that are still live (by the starter's id, with the turn ends seen since). A
-  // session with no subagents may report a finding only while one is live. A review is live from its send
-  // until a turn that listed it ends; an item injected into a running turn is no starter of it, so a review
-  // also ends at the second turn end after its send, which no handover to the next turn outlasts.
+  // reviews it has been sent that are still live (by the starter's id). A review is live from its send until a
+  // turn that took it ends: it was a starter of the turn, or was delivered (an item injected into a running
+  // turn is no starter of it, and one handed to the next turn is not delivered yet). A session with no
+  // subagents may report a finding only while one is live.
   const reviewing = new Map<
     ConversationId,
     {
       readonly sessionId: SessionId;
       readonly inSession: boolean;
-      readonly live: Map<ConversationItemId, { kind: ReviewTurnKind; ends: number }>;
+      readonly live: Map<ConversationItemId, { kind: ReviewTurnKind }>;
     }
   >();
   // Each chat's release of Your folder that waits for its jobs to stop. The chat's next turn cancels it: the
@@ -544,7 +546,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               },
             }
           : null;
-      const liveReviews = new Map<ConversationItemId, { kind: ReviewTurnKind; ends: number }>();
+      const liveReviews = new Map<ConversationItemId, { kind: ReviewTurnKind }>();
       const reviewTurns = (): readonly ShapeReviewTurn[] =>
         [...liveReviews].map(([id, r]) => ({ id, kind: r.kind }));
       let noSubagents = false;
@@ -862,7 +864,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       const startReview = (): void => {
         const open = reviewing.get(conv.id);
         if (review !== null && open?.inSession === true)
-          open.live.set(item.id, { kind: review.kind, ends: 0 });
+          open.live.set(item.id, { kind: review.kind });
       };
       // The plan's lines go ahead of the message, and its pictures join the message's under the one budget.
       const sentAsBlocks = new Set<string>(out.blocks);
@@ -896,9 +898,15 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
     },
 
     onTurnEnded(conv, end) {
-      for (const [id, review] of reviewing.get(conv.id)?.live ?? []) {
-        review.ends += 1;
-        if (end.starters.includes(id) || review.ends >= 2) reviewing.get(conv.id)?.live.delete(id);
+      const open = reviewing.get(conv.id);
+      if (open !== undefined) {
+        const kept = reviewsAfterTurnEnd(
+          [...open.live].map(([id, r]) => ({ id, kind: r.kind })),
+          end.starters,
+          (id) => getItem(state.db, id).deliveredAt !== null,
+        );
+        for (const id of [...open.live.keys()])
+          if (!kept.some((r) => r.id === id)) open.live.delete(id);
       }
       const chat = chatOf(conv);
       state.write((ctx) => {

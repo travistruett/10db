@@ -4,7 +4,13 @@ import { JudgeKind, type ConversationItemId, type WorkPlace } from '@10db/contra
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { tempDir, type TempDir } from '../../test/fixtures';
 import { fileAccessJudge } from '../sandbox';
-import { judgeShapeCall, stampReview, type ShapeAccess, type ShapeReviewTurn } from '../shape';
+import {
+  judgeShapeCall,
+  reviewsAfterTurnEnd,
+  stampReview,
+  type ShapeAccess,
+  type ShapeReviewTurn,
+} from '../shape';
 import { CHAT_GIT_REFUSAL } from './git-rule';
 import {
   CHAT_MOVING,
@@ -538,6 +544,13 @@ describe('a chat with a plan', () => {
     live = live.filter((r) => r.id !== planReview.id);
     expect(judge(mcp('report_finding')).decision).toBe('allow');
     expect(stampReview(live, { effortKey: 'e' })).toMatchObject({ reviewer: 'rehearsal' });
+    // An injected item is no turn's starter but is delivered by its receipt, so the turn's end drops it;
+    // one handed to the next turn is not delivered yet, and stays.
+    const injected = { id: 'cvi_injected' as ConversationItemId, kind: 'review' } as const;
+    const handedOver = { id: 'cvi_handed' as ConversationItemId, kind: 'rehearse' } as const;
+    expect(reviewsAfterTurnEnd([injected, handedOver], [], (id) => id === injected.id)).toEqual([
+      handedOver,
+    ]);
     // Once none is live the report is refused.
     live = [];
     expect(judge(mcp('report_finding')).decision).toBe('deny');

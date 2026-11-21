@@ -39,3 +39,16 @@ export function stampReview(
     `A plan review reports each finding as reviewer "${ShapeReviewer.Scope}" or "${ShapeReviewer.Engineering}".`,
   );
 }
+
+/**
+ * The reviews still live after a turn ends: one that turn took (a starter of it) or that was delivered
+ * is done. An item injected into a running turn is no starter of it but is delivered by its receipt; one
+ * handed to the next turn is not delivered yet, so it stays.
+ */
+export function reviewsAfterTurnEnd(
+  live: readonly ShapeReviewTurn[],
+  starters: readonly ConversationItemId[],
+  delivered: (id: ConversationItemId) => boolean,
+): ShapeReviewTurn[] {
+  return live.filter((r) => !starters.includes(r.id) && !delivered(r.id));
+}

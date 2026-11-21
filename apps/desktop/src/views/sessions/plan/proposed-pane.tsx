@@ -437,7 +437,8 @@ function reviewWords(
   if (answer === undefined) return '';
   const what = answer.kind === 'review' ? 'Plan review' : 'Check for Questions';
   if (answer.result.status === 'started') return turning ? `${what} is running.` : '';
+  // A refused press always says why, whether or not a turn shows.
   if (answer.result.status === 'running')
-    return turning ? 'A review is already running; press again when it ends.' : '';
+    return 'A review is already running; press again when it ends.';
   return answer.kind === 'review' ? 'Nothing to review.' : 'Every task has been checked.';
 }
