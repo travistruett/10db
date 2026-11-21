@@ -204,9 +204,7 @@ export function ProposedPane({
       <Stack gap={6} px="md" pt="md" pb="xs" style={{ flex: 'none' }}>
         <Group justify="space-between" wrap="nowrap">
           <Text fz={13} fw={600}>
-            {view === undefined || view.shape.round === 0
-              ? 'Plan'
-              : `Plan · round ${String(view.shape.round)} · updated ${shortAgo(view.shape.updatedAt, now)}`}
+            Plan
           </Text>
           <Group gap="xs" wrap="nowrap">
             <Menu position="bottom-end" withinPortal>
@@ -289,6 +287,11 @@ export function ProposedPane({
             </Group>
           </Group>
         </Group>
+        {view === undefined || view.shape.round === 0 ? null : (
+          <Text size="xs" c="dimmed">
+            {`Round ${String(view.shape.round)} · updated ${shortAgo(view.shape.updatedAt, now)}`}
+          </Text>
+        )}
         {reviewLine === '' ? null : (
           <Text size="xs" c="dimmed" role="status" aria-label="Review">
             {reviewLine}
