@@ -1,3 +1,4 @@
+import { MOCKUP_CSP } from '@10db/contracts';
 import { MantineProvider } from '@mantine/core';
 import { render, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
@@ -6,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { server } from '../../../../test/daemon';
 import { theme } from '../../../../theme';
 import { AttachmentView } from './attachment-view';
-import { MOCKUP_CSP, refusingLoader } from './safe-render';
+import { refusingLoader } from './safe-render';
 
 /** The renderers need no daemon: Mantine alone. */
 const renderWithDaemon = (ui: ReactElement): void => {

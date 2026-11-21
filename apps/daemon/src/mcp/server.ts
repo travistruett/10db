@@ -4,6 +4,7 @@ import {
   ChatId,
   ChatToolInputs,
   ChatToolName,
+  CheckDesignInput,
   ConversationOwnerKind,
   DomainError,
   McpToolInputs,
@@ -28,6 +29,7 @@ import { hashToken } from './tokens';
 import { ClaimWaits } from './claim-wait';
 import { CHAT_TOOL_DESCRIPTIONS } from './chat-tools';
 import { SHAPE_TOOL_DESCRIPTIONS } from './shape-tools';
+import { checkDesignTool, offersDesignCheck } from './design-check-tool';
 import { ToolImages } from './tool-images';
 import { createToolHandlers, TOOL_DESCRIPTIONS, type McpDeps } from './tools';
 
@@ -64,13 +66,27 @@ function laneTools(
   claimWaits: ClaimWaits,
 ): RegisteredTool[] {
   const handlers = createToolHandlers(deps, sessionId, workstreamId, claimWaits);
-  return Object.values(McpToolName).map((name) => ({
+  const tools: RegisteredTool[] = Object.values(McpToolName).map((name) => ({
     name,
     description: TOOL_DESCRIPTIONS[name],
     schema: McpToolInputs[name],
     // Each handler takes its own tool's parsed input; the registry pairs them by name.
     run: (input) => (handlers[name] as (input: unknown) => Promise<unknown>)(input),
   }));
+  // A task with an approved mock-up is also offered the tool that shows it beside the app.
+  if (deps.pictures !== undefined && offersDesignCheck(deps.state.db, workstreamId)) {
+    const check = checkDesignTool(
+      { state: deps.state, pictures: deps.pictures, sessionId },
+      workstreamId,
+    );
+    tools.push({
+      name: check.name,
+      description: check.description,
+      schema: check.schema,
+      run: (input) => check.run(CheckDesignInput.parse(input)),
+    });
+  }
+  return tools;
 }
 
 /** The chat a conversation's session belongs to. */

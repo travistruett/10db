@@ -66,6 +66,7 @@ export type ShapeApiServices = Pick<
   | 'setOneWayPaths'
   | 'rehearseShape'
   | 'reviewShape'
+  | 'designReviewShape'
   | 'approveShapeAttachment'
   | 'dismissShapeFinding'
 >;
@@ -229,6 +230,7 @@ export function createShapeServices(deps: {
     }),
     rehearseShape: (shapeId, input) => shape.rehearse(shapeId, input.proposalIds),
     reviewShape: (shapeId, input) => shape.review(shapeId, input.proposalIds),
+    designReviewShape: (shapeId, input) => shape.designReview(shapeId, input.proposalIds),
     approveShapeAttachment: (shapeId, attachmentId, input) => {
       shape.approveAttachment(shapeId, attachmentId, input.approved);
     },

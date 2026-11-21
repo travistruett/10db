@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve as resolvePath } from 'node:path';
 import {
   ConversationItemKind,
@@ -7,7 +7,8 @@ import {
   ShapeMessageKind,
   ShapeOrigin,
   parseItemBody,
-  shapeFileKind,
+  Provider,
+  ShapeFileKind,
   type ConversationFileId,
   type ShapeId,
 } from '@10db/contracts';
@@ -37,6 +38,7 @@ import {
   inlinePictureBytes,
   pathImageReasons,
   pathReasonText,
+  pdfTextPath,
   readAllowance,
   readBytesSpent,
   readCountedLine,
@@ -103,6 +105,8 @@ export interface PlanPartsDeps {
   readonly turnOf: (shapeId: ShapeId) => PlanTurnState;
   /** Tells the screen the plan changed, for what no row records. */
   readonly announce: (shapeId: ShapeId) => void;
+  /** Whether a PDF's text is being read, starting the read again if a restart cut it short. */
+  readonly pdfTextComing: (storedPath: string, name: string) => boolean;
 }
 
 /** What a turn's message is preceded by, and what goes with it. */
@@ -141,6 +145,8 @@ export interface PlanParts {
       readonly fresh: boolean;
       readonly digest: string | null;
       readonly limits: PictureLimits;
+      /** Who runs the session: Codex can't read a PDF, so its intake line points at the PDF's text. */
+      readonly provider: Provider;
       /** Picture bytes the turn's own message already sends as blocks, which the one budget counts first. */
       readonly carrying?: number;
     },
@@ -217,6 +223,7 @@ export function createPlanParts(deps: PlanPartsDeps): PlanParts {
     shown: readonly ShapeFileRow[],
     sizes: readonly string[],
     converted: string | null,
+    provider: Provider,
   ): string => {
     const byPath = pathImageReasons(shown, intake.files, budget.spent, budget.limits);
     return [
@@ -224,10 +231,25 @@ export function createPlanParts(deps: PlanPartsDeps): PlanParts {
       ...(converted === null ? [] : [`[note] ${converted}`]),
       ...(sizes.length === 0 ? [] : [`[note] ${sizes.join('\n')}`]),
       ...shown.map((file) => {
+        if (file.mediaType === ShapeFileKind.Pdf) return pdfLine(file, provider);
         const reason = byPath.get(file.id);
         return `[file] ${file.storedPath} (${file.name})${reason === undefined ? '' : ` — ${pathReasonText(reason, budget.limits)}; Read it`}`;
       }),
     ].join('\n');
+  };
+
+  /**
+   * A PDF's line. Claude reads the PDF itself, scans included. Codex can't read a PDF, so it gets the
+   * PDF's text, or a note when 10db found none (a scan).
+   */
+  const pdfLine = (file: ShapeFileRow, provider: Provider): string => {
+    if (provider !== Provider.Codex) return `[file] ${file.storedPath} (${file.name})`;
+    const textPath = pdfTextPath(file.storedPath);
+    if (existsSync(textPath))
+      return `[file] ${textPath} (${file.name}: the PDF's text; Codex can't read a PDF)`;
+    if (deps.pdfTextComing(file.storedPath, file.name))
+      return `[file] ${file.storedPath} (${file.name}: 10db is still reading the PDF's text; it will be at ${textPath})`;
+    return `[file] ${file.storedPath} (${file.name}: a PDF with no text 10db could read, and Codex can't read a PDF)`;
   };
 
   /** The images a turn points the agent at as a path that a Read would refuse (§5.4). */
@@ -312,8 +334,7 @@ export function createPlanParts(deps: PlanPartsDeps): PlanParts {
     for (const file of files) {
       if (!inline.has(file.id)) continue;
       try {
-        const kind = shapeFileKind(file.name);
-        const image = kind === null ? null : asImage(kind, readFileSync(file.storedPath));
+        const image = asImage(file.mediaType, readFileSync(file.storedPath));
         if (image === null) continue;
         sent.images.push(image);
         sent.ids.push(file.id);
@@ -457,6 +478,7 @@ export function createPlanParts(deps: PlanPartsDeps): PlanParts {
         shown,
         digested ? [] : intake.missized.lines,
         digested ? null : intake.converted,
+        session.provider,
       );
       const { images, ids } = imagesOf(intake.files, budget);
       const unreadable = unreadableOf(shapeId, intake, budget, shown, new Set(ids), session.fresh);

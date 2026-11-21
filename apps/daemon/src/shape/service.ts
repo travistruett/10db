@@ -1,11 +1,12 @@
-import { rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import {
   ConflictError,
   ConversationItemKind,
   ConversationProfile,
   EventType,
   InvalidError,
+  shapeFileRefusal,
   NotFoundError,
   parseItemBody,
   ShapeEventKind,
@@ -22,6 +23,7 @@ import {
   type PrincipleId,
   type ProjectId,
   type ShapeDto,
+  ShapeFileKind,
   type ShapeFileDto,
   type ShapeFindingId,
   type ShapeAcceptId,
@@ -63,6 +65,7 @@ import {
 import type { Clock } from '../clock';
 import {
   createExploreEngine,
+  keepPdfText,
   pictureLimitsFor,
   STRICTEST_LIMITS,
   type ExploreEngine,
@@ -70,6 +73,7 @@ import {
 } from '../conversation';
 import { createEventBus, createLiveFrames, type StateStore } from '../events';
 import type { Logger } from '../log';
+import type { Pictures } from '../pictures';
 import { mintSessionToken, type ShapeToolsFor } from '../mcp';
 import type { AgentAdapter } from '../sessions';
 import type { Hold } from '../verify';
@@ -81,8 +85,9 @@ import {
   type TrackedFiles,
 } from './ceremony';
 import { convertProposals, type ConvertOutcome, type JoiningProblem } from './convert';
-import { checkDroppedFile, storeFile } from './dropped-files';
+import { checkDroppedFile, readyToKeep, storeFile } from './dropped-files';
 import { dropNote, editNote, restoreNote, rowLabel, unpinNote } from './edit-notes';
+import { designTargets, runDesignReview } from './design-review';
 import { createPlanParts, type PlanParts, type PlanTurnState } from './plan-parts';
 import type { ShapeJev } from './jev';
 import { rehearseNote, reviewNote } from './policy';
@@ -163,12 +168,13 @@ export interface ShapeServiceDeps {
   readonly limitsFor?: (kind: AccountKind) => PictureLimits;
   /** Holds new turns back, as a waiting update's drain does; given to the engine the service runs. */
   readonly hold?: Hold;
+  /** Draws a mock-up and shoots the app's pages for a Design review; absent, the press is refused. */
+  readonly pictures?: Pick<Pictures, 'shootNow' | 'drawMockup'>;
 }
 
-/** A file as the input hands it over: the name and type the browser reported, and its bytes. */
+/** A file as the input hands it over: the name the browser reported, and its bytes. */
 export interface DroppedFile {
   readonly name: string;
-  readonly mediaType: string;
   readonly bytes: Uint8Array;
 }
 
@@ -182,7 +188,7 @@ export interface ShapeService {
    * Keeps a dropped file (§5.4) and sends it with the next message: an image as an image block, any
    * other file as a line naming its path. Throws InvalidError, naming the file, when it is refused.
    */
-  addFile(shapeId: ShapeId, file: DroppedFile): ShapeFileDto;
+  addFile(shapeId: ShapeId, file: DroppedFile): Promise<ShapeFileDto>;
   /**
    * The builder's actions on a row (§6 Editing). Each is one write and reaches the next turn as a note.
    * Throws NotFoundError for a row of another conversation and ConflictError for a converted or dropped one.
@@ -214,6 +220,16 @@ export interface ShapeService {
     shapeId: ShapeId,
     proposalIds?: readonly ShapeProposalId[],
   ): { status: 'started' | 'running' | 'nothing'; tasks: number };
+  /**
+   * Design review: for each pending task (`proposalIds` when given) that has a mock-up and a page area,
+   * draws the mock-up and shoots the page as it is now, then queues a turn in which the session has them
+   * compared with the app and the project's `DESIGN.md`. `nothing` when no task has both; `running` while
+   * a review press waits or its turn runs, or the pictures are still being taken.
+   */
+  designReview(
+    shapeId: ShapeId,
+    proposalIds?: readonly ShapeProposalId[],
+  ): Promise<{ status: 'started' | 'running' | 'nothing'; tasks: number }>;
   /** Approves a mock-up as the design target, or takes the approval back; a note tells the session. */
   approveAttachment(shapeId: ShapeId, attachmentId: ShapeAttachmentId, approved: boolean): void;
   /**
@@ -346,9 +362,12 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       busy !== null &&
       (busy ||
         pressPending(shapeId, ShapeEventKind.Review) ||
-        pressPending(shapeId, ShapeEventKind.Rehearse))
+        pressPending(shapeId, ShapeEventKind.Rehearse) ||
+        pressPending(shapeId, ShapeEventKind.DesignReview))
     );
   };
+  /** The plans whose Design review is taking its pictures. */
+  const takingPictures = new Set<ShapeId>();
   /** A press of `kind` waits or runs: queued, or handed to a session and not taken yet. */
   const pressPending = (shapeId: ShapeId, kind: ShapeEventKind): boolean => {
     const conversation = conversationOf(shapeId);
@@ -472,12 +491,51 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     if (note !== null) turnOf(shapeId).notes.push(note);
   };
 
+  // PDFs whose text is being read, and those read at least once this run, by stored path.
+  const pdfReading = new Set<string>();
+  const pdfTried = new Set<string>();
+  let shuttingDown = false;
+
+  /** Reads a PDF's text after the upload has answered; it only logs, and writes nothing once closing. */
+  const readPdfText = (storedPath: string, name: string, bytes: Uint8Array): void => {
+    pdfReading.add(storedPath);
+    pdfTried.add(storedPath);
+    void keepPdfText(storedPath, bytes, () => !shuttingDown && existsSync(dirname(storedPath)))
+      .then((written) => {
+        if (written === null) log.info({ file: name }, 'a dropped PDF has no text');
+      })
+      .catch((error: unknown) => {
+        log.warn({ err: error, file: name }, 'a dropped PDF’s text could not be read');
+      })
+      .finally(() => {
+        pdfReading.delete(storedPath);
+      });
+  };
+
+  /**
+   * Whether a PDF's text is on its way. A PDF with no text file that this run never read (the daemon
+   * restarted in the middle of reading it) is read again, once.
+   */
+  const pdfTextComing = (storedPath: string, name: string): boolean => {
+    if (pdfReading.has(storedPath)) return true;
+    if (pdfTried.has(storedPath) || shuttingDown) return false;
+    try {
+      readPdfText(storedPath, name, readFileSync(storedPath));
+      return true;
+    } catch (error) {
+      pdfTried.add(storedPath);
+      log.warn({ err: error, file: name }, 'a dropped PDF could not be read again');
+      return false;
+    }
+  };
+
   const planParts = createPlanParts({
     state,
     log,
     filesDir: deps.filesDir,
     turnOf,
     announce,
+    pdfTextComing,
   });
 
   return {
@@ -506,16 +564,21 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
             const bytes = new TextEncoder().encode(file.content);
             const checked = checkDroppedFile({
               name: file.name,
-              mediaType: '',
               bytes,
               held: countShapeFiles(ctx.tx, shape.id),
             });
+            // Inline files are text by construction; one that reads as anything else is refused.
+            if (
+              checked.mediaType !== ShapeFileKind.Text &&
+              checked.mediaType !== ShapeFileKind.Markdown
+            )
+              throw new InvalidError(`${checked.name} isn't a text file`);
             insertShapeFile(ctx, {
               shapeId: shape.id,
               name: checked.name,
               mediaType: checked.mediaType,
-              size: bytes.length,
-              storedPath: storeFile(deps.filesDir, shape.id, checked.name, bytes),
+              size: checked.bytes.length,
+              storedPath: storeFile(deps.filesDir, shape.id, checked.storedName, checked.bytes),
             });
           }
           return shape;
@@ -528,23 +591,35 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       }
     },
 
-    addFile(shapeId, file) {
+    async addFile(shapeId, file) {
       getShape(state.db, shapeId);
-      const checked = checkDroppedFile({
-        ...file,
-        held: countShapeFiles(state.db, shapeId),
-      });
-      const storedPath = storeFile(deps.filesDir, shapeId, checked.name, file.bytes);
+      const checked = await readyToKeep(
+        checkDroppedFile({
+          name: file.name,
+          bytes: file.bytes,
+          held: countShapeFiles(state.db, shapeId),
+        }),
+      );
+      const storedPath = storeFile(deps.filesDir, shapeId, checked.storedName, checked.bytes);
       try {
-        const row = state.write((ctx) =>
-          insertShapeFile(ctx, {
+        const row = state.write((ctx) => {
+          // Counted again here: drops that overlap each passed the first count.
+          const refusal = shapeFileRefusal({
+            name: checked.name,
+            size: checked.bytes.length,
+            held: countShapeFiles(ctx.tx, shapeId),
+          });
+          if (refusal !== null) throw new InvalidError(refusal);
+          return insertShapeFile(ctx, {
             shapeId,
             name: checked.name,
             mediaType: checked.mediaType,
-            size: file.bytes.length,
+            size: checked.bytes.length,
             storedPath,
-          }),
-        );
+          });
+        });
+        if (checked.mediaType === ShapeFileKind.Pdf)
+          readPdfText(storedPath, checked.name, checked.bytes);
         return fileDtoOf(row);
       } catch (error) {
         rmSync(storedPath, { force: true });
@@ -622,6 +697,36 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       );
       engine.queued(conversationOf(shapeId));
       return { status: 'started', tasks: rows.length };
+    },
+
+    async designReview(shapeId, proposalIds) {
+      const { projectId } = getShape(state.db, shapeId);
+      const project = getProject(state.db, projectId);
+      const targets = designTargets(state.db, shapeId, project.areas, proposalIds);
+      if (targets.length === 0 || deps.pictures === undefined)
+        return { status: 'nothing', tasks: 0 };
+      if (
+        takingPictures.has(shapeId) ||
+        pressPending(shapeId, ShapeEventKind.DesignReview) ||
+        reviewInSessionBusy(shapeId)
+      )
+        return { status: 'running', tasks: targets.length };
+      takingPictures.add(shapeId);
+      try {
+        await runDesignReview(
+          { state, pictures: deps.pictures, planFilesDir: (id) => join(deps.filesDir, id) },
+          shapeId,
+          project,
+          targets,
+          (line) => {
+            say(shapeId, ShapeMessageAuthor.Note, ShapeMessageKind.Notice, line);
+          },
+        );
+      } finally {
+        takingPictures.delete(shapeId);
+      }
+      engine.queued(conversationOf(shapeId));
+      return { status: 'started', tasks: targets.length };
     },
 
     approveAttachment(shapeId, attachmentId, approved) {
@@ -818,6 +923,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     },
 
     async close() {
+      shuttingDown = true;
       await engine.close();
     },
   };

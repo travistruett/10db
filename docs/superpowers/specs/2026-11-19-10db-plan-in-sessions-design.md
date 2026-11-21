@@ -142,7 +142,7 @@ switches **Plan | Changes**.
 | --- | --- | --- | --- | --- |
 | Plan review | the goal's spec (`write_spec`), scope and engineering reviewers | Built (`shape/review.ts`) | separate reviewers | in the session; says it ran without separate reviewers |
 | Check for Questions | each task, read as the agent about to build it would, for the questions it would have to ask (missing facts, unmade choices); they land on the task, so they are answered while planning, not mid-run | Built (the engine's "rehearsal") | a rehearsal agent per task | in the session, one task after another; says so |
-| Design review | each UI task's approved mock-up against the project's screenshots and its `DESIGN.md` where it has one | **New** (slice 5 designs its inputs) | a design reviewer | in the session |
+| Design review | each UI task's approved mock-up against the project's screenshots and its `DESIGN.md` where it has one | **Built** (slice 5) | a design reviewer | in the session |
 
 Accept warns on open findings and never blocks (the Convert rule). A follow-up task gives Codex separate
 reviewers once it can run subagents.
@@ -173,8 +173,12 @@ reviewers once it can run subagents.
 - A session with a plan keeps its files in the plan's folder (`<data>/shapes/<id>`), not the chat folder, so
   Archive never deletes them. The session may read that folder as it reads its chat folder: it is added
   to the Claude hook's file access and to Codex's sandbox.
-- Claude Code reads PDFs and images itself. **Verified in slice 5's research:** what Codex does with a PDF;
-  where it can't read one, 10db hands it the PDF's text.
+- Claude Code reads PDFs and images itself. **Verified in slice 5's research:** Codex 0.167.0
+  (`codex-generated/ts/v2/UserInput.ts`) takes only `text`, `image`, `localImage`, `audio`, `skill` and `mention`
+  input, and its `view_image` reads PNG, JPEG and WebP only, so it can't read a PDF; this Mac has no `pdftotext`.
+  10db extracts the PDF's text at upload with `unpdf` (bundled into the daemon) and keeps it beside the PDF as
+  `<stored>.txt`; a Codex session's intake line points at that text file, and a PDF with no text (a scan) says so
+  to Codex only, since Claude reads the scan itself.
 
 ## 7. What goes away, and where the rest goes
 

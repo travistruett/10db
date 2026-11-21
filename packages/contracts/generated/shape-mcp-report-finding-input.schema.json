@@ -22,7 +22,8 @@
       "enum": [
         "scope",
         "engineering",
-        "rehearsal"
+        "rehearsal",
+        "design"
       ]
     },
     "finding": {

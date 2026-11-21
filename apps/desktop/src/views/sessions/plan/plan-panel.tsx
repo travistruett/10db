@@ -22,10 +22,11 @@ export interface PlanPanelProps {
   readonly onClose?: () => void;
   /** Why?: the session scrolls to the messages a row came from and marks them. */
   readonly onWhy: (row: ShapeProposalDto) => void;
+  readonly onAskForChanges: (text: string) => void;
 }
 
 /** The session's Plan: its rows beside the conversation, with Accept, and Record and Export in ⋯. */
-export function PlanPanel({ shapeId, onClose, onWhy }: PlanPanelProps) {
+export function PlanPanel({ shapeId, onClose, onWhy, onAskForChanges }: PlanPanelProps) {
   const query = useShapeView(shapeId);
   const error = query.isError ? query.error.message : null;
   return (
@@ -36,6 +37,7 @@ export function PlanPanel({ shapeId, onClose, onWhy }: PlanPanelProps) {
         error={error}
         summaryHere
         onWhy={onWhy}
+        onAskForChanges={onAskForChanges}
         {...(onClose === undefined ? {} : { onClose })}
         menu={query.data === undefined ? null : <PlanMenu view={query.data} />}
       />

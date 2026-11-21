@@ -18,7 +18,11 @@ export { itemDtoOf } from './item-dto';
 export { createItemRecorder, type ItemRecorder } from './item-recorder';
 export { createLiveRegistry, type LiveRegistry } from './live-registry';
 export type { ExploreOwnerHooks, ExploreStart, Outgoing, TurnEnd } from './explore-hooks';
-export { refuseMislabelledBytes, safeFileName } from './file-check';
+export { safeFileName } from './file-check';
+export { classifyBytes, DroppedKind } from './file-kind';
+export { ExtractionError } from './extraction-error';
+export { extractText } from './extraction';
+export { keepPdfText, pdfTextPath } from './pdf-text';
 export { keepBuilderMessage, type PastedFile } from './intake';
 export { buildThreadDigest, builderMessageText, FRESH_SESSION_NOTICE } from './lane-text';
 export { readConversationPicture } from './pictures';
@@ -39,7 +43,12 @@ export {
   unmeasuredRead,
   type ReadKind,
 } from './inline-budget';
-export { inlineImageIds, pathImageReasons, pathReasonText } from './picture-budget';
+export {
+  imagesWithinBudget,
+  inlineImageIds,
+  pathImageReasons,
+  pathReasonText,
+} from './picture-budget';
 export {
   STRICTEST_LIMITS,
   pictureLimitsFor,

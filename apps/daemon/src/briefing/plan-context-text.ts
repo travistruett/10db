@@ -1,4 +1,5 @@
 import {
+  CHECK_DESIGN_TOOL,
   McpToolName,
   type ApprovedMockup,
   type PlanContext,
@@ -70,7 +71,7 @@ export function renderMockups(mockups: readonly ApprovedMockup[]): string[] {
   }
   return [
     '',
-    `Approved mock-up${mockups.length === 1 ? '' : 's'} (the design target: match ${mockups.length === 1 ? 'it' : 'them'}, and say in your handoff where you could not):`,
+    `Approved mock-up${mockups.length === 1 ? '' : 's'} (the design target: match ${mockups.length === 1 ? 'it' : 'them'}). Before you hand off, call ${CHECK_DESIGN_TOOL}: it shows ${mockups.length === 1 ? 'it' : 'them'} beside the app as it is now. Fix what differs, record what still differs with the verdict of ${CHECK_DESIGN_TOOL}, and say in your handoff where you could not match ${mockups.length === 1 ? 'it' : 'them'}:`,
     ...kept.flatMap((m) => {
       const fence = fenceFor(m.html);
       return [`Mock-up ${m.key}:`, `${fence}html`, m.html, fence];

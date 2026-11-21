@@ -18,6 +18,7 @@ import {
   useConvertShape,
   useDismissFinding,
   useReviewShape,
+  type ReviewKind,
   useRowChange,
 } from '../../../daemon/shape-queries';
 import { shortAgo } from '../../factory/short-ago';
@@ -52,6 +53,8 @@ export interface ProposedPaneProps {
   readonly onClose?: () => void;
   /** Why?: scrolls the conversation to the messages a row came from and highlights them. */
   readonly onWhy: (row: ShapeProposalDto) => void;
+  /** Ask for Changes on a mock-up: the session's composer takes the words. */
+  readonly onAskForChanges: (text: string) => void;
   /**
    * A count in the bar's summary line asked for this section while the pane was a drawer. The pane
    * focuses the section's first row once it has the rows (a drawer mounts it on open) and calls
@@ -70,6 +73,7 @@ export function ProposedPane({
   menu,
   onClose,
   onWhy,
+  onAskForChanges,
   jumpRequest = null,
   onJumped,
 }: ProposedPaneProps) {
@@ -92,6 +96,8 @@ export function ProposedPane({
   const hasProposals = (view?.proposals.length ?? 0) > 0;
   const dismiss = useDismissFinding(view?.shape.id ?? null);
   const review = useReviewShape(view?.shape.id ?? null);
+  // A Design review takes its pictures before its turn is queued: the press waits for them.
+  const takingPictures = review.isPending && review.variables === 'design_review';
   // "Is running" is true only while a turn runs or waits; it goes when the review's turn ends.
   const turning = view !== undefined && (view.turn.running || view.turn.queued > 0);
   const reviewLine = review.isError ? review.error.message : reviewWords(review.data, turning);
@@ -208,10 +214,10 @@ export function ProposedPane({
                   variant="default"
                   size="xs"
                   rightSection={<IconChevronDown size={14} stroke={1.5} />}
-                  loading={review.isPending}
-                  disabled={view === undefined || rows.length === 0}
+                  loading={review.isPending && review.variables !== 'design_review'}
+                  disabled={view === undefined || rows.length === 0 || takingPictures}
                 >
-                  Review
+                  {takingPictures ? 'Taking pictures' : 'Review'}
                 </Button>
               </Menu.Target>
               <Menu.Dropdown>
@@ -228,6 +234,13 @@ export function ProposedPane({
                   }}
                 >
                   Check for Questions
+                </Menu.Item>
+                <Menu.Item
+                  onClick={() => {
+                    review.mutate('design_review');
+                  }}
+                >
+                  Design review
                 </Menu.Item>
               </Menu.Dropdown>
             </Menu>
@@ -328,7 +341,9 @@ export function ProposedPane({
               <Skeleton height={14} width="80%" />
             </Stack>
           ) : view !== undefined && hasProposals ? (
-            <AttachmentsContext value={{ shapeId: view.shape.id, attachments: view.attachments }}>
+            <AttachmentsContext
+              value={{ shapeId: view.shape.id, attachments: view.attachments, onAskForChanges }}
+            >
               <ProposedList
                 projectId={view.shape.projectId}
                 groups={groups}
@@ -427,18 +442,30 @@ function ConvertPanel({
   );
 }
 
+const REVIEW_NAMES: Record<ReviewKind, string> = {
+  review: 'Plan review',
+  rehearse: 'Check for Questions',
+  design_review: 'Design review',
+};
+
+/** What a press that found nothing to read says. */
+const NOTHING_TO_SAY: Record<ReviewKind, string> = {
+  review: 'Nothing to review.',
+  rehearse: 'Every task has been checked.',
+  design_review: 'Nothing to review: no task has both a mock-up and a page.',
+};
+
 /** What a review press came to, in words. */
 function reviewWords(
   answer:
-    | { readonly kind: 'review' | 'rehearse'; readonly result: { status: string; tasks: number } }
-    | undefined,
+    { readonly kind: ReviewKind; readonly result: { status: string; tasks: number } } | undefined,
   turning: boolean,
 ): string {
   if (answer === undefined) return '';
-  const what = answer.kind === 'review' ? 'Plan review' : 'Check for Questions';
+  const what = REVIEW_NAMES[answer.kind];
   if (answer.result.status === 'started') return turning ? `${what} is running.` : '';
   // A refused press always says why, whether or not a turn shows.
   if (answer.result.status === 'running')
     return 'A review is already running; press again when it ends.';
-  return answer.kind === 'review' ? 'Nothing to review.' : 'Every task has been checked.';
+  return NOTHING_TO_SAY[answer.kind];
 }

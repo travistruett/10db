@@ -50,6 +50,8 @@ export const ShapeMessageKind = {
   Rehearse: 'rehearse',
   /** The note that starts a plan review turn; like Rehearse it can't be cited as a source. */
   Review: 'review',
+  /** The note that starts a design review turn; like Review it can't be cited as a source. */
+  DesignReview: 'design_review',
   Edit: 'edit',
   Digest: 'digest',
   Event: 'event',
@@ -415,6 +417,8 @@ export const ShapeReviewer = {
   Scope: 'scope',
   Engineering: 'engineering',
   Rehearsal: 'rehearsal',
+  /** Compares a task's mock-up with the app as it is now and the project's `DESIGN.md` (§4). */
+  Design: 'design',
 } as const;
 export type ShapeReviewer = ValueOf<typeof ShapeReviewer>;
 

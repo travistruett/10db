@@ -3,9 +3,6 @@ import { shapeFileKind, shapeFileRefusal, ShapeFileKind, type ShapeFileDto } fro
 // Shape spec §5.4. The input checks a dropped file before it uploads, so the reason shows at once;
 // the daemon checks again, and its words are shown when it still refuses.
 
-/** What the file picker offers; a drop skips it, so the checks below still run. */
-export const FILE_PICKER_ACCEPT = '.md,.markdown,.txt,.pdf,.png,.jpg,.jpeg,.webp';
-
 const EXTENSION: Readonly<Record<string, string>> = {
   [ShapeFileKind.Png]: 'png',
   [ShapeFileKind.Jpeg]: 'jpg',
@@ -41,7 +38,6 @@ export async function addFiles(
     const refusal = shapeFileRefusal({
       name: file.name,
       size: file.size,
-      mediaType: file.type,
       held: count,
     });
     if (refusal !== null) {

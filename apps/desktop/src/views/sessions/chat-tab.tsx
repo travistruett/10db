@@ -70,7 +70,7 @@ import { dropNotes } from './plan/drop-notes';
 import { planChoice, usePlanOpen } from './plan/plan-choice';
 import { planEventEntry } from './plan/plan-entries';
 import { PlanSide, planBeside } from './plan/plan-side';
-import { addFiles, FILE_PICKER_ACCEPT } from '../../conversation/dropped-files';
+import { addFiles } from '../../conversation/dropped-files';
 import { useShapeView, useUploadShapeFile } from '../../daemon/shape-queries';
 import { changesTotals, withQuote } from './changes-files';
 import { GitStepButton } from './git-step-button';
@@ -760,7 +760,6 @@ export function ChatTab({
                     ? {}
                     : {
                         uploads: {
-                          accept: FILE_PICKER_ACCEPT,
                           onFiles: (files: File[]) => {
                             void dropIntoPlan(files);
                           },
@@ -802,6 +801,17 @@ export function ChatTab({
         shapeId={planId}
         onClose={() => {
           planChoice.set(chat.id, false);
+        }}
+        onAskForChanges={(text) => {
+          // A drawer would cover the composer the draft lands in.
+          if (!besidePlan) planChoice.set(chat.id, false);
+          setDraft((now) => ({ ...now, text: now.text === '' ? text : `${now.text}\n${text}` }));
+          // A closing drawer gives focus back to the Plan toggle as it unmounts; the composer takes it after.
+          if (besidePlan) input.current?.focus();
+          else
+            requestAnimationFrame(() => {
+              input.current?.focus();
+            });
         }}
         onWhy={(row) => {
           // A drawer would cover the messages it points at.

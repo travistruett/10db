@@ -28,7 +28,12 @@ import type { ShapeReviewTurn } from './review-turn';
 const AGENT_PREFIX = 'tendb-';
 
 /** The reviewers a Shape session may launch with `Agent` (§7). */
-export const PLAN_REVIEWERS = ['tendb-scope', 'tendb-engineering', 'tendb-rehearsal'] as const;
+export const PLAN_REVIEWERS = [
+  'tendb-scope',
+  'tendb-engineering',
+  'tendb-rehearsal',
+  'tendb-design',
+] as const;
 
 /**
  * The agent that reads the code for the session (§5.2): file tools and, in the sandbox, the same

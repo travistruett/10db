@@ -27,12 +27,22 @@ export interface PlanSideProps {
   readonly shapeId: ShapeId | null;
   readonly onClose: () => void;
   readonly onWhy: (row: ShapeProposalDto) => void;
+  /** Ask for Changes on a mock-up: puts the words in the session's composer draft and focuses it. */
+  readonly onAskForChanges: (text: string) => void;
   /** The session's Changes, when they are open too: the side column's head then switches between the two. */
   readonly changes?: ReactNode;
 }
 
 /** The Plan panel's place beside a conversation, or its drawer; with Changes open it holds either. */
-export function PlanSide({ open, beside, shapeId, onClose, onWhy, changes = null }: PlanSideProps) {
+export function PlanSide({
+  open,
+  beside,
+  shapeId,
+  onClose,
+  onWhy,
+  onAskForChanges,
+  changes = null,
+}: PlanSideProps) {
   const [picked, setPicked] = useState<Side>(Side.Plan);
   // Opening the Plan shows it, even while Changes are open: the builder asked for it last.
   const [wasOpen, setWasOpen] = useState(open);
@@ -70,7 +80,12 @@ export function PlanSide({ open, beside, shapeId, onClose, onWhy, changes = null
       </Box>
     ) : (
       <Box style={{ flex: 1, minHeight: 0 }}>
-        <PlanPanel shapeId={shapeId} onWhy={onWhy} {...(beside ? { onClose } : {})} />
+        <PlanPanel
+          shapeId={shapeId}
+          onWhy={onWhy}
+          onAskForChanges={onAskForChanges}
+          {...(beside ? { onClose } : {})}
+        />
       </Box>
     );
   if (beside) {

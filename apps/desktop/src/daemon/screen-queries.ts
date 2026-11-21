@@ -1,6 +1,8 @@
 import {
   PicturesStatusDto,
+  TaskDesignCheckDto,
   TaskScreensDto,
+  type DesignCheckId,
   type ProjectId,
   type TaskId,
   type TaskScreenId,
@@ -65,5 +67,43 @@ export function usePicturesStatus(projectId: ProjectId) {
       ),
     // The browser's download and a sign-in move on with no event of their own.
     refetchInterval: 5_000,
+  });
+}
+
+export const designCheckKeys = {
+  all: ['design-checks'],
+  of: (taskId: TaskId) => ['design-checks', taskId] as const,
+} as const;
+
+/** A task's newest design check: its mock-up drawn, the page shot as it was, and the verdict. */
+export function useTaskDesignCheck(taskId: TaskId) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: designCheckKeys.of(taskId),
+    queryFn: async () =>
+      readJson(
+        await client.tasks[':taskId']['design-checks'].$get({ param: { taskId } }),
+        TaskDesignCheckDto,
+      ),
+  });
+}
+
+/** One picture of a design check as a data URL; a check's pictures never change, so each is read once. */
+export function useDesignCheckPicture(checkId: DesignCheckId, part: 'mockup' | number) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: ['design-check-pictures', checkId, part] as const,
+    queryFn: async (): Promise<string> => {
+      const res: Response =
+        part === 'mockup'
+          ? await client['design-checks'][':checkId'].mockup.$get({ param: { checkId } })
+          : await client['design-checks'][':checkId'].shots[':index'].$get({
+              param: { checkId, index: String(part) },
+            });
+      if (!res.ok) throw new Error(`The daemon answered HTTP ${String(res.status)}`);
+      return dataUrlOf(await res.blob());
+    },
+    staleTime: Infinity,
+    gcTime: 5 * 60_000,
   });
 }

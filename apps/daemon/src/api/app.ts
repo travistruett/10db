@@ -117,6 +117,7 @@ import {
   PassPullRequestRequest,
   ConversationFileId,
   TaskScreenId,
+  DesignCheckId,
   TaskId,
   ChangesScope,
   TaskInput,
@@ -159,6 +160,13 @@ import { z } from 'zod';
 import type { ApiServices } from './services';
 import type { SelfUpdateServices, TaskRemovalServices } from './services';
 import { streamEvents } from './stream';
+
+/** A kept picture never changes. */
+const PICTURE_HEADERS = {
+  'content-type': 'image/png',
+  'cache-control': 'private, max-age=31536000, immutable',
+  'x-content-type-options': 'nosniff',
+} as const;
 
 /** What the screen routes need from the screens module: the broker's window side and the kept pictures. */
 export interface ScreenRoutes {
@@ -909,6 +917,18 @@ export function createApp(deps: ApiDeps) {
         ),
     )
     .post(
+      '/shapes/:shapeId/design-review',
+      validator('json', (value): ShapeRehearseInput => ShapeRehearseInput.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.designReviewShape(
+            ShapeId.parse(c.req.param('shapeId')),
+            c.req.valid('json'),
+          ),
+          202,
+        ),
+    )
+    .post(
       '/shapes/:shapeId/findings/:findingId/dismiss',
       validator('json', (value): ShapeDismissInput => ShapeDismissInput.parse(value)),
       (c) => {
@@ -1047,7 +1067,7 @@ export function createApp(deps: ApiDeps) {
       return c.body(null, 204);
     })
     // The file itself is the body, so a 20 MB drop is not base64 inside JSON: its name is the query and
-    // its type the content type.
+    // what it is comes from its bytes.
     .post(
       '/shapes/:shapeId/files',
       validator('query', (value): ShapeFileQuery => ShapeFileQuery.parse(value)),
@@ -1055,11 +1075,7 @@ export function createApp(deps: ApiDeps) {
         const { name } = c.req.valid('query');
         const bytes = new Uint8Array(await c.req.arrayBuffer());
         return c.json(
-          deps.services.addShapeFile(ShapeId.parse(c.req.param('shapeId')), {
-            name,
-            mediaType: c.req.header('content-type') ?? '',
-            bytes,
-          }),
+          await deps.services.addShapeFile(ShapeId.parse(c.req.param('shapeId')), { name, bytes }),
           201,
         );
       },
@@ -1804,11 +1820,32 @@ export function createApp(deps: ApiDeps) {
       c.json(deps.services.taskScreens(TaskId.parse(c.req.param('taskId')))),
     )
     .get('/screens/:screenId', (c) =>
-      c.body(deps.services.screenPicture(TaskScreenId.parse(c.req.param('screenId'))), 200, {
-        'content-type': 'image/png',
-        'cache-control': 'private, max-age=31536000, immutable',
-        'x-content-type-options': 'nosniff',
-      }),
+      c.body(
+        deps.services.screenPicture(TaskScreenId.parse(c.req.param('screenId'))),
+        200,
+        PICTURE_HEADERS,
+      ),
+    )
+    // A design check (plan-in-sessions spec §4): a task's newest, and its pictures.
+    .get('/tasks/:taskId/design-checks', (c) =>
+      c.json(deps.services.taskDesignCheck(TaskId.parse(c.req.param('taskId')))),
+    )
+    .get('/design-checks/:checkId/mockup', (c) =>
+      c.body(
+        deps.services.designCheckPicture(DesignCheckId.parse(c.req.param('checkId')), 'mockup'),
+        200,
+        PICTURE_HEADERS,
+      ),
+    )
+    .get('/design-checks/:checkId/shots/:index', (c) =>
+      c.body(
+        deps.services.designCheckPicture(
+          DesignCheckId.parse(c.req.param('checkId')),
+          z.coerce.number().int().min(0).parse(c.req.param('index')),
+        ),
+        200,
+        PICTURE_HEADERS,
+      ),
     )
     .get('/dev-ui/connection', (c) =>
       deps.devUi

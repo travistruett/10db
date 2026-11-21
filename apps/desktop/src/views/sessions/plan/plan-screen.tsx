@@ -42,6 +42,7 @@ export function PlanScreen({ shapeId }: { readonly shapeId: ShapeId }) {
           error={query.isError ? query.error.message : null}
           summaryHere
           onWhy={() => undefined}
+          onAskForChanges={() => undefined}
         />
       </Box>
     </Box>

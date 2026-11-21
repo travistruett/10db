@@ -1,4 +1,11 @@
-import type { BrowserStatus, PageCamera, ShootInput, Shot, ShotOutcome } from '../src/pictures';
+import type {
+  BrowserStatus,
+  DrawInput,
+  PageCamera,
+  ShootInput,
+  Shot,
+  ShotOutcome,
+} from '../src/pictures';
 import { pngOfSize } from './png';
 
 // The browser for pictures is a child process 10db does not own: daemon tests take pictures with this.
@@ -8,6 +15,7 @@ export class FakeCamera implements PageCamera {
   readonly shots: ShootInput[] = [];
   /** The browser's state as each shot was asked. */
   readonly shotWhile: string[] = [];
+  readonly drawn: DrawInput[] = [];
   readonly signIns: string[] = [];
   /** Told of each shot as it is asked, before it is answered. */
   onShoot: ((input: ShootInput) => void) | null = null;
@@ -85,6 +93,20 @@ export class FakeCamera implements PageCamera {
             : null,
       cameraFailed,
     };
+  }
+  /** A mock-up drawn: always clean, sized as asked. */
+  drawHtml(input: DrawInput): Promise<Shot> {
+    this.drawn.push(input);
+    return Promise.resolve({
+      outcome: 'clean',
+      png: pngOfSize(input.viewport.width, input.viewport.height, 2),
+      width: input.viewport.width,
+      height: input.viewport.height,
+      landedUrl: null,
+      overlayText: null,
+      reason: null,
+      cameraFailed: false,
+    });
   }
   signIn(input: { url: string }): Promise<never> {
     this.signIns.push(input.url);

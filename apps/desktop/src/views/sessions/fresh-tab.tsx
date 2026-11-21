@@ -3,7 +3,7 @@ import { Alert, Box, Button, Group, Select, Text } from '@mantine/core';
 import { useElementSize } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
 import { Composer } from '../../conversation/composer';
-import { addFiles, FILE_PICKER_ACCEPT } from '../../conversation/dropped-files';
+import { addFiles } from '../../conversation/dropped-files';
 import { CONVERSATION_WIDTH } from '../../conversation/conversation-layout';
 import { composerPhase } from '../../conversation/composer-phase';
 import { applyDraftChange, hasContent, type DraftChange } from '../../conversation/drafts';
@@ -208,7 +208,6 @@ export function FreshTab({
               {...(tab.plan
                 ? {
                     uploads: {
-                      accept: FILE_PICKER_ACCEPT,
                       onFiles: (files: File[]) => {
                         setCreateError(null);
                         ensureChat(null, files).catch((error: unknown) => {
@@ -282,6 +281,7 @@ export function FreshTab({
             planChoice.set(tab.id, false);
           }}
           onWhy={() => undefined}
+          onAskForChanges={() => undefined}
         />
       ) : null}
     </Box>

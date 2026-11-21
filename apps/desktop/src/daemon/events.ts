@@ -4,6 +4,7 @@ import {
   DaemonEvent,
   EventsHead,
   EventType,
+  TaskId,
   GithubLoginEndedData,
 } from '@10db/contracts';
 import { useQueryClient, type QueryKey } from '@tanstack/react-query';
@@ -40,7 +41,7 @@ import { passKeys, writePassActivity } from './pass-queries';
 import { folderKeys } from './project-folder-queries';
 import { queryKeys } from './queries';
 import { shapeKeys } from './shape-queries';
-import { screenKeys } from './screen-queries';
+import { designCheckKeys, screenKeys } from './screen-queries';
 import { skipKeys } from './skip-queries';
 import { statusKeys } from './status-queries';
 import { trustKeys } from './trust-queries';
@@ -226,6 +227,11 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
       ])
         void queryClient.invalidateQueries({ queryKey });
       applyInboxEvent(queryClient, client, event);
+      // A lane's design check, or its verdict, was kept: only that task's drawer asks again.
+      if (event.type === EventType.TaskChanged && typeof event.data['designCheckId'] === 'string')
+        void queryClient.invalidateQueries({
+          queryKey: designCheckKeys.of(TaskId.parse(event.entityId)),
+        });
       if (event.type === EventType.AccountLoginEnded) {
         const ended = AccountLoginEndedData.safeParse(event.data);
         if (ended.success)

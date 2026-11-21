@@ -905,6 +905,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerSelfUpdateCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   // Started once recovery is through; a launch before then waits for no before picture.
   let pictures: Pictures | null = null;
+  // The on-demand pictures of a Design review and `check_design`, which run well after the pictures start.
+  const picturesNow: Pick<Pictures, 'shootNow' | 'drawMockup' | 'bytesOf'> = {
+    shootNow: (input) =>
+      pictures?.shootNow(input) ?? Promise.reject(new Error('Pictures have not started yet')),
+    drawMockup: (projectId, html) =>
+      pictures?.drawMockup(projectId, html) ??
+      Promise.reject(new Error('Pictures have not started yet')),
+    bytesOf: (sha256) => pictures?.bytesOf(sha256) ?? 0,
+  };
   let preview: Preview | null = null;
   // The API's port, once it listens: an app address may not name it, and no picture is taken before.
   let listenPort: number | null = null;
@@ -1727,6 +1736,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     filesDir: shapesDir,
     joiningProblem: (taskId) => starter.joiningProblem(taskId),
     screens,
+    pictures: picturesNow,
     jev: createShapeJev({
       state,
       judge,
@@ -2254,6 +2264,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onNoAnswer: (projectId) => {
       void previewNow.lost(projectId);
     },
+    // An on-demand picture (Design review, `check_design`) holds the preview up with no pass open.
+    holdApp: (projectId, say) => previewNow.hold(projectId, say),
     // 10db's own dev UI draws nothing without the daemon, so its pictures read it as Open Page's tab does.
     devUi: opts.devUiOrigin ? { origin: opts.devUiOrigin, token: devUiToken(opts.dataDir) } : null,
     state,
@@ -2276,6 +2288,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // Turn pictures go 14 days after their task is done: swept now and once a day.
   const picturePruning = startPruning({
+    planFilesDir: (shapeId) => join(shapesDir, shapeId),
     state,
     dataDir: opts.dataDir,
     clock,
@@ -2851,6 +2864,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       migrationsBase,
       dependencyChanges,
       shapeTools: shape.toolsFor,
+      pictures: picturesNow,
       chatTools: createChatTools({
         state,
         bus,

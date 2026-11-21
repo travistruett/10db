@@ -1,5 +1,4 @@
-import { isShapeImage, shapeFileKind } from '@10db/contracts';
-import { isImageName, tooBigAlone } from './inline-budget';
+import { isImageFile, tooBigAlone } from './inline-budget';
 import type { PictureLimits } from './picture-limits';
 
 // The API refuses an image over a per-image size (10 MB as base64 on the Claude API, 5 MB on Bedrock), over
@@ -10,6 +9,7 @@ import type { PictureLimits } from './picture-limits';
 export interface FileSize {
   readonly id: string;
   readonly name: string;
+  readonly mediaType: string;
   readonly size: number;
   /** Where the file is kept; its header is read to find a side the API would refuse. */
   readonly storedPath: string;
@@ -55,7 +55,7 @@ function imageVerdicts(
   const verdicts = new Map<string, 'inline' | PathReason>();
   let total = 0;
   for (const file of files) {
-    if (!isImageName(file.name)) continue;
+    if (!isImageFile(file)) continue;
     if (tooBigAlone(file, limits)) verdicts.set(file.id, 'too-big');
     else if (total + file.size > limits.messageMaxBytes) verdicts.set(file.id, 'message-full');
     else if (spent + total + file.size > limits.inlineMaxBytes)
@@ -83,8 +83,7 @@ export function pathImageReasons(
   const verdicts = imageVerdicts(sent, spent, limits);
   const reasons = new Map<string, PathReason>();
   for (const file of shown) {
-    const kind = shapeFileKind(file.name);
-    if (kind === null || !isShapeImage(kind)) continue;
+    if (!isImageFile(file)) continue;
     if (tooBigAlone(file, limits)) {
       reasons.set(file.id, 'too-big');
       continue;
@@ -93,4 +92,26 @@ export function pathImageReasons(
     if (verdict !== undefined && verdict !== 'inline') reasons.set(file.id, verdict);
   }
   return reasons;
+}
+
+/**
+ * Which of `sizes` (PNG bytes, in the order they matter) a tool result may carry as image blocks after
+ * `spent` bytes were sent earlier: each within the per-image cap, and together within the per-message cap and
+ * what is left of the conversation's. A resumed session resends every image, so one past the request limit
+ * would fail every later turn. Answers the indexes sent; the rest are left out.
+ */
+export function imagesWithinBudget(
+  sizes: readonly number[],
+  spent: number,
+  limits: PictureLimits,
+): number[] {
+  const room = Math.min(limits.messageMaxBytes, limits.inlineMaxBytes - spent);
+  let used = 0;
+  const sent: number[] = [];
+  sizes.forEach((bytes, index) => {
+    if (bytes > limits.imageMaxBytes || used + bytes > room) return;
+    used += bytes;
+    sent.push(index);
+  });
+  return sent;
 }

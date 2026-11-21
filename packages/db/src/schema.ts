@@ -24,6 +24,9 @@ import type {
   ClaimId,
   ClaimKind,
   DecisionId,
+  DesignCheckId,
+  DesignCheckPurpose,
+  DesignCheckShot,
   Delivery,
   DeviationId,
   Effort,
@@ -2463,6 +2466,40 @@ export const taskScreens = sqliteTable(
     index('task_screens_task_idx').on(t.taskId, t.createdAt),
     index('task_screens_sha_idx').on(t.sha256),
   ],
+);
+
+/**
+ * A mock-up drawn and its page shot as it is now, kept with the verdict (plan-in-sessions spec §4): one row
+ * per task checked, by a Design review of the plan (`task_id` null: its tasks are still plan rows, named by
+ * the mock-up's `attachment_id`) or by a lane's `check_design`. Its files lie under `screens/` by hash.
+ */
+export const designChecks = sqliteTable(
+  'design_checks',
+  {
+    id: text('id').$type<DesignCheckId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id),
+    shapeId: text('shape_id')
+      .$type<ShapeId>()
+      .references(() => shapes.id),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .references(() => tasks.id),
+    attachmentId: text('attachment_id')
+      .$type<ShapeAttachmentId>()
+      .notNull()
+      .references(() => shapeAttachments.id),
+    purpose: text('purpose').$type<DesignCheckPurpose>().notNull(),
+    /** The drawn mock-up's PNG hash; null when it could not be drawn. */
+    mockupSha256: text('mockup_sha256'),
+    shots: text('shots', { mode: 'json' }).$type<DesignCheckShot[]>().notNull(),
+    designMdPath: text('design_md_path'),
+    verdict: text('verdict'),
+    createdAt: createdAt(),
+  },
+  (t) => [index('design_checks_task_idx').on(t.taskId, t.createdAt)],
 );
 
 /**

@@ -18,6 +18,8 @@ const AREAS_OF_THE_PROJECT = /\(it has ([^)]+)\)/;
 /** A Plan review turn lists `- effortKey <key> · <title>`; a Check for Questions turn `- effortKey <e> · taskKey <t> · taskHash <h>`. */
 const REVIEW_EFFORT = /^- effortKey (\S+)/gm;
 const REHEARSE_TASK = /^- effortKey (\S+) · taskKey (\S+) · taskHash (\S+)/gm;
+/** A Design review turn lists `- effortKey <e> · taskKey <t>` for each task it compares. */
+const DESIGN_TASK = /^- effortKey (\S+) · taskKey (\S+)/gm;
 /** "mock it up" attaches a small mockup to the scripted goal's first task. */
 const MOCK_IT_UP = /\bmock it up\b/i;
 const MOCKUP_HTML = '<main><h1>Dense board</h1><p>Cards sit closer together.</p></main>';
@@ -142,9 +144,10 @@ export function scriptedShapeBehaviour(): FakeShapeBehaviour {
         BUILDER_MESSAGE_ID,
         '',
       );
-      // The two review turns the Review menu sends. The script reports as the reviewers do; its MCP calls
+      // The three review turns the Review menu sends. The script reports as the reviewers do; its MCP calls
       // bypass the session's hook, which stamps the reviewer from the subagent's type.
-      const trimmed = text.trim();
+      // The plan's `[note]` and `[file]` lines (an approval, an edit, a drop) go ahead of the ask.
+      const trimmed = text.replace(/^(?:\[(?:note|file)\] .*\n)+/, '').trim();
       if (trimmed.startsWith('Plan review:')) {
         const efforts = [...trimmed.matchAll(REVIEW_EFFORT)].map((m) => m[1] ?? '');
         for (const effortKey of efforts)
@@ -158,6 +161,21 @@ export function scriptedShapeBehaviour(): FakeShapeBehaviour {
             },
           });
         return { text: `Reviewed ${String(efforts.length)}.` };
+      }
+      if (trimmed.startsWith('Design review:')) {
+        const tasks = [...trimmed.matchAll(DESIGN_TASK)];
+        for (const [, effortKey, taskKey] of tasks)
+          await call('report_finding', {
+            effortKey,
+            taskKey,
+            reviewer: 'design',
+            finding: {
+              kind: 'finding',
+              severity: 'low',
+              text: 'The mock-up leaves out the empty state.',
+            },
+          });
+        return { text: `Compared ${String(tasks.length)}.` };
       }
       if (trimmed.startsWith('Rehearse:')) {
         const tasks = [...trimmed.matchAll(REHEARSE_TASK)];

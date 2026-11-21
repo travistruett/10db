@@ -23,6 +23,19 @@ const LABEL: Readonly<Record<string, string>> = {
   [ShapeFileKind.Pdf]: 'PDF',
 };
 
+const SIGNED_KINDS: readonly ShapeFileKind[] = [
+  ShapeFileKind.Png,
+  ShapeFileKind.Jpeg,
+  ShapeFileKind.Webp,
+  ShapeFileKind.Pdf,
+];
+
+/** The image or PDF kind the bytes' magic number names, or null. */
+export function signedKind(bytes: Uint8Array): ShapeFileKind | null {
+  for (const kind of SIGNED_KINDS) if (SIGNATURES[kind]?.(bytes) === true) return kind;
+  return null;
+}
+
 /** A name with no directory in it and nothing a terminal would act on. */
 export function safeFileName(name: string): string {
   const base = basename(name.replaceAll('\\', '/'))

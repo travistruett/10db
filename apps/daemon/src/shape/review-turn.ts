@@ -5,7 +5,11 @@ import { InvalidError, ShapeReviewer, type ConversationItemId } from '@10db/cont
 // not the model, says whose findings they are.
 
 /** The kind of review a live review turn is. */
-export const ReviewTurnKind = { PlanReview: 'review', CheckForQuestions: 'rehearse' } as const;
+export const ReviewTurnKind = {
+  PlanReview: 'review',
+  CheckForQuestions: 'rehearse',
+  DesignReview: 'design_review',
+} as const;
 export type ReviewTurnKind = (typeof ReviewTurnKind)[keyof typeof ReviewTurnKind];
 
 /** A review turn that is running: the item that started it, and which review it is. */
@@ -18,7 +22,7 @@ export interface ShapeReviewTurn {
  * The input of a finding the main session reports while the `reviews` it has been sent are live, with
  * `reviewer` set from them. A Check for Questions reports as the rehearsal, which is the report that names
  * `rehearsal` or carries a `taskHash` (or the only one live); a Plan review names the lens it reads
- * through, scope or engineering, which is bookkeeping and no limit.
+ * through, scope or engineering, which is bookkeeping and no limit; a Design review reports as `design`.
  */
 export function stampReview(
   reviews: readonly ShapeReviewTurn[],
@@ -26,10 +30,13 @@ export function stampReview(
 ): Record<string, unknown> {
   const checking = reviews.some((r) => r.kind === ReviewTurnKind.CheckForQuestions);
   const reviewing = reviews.some((r) => r.kind === ReviewTurnKind.PlanReview);
-  if (!checking && !reviewing)
+  const designing = reviews.some((r) => r.kind === ReviewTurnKind.DesignReview);
+  if (!checking && !reviewing && !designing)
     throw new InvalidError(
       'Only a reviewer reports a finding; the main session cannot, outside a review turn.',
     );
+  if (designing && (input['reviewer'] === ShapeReviewer.Design || (!checking && !reviewing)))
+    return { ...input, reviewer: ShapeReviewer.Design };
   const asked = input['reviewer'] === ShapeReviewer.Rehearsal || input['taskHash'] !== undefined;
   if (checking && (asked || !reviewing)) return { ...input, reviewer: ShapeReviewer.Rehearsal };
   const lens = input['reviewer'];
