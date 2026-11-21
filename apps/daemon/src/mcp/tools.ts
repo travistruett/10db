@@ -80,6 +80,7 @@ import { buildContextPack, quoteSlackAnswer } from '../briefing';
 import {
   checkoutOf,
   MIGRATIONS_HAZARD,
+  runCommits,
   type DependencyChanges,
   type MigrationsBase,
 } from '../delivery';
@@ -1218,10 +1219,11 @@ export function createToolHandlers(
       const checkout = checkoutOf(db, row);
       const head = await deps.git.head(checkout);
       const base = row.baseHead ?? head;
-      const [changed, commits] = await Promise.all([
+      const [changed, run] = await Promise.all([
         deps.git.changedFilesSince(checkout, base),
-        deps.git.commitsSince(checkout, base),
+        runCommits({ db, git: deps.git }, row, checkout, base, head),
       ]);
+      const commits = [...run.commits];
       return deps.state.write((ctx) => {
         const handoff = insertHandoff(ctx, {
           workstreamId,

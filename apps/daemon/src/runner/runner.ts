@@ -7,6 +7,8 @@ import {
   JudgeDecision,
   JudgeOutcome,
   Approval,
+  McpToolName,
+  McpToolOutputs,
   ConflictError,
   currentStep,
   EventType,
@@ -167,6 +169,7 @@ import {
   getTaskStartDirt,
   recordTaskStartDirt,
   taskHasRunASession,
+  listToolOpResults,
 } from '@10db/db';
 import {
   BACKGROUND_DONE_NUDGE,
@@ -4187,6 +4190,10 @@ export function createRunner(opts: RunnerOptions): Runner {
       paths,
       record: getTaskStartDirt(db, row.taskId),
       lastSession: listSessions(db, id).at(-1)?.id ?? null,
+      leaves: listToolOpResults(db, id, McpToolName.ReportDeviation).filter(
+        (result) =>
+          (McpToolOutputs.report_deviation.safeParse(result).data?.leftUncommitted.length ?? 0) > 0,
+      ).length,
     });
     const attempt = free ? row.attempt : row.attempt + 1;
     if (attempt > opts.limits.maxFixAttempts) {
@@ -4868,9 +4875,9 @@ export function createRunner(opts: RunnerOptions): Runner {
               body: 'The agent ended its turn twice after being asked for a handoff; 10db is verifying the work as it stands.',
             });
           }
-          // The paths a sent-back session was asked to commit, so the send-back after it can tell new ones.
-          const sent = getWorkstreamRow(db, id).nextAction;
-          opts.state.write((ctx) =>
+          opts.state.write((ctx) => {
+            // The paths a sent-back session was asked to commit, so the send-back after it can tell new ones.
+            const sent = getWorkstreamRow(ctx.tx, id).nextAction;
             transitionWorkstream(ctx, id, {
               to: S.Verifying,
               fence: ctl.fence,
@@ -4885,8 +4892,8 @@ export function createRunner(opts: RunnerOptions): Runner {
                 : outcome.unaskedRun !== null
                   ? `step complete after ${String(outcome.unaskedRun)} handoffs in a row that nobody asked for`
                   : 'step complete',
-            }),
-          );
+            });
+          });
           continue;
         }
         await settleLane(id, ctl, outcome);

@@ -27,11 +27,11 @@ function committedByRun(db: DbReader, row: WorkstreamRow): Set<string> {
 }
 
 /**
- * The run's commits from `base` to `head`. The builder's own checkout is shared: the builder and other
- * tools commit on its branch too, so only the commits the run's sessions made through the commit tool
- * are the run's, and a commit of anyone else's between two of them splits their history in two
- * ranges. A worktree's branch holds only 10db's commits, base merges included: every commit is the
- * run's, in one range from `base` to `head`.
+ * The run's commits from `base` to `head`, each range starting at its first commit's parent. The
+ * builder's own checkout is shared: the builder and other tools commit on its branch too, so only the
+ * commits the run's sessions made through the commit tool are the run's, and a commit of anyone
+ * else's between two of them splits their history in two ranges. A worktree's branch holds only
+ * 10db's commits, base merges included: every commit is the run's, in one range from `base` to `head`.
  */
 export async function runCommits(
   deps: { readonly db: DbReader; readonly git: Pick<Git, 'commitsSince'> },
@@ -46,15 +46,14 @@ export async function runCommits(
   const own = committedByRun(deps.db, row);
   const ranges: CommitRange[] = [];
   let open: { base: string; head: string } | null = null;
-  let before = base;
   for (const sha of all) {
-    if (own.has(sha)) {
-      if (open === null) {
-        open = { base: before, head: sha };
-        ranges.push(open);
-      } else open.head = sha;
-    } else open = null;
-    before = sha;
+    if (!own.has(sha)) open = null;
+    else if (open !== null) open.head = sha;
+    else {
+      // From the commit's own first parent: `base` need not be one, as after the builder reset the branch.
+      open = { base: `${sha}^`, head: sha };
+      ranges.push(open);
+    }
   }
   return { commits: all.filter((sha) => own.has(sha)), ranges };
 }
