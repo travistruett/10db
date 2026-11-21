@@ -17,16 +17,20 @@ export interface ChatLive {
    */
   readonly planRules: { peek(): string | null; take(): string | null } | null;
   /**
-   * The review turn the session is in, for a session that runs no subagents: it does Plan's reviews itself, and
-   * only while this is set may its own `report_finding` pass. Null otherwise, and always null with subagents.
+   * The reviews the session has been sent and is doing now, for a session that runs no subagents: it does Plan's
+   * reviews itself, and only while one is live may its own `report_finding` pass. Always empty with subagents.
    */
-  readonly review: () => ShapeReviewTurn | null;
+  readonly review: () => readonly ShapeReviewTurn[];
+  /** Whether this session runs no subagents, so does Plan's reviews itself. */
+  readonly inSession: () => boolean;
 }
 
 export interface ChatLiveSessions {
   open(conversationId: ConversationId, live: ChatLive): void;
   /** Forgets the session, unless a later one of the conversation took its place. */
   end(conversationId: ConversationId, sessionId: SessionId): void;
+  /** The conversation's open session, whoever it is. */
+  current(conversationId: ConversationId): ChatLive | null;
   /** The conversation's open session, when it is this one. */
   get(conversationId: ConversationId, sessionId: SessionId): ChatLive | null;
 }
@@ -40,6 +44,7 @@ export function createChatLiveSessions(): ChatLiveSessions {
     end(conversationId, sessionId) {
       if (open.get(conversationId)?.sessionId === sessionId) open.delete(conversationId);
     },
+    current: (conversationId) => open.get(conversationId) ?? null,
     get(conversationId, sessionId) {
       const live = open.get(conversationId);
       return live?.sessionId === sessionId ? live : null;

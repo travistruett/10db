@@ -134,7 +134,7 @@ export function judgeChatCall(
   call: ChatCall,
   access: ShapeAccess,
   folder?: ChatPlace,
-  review?: () => ShapeReviewTurn | null,
+  review?: () => readonly ShapeReviewTurn[],
 ): ShapeVerdict {
   const asSession = {
     toolName: call.toolName,

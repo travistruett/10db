@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import type { SessionId, ShapeId } from '@10db/contracts';
+import type { ConversationItemId, SessionId, ShapeId } from '@10db/contracts';
 import {
   ChatToolName,
   FolderAsker,
@@ -286,9 +286,14 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
   /** The plan of a conversation's chat, or null. */
   const planOf = (conv: ConversationRow): ShapeId | null => planOfConversation(state.db, conv.id);
   /** Whether the conversation's agent runs Plan's subagents on the account and model it runs on now. */
-  const subagentsOf = (conv: ConversationRow): boolean => {
-    const launch = deps.launch(conv.projectId, conv.model, conv.effort);
-    return deps.subagentsOf(launch.account.kind, launch.modelId);
+  const subagentsKnown = (conv: ConversationRow): boolean => {
+    try {
+      const launch = deps.launch(conv.projectId, conv.model, conv.effort);
+      return deps.subagentsOf(launch.account.kind, launch.modelId);
+    } catch {
+      // A launch that can't be read reads as the agent form: the session's own start settles the rest.
+      return true;
+    }
   };
   const describe = (conv: ConversationRow, model: string | null) => {
     const launch = deps.launch(conv.projectId, model, conv.effort);
@@ -324,11 +329,18 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
     ConversationId,
     { readonly sessionId: SessionId; peek(): string | null; take(): string | null }
   >();
-  // The session of each conversation that runs no subagents, where its review turn is set while the turn
-  // runs: Plan's reviews are done in the session, and its `report_finding` is allowed only meanwhile.
+  // Each conversation's open session: whether it runs no subagents, so does Plan's reviews itself, and the
+  // reviews it has been sent that are still live (by the starter's id, with the turn ends seen since). A
+  // session with no subagents may report a finding only while one is live. A review is live from its send
+  // until a turn that listed it ends; an item injected into a running turn is no starter of it, so a review
+  // also ends at the second turn end after its send, which no handover to the next turn outlasts.
   const reviewing = new Map<
     ConversationId,
-    { readonly sessionId: SessionId; set(turn: ShapeReviewTurn | null): void }
+    {
+      readonly sessionId: SessionId;
+      readonly inSession: boolean;
+      readonly live: Map<ConversationItemId, { kind: ReviewTurnKind; ends: number }>;
+    }
   >();
   // Each chat's release of Your folder that waits for its jobs to stop. The chat's next turn cancels it: the
   // hold stays with the chat, and what is stopped meanwhile is the turn's before.
@@ -532,13 +544,17 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               },
             }
           : null;
-      let reviewTurn: ShapeReviewTurn | null = null;
+      const liveReviews = new Map<ConversationItemId, { kind: ReviewTurnKind; ends: number }>();
+      const reviewTurns = (): readonly ShapeReviewTurn[] =>
+        [...liveReviews].map(([id, r]) => ({ id, kind: r.kind }));
+      let noSubagents = false;
       deps.live.open(conv.id, {
         sessionId: start.sessionId,
         observer: start.observer,
         signal: ending.signal,
         planRules,
-        review: () => reviewTurn,
+        review: reviewTurns,
+        inSession: () => noSubagents,
       });
       holdingSession.set(chat.id, start.sessionId);
       const endJobs = ready === null ? undefined : () => ready.endJobs();
@@ -609,13 +625,12 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         deps.webSearchOf(launch.account.kind, launch.modelId) &&
         (providerOf(launch.account.kind) === Provider.Claude || switches.web);
       const subagents = deps.subagentsOf(launch.account.kind, launch.modelId);
-      if (!subagents)
-        reviewing.set(conv.id, {
-          sessionId: start.sessionId,
-          set: (turn) => {
-            reviewTurn = turn;
-          },
-        });
+      noSubagents = !subagents;
+      reviewing.set(conv.id, {
+        sessionId: start.sessionId,
+        inSession: noSubagents,
+        live: liveReviews,
+      });
       // The web the session has: the chat's confinement refuses Claude's web tools on any judge but auto
       // mode's, while Codex's own search needs no tool call and runs under the Web switch.
       const web =
@@ -713,7 +728,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
                 judge: judgeForCall(judge, req.reportedMode ?? null, tendbReady),
               },
               folder,
-              () => reviewTurn,
+              reviewTurns,
             );
             return readsNow()?.preToolUse(req, verdict) ?? verdict;
           },
@@ -753,7 +768,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
                         chatCallOf(req),
                         { ...access, judge: JudgeKind.Rules },
                         folder,
-                        () => reviewTurn,
+                        reviewTurns,
                       );
                       // A rewrite of the call is the guard's; its decision is what the floor gives.
                       return 'updatedInput' in floor ? { decision: 'allow' } : floor;
@@ -832,7 +847,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           ? deps.plan.inlineSpent(shapeId, session.limits)
           : heldInlineBytes(listFiles(state.db, conv.id), session.limits);
       const review = reviewOf(item);
-      const inSession = !subagentsOf(conv);
+      const inSession = reviewing.get(conv.id)?.inSession ?? !subagentsKnown(conv);
       const out = outgoingMessage(
         deliverable(state, item, inSession),
         spent,
@@ -845,8 +860,9 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         return { text: out.text, images: out.images, blocks: out.blocks, sent: () => undefined };
       // A review the session does itself is its review turn from the send until the turn ends.
       const startReview = (): void => {
-        if (review !== null && inSession)
-          reviewing.get(conv.id)?.set({ id: item.id, kind: review.kind });
+        const open = reviewing.get(conv.id);
+        if (review !== null && open?.inSession === true)
+          open.live.set(item.id, { kind: review.kind, ends: 0 });
       };
       // The plan's lines go ahead of the message, and its pictures join the message's under the one budget.
       const sentAsBlocks = new Set<string>(out.blocks);
@@ -880,7 +896,10 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
     },
 
     onTurnEnded(conv, end) {
-      reviewing.get(conv.id)?.set(null);
+      for (const [id, review] of reviewing.get(conv.id)?.live ?? []) {
+        review.ends += 1;
+        if (end.starters.includes(id) || review.ends >= 2) reviewing.get(conv.id)?.live.delete(id);
+      }
       const chat = chatOf(conv);
       state.write((ctx) => {
         touchChat(ctx, chat.id, deps.now().toISOString());

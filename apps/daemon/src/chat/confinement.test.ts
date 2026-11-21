@@ -508,29 +508,45 @@ describe('a chat with a plan', () => {
       });
   });
 
-  it('lets a session with no subagents report a finding only during its review turn, as that review', () => {
-    // A Codex session runs no reviewers: its own report_finding passes while a review turn is live.
-    const turn = { id: 'cvi_review' as ConversationItemId, kind: 'review' } as const;
-    let live: ShapeReviewTurn | null = turn;
+  it('lets a session with no subagents report only while a review it was sent is live, stamped from the live reviews', () => {
+    // A Codex session runs no reviewers: its own report_finding passes while a review is live.
+    const planReview = { id: 'cvi_review' as ConversationItemId, kind: 'review' } as const;
+    const check = { id: 'cvi_check' as ConversationItemId, kind: 'rehearse' } as const;
+    let live: readonly ShapeReviewTurn[] = [planReview];
     const judge = (call: ReturnType<typeof mcp>) =>
       judgeChatCall(call, withPlan(), undefined, () => live);
     expect(judge(mcp('report_finding')).decision).toBe('allow');
-    // The review, not the model, says whose finding it is.
-    expect(stampReview(turn, { effortKey: 'e', reviewer: 'engineering' })).toMatchObject({
+    expect(stampReview(live, { effortKey: 'e', reviewer: 'engineering' })).toMatchObject({
       reviewer: 'engineering',
     });
-    expect(() => stampReview(turn, { effortKey: 'e', reviewer: 'rehearsal' })).toThrow();
+    expect(() => stampReview(live, { effortKey: 'e', reviewer: 'rehearsal' })).toThrow();
+    expect(stampReview([check], { effortKey: 'e', reviewer: 'scope' })).toMatchObject({
+      reviewer: 'rehearsal',
+    });
+    // Both live at once (a second press injected into the first's turn): each report is its own review's.
+    live = [planReview, check];
+    expect(stampReview(live, { effortKey: 'e', reviewer: 'scope' })).toMatchObject({
+      reviewer: 'scope',
+    });
     expect(
-      stampReview({ ...turn, kind: 'rehearse' }, { effortKey: 'e', reviewer: 'scope' }),
+      stampReview(live, { effortKey: 'e', taskKey: 't', taskHash: 'h', reviewer: 'scope' }),
     ).toMatchObject({ reviewer: 'rehearsal' });
-    // Every other main-session path keeps its rule: once the turn ends the report is refused.
-    live = null;
+    expect(stampReview(live, { effortKey: 'e', reviewer: 'rehearsal' })).toMatchObject({
+      reviewer: 'rehearsal',
+    });
+    // The handover: turn N's end drops only what it took, so the review handed to N+1 still reports.
+    live = live.filter((r) => r.id !== planReview.id);
+    expect(judge(mcp('report_finding')).decision).toBe('allow');
+    expect(stampReview(live, { effortKey: 'e' })).toMatchObject({ reviewer: 'rehearsal' });
+    // Once none is live the report is refused.
+    live = [];
     expect(judge(mcp('report_finding')).decision).toBe('deny');
+    expect(() => stampReview(live, { effortKey: 'e', reviewer: 'scope' })).toThrow();
     // Claude's rule is unchanged: a tendb-* reviewer reports, stamped from its type; the main session, never.
     expect(judge(mcp('report_finding', { agentId: 'a1', agentType: 'tendb-scope' }))).toMatchObject(
       { decision: 'allow', updatedInput: { reviewer: 'scope' } },
     );
-    live = turn;
+    live = [planReview];
     expect(judge(mcp('report_finding', { agentId: 'a1', agentType: 'scope' })).decision).toBe(
       'deny',
     );

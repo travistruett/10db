@@ -129,6 +129,13 @@ export interface ShapeServiceDeps {
   readonly owedRules?: ShapeToolDeps['owedRules'];
   /** The review turn a chat's session is in; see `ShapeToolDeps.reviewOf`. */
   readonly reviewOf?: ShapeToolDeps['reviewOf'];
+  /** Whether a chat's session runs no subagents; see `ShapeToolDeps.noSubagents`. */
+  readonly noSubagents?: ShapeToolDeps['noSubagents'];
+  /**
+   * The conversation's open session, when it does Plan's reviews itself: whether it has one live. Null
+   * for a session with subagents or none open.
+   */
+  readonly reviewBusy?: (conversationId: ConversationId) => boolean | null;
   /**
    * Resolves a project's launch, on `model` (an ID the account lists) or, with null, on the `plan`
    * role's, at the conversation's own `effort` or, with null, the role's; throws when its account can't
@@ -329,6 +336,19 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       const shapeId = planOfConversation(state.db, c.id);
       return shapeId === null ? [] : [{ conversation: c, shapeId }];
     });
+  /**
+   * A session that does Plan's reviews itself takes one at a time: a press of either kind is refused while
+   * another review press waits or its turn runs, so two reviews never share a turn there.
+   */
+  const reviewInSessionBusy = (shapeId: ShapeId): boolean => {
+    const busy = deps.reviewBusy?.(conversationOf(shapeId)) ?? null;
+    return (
+      busy !== null &&
+      (busy ||
+        pressPending(shapeId, ShapeEventKind.Review) ||
+        pressPending(shapeId, ShapeEventKind.Rehearse))
+    );
+  };
   /** A press of `kind` waits or runs: queued, or handed to a session and not taken yet. */
   const pressPending = (shapeId: ShapeId, kind: ShapeEventKind): boolean => {
     const conversation = conversationOf(shapeId);
@@ -423,6 +443,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         world: worldOfShape,
         ...(deps.owedRules === undefined ? {} : { owedRules: deps.owedRules }),
         ...(deps.reviewOf === undefined ? {} : { reviewOf: deps.reviewOf }),
+        ...(deps.noSubagents === undefined ? {} : { noSubagents: deps.noSubagents }),
       },
       chat,
     );
@@ -566,7 +587,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     rehearse(shapeId, proposalIds) {
       const tasks = unrehearsedTasks(state.db, shapeId, proposalIds);
       if (tasks.length === 0) return { status: 'nothing', tasks: 0 };
-      if (pressPending(shapeId, ShapeEventKind.Rehearse))
+      if (pressPending(shapeId, ShapeEventKind.Rehearse) || reviewInSessionBusy(shapeId))
         return { status: 'running', tasks: tasks.length };
       const { note, instruction, inSession } = rehearseNote(tasks);
       // The note is a row in the transcript, and the turn lists each task at the hash it was read at.
@@ -587,7 +608,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     review(shapeId, proposalIds) {
       const rows = reviewEfforts(state.db, shapeId, proposalIds);
       if (rows.length === 0) return { status: 'nothing', tasks: 0 };
-      if (pressPending(shapeId, ShapeEventKind.Review))
+      if (pressPending(shapeId, ShapeEventKind.Review) || reviewInSessionBusy(shapeId))
         return { status: 'running', tasks: rows.length };
       const { note, instruction, inSession } = reviewNote(rows);
       state.write((ctx) =>

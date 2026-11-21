@@ -412,7 +412,7 @@ function judgeWeb(call: ShapeCall, judge: JudgeKind | undefined): GuardVerdict {
  */
 export function judgePlanTool(
   call: ShapeCall,
-  review?: () => ShapeReviewTurn | null,
+  review?: () => readonly ShapeReviewTurn[],
 ): ShapeVerdict {
   const name = call.toolName.slice(MCP_PREFIX.length);
   if (!SHAPE_TOOLS.has(name)) return deny(`${call.toolName} is not a Shape tool.`);
@@ -420,7 +420,7 @@ export function judgePlanTool(
   if (name !== REVIEWER_TOOL)
     return isReviewer ? deny(`A reviewer cannot call ${name}; it reports findings only.`) : ALLOW;
   if (!isReviewer)
-    return (review?.() ?? null) === null
+    return (review?.().length ?? 0) === 0
       ? deny('Only a reviewer reports a finding; the main session cannot, outside a review turn.')
       : ALLOW;
   const reviewer = call.agentType;

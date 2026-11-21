@@ -15,16 +15,23 @@ export interface ShapeReviewTurn {
 }
 
 /**
- * The input of a finding the main session reports during `review`, with `reviewer` set from the review.
- * A Check for Questions reports as the rehearsal; a Plan review names the lens it reads through, scope or
- * engineering, which is bookkeeping and no limit.
+ * The input of a finding the main session reports while the `reviews` it has been sent are live, with
+ * `reviewer` set from them. A Check for Questions reports as the rehearsal, which is the report that names
+ * `rehearsal` or carries a `taskHash` (or the only one live); a Plan review names the lens it reads
+ * through, scope or engineering, which is bookkeeping and no limit.
  */
 export function stampReview(
-  review: ShapeReviewTurn,
+  reviews: readonly ShapeReviewTurn[],
   input: Record<string, unknown>,
 ): Record<string, unknown> {
-  if (review.kind === ReviewTurnKind.CheckForQuestions)
-    return { ...input, reviewer: ShapeReviewer.Rehearsal };
+  const checking = reviews.some((r) => r.kind === ReviewTurnKind.CheckForQuestions);
+  const reviewing = reviews.some((r) => r.kind === ReviewTurnKind.PlanReview);
+  if (!checking && !reviewing)
+    throw new InvalidError(
+      'Only a reviewer reports a finding; the main session cannot, outside a review turn.',
+    );
+  const asked = input['reviewer'] === ShapeReviewer.Rehearsal || input['taskHash'] !== undefined;
+  if (checking && (asked || !reviewing)) return { ...input, reviewer: ShapeReviewer.Rehearsal };
   const lens = input['reviewer'];
   if (lens === ShapeReviewer.Scope || lens === ShapeReviewer.Engineering)
     return { ...input, reviewer: lens };

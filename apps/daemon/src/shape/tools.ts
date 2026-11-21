@@ -44,11 +44,13 @@ export interface ShapeToolDeps {
   };
   /** Takes the planning rules the calling session is owed, once (`ChatLive.planRules`). */
   readonly owedRules?: (conversationId: ConversationId, sessionId: SessionId) => string | null;
-  /** The review turn the calling session is in (`ChatLive.review`): its own findings are stamped from it. */
+  /** Whether the calling session runs no subagents (`ChatLive.inSession`). */
+  readonly noSubagents?: (conversationId: ConversationId, sessionId: SessionId) => boolean;
+  /** The reviews the calling session has been sent (`ChatLive.review`): its own findings are stamped from it. */
   readonly reviewOf?: (
     conversationId: ConversationId,
     sessionId: SessionId,
-  ) => ShapeReviewTurn | null;
+  ) => readonly ShapeReviewTurn[];
 }
 
 /** The chat a handler set serves: the session's tools are held to it. */
@@ -178,9 +180,19 @@ export function createShapeToolHandlers(
     report_finding: (input) => {
       // A session in a review turn reports as that review; the model's own `reviewer` is only the lens a
       // plan review reads through. A reviewer subagent's call arrives stamped by the hook, outside any turn.
-      const review = deps.reviewOf?.(chat.conversationId, chat.sessionId) ?? null;
+      const reviews = deps.reviewOf?.(chat.conversationId, chat.sessionId) ?? [];
+      // A session with no subagents reports only as its live review. One with none left (Stop raced the
+      // hook) is refused, never written unstamped. A reviewer subagent's call arrives stamped.
+      if (deps.noSubagents?.(chat.conversationId, chat.sessionId) === true && reviews.length === 0)
+        return Promise.reject(
+          new InvalidError(
+            'Only a reviewer reports a finding; this session has no review turn running.',
+          ),
+        );
       const stamped =
-        review === null ? input : ShapeToolInputs.report_finding.parse(stampReview(review, input));
+        reviews.length === 0
+          ? input
+          : ShapeToolInputs.report_finding.parse(stampReview(reviews, input));
       return withPlan((shapeId) => deps.state.write((ctx) => reportFinding(ctx, shapeId, stamped)));
     },
     resolve_finding: (input) =>
