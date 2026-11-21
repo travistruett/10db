@@ -76,7 +76,7 @@ export {
 export { recoverBatches } from './recover';
 export { moveRetiredLandings } from './retired-landings';
 export { checkoutChanges, workstreamChanges } from './workstream-changes';
-export { diffOfRanges, runCommits, type CommitRange, type RunCommits } from './run-commits';
+export { diffOfRanges, runCommits } from './run-commits';
 export {
   allCheckouts,
   checkoutOf,
