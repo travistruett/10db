@@ -192,6 +192,7 @@ import type {
   ShapeMeasuresDto,
   ShapeAcceptId,
   ShapeUndoAcceptResult,
+  ShapeStartCountsDto,
   ShapeId,
   ShapeMessageDto,
   ShapeOfDto,
@@ -551,6 +552,8 @@ export interface ApiServices extends PlanRecordServices {
    * ConflictError (409), in words, for a task that has a run or a dependent.
    */
   undoShapeAccept(shapeId: ShapeId, acceptId: ShapeAcceptId): ShapeUndoAcceptResult;
+  /** What Accept and Start would do with these pending proposals, for the confirm; writes nothing. */
+  shapeStartCounts(shapeId: ShapeId, proposalIds: readonly ShapeProposalId[]): ShapeStartCountsDto;
   /** Withdraw Decision: a decision the conversation wrote; throws ConflictError unless it is the head of its chain. */
   withdrawShapeDecision(shapeId: ShapeId, decisionId: DecisionId, reason: string): void;
   /** Withdraw Principle: a principle the conversation wrote; throws ConflictError once a later principle replaced it. */

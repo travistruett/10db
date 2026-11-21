@@ -7,6 +7,7 @@ import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-se
 import {
   AccountKind,
   ConversationOwnerKind,
+  Delivery,
   type ChatId,
   type ConversationId,
   EventType,
@@ -2504,7 +2505,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       fetch: opts.fetch ?? fetch,
       reconnect: () => replyWatch.reconnect(),
     }),
-    shape: createShapeServices({ shape, state, clock }),
+    shape: createShapeServices({
+      shape,
+      state,
+      clock,
+      log: logger.child({ component: 'shape-services' }),
+      // Reads `services` at call time, as the follow-up starter does.
+      startTasks: async (projectId, title, taskIds) => {
+        await services.settleSizing(taskIds);
+        if (getProject(db, projectId).delivery === Delivery.PullRequest)
+          services.startBatch(projectId, { title, taskIds: [...taskIds] });
+        else for (const id of taskIds) services.startTask(id);
+      },
+    }),
     conversation: createConversationServices({
       state,
       engine: exploreEngine,

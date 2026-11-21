@@ -1,3 +1,4 @@
+export { finished as taskFinished, unfinishedDependencies, type BlockedTask } from './deps';
 export { batchBranchName } from './branch-name';
 export {
   createBaseUpdates,

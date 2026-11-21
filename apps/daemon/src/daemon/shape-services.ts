@@ -1,4 +1,16 @@
-import type { ShapeConvertedRow, ShapeId, ShapeOfDto } from '@10db/contracts';
+import {
+  DomainError,
+  ShapeProposalKind,
+  Delivery,
+  type ProjectId,
+  type ShapeAcceptId,
+  type ShapeConvertedRow,
+  type ShapeId,
+  type ShapeOfDto,
+  type ShapeStartOutcome,
+  type TaskDto,
+  type TaskId,
+} from '@10db/contracts';
 import {
   findShapeLinkOfGoal,
   findShapeLinkOfTask,
@@ -6,13 +18,25 @@ import {
   getShape,
   chatOfShape,
   getShapeJevOptIn,
+  getTask,
+  latestWorkstreamOf,
+  listAcceptedProposals,
+  listShapeLinks,
   questionCardRates,
   setShapeJevOptIn,
 } from '@10db/db';
 import type { ApiServices } from '../api';
 import type { Clock } from '../clock';
+import { unfinishedDependencies } from '../delivery';
+import type { Logger } from '../log';
 import type { StateStore } from '../events';
-import { shadowAgreement, sizingMeasure, type ShapeService } from '../shape';
+import {
+  shadowAgreement,
+  sizingMeasure,
+  START_CAP,
+  startCounts,
+  type ShapeService,
+} from '../shape';
 
 /** Shape's side of the HTTP API: conversations, their messages, Propose, Convert and the two undos. */
 export type ShapeApiServices = Pick<
@@ -21,6 +45,7 @@ export type ShapeApiServices = Pick<
   | 'getShapeView'
   | 'chooseShapeModel'
   | 'convertShape'
+  | 'shapeStartCounts'
   | 'removeDraftGoal'
   | 'undoShapeAccept'
   | 'withdrawShapeDecision'
@@ -47,8 +72,85 @@ export function createShapeServices(deps: {
   readonly shape: ShapeService;
   readonly state: StateStore;
   readonly clock: Clock;
+  readonly log: Logger;
+  /** Starts the tasks through the starter Start Ready Tasks uses, after sizing settles. */
+  readonly startTasks: (
+    projectId: ProjectId,
+    title: string,
+    taskIds: readonly TaskId[],
+  ) => Promise<void>;
 }): ShapeApiServices {
-  const { shape, state } = deps;
+  const { shape, state, log } = deps;
+
+  /**
+   * Starts what the Accept made and is ready: the same rule as the confirm's counts, over the made
+   * tasks as they stand. Every error after the Accept committed becomes `refused`, since the Accept stands.
+   */
+  const startAccepted = async (
+    shapeId: ShapeId,
+    acceptId: ShapeAcceptId | null,
+  ): Promise<ShapeStartOutcome> => {
+    if (acceptId === null) return { started: [], left: [], refused: null };
+    const proposals = listAcceptedProposals(state.db, acceptId).filter(
+      (p) => p.kind === ShapeProposalKind.Goal || p.kind === ShapeProposalKind.Task,
+    );
+    const ofAccept = new Set(proposals.map((p) => p.id));
+    const madeIds = [
+      ...new Set(
+        listShapeLinks(state.db, shapeId).flatMap((l) =>
+          l.taskId !== null && ofAccept.has(l.proposalId) ? [l.taskId] : [],
+        ),
+      ),
+    ];
+    const made: TaskDto[] = madeIds.map((id) => getTask(state.db, id));
+    const byId = new Map(made.map((t) => [t.id, t]));
+    const outside = new Map(
+      unfinishedDependencies(state.db, made, new Set(madeIds)).map((b) => [
+        b.task.id,
+        b.deps.map((d) => d.title),
+      ]),
+    );
+    const counts = startCounts({
+      tasks: made.map((t) => ({
+        key: t.id,
+        title: t.title,
+        place: t.workspaceMode,
+        waitsOnStart: t.dependsOn.filter((id) => byId.has(id)),
+        waitsOutside: outside.get(t.id) ?? [],
+      })),
+      startsAtOnce: new Set(),
+      local:
+        getProject(state.db, getShape(state.db, shapeId).projectId).delivery !==
+        Delivery.PullRequest,
+      cap: START_CAP,
+    });
+    const startIds = counts.startKeys.flatMap((key) => {
+      const task = byId.get(key as TaskId);
+      return task === undefined ? [] : [task.id];
+    });
+    const left = counts.leftKeys.flatMap(({ key, why }) => {
+      const task = byId.get(key as TaskId);
+      return task === undefined ? [] : [{ taskId: task.id, title: task.title, why }];
+    });
+    let refused: string | null = null;
+    if (startIds.length > 0) {
+      const shapeRow = getShape(state.db, shapeId);
+      try {
+        await deps.startTasks(shapeRow.projectId, shapeRow.title, startIds);
+      } catch (error) {
+        refused =
+          error instanceof DomainError
+            ? error.message
+            : "The start failed; the daemon's log says why";
+        log.warn({ err: error, shapeId, taskIds: startIds }, 'Accept and Start could not start');
+      }
+    }
+    return {
+      started: startIds.filter((id) => latestWorkstreamOf(state.db, id) !== undefined),
+      left,
+      refused,
+    };
+  };
   const shapeOf = (shapeId: ShapeId | undefined): ShapeOfDto =>
     shapeId === undefined
       ? { shapeId: null, title: null, chatId: null }
@@ -66,6 +168,7 @@ export function createShapeServices(deps: {
         ...(input.cut === undefined ? {} : { cut: input.cut }),
       });
       if (!outcome.ok) return { kind: 'refused', errors: [...outcome.errors] };
+      const start = input.start === true ? await startAccepted(id, outcome.acceptId) : undefined;
       return {
         kind: 'converted',
         result: {
@@ -74,12 +177,14 @@ export function createShapeServices(deps: {
             ...r,
             taskIds: [...r.taskIds],
           })),
+          ...(start === undefined ? {} : { start }),
         },
       };
     },
     removeDraftGoal: (goalId) => {
       shape.removeDraftGoal(goalId);
     },
+    shapeStartCounts: (shapeId, proposalIds) => shape.startCounts(shapeId, proposalIds),
     undoShapeAccept: (shapeId, acceptId) => shape.undoAccept(shapeId, acceptId),
     resumeShape: (id, event) => shape.resume(id, event),
     getGoalShape: (goalId) => shapeOf(findShapeLinkOfGoal(state.db, goalId)?.shapeId),

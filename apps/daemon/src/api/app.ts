@@ -95,6 +95,7 @@ import {
   ScreenImageInput,
   ScreenRefusalInput,
   ShapeConvertInput,
+  ShapeStartCountsQuery,
   ShapeDismissInput,
   ShapeAttachmentId,
   ShapeEditInput,
@@ -906,6 +907,17 @@ export function createApp(deps: ApiDeps) {
             ShapeId.parse(c.req.param('shapeId')),
             c.req.valid('json').model,
             c.req.valid('json').effort,
+          ),
+        ),
+    )
+    .get(
+      '/shapes/:shapeId/start-counts',
+      validator('query', (value): ShapeStartCountsQuery => ShapeStartCountsQuery.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.shapeStartCounts(
+            ShapeId.parse(c.req.param('shapeId')),
+            c.req.valid('query').proposalIds,
           ),
         ),
     )

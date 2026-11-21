@@ -30,6 +30,7 @@ import {
   type ShapeModelsDto,
   type MilestoneCut,
   type ShapeProposalId,
+  type ShapeStartCountsDto,
   type ShapeViewDto,
   type StartShapeInput,
 } from '@10db/contracts';
@@ -99,6 +100,7 @@ import {
   withdrawConvertedPrinciple,
   type UndoneAccept,
 } from './undo';
+import { buildStartCounts } from './preview';
 import { buildShapeView, fileDtoOf, type ViewWorld } from './view';
 
 // Shape spec §5.1, §5.3, §6, §11. A Plan conversation: its rows, presses and Convert, over the explore
@@ -224,6 +226,8 @@ export interface ShapeService {
    * InvalidError for an Accept undone or not the latest, ConflictError for a task that has a run.
    */
   undoAccept(shapeId: ShapeId, acceptId: ShapeAcceptId): UndoneAccept;
+  /** What Accept and Start would do with these pending proposals: the confirm's counts. Writes nothing. */
+  startCounts(shapeId: ShapeId, proposalIds: readonly ShapeProposalId[]): ShapeStartCountsDto;
   /** Withdraw Decision: a decision the conversation wrote, with the builder's reason. */
   withdrawDecision(shapeId: ShapeId, decisionId: DecisionId, reason: string): void;
   /**
@@ -662,6 +666,10 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
 
     undoAccept(shapeId, acceptId) {
       return state.write((ctx) => undoAccept(ctx, shapeId, acceptId));
+    },
+
+    startCounts(shapeId, proposalIds) {
+      return buildStartCounts(state.db, shapeId, proposalIds, clock.now());
     },
 
     withdrawDecision(shapeId, decisionId, reason) {

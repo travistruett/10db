@@ -26,3 +26,4 @@ export {
   type ShapeService,
 } from './service';
 export { sizingMeasure } from './sizing';
+export { START_CAP, startCounts } from './start-counts';

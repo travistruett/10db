@@ -19,7 +19,7 @@ export interface BlockedTask {
  * Done, or still open though its failed run shipped anyway: the board puts the latter in Done
  * once its pull request has merged.
  */
-function finished(task: TaskDto): boolean {
+export function finished(task: TaskDto): boolean {
   return (
     task.status === TaskStatus.Done ||
     (task.status === TaskStatus.Open && task.boardStatus === BoardStatus.Done)

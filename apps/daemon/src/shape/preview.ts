@@ -4,11 +4,14 @@ import {
   ShapeProposalKind,
   ShapeProposalState,
   TaskSize,
+  Delivery,
   TaskStatus,
   WorkstreamState,
   type ProjectId,
   type ShapeId,
   type ShapePreviewDto,
+  type ShapeProposalId,
+  type ShapeStartCountsDto,
   type ShapePreviewLandings,
   type TaskId,
 } from '@10db/contracts';
@@ -26,8 +29,11 @@ import {
   listWorkstreams,
   type DbReader,
 } from '@10db/db';
+import { taskFinished } from '../delivery';
+import { proposePlacement } from '../placement';
 import { simulateFactory, type ScheduleItem } from './preview-schedule';
 import { bucketHours, buildSizes, median } from './sizing';
+import { START_CAP, startCounts, type StartCountTask } from './start-counts';
 
 // Shape spec §10.2. What the factory would do with the draft: the project's running and queued work
 // holds its lanes first, for what is left of its estimate, then the draft's tasks follow with their
@@ -35,12 +41,47 @@ import { bucketHours, buildSizes, median } from './sizing';
 
 const MINUTE_MS = 60_000;
 
+/** A pending task of the draft, with the keys it waits on as the proposal names them. */
+interface DraftTask {
+  readonly key: string;
+  readonly title: string;
+  readonly areas: readonly string[];
+  readonly waitsOn: readonly string[];
+}
+
+/** The pending tasks of the draft, goal tasks first as their goal comes, limited to `only` when given. */
+function draftTasks(
+  db: DbReader,
+  shapeId: ShapeId,
+  only: ReadonlySet<ShapeProposalId> | null,
+): DraftTask[] {
+  const tasks: DraftTask[] = [];
+  for (const row of listShapeProposals(db, shapeId)) {
+    if (row.state !== ShapeProposalState.Pending) continue;
+    if (only !== null && !only.has(row.id)) continue;
+    if (row.kind === ShapeProposalKind.Goal) {
+      for (const t of ShapeProposalBody.goal.parse(row.body).tasks)
+        tasks.push({
+          key: t.key,
+          title: t.title,
+          areas: t.areas,
+          waitsOn: [...t.depends_on, ...t.dependsOnOutside],
+        });
+    } else if (row.kind === ShapeProposalKind.Task) {
+      const t = ShapeProposalBody.task.parse(row.body);
+      tasks.push({ key: row.key, title: t.title, areas: t.areas, waitsOn: t.dependsOn });
+    }
+  }
+  return tasks;
+}
+
 /** The pending tasks of the draft, as the schedule places them. */
 function draftItems(
   db: DbReader,
   shapeId: ShapeId,
   fallbackHours: number,
   activeTasks: ReadonlySet<TaskId>,
+  only: ReadonlySet<ShapeProposalId> | null = null,
 ): ScheduleItem[] {
   const hours = new Map(buildSizes(db, shapeId).map((s) => [s.key, s.hours]));
   const converted = new Map(
@@ -53,32 +94,14 @@ function draftItems(
       if (id === undefined) return [key];
       return activeTasks.has(id) ? [id] : [];
     });
-  const items: ScheduleItem[] = [];
-  for (const row of listShapeProposals(db, shapeId)) {
-    if (row.state !== ShapeProposalState.Pending) continue;
-    if (row.kind === ShapeProposalKind.Goal) {
-      for (const t of ShapeProposalBody.goal.parse(row.body).tasks)
-        items.push({
-          key: t.key,
-          title: t.title,
-          hours: hours.get(t.key) ?? fallbackHours,
-          areas: t.areas,
-          dependsOn: resolve([...t.depends_on, ...t.dependsOnOutside]),
-          existing: null,
-        });
-    } else if (row.kind === ShapeProposalKind.Task) {
-      const t = ShapeProposalBody.task.parse(row.body);
-      items.push({
-        key: row.key,
-        title: t.title,
-        hours: hours.get(row.key) ?? fallbackHours,
-        areas: t.areas,
-        dependsOn: resolve(t.dependsOn),
-        existing: null,
-      });
-    }
-  }
-  return items;
+  return draftTasks(db, shapeId, only).map((t) => ({
+    key: t.key,
+    title: t.title,
+    hours: hours.get(t.key) ?? fallbackHours,
+    areas: t.areas,
+    dependsOn: resolve(t.waitsOn),
+    existing: null,
+  }));
 }
 
 /**
@@ -203,4 +226,66 @@ export function buildPreview(db: DbReader, shapeId: ShapeId, now: Date): ShapePr
     endEstimateHours: schedule.scheduleHours + (nonLaneHoursPerTask ?? 0) * pathTasks,
     landings: countLandings(db, shapeId, draft),
   };
+}
+
+/**
+ * What Accept and Start would do with the given pending proposals: the tasks that start, how many at
+ * once, for a lane or for other tasks, and those it leaves on the Board with why. It runs the same
+ * lane simulation as the preview, over the chosen rows only, and writes nothing.
+ */
+export function buildStartCounts(
+  db: DbReader,
+  shapeId: ShapeId,
+  proposalIds: readonly ShapeProposalId[],
+  now: Date,
+): ShapeStartCountsDto {
+  const projectId = getShape(db, shapeId).projectId;
+  const project = getProject(db, projectId);
+  const finished = listFinishedLaneTimes(db, projectId).map((t) => t.minutes / 60);
+  const medianHours =
+    finished.length === 0 ? bucketHours(db, projectId)[TaskSize.M] : median(finished);
+  const existing = existingItems(db, projectId, medianHours, now);
+  const only = new Set(proposalIds);
+  const draft = draftItems(
+    db,
+    shapeId,
+    medianHours,
+    new Set(existing.map((i) => i.key as TaskId)),
+    only,
+  );
+  const schedule = simulateFactory(project.maxLanes, [...existing, ...draft]);
+  const draftKeys = new Set(draft.map((i) => i.key));
+  const startsAtOnce = new Set(
+    schedule.lanes.flatMap((l) =>
+      l.items.filter((i) => draftKeys.has(i.key) && i.startHours === 0).map((i) => i.key),
+    ),
+  );
+  const converted = new Map(
+    listShapeLinks(db, shapeId).flatMap((l) => (l.taskId === null ? [] : [[l.key, l.taskId]])),
+  );
+  const tasks: StartCountTask[] = draftTasks(db, shapeId, only).map((t) => ({
+    key: t.key,
+    title: t.title,
+    place: proposePlacement(project, { areas: t.areas, kinds: [] }).workspaceMode,
+    waitsOnStart: t.waitsOn.filter((key) => draftKeys.has(key)),
+    waitsOutside: t.waitsOn.flatMap((key) => {
+      if (draftKeys.has(key)) return [];
+      const id = converted.get(key);
+      if (id === undefined) return [key];
+      const dep = getTask(db, id);
+      return taskFinished(dep) ? [] : [dep.title];
+    }),
+  }));
+  const {
+    now: atOnce,
+    forLane,
+    forOthers,
+    stay,
+  } = startCounts({
+    tasks,
+    startsAtOnce,
+    local: project.delivery !== Delivery.PullRequest,
+    cap: START_CAP,
+  });
+  return { now: atOnce, forLane, forOthers, stay };
 }
