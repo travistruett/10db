@@ -30,7 +30,7 @@ import {
   type DbReader,
   type WorkstreamRow,
 } from '@10db/db';
-import { batchCardFields, checkoutOf, type DeliveryJobs } from '../delivery';
+import { batchCardFields, checkoutOf, runCommits, type DeliveryJobs } from '../delivery';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import type { InboxService } from '../inbox';
@@ -74,7 +74,9 @@ async function readCheckFacts(git: Git, db: DbReader, row: WorkstreamRow) {
   const checkout = checkoutOf(db, row);
   const head = await git.head(checkout).catch(() => 'unknown');
   const baseHead = row.baseHead ?? head;
-  const commits = await git.commitsSince(checkout, baseHead).catch(() => []);
+  const commits = await runCommits({ db, git }, row, checkout, baseHead, head)
+    .then((run) => [...run.commits])
+    .catch(() => []);
   return { baseHead, head, commits };
 }
 

@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { mintId, ProjectDto, TaskDto, WorkstreamChangesDto, WorkstreamDto } from '@10db/contracts';
-import { patchWorkstream } from '@10db/db';
+import { insertToolOp, patchWorkstream } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
@@ -77,6 +77,16 @@ describe('GET /workstreams/:id/changes', () => {
     writeFileSync(join(repo.path, 'feature.txt'), 'hello\nworld\n');
     rawGit('add', 'feature.txt');
     rawGit('commit', '-q', '-m', 'add feature');
+    // As the run's commit tool records it: in the project's own checkout only the run's commits count.
+    daemon.state.write((ctx) => {
+      insertToolOp(ctx, {
+        workstreamId: ws.id,
+        sessionId: mintId('Session'),
+        opId: 'op-changes-feature',
+        tool: 'commit',
+        result: { sha: rawGit('rev-parse', 'HEAD'), alreadyCommitted: false },
+      });
+    });
 
     const changes = await api().get(`/workstreams/${ws.id}/changes`, WorkstreamChangesDto);
 

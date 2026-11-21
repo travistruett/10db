@@ -22,6 +22,7 @@ import {
 import { z } from 'zod';
 import { GitError, type Git } from '../git';
 import { checkoutOf } from './checkout';
+import { diffOfRanges, runCommits } from './run-commits';
 
 /** The most diff text one answer carries; the per-file counts always cover every file. */
 export const MAX_CHANGES_DIFF_BYTES = 512 * 1024;
@@ -83,10 +84,11 @@ function keptTurnsRange(
 }
 
 /**
- * What a workstream changed: the diff from the head it started at to its head, for the builder to
- * check. The head is read once, from the check card the builder is looking at when there is one and
- * from its checkout (its batch's worktree, else the project's) otherwise, and every part of the
- * answer is read at that one commit. A Ready pass page shows its kept commit instead: work kept at a
+ * What a workstream changed: the diff its own commits make from the head it started at to its head,
+ * for the builder to check (`runCommits`: in the builder's own checkout, not the builder's commits).
+ * The head is read once, from the check card the builder is looking at when there is one and from
+ * its checkout (its batch's worktree, else the project's) otherwise, and every part of the answer is
+ * read at that one commit. A Ready pass page shows its kept commit instead: work kept at a
  * ref, which no branch carries, so it lists no commits.
  */
 export async function workstreamChanges(
@@ -97,11 +99,10 @@ export async function workstreamChanges(
   const row = getWorkstreamRow(deps.db, id);
   if (scope !== undefined) {
     const turns = keptTurnsRange(deps.db, row, scope);
-    if (turns)
-      return readChanges(deps.git, checkoutOf(deps.db, row), id, turns.base, turns.head, false);
+    if (turns) return readChanges(deps.git, checkoutOf(deps.db, row), id, turns.base, turns.head);
   }
   const kept = shownKeptWork(deps.db, row);
-  if (kept) return readChanges(deps.git, checkoutOf(deps.db, row), id, kept.base, kept.head, false);
+  if (kept) return readChanges(deps.git, checkoutOf(deps.db, row), id, kept.base, kept.head);
   if (row.baseHead === null)
     throw new ConflictError(`Workstream ${id} has not started work in a checkout yet`);
   // A worktree's path is cleared only once its batch has finished, so an unfinished batch without
@@ -125,7 +126,22 @@ export async function workstreamChanges(
       throw new ConflictError(`Workstream ${id}'s changes cannot be read: ${error.message}`);
     throw error;
   }
-  return readChanges(deps.git, checkout, id, baseHead, head, true);
+  try {
+    const run = await runCommits(deps, row, checkout, baseHead, head);
+    const changes = await diffOfRanges(deps.git, checkout, run.ranges, MAX_CHANGES_DIFF_BYTES);
+    return {
+      baseHead,
+      head,
+      commits: [...run.commits],
+      diff: changes.diff,
+      truncated: changes.truncated,
+      files: [...changes.files],
+    };
+  } catch (error) {
+    if (error instanceof GitError)
+      throw new ConflictError(`Workstream ${id}'s changes cannot be read: ${error.message}`);
+    throw error;
+  }
 }
 
 /**
@@ -159,14 +175,13 @@ export async function checkoutChanges(input: {
   };
 }
 
-/** The changes from `baseHead` to `head` in a workstream's checkout, with the commits between when asked. */
+/** The changes from `baseHead` to `head` in a workstream's checkout, listing no commits. */
 async function readChanges(
   git: Git,
   checkout: string,
   id: WorkstreamId,
   baseHead: string,
   head: string,
-  withCommits: boolean,
 ): Promise<WorkstreamChangesDto> {
   if (!existsSync(checkout)) throw new NotFoundError('checkout of workstream', id);
   try {
@@ -176,7 +191,7 @@ async function readChanges(
       base: baseHead,
       head,
       uncommitted: false,
-      withCommits,
+      withCommits: false,
     });
   } catch (error) {
     // A base the checkout no longer holds, or a checkout with no commit yet, cannot be shown.

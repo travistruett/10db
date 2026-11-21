@@ -980,7 +980,11 @@ export const NextAction = z.discriminatedUnion('kind', [
     base: z.string().min(1),
     paths: z.array(z.string().min(1)).min(1),
   }),
-  z.object({ kind: z.literal('verify') }),
+  z.object({
+    kind: z.literal('verify'),
+    /** The paths the step was last sent back to commit, when the session that just ended was sent for them. */
+    sentBack: z.array(z.string().min(1)).optional(),
+  }),
   /**
    * Rerun a step a reviewer rejected; the rejecting step's notes are in its result. With a
    * `providerSessionId` the step's own session is resumed to fix it; without one a fresh session starts.

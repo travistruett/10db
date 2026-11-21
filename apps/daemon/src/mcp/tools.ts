@@ -80,6 +80,7 @@ import { buildContextPack, quoteSlackAnswer } from '../briefing';
 import {
   checkoutOf,
   MIGRATIONS_HAZARD,
+  runCommits,
   type DependencyChanges,
   type MigrationsBase,
 } from '../delivery';
@@ -663,7 +664,7 @@ export function createToolHandlers(
                 : `${input.reason} Left uncommitted as not this task's: ${leftUncommitted.join(', ')}. (agent:${sessionId})`,
             sourceId,
           });
-          leaveTaskPaths(ctx, task.id, leftUncommitted, deviationId);
+          leaveTaskPaths(ctx, task.id, leftUncommitted, { by: deviationId, in: sessionId });
           return record('report_deviation', input.opId, { deviationId, leftUncommitted }, ctx);
         }),
       );
@@ -1218,10 +1219,11 @@ export function createToolHandlers(
       const checkout = checkoutOf(db, row);
       const head = await deps.git.head(checkout);
       const base = row.baseHead ?? head;
-      const [changed, commits] = await Promise.all([
+      const [changed, run] = await Promise.all([
         deps.git.changedFilesSince(checkout, base),
-        deps.git.commitsSince(checkout, base),
+        runCommits({ db, git: deps.git }, row, checkout, base, head),
       ]);
+      const commits = [...run.commits];
       return deps.state.write((ctx) => {
         const handoff = insertHandoff(ctx, {
           workstreamId,

@@ -45,6 +45,8 @@ export interface JudgeNewTestsInput {
   /** The commit the work started from: the commits after it are read. */
   readonly base: string;
   readonly head: string;
+  /** The work's own commits among them; every commit after `base` when absent. */
+  readonly commits?: ReadonlySet<string>;
   readonly taskId: TaskId;
   readonly signal?: AbortSignal;
 }
@@ -126,6 +128,7 @@ async function collectCases(
   const commits = await git.commitMessagesSince(input.checkout, input.base, input.head);
   for (const commit of commits) {
     // A merge brings in what other work added; it is not this work's tests.
+    if (input.commits !== undefined && !input.commits.has(commit.sha)) continue;
     const [parent, ...others] = commit.parents;
     if (parent === undefined || others.length > 0) continue;
     const diff = await git.diffSince(input.checkout, parent, commit.sha, DIFF_BYTES);
