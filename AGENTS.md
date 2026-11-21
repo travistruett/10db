@@ -67,7 +67,10 @@ A local macOS control plane that runs Claude Code sessions as a software factory
   needed for the goal, later, or cut, and only the needed ones run. A plan is written once its predecessors
   have merged, so at most one milestone is planned ahead, and one plan's index stays under about 8,000 words; a
   bigger one is split (`docs/architecture/research/2026-11-14-build-process-audit.md` §3.2).
-- **A plan is an index plus one card per task.** The index (`docs/superpowers/plans/<date>-<name>.md`) holds the
+- **A plan is sized first, by what its code touches.** A Feature milestone's plan is one page (brief, sizes, the
+  parts and their tests) built by one implementer end to end; a plan longer than its code is cut.
+- **A Core milestone's plan is an index plus one card per task** (security, permissions, data loss, git,
+  recovery; 10db's Careful and Critical). The index (`docs/superpowers/plans/<date>-<name>.md`) holds the
   brief, Global Constraints, provider parity, Interfaces, the state table, the tracks and one line per task.
   Each task is a card (`docs/superpowers/plans/<date>-<name>/task-<n>.md`) an implementer can work from alone: its
   files, the Interfaces signatures it implements or calls (quoted exactly), the state-table rows it handles (as
