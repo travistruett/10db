@@ -7,20 +7,12 @@ import type { TopLevelSpec } from 'vega-lite';
 
 // Shape spec §10.3. What the session attaches can be shaped by a pasted document, so nothing it
 // writes runs code or reaches the network:
-// - a mockup renders in an iframe with an empty sandbox, through srcdoc, under MOCKUP_CSP;
+// - a mockup renders in an iframe with an empty sandbox, through srcdoc, under `MOCKUP_CSP` (`@10db/contracts`);
 // - a chart is Vega-Lite with inline data.values only, checked again here, drawn with a loader that
 //   refuses every load and Vega's interpreter (the window's CSP has no unsafe-eval);
 // - a diagram is Mermaid at securityLevel 'strict', of a kind we know, refused if it names an image.
 // A chart and a diagram are drawn to an SVG string and shown as an <img>: an SVG image runs no script,
 // follows no link and loads nothing.
-
-/** The mockup document's policy: no script, no network, no frame; inline styles and data images only. */
-export const MOCKUP_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:";
-
-/** The srcdoc for a mockup: its policy first, before anything the mockup holds. */
-export function mockupDocument(html: string): string {
-  return `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${MOCKUP_CSP}"><meta charset="utf-8"></head><body>${html}</body></html>`;
-}
 
 const refuse = (): Promise<never> =>
   Promise.reject(new Error('A chart loads nothing: its data is inline in data.values'));

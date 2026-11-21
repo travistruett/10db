@@ -44,6 +44,8 @@ export * from './knowledge-search';
 export { CONTRACT_SCHEMAS, renderJsonSchemas } from './json-schema';
 export * from './landing';
 export * from './mcp-tools';
+export * from './design-check';
+export * from './mockup-document';
 export * from './model-profiles';
 export * from './page-areas';
 export { globsOverlap } from './glob-overlap';

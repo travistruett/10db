@@ -101,6 +101,7 @@ describe('the reviewers (§7)', () => {
   it('are joined by the researcher and the code researcher, the only other agents', () => {
     expect(Object.keys(SHAPE_AGENTS).sort()).toEqual([
       'tendb-code-researcher',
+      'tendb-design',
       'tendb-engineering',
       'tendb-rehearsal',
       'tendb-researcher',

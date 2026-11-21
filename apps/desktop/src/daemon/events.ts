@@ -40,7 +40,7 @@ import { passKeys, writePassActivity } from './pass-queries';
 import { folderKeys } from './project-folder-queries';
 import { queryKeys } from './queries';
 import { shapeKeys } from './shape-queries';
-import { screenKeys } from './screen-queries';
+import { designCheckKeys, screenKeys } from './screen-queries';
 import { skipKeys } from './skip-queries';
 import { statusKeys } from './status-queries';
 import { trustKeys } from './trust-queries';
@@ -163,6 +163,8 @@ export const EVENT_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly Qu
   'task.message_added': [passKeys.turnsAll, passKeys.live, liveKeys.all],
   // A picture of a task's page was kept: its thread and its drawer show it.
   'task.screen_added': [screenKeys.all],
+  // A lane's design check, or its verdict, was kept (the event carries `designCheckId`).
+  'task.changed': [designCheckKeys.all],
   // A notice that asks nothing joined Activity, and its task's drawer lists it.
   'notice.posted': [activityKeys.all],
   // A turn began or ended: what streams is read again, so an item that finished leaves it, and what the turn

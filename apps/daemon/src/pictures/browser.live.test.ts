@@ -658,6 +658,30 @@ describe.skipIf(!live)('the pinned browser, live', () => {
     expect(files.filter((f) => readFileSync(f).includes(COOKIE_MARKER))).toEqual([]);
   }, 60_000);
 
+  it('draws a mock-up with nothing loaded and no script run', async () => {
+    const beacons: string[] = [];
+    const beacon = createServer((req, res) => {
+      beacons.push(req.url ?? '');
+      res.end('');
+    });
+    const port = await listen(beacon, '127.0.0.1', 0);
+    const there = `http://127.0.0.1:${String(port)}`;
+    try {
+      const drawn = await camera.drawHtml({
+        html: `<h1>Cards</h1><img src="${there}/image"><script>new Image().src = '${there}/script';</script>`,
+        viewport: VIEWPORT,
+        theme: 'default',
+        signal: new AbortController().signal,
+      });
+      expect(drawn.outcome).toBe(ShotOutcome.Clean);
+      expect(drawn.png?.length).toBeGreaterThan(1000);
+      // The page stays open until its context closes; a late request would have come by now.
+      expect(beacons).toEqual([]);
+    } finally {
+      beacon.close();
+    }
+  }, 60_000);
+
   it('leaves no browser process once closed', async () => {
     await shoot('/clean');
     expect((await browserProcesses(exe)).length).toBeGreaterThan(0);

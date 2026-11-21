@@ -73,6 +73,7 @@ import {
 } from '../conversation';
 import { createEventBus, createLiveFrames, type StateStore } from '../events';
 import type { Logger } from '../log';
+import type { Pictures } from '../pictures';
 import { mintSessionToken, type ShapeToolsFor } from '../mcp';
 import type { AgentAdapter } from '../sessions';
 import type { Hold } from '../verify';
@@ -86,6 +87,7 @@ import {
 import { convertProposals, type ConvertOutcome, type JoiningProblem } from './convert';
 import { checkDroppedFile, readyToKeep, storeFile } from './dropped-files';
 import { dropNote, editNote, restoreNote, rowLabel, unpinNote } from './edit-notes';
+import { designTargets, runDesignReview } from './design-review';
 import { createPlanParts, type PlanParts, type PlanTurnState } from './plan-parts';
 import type { ShapeJev } from './jev';
 import { rehearseNote, reviewNote } from './policy';
@@ -166,6 +168,8 @@ export interface ShapeServiceDeps {
   readonly limitsFor?: (kind: AccountKind) => PictureLimits;
   /** Holds new turns back, as a waiting update's drain does; given to the engine the service runs. */
   readonly hold?: Hold;
+  /** Draws a mock-up and shoots the app's pages for a Design review; absent, the press is refused. */
+  readonly pictures?: Pick<Pictures, 'shootNow' | 'drawMockup'>;
 }
 
 /** A file as the input hands it over: the name the browser reported, and its bytes. */
@@ -216,6 +220,16 @@ export interface ShapeService {
     shapeId: ShapeId,
     proposalIds?: readonly ShapeProposalId[],
   ): { status: 'started' | 'running' | 'nothing'; tasks: number };
+  /**
+   * Design review: for each pending task (`proposalIds` when given) that has a mock-up and a page area,
+   * draws the mock-up and shoots the page as it is now, then queues a turn in which the session has them
+   * compared with the app and the project's `DESIGN.md`. `nothing` when no task has both; `running` while
+   * a review press waits or its turn runs, or the pictures are still being taken.
+   */
+  designReview(
+    shapeId: ShapeId,
+    proposalIds?: readonly ShapeProposalId[],
+  ): Promise<{ status: 'started' | 'running' | 'nothing'; tasks: number }>;
   /** Approves a mock-up as the design target, or takes the approval back; a note tells the session. */
   approveAttachment(shapeId: ShapeId, attachmentId: ShapeAttachmentId, approved: boolean): void;
   /**
@@ -348,9 +362,12 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       busy !== null &&
       (busy ||
         pressPending(shapeId, ShapeEventKind.Review) ||
-        pressPending(shapeId, ShapeEventKind.Rehearse))
+        pressPending(shapeId, ShapeEventKind.Rehearse) ||
+        pressPending(shapeId, ShapeEventKind.DesignReview))
     );
   };
+  /** The plans whose Design review is taking its pictures. */
+  const takingPictures = new Set<ShapeId>();
   /** A press of `kind` waits or runs: queued, or handed to a session and not taken yet. */
   const pressPending = (shapeId: ShapeId, kind: ShapeEventKind): boolean => {
     const conversation = conversationOf(shapeId);
@@ -660,6 +677,36 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       );
       engine.queued(conversationOf(shapeId));
       return { status: 'started', tasks: rows.length };
+    },
+
+    async designReview(shapeId, proposalIds) {
+      const { projectId } = getShape(state.db, shapeId);
+      const project = getProject(state.db, projectId);
+      const targets = designTargets(state.db, shapeId, project.areas, proposalIds);
+      if (targets.length === 0 || deps.pictures === undefined)
+        return { status: 'nothing', tasks: 0 };
+      if (
+        takingPictures.has(shapeId) ||
+        pressPending(shapeId, ShapeEventKind.DesignReview) ||
+        reviewInSessionBusy(shapeId)
+      )
+        return { status: 'running', tasks: targets.length };
+      takingPictures.add(shapeId);
+      try {
+        await runDesignReview(
+          { state, pictures: deps.pictures, planFilesDir: (id) => join(deps.filesDir, id) },
+          shapeId,
+          project,
+          targets,
+          (line) => {
+            say(shapeId, ShapeMessageAuthor.Note, ShapeMessageKind.Notice, line);
+          },
+        );
+      } finally {
+        takingPictures.delete(shapeId);
+      }
+      engine.queued(conversationOf(shapeId));
+      return { status: 'started', tasks: targets.length };
     },
 
     approveAttachment(shapeId, attachmentId, approved) {

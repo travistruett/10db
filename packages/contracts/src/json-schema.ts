@@ -6,6 +6,7 @@ import {
   TaskScreenDto,
   TaskScreensDto,
 } from './task-screens';
+import { TaskDesignCheckDto } from './design-check';
 import { TaskSessionDto } from './task-session';
 import { TaskFileDto, TaskMessageDto, TaskMessageInput, TaskThreadDto } from './task-thread';
 import {
@@ -580,6 +581,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'task-thread-dto': TaskThreadDto,
   'task-screen-dto': TaskScreenDto,
   'task-screens-dto': TaskScreensDto,
+  'task-design-check-dto': TaskDesignCheckDto,
   'task-screen-added-data': TaskScreenAddedData,
   'screens-matrix': ScreensMatrix,
   'pictures-status-dto': PicturesStatusDto,

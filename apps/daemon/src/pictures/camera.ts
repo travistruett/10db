@@ -59,6 +59,14 @@ export interface ShootInput {
   readonly signal: AbortSignal;
 }
 
+export interface DrawInput {
+  /** A mock-up's HTML, as the session wrote it. */
+  readonly html: string;
+  readonly viewport: ScreenViewport;
+  readonly theme: ScreenTheme;
+  readonly signal: AbortSignal;
+}
+
 export interface SignInInput {
   readonly appUrl: AppUrl;
   readonly url: string;
@@ -67,6 +75,11 @@ export interface SignInInput {
 
 export interface PageCamera {
   shoot(input: ShootInput): Promise<Shot>;
+  /**
+   * Draws a mock-up's HTML under its own policy (`mockupDocument`): no script runs, nothing loads, and
+   * the page reaches no address at all. A `clean` shot is the viewport's PNG.
+   */
+  drawHtml(input: DrawInput): Promise<Shot>;
   /**
    * Opens `url` (same origin as `appUrl`) in a fresh context, under the same guard as a shot, and
    * answers its storage state; throws when it lands off the app's origin.
@@ -79,18 +92,20 @@ export interface PageCamera {
 
 /** A camera with no browser behind it: refused, saying why; it takes no picture and signs nothing in. */
 export function refusedCamera(problem: string): PageCamera {
+  const refused = (input: { readonly viewport: ScreenViewport }): Promise<Shot> =>
+    Promise.resolve({
+      outcome: ShotOutcome.Failed,
+      png: null,
+      width: input.viewport.width,
+      height: input.viewport.height,
+      landedUrl: null,
+      overlayText: null,
+      reason: problem,
+      cameraFailed: true,
+    });
   return {
-    shoot: (input) =>
-      Promise.resolve({
-        outcome: ShotOutcome.Failed,
-        png: null,
-        width: input.viewport.width,
-        height: input.viewport.height,
-        landedUrl: null,
-        overlayText: null,
-        reason: problem,
-        cameraFailed: true,
-      }),
+    shoot: refused,
+    drawHtml: refused,
     signIn: () => Promise.reject(new Error(problem)),
     status: () => ({ state: 'refused', problem }),
     close: () => Promise.resolve(),

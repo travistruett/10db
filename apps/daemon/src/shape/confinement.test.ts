@@ -460,7 +460,7 @@ describe('judgeShapeCall', () => {
     );
   });
 
-  it.each(['tendb-scope', 'tendb-engineering', 'tendb-rehearsal'])(
+  it.each(['tendb-scope', 'tendb-engineering', 'tendb-rehearsal', 'tendb-design'])(
     'lets a %s reviewer report a finding, with the reviewer set from its type over what it wrote',
     (reviewer) => {
       const verdict = judgeShapeCall(

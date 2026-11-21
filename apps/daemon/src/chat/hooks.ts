@@ -224,7 +224,7 @@ function messageText(message: DeliverableMessage, blocks: ReadonlySet<string>): 
   return [`[m:${message.id}] ${message.body}`, ...paths].join('\n');
 }
 
-/** The review a turn starter asks for, or null when it asks for none: a Plan review or Check for Questions press. */
+/** The review a turn starter asks for, or null when it asks for none: a Plan review, Check for Questions or Design review press. */
 function reviewOf(
   item: ConversationItemRow,
 ): { kind: ReviewTurnKind; ask: string; inSession: string } | null {
@@ -235,7 +235,9 @@ function reviewOf(
       ? ReviewTurnKind.PlanReview
       : body.kind === ShapeEventKind.Rehearse
         ? ReviewTurnKind.CheckForQuestions
-        : null;
+        : body.kind === ShapeEventKind.DesignReview
+          ? ReviewTurnKind.DesignReview
+          : null;
   if (kind === null || body.prompt === undefined) return null;
   return { kind, ask: body.prompt, inSession: body.promptInSession ?? body.prompt };
 }

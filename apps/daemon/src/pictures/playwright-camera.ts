@@ -1,4 +1,4 @@
-import { handOffTo, routeUrl, ScreenTheme } from '@10db/contracts';
+import { handOffTo, mockupDocument, routeUrl, ScreenTheme } from '@10db/contracts';
 import type { BrowserContext, BrowserContextOptions, Page, Response } from 'playwright-core';
 import { systemClock, type Clock } from '../clock';
 import type { Logger } from '../log';
@@ -43,10 +43,17 @@ export interface CameraBrowser extends ClosableBrowser {
  * Lets through only what `requestAllowed` allows, and names in the log what it refused. A redirect's
  * next hop never reaches a route, so the daemon's proxy is what holds; this is the first check.
  */
-async function guard(context: CameraContext, reach: CameraReach, logger: Logger): Promise<void> {
+async function guard(
+  context: CameraContext,
+  reach: CameraReach | null,
+  logger: Logger,
+): Promise<void> {
+  // No reach at all (a drawn mock-up): the page's own blank page and data: URLs, nothing else.
+  const allowed = (url: string): boolean =>
+    reach === null ? url === 'about:blank' || url.startsWith('data:') : requestAllowed(reach, url);
   await context.route('**/*', async (route, request) => {
     const url = request.url();
-    if (requestAllowed(reach, url)) {
+    if (allowed(url)) {
       await route.continue();
       return;
     }
@@ -57,7 +64,7 @@ async function guard(context: CameraContext, reach: CameraReach, logger: Logger)
     () => true,
     (socket) => {
       const url = socket.url();
-      if (requestAllowed(reach, url)) {
+      if (reach !== null && requestAllowed(reach, url)) {
         socket.connectToServer();
         return;
       }
@@ -136,7 +143,8 @@ async function load(page: Page, url: string): Promise<PageLoad> {
 interface ContextRun {
   readonly browser: CameraBrowser;
   readonly proxy: AppProxy;
-  readonly reach: CameraReach;
+  /** What the page may reach; null for a page that may reach nothing. */
+  readonly reach: CameraReach | null;
   readonly signal: AbortSignal;
   readonly logger: Logger;
   readonly clock: Clock;
@@ -213,7 +221,7 @@ export function createPlaywrightCamera<B extends CameraBrowser>(
   const runOf = (
     browser: CameraBrowser,
     proxy: AppProxy,
-    reach: CameraReach,
+    reach: CameraReach | null,
     signal: AbortSignal,
   ) => ({
     browser,
@@ -289,6 +297,65 @@ export function createPlaywrightCamera<B extends CameraBrowser>(
         if (error instanceof DeadlineError) return failed(`the page ${settleLine}`, null, true);
         if (error instanceof BrowserStuckError) {
           return failed('the page would not close, so the browser was closed', null, true);
+        }
+        throw error;
+      }
+    },
+
+    async drawHtml({ html, viewport, theme, signal }) {
+      const failed = (reason: string, cameraFailed: boolean): Shot => ({
+        outcome: ShotOutcome.Failed,
+        png: null,
+        width: viewport.width,
+        height: viewport.height,
+        landedUrl: null,
+        overlayText: null,
+        reason,
+        cameraFailed,
+      });
+      signal.throwIfAborted();
+      const drawn = host.use((browser, proxy) =>
+        inContext(
+          runOf(browser, proxy, null, signal),
+          {
+            viewport: { width: viewport.width, height: viewport.height },
+            deviceScaleFactor: 1,
+            colorScheme: theme === ScreenTheme.Default ? null : theme,
+            reducedMotion: 'reduce',
+            // The window shows a mock-up with no script; so does the picture.
+            javaScriptEnabled: false,
+          },
+          async (context) => {
+            const page = await context.newPage();
+            await page.setContent(mockupDocument(html), {
+              waitUntil: 'load',
+              timeout: LOAD_TIMEOUT_MS,
+            });
+            const png = await page.screenshot({
+              type: 'png',
+              animations: 'disabled',
+              caret: 'hide',
+              scale: 'css',
+            });
+            return {
+              outcome: ShotOutcome.Clean,
+              png: new Uint8Array(png),
+              width: viewport.width,
+              height: viewport.height,
+              landedUrl: null,
+              overlayText: null,
+              reason: null,
+              cameraFailed: false,
+            } satisfies Shot;
+          },
+        ),
+      );
+      try {
+        return await drawn;
+      } catch (error) {
+        if (error instanceof DeadlineError) return failed(`the mock-up ${settleLine}`, true);
+        if (error instanceof BrowserStuckError) {
+          return failed('the page would not close, so the browser was closed', true);
         }
         throw error;
       }

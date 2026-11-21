@@ -5,6 +5,7 @@ import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { useId } from 'react';
 import { useTaskPlanContext } from '../../daemon/plan-record-queries';
 import { AttachmentView } from '../sessions/plan/attachments/attachment-view';
+import { DesignCheckView } from './design-check-view';
 import { AnchorBadge } from '../sessions/plan/record/anchor-badge';
 import { resultStatus } from '../sessions/plan/record/anchor-status';
 
@@ -47,6 +48,7 @@ export function PlanContextDisclosure({ taskId }: { readonly taskId: TaskId }) {
               />
             </Stack>
           ))}
+          <DesignCheckView taskId={taskId} />
           {context === null ? null : answer.packed === null ? (
             <Text size="sm" c="dimmed">
               Not sent yet

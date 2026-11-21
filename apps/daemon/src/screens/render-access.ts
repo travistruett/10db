@@ -71,6 +71,12 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
     "A kept screenshot is for the conversation's transcript, not for a screen.",
   '/tasks/:taskId/screens':
     "A picture of the builder's app is for the UI Workbench and the drawer, not for a screen.",
+  '/tasks/:taskId/design-checks':
+    "A design check shows the builder's app to the task's drawer, not to a screen.",
+  '/design-checks/:checkId/mockup':
+    "A design check's pictures are for the task's drawer, not for a screen.",
+  '/design-checks/:checkId/shots/:index':
+    "A design check's pictures are for the task's drawer, not for a screen.",
   '/screens/:screenId':
     "A picture of the builder's app is for the UI Workbench and the drawer, not for a screen.",
   '/projects/:projectId/pictures':

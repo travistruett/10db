@@ -11,6 +11,9 @@ export const DEV_UI_READS: readonly string[] = [
   ...RENDER_READS.map((r) => r.route),
   '/tasks/:taskId/screens',
   '/screens/:screenId',
+  '/tasks/:taskId/design-checks',
+  '/design-checks/:checkId/mockup',
+  '/design-checks/:checkId/shots/:index',
   '/shapes/:shapeId/screens/:name',
   // A call's whole output, read from its file: the dev UI's transcript expands it as the app's does.
   '/conversations/:conversationId/items/:itemId/full',

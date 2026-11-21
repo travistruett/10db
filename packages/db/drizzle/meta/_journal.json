@@ -708,6 +708,13 @@
       "when": 1795229371458,
       "tag": "0100_heavy_omega_sentinel",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "6",
+      "when": 1795233996461,
+      "tag": "0101_misty_tigra",
+      "breakpoints": true
     }
   ]
 }

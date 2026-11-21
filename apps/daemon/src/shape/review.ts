@@ -46,6 +46,8 @@ export interface RehearsalTask {
   readonly hash: string;
   /** The task in full, as the rehearsal note hands it to the reviewer. */
   readonly text: string;
+  /** The areas the task names. */
+  readonly areas: readonly string[];
 }
 
 const efforts = (db: DbReader, shapeId: ShapeId): ShapeProposalRow[] =>
@@ -93,6 +95,7 @@ export function rehearsalTasks(db: DbReader, shapeId: ShapeId): RehearsalTask[] 
                 taskKey: t.key,
                 title: t.title,
                 hash,
+                areas: t.areas,
                 text: renderTask({
                   title: t.title,
                   description: t.description,
@@ -116,6 +119,7 @@ export function rehearsalTasks(db: DbReader, shapeId: ShapeId): RehearsalTask[] 
             taskKey: row.key,
             title: task.title,
             hash,
+            areas: task.areas,
             text: renderTask(task),
           },
         ];
