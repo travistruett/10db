@@ -2254,6 +2254,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onNoAnswer: (projectId) => {
       void previewNow.lost(projectId);
     },
+    // An on-demand picture (Design review, `check_design`) holds the preview up with no pass open.
+    holdApp: (projectId, say) => previewNow.hold(projectId, say),
     // 10db's own dev UI draws nothing without the daemon, so its pictures read it as Open Page's tab does.
     devUi: opts.devUiOrigin ? { origin: opts.devUiOrigin, token: devUiToken(opts.dataDir) } : null,
     state,

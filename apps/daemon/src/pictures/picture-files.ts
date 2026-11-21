@@ -2,7 +2,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { InvalidError } from '@10db/contracts';
-import { hashNamed, insertTaskScreen, type DbReader, type NewTaskScreen } from '@10db/db';
+import {
+  designCheckNames,
+  hashNamed,
+  insertTaskScreen,
+  type DbReader,
+  type NewTaskScreen,
+} from '@10db/db';
 import type { TaskScreenDto } from '@10db/contracts';
 import type { StateStore } from '../events';
 
@@ -19,7 +25,7 @@ const screensDir = (dataDir: string): string => join(dataDir, 'screens');
 const pictureDir = (dataDir: string, sha256: string): string =>
   join(screensDir(dataDir), sha256.slice(0, 2));
 
-const picturePath = (dataDir: string, sha256: string): string =>
+export const picturePath = (dataDir: string, sha256: string): string =>
   join(pictureDir(dataDir, sha256), `${sha256}.png`);
 
 /** A PNG's size in pixels, read from its IHDR chunk; null for bytes that are not a whole PNG header. */
@@ -33,7 +39,10 @@ export function pngSize(bytes: Uint8Array): { width: number; height: number } | 
 }
 
 /** Writes a picture's file once, private to this user; answers its hash and where it lies. */
-function writePicture(dataDir: string, png: Uint8Array): { sha256: string; storedPath: string } {
+export function writePicture(
+  dataDir: string,
+  png: Uint8Array,
+): { sha256: string; storedPath: string } {
   const sha256 = createHash('sha256').update(png).digest('hex');
   const storedPath = picturePath(dataDir, sha256);
   if (existsSync(storedPath)) return { sha256, storedPath };
@@ -91,9 +100,9 @@ export function keepScreen(
   return kept;
 }
 
-/** Removes the file of `sha256` when no unpruned row names it; answers whether it did. */
+/** Removes the file of `sha256` when no unpruned picture or design check names it; answers whether it did. */
 export function removeUnnamed(db: DbReader, dataDir: string, sha256: string): boolean {
-  if (hashNamed(db, sha256)) return false;
+  if (hashNamed(db, sha256) || designCheckNames(db, sha256)) return false;
   const path = picturePath(dataDir, sha256);
   if (!existsSync(path)) return false;
   rmSync(path, { force: true });

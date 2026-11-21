@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import {
   APP_URL_IS_DAEMON,
   BrowserState,
@@ -12,6 +13,7 @@ import {
   PassTurnId,
   ProjectId,
   ScreenKind,
+  ScreenTheme,
   TaskId,
   TaskMessageAuthor,
   TaskStatus,
@@ -19,8 +21,10 @@ import {
   WorkstreamState,
   type AppUrl,
   type DaemonEvent,
+  type DesignCheckPurpose,
   type PicturesStatusDto,
   type ProjectDto,
+  type ScreenViewport,
   type TaskDto,
   type TaskScreenDto,
   type TaskScreenId,
@@ -59,9 +63,22 @@ import type { Logger } from '../log';
 import { beforeAllowed, wroteBefore, type TaskActivity } from './before-rule';
 import type { PageCamera, Shot } from './camera';
 import { CAPTURE_IDLE, captureStep, type CaptureEvent, type CaptureRequest } from './capture-queue';
-import { keepScreen, sweepPictureTemps, type ScreenToKeep } from './picture-files';
+import {
+  keepScreen,
+  picturePath,
+  pngSize,
+  sweepPictureTemps,
+  writePicture,
+  type ScreenToKeep,
+} from './picture-files';
 import { keptRoute, pageAreaRoutes } from './kept-route';
-import { pageRoute, pictureRoutes, takesPictures, turnChangedSomething } from './picture-routes';
+import {
+  pageRoute,
+  pageRouteLoads,
+  pictureRoutes,
+  takesPictures,
+  turnChangedSomething,
+} from './picture-routes';
 import { judgePreview, routeLoad, type RouteShot } from './preview-marks';
 import { signIn, sweepLoginLogs, type SignInDeps, type SignInProject } from './sign-in';
 import { forgetStorageState, readStorageState, type StorageState } from './storage-state';
@@ -83,6 +100,35 @@ const MISSED_AFTER_MS = 60 * 60_000;
 
 /** The start of the thread notice said once per task when a page lands elsewhere. */
 const ELSEWHERE_NOTICE = 'Pictures of this page landed on another page of the app';
+
+/** A page shot on demand: its PNG's hash and where it lies. */
+export interface NowShot {
+  readonly route: string;
+  readonly viewport: ScreenViewport;
+  readonly theme: ScreenTheme;
+  readonly sha256: string;
+  readonly path: string;
+}
+
+/** What `shootNow` answers: the pages it shot, and what it could not shoot and why. */
+export interface ShotsNow {
+  readonly shots: readonly NowShot[];
+  /** A route that was not shot, or null for all of them (no app address, nothing answering). */
+  readonly missing: readonly { readonly route: string | null; readonly reason: string }[];
+}
+
+export interface ShootNowInput {
+  readonly projectId: ProjectId;
+  readonly routes: readonly string[];
+  /** Why the pictures are wanted, for the log. */
+  readonly purpose: DesignCheckPurpose;
+  /** Told what the preview would show in a pass header, when it starts with no pass open. */
+  readonly say?: (line: string) => void;
+}
+
+/** A mock-up drawn: its PNG's hash and where it lies, or why it could not be. */
+export type MockupDrawn =
+  { readonly sha256: string; readonly path: string } | { readonly missing: string };
 
 export interface PicturesDeps {
   readonly state: StateStore;
@@ -109,6 +155,11 @@ export interface PicturesDeps {
    * without it; null when the daemon trusts no dev UI.
    */
   readonly devUi: { readonly origin: string; readonly token: string } | null;
+  /**
+   * Keeps the project's app up for an on-demand shot and says whether it answers; absent, the shot
+   * goes ahead at whatever answers.
+   */
+  readonly holdApp?: (projectId: ProjectId, say?: (line: string) => void) => Promise<boolean>;
 }
 
 export interface Pictures {
@@ -119,6 +170,14 @@ export interface Pictures {
   awaitBefore(task: TaskDto, signal: AbortSignal): Promise<void>;
   /** Settings › General's status line for a project. */
   status(projectId: ProjectId): PicturesStatusDto;
+  /**
+   * Shots of the routes as they are now, for a design check: the first viewport and theme of the
+   * project's matrix, signed in as a capture is, one at a time with every other capture. Nothing is
+   * kept as a task picture; a check keeps the files.
+   */
+  shootNow(input: ShootNowInput): Promise<ShotsNow>;
+  /** Draws a mock-up's HTML in the first viewport and theme of the project's matrix, cached by what it drew. */
+  drawMockup(projectId: ProjectId, html: string): Promise<MockupDrawn>;
   screens(taskId: TaskId): TaskScreensDto;
   /** A picture's PNG; throws NotFoundError for a pruned or missing one. */
   screenFile(screenId: TaskScreenId): Uint8Array<ArrayBuffer>;
@@ -254,6 +313,13 @@ export function startPictures(deps: PicturesDeps): Pictures {
   function shootableAddress(projectId: ProjectId, port: number): AppUrl | null {
     const { appUrl } = getProject(db, projectId);
     return appUrl === null || onDaemon(appUrl, port) ? null : appUrl;
+  }
+
+  /** The daemon's address and token for a shot of 10db's own dev UI; null for every other app. */
+  function devUiFor(appUrl: AppUrl, port: number): { url: string; token: string } | null {
+    return deps.devUi !== null && URL.parse(appUrl)?.origin === deps.devUi.origin
+      ? { url: `http://127.0.0.1:${String(port)}`, token: deps.devUi.token }
+      : null;
   }
 
   /** What the task's sessions did up to `until`, as the before rule reads it. */
@@ -416,10 +482,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
     const shots: Omit<ScreenToKeep, 'keptSha'>[] = [];
     const judged = pageRoute(project, task);
     const loads: RouteShot[] = [];
-    const devUi =
-      deps.devUi !== null && URL.parse(appUrl)?.origin === deps.devUi.origin
-        ? { url: `http://127.0.0.1:${String(port)}`, token: deps.devUi.token }
-        : null;
+    const devUi = devUiFor(appUrl, port);
     for (const target of targets) {
       const shoot = (state: StorageState | null): Promise<Shot> =>
         shootableAddress(project.id, port) === appUrl
@@ -665,7 +728,133 @@ export function startPictures(deps: PicturesDeps): Pictures {
     handlers[event.type]?.(event);
   });
 
+  /** Mock-ups drawn since start, by what was drawn (HTML, viewport, theme): the PNG's hash. */
+  const drawnMockups = new Map<string, string>();
+  /** On-demand draws and shots under way, aborted by `stop`. */
+  const nowRuns = new Set<AbortController>();
+
+  /** The first viewport and theme of the project's matrix: what an on-demand picture is taken in. */
+  function firstOfMatrix(project: ProjectDto): { viewport: ScreenViewport; theme: ScreenTheme } {
+    const [viewport] = project.screens.viewports;
+    const [theme] = project.screens.themes;
+    return {
+      viewport: viewport ?? { width: 1440, height: 900 },
+      theme: theme ?? ScreenTheme.Default,
+    };
+  }
+
+  async function drawMockup(projectId: ProjectId, html: string): Promise<MockupDrawn> {
+    const { viewport, theme } = firstOfMatrix(getProject(db, projectId));
+    const key = createHash('sha256')
+      .update(JSON.stringify([html, viewport, theme]))
+      .digest('hex');
+    const known = drawnMockups.get(key);
+    if (known !== undefined && existsSync(picturePath(deps.dataDir, known)))
+      return { sha256: known, path: picturePath(deps.dataDir, known) };
+    const abort = new AbortController();
+    nowRuns.add(abort);
+    try {
+      const drawn = await deps.camera.drawHtml({ html, viewport, theme, signal: abort.signal });
+      if (drawn.png === null || drawn.outcome !== 'clean')
+        return { missing: drawn.reason ?? 'the mock-up could not be drawn' };
+      if (pngSize(drawn.png) === null)
+        return { missing: 'the browser answered a picture that is not a PNG' };
+      const file = writePicture(deps.dataDir, drawn.png);
+      drawnMockups.set(key, file.sha256);
+      return { sha256: file.sha256, path: file.storedPath };
+    } catch (error) {
+      return { missing: abort.signal.aborted ? 'the daemon is stopping' : errorText(error) };
+    } finally {
+      nowRuns.delete(abort);
+    }
+  }
+
+  /** Why a shot that is not clean gives the design review nothing, in a line. */
+  function missingReason(shot: Shot): string {
+    switch (shot.outcome) {
+      case 'overlay':
+        return `the app shows its error overlay: ${shot.overlayText ?? 'no text'}`;
+      case 'elsewhere':
+        return 'the page lands on another page of the app (a sign-in, perhaps): set a dev login command in Settings › General';
+      case 'no_answer':
+        return 'the app did not answer';
+      case 'clean':
+      case 'failed':
+        return shot.reason ?? 'the page could not be shot';
+    }
+  }
+
+  async function shootNow(input: ShootNowInput): Promise<ShotsNow> {
+    const project = getProject(db, input.projectId);
+    const none = (reason: string): ShotsNow => ({ shots: [], missing: [{ route: null, reason }] });
+    const routes = [...new Set(input.routes)].filter(pageRouteLoads);
+    if (routes.length === 0) return none('the task names no page whose route loads');
+    if (project.appUrl === null) return none('the project has no app address');
+    const port = listenPort ?? (await deps.daemonPort);
+    const appUrl = shootableAddress(project.id, port);
+    if (appUrl === null) return none("the app address is 10db's own port");
+    const abort = new AbortController();
+    nowRuns.add(abort);
+    try {
+      if (deps.holdApp && !(await deps.holdApp(project.id, input.say)))
+        return none(
+          project.previewCommand === null
+            ? `nothing answers at ${appUrl}, and the project has no preview command to start it`
+            : `nothing answered at ${appUrl} in time`,
+        );
+      const { viewport, theme } = firstOfMatrix(project);
+      const devUi = devUiFor(appUrl, port);
+      let storageState = readStorageState(deps.dataDir, project.id);
+      if (storageState === null && project.devLoginCommand !== null)
+        storageState = await runSignIn(project, abort.signal);
+      let signedInAgain = false;
+      const shots: NowShot[] = [];
+      const missing: { route: string | null; reason: string }[] = [];
+      for (const route of routes) {
+        const shoot = (state: StorageState | null): Promise<Shot> =>
+          deps.camera.shoot({
+            appUrl,
+            route,
+            viewport,
+            theme,
+            storageState: state,
+            devUi,
+            signal: abort.signal,
+          });
+        const startedAt = deps.clock.now().getTime();
+        let shot = await shoot(storageState);
+        if (shot.outcome === 'elsewhere' && project.devLoginCommand !== null && !signedInAgain) {
+          signedInAgain = true;
+          storageState = await runSignIn(project, abort.signal);
+          if (storageState !== null) shot = await shoot(storageState);
+        }
+        log.info(
+          {
+            projectId: project.id,
+            purpose: input.purpose,
+            route,
+            outcome: shot.outcome,
+            ms: deps.clock.now().getTime() - startedAt,
+            bytes: shot.png?.length ?? 0,
+          },
+          'took a picture now',
+        );
+        if (shot.outcome === 'clean' && shot.png !== null && pngSize(shot.png) !== null) {
+          const file = writePicture(deps.dataDir, shot.png);
+          shots.push({ route, viewport, theme, sha256: file.sha256, path: file.storedPath });
+        } else missing.push({ route, reason: missingReason(shot) });
+      }
+      return { shots, missing };
+    } catch (error) {
+      return none(abort.signal.aborted ? 'the daemon is stopping' : errorText(error));
+    } finally {
+      nowRuns.delete(abort);
+    }
+  }
+
   return {
+    shootNow,
+    drawMockup,
     async awaitBefore(task, signal) {
       askBefore(task, task.passId ?? null);
       if (!beforePending(task.id)) return;
@@ -710,6 +899,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
     async stop() {
       unsubscribe();
       apply({ kind: 'shutdown' });
+      for (const abort of nowRuns) abort.abort();
       await current?.done;
     },
   };

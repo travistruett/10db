@@ -45,6 +45,10 @@ export interface PreviewTiming {
   readonly probeEveryMs: number;
   /** How long a stopped preview's command may take to exit before its tree is ended without it. */
   readonly stopWithinMs: number;
+  /** How long a hold keeps the preview past its last ask. */
+  readonly holdMs: number;
+  /** How long a hold's ask waits for the app to answer. */
+  readonly holdAnswerWithinMs: number;
 }
 
 const DEFAULT_TIMING: PreviewTiming = {
@@ -52,6 +56,8 @@ const DEFAULT_TIMING: PreviewTiming = {
   answerWithinMs: 120_000,
   probeEveryMs: 1_000,
   stopWithinMs: 10_000,
+  holdMs: 5 * 60_000,
+  holdAnswerWithinMs: 60_000,
 };
 
 export interface PreviewDeps {
@@ -83,6 +89,12 @@ export interface Preview {
   lost(projectId: ProjectId): Promise<void>;
   /** Restart Preview: forgets the exits that stopped it and starts it again. */
   restart(projectId: ProjectId): Promise<void>;
+  /**
+   * Keeps the project's preview up with no pass open, for the hold's length past this ask, and answers
+   * whether the app answers within its deadline (false at once when there is no app address, or no
+   * command to serve it and nothing answering). `say` is told what a pass's header would show.
+   */
+  hold(projectId: ProjectId, say?: (line: string) => void): Promise<boolean>;
   /** Stops every preview and follows nothing more. */
   stop(): Promise<void>;
 }
@@ -114,6 +126,14 @@ export function startPreview(deps: PreviewDeps): Preview {
   /** Each project's reconciles run one at a time. */
   const queues = new Map<ProjectId, Promise<void>>();
   const timers = new Set<ReturnType<typeof setTimeout>>();
+  /** Projects held up with no pass: each hold's timer, and where its notices go instead of a header. */
+  const holds = new Map<
+    ProjectId,
+    {
+      readonly timer: ReturnType<typeof setTimeout>;
+      readonly say: ((line: string) => void) | undefined;
+    }
+  >();
   const life = { stopping: false };
   /** Read through a call, so a check after an await sees what stop() set meanwhile. */
   const stopped = (): boolean => life.stopping;
@@ -132,6 +152,17 @@ export function startPreview(deps: PreviewDeps): Preview {
         at: ctx.now,
       });
     });
+  }
+
+  /** A pass's header carries the notice; with no pass open, a hold's own `say` gets its text. */
+  function tell(
+    projectId: ProjectId,
+    pass: PassDto | undefined,
+    kind: PassNoticeKind,
+    text: string,
+  ): void {
+    if (pass) notice(pass, kind, text);
+    else holds.get(projectId)?.say?.(text);
   }
 
   /** Takes the notice off the pass it is on, open or not: an ended pass's header keeps none either. */
@@ -211,13 +242,12 @@ export function startPreview(deps: PreviewDeps): Preview {
           return;
         }
         if (sayLate && Date.now() - startedAt > timing.answerWithinMs) {
-          const pass = findOpenPass(db, projectId);
-          if (pass)
-            notice(
-              pass,
-              PassNoticeKind.PreviewStarting,
-              `The preview is running, but nothing answers at ${appUrl} yet: check that \`${run.command}\` serves that address.`,
-            );
+          tell(
+            projectId,
+            findOpenPass(db, projectId),
+            PassNoticeKind.PreviewStarting,
+            `The preview is running, but nothing answers at ${appUrl} yet: check that \`${run.command}\` serves that address.`,
+          );
         }
         // Still looked at after the deadline: a slow first build answers late, and the notice goes then.
         watchAnswer(projectId, appUrl, run, startedAt, sayLate);
@@ -241,20 +271,22 @@ export function startPreview(deps: PreviewDeps): Preview {
     }
     gaveUp.set(projectId, run.command);
     log.warn({ projectId }, 'the preview stopped for good');
-    const pass = findOpenPass(db, projectId);
-    if (pass === undefined) return;
     const tail = result === null ? '' : tailOf(result.tail);
-    notice(
-      pass,
+    tell(
+      projectId,
+      findOpenPass(db, projectId),
       PassNoticeKind.PreviewStopped,
       `The preview stopped: \`${run.command}\` exited ${String(RESTARTS_IN_WINDOW + 1)} times in 10 minutes.${tail === '' ? '' : `\n${tail}`}`,
     );
   }
 
   function launch(project: ProjectDto, command: string, appUrl: string): void {
-    const pass = findOpenPass(db, project.id);
-    if (pass === undefined) return;
-    notice(pass, PassNoticeKind.PreviewStarting, `Starting the preview: \`${command}\``);
+    tell(
+      project.id,
+      findOpenPass(db, project.id),
+      PassNoticeKind.PreviewStarting,
+      `Starting the preview: \`${command}\``,
+    );
     const abort = new AbortController();
     let ledger: PreviewLedger | null = null;
     if (deps.ledgers) {
@@ -313,7 +345,13 @@ export function startPreview(deps: PreviewDeps): Preview {
     const pass = project ? findOpenPass(db, projectId) : undefined;
     const command = project?.previewCommand ?? null;
     const appUrl = project?.appUrl ?? null;
-    if (project === undefined || pass === undefined || command === null || appUrl === null) {
+    // The preview runs for an open pass, or while a hold keeps it.
+    if (
+      project === undefined ||
+      (pass === undefined && !holds.has(projectId)) ||
+      command === null ||
+      appUrl === null
+    ) {
       await end(projectId);
       clearNotice(projectId);
       return;
@@ -331,7 +369,8 @@ export function startPreview(deps: PreviewDeps): Preview {
       exits.delete(projectId);
     }
     if (!project.sandboxLoopback) {
-      notice(
+      tell(
+        projectId,
         pass,
         PassNoticeKind.PreviewStopped,
         `The preview needs Allow loopback in Project Settings › General: \`${command}\` serves ${appUrl}, and the gate's sandbox lets nothing listen without it.`,
@@ -345,6 +384,27 @@ export function startPreview(deps: PreviewDeps): Preview {
     }
     if (stopped()) return;
     launch(project, command, appUrl);
+  }
+
+  /** Looks at the address until it answers or the hold's deadline passes; stops early when nothing runs to serve it. */
+  async function waitForApp(projectId: ProjectId): Promise<boolean> {
+    let appUrl: string | null;
+    try {
+      appUrl = getProject(db, projectId).appUrl;
+    } catch {
+      return false;
+    }
+    if (appUrl === null) return false;
+    const deadline = Date.now() + timing.holdAnswerWithinMs;
+    while (!stopped()) {
+      if (await answers(appUrl)) return true;
+      if (!runs.has(projectId) || Date.now() >= deadline) return false;
+      await new Promise<void>((resolve) => {
+        // A real timer on purpose, as the other preview timers; not tracked, so a stop never strands this wait.
+        setTimeout(resolve, timing.probeEveryMs);
+      });
+    }
+    return false;
   }
 
   function ensure(projectId: ProjectId): Promise<void> {
@@ -403,6 +463,22 @@ export function startPreview(deps: PreviewDeps): Preview {
         watchAnswer(projectId, run.appUrl, run, Date.now(), false);
       });
     },
+    async hold(projectId, say) {
+      const earlier = holds.get(projectId);
+      if (earlier) {
+        clearTimeout(earlier.timer);
+        timers.delete(earlier.timer);
+      }
+      const timer = setTimeout(() => {
+        timers.delete(timer);
+        holds.delete(projectId);
+        void ensure(projectId);
+      }, timing.holdMs);
+      timers.add(timer);
+      holds.set(projectId, { timer, say });
+      await ensure(projectId);
+      return waitForApp(projectId);
+    },
     async restart(projectId) {
       await enqueue(projectId, async () => {
         gaveUp.delete(projectId);
@@ -416,6 +492,7 @@ export function startPreview(deps: PreviewDeps): Preview {
       unsubscribe();
       for (const timer of timers) clearTimeout(timer);
       timers.clear();
+      holds.clear();
       await Promise.all([...runs.keys()].map((projectId) => end(projectId)));
     },
   };

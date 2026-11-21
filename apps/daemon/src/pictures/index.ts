@@ -1,6 +1,7 @@
 export type { BrowserStatus, DrawInput, PageCamera, ShootInput, Shot } from './camera';
 export { refusedCamera, ShotOutcome } from './camera';
-export { startPictures, type Pictures } from './pictures';
+export type { MockupDrawn, NowShot, Pictures, ShootNowInput, ShotsNow } from './pictures';
+export { startPictures } from './pictures';
 export { createBrowserHost } from './browser-host';
 export { launchChromium } from './playwright';
 export { createPlaywrightCamera } from './playwright-camera';

@@ -1,12 +1,19 @@
-import { ScreenKind, type TaskId, type TaskScreenId } from '@10db/contracts';
-import { listFinishedTurnScreens, listPrunedHashes, markScreensPruned } from '@10db/db';
+import { ScreenKind, type DesignCheckId, type TaskId, type TaskScreenId } from '@10db/contracts';
+import {
+  deleteDesignChecks,
+  listDesignChecksForPruning,
+  listFinishedTurnScreens,
+  listPrunedHashes,
+  markScreensPruned,
+} from '@10db/db';
 import type { Clock, Timer } from '../clock';
 import type { StateStore } from '../events';
 import type { Logger } from '../log';
 import { removeUnnamed } from './picture-files';
 
 // Workbench spec docs/superpowers/specs/2026-11-09-10db-workbench-design.md §10 "When", §11: a turn
-// picture is kept 14 days after its task is done or cancelled; a before and an after are kept for good.
+// picture, and a design check, is kept 14 days after its task is done or cancelled; a before and an after
+// are kept for good.
 // No thread message can show a turn picture yet, so none is exempt. A pruned row stays as a record,
 // and its file is deleted once no unpruned row names its hash.
 
@@ -33,6 +40,25 @@ export function prunableTurnScreens(
   });
 }
 
+/**
+ * The design checks to delete: a task's 14 days after the task was done or cancelled, one with no task
+ * (a plan's Design review) 14 days after it was made.
+ */
+export function prunableDesignChecks(
+  rows: readonly {
+    readonly id: DesignCheckId;
+    readonly createdAt: string;
+    readonly taskDoneAt: string | null;
+    readonly hasTask: boolean;
+  }[],
+  now: number,
+): DesignCheckId[] {
+  return rows.flatMap((row) => {
+    const since = row.hasTask ? row.taskDoneAt : row.createdAt;
+    return since !== null && now - Date.parse(since) >= TURN_PICTURES_KEPT_MS ? [row.id] : [];
+  });
+}
+
 export interface PruningDeps {
   readonly state: StateStore;
   readonly dataDir: string;
@@ -52,8 +78,14 @@ function sweep(deps: PruningDeps): void {
     deps.state.write((ctx) => {
       markScreensPruned(ctx, pruned);
     });
+  const checks = prunableDesignChecks(
+    listDesignChecksForPruning(deps.state.db),
+    deps.clock.now().getTime(),
+  );
+  const checkHashes =
+    checks.length === 0 ? [] : deps.state.write((ctx) => deleteDesignChecks(ctx, checks));
   let removed = 0;
-  for (const sha of listPrunedHashes(deps.state.db))
+  for (const sha of new Set([...listPrunedHashes(deps.state.db), ...checkHashes]))
     if (removeUnnamed(deps.state.db, deps.dataDir, sha)) removed += 1;
   if (pruned.length > 0 || removed > 0)
     deps.logger.info({ pruned: pruned.length, filesRemoved: removed }, 'pruned turn pictures');
