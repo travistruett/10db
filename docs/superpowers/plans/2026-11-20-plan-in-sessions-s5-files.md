@@ -28,7 +28,7 @@ A: Feature (the content check is a parser and gets one unit test). B: Small, fol
 Claude reads PDFs and images itself, so nothing changes there. Codex 0.167 takes only `text`, `image`,
 `localImage`, `audio`, `skill` and `mention` input (`codex-generated/ts/v2/UserInput.ts`), and its
 `view_image` takes PNG, JPEG and WebP only, so a PDF's intake line in a Codex session points at the extracted
-text file and says so. A PDF with no extractable text (a scan) says that on both providers. `.docx`, `.pptx`
+text file and says so. A PDF with no extractable text (a scan) says so to Codex only; Claude reads the scan itself. `.docx`, `.pptx`
 and text files are text everywhere.
 
 ## Parts

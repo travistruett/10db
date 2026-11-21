@@ -178,7 +178,7 @@ reviewers once it can run subagents.
   input, and its `view_image` reads PNG, JPEG and WebP only, so it can't read a PDF; this Mac has no `pdftotext`.
   10db extracts the PDF's text at upload with `unpdf` (bundled into the daemon) and keeps it beside the PDF as
   `<stored>.txt`; a Codex session's intake line points at that text file, and a PDF with no text (a scan) says so
-  on both providers.
+  to Codex only, since Claude reads the scan itself.
 
 ## 7. What goes away, and where the rest goes
 

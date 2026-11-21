@@ -17,6 +17,7 @@ for (const name of [
   'srt.mjs',
   'builder-mcp.mjs',
   'builder-mcp.mjs.map',
+  'extract-worker.mjs',
   'vendor',
   'drizzle',
   'harness',
@@ -57,6 +58,15 @@ await build({
   entryPoints: [resolve(root, 'src/builder-mcp.ts')],
   outfile: resolve(outDir, 'builder-mcp.mjs'),
   sourcemap: true,
+});
+// The thread PDF and office-document text is extracted in: killed at a deadline, loaded by the daemon
+// from beside itself.
+// It gets no `require` banner: PDF.js declares its own.
+await build({
+  ...bundle,
+  banner: {},
+  entryPoints: [resolve(root, 'src/conversation/extract-worker.ts')],
+  outfile: resolve(outDir, 'extract-worker.mjs'),
 });
 // srt's command line, which runs every gate under the sandbox: the app carries its own copy.
 await build({

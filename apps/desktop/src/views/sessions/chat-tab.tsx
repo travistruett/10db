@@ -806,7 +806,12 @@ export function ChatTab({
           // A drawer would cover the composer the draft lands in.
           if (!besidePlan) planChoice.set(chat.id, false);
           setDraft((now) => ({ ...now, text: now.text === '' ? text : `${now.text}\n${text}` }));
-          input.current?.focus();
+          // A closing drawer gives focus back to the Plan toggle as it unmounts; the composer takes it after.
+          if (besidePlan) input.current?.focus();
+          else
+            requestAnimationFrame(() => {
+              input.current?.focus();
+            });
         }}
         onWhy={(row) => {
           // A drawer would cover the messages it points at.

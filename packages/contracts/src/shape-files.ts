@@ -83,7 +83,14 @@ const InlineFileName = z
   .max(100)
   .refine((name) => !/[/\\\0]/.test(name) && !name.startsWith('.') && !name.startsWith('~'), {
     message: 'A file is a name, never a path',
-  });
+  })
+  .refine(
+    (name) => {
+      const kind = shapeFileKind(name);
+      return kind === null || kind === ShapeFileKind.Markdown || kind === ShapeFileKind.Text;
+    },
+    { message: 'start_shape takes text files only; images and PDFs are dropped into the app' },
+  );
 
 export const StartShapeFile = z.object({ name: InlineFileName, content: z.string().min(1) });
 export type StartShapeFile = z.infer<typeof StartShapeFile>;

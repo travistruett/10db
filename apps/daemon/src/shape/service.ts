@@ -6,6 +6,7 @@ import {
   ConversationProfile,
   EventType,
   InvalidError,
+  shapeFileRefusal,
   NotFoundError,
   parseItemBody,
   ShapeEventKind,
@@ -65,7 +66,6 @@ import type { Clock } from '../clock';
 import {
   createExploreEngine,
   keepPdfText,
-  pdfTextPath,
   pictureLimitsFor,
   STRICTEST_LIMITS,
   type ExploreEngine,
@@ -84,7 +84,7 @@ import {
   type TrackedFiles,
 } from './ceremony';
 import { convertProposals, type ConvertOutcome, type JoiningProblem } from './convert';
-import { checkDroppedFile, storeFile } from './dropped-files';
+import { checkDroppedFile, readyToKeep, storeFile } from './dropped-files';
 import { dropNote, editNote, restoreNote, rowLabel, unpinNote } from './edit-notes';
 import { createPlanParts, type PlanParts, type PlanTurnState } from './plan-parts';
 import type { ShapeJev } from './jev';
@@ -511,6 +511,12 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
               bytes,
               held: countShapeFiles(ctx.tx, shape.id),
             });
+            // Inline files are text by construction; one that reads as anything else is refused.
+            if (
+              checked.mediaType !== ShapeFileKind.Text &&
+              checked.mediaType !== ShapeFileKind.Markdown
+            )
+              throw new InvalidError(`${checked.name} isn't a text file`);
             insertShapeFile(ctx, {
               shapeId: shape.id,
               name: checked.name,
@@ -531,30 +537,44 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
 
     async addFile(shapeId, file) {
       getShape(state.db, shapeId);
-      const checked = checkDroppedFile({
-        name: file.name,
-        bytes: file.bytes,
-        held: countShapeFiles(state.db, shapeId),
-      });
+      const checked = await readyToKeep(
+        checkDroppedFile({
+          name: file.name,
+          bytes: file.bytes,
+          held: countShapeFiles(state.db, shapeId),
+        }),
+      );
       const storedPath = storeFile(deps.filesDir, shapeId, checked.storedName, checked.bytes);
+      let textPath: string | null = null;
       try {
-        if (checked.mediaType === ShapeFileKind.Pdf)
-          await keepPdfText(storedPath, checked.bytes, (error) => {
+        if (checked.mediaType === ShapeFileKind.Pdf) {
+          try {
+            textPath = await keepPdfText(storedPath, checked.bytes);
+            if (textPath === null) log.info({ file: checked.name }, 'a dropped PDF has no text');
+          } catch (error) {
             log.warn({ err: error, file: checked.name }, 'a dropped PDF’s text could not be read');
+          }
+        }
+        const row = state.write((ctx) => {
+          // Counted again here: drops that overlap each passed the first count.
+          const refusal = shapeFileRefusal({
+            name: checked.name,
+            size: checked.bytes.length,
+            held: countShapeFiles(ctx.tx, shapeId),
           });
-        const row = state.write((ctx) =>
-          insertShapeFile(ctx, {
+          if (refusal !== null) throw new InvalidError(refusal);
+          return insertShapeFile(ctx, {
             shapeId,
             name: checked.name,
             mediaType: checked.mediaType,
             size: checked.bytes.length,
             storedPath,
-          }),
-        );
+          });
+        });
         return fileDtoOf(row);
       } catch (error) {
         rmSync(storedPath, { force: true });
-        rmSync(pdfTextPath(storedPath), { force: true });
+        if (textPath !== null) rmSync(textPath, { force: true });
         throw error;
       }
     },

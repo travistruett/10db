@@ -1,5 +1,5 @@
-import { InvalidError } from '@10db/contracts';
 import { strFromU8, unzipSync } from 'fflate';
+import { ExtractionError } from './extraction-error.ts';
 
 // A .docx or .pptx as the Markdown a session reads: a ZIP of XML, so a paragraph is a `<w:p>` or `<a:p>`
 // and its text the runs inside.
@@ -108,22 +108,28 @@ function unzipped(
         if (!wanted(entry.name)) return false;
         inflated += entry.originalSize;
         if (inflated > MAX_INFLATED_BYTES)
-          throw new InvalidError('The file is too large once opened');
+          throw new ExtractionError('The file is too large once opened');
         return true;
       },
     });
   } catch (error) {
-    if (error instanceof InvalidError) throw error;
-    throw new InvalidError("The file can't be opened");
+    if (error instanceof ExtractionError) throw error;
+    throw new ExtractionError("The file can't be opened");
   }
 }
 
 /** The document's text: a line per paragraph, or a `## Slide N` section per slide, in slide order. */
 export function officeText(kind: 'docx' | 'pptx', bytes: Uint8Array): string {
+  const text = officeBody(kind, bytes);
+  if (text.trim() === '') throw new ExtractionError('has no text 10db could read');
+  return text;
+}
+
+function officeBody(kind: 'docx' | 'pptx', bytes: Uint8Array): string {
   if (kind === 'docx') {
     const entries = unzipped(bytes, (name) => name === 'word/document.xml');
     const xml = entries['word/document.xml'];
-    if (xml === undefined) throw new InvalidError("The file can't be opened");
+    if (xml === undefined) throw new ExtractionError("The file can't be opened");
     return `${paragraphs(strFromU8(xml), 'w').join('\n')}\n`;
   }
   const entries = unzipped(bytes, (name) => /^ppt\/slides\/slide\d+\.xml$/.test(name));
