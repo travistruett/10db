@@ -236,14 +236,16 @@ export function createPlanParts(deps: PlanPartsDeps): PlanParts {
     ].join('\n');
   };
 
-  /** A PDF's line: its text file for Codex, which can't read a PDF; a note when it has no text. */
+  /**
+   * A PDF's line. Claude reads the PDF itself, scans included. Codex can't read a PDF, so it gets the
+   * PDF's text, or a note when 10db found none (a scan).
+   */
   const pdfLine = (file: ShapeFileRow, provider: Provider): string => {
+    if (provider !== Provider.Codex) return `[file] ${file.storedPath} (${file.name})`;
     const textPath = pdfTextPath(file.storedPath);
-    if (!existsSync(textPath))
-      return `[file] ${file.storedPath} (${file.name}: a PDF with no text 10db could read)`;
-    return provider === Provider.Codex
+    return existsSync(textPath)
       ? `[file] ${textPath} (${file.name}: the PDF's text; Codex can't read a PDF)`
-      : `[file] ${file.storedPath} (${file.name})`;
+      : `[file] ${file.storedPath} (${file.name}: a PDF with no text 10db could read, and Codex can't read a PDF)`;
   };
 
   /** The images a turn points the agent at as a path that a Read would refuse (§5.4). */
