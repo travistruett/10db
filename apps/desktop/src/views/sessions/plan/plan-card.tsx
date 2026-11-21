@@ -8,7 +8,7 @@ export interface PlanCardProps {
 }
 
 /**
- * A card of the Plan: the Board's card tone, raised one tone above the panel, which keeps the
+ * A card of the Plan: the panel tone (bg_1 in both schemes), one step off the panel, which keeps the
  * conversation's surface. No outline, radius md.
  */
 export function PlanCard({ head, children }: PlanCardProps) {
@@ -19,7 +19,7 @@ export function PlanCard({ head, children }: PlanCardProps) {
       style={{
         listStyle: 'none',
         borderRadius: 'var(--mantine-radius-md)',
-        background: 'var(--tendb-color-card)',
+        background: 'var(--tendb-color-panel)',
       }}
     >
       {head}
