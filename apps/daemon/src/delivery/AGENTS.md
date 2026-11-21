@@ -20,4 +20,4 @@
 - A `Card` needs `tier`, `urgency` and `closesWhen` (`decisions/2026-11-17-every-card-has-a-tier.md`); a notice
   goes through `post` or `postIn`.
 - `createPr` copies commits' `Test-budget:` lines into its body (`testBudgetLines`, `pr-text.ts`).
-- `run-commits.ts`: a run's own work (`runCommits`): in the builder's own checkout only the commits its sessions made through the commit tool, as first-parent ranges that start at each range's first commit's parent and that anyone else's commit splits; in a worktree every commit since `baseHead`, in one range. `diffOfRanges` reads them as one diff, cut to its byte cap, with each file's counts summed. The runner's checks, recovery's check facts, a handoff's commits and `workstreamChanges` read it (`decisions/2026-11-20-a-task-is-judged-on-its-own-commits-in-a-shared-checkout.md`).
+- `run-commits.ts`: a run's own commits and their diff (`runner/AGENTS.md`).
