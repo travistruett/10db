@@ -34,6 +34,7 @@ import {
   listShapeLinks,
   listShapeProposals,
   listShapeQuestions,
+  schema,
   searchPrincipleIds,
   seedProject,
   supersedeDecision,
@@ -172,9 +173,12 @@ describe('Undo Accept', () => {
           tasks: [
             { key: 'a1', title: 'A one', areas: ['api'], size: 'S' },
             { key: 'a2', title: 'A two', areas: ['api'], size: 'S', depends_on: ['a1'] },
+            { key: 'a3', title: 'A three', areas: ['api'], size: 'S' },
           ],
         },
       ],
+      // lb waits on a3, and a1 comes to wait on lb below: the goal and the loose task wait on each other task by task.
+      looseTasks: [task('lb', { dependsOn: ['a3'] })],
       records: [
         decisionRecord('d1'),
         {
@@ -200,6 +204,10 @@ describe('Undo Accept', () => {
 
     const b = taskOf(store, shapeId, 'b');
     const a1 = taskOf(store, shapeId, 'a1');
+    const lb = taskOf(store, shapeId, 'lb');
+    store.write((ctx) => {
+      ctx.tx.insert(schema.taskDeps).values({ taskId: a1, dependsOnId: lb }).run();
+    });
     const undone = store.write((ctx) => undoAccept(ctx, shapeId, second)).value;
     expect(undone).toEqual({
       goals: 0,
@@ -252,7 +260,7 @@ describe('Undo Accept', () => {
     const again = store.write((ctx) => undoAccept(ctx, shapeId, first)).value;
     expect(again).toEqual({
       goals: 1,
-      tasks: 2,
+      tasks: 4,
       decisions: 0,
       principles: 1,
       questions: 0,
@@ -260,6 +268,7 @@ describe('Undo Accept', () => {
     });
     expect(() => getGoal(store.db, goalA)).toThrow(NotFoundError);
     expect(getTask(store.db, a1).status).toBe(TaskStatus.Cancelled);
+    expect(getTask(store.db, lb).status).toBe(TaskStatus.Cancelled);
     expect(getDecision(store.db, d1).withdrawnAt).toBeNull();
     expect(proposal(store, shapeId, 'd1').state).toBe(ShapeProposalState.Accepted);
     expect(

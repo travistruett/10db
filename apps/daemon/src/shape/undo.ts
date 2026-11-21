@@ -41,6 +41,8 @@ import {
   patchShapeProposal,
   pendingProposalOf,
   rekeyShapeAttachmentsToProposal,
+  releaseShapeLinksOfGoal,
+  revivingClash,
   releaseDetachedShapeQuestions,
   releaseShapeQuestion,
   removeDraftGoal,
@@ -173,8 +175,9 @@ function principleFate(db: DbReader, id: PrincipleId): Fate {
     case KnowledgeState.Withdrawn:
     case KnowledgeState.Retired:
       return 'taken';
+    // Withdrawing it would bring its predecessor back beside another principle: Undo leaves it.
     case KnowledgeState.Current:
-      return 'withdraw';
+      return revivingClash(db, principle) === undefined ? 'withdraw' : 'kept';
     // A proposed principle is decided through its proposal, which Undo does not touch.
     case KnowledgeState.Proposed:
       return pendingProposalOf(db, id) === null ? 'withdraw' : 'kept';
@@ -246,14 +249,16 @@ function acceptReach(db: DbReader, shapeId: ShapeId, acceptId: ShapeAcceptId): R
 
   const groups = [...listLandingGroupsOfAccept(db, acceptId)];
   const made = new Set(taskIds);
-  const landings = ofKind('landing').map((proposal) => {
-    const title = ShapeProposalBody.landing.parse(proposal.body).title;
+  const landings = ofKind('landing').flatMap((proposal) => {
+    const parsed = ShapeProposalBody.landing.safeParse(proposal.body);
+    if (!parsed.success) return [];
+    const title = parsed.data.title;
     const at = groups.findIndex((g) => g.title === title);
     const group = at < 0 ? undefined : groups.splice(at, 1)[0];
     const members = group?.members ?? [];
     const stays = members.some((id) => !made.has(id));
     if (stays) kept.add(proposal.id);
-    return { proposal, groupId: group?.id ?? null, members, stays };
+    return [{ proposal, groupId: group?.id ?? null, members, stays }];
   });
   return {
     goals,
@@ -318,12 +323,6 @@ function rewrapped(error: unknown): unknown {
   return error;
 }
 
-/** A unit leaves the Board as a whole: a goal with its tasks, or one loose task. */
-interface Unit {
-  readonly taskIds: readonly TaskId[];
-  readonly remove: () => void;
-}
-
 /**
  * Undo Accept: takes back exactly what one Accept wrote, read from its proposals and their links,
  * in the caller's one write. It cancels no run and leaves no branch, batch or worktree: any task of
@@ -354,50 +353,54 @@ export function undoAccept(
           `${getGoal(ctx.tx, goalId).title} holds ${task.title}, which this Accept didn't make`,
         );
 
-  const units: Unit[] = reach.goals.map(({ goalId }) => ({
-    taskIds: listGoalTasks(ctx.tx, goalId)
-      .filter((t) => t.status !== TaskStatus.Cancelled)
-      .map((t) => t.id),
-    remove: () => {
-      removeDraftGoalOf(ctx, shapeId, goalId);
-    },
-  }));
-  for (const { proposal, taskId } of reach.tasks) {
-    const links = reach.links.filter((l) => l.proposalId === proposal.id);
-    if (getTask(ctx.tx, taskId).status === TaskStatus.Cancelled) {
-      deleteShapeLinksOf(ctx, proposal.id);
-      continue;
-    }
-    units.push({
-      taskIds: [taskId],
-      remove: () => {
-        rekeyShapeAttachmentsToProposal(ctx, links);
-        cancelNeverStartedTask(ctx, taskId);
-        deleteShapeLinksOf(ctx, proposal.id);
-      },
-    });
-  }
-  // A unit goes once nothing else remaining in the Accept waits on its tasks.
-  const waitsOn = new Map(
-    units.flatMap((u) => u.taskIds).map((id) => [id, getTask(ctx.tx, id).dependsOn] as const),
-  );
   try {
-    for (let remaining = units; remaining.length > 0;) {
+    // Attachments, questions and links come off first, while every task is still open: cancelling
+    // a task detaches the questions stored under it.
+    const allLinks = listShapeLinks(ctx.tx, shapeId);
+    for (const { goalId, proposal } of reach.goals) {
+      const goalTasks = listGoalTasks(ctx.tx, goalId).map((t) => t.id);
+      const inGoal = allLinks.filter(
+        (l) =>
+          l.goalId === goalId ||
+          l.proposalId === proposal.id ||
+          (l.taskId !== null && goalTasks.includes(l.taskId)),
+      );
+      rekeyShapeAttachmentsToProposal(ctx, inGoal);
+      releaseDetachedShapeQuestions(
+        ctx,
+        shapeId,
+        inGoal.filter((l) => l.taskId !== null).map((l) => l.key),
+      );
+      releaseShapeLinksOfGoal(ctx, goalId, goalTasks);
+      deleteShapeLinksOf(ctx, proposal.id);
+    }
+    for (const { proposal } of reach.tasks)
+      rekeyShapeAttachmentsToProposal(
+        ctx,
+        reach.links.filter((l) => l.proposalId === proposal.id),
+      );
+    // Then every task this Accept made, in an order no remaining one waits on: tasks of a goal and
+    // loose tasks wait on each other across goals, so the order is by task, not by goal.
+    const waitsOn = new Map(
+      reach.liveTaskIds.map((id) => [id, getTask(ctx.tx, id).dependsOn] as const),
+    );
+    for (let remaining = [...reach.liveTaskIds]; remaining.length > 0;) {
       const leaves = remaining.filter(
-        (u) =>
-          !remaining.some(
-            (other) =>
-              other !== u &&
-              other.taskIds.some((t) => waitsOn.get(t)?.some((d) => u.taskIds.includes(d))),
-          ),
+        (id) => !remaining.some((other) => waitsOn.get(other)?.includes(id)),
       );
       if (leaves.length === 0)
         throw new ConflictError(
           'Tasks of this Accept wait on each other, so Undo cannot order them',
         );
-      for (const unit of leaves) unit.remove();
-      remaining = remaining.filter((u) => !leaves.includes(u));
+      for (const id of leaves) cancelNeverStartedTask(ctx, id);
+      remaining = remaining.filter((id) => !leaves.includes(id));
     }
+    for (const { proposal } of [
+      ...reach.goals.flatMap((g) => g.additions.map((proposal) => ({ proposal }))),
+      ...reach.tasks,
+    ])
+      deleteShapeLinksOf(ctx, proposal.id);
+    for (const { goalId } of reach.goals) removeDraftGoal(ctx, goalId);
   } catch (error) {
     throw rewrapped(error);
   }
