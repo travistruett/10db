@@ -15,12 +15,11 @@ description: Use when you add or change behavior, before writing the implementat
    the clock and processes you don't own. Add no branch, flag or export only a test uses.
    Tests of merges, pushes, worktrees, migrations, recovery, sandboxes, guards, permissions
    and claims exercise the real thing.
-4. Run only that test and watch it fail because the behavior is missing, not because of a
-   typo, import error or broken fixture.
-5. Write the smallest implementation that passes it.
+4. Run only that test; see it fail for the missing behavior, not a typo or broken fixture.
+   If it is refused, keep it, go on, and attach the run with `mcp__10db__record_evidence`.
+5. Write the smallest implementation that passes.
 6. Run the checks for what you changed (its packages' tests, typecheck and lint), never
-   the full gate: 10db runs it after your step. Attach extra runs with
-   `mcp__10db__record_evidence`.
+   the full gate: 10db runs it after your step. Attach runs the same way.
 
 Never weaken a test to pass it; if a test is wrong, say why in the commit message.
 Removing a test that guards neither core nor an escaped bug is welcome, in its own commit.

@@ -320,7 +320,7 @@ const JUDGED_LANE_RULE = judgedAutoModeRule(LANE_REFUSED_CALL);
 
 /** A lane nobody watches waits on no card: what would raise one is skipped (trust line §5). */
 const SKIPPED_RULE =
-  'Nobody is watching this task. A call 10db or auto mode refuses with "Skipped:" is left out on purpose: carry on without it, and list each skipped call in your handoff. If the step\'s job can\'t be done without it, call report_blocked with the reason.';
+  'Nobody is watching this task. A call 10db or auto mode refuses with "Skipped:" is left out on purpose: carry on without it, and list each skipped call in your handoff. A test or check that a refusal or the sandbox keeps from running is no reason to stop: keep it, finish the change, and attach the refused run with record_evidence (its command, exit code and what stopped it). Call report_blocked only when the change itself can\'t be made without the call.';
 
 /** A pass has the builder in it, who can allow a refused call. */
 const JUDGED_PASS_RULE = judgedAutoModeRule(
@@ -528,12 +528,14 @@ function sandboxRulesFor(provider: Provider, setup: SetupLines): readonly string
     case Provider.Claude:
       return withSetupLines(SANDBOX_RULES, setup);
     case Provider.Codex:
+      // Codex has no auto mode, but a lane nobody watches still meets skipped calls.
       return withSetupLines(
-        SANDBOX_RULES.filter((line) => line !== AUTO_MODE_RULE).flatMap((line) =>
-          line === CLAUDE_HOSTS_RULE
-            ? [CODEX_HOSTS_RULE, ...(setup.webJudged ? [CODEX_WEB_RULE] : [])]
-            : [line],
-        ),
+        SANDBOX_RULES.flatMap((line) => {
+          if (line === AUTO_MODE_RULE) return setup.attended ? [] : [SKIPPED_RULE];
+          if (line === CLAUDE_HOSTS_RULE)
+            return [CODEX_HOSTS_RULE, ...(setup.webJudged ? [CODEX_WEB_RULE] : [])];
+          return [line];
+        }),
         setup,
       );
   }
