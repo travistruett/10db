@@ -582,7 +582,9 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   page,
   request,
 }) => {
-  const projectId = await createProject(request, 'sessions-plan');
+  const projectId = await createProject(request, 'sessions-plan', [
+    { name: 'repo', globs: ['**'], role: 'page', route: '/people' },
+  ]);
   const titlesWithIds = async (): Promise<z.infer<typeof Tasks>> =>
     Tasks.parse(
       await (
@@ -669,6 +671,12 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await expect(page.getByText('Here is a mock-up.')).toBeVisible();
   await panel.getByRole('button', { name: /^Approve mock-up/ }).click();
   await expect(panel.getByRole('button', { name: /^Unapprove mock-up/ })).toBeVisible();
+
+  // Design review reads each task that has a mock-up and a page area; with no browser in this daemon the
+  // pictures are missing, the review still runs, and its finding lands on the row.
+  await panel.getByRole('button', { name: 'Review' }).click();
+  await page.getByRole('menuitem', { name: 'Design review' }).click();
+  await expect(panel.getByText('The mock-up leaves out the empty state.').first()).toBeVisible();
 
   // Accept lists the rows, says nothing starts, and writes the ticked ones to the Board.
   const before = (await titles()).length;

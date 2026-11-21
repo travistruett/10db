@@ -142,7 +142,7 @@ switches **Plan | Changes**.
 | --- | --- | --- | --- | --- |
 | Plan review | the goal's spec (`write_spec`), scope and engineering reviewers | Built (`shape/review.ts`) | separate reviewers | in the session; says it ran without separate reviewers |
 | Check for Questions | each task, read as the agent about to build it would, for the questions it would have to ask (missing facts, unmade choices); they land on the task, so they are answered while planning, not mid-run | Built (the engine's "rehearsal") | a rehearsal agent per task | in the session, one task after another; says so |
-| Design review | each UI task's approved mock-up against the project's screenshots and its `DESIGN.md` where it has one | **New** (slice 5 designs its inputs) | a design reviewer | in the session |
+| Design review | each UI task's approved mock-up against the project's screenshots and its `DESIGN.md` where it has one | **Built** (slice 5) | a design reviewer | in the session |
 
 Accept warns on open findings and never blocks (the Convert rule). A follow-up task gives Codex separate
 reviewers once it can run subagents.

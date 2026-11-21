@@ -15,3 +15,4 @@
   command calls `onNoAnswer` (`lost`: starts the preview when none runs, says a running one that answered no longer
   does) instead of raising the "Nothing answers" notice. `POST /projects/:id/preview/restart` is Restart Preview.
   Shutdown stops it after the pictures.
+- A hold (`hold(projectId, say)`): an on-demand picture keeps the preview up with no pass open for 5 minutes past the last ask (`holdMs`), then `reconcile` ends it unless a pass is open. `hold` waits for the app to answer, at most 60 s (`holdAnswerWithinMs`), and stops early when nothing runs to serve it. With no pass, what a header notice would say goes to the hold's `say` (a line on the plan's transcript) instead.
