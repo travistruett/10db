@@ -18,6 +18,7 @@ import {
   FixFresh,
   FixBy,
   FIX_ATTEMPT_LIMIT,
+  MAX_STEP_SUMMARY,
   InboxKind,
   CARD_OPENS,
   RoutedBy,
@@ -621,6 +622,8 @@ type Outcome =
       readonly ending: string;
       /** What the session wrote as its last message in its longest turn; '' when it wrote nothing. */
       readonly wrote: string;
+      /** The session that ended: an implement step keeps what it wrote as the step's report. */
+      readonly sessionId: SessionId;
     }
   | {
       readonly kind: 'parked';
@@ -3940,6 +3943,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 unaskedRun: st.unaskedRunEnded,
                 ending: describeEnding(st),
                 wrote: st.wrote,
+                sessionId: session.id,
               };
               await handle.stop();
             }
@@ -4028,6 +4032,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                     unaskedRun: st.unaskedRunEnded,
                     ending: describeEnding(st),
                     wrote: st.wrote,
+                    sessionId: session.id,
                   };
                   break;
               }
@@ -4877,11 +4882,31 @@ export function createRunner(opts: RunnerOptions): Runner {
           }
           opts.state.write((ctx) => {
             // The paths a sent-back session was asked to commit, so the send-back after it can tell new ones.
-            const sent = getWorkstreamRow(ctx.tx, id).nextAction;
+            const now = getWorkstreamRow(ctx.tx, id);
+            const sent = now.nextAction;
+            // An implement step ends by ending its turn, so what the session wrote last is its only account
+            // of the work: a task that changes nothing has no diff to show instead.
+            const report = outcome.wrote.trim();
             transitionWorkstream(ctx, id, {
               to: S.Verifying,
               fence: ctl.fence,
               patch: {
+                ...(report === ''
+                  ? {}
+                  : {
+                      steps: now.steps.map((s, i) =>
+                        i === now.stepIndex
+                          ? {
+                              ...s,
+                              report: {
+                                summary: report.slice(0, MAX_STEP_SUMMARY),
+                                sessionId: outcome.sessionId,
+                                at: ctx.now,
+                              },
+                            }
+                          : s,
+                      ),
+                    }),
                 nextAction:
                   sent.kind === 'uncommitted'
                     ? { kind: 'verify', sentBack: [...sent.paths] }

@@ -22,6 +22,19 @@ export const StepResult = z.object({
 });
 export type StepResult = z.infer<typeof StepResult>;
 
+/**
+ * What an implement step's last session wrote as its final message: the build's own account of what it
+ * did, found and skipped. An implement step ends by ending its turn, so this is not a `result`; a build
+ * that plans first keeps its plan there, and a review's verdict is a separate result on its own step.
+ */
+export const StepReport = z.object({
+  summary: z.string().min(1).max(MAX_STEP_SUMMARY),
+  /** The session that wrote it. */
+  sessionId: SessionId,
+  at: z.iso.datetime(),
+});
+export type StepReport = z.infer<typeof StepReport>;
+
 /** The follow-up task filed for the findings a task shipped with at the retry limit. */
 export const ShippedAtLimit = z.object({
   followUpTaskId: TaskId,
@@ -65,6 +78,8 @@ export const WorkstreamStep = z.object({
    */
   retryFloor: z.int().min(0).optional(),
   result: StepResult.nullable(),
+  /** An implement step's latest report (see `StepReport`); absent on any other step and until a session of it has ended. */
+  report: StepReport.optional(),
   /** Results this step kept when it ran again (a rejection it was sent back for), oldest first. */
   earlier: z.array(StepResult).default([]),
   /** Times this step's rejection sent the work back since the attempts last started over; a retry sets it to 0. */
@@ -140,6 +155,25 @@ export function planOf(steps: readonly WorkstreamStep[]): TaskPlan | null {
     personaName: step.personaName,
     summary: step.result.summary,
     at: step.result.at,
+  };
+}
+
+/** The build's account of its work, and the step that wrote it. */
+export interface TaskReport {
+  readonly personaName: string;
+  readonly summary: string;
+  /** When the build session ended. */
+  readonly at: string;
+}
+
+/** The latest report an implement step kept; null when no build session has ended with one. */
+export function reportOf(steps: readonly WorkstreamStep[]): TaskReport | null {
+  const step = steps.findLast((s) => s.role === StepRole.Implement && s.report !== undefined);
+  if (!step?.report) return null;
+  return {
+    personaName: step.personaName || ROLE_LABEL.implement,
+    summary: step.report.summary,
+    at: step.report.at,
   };
 }
 

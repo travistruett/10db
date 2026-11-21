@@ -42,7 +42,8 @@
         }
       },
       {
-        "do": "turn_complete"
+        "do": "turn_complete",
+        "text": "Wrote src/greeting/hello.txt and committed it."
       }
     ],
     [

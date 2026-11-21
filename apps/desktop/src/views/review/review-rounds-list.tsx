@@ -8,6 +8,7 @@ import {
 } from '@10db/contracts';
 import { Badge, Group, Paper, Stack, Text } from '@mantine/core';
 import { RelativeTime } from '../factory/relative-time';
+import { ROLES } from '../settings/role-labels';
 import { FindingsList, FullReview } from './review-findings';
 
 /** How a review round came out, in the words and color the list and the drawer's latest-review line share. */
@@ -27,6 +28,11 @@ export function roundVerdict(
 /** Who gave a round's verdict: the reviewer's name, else its role. */
 export function roundReviewer(round: ReviewRound): string {
   return round.personaName || ROLE_LABEL[round.role];
+}
+
+/** The phase a round's verdict belongs to, so a reviewer's result is never read as the build's. */
+export function roundPhase(round: ReviewRound): string {
+  return ROLES.find((r) => r.role === round.role)?.label ?? ROLE_LABEL[round.role];
 }
 
 /** Every verdict the task's review steps gave, newest first, each with its findings. */
@@ -51,6 +57,9 @@ export function ReviewRoundsList({ steps }: { readonly steps: readonly Workstrea
                     {verdict.label}
                   </Badge>
                   <Text size="sm">{roundReviewer(round)}</Text>
+                  <Text size="xs" c="dimmed" data-testid="review-phase">
+                    {roundPhase(round)}
+                  </Text>
                 </Group>
                 <RelativeTime at={round.result.at} />
               </Group>
