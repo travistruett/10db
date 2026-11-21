@@ -576,8 +576,8 @@ export interface ApiServices extends PlanRecordServices {
   /** Keeps a dropped file; throws InvalidError naming the file and the reason when it is refused. */
   addShapeFile(
     shapeId: ShapeId,
-    file: { readonly name: string; readonly mediaType: string; readonly bytes: Uint8Array },
-  ): ShapeFileDto;
+    file: { readonly name: string; readonly bytes: Uint8Array },
+  ): Promise<ShapeFileDto>;
   /**
    * Keeps the builder's message and its pasted pictures. Throws NotFoundError for an unknown task and
    * InvalidError, naming what is refused, for an empty message or a file that is no PNG, JPEG or

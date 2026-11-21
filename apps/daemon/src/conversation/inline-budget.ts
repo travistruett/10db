@@ -1,9 +1,8 @@
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  isShapeImage,
   ScreenMessageBody,
-  shapeFileKind,
+  ShapeFileKind,
   ShapeMessageKind,
   type ShapeId,
   type ShapeMessageDto,
@@ -170,10 +169,15 @@ export function readBytesSpent(messages: readonly ShapeMessageDto[]): number {
   return Math.max(0, total);
 }
 
-export const isImageName = (name: string): boolean => {
-  const kind = shapeFileKind(name);
-  return kind !== null && isShapeImage(kind);
-};
+const IMAGE_TYPES: ReadonlySet<string> = new Set([
+  ShapeFileKind.Png,
+  ShapeFileKind.Jpeg,
+  ShapeFileKind.Webp,
+]);
+
+/** Whether the file is a picture, by the type its row holds: what its bytes were when it was kept. */
+export const isImageFile = (file: { readonly mediaType: string }): boolean =>
+  IMAGE_TYPES.has(file.mediaType);
 
 /** What a Screen message's body says, or null for a body that isn't one. */
 export function parseScreenBody(body: string): ScreenMessageBody | null {
@@ -254,9 +258,7 @@ export function inlinePictureBytes(
 ): number {
   const sent = listFiles(state.db, shapeConversation(state.db, shapeId).id).reduce(
     (sum, file) =>
-      file.inlineSent && isImageName(file.name) && !tooBigAlone(file, limits)
-        ? sum + file.size
-        : sum,
+      file.inlineSent && isImageFile(file) && !tooBigAlone(file, limits) ? sum + file.size : sum,
     0,
   );
   return sent + liveScreenBytes(listShapeMessages(state.db, shapeId), filesRoot, shapeId);
@@ -307,7 +309,7 @@ export function carriedTooMuch(
   const messages = listShapeMessages(state.db, shapeId);
   let sent = 0;
   for (const file of listFiles(state.db, shapeConversation(state.db, shapeId).id)) {
-    if (!file.inlineSent || !isImageName(file.name)) continue;
+    if (!file.inlineSent || !isImageFile(file)) continue;
     if (tooBigAlone(file, limits))
       return { carried: file.size, allowed: limits.imageMaxBytes, reason: 'image' };
     sent += file.size;

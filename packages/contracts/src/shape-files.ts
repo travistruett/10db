@@ -6,7 +6,7 @@ import { ProjectId, ConversationFileId, ShapeId } from './ids';
 
 const Timestamp = z.iso.datetime();
 
-/** What a file is, by its extension: the types §5.4 accepts. */
+/** The types a dropped file is stored as: what its bytes are, and Markdown for a name that says so. */
 export const ShapeFileKind = {
   Markdown: 'text/markdown',
   Text: 'text/plain',
@@ -33,7 +33,7 @@ export const SHAPE_FILES_MAX = 20;
 /** What start_shape's inline files may total: a model emits them in one tool call. */
 export const SHAPE_TEXT_FILES_MAX_BYTES = 256 * 1024;
 
-/** The file's kind from its extension, or null when §5.4 doesn't accept it. */
+/** The kind a name's extension says, or null; a dropped file's kind comes from its bytes instead. */
 export function shapeFileKind(name: string): ShapeFileKind | null {
   const dot = name.lastIndexOf('.');
   if (dot <= 0) return null;
@@ -49,16 +49,13 @@ export const isShapeImage = (kind: ShapeFileKind): kind is ShapeImageKind =>
 
 /**
  * Why a dropped file is refused, in the words the input shows, or null. `held` is how many files the
- * conversation has already. The declared media type is not trusted: the extension decides.
+ * conversation has already. What the file is comes from its bytes, which the daemon checks.
  */
 export function shapeFileRefusal(file: {
   readonly name: string;
   readonly size: number;
-  readonly mediaType: string;
   readonly held: number;
 }): string | null {
-  if (shapeFileKind(file.name) === null)
-    return `${file.name} can't be added: drop Markdown, plain text, PDF, PNG, JPEG or WebP`;
   if (file.size === 0) return `${file.name} is empty`;
   if (file.size > SHAPE_FILE_MAX_BYTES)
     return `${file.name} is ${String(Math.ceil(file.size / (1024 * 1024)))} MB; the limit is ${String(SHAPE_FILE_MAX_BYTES / (1024 * 1024))} MB`;
@@ -79,8 +76,6 @@ export const ShapeFileDto = z.object({
 });
 export type ShapeFileDto = z.infer<typeof ShapeFileDto>;
 
-const TEXT_EXTENSIONS = new Set(['md', 'markdown', 'txt']);
-
 /** A name and no path: nothing the daemon would copy from elsewhere on the Mac. */
 const InlineFileName = z
   .string()
@@ -88,19 +83,7 @@ const InlineFileName = z
   .max(100)
   .refine((name) => !/[/\\\0]/.test(name) && !name.startsWith('.') && !name.startsWith('~'), {
     message: 'A file is a name, never a path',
-  })
-  .refine(
-    (name) => {
-      const kind = shapeFileKind(name);
-      return (
-        kind !== null && TEXT_EXTENSIONS.has(name.slice(name.lastIndexOf('.') + 1).toLowerCase())
-      );
-    },
-    {
-      message:
-        'start_shape takes Markdown or plain text files only; images and PDFs are dropped into the app',
-    },
-  );
+  });
 
 export const StartShapeFile = z.object({ name: InlineFileName, content: z.string().min(1) });
 export type StartShapeFile = z.infer<typeof StartShapeFile>;

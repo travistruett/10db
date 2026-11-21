@@ -22,6 +22,7 @@ import {
   type PrincipleId,
   type ProjectId,
   type ShapeDto,
+  ShapeFileKind,
   type ShapeFileDto,
   type ShapeFindingId,
   type ShapeAcceptId,
@@ -63,6 +64,8 @@ import {
 import type { Clock } from '../clock';
 import {
   createExploreEngine,
+  keepPdfText,
+  pdfTextPath,
   pictureLimitsFor,
   STRICTEST_LIMITS,
   type ExploreEngine,
@@ -165,10 +168,9 @@ export interface ShapeServiceDeps {
   readonly hold?: Hold;
 }
 
-/** A file as the input hands it over: the name and type the browser reported, and its bytes. */
+/** A file as the input hands it over: the name the browser reported, and its bytes. */
 export interface DroppedFile {
   readonly name: string;
-  readonly mediaType: string;
   readonly bytes: Uint8Array;
 }
 
@@ -182,7 +184,7 @@ export interface ShapeService {
    * Keeps a dropped file (§5.4) and sends it with the next message: an image as an image block, any
    * other file as a line naming its path. Throws InvalidError, naming the file, when it is refused.
    */
-  addFile(shapeId: ShapeId, file: DroppedFile): ShapeFileDto;
+  addFile(shapeId: ShapeId, file: DroppedFile): Promise<ShapeFileDto>;
   /**
    * The builder's actions on a row (§6 Editing). Each is one write and reaches the next turn as a note.
    * Throws NotFoundError for a row of another conversation and ConflictError for a converted or dropped one.
@@ -506,7 +508,6 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
             const bytes = new TextEncoder().encode(file.content);
             const checked = checkDroppedFile({
               name: file.name,
-              mediaType: '',
               bytes,
               held: countShapeFiles(ctx.tx, shape.id),
             });
@@ -514,8 +515,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
               shapeId: shape.id,
               name: checked.name,
               mediaType: checked.mediaType,
-              size: bytes.length,
-              storedPath: storeFile(deps.filesDir, shape.id, checked.name, bytes),
+              size: checked.bytes.length,
+              storedPath: storeFile(deps.filesDir, shape.id, checked.storedName, checked.bytes),
             });
           }
           return shape;
@@ -528,26 +529,32 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       }
     },
 
-    addFile(shapeId, file) {
+    async addFile(shapeId, file) {
       getShape(state.db, shapeId);
       const checked = checkDroppedFile({
-        ...file,
+        name: file.name,
+        bytes: file.bytes,
         held: countShapeFiles(state.db, shapeId),
       });
-      const storedPath = storeFile(deps.filesDir, shapeId, checked.name, file.bytes);
+      const storedPath = storeFile(deps.filesDir, shapeId, checked.storedName, checked.bytes);
       try {
+        if (checked.mediaType === ShapeFileKind.Pdf)
+          await keepPdfText(storedPath, checked.bytes, (error) => {
+            log.warn({ err: error, file: checked.name }, 'a dropped PDF’s text could not be read');
+          });
         const row = state.write((ctx) =>
           insertShapeFile(ctx, {
             shapeId,
             name: checked.name,
             mediaType: checked.mediaType,
-            size: file.bytes.length,
+            size: checked.bytes.length,
             storedPath,
           }),
         );
         return fileDtoOf(row);
       } catch (error) {
         rmSync(storedPath, { force: true });
+        rmSync(pdfTextPath(storedPath), { force: true });
         throw error;
       }
     },

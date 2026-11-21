@@ -297,6 +297,14 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       return true;
     }
   };
+  /** The provider the conversation's agent runs on now; Claude when its launch can't be read. */
+  const providerKnown = (conv: ConversationRow): Provider => {
+    try {
+      return providerOf(deps.launch(conv.projectId, conv.model, conv.effort).account.kind);
+    } catch {
+      return Provider.Claude;
+    }
+  };
   const describe = (conv: ConversationRow, model: string | null) => {
     const launch = deps.launch(conv.projectId, model, conv.effort);
     const name = storedModelNames(state.db).find((m) => m.id === launch.modelId)?.name;
@@ -875,6 +883,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         fresh: session.fresh,
         digest: session.digest,
         limits: session.limits,
+        provider: providerKnown(conv),
         carrying,
       });
       // A session that started before its plan is owed the planning rules: they go first, and are owed no

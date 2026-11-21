@@ -1047,7 +1047,7 @@ export function createApp(deps: ApiDeps) {
       return c.body(null, 204);
     })
     // The file itself is the body, so a 20 MB drop is not base64 inside JSON: its name is the query and
-    // its type the content type.
+    // what it is comes from its bytes.
     .post(
       '/shapes/:shapeId/files',
       validator('query', (value): ShapeFileQuery => ShapeFileQuery.parse(value)),
@@ -1055,11 +1055,7 @@ export function createApp(deps: ApiDeps) {
         const { name } = c.req.valid('query');
         const bytes = new Uint8Array(await c.req.arrayBuffer());
         return c.json(
-          deps.services.addShapeFile(ShapeId.parse(c.req.param('shapeId')), {
-            name,
-            mediaType: c.req.header('content-type') ?? '',
-            bytes,
-          }),
+          await deps.services.addShapeFile(ShapeId.parse(c.req.param('shapeId')), { name, bytes }),
           201,
         );
       },
