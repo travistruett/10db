@@ -65,6 +65,7 @@ export const ShapeEventKind = {
   Propose: 'propose',
   Rehearse: 'rehearse',
   Review: 'review',
+  DesignReview: 'design_review',
   Edit: 'edit',
   Event: 'event',
   Screen: 'screen',

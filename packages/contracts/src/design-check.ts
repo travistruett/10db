@@ -51,3 +51,21 @@ export const TaskDesignCheckDto = z.object({
   newest: DesignCheckDto.nullable(),
 });
 export type TaskDesignCheckDto = z.infer<typeof TaskDesignCheckDto>;
+
+/** The lane tool that shows an agent its task's mock-up beside the app as it is now. */
+export const CHECK_DESIGN_TOOL = 'check_design';
+
+export const CheckDesignInput = z.object({
+  verdict: z
+    .string()
+    .min(1)
+    .max(2000)
+    .optional()
+    .describe(
+      'On a second call, after you compared the pictures: what still differs between the mock-up and the app, or that nothing does. Kept with the check.',
+    ),
+});
+export type CheckDesignInput = z.infer<typeof CheckDesignInput>;
+
+export const CHECK_DESIGN_DESCRIPTION =
+  "Shows you this task's approved mock-up drawn to a picture, beside pictures of the task's page or pages as the app shows them now, with the project's DESIGN.md path. Call it before you hand off, compare, and fix what differs; then call it again with `verdict` to record what still differs, or that nothing does. Every check is kept for the builder. In a task that runs in a separate copy, 10db serves no app there: it says so, and you compare by reading the mock-up's HTML in your brief. The pictures go to your model and stay on this Mac otherwise.";

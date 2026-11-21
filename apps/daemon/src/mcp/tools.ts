@@ -87,6 +87,7 @@ import {
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { judgeToolUse, type ProtectedPath } from '../guard';
+import type { Pictures } from '../pictures';
 import {
   AnsweredAwayError,
   CardTier,
@@ -155,6 +156,8 @@ export interface McpDeps {
   readonly shapeTools?: ShapeToolsFor;
   /** The tools of a chat's session; absent, such a session is refused. */
   readonly chatTools?: ChatToolsFor;
+  /** Draws a mock-up and shoots the app for `check_design`; absent, a lane is not offered it. */
+  readonly pictures?: Pick<Pictures, 'shootNow' | 'drawMockup'>;
 }
 
 /** What a build step that plans first is told once its plan is recorded. */

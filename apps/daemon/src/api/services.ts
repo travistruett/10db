@@ -222,6 +222,8 @@ import type {
   TaskPictureKind,
   TaskScreenId,
   TaskScreensDto,
+  TaskDesignCheckDto,
+  DesignCheckId,
   PicturesStatusDto,
   TaskInput,
   RunNextResult,
@@ -601,6 +603,10 @@ export interface ApiServices extends PlanRecordServices {
   taskScreens(taskId: TaskId): TaskScreensDto;
   /** A picture's PNG; throws NotFoundError for a pruned or missing one. */
   screenPicture(screenId: TaskScreenId): Uint8Array<ArrayBuffer>;
+  /** A task's newest design check, for its drawer. */
+  taskDesignCheck(taskId: TaskId): TaskDesignCheckDto;
+  /** A design check's mock-up picture, or one of its page shots by position; NotFoundError when none. */
+  designCheckPicture(checkId: DesignCheckId, part: 'mockup' | number): Uint8Array<ArrayBuffer>;
   /** Settings › General: the browser for pictures and the project's last sign-in. */
   picturesStatus(projectId: ProjectId): PicturesStatusDto;
   /** Restart Preview: runs the project's preview command again, its restarts forgotten. */
@@ -631,6 +637,8 @@ export interface ApiServices extends PlanRecordServices {
   ): void;
   /** Plan review on the given rows (or all); `tasks` counts the goals and loose tasks it reads. */
   reviewShape(shapeId: ShapeId, input: ShapeRehearseInput): ShapeRehearseResult;
+  /** Design review on the given rows (or all): answers once the pictures are taken and the turn is queued. */
+  designReviewShape(shapeId: ShapeId, input: ShapeRehearseInput): Promise<ShapeRehearseResult>;
   /** The builder dismisses a finding or a rehearsal question. */
   dismissShapeFinding(shapeId: ShapeId, findingId: ShapeFindingId, input: ShapeDismissInput): void;
   /** Ship anyway (from OPEN) or Retry (from FAILED). */

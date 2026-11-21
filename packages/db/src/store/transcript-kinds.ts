@@ -106,6 +106,7 @@ export function shapeItemOf(
     case ShapeMessageKind.Propose:
     case ShapeMessageKind.Rehearse:
     case ShapeMessageKind.Review:
+    case ShapeMessageKind.DesignReview:
     case ShapeMessageKind.Edit:
     case ShapeMessageKind.Event:
     case ShapeMessageKind.Screen:

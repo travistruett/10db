@@ -8,3 +8,4 @@ export { createPlaywrightCamera } from './playwright-camera';
 export { pageRouteLoads, takesPictures } from './picture-routes';
 export { startPruning } from './prune';
 export { keptRoute, pageAreaRoutes } from './kept-route';
+export { checkShotsOf, missingLines } from './design-shots';

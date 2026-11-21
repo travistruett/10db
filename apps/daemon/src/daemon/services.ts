@@ -868,6 +868,8 @@ export function createServices(deps: {
     ...deps.thread,
     taskScreens: (taskId) => deps.pictures.screens(taskId),
     screenPicture: (screenId) => deps.pictures.screenFile(screenId),
+    taskDesignCheck: (taskId) => deps.pictures.designCheck(taskId),
+    designCheckPicture: (checkId, part) => deps.pictures.designCheckFile(checkId, part),
     picturesStatus: (projectId) => deps.pictures.status(projectId),
     restartPreview: async (projectId) => {
       getProject(db, projectId);

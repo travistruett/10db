@@ -21,6 +21,8 @@ import {
   WorkstreamState,
   type AppUrl,
   type DaemonEvent,
+  type DesignCheckId,
+  type TaskDesignCheckDto,
   type DesignCheckPurpose,
   type PicturesStatusDto,
   type ProjectDto,
@@ -32,6 +34,8 @@ import {
 } from '@10db/contracts';
 import {
   findPass,
+  getDesignCheck,
+  latestTaskDesignCheck,
   getPassTurn,
   getProject,
   getTask,
@@ -112,6 +116,9 @@ export interface NowShot {
 
 /** What `shootNow` answers: the pages it shot, and what it could not shoot and why. */
 export interface ShotsNow {
+  /** The window and theme every shot was taken in. */
+  readonly viewport: ScreenViewport;
+  readonly theme: ScreenTheme;
   readonly shots: readonly NowShot[];
   /** A route that was not shot, or null for all of them (no app address, nothing answering). */
   readonly missing: readonly { readonly route: string | null; readonly reason: string }[];
@@ -179,6 +186,10 @@ export interface Pictures {
   /** Draws a mock-up's HTML in the first viewport and theme of the project's matrix, cached by what it drew. */
   drawMockup(projectId: ProjectId, html: string): Promise<MockupDrawn>;
   screens(taskId: TaskId): TaskScreensDto;
+  /** The task's newest design check. */
+  designCheck(taskId: TaskId): TaskDesignCheckDto;
+  /** A design check's mock-up PNG or the PNG of its shot at a position; NotFoundError when it has none. */
+  designCheckFile(checkId: DesignCheckId, part: 'mockup' | number): Uint8Array<ArrayBuffer>;
   /** A picture's PNG; throws NotFoundError for a pruned or missing one. */
   screenFile(screenId: TaskScreenId): Uint8Array<ArrayBuffer>;
   /** Drops what waits, aborts the load in flight and waits for it; nothing is asked again. */
@@ -786,9 +797,22 @@ export function startPictures(deps: PicturesDeps): Pictures {
 
   async function shootNow(input: ShootNowInput): Promise<ShotsNow> {
     const project = getProject(db, input.projectId);
-    const none = (reason: string): ShotsNow => ({ shots: [], missing: [{ route: null, reason }] });
-    const routes = [...new Set(input.routes)].filter(pageRouteLoads);
-    if (routes.length === 0) return none('the task names no page whose route loads');
+    const { viewport, theme } = firstOfMatrix(project);
+    const none = (reason: string): ShotsNow => ({
+      viewport,
+      theme,
+      shots: [],
+      missing: [{ route: null, reason }],
+    });
+    const asked = [...new Set(input.routes)];
+    const routes = asked.filter(pageRouteLoads);
+    const unloadable = asked
+      .filter((r) => !pageRouteLoads(r))
+      .map((route) => ({
+        route,
+        reason: 'the route has a parameter, so there is no page to load',
+      }));
+    if (routes.length === 0) return { viewport, theme, shots: [], missing: unloadable };
     if (project.appUrl === null) return none('the project has no app address');
     const port = listenPort ?? (await deps.daemonPort);
     const appUrl = shootableAddress(project.id, port);
@@ -802,14 +826,13 @@ export function startPictures(deps: PicturesDeps): Pictures {
             ? `nothing answers at ${appUrl}, and the project has no preview command to start it`
             : `nothing answered at ${appUrl} in time`,
         );
-      const { viewport, theme } = firstOfMatrix(project);
       const devUi = devUiFor(appUrl, port);
       let storageState = readStorageState(deps.dataDir, project.id);
       if (storageState === null && project.devLoginCommand !== null)
         storageState = await runSignIn(project, abort.signal);
       let signedInAgain = false;
       const shots: NowShot[] = [];
-      const missing: { route: string | null; reason: string }[] = [];
+      const missing: { route: string | null; reason: string }[] = [...unloadable];
       for (const route of routes) {
         const shoot = (state: StorageState | null): Promise<Shot> =>
           deps.camera.shoot({
@@ -844,7 +867,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
           shots.push({ route, viewport, theme, sha256: file.sha256, path: file.storedPath });
         } else missing.push({ route, reason: missingReason(shot) });
       }
-      return { shots, missing };
+      return { viewport, theme, shots, missing };
     } catch (error) {
       return none(abort.signal.aborted ? 'the daemon is stopping' : errorText(error));
     } finally {
@@ -886,6 +909,20 @@ export function startPictures(deps: PicturesDeps): Pictures {
     screens(taskId) {
       getTask(db, taskId);
       return { taskId, screens: listTaskScreens(db, taskId), fromGoal: goalPictures(taskId) };
+    },
+    designCheck(taskId) {
+      getTask(db, taskId);
+      return { taskId, newest: latestTaskDesignCheck(db, taskId) };
+    },
+    designCheckFile(checkId, part) {
+      const check = getDesignCheck(db, checkId);
+      const sha = part === 'mockup' ? check.mockupSha256 : (check.shots[part]?.sha256 ?? null);
+      if (sha === null) throw new NotFoundError('design check picture', checkId);
+      try {
+        return readFileSync(picturePath(deps.dataDir, sha));
+      } catch {
+        throw new NotFoundError('design check picture', checkId);
+      }
     },
     screenFile(screenId) {
       const row = getTaskScreenRow(db, screenId);
