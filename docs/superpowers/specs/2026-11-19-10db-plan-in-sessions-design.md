@@ -1,6 +1,6 @@
 # 10db: Plan becomes part of Sessions
 
-**Status:** designed on 2026-11-19; slices 1 and 2 are built. **Replaces** the Plan view (`views/shape/`) as its own nav item.
+**Status:** designed on 2026-11-19; slices 1, 2 and 3 are built. **Replaces** the Plan view (`views/shape/`) as its own nav item.
 **Keeps** the Plan engine as built: proposals, rounds, pins, reviewers, rehearsal, attachments, Convert
 (`2026-11-02-10db-brainstorm-chat-design.md`), and the Sessions life as built
 (`2026-11-17-10db-sessions-simplified-design.md`).
