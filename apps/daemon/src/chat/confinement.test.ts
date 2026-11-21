@@ -171,16 +171,14 @@ describe('a chat’s edits', () => {
   );
 
   it('lets Claude Code’s own bookkeeping through, a background subagent’s hand-back included', () => {
-    for (const toolName of [
-      'SubagentHandback',
-      'TodoWrite',
-      'ToolSearch',
-      'TaskStop',
-      'SendMessage',
-    ])
+    for (const toolName of ['SubagentHandback', 'TodoWrite', 'ToolSearch', 'TaskStop'])
       expect(
         judgeChatCall({ toolName, input: {}, agentId: 'sub-1' }, access, holding).decision,
       ).toBe('allow');
+    // SendMessage reaches other Claude sessions, so it is not bookkeeping.
+    expect(judgeChatCall({ toolName: 'SendMessage', input: {} }, access, holding).decision).toBe(
+      'deny',
+    );
   });
 
   it('names a tool it does not know as none of this chat’s, not as a read-only chat', () => {

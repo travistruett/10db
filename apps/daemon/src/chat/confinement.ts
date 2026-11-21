@@ -17,13 +17,13 @@ const WEB_TOOLS: ReadonlySet<string> = new Set(['WebSearch', 'WebFetch']);
 const EDIT_TOOLS: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const AGENT_TOOLS: ReadonlySet<string> = new Set(['Agent', 'Task']);
 /**
- * Claude Code's own bookkeeping: its to-do list, loading a deferred tool's schema, its tasks, and a
- * background agent's hand-back and messages. None touches a file, a command or the network, and a
- * background reviewer that can't hand back never finishes.
+ * Claude Code's own bookkeeping: its to-do list, loading a deferred tool's schema, its own tasks, and
+ * a background subagent's hand-back to this session. None touches a file, a command, the network or
+ * another session, and a background reviewer that can't hand back never finishes. SendMessage is not
+ * one: it can reach other Claude sessions on the Mac and in the cloud.
  */
 const HARNESS_TOOLS: ReadonlySet<string> = new Set([
   'SubagentHandback',
-  'SendMessage',
   'TodoWrite',
   'ToolSearch',
   'TaskCreate',
