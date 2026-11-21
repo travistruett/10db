@@ -57,10 +57,3 @@ export function goalLiveLine(words: readonly LiveWord[]): string {
     return n === 0 ? [] : [`${String(n)} ${word.toLowerCase()}`];
   }).join(' · ');
 }
-
-/** The dot an accepted row wears over Accepted: running while anything runs, done once all that remains is done. */
-export function liveDot(words: readonly LiveWord[]): 'running' | 'done' | null {
-  if (words.some((w) => w.word === 'Running')) return 'running';
-  const kept = words.filter((w) => w.word !== 'Removed');
-  return kept.length > 0 && kept.every((w) => w.word === 'Done') ? 'done' : null;
-}

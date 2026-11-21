@@ -1,10 +1,9 @@
-import {
-  ShapeFindingSeverity,
-  type CeremonyReason,
-  type ShapeCeremonyDto,
-  type ShapeFindingDto,
-  type ShapeProposalDto,
-  type ShapeViewDto,
+import type {
+  CeremonyReason,
+  ShapeCeremonyDto,
+  ShapeFindingDto,
+  ShapeProposalDto,
+  ShapeViewDto,
 } from '@10db/contracts';
 
 // Shape spec §7. What the sidebar and the Convert modal say about a row's ceremony, the reviewers'
@@ -107,22 +106,4 @@ export function convertWarnings(
       : [`${String(findings)} review ${plural(findings, 'finding is', 'findings are')} open`]),
     ...missing.map((key) => `${key} needs a spec and has none`),
   ];
-}
-
-/** The color a finding's severity wears on its tag and on a row's findings chip. */
-export const SEVERITY_COLOR: Record<ShapeFindingSeverity, string> = {
-  [ShapeFindingSeverity.Low]: 'gray',
-  [ShapeFindingSeverity.Medium]: 'orange',
-  [ShapeFindingSeverity.High]: 'red',
-};
-
-const SEVERITY_ORDER: readonly ShapeFindingSeverity[] = [
-  ShapeFindingSeverity.High,
-  ShapeFindingSeverity.Medium,
-  ShapeFindingSeverity.Low,
-];
-
-/** The most severe of a row's findings; null when none carries a severity. */
-export function highestSeverity(findings: readonly ShapeFindingDto[]): ShapeFindingSeverity | null {
-  return SEVERITY_ORDER.find((s) => findings.some((f) => f.severity === s)) ?? null;
 }

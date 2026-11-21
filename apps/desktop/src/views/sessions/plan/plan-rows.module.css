@@ -1,15 +1,23 @@
-/* A row of the Plan: one line, chips at the right, its actions in their place on hover or focus. */
+/* A row of the Plan: one line, its facts at the right, its actions in their place on hover or focus. */
 .row {
   position: relative;
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  padding: 6px 8px;
+  gap: 10px;
+  padding: 3px 14px;
   border-radius: var(--mantine-radius-sm);
 }
 
 .row:hover {
   background: var(--mantine-color-default-hover);
+}
+
+/* The round's dot hangs in the row's left padding, so every title starts at one edge. */
+.dot {
+  position: absolute;
+  left: 3px;
+  top: 12px;
+  z-index: 1;
 }
 
 /* The title button covers the whole row, so a click anywhere opens it; what sits above it lifts itself. */
@@ -31,6 +39,7 @@
   flex: none;
   align-items: center;
   justify-items: end;
+  min-height: 24px;
 }
 
 .slot > * {
@@ -40,7 +49,7 @@
 .chips {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   pointer-events: none;
 }
 
@@ -59,5 +68,23 @@
 .row:hover .actions,
 .row:has(:focus-visible) .actions,
 .row:has([aria-expanded='true'].menu) .actions {
+  opacity: 1;
+}
+
+/* The size column: a fixed width, so sizes line up down a card. */
+.trail {
+  flex: none;
+  min-width: 36px;
+  padding-top: 3px;
+  text-align: right;
+}
+
+/* A note's Dismiss shows on hover or focus of the note. */
+.note .dismiss {
+  opacity: 0;
+}
+
+.note:hover .dismiss,
+.note:focus-within .dismiss {
   opacity: 1;
 }

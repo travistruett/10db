@@ -1,10 +1,12 @@
 import type { ShapeProposalDto, ShapeTaskSizeDto } from '@10db/contracts';
-import { List, Stack, Text } from '@mantine/core';
+import { Stack, Text } from '@mantine/core';
 import { IconClockExclamation } from '@tabler/icons-react';
+import type { ReactNode } from 'react';
 import { sizeFacts } from './size-line';
 
-// What an opened row says, read-only (editing is a later slice). Text is plain: nothing a model
-// wrote is rendered as markup.
+// What an opened row says. Text is plain: nothing a model wrote is rendered as markup. An opened row is
+// one block with one left edge, in one order: the description, the notes, what it is done when, one
+// dim line of facts and links, and the attachments. Everything in it is 13 px, its labels 12 px dim.
 
 export function Labelled({
   label,
@@ -14,12 +16,14 @@ export function Labelled({
   readonly children: string;
 }) {
   return (
-    <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
-      <Text span size="sm" c="dimmed">
-        {label}{' '}
+    <Stack gap={0}>
+      <Text fz={12} c="dimmed">
+        {label}
       </Text>
-      {children}
-    </Text>
+      <Text fz={13} style={{ whiteSpace: 'pre-wrap' }}>
+        {children}
+      </Text>
+    </Stack>
   );
 }
 
@@ -33,103 +37,175 @@ export function Items({
   if (items.length === 0) return null;
   return (
     <Stack gap={2}>
-      <Text size="xs" c="dimmed">
+      <Text fz={12} c="dimmed">
         {label}
       </Text>
-      <List size="sm" spacing={2} listStyleType="none" withPadding={false}>
+      <Stack component="ul" gap={2} m={0} p={0} style={{ listStyle: 'none' }}>
         {items.map((item) => (
-          <List.Item key={item}>{item}</List.Item>
+          <Text key={item} component="li" fz={13}>
+            {item}
+          </Text>
         ))}
-      </List>
+      </Stack>
     </Stack>
   );
 }
 
-/** The size and area of an opened task, once: "repo · ~0.5 h", flagged when it ran outside its size. */
-export function SizeFacts({
-  areas,
-  size,
-}: {
-  readonly areas: readonly string[];
-  readonly size: ShapeTaskSizeDto | undefined;
-}) {
+export interface DetailBlockProps {
+  readonly description?: string;
+  readonly notes?: ReactNode;
+  readonly criteria?: readonly string[];
+  /** Labelled parts a kind has beyond these. */
+  readonly more?: ReactNode;
+  /** The facts of the dim line, such as "repo · ~0.5 h". */
+  readonly facts?: readonly string[];
+  /** The facts' icon: the actual ran outside the size by more than one bucket. */
+  readonly flagged?: boolean;
+  /** Links that end the dim line, such as Why?. */
+  readonly links?: readonly ReactNode[] | undefined;
+  readonly attachments?: ReactNode;
+}
+
+/** The opened row's block, in its one order. */
+export function DetailBlock({
+  description = '',
+  notes,
+  criteria = [],
+  more,
+  facts = [],
+  flagged = false,
+  links = [],
+  attachments,
+}: DetailBlockProps) {
   return (
-    <Text size="xs" c="dimmed">
-      {sizeFacts(areas, size)}
-      {size?.missized === true ? (
-        <>
-          {' '}
-          <IconClockExclamation
-            size={14}
-            stroke={1.5}
-            role="img"
-            aria-label="Outside its size by more than one bucket"
-            style={{ verticalAlign: '-2px' }}
-          />
-        </>
-      ) : null}
-    </Text>
+    <Stack gap={10}>
+      {description === '' ? null : (
+        <Text fz={13} style={{ whiteSpace: 'pre-wrap' }}>
+          {description}
+        </Text>
+      )}
+      {notes}
+      <Items label="Done when" items={criteria} />
+      {more}
+      <Text
+        fz={12}
+        c="dimmed"
+        component="div"
+        style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}
+      >
+        {[
+          ...(facts.length === 0
+            ? []
+            : [
+                <span key="facts">
+                  {facts.join(' · ')}
+                  {flagged ? (
+                    <>
+                      {' '}
+                      <IconClockExclamation
+                        size={14}
+                        stroke={1.5}
+                        role="img"
+                        aria-label="Outside its size by more than one bucket"
+                        style={{ verticalAlign: '-2px' }}
+                      />
+                    </>
+                  ) : null}
+                </span>,
+              ]),
+          ...links,
+        ].flatMap((part, index) => [
+          ...(index === 0 ? [] : [<span key={`dot-${String(index)}`}>·</span>]),
+          part,
+        ])}
+      </Text>
+      {attachments}
+    </Stack>
   );
 }
 
-/** A goal's tasks and their title, size and area are in its card; an opened goal adds what they don't say. */
-export function RowDetails({
-  row,
-  sizes,
-}: {
+/** A task's facts, once: "repo · ~0.5 h", then what it depends on. */
+export function taskFacts(
+  areas: readonly string[],
+  size: ShapeTaskSizeDto | undefined,
+  dependsOn: readonly string[],
+): string[] {
+  return [
+    sizeFacts(areas, size),
+    ...(dependsOn.length === 0 ? [] : [`depends on ${dependsOn.join(', ')}`]),
+  ];
+}
+
+export interface RowDetailsProps {
   readonly row: ShapeProposalDto;
   readonly sizes: readonly ShapeTaskSizeDto[];
-}) {
+  readonly notes?: ReactNode;
+  readonly links?: readonly ReactNode[] | undefined;
+  readonly attachments?: ReactNode;
+  /** A goal's lane time as "~1 h", for the goal's dim line. */
+  readonly laneTime?: string | null;
+}
+
+/** An opened row of a card: what its kind says, in the block's order. */
+export function RowDetails({ row, sizes, notes, links, attachments, laneTime }: RowDetailsProps) {
+  const block = { notes, links, attachments };
   switch (row.kind) {
     case 'goal': {
       const off = sizes.filter((s) => s.missized).length;
       return (
-        <Stack gap="xs">
-          <Items label="Criteria" items={row.body.criteria.map((c) => `${c.text} (${c.check})`)} />
-          <Labelled label="Ceremony">{row.body.ceremony}</Labelled>
-          {off === 0 ? null : <Text size="xs" c="dimmed">{`${String(off)} mis-sized`}</Text>}
-        </Stack>
+        <DetailBlock
+          {...block}
+          criteria={row.body.criteria.map((c) => `${c.text} (${c.check})`)}
+          facts={[
+            `Ceremony ${row.body.ceremony}`,
+            ...(laneTime === null || laneTime === undefined ? [] : [laneTime]),
+            ...(off === 0 ? [] : [`${String(off)} mis-sized`]),
+          ]}
+        />
       );
     }
     case 'task':
       return (
-        <Stack gap="xs">
-          {row.body.description === '' ? null : (
-            <Labelled label="Description">{row.body.description}</Labelled>
-          )}
-          <Items label="Criteria" items={row.body.criteria} />
-          {row.body.dependsOn.length === 0 ? null : (
-            <Labelled label="Depends on">{row.body.dependsOn.join(', ')}</Labelled>
-          )}
-          <SizeFacts areas={row.body.areas} size={sizes[0]} />
-        </Stack>
+        <DetailBlock
+          {...block}
+          description={row.body.description}
+          criteria={row.body.criteria}
+          facts={taskFacts(row.body.areas, sizes[0], row.body.dependsOn)}
+          flagged={sizes[0]?.missized === true}
+        />
       );
     case 'decision':
       return (
-        <Stack gap="xs">
-          <Labelled label="Question">{row.body.question}</Labelled>
-          <Labelled label="Why">{row.body.rationale}</Labelled>
-        </Stack>
+        <DetailBlock
+          {...block}
+          more={
+            <>
+              <Labelled label="Question">{row.body.question}</Labelled>
+              <Labelled label="Why">{row.body.rationale}</Labelled>
+            </>
+          }
+        />
       );
     case 'principle':
-      return <Labelled label="Why">{row.body.rationale}</Labelled>;
+      return (
+        <DetailBlock {...block} more={<Labelled label="Why">{row.body.rationale}</Labelled>} />
+      );
     case 'question':
-      return <Labelled label="Asked of">{row.body.for}</Labelled>;
+      return <DetailBlock {...block} more={<Labelled label="Asked of">{row.body.for}</Labelled>} />;
     case 'landing':
-      return <Items label="Lands together" items={row.body.keys} />;
+      return (
+        <DetailBlock {...block} more={<Items label="Lands together" items={row.body.keys} />} />
+      );
     case 'change_task':
       return (
-        <Stack gap="xs">
-          {row.body.description === undefined ? null : (
-            <Labelled label="Description">{row.body.description}</Labelled>
-          )}
-          <Items label="Criteria" items={row.body.acceptanceCriteria ?? []} />
-          {row.body.areas === undefined ? null : (
-            <Labelled label="Areas">{row.body.areas.join(', ')}</Labelled>
-          )}
-        </Stack>
+        <DetailBlock
+          {...block}
+          description={row.body.description ?? ''}
+          criteria={row.body.acceptanceCriteria ?? []}
+          facts={row.body.areas === undefined ? [] : [row.body.areas.join(', ')]}
+        />
       );
     case 'remove_task':
-      return <Labelled label="Why">{row.body.why}</Labelled>;
+      return <DetailBlock {...block} more={<Labelled label="Why">{row.body.why}</Labelled>} />;
   }
 }

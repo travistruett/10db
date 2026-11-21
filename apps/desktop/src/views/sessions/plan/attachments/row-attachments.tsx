@@ -21,25 +21,22 @@ export const AttachmentsContext = createContext<{
 
 const KIND_LABEL = { mermaid: 'Diagram', chart: 'Chart', mockup: 'Mockup' } as const;
 
-/** One task of a goal: its key in the goal's body and its place in the goal's order. */
+/** One task of a goal, by its key in the goal's body. */
 export interface GoalTaskRef {
   readonly key: string;
-  readonly index: number;
 }
 
 /**
  * A row's attachments: by its key or the goal or tasks Convert made of it. A goal's own are those of
- * the goal; with `task`, those of that one task of it.
+ * the goal; with `task`, those of that one task of it. Convert keeps the key, so a goal's task is
+ * matched by it and never by position: the tasks it made follow dependency order, not the goal's.
  */
 export function attachmentsOf(
   row: ShapeProposalDto,
   all: readonly ShapeAttachmentDto[],
   task?: GoalTaskRef,
 ): ShapeAttachmentDto[] {
-  if (task !== undefined) {
-    const taskId = row.converted?.taskIds[task.index] ?? null;
-    return all.filter((a) => a.key === task.key || (taskId !== null && a.taskId === taskId));
-  }
+  if (task !== undefined) return all.filter((a) => a.key === task.key);
   const goalId = row.converted?.goalId ?? null;
   const taskIds = new Set<string>(row.converted?.taskIds ?? []);
   return all.filter(
@@ -50,13 +47,7 @@ export function attachmentsOf(
   );
 }
 
-/** What a row's mock-ups say at a glance: approved, waiting for approval, or none. */
-export function mockupState(mine: readonly ShapeAttachmentDto[]): 'approved' | 'waiting' | null {
-  const mockups = mine.filter((a) => a.attachment.kind === 'mockup');
-  if (mockups.length === 0) return null;
-  return mockups.some((a) => a.approved) ? 'approved' : 'waiting';
-}
-
+/** A row's attachments: a dim label, the attachment, and under a mock-up its Approve and Ask for Changes. */
 export function RowAttachments({
   row,
   title,
@@ -70,33 +61,32 @@ export function RowAttachments({
   const mine = attachmentsOf(row, attachments, task);
   if (mine.length === 0 || shapeId === null) return null;
   return (
-    <Stack gap="xs" pt="xs">
+    <Stack gap={10}>
       {mine.map((a) => (
         <Stack key={a.id} gap={4}>
-          <Group gap="xs">
-            <Text size="xs" c="dimmed">
-              {KIND_LABEL[a.attachment.kind]}
-              {a.approved ? ' · approved' : ''}
-            </Text>
-            {a.attachment.kind === 'mockup' &&
-            a.goalId === null &&
-            !(row.kind === 'goal' && a.key === row.key) ? (
-              <>
-                <ApproveButton shapeId={shapeId} attachment={a} title={title} />
-                <Button
-                  variant="subtle"
-                  size="compact-xs"
-                  aria-label={`Ask for changes to mock-up: ${title}`}
-                  onClick={() => {
-                    onAskForChanges(`Change the mock-up for "${title}": `);
-                  }}
-                >
-                  Ask for Changes
-                </Button>
-              </>
-            ) : null}
-          </Group>
+          <Text fz={12} c="dimmed">
+            {KIND_LABEL[a.attachment.kind]}
+            {a.approved ? ' · approved' : ''}
+          </Text>
           <AttachmentView attachment={a.attachment} title={title} />
+          {a.attachment.kind === 'mockup' &&
+          a.goalId === null &&
+          !(row.kind === 'goal' && a.key === row.key) ? (
+            <Group gap={4}>
+              <ApproveButton shapeId={shapeId} attachment={a} title={title} />
+              <Button
+                variant="subtle"
+                color="gray"
+                size="compact-xs"
+                aria-label={`Ask for changes to mock-up: ${title}`}
+                onClick={() => {
+                  onAskForChanges(`Change the mock-up for "${title}": `);
+                }}
+              >
+                Ask for Changes
+              </Button>
+            </Group>
+          ) : null}
         </Stack>
       ))}
     </Stack>
@@ -118,6 +108,7 @@ function ApproveButton({
   return (
     <Button
       variant="subtle"
+      color="gray"
       size="compact-xs"
       loading={approve.isPending}
       aria-label={`${label} mock-up: ${title}`}

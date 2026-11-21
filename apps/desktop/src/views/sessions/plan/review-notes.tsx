@@ -1,7 +1,8 @@
 import type { ShapeFindingDto, ShapeFindingId } from '@10db/contracts';
-import { ActionIcon, Badge, Box, Button, Group, Text, Tooltip } from '@mantine/core';
+import { ActionIcon, Box, Button, Group, Stack, Text, Tooltip } from '@mantine/core';
 import { IconHelpCircle, IconMessageExclamation, IconX } from '@tabler/icons-react';
-import { ceremonyLine, SEVERITY_COLOR, type RowReview } from './review-lines';
+import classes from './plan-rows.module.css';
+import { ceremonyLine, type RowReview } from './review-lines';
 
 export interface ReviewLinesProps {
   readonly review: RowReview;
@@ -142,6 +143,8 @@ export interface ReviewNotesProps {
   readonly onCeremony?: (change: 'skip' | 'use') => void;
 }
 
+const capital = (word: string): string => word.charAt(0).toUpperCase() + word.slice(1);
+
 function NoteLine({
   finding,
   onDismiss,
@@ -150,23 +153,30 @@ function NoteLine({
   readonly onDismiss: ReviewNotesProps['onDismiss'];
 }) {
   const isQuestion = finding.kind === 'question';
-  const color =
-    isQuestion || finding.severity === null ? 'violet' : SEVERITY_COLOR[finding.severity];
+  const label = isQuestion
+    ? 'Question'
+    : `${capital(finding.reviewer)}${finding.severity === null ? '' : ` · ${finding.severity}`}`;
   return (
-    <Group component="li" gap={6} wrap="nowrap" align="flex-start" style={{ listStyle: 'none' }}>
-      <Badge size="xs" variant="light" color={color} tt="none" fw={400} style={{ flex: 'none' }}>
-        {isQuestion
-          ? 'ask'
-          : `${finding.reviewer}${finding.severity === null ? '' : ` · ${finding.severity}`}`}
-      </Badge>
-      <Text size="xs" style={{ flex: 1, minWidth: 0 }}>
-        {finding.text}
-      </Text>
+    <Group
+      component="li"
+      className={classes['note']}
+      gap={6}
+      wrap="nowrap"
+      align="flex-start"
+      style={{ listStyle: 'none' }}
+    >
+      <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
+        <Text fz={12} c="dimmed">
+          {label}
+        </Text>
+        <Text fz={13}>{finding.text}</Text>
+      </Stack>
       <Tooltip label="Dismiss">
         <ActionIcon
           variant="subtle"
           color="gray"
           size="xs"
+          className={classes['dismiss']}
           aria-label={`Dismiss ${isQuestion ? 'question' : 'finding'}: ${finding.text}`}
           onClick={() => {
             onDismiss(finding.id);
@@ -195,15 +205,16 @@ export function ReviewNotes({
   if (line === null && findings.length === 0 && questions.length === 0 && settled === 0)
     return null;
   return (
-    <Box component="ul" m={0} p={0} style={{ listStyle: 'none', display: 'grid', gap: 4 }}>
+    <Box component="ul" m={0} p={0} style={{ listStyle: 'none', display: 'grid', gap: 8 }}>
       {line === null || ceremony === undefined ? null : (
         <Group component="li" gap="xs" wrap="nowrap" style={{ listStyle: 'none' }}>
-          <Text size="xs" c="dimmed">
+          <Text fz={12} c="dimmed">
             {line}
           </Text>
           {onCeremony === undefined ? null : ceremony.skippedByYou ? (
             <Button
               variant="subtle"
+              color="gray"
               size="compact-xs"
               onClick={() => {
                 onCeremony('use');
@@ -214,6 +225,7 @@ export function ReviewNotes({
           ) : ceremony.reasons.length > 0 ? (
             <Button
               variant="subtle"
+              color="gray"
               size="compact-xs"
               onClick={() => {
                 onCeremony('skip');
@@ -228,7 +240,7 @@ export function ReviewNotes({
         <NoteLine key={f.id} finding={f} onDismiss={onDismiss} />
       ))}
       {settled === 0 ? null : (
-        <Text component="li" size="xs" c="dimmed" style={{ listStyle: 'none' }}>
+        <Text component="li" fz={12} c="dimmed" style={{ listStyle: 'none' }}>
           {`${String(settled)} resolved or dismissed`}
         </Text>
       )}

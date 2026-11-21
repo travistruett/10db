@@ -87,9 +87,9 @@ function MockupFrame({ html, title }: { readonly html: string; readonly title: s
       referrerPolicy="no-referrer"
       loading="lazy"
       w="100%"
-      h={320}
+      h={220}
       style={{
-        border: '1px solid var(--mantine-color-default-border)',
+        border: 0,
         borderRadius: 'var(--mantine-radius-sm)',
         background: 'white',
       }}

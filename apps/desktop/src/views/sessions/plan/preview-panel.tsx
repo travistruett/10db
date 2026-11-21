@@ -6,7 +6,7 @@ import { landingsLine, foldedSummary, hoursText } from './preview-text';
 
 // Shape spec §10.2: how the project's lanes would run the draft, folded under the cards. Work already
 // running or queued holds its lane first; a lane with no task is not drawn; the critical path is one
-// dim line; a clash is one short sentence; the end is marked "estimate". A preview is read, never written.
+// dim line; a clash is the daemon's one line; the end is marked "estimate". A preview is read, never written.
 
 /** A lane's bar: each task a segment placed by its hours, the critical ones in the accent. */
 function LaneBar({
@@ -136,12 +136,12 @@ export function PreviewPanel({ preview }: { readonly preview: ShapePreviewDto })
               </Box>
             </Box>
           ))}
-          {path.length < 2 ? null : (
+          {path.length === 0 ? null : (
             <Text size="xs" c="dimmed">{`Critical path: ${path.join(' → ')}`}</Text>
           )}
           {preview.clashes.map((clash) => (
-            <Text key={clash.area} size="xs" c="dimmed" data-clash={clash.area}>
-              {`${String(clash.titles.length)} tasks claim ${clash.area}, so they run one after another.`}
+            <Text key={clash.area} fz={12} c="dimmed" data-clash={clash.area}>
+              {clash.text}
             </Text>
           ))}
         </Stack>

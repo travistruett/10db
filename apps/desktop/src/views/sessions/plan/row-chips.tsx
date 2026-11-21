@@ -1,27 +1,41 @@
-import type { ShapeFindingSeverity } from '@10db/contracts';
-import { Badge } from '@mantine/core';
+import { Text } from '@mantine/core';
 import { IconPin } from '@tabler/icons-react';
-import { SEVERITY_COLOR } from './review-lines';
 
 /** What a row's chips say; each part is left out when it has nothing to say. */
 export interface RowChipFacts {
-  /** The size bucket, or another short fact such as a decision's scope. */
-  readonly meta?: string | undefined;
-  readonly findings?: { readonly count: number; readonly severity: ShapeFindingSeverity | null };
-  readonly questions?: number;
-  readonly mockup?: 'approved' | 'waiting' | null;
+  /** The round's mark in words ("New", "Changed", "Moved to Earlier"). */
+  readonly mark?: { readonly text: string; readonly kind: string } | null;
+  /** What the row is when its card names something else: "Added", "Principle", "Removal". */
+  readonly kind?: string | null;
+  /** The spec the row's ceremony asks for. */
+  readonly spec?: boolean;
+  /** Findings and questions together. */
+  readonly notes?: number;
   readonly pinned?: boolean;
 }
 
 const plural = (n: number, one: string): string => `${String(n)} ${one}${n === 1 ? '' : 's'}`;
 
-const chip = { size: 'xs', variant: 'light', tt: 'none', fw: 400 } as const;
-
-/** The small facts at a row's right: size, findings (in their highest severity's color), questions and mock-up. */
+/** The small dim facts at a row's right, in words and no color: the round's mark, kind, spec, pin and notes. */
 export function RowChips({ facts }: { readonly facts: RowChipFacts }) {
-  const { meta, findings, questions = 0, mockup = null, pinned = false } = facts;
+  const { mark = null, kind = null, spec = false, notes = 0, pinned = false } = facts;
   return (
     <>
+      {mark === null ? null : (
+        <Text span fz={12} c="dimmed" data-mark={mark.kind}>
+          {mark.text}
+        </Text>
+      )}
+      {kind === null ? null : (
+        <Text span fz={12} c="dimmed">
+          {kind}
+        </Text>
+      )}
+      {spec ? (
+        <Text span fz={12} c="dimmed">
+          Spec required
+        </Text>
+      ) : null}
       {pinned ? (
         <IconPin
           size={14}
@@ -31,28 +45,10 @@ export function RowChips({ facts }: { readonly facts: RowChipFacts }) {
           color="var(--mantine-color-dimmed)"
         />
       ) : null}
-      {findings === undefined || findings.count === 0 ? null : (
-        <Badge
-          {...chip}
-          color={findings.severity === null ? 'gray' : SEVERITY_COLOR[findings.severity]}
-        >
-          {plural(findings.count, 'finding')}
-        </Badge>
-      )}
-      {questions === 0 ? null : (
-        <Badge {...chip} color="violet">
-          {plural(questions, 'question')}
-        </Badge>
-      )}
-      {mockup === null ? null : (
-        <Badge {...chip} color={mockup === 'approved' ? 'green' : 'gray'}>
-          {mockup === 'approved' ? 'mock-up ✓' : 'mock-up'}
-        </Badge>
-      )}
-      {meta === undefined || meta === '' ? null : (
-        <Badge {...chip} color="gray">
-          {meta}
-        </Badge>
+      {notes === 0 ? null : (
+        <Text span fz={12} c="dimmed">
+          {plural(notes, 'note')}
+        </Text>
       )}
     </>
   );

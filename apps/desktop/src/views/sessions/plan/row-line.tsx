@@ -5,6 +5,12 @@ import classes from './plan-rows.module.css';
 /** Marks a row's button, so ↑/↓ finds its siblings. */
 export const ROW_ATTRIBUTE = 'data-shape-row';
 
+/** The one row of the panel that is open, and whether it is being edited. */
+export interface OpenRow {
+  readonly id: string;
+  readonly editing: boolean;
+}
+
 /** Moves focus to the next or previous row button of the Plan; false at either end. */
 export function moveRowFocus(from: HTMLElement, delta: 1 | -1): boolean {
   const list = from.closest('[aria-label="Plan rows"]');
@@ -17,20 +23,20 @@ export function moveRowFocus(from: HTMLElement, delta: 1 | -1): boolean {
 }
 
 export interface RowLineProps {
-  /** The state dot before the title; absent for a goal's task, whose state is its goal's. */
-  readonly dot?: { readonly label: string; readonly color: string };
+  /** The round's dot before the title; absent when the round left the row alone. */
+  readonly dot?: { readonly label: string; readonly color: string } | null;
   readonly title: string;
-  /** A goal's head: the strongest text of the panel. */
-  readonly strong?: boolean;
+  /** A goal's head: a card title. */
+  readonly head?: boolean;
   /** Dimmed once Convert has made the row. */
   readonly dim?: boolean;
   /** Dimmed lines under the title: a goal's objective, what Convert made of the row. */
   readonly subs?: ReactNode;
-  /** The chips at the right; hover or focus swaps them for `actions`. */
+  /** The facts at the right; hover or focus swaps them for `actions`. */
   readonly chips: ReactNode;
   readonly actions?: ReactNode;
-  /** A fact that stays at the right edge, such as a goal's lane time. */
-  readonly trailing?: ReactNode;
+  /** The size column: a size, or a goal's lane time. */
+  readonly trailing?: string | undefined;
   readonly section?: string;
   readonly opened: boolean;
   readonly regionId: string;
@@ -41,13 +47,13 @@ export interface RowLineProps {
 }
 
 /**
- * One line of the Plan: a dot, the title as a button that covers the row, and at the right its chips,
- * which hover or keyboard focus swap for the row's actions.
+ * One line of the Plan: the title as a button that covers the row, then its facts, which hover or
+ * keyboard focus swap for the row's actions, then the size column.
  */
 export function RowLine({
   dot,
   title,
-  strong = false,
+  head = false,
   dim = false,
   subs,
   chips,
@@ -63,15 +69,14 @@ export function RowLine({
 }: RowLineProps) {
   return (
     <div className={classes['row']}>
-      {dot === undefined ? null : (
+      {dot === undefined || dot === null ? null : (
         <Tooltip label={dot.label}>
           <ColorSwatch
-            size={8}
+            size={6}
             color={`var(--mantine-color-${dot.color}-filled)`}
             aria-label={dot.label}
             role="img"
-            mt={7}
-            style={{ flex: 'none' }}
+            className={classes['dot']}
           />
         </Tooltip>
       )}
@@ -89,9 +94,9 @@ export function RowLine({
           style={{ display: 'block', width: '100%', textAlign: 'left' }}
         >
           <Text
-            size="sm"
-            fw={strong ? 500 : 400}
-            {...(dim ? { c: 'dimmed' } : strong ? { c: 'bright' } : {})}
+            fz={head ? 15 : 14}
+            fw={head ? 600 : 400}
+            {...(dim ? { c: 'dimmed' } : head ? { c: 'bright' } : {})}
             {...(opened ? {} : { lineClamp: 2 })}
           >
             {title}
@@ -103,7 +108,9 @@ export function RowLine({
         <div className={classes['chips']}>{chips}</div>
         {actions === undefined ? null : <div className={classes['actions']}>{actions}</div>}
       </div>
-      {trailing}
+      <Text fz={12} c="dimmed" className={classes['trail']}>
+        {trailing}
+      </Text>
     </div>
   );
 }

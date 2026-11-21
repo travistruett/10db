@@ -5,24 +5,26 @@ import {
   type ShapeProposalDto,
   type ShapeTaskSizeDto,
 } from '@10db/contracts';
-import { ActionIcon, Anchor, Box, Button, Group, Menu, Stack, Text } from '@mantine/core';
+import { ActionIcon, Anchor, Box, Group, Menu, Stack, Text } from '@mantine/core';
 import { IconDots, IconPencil } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
-import { use, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useRef, type KeyboardEvent, type ReactNode } from 'react';
 import type { RowChange } from '../../../daemon/shape-queries';
 import { useSelectedProject } from '../../../shell/selected-project';
+import { RowAttachments } from './attachments/row-attachments';
 import {
-  attachmentsOf,
-  AttachmentsContext,
-  mockupState,
-  RowAttachments,
-} from './attachments/row-attachments';
-import { convertedLine, proposalTitle, rowChipMeta, rowDot } from './proposal-text';
-import { highestSeverity, type RowReview } from './review-lines';
+  convertedLine,
+  kindChip,
+  markText,
+  proposalTitle,
+  rowChipMeta,
+  rowDot,
+} from './proposal-text';
+import type { RowReview } from './review-lines';
 import { ReviewNotes } from './review-notes';
 import { RowChips } from './row-chips';
-import { RowLine, moveRowFocus } from './row-line';
-import { goalLiveLine, liveDot } from './live-state';
+import { RowLine, moveRowFocus, type OpenRow } from './row-line';
+import { goalLiveLine } from './live-state';
 import { RowDetails } from './row-details';
 import { RowEditor } from './row-editor';
 import { useLiveWords } from './use-live-words';
@@ -61,14 +63,33 @@ export interface ProposalRowProps {
   /** The ceremony, findings and rehearsal questions of a pending goal or task (spec §7). */
   readonly review?: RowReview | undefined;
   readonly handlers: RowHandlers;
+  /** The panel's one open row; this row is open when it is its. */
+  readonly open: OpenRow | null;
+  readonly onOpenChange: (next: OpenRow | null) => void;
   /** Rows below the line, inside the same list item: a goal's tasks. */
   readonly children?: ReactNode;
 }
 
+/** A small dim link ending an opened row's line of facts. */
+function MetaLink({
+  onClick,
+  children,
+}: {
+  readonly onClick: () => void;
+  readonly children: string;
+}) {
+  return (
+    <Anchor component="button" type="button" fz={12} c="dimmed" underline="hover" onClick={onClick}>
+      {children}
+    </Anchor>
+  );
+}
+
 /**
- * One row of a card: a line of title and chips over a region, as Factory's goal rows are, so a click or
- * Enter opens it in place. A pending row edits in place (a pencil, or E); an edit pins it. P pins or
- * unpins the row and W asks why. Its pencil and menu take the chips' place on hover or focus.
+ * One row of a card: a line of title, facts and size over a region, as Factory's goal rows are, so a
+ * click or Enter opens it in place, and only one row of the panel is open at a time. A pending row edits
+ * in place (a pencil, or E); an edit pins it. P pins or unpins the row and W asks why. Its pencil and
+ * menu take the facts' place on hover or focus.
  */
 export function ProposalRow({
   projectId,
@@ -80,10 +101,12 @@ export function ProposalRow({
   actions,
   review,
   handlers,
+  open,
+  onOpenChange,
   children,
 }: ProposalRowProps) {
-  const [opened, setOpened] = useState(false);
-  const [editing, setEditing] = useState(false);
+  const opened = open?.id === row.id;
+  const editing = opened && open.editing;
   const button = useRef<HTMLButtonElement>(null);
   const title = proposalTitle(row);
   const live = useLiveWords(row, projectId);
@@ -96,8 +119,8 @@ export function ProposalRow({
         ? goalLiveLine(live.words)
         : (live.words[0]?.word ?? ''),
   );
-  const { attachments } = use(AttachmentsContext);
-  const dot = rowDot(row, live === null ? null : liveDot(live.words));
+  const dot = rowDot(row);
+  const mark = markText(row);
   const openTask =
     live === null || row.converted === null
       ? null
@@ -122,11 +145,10 @@ export function ProposalRow({
     change(pinned ? { kind: 'unpin' } : { kind: 'restore' });
   };
   const startEditing = (): void => {
-    setOpened(true);
-    setEditing(true);
+    onOpenChange({ id: row.id, editing: true });
   };
   const stopEditing = (): void => {
-    setEditing(false);
+    onOpenChange({ id: row.id, editing: false });
     button.current?.focus();
   };
 
@@ -182,19 +204,25 @@ export function ProposalRow({
   // A goal's questions belong to its tasks, which show them; a loose task is its own single task.
   const ownQuestions = row.kind === 'goal' ? [] : questions;
   const lane = row.kind === 'goal' ? goalHours(sizes) : null;
-  const size = row.kind === 'task' ? (sizes[0]?.size ?? row.body.size) : undefined;
-  const mockup = mockupState(attachmentsOf(row, attachments));
+  const trailing =
+    row.kind === 'goal'
+      ? (lane ?? undefined)
+      : row.kind === 'task'
+        ? (sizes[0]?.size ?? row.body.size)
+        : rowChipMeta(row);
+  const ceremony = review?.ceremony;
+  const spec = ceremony?.ceremony === 'spec' && !ceremony.skippedByYou;
 
   const subs: ReactNode[] = [];
   if (row.kind === 'goal')
     subs.push(
-      <Text key="objective" size="xs" c="dimmed" lineClamp={2}>
+      <Text key="objective" fz={13} c="dimmed" {...(opened ? {} : { lineClamp: 2 })}>
         {row.body.objective}
       </Text>,
     );
   if (converted !== null)
     subs.push(
-      <Text key="converted" size="xs" c="dimmed">
+      <Text key="converted" fz={12} c="dimmed">
         {converted}
       </Text>,
     );
@@ -202,7 +230,7 @@ export function ProposalRow({
     subs.push(
       <Anchor
         key="board"
-        size="xs"
+        fz={12}
         className={classes['lift']}
         renderRoot={(props) =>
           openTask === null ? (
@@ -223,16 +251,16 @@ export function ProposalRow({
     <RowLine
       dot={dot}
       title={title}
-      strong={head}
+      head={head}
       dim={converted !== null}
       subs={subs.length === 0 ? undefined : <Stack gap={0}>{subs}</Stack>}
       chips={
         <RowChips
           facts={{
-            meta: size ?? rowChipMeta(row),
-            findings: { count: findings.length, severity: highestSeverity(findings) },
-            questions: ownQuestions.length,
-            mockup,
+            mark: mark === null || row.mark === null ? null : { text: mark, kind: row.mark },
+            kind: kindChip(row),
+            spec,
+            notes: findings.length + ownQuestions.length,
             pinned,
           }}
         />
@@ -272,34 +300,20 @@ export function ProposalRow({
           </Menu>
         </Group>
       }
-      trailing={
-        lane === null ? undefined : (
-          <Text size="xs" c="dimmed" style={{ flex: 'none', paddingTop: 2 }}>
-            {lane}
-          </Text>
-        )
-      }
+      trailing={trailing}
       section={section}
       opened={opened}
       regionId={regionId}
       tabbable={tabbable}
       buttonRef={button}
       onToggle={() => {
-        setOpened((o) => !o);
-        setEditing(false);
+        onOpenChange(opened ? null : { id: row.id, editing: false });
       }}
       onKeyDown={onKeyDown}
     />
   );
   const region = opened ? (
-    <Box
-      id={regionId}
-      role="region"
-      aria-label={`${title} details`}
-      px={8}
-      pb={6}
-      pl={head ? 8 : 24}
-    >
+    <Box id={regionId} role="region" aria-label={`${title} details`} px={14} pt={4} pb={8}>
       {editing ? (
         <RowEditor
           row={row}
@@ -310,48 +324,52 @@ export function ProposalRow({
           }}
         />
       ) : (
-        <Stack gap="xs">
-          {review === undefined ? null : (
-            <ReviewNotes
-              ceremony={review.ceremony}
-              findings={findings}
-              questions={ownQuestions}
-              settled={review.settled}
-              onDismiss={handlers.onDismiss}
-              onCeremony={(c) => {
-                change(
-                  c === 'skip'
-                    ? { kind: 'edit', fields: { ceremony: 'direct' } }
-                    : { kind: 'unpin', field: 'ceremony' },
-                );
-              }}
-            />
-          )}
-          <RowDetails row={row} sizes={sizes} />
-          <RowAttachments row={row} title={title} />
-          <Group gap="xs">
-            <Button
-              variant="subtle"
-              size="compact-xs"
+        <RowDetails
+          row={row}
+          sizes={sizes}
+          laneTime={lane}
+          notes={
+            review === undefined ? undefined : (
+              <ReviewNotes
+                ceremony={review.ceremony}
+                findings={findings}
+                questions={ownQuestions}
+                settled={review.settled}
+                onDismiss={handlers.onDismiss}
+                onCeremony={(c) => {
+                  change(
+                    c === 'skip'
+                      ? { kind: 'edit', fields: { ceremony: 'direct' } }
+                      : { kind: 'unpin', field: 'ceremony' },
+                  );
+                }}
+              />
+            )
+          }
+          links={[
+            <MetaLink
+              key="why"
               onClick={() => {
                 handlers.onWhy(row);
               }}
             >
               Why?
-            </Button>
-            {earlier ? (
-              <Button
-                variant="subtle"
-                size="compact-xs"
-                onClick={() => {
-                  change({ kind: 'restore' });
-                }}
-              >
-                Restore
-              </Button>
-            ) : null}
-          </Group>
-        </Stack>
+            </MetaLink>,
+            ...(earlier
+              ? [
+                  <MetaLink
+                    key="restore"
+                    onClick={() => {
+                      change({ kind: 'restore' });
+                    }}
+                  >
+                    Restore
+                  </MetaLink>,
+                ]
+              : []),
+          ]}
+          attachments={<RowAttachments row={row} title={title} />}
+        />
       )}
     </Box>
   ) : null;

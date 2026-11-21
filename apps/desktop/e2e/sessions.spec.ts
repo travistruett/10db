@@ -674,6 +674,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   // Review ▾: Plan review puts a finding on its row and Check for Questions a question; Accept only warns.
   await panel.getByRole('button', { name: 'Review' }).click();
   await page.getByRole('menuitem', { name: 'Plan review' }).click();
+  await panel.getByRole('button', { name: 'Board polish', exact: true }).click();
   await expect(panel.getByText('The scope is wider than one pull request.').first()).toBeVisible();
   await panel.getByRole('button', { name: 'Review' }).click();
   await page.getByRole('menuitem', { name: 'Check for Questions' }).click();
@@ -696,12 +697,18 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   // pictures are missing, the review still runs, and its finding lands on the row.
   await panel.getByRole('button', { name: 'Review' }).click();
   await page.getByRole('menuitem', { name: 'Design review' }).click();
+  await panel.getByRole('button', { name: 'Board polish', exact: true }).click();
   await expect(panel.getByText('The mock-up leaves out the empty state.').first()).toBeVisible();
 
   // The run preview is folded; opened it draws only the lanes that have a task.
   await panel.getByRole('button', { name: 'How it would run' }).click();
   await expect(panel.getByText('Critical path:')).toBeVisible();
   await expect(panel.getByText('Lane 2')).toHaveCount(0);
+  await expect(
+    panel
+      .getByRole('region', { name: 'How it would run' })
+      .getByText('Compact card density', { exact: true }),
+  ).toBeVisible();
 
   // Accept lists the rows, says nothing starts, and writes the ticked ones to the Board.
   const before = (await titles()).length;
@@ -772,7 +779,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await undo.getByRole('button', { name: 'Undo Accept' }).click();
   await expect(undo).toBeHidden();
   await expect(goalRow.getByText(/On the Board/)).toHaveCount(0);
-  await expect(goalRow.getByRole('img', { name: 'Proposed' })).toBeVisible();
+  await expect(goalRow.getByRole('link', { name: 'Open on Board' })).toHaveCount(0);
   await expect(panel.getByText('On the Board · Ready', { exact: true })).toHaveCount(2);
   expect(await goalTitles()).not.toContain('Board polish');
   expect(await titles()).toHaveLength(before + 2);

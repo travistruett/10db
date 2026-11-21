@@ -1,41 +1,43 @@
 import type { ShapeProposalDto, ShapeTaskSizeDto } from '@10db/contracts';
-import { Box, Stack } from '@mantine/core';
-import { use, useState, type KeyboardEvent } from 'react';
-import {
-  attachmentsOf,
-  AttachmentsContext,
-  mockupState,
-  RowAttachments,
-} from './attachments/row-attachments';
-import { RowChips } from './row-chips';
-import { RowLine, moveRowFocus } from './row-line';
-import type { TaskReview } from './review-lines';
-import { Items, Labelled, SizeFacts } from './row-details';
-import { ReviewNotes } from './review-notes';
+import type { KeyboardEvent } from 'react';
+import { RowAttachments } from './attachments/row-attachments';
 import type { RowHandlers } from './proposal-row';
+import type { TaskReview } from './review-lines';
+import { ReviewNotes } from './review-notes';
+import { RowChips } from './row-chips';
+import { DetailBlock, taskFacts } from './row-details';
+import { RowLine, moveRowFocus, type OpenRow } from './row-line';
+import { Box } from '@mantine/core';
 
-type GoalTask = Extract<ShapeProposalDto, { kind: 'goal' }>['body']['tasks'][number];
+type GoalProposal = Extract<ShapeProposalDto, { kind: 'goal' }>;
 
 export interface GoalTaskRowProps {
-  readonly goal: Extract<ShapeProposalDto, { kind: 'goal' }>;
-  readonly task: GoalTask;
-  readonly index: number;
+  readonly goal: GoalProposal;
+  readonly task: GoalProposal['body']['tasks'][number];
   readonly size: ShapeTaskSizeDto | undefined;
   /** The rehearsal's open questions about this task; absent once the goal is accepted. */
   readonly review: TaskReview | undefined;
   readonly handlers: RowHandlers;
+  readonly open: OpenRow | null;
+  readonly onOpenChange: (next: OpenRow | null) => void;
 }
 
 /**
- * One of a goal's tasks inside its card: the title and chips on a line, and opened its description,
- * criteria, area and estimate, the rehearsal's questions and its mock-ups. A goal's tasks are edited
- * through the goal, so the line has no actions.
+ * One of a goal's tasks inside its card: the title, its notes and its size on a line, and opened its
+ * description, notes, criteria, area and estimate and its mock-ups. A goal's tasks are edited through
+ * the goal, so the line has no actions.
  */
-export function GoalTaskRow({ goal, task, index, size, review, handlers }: GoalTaskRowProps) {
-  const [opened, setOpened] = useState(false);
-  const { attachments } = use(AttachmentsContext);
-  const ref = { key: task.key, index };
-  const mockup = mockupState(attachmentsOf(goal, attachments, ref));
+export function GoalTaskRow({
+  goal,
+  task,
+  size,
+  review,
+  handlers,
+  open,
+  onOpenChange,
+}: GoalTaskRowProps) {
+  const id = `${goal.id}:${task.key}`;
+  const opened = open?.id === id;
   const questions = review?.questions ?? [];
   const regionId = `shape-row-${goal.id}-${task.key}`;
   const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
@@ -47,37 +49,30 @@ export function GoalTaskRow({ goal, task, index, size, review, handlers }: GoalT
     <li style={{ listStyle: 'none' }}>
       <RowLine
         title={task.title}
-        chips={
-          <RowChips
-            facts={{
-              meta: size?.size ?? task.size,
-              questions: questions.length,
-              mockup,
-            }}
-          />
-        }
+        chips={<RowChips facts={{ notes: questions.length }} />}
+        trailing={size?.size ?? task.size}
         opened={opened}
         regionId={regionId}
         tabbable={false}
         onToggle={() => {
-          setOpened((o) => !o);
+          onOpenChange(opened ? null : { id, editing: false });
         }}
         onKeyDown={onKeyDown}
       />
       {opened ? (
-        <Box id={regionId} role="region" aria-label={`${task.title} details`} px={8} pb={6} pl={24}>
-          <Stack gap="xs">
-            <ReviewNotes findings={[]} questions={questions} onDismiss={handlers.onDismiss} />
-            {task.description === '' ? null : (
-              <Labelled label="Description">{task.description}</Labelled>
-            )}
-            <Items label="Criteria" items={task.criteria} />
-            {task.depends_on.length === 0 ? null : (
-              <Labelled label="Depends on">{task.depends_on.join(', ')}</Labelled>
-            )}
-            <SizeFacts areas={task.areas} size={size} />
-            <RowAttachments row={goal} title={task.title} task={ref} />
-          </Stack>
+        <Box id={regionId} role="region" aria-label={`${task.title} details`} px={14} pt={4} pb={8}>
+          <DetailBlock
+            description={task.description}
+            notes={
+              questions.length === 0 ? undefined : (
+                <ReviewNotes findings={[]} questions={questions} onDismiss={handlers.onDismiss} />
+              )
+            }
+            criteria={task.criteria}
+            facts={taskFacts(task.areas, size, task.depends_on)}
+            flagged={size?.missized === true}
+            attachments={<RowAttachments row={goal} title={task.title} task={{ key: task.key }} />}
+          />
         </Box>
       ) : null}
     </li>

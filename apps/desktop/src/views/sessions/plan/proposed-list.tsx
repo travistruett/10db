@@ -2,10 +2,10 @@ import type { ProjectId, ShapeProposalDto, ShapeTaskSizeDto } from '@10db/contra
 import { Box, Text, UnstyledButton } from '@mantine/core';
 import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { useState, type ReactNode } from 'react';
-import { CountBadge } from '../../../shell/count-badge';
 import { GoalTaskRow } from './goal-task-row';
 import { CardName, PlanCard } from './plan-card';
 import { ProposalRow, type RowAction, type RowHandlers } from './proposal-row';
+import type { OpenRow } from './row-line';
 import type { RowReview } from './review-lines';
 import { isConverted, SectionKey, type ProposedGroups } from './proposed-groups';
 
@@ -60,6 +60,8 @@ export function ProposedList({
 }: ProposedListProps) {
   const sizesOf = (row: ShapeProposalDto) => sizes.filter((s) => s.proposalId === row.id);
   const [earlierOpen, setEarlierOpen] = useState(false);
+  // One row of the panel is open at a time: opening another closes it.
+  const [open, setOpen] = useState<OpenRow | null>(null);
   const blocks = blocksOf(groups);
   // The Tab key reaches the first row on screen: a goal's head, or the first card's first row.
   const firstId = (groups.goals[0] ?? blocks[0]?.rows[0])?.id;
@@ -67,6 +69,28 @@ export function ProposedList({
   // own count lands on a pending row.
   const sectionOf = (row: ShapeProposalDto, own: SectionKey): SectionKey =>
     isConverted(row) ? SectionKey.Converted : own;
+  /** A goal's tasks as rows, under its head or under it in Earlier. */
+  const tasksOf = (goal: ShapeProposalDto): ReactNode => {
+    if (goal.kind !== 'goal') return null;
+    const review = reviewOf?.(goal);
+    const own = sizesOf(goal);
+    return (
+      <Box component="ul" m={0} p={0} pl={12} style={{ listStyle: 'none' }}>
+        {goal.body.tasks.map((task) => (
+          <GoalTaskRow
+            key={task.key}
+            goal={goal}
+            task={task}
+            size={own.find((s) => s.key === task.key)}
+            review={review?.tasks.find((t) => t.key === task.key)}
+            handlers={handlers}
+            open={open}
+            onOpenChange={setOpen}
+          />
+        ))}
+      </Box>
+    );
+  };
   const rowOf = (row: ShapeProposalDto, own: SectionKey, children?: ReactNode) => (
     <ProposalRow
       projectId={projectId}
@@ -78,6 +102,8 @@ export function ProposedList({
       actions={actionsFor(row)}
       review={reviewOf?.(row)}
       handlers={handlers}
+      open={open}
+      onOpenChange={setOpen}
       {...(row.kind === 'goal' ? { head: true } : {})}
     >
       {children}
@@ -90,34 +116,13 @@ export function ProposedList({
       aria-label="Plan rows"
       m={0}
       p={0}
-      style={{ listStyle: 'none', display: 'grid', gap: 10 }}
+      style={{ listStyle: 'none', display: 'grid', gap: 12 }}
     >
-      {groups.goals.map((goal) => {
-        if (goal.kind !== 'goal') return null;
-        const review = reviewOf?.(goal);
-        const own = sizesOf(goal);
-        return (
-          <PlanCard key={goal.id} head={null}>
-            {rowOf(
-              goal,
-              SectionKey.Goals,
-              <Box component="ul" m={0} p={0} pl={16} style={{ listStyle: 'none' }}>
-                {goal.body.tasks.map((task, index) => (
-                  <GoalTaskRow
-                    key={task.key}
-                    goal={goal}
-                    task={task}
-                    index={index}
-                    size={own.find((s) => s.key === task.key)}
-                    review={review?.tasks.find((t) => t.key === task.key)}
-                    handlers={handlers}
-                  />
-                ))}
-              </Box>,
-            )}
-          </PlanCard>
-        );
-      })}
+      {groups.goals.map((goal) => (
+        <PlanCard key={goal.id} head={null}>
+          {rowOf(goal, SectionKey.Goals, tasksOf(goal))}
+        </PlanCard>
+      ))}
       {blocks.map((block) => (
         <PlanCard
           key={block.section}
@@ -143,16 +148,16 @@ export function ProposedList({
               onClick={() => {
                 setEarlierOpen((o) => !o);
               }}
-              px={8}
-              py={4}
+              px={14}
+              mb={8}
             >
-              <Text size="xs" c="dimmed" component="span">
+              <Text fz={13} c="dimmed" component="span">
                 {earlierOpen ? (
                   <IconChevronDown size={14} stroke={1.5} aria-hidden="true" />
                 ) : (
                   <IconChevronRight size={14} stroke={1.5} aria-hidden="true" />
                 )}{' '}
-                Earlier <CountBadge count={groups.earlier.length} />
+                Earlier {groups.earlier.length}
               </Text>
             </UnstyledButton>
           }
@@ -169,7 +174,11 @@ export function ProposedList({
                   sizes={sizesOf(row)}
                   actions={[]}
                   handlers={handlers}
-                />
+                  open={open}
+                  onOpenChange={setOpen}
+                >
+                  {tasksOf(row)}
+                </ProposalRow>
               ))}
             </Box>
           ) : null}

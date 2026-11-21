@@ -73,27 +73,54 @@ export function convertedLine(row: ShapeProposalDto, liveLine?: string): string 
   }
 }
 
-/** The state dot before a row's title: the first of accepted, the round's mark, pinned, else proposed. */
+/**
+ * The dot before a row's title: blue for what the latest round created or changed, the one color the
+ * Plan draws. Every other row has none; the mark's words (`markText`) say it too.
+ */
 export function rowDot(
   row: ShapeProposalDto,
-  live: 'running' | 'done' | null = null,
-): { readonly label: string; readonly color: string } {
-  if (isConverted(row)) {
-    if (live === 'running') return { label: 'Running', color: 'blue' };
-    if (live === 'done') return { label: 'Done', color: 'teal' };
-    return { label: 'Accepted', color: 'teal' };
-  }
+): { readonly label: string; readonly color: string } | null {
+  if (isConverted(row)) return null;
   switch (row.mark) {
     case 'new':
       return { label: 'New this round', color: 'blue' };
     case 'changed':
       return { label: 'Changed this round', color: 'blue' };
     case 'moved':
-      return { label: 'Moved to Earlier', color: 'gray' };
     case null:
-      return row.pinned.length > 0
-        ? { label: 'Pinned', color: 'yellow' }
-        : { label: 'Proposed', color: 'gray' };
+      return null;
+  }
+}
+
+/** What the latest round did to a row, until the next round (spec §6); null when it did nothing. */
+export function markText(row: ShapeProposalDto): string | null {
+  switch (row.mark) {
+    case 'new':
+      return 'New';
+    case 'changed':
+      return 'Changed';
+    case 'moved':
+      return 'Moved to Earlier';
+    case null:
+      return null;
+  }
+}
+
+/** What a row is when its card names something else: an addition under Loose tasks, a principle under Decisions. */
+export function kindChip(row: ShapeProposalDto): string | null {
+  switch (row.kind) {
+    case 'task':
+      return row.body.goalId === undefined ? null : 'Added';
+    case 'principle':
+      return 'Principle';
+    case 'remove_task':
+      return 'Removal';
+    case 'goal':
+    case 'decision':
+    case 'question':
+    case 'landing':
+    case 'change_task':
+      return null;
   }
 }
 
