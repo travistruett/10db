@@ -91,6 +91,11 @@
   display: none;
 }
 
+.mark {
+  display: grid;
+  place-items: center;
+}
+
 .dot {
   display: none;
   width: 8px;

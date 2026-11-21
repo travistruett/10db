@@ -68,7 +68,7 @@ function PlanMenu({ view }: { readonly view: ShapeViewDto }) {
     <>
       <Menu position="bottom-end" withinPortal>
         <Menu.Target>
-          <ActionIcon variant="subtle" aria-label="More Plan actions">
+          <ActionIcon variant="subtle" color="gray" size="input-xs" aria-label="More Plan actions">
             <IconDots size={16} stroke={1.5} />
           </ActionIcon>
         </Menu.Target>

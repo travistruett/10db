@@ -21,6 +21,7 @@ import {
   type ReviewKind,
   useRowChange,
 } from '../../../daemon/shape-queries';
+import { SplitButton } from '../../../shell/split-button';
 import { shortAgo } from '../../factory/short-ago';
 import { useNow } from '../../../shell/relative';
 import { ConvertModal, convertibleRows } from './convert-modal';
@@ -244,29 +245,15 @@ export function ProposedPane({
                 </Menu.Item>
               </Menu.Dropdown>
             </Menu>
-            <Button.Group>
-              <Button
-                variant="default"
-                size="xs"
-                disabled={view === undefined || rows.length === 0}
-                onClick={() => {
-                  setConverting('accept');
-                }}
-              >
-                Accept
-              </Button>
-              <Menu position="bottom-end" withinPortal>
-                <Menu.Target>
-                  <ActionIcon
-                    variant="default"
-                    size={26}
-                    aria-label="More accept actions"
-                    disabled={view === undefined || rows.length === 0}
-                  >
-                    <IconChevronDown size={14} stroke={1.5} />
-                  </ActionIcon>
-                </Menu.Target>
-                <Menu.Dropdown>
+            <SplitButton
+              size="xs"
+              disabledReason={view === undefined || rows.length === 0 ? 'Nothing to accept' : null}
+              onClick={() => {
+                setConverting('accept');
+              }}
+              menuLabel="More accept actions"
+              menu={
+                <>
                   <Menu.Item
                     onClick={() => {
                       setConverting('accept');
@@ -281,15 +268,25 @@ export function ProposedPane({
                   >
                     Accept and Start
                   </Menu.Item>
-                </Menu.Dropdown>
-              </Menu>
-            </Button.Group>
-            {menu}
-            {onClose === undefined ? null : (
-              <ActionIcon variant="subtle" aria-label="Close Plan" onClick={onClose}>
-                <IconX size={16} stroke={1.5} />
-              </ActionIcon>
-            )}
+                </>
+              }
+            >
+              Accept
+            </SplitButton>
+            <Group gap={4} wrap="nowrap">
+              {menu}
+              {onClose === undefined ? null : (
+                <ActionIcon
+                  variant="subtle"
+                  color="gray"
+                  size="input-xs"
+                  aria-label="Close Plan"
+                  onClick={onClose}
+                >
+                  <IconX size={16} stroke={1.5} />
+                </ActionIcon>
+              )}
+            </Group>
           </Group>
         </Group>
         {reviewLine === '' ? null : (

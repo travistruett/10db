@@ -43,6 +43,7 @@ export function SplitButton({
           <ActionIcon
             size={size === 'xs' ? 'input-xs' : 'input-sm'}
             aria-label={menuLabel}
+            disabled={disabledReason !== null}
             // The seam is drawn in the body color, so it reads as a cut through one button.
             style={{
               borderTopLeftRadius: 0,

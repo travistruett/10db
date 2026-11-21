@@ -173,11 +173,7 @@ export function SessionRow({
         </span>
         <span className={classes['end']}>
           {state?.mark === undefined || state.mark === null ? null : (
-            <span
-              className={classes['mark']}
-              data-mark={state.mark}
-              style={{ display: 'grid', placeItems: 'center' }}
-            >
+            <span className={classes['mark']} data-mark={state.mark}>
               <MarkIcon mark={state.mark} />
             </span>
           )}
