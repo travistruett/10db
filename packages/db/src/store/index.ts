@@ -61,6 +61,7 @@ export * from './stakeholder-sends';
 export * from './stakeholder-timers';
 export * from './waiting-on';
 export * from './team';
+export * from './design-checks';
 export * from './task-screens';
 export * from './task-start-dirt';
 export * from './skipped-actions';
