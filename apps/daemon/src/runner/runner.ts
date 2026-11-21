@@ -7,6 +7,8 @@ import {
   JudgeDecision,
   JudgeOutcome,
   Approval,
+  McpToolName,
+  McpToolOutputs,
   ConflictError,
   currentStep,
   EventType,
@@ -164,6 +166,10 @@ import {
   approvedCallKeys,
   approvedSkipsForTask,
   listSkipsForWorkstream,
+  getTaskStartDirt,
+  recordTaskStartDirt,
+  taskHasRunASession,
+  listToolOpResults,
 } from '@10db/db';
 import {
   BACKGROUND_DONE_NUDGE,
@@ -224,6 +230,7 @@ import {
   type SessionLaunch,
 } from '../environment';
 import { createPassGitSession, type Git } from '../git';
+import { readStartDirt, withoutStartDirt } from './start-dirt';
 import {
   answerUnattended,
   judgePreToolUse,
@@ -655,6 +662,8 @@ type Outcome =
       readonly kind: 'refused';
       readonly message: string;
       readonly providerSessionId: string | null;
+      /** What the run fails as; a refusal that names none is a session that failed. */
+      readonly failure?: WorkstreamFailure;
     }
   | {
       /** The account cannot run the model the session launched on; the lane starts over on another. */
@@ -2006,7 +2015,13 @@ export function createRunner(opts: RunnerOptions): Runner {
       case 'refused':
       case 'background_hung':
         // A retry would hang the same way, and the work it left is for the builder to see.
-        fail(id, ctl.fence, { kind: WorkstreamFailure.SessionFailed, reason: outcome.message });
+        fail(id, ctl.fence, {
+          kind:
+            outcome.kind === 'refused'
+              ? (outcome.failure ?? WorkstreamFailure.SessionFailed)
+              : WorkstreamFailure.SessionFailed,
+          reason: outcome.message,
+        });
         return;
       case 'crashed': {
         const attempts = row.recoveryAttempts + 1;
@@ -2325,6 +2340,24 @@ export function createRunner(opts: RunnerOptions): Runner {
     const task = getTask(db, row.taskId);
     // A page of a pass (Workbench spec §6.2): its session runs turn after turn, each from a builder message.
     const pass = passOfWorkstream(db, id) ?? null;
+    // What a shared checkout held uncommitted before the task first ran is someone else's work. Once
+    // any session has run for the task (a pass page's, or one from before the record existed), what
+    // the checkout holds may be the task's own, and a checkout that can't be read is not known to
+    // hold anyone else's: either way nothing is recorded as theirs, so every change stays the task's.
+    if (pass === null && getTaskStartDirt(db, task.id) === null) {
+      const entries = taskHasRunASession(db, task.id)
+        ? []
+        : await readStartDirt(opts.git, checkout).catch((error: unknown) => {
+            opts.logger.warn(
+              { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+              "the checkout's uncommitted paths could not be read when the task first launched",
+            );
+            return [];
+          });
+      opts.state.write((ctx) => {
+        recordTaskStartDirt(ctx, task.id, entries);
+      });
+    }
     const fresh = actionOnAnotherAccount(id, ctl, row) ?? reviseAfterModelDrift(id, ctl, row);
     // A Codex thread the lane resumes with a builder message pushed to it and never seen taken is read
     // back first (Workbench spec §12): what it took is delivered, never sent again, and a thread that
@@ -3835,9 +3868,11 @@ export function createRunner(opts: RunnerOptions): Runner {
               const skipped = listSkipsForWorkstream(db, id)
                 .filter((skip) => skip.kind !== SkipKind.Question)
                 .map((skip) => skip.summary);
+              // The reason is the session's own: a skip let it report, but need not be its cause.
               st.outcome = {
                 kind: 'refused',
-                message: `The ${step.role} step couldn't do its job without a call 10db skipped: ${ctl.blockedReason}. Skipped: ${skipped.join('; ')}`,
+                failure: WorkstreamFailure.Blocked,
+                message: `The ${step.role} step stopped and reported it was blocked: ${ctl.blockedReason.replace(/[\s.]+$/, '')}. Calls 10db skipped in this run: ${skipped.join('; ')}`,
                 providerSessionId: st.providerSessionId,
               };
               await handle.stop();
@@ -4123,15 +4158,21 @@ export function createRunner(opts: RunnerOptions): Runner {
     return outcome;
   }
 
-  /** The paths in the claims the workstream holds right now that git reports as changed. */
+  /**
+   * The paths in the claims the workstream holds right now that git reports as changed, less those
+   * still exactly as the checkout held them when the task first launched.
+   */
   async function claimedChanges(row: WorkstreamRow): Promise<string[]> {
     const project = getProject(db, row.projectId);
-    const changed = await opts.git.changedPaths(checkoutOf(db, row));
+    const checkout = checkoutOf(db, row);
+    const changed = await opts.git.changedPaths(checkout);
     const claims = activeClaims(db, row.id).map((c) => ({ kind: c.kind, name: c.name }));
     // A pass lane's claims name the pass's own areas: the whole-project page for a pass of one.
     const pass = passHoldingTask(db, getTask(db, row.taskId));
     const areas = pass ? [...passAreasOf(db, pass.id)] : project.areas;
-    return findClaimed(changed, { areas, hazards: project.hazards }, claims).sort();
+    const claimed = findClaimed(changed, { areas, hazards: project.hazards }, claims);
+    const start = pass ? null : getTaskStartDirt(db, row.taskId);
+    return withoutStartDirt(claimed, checkout, start).sort();
   }
 
   /**
@@ -4210,6 +4251,23 @@ export function createRunner(opts: RunnerOptions): Runner {
       });
       clearLease(ctx, id);
     });
+  }
+
+  /**
+   * The run's commits since `base`. The builder's own checkout is shared: the builder and other tools
+   * commit on its branch too, so only the commits the run's sessions made through the commit tool are
+   * named. A worktree's branch holds only 10db's commits, base merges included, so every one is.
+   */
+  async function runCommits(row: WorkstreamRow, checkout: string, base: string): Promise<string[]> {
+    const shas = await opts.git.commitsSince(checkout, base);
+    if (checkout !== getProject(db, row.projectId).repoPath) return shas;
+    const own = new Set(
+      listToolOpResults(db, row.id, McpToolName.Commit).flatMap((result) => {
+        const parsed = McpToolOutputs.commit.safeParse(result);
+        return parsed.success ? [parsed.data.sha] : [];
+      }),
+    );
+    return shas.filter((sha) => own.has(sha));
   }
 
   /** The facts the builder checks: where the task began, where it is now, and what it committed. */
@@ -4536,7 +4594,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       hosts: result.blockedHosts,
     });
     const head = await opts.git.head(checkout);
-    const commitShas = await opts.git.commitsSince(checkout, row.baseHead ?? head);
+    const commitShas = await runCommits(row, checkout, row.baseHead ?? head);
     // A cancel that landed while git was read must not be overwritten by the verdict.
     if (stopRequested(ctl) === 'cancelled') {
       cancelNow(id, ctl.fence);

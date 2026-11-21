@@ -22,6 +22,16 @@
     "reason": {
       "type": "string",
       "minLength": 1
+    },
+    "leaveUncommitted": {
+      "default": [],
+      "description": "Uncommitted paths 10db asked you to commit that are not this task's work, such as another writer's edits in a shared checkout. 10db leaves them uncommitted and stops sending your step back for them. Never name a file this task changed.",
+      "maxItems": 200,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
     }
   },
   "required": [

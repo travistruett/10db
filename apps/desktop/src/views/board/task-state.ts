@@ -77,6 +77,8 @@ function whatHappened(kind: string | null, step: string | null): string {
       return `The checks kept failing and the ${step ?? 'run'}${step ? ' step' : ''} ran out of fix attempts.`;
     case WorkstreamFailure.SessionFailed:
       return `The ${step ? `${step} ` : ''}session kept crashing or could not start.`;
+    case WorkstreamFailure.Blocked:
+      return `The ${step ? `${step} ` : ''}session stopped and said why it couldn’t go on.`;
     case WorkstreamFailure.RetryLimit:
       return `The ${step ? `${step} step` : 'run'} ran out of fix attempts.`;
     case WorkstreamFailure.RejectedAtLimit:
@@ -138,6 +140,7 @@ function whatRetryDoes(
     case WorkstreamFailure.RetryLimit:
       return `Retry runs the ${step} step again with its fix attempts reset.`;
     case WorkstreamFailure.SessionFailed:
+    case WorkstreamFailure.Blocked:
       return `Retry runs the ${step} step again in a new session.`;
     case WorkstreamFailure.InstallBroken:
       return `Retry installs the packages again, then runs the ${step} step again.`;

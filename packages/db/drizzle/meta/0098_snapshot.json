@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "af12cfd5-646e-4212-9bbd-6317787db315",
+  "id": "1d2a2018-7750-4396-a988-450c1e5ffd6b",
   "prevId": "4c20f776-bad6-45b9-a402-8483fcd46e72",
   "tables": {
     "aa_models": {
@@ -2892,13 +2892,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "accept_id": {
-          "name": "accept_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -2943,19 +2936,6 @@
           "tableTo": "shapes",
           "columnsFrom": [
             "shape_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "landing_groups_accept_id_shape_accepts_id_fk": {
-          "name": "landing_groups_accept_id_shape_accepts_id_fk",
-          "tableFrom": "landing_groups",
-          "tableTo": "shape_accepts",
-          "columnsFrom": [
-            "accept_id"
           ],
           "columnsTo": [
             "id"
@@ -6309,73 +6289,6 @@
         }
       }
     },
-    "shape_accepts": {
-      "name": "shape_accepts",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "shape_id": {
-          "name": "shape_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "undone_at": {
-          "name": "undone_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "shape_accepts_shape_idx": {
-          "name": "shape_accepts_shape_idx",
-          "columns": [
-            "shape_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "shape_accepts_shape_id_shapes_id_fk": {
-          "name": "shape_accepts_shape_id_shapes_id_fk",
-          "tableFrom": "shape_accepts",
-          "tableTo": "shapes",
-          "columnsFrom": [
-            "shape_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "shape_attachment_revisions": {
       "name": "shape_attachment_revisions",
       "columns": {
@@ -7335,13 +7248,6 @@
           "autoincrement": false,
           "default": "'[]'"
         },
-        "accept_id": {
-          "name": "accept_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -7374,19 +7280,6 @@
           "tableTo": "shapes",
           "columnsFrom": [
             "shape_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "shape_proposals_accept_id_shape_accepts_id_fk": {
-          "name": "shape_proposals_accept_id_shape_accepts_id_fk",
-          "tableFrom": "shape_proposals",
-          "tableTo": "shape_accepts",
-          "columnsFrom": [
-            "accept_id"
           ],
           "columnsTo": [
             "id"
@@ -9336,6 +9229,51 @@
           "tableTo": "pass_turns",
           "columnsFrom": [
             "turn_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "task_start_dirt": {
+      "name": "task_start_dirt",
+      "columns": {
+        "task_id": {
+          "name": "task_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entries": {
+          "name": "entries",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "task_start_dirt_task_id_tasks_id_fk": {
+          "name": "task_start_dirt_task_id_tasks_id_fk",
+          "tableFrom": "task_start_dirt",
+          "tableTo": "tasks",
+          "columnsFrom": [
+            "task_id"
           ],
           "columnsTo": [
             "id"

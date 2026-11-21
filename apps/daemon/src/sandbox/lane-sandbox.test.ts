@@ -671,6 +671,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       // Claude Code and the git it runs itself, outside the sandbox, get no variable that names a
       // path the lane can write: the sandboxed shell sets those from the env file.
       expect(session.spec.env).toEqual({
+        pnpm_config_manage_package_manager_versions: 'false',
         MISE_LOG_LEVEL: 'error',
         CLAUDE_CODE_TMPDIR: session.tmpDir,
         GIT_CONFIG_GLOBAL: '/dev/null',
@@ -689,6 +690,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         pnpm_config_store_dir: join(cache, 'pnpm-store'),
         pnpm_config_state_dir: join(cache, 'pnpm-state'),
         pnpm_config_cache_dir: join(cache, 'pnpm-cache'),
+        pnpm_config_manage_package_manager_versions: 'false',
         CARGO_HOME: join(cache, 'cargo'),
         UV_CACHE_DIR: join(cache, 'uv'),
         UV_TOOL_DIR: join(cache, 'uv-tools'),

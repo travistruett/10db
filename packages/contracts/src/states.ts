@@ -406,6 +406,11 @@ export const WorkstreamFailure = {
   GateFailed: 'gate_failed',
   /** The session crashed too often, could not start, or recovery gave up on it. */
   SessionFailed: 'session_failed',
+  /**
+   * The session ran, said through report_blocked that the step can't do its job, and stopped; the
+   * failure reason is its own, with the calls 10db skipped in the run listed after it.
+   */
+  Blocked: 'blocked',
   /** The step ran out of fix attempts: uncommitted changes, merge conflicts or the builder's send-backs. */
   RetryLimit: 'retry_limit',
   /** A reviewer rejected the work with no fix attempt left. */

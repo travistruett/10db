@@ -2,6 +2,7 @@ import { createDeliveryJobs } from '../delivery';
 import { execFileSync } from 'node:child_process';
 import {
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -3063,6 +3064,140 @@ describe('a step that ends with changes in its claims', () => {
     expect(ws(workstream.id).state).toBe('DONE');
     expect(engine.adapter.prompts[1]?.prompt).toContain('- src/api/a.txt');
     expect(gateEvidence(workstream.id)).toHaveLength(1);
+  });
+
+  it("leaves what the checkout held before the task first ran, naming only the task's own change", async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [write('src/api/a.txt'), turn],
+        [commit('op-uncom-0002', ['src/api/a.txt']), turn],
+      ],
+    });
+    // The builder's edit in a shared checkout, inside the task's claims and older than the task.
+    mkdirSync(join(engine.repoPath, 'src/api'), { recursive: true });
+    writeFileSync(join(engine.repoPath, 'src/api/builder.txt'), 'theirs');
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      nextAction: { kind: 'uncommitted', paths: ['src/api/a.txt'] },
+    });
+
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(gateEvidence(workstream.id)).toHaveLength(1);
+  });
+
+  it('finishes on its own commit once its session leaves an edit another writer made while it ran', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          write('src/api/a.txt'),
+          { do: 'await_signal', name: 'builder-wrote' },
+          commit('op-uncom-0003', ['src/api/a.txt']),
+          turn,
+        ],
+        [
+          {
+            do: 'mcp',
+            tool: 'report_deviation',
+            args: {
+              opId: 'op-uncom-0004',
+              cause: 'Another writer is editing this checkout.',
+              severity: 'warn',
+              reason: 'This task never changed src/api/builder.txt.',
+              leaveUncommitted: ['src/api/builder.txt'],
+            },
+          },
+          turn,
+        ],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    // The builder edits inside the task's claims after the task first launched.
+    await waitFor(() => existsSync(join(engine.repoPath, 'src/api/a.txt')) || undefined);
+    writeFileSync(join(engine.repoPath, 'src/api/builder.txt'), 'theirs');
+    engine.adapter.signal('builder-wrote');
+    await engine.runner.idle();
+    expect(ws(workstream.id).nextAction).toEqual({
+      kind: 'uncommitted',
+      paths: ['src/api/builder.txt'],
+    });
+    const repoGit = (...args: string[]) =>
+      execFileSync('git', ['-C', engine.repoPath, ...args], {
+        env: isolatedGitEnv(),
+        encoding: 'utf8',
+      }).trim();
+    const head = repoGit('rev-parse', 'HEAD');
+
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    // No second commit: the gate passed on the step's one commit, and the builder's edit stays theirs.
+    expect(repoGit('rev-parse', 'HEAD')).toBe(head);
+    expect(gateEvidence(workstream.id).map((e) => e.commitShas)).toEqual([[head]]);
+    expect(repoGit('status', '--porcelain')).toBe('?? src/api/builder.txt');
+  });
+
+  it("a retry after its committed step was blocked finishes on that commit, naming only the task's commits", async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          write('src/api/a.txt'),
+          commit('op-retry-0001', ['src/api/a.txt']),
+          // Skipped, sent out to the network, so the step can say it was blocked.
+          { do: 'tool', toolName: 'Bash', input: { command: 'curl -s https://example.com' } },
+          { do: 'mcp', tool: 'report_blocked', args: { reason: 'The checks could not start.' } },
+          turn,
+        ],
+        [turn],
+      ],
+    });
+    const repoGit = (...args: string[]) =>
+      execFileSync('git', ['-C', engine.repoPath, ...args], {
+        env: isolatedGitEnv(),
+        encoding: 'utf8',
+      }).trim();
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({ state: 'FAILED', failureKind: 'blocked' });
+    const own = repoGit('rev-parse', 'HEAD');
+    // The builder commits their own work on the shared branch before pressing Retry.
+    writeFileSync(join(engine.repoPath, 'builder.txt'), 'theirs');
+    repoGit('add', 'builder.txt');
+    repoGit('commit', '-q', '-m', 'Builder work');
+    const builders = repoGit('rev-parse', 'HEAD');
+
+    engine.retry(workstream.id);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(repoGit('rev-parse', 'HEAD')).toBe(builders);
+    expect(gateEvidence(workstream.id).map((e) => e.commitShas)).toEqual([[own]]);
+  });
+
+  it('keeps charging a task with its own uncommitted change when it ran before its start was recorded', async () => {
+    engine = await createTestEngine({
+      Alpha: [[write('src/api/a.txt'), turn], [turn]],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).nextAction).toEqual({ kind: 'uncommitted', paths: ['src/api/a.txt'] });
+
+    // As for a task that ran before 10db recorded what a checkout held, or one taken out of a pass.
+    engine.store.db.delete(schema.taskStartDirt).run();
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      nextAction: { kind: 'uncommitted', paths: ['src/api/a.txt'] },
+    });
   });
 
   it('fails the step once it has been sent back as many times as the fix limit allows', async () => {

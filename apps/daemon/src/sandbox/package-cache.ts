@@ -8,6 +8,9 @@ import { join } from 'node:path';
  * Moving `CARGO_HOME` leaves rustup's `cargo` on PATH and its toolchains in `RUSTUP_HOME`; cargo no
  * longer reads `~/.cargo/config.toml` or its credentials, and `cargo install` into the
  * default root fails: `bin` there links to the read-only `~/.cargo/bin` when it exists.
+ * pnpm runs as the version on PATH, never switching to the one a project's `packageManager` pins: the
+ * switch fetches that version into the run's empty cache and first locks a directory in `/tmp` that
+ * only a package install may write, so in any other run every pnpm command failed before it started.
  */
 export function packageCacheEnv(cacheDir: string): Record<string, string> {
   return {
@@ -17,6 +20,7 @@ export function packageCacheEnv(cacheDir: string): Record<string, string> {
     pnpm_config_store_dir: join(cacheDir, 'pnpm-store'),
     pnpm_config_state_dir: join(cacheDir, 'pnpm-state'),
     pnpm_config_cache_dir: join(cacheDir, 'pnpm-cache'),
+    pnpm_config_manage_package_manager_versions: 'false',
     CARGO_HOME: join(cacheDir, 'cargo'),
     UV_CACHE_DIR: join(cacheDir, 'uv'),
     UV_TOOL_DIR: join(cacheDir, 'uv-tools'),
