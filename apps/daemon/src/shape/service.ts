@@ -1,5 +1,5 @@
-import { rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, rmSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import {
   ConflictError,
   ConversationItemKind,
@@ -474,13 +474,32 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     if (note !== null) turnOf(shapeId).notes.push(note);
   };
 
+  // PDFs whose text is still being read, by stored path; the intake line tells Codex so.
+  const pdfReading = new Set<string>();
+  let shuttingDown = false;
   const planParts = createPlanParts({
     state,
     log,
     filesDir: deps.filesDir,
     turnOf,
     announce,
+    pdfReading,
   });
+
+  /** Reads a PDF's text after the upload has answered; it only logs, and writes nothing once closing. */
+  const readPdfText = (storedPath: string, name: string, bytes: Uint8Array): void => {
+    pdfReading.add(storedPath);
+    void keepPdfText(storedPath, bytes, () => !shuttingDown && existsSync(dirname(storedPath)))
+      .then((written) => {
+        if (written === null) log.info({ file: name }, 'a dropped PDF has no text');
+      })
+      .catch((error: unknown) => {
+        log.warn({ err: error, file: name }, 'a dropped PDF’s text could not be read');
+      })
+      .finally(() => {
+        pdfReading.delete(storedPath);
+      });
+  };
 
   return {
     startFromTerminal(input) {
@@ -545,16 +564,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         }),
       );
       const storedPath = storeFile(deps.filesDir, shapeId, checked.storedName, checked.bytes);
-      let textPath: string | null = null;
       try {
-        if (checked.mediaType === ShapeFileKind.Pdf) {
-          try {
-            textPath = await keepPdfText(storedPath, checked.bytes);
-            if (textPath === null) log.info({ file: checked.name }, 'a dropped PDF has no text');
-          } catch (error) {
-            log.warn({ err: error, file: checked.name }, 'a dropped PDF’s text could not be read');
-          }
-        }
         const row = state.write((ctx) => {
           // Counted again here: drops that overlap each passed the first count.
           const refusal = shapeFileRefusal({
@@ -571,10 +581,11 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
             storedPath,
           });
         });
+        if (checked.mediaType === ShapeFileKind.Pdf)
+          readPdfText(storedPath, checked.name, checked.bytes);
         return fileDtoOf(row);
       } catch (error) {
         rmSync(storedPath, { force: true });
-        if (textPath !== null) rmSync(textPath, { force: true });
         throw error;
       }
     },
@@ -845,6 +856,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     },
 
     async close() {
+      shuttingDown = true;
       await engine.close();
     },
   };

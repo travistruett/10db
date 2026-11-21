@@ -11,19 +11,26 @@ export const pdfTextPath = (storedPath: string): string =>
   join(dirname(storedPath), 'text', `${basename(storedPath)}.txt`);
 
 /**
- * Keeps the PDF's text beside it and answers the path it wrote, or null when the PDF has no text.
- * Throws when the PDF can't be read in time.
+ * Keeps the PDF's text beside it and answers the path it wrote, or null when the PDF has no text or
+ * `stillWanted` says no more. Throws when the PDF can't be read in time.
  */
 export async function keepPdfText(
   storedPath: string,
   bytes: Uint8Array,
+  stillWanted: () => boolean,
   deadlineMs?: number,
 ): Promise<string | null> {
   const text = await extractText({ kind: 'pdf', bytes }, deadlineMs);
-  if (text === null) return null;
+  // The daemon may be closing, or the conversation's files removed, by the time the text is ready.
+  if (text === null || !stillWanted()) return null;
   const path = pdfTextPath(storedPath);
-  mkdirSync(dirname(path), { recursive: true });
-  // `wx`: never over a file that is already there.
-  writeFileSync(path, text, { flag: 'wx', mode: 0o600 });
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    // `wx`: never over a file that is already there.
+    writeFileSync(path, text, { flag: 'wx', mode: 0o600 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw error;
+  }
   return path;
 }
