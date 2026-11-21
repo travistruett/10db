@@ -772,7 +772,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   expect(await titles()).toHaveLength(before + 2);
 
   // Accept and Start: the confirm counts what starts, and the goal's tasks get runs.
-  await panel.getByRole('button', { name: 'More accept actions' }).click();
+  await panel.getByRole('button', { name: 'More ways to accept' }).click();
   await expect(page.getByRole('menuitem', { name: 'Accept and Start' })).toBeVisible();
   await page.getByRole('menuitem', { name: 'Accept and Start' }).click();
   const startDialog = page.getByRole('dialog', { name: 'Accept and Start' });

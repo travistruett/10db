@@ -471,14 +471,28 @@ export function ChatTab({
     { chatId: chat.id, projectId: chat.projectId },
   );
   const ended = conversation.state === 'ended_error';
+  // A start that fails or a session that ends in error leaves the daemon's own notice as the last item; it
+  // says why and is the warning. The "stopped" line after it is only the state, so it stays dim.
+  const lastItem = items.at(-1);
+  const failureId =
+    ended &&
+    lastItem?.kind === 'notice' &&
+    lastItem.change === undefined &&
+    lastItem.handedTo === undefined
+      ? lastItem.id
+      : null;
   const shown = ended
     ? [
-        ...entries,
+        ...entries.map((entry) =>
+          entry.kind === 'notice' && entry.id === failureId
+            ? { ...entry, tone: 'error' as const }
+            : entry,
+        ),
         {
           kind: 'notice' as const,
           id: 'ended',
           text: 'The session stopped. Send a message to start it again.',
-          tone: 'error' as const,
+          tone: 'info' as const,
         },
       ]
     : entries;

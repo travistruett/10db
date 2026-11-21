@@ -10,6 +10,7 @@ import {
   Skeleton,
   Stack,
   Text,
+  Tooltip,
 } from '@mantine/core';
 import { IconChevronDown, IconX } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
@@ -21,6 +22,7 @@ import {
   type ReviewKind,
   useRowChange,
 } from '../../../daemon/shape-queries';
+import { SplitButton } from '../../../shell/split-button';
 import { shortAgo } from '../../factory/short-ago';
 import { useNow } from '../../../shell/relative';
 import { ConvertModal, convertibleRows } from './convert-modal';
@@ -203,22 +205,23 @@ export function ProposedPane({
       <Stack gap={6} px="md" pt="md" pb="xs" style={{ flex: 'none' }}>
         <Group justify="space-between" wrap="nowrap">
           <Text fz={13} fw={600}>
-            {view === undefined || view.shape.round === 0
-              ? 'Plan'
-              : `Plan · round ${String(view.shape.round)} · updated ${shortAgo(view.shape.updatedAt, now)}`}
+            Plan
           </Text>
           <Group gap="xs" wrap="nowrap">
             <Menu position="bottom-end" withinPortal>
               <Menu.Target>
-                <Button
-                  variant="default"
-                  size="xs"
-                  rightSection={<IconChevronDown size={14} stroke={1.5} />}
-                  loading={review.isPending && review.variables !== 'design_review'}
-                  disabled={view === undefined || rows.length === 0 || takingPictures}
-                >
-                  {takingPictures ? 'Taking pictures' : 'Review'}
-                </Button>
+                <Tooltip label="Have reviewers read the plan before you accept it">
+                  <Button
+                    variant="subtle"
+                    color="gray"
+                    size="xs"
+                    rightSection={<IconChevronDown size={14} stroke={1.5} />}
+                    loading={review.isPending && review.variables !== 'design_review'}
+                    disabled={view === undefined || rows.length === 0 || takingPictures}
+                  >
+                    {takingPictures ? 'Taking pictures' : 'Review'}
+                  </Button>
+                </Tooltip>
               </Menu.Target>
               <Menu.Dropdown>
                 <Menu.Item
@@ -226,47 +229,40 @@ export function ProposedPane({
                     review.mutate('review');
                   }}
                 >
-                  Plan review
+                  <ReviewItem hint="Scope and engineering reviewers read each goal and loose task">
+                    Plan review
+                  </ReviewItem>
                 </Menu.Item>
                 <Menu.Item
                   onClick={() => {
                     review.mutate('rehearse');
                   }}
                 >
-                  Check for Questions
+                  <ReviewItem hint="Reads each task as the agent who will build it, for what it would have to ask">
+                    Check for Questions
+                  </ReviewItem>
                 </Menu.Item>
                 <Menu.Item
                   onClick={() => {
                     review.mutate('design_review');
                   }}
                 >
-                  Design review
+                  <ReviewItem hint="Compares each task's mock-up with the app as it is now and DESIGN.md">
+                    Design review
+                  </ReviewItem>
                 </Menu.Item>
               </Menu.Dropdown>
             </Menu>
-            <Button.Group>
-              <Button
-                variant="default"
-                size="xs"
-                disabled={view === undefined || rows.length === 0}
-                onClick={() => {
-                  setConverting('accept');
-                }}
-              >
-                Accept
-              </Button>
-              <Menu position="bottom-end" withinPortal>
-                <Menu.Target>
-                  <ActionIcon
-                    variant="default"
-                    size={26}
-                    aria-label="More accept actions"
-                    disabled={view === undefined || rows.length === 0}
-                  >
-                    <IconChevronDown size={14} stroke={1.5} />
-                  </ActionIcon>
-                </Menu.Target>
-                <Menu.Dropdown>
+            <SplitButton
+              size="xs"
+              disabledReason={view === undefined || rows.length === 0 ? 'Nothing to accept' : null}
+              onClick={() => {
+                setConverting('accept');
+              }}
+              hint="Put the pending rows on the Board. Nothing starts."
+              menuLabel="More ways to accept"
+              menu={
+                <>
                   <Menu.Item
                     onClick={() => {
                       setConverting('accept');
@@ -279,19 +275,38 @@ export function ProposedPane({
                       setConverting('start');
                     }}
                   >
-                    Accept and Start
+                    <ReviewItem hint="Also starts the accepted tasks that are ready">
+                      Accept and Start
+                    </ReviewItem>
                   </Menu.Item>
-                </Menu.Dropdown>
-              </Menu>
-            </Button.Group>
-            {menu}
-            {onClose === undefined ? null : (
-              <ActionIcon variant="subtle" aria-label="Close Plan" onClick={onClose}>
-                <IconX size={16} stroke={1.5} />
-              </ActionIcon>
-            )}
+                </>
+              }
+            >
+              Accept
+            </SplitButton>
+            <Group gap={4} wrap="nowrap">
+              {menu}
+              {onClose === undefined ? null : (
+                <Tooltip label="Close Plan">
+                  <ActionIcon
+                    variant="subtle"
+                    color="gray"
+                    size="input-xs"
+                    aria-label="Close Plan"
+                    onClick={onClose}
+                  >
+                    <IconX size={16} stroke={1.5} />
+                  </ActionIcon>
+                </Tooltip>
+              )}
+            </Group>
           </Group>
         </Group>
+        {view === undefined || view.shape.round === 0 ? null : (
+          <Text size="xs" c="dimmed">
+            {`Round ${String(view.shape.round)} · updated ${shortAgo(view.shape.updatedAt, now)}`}
+          </Text>
+        )}
         {reviewLine === '' ? null : (
           <Text size="xs" c="dimmed" role="status" aria-label="Review">
             {reviewLine}
@@ -468,4 +483,16 @@ function reviewWords(
   if (answer.result.status === 'running')
     return 'A review is already running; press again when it ends.';
   return NOTHING_TO_SAY[answer.kind];
+}
+
+/** A menu item's name with a dimmed line saying what it does. */
+function ReviewItem({ hint, children }: { readonly hint: string; readonly children: ReactNode }) {
+  return (
+    <Stack gap={0}>
+      <Text size="sm">{children}</Text>
+      <Text size="xs" c="dimmed" maw={260}>
+        {hint}
+      </Text>
+    </Stack>
+  );
 }

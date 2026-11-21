@@ -9,6 +9,8 @@ export const CONVERSATION_MIN_PX = 520;
 /** The panel beside the conversation takes between these two widths. */
 const PANEL_MIN_PX = 420;
 const PANEL_MAX_PX = 480;
+/** What the panel adds to its own 16 px inset, so the divider has the same 20 px on each side. */
+const GUTTER_EXTRA_PX = 4;
 /** The panel as a drawer over a tab too narrow to hold both. */
 const DRAWER_PX = 560;
 
@@ -100,6 +102,8 @@ export function PlanSide({
           display: 'flex',
           flexDirection: 'column',
           borderLeft: '1px solid var(--mantine-color-default-border)',
+          // The panel's own px md plus this is the 20 px the conversation keeps between its text and the divider.
+          paddingLeft: GUTTER_EXTRA_PX,
         }}
       >
         {head}

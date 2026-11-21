@@ -9,7 +9,9 @@ export interface SplitButtonProps {
   readonly disabledReason?: string | null;
   readonly onClick: () => void;
   readonly leftSection?: ReactNode;
-  /** Names the chevron for assistive tech, which can't see the arrow. */
+  /** What the action does, said as its tooltip while it is on. */
+  readonly hint?: string;
+  /** Names the chevron for assistive tech, which can't see the arrow, and is its tooltip. */
   readonly menuLabel: string;
   /** `Menu.Item`s: the actions that share the primary action's place. */
   readonly menu: ReactNode;
@@ -22,12 +24,14 @@ export function SplitButton({
   disabledReason = null,
   onClick,
   leftSection,
+  hint,
   menuLabel,
   menu,
 }: SplitButtonProps) {
+  const label = disabledReason ?? hint ?? null;
   return (
     <Group wrap="nowrap" gap={0}>
-      <Tooltip label={disabledReason ?? ''} disabled={disabledReason === null}>
+      <Tooltip label={label ?? ''} disabled={label === null}>
         <Button
           size={size}
           leftSection={leftSection}
@@ -40,18 +44,21 @@ export function SplitButton({
       </Tooltip>
       <Menu position="bottom-end" withinPortal>
         <Menu.Target>
-          <ActionIcon
-            size={size === 'xs' ? 'input-xs' : 'input-sm'}
-            aria-label={menuLabel}
-            // The seam is drawn in the body color, so it reads as a cut through one button.
-            style={{
-              borderTopLeftRadius: 0,
-              borderBottomLeftRadius: 0,
-              borderLeft: '1px solid var(--mantine-color-body)',
-            }}
-          >
-            <IconChevronDown size={16} stroke={1.5} />
-          </ActionIcon>
+          <Tooltip label={menuLabel} disabled={disabledReason !== null}>
+            <ActionIcon
+              size={size === 'xs' ? 'input-xs' : 'input-sm'}
+              aria-label={menuLabel}
+              disabled={disabledReason !== null}
+              // The seam is drawn in the body color, so it reads as a cut through one button.
+              style={{
+                borderTopLeftRadius: 0,
+                borderBottomLeftRadius: 0,
+                borderLeft: '1px solid var(--mantine-color-body)',
+              }}
+            >
+              <IconChevronDown size={16} stroke={1.5} />
+            </ActionIcon>
+          </Tooltip>
         </Menu.Target>
         <Menu.Dropdown>{menu}</Menu.Dropdown>
       </Menu>

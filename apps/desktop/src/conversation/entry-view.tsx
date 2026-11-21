@@ -14,6 +14,7 @@ import {
   IconCheck,
   IconChevronRight,
   IconCopy,
+  IconAlertTriangle,
   IconInfoCircle,
 } from '@tabler/icons-react';
 import type { ConversationEntry } from './entry';
@@ -125,22 +126,17 @@ export function ConversationEntryView({ entry }: { readonly entry: ConversationE
       return <Reply entry={entry} />;
     case 'reasoning':
       return <Reasoning entry={entry} />;
-    case 'notice':
+    case 'notice': {
+      // A failure the builder must act on is red with a warning triangle; anything else is dim with an info icon.
+      const failed = entry.tone === 'error';
+      const Icon = failed ? IconAlertTriangle : IconInfoCircle;
       return (
-        <Text
-          size="xs"
-          c={entry.tone === 'error' ? 'red' : 'dimmed'}
-          style={{ overflowWrap: 'anywhere' }}
-        >
-          <IconInfoCircle
-            size={14}
-            stroke={1.5}
-            aria-hidden="true"
-            style={{ verticalAlign: '-2px' }}
-          />{' '}
+        <Text size="xs" c={failed ? 'red' : 'dimmed'} style={{ overflowWrap: 'anywhere' }}>
+          <Icon size={14} stroke={1.5} aria-hidden="true" style={{ verticalAlign: '-2px' }} />{' '}
           {entry.text}
         </Text>
       );
+    }
     case 'divider':
       return (
         <Divider
