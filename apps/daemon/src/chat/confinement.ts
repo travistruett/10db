@@ -16,6 +16,23 @@ const READ_TOOLS: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob']);
 const WEB_TOOLS: ReadonlySet<string> = new Set(['WebSearch', 'WebFetch']);
 const EDIT_TOOLS: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const AGENT_TOOLS: ReadonlySet<string> = new Set(['Agent', 'Task']);
+/**
+ * Claude Code's own bookkeeping: its to-do list, loading a deferred tool's schema, its own tasks, and
+ * a background subagent's hand-back to this session. None touches a file, a command, the network or
+ * another session, and a background reviewer that can't hand back never finishes. SendMessage is not
+ * one: it can reach other Claude sessions on the Mac and in the cloud.
+ */
+const HARNESS_TOOLS: ReadonlySet<string> = new Set([
+  'SubagentHandback',
+  'TodoWrite',
+  'ToolSearch',
+  'TaskCreate',
+  'TaskGet',
+  'TaskList',
+  'TaskUpdate',
+  'TaskStop',
+  'TaskOutput',
+]);
 const OWN_PREFIX = 'mcp__10db__';
 const CHAT_TOOLS: ReadonlySet<string> = new Set(Object.values(ChatToolName));
 const PLAN_TOOLS: ReadonlySet<string> = new Set(Object.values(ShapeToolName));
@@ -141,6 +158,7 @@ export function judgeChatCall(
     toolInput: call.input,
     ...(call.cwd === undefined ? {} : { cwd: call.cwd }),
   };
+  if (HARNESS_TOOLS.has(call.toolName)) return ALLOW;
   if (folder !== undefined) {
     // A session that only reads or is being asked where to work keeps no call once the chat has another
     // session (a background agent's, however long it stays warm).
