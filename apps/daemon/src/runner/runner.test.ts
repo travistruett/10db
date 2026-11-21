@@ -2419,6 +2419,27 @@ describe('flows', () => {
     });
   });
 
+  it('keeps what a verification-only build wrote as its report, apart from the review that follows', async () => {
+    // A task that only checks things commits nothing: the build's last message is the whole result,
+    // and it was dropped when the session ended, so the card had nothing of the build to show.
+    const wrote =
+      'Docker status: running. HTTP check on localhost:8080: skipped, the sandbox refused it.';
+    engine = await createTestEngine({
+      Alpha: [
+        [{ do: 'turn_complete', text: wrote }],
+        [approve('op-report-0001'), { do: 'turn_complete', text: 'Reviewed.' }],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+    expect(ws(workstream.id).state).toBe('DONE');
+    const build = listSessions(engine.store.db, workstream.id)[0];
+    expect(step(workstream.id, 0)?.report).toMatchObject({ summary: wrote, sessionId: build?.id });
+    // The review's result is its own, and its step carries no report.
+    expect(step(workstream.id, 1)?.result?.summary).toBe('Looks right.');
+    expect(step(workstream.id, 1)?.report).toBeUndefined();
+  });
+
   it('sends a rejection back to the implement step, one profile up, with the notes', async () => {
     engine = await createTestEngine({
       Alpha: [

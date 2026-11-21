@@ -229,7 +229,14 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
     .getByRole('button', { name: new RegExp(TASK) })
     .first()
     .click();
-  await expect(page.getByRole('dialog', { name: 'Task' })).toBeVisible();
+  const taskDrawer = page.getByRole('dialog', { name: 'Task' });
+  await expect(taskDrawer).toBeVisible();
+  // What the build wrote last is on the card under its own phase, apart from the review's verdict.
+  const report = taskDrawer.getByTestId('task-report');
+  await expect(report.getByText('Implementation report')).toBeVisible();
+  await expect(report.getByText('Wrote src/greeting/hello.txt and committed it.')).toBeVisible();
+  await taskDrawer.getByRole('tab', { name: /Reviews/ }).click();
+  await expect(taskDrawer.getByTestId('review-phase').first()).toHaveText('Review');
   await page.keyboard.press('Escape');
 
   // Knowledge: a decision written through the API (as Claude Code would) appears in the open view
