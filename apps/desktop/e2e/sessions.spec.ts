@@ -583,12 +583,13 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   request,
 }) => {
   const projectId = await createProject(request, 'sessions-plan');
-  const titles = async (): Promise<string[]> =>
+  const titlesWithIds = async (): Promise<z.infer<typeof Tasks>> =>
     Tasks.parse(
       await (
         await request.get(`${daemonUrl}/projects/${projectId}/tasks`, { headers: auth })
       ).json(),
-    ).map((t) => t.title);
+    );
+  const titles = async (): Promise<string[]> => (await titlesWithIds()).map((t) => t.title);
   await claudeIsInstalled(page);
   await page.addInitScript((id) => {
     window.localStorage.setItem('tendb.project', JSON.stringify(id));
@@ -687,6 +688,57 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await expect(panel.getByText('On the Board · 2 ready', { exact: true })).toHaveCount(0);
   expect(await titles()).toHaveLength(before + 2);
 
+  // Accept, then Undo Accept: the goal and its two tasks go, the goal is proposed again, and the loose rows
+  // stay on the Board because they were the earlier Accept's.
+  const goalRow = panel.getByRole('listitem').filter({ hasText: 'Board polish' });
+  const goalTitles = async (): Promise<string> =>
+    JSON.stringify(
+      await (
+        await request.get(`${daemonUrl}/projects/${projectId}/goals`, { headers: auth })
+      ).json(),
+    );
+  await panel.getByRole('button', { name: 'Accept', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Accept 1' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(goalRow.getByText('On the Board · 2 ready', { exact: true })).toBeVisible();
+  expect(await goalTitles()).toContain('Board polish');
+  await panel.getByRole('button', { name: 'More Plan actions' }).click();
+  await page.getByRole('menuitem', { name: 'Undo Accept' }).click();
+  const undo = page.getByRole('dialog', { name: 'Undo Accept' });
+  await expect(undo.getByText(/1 goal, 2 tasks/)).toBeVisible();
+  await undo.getByRole('button', { name: 'Undo Accept' }).click();
+  await expect(undo).toBeHidden();
+  await expect(goalRow.getByText(/On the Board/)).toHaveCount(0);
+  await expect(goalRow.getByRole('img', { name: 'Proposed' })).toBeVisible();
+  await expect(panel.getByText('On the Board · Ready', { exact: true })).toHaveCount(2);
+  expect(await goalTitles()).not.toContain('Board polish');
+  expect(await titles()).toHaveLength(before + 2);
+
+  // Accept and Start: the confirm counts what starts, and the goal's tasks get runs.
+  await panel.getByRole('button', { name: 'More accept actions' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Accept and Start' })).toBeVisible();
+  await page.getByRole('menuitem', { name: 'Accept and Start' }).click();
+  const startDialog = page.getByRole('dialog', { name: 'Accept and Start' });
+  await expect(
+    startDialog.getByRole('status').filter({ hasText: /start now|wait for a lane/ }),
+  ).toBeVisible();
+  await expect(startDialog.getByRole('button', { name: 'Accept and Start 1' })).toBeVisible();
+  await startDialog.getByRole('button', { name: 'Accept and Start 1' }).click();
+  await expect(startDialog).toBeHidden();
+  await expect(goalRow.getByText(/On the Board/)).toHaveText(
+    /queued|running|needs you|in review|done/i,
+  );
+
+  // The goal's tasks have runs now, so Undo Accept is disabled and says why.
+  await panel.getByRole('button', { name: 'More Plan actions' }).click();
+  const undoItem = page.getByRole('menuitem', { name: /Undo Accept/ });
+  await expect(undoItem).toBeDisabled();
+  await expect(undoItem).toContainText(
+    'has started; cancel its run and remove it from the Board first',
+  );
+
+  await page.keyboard.press('Escape');
+
   // Under the side-by-side width the panel is a drawer, which Close Plan closes and the title's Plan reopens.
   await page.setViewportSize({ width: 900, height: 900 });
   const drawer = page.getByRole('dialog', { name: 'Plan' });
@@ -726,6 +778,19 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
       .array(z.looseObject({ id: z.string(), planId: z.string().nullable() }))
       .parse(await (await request.get(`${daemonUrl}/chats?open=1`, { headers: auth })).json())
       .find((chat) => chat.id === chatId())?.planId;
+  // The runs the start made are cancelled, so a later spec finds no running lane.
+  const goalTasks = new Set(
+    (await titlesWithIds())
+      .filter((t) => ['Compact card density', 'Thin scrollbars'].includes(t.title))
+      .map((t) => t.id),
+  );
+  const activeOfGoal = async (): Promise<z.infer<typeof Workstreams>> =>
+    Workstreams.parse(
+      await (await request.get(`${daemonUrl}/workstreams?active=true`, { headers: auth })).json(),
+    ).filter((w) => w.projectId === projectId && goalTasks.has(String(w['taskId'])));
+  for (const stream of await activeOfGoal())
+    await request.post(`${daemonUrl}/workstreams/${stream.id}/cancel`, { headers: auth });
+  await expect.poll(async () => (await activeOfGoal()).length).toBe(0);
   await archive();
   await newTab();
   await sendLine(page, 'Make the cards denser');

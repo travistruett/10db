@@ -5,12 +5,13 @@ import {
   Box,
   Button,
   Group,
+  Menu,
   ScrollArea,
   Skeleton,
   Stack,
   Text,
 } from '@mantine/core';
-import { IconX } from '@tabler/icons-react';
+import { IconChevronDown, IconX } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { useConvertShape, useDismissFinding, useRowChange } from '../../../daemon/shape-queries';
@@ -69,7 +70,7 @@ export function ProposedPane({
 }: ProposedPaneProps) {
   const now = useNow();
   const listRef = useRef<HTMLDivElement>(null);
-  const [converting, setConverting] = useState(false);
+  const [converting, setConverting] = useState<'accept' | 'start' | null>(null);
   const [changesOnly, setChangesOnly] = useState(false);
   const [goalToRemove, setGoalToRemove] = useState<RemoveDraftGoalTarget | null>(null);
   const [decisionToWithdraw, setDecisionToWithdraw] = useState<WithdrawTarget | null>(null);
@@ -192,16 +193,46 @@ export function ProposedPane({
               : `Plan · round ${String(view.shape.round)} · updated ${shortAgo(view.shape.updatedAt, now)}`}
           </Text>
           <Group gap="xs" wrap="nowrap">
-            <Button
-              variant="default"
-              size="xs"
-              disabled={view === undefined || rows.length === 0}
-              onClick={() => {
-                setConverting(true);
-              }}
-            >
-              Accept
-            </Button>
+            <Button.Group>
+              <Button
+                variant="default"
+                size="xs"
+                disabled={view === undefined || rows.length === 0}
+                onClick={() => {
+                  setConverting('accept');
+                }}
+              >
+                Accept
+              </Button>
+              <Menu position="bottom-end" withinPortal>
+                <Menu.Target>
+                  <ActionIcon
+                    variant="default"
+                    size={26}
+                    aria-label="More accept actions"
+                    disabled={view === undefined || rows.length === 0}
+                  >
+                    <IconChevronDown size={14} stroke={1.5} />
+                  </ActionIcon>
+                </Menu.Target>
+                <Menu.Dropdown>
+                  <Menu.Item
+                    onClick={() => {
+                      setConverting('accept');
+                    }}
+                  >
+                    Accept
+                  </Menu.Item>
+                  <Menu.Item
+                    onClick={() => {
+                      setConverting('start');
+                    }}
+                  >
+                    Accept and Start
+                  </Menu.Item>
+                </Menu.Dropdown>
+              </Menu>
+            </Button.Group>
             {menu}
             {onClose === undefined ? null : (
               <ActionIcon variant="subtle" aria-label="Close Plan" onClick={onClose}>
@@ -275,9 +306,10 @@ export function ProposedPane({
           <ConvertPanel
             view={view}
             rows={rows}
-            opened={converting}
+            opened={converting !== null}
+            start={converting === 'start'}
             onClose={() => {
-              setConverting(false);
+              setConverting(null);
             }}
           />
           <RemoveDraftGoalModal
@@ -310,11 +342,13 @@ function ConvertPanel({
   view,
   rows,
   opened,
+  start,
   onClose,
 }: {
   readonly view: ShapeViewDto;
   readonly rows: readonly ShapeProposalDto[];
   readonly opened: boolean;
+  readonly start: boolean;
   readonly onClose: () => void;
 }) {
   const convert = useConvertShape(view.shape.id);
@@ -328,6 +362,7 @@ function ConvertPanel({
     <ConvertModal
       opened={opened}
       onClose={close}
+      start={start}
       rows={rows}
       view={view}
       pending={convert.isPending}
@@ -339,6 +374,7 @@ function ConvertPanel({
           .mutateAsync({
             proposalIds: ids,
             ...(options?.cut === undefined ? {} : { cut: options.cut }),
+            ...(options?.start === true ? { start: true } : {}),
           })
           .catch(() => undefined);
         if (result?.kind === 'refused') setRefusals(result.errors);

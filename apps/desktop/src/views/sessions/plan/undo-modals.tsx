@@ -1,12 +1,15 @@
-import type { DecisionId, GoalId, PrincipleId, ShapeId } from '@10db/contracts';
+import type { DecisionId, GoalId, PrincipleId, ShapeAcceptDto, ShapeId } from '@10db/contracts';
 import { Button, Stack, Text, Textarea } from '@mantine/core';
 import { useState } from 'react';
 import {
   useRemoveDraftGoal,
+  useUndoAccept,
   useWithdrawDecision,
   useWithdrawPrinciple,
 } from '../../../daemon/shape-queries';
 import { FormModal } from '../../../shell/form-modal';
+import { useNow } from '../../../shell/relative';
+import { shortAgo } from '../../factory/short-ago';
 
 export interface RemoveDraftGoalTarget {
   readonly goalId: GoalId;
@@ -197,5 +200,77 @@ export function WithdrawPrincipleModal({
       onReset={withdraw.reset}
       onClose={onClose}
     />
+  );
+}
+
+const plural = (n: number, noun: string): string => `${String(n)} ${noun}${n === 1 ? '' : 's'}`;
+
+/** What Undo Accept takes back, a zero part dropped: "1 goal, 2 tasks; withdraws 1 record". */
+function undoSummary(accept: ShapeAcceptDto): string {
+  const board = [
+    accept.goals === 0 ? null : plural(accept.goals, 'goal'),
+    accept.tasks === 0 ? null : plural(accept.tasks, 'task'),
+  ]
+    .filter((part) => part !== null)
+    .join(', ');
+  const records = accept.records === 0 ? '' : `withdraws ${plural(accept.records, 'record')}`;
+  return [board, records].filter((part) => part !== '').join('; ');
+}
+
+/**
+ * The confirm before Undo Accept: the plan's latest Accept is taken back (its goals, tasks and records),
+ * and its rows are proposed again. The daemon refuses in words when a task has started; they show here.
+ */
+export function UndoAcceptModal({
+  shapeId,
+  accept,
+  onClose,
+}: {
+  readonly shapeId: ShapeId;
+  readonly accept: ShapeAcceptDto | null;
+  readonly onClose: () => void;
+}) {
+  const undo = useUndoAccept(shapeId);
+  const now = useNow();
+  const close = () => {
+    undo.reset();
+    onClose();
+  };
+  const summary = accept === null ? '' : undoSummary(accept);
+  return (
+    <FormModal
+      opened={accept !== null}
+      onClose={close}
+      title="Undo Accept"
+      size="md"
+      error={undo.error?.message ?? null}
+      actions={
+        <>
+          <Button variant="default" onClick={close}>
+            Cancel
+          </Button>
+          <Button
+            color="red"
+            loading={undo.isPending}
+            onClick={() => {
+              if (accept) undo.mutate(accept.id, { onSuccess: close });
+            }}
+          >
+            Undo Accept
+          </Button>
+        </>
+      }
+    >
+      <Stack gap="xs">
+        {accept === null ? null : (
+          <Text size="sm">
+            {`Takes back what the Accept of ${shortAgo(accept.at, now)} put on the Board${summary === '' ? '' : `: ${summary}`}.`}
+          </Text>
+        )}
+        {accept === null || accept.kept === 0 ? null : (
+          <Text size="sm" c="dimmed">{`${String(accept.kept)} stay.`}</Text>
+        )}
+      </Stack>
+    </FormModal>
   );
 }

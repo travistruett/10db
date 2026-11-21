@@ -4,12 +4,13 @@ import {
   type MilestoneCut,
   type ShapeProposalDto,
   type ShapeProposalId,
+  type ShapeStartCountsDto,
   type ShapeViewDto,
 } from '@10db/contracts';
 import { Button, Checkbox, Group, Radio, ScrollArea, Stack, Text } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
 import { useState } from 'react';
-import type { ConvertShapeResult } from '../../../daemon/shape-queries';
+import { useStartCounts, type ConvertShapeResult } from '../../../daemon/shape-queries';
 import { FormModal } from '../../../shell/form-modal';
 import { destination, proposalTitle } from './proposal-text';
 import { isConverted } from './proposed-groups';
@@ -27,8 +28,26 @@ export function convertibleRows(proposals: readonly ShapeProposalDto[]): ShapePr
   return proposals.filter((p) => p.state === 'pending' && !isConverted(p));
 }
 
+/** The counts line of Accept and Start's confirm; a part that is zero drops out. */
+export function startCountsLine(counts: ShapeStartCountsDto): string {
+  const waits = [
+    counts.forLane === 0 ? null : `${String(counts.forLane)} wait for a lane`,
+    counts.forOthers === 0
+      ? null
+      : `${String(counts.forOthers)} ${counts.forLane === 0 ? 'wait ' : ''}for other tasks`,
+  ].filter((part) => part !== null);
+  return [
+    counts.now === 0 ? null : `${String(counts.now)} start now`,
+    waits.length === 0 ? null : waits.join(', '),
+  ]
+    .filter((part) => part !== null)
+    .join('; ');
+}
+
 export interface ConvertModalProps {
   readonly opened: boolean;
+  /** Accept and Start: the confirm says what starts, and Convert also starts it. */
+  readonly start: boolean;
   readonly onClose: () => void;
   readonly rows: readonly ShapeProposalDto[];
   /** What the review has to say: ceremony, findings and the rehearsal's marks and questions. */
@@ -40,7 +59,7 @@ export interface ConvertModalProps {
   readonly failure: string | null;
   readonly onConvert: (
     ids: readonly ShapeProposalId[],
-    options?: { readonly cut?: readonly MilestoneCut[] },
+    options?: { readonly cut?: readonly MilestoneCut[]; readonly start?: boolean },
   ) => Promise<ConvertShapeResult | undefined>;
 }
 
@@ -50,6 +69,7 @@ export interface ConvertModalProps {
  */
 export function ConvertModal({
   opened,
+  start,
   onClose,
   rows,
   view,
@@ -78,6 +98,19 @@ export function ConvertModal({
   const chosen = rows.filter((r) =>
     cutting && r.kind === 'goal' ? marks.get(r.id) === MilestoneMark.Needed : !unticked.has(r.id),
   );
+  const counts = useStartCounts(
+    view.shape.id,
+    chosen.map((r) => r.id),
+    opened && start,
+  ).data;
+  // Nothing in what is ticked would start: the button is a plain Accept and sends no start.
+  const startsAny = counts === undefined || counts.now + counts.forLane + counts.forOthers > 0;
+  const starting = start && startsAny;
+  // After an Accept the start could not follow, or had nothing new: the modal stays until Done.
+  const [after, setAfter] = useState<{ readonly line: string; readonly refused: boolean } | null>(
+    null,
+  );
+  if (!opened && after !== null) setAfter(null);
   const beside = refusals.length > 0 ? refusals : failure === null ? [] : [failure];
   const rehearsing = view.turn.rehearsing;
   const rehearsingCount = chosen
@@ -93,19 +126,36 @@ export function ConvertModal({
           return mark === undefined ? [] : [{ proposalId: m.id, mark }];
         })
       : undefined;
-    const result = await (cut === undefined ? onConvert(ids) : onConvert(ids, { cut }));
-    if (result?.kind === 'converted') onClose();
+    const options = {
+      ...(cut === undefined ? {} : { cut }),
+      ...(starting ? { start: true } : {}),
+    };
+    const result = await onConvert(ids, options);
+    if (result?.kind !== 'converted') return;
+    const outcome = result.result.start;
+    if (outcome?.refused != null)
+      setAfter({ line: `Accepted. The start was refused: ${outcome.refused}`, refused: true });
+    else if (outcome?.started.length === 0 && outcome.left.length === 0)
+      setAfter({ line: 'Nothing new to start', refused: false });
+    else onClose();
   };
 
   return (
     <FormModal
       opened={opened}
       onClose={onClose}
-      title="Accept"
+      title={start ? 'Accept and Start' : 'Accept'}
       size="lg"
       actions={
         <>
-          {beside.length === 0 ? null : (
+          {after?.refused === true ? (
+            <ScrollArea.Autosize mah={72} maw={320} type="auto">
+              <Text size="xs" c="red" role="alert">
+                {after.line}
+              </Text>
+            </ScrollArea.Autosize>
+          ) : null}
+          {beside.length === 0 || after !== null ? null : (
             <ScrollArea.Autosize mah={72} maw={320} type="auto">
               <Stack gap={0} role="alert">
                 {beside.map((line) => (
@@ -116,23 +166,49 @@ export function ConvertModal({
               </Stack>
             </ScrollArea.Autosize>
           )}
-          <Button variant="default" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            loading={pending}
-            disabled={chosen.length === 0 || unmarked.length > 0}
-            onClick={() => {
-              void convert();
-            }}
-          >
-            {`Accept ${String(chosen.length)}`}
-          </Button>
+          {after === null ? (
+            <>
+              <Button variant="default" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button
+                loading={pending}
+                disabled={chosen.length === 0 || unmarked.length > 0}
+                onClick={() => {
+                  void convert();
+                }}
+              >
+                {`${starting ? 'Accept and Start' : 'Accept'} ${String(chosen.length)}`}
+              </Button>
+            </>
+          ) : (
+            <Button onClick={onClose}>Done</Button>
+          )}
         </>
       }
     >
       <Stack gap="md">
-        <Text size="sm">Nothing starts. Tasks wait on the Board.</Text>
+        {start ? (
+          <>
+            {counts === undefined ? null : (
+              <Text size="sm" role="status">
+                {startsAny ? startCountsLine(counts) : 'Nothing to start'}
+              </Text>
+            )}
+            {counts?.stay.map((t, i) => (
+              <Text key={`${String(i)}-${t.title}`} size="xs" c="dimmed">
+                {`${t.title} stays on the Board: ${t.why}`}
+              </Text>
+            ))}
+          </>
+        ) : (
+          <Text size="sm">Nothing starts. Tasks wait on the Board.</Text>
+        )}
+        {after === null || after.refused ? null : (
+          <Text size="sm" role="status">
+            {after.line}
+          </Text>
+        )}
         {arrived === 0 ? null : (
           <Text size="sm" c="dimmed" role="status">
             {`${String(arrived)} new since you opened this`}

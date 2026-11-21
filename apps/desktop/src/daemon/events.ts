@@ -71,7 +71,15 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   ],
   // A run's skip is recorded under its task's event; a task becoming done, or changing rigor, moves the rigor
   // figures.
-  task: [['tasks'], goalKeys.all, CANDIDATES, skipKeys.all, rigorFiguresKeys.all],
+  // Accept and Start's counts follow lanes freeing up.
+  task: [
+    ['tasks'],
+    goalKeys.all,
+    CANDIDATES,
+    skipKeys.all,
+    rigorFiguresKeys.all,
+    shapeKeys.startCountsAll,
+  ],
   // A goal's strip counts its tasks and takes its status from their runs, batches and cards.
   goal: [goalKeys.all],
   // The digest's Decisions and Deviations rows.
@@ -111,6 +119,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
     passKeys.live,
     folderKeys.all,
     taskSessionKeys.all,
+    shapeKeys.startCountsAll,
   ],
   // A session's span says which tasks ran that day.
   session: [...WORK, humanTouchKeys.all],
