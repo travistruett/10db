@@ -113,8 +113,8 @@ export function useDismissFinding(shapeId: ShapeId | null) {
   });
 }
 
-/** Which review a press asks for: Plan review, or Check for Questions (the rehearsal). */
-export type ReviewKind = 'review' | 'rehearse';
+/** Which review a press asks for: Plan review, Check for Questions (the rehearsal), or Design review. */
+export type ReviewKind = 'review' | 'rehearse' | 'design_review';
 
 /**
  * Sends the session a review turn over every pending goal and task. The answer says whether a turn was
@@ -130,7 +130,9 @@ export function useReviewShape(shapeId: ShapeId | null) {
       const res =
         kind === 'review'
           ? await client.shapes[':shapeId'].review.$post({ param, json: {} })
-          : await client.shapes[':shapeId'].rehearse.$post({ param, json: {} });
+          : kind === 'rehearse'
+            ? await client.shapes[':shapeId'].rehearse.$post({ param, json: {} })
+            : await client.shapes[':shapeId']['design-review'].$post({ param, json: {} });
       return { kind, result: await readJson(res, ShapeRehearseResult) };
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
