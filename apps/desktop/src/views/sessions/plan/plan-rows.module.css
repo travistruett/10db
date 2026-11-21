@@ -1,3 +1,48 @@
+/* The Plan's sections: each goal, then each kind of row, the run preview and Earlier, apart by space alone. */
+.sections {
+  list-style: none;
+  display: grid;
+  gap: 20px;
+}
+
+.section {
+  list-style: none;
+  min-width: 0;
+}
+
+/* A section's head lines its name up with the rows' titles; the chevron hangs in the gutter before it. */
+.sectionHead {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 2px 12px 6px;
+  border-radius: var(--mantine-radius-sm);
+}
+
+.chevron {
+  position: absolute;
+  left: -4px;
+  top: 6px;
+  color: var(--mantine-color-dimmed);
+  transition: transform 120ms ease;
+}
+
+.chevron[data-open] {
+  transform: rotate(90deg);
+}
+
+.sectionHead:hover .chevron,
+.sectionHead:focus-visible .chevron {
+  color: var(--mantine-color-text);
+}
+
+.aside {
+  margin-left: auto;
+  min-width: 0;
+}
+
 /* A row of the Plan: a grid of the title, its facts and its size column, with its sub-lines under all three. */
 .row {
   position: relative;
@@ -10,14 +55,14 @@
 }
 
 .row:hover {
-  background: color-mix(in srgb, var(--mantine-color-default-hover) 50%, var(--tendb-color-panel));
+  background: color-mix(in srgb, var(--tendb-color-panel) 60%, transparent);
 }
 
-/* An opened row and its region sit on the selected tone, set off from the rows around it. */
+/* An opened row and its region are the one raised block of the list, on the panel tone. */
 .opened {
   margin: 6px 0;
-  border-radius: var(--mantine-radius-sm);
-  background: var(--panel-row-selected, var(--mantine-color-default-hover));
+  border-radius: var(--mantine-radius-md);
+  background: var(--tendb-color-panel);
 }
 
 .opened .row:hover {

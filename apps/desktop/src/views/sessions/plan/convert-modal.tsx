@@ -7,7 +7,7 @@ import {
   type ShapeStartCountsDto,
   type ShapeViewDto,
 } from '@10db/contracts';
-import { Button, Checkbox, Group, Radio, ScrollArea, Stack, Text } from '@mantine/core';
+import { Button, Checkbox, Group, Radio, ScrollArea, Stack, Switch, Text } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useStartCounts, type ConvertShapeResult } from '../../../daemon/shape-queries';
@@ -28,7 +28,7 @@ export function convertibleRows(proposals: readonly ShapeProposalDto[]): ShapePr
   return proposals.filter((p) => p.state === 'pending' && !isConverted(p));
 }
 
-/** The counts line of Accept and Start's confirm; a part that is zero drops out. */
+/** The counts line under the Start switch; a part that is zero drops out. */
 export function startCountsLine(counts: ShapeStartCountsDto): string {
   const waits = [
     counts.forLane === 0 ? null : `${String(counts.forLane)} wait for a lane`,
@@ -46,8 +46,6 @@ export function startCountsLine(counts: ShapeStartCountsDto): string {
 
 export interface ConvertModalProps {
   readonly opened: boolean;
-  /** Accept and Start: the confirm says what starts, and Convert also starts it. */
-  readonly start: boolean;
   readonly onClose: () => void;
   readonly rows: readonly ShapeProposalDto[];
   /** What the review has to say: ceremony, findings and the rehearsal's marks and questions. */
@@ -64,12 +62,12 @@ export interface ConvertModalProps {
 }
 
 /**
- * A form modal with a checkbox per pending proposal and where it goes, the line that says nothing
- * starts, and the primary Accept n. Accept never starts or stops a turn. Open questions and findings warn and never block.
+ * A form modal with a checkbox per pending proposal and where it goes, a Start switch (off: nothing
+ * starts; on: what would start, counted), and the primary Accept n or Accept and Start n. Accept never
+ * starts or stops a turn. Open questions and findings warn and never block.
  */
 export function ConvertModal({
   opened,
-  start,
   onClose,
   rows,
   view,
@@ -79,6 +77,8 @@ export function ConvertModal({
   onConvert,
 }: ConvertModalProps) {
   const [unticked, setUnticked] = useState<ReadonlySet<ShapeProposalId>>(new Set());
+  // Start: the confirm says what starts, and Convert also starts it. Every opening begins off.
+  const [start, setStart] = useState(false);
   const [marks, setMarks] = useState<ReadonlyMap<ShapeProposalId, MilestoneMark>>(new Map());
   // The rows there were when the modal opened. A round that lands under it adds rows, ticked, and the
   // builder's unticks and marks stay as they were.
@@ -86,6 +86,7 @@ export function ConvertModal({
   if (opened && openedWith === null) setOpenedWith(new Set(rows.map((r) => r.id)));
   if (!opened && openedWith !== null) {
     setOpenedWith(null);
+    setStart(false);
     setUnticked(new Set());
     setMarks(new Map());
   }
@@ -144,7 +145,7 @@ export function ConvertModal({
     <FormModal
       opened={opened}
       onClose={onClose}
-      title={start ? 'Accept and Start' : 'Accept'}
+      title="Accept"
       size="lg"
       actions={
         <>
@@ -188,22 +189,32 @@ export function ConvertModal({
       }
     >
       <Stack gap="md">
-        {start ? (
-          <>
-            {counts === undefined ? null : (
-              <Text size="sm" role="status">
-                {startsAny ? startCountsLine(counts) : 'Nothing to start'}
-              </Text>
-            )}
-            {counts?.stay.map((t, i) => (
-              <Text key={`${String(i)}-${t.title}`} size="xs" c="dimmed">
-                {`${t.title} stays on the Board: ${t.why}`}
-              </Text>
-            ))}
-          </>
-        ) : (
-          <Text size="sm">Nothing starts. Tasks wait on the Board.</Text>
-        )}
+        <Stack gap={4}>
+          <Switch
+            label="Start the tasks that are ready"
+            checked={start}
+            disabled={after !== null}
+            onChange={(event) => {
+              setStart(event.currentTarget.checked);
+            }}
+          />
+          <Text size="sm" c="dimmed" pl={48} role="status">
+            {!start
+              ? 'Nothing starts. Tasks wait on the Board.'
+              : counts === undefined
+                ? 'Counting what would start…'
+                : startsAny
+                  ? startCountsLine(counts)
+                  : 'Nothing to start'}
+          </Text>
+          {start
+            ? counts?.stay.map((t, i) => (
+                <Text key={`${String(i)}-${t.title}`} size="xs" c="dimmed" pl={48}>
+                  {`${t.title} stays on the Board: ${t.why}`}
+                </Text>
+              ))
+            : null}
+        </Stack>
         {after === null || after.refused ? null : (
           <Text size="sm" role="status">
             {after.line}

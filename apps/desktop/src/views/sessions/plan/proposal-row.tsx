@@ -50,7 +50,7 @@ export interface ProposalRowProps {
   /** The Plan's project: its accepted rows read their tasks' live state from it. */
   readonly projectId: ProjectId;
   readonly row: ShapeProposalDto;
-  /** A goal's head, which opens above its tasks inside its card, instead of a row of a list. */
+  /** A goal's head, which opens above its tasks in its section, instead of a row of a list. */
   readonly head?: boolean;
   /** The section the row opens, so a summary count can jump to the first row of it. */
   readonly section: string;

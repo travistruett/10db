@@ -1,9 +1,15 @@
-import type { ProjectId, ShapeProposalDto, ShapeTaskSizeDto } from '@10db/contracts';
-import { Box, Text, UnstyledButton } from '@mantine/core';
-import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
+import type {
+  ProjectId,
+  ShapePreviewDto,
+  ShapeProposalDto,
+  ShapeTaskSizeDto,
+} from '@10db/contracts';
+import { Box } from '@mantine/core';
 import { useState, type ReactNode } from 'react';
 import { GoalTaskRow } from './goal-task-row';
-import { CardName, PlanCard } from './plan-card';
+import { PlanSection } from './plan-section';
+import classes from './plan-rows.module.css';
+import { PreviewPanel, RUN_SECTION } from './preview-panel';
 import { ProposalRow, type RowAction, type RowHandlers } from './proposal-row';
 import type { OpenRow } from './row-line';
 import type { RowReview } from './review-lines';
@@ -13,11 +19,11 @@ interface Block {
   readonly section: SectionKey;
   readonly name: string;
   readonly rows: readonly ShapeProposalDto[];
-  /** A dimmed line under the card's name. */
+  /** A dimmed line under the section's name. */
   readonly note?: string;
 }
 
-/** The cards after the goals, each holding one kind of row. */
+/** The sections after the goals, each holding one kind of row. */
 function blocksOf(groups: ProposedGroups): Block[] {
   return [
     { section: SectionKey.Tasks, name: 'Loose tasks', rows: groups.looseTasks },
@@ -33,11 +39,18 @@ function blocksOf(groups: ProposedGroups): Block[] {
   ].filter((block) => block.rows.length > 0);
 }
 
+/** What is folded before the builder folds anything: the run preview and Earlier. */
+export const FOLDED_AT_FIRST: ReadonlySet<string> = new Set([RUN_SECTION, SectionKey.Earlier]);
+
 export interface ProposedListProps {
   readonly projectId: ProjectId;
   readonly groups: ProposedGroups;
   /** Each proposed task's derived size, and its actual once converted and finished (§8). */
   readonly sizes: readonly ShapeTaskSizeDto[];
+  readonly preview: ShapePreviewDto;
+  /** The folded sections, by a kind's section key or `RUN_SECTION`; `onFold` flips one. */
+  readonly folded: ReadonlySet<string>;
+  readonly onFold: (key: string) => void;
   /** The row's menu items: Remove Draft Goal on a converted goal, Withdraw Decision on a decision. */
   readonly actionsFor: (row: ShapeProposalDto) => readonly RowAction[];
   /** The ceremony, findings and rehearsal questions of a pending goal or task, or undefined for any other row. */
@@ -47,24 +60,27 @@ export interface ProposedListProps {
 }
 
 /**
- * The Plan's rows as cards: a card for each goal, holding its tasks, then Loose tasks, Decisions and
- * the rest. ↑/↓ move between the rows, and Earlier holds the superseded ones.
+ * The Plan's rows on the panel's surface: each goal under its bright title with its tasks, then a
+ * folding section for Loose tasks, Decisions and the rest, How it would run, and Earlier for the
+ * superseded ones. ↑/↓ move between the rows of the open sections.
  */
 export function ProposedList({
   projectId,
   groups,
   sizes,
+  preview,
+  folded,
+  onFold,
   actionsFor,
   reviewOf,
   handlers,
 }: ProposedListProps) {
   const sizesOf = (row: ShapeProposalDto) => sizes.filter((s) => s.proposalId === row.id);
-  const [earlierOpen, setEarlierOpen] = useState(false);
   // One row of the panel is open at a time: opening another closes it.
   const [open, setOpen] = useState<OpenRow | null>(null);
   const blocks = blocksOf(groups);
-  // The Tab key reaches the first row on screen: a goal's head, or the first card's first row.
-  const firstId = (groups.goals[0] ?? blocks[0]?.rows[0])?.id;
+  // The Tab key reaches the first row on screen: a goal's head, or the first open section's first row.
+  const firstId = (groups.goals[0] ?? blocks.find((b) => !folded.has(b.section))?.rows[0])?.id;
   // A converted row is marked apart, so "N accepted" lands on it whichever kind it is and a kind's
   // own count lands on a pending row.
   const sectionOf = (row: ShapeProposalDto, own: SectionKey): SectionKey =>
@@ -111,78 +127,64 @@ export function ProposedList({
   );
 
   return (
-    <Box
-      component="ul"
-      aria-label="Plan rows"
-      m={0}
-      p={0}
-      style={{ listStyle: 'none', display: 'grid', gap: 12 }}
-    >
+    <Box component="ul" aria-label="Plan rows" m={0} p={0} className={classes['sections']}>
       {groups.goals.map((goal) => (
-        <PlanCard key={goal.id} head={null}>
+        <Box component="li" key={goal.id} className={classes['section']}>
           {rowOf(goal, SectionKey.Goals, tasksOf(goal))}
-        </PlanCard>
+        </Box>
       ))}
       {blocks.map((block) => (
-        <PlanCard
+        <PlanSection
           key={block.section}
-          head={
-            <CardName
-              name={block.name}
-              count={block.rows.length}
-              {...(block.note === undefined ? {} : { note: block.note })}
-            />
-          }
+          name={block.name}
+          count={block.rows.length}
+          {...(block.note === undefined ? {} : { note: block.note })}
+          folded={folded.has(block.section)}
+          onFold={() => {
+            onFold(block.section);
+          }}
         >
           <Box component="ul" m={0} p={0} style={{ listStyle: 'none' }}>
             {block.rows.map((row) => rowOf(row, block.section))}
           </Box>
-        </PlanCard>
+        </PlanSection>
       ))}
+      <PreviewPanel
+        preview={preview}
+        folded={folded.has(RUN_SECTION)}
+        onFold={() => {
+          onFold(RUN_SECTION);
+        }}
+      />
       {groups.earlier.length === 0 ? null : (
-        <PlanCard
-          head={
-            <UnstyledButton
-              aria-expanded={earlierOpen}
-              data-section={SectionKey.Earlier}
-              onClick={() => {
-                setEarlierOpen((o) => !o);
-              }}
-              px={12}
-              mb={8}
-            >
-              <Text fz={13} fw={600} c="dimmed" component="span">
-                {earlierOpen ? (
-                  <IconChevronDown size={14} stroke={1.5} aria-hidden="true" />
-                ) : (
-                  <IconChevronRight size={14} stroke={1.5} aria-hidden="true" />
-                )}{' '}
-                Earlier {groups.earlier.length}
-              </Text>
-            </UnstyledButton>
-          }
+        <PlanSection
+          name="Earlier"
+          count={groups.earlier.length}
+          section={SectionKey.Earlier}
+          folded={folded.has(SectionKey.Earlier)}
+          onFold={() => {
+            onFold(SectionKey.Earlier);
+          }}
         >
-          {earlierOpen ? (
-            <Box component="ul" m={0} p={0} style={{ listStyle: 'none' }}>
-              {groups.earlier.map((row) => (
-                <ProposalRow
-                  projectId={projectId}
-                  key={row.id}
-                  row={row}
-                  section={SectionKey.Earlier}
-                  tabbable={false}
-                  sizes={sizesOf(row)}
-                  actions={[]}
-                  handlers={handlers}
-                  open={open}
-                  onOpenChange={setOpen}
-                >
-                  {tasksOf(row)}
-                </ProposalRow>
-              ))}
-            </Box>
-          ) : null}
-        </PlanCard>
+          <Box component="ul" m={0} p={0} style={{ listStyle: 'none' }}>
+            {groups.earlier.map((row) => (
+              <ProposalRow
+                projectId={projectId}
+                key={row.id}
+                row={row}
+                section={SectionKey.Earlier}
+                tabbable={false}
+                sizes={sizesOf(row)}
+                actions={[]}
+                handlers={handlers}
+                open={open}
+                onOpenChange={setOpen}
+              >
+                {tasksOf(row)}
+              </ProposalRow>
+            ))}
+          </Box>
+        </PlanSection>
       )}
     </Box>
   );
