@@ -71,7 +71,7 @@ const LISTING_SET = /^(.*)\[([^\n])\]$/s;
 const LISTING_CHILDREN = /^(.*)\/\*$/s;
 
 /** The dir a listing pattern opens, or null when `pattern` is not exactly what a grant below emits. */
-function listingDir(pattern: string): string | null {
+export function listingDir(pattern: string): string | null {
   const set = LISTING_SET.exec(pattern);
   const dir = set === null ? LISTING_CHILDREN.exec(pattern)?.[1] : `${set[1] ?? ''}${set[2] ?? ''}`;
   if (dir === undefined || dir === '' || dir === '/' || !isSandboxPath(dir)) return null;
