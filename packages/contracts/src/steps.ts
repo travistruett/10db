@@ -32,8 +32,25 @@ export const StepReport = z.object({
   /** The session that wrote it. */
   sessionId: SessionId,
   at: z.iso.datetime(),
+  /** The step's attempt that wrote it, 1 for the first: one more than its `attempts` then. Absent on an older row. */
+  attempt: z.int().min(1).optional(),
 });
 export type StepReport = z.infer<typeof StepReport>;
+
+/**
+ * The build's report as a later step is handed it: the implementer's own account, which that step
+ * weighs as evidence. `current` is false when the build ran again after writing it and wrote nothing.
+ */
+export const ImplementationReport = z.object({
+  personaName: z.string(),
+  summary: z.string().min(1).max(MAX_STEP_SUMMARY),
+  sessionId: SessionId,
+  at: z.iso.datetime(),
+  /** Null on a report stored before attempts were kept. */
+  attempt: z.int().min(1).nullable(),
+  current: z.boolean(),
+});
+export type ImplementationReport = z.infer<typeof ImplementationReport>;
 
 /** The follow-up task filed for the findings a task shipped with at the retry limit. */
 export const ShippedAtLimit = z.object({
@@ -174,6 +191,32 @@ export function reportOf(steps: readonly WorkstreamStep[]): TaskReport | null {
     personaName: step.personaName || ROLE_LABEL.implement,
     summary: step.report.summary,
     at: step.report.at,
+  };
+}
+
+/**
+ * The report of the latest implement step before `stepIndex`, for the step there to read; null when none
+ * has one. A send-back that reran the build and got no report leaves the older one, marked not current.
+ */
+export function implementationReportFor(
+  steps: readonly WorkstreamStep[],
+  stepIndex: number,
+): ImplementationReport | null {
+  const step = steps
+    .slice(0, stepIndex)
+    .findLast((s) => s.role === StepRole.Implement && s.report !== undefined);
+  if (!step?.report) return null;
+  const { summary, sessionId, at, attempt } = step.report;
+  return {
+    personaName: step.personaName || ROLE_LABEL.implement,
+    summary,
+    sessionId,
+    at,
+    attempt: attempt ?? null,
+    // The step's attempt now, and its latest start, both say whether a later run wrote nothing.
+    current:
+      (attempt === undefined || attempt === step.attempts + 1) &&
+      (step.startedAt === null || at >= step.startedAt),
   };
 }
 

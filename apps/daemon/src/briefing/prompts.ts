@@ -8,6 +8,7 @@ import {
   type QuestionRouteDto,
   type EvidenceDto,
   type HandoffDto,
+  type ImplementationReport,
   type NextAction,
   Provider,
   type StepResult,
@@ -588,6 +589,25 @@ const VERDICT_LABEL = { approve: 'approved', reject: 'rejected' } as const;
 const bullets = (lines: readonly string[]) =>
   lines.length === 0 ? '- (none)' : lines.map((l) => `- ${l}`).join('\n');
 
+/**
+ * The build's report as a later step reads it, with the attempt and session that wrote it. It is the
+ * implementer's own account: evidence the step weighs, not a result it inherits.
+ */
+function renderImplementationReport(r: ImplementationReport | null): string[] {
+  if (r === null) return [];
+  const attempt = r.attempt === null ? '' : `, attempt ${String(r.attempt)}`;
+  return [
+    '',
+    `Implementation report${attempt} (${r.personaName}, session ${r.sessionId}, written ${r.at}):`,
+    '---',
+    r.summary,
+    '---',
+    r.current
+      ? "This is what the build session wrote when it ended: the implementer's own account of what it did, ran, found and skipped. Weigh it as evidence and check what you can; your judgment of the work is your own."
+      : "The build ran again after this report and wrote none, so it describes an earlier attempt. It is the implementer's own account: weigh it as evidence and check what you can.",
+  ];
+}
+
 function renderHandoff(h: HandoffDto): string {
   const c = h.content;
   return [
@@ -942,6 +962,7 @@ function stepSection(input: PromptInput): string[] {
       lines.push('---');
     }
   }
+  lines.push(...renderImplementationReport(input.contextPack.implementationReport));
   if (input.previousResult && step.plansFirst === true)
     lines.push('', 'Your plan:', input.previousResult.summary);
   else if (input.previousResult) {
@@ -1039,6 +1060,7 @@ export function compactionReinjection(
     '',
     renderKnowledge(pack, brief),
     ...(pack.handoff ? ['', 'Latest handoff:', renderHandoff(pack.handoff)] : []),
+    ...renderImplementationReport(pack.implementationReport),
     ...(denials.length > 0 ? ['', ...renderDenials(denials)] : []),
     ...(answered ? renderAnsweredCards(answered.role, answered.answeredCards) : []),
   ].join('\n');
