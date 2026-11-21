@@ -77,6 +77,7 @@ export const DEV_UI_READS: readonly string[] = [
 
 /** The GETs the dev UI may not make, with why: each writes, runs a command, or hands out a token. */
 export const DEV_UI_REFUSED_READS: Readonly<Record<string, string>> = {
+  '/shapes/:shapeId/start-counts': "Only the 10db app's Accept confirm reads it.",
   '/conversations/:conversationId/takeover':
     "A chat's takeover is read from its folder of files, which the builder's terminal agent can write.",
   '/conversations/:conversationId/takeover/preview':

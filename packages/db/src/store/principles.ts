@@ -347,14 +347,20 @@ export function retirePrinciple(
   return getPrinciple(ctx.tx, id);
 }
 
-/** Refuses to bring `p`'s predecessor back as current if its key and target now belong to another. */
-function refuseRevivingClash(db: DbReader, p: PrincipleDto): void {
-  if (p.state !== KnowledgeState.Current || p.supersedesId === null) return;
+/** The principle that holds `p`'s predecessor's key and target now, when withdrawing `p` would clash with it. */
+export function revivingClash(db: DbReader, p: PrincipleDto): PrincipleDto | undefined {
+  if (p.state !== KnowledgeState.Current || p.supersedesId === null) return undefined;
   const predecessor = getPrinciple(db, p.supersedesId);
   const clash = currentPrincipleFor(db, predecessor.topicKey, targetOf(predecessor));
-  if (clash && clash.id !== p.id)
+  return clash && clash.id !== p.id ? clash : undefined;
+}
+
+/** Refuses to bring `p`'s predecessor back as current if its key and target now belong to another. */
+function refuseRevivingClash(db: DbReader, p: PrincipleDto): void {
+  const clash = revivingClash(db, p);
+  if (clash && p.supersedesId !== null)
     throw new ConflictError(
-      `Principle ${clash.id} now holds the key ${predecessor.topicKey} at the scope of ${predecessor.id}, which withdrawing ${p.id} would make current again; retire ${clash.id} first`,
+      `Principle ${clash.id} now holds the key ${getPrinciple(db, p.supersedesId).topicKey} at the scope of ${p.supersedesId}, which withdrawing ${p.id} would make current again; retire ${clash.id} first`,
     );
 }
 

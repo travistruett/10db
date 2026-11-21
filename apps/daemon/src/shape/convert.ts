@@ -21,6 +21,7 @@ import {
   type PlanRemoval,
   type PrincipleId,
   type ProjectId,
+  type ShapeAcceptId,
   type ShapeId,
   type ShapeProposalId,
   type ShapeProposalKind,
@@ -43,6 +44,7 @@ import {
   insertGoalTask,
   insertLandingGroup,
   insertPrinciple,
+  insertShapeAccept,
   insertShapeLink,
   insertShapeQuestion,
   insertSource,
@@ -85,6 +87,8 @@ export type ConvertOutcome =
       readonly ok: true;
       /** How many proposals this call converted; a repeated Convert reports 0. */
       readonly createdNow: number;
+      /** The Accept this call recorded; null when it converted nothing. */
+      readonly acceptId: ShapeAcceptId | null;
       /** What each selected proposal became, in the order selected. */
       readonly results: readonly ConvertedRow[];
     }
@@ -468,7 +472,8 @@ export function convertProposals(
     );
   if (errors.length > 0 || 'cycle' in sorted) return { ok: false, errors };
 
-  // Writes.
+  // Writes. A call that converts something is one Accept, recorded before its first write.
+  const accept = pending.length > 0 ? insertShapeAccept(ctx, shapeId) : null;
   const taskIds = new Map<string, TaskId>(world.convertedTasks);
   const made = new Map<
     ShapeProposalId,
@@ -575,6 +580,7 @@ export function convertProposals(
       title: landing.title,
       taskIds: members,
       shapeId,
+      ...(accept ? { acceptId: accept.id } : {}),
     });
     made.set(row.id, { taskIds: members });
   }
@@ -698,7 +704,10 @@ export function convertProposals(
   // A milestone cut stays on the Plan as a dropped row, with its outline.
   for (const id of judged.cut) patchShapeProposal(ctx, id, { state: ShapeProposalState.Rejected });
   for (const row of pending)
-    patchShapeProposal(ctx, row.id, { state: ShapeProposalState.Accepted });
+    patchShapeProposal(ctx, row.id, {
+      state: ShapeProposalState.Accepted,
+      acceptId: accept?.id ?? null,
+    });
   const left = listShapeProposals(ctx.tx, shapeId).some(
     (r) => r.state === ShapeProposalState.Pending,
   );
@@ -723,5 +732,5 @@ export function convertProposals(
       ...(questionId ? { questionId } : {}),
     };
   });
-  return { ok: true, createdNow: pending.length, results };
+  return { ok: true, createdNow: pending.length, acceptId: accept?.id ?? null, results };
 }

@@ -70,7 +70,7 @@ export function destination(row: ShapeProposalDto): string {
 const taskCount = (n: number): string => `${String(n)} ${n === 1 ? 'task' : 'tasks'}`;
 
 /** The dimmed line under a converted row; null for a row Convert hasn't made. */
-export function convertedLine(row: ShapeProposalDto): string | null {
+export function convertedLine(row: ShapeProposalDto, liveLine?: string): string | null {
   if (!isConverted(row)) return null;
   if (row.converted?.withdrawn === true) return 'Withdrawn';
   switch (row.kind) {
@@ -87,6 +87,7 @@ export function convertedLine(row: ShapeProposalDto): string | null {
       return 'Accepted · stored, sent when people arrive';
     case 'goal':
     case 'task':
+      return liveLine === undefined ? 'Accepted · on the Board' : `On the Board · ${liveLine}`;
     case 'change_task':
     case 'remove_task':
     case 'landing':
@@ -105,6 +106,30 @@ export function markText(row: ShapeProposalDto): string | null {
       return 'moved to Earlier';
     case null:
       return null;
+  }
+}
+
+/** The state dot before a row's title: the first of accepted, the round's mark, pinned, else proposed. */
+export function rowDot(
+  row: ShapeProposalDto,
+  live: 'running' | 'done' | null = null,
+): { readonly label: string; readonly color: string } {
+  if (isConverted(row)) {
+    if (live === 'running') return { label: 'Running', color: 'blue' };
+    if (live === 'done') return { label: 'Done', color: 'teal' };
+    return { label: 'Accepted', color: 'teal' };
+  }
+  switch (row.mark) {
+    case 'new':
+      return { label: 'New this round', color: 'blue' };
+    case 'changed':
+      return { label: 'Changed this round', color: 'blue' };
+    case 'moved':
+      return { label: 'Moved to Earlier', color: 'gray' };
+    case null:
+      return row.pinned.length > 0
+        ? { label: 'Pinned', color: 'yellow' }
+        : { label: 'Proposed', color: 'gray' };
   }
 }
 

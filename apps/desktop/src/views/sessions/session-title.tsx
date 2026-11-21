@@ -1,5 +1,5 @@
 import type { ChatDto, ConversationDto } from '@10db/contracts';
-import { ActionIcon, Box, Button, Menu, TextInput } from '@mantine/core';
+import { ActionIcon, Box, Button, Menu, TextInput, Tooltip } from '@mantine/core';
 import { IconDots, IconLayoutSidebarRight } from '@tabler/icons-react';
 import { useRef, useState, type ReactNode } from 'react';
 import { OWNS_ESCAPE_ATTRIBUTE } from '../../conversation/escape';
@@ -28,8 +28,12 @@ export interface SessionTitleProps {
   readonly onTerminalUncopied?: (line: string) => void;
   /** Controls before the terminal button: the git step. */
   readonly steps?: ReactNode;
-  /** A session with a plan: the Plan panel's toggle. */
-  readonly plan?: { readonly open: boolean; readonly onToggle: () => void };
+  /** The Plan panel's toggle; `pending` while Show Plan is being made. */
+  readonly plan?: {
+    readonly open: boolean;
+    readonly onToggle: () => void;
+    readonly pending?: boolean;
+  };
 }
 
 /** The title: the session switcher, or, while renaming, a field over it. */
@@ -132,15 +136,18 @@ export function SessionTitle({
       actions={
         <>
           {plan === undefined ? null : (
-            <Button
-              variant={plan.open ? 'light' : 'default'}
-              size="xs"
-              aria-pressed={plan.open}
-              leftSection={<IconLayoutSidebarRight size={14} stroke={1.5} />}
-              onClick={plan.onToggle}
-            >
-              Plan
-            </Button>
+            <Tooltip label={plan.open ? 'Close Plan' : 'Show Plan'}>
+              <Button
+                variant={plan.open ? 'light' : 'default'}
+                size="xs"
+                aria-pressed={plan.open}
+                loading={plan.pending === true}
+                leftSection={<IconLayoutSidebarRight size={14} stroke={1.5} />}
+                onClick={plan.onToggle}
+              >
+                Plan
+              </Button>
+            </Tooltip>
           )}
           {steps}
           {offersTerminal ? (

@@ -1,19 +1,35 @@
 import {
   ShapeProposalState,
+  type ProjectId,
   type ShapeFindingId,
   type ShapeProposalDto,
   type ShapeTaskSizeDto,
 } from '@10db/contracts';
-import { ActionIcon, Box, Button, Group, Menu, Text, UnstyledButton } from '@mantine/core';
+import {
+  ActionIcon,
+  Anchor,
+  Box,
+  Button,
+  ColorSwatch,
+  Group,
+  Menu,
+  Text,
+  Tooltip,
+  UnstyledButton,
+} from '@mantine/core';
 import { IconDots, IconPencil, IconPin } from '@tabler/icons-react';
+import { Link } from '@tanstack/react-router';
 import { useRef, useState, type KeyboardEvent } from 'react';
 import type { RowChange } from '../../../daemon/shape-queries';
+import { useSelectedProject } from '../../../shell/selected-project';
 import { RowAttachments } from './attachments/row-attachments';
-import { convertedLine, markText, proposalTitle, rowMeta } from './proposal-text';
+import { convertedLine, markText, proposalTitle, rowDot, rowMeta } from './proposal-text';
 import type { RowReview } from './review-lines';
 import { ReviewLines } from './review-notes';
+import { goalLiveLine, liveDot } from './live-state';
 import { RowDetails } from './row-details';
 import { RowEditor } from './row-editor';
+import { useLiveWords } from './use-live-words';
 import { goalHoursLine } from './size-line';
 import { SizeLineText } from './task-size-line';
 import { editableFields } from './row-editing';
@@ -47,6 +63,8 @@ export interface RowHandlers {
 }
 
 export interface ProposalRowProps {
+  /** The Plan's project: its accepted rows read their tasks' live state from it. */
+  readonly projectId: ProjectId;
   readonly row: ShapeProposalDto;
   /** The kind's label, on the first row of its section only. */
   readonly label: string | null;
@@ -98,6 +116,7 @@ function SizeLines({
  * row and W asks why. Its menu is a sibling of the button, because a button can't hold another control.
  */
 export function ProposalRow({
+  projectId,
   row,
   label,
   note,
@@ -112,9 +131,29 @@ export function ProposalRow({
   const [editing, setEditing] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const title = proposalTitle(row);
-  const converted = convertedLine(row);
+  const live = useLiveWords(row, projectId);
+  const { select } = useSelectedProject();
+  const converted = convertedLine(
+    row,
+    live === null
+      ? undefined
+      : row.kind === 'goal'
+        ? goalLiveLine(live.words)
+        : (live.words[0]?.word ?? ''),
+  );
   const meta = rowMeta(row);
   const mark = markText(row);
+  const dot = rowDot(row, live === null ? null : liveDot(live.words));
+  const openTask =
+    live === null || row.converted === null
+      ? null
+      : row.kind === 'task'
+        ? (row.converted.taskIds[0] ?? null)
+        : (row.converted.taskIds.find((_, i) => {
+            const task = live.tasks[i];
+            return task !== undefined && task.status !== 'cancelled' && task.boardStatus !== 'done';
+          }) ?? null);
+  const openGoal = row.kind === 'goal' ? (row.converted?.goalId ?? null) : null;
   const regionId = `shape-row-${row.id}`;
   const pinned = row.pinned.length > 0;
   const mutable =
@@ -205,6 +244,16 @@ export function ProposalRow({
         </Text>
         <Box style={{ flex: 1, minWidth: 0 }}>
           <Group wrap="nowrap" align="flex-start" gap="xs">
+            <Tooltip label={dot.label}>
+              <ColorSwatch
+                size={8}
+                color={`var(--mantine-color-${dot.color}-filled)`}
+                aria-label={dot.label}
+                role="img"
+                mt={7}
+                style={{ flex: 'none' }}
+              />
+            </Tooltip>
             <UnstyledButton
               ref={button}
               {...{ [ROW_ATTRIBUTE]: '' }}
@@ -282,6 +331,24 @@ export function ProposalRow({
               </Menu.Dropdown>
             </Menu>
           </Group>
+          {openTask === null && openGoal === null ? null : (
+            <Anchor
+              size="xs"
+              pl={16}
+              renderRoot={(props) =>
+                openTask === null ? (
+                  <Link {...props} to="/factory" search={{ goal: openGoal ?? undefined }} />
+                ) : (
+                  <Link {...props} to="/board" search={{ task: openTask }} />
+                )
+              }
+              onClick={() => {
+                select(projectId);
+              }}
+            >
+              Open on Board
+            </Anchor>
+          )}
           {review === undefined ? null : (
             <ReviewLines
               review={review}

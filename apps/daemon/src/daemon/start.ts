@@ -7,6 +7,7 @@ import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-se
 import {
   AccountKind,
   ConversationOwnerKind,
+  Delivery,
   type ChatId,
   type ConversationId,
   EventType,
@@ -1621,10 +1622,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // `see_screen` (§5.5): the window draws a screen on the daemon's request, held to reads by a token
   // that belongs to that one request.
   const screenBroker = createScreenBroker();
+  // Where each plan's folder lives: `<data>/shapes/<plan>`.
+  const shapesDir = join(opts.dataDir, 'shapes');
   const screens = createScreens({
     state,
     broker: screenBroker,
-    filesDir: join(opts.dataDir, 'shapes'),
+    filesDir: shapesDir,
   });
   const laneSandbox = sandboxes?.lane ?? null;
   // One engine runs every explore conversation's session (sessions spec §6.1); Plan registers on it.
@@ -1703,13 +1706,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           worktreeBase: worktreeRoot,
           codexLaneTempRoot: (sandboxRoots ?? namedSandboxRoots({}, homedir())).codexLanes,
         });
+  // The chat's open sessions: the shape service takes a session's owed planning rules from them.
+  const chatLive = createChatLiveSessions();
   const shape = createShapeService({
     state,
     adapter,
+    owedRules: (conversationId, sessionId) =>
+      chatLive.get(conversationId, sessionId)?.planRules?.take() ?? null,
     engine: exploreEngine,
     clock,
     log: logger.child({ component: 'shape' }),
-    filesDir: join(opts.dataDir, 'shapes'),
+    filesDir: shapesDir,
     joiningProblem: (taskId) => starter.joiningProblem(taskId),
     screens,
     jev: createShapeJev({
@@ -1730,6 +1737,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     pendingOpens,
     clock,
     dataDir: opts.dataDir,
+    shapesDir,
     log: logger.child({ component: 'chat-service' }),
     now: () => clock.now(),
     modelsOf: conversationModels,
@@ -1850,7 +1858,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     changedPaths: (checkout) => git.changedPaths(checkout),
   });
   takeoverService = takeover;
-  const chatLive = createChatLiveSessions();
   const firstStartAfterMove = new Set<ChatId>();
   const chatMovesAbort = new AbortController();
   const chatWork = createChatWorkService({
@@ -2498,7 +2505,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       fetch: opts.fetch ?? fetch,
       reconnect: () => replyWatch.reconnect(),
     }),
-    shape: createShapeServices({ shape, state, clock }),
+    shape: createShapeServices({
+      shape,
+      state,
+      clock,
+      log: logger.child({ component: 'shape-services' }),
+      // Reads `services` at call time, as the follow-up starter does.
+      startTasks: async (projectId, title, taskIds) => {
+        await services.settleSizing(taskIds);
+        if (getProject(db, projectId).delivery === Delivery.PullRequest)
+          services.startBatch(projectId, { title, taskIds: [...taskIds] });
+        else for (const id of taskIds) services.startTask(id);
+      },
+    }),
     conversation: createConversationServices({
       state,
       engine: exploreEngine,

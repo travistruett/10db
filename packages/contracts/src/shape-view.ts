@@ -6,6 +6,7 @@ import {
   DecisionId,
   GoalId,
   PrincipleId,
+  ShapeAcceptId,
   ShapeAttachmentId,
   ShapeId,
   ConversationItemId,
@@ -168,6 +169,32 @@ export const ShapeModelsDto = z.object({
 });
 export type ShapeModelsDto = z.infer<typeof ShapeModelsDto>;
 
+/** The newest Accept of a plan that is not undone, counted as Undo Accept would act on it. */
+export const ShapeAcceptDto = z.object({
+  id: ShapeAcceptId,
+  at: Timestamp,
+  goals: z.int().min(0),
+  /** Every task it made: a goal's tasks and loose tasks alike, so a goal-only Accept reads "1 goal, 2 tasks". */
+  tasks: z.int().min(0),
+  records: z.int().min(0),
+  /** What Undo would leave, counted as undoAccept counts it. */
+  kept: z.int().min(0),
+  /** Every task it made, so the app can tell from its cached runs whether Undo would be refused. */
+  taskIds: z.array(TaskId),
+});
+export type ShapeAcceptDto = z.infer<typeof ShapeAcceptDto>;
+
+/** What Undo Accept took back and left. */
+export const ShapeUndoAcceptResult = z.object({
+  goals: z.int().min(0),
+  tasks: z.int().min(0),
+  decisions: z.int().min(0),
+  principles: z.int().min(0),
+  questions: z.int().min(0),
+  kept: z.int().min(0),
+});
+export type ShapeUndoAcceptResult = z.infer<typeof ShapeUndoAcceptResult>;
+
 /** Everything the Shape screen renders for one conversation. */
 export const ShapeViewDto = z.object({
   shape: ShapeDto,
@@ -198,6 +225,8 @@ export const ShapeViewDto = z.object({
   attachments: z.array(ShapeAttachmentDto),
   /** The tokens (input and output) the conversation's sessions have used so far; the header says "88k tokens" (§4). */
   tokens: z.int().min(0),
+  /** The newest Accept not undone, or null. */
+  lastAccept: ShapeAcceptDto.nullable(),
 });
 export type ShapeViewDto = z.infer<typeof ShapeViewDto>;
 
@@ -234,6 +263,8 @@ export const ShapeConvertInput = z.object({
   proposalIds: z.array(ShapeProposalId).min(1),
   /** One mark per pending milestone; Convert refuses a Plan with more than five of them without it. */
   cut: z.array(MilestoneCut).optional(),
+  /** Accept and Start: also starts the accepted tasks that are ready, through the starter Start Ready Tasks uses. */
+  start: z.boolean().optional(),
 });
 export type ShapeConvertInput = z.infer<typeof ShapeConvertInput>;
 
@@ -249,10 +280,42 @@ export const ShapeConvertedRow = z.object({
 });
 export type ShapeConvertedRow = z.infer<typeof ShapeConvertedRow>;
 
+/** What Accept and Start's start came to; the Accept stands whatever it says. */
+export const ShapeStartOutcome = z.object({
+  /** Tasks that got a run from this start; their runs queue through the scheduler. */
+  started: z.array(TaskId),
+  /** Tasks left on the Board, with why. */
+  left: z.array(z.object({ taskId: TaskId, title: z.string(), why: z.string() })),
+  /** Why the start stopped, when it did: a DomainError's message, or a plain line (the cause is logged). */
+  refused: z.string().nullable(),
+});
+export type ShapeStartOutcome = z.infer<typeof ShapeStartOutcome>;
+
+/** What Accept and Start would do with the ticked rows, for the confirm. */
+export const ShapeStartCountsDto = z.object({
+  now: z.int().min(0),
+  forLane: z.int().min(0),
+  forOthers: z.int().min(0),
+  /** Tasks this start leaves on the Board, with why, as `ShapeStartOutcome.left` will say. */
+  stay: z.array(z.object({ title: z.string(), why: z.string() })),
+});
+export type ShapeStartCountsDto = z.infer<typeof ShapeStartCountsDto>;
+
+/** `GET /shapes/:shapeId/start-counts?proposalIds=a,b`: the ticked rows, comma-separated. */
+export const ShapeStartCountsQuery = z.object({
+  proposalIds: z
+    .string()
+    .transform((v) => v.split(',').filter((id) => id !== ''))
+    .pipe(z.array(ShapeProposalId).min(1)),
+});
+export type ShapeStartCountsQuery = z.infer<typeof ShapeStartCountsQuery>;
+
 export const ShapeConvertResult = z.object({
   /** How many proposals this call converted; a repeated Convert reports 0. */
   createdNow: z.int().min(0),
   results: z.array(ShapeConvertedRow),
+  /** Present when the request asked to start. */
+  start: ShapeStartOutcome.optional(),
 });
 export type ShapeConvertResult = z.infer<typeof ShapeConvertResult>;
 

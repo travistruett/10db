@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import type { ShapeId } from '@10db/contracts';
+import type { SessionId, ShapeId } from '@10db/contracts';
 import {
   ChatToolName,
   FolderAsker,
@@ -34,6 +34,7 @@ import {
   listFiles,
   listItemFiles,
   listItems,
+  planIdOfChat,
   planOfConversation,
   touchChat,
   type ConversationItemRow,
@@ -58,12 +59,14 @@ import { principlesBrief } from '../knowledge';
 import type { Logger } from '../log';
 import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
 import type { ExploreProfile, ShapeToolRequest } from '../sessions';
-import type {
-  PlanParts,
-  ShapeAccess,
-  ShapeLaunch,
-  ShapePrepared,
-  ShapePrepareInput,
+import {
+  owedPlanningRules,
+  PLANNING_STUB,
+  type PlanParts,
+  type ShapeAccess,
+  type ShapeLaunch,
+  type ShapePrepared,
+  type ShapePrepareInput,
 } from '../shape';
 import {
   buildTrustPolicy,
@@ -131,7 +134,7 @@ export const CHAT_MCP_TOOLS: readonly string[] = Object.values(ChatToolName).map
   (name) => `mcp__10db__${name}`,
 );
 
-/** Every Plan tool as a session with a plan names it on 10db's own server. */
+/** Every Plan tool as a session names it on 10db's own server. */
 const PLAN_MCP_TOOLS: readonly string[] = Object.values(ShapeToolName).map(
   (name) => `mcp__10db__${name}`,
 );
@@ -143,7 +146,6 @@ const PLAN_MCP_TOOLS: readonly string[] = Object.values(ShapeToolName).map(
  */
 export function chatProfile(
   sandboxed: boolean,
-  hasPlan = false,
 ): Omit<ExploreProfile, 'kind' | 'systemPrompt' | 'judge'> {
   return {
     tools: [
@@ -159,8 +161,9 @@ export function chatProfile(
       'Glob',
       'Skill',
       ...CHAT_MCP_TOOLS.filter((tool) => !JUDGED_CHAT_TOOLS.has(tool.slice('mcp__10db__'.length))),
-      // Plan's tools never ask: the confinement judges who calls which.
-      ...(hasPlan ? PLAN_MCP_TOOLS : []),
+      // Plan's tools never ask, and every session has them: the confinement judges who calls which, and a
+      // session started before its plan could not gain them later.
+      ...PLAN_MCP_TOOLS,
     ],
     disallowedTools: [...WATCH_TOOLS, ...(sandboxed ? [] : ['Bash', ...EDIT_TOOLS])],
     agents: {},
@@ -190,7 +193,7 @@ export interface ChatHooksDeps {
   /** Resolves a project's launch on `model` or, with null, on the `plan` role's, at `effort` or the model's own. */
   launch(projectId: ProjectId, model: string | null, effort: Effort | null): ShapeLaunch;
   readonly prepare?: (input: ShapePrepareInput) => Promise<ShapePrepared>;
-  /** What a chat with a plan adds to its session: its prompt, agents, intake and read budget. */
+  /** What a chat adds to its session for planning: its folder and agents always, and its prompt, intake and read budget once it has a plan. */
   readonly plan?: PlanParts;
   /** Whether the agent on an account kind and model runs Plan's agents (`capabilities.subagents`). */
   readonly subagentsOf: (kind: AgentAccountKind, model: string) => boolean;
@@ -278,6 +281,13 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
   // The session each chat's hold belongs to now: a session that is not it (an older one, closed, whose
   // background agent is still calling) holds nothing even when the chat's next turn holds Your folder.
   const holdingSession = new Map<ChatId, string>();
+  // The planning rules a session that started with no plan is owed, keyed by conversation (one session is
+  // live per conversation, as `holdingSession`): the next message carries them, or a passing `propose_plan`
+  // answers them.
+  const owedRules = new Map<
+    ConversationId,
+    { readonly sessionId: SessionId; peek(): string | null; take(): string | null }
+  >();
   // Each chat's release of Your folder that waits for its jobs to stop. The chat's next turn cancels it: the
   // hold stays with the chat, and what is stopped meanwhile is the turn's before.
   const pendingReleases = new Map<ChatId, { cancelled: boolean }>();
@@ -440,10 +450,11 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         firstChange: () => deps.firstChange?.(chat.id),
       };
       const shapeId = planOfConversation(state.db, conv.id);
-      // Made before the sandbox, which opens the folder only when it exists: a file dropped later then lands
-      // inside a folder the warm session already has.
-      const plan = shapeId === null ? undefined : deps.plan;
-      const planFiles = shapeId === null ? undefined : plan?.filesDir(shapeId);
+      const plan = deps.plan;
+      // Every chat has its plan's folder, derived from the chat until a plan exists. Made before the sandbox,
+      // which opens it only when it exists, and fixed for the session: Codex's kernel grant is set at start and
+      // Claude's guard reads `access`, so a file dropped once a plan begins mid-session lands inside it.
+      const planFiles = plan?.filesDir(shapeId ?? planIdOfChat(chat.id));
       const limitNotes = createLimitNotes();
       const ending = new AbortController();
       const ready =
@@ -463,10 +474,27 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               observer: start.observer,
               limits: limitNotes,
             });
+      // A session that starts with no plan is owed the planning rules once it has one. A session that has its
+      // plan at start, resumed or not, holds the rules in its system prompt (a resumed Codex thread's
+      // developer instructions are configuration overrides for it), so it is owed nothing.
+      const owesRules = shapeId === null;
+      let owed: string | null = null;
+      const planRules =
+        owesRules && plan !== undefined
+          ? {
+              peek: () => owed,
+              take: () => {
+                const rules = owed;
+                owed = null;
+                return rules;
+              },
+            }
+          : null;
       deps.live.open(conv.id, {
         sessionId: start.sessionId,
         observer: start.observer,
         signal: ending.signal,
+        planRules,
       });
       holdingSession.set(chat.id, start.sessionId);
       const endJobs = ready === null ? undefined : () => ready.endJobs();
@@ -479,6 +507,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           if (sessionJobs.get(conv.id) === endJobs) sessionJobs.delete(conv.id);
           if (sessionClosers.get(conv.id) === release) sessionClosers.delete(conv.id);
           if (holdingSession.get(chat.id) === start.sessionId) holdingSession.delete(chat.id);
+          if (owedRules.get(conv.id)?.sessionId === start.sessionId) owedRules.delete(conv.id);
           deps.live.end(conv.id, start.sessionId);
           try {
             await ready?.release();
@@ -539,8 +568,22 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       // mode's, while Codex's own search needs no tool call and runs under the Web switch.
       const web =
         webOn && (judge === JudgeKind.Native || providerOf(launch.account.kind) === Provider.Codex);
-      const reads =
-        plan === undefined || shapeId === null ? undefined : plan.reads(shapeId, access, limits);
+      // A plan can begin while the session runs, so its read budget is resolved at each call, once per plan.
+      const readsOf = new Map<ShapeId, ReturnType<PlanParts['reads']>>();
+      const readsNow = (): ReturnType<PlanParts['reads']> | undefined => {
+        const id = planOf(conv);
+        if (id === null || plan === undefined) return undefined;
+        let reads = readsOf.get(id);
+        if (reads === undefined) {
+          reads = plan.reads(id, access, limits);
+          readsOf.set(id, reads);
+        }
+        return reads;
+      };
+      if (plan !== undefined && planRules !== null) {
+        owed = owedPlanningRules(plan.systemPrompt(launch.agentModels, subagents, web));
+        owedRules.set(conv.id, { sessionId: start.sessionId, ...planRules });
+      }
       // A session with nothing to resume is told the standing rules, and what it missed as a digest.
       const where =
         chat.workPlace === WorkPlace.Branch
@@ -563,10 +606,14 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
             kind: 'explore',
             judge,
             systemPrompt:
-              plan === undefined || shapeId === null
+              plan === undefined
                 ? chatSystemPrompt(webOn)
-                : `${chatSystemPrompt(webOn)}\n\n${plan.systemPrompt(launch.agentModels, subagents, web)}`,
-            ...chatProfile(ready?.commands !== undefined, shapeId !== null),
+                : `${chatSystemPrompt(webOn)}\n\n${
+                    shapeId === null
+                      ? PLANNING_STUB
+                      : plan.systemPrompt(launch.agentModels, subagents, web)
+                  }`,
+            ...chatProfile(ready?.commands !== undefined),
             ...(plan === undefined
               ? {}
               : { agents: plan.agents(ready?.commands !== undefined, subagents, web) }),
@@ -615,16 +662,16 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               },
               folder,
             );
-            return reads === undefined ? verdict : reads.preToolUse(req, verdict);
+            return readsNow()?.preToolUse(req, verdict) ?? verdict;
           },
-          ...(reads === undefined
+          ...(plan === undefined
             ? {}
             : {
                 postToolUse: (req) => {
-                  reads.postToolUse(req);
+                  readsNow()?.postToolUse(req);
                 },
                 toolFailed: (req) => {
-                  reads.toolFailed(req);
+                  readsNow()?.toolFailed(req);
                 },
               }),
           ...(deps.judge === undefined || judge === JudgeKind.Rules
@@ -751,12 +798,21 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         limits: session.limits,
         carrying,
       });
+      // A session that started before its plan is owed the planning rules: they go first, and are owed no
+      // longer once the send has happened, so a send that throws leaves them for the next message.
+      const owing = owedRules.get(conv.id);
+      const rules = owing?.peek() ?? null;
+      const lines = [
+        ...(rules === null ? [] : [rules]),
+        ...(intake.lines === '' ? [] : [intake.lines]),
+      ];
       return {
-        text: intake.lines === '' ? out.text : `${intake.lines}\n\n${out.text}`,
+        text: lines.length === 0 ? out.text : `${lines.join('\n\n')}\n\n${out.text}`,
         images: [...out.images, ...intake.images],
         blocks: [...out.blocks, ...intake.blocks],
         sent: (ctx) => {
           intake.sent(ctx);
+          owing?.take();
         },
       };
     },

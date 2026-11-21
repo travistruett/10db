@@ -2,11 +2,22 @@ import {
   InvalidError,
   ShapeMessageAuthor,
   ShapeMessageKind,
+  ShapeOrigin,
+  type ChatId,
+  type ConversationId,
   type PlanDraft,
+  type ProjectId,
   type SeeScreenInput,
+  type SessionId,
   type ShapeId,
 } from '@10db/contracts';
-import { findRecords, getShape, insertShapeMessage, similarTasks } from '@10db/db';
+import {
+  ensurePlanOfChat,
+  findRecords,
+  insertShapeMessage,
+  planOfChat,
+  similarTasks,
+} from '@10db/db';
 import type { StateStore } from '../events';
 import type { ShapeToolHandlers } from '../mcp';
 import type { ScreenService } from '../screens';
@@ -16,8 +27,9 @@ import { reportFinding, resolveFinding, writeSpec } from './review';
 import { buildSizes } from './sizing';
 import { ceremonies, type ViewWorld } from './view';
 
-// Shape spec §5.5. The tools a conversation's session calls through the `10db` MCP server: note_heard,
-// propose_plan, similar_tasks and find_records; the others come with the slices that use them.
+// Shape spec §5.5. The Plan tools a chat's session calls through the `10db` MCP server. Each handler looks the
+// chat's plan up when it is called, so a plan made mid-session is found at once. `propose_plan` is the one that
+// can make it; `note_heard` and the two searches work without one, and the tools that need rows are refused.
 
 export interface ShapeToolDeps {
   readonly state: StateStore;
@@ -28,7 +40,35 @@ export interface ShapeToolDeps {
     /** The service's `see` with the limits of the conversation's account already given. */
     see(shapeId: ShapeId, input: SeeScreenInput): ReturnType<ScreenService['see']>;
   };
+  /** Takes the planning rules the calling session is owed, once (`ChatLive.planRules`). */
+  readonly owedRules?: (conversationId: ConversationId, sessionId: SessionId) => string | null;
 }
+
+/** The chat a handler set serves: the session's tools are held to it. */
+export interface ShapeToolChat {
+  readonly chatId: ChatId;
+  readonly conversationId: ConversationId;
+  readonly sessionId: SessionId;
+  readonly projectId: ProjectId;
+}
+
+/** The words of a Plan tool called in a session with no plan. */
+export const NO_PLAN_YET = 'This session has no Plan yet: propose_plan starts one.';
+
+/** A refused round that made the plan it was for: thrown inside the write so the plan rolls back with it. */
+class RefusedFirstRoundError extends Error {
+  override readonly name = 'RefusedFirstRoundError';
+  readonly errors: readonly string[];
+  constructor(errors: readonly string[]) {
+    super('the first round was refused');
+    this.errors = errors;
+  }
+}
+
+const refusal = (errors: readonly string[]): InvalidError =>
+  new InvalidError(
+    `${plural(errors.length, errors.length === 1 ? 'error' : 'errors')}; nothing was changed. Fix them all and call propose_plan again:\n${errors.map((e) => `- ${e}`).join('\n')}`,
+  );
 
 const plural = (n: number, noun: string): string => `${String(n)} ${noun}`;
 const round = (n: number): number => Math.round(n * 100) / 100;
@@ -56,9 +96,13 @@ function describeDraft(draft: PlanDraft): string {
   return parts.length > 0 ? parts.join(', ') : 'nothing';
 }
 
-export function createShapeToolHandlers(deps: ShapeToolDeps, shapeId: ShapeId): ShapeToolHandlers {
+export function createShapeToolHandlers(
+  deps: ShapeToolDeps,
+  chat: ShapeToolChat,
+): ShapeToolHandlers {
   const { screens } = deps;
-  const line = (body: string): void => {
+  const planNow = (): ShapeId | null => planOfChat(deps.state.db, chat.chatId);
+  const line = (shapeId: ShapeId, body: string): void => {
     deps.state.write((ctx) => {
       insertShapeMessage(ctx, shapeId, {
         author: ShapeMessageAuthor.Claude,
@@ -67,14 +111,26 @@ export function createShapeToolHandlers(deps: ShapeToolDeps, shapeId: ShapeId): 
       });
     });
   };
+  // A dimmed line goes in the transcript only when there is a plan to hold it.
+  const lineIfPlan = (body: string): void => {
+    const shapeId = planNow();
+    if (shapeId !== null) line(shapeId, body);
+  };
+  // A tool that needs the plan's rows: refused with no plan, else run on the plan found now.
+  const withPlan = (run: (shapeId: ShapeId) => unknown): Promise<unknown> => {
+    const shapeId = planNow();
+    if (shapeId === null) return Promise.reject(new InvalidError(NO_PLAN_YET));
+    return Promise.resolve().then(() => run(shapeId));
+  };
   return {
     note_heard: (input) => {
-      line(`note_heard · ${input.items.join(' · ')}`);
+      const shapeId = planNow();
+      if (shapeId === null) return Promise.resolve({ heard: 0 });
+      line(shapeId, `note_heard · ${input.items.join(' · ')}`);
       return Promise.resolve({ heard: input.items.length });
     },
     similar_tasks: (input) => {
-      const shape = getShape(deps.state.db, shapeId);
-      const tasks = similarTasks(deps.state.db, shape.projectId, input.query, SIMILAR_LIMIT).map(
+      const tasks = similarTasks(deps.state.db, chat.projectId, input.query, SIMILAR_LIMIT).map(
         (t) => ({
           taskId: t.taskId,
           title: t.title,
@@ -84,14 +140,13 @@ export function createShapeToolHandlers(deps: ShapeToolDeps, shapeId: ShapeId): 
           tokens: t.tokens,
         }),
       );
-      line(`similar_tasks · ${plural(tasks.length, tasks.length === 1 ? 'task' : 'tasks')}`);
+      lineIfPlan(`similar_tasks · ${plural(tasks.length, tasks.length === 1 ? 'task' : 'tasks')}`);
       return Promise.resolve({ tasks });
     },
     find_records: (input) => {
-      const shape = getShape(deps.state.db, shapeId);
-      const records = findRecords(deps.state.db, shape.projectId, input.query, RECORDS_LIMIT);
+      const records = findRecords(deps.state.db, chat.projectId, input.query, RECORDS_LIMIT);
       // Each hit is cited as a dimmed line with its date, so a contradiction is on record (§5.5).
-      line(
+      lineIfPlan(
         records.length === 0
           ? 'find_records · nothing recorded'
           : `find_records · ${records
@@ -106,34 +161,41 @@ export function createShapeToolHandlers(deps: ShapeToolDeps, shapeId: ShapeId): 
     },
     ...(screens === undefined
       ? {}
-      : { see_screen: (input: SeeScreenInput) => screens.see(shapeId, input) }),
+      : {
+          see_screen: (input: SeeScreenInput) => withPlan((shapeId) => screens.see(shapeId, input)),
+        }),
     attach: (input) =>
-      Promise.resolve().then(() => deps.state.write((ctx) => attach(ctx, shapeId, input))),
+      withPlan((shapeId) => deps.state.write((ctx) => attach(ctx, shapeId, input))),
     write_spec: (input) =>
-      Promise.resolve().then(() => deps.state.write((ctx) => writeSpec(ctx, shapeId, input))),
+      withPlan((shapeId) => deps.state.write((ctx) => writeSpec(ctx, shapeId, input))),
     report_finding: (input) =>
-      Promise.resolve().then(() => deps.state.write((ctx) => reportFinding(ctx, shapeId, input))),
+      withPlan((shapeId) => deps.state.write((ctx) => reportFinding(ctx, shapeId, input))),
     resolve_finding: (input) =>
-      Promise.resolve().then(() => deps.state.write((ctx) => resolveFinding(ctx, shapeId, input))),
+      withPlan((shapeId) => deps.state.write((ctx) => resolveFinding(ctx, shapeId, input))),
     propose_plan: (input) => {
-      // The reconcile and its transcript line are one write: the line never disagrees with the rows.
-      const outcome = deps.state.write((ctx) => {
-        const result = reconcileDraft(ctx, shapeId, input.draft);
-        insertShapeMessage(ctx, shapeId, {
-          author: ShapeMessageAuthor.Claude,
-          kind: ShapeMessageKind.Tool,
-          body: result.ok
-            ? `propose_plan · ${describeDraft(input.draft)} · passed`
-            : `propose_plan · refused · ${plural(result.errors.length, result.errors.length === 1 ? 'error' : 'errors')}`,
+      // The plan (when this call makes it), the reconcile and its transcript line are one write: the line
+      // never disagrees with the rows, and a first round that is refused leaves no plan behind.
+      let outcome;
+      try {
+        outcome = deps.state.write((ctx) => {
+          const { shapeId, made } = ensurePlanOfChat(ctx, chat.chatId, ShapeOrigin.App);
+          const result = reconcileDraft(ctx, shapeId, input.draft);
+          if (!result.ok && made) throw new RefusedFirstRoundError(result.errors);
+          insertShapeMessage(ctx, shapeId, {
+            author: ShapeMessageAuthor.Claude,
+            kind: ShapeMessageKind.Tool,
+            body: result.ok
+              ? `propose_plan · ${describeDraft(input.draft)} · passed`
+              : `propose_plan · refused · ${plural(result.errors.length, result.errors.length === 1 ? 'error' : 'errors')}`,
+          });
+          return { result, shapeId };
         });
-        return result;
-      });
-      if (!outcome.ok)
-        return Promise.reject(
-          new InvalidError(
-            `${plural(outcome.errors.length, outcome.errors.length === 1 ? 'error' : 'errors')}; nothing was changed. Fix them all and call propose_plan again:\n${outcome.errors.map((e) => `- ${e}`).join('\n')}`,
-          ),
-        );
+      } catch (error) {
+        if (error instanceof RefusedFirstRoundError) return Promise.reject(refusal(error.errors));
+        throw error;
+      }
+      const { result, shapeId } = outcome;
+      if (!result.ok) return Promise.reject(refusal(result.errors));
       // The rule, not Claude's guess, says which efforts need a spec before Convert (§7).
       const needSpec = ceremonies(
         deps.state.db,
@@ -143,13 +205,16 @@ export function createShapeToolHandlers(deps: ShapeToolDeps, shapeId: ShapeId): 
       )
         .filter((c) => c.ceremony === 'spec' && !c.specWritten)
         .map((c) => c.key);
+      // A passing round hands a session whose plan began mid-session the planning rules, once.
+      const rules = deps.owedRules?.(chat.conversationId, chat.sessionId) ?? null;
       return Promise.resolve({
-        round: outcome.round,
-        created: outcome.created,
-        updated: outcome.updated,
-        superseded: outcome.superseded,
-        kept: outcome.kept,
-        converted: outcome.converted,
+        round: result.round,
+        created: result.created,
+        updated: result.updated,
+        superseded: result.superseded,
+        kept: result.kept,
+        converted: result.converted,
+        ...(rules === null ? {} : { rules }),
         ...(needSpec.length === 0
           ? {}
           : {

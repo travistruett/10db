@@ -15,7 +15,7 @@ import { auth, createProject } from './shape-project';
 // Runs after see-screen.spec.ts and before stakeholder-questions.spec.ts (files run in name order with one worker). It
 // adds its own project and drives one chat on the real daemon: the fake adapter answers the first
 // message from script-book.json's "Chat: Why does login fail after sleep?", which reads, runs a
-// command, names the session, replies in markdown, and after "File as Tasks" files a task, starts it,
+// command, names the session, replies in markdown, and after the builder asks for the work as tasks it files a task, starts it,
 // and asks to remove the builder's own task, which waits on a card.
 
 const FIRST_LINE = 'Why does login fail after sleep?';
@@ -161,9 +161,8 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   await confirm.getByRole('button', { name: 'Cancel' }).click();
   await expect(confirm).toBeHidden();
 
-  // File as Tasks: the task row, its start row, then the judge's card for the builder's own task.
-  await page.getByRole('button', { name: 'More session actions' }).click();
-  await page.getByRole('menuitem', { name: 'File as Tasks' }).click();
+  // The builder asks for the tasks in words: the task row, its start row, then the judge's card for the builder's own task.
+  await sendLine(page, 'File the work we agreed on as tasks on the Board.');
   await expect(page.getByText('Retry login once on a 401').first()).toBeVisible();
   await expect(page.getByText('Added to Ready')).toBeVisible();
   await expect(page.getByText(/Started Retry login once on a 401/)).toBeVisible();
@@ -579,17 +578,18 @@ test('a chat goes to the builder’s terminal and back: the banner, a held messa
   }
 });
 
-test('New Plan: a dropped file and a message fill the panel, a pinned row survives a round, Accept writes the Board, Remove Draft Goal takes it back', async ({
+test('New Plan: a dropped file and a message fill the panel, a pinned row survives a round, Accept writes the Board, Remove Draft Goal takes it back, and a plain session grows a plan by Show Plan or by proposing', async ({
   page,
   request,
 }) => {
   const projectId = await createProject(request, 'sessions-plan');
-  const titles = async (): Promise<string[]> =>
+  const titlesWithIds = async (): Promise<z.infer<typeof Tasks>> =>
     Tasks.parse(
       await (
         await request.get(`${daemonUrl}/projects/${projectId}/tasks`, { headers: auth })
       ).json(),
-    ).map((t) => t.title);
+    );
+  const titles = async (): Promise<string[]> => (await titlesWithIds()).map((t) => t.title);
   await claudeIsInstalled(page);
   await page.addInitScript((id) => {
     window.localStorage.setItem('tendb.project', JSON.stringify(id));
@@ -664,7 +664,8 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await expectAccessible(page, 'accept');
   await dialog.getByRole('button', { name: 'Accept 4' }).click();
   await expect(dialog).toBeHidden();
-  await expect(panel.getByText('Accepted · on the Board')).toHaveCount(3);
+  await expect(panel.getByText('On the Board · 2 ready', { exact: true })).toHaveCount(1);
+  await expect(panel.getByText('On the Board · Ready', { exact: true })).toHaveCount(2);
   await expect(panel.getByText('Accepted · in Knowledge')).toHaveCount(1);
   const accepted = await titles();
   expect(accepted).toHaveLength(before + 4);
@@ -683,8 +684,60 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
     .getByRole('dialog', { name: 'Remove Draft Goal' })
     .getByRole('button', { name: 'Remove Draft Goal' })
     .click();
-  await expect(panel.getByText('Accepted · on the Board')).toHaveCount(2);
+  await expect(panel.getByText('On the Board · Ready', { exact: true })).toHaveCount(2);
+  await expect(panel.getByText('On the Board · 2 ready', { exact: true })).toHaveCount(0);
   expect(await titles()).toHaveLength(before + 2);
+
+  // Accept, then Undo Accept: the goal and its two tasks go, the goal is proposed again, and the loose rows
+  // stay on the Board because they were the earlier Accept's.
+  const goalRow = panel.getByRole('listitem').filter({ hasText: 'Board polish' });
+  const goalTitles = async (): Promise<string> =>
+    JSON.stringify(
+      await (
+        await request.get(`${daemonUrl}/projects/${projectId}/goals`, { headers: auth })
+      ).json(),
+    );
+  await panel.getByRole('button', { name: 'Accept', exact: true }).click();
+  await dialog.getByRole('button', { name: 'Accept 1' }).click();
+  await expect(dialog).toBeHidden();
+  await expect(goalRow.getByText('On the Board · 2 ready', { exact: true })).toBeVisible();
+  expect(await goalTitles()).toContain('Board polish');
+  await panel.getByRole('button', { name: 'More Plan actions' }).click();
+  await page.getByRole('menuitem', { name: 'Undo Accept' }).click();
+  const undo = page.getByRole('dialog', { name: 'Undo Accept' });
+  await expect(undo.getByText(/1 goal, 2 tasks/)).toBeVisible();
+  await undo.getByRole('button', { name: 'Undo Accept' }).click();
+  await expect(undo).toBeHidden();
+  await expect(goalRow.getByText(/On the Board/)).toHaveCount(0);
+  await expect(goalRow.getByRole('img', { name: 'Proposed' })).toBeVisible();
+  await expect(panel.getByText('On the Board · Ready', { exact: true })).toHaveCount(2);
+  expect(await goalTitles()).not.toContain('Board polish');
+  expect(await titles()).toHaveLength(before + 2);
+
+  // Accept and Start: the confirm counts what starts, and the goal's tasks get runs.
+  await panel.getByRole('button', { name: 'More accept actions' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Accept and Start' })).toBeVisible();
+  await page.getByRole('menuitem', { name: 'Accept and Start' }).click();
+  const startDialog = page.getByRole('dialog', { name: 'Accept and Start' });
+  await expect(
+    startDialog.getByRole('status').filter({ hasText: /start now|wait for a lane/ }),
+  ).toBeVisible();
+  await expect(startDialog.getByRole('button', { name: 'Accept and Start 1' })).toBeVisible();
+  await startDialog.getByRole('button', { name: 'Accept and Start 1' }).click();
+  await expect(startDialog).toBeHidden();
+  await expect(goalRow.getByText(/On the Board/)).toHaveText(
+    /queued|running|needs you|in review|done/i,
+  );
+
+  // The goal's tasks have runs now, so Undo Accept is disabled and says why.
+  await panel.getByRole('button', { name: 'More Plan actions' }).click();
+  const undoItem = page.getByRole('menuitem', { name: /Undo Accept/ });
+  await expect(undoItem).toBeDisabled();
+  await expect(undoItem).toContainText(
+    'has started; cancel its run and remove it from the Board first',
+  );
+
+  await page.keyboard.press('Escape');
 
   // Under the side-by-side width the panel is a drawer, which Close Plan closes and the title's Plan reopens.
   await page.setViewportSize({ width: 900, height: 900 });
@@ -702,4 +755,90 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await expect(
     page.getByRole('complementary', { name: 'Plan' }).getByText('Board polish'),
   ).toBeVisible();
+
+  // A plain session has no plan until Show Plan or a proposal makes one. ⌘T opens a fresh tab in the project.
+  // Archive returns once the screen has left the session; where it falls depends on what earlier specs left open.
+  const archive = async (): Promise<void> => {
+    const was = page.url();
+    await page.getByRole('button', { name: 'More session actions' }).click();
+    await page.getByRole('menuitem', { name: 'Archive' }).click();
+    await expect(page).not.toHaveURL(was);
+  };
+  const newTab = async (): Promise<void> => {
+    const was = page.url();
+    await expect(async () => {
+      await page.keyboard.press('Meta+t');
+      await expect(page).not.toHaveURL(was, { timeout: 2000 });
+    }).toPass();
+    await expect(page).toHaveURL(/\/sessions\?fresh=/);
+  };
+  const chatId = (): string => new URL(page.url()).searchParams.get('chat') ?? '';
+  const plan = async (): Promise<string | null | undefined> =>
+    z
+      .array(z.looseObject({ id: z.string(), planId: z.string().nullable() }))
+      .parse(await (await request.get(`${daemonUrl}/chats?open=1`, { headers: auth })).json())
+      .find((chat) => chat.id === chatId())?.planId;
+  // The runs the start made are cancelled, so a later spec finds no running lane.
+  const goalTasks = new Set(
+    (await titlesWithIds())
+      .filter((t) => ['Compact card density', 'Thin scrollbars'].includes(t.title))
+      .map((t) => t.id),
+  );
+  const activeOfGoal = async (): Promise<z.infer<typeof Workstreams>> =>
+    Workstreams.parse(
+      await (await request.get(`${daemonUrl}/workstreams?active=true`, { headers: auth })).json(),
+    ).filter((w) => w.projectId === projectId && goalTasks.has(String(w['taskId'])));
+  for (const stream of await activeOfGoal())
+    await request.post(`${daemonUrl}/workstreams/${stream.id}/cancel`, { headers: auth });
+  await expect.poll(async () => (await activeOfGoal()).length).toBe(0);
+  await archive();
+  await newTab();
+  await sendLine(page, 'Make the cards denser');
+  await expect(page.getByText('Noted 1 thing.', { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/sessions\?chat=/);
+  expect(await plan()).toBeNull();
+  await expect(page.getByRole('complementary', { name: 'Plan' })).toHaveCount(0);
+
+  // Show Plan opens the empty panel; a file dropped on the warm session is read from the folder opened at start.
+  await page.getByRole('button', { name: 'Plan', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Plan', exact: true })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  const plain = page.getByRole('complementary', { name: 'Plan' });
+  await expect(plain.getByText('Talk it through, or drop a document.')).toBeVisible();
+  await expectAccessible(page, 'a plain session with Show Plan just pressed');
+  await page.locator('input[type=file]').setInputFiles({
+    name: 'notes.md',
+    mimeType: 'text/markdown',
+    buffer: Buffer.from('# Notes\nMake the cards denser\n'),
+  });
+  await sendLine(page, 'Thin out the scrollbars');
+  await expect(page.getByText(/^Noted \d+ things?\. I have notes\.md\.$/)).toBeVisible();
+  await expect(plain.getByText('Heard so far')).toBeVisible();
+
+  // A proposal fills the panel, and its rows are dotted as new.
+  await sendLine(page, 'propose it');
+  await expect(plain.getByText('Board polish')).toBeVisible();
+  await expect(plain.getByRole('img', { name: 'New this round' }).first()).toBeVisible();
+
+  // The builder closed the panel: a round that lands leaves it closed, and the menu offers Show Plan.
+  await page.getByRole('button', { name: 'More session actions' }).click();
+  await page.getByRole('menuitem', { name: 'Close Plan' }).click();
+  await expect(plain).toHaveCount(0);
+  await sendLine(page, 'propose it again');
+  await expect(page.getByText('Here is the plan.', { exact: true })).toHaveCount(2);
+  await expect(plain).toHaveCount(0);
+  await page.getByRole('button', { name: 'More session actions' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Show Plan' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await archive();
+
+  // A first message that proposes starts the plan with no Show Plan.
+  await newTab();
+  await sendLine(page, 'propose it');
+  await expect(
+    page.getByRole('complementary', { name: 'Plan' }).getByText('Board polish'),
+  ).toBeVisible();
+  await archive();
 });

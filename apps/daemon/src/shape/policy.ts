@@ -82,6 +82,17 @@ export function shapeAllowedTools(judge: JudgeKind | undefined): readonly string
     : SHAPE_ALLOWED_TOOLS;
 }
 
+/**
+ * What a session with no plan is told of planning: when to start one, and that 10db then gives it the rules.
+ * It holds no standing-rules trigger, which belongs to a session that has a plan.
+ */
+export const PLANNING_STUB = `Planning: the builder can plan in this session. When the conversation turns to deciding work for the Board (goals, tasks, decisions to record), start a Plan with propose_plan, citing the builder's messages by their [m:ID], or suggest the builder press Show Plan; 10db then gives you the planning rules. A question, a change you make to the code yourself, or a talk that decides no work needs no plan. When the builder asks you to file one task, use create_task.`;
+
+/** The planning rules a session that started without a plan is owed once its plan exists. */
+export function owedPlanningRules(rules: string): string {
+  return `[planning rules] This session now has a Plan. Follow these rules for it from now on.\n\n${rules}`;
+}
+
 const REPORTING = `Report with report_finding, once per finding, passing the effortKey you were given. Each call answers with a findingId. Do not change anything and do not call any other 10db tool. Your last message lists every finding you reported, each with its findingId and one line, so the session can resolve it; say "nothing to report" if there were none.`;
 
 const CODE_RESEARCHER_PROMPT = `You answer one question about this project's code for a planning session. The session gives you the question in words. You have Read, Grep and Glob, and Bash when the session has its sandbox. Read and search files with Read, Grep and Glob; they never ask. Use Bash only for what those tools can't do, such as git history (git log, git blame, git show), which runs at once. Any other command waits for the builder's approval and runs where it cannot change the checkout, so use one only when nothing read-only answers. Give every path to a tool or command as an absolute path, not \`cd\` into a directory first (a command that starts with \`cd\` waits for approval), and use no command substitution (\`$(…)\` or backticks), which also waits. You reach no web page and no MCP server, and you launch no agent.

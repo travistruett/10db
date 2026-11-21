@@ -202,6 +202,7 @@ export function insertShapeProposal(ctx: WriteContext, input: NewShapeProposal):
     ...input,
     pinned: [...input.pinned],
     sourceMessageIds: [...input.sourceMessageIds],
+    acceptId: null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };
@@ -212,7 +213,14 @@ export function insertShapeProposal(ctx: WriteContext, input: NewShapeProposal):
 export type ShapeProposalPatch = Partial<
   Pick<
     ShapeProposalRow,
-    'state' | 'round' | 'createdRound' | 'pinned' | 'body' | 'taskHashes' | 'sourceMessageIds'
+    | 'state'
+    | 'round'
+    | 'createdRound'
+    | 'pinned'
+    | 'body'
+    | 'taskHashes'
+    | 'sourceMessageIds'
+    | 'acceptId'
   >
 >;
 
@@ -469,6 +477,12 @@ export function deleteShapeLinksOf(ctx: WriteContext, proposalId: ShapeProposalI
   ctx.tx.delete(schema.shapeLinks).where(eq(schema.shapeLinks.proposalId, proposalId)).run();
 }
 
+/** Deletes a question Convert stored, and its link; its proposal is the caller's to reset. */
+export function releaseShapeQuestion(ctx: WriteContext, questionId: ShapeQuestionId): void {
+  ctx.tx.delete(schema.shapeLinks).where(eq(schema.shapeLinks.questionId, questionId)).run();
+  ctx.tx.delete(schema.shapeQuestions).where(eq(schema.shapeQuestions.id, questionId)).run();
+}
+
 /**
  * Takes back the questions a task removal detached from the tasks of a goal Remove Draft Goal is
  * about to remove: each is deleted with its link and its proposal is pending again, so it converts
@@ -501,9 +515,11 @@ export function releaseDetachedShapeQuestions(
       .get();
     const about = ShapeProposalBody.question.safeParse(proposal?.body).data?.about;
     if (about === undefined || !taskKeys.includes(about)) continue;
-    ctx.tx.delete(schema.shapeLinks).where(eq(schema.shapeLinks.questionId, question.id)).run();
-    ctx.tx.delete(schema.shapeQuestions).where(eq(schema.shapeQuestions.id, question.id)).run();
-    patchShapeProposal(ctx, question.proposalId, { state: ShapeProposalState.Pending });
+    releaseShapeQuestion(ctx, question.id);
+    patchShapeProposal(ctx, question.proposalId, {
+      state: ShapeProposalState.Pending,
+      acceptId: null,
+    });
   }
 }
 
@@ -555,9 +571,11 @@ export function releaseShapeLinksOfGoal(
     )
     .all();
   for (const question of questions) {
-    ctx.tx.delete(schema.shapeLinks).where(eq(schema.shapeLinks.questionId, question.id)).run();
-    ctx.tx.delete(schema.shapeQuestions).where(eq(schema.shapeQuestions.id, question.id)).run();
-    patchShapeProposal(ctx, question.proposalId, { state: ShapeProposalState.Pending });
+    releaseShapeQuestion(ctx, question.id);
+    patchShapeProposal(ctx, question.proposalId, {
+      state: ShapeProposalState.Pending,
+      acceptId: null,
+    });
   }
   ctx.tx
     .delete(schema.shapeLinks)

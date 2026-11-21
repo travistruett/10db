@@ -715,6 +715,7 @@ export function importBundle(
     if (held)
       patchShapeProposal(ctx, held.id, {
         state: ShapeProposalState.Pending,
+        acceptId: null,
         body,
         round,
         pinned: [...new Set([...held.pinned, PIN_IMPORTED])],

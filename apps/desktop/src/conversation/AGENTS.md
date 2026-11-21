@@ -17,5 +17,5 @@
   already empty. A tool row's output drops the terminal's escape codes
   (`terminal-text.ts`). `ZoomablePicture` is a picture in a thread that opens in a dialog on a click.
 - The composer's `held` prop (sessions spec §7.3): while a writer keeps the turn from Your folder, Send (and Stop and
-  Redo) shows Wait for It, Send Reading Only and File as Tasks in place of sending; Esc cancels (the group owns Esc,
+  Redo) shows Wait for It and Send Reading Only in place of sending; Esc cancels (the group owns Esc,
   so it never stops the turn), ⌘↩ waits. With no `held` it sends at once. The caller says when (`keepingWords`).

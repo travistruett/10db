@@ -2,9 +2,12 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { FakeShapeBehaviour } from './fake-session';
 
-const BUILDER_MESSAGE_ID = /\[m:([^\]]+)\]/;
+/** How the planning rules owed to a session that began without a plan start. */
+const OWED_RULES = '[planning rules]';
+// Anchored to a line start: the planning rules a message may carry ahead of it quote the form "[m:ID] text".
+const BUILDER_MESSAGE_ID = /^\[m:([^\]]+)\]/m;
 /** An intake line naming a file the builder dropped: `[file] <path> (<name>)`, with an optional reason after. */
-const DROPPED_FILE = /^\[file\] .* \((.+?)\)(?: — .*)?$/gm;
+const DROPPED_FILE = /^\[file\] (.*) \((.+?)\)(?: — .*)?$/gm;
 /** A message that asks for the plan: the scripted agent proposes it as things are decided. */
 const ASKS_TO_PROPOSE = /\bpropose\b/i;
 const MAX_HEARD_ITEMS = 5;
@@ -81,6 +84,12 @@ function scriptedDraft(area: string, sources: readonly string[]): Record<string,
  * one decision) through `propose_plan`, in the project's
  * first area, learning the area from the refusal when the draft's first guess is wrong. Asked to
  * "show a fence", it answers with a code fence and a link, for the window's CSP e2e row.
+ *
+ * It works in a session with no plan too: `note_heard` answers and writes nothing, and "propose" makes the
+ * plan through the same handler. It says "I have <name>." of a dropped file only when its own PreToolUse
+ * hook lets it Read the stored path, and "I could not read <name>." otherwise, so a check of the file proves
+ * the folder is readable. The builder's message id is the `[m:ID]` that opens a line: the owed planning
+ * rules `outgoing` puts first quote the form in the middle of a line, and are not an id.
  */
 export function scriptedShapeBehaviour(): FakeShapeBehaviour {
   /** The builder's message ids each conversation has seen, as a proposal may cite them. */
@@ -117,7 +126,15 @@ export function scriptedShapeBehaviour(): FakeShapeBehaviour {
       // The message's id goes first, so a proposal made in this very turn can cite it.
       const id = BUILDER_MESSAGE_ID.exec(turn.message)?.[1];
       if (id !== undefined) ids.push(id);
-      const text = turn.message.replace(BUILDER_MESSAGE_ID, '');
+      // The planning rules a session owes come first and say "propose" themselves: only what follows them,
+      // from the first dropped file or the message's id, is the builder's.
+      const rulesEnd = turn.message.startsWith(OWED_RULES)
+        ? turn.message.search(/^\[(?:file\] |m:)/m)
+        : 0;
+      const text = (rulesEnd < 0 ? turn.message : turn.message.slice(rulesEnd)).replace(
+        BUILDER_MESSAGE_ID,
+        '',
+      );
       if (ASKS_TO_PROPOSE.test(text)) {
         if (ids.length === 0) return { text: 'There is nothing to propose from yet.' };
         let area = 'repo';
@@ -154,7 +171,12 @@ export function scriptedShapeBehaviour(): FakeShapeBehaviour {
         .slice(0, MAX_HEARD_ITEMS)
         .map((s) => s.slice(0, MAX_HEARD_CHARS));
       await call('note_heard', { items });
-      const files = [...turn.message.matchAll(DROPPED_FILE)].map((m) => ` I have ${m[1] ?? ''}.`);
+      // A file counts as read only when the session's own hook lets it Read the stored path.
+      const files = [...turn.message.matchAll(DROPPED_FILE)].map((m) => {
+        const name = m[2] ?? '';
+        const verdict = turn.guard({ toolName: 'Read', input: { file_path: m[1] ?? '' } });
+        return verdict.decision === 'allow' ? ` I have ${name}.` : ` I could not read ${name}.`;
+      });
       return {
         text: `Noted ${String(items.length)} ${items.length === 1 ? 'thing' : 'things'}.${files.join('')}`,
       };

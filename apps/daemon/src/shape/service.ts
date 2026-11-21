@@ -24,11 +24,13 @@ import {
   type ShapeDto,
   type ShapeFileDto,
   type ShapeFindingId,
+  type ShapeAcceptId,
   type ShapeId,
   type ShapeMessageDto,
   type ShapeModelsDto,
   type MilestoneCut,
   type ShapeProposalId,
+  type ShapeStartCountsDto,
   type ShapeViewDto,
   type StartShapeInput,
 } from '@10db/contracts';
@@ -90,8 +92,15 @@ import {
   unpinProposal as unpinRow,
 } from './rounds';
 import type { ShapeLaunch } from './session-launch';
-import { createShapeToolHandlers } from './tools';
-import { removeDraftGoalOf, withdrawConvertedDecision, withdrawConvertedPrinciple } from './undo';
+import { createShapeToolHandlers, type ShapeToolDeps } from './tools';
+import {
+  removeDraftGoalOf,
+  undoAccept,
+  withdrawConvertedDecision,
+  withdrawConvertedPrinciple,
+  type UndoneAccept,
+} from './undo';
+import { buildStartCounts } from './preview';
 import { buildShapeView, fileDtoOf, type ViewWorld } from './view';
 
 // Shape spec §5.1, §5.3, §6, §11. A Plan conversation: its rows, presses and Convert, over the explore
@@ -109,6 +118,8 @@ export interface ShapeServiceDeps {
   readonly engine?: ExploreEngine;
   readonly clock: Clock;
   readonly log: Logger;
+  /** Takes the planning rules a chat's session is owed, once; see `ShapeToolDeps.owedRules`. */
+  readonly owedRules?: ShapeToolDeps['owedRules'];
   /**
    * Resolves a project's launch, on `model` (an ID the account lists) or, with null, on the `plan`
    * role's, at the conversation's own `effort` or, with null, the role's; throws when its account can't
@@ -210,6 +221,13 @@ export interface ShapeService {
    * InvalidError for a goal no conversation made and ConflictError once a task has started.
    */
   removeDraftGoal(goalId: GoalId): void;
+  /**
+   * Undo Accept: takes back the plan's latest Accept in one write and never stops a run. Throws
+   * InvalidError for an Accept undone or not the latest, ConflictError for a task that has a run.
+   */
+  undoAccept(shapeId: ShapeId, acceptId: ShapeAcceptId): UndoneAccept;
+  /** What Accept and Start would do with these pending proposals: the confirm's counts. Writes nothing. */
+  startCounts(shapeId: ShapeId, proposalIds: readonly ShapeProposalId[]): ShapeStartCountsDto;
   /** Withdraw Decision: a decision the conversation wrote, with the builder's reason. */
   withdrawDecision(shapeId: ShapeId, decisionId: DecisionId, reason: string): void;
   /**
@@ -370,7 +388,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     }
   };
   const { screens } = deps;
-  const toolsFor: ShapeToolsFor = ({ shapeId }) =>
+  const toolsFor: ShapeToolsFor = (chat) =>
     createShapeToolHandlers(
       {
         state,
@@ -383,8 +401,9 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
               },
             }),
         world: worldOfShape,
+        ...(deps.owedRules === undefined ? {} : { owedRules: deps.owedRules }),
       },
-      shapeId,
+      chat,
     );
 
   /**
@@ -643,6 +662,14 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           throw new InvalidError(`${goalId} is not a goal a conversation made`);
         removeDraftGoalOf(ctx, link.shapeId, goalId);
       });
+    },
+
+    undoAccept(shapeId, acceptId) {
+      return state.write((ctx) => undoAccept(ctx, shapeId, acceptId));
+    },
+
+    startCounts(shapeId, proposalIds) {
+      return buildStartCounts(state.db, shapeId, proposalIds, clock.now());
     },
 
     withdrawDecision(shapeId, decisionId, reason) {

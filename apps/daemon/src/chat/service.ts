@@ -1,4 +1,4 @@
-import { rmSync } from 'node:fs';
+import { rmdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ACTIVE_STATES,
@@ -57,12 +57,14 @@ import {
   patchConversation,
   recentChats,
   searchChats,
+  ensurePlanOfChat,
   setChatTitle,
   setChatWork,
   touchChat,
   unarchiveChat,
   type ChatRow,
   type ConversationItemRow,
+  planIdOfChat,
   planOfChat,
 } from '@10db/db';
 import type { Clock } from '../clock';
@@ -107,6 +109,8 @@ export const PASS_OPENING =
   'A pass is opening and has stopped this chat’s turn; try again once it has opened';
 /** What a send is refused with while Do It hands the chat's work to a task in a separate copy. */
 export const HANDING_OFF = 'This chat is handing its work to a task';
+/** What Show Plan is refused with on a chat whose work moved to a task. */
+export const SEALED_NO_PLAN = 'This session’s work moved to a task, so it has no Plan.';
 /** What Do It and archive are refused with while a pass waits to open for the chat. */
 export const PENDING_OPEN_FOR_CHAT = 'A pass is waiting to open for this chat; Cancel it first';
 /** What archive is refused with while the task a chat was handed to is unfinished. */
@@ -115,6 +119,20 @@ export const HANDED_TASK_RUNNING = 'The task this session was handed to is still
 export const CHANGE_MODEL_BETWEEN_TURNS = 'Change the model between turns.';
 /** What a model the account doesn't offer is refused with. */
 export const MODEL_NOT_OFFERED = 'Not available on this account';
+
+/**
+ * Removes a folder only while it is empty; one that is missing or holds files stays as it is. Any other
+ * failure is logged, not thrown: the folder is housekeeping and the archive it follows has committed.
+ */
+function removeEmptyFolder(path: string, log: Logger): void {
+  try {
+    rmdirSync(path);
+  } catch (error) {
+    const code = error instanceof Error && 'code' in error ? error.code : null;
+    if (code !== 'ENOENT' && code !== 'ENOTEMPTY')
+      log.warn({ err: error, path }, 'an archived chat’s empty plan folder could not be removed');
+  }
+}
 
 /** Matches a panel search returns at a time. */
 const CHAT_SEARCH_PAGE = 30;
@@ -153,6 +171,8 @@ export interface ChatService {
    */
   archive(id: ChatId, request?: ArchiveRequest): Promise<ChatDto>;
   unarchive(id: ChatId): ChatDto;
+  /** Makes the chat's Plan when it has none (nothing is run), and answers the chat with its `planId`. */
+  showPlan(id: ChatId): ChatDto;
   /**
    * The chat branch of the message route: the message stored queued, the chat touched, a turn asked for.
    * With `wait`, a turn Your folder keeps out waits for it to free, ahead of any task that hasn't started;
@@ -217,6 +237,8 @@ export interface ChatServiceDeps {
   readonly pendingOpens: Pick<PendingOpens, 'get'>;
   readonly clock: Pick<Clock, 'now'>;
   readonly dataDir: string;
+  /** Where each plan's folder lives, `<shapesDir>/<plan>`. */
+  readonly shapesDir: string;
   readonly log: Logger;
   readonly now: () => Date;
   /** The models a project's account offers for a conversation, and its default. */
@@ -445,6 +467,10 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
         // A chat in the builder's terminal gives the folder back and its files go.
         takeover?.ended(id);
         rmSync(chatFolder(deps.dataDir, chat.conversationId), { recursive: true, force: true });
+        // A chat with no plan has nothing in its derived plan folder (uploads and screens need a plan), so it is
+        // empty; the next session of a reopened chat makes it again.
+        if (planOfChat(state.db, id) === null)
+          removeEmptyFolder(join(deps.shapesDir, planIdOfChat(id)), deps.log);
         return dtoOf(id);
       };
       return takeover === null ? archive() : takeover.serialized(id, archive);
@@ -456,6 +482,15 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       });
       engine.unretire(getChat(state.db, id).conversationId);
       reopen(id);
+      return dtoOf(id);
+    },
+
+    showPlan(id) {
+      const chat = getChat(state.db, id);
+      if (chat.archivedAt !== null) throw new ConflictError(CHAT_ARCHIVED);
+      if (getConversation(state.db, chat.conversationId).state === ConversationState.Sealed)
+        throw new ConflictError(SEALED_NO_PLAN);
+      state.write((ctx) => ensurePlanOfChat(ctx, id, ShapeOrigin.App));
       return dtoOf(id);
     },
 

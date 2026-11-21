@@ -9,6 +9,12 @@ export interface ChatLive {
   readonly observer: WaitObserver;
   /** Aborts when the session ends. */
   readonly signal: AbortSignal;
+  /**
+   * The planning rules a session that started with no plan is owed once it has one, while they are owed:
+   * `peek` reads them, `take` reads them and owes them no longer. Null for a session that started with its
+   * plan, which holds the rules in its system prompt (a resumed Codex thread's developer instructions).
+   */
+  readonly planRules: { peek(): string | null; take(): string | null } | null;
 }
 
 export interface ChatLiveSessions {

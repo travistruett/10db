@@ -11,6 +11,8 @@ export {
   SHAPE_ALLOWED_TOOLS,
   SHAPE_BUILT_IN_TOOLS,
   SHAPE_DISALLOWED_TOOLS,
+  PLANNING_STUB,
+  owedPlanningRules,
   shapeSystemPrompt,
   shapeToolset,
 } from './policy';
@@ -24,3 +26,4 @@ export {
   type ShapeService,
 } from './service';
 export { sizingMeasure } from './sizing';
+export { START_CAP, startCounts } from './start-counts';

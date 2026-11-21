@@ -95,10 +95,12 @@ import {
   ScreenImageInput,
   ScreenRefusalInput,
   ShapeConvertInput,
+  ShapeStartCountsQuery,
   ShapeDismissInput,
   ShapeAttachmentId,
   ShapeEditInput,
   ShapeFindingId,
+  ShapeAcceptId,
   ShapeId,
   ShapeProposalId,
   ShapeModelInput,
@@ -835,6 +837,9 @@ export function createApp(deps: ApiDeps) {
     .post('/chats/:chatId/unarchive', (c) =>
       c.json(deps.services.unarchiveChat(ChatId.parse(c.req.param('chatId')))),
     )
+    .post('/chats/:chatId/plan', (c) =>
+      c.json(deps.services.showChatPlan(ChatId.parse(c.req.param('chatId')))),
+    )
     .get('/projects/:projectId/chat-models', (c) =>
       c.json(deps.services.chatModels(ProjectId.parse(c.req.param('projectId')))),
     )
@@ -905,6 +910,17 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
+    .get(
+      '/shapes/:shapeId/start-counts',
+      validator('query', (value): ShapeStartCountsQuery => ShapeStartCountsQuery.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.shapeStartCounts(
+            ShapeId.parse(c.req.param('shapeId')),
+            c.req.valid('query').proposalIds,
+          ),
+        ),
+    )
     .post(
       '/shapes/:shapeId/convert',
       validator('json', (value): ShapeConvertInput => ShapeConvertInput.parse(value)),
@@ -938,6 +954,14 @@ export function createApp(deps: ApiDeps) {
       deps.services.removeDraftGoal(GoalId.parse(c.req.param('goalId')));
       return c.body(null, 204);
     })
+    .post('/shapes/:shapeId/accepts/:acceptId/undo', (c) =>
+      c.json(
+        deps.services.undoShapeAccept(
+          ShapeId.parse(c.req.param('shapeId')),
+          ShapeAcceptId.parse(c.req.param('acceptId')),
+        ),
+      ),
+    )
     .post(
       '/shapes/:shapeId/decisions/:decisionId/withdraw',
       validator('json', (value): ShapeWithdrawInput => ShapeWithdrawInput.parse(value)),

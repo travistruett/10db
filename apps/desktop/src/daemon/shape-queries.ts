@@ -3,12 +3,15 @@ import {
   ShapeConvertResult,
   ShapeFileDto,
   ShapeOfDto,
+  ShapeStartCountsDto,
+  ShapeUndoAcceptResult,
   ShapeViewDto,
   type DecisionId,
   type PrincipleId,
   type GoalId,
   type MilestoneCut,
   type ProjectId,
+  type ShapeAcceptId,
   type ShapeFindingId,
   type ShapeId,
   type ShapeProposalId,
@@ -25,6 +28,10 @@ export const shapeKeys = {
   all: ['shapes'],
   list: (projectId: ProjectId) => ['shapes', 'list', projectId] as const,
   view: (shapeId: ShapeId) => ['shapes', 'view', shapeId] as const,
+  /** The prefix of every Accept and Start count, so task and run events refetch them all. */
+  startCountsAll: ['shapes', 'start-counts'],
+  startCounts: (shapeId: ShapeId, proposalIds: readonly ShapeProposalId[]) =>
+    ['shapes', 'start-counts', shapeId, [...proposalIds].sort()] as const,
 } as const;
 
 /** One conversation as the screen renders it: transcript, proposals, the heard echo and the turn. */
@@ -121,12 +128,15 @@ export function useConvertShape(shapeId: ShapeId) {
       readonly proposalIds: readonly ShapeProposalId[];
       /** The builder's cut of a Plan with many milestones. */
       readonly cut?: readonly MilestoneCut[];
+      /** Accept and Start: also starts what is ready. */
+      readonly start?: boolean;
     }): Promise<ConvertShapeResult> => {
       const res = await client.shapes[':shapeId'].convert.$post({
         param: { shapeId },
         json: {
           proposalIds: [...input.proposalIds],
           ...(input.cut === undefined ? {} : { cut: [...input.cut] }),
+          ...(input.start === true ? { start: true } : {}),
         },
       });
       if (res.status === 400) {
@@ -141,6 +151,49 @@ export function useConvertShape(shapeId: ShapeId) {
     },
     // Convert writes goals, tasks and decisions, whose own events refresh the Board and Factory.
     onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
+  });
+}
+
+/**
+ * What Accept and Start would do with the ticked rows, for the confirm. Enabled only while the modal
+ * is in start mode with at least one row; task and run events refetch it (`shapeKeys.startCountsAll`).
+ */
+export function useStartCounts(
+  shapeId: ShapeId,
+  proposalIds: readonly ShapeProposalId[],
+  enabled: boolean,
+) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: shapeKeys.startCounts(shapeId, proposalIds),
+    queryFn: async () =>
+      readJson(
+        await client.shapes[':shapeId']['start-counts'].$get({
+          param: { shapeId },
+          query: { proposalIds: [...proposalIds].sort().join(',') },
+        }),
+        ShapeStartCountsDto,
+      ),
+    enabled: enabled && proposalIds.length > 0,
+  });
+}
+
+/**
+ * Undo Accept: takes back the plan's latest Accept. A refusal (400, 409) rejects with the daemon's words;
+ * settled either way, the view is read again, so "Undo the later Accept first" shows the new latest one.
+ */
+export function useUndoAccept(shapeId: ShapeId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (acceptId: ShapeAcceptId) =>
+      readJson(
+        await client.shapes[':shapeId'].accepts[':acceptId'].undo.$post({
+          param: { shapeId, acceptId },
+        }),
+        ShapeUndoAcceptResult,
+      ),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
   });
 }
 

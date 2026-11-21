@@ -508,17 +508,21 @@ describe('a chat with a plan', () => {
       });
   });
 
-  it('refuses a Plan tool where the chat has no plan', () => {
-    expect(judgeChatCall(mcp('propose_plan'), access)).toEqual({
-      decision: 'deny',
-      reason: 'This session has no Plan.',
-    });
-  });
-
   it('reads its own plan’s folder and no other plan’s', () => {
     const read = (path: string) =>
       judgeChatCall({ toolName: 'Read', input: { file_path: path } }, withPlan()).decision;
     expect(read(join(planFolder(), 'notes.txt'))).toBe('allow');
+    expect(read(join(dir.path, 'shapes', 'shp_other', 'notes.txt'))).toBe('deny');
+  });
+
+  it('reads its plan’s folder where the data directory is protected, and nothing else under it', () => {
+    mkdirSync(join(dir.path, 'accounts'), { recursive: true });
+    writeFileSync(join(dir.path, 'accounts', 'token'), 'x\n');
+    const guarded = (): ShapeAccess => ({ ...withPlan(), protectedReads: [dir.path] });
+    const read = (path: string) =>
+      judgeChatCall({ toolName: 'Read', input: { file_path: path } }, guarded()).decision;
+    expect(read(join(planFolder(), 'notes.txt'))).toBe('allow');
+    expect(read(join(dir.path, 'accounts', 'token'))).toBe('deny');
     expect(read(join(dir.path, 'shapes', 'shp_other', 'notes.txt'))).toBe('deny');
   });
 });

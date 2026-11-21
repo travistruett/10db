@@ -190,6 +190,9 @@ import type {
   ShapeFindingId,
   ShapeJevSettingDto,
   ShapeMeasuresDto,
+  ShapeAcceptId,
+  ShapeUndoAcceptResult,
+  ShapeStartCountsDto,
   ShapeId,
   ShapeMessageDto,
   ShapeOfDto,
@@ -544,6 +547,13 @@ export interface ApiServices extends PlanRecordServices {
   /** The conversation that made a goal or a task, for its drawer's Open conversation; none for work filed by hand. */
   getGoalShape(goalId: GoalId): ShapeOfDto;
   getTaskShape(taskId: TaskId): ShapeOfDto;
+  /**
+   * Undo Accept: takes back the plan's latest Accept. InvalidError (400) for one undone or not the latest;
+   * ConflictError (409), in words, for a task that has a run or a dependent.
+   */
+  undoShapeAccept(shapeId: ShapeId, acceptId: ShapeAcceptId): ShapeUndoAcceptResult;
+  /** What Accept and Start would do with these pending proposals, for the confirm; writes nothing. */
+  shapeStartCounts(shapeId: ShapeId, proposalIds: readonly ShapeProposalId[]): ShapeStartCountsDto;
   /** Withdraw Decision: a decision the conversation wrote; throws ConflictError unless it is the head of its chain. */
   withdrawShapeDecision(shapeId: ShapeId, decisionId: DecisionId, reason: string): void;
   /** Withdraw Principle: a principle the conversation wrote; throws ConflictError once a later principle replaced it. */
@@ -696,6 +706,7 @@ export interface ApiServices extends PlanRecordServices {
     | { readonly archived: false; readonly preview: ArchivePreviewDto }
   >;
   unarchiveChat(id: ChatId): ChatDto;
+  showChatPlan(id: ChatId): ChatDto;
   /** The builder's choice of where a session's work happens; `settled` is false when another choice had won. */
   chooseChatWork(
     id: ChatId,

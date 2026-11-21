@@ -1,4 +1,5 @@
 import { isIP } from 'node:net';
+import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { JudgeKind, ShapeToolName } from '@10db/contracts';
 import { z } from 'zod';
@@ -201,21 +202,38 @@ function judgeProjectTool(call: ShapeCall, access: ShapeAccess): GuardVerdict {
 }
 
 function fileAccessContext(access: ShapeAccess): FileAccessContext {
+  const setupReads = openedReads(access);
   return {
     checkout: access.checkout,
     home: access.home,
     protectedReads: access.protectedReads,
     ...(access.secretFiles === undefined ? {} : { secretFiles: access.secretFiles }),
-    readList:
-      access.planFilesDir === undefined
-        ? [access.filesDir]
-        : [access.filesDir, access.planFilesDir],
+    readList: [access.filesDir],
     // Nothing of Claude Code's is readable: a large result is read back through a narrower search.
     configDir: join(NOWHERE, 'no-claude-config'),
     providerSessionId: null,
     sandboxTemp: { roots: access.sandboxRoots, own: join(NOWHERE, 'no-own-temp-dir') },
-    ...(access.setupReads === undefined ? {} : { setupReads: access.setupReads }),
+    ...(setupReads.length === 0 ? {} : { setupReads }),
   };
+}
+
+/**
+ * The folders opened for reading past the protected paths: the setup's, and the session's plan folder,
+ * which lies under the protected data directory. Only a folder named here is opened; the rest of the
+ * data directory stays protected.
+ */
+function openedReads(access: ShapeAccess): string[] {
+  const reads = [...(access.setupReads ?? [])];
+  if (access.planFilesDir !== undefined) {
+    let real = access.planFilesDir;
+    try {
+      real = realpathSync(access.planFilesDir);
+    } catch {
+      // A folder that is not there yet is named by its own spelling.
+    }
+    reads.push(real);
+  }
+  return reads;
 }
 
 function judgeRead(call: ShapeCall, access: ShapeAccess): GuardVerdict {

@@ -216,6 +216,26 @@ export function useArchiveChat() {
   });
 }
 
+/**
+ * Gives a session its Plan. The returned chat, with its `planId`, is written into the open list at once so
+ * the panel can open on it; the refetch confirms.
+ */
+export function useShowPlan() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (chatId: ChatId) =>
+      readJson(await client.chats[':chatId'].plan.$post({ param: { chatId } }), ChatDto),
+    onSuccess: (chat) => {
+      queryClient.setQueryData<readonly ChatDto[]>(chatKeys.open, (held) =>
+        held?.map((row) => (row.id === chat.id ? chat : row)),
+      );
+      // Not awaited: the cache already holds the plan, so the toggle is done once the answer is in.
+      void queryClient.invalidateQueries({ queryKey: chatKeys.all });
+    },
+  });
+}
+
 /** Brings an archived chat back. */
 export function useUnarchiveChat() {
   const { client } = useDaemon();
