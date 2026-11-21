@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { BriefKey } from './goals';
-import { ShapeAttachmentRevisionId, ShapeId, WorkstreamId } from './ids';
+import { ShapeAttachmentId, ShapeAttachmentRevisionId, ShapeId, WorkstreamId } from './ids';
 
 // A Plan's record: the documents, entries and anchors a planning effort keeps on its Plan, and what a
 // lane's brief carries of it. The bundle that imports a record is in `plan-bundle.ts`.
@@ -277,3 +277,12 @@ export const PlanContext = z.object({
   used: z.int().min(0),
 });
 export type PlanContext = z.infer<typeof PlanContext>;
+
+/** A mock-up the builder approved as a task's design target, as its lane's brief and drawer carry it. */
+export const ApprovedMockup = z.object({
+  id: ShapeAttachmentId,
+  /** The task or goal key it was drawn for. */
+  key: z.string(),
+  html: z.string(),
+});
+export type ApprovedMockup = z.infer<typeof ApprovedMockup>;

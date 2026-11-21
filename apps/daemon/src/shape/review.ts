@@ -122,6 +122,23 @@ export function rehearsalTasks(db: DbReader, shapeId: ShapeId): RehearsalTask[] 
   });
 }
 
+/** The goals and loose tasks a plan review reads, narrowed to some proposals when the builder chose them. */
+export function reviewEfforts(
+  db: DbReader,
+  shapeId: ShapeId,
+  proposalIds?: readonly ShapeProposalId[],
+): { readonly effortKey: string; readonly title: string }[] {
+  return efforts(db, shapeId)
+    .filter((row) => proposalIds === undefined || proposalIds.includes(row.id))
+    .map((row) => ({
+      effortKey: row.key,
+      title:
+        row.kind === ShapeProposalKind.Goal
+          ? ShapeProposalBody.goal.parse(row.body).objective
+          : ShapeProposalBody.task.parse(row.body).title,
+    }));
+}
+
 /** The tasks with no mark at their current hash; narrowed to some proposals when the builder chose them. */
 export function unrehearsedTasks(
   db: DbReader,

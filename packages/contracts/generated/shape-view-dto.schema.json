@@ -3004,6 +3004,9 @@
                 ]
               }
             ]
+          },
+          "approved": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -3011,7 +3014,8 @@
           "key",
           "goalId",
           "taskId",
-          "attachment"
+          "attachment",
+          "approved"
         ]
       }
     },

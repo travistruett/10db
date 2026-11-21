@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import type { SessionId, ShapeId } from '@10db/contracts';
+import type { ConversationItemId, SessionId, ShapeId } from '@10db/contracts';
 import {
   ChatToolName,
   FolderAsker,
@@ -12,6 +12,7 @@ import {
   ConversationItemAuthor,
   ConversationItemKind,
   DeniedBy,
+  ShapeEventKind,
   parseItemBody,
   InvalidError,
   Provider,
@@ -30,6 +31,7 @@ import {
   getChat,
   getConversation,
   getProject,
+  getItem,
   insertItem,
   listFiles,
   listItemFiles,
@@ -62,6 +64,9 @@ import type { ExploreProfile, ShapeToolRequest } from '../sessions';
 import {
   owedPlanningRules,
   PLANNING_STUB,
+  ReviewTurnKind,
+  reviewsAfterTurnEnd,
+  type ShapeReviewTurn,
   type PlanParts,
   type ShapeAccess,
   type ShapeLaunch,
@@ -219,9 +224,37 @@ function messageText(message: DeliverableMessage, blocks: ReadonlySet<string>): 
   return [`[m:${message.id}] ${message.body}`, ...paths].join('\n');
 }
 
-function deliverable(state: StateStore, item: ConversationItemRow): DeliverableMessage {
+/** The review a turn starter asks for, or null when it asks for none: a Plan review or Check for Questions press. */
+function reviewOf(
+  item: ConversationItemRow,
+): { kind: ReviewTurnKind; ask: string; inSession: string } | null {
+  if (item.kind !== ConversationItemKind.ShapeEvent) return null;
+  const body = parseItemBody(item.kind, item.body);
+  const kind =
+    body.kind === ShapeEventKind.Review
+      ? ReviewTurnKind.PlanReview
+      : body.kind === ShapeEventKind.Rehearse
+        ? ReviewTurnKind.CheckForQuestions
+        : null;
+  if (kind === null || body.prompt === undefined) return null;
+  return { kind, ask: body.prompt, inSession: body.promptInSession ?? body.prompt };
+}
+
+/** A builder's message, or the ask of a review press, which reaches the session as one. */
+function deliverable(
+  state: StateStore,
+  item: ConversationItemRow,
+  inSession: boolean,
+): DeliverableMessage {
+  const review = reviewOf(item);
   const body =
-    item.kind === ConversationItemKind.Message ? parseItemBody(item.kind, item.body).text : '';
+    review !== null
+      ? inSession
+        ? review.inSession
+        : review.ask
+      : item.kind === ConversationItemKind.Message
+        ? parseItemBody(item.kind, item.body).text
+        : '';
   return {
     id: item.id,
     body,
@@ -254,6 +287,16 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
   };
   /** The plan of a conversation's chat, or null. */
   const planOf = (conv: ConversationRow): ShapeId | null => planOfConversation(state.db, conv.id);
+  /** Whether the conversation's agent runs Plan's subagents on the account and model it runs on now. */
+  const subagentsKnown = (conv: ConversationRow): boolean => {
+    try {
+      const launch = deps.launch(conv.projectId, conv.model, conv.effort);
+      return deps.subagentsOf(launch.account.kind, launch.modelId);
+    } catch {
+      // A launch that can't be read reads as the agent form: the session's own start settles the rest.
+      return true;
+    }
+  };
   const describe = (conv: ConversationRow, model: string | null) => {
     const launch = deps.launch(conv.projectId, model, conv.effort);
     const name = storedModelNames(state.db).find((m) => m.id === launch.modelId)?.name;
@@ -287,6 +330,19 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
   const owedRules = new Map<
     ConversationId,
     { readonly sessionId: SessionId; peek(): string | null; take(): string | null }
+  >();
+  // Each conversation's open session: whether it runs no subagents, so does Plan's reviews itself, and the
+  // reviews it has been sent that are still live (by the starter's id). A review is live from its send until a
+  // turn that took it ends: it was a starter of the turn, or was delivered (an item injected into a running
+  // turn is no starter of it, and one handed to the next turn is not delivered yet). A session with no
+  // subagents may report a finding only while one is live.
+  const reviewing = new Map<
+    ConversationId,
+    {
+      readonly sessionId: SessionId;
+      readonly inSession: boolean;
+      readonly live: Map<ConversationItemId, { kind: ReviewTurnKind }>;
+    }
   >();
   // Each chat's release of Your folder that waits for its jobs to stop. The chat's next turn cancels it: the
   // hold stays with the chat, and what is stopped meanwhile is the turn's before.
@@ -490,11 +546,17 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               },
             }
           : null;
+      const liveReviews = new Map<ConversationItemId, { kind: ReviewTurnKind }>();
+      const reviewTurns = (): readonly ShapeReviewTurn[] =>
+        [...liveReviews].map(([id, r]) => ({ id, kind: r.kind }));
+      let noSubagents = false;
       deps.live.open(conv.id, {
         sessionId: start.sessionId,
         observer: start.observer,
         signal: ending.signal,
         planRules,
+        review: reviewTurns,
+        inSession: () => noSubagents,
       });
       holdingSession.set(chat.id, start.sessionId);
       const endJobs = ready === null ? undefined : () => ready.endJobs();
@@ -508,6 +570,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
           if (sessionClosers.get(conv.id) === release) sessionClosers.delete(conv.id);
           if (holdingSession.get(chat.id) === start.sessionId) holdingSession.delete(chat.id);
           if (owedRules.get(conv.id)?.sessionId === start.sessionId) owedRules.delete(conv.id);
+          if (reviewing.get(conv.id)?.sessionId === start.sessionId) reviewing.delete(conv.id);
           deps.live.end(conv.id, start.sessionId);
           try {
             await ready?.release();
@@ -564,6 +627,12 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         deps.webSearchOf(launch.account.kind, launch.modelId) &&
         (providerOf(launch.account.kind) === Provider.Claude || switches.web);
       const subagents = deps.subagentsOf(launch.account.kind, launch.modelId);
+      noSubagents = !subagents;
+      reviewing.set(conv.id, {
+        sessionId: start.sessionId,
+        inSession: noSubagents,
+        live: liveReviews,
+      });
       // The web the session has: the chat's confinement refuses Claude's web tools on any judge but auto
       // mode's, while Codex's own search needs no tool call and runs under the Web switch.
       const web =
@@ -661,6 +730,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
                 judge: judgeForCall(judge, req.reportedMode ?? null, tendbReady),
               },
               folder,
+              reviewTurns,
             );
             return readsNow()?.preToolUse(req, verdict) ?? verdict;
           },
@@ -700,6 +770,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
                         chatCallOf(req),
                         { ...access, judge: JudgeKind.Rules },
                         folder,
+                        reviewTurns,
                       );
                       // A rewrite of the call is the guard's; its decision is what the floor gives.
                       return 'updatedInput' in floor ? { decision: 'allow' } : floor;
@@ -777,8 +848,10 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         : shapeId !== null && deps.plan !== undefined
           ? deps.plan.inlineSpent(shapeId, session.limits)
           : heldInlineBytes(listFiles(state.db, conv.id), session.limits);
+      const review = reviewOf(item);
+      const inSession = reviewing.get(conv.id)?.inSession ?? !subagentsKnown(conv);
       const out = outgoingMessage(
-        deliverable(state, item),
+        deliverable(state, item, inSession),
         spent,
         session.limits,
         false,
@@ -787,6 +860,12 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       );
       if (shapeId === null || deps.plan === undefined)
         return { text: out.text, images: out.images, blocks: out.blocks, sent: () => undefined };
+      // A review the session does itself is its review turn from the send until the turn ends.
+      const startReview = (): void => {
+        const open = reviewing.get(conv.id);
+        if (review !== null && open?.inSession === true)
+          open.live.set(item.id, { kind: review.kind });
+      };
       // The plan's lines go ahead of the message, and its pictures join the message's under the one budget.
       const sentAsBlocks = new Set<string>(out.blocks);
       const carrying = listFiles(state.db, conv.id)
@@ -813,11 +892,22 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
         sent: (ctx) => {
           intake.sent(ctx);
           owing?.take();
+          startReview();
         },
       };
     },
 
     onTurnEnded(conv, end) {
+      const open = reviewing.get(conv.id);
+      if (open !== undefined) {
+        const kept = reviewsAfterTurnEnd(
+          [...open.live].map(([id, r]) => ({ id, kind: r.kind })),
+          end.starters,
+          (id) => getItem(state.db, id).deliveredAt !== null,
+        );
+        for (const id of [...open.live.keys()])
+          if (!kept.some((r) => r.id === id)) open.live.delete(id);
+      }
       const chat = chatOf(conv);
       state.write((ctx) => {
         touchChat(ctx, chat.id, deps.now().toISOString());

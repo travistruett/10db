@@ -16,6 +16,7 @@ import {
 } from '../guard';
 import { readAccess, readPathsOf, type FileAccessContext } from '../sandbox';
 import type { ShapeVerdict } from '../sessions';
+import type { ShapeReviewTurn } from './review-turn';
 
 // Shape spec §5.2. A Shape session's file tools read the project's checkout and its conversation's
 // dropped files, and nothing else; this judge refuses the rest with no card. In its read-only lane
@@ -403,14 +404,25 @@ function judgeWeb(call: ShapeCall, judge: JudgeKind | undefined): GuardVerdict {
   return problem === null ? ALLOW : deny(problem);
 }
 
-/** A Plan tool call from a chat's session: allowed, refused, or report_finding with `reviewer` stamped. */
-export function judgePlanTool(call: ShapeCall): ShapeVerdict {
+/**
+ * A Plan tool call from a chat's session: allowed, refused, or report_finding with `reviewer` stamped.
+ * `review` reads the review turn the session is in, which only a session that runs no subagents has: its
+ * own report_finding is allowed during that turn and the handler stamps it from the review. A subagent's
+ * is judged as ever, whatever turn is live.
+ */
+export function judgePlanTool(
+  call: ShapeCall,
+  review?: () => readonly ShapeReviewTurn[],
+): ShapeVerdict {
   const name = call.toolName.slice(MCP_PREFIX.length);
   if (!SHAPE_TOOLS.has(name)) return deny(`${call.toolName} is not a Shape tool.`);
   const isReviewer = call.agentId !== undefined;
   if (name !== REVIEWER_TOOL)
     return isReviewer ? deny(`A reviewer cannot call ${name}; it reports findings only.`) : ALLOW;
-  if (!isReviewer) return deny('Only a reviewer reports a finding; the main session cannot.');
+  if (!isReviewer)
+    return (review?.().length ?? 0) === 0
+      ? deny('Only a reviewer reports a finding; the main session cannot, outside a review turn.')
+      : ALLOW;
   const reviewer = call.agentType;
   if (reviewer === undefined || !(PLAN_REVIEWERS as readonly string[]).includes(reviewer))
     return deny(`Only a ${PLAN_REVIEWERS.join(', ')} reviewer reports a finding.`);

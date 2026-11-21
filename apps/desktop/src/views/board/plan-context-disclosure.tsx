@@ -4,6 +4,7 @@ import { useDisclosure } from '@mantine/hooks';
 import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { useId } from 'react';
 import { useTaskPlanContext } from '../../daemon/plan-record-queries';
+import { AttachmentView } from '../sessions/plan/attachments/attachment-view';
 import { AnchorBadge } from '../sessions/plan/record/anchor-badge';
 import { resultStatus } from '../sessions/plan/record/anchor-status';
 
@@ -16,7 +17,7 @@ export function PlanContextDisclosure({ taskId }: { readonly taskId: TaskId }) {
   const [opened, { toggle }] = useDisclosure(false);
   const bodyId = useId();
   const context = answer?.context ?? null;
-  if (answer === undefined || context === null) return null;
+  if (answer === undefined || (context === null && answer.mockups.length === 0)) return null;
   const Chevron = opened ? IconChevronDown : IconChevronRight;
   return (
     <Stack gap={4}>
@@ -28,12 +29,25 @@ export function PlanContextDisclosure({ taskId }: { readonly taskId: TaskId }) {
       >
         <Group gap={4} wrap="nowrap">
           <Chevron size={14} stroke={1.5} aria-hidden="true" />
-          <Text size="sm">{`Plan context · ${context.ref} · revision ${String(context.revision)}`}</Text>
+          <Text size="sm">
+            {context === null
+              ? 'Plan context · approved mock-ups'
+              : `Plan context · ${context.ref} · revision ${String(context.revision)}`}
+          </Text>
         </Group>
       </UnstyledButton>
       <Collapse expanded={opened} id={bodyId}>
         <Stack gap="xs">
-          {answer.packed === null ? (
+          {answer.mockups.map((m) => (
+            <Stack key={m.id} gap={4}>
+              <Text size="xs" c="dimmed">{`Approved mock-up · ${m.key}`}</Text>
+              <AttachmentView
+                attachment={{ kind: 'mockup', html: m.html }}
+                title={`Approved mock-up ${m.key}`}
+              />
+            </Stack>
+          ))}
+          {context === null ? null : answer.packed === null ? (
             <Text size="sm" c="dimmed">
               Not sent yet
             </Text>

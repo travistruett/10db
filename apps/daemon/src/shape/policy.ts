@@ -280,7 +280,8 @@ Be brief. Name files and paths when you cite the code.`;
 
 /**
  * What a rehearsal turn is told (§7). The daemon can't launch a subagent itself, so it injects a note,
- * as Propose does, listing each task with the hash it read, and asks for one `Agent` call per task.
+ * as Propose does, listing each task with the hash it read, and asks for one `Agent` call per task. A
+ * session that runs no subagents (`inSession`) reads each task itself, one after another, and says so.
  */
 export function rehearseNote(
   tasks: readonly {
@@ -289,7 +290,7 @@ export function rehearseNote(
     readonly hash: string;
     readonly text: string;
   }[],
-): { readonly note: string; readonly instruction: string } {
+): { readonly note: string; readonly instruction: string; readonly inSession: string } {
   const count = `${String(tasks.length)} ${tasks.length === 1 ? 'task' : 'tasks'}`;
   const listed = tasks
     .map(
@@ -303,5 +304,23 @@ export function rehearseNote(
   return {
     note: `Rehearsing ${count}`,
     instruction: `Rehearse: read these ${count} as their implementer. Make one Agent call per task, subagent_type "tendb-rehearsal", giving each the effortKey, the taskKey, the taskHash exactly as listed and the task in full. Launch them together and propose nothing.\n\n${listed}`,
+    inSession: `Check for Questions: you have no separate reviewers here, so read these ${count} yourself, one after another, each as the implementer who will be handed it and has read nothing else. Read the code it touches, then report with report_finding: effortKey, taskKey and taskHash exactly as listed, finding { kind: "question", text } for each question you would have to ask before starting, the last with final: true, or one call with finding { kind: "none" } when you have none. A task with no closing report counts as not rehearsed. Say in one line that you ran without separate reviewers. Propose nothing.\n\n${listed}`,
+  };
+}
+
+/**
+ * What a plan review turn is told: the goals and loose tasks to review, each with its spec's key. Claude
+ * launches the scope and engineering reviewers on each; a session with no subagents (`inSession`) reads
+ * each through both lenses itself and says so.
+ */
+export function reviewNote(
+  efforts: readonly { readonly effortKey: string; readonly title: string }[],
+): { readonly note: string; readonly instruction: string; readonly inSession: string } {
+  const count = `${String(efforts.length)} ${efforts.length === 1 ? 'goal or task' : 'goals and tasks'}`;
+  const listed = efforts.map((e) => `- effortKey ${e.effortKey} · ${e.title}`).join('\n');
+  return {
+    note: `Reviewing ${count}`,
+    instruction: `Plan review: review these ${count}. For each, write its spec with write_spec (effortKey, markdown) if it has none yet, then launch the reviewers in the same turn with two Agent calls, subagent_type "tendb-scope" and "tendb-engineering", giving each the effortKey, the spec and the tasks. Each ends by listing its findings with their findingIds. Propose nothing; the builder decides what to change.\n\n${listed}`,
+    inSession: `Plan review: you have no separate reviewers here, so review these ${count} yourself. For each, write its spec with write_spec (effortKey, markdown) if it has none yet, read the code it touches, then read it twice: for SCOPE (work no task covers, tasks that serve nothing, criteria nobody could check, a task too big for one pull request) and for ENGINEERING (files, contracts, migrations, tests and risks it gets wrong or leaves out). Report each finding with report_finding: effortKey, reviewer "scope" or "engineering" for the reading it came from, finding { kind: "finding", severity, text }. Say in one line that you ran without separate reviewers. Propose nothing; the builder decides what to change.\n\n${listed}`,
   };
 }

@@ -240,6 +240,8 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     getSmallProposalLimit: track('getSmallProposalLimit'),
     setSmallProposalLimit: track('setSmallProposalLimit'),
     rehearseShape: track('rehearseShape'),
+    reviewShape: track('reviewShape'),
+    approveShapeAttachment: track('approveShapeAttachment'),
     dismissShapeFinding: track('dismissShapeFinding'),
     listKnowledge: track('listKnowledge'),
     recordDecision: track('recordDecision'),

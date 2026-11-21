@@ -107,3 +107,7 @@ these stores. Add a line here when a migration adds or changes a store.
   names are taken, and `searchChats` pages a title search by `last_activity_at` then id. `takenOverChats` leaves out
   a branch session that has a worktree, whose terminal holds nothing. Its generated name, `sloppy_skrulls`, stays.
 - `rigorFigures` (`store/rigor-figures.ts`) computes, with nothing stored, what each rigor's tasks that became done in a period took: a task is in the window by its last `task.changed` to `done` (its `updated_at` when none was logged) and a task still in a Workbench pass is left out (one taken out runs as an ordinary task); a step counts when `startedAt` is set, send-backs are the `step.changed` events whose `sentBackBy` is not `builder`, pull requests are distinct batch PR URLs, and the judge-override share reads the project's answered (acted or overridden) `task_rigor` rows in `judge_calls` through `task_id`. `humanTouchDays` counts every `InboxKind` through one `Record<InboxKind, number>`, so a new kind fails typecheck until it has a column.
+- Plan in sessions, migration 0100 (generated): `shape_attachments.approved_at` (null, or when the builder approved a
+  mock-up as the design target). `setShapeAttachmentApproved` sets or clears it on a mock-up of the plan and announces
+  the change; `listApprovedMockupsOfTask` reads a task's approved mock-ups (the attachments Convert linked to it,
+  `kind` `mockup`, oldest first), which its lane's brief and its drawer's Plan context carry.

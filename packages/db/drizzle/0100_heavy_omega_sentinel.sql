@@ -1,0 +1,1 @@
+ALTER TABLE `shape_attachments` ADD `approved_at` text;

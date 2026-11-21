@@ -3,6 +3,7 @@ import {
   ShapeMessageAuthor,
   ShapeMessageKind,
   ShapeOrigin,
+  ShapeToolInputs,
   type ChatId,
   type ConversationId,
   type PlanDraft,
@@ -23,6 +24,7 @@ import type { ShapeToolHandlers } from '../mcp';
 import type { ScreenService } from '../screens';
 import { attach } from './attach';
 import { reconcileDraft } from './rounds';
+import { stampReview, type ShapeReviewTurn } from './review-turn';
 import { reportFinding, resolveFinding, writeSpec } from './review';
 import { buildSizes } from './sizing';
 import { ceremonies, type ViewWorld } from './view';
@@ -42,6 +44,13 @@ export interface ShapeToolDeps {
   };
   /** Takes the planning rules the calling session is owed, once (`ChatLive.planRules`). */
   readonly owedRules?: (conversationId: ConversationId, sessionId: SessionId) => string | null;
+  /** Whether the calling session runs no subagents (`ChatLive.inSession`). */
+  readonly noSubagents?: (conversationId: ConversationId, sessionId: SessionId) => boolean;
+  /** The reviews the calling session has been sent (`ChatLive.review`): its own findings are stamped from it. */
+  readonly reviewOf?: (
+    conversationId: ConversationId,
+    sessionId: SessionId,
+  ) => readonly ShapeReviewTurn[];
 }
 
 /** The chat a handler set serves: the session's tools are held to it. */
@@ -168,8 +177,24 @@ export function createShapeToolHandlers(
       withPlan((shapeId) => deps.state.write((ctx) => attach(ctx, shapeId, input))),
     write_spec: (input) =>
       withPlan((shapeId) => deps.state.write((ctx) => writeSpec(ctx, shapeId, input))),
-    report_finding: (input) =>
-      withPlan((shapeId) => deps.state.write((ctx) => reportFinding(ctx, shapeId, input))),
+    report_finding: (input) => {
+      // A session in a review turn reports as that review; the model's own `reviewer` is only the lens a
+      // plan review reads through. A reviewer subagent's call arrives stamped by the hook, outside any turn.
+      const reviews = deps.reviewOf?.(chat.conversationId, chat.sessionId) ?? [];
+      // A session with no subagents reports only as its live review. One with none left (Stop raced the
+      // hook) is refused, never written unstamped. A reviewer subagent's call arrives stamped.
+      if (deps.noSubagents?.(chat.conversationId, chat.sessionId) === true && reviews.length === 0)
+        return Promise.reject(
+          new InvalidError(
+            'Only a reviewer reports a finding; this session has no review turn running.',
+          ),
+        );
+      const stamped =
+        reviews.length === 0
+          ? input
+          : ShapeToolInputs.report_finding.parse(stampReview(reviews, input));
+      return withPlan((shapeId) => deps.state.write((ctx) => reportFinding(ctx, shapeId, stamped)));
+    },
     resolve_finding: (input) =>
       withPlan((shapeId) => deps.state.write((ctx) => resolveFinding(ctx, shapeId, input))),
     propose_plan: (input) => {

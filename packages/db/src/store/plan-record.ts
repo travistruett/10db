@@ -246,6 +246,7 @@ export function insertDocumentAttachment(
     ...input,
     goalId: null,
     taskId: null,
+    approvedAt: null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };

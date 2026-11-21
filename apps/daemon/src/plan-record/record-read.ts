@@ -40,6 +40,7 @@ import {
   type ShapeAttachmentRow,
   type ShapeProposalRow,
 } from '@10db/db';
+import { approvedMockupsOf } from './approved-mockups';
 import { anchorCheckDto } from './check-dto';
 
 // What the Record view reads of a Plan. Every list is filtered, sorted and paged here, never in the
@@ -475,5 +476,6 @@ export function readTaskPlanContext(db: DbReader, taskId: TaskId): TaskPlanConte
     },
     packed,
     checks: pin === null ? [] : currentChecks(db, pin.shapeId, taskId),
+    mockups: approvedMockupsOf(db, taskId),
   };
 }

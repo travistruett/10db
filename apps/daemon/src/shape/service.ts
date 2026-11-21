@@ -25,6 +25,7 @@ import {
   type ShapeFileDto,
   type ShapeFindingId,
   type ShapeAcceptId,
+  type ShapeAttachmentId,
   type ShapeId,
   type ShapeMessageDto,
   type ShapeModelsDto,
@@ -54,6 +55,7 @@ import {
   listShapes,
   patchShape,
   setOneWayPaths as setOneWayPathsRow,
+  setShapeAttachmentApproved,
   settleOpenQuestionsOfTask,
   shapeConversation,
   type WriteContext,
@@ -83,8 +85,13 @@ import { checkDroppedFile, storeFile } from './dropped-files';
 import { dropNote, editNote, restoreNote, rowLabel, unpinNote } from './edit-notes';
 import { createPlanParts, type PlanParts, type PlanTurnState } from './plan-parts';
 import type { ShapeJev } from './jev';
-import { rehearseNote } from './policy';
-import { dismissFinding as dismissRow, editedTaskKeys, unrehearsedTasks } from './review';
+import { rehearseNote, reviewNote } from './policy';
+import {
+  dismissFinding as dismissRow,
+  editedTaskKeys,
+  reviewEfforts,
+  unrehearsedTasks,
+} from './review';
 import {
   dropProposal as dropRow,
   editProposal as editRow,
@@ -120,6 +127,15 @@ export interface ShapeServiceDeps {
   readonly log: Logger;
   /** Takes the planning rules a chat's session is owed, once; see `ShapeToolDeps.owedRules`. */
   readonly owedRules?: ShapeToolDeps['owedRules'];
+  /** The review turn a chat's session is in; see `ShapeToolDeps.reviewOf`. */
+  readonly reviewOf?: ShapeToolDeps['reviewOf'];
+  /** Whether a chat's session runs no subagents; see `ShapeToolDeps.noSubagents`. */
+  readonly noSubagents?: ShapeToolDeps['noSubagents'];
+  /**
+   * The conversation's open session, when it does Plan's reviews itself: whether it has one live. Null
+   * for a session with subagents or none open.
+   */
+  readonly reviewBusy?: (conversationId: ConversationId) => boolean | null;
   /**
    * Resolves a project's launch, on `model` (an ID the account lists) or, with null, on the `plan`
    * role's, at the conversation's own `effort` or, with null, the role's; throws when its account can't
@@ -189,6 +205,17 @@ export interface ShapeService {
     shapeId: ShapeId,
     proposalIds?: readonly ShapeProposalId[],
   ): { status: 'started' | 'running' | 'nothing'; tasks: number };
+  /**
+   * Plan review: queues a turn in which the session has each goal and loose task (`proposalIds` when
+   * given, else every pending one) reviewed for scope and engineering, by the reviewers where it has
+   * them and itself where it has none. `running` when a review turn is already queued or running.
+   */
+  review(
+    shapeId: ShapeId,
+    proposalIds?: readonly ShapeProposalId[],
+  ): { status: 'started' | 'running' | 'nothing'; tasks: number };
+  /** Approves a mock-up as the design target, or takes the approval back; a note tells the session. */
+  approveAttachment(shapeId: ShapeId, attachmentId: ShapeAttachmentId, approved: boolean): void;
   /**
    * Reopens a conversation with an event as a note (spec §12): the note is a transcript row a
    * proposal may cite, and with each converted row's current state it reaches the next turn. Starts no
@@ -309,6 +336,19 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       const shapeId = planOfConversation(state.db, c.id);
       return shapeId === null ? [] : [{ conversation: c, shapeId }];
     });
+  /**
+   * A session that does Plan's reviews itself takes one at a time: a press of either kind is refused while
+   * another review press waits or its turn runs, so two reviews never share a turn there.
+   */
+  const reviewInSessionBusy = (shapeId: ShapeId): boolean => {
+    const busy = deps.reviewBusy?.(conversationOf(shapeId)) ?? null;
+    return (
+      busy !== null &&
+      (busy ||
+        pressPending(shapeId, ShapeEventKind.Review) ||
+        pressPending(shapeId, ShapeEventKind.Rehearse))
+    );
+  };
   /** A press of `kind` waits or runs: queued, or handed to a session and not taken yet. */
   const pressPending = (shapeId: ShapeId, kind: ShapeEventKind): boolean => {
     const conversation = conversationOf(shapeId);
@@ -402,6 +442,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
             }),
         world: worldOfShape,
         ...(deps.owedRules === undefined ? {} : { owedRules: deps.owedRules }),
+        ...(deps.reviewOf === undefined ? {} : { reviewOf: deps.reviewOf }),
+        ...(deps.noSubagents === undefined ? {} : { noSubagents: deps.noSubagents }),
       },
       chat,
     );
@@ -545,9 +587,9 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     rehearse(shapeId, proposalIds) {
       const tasks = unrehearsedTasks(state.db, shapeId, proposalIds);
       if (tasks.length === 0) return { status: 'nothing', tasks: 0 };
-      if (pressPending(shapeId, ShapeEventKind.Rehearse))
+      if (pressPending(shapeId, ShapeEventKind.Rehearse) || reviewInSessionBusy(shapeId))
         return { status: 'running', tasks: tasks.length };
-      const { note, instruction } = rehearseNote(tasks);
+      const { note, instruction, inSession } = rehearseNote(tasks);
       // The note is a row in the transcript, and the turn lists each task at the hash it was read at.
       state.write((ctx) =>
         insertShapeMessage(ctx, shapeId, {
@@ -555,11 +597,42 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           kind: ShapeMessageKind.Rehearse,
           body: note,
           prompt: instruction,
+          promptInSession: inSession,
           rehearsing: tasks.map((t) => ({ taskKey: t.taskKey, hash: t.hash })),
         }),
       );
       engine.queued(conversationOf(shapeId));
       return { status: 'started', tasks: tasks.length };
+    },
+
+    review(shapeId, proposalIds) {
+      const rows = reviewEfforts(state.db, shapeId, proposalIds);
+      if (rows.length === 0) return { status: 'nothing', tasks: 0 };
+      if (pressPending(shapeId, ShapeEventKind.Review) || reviewInSessionBusy(shapeId))
+        return { status: 'running', tasks: rows.length };
+      const { note, instruction, inSession } = reviewNote(rows);
+      state.write((ctx) =>
+        insertShapeMessage(ctx, shapeId, {
+          author: ShapeMessageAuthor.Note,
+          kind: ShapeMessageKind.Review,
+          body: note,
+          prompt: instruction,
+          promptInSession: inSession,
+        }),
+      );
+      engine.queued(conversationOf(shapeId));
+      return { status: 'started', tasks: rows.length };
+    },
+
+    approveAttachment(shapeId, attachmentId, approved) {
+      state.write((ctx) => {
+        setShapeAttachmentApproved(ctx, shapeId, attachmentId, approved);
+      });
+      turnOf(shapeId).notes.push(
+        approved
+          ? 'The builder approved a mock-up as the design target.'
+          : 'The builder took back the approval of a mock-up.',
+      );
     },
 
     resume(shapeId, event) {

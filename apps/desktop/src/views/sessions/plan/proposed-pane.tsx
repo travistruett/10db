@@ -14,7 +14,12 @@ import {
 import { IconChevronDown, IconX } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { useConvertShape, useDismissFinding, useRowChange } from '../../../daemon/shape-queries';
+import {
+  useConvertShape,
+  useDismissFinding,
+  useReviewShape,
+  useRowChange,
+} from '../../../daemon/shape-queries';
 import { shortAgo } from '../../factory/short-ago';
 import { useNow } from '../../../shell/relative';
 import { ConvertModal, convertibleRows } from './convert-modal';
@@ -86,6 +91,10 @@ export function ProposedPane({
   const rows = convertibleRows(view?.proposals ?? []);
   const hasProposals = (view?.proposals.length ?? 0) > 0;
   const dismiss = useDismissFinding(view?.shape.id ?? null);
+  const review = useReviewShape(view?.shape.id ?? null);
+  // "Is running" is true only while a turn runs or waits; it goes when the review's turn ends.
+  const turning = view !== undefined && (view.turn.running || view.turn.queued > 0);
+  const reviewLine = review.isError ? review.error.message : reviewWords(review.data, turning);
   const handlers: RowHandlers = {
     onChange: (row, action) => {
       change.mutate({ id: row.id, action });
@@ -193,6 +202,35 @@ export function ProposedPane({
               : `Plan · round ${String(view.shape.round)} · updated ${shortAgo(view.shape.updatedAt, now)}`}
           </Text>
           <Group gap="xs" wrap="nowrap">
+            <Menu position="bottom-end" withinPortal>
+              <Menu.Target>
+                <Button
+                  variant="default"
+                  size="xs"
+                  rightSection={<IconChevronDown size={14} stroke={1.5} />}
+                  loading={review.isPending}
+                  disabled={view === undefined || rows.length === 0}
+                >
+                  Review
+                </Button>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item
+                  onClick={() => {
+                    review.mutate('review');
+                  }}
+                >
+                  Plan review
+                </Menu.Item>
+                <Menu.Item
+                  onClick={() => {
+                    review.mutate('rehearse');
+                  }}
+                >
+                  Check for Questions
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
             <Button.Group>
               <Button
                 variant="default"
@@ -241,6 +279,11 @@ export function ProposedPane({
             )}
           </Group>
         </Group>
+        {reviewLine === '' ? null : (
+          <Text size="xs" c="dimmed" role="status" aria-label="Review">
+            {reviewLine}
+          </Text>
+        )}
         {summaryHere ? (
           <SummaryLine groups={groupProposals(view?.proposals ?? [])} onJump={jump} />
         ) : null}
@@ -285,7 +328,7 @@ export function ProposedPane({
               <Skeleton height={14} width="80%" />
             </Stack>
           ) : view !== undefined && hasProposals ? (
-            <AttachmentsContext value={view.attachments}>
+            <AttachmentsContext value={{ shapeId: view.shape.id, attachments: view.attachments }}>
               <ProposedList
                 projectId={view.shape.projectId}
                 groups={groups}
@@ -382,4 +425,20 @@ function ConvertPanel({
       }}
     />
   );
+}
+
+/** What a review press came to, in words. */
+function reviewWords(
+  answer:
+    | { readonly kind: 'review' | 'rehearse'; readonly result: { status: string; tasks: number } }
+    | undefined,
+  turning: boolean,
+): string {
+  if (answer === undefined) return '';
+  const what = answer.kind === 'review' ? 'Plan review' : 'Check for Questions';
+  if (answer.result.status === 'started') return turning ? `${what} is running.` : '';
+  // A refused press always says why, whether or not a turn shows.
+  if (answer.result.status === 'running')
+    return 'A review is already running; press again when it ends.';
+  return answer.kind === 'review' ? 'Nothing to review.' : 'Every task has been checked.';
 }

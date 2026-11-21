@@ -1,12 +1,17 @@
-import type { ShapeAttachmentDto, ShapeProposalDto } from '@10db/contracts';
-import { Stack, Text } from '@mantine/core';
+import type { ShapeAttachmentDto, ShapeId, ShapeProposalDto } from '@10db/contracts';
+import { Button, Group, Stack, Text } from '@mantine/core';
 import { createContext, use } from 'react';
+import { useApproveAttachment } from '../../../../daemon/shape-queries';
 import { AttachmentView } from './attachment-view';
 
 // Shape spec §10.3: an opened row shows what the session attached to it, each rendered inert. The
 // sidebar provides the view's attachments once, so the rows between don't pass them along.
 
-export const AttachmentsContext = createContext<readonly ShapeAttachmentDto[]>([]);
+/** The plan's attachments, and the plan they belong to (an approval is written against it). */
+export const AttachmentsContext = createContext<{
+  readonly shapeId: ShapeId | null;
+  readonly attachments: readonly ShapeAttachmentDto[];
+}>({ shapeId: null, attachments: [] });
 
 const KIND_LABEL = { mermaid: 'Diagram', chart: 'Chart', mockup: 'Mockup' } as const;
 
@@ -34,18 +39,54 @@ export function RowAttachments({
   readonly row: ShapeProposalDto;
   readonly title: string;
 }) {
-  const mine = attachmentsOf(row, use(AttachmentsContext));
-  if (mine.length === 0) return null;
+  const { shapeId, attachments } = use(AttachmentsContext);
+  const mine = attachmentsOf(row, attachments);
+  if (mine.length === 0 || shapeId === null) return null;
   return (
     <Stack gap="xs" pt="xs">
       {mine.map((a) => (
         <Stack key={a.id} gap={4}>
-          <Text size="xs" c="dimmed">
-            {KIND_LABEL[a.attachment.kind]}
-          </Text>
+          <Group gap="xs">
+            <Text size="xs" c="dimmed">
+              {KIND_LABEL[a.attachment.kind]}
+              {a.approved ? ' · approved' : ''}
+            </Text>
+            {a.attachment.kind === 'mockup' &&
+            a.goalId === null &&
+            !(row.kind === 'goal' && a.key === row.key) ? (
+              <ApproveButton shapeId={shapeId} attachment={a} title={title} />
+            ) : null}
+          </Group>
           <AttachmentView attachment={a.attachment} title={title} />
         </Stack>
       ))}
     </Stack>
+  );
+}
+
+/** Approves a mock-up as the design target, or takes the approval back. */
+function ApproveButton({
+  shapeId,
+  attachment,
+  title,
+}: {
+  readonly shapeId: ShapeId;
+  readonly attachment: ShapeAttachmentDto;
+  readonly title: string;
+}) {
+  const approve = useApproveAttachment(shapeId);
+  const label = attachment.approved ? 'Unapprove' : 'Approve';
+  return (
+    <Button
+      variant="subtle"
+      size="compact-xs"
+      loading={approve.isPending}
+      aria-label={`${label} mock-up: ${title}`}
+      onClick={() => {
+        approve.mutate({ attachmentId: attachment.id, approved: !attachment.approved });
+      }}
+    >
+      {label}
+    </Button>
   );
 }

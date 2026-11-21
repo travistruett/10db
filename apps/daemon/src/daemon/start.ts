@@ -1713,6 +1713,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     adapter,
     owedRules: (conversationId, sessionId) =>
       chatLive.get(conversationId, sessionId)?.planRules?.take() ?? null,
+    reviewOf: (conversationId, sessionId) =>
+      chatLive.get(conversationId, sessionId)?.review() ?? [],
+    noSubagents: (conversationId, sessionId) =>
+      chatLive.get(conversationId, sessionId)?.inSession() ?? true,
+    reviewBusy: (conversationId) => {
+      const live = chatLive.current(conversationId);
+      return live?.inSession() === true ? live.review().length > 0 : null;
+    },
     engine: exploreEngine,
     clock,
     log: logger.child({ component: 'shape' }),
