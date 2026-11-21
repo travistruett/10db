@@ -10,6 +10,7 @@ import {
   Skeleton,
   Stack,
   Text,
+  Tooltip,
 } from '@mantine/core';
 import { IconChevronDown, IconX } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
@@ -209,15 +210,18 @@ export function ProposedPane({
           <Group gap="xs" wrap="nowrap">
             <Menu position="bottom-end" withinPortal>
               <Menu.Target>
-                <Button
-                  variant="default"
-                  size="xs"
-                  rightSection={<IconChevronDown size={14} stroke={1.5} />}
-                  loading={review.isPending && review.variables !== 'design_review'}
-                  disabled={view === undefined || rows.length === 0 || takingPictures}
-                >
-                  {takingPictures ? 'Taking pictures' : 'Review'}
-                </Button>
+                <Tooltip label="Have reviewers read the plan before you accept it">
+                  <Button
+                    variant="subtle"
+                    color="gray"
+                    size="xs"
+                    rightSection={<IconChevronDown size={14} stroke={1.5} />}
+                    loading={review.isPending && review.variables !== 'design_review'}
+                    disabled={view === undefined || rows.length === 0 || takingPictures}
+                  >
+                    {takingPictures ? 'Taking pictures' : 'Review'}
+                  </Button>
+                </Tooltip>
               </Menu.Target>
               <Menu.Dropdown>
                 <Menu.Item
@@ -225,21 +229,27 @@ export function ProposedPane({
                     review.mutate('review');
                   }}
                 >
-                  Plan review
+                  <ReviewItem hint="Scope and engineering reviewers read each goal and loose task">
+                    Plan review
+                  </ReviewItem>
                 </Menu.Item>
                 <Menu.Item
                   onClick={() => {
                     review.mutate('rehearse');
                   }}
                 >
-                  Check for Questions
+                  <ReviewItem hint="Reads each task as the agent who will build it, for what it would have to ask">
+                    Check for Questions
+                  </ReviewItem>
                 </Menu.Item>
                 <Menu.Item
                   onClick={() => {
                     review.mutate('design_review');
                   }}
                 >
-                  Design review
+                  <ReviewItem hint="Compares each task's mock-up with the app as it is now and DESIGN.md">
+                    Design review
+                  </ReviewItem>
                 </Menu.Item>
               </Menu.Dropdown>
             </Menu>
@@ -249,7 +259,8 @@ export function ProposedPane({
               onClick={() => {
                 setConverting('accept');
               }}
-              menuLabel="More accept actions"
+              hint="Put the pending rows on the Board. Nothing starts."
+              menuLabel="More ways to accept"
               menu={
                 <>
                   <Menu.Item
@@ -264,7 +275,9 @@ export function ProposedPane({
                       setConverting('start');
                     }}
                   >
-                    Accept and Start
+                    <ReviewItem hint="Also starts the accepted tasks that are ready">
+                      Accept and Start
+                    </ReviewItem>
                   </Menu.Item>
                 </>
               }
@@ -274,15 +287,17 @@ export function ProposedPane({
             <Group gap={4} wrap="nowrap">
               {menu}
               {onClose === undefined ? null : (
-                <ActionIcon
-                  variant="subtle"
-                  color="gray"
-                  size="input-xs"
-                  aria-label="Close Plan"
-                  onClick={onClose}
-                >
-                  <IconX size={16} stroke={1.5} />
-                </ActionIcon>
+                <Tooltip label="Close Plan">
+                  <ActionIcon
+                    variant="subtle"
+                    color="gray"
+                    size="input-xs"
+                    aria-label="Close Plan"
+                    onClick={onClose}
+                  >
+                    <IconX size={16} stroke={1.5} />
+                  </ActionIcon>
+                </Tooltip>
               )}
             </Group>
           </Group>
@@ -468,4 +483,16 @@ function reviewWords(
   if (answer.result.status === 'running')
     return 'A review is already running; press again when it ends.';
   return NOTHING_TO_SAY[answer.kind];
+}
+
+/** A menu item's name with a dimmed line saying what it does. */
+function ReviewItem({ hint, children }: { readonly hint: string; readonly children: ReactNode }) {
+  return (
+    <Stack gap={0}>
+      <Text size="sm">{children}</Text>
+      <Text size="xs" c="dimmed" maw={260}>
+        {hint}
+      </Text>
+    </Stack>
+  );
 }

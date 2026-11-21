@@ -4,7 +4,7 @@ import {
   type ShapeProposalDto,
   type ShapeViewDto,
 } from '@10db/contracts';
-import { ActionIcon, Menu, Modal, Text } from '@mantine/core';
+import { ActionIcon, Menu, Modal, Text, Tooltip } from '@mantine/core';
 import { IconArrowBackUp, IconBooks, IconDots, IconFileExport } from '@tabler/icons-react';
 import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
@@ -68,9 +68,16 @@ function PlanMenu({ view }: { readonly view: ShapeViewDto }) {
     <>
       <Menu position="bottom-end" withinPortal>
         <Menu.Target>
-          <ActionIcon variant="subtle" color="gray" size="input-xs" aria-label="More Plan actions">
-            <IconDots size={16} stroke={1.5} />
-          </ActionIcon>
+          <Tooltip label="Record, Export and Undo Accept">
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              size="input-xs"
+              aria-label="More Plan actions"
+            >
+              <IconDots size={16} stroke={1.5} />
+            </ActionIcon>
+          </Tooltip>
         </Menu.Target>
         <Menu.Dropdown>
           <Menu.Item
