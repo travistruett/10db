@@ -1,4 +1,4 @@
-export type { BrowserStatus, PageCamera, ShootInput, Shot } from './camera';
+export type { BrowserStatus, DrawInput, PageCamera, ShootInput, Shot } from './camera';
 export { refusedCamera, ShotOutcome } from './camera';
 export { startPictures, type Pictures } from './pictures';
 export { createBrowserHost } from './browser-host';

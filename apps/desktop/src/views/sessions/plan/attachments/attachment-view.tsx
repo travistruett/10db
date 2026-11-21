@@ -1,7 +1,7 @@
-import type { ShapeAttachment } from '@10db/contracts';
+import { mockupDocument, type ShapeAttachment } from '@10db/contracts';
 import { Box, Skeleton, Text, useComputedColorScheme } from '@mantine/core';
 import { useEffect, useState } from 'react';
-import { chartRefusal, chartSvg, mermaidSvg, mockupDocument, svgDataUrl } from './safe-render';
+import { chartRefusal, chartSvg, mermaidSvg, svgDataUrl } from './safe-render';
 
 // Shape spec §10.3: one attachment, rendered inert. See safe-render.ts for what makes each safe.
 
