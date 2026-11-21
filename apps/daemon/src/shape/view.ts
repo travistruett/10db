@@ -25,6 +25,7 @@ import {
   getShape,
   listRehearsals,
   listShapeAttachments,
+  latestShapeAccept,
   listShapeFiles,
   listShapeFindings,
   listShapeLinks,
@@ -43,6 +44,7 @@ import { attachmentsOf } from './attach';
 import { buildPreview } from './preview';
 import { rehearsalTasks } from './review';
 import { buildSizes } from './sizing';
+import { acceptPreview } from './undo';
 
 // Shape spec §4, §6 Rows. What the Shape screen reads: the transcript, every proposal row with its
 // typed body, and what Convert made of the accepted ones.
@@ -233,6 +235,12 @@ const findingOf = (row: ShapeFindingRow): ShapeFindingDto => ({
   updatedAt: row.updatedAt,
 });
 
+function lastAcceptOf(db: DbReader, shapeId: ShapeId): ShapeViewDto['lastAccept'] {
+  const accept = latestShapeAccept(db, shapeId);
+  if (accept === undefined) return null;
+  return { id: accept.id, at: accept.createdAt, ...acceptPreview(db, shapeId, accept.id) };
+}
+
 export function buildShapeView(
   db: DbReader,
   shapeId: ShapeId,
@@ -269,5 +277,6 @@ export function buildShapeView(
     preview: buildPreview(db, shapeId, now),
     attachments: attachmentsOf(db, shapeId),
     tokens: shapeTokens(db, shapeId),
+    lastAccept: lastAcceptOf(db, shapeId),
   };
 }

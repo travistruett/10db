@@ -24,6 +24,7 @@ import {
   type ShapeDto,
   type ShapeFileDto,
   type ShapeFindingId,
+  type ShapeAcceptId,
   type ShapeId,
   type ShapeMessageDto,
   type ShapeModelsDto,
@@ -91,7 +92,13 @@ import {
 } from './rounds';
 import type { ShapeLaunch } from './session-launch';
 import { createShapeToolHandlers, type ShapeToolDeps } from './tools';
-import { removeDraftGoalOf, withdrawConvertedDecision, withdrawConvertedPrinciple } from './undo';
+import {
+  removeDraftGoalOf,
+  undoAccept,
+  withdrawConvertedDecision,
+  withdrawConvertedPrinciple,
+  type UndoneAccept,
+} from './undo';
 import { buildShapeView, fileDtoOf, type ViewWorld } from './view';
 
 // Shape spec §5.1, §5.3, §6, §11. A Plan conversation: its rows, presses and Convert, over the explore
@@ -212,6 +219,11 @@ export interface ShapeService {
    * InvalidError for a goal no conversation made and ConflictError once a task has started.
    */
   removeDraftGoal(goalId: GoalId): void;
+  /**
+   * Undo Accept: takes back the plan's latest Accept in one write and never stops a run. Throws
+   * InvalidError for an Accept undone or not the latest, ConflictError for a task that has a run.
+   */
+  undoAccept(shapeId: ShapeId, acceptId: ShapeAcceptId): UndoneAccept;
   /** Withdraw Decision: a decision the conversation wrote, with the builder's reason. */
   withdrawDecision(shapeId: ShapeId, decisionId: DecisionId, reason: string): void;
   /**
@@ -646,6 +658,10 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           throw new InvalidError(`${goalId} is not a goal a conversation made`);
         removeDraftGoalOf(ctx, link.shapeId, goalId);
       });
+    },
+
+    undoAccept(shapeId, acceptId) {
+      return state.write((ctx) => undoAccept(ctx, shapeId, acceptId));
     },
 
     withdrawDecision(shapeId, decisionId, reason) {

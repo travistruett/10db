@@ -215,6 +215,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     removeDraftGoal: track('removeDraftGoal'),
     withdrawShapeDecision: track('withdrawShapeDecision'),
     withdrawShapePrinciple: track('withdrawShapePrinciple'),
+    undoShapeAccept: track('undoShapeAccept'),
     resumeShape: track('resumeShape'),
     getGoalShape: track('getGoalShape'),
     getTaskShape: track('getTaskShape'),

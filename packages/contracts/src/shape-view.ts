@@ -6,6 +6,7 @@ import {
   DecisionId,
   GoalId,
   PrincipleId,
+  ShapeAcceptId,
   ShapeAttachmentId,
   ShapeId,
   ConversationItemId,
@@ -168,6 +169,32 @@ export const ShapeModelsDto = z.object({
 });
 export type ShapeModelsDto = z.infer<typeof ShapeModelsDto>;
 
+/** The newest Accept of a plan that is not undone, counted as Undo Accept would act on it. */
+export const ShapeAcceptDto = z.object({
+  id: ShapeAcceptId,
+  at: Timestamp,
+  goals: z.int().min(0),
+  /** Every task it made: a goal's tasks and loose tasks alike, so a goal-only Accept reads "1 goal, 2 tasks". */
+  tasks: z.int().min(0),
+  records: z.int().min(0),
+  /** What Undo would leave, counted as undoAccept counts it. */
+  kept: z.int().min(0),
+  /** Every task it made, so the app can tell from its cached runs whether Undo would be refused. */
+  taskIds: z.array(TaskId),
+});
+export type ShapeAcceptDto = z.infer<typeof ShapeAcceptDto>;
+
+/** What Undo Accept took back and left. */
+export const ShapeUndoAcceptResult = z.object({
+  goals: z.int().min(0),
+  tasks: z.int().min(0),
+  decisions: z.int().min(0),
+  principles: z.int().min(0),
+  questions: z.int().min(0),
+  kept: z.int().min(0),
+});
+export type ShapeUndoAcceptResult = z.infer<typeof ShapeUndoAcceptResult>;
+
 /** Everything the Shape screen renders for one conversation. */
 export const ShapeViewDto = z.object({
   shape: ShapeDto,
@@ -198,6 +225,8 @@ export const ShapeViewDto = z.object({
   attachments: z.array(ShapeAttachmentDto),
   /** The tokens (input and output) the conversation's sessions have used so far; the header says "88k tokens" (§4). */
   tokens: z.int().min(0),
+  /** The newest Accept not undone, or null. */
+  lastAccept: ShapeAcceptDto.nullable(),
 });
 export type ShapeViewDto = z.infer<typeof ShapeViewDto>;
 

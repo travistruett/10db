@@ -99,6 +99,7 @@ import {
   ShapeAttachmentId,
   ShapeEditInput,
   ShapeFindingId,
+  ShapeAcceptId,
   ShapeId,
   ShapeProposalId,
   ShapeModelInput,
@@ -941,6 +942,14 @@ export function createApp(deps: ApiDeps) {
       deps.services.removeDraftGoal(GoalId.parse(c.req.param('goalId')));
       return c.body(null, 204);
     })
+    .post('/shapes/:shapeId/accepts/:acceptId/undo', (c) =>
+      c.json(
+        deps.services.undoShapeAccept(
+          ShapeId.parse(c.req.param('shapeId')),
+          ShapeAcceptId.parse(c.req.param('acceptId')),
+        ),
+      ),
+    )
     .post(
       '/shapes/:shapeId/decisions/:decisionId/withdraw',
       validator('json', (value): ShapeWithdrawInput => ShapeWithdrawInput.parse(value)),

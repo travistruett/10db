@@ -107,6 +107,29 @@ export function insertLandingGroup(
   return toDto(row);
 }
 
+/** The groups an Accept made, each with the tasks now in it. */
+export function listLandingGroupsOfAccept(
+  db: DbReader,
+  id: ShapeAcceptId,
+): { readonly id: LandingGroupId; readonly title: string; readonly members: TaskId[] }[] {
+  return db
+    .select()
+    .from(schema.landingGroups)
+    .where(eq(schema.landingGroups.acceptId, id))
+    .orderBy(schema.landingGroups.createdAt, schema.landingGroups.id)
+    .all()
+    .map((group) => ({
+      id: group.id,
+      title: group.title,
+      members: db
+        .select({ id: schema.tasks.id })
+        .from(schema.tasks)
+        .where(eq(schema.tasks.landingGroupId, group.id))
+        .all()
+        .map((t) => t.id),
+    }));
+}
+
 /** Clears the group's tasks' landing_group_id, then deletes the group. */
 export function deleteLandingGroupOf(ctx: WriteContext, id: LandingGroupId): void {
   const members = ctx.tx

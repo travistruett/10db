@@ -21,6 +21,19 @@ export function insertShapeAccept(ctx: WriteContext, shapeId: ShapeId): ShapeAcc
   return row;
 }
 
+/** One Accept of the plan, whatever its state, or undefined when the plan has no such Accept. */
+export function getShapeAccept(
+  db: DbReader,
+  shapeId: ShapeId,
+  id: ShapeAcceptId,
+): ShapeAcceptRow | undefined {
+  return db
+    .select()
+    .from(schema.shapeAccepts)
+    .where(and(eq(schema.shapeAccepts.id, id), eq(schema.shapeAccepts.shapeId, shapeId)))
+    .get();
+}
+
 /** The newest Accept of the plan that is not undone, or undefined. */
 export function latestShapeAccept(db: DbReader, shapeId: ShapeId): ShapeAcceptRow | undefined {
   return db

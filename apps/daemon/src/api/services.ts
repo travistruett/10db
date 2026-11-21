@@ -190,6 +190,8 @@ import type {
   ShapeFindingId,
   ShapeJevSettingDto,
   ShapeMeasuresDto,
+  ShapeAcceptId,
+  ShapeUndoAcceptResult,
   ShapeId,
   ShapeMessageDto,
   ShapeOfDto,
@@ -544,6 +546,11 @@ export interface ApiServices extends PlanRecordServices {
   /** The conversation that made a goal or a task, for its drawer's Open conversation; none for work filed by hand. */
   getGoalShape(goalId: GoalId): ShapeOfDto;
   getTaskShape(taskId: TaskId): ShapeOfDto;
+  /**
+   * Undo Accept: takes back the plan's latest Accept. InvalidError (400) for one undone or not the latest;
+   * ConflictError (409), in words, for a task that has a run or a dependent.
+   */
+  undoShapeAccept(shapeId: ShapeId, acceptId: ShapeAcceptId): ShapeUndoAcceptResult;
   /** Withdraw Decision: a decision the conversation wrote; throws ConflictError unless it is the head of its chain. */
   withdrawShapeDecision(shapeId: ShapeId, decisionId: DecisionId, reason: string): void;
   /** Withdraw Principle: a principle the conversation wrote; throws ConflictError once a later principle replaced it. */
