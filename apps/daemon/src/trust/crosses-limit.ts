@@ -61,6 +61,10 @@ export interface CrossesLimitRequest {
 const TOO_LONG = "Too long for 10db's judge to read whole";
 const NOT_SURE = "10db's judge wasn't sure this is safe";
 
+/** An allow too unsure to act on: the builder sees that the judge leaned towards running the call. */
+const leanedAllow = (confidence: number, floor: number): string =>
+  `10db's judge leaned towards allowing this, but only ${String(Math.round(confidence * 100))}% sure (it needs ${String(Math.round(floor * 100))}%)`;
+
 const LIMIT_NAMES: ReadonlySet<string> = new Set(LIMIT_ORDER);
 const isLimitName = (choice: string): choice is LimitName => LIMIT_NAMES.has(choice);
 
@@ -147,7 +151,10 @@ export async function crossesLimit(
   if (answer.choice === 'allow')
     return answer.confidence >= floor
       ? settle(JudgeOutcome.Acted, { kind: 'allow', by: 'model' })
-      : settle(JudgeOutcome.BelowFloor, { kind: 'limit', at: { limit: null, reason: NOT_SURE } });
+      : settle(JudgeOutcome.BelowFloor, {
+          kind: 'limit',
+          at: { limit: null, reason: leanedAllow(answer.confidence, floor) },
+        });
   if (isLimitName(answer.choice))
     return settle(JudgeOutcome.Acted, {
       kind: 'limit',

@@ -30,17 +30,22 @@ export async function readStartDirt(
   return paths.map((path) => ({ path, fingerprint: fileFingerprint(checkout, path) }));
 }
 
-/** `paths` less those still exactly as the task's checkout held them when it first launched. */
+/**
+ * `paths` less those still exactly as the task's checkout held them when it first launched, and
+ * less those a session of the task named as someone else's.
+ */
 export function withoutStartDirt(
   paths: readonly string[],
   checkout: string,
   start: readonly StartDirtEntry[] | null,
 ): string[] {
   if (start === null || start.length === 0) return [...paths];
-  const before = new Map(start.map((entry) => [entry.path, entry.fingerprint]));
+  const before = new Map(start.map((entry) => [entry.path, entry]));
   return paths.filter((path) => {
-    if (!before.has(path)) return true;
+    const entry = before.get(path);
+    if (entry === undefined) return true;
+    if (entry.leftBy !== undefined) return false;
     const now = fileFingerprint(checkout, path);
-    return now === UNREADABLE || before.get(path) !== now;
+    return now === UNREADABLE || entry.fingerprint !== now;
   });
 }

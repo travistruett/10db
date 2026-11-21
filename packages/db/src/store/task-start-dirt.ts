@@ -1,4 +1,4 @@
-import type { TaskId } from '@10db/contracts';
+import type { DeviationId, TaskId } from '@10db/contracts';
 import { eq } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { StartDirtEntry } from '../schema';
@@ -6,7 +6,7 @@ import type { StartDirtEntry } from '../schema';
 export type { StartDirtEntry } from '../schema';
 import type { DbReader, WriteContext } from './store';
 
-/** What the task's checkout held uncommitted when it first launched, or null before that. */
+/** What the task's checkout held uncommitted that is not its work, or null before it first launched. */
 export function getTaskStartDirt(db: DbReader, taskId: TaskId): readonly StartDirtEntry[] | null {
   const row = db
     .select({ entries: schema.taskStartDirt.entries })
@@ -26,6 +26,30 @@ export function recordTaskStartDirt(
     .insert(schema.taskStartDirt)
     .values({ taskId, entries: [...entries], createdAt: ctx.now })
     .onConflictDoNothing()
+    .run();
+}
+
+/**
+ * Adds `paths` to the task's record as named by `deviationId`, keeping every other entry. A path
+ * the record already holds is named again; a task with no record gets one holding only these.
+ */
+export function leaveTaskPaths(
+  ctx: WriteContext,
+  taskId: TaskId,
+  paths: readonly string[],
+  deviationId: DeviationId,
+): void {
+  if (paths.length === 0) return;
+  const named = new Set(paths);
+  const kept = (getTaskStartDirt(ctx.tx, taskId) ?? []).filter((entry) => !named.has(entry.path));
+  const entries = [
+    ...kept,
+    ...[...named].map((path) => ({ path, fingerprint: null, leftBy: deviationId })),
+  ];
+  ctx.tx
+    .insert(schema.taskStartDirt)
+    .values({ taskId, entries, createdAt: ctx.now })
+    .onConflictDoUpdate({ target: schema.taskStartDirt.taskId, set: { entries } })
     .run();
 }
 
