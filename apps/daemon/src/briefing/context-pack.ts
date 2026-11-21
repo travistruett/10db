@@ -1,5 +1,6 @@
 import {
   EventType,
+  implementationReportFor,
   type ContextPack,
   type TaskId,
   type DecisionId,
@@ -114,6 +115,7 @@ export function buildContextPack(
     },
     plan: buildPlanContext(db, workstream, opts.base === undefined ? {} : { base: opts.base }),
     mockups: approvedMockupsOf(db, task.id),
+    implementationReport: implementationReportFor(workstream.steps, workstream.stepIndex),
   };
 }
 

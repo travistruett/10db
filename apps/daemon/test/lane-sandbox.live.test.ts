@@ -1684,6 +1684,7 @@ describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
           },
           plan: null,
           mockups: [],
+          implementationReport: null,
         },
       });
       const run = await runLane({

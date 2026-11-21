@@ -2419,22 +2419,37 @@ describe('flows', () => {
     });
   });
 
-  it('keeps what a verification-only build wrote as its report, apart from the review that follows', async () => {
-    // A task that only checks things commits nothing: the build's last message is the whole result,
-    // and it was dropped when the session ended, so the card had nothing of the build to show.
-    const wrote =
-      'Docker status: running. HTTP check on localhost:8080: skipped, the sandbox refused it.';
+  it('hands the reviewer the current attempt of a verification-only build report, after a send-back too', async () => {
+    // A task that only checks things commits nothing: the build's last message is the whole result.
+    // The card showed it, but the review's brief listed only steps with a recorded result, so each
+    // reviewer had nothing of the build to judge, and a send-back left the next one no better off.
+    const first =
+      'Docker status: exit 0. HTTP check on localhost:8080: skipped, precondition PORT-FORWARD-MISSING.';
+    const second = 'Docker status: exit 0. HTTP check on localhost:8080: exit 7, CURL-SEVEN.';
     engine = await createTestEngine({
       Alpha: [
-        [{ do: 'turn_complete', text: wrote }],
-        [approve('op-report-0001'), { do: 'turn_complete', text: 'Reviewed.' }],
+        [{ do: 'turn_complete', text: first }],
+        [reject('op-report-0001', '1. Run the HTTP check.'), turn],
+        [{ do: 'turn_complete', text: second }],
+        [approve('op-report-0002'), { do: 'turn_complete', text: 'Reviewed.' }],
       ],
     });
     const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
     await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
     expect(ws(workstream.id).state).toBe('DONE');
-    const build = listSessions(engine.store.db, workstream.id)[0];
-    expect(step(workstream.id, 0)?.report).toMatchObject({ summary: wrote, sessionId: build?.id });
+    const [, review1, , review2] = engine.adapter.prompts.map((p) => p.prompt);
+    expect(review1).toContain(`Implementation report, attempt 1`);
+    expect(review1).toContain(first);
+    // The second reviewer judges the build after the send-back, and is told which attempt that is.
+    expect(review2).toContain(`Implementation report, attempt 2`);
+    expect(review2).toContain(second);
+    expect(review2).not.toContain(first);
+    const builds = listSessions(engine.store.db, workstream.id);
+    expect(step(workstream.id, 0)?.report).toMatchObject({
+      summary: second,
+      sessionId: builds[2]?.id,
+      attempt: 2,
+    });
     // The review's result is its own, and its step carries no report.
     expect(step(workstream.id, 1)?.result?.summary).toBe('Looks right.');
     expect(step(workstream.id, 1)?.report).toBeUndefined();
