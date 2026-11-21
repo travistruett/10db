@@ -51,7 +51,9 @@ export function RowAttachments({
               {KIND_LABEL[a.attachment.kind]}
               {a.approved ? ' · approved' : ''}
             </Text>
-            {a.attachment.kind === 'mockup' ? (
+            {a.attachment.kind === 'mockup' &&
+            a.goalId === null &&
+            !(row.kind === 'goal' && a.key === row.key) ? (
               <ApproveButton shapeId={shapeId} attachment={a} title={title} />
             ) : null}
           </Group>

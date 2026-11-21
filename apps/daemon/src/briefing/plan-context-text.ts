@@ -42,16 +42,44 @@ export function renderPlanContext(plan: PlanContext): string[] {
   ];
 }
 
+/** What one approved mock-up, and all of a task's together, may add to a lane's brief, in characters. */
+export const MOCKUP_BRIEF_LIMIT = 20_000;
+export const MOCKUPS_BRIEF_LIMIT = 60_000;
+
+/** A fence longer than any run of backticks in `text`, so the text can't close it. */
+const fenceFor = (text: string): string =>
+  '`'.repeat(Math.max(3, ...[...text.matchAll(/`+/g)].map((m) => m[0].length + 1)));
+
 /**
  * The mock-ups the builder approved for the task: the design its lane builds to, each as the HTML the
- * builder saw, fenced so a tag in it is read as text.
+ * builder saw, fenced so a tag in it is read as text. One too big for the brief, or past the total, is
+ * named and left out.
  */
 export function renderMockups(mockups: readonly ApprovedMockup[]): string[] {
   if (mockups.length === 0) return [];
+  const kept: ApprovedMockup[] = [];
+  const left: string[] = [];
+  let used = 0;
+  for (const m of mockups) {
+    if (m.html.length > MOCKUP_BRIEF_LIMIT || used + m.html.length > MOCKUPS_BRIEF_LIMIT)
+      left.push(`${m.key} (${String(m.html.length)} characters)`);
+    else {
+      kept.push(m);
+      used += m.html.length;
+    }
+  }
   return [
     '',
     `Approved mock-up${mockups.length === 1 ? '' : 's'} (the design target: match ${mockups.length === 1 ? 'it' : 'them'}, and say in your handoff where you could not):`,
-    ...mockups.flatMap((m) => [`Mock-up ${m.key}:`, '```html', m.html, '```']),
+    ...kept.flatMap((m) => {
+      const fence = fenceFor(m.html);
+      return [`Mock-up ${m.key}:`, `${fence}html`, m.html, fence];
+    }),
+    ...(left.length === 0
+      ? []
+      : [
+          `Left out for size (over ${String(MOCKUP_BRIEF_LIMIT)} characters each or ${String(MOCKUPS_BRIEF_LIMIT)} together): ${left.join(', ')}. Ask the builder for it if you need it.`,
+        ]),
   ];
 }
 

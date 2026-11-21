@@ -92,6 +92,9 @@ export function ProposedPane({
   const hasProposals = (view?.proposals.length ?? 0) > 0;
   const dismiss = useDismissFinding(view?.shape.id ?? null);
   const review = useReviewShape(view?.shape.id ?? null);
+  // "Is running" is true only while a turn runs or waits; it goes when the review's turn ends.
+  const turning = view !== undefined && (view.turn.running || view.turn.queued > 0);
+  const reviewLine = review.isError ? review.error.message : reviewWords(review.data, turning);
   const handlers: RowHandlers = {
     onChange: (row, action) => {
       change.mutate({ id: row.id, action });
@@ -276,9 +279,9 @@ export function ProposedPane({
             )}
           </Group>
         </Group>
-        {review.data === undefined && !review.isError ? null : (
+        {reviewLine === '' ? null : (
           <Text size="xs" c="dimmed" role="status" aria-label="Review">
-            {review.isError ? review.error.message : reviewWords(review.data)}
+            {reviewLine}
           </Text>
         )}
         {summaryHere ? (
@@ -429,10 +432,12 @@ function reviewWords(
   answer:
     | { readonly kind: 'review' | 'rehearse'; readonly result: { status: string; tasks: number } }
     | undefined,
+  turning: boolean,
 ): string {
   if (answer === undefined) return '';
   const what = answer.kind === 'review' ? 'Plan review' : 'Check for Questions';
-  if (answer.result.status === 'started') return `${what} is running.`;
-  if (answer.result.status === 'running') return `${what} is already running.`;
+  if (answer.result.status === 'started') return turning ? `${what} is running.` : '';
+  if (answer.result.status === 'running')
+    return turning ? 'A review is already running; press again when it ends.' : '';
   return answer.kind === 'review' ? 'Nothing to review.' : 'Every task has been checked.';
 }

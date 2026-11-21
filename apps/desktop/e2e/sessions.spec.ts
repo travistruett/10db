@@ -701,7 +701,10 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   }, projectId);
   await taskPage.goto(`/board?task=${densityId ?? ''}`);
   await taskPage.getByRole('button', { name: /Plan context/ }).click();
-  await expect(taskPage.getByTitle(/Approved mock-up density/)).toBeVisible();
+  await expect(taskPage.getByText('Approved mock-up · density')).toBeVisible();
+  await expect(
+    taskPage.frameLocator('iframe[title^="Mockup"]').getByText('Cards sit closer together.'),
+  ).toBeVisible();
   await taskPage.close();
 
   // Remove Draft Goal takes the goal and its tasks back, and the goal is proposed again.

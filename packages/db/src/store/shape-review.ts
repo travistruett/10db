@@ -352,6 +352,7 @@ export function setShapeAttachmentApproved(
     .where(eq(schema.shapeAttachments.id, id))
     .get();
   if (row?.shapeId !== shapeId) throw new NotFoundError('shape attachment', id);
+  if (row.goalId !== null) throw new InvalidError('Only a task’s mock-up reaches a lane.');
   if (row.kind !== 'mockup')
     throw new InvalidError('Only a mock-up is approved as a design target.');
   ctx.tx
