@@ -24,13 +24,8 @@ export async function keepPdfText(
   // The daemon may be closing, or the conversation's files removed, by the time the text is ready.
   if (text === null || !stillWanted()) return null;
   const path = pdfTextPath(storedPath);
-  try {
-    mkdirSync(dirname(path), { recursive: true });
-    // `wx`: never over a file that is already there.
-    writeFileSync(path, text, { flag: 'wx', mode: 0o600 });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw error;
-  }
+  mkdirSync(dirname(path), { recursive: true });
+  // `wx`: never over a file that is already there.
+  writeFileSync(path, text, { flag: 'wx', mode: 0o600 });
   return path;
 }

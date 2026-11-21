@@ -105,8 +105,8 @@ export interface PlanPartsDeps {
   readonly turnOf: (shapeId: ShapeId) => PlanTurnState;
   /** Tells the screen the plan changed, for what no row records. */
   readonly announce: (shapeId: ShapeId) => void;
-  /** Stored paths of the PDFs whose text is still being read. */
-  readonly pdfReading: ReadonlySet<string>;
+  /** Whether a PDF's text is being read, starting the read again if a restart cut it short. */
+  readonly pdfTextComing: (storedPath: string, name: string) => boolean;
 }
 
 /** What a turn's message is preceded by, and what goes with it. */
@@ -247,9 +247,8 @@ export function createPlanParts(deps: PlanPartsDeps): PlanParts {
     const textPath = pdfTextPath(file.storedPath);
     if (existsSync(textPath))
       return `[file] ${textPath} (${file.name}: the PDF's text; Codex can't read a PDF)`;
-    if (deps.pdfReading.has(file.storedPath))
+    if (deps.pdfTextComing(file.storedPath, file.name))
       return `[file] ${file.storedPath} (${file.name}: 10db is still reading the PDF's text; it will be at ${textPath})`;
-    // After a restart a PDF whose reading was cut short has no text file and counts as having none.
     return `[file] ${file.storedPath} (${file.name}: a PDF with no text 10db could read, and Codex can't read a PDF)`;
   };
 

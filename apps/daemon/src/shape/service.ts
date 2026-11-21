@@ -1,4 +1,4 @@
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   ConflictError,
@@ -491,21 +491,15 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     if (note !== null) turnOf(shapeId).notes.push(note);
   };
 
-  // PDFs whose text is still being read, by stored path; the intake line tells Codex so.
+  // PDFs whose text is being read, and those read at least once this run, by stored path.
   const pdfReading = new Set<string>();
+  const pdfTried = new Set<string>();
   let shuttingDown = false;
-  const planParts = createPlanParts({
-    state,
-    log,
-    filesDir: deps.filesDir,
-    turnOf,
-    announce,
-    pdfReading,
-  });
 
   /** Reads a PDF's text after the upload has answered; it only logs, and writes nothing once closing. */
   const readPdfText = (storedPath: string, name: string, bytes: Uint8Array): void => {
     pdfReading.add(storedPath);
+    pdfTried.add(storedPath);
     void keepPdfText(storedPath, bytes, () => !shuttingDown && existsSync(dirname(storedPath)))
       .then((written) => {
         if (written === null) log.info({ file: name }, 'a dropped PDF has no text');
@@ -517,6 +511,32 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         pdfReading.delete(storedPath);
       });
   };
+
+  /**
+   * Whether a PDF's text is on its way. A PDF with no text file that this run never read (the daemon
+   * restarted in the middle of reading it) is read again, once.
+   */
+  const pdfTextComing = (storedPath: string, name: string): boolean => {
+    if (pdfReading.has(storedPath)) return true;
+    if (pdfTried.has(storedPath) || shuttingDown) return false;
+    try {
+      readPdfText(storedPath, name, readFileSync(storedPath));
+      return true;
+    } catch (error) {
+      pdfTried.add(storedPath);
+      log.warn({ err: error, file: name }, 'a dropped PDF could not be read again');
+      return false;
+    }
+  };
+
+  const planParts = createPlanParts({
+    state,
+    log,
+    filesDir: deps.filesDir,
+    turnOf,
+    announce,
+    pdfTextComing,
+  });
 
   return {
     startFromTerminal(input) {
