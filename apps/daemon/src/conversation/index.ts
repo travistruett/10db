@@ -19,7 +19,7 @@ export { createItemRecorder, type ItemRecorder } from './item-recorder';
 export { createLiveRegistry, type LiveRegistry } from './live-registry';
 export type { ExploreOwnerHooks, ExploreStart, Outgoing, TurnEnd } from './explore-hooks';
 export { safeFileName } from './file-check';
-export { classifyBytes, DroppedKind } from './file-kind';
+export { classifyBytes, DroppedKind, unsupportedOffice } from './file-kind';
 export { ExtractionError } from './extraction-error';
 export { extractText } from './extraction';
 export { keepPdfText, pdfTextPath } from './pdf-text';
