@@ -5,7 +5,12 @@
       "entry": [".claude/hooks/*.mjs", "scripts/**/*.mjs"]
     },
     "apps/daemon": {
-      "entry": ["scripts/*.ts", "test/fake-srt.ts", "src/builder-mcp.ts"],
+      "entry": [
+        "scripts/*.ts",
+        "test/fake-srt.ts",
+        "src/builder-mcp.ts",
+        "src/conversation/extract-worker.ts"
+      ],
       "ignoreDependencies": ["@anthropic-ai/sandbox-runtime"]
     },
     "apps/desktop": {
