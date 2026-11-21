@@ -48,6 +48,9 @@ describe('classifyBytes', () => {
 describe('officeText', () => {
   it('reads a docx paragraph by paragraph and a pptx slide by slide in order', () => {
     expect(officeText('docx', docx)).toBe('Hello & welcome\nSecond AB\n');
+    expect(
+      officeText('docx', zipSync({ 'word/document.xml': strToU8('<w:p>a<w:p>'.repeat(3)) })),
+    ).toBe('\n');
     expect(officeText('pptx', pptx)).toBe('## Slide 2\nTwo\n<b>\n\n## Slide 10\nTen\n');
   });
 });
