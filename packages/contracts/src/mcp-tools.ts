@@ -37,7 +37,7 @@ import {
   Verdict,
 } from './states';
 import { Rigor } from './rigor';
-import { MAX_STEP_SUMMARY } from './steps';
+import { ImplementationReport, MAX_STEP_SUMMARY } from './steps';
 
 const OpId = z
   .string()
@@ -146,6 +146,8 @@ export const ContextPack = z.object({
   plan: PlanContext.nullable().default(null),
   /** The mock-ups the builder approved for the task, which its lane builds to; none for most tasks. */
   mockups: z.array(ApprovedMockup).default([]),
+  /** What the build wrote when its session ended, for a step after it; null for the build itself and when none. */
+  implementationReport: ImplementationReport.nullable().default(null),
 });
 export type ContextPack = z.infer<typeof ContextPack>;
 

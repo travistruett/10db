@@ -4902,6 +4902,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                                 summary: report.slice(0, MAX_STEP_SUMMARY),
                                 sessionId: outcome.sessionId,
                                 at: ctx.now,
+                                attempt: s.attempts + 1,
                               },
                             }
                           : s,
