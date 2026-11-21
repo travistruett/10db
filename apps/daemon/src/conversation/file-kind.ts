@@ -49,6 +49,18 @@ function zipNames(bytes: Uint8Array): readonly string[] {
   return names;
 }
 
+/** Why a refused file is an Office format 10db can't read yet, with what to drop instead; null otherwise. */
+export function unsupportedOffice(bytes: Uint8Array): string | null {
+  // The Compound File header every pre-2007 Office document begins with.
+  if ([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1].every((byte, i) => bytes[i] === byte))
+    return "10db can't read older Office files (.doc, .xls, .ppt) yet; save it as .docx, .pptx or CSV and drop that";
+  if (bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 3 && bytes[3] === 4)
+    return zipNames(bytes).includes('xl/workbook.xml')
+      ? "10db can't read Excel workbooks yet; save the sheet as CSV and drop that"
+      : null;
+  return null;
+}
+
 /** The kind of a dropped file by its bytes, or null for anything 10db won't hand a session. */
 export function classifyBytes(bytes: Uint8Array): ClassifiedBytes | null {
   const signed = signedKind(bytes);

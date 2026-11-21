@@ -14,6 +14,7 @@ import {
   ExtractionError,
   extractText,
   safeFileName,
+  unsupportedOffice,
 } from '../conversation';
 
 // Shape spec §5.4, plan-in-sessions spec §6. What a dropped file must be to reach the session, and
@@ -65,7 +66,9 @@ export function checkDroppedFile(file: {
   if (refusal !== null) throw new InvalidError(refusal);
   const classified = classifyBytes(file.bytes);
   if (classified === null)
-    throw new InvalidError(`${name} can't be added: drop a text file, PDF, image, .docx or .pptx`);
+    throw new InvalidError(
+      `${name} can't be added: ${unsupportedOffice(file.bytes) ?? 'drop a text file, PDF, image, .docx or .pptx'}`,
+    );
   const checked = { name, bytes: file.bytes, office: null } as const;
   switch (classified.kind) {
     case DroppedKind.Image:
