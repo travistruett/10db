@@ -1,7 +1,7 @@
 import type { ShapeFindingDto, ShapeFindingId } from '@10db/contracts';
-import { Box, Button, Group, Text } from '@mantine/core';
-import { IconHelpCircle, IconMessageExclamation } from '@tabler/icons-react';
-import { ceremonyLine, type RowReview } from './review-lines';
+import { ActionIcon, Badge, Box, Button, Group, Text, Tooltip } from '@mantine/core';
+import { IconHelpCircle, IconMessageExclamation, IconX } from '@tabler/icons-react';
+import { ceremonyLine, SEVERITY_COLOR, type RowReview } from './review-lines';
 
 export interface ReviewLinesProps {
   readonly review: RowReview;
@@ -126,6 +126,110 @@ export function ReviewLines({
       {review.settled === 0 ? null : (
         <Text component="li" size="xs" c="dimmed" style={{ listStyle: 'none' }}>
           {`${String(review.settled)} resolved or dismissed`}
+        </Text>
+      )}
+    </Box>
+  );
+}
+
+export interface ReviewNotesProps {
+  readonly ceremony?: RowReview['ceremony'];
+  readonly findings: readonly ShapeFindingDto[];
+  readonly questions: readonly ShapeFindingDto[];
+  /** Findings and questions already resolved or dismissed. */
+  readonly settled?: number;
+  readonly onDismiss: (id: ShapeFindingId) => void;
+  readonly onCeremony?: (change: 'skip' | 'use') => void;
+}
+
+function NoteLine({
+  finding,
+  onDismiss,
+}: {
+  readonly finding: ShapeFindingDto;
+  readonly onDismiss: ReviewNotesProps['onDismiss'];
+}) {
+  const isQuestion = finding.kind === 'question';
+  const color =
+    isQuestion || finding.severity === null ? 'violet' : SEVERITY_COLOR[finding.severity];
+  return (
+    <Group component="li" gap={6} wrap="nowrap" align="flex-start" style={{ listStyle: 'none' }}>
+      <Badge size="xs" variant="light" color={color} tt="none" fw={400} style={{ flex: 'none' }}>
+        {isQuestion
+          ? 'ask'
+          : `${finding.reviewer}${finding.severity === null ? '' : ` · ${finding.severity}`}`}
+      </Badge>
+      <Text size="xs" style={{ flex: 1, minWidth: 0 }}>
+        {finding.text}
+      </Text>
+      <Tooltip label="Dismiss">
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          size="xs"
+          aria-label={`Dismiss ${isQuestion ? 'question' : 'finding'}: ${finding.text}`}
+          onClick={() => {
+            onDismiss(finding.id);
+          }}
+        >
+          <IconX size={12} stroke={1.5} />
+        </ActionIcon>
+      </Tooltip>
+    </Group>
+  );
+}
+
+/**
+ * What an opened row says about its review: the spec the ceremony asks for (with Skip Spec), the open
+ * findings and the rehearsal's open questions, each a small tag, the words and a quiet Dismiss.
+ */
+export function ReviewNotes({
+  ceremony,
+  findings,
+  questions,
+  settled = 0,
+  onDismiss,
+  onCeremony,
+}: ReviewNotesProps) {
+  const line = ceremony === undefined ? null : ceremonyLine(ceremony);
+  if (line === null && findings.length === 0 && questions.length === 0 && settled === 0)
+    return null;
+  return (
+    <Box component="ul" m={0} p={0} style={{ listStyle: 'none', display: 'grid', gap: 4 }}>
+      {line === null || ceremony === undefined ? null : (
+        <Group component="li" gap="xs" wrap="nowrap" style={{ listStyle: 'none' }}>
+          <Text size="xs" c="dimmed">
+            {line}
+          </Text>
+          {onCeremony === undefined ? null : ceremony.skippedByYou ? (
+            <Button
+              variant="subtle"
+              size="compact-xs"
+              onClick={() => {
+                onCeremony('use');
+              }}
+            >
+              Use spec
+            </Button>
+          ) : ceremony.reasons.length > 0 ? (
+            <Button
+              variant="subtle"
+              size="compact-xs"
+              onClick={() => {
+                onCeremony('skip');
+              }}
+            >
+              Skip spec
+            </Button>
+          ) : null}
+        </Group>
+      )}
+      {[...findings, ...questions].map((f) => (
+        <NoteLine key={f.id} finding={f} onDismiss={onDismiss} />
+      ))}
+      {settled === 0 ? null : (
+        <Text component="li" size="xs" c="dimmed" style={{ listStyle: 'none' }}>
+          {`${String(settled)} resolved or dismissed`}
         </Text>
       )}
     </Box>

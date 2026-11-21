@@ -1,10 +1,18 @@
-import type { ShapeProposalDto } from '@10db/contracts';
+import type { ShapeProposalDto, ShapeTaskSizeDto } from '@10db/contracts';
 import { List, Stack, Text } from '@mantine/core';
+import { IconClockExclamation } from '@tabler/icons-react';
+import { sizeFacts } from './size-line';
 
 // What an opened row says, read-only (editing is a later slice). Text is plain: nothing a model
 // wrote is rendered as markup.
 
-function Labelled({ label, children }: { readonly label: string; readonly children: string }) {
+export function Labelled({
+  label,
+  children,
+}: {
+  readonly label: string;
+  readonly children: string;
+}) {
   return (
     <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
       <Text span size="sm" c="dimmed">
@@ -15,7 +23,13 @@ function Labelled({ label, children }: { readonly label: string; readonly childr
   );
 }
 
-function Items({ label, items }: { readonly label: string; readonly items: readonly string[] }) {
+export function Items({
+  label,
+  items,
+}: {
+  readonly label: string;
+  readonly items: readonly string[];
+}) {
   if (items.length === 0) return null;
   return (
     <Stack gap={2}>
@@ -31,22 +45,52 @@ function Items({ label, items }: { readonly label: string; readonly items: reado
   );
 }
 
-export function RowDetails({ row }: { readonly row: ShapeProposalDto }) {
+/** The size and area of an opened task, once: "repo · ~0.5 h", flagged when it ran outside its size. */
+export function SizeFacts({
+  areas,
+  size,
+}: {
+  readonly areas: readonly string[];
+  readonly size: ShapeTaskSizeDto | undefined;
+}) {
+  return (
+    <Text size="xs" c="dimmed">
+      {sizeFacts(areas, size)}
+      {size?.missized === true ? (
+        <>
+          {' '}
+          <IconClockExclamation
+            size={14}
+            stroke={1.5}
+            role="img"
+            aria-label="Outside its size by more than one bucket"
+            style={{ verticalAlign: '-2px' }}
+          />
+        </>
+      ) : null}
+    </Text>
+  );
+}
+
+/** A goal's tasks and their title, size and area are in its card; an opened goal adds what they don't say. */
+export function RowDetails({
+  row,
+  sizes,
+}: {
+  readonly row: ShapeProposalDto;
+  readonly sizes: readonly ShapeTaskSizeDto[];
+}) {
   switch (row.kind) {
-    case 'goal':
+    case 'goal': {
+      const off = sizes.filter((s) => s.missized).length;
       return (
         <Stack gap="xs">
-          <Labelled label="Objective">{row.body.objective}</Labelled>
           <Items label="Criteria" items={row.body.criteria.map((c) => `${c.text} (${c.check})`)} />
-          <Items
-            label="Tasks"
-            items={row.body.tasks.map(
-              (t) => `${t.title} · ${t.size ?? 'sized by history'} · ${t.areas.join(', ')}`,
-            )}
-          />
           <Labelled label="Ceremony">{row.body.ceremony}</Labelled>
+          {off === 0 ? null : <Text size="xs" c="dimmed">{`${String(off)} mis-sized`}</Text>}
         </Stack>
       );
+    }
     case 'task':
       return (
         <Stack gap="xs">
@@ -54,10 +98,10 @@ export function RowDetails({ row }: { readonly row: ShapeProposalDto }) {
             <Labelled label="Description">{row.body.description}</Labelled>
           )}
           <Items label="Criteria" items={row.body.criteria} />
-          <Labelled label="Areas">{row.body.areas.join(', ')}</Labelled>
           {row.body.dependsOn.length === 0 ? null : (
             <Labelled label="Depends on">{row.body.dependsOn.join(', ')}</Labelled>
           )}
+          <SizeFacts areas={row.body.areas} size={sizes[0]} />
         </Stack>
       );
     case 'decision':

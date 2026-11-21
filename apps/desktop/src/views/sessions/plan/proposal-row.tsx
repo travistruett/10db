@@ -5,48 +5,30 @@ import {
   type ShapeProposalDto,
   type ShapeTaskSizeDto,
 } from '@10db/contracts';
-import {
-  ActionIcon,
-  Anchor,
-  Box,
-  Button,
-  ColorSwatch,
-  Group,
-  Menu,
-  Text,
-  Tooltip,
-  UnstyledButton,
-} from '@mantine/core';
-import { IconDots, IconPencil, IconPin } from '@tabler/icons-react';
+import { ActionIcon, Anchor, Box, Button, Group, Menu, Stack, Text } from '@mantine/core';
+import { IconDots, IconPencil } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
-import { useRef, useState, type KeyboardEvent } from 'react';
+import { use, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { RowChange } from '../../../daemon/shape-queries';
 import { useSelectedProject } from '../../../shell/selected-project';
-import { RowAttachments } from './attachments/row-attachments';
-import { convertedLine, markText, proposalTitle, rowDot, rowMeta } from './proposal-text';
-import type { RowReview } from './review-lines';
-import { ReviewLines } from './review-notes';
+import {
+  attachmentsOf,
+  AttachmentsContext,
+  mockupState,
+  RowAttachments,
+} from './attachments/row-attachments';
+import { convertedLine, proposalTitle, rowChipMeta, rowDot } from './proposal-text';
+import { highestSeverity, type RowReview } from './review-lines';
+import { ReviewNotes } from './review-notes';
+import { RowChips } from './row-chips';
+import { RowLine, moveRowFocus } from './row-line';
 import { goalLiveLine, liveDot } from './live-state';
 import { RowDetails } from './row-details';
 import { RowEditor } from './row-editor';
 import { useLiveWords } from './use-live-words';
-import { goalHoursLine } from './size-line';
-import { SizeLineText } from './task-size-line';
+import { goalHours } from './size-line';
+import classes from './plan-rows.module.css';
 import { editableFields } from './row-editing';
-
-/** Marks a row's button, so ↑/↓ finds its siblings. */
-export const ROW_ATTRIBUTE = 'data-shape-row';
-
-/** Moves focus to the next or previous row button of the same list; false at either end. */
-export function moveRowFocus(from: HTMLElement, delta: 1 | -1): boolean {
-  const list = from.closest('ul');
-  if (list === null) return false;
-  const rows = [...list.querySelectorAll<HTMLElement>(`[${ROW_ATTRIBUTE}]`)];
-  const next = rows[rows.indexOf(from) + delta];
-  if (next === undefined) return false;
-  next.focus();
-  return true;
-}
 
 export interface RowAction {
   readonly label: string;
@@ -66,10 +48,8 @@ export interface ProposalRowProps {
   /** The Plan's project: its accepted rows read their tasks' live state from it. */
   readonly projectId: ProjectId;
   readonly row: ShapeProposalDto;
-  /** The kind's label, on the first row of its section only. */
-  readonly label: string | null;
-  /** A dimmed line under the row, for the first row of a section that needs one. */
-  readonly note: string | undefined;
+  /** A goal's head, which opens above its tasks inside its card, instead of a row of a list. */
+  readonly head?: boolean;
   /** The section the row opens, so a summary count can jump to the first row of it. */
   readonly section: string;
   /** The one row the Tab key reaches; the arrows move between the rest. */
@@ -81,51 +61,26 @@ export interface ProposalRowProps {
   /** The ceremony, findings and rehearsal questions of a pending goal or task (spec §7). */
   readonly review?: RowReview | undefined;
   readonly handlers: RowHandlers;
-}
-
-/** "Sized M (~2 h) · took 5 h of lane time" under a task row, or a goal's summed hours (§8). */
-function SizeLines({
-  row,
-  sizes,
-}: {
-  readonly row: ShapeProposalDto;
-  readonly sizes: readonly ShapeTaskSizeDto[];
-}) {
-  if (row.kind === 'goal') {
-    const total = goalHoursLine(sizes);
-    const off = sizes.filter((s) => s.missized).length;
-    return total === null ? null : (
-      <Text size="xs" c="dimmed">
-        {total}
-        {off > 0 ? ` · ${String(off)} mis-sized` : ''}
-      </Text>
-    );
-  }
-  return (
-    <>
-      {sizes.map((s) => (
-        <SizeLineText key={s.key} size={s} />
-      ))}
-    </>
-  );
+  /** Rows below the line, inside the same list item: a goal's tasks. */
+  readonly children?: ReactNode;
 }
 
 /**
- * One row of the Proposed list: a button over a region, as Factory's goal rows are, so Enter opens
- * the details. A pending row edits in place (a pencil, or E); an edit pins it. P pins or unpins the
- * row and W asks why. Its menu is a sibling of the button, because a button can't hold another control.
+ * One row of a card: a line of title and chips over a region, as Factory's goal rows are, so a click or
+ * Enter opens it in place. A pending row edits in place (a pencil, or E); an edit pins it. P pins or
+ * unpins the row and W asks why. Its pencil and menu take the chips' place on hover or focus.
  */
 export function ProposalRow({
   projectId,
   row,
-  label,
-  note,
+  head = false,
   section,
   tabbable,
   sizes,
   actions,
   review,
   handlers,
+  children,
 }: ProposalRowProps) {
   const [opened, setOpened] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -141,8 +96,7 @@ export function ProposalRow({
         ? goalLiveLine(live.words)
         : (live.words[0]?.word ?? ''),
   );
-  const meta = rowMeta(row);
-  const mark = markText(row);
+  const { attachments } = use(AttachmentsContext);
   const dot = rowDot(row, live === null ? null : liveDot(live.words));
   const openTask =
     live === null || row.converted === null
@@ -223,135 +177,146 @@ export function ProposalRow({
     ...actions,
   ];
 
-  return (
-    <li style={{ listStyle: 'none', borderTop: '1px solid var(--mantine-color-default-border)' }}>
-      <Group
-        wrap="nowrap"
-        align="flex-start"
-        gap="sm"
-        py={8}
-        // Rows far below the fold cost nothing until they scroll near.
-        style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 44px' }}
+  const findings = review?.findings ?? [];
+  const questions = review?.tasks.flatMap((t) => t.questions) ?? [];
+  // A goal's questions belong to its tasks, which show them; a loose task is its own single task.
+  const ownQuestions = row.kind === 'goal' ? [] : questions;
+  const lane = row.kind === 'goal' ? goalHours(sizes) : null;
+  const size = row.kind === 'task' ? (sizes[0]?.size ?? row.body.size) : undefined;
+  const mockup = mockupState(attachmentsOf(row, attachments));
+
+  const subs: ReactNode[] = [];
+  if (row.kind === 'goal')
+    subs.push(
+      <Text key="objective" size="xs" c="dimmed" lineClamp={2}>
+        {row.body.objective}
+      </Text>,
+    );
+  if (converted !== null)
+    subs.push(
+      <Text key="converted" size="xs" c="dimmed">
+        {converted}
+      </Text>,
+    );
+  if (openTask !== null || openGoal !== null)
+    subs.push(
+      <Anchor
+        key="board"
+        size="xs"
+        className={classes['lift']}
+        renderRoot={(props) =>
+          openTask === null ? (
+            <Link {...props} to="/factory" search={{ goal: openGoal ?? undefined }} />
+          ) : (
+            <Link {...props} to="/board" search={{ task: openTask }} />
+          )
+        }
+        onClick={() => {
+          select(projectId);
+        }}
       >
-        <Text
-          size="xs"
-          c="dimmed"
-          w={64}
-          style={{ flex: 'none', textTransform: 'uppercase' }}
-          aria-hidden="true"
-        >
-          {label}
-        </Text>
-        <Box style={{ flex: 1, minWidth: 0 }}>
-          <Group wrap="nowrap" align="flex-start" gap="xs">
-            <Tooltip label={dot.label}>
-              <ColorSwatch
-                size={8}
-                color={`var(--mantine-color-${dot.color}-filled)`}
-                aria-label={dot.label}
-                role="img"
-                mt={7}
-                style={{ flex: 'none' }}
-              />
-            </Tooltip>
-            <UnstyledButton
-              ref={button}
-              {...{ [ROW_ATTRIBUTE]: '' }}
-              data-section={section}
-              aria-expanded={opened}
-              aria-controls={opened ? regionId : undefined}
-              tabIndex={tabbable ? 0 : -1}
-              onClick={() => {
-                setOpened((o) => !o);
-                setEditing(false);
-              }}
-              onKeyDown={onKeyDown}
-              style={{ flex: 1, minWidth: 0, textAlign: 'left' }}
+        Open on Board
+      </Anchor>,
+    );
+
+  const line = (
+    <RowLine
+      dot={dot}
+      title={title}
+      strong={head}
+      dim={converted !== null}
+      subs={subs.length === 0 ? undefined : <Stack gap={0}>{subs}</Stack>}
+      chips={
+        <RowChips
+          facts={{
+            meta: size ?? rowChipMeta(row),
+            findings: { count: findings.length, severity: highestSeverity(findings) },
+            questions: ownQuestions.length,
+            mockup,
+            pinned,
+          }}
+        />
+      }
+      actions={
+        <Group gap={2} wrap="nowrap">
+          {canEdit ? (
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              size="sm"
+              aria-label={`Edit ${title}`}
+              onClick={startEditing}
             >
-              <Text
-                size="sm"
-                c={converted === null ? 'bright' : 'dimmed'}
-                fw={500}
-                {...(opened ? {} : { lineClamp: 2 })}
-              >
-                {title}
-                {pinned ? (
-                  <>
-                    {' '}
-                    <IconPin
-                      size={16}
-                      stroke={1.5}
-                      role="img"
-                      aria-label="Pinned"
-                      color="var(--mantine-color-dimmed)"
-                      style={{ verticalAlign: '-3px' }}
-                    />
-                  </>
-                ) : null}
-              </Text>
-              {meta === '' ? null : (
-                <Text size="xs" c="dimmed">
-                  {meta}
-                </Text>
-              )}
-              <SizeLines row={row} sizes={sizes} />
-              {converted === null ? null : (
-                <Text size="xs" c="dimmed">
-                  {converted}
-                </Text>
-              )}
-            </UnstyledButton>
-            {mark === null ? null : (
-              <Text size="xs" c="dimmed" style={{ flex: 'none' }} data-mark={row.mark}>
-                {mark}
-              </Text>
-            )}
-            {canEdit ? (
+              <IconPencil size={16} stroke={1.5} />
+            </ActionIcon>
+          ) : null}
+          <Menu position="bottom-end" withinPortal>
+            <Menu.Target>
               <ActionIcon
                 variant="subtle"
+                color="gray"
                 size="sm"
-                aria-label={`Edit ${title}`}
-                onClick={startEditing}
+                className={classes['menu']}
+                aria-label={`Actions for ${title}`}
               >
-                <IconPencil size={16} stroke={1.5} />
+                <IconDots size={16} stroke={1.5} />
               </ActionIcon>
-            ) : null}
-            <Menu position="bottom-end" withinPortal>
-              <Menu.Target>
-                <ActionIcon variant="subtle" size="sm" aria-label={`Actions for ${title}`}>
-                  <IconDots size={16} stroke={1.5} />
-                </ActionIcon>
-              </Menu.Target>
-              <Menu.Dropdown>
-                {menu.map((action) => (
-                  <Menu.Item key={action.label} onClick={action.onSelect}>
-                    {action.label}
-                  </Menu.Item>
-                ))}
-              </Menu.Dropdown>
-            </Menu>
-          </Group>
-          {openTask === null && openGoal === null ? null : (
-            <Anchor
-              size="xs"
-              pl={16}
-              renderRoot={(props) =>
-                openTask === null ? (
-                  <Link {...props} to="/factory" search={{ goal: openGoal ?? undefined }} />
-                ) : (
-                  <Link {...props} to="/board" search={{ task: openTask }} />
-                )
-              }
-              onClick={() => {
-                select(projectId);
-              }}
-            >
-              Open on Board
-            </Anchor>
-          )}
+            </Menu.Target>
+            <Menu.Dropdown>
+              {menu.map((action) => (
+                <Menu.Item key={action.label} onClick={action.onSelect}>
+                  {action.label}
+                </Menu.Item>
+              ))}
+            </Menu.Dropdown>
+          </Menu>
+        </Group>
+      }
+      trailing={
+        lane === null ? undefined : (
+          <Text size="xs" c="dimmed" style={{ flex: 'none', paddingTop: 2 }}>
+            {lane}
+          </Text>
+        )
+      }
+      section={section}
+      opened={opened}
+      regionId={regionId}
+      tabbable={tabbable}
+      buttonRef={button}
+      onToggle={() => {
+        setOpened((o) => !o);
+        setEditing(false);
+      }}
+      onKeyDown={onKeyDown}
+    />
+  );
+  const region = opened ? (
+    <Box
+      id={regionId}
+      role="region"
+      aria-label={`${title} details`}
+      px={8}
+      pb={6}
+      pl={head ? 8 : 24}
+    >
+      {editing ? (
+        <RowEditor
+          row={row}
+          onCancel={stopEditing}
+          onSave={(fields) => {
+            change({ kind: 'edit', fields });
+            stopEditing();
+          }}
+        />
+      ) : (
+        <Stack gap="xs">
           {review === undefined ? null : (
-            <ReviewLines
-              review={review}
+            <ReviewNotes
+              ceremony={review.ceremony}
+              findings={findings}
+              questions={ownQuestions}
+              settled={review.settled}
               onDismiss={handlers.onDismiss}
               onCeremony={(c) => {
                 change(
@@ -362,54 +327,48 @@ export function ProposalRow({
               }}
             />
           )}
-          {opened ? (
-            <Box id={regionId} role="region" aria-label={`${title} details`} pt="xs" pb={4}>
-              {editing ? (
-                <RowEditor
-                  row={row}
-                  onCancel={stopEditing}
-                  onSave={(fields) => {
-                    change({ kind: 'edit', fields });
-                    stopEditing();
-                  }}
-                />
-              ) : (
-                <>
-                  <RowDetails row={row} />
-                  <RowAttachments row={row} title={title} />
-                  <Group gap="xs" pt="xs">
-                    <Button
-                      variant="subtle"
-                      size="compact-xs"
-                      onClick={() => {
-                        handlers.onWhy(row);
-                      }}
-                    >
-                      Why?
-                    </Button>
-                    {earlier ? (
-                      <Button
-                        variant="subtle"
-                        size="compact-xs"
-                        onClick={() => {
-                          change({ kind: 'restore' });
-                        }}
-                      >
-                        Restore
-                      </Button>
-                    ) : null}
-                  </Group>
-                </>
-              )}
-            </Box>
-          ) : null}
-        </Box>
-      </Group>
-      {note === undefined ? null : (
-        <Text size="xs" c="dimmed" pl={76} pb={6}>
-          {note}
-        </Text>
+          <RowDetails row={row} sizes={sizes} />
+          <RowAttachments row={row} title={title} />
+          <Group gap="xs">
+            <Button
+              variant="subtle"
+              size="compact-xs"
+              onClick={() => {
+                handlers.onWhy(row);
+              }}
+            >
+              Why?
+            </Button>
+            {earlier ? (
+              <Button
+                variant="subtle"
+                size="compact-xs"
+                onClick={() => {
+                  change({ kind: 'restore' });
+                }}
+              >
+                Restore
+              </Button>
+            ) : null}
+          </Group>
+        </Stack>
       )}
+    </Box>
+  ) : null;
+
+  if (head)
+    return (
+      <>
+        {line}
+        {region}
+        {children}
+      </>
+    );
+  return (
+    <li style={{ listStyle: 'none' }}>
+      {line}
+      {region}
+      {children}
     </li>
   );
 }

@@ -200,11 +200,13 @@ export function ProposedPane({
       component="section"
       aria-label="Plan"
       h="100%"
+      // The panel takes the Board's card tone, so its cards (the Board's tray tone) sit one tone down.
+      bg="var(--tendb-color-card)"
       style={{ display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 }}
     >
       <Stack gap={6} px="md" pt="md" pb="xs" style={{ flex: 'none' }}>
         <Group justify="space-between" wrap="nowrap">
-          <Text fz={13} fw={600}>
+          <Text fz={16} fw={600}>
             Plan
           </Text>
           <Group gap="xs" wrap="nowrap">
@@ -303,9 +305,28 @@ export function ProposedPane({
           </Group>
         </Group>
         {view === undefined || view.shape.round === 0 ? null : (
-          <Text size="xs" c="dimmed">
-            {`Round ${String(view.shape.round)} · updated ${shortAgo(view.shape.updatedAt, now)}`}
-          </Text>
+          <Group gap={6} wrap="nowrap">
+            <Text size="xs" c="dimmed">
+              {`Round ${String(view.shape.round)} · updated ${shortAgo(view.shape.updatedAt, now)}`}
+            </Text>
+            {changes.length === 0 ? null : (
+              <>
+                <Text size="xs" c="dimmed" aria-hidden="true">
+                  ·
+                </Text>
+                <Button
+                  variant="subtle"
+                  size="compact-xs"
+                  aria-pressed={filtering}
+                  onClick={() => {
+                    setChangesOnly((on) => !on);
+                  }}
+                >
+                  {`${String(changes.length)} ${changes.length === 1 ? 'change' : 'changes'}`}
+                </Button>
+              </>
+            )}
+          </Group>
         )}
         {reviewLine === '' ? null : (
           <Text size="xs" c="dimmed" role="status" aria-label="Review">
@@ -315,19 +336,6 @@ export function ProposedPane({
         {summaryHere ? (
           <SummaryLine groups={groupProposals(view?.proposals ?? [])} onJump={jump} />
         ) : null}
-        {changes.length === 0 || view === undefined ? null : (
-          <Button
-            variant="subtle"
-            size="compact-xs"
-            style={{ alignSelf: 'flex-start' }}
-            aria-pressed={filtering}
-            onClick={() => {
-              setChangesOnly((on) => !on);
-            }}
-          >
-            {`${String(changes.length)} ${changes.length === 1 ? 'change' : 'changes'} in round ${String(view.shape.round)}`}
-          </Button>
-        )}
         {change.isError ? (
           <Alert color="red" title="Couldn't change the row">
             {change.error.message}

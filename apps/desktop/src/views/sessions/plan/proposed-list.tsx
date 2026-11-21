@@ -1,33 +1,36 @@
 import type { ProjectId, ShapeProposalDto, ShapeTaskSizeDto } from '@10db/contracts';
 import { Box, Text, UnstyledButton } from '@mantine/core';
 import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { CountBadge } from '../../../shell/count-badge';
-import { kindLabel } from './proposal-text';
+import { GoalTaskRow } from './goal-task-row';
+import { CardName, PlanCard } from './plan-card';
 import { ProposalRow, type RowAction, type RowHandlers } from './proposal-row';
 import type { RowReview } from './review-lines';
 import { isConverted, SectionKey, type ProposedGroups } from './proposed-groups';
 
 interface Block {
   readonly section: SectionKey;
+  readonly name: string;
   readonly rows: readonly ShapeProposalDto[];
-  /** A dimmed line under the section's first row. */
+  /** A dimmed line under the card's name. */
   readonly note?: string;
 }
 
+/** The cards after the goals, each holding one kind of row. */
 function blocksOf(groups: ProposedGroups): Block[] {
   return [
-    { section: SectionKey.Goals, rows: groups.goals },
-    { section: SectionKey.Tasks, rows: groups.looseTasks },
-    { section: SectionKey.Changes, rows: groups.changes },
-    { section: SectionKey.Landings, rows: groups.landings },
-    { section: SectionKey.Records, rows: groups.records },
+    { section: SectionKey.Tasks, name: 'Loose tasks', rows: groups.looseTasks },
+    { section: SectionKey.Changes, name: 'Changes', rows: groups.changes },
+    { section: SectionKey.Landings, name: 'Landings', rows: groups.landings },
+    { section: SectionKey.Records, name: 'Decisions', rows: groups.records },
     {
       section: SectionKey.Questions,
+      name: 'Questions for others',
       rows: groups.questions,
       note: 'Sent when people arrive (goals phase 3)',
     },
-  ];
+  ].filter((block) => block.rows.length > 0);
 }
 
 export interface ProposedListProps {
@@ -44,8 +47,8 @@ export interface ProposedListProps {
 }
 
 /**
- * The rows of the sidebar as one hairline-divided list, each kind labelled in a narrow left column.
- * A list, not cards (DESIGN.md); ↑/↓ move between the rows, and Earlier holds the superseded ones.
+ * The Plan's rows as cards: a card for each goal, holding its tasks, then Loose tasks, Decisions and
+ * the rest. ↑/↓ move between the rows, and Earlier holds the superseded ones.
  */
 export function ProposedList({
   projectId,
@@ -57,44 +60,91 @@ export function ProposedList({
 }: ProposedListProps) {
   const sizesOf = (row: ShapeProposalDto) => sizes.filter((s) => s.proposalId === row.id);
   const [earlierOpen, setEarlierOpen] = useState(false);
-  const rows = blocksOf(groups).flatMap((block) =>
-    block.rows.map((row, index) => ({
-      row,
-      // A converted row is marked apart, so "N converted" lands on it whichever kind it is and
-      // a kind's own count lands on a pending row.
-      section: isConverted(row) ? SectionKey.Converted : block.section,
-      label: index === 0 ? kindLabel(row) : null,
-      note: index === 0 ? block.note : undefined,
-    })),
+  const blocks = blocksOf(groups);
+  // The Tab key reaches the first row on screen: a goal's head, or the first card's first row.
+  const firstId = (groups.goals[0] ?? blocks[0]?.rows[0])?.id;
+  // A converted row is marked apart, so "N accepted" lands on it whichever kind it is and a kind's
+  // own count lands on a pending row.
+  const sectionOf = (row: ShapeProposalDto, own: SectionKey): SectionKey =>
+    isConverted(row) ? SectionKey.Converted : own;
+  const rowOf = (row: ShapeProposalDto, own: SectionKey, children?: ReactNode) => (
+    <ProposalRow
+      projectId={projectId}
+      key={row.id}
+      row={row}
+      section={sectionOf(row, own)}
+      tabbable={row.id === firstId}
+      sizes={sizesOf(row)}
+      actions={actionsFor(row)}
+      review={reviewOf?.(row)}
+      handlers={handlers}
+      {...(row.kind === 'goal' ? { head: true } : {})}
+    >
+      {children}
+    </ProposalRow>
   );
 
   return (
-    <Box component="ul" aria-label="Plan rows" m={0} p={0} style={{ listStyle: 'none' }}>
-      {rows.map(({ row, section, label, note }, index) => (
-        <ProposalRow
-          projectId={projectId}
-          key={row.id}
-          row={row}
-          label={label}
-          note={note}
-          section={section}
-          tabbable={index === 0}
-          sizes={sizesOf(row)}
-          actions={actionsFor(row)}
-          review={reviewOf?.(row)}
-          handlers={handlers}
-        />
+    <Box
+      component="ul"
+      aria-label="Plan rows"
+      m={0}
+      p={0}
+      style={{ listStyle: 'none', display: 'grid', gap: 10 }}
+    >
+      {groups.goals.map((goal) => {
+        if (goal.kind !== 'goal') return null;
+        const review = reviewOf?.(goal);
+        const own = sizesOf(goal);
+        return (
+          <PlanCard key={goal.id} head={null}>
+            {rowOf(
+              goal,
+              SectionKey.Goals,
+              <Box component="ul" m={0} p={0} pl={16} style={{ listStyle: 'none' }}>
+                {goal.body.tasks.map((task, index) => (
+                  <GoalTaskRow
+                    key={task.key}
+                    goal={goal}
+                    task={task}
+                    index={index}
+                    size={own.find((s) => s.key === task.key)}
+                    review={review?.tasks.find((t) => t.key === task.key)}
+                    handlers={handlers}
+                  />
+                ))}
+              </Box>,
+            )}
+          </PlanCard>
+        );
+      })}
+      {blocks.map((block) => (
+        <PlanCard
+          key={block.section}
+          head={
+            <CardName
+              name={block.name}
+              count={block.rows.length}
+              {...(block.note === undefined ? {} : { note: block.note })}
+            />
+          }
+        >
+          <Box component="ul" m={0} p={0} style={{ listStyle: 'none' }}>
+            {block.rows.map((row) => rowOf(row, block.section))}
+          </Box>
+        </PlanCard>
       ))}
       {groups.earlier.length === 0 ? null : (
-        <>
-          <Box component="li" style={{ listStyle: 'none', borderTop: ROW_BORDER }}>
+        <PlanCard
+          head={
             <UnstyledButton
               aria-expanded={earlierOpen}
               data-section={SectionKey.Earlier}
               onClick={() => {
                 setEarlierOpen((o) => !o);
               }}
-              py={8}
+              px={8}
+              py={4}
             >
               <Text size="xs" c="dimmed" component="span">
                 {earlierOpen ? (
@@ -105,27 +155,26 @@ export function ProposedList({
                 Earlier <CountBadge count={groups.earlier.length} />
               </Text>
             </UnstyledButton>
-          </Box>
-          {earlierOpen
-            ? groups.earlier.map((row) => (
+          }
+        >
+          {earlierOpen ? (
+            <Box component="ul" m={0} p={0} style={{ listStyle: 'none' }}>
+              {groups.earlier.map((row) => (
                 <ProposalRow
                   projectId={projectId}
                   key={row.id}
                   row={row}
-                  label={kindLabel(row)}
-                  note={undefined}
                   section={SectionKey.Earlier}
                   tabbable={false}
                   sizes={sizesOf(row)}
                   actions={[]}
                   handlers={handlers}
                 />
-              ))
-            : null}
-        </>
+              ))}
+            </Box>
+          ) : null}
+        </PlanCard>
       )}
     </Box>
   );
 }
-
-const ROW_BORDER = '1px solid var(--mantine-color-default-border)';

@@ -21,32 +21,53 @@ export const AttachmentsContext = createContext<{
 
 const KIND_LABEL = { mermaid: 'Diagram', chart: 'Chart', mockup: 'Mockup' } as const;
 
-/** A row's attachments: by its key or a goal's task keys, or by the goal or tasks Convert made of it. */
+/** One task of a goal: its key in the goal's body and its place in the goal's order. */
+export interface GoalTaskRef {
+  readonly key: string;
+  readonly index: number;
+}
+
+/**
+ * A row's attachments: by its key or the goal or tasks Convert made of it. A goal's own are those of
+ * the goal; with `task`, those of that one task of it.
+ */
 export function attachmentsOf(
   row: ShapeProposalDto,
   all: readonly ShapeAttachmentDto[],
+  task?: GoalTaskRef,
 ): ShapeAttachmentDto[] {
-  const keys = new Set<string>([row.key]);
-  if (row.kind === 'goal') for (const task of row.body.tasks) keys.add(task.key);
+  if (task !== undefined) {
+    const taskId = row.converted?.taskIds[task.index] ?? null;
+    return all.filter((a) => a.key === task.key || (taskId !== null && a.taskId === taskId));
+  }
   const goalId = row.converted?.goalId ?? null;
   const taskIds = new Set<string>(row.converted?.taskIds ?? []);
   return all.filter(
     (a) =>
-      keys.has(a.key) ||
+      a.key === row.key ||
       (goalId !== null && a.goalId === goalId) ||
-      (a.taskId !== null && taskIds.has(a.taskId)),
+      (row.kind !== 'goal' && a.taskId !== null && taskIds.has(a.taskId)),
   );
+}
+
+/** What a row's mock-ups say at a glance: approved, waiting for approval, or none. */
+export function mockupState(mine: readonly ShapeAttachmentDto[]): 'approved' | 'waiting' | null {
+  const mockups = mine.filter((a) => a.attachment.kind === 'mockup');
+  if (mockups.length === 0) return null;
+  return mockups.some((a) => a.approved) ? 'approved' : 'waiting';
 }
 
 export function RowAttachments({
   row,
   title,
+  task,
 }: {
   readonly row: ShapeProposalDto;
   readonly title: string;
+  readonly task?: GoalTaskRef;
 }) {
   const { shapeId, attachments, onAskForChanges } = use(AttachmentsContext);
-  const mine = attachmentsOf(row, attachments);
+  const mine = attachmentsOf(row, attachments, task);
   if (mine.length === 0 || shapeId === null) return null;
   return (
     <Stack gap="xs" pt="xs">

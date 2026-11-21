@@ -1,85 +1,151 @@
 import type { ShapePreviewDto, ShapePreviewItem } from '@10db/contracts';
-import { Box, Group, Stack, Text } from '@mantine/core';
-import { IconArrowsSplit } from '@tabler/icons-react';
-import { useId } from 'react';
-import { landingsLine, previewSummary, hoursText } from './preview-text';
+import { Box, Group, Stack, Text, UnstyledButton } from '@mantine/core';
+import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
+import { useId, useState } from 'react';
+import { landingsLine, foldedSummary, hoursText } from './preview-text';
 
-// Shape spec §10.2: how the project's lanes would run the draft. Work already running or queued holds
-// its lane first; the critical path is blue; a clash is a dimmed line with a Tabler arrows-split icon
-// and no status color; the end is marked "estimate". A preview is read, never written.
+// Shape spec §10.2: how the project's lanes would run the draft, folded under the cards. Work already
+// running or queued holds its lane first; a lane with no task is not drawn; the critical path is one
+// dim line; a clash is one short sentence; the end is marked "estimate". A preview is read, never written.
 
-const BLUE = 'var(--mantine-color-blue-6)';
-
-function Bar({ item }: { readonly item: ShapePreviewItem }) {
+/** A lane's bar: each task a segment placed by its hours, the critical ones in the accent. */
+function LaneBar({
+  items,
+  span,
+}: {
+  readonly items: readonly ShapePreviewItem[];
+  readonly span: number;
+}) {
   return (
     <Box
-      component="li"
-      data-key={item.key}
-      data-critical={item.critical ? 'true' : 'false'}
-      py={4}
-      pl="xs"
+      aria-hidden="true"
+      h={6}
+      my={4}
       style={{
-        listStyle: 'none',
-        borderInlineStart: `2px solid ${item.critical ? BLUE : 'var(--mantine-color-default-border)'}`,
-        ...(item.critical ? { color: BLUE } : {}),
+        position: 'relative',
+        borderRadius: 3,
+        background: 'var(--tendb-color-card)',
+        overflow: 'hidden',
       }}
     >
-      <Group gap={6} wrap="nowrap" justify="space-between">
-        <Text
-          size="xs"
-          truncate="end"
-          {...(item.existing && !item.critical ? { c: 'dimmed' } : {})}
-        >
-          {item.title}
-        </Text>
-        <Text size="xs" c="dimmed" style={{ flex: 'none', fontVariantNumeric: 'tabular-nums' }}>
-          {`${hoursText(item.startHours)}–${hoursText(item.endHours)}`}
-          {item.existing ? ' · already in the factory' : ''}
-        </Text>
-      </Group>
+      {items.map((item) => (
+        <Box
+          key={item.key}
+          style={{
+            position: 'absolute',
+            top: 0,
+            bottom: 0,
+            left: `${String((item.startHours / span) * 100)}%`,
+            width: `${String(((item.endHours - item.startHours) / span) * 100)}%`,
+            background: item.critical
+              ? 'var(--mantine-color-blue-filled)'
+              : 'var(--mantine-color-dimmed)',
+            borderRight: '2px solid var(--tendb-color-column)',
+          }}
+        />
+      ))}
     </Box>
   );
 }
 
 export function PreviewPanel({ preview }: { readonly preview: ShapePreviewDto }) {
-  const headingId = useId();
+  const regionId = useId();
+  const [opened, setOpened] = useState(false);
   if (preview.tasks === 0) return null;
   const titles = new Map(preview.lanes.flatMap((l) => l.items.map((i) => [i.key, i.title])));
   const path = preview.criticalPath.map((key) => titles.get(key) ?? key);
+  // The simulation returns one entry per lane the project allows, so a draft that fits in fewer leaves
+  // empty ones; only a lane with a task is drawn.
+  const lanes = preview.lanes.filter((lane) => lane.items.length > 0);
+  const span = Math.max(
+    preview.scheduleHours,
+    ...lanes.flatMap((l) => l.items.map((i) => i.endHours)),
+    0.1,
+  );
   return (
-    <Box component="section" role="region" aria-labelledby={headingId} mt="md">
-      <Stack gap={6}>
-        <Text id={headingId} size="xs" fw={500} c="dimmed" tt="uppercase">
-          Factory preview
-        </Text>
-        <Text size="xs">{previewSummary(preview)}</Text>
-        <Text size="xs">{landingsLine(preview.landings)}</Text>
-        {preview.lanes.map((lane, index) => (
-          <Box key={lane.items[0]?.key ?? index}>
-            <Text size="xs" c="dimmed" id={`${headingId}-lane-${String(index)}`}>
-              {`Lane ${String(index + 1)}`}
-            </Text>
-            <Box component="ul" m={0} p={0} aria-labelledby={`${headingId}-lane-${String(index)}`}>
-              {lane.items.map((item) => (
-                <Bar key={item.key} item={item} />
-              ))}
-            </Box>
-          </Box>
-        ))}
-        {path.length === 0 ? null : (
-          <Text size="xs" style={{ color: BLUE }}>{`Critical path: ${path.join(' → ')}`}</Text>
-        )}
-        {preview.clashes.map((clash) => (
-          <Group key={clash.area} gap={6} wrap="nowrap" align="flex-start" data-clash={clash.area}>
-            <Text c="dimmed" component="span" style={{ display: 'inline-flex', flex: 'none' }}>
-              <IconArrowsSplit size={16} stroke={1.5} aria-hidden="true" />
-            </Text>
-            <Text size="xs" c="dimmed">
-              {clash.text}
+    <Box
+      component="section"
+      aria-label="How it would run"
+      mt="md"
+      p="xs"
+      style={{ borderRadius: 'var(--mantine-radius-md)', background: 'var(--tendb-color-column)' }}
+    >
+      <UnstyledButton
+        aria-expanded={opened}
+        aria-controls={opened ? regionId : undefined}
+        onClick={() => {
+          setOpened((o) => !o);
+        }}
+        w="100%"
+        px={8}
+        py={4}
+      >
+        <Group gap={6} wrap="nowrap" justify="space-between">
+          <Group gap={4} wrap="nowrap">
+            {opened ? (
+              <IconChevronDown size={14} stroke={1.5} aria-hidden="true" />
+            ) : (
+              <IconChevronRight size={14} stroke={1.5} aria-hidden="true" />
+            )}
+            <Text size="sm" fw={500} c="bright">
+              How it would run
             </Text>
           </Group>
-        ))}
-      </Stack>
+          <Text size="xs" c="dimmed" truncate="end">
+            {foldedSummary(preview)}
+          </Text>
+        </Group>
+      </UnstyledButton>
+      {opened ? (
+        <Stack id={regionId} gap={8} px={8} pt={6} pb={4}>
+          <Text size="xs" c="dimmed">
+            {`Ends in about ${hoursText(preview.endEstimateHours)} (estimate) · ${landingsLine(preview.landings)}`}
+          </Text>
+          {lanes.map((lane, index) => (
+            <Box key={lane.items[0]?.key ?? index}>
+              {lanes.length === 1 ? null : (
+                <Text size="xs" c="dimmed">
+                  {`Lane ${String(index + 1)}`}
+                </Text>
+              )}
+              <LaneBar items={lane.items} span={span} />
+              <Box component="ul" m={0} p={0} style={{ listStyle: 'none' }}>
+                {lane.items.map((item) => (
+                  <Group
+                    component="li"
+                    key={item.key}
+                    gap={6}
+                    wrap="nowrap"
+                    justify="space-between"
+                    data-key={item.key}
+                    data-critical={item.critical ? 'true' : 'false'}
+                  >
+                    <Text size="xs" truncate="end">
+                      {item.title}
+                    </Text>
+                    <Text
+                      size="xs"
+                      c="dimmed"
+                      style={{ flex: 'none', fontVariantNumeric: 'tabular-nums' }}
+                    >
+                      {`${hoursText(item.startHours)}–${hoursText(item.endHours)}`}
+                      {item.existing ? ' · already in the factory' : ''}
+                    </Text>
+                  </Group>
+                ))}
+              </Box>
+            </Box>
+          ))}
+          {path.length < 2 ? null : (
+            <Text size="xs" c="dimmed">{`Critical path: ${path.join(' → ')}`}</Text>
+          )}
+          {preview.clashes.map((clash) => (
+            <Text key={clash.area} size="xs" c="dimmed" data-clash={clash.area}>
+              {`${String(clash.titles.length)} tasks claim ${clash.area}, so they run one after another.`}
+            </Text>
+          ))}
+        </Stack>
+      ) : null}
     </Box>
   );
 }

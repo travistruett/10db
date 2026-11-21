@@ -655,7 +655,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await page.keyboard.press('ArrowUp');
   await expect(rows.first()).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(panel.getByText('The board is denser and calmer to scan.')).toBeVisible();
+  await expect(panel.getByRole('region', { name: 'Board polish details' })).toBeVisible();
 
   // Pin a loose task by editing its title; the next round leaves it as it is.
   await panel.getByRole('button', { name: 'Edit Drop the Abandon strip' }).click();
@@ -677,6 +677,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await expect(panel.getByText('The scope is wider than one pull request.').first()).toBeVisible();
   await panel.getByRole('button', { name: 'Review' }).click();
   await page.getByRole('menuitem', { name: 'Check for Questions' }).click();
+  await panel.getByRole('button', { name: 'Compact card density', exact: true }).click();
   await expect(panel.getByText('Which screen does this change first?').first()).toBeVisible();
 
   // A mock-up the session drew is approved from its row.
@@ -696,6 +697,11 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await panel.getByRole('button', { name: 'Review' }).click();
   await page.getByRole('menuitem', { name: 'Design review' }).click();
   await expect(panel.getByText('The mock-up leaves out the empty state.').first()).toBeVisible();
+
+  // The run preview is folded; opened it draws only the lanes that have a task.
+  await panel.getByRole('button', { name: 'How it would run' }).click();
+  await expect(panel.getByText('Critical path:')).toBeVisible();
+  await expect(panel.getByText('Lane 2')).toHaveCount(0);
 
   // Accept lists the rows, says nothing starts, and writes the ticked ones to the Board.
   const before = (await titles()).length;

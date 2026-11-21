@@ -1,0 +1,63 @@
+/* A row of the Plan: one line, chips at the right, its actions in their place on hover or focus. */
+.row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--mantine-radius-sm);
+}
+
+.row:hover {
+  background: var(--tendb-color-card);
+}
+
+/* The title button covers the whole row, so a click anywhere opens it; what sits above it lifts itself. */
+.hit::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+.lift {
+  position: relative;
+  z-index: 1;
+}
+
+.slot {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  flex: none;
+  align-items: center;
+  justify-items: end;
+}
+
+.slot > * {
+  grid-area: 1 / 1;
+}
+
+.chips {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  opacity: 0;
+}
+
+.row:hover .chips,
+.row:has(:focus-visible) .chips,
+.row:has([aria-expanded='true'].menu) .chips {
+  opacity: 0;
+}
+
+.row:hover .actions,
+.row:has(:focus-visible) .actions,
+.row:has([aria-expanded='true'].menu) .actions {
+  opacity: 1;
+}

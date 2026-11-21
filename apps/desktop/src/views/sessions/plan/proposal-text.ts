@@ -1,8 +1,8 @@
 import type { ShapeProposalDto } from '@10db/contracts';
 import { isConverted } from './proposed-groups';
 
-// The words the Proposed list uses for a row: its title, what it becomes, and the dimmed line that
-// says Convert has made it.
+// The words the Plan uses for a row: its title, what it becomes, and the dimmed line that says Convert
+// has made it.
 
 /** The row's title: what the builder reads it by. */
 export function proposalTitle(row: ShapeProposalDto): string {
@@ -21,28 +21,6 @@ export function proposalTitle(row: ShapeProposalDto): string {
       return row.body.title ?? 'Change to a task on the Board';
     case 'remove_task':
       return 'Remove a task from the Board';
-  }
-}
-
-/** The small label in the narrow left column. */
-export function kindLabel(row: ShapeProposalDto): string {
-  switch (row.kind) {
-    case 'goal':
-      return 'Goal';
-    case 'task':
-      return row.body.goalId === undefined ? 'Task' : 'Added';
-    case 'change_task':
-      return 'Change';
-    case 'remove_task':
-      return 'Remove';
-    case 'landing':
-      return 'Landing';
-    case 'decision':
-      return 'Decision';
-    case 'principle':
-      return 'Principle';
-    case 'question':
-      return 'Ask';
   }
 }
 
@@ -95,20 +73,6 @@ export function convertedLine(row: ShapeProposalDto, liveLine?: string): string 
   }
 }
 
-/** What the latest round did to a row, until the next round (spec §6); null when it did nothing. */
-export function markText(row: ShapeProposalDto): string | null {
-  switch (row.mark) {
-    case 'new':
-      return 'new';
-    case 'changed':
-      return 'changed';
-    case 'moved':
-      return 'moved to Earlier';
-    case null:
-      return null;
-  }
-}
-
 /** The state dot before a row's title: the first of accepted, the round's mark, pinned, else proposed. */
 export function rowDot(
   row: ShapeProposalDto,
@@ -133,13 +97,9 @@ export function rowDot(
   }
 }
 
-/** The short facts shown after a title on a collapsed row. */
-export function rowMeta(row: ShapeProposalDto): string {
+/** The short fact a row's chip carries when it has no size: a decision's scope, who a question is for. */
+export function rowChipMeta(row: ShapeProposalDto): string {
   switch (row.kind) {
-    case 'goal':
-      return taskCount(row.body.tasks.length);
-    case 'task':
-      return [row.body.size ?? 'sized by history', row.body.areas.join(', ')].join(' · ');
     case 'landing':
       return `${taskCount(row.body.keys.length)} · 1 pull request`;
     case 'question':
@@ -147,6 +107,8 @@ export function rowMeta(row: ShapeProposalDto): string {
     case 'decision':
     case 'principle':
       return row.body.scope === 'area' ? `area ${row.body.area ?? ''}` : row.body.scope;
+    case 'goal':
+    case 'task':
     case 'change_task':
     case 'remove_task':
       return '';
