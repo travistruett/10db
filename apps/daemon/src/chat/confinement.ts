@@ -3,7 +3,7 @@ import { ChatToolName, JudgeKind, ShapeToolName, type WorkPlace } from '@10db/co
 import { isWithinOnEveryReading, stringField } from '../guard';
 import type { ShapeVerdict } from '../sessions';
 import { expandHome } from '../sandbox';
-import { judgePlanTool, judgeShapeCall, type ShapeAccess } from '../shape';
+import { judgePlanTool, judgeShapeCall, type ShapeAccess, type ShapeReviewTurn } from '../shape';
 import { firstChangeOf } from './first-change';
 import { CHAT_GIT_REFUSAL, JUDGED_CHAT_TOOL_ASK, JUDGED_CHAT_TOOLS } from './git-rule';
 
@@ -134,6 +134,7 @@ export function judgeChatCall(
   call: ChatCall,
   access: ShapeAccess,
   folder?: ChatPlace,
+  review?: () => ShapeReviewTurn | null,
 ): ShapeVerdict {
   const asSession = {
     toolName: call.toolName,
@@ -175,12 +176,15 @@ export function judgeChatCall(
     const own = call.toolName.slice(OWN_PREFIX.length);
     // Every session has Plan's tools; who calls which is Plan's judge's (`report_finding` only from a reviewer).
     if (PLAN_TOOLS.has(own))
-      return judgePlanTool({
-        toolName: call.toolName,
-        toolInput: call.input,
-        agentId: call.agentId,
-        agentType: call.agentType,
-      });
+      return judgePlanTool(
+        {
+          toolName: call.toolName,
+          toolInput: call.input,
+          agentId: call.agentId,
+          agentType: call.agentType,
+        },
+        review,
+      );
     if (!CHAT_TOOLS.has(own)) return deny(`${call.toolName} is not one of this chat's tools.`);
     // Only 10db's judge settles these. Claude's auto mode lets a push, a pull request and a merge through unasked,
     // so on it, and on the rules floor, the builder is asked.

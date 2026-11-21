@@ -3,6 +3,7 @@ import {
   ShapeMessageAuthor,
   ShapeMessageKind,
   ShapeOrigin,
+  ShapeToolInputs,
   type ChatId,
   type ConversationId,
   type PlanDraft,
@@ -23,6 +24,7 @@ import type { ShapeToolHandlers } from '../mcp';
 import type { ScreenService } from '../screens';
 import { attach } from './attach';
 import { reconcileDraft } from './rounds';
+import { stampReview, type ShapeReviewTurn } from './review-turn';
 import { reportFinding, resolveFinding, writeSpec } from './review';
 import { buildSizes } from './sizing';
 import { ceremonies, type ViewWorld } from './view';
@@ -42,6 +44,11 @@ export interface ShapeToolDeps {
   };
   /** Takes the planning rules the calling session is owed, once (`ChatLive.planRules`). */
   readonly owedRules?: (conversationId: ConversationId, sessionId: SessionId) => string | null;
+  /** The review turn the calling session is in (`ChatLive.review`): its own findings are stamped from it. */
+  readonly reviewOf?: (
+    conversationId: ConversationId,
+    sessionId: SessionId,
+  ) => ShapeReviewTurn | null;
 }
 
 /** The chat a handler set serves: the session's tools are held to it. */
@@ -168,8 +175,14 @@ export function createShapeToolHandlers(
       withPlan((shapeId) => deps.state.write((ctx) => attach(ctx, shapeId, input))),
     write_spec: (input) =>
       withPlan((shapeId) => deps.state.write((ctx) => writeSpec(ctx, shapeId, input))),
-    report_finding: (input) =>
-      withPlan((shapeId) => deps.state.write((ctx) => reportFinding(ctx, shapeId, input))),
+    report_finding: (input) => {
+      // A session in a review turn reports as that review; the model's own `reviewer` is only the lens a
+      // plan review reads through. A reviewer subagent's call arrives stamped by the hook, outside any turn.
+      const review = deps.reviewOf?.(chat.conversationId, chat.sessionId) ?? null;
+      const stamped =
+        review === null ? input : ShapeToolInputs.report_finding.parse(stampReview(review, input));
+      return withPlan((shapeId) => deps.state.write((ctx) => reportFinding(ctx, shapeId, stamped)));
+    },
     resolve_finding: (input) =>
       withPlan((shapeId) => deps.state.write((ctx) => resolveFinding(ctx, shapeId, input))),
     propose_plan: (input) => {

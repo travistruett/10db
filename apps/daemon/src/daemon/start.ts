@@ -1713,6 +1713,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     adapter,
     owedRules: (conversationId, sessionId) =>
       chatLive.get(conversationId, sessionId)?.planRules?.take() ?? null,
+    reviewOf: (conversationId, sessionId) =>
+      chatLive.get(conversationId, sessionId)?.review() ?? null,
     engine: exploreEngine,
     clock,
     log: logger.child({ component: 'shape' }),

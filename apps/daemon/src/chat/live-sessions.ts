@@ -1,5 +1,6 @@
 import type { ConversationId, SessionId } from '@10db/contracts';
 import type { WaitObserver } from '../inbox';
+import type { ShapeReviewTurn } from '../shape';
 
 // A chat's session that is open now, as its tools need it: a card a tool raises is told to the
 // engine through the session's observer, so the tab says it waits, and goes when the session ends.
@@ -15,6 +16,11 @@ export interface ChatLive {
    * plan, which holds the rules in its system prompt (a resumed Codex thread's developer instructions).
    */
   readonly planRules: { peek(): string | null; take(): string | null } | null;
+  /**
+   * The review turn the session is in, for a session that runs no subagents: it does Plan's reviews itself, and
+   * only while this is set may its own `report_finding` pass. Null otherwise, and always null with subagents.
+   */
+  readonly review: () => ShapeReviewTurn | null;
 }
 
 export interface ChatLiveSessions {

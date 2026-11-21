@@ -1,10 +1,10 @@
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { JudgeKind, type WorkPlace } from '@10db/contracts';
+import { JudgeKind, type ConversationItemId, type WorkPlace } from '@10db/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { tempDir, type TempDir } from '../../test/fixtures';
 import { fileAccessJudge } from '../sandbox';
-import { judgeShapeCall, type ShapeAccess } from '../shape';
+import { judgeShapeCall, stampReview, type ShapeAccess, type ShapeReviewTurn } from '../shape';
 import { CHAT_GIT_REFUSAL } from './git-rule';
 import {
   CHAT_MOVING,
@@ -506,6 +506,35 @@ describe('a chat with a plan', () => {
       expect(verdict).toMatchObject({
         updatedInput: { effortKey: 'e', reviewer: 'engineering' },
       });
+  });
+
+  it('lets a session with no subagents report a finding only during its review turn, as that review', () => {
+    // A Codex session runs no reviewers: its own report_finding passes while a review turn is live.
+    const turn = { id: 'cvi_review' as ConversationItemId, kind: 'review' } as const;
+    let live: ShapeReviewTurn | null = turn;
+    const judge = (call: ReturnType<typeof mcp>) =>
+      judgeChatCall(call, withPlan(), undefined, () => live);
+    expect(judge(mcp('report_finding')).decision).toBe('allow');
+    // The review, not the model, says whose finding it is.
+    expect(stampReview(turn, { effortKey: 'e', reviewer: 'engineering' })).toMatchObject({
+      reviewer: 'engineering',
+    });
+    expect(() => stampReview(turn, { effortKey: 'e', reviewer: 'rehearsal' })).toThrow();
+    expect(
+      stampReview({ ...turn, kind: 'rehearse' }, { effortKey: 'e', reviewer: 'scope' }),
+    ).toMatchObject({ reviewer: 'rehearsal' });
+    // Every other main-session path keeps its rule: once the turn ends the report is refused.
+    live = null;
+    expect(judge(mcp('report_finding')).decision).toBe('deny');
+    // Claude's rule is unchanged: a tendb-* reviewer reports, stamped from its type; the main session, never.
+    expect(judge(mcp('report_finding', { agentId: 'a1', agentType: 'tendb-scope' }))).toMatchObject(
+      { decision: 'allow', updatedInput: { reviewer: 'scope' } },
+    );
+    live = turn;
+    expect(judge(mcp('report_finding', { agentId: 'a1', agentType: 'scope' })).decision).toBe(
+      'deny',
+    );
+    expect(judgeChatCall(mcp('report_finding'), withPlan()).decision).toBe('deny');
   });
 
   it('reads its own plan’s folder and no other plan’s', () => {
