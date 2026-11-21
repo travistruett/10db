@@ -263,6 +263,7 @@ export function buildStartCounts(
   const converted = new Map(
     listShapeLinks(db, shapeId).flatMap((l) => (l.taskId === null ? [] : [[l.key, l.taskId]])),
   );
+  const titleOf = new Map(draftTasks(db, shapeId, null).map((t) => [t.key, t.title]));
   const tasks: StartCountTask[] = draftTasks(db, shapeId, only).map((t) => ({
     key: t.key,
     title: t.title,
@@ -271,7 +272,7 @@ export function buildStartCounts(
     waitsOutside: t.waitsOn.flatMap((key) => {
       if (draftKeys.has(key)) return [];
       const id = converted.get(key);
-      if (id === undefined) return [key];
+      if (id === undefined) return [titleOf.get(key) ?? key];
       const dep = getTask(db, id);
       return taskFinished(dep) ? [] : [dep.title];
     }),

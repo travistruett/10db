@@ -149,7 +149,10 @@ export function ProposalRow({
       ? null
       : row.kind === 'task'
         ? (row.converted.taskIds[0] ?? null)
-        : (row.converted.taskIds.find((_, i) => live.tasks[i]?.boardStatus !== 'done') ?? null);
+        : (row.converted.taskIds.find((_, i) => {
+            const task = live.tasks[i];
+            return task !== undefined && task.status !== 'cancelled' && task.boardStatus !== 'done';
+          }) ?? null);
   const openGoal = row.kind === 'goal' ? (row.converted?.goalId ?? null) : null;
   const regionId = `shape-row-${row.id}`;
   const pinned = row.pinned.length > 0;

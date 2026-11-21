@@ -91,65 +91,77 @@ export function createShapeServices(deps: {
     acceptId: ShapeAcceptId | null,
   ): Promise<ShapeStartOutcome> => {
     if (acceptId === null) return { started: [], left: [], refused: null };
-    const proposals = listAcceptedProposals(state.db, acceptId).filter(
-      (p) => p.kind === ShapeProposalKind.Goal || p.kind === ShapeProposalKind.Task,
-    );
-    const ofAccept = new Set(proposals.map((p) => p.id));
-    const madeIds = [
-      ...new Set(
-        listShapeLinks(state.db, shapeId).flatMap((l) =>
-          l.taskId !== null && ofAccept.has(l.proposalId) ? [l.taskId] : [],
+    try {
+      const proposals = listAcceptedProposals(state.db, acceptId).filter(
+        (p) => p.kind === ShapeProposalKind.Goal || p.kind === ShapeProposalKind.Task,
+      );
+      const ofAccept = new Set(proposals.map((p) => p.id));
+      const madeIds = [
+        ...new Set(
+          listShapeLinks(state.db, shapeId).flatMap((l) =>
+            l.taskId !== null && ofAccept.has(l.proposalId) ? [l.taskId] : [],
+          ),
         ),
-      ),
-    ];
-    const made: TaskDto[] = madeIds.map((id) => getTask(state.db, id));
-    const byId = new Map(made.map((t) => [t.id, t]));
-    const outside = new Map(
-      unfinishedDependencies(state.db, made, new Set(madeIds)).map((b) => [
-        b.task.id,
-        b.deps.map((d) => d.title),
-      ]),
-    );
-    const counts = startCounts({
-      tasks: made.map((t) => ({
-        key: t.id,
-        title: t.title,
-        place: t.workspaceMode,
-        waitsOnStart: t.dependsOn.filter((id) => byId.has(id)),
-        waitsOutside: outside.get(t.id) ?? [],
-      })),
-      startsAtOnce: new Set(),
-      local:
-        getProject(state.db, getShape(state.db, shapeId).projectId).delivery !==
-        Delivery.PullRequest,
-      cap: START_CAP,
-    });
-    const startIds = counts.startKeys.flatMap((key) => {
-      const task = byId.get(key as TaskId);
-      return task === undefined ? [] : [task.id];
-    });
-    const left = counts.leftKeys.flatMap(({ key, why }) => {
-      const task = byId.get(key as TaskId);
-      return task === undefined ? [] : [{ taskId: task.id, title: task.title, why }];
-    });
-    let refused: string | null = null;
-    if (startIds.length > 0) {
-      const shapeRow = getShape(state.db, shapeId);
-      try {
-        await deps.startTasks(shapeRow.projectId, shapeRow.title, startIds);
-      } catch (error) {
-        refused =
+      ];
+      const made: TaskDto[] = madeIds.map((id) => getTask(state.db, id));
+      const byId = new Map<string, TaskDto>(made.map((t) => [t.id, t]));
+      const outside = new Map(
+        unfinishedDependencies(state.db, made, new Set(madeIds)).map((b) => [
+          b.task.id,
+          b.deps.map((d) => d.title),
+        ]),
+      );
+      const counts = startCounts({
+        tasks: made.map((t) => ({
+          key: t.id,
+          title: t.title,
+          place: t.workspaceMode,
+          waitsOnStart: t.dependsOn.filter((id) => byId.has(id)),
+          waitsOutside: outside.get(t.id) ?? [],
+        })),
+        startsAtOnce: new Set(),
+        local:
+          getProject(state.db, getShape(state.db, shapeId).projectId).delivery !==
+          Delivery.PullRequest,
+        cap: START_CAP,
+      });
+      const startIds = counts.startKeys.flatMap((key) => {
+        const task = byId.get(key);
+        return task === undefined ? [] : [task.id];
+      });
+      const left = counts.leftKeys.flatMap(({ key, why }) => {
+        const task = byId.get(key);
+        return task === undefined ? [] : [{ taskId: task.id, title: task.title, why }];
+      });
+      let refused: string | null = null;
+      if (startIds.length > 0) {
+        const shapeRow = getShape(state.db, shapeId);
+        try {
+          await deps.startTasks(shapeRow.projectId, shapeRow.title, startIds);
+        } catch (error) {
+          refused =
+            error instanceof DomainError
+              ? error.message
+              : "The start failed; the daemon's log says why";
+          log.warn({ err: error, shapeId, taskIds: startIds }, 'Accept and Start could not start');
+        }
+      }
+      return {
+        started: startIds.filter((id) => latestWorkstreamOf(state.db, id) !== undefined),
+        left,
+        refused,
+      };
+    } catch (error) {
+      log.warn({ err: error, shapeId, acceptId }, 'Accept and Start could not start');
+      return {
+        started: [],
+        left: [],
+        refused:
           error instanceof DomainError
             ? error.message
-            : "The start failed; the daemon's log says why";
-        log.warn({ err: error, shapeId, taskIds: startIds }, 'Accept and Start could not start');
-      }
+            : "The start failed; the daemon's log says why",
+      };
     }
-    return {
-      started: startIds.filter((id) => latestWorkstreamOf(state.db, id) !== undefined),
-      left,
-      refused,
-    };
   };
   const shapeOf = (shapeId: ShapeId | undefined): ShapeOfDto =>
     shapeId === undefined
