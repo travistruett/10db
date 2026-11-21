@@ -105,6 +105,10 @@ export const ShapeRehearseResult = z.object({
 });
 export type ShapeRehearseResult = z.infer<typeof ShapeRehearseResult>;
 
+/** `POST /shapes/:id/attachments/:attachmentId/approval`: approves a mock-up, or takes the approval back. */
+export const ShapeApprovalInput = z.object({ approved: z.boolean() });
+export type ShapeApprovalInput = z.infer<typeof ShapeApprovalInput>;
+
 /** Dismiss a finding, with a one-line reason. */
 export const ShapeDismissInput = z.object({ how: z.string().min(1).max(200).optional() });
 export type ShapeDismissInput = z.infer<typeof ShapeDismissInput>;

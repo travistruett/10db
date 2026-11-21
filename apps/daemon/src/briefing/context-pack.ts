@@ -31,7 +31,7 @@ import {
   principleHit,
   workstreamAreas,
 } from '../knowledge';
-import { buildPlanContext } from '../plan-record';
+import { approvedMockupsOf, buildPlanContext } from '../plan-record';
 import { renderPlanContext } from './plan-context-text';
 
 /** The name of a stakeholder who answered, from the handle stored on the answer; null for the builder. */
@@ -113,6 +113,7 @@ export function buildContextPack(
       empty: shown === 0,
     },
     plan: buildPlanContext(db, workstream, opts.base === undefined ? {} : { base: opts.base }),
+    mockups: approvedMockupsOf(db, task.id),
   };
 }
 

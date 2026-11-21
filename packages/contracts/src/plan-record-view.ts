@@ -18,6 +18,7 @@ import {
   PlanEntryKind,
   PlanEntryState,
   SectionIndexEntry,
+  ApprovedMockup,
 } from './plan-record';
 import {
   ShapeFindingKind,
@@ -285,5 +286,7 @@ export const TaskPlanContextDto = z.object({
     .nullable(),
   packed: z.object({ at: Timestamp, workstreamId: WorkstreamId, text: z.string() }).nullable(),
   checks: z.array(AnchorCheckDto),
+  /** The task's approved mock-ups as they stand now. */
+  mockups: z.array(ApprovedMockup),
 });
 export type TaskPlanContextDto = z.infer<typeof TaskPlanContextDto>;

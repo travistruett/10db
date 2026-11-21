@@ -1,4 +1,9 @@
-import { McpToolName, type PlanContext, type PlanItemDropped } from '@10db/contracts';
+import {
+  McpToolName,
+  type ApprovedMockup,
+  type PlanContext,
+  type PlanItemDropped,
+} from '@10db/contracts';
 import { planItemLine } from '../plan-record';
 
 /**
@@ -34,6 +39,19 @@ export function renderPlanContext(plan: PlanContext): string[] {
       plan.intent.map((item) => planItemLine({ group: 'intent', item })),
     ),
     ...notIncludedLine(plan),
+  ];
+}
+
+/**
+ * The mock-ups the builder approved for the task: the design its lane builds to, each as the HTML the
+ * builder saw, fenced so a tag in it is read as text.
+ */
+export function renderMockups(mockups: readonly ApprovedMockup[]): string[] {
+  if (mockups.length === 0) return [];
+  return [
+    '',
+    `Approved mock-up${mockups.length === 1 ? '' : 's'} (the design target: match ${mockups.length === 1 ? 'it' : 'them'}, and say in your handoff where you could not):`,
+    ...mockups.flatMap((m) => [`Mock-up ${m.key}:`, '```html', m.html, '```']),
   ];
 }
 

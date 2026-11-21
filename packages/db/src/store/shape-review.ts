@@ -2,6 +2,7 @@ import {
   ConflictError,
   EventType,
   InboxKind,
+  InvalidError,
   mintId,
   NotFoundError,
   ShapeFindingKind,
@@ -320,6 +321,7 @@ export function insertShapeAttachment(
     ...input,
     docKey: null,
     title: null,
+    approvedAt: null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };
@@ -333,6 +335,45 @@ export function listShapeAttachments(db: DbReader, shapeId: ShapeId): ShapeAttac
     .select()
     .from(schema.shapeAttachments)
     .where(eq(schema.shapeAttachments.shapeId, shapeId))
+    .orderBy(asc(schema.shapeAttachments.id))
+    .all();
+}
+
+/** Approves a mock-up of the plan as the design target, or takes the approval back. */
+export function setShapeAttachmentApproved(
+  ctx: WriteContext,
+  shapeId: ShapeId,
+  id: ShapeAttachmentId,
+  approved: boolean,
+): void {
+  const row = ctx.tx
+    .select()
+    .from(schema.shapeAttachments)
+    .where(eq(schema.shapeAttachments.id, id))
+    .get();
+  if (row?.shapeId !== shapeId) throw new NotFoundError('shape attachment', id);
+  if (row.kind !== 'mockup')
+    throw new InvalidError('Only a mock-up is approved as a design target.');
+  ctx.tx
+    .update(schema.shapeAttachments)
+    .set({ approvedAt: approved ? ctx.now : null, updatedAt: ctx.now })
+    .where(eq(schema.shapeAttachments.id, id))
+    .run();
+  announce(ctx, shapeId);
+}
+
+/** The mock-ups approved for a task: those Convert linked to it, oldest first. */
+export function listApprovedMockupsOfTask(db: DbReader, taskId: TaskId): ShapeAttachmentRow[] {
+  return db
+    .select()
+    .from(schema.shapeAttachments)
+    .where(
+      and(
+        eq(schema.shapeAttachments.taskId, taskId),
+        eq(schema.shapeAttachments.kind, 'mockup'),
+        isNotNull(schema.shapeAttachments.approvedAt),
+      ),
+    )
     .orderBy(asc(schema.shapeAttachments.id))
     .all();
 }

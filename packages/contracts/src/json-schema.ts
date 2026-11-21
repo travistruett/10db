@@ -261,6 +261,7 @@ import {
 import { ShapeJevSettingDto, ShapeMeasuresDto } from './shape-measures';
 import {
   OneWayPathsDto,
+  ShapeApprovalInput,
   ShapeDismissInput,
   ShapeRehearseInput,
   ShapeRehearseResult,
@@ -552,6 +553,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'small-proposal-limit-dto': SmallProposalLimitDto,
   'shape-rehearse-input': ShapeRehearseInput,
   'shape-rehearse-result': ShapeRehearseResult,
+  'shape-approval-input': ShapeApprovalInput,
   'shape-dismiss-input': ShapeDismissInput,
   'shape-model-input': ShapeModelInput,
   'shape-models-dto': ShapeModelsDto,

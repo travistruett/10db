@@ -15,6 +15,13 @@ const MAX_HEARD_CHARS = 80;
 /** What the project's areas are, when a draft names one it hasn't got: "(it has src, ui)". */
 const AREAS_OF_THE_PROJECT = /\(it has ([^)]+)\)/;
 
+/** A Plan review turn lists `- effortKey <key> · <title>`; a Check for Questions turn `- effortKey <e> · taskKey <t> · taskHash <h>`. */
+const REVIEW_EFFORT = /^- effortKey (\S+)/gm;
+const REHEARSE_TASK = /^- effortKey (\S+) · taskKey (\S+) · taskHash (\S+)/gm;
+/** "mock it up" attaches a small mockup to the scripted goal's first task. */
+const MOCK_IT_UP = /\bmock it up\b/i;
+const MOCKUP_HTML = '<main><h1>Dense board</h1><p>Cards sit closer together.</p></main>';
+
 /** "show a fence" asks for a reply with a code fence and a link, which the UI draws as markdown. */
 const SHOW_A_FENCE = /\bshow a fence\b/i;
 const FENCE_REPLY = [
@@ -135,6 +142,43 @@ export function scriptedShapeBehaviour(): FakeShapeBehaviour {
         BUILDER_MESSAGE_ID,
         '',
       );
+      // The two review turns the Review menu sends. The script reports as the reviewers do; its MCP calls
+      // bypass the session's hook, which stamps the reviewer from the subagent's type.
+      const trimmed = text.trim();
+      if (trimmed.startsWith('Plan review:')) {
+        const efforts = [...trimmed.matchAll(REVIEW_EFFORT)].map((m) => m[1] ?? '');
+        for (const effortKey of efforts)
+          await call('report_finding', {
+            effortKey,
+            reviewer: 'scope',
+            finding: {
+              kind: 'finding',
+              severity: 'medium',
+              text: 'The scope is wider than one pull request.',
+            },
+          });
+        return { text: `Reviewed ${String(efforts.length)}.` };
+      }
+      if (trimmed.startsWith('Rehearse:')) {
+        const tasks = [...trimmed.matchAll(REHEARSE_TASK)];
+        for (const [, effortKey, taskKey, taskHash] of tasks)
+          await call('report_finding', {
+            effortKey,
+            taskKey,
+            taskHash,
+            reviewer: 'rehearsal',
+            final: true,
+            finding: { kind: 'question', text: 'Which screen does this change first?' },
+          });
+        return { text: `Read ${String(tasks.length)}.` };
+      }
+      if (MOCK_IT_UP.test(text)) {
+        const answer = await call('attach', {
+          target: { key: 'density' },
+          attachment: { kind: 'mockup', html: MOCKUP_HTML },
+        });
+        return { text: answer.isError ? 'I could not attach it.' : 'Here is a mock-up.' };
+      }
       if (ASKS_TO_PROPOSE.test(text)) {
         if (ids.length === 0) return { text: 'There is nothing to propose from yet.' };
         let area = 'repo';

@@ -120,11 +120,13 @@ export function insertShapeMessage(
     readonly queued?: boolean;
     /** What a press asks the session to do, which makes it a turn starter (Propose, Rehearse). */
     readonly prompt?: string;
+    /** The same ask for a session that runs no subagents. */
+    readonly promptInSession?: string;
     /** The tasks a Rehearse press lists, each at the hash it was proposed at. */
     readonly rehearsing?: readonly { readonly taskKey: string; readonly hash: string }[];
   },
 ): ShapeMessageDto {
-  const { queued, prompt, rehearsing, ...message } = input;
+  const { queued, prompt, promptInSession, rehearsing, ...message } = input;
   const shape = getShape(ctx.tx, shapeId);
   const builderText =
     message.author === ShapeMessageAuthor.Builder && message.kind === ShapeMessageKind.Text;
@@ -138,6 +140,7 @@ export function insertShapeMessage(
       ? {
           ...item.body,
           ...(prompt === undefined ? {} : { prompt }),
+          ...(promptInSession === undefined ? {} : { promptInSession }),
           ...(rehearsing === undefined
             ? {}
             : { rehearsing: rehearsing.map((t) => ({ taskKey: t.taskKey, hash: t.hash })) }),

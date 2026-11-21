@@ -48,6 +48,8 @@ export const ShapeMessageKind = {
   Propose: 'propose',
   /** The note that starts a rehearsal turn (§7); like Propose it can't be cited as a source. */
   Rehearse: 'rehearse',
+  /** The note that starts a plan review turn; like Rehearse it can't be cited as a source. */
+  Review: 'review',
   Edit: 'edit',
   Digest: 'digest',
   Event: 'event',

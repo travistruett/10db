@@ -1921,6 +1921,8 @@ export const shapeAttachments = sqliteTable(
     taskId: text('task_id')
       .$type<TaskId>()
       .references(() => tasks.id),
+    /** When the builder approved a mock-up as the design target; null while it is not. */
+    approvedAt: text('approved_at'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

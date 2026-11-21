@@ -20,6 +20,7 @@ import {
   AnchorCheckDto,
   PlanAlternative,
   PlanAnchor,
+  ApprovedMockup,
   PlanContext,
   PlanEntryKind,
   PlanEntryState,
@@ -143,6 +144,8 @@ export const ContextPack = z.object({
   }),
   /** The task's Plan section and what it cites, for a task made from a Plan; null for the others. */
   plan: PlanContext.nullable().default(null),
+  /** The mock-ups the builder approved for the task, which its lane builds to; none for most tasks. */
+  mockups: z.array(ApprovedMockup).default([]),
 });
 export type ContextPack = z.infer<typeof ContextPack>;
 

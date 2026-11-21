@@ -1917,6 +1917,7 @@
           "enum": [
             "propose",
             "rehearse",
+            "review",
             "edit",
             "event",
             "screen"

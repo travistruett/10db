@@ -24,6 +24,7 @@ const emptyPack: ContextPack = {
     empty: true,
   },
   plan: null,
+  mockups: [],
 };
 const implementStep = {
   index: 0,

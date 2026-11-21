@@ -93,6 +93,15 @@ export function attachmentsOf(db: DbReader, shapeId: ShapeId): ShapeAttachmentDt
     const attachment = attachmentOf(row.kind, row.body);
     return attachment === null
       ? []
-      : [{ id: row.id, key: row.key, goalId: row.goalId, taskId: row.taskId, attachment }];
+      : [
+          {
+            id: row.id,
+            key: row.key,
+            goalId: row.goalId,
+            taskId: row.taskId,
+            attachment,
+            approved: row.approvedAt !== null,
+          },
+        ];
   });
 }

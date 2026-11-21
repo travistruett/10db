@@ -101,6 +101,7 @@ import {
   ShapeEditInput,
   ShapeFindingId,
   ShapeAcceptId,
+  ShapeApprovalInput,
   ShapeId,
   ShapeProposalId,
   ShapeModelInput,
@@ -883,6 +884,27 @@ export function createApp(deps: ApiDeps) {
       (c) =>
         c.json(
           deps.services.rehearseShape(ShapeId.parse(c.req.param('shapeId')), c.req.valid('json')),
+          202,
+        ),
+    )
+    .post(
+      '/shapes/:shapeId/attachments/:attachmentId/approval',
+      validator('json', (value): ShapeApprovalInput => ShapeApprovalInput.parse(value)),
+      (c) => {
+        deps.services.approveShapeAttachment(
+          ShapeId.parse(c.req.param('shapeId')),
+          ShapeAttachmentId.parse(c.req.param('attachmentId')),
+          c.req.valid('json'),
+        );
+        return c.body(null, 204);
+      },
+    )
+    .post(
+      '/shapes/:shapeId/review',
+      validator('json', (value): ShapeRehearseInput => ShapeRehearseInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.reviewShape(ShapeId.parse(c.req.param('shapeId')), c.req.valid('json')),
           202,
         ),
     )

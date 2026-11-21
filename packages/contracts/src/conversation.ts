@@ -64,6 +64,7 @@ export type TurnMarker = ValueOf<typeof TurnMarker>;
 export const ShapeEventKind = {
   Propose: 'propose',
   Rehearse: 'rehearse',
+  Review: 'review',
   Edit: 'edit',
   Event: 'event',
   Screen: 'screen',
@@ -124,6 +125,8 @@ export const ConversationItemBody = {
     text: z.string(),
     /** What the press asks the session to do: a Propose or Rehearse is a turn starter (queued). */
     prompt: z.string().optional(),
+    /** The same ask for a session with no subagents, which does the review itself; absent, `prompt` serves every session. */
+    promptInSession: z.string().optional(),
     /** The tasks a Rehearse turn rehearses, each with the hash it was proposed at. */
     rehearsing: z.array(z.object({ taskKey: z.string(), hash: z.string() })).optional(),
   }),

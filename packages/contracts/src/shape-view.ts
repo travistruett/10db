@@ -149,6 +149,8 @@ export const ShapeAttachmentDto = z.object({
   goalId: GoalId.nullable(),
   taskId: TaskId.nullable(),
   attachment: ShapeAttachment,
+  /** Whether the builder approved a mock-up as the design target. */
+  approved: z.boolean(),
 });
 export type ShapeAttachmentDto = z.infer<typeof ShapeAttachmentDto>;
 

@@ -19,7 +19,7 @@ import { quotedWords, renderDecisionIndex, renderDecisions, renderRules } from '
 import { isOutsideCopy } from '../sandbox';
 import { failedSteps } from './failed-steps';
 import { LaneBrief } from './lane-brief';
-import { renderPlanContext, renderPlanIndex } from './plan-context-text';
+import { renderMockups, renderPlanContext, renderPlanIndex } from './plan-context-text';
 import { AWAY_ANSWER } from '../trust';
 
 interface StepBrief {
@@ -995,6 +995,7 @@ export function buildSessionPrompt(input: PromptInput): string {
     'Acceptance criteria:',
     bullets(input.task.acceptanceCriteria),
     ...planBlock(input.contextPack.plan, brief),
+    ...renderMockups(input.contextPack.mockups),
     '',
     `Your claims: ${claims}.`,
     '',
@@ -1030,6 +1031,7 @@ export function compactionReinjection(
     'Acceptance criteria:',
     bullets(pack.task.acceptanceCriteria),
     ...planBlock(pack.plan, brief),
+    ...renderMockups(pack.mockups),
     '',
     `Your claims: ${claims}.`,
     '',

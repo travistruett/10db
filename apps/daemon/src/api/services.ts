@@ -197,6 +197,7 @@ import type {
   ShapeMessageDto,
   ShapeOfDto,
   ShapeProposalId,
+  ShapeApprovalInput,
   ShapeRehearseInput,
   ShapeRehearseResult,
   ShapeViewDto,
@@ -622,6 +623,14 @@ export interface ApiServices extends PlanRecordServices {
   setSmallProposalLimit(projectId: ProjectId, input: SmallProposalLimitDto): SmallProposalLimitDto;
   /** Rehearse, and opening the Convert modal with an unrehearsed task (spec §7). */
   rehearseShape(shapeId: ShapeId, input: ShapeRehearseInput): ShapeRehearseResult;
+  /** Approves a mock-up of the plan as the design target, or takes the approval back. */
+  approveShapeAttachment(
+    shapeId: ShapeId,
+    attachmentId: ShapeAttachmentId,
+    input: ShapeApprovalInput,
+  ): void;
+  /** Plan review on the given rows (or all); `tasks` counts the goals and loose tasks it reads. */
+  reviewShape(shapeId: ShapeId, input: ShapeRehearseInput): ShapeRehearseResult;
   /** The builder dismisses a finding or a rehearsal question. */
   dismissShapeFinding(shapeId: ShapeId, findingId: ShapeFindingId, input: ShapeDismissInput): void;
   /** Ship anyway (from OPEN) or Retry (from FAILED). */
