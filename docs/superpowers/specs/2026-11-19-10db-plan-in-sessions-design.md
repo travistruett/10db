@@ -1,6 +1,6 @@
 # 10db: Plan becomes part of Sessions
 
-**Status:** designed on 2026-11-19; slices 1, 2 and 3 are built. **Replaces** the Plan view (`views/shape/`) as its own nav item.
+**Status:** designed on 2026-11-19; slices 1-4 are built. **Replaces** the Plan view (`views/shape/`) as its own nav item.
 **Keeps** the Plan engine as built: proposals, rounds, pins, reviewers, rehearsal, attachments, Convert
 (`2026-11-02-10db-brainstorm-chat-design.md`), and the Sessions life as built
 (`2026-11-17-10db-sessions-simplified-design.md`).
@@ -96,7 +96,7 @@ switches **Plan | Changes**.
   question proposals, for a person or role). A row shows its title, its size, a dot for its state (proposed,
   changed this round, pinned, accepted, running, done) and its findings count. Click opens it in place:
   description, acceptance criteria, its mock-ups, Why?
-- **Tick per row**, on by default: Accept takes the ticked rows.
+- **Tick per row**, on by default: Accept takes the ticked rows (in its modal; the panel itself has no ticks, and Review ▾ reads every pending row).
 - **Mock-ups** show under their task as a thumbnail; open draws the sandboxed HTML. **Approve** marks it the
   design target; **Ask for Changes** puts a draft in the composer naming it.
 - **Source files** the builder dropped list at the foot; at Accept they are linked to the goals they fed.
@@ -136,7 +136,7 @@ switches **Plan | Changes**.
 
 ## 4. Review
 
-**Review ▾** runs on the ticked items; each finding lands on its item and in the conversation.
+**Review ▾** runs on every pending goal and loose task (the panel has no ticks; the ticks are Accept's modal); each finding lands on its item and in the conversation.
 
 | Review | What it reads | Built? | Claude | Codex |
 | --- | --- | --- | --- | --- |
