@@ -110,30 +110,28 @@ describe('lanePermissions and the toolchain listings', () => {
     const tool = join(installs, 'node');
     const version = join(tool, '26.13.0');
     for (const dir of ['bin', 'etc', 'lib']) mkdirSync(join(version, dir), { recursive: true });
-    mkdirSync(join(installs, 'stray', 'inside'), { recursive: true });
+    mkdirSync(join(installs, 'empty', 'inside'), { recursive: true });
     writeFileSync(join(installs, '.mise-installs.toml'), '');
     writeFileSync(join(tool, '.mise.backend.toml'), '');
     writeFileSync(join(version, 'notes.txt'), '');
     symlinkSync(join(home, '.rustup'), join(tool, 'linked'));
-    // The two patterns the lane profile lists a dir with (`listingGrant`, `childListingGrant`).
-    const listings = [installs, tool].flatMap((dir) => [
-      `${dir.slice(0, -1)}[${dir.slice(-1)}]`,
-      `${dir}/*`,
-    ]);
+    // The two patterns the lane profile lists `installs` with (`listingGrant`, `childListingGrant`).
+    const listings = [`${installs.slice(0, -1)}[s]`, `${installs}/*`];
     const reads = [join(version, 'bin'), join(version, 'lib')];
 
     const entries = filesystem([...listings, ...reads]);
 
     expect(entries).toMatchObject({
       [installs]: 'read',
-      [tool]: 'read',
       [join(version, 'bin')]: 'read',
       [join(version, 'etc')]: 'deny',
       [join(version, 'notes.txt')]: 'deny',
-      [join(installs, 'stray')]: 'deny',
+      [join(tool, '.mise.backend.toml')]: 'deny',
+      [join(installs, 'empty', 'inside')]: 'deny',
     });
-    for (const open of [join(installs, '.mise-installs.toml'), version, join(tool, 'linked')])
-      expect(entries).not.toHaveProperty([open]);
+    const listable = [tool, version, join(installs, 'empty')];
+    for (const path of [join(installs, '.mise-installs.toml'), ...listable, join(tool, 'linked')])
+      expect(entries).not.toHaveProperty([path]);
     expect(Object.keys(entries).some((key) => key.includes('*') || key.includes('['))).toBe(false);
   });
 });

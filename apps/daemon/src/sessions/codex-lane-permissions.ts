@@ -27,10 +27,12 @@ function entriesOf(dir: string): Dirent[] {
  * The entries a listed dir needs in Codex, which takes a glob only to deny. The Claude profile lets a
  * command list such a dir (mise's `installs` and each tool dir in it, which mise lists on every
  * command, and a shim fails without) and read each file directly in it, and nothing else in it that no
- * read grants. Codex gets the dir as a `read` and a `deny` on each entry under it that the Claude
- * profile keeps closed, as it is now: a dir that holds no read is denied whole, and a link is skipped,
- * since Codex would apply its entry to the target, which its own entries judge. What appears under the
- * dir after the session starts is readable to Codex, where the Claude profile keeps it closed.
+ * read grants, and each dir directly in it as a listing too. Codex gets the dir as a `read` and a
+ * `deny` on each entry under it that the Claude profile keeps closed, as it is now: a dir in a listed
+ * dir stays listable with its unread entries denied, a deeper dir that holds no read is denied whole,
+ * and a link is skipped, since Codex would apply its entry to the target, which its own entries judge.
+ * What appears under the dir after the session starts is readable to Codex, where the Claude profile
+ * keeps it closed.
  */
 function listedDirEntries(
   dir: string,
@@ -43,8 +45,8 @@ function listedDirEntries(
     entriesOf(at).flatMap((entry): [string, Access][] => {
       const path = join(at, entry.name);
       if (entry.isSymbolicLink() || opened.some((root) => isEqualOrUnder(path, root))) return [];
-      if (entry.isDirectory() && holdsRead(path)) return walk(path, listed.has(path));
-      if (isListed && !entry.isDirectory()) return [];
+      if (entry.isDirectory() && (isListed || holdsRead(path))) return walk(path, listed.has(path));
+      if (isListed) return [];
       return [[path, 'deny']];
     });
   return [[dir, 'read'], ...walk(dir, true)];
@@ -130,8 +132,14 @@ function filesystemOf(sandbox: LaneSandboxSpec): Record<string, Access> {
     entries.set(key, 'read');
   };
   /** Whether an entry already lets the lane read `real`, by real path. */
-  const readable = (real: string): boolean =>
-    [...entries].some(([key, access]) => access !== 'deny' && isEqualOrUnder(real, key));
+  /** Whether the lane may read `real`, by real path: the most specific entry over it decides. */
+  const readable = (real: string): boolean => {
+    let decides: [string, Access] | null = null;
+    for (const [key, access] of entries)
+      if (isEqualOrUnder(real, key) && (decides === null || isEqualOrUnder(key, decides[0])))
+        decides = [key, access];
+    return decides !== null && decides[1] !== 'deny';
+  };
   for (const path of denyWrite) {
     const real = realOrSelf(path);
     // The link itself, not what it points to: its name under its dir's real path.
