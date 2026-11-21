@@ -656,12 +656,27 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await expect(pinned).toBeVisible();
   await expect(panel.getByText('Drop the Abandon strip', { exact: true })).toHaveCount(0);
 
+  // Review ▾: Plan review puts a finding on its row and Check for Questions a question; Accept only warns.
+  await panel.getByRole('button', { name: 'Review' }).click();
+  await page.getByRole('menuitem', { name: 'Plan review' }).click();
+  await expect(panel.getByText('The scope is wider than one pull request.').first()).toBeVisible();
+  await panel.getByRole('button', { name: 'Review' }).click();
+  await page.getByRole('menuitem', { name: 'Check for Questions' }).click();
+  await expect(panel.getByText('Which screen does this change first?').first()).toBeVisible();
+
+  // A mock-up the session drew is approved from its row.
+  await sendLine(page, 'mock it up');
+  await expect(page.getByText('Here is a mock-up.')).toBeVisible();
+  await panel.getByRole('button', { name: /^Approve mock-up/ }).click();
+  await expect(panel.getByRole('button', { name: /^Unapprove mock-up/ })).toBeVisible();
+
   // Accept lists the rows, says nothing starts, and writes the ticked ones to the Board.
   const before = (await titles()).length;
   await panel.getByRole('button', { name: 'Accept', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Accept' });
   await expect(dialog.getByText('Nothing starts. Tasks wait on the Board.')).toBeVisible();
-  await expectAccessible(page, 'accept');
+  // The mock-up's sandboxed frame runs no script, so a scan can't reach into it.
+  await expectAccessible(page, 'accept', ['iframe']);
   await dialog.getByRole('button', { name: 'Accept 4' }).click();
   await expect(dialog).toBeHidden();
   await expect(panel.getByText('On the Board · 2 ready', { exact: true })).toHaveCount(1);
@@ -676,6 +691,18 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
       'Drop the Abandon strip, keep Retry',
     ]),
   );
+
+  // The approved mock-up reaches its task: the drawer's Plan context shows it.
+  const densityId = (await titlesWithIds()).find((t) => t.title === 'Compact card density')?.id;
+  expect(densityId).toBeDefined();
+  const taskPage = await page.context().newPage();
+  await taskPage.addInitScript((id) => {
+    window.localStorage.setItem('tendb.project', JSON.stringify(id));
+  }, projectId);
+  await taskPage.goto(`/board?task=${densityId ?? ''}`);
+  await taskPage.getByRole('button', { name: /Plan context/ }).click();
+  await expect(taskPage.getByTitle(/Approved mock-up density/)).toBeVisible();
+  await taskPage.close();
 
   // Remove Draft Goal takes the goal and its tasks back, and the goal is proposed again.
   await panel.getByRole('button', { name: 'Actions for Board polish' }).click();
@@ -743,7 +770,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await page.setViewportSize({ width: 900, height: 900 });
   const drawer = page.getByRole('dialog', { name: 'Plan' });
   await expect(drawer).toBeVisible();
-  await expectAccessible(page, 'the plan as a drawer');
+  await expectAccessible(page, 'the plan as a drawer', ['iframe']);
   await drawer.getByRole('button', { name: 'Close Plan' }).first().click();
   await expect(drawer).toBeHidden();
   await page.getByRole('button', { name: 'Plan', exact: true }).click();

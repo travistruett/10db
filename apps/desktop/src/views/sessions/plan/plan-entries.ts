@@ -23,6 +23,7 @@ function shapeEventEntry(item: Item<'shape_event'>, shapeId: ShapeId): Conversat
   switch (item.event) {
     case 'propose':
     case 'rehearse':
+    case 'review':
     case 'event':
       return { kind: 'notice', id, text: item.text, tone: 'info' };
     case 'screen': {

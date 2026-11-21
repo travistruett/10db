@@ -2,6 +2,7 @@ import {
   ShapeConvertError,
   ShapeConvertResult,
   ShapeFileDto,
+  ShapeRehearseResult,
   ShapeOfDto,
   ShapeStartCountsDto,
   ShapeUndoAcceptResult,
@@ -12,6 +13,7 @@ import {
   type MilestoneCut,
   type ProjectId,
   type ShapeAcceptId,
+  type ShapeAttachmentId,
   type ShapeFindingId,
   type ShapeId,
   type ShapeProposalId,
@@ -103,6 +105,51 @@ export function useDismissFinding(shapeId: ShapeId | null) {
         await client.shapes[':shapeId'].findings[':findingId'].dismiss.$post({
           param: { shapeId, findingId: input.findingId },
           json: input.how === undefined ? {} : { how: input.how },
+        }),
+        z.null(),
+      );
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
+  });
+}
+
+/** Which review a press asks for: Plan review, or Check for Questions (the rehearsal). */
+export type ReviewKind = 'review' | 'rehearse';
+
+/**
+ * Sends the session a review turn over every pending goal and task. The answer says whether a turn was
+ * queued, one already runs, or there was nothing to read.
+ */
+export function useReviewShape(shapeId: ShapeId | null) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (kind: ReviewKind) => {
+      if (shapeId === null) throw new Error('Open a conversation first.');
+      const param = { shapeId };
+      const res =
+        kind === 'review'
+          ? await client.shapes[':shapeId'].review.$post({ param, json: {} })
+          : await client.shapes[':shapeId'].rehearse.$post({ param, json: {} });
+      return { kind, result: await readJson(res, ShapeRehearseResult) };
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
+  });
+}
+
+/** The builder approves a mock-up as the design target, or takes the approval back. */
+export function useApproveAttachment(shapeId: ShapeId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      readonly attachmentId: ShapeAttachmentId;
+      readonly approved: boolean;
+    }) => {
+      await readJson(
+        await client.shapes[':shapeId'].attachments[':attachmentId'].approval.$post({
+          param: { shapeId, attachmentId: input.attachmentId },
+          json: { approved: input.approved },
         }),
         z.null(),
       );

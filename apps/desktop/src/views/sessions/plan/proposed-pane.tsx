@@ -14,7 +14,12 @@ import {
 import { IconChevronDown, IconX } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { useConvertShape, useDismissFinding, useRowChange } from '../../../daemon/shape-queries';
+import {
+  useConvertShape,
+  useDismissFinding,
+  useReviewShape,
+  useRowChange,
+} from '../../../daemon/shape-queries';
 import { shortAgo } from '../../factory/short-ago';
 import { useNow } from '../../../shell/relative';
 import { ConvertModal, convertibleRows } from './convert-modal';
@@ -86,6 +91,7 @@ export function ProposedPane({
   const rows = convertibleRows(view?.proposals ?? []);
   const hasProposals = (view?.proposals.length ?? 0) > 0;
   const dismiss = useDismissFinding(view?.shape.id ?? null);
+  const review = useReviewShape(view?.shape.id ?? null);
   const handlers: RowHandlers = {
     onChange: (row, action) => {
       change.mutate({ id: row.id, action });
@@ -193,6 +199,35 @@ export function ProposedPane({
               : `Plan · round ${String(view.shape.round)} · updated ${shortAgo(view.shape.updatedAt, now)}`}
           </Text>
           <Group gap="xs" wrap="nowrap">
+            <Menu position="bottom-end" withinPortal>
+              <Menu.Target>
+                <Button
+                  variant="default"
+                  size="xs"
+                  rightSection={<IconChevronDown size={14} stroke={1.5} />}
+                  loading={review.isPending}
+                  disabled={view === undefined || rows.length === 0}
+                >
+                  Review
+                </Button>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item
+                  onClick={() => {
+                    review.mutate('review');
+                  }}
+                >
+                  Plan review
+                </Menu.Item>
+                <Menu.Item
+                  onClick={() => {
+                    review.mutate('rehearse');
+                  }}
+                >
+                  Check for Questions
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
             <Button.Group>
               <Button
                 variant="default"
@@ -241,6 +276,11 @@ export function ProposedPane({
             )}
           </Group>
         </Group>
+        {review.data === undefined && !review.isError ? null : (
+          <Text size="xs" c="dimmed" role="status" aria-label="Review">
+            {review.isError ? review.error.message : reviewWords(review.data)}
+          </Text>
+        )}
         {summaryHere ? (
           <SummaryLine groups={groupProposals(view?.proposals ?? [])} onJump={jump} />
         ) : null}
@@ -285,7 +325,7 @@ export function ProposedPane({
               <Skeleton height={14} width="80%" />
             </Stack>
           ) : view !== undefined && hasProposals ? (
-            <AttachmentsContext value={view.attachments}>
+            <AttachmentsContext value={{ shapeId: view.shape.id, attachments: view.attachments }}>
               <ProposedList
                 projectId={view.shape.projectId}
                 groups={groups}
@@ -382,4 +422,17 @@ function ConvertPanel({
       }}
     />
   );
+}
+
+/** What a review press came to, in words. */
+function reviewWords(
+  answer:
+    | { readonly kind: 'review' | 'rehearse'; readonly result: { status: string; tasks: number } }
+    | undefined,
+): string {
+  if (answer === undefined) return '';
+  const what = answer.kind === 'review' ? 'Plan review' : 'Check for Questions';
+  if (answer.result.status === 'started') return `${what} is running.`;
+  if (answer.result.status === 'running') return `${what} is already running.`;
+  return answer.kind === 'review' ? 'Nothing to review.' : 'Every task has been checked.';
 }
