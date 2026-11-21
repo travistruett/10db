@@ -15,7 +15,7 @@ export function PlanCard({ head, children }: PlanCardProps) {
   return (
     <Box
       component="li"
-      p={12}
+      p={8}
       style={{
         listStyle: 'none',
         borderRadius: 'var(--mantine-radius-md)',
@@ -28,7 +28,7 @@ export function PlanCard({ head, children }: PlanCardProps) {
   );
 }
 
-/** The head of a card that holds a kind of row: its name (15 / 600), a dim count and a dim note. */
+/** The head of a card that holds a kind of row: its name (13 / 600, dim), a dim count and a dim note. */
 export function CardName({
   name,
   count,
@@ -39,12 +39,12 @@ export function CardName({
   readonly note?: string;
 }) {
   return (
-    <Box px={14} mb={8}>
+    <Box px={12} mb={8}>
       <Group gap={8} wrap="nowrap" align="baseline">
-        <Text fz={15} fw={600} c="bright">
+        <Text fz={13} fw={600} c="dimmed">
           {name}
         </Text>
-        <Text fz={13} c="dimmed">
+        <Text fz={12} c="dimmed">
           {count}
         </Text>
       </Group>

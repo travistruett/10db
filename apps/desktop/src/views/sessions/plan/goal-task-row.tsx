@@ -6,6 +6,7 @@ import type { TaskReview } from './review-lines';
 import { ReviewNotes } from './review-notes';
 import { RowChips } from './row-chips';
 import { DetailBlock, taskFacts } from './row-details';
+import classes from './plan-rows.module.css';
 import { RowLine, moveRowFocus, type OpenRow } from './row-line';
 import { Box } from '@mantine/core';
 
@@ -46,7 +47,7 @@ export function GoalTaskRow({
     if (delta !== null && moveRowFocus(event.currentTarget, delta)) event.preventDefault();
   };
   return (
-    <li style={{ listStyle: 'none' }}>
+    <li className={opened ? classes['opened'] : undefined} style={{ listStyle: 'none' }}>
       <RowLine
         title={task.title}
         chips={<RowChips facts={{ notes: questions.length }} />}
@@ -60,7 +61,7 @@ export function GoalTaskRow({
         onKeyDown={onKeyDown}
       />
       {opened ? (
-        <Box id={regionId} role="region" aria-label={`${task.title} details`} px={14} pt={4} pb={8}>
+        <Box id={regionId} role="region" aria-label={`${task.title} details`} px={12} pt={4} pb={8}>
           <DetailBlock
             description={task.description}
             notes={

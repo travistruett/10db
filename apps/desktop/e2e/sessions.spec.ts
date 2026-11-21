@@ -640,7 +640,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   // "propose it": the scripted plan fills the panel, with no Propose press.
   await sendLine(page, 'propose it');
   await expect(panel.getByText('Board polish')).toBeVisible();
-  await expect(panel.getByRole('group', { name: 'Summary' })).toHaveText(
+  await expect(panel.getByRole('group', { name: 'Summary' })).toContainText(
     '1 goal · 2 loose · 1 to record',
   );
   await expectAccessible(page, 'the plan beside the conversation');

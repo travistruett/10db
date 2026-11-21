@@ -72,12 +72,11 @@ export function RowAttachments({
           {a.attachment.kind === 'mockup' &&
           a.goalId === null &&
           !(row.kind === 'goal' && a.key === row.key) ? (
-            <Group gap={4}>
+            <Group gap={8}>
               <ApproveButton shapeId={shapeId} attachment={a} title={title} />
               <Button
-                variant="subtle"
-                color="gray"
-                size="compact-xs"
+                variant="default"
+                size="xs"
                 aria-label={`Ask for changes to mock-up: ${title}`}
                 onClick={() => {
                   onAskForChanges(`Change the mock-up for "${title}": `);
@@ -107,9 +106,8 @@ function ApproveButton({
   const label = attachment.approved ? 'Unapprove' : 'Approve';
   return (
     <Button
-      variant="subtle"
-      color="gray"
-      size="compact-xs"
+      variant="default"
+      size="xs"
       loading={approve.isPending}
       aria-label={`${label} mock-up: ${title}`}
       onClick={() => {

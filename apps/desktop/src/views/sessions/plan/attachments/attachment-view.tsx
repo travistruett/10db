@@ -1,5 +1,6 @@
 import { mockupDocument, type ShapeAttachment } from '@10db/contracts';
-import { Box, Skeleton, Text, useComputedColorScheme } from '@mantine/core';
+import { Box, Modal, Skeleton, Text, UnstyledButton, useComputedColorScheme } from '@mantine/core';
+import { useDisclosure } from '@mantine/hooks';
 import { useEffect, useState } from 'react';
 import { chartRefusal, chartSvg, mermaidSvg, svgDataUrl } from './safe-render';
 
@@ -76,7 +77,15 @@ function ChartView({
   return <Drawing drawn={drawn} label={`Chart: ${title}`} />;
 }
 
-function MockupFrame({ html, title }: { readonly html: string; readonly title: string }) {
+function Frame({
+  html,
+  title,
+  height,
+}: {
+  readonly html: string;
+  readonly title: string;
+  readonly height: number | string;
+}) {
   return (
     <Box
       component="iframe"
@@ -87,13 +96,37 @@ function MockupFrame({ html, title }: { readonly html: string; readonly title: s
       referrerPolicy="no-referrer"
       loading="lazy"
       w="100%"
-      h={220}
-      style={{
-        border: 0,
-        borderRadius: 'var(--mantine-radius-sm)',
-        background: 'white',
-      }}
+      h={height}
+      style={{ border: 0, display: 'block', background: 'white' }}
     />
+  );
+}
+
+/** A capped preview of a mock-up that opens full size on a click: the frame itself takes no clicks. */
+function MockupFrame({ html, title }: { readonly html: string; readonly title: string }) {
+  const [full, { open, close }] = useDisclosure(false);
+  return (
+    <>
+      <Box
+        style={{
+          position: 'relative',
+          overflow: 'hidden',
+          maxHeight: 160,
+          borderRadius: 'var(--mantine-radius-sm)',
+          border: '1px solid var(--mantine-color-default-hover)',
+        }}
+      >
+        <Frame html={html} title={title} height={160} />
+        <UnstyledButton
+          aria-label={`Open mock-up full size: ${title}`}
+          onClick={open}
+          style={{ position: 'absolute', inset: 0 }}
+        />
+      </Box>
+      <Modal opened={full} onClose={close} title={`Mock-up: ${title}`} size="xl">
+        <Frame html={html} title={title} height="70vh" />
+      </Modal>
+    </>
   );
 }
 

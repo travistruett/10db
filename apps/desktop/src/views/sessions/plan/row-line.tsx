@@ -80,30 +80,28 @@ export function RowLine({
           />
         </Tooltip>
       )}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <UnstyledButton
-          ref={buttonRef}
-          className={classes['hit']}
-          {...{ [ROW_ATTRIBUTE]: '' }}
-          {...(section === undefined ? {} : { 'data-section': section })}
-          aria-expanded={opened}
-          aria-controls={opened ? regionId : undefined}
-          tabIndex={tabbable ? 0 : -1}
-          onClick={onToggle}
-          onKeyDown={onKeyDown}
-          style={{ display: 'block', width: '100%', textAlign: 'left' }}
+      <UnstyledButton
+        ref={buttonRef}
+        className={classes['hit']}
+        {...{ [ROW_ATTRIBUTE]: '' }}
+        {...(section === undefined ? {} : { 'data-section': section })}
+        aria-expanded={opened}
+        aria-controls={opened ? regionId : undefined}
+        tabIndex={tabbable ? 0 : -1}
+        onClick={onToggle}
+        onKeyDown={onKeyDown}
+        style={{ display: 'block', minWidth: 0, textAlign: 'left' }}
+      >
+        <Text
+          fz={14}
+          fw={head ? 600 : 400}
+          lh="20px"
+          {...(dim ? { c: 'dimmed' } : head ? { c: 'bright' } : {})}
+          {...(opened ? {} : { lineClamp: 2 })}
         >
-          <Text
-            fz={head ? 15 : 14}
-            fw={head ? 600 : 400}
-            {...(dim ? { c: 'dimmed' } : head ? { c: 'bright' } : {})}
-            {...(opened ? {} : { lineClamp: 2 })}
-          >
-            {title}
-          </Text>
-        </UnstyledButton>
-        {subs}
-      </div>
+          {title}
+        </Text>
+      </UnstyledButton>
       <div className={classes['slot']}>
         <div className={classes['chips']}>{chips}</div>
         {actions === undefined ? null : <div className={classes['actions']}>{actions}</div>}
@@ -111,6 +109,7 @@ export function RowLine({
       <Text fz={12} c="dimmed" className={classes['trail']}>
         {trailing}
       </Text>
+      {subs === undefined ? null : <div className={classes['subs']}>{subs}</div>}
     </div>
   );
 }

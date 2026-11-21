@@ -142,12 +142,10 @@ export interface RowDetailsProps {
   readonly notes?: ReactNode;
   readonly links?: readonly ReactNode[] | undefined;
   readonly attachments?: ReactNode;
-  /** A goal's lane time as "~1 h", for the goal's dim line. */
-  readonly laneTime?: string | null;
 }
 
 /** An opened row of a card: what its kind says, in the block's order. */
-export function RowDetails({ row, sizes, notes, links, attachments, laneTime }: RowDetailsProps) {
+export function RowDetails({ row, sizes, notes, links, attachments }: RowDetailsProps) {
   const block = { notes, links, attachments };
   switch (row.kind) {
     case 'goal': {
@@ -157,8 +155,7 @@ export function RowDetails({ row, sizes, notes, links, attachments, laneTime }: 
           {...block}
           criteria={row.body.criteria.map((c) => `${c.text} (${c.check})`)}
           facts={[
-            `Ceremony ${row.body.ceremony}`,
-            ...(laneTime === null || laneTime === undefined ? [] : [laneTime]),
+            row.body.ceremony === 'spec' ? 'Spec first' : 'Direct, no spec',
             ...(off === 0 ? [] : [`${String(off)} mis-sized`]),
           ]}
         />

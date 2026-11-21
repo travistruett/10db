@@ -1,5 +1,5 @@
-import { Text } from '@mantine/core';
-import { IconPin } from '@tabler/icons-react';
+import { Text, Tooltip } from '@mantine/core';
+import { IconMessage, IconPin } from '@tabler/icons-react';
 
 /** What a row's chips say; each part is left out when it has nothing to say. */
 export interface RowChipFacts {
@@ -16,7 +16,7 @@ export interface RowChipFacts {
 
 const plural = (n: number, one: string): string => `${String(n)} ${one}${n === 1 ? '' : 's'}`;
 
-/** The small dim facts at a row's right, in words and no color: the round's mark, kind, spec, pin and notes. */
+/** The small dim facts at a row's right, no color: the round's mark, kind, spec and pin in words, and notes as an icon and a count. */
 export function RowChips({ facts }: { readonly facts: RowChipFacts }) {
   const { mark = null, kind = null, spec = false, notes = 0, pinned = false } = facts;
   return (
@@ -46,9 +46,19 @@ export function RowChips({ facts }: { readonly facts: RowChipFacts }) {
         />
       ) : null}
       {notes === 0 ? null : (
-        <Text span fz={12} c="dimmed">
-          {plural(notes, 'note')}
-        </Text>
+        <Tooltip label={plural(notes, 'note')}>
+          <Text
+            span
+            fz={12}
+            c="dimmed"
+            role="img"
+            aria-label={plural(notes, 'note')}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}
+          >
+            <IconMessage size={14} stroke={1.5} aria-hidden="true" />
+            {notes}
+          </Text>
+        </Tooltip>
       )}
     </>
   );

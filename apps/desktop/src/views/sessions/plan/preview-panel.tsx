@@ -66,8 +66,8 @@ export function PreviewPanel({ preview }: { readonly preview: ShapePreviewDto })
     <Box
       component="section"
       aria-label="How it would run"
-      mt="md"
-      p="xs"
+      mt={12}
+      p={8}
       style={{ borderRadius: 'var(--mantine-radius-md)', background: 'var(--tendb-color-panel)' }}
     >
       <UnstyledButton
@@ -77,27 +77,29 @@ export function PreviewPanel({ preview }: { readonly preview: ShapePreviewDto })
           setOpened((o) => !o);
         }}
         w="100%"
-        px={8}
+        px={12}
         py={4}
+        style={{ position: 'relative' }}
       >
-        <Group gap={6} wrap="nowrap" justify="space-between">
-          <Group gap={4} wrap="nowrap">
-            {opened ? (
-              <IconChevronDown size={14} stroke={1.5} aria-hidden="true" />
-            ) : (
-              <IconChevronRight size={14} stroke={1.5} aria-hidden="true" />
-            )}
-            <Text size="sm" fw={500} c="bright">
-              How it would run
-            </Text>
-          </Group>
-          <Text size="xs" c="dimmed" truncate="end">
+        {/* The chevron hangs in the left padding, so the label starts on the cards' title edge. */}
+        <span style={{ position: 'absolute', left: 0, top: 8, display: 'inline-flex' }}>
+          {opened ? (
+            <IconChevronDown size={12} stroke={1.5} aria-hidden="true" />
+          ) : (
+            <IconChevronRight size={12} stroke={1.5} aria-hidden="true" />
+          )}
+        </span>
+        <Group gap={8} wrap="nowrap" justify="space-between">
+          <Text fz={13} fw={600} c="dimmed" style={{ flex: 'none' }}>
+            How it would run
+          </Text>
+          <Text fz={12} c="dimmed" truncate="end" style={{ minWidth: 0 }}>
             {foldedSummary(preview)}
           </Text>
         </Group>
       </UnstyledButton>
       {opened ? (
-        <Stack id={regionId} gap={8} px={8} pt={6} pb={4}>
+        <Stack id={regionId} gap={8} px={12} pt={6} pb={4}>
           <Text size="xs" c="dimmed">
             {`Ends in about ${hoursText(preview.endEstimateHours)} (estimate) · ${landingsLine(preview.landings)}`}
           </Text>

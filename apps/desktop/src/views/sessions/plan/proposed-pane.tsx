@@ -2,6 +2,7 @@ import type { ShapeProposalDto, ShapeViewDto } from '@10db/contracts';
 import {
   ActionIcon,
   Alert,
+  Anchor,
   Box,
   Button,
   Group,
@@ -202,7 +203,7 @@ export function ProposedPane({
       h="100%"
       style={{ display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 }}
     >
-      <Stack gap={6} px="md" pt="md" pb="xs" style={{ flex: 'none' }}>
+      <Stack gap={6} px="md" pt="md" pb={12} style={{ flex: 'none' }}>
         <Group justify="space-between" wrap="nowrap">
           <Text fz={16} fw={600}>
             Plan
@@ -302,37 +303,43 @@ export function ProposedPane({
             </Group>
           </Group>
         </Group>
-        {view === undefined || view.shape.round === 0 ? null : (
-          <Group gap={6} wrap="nowrap">
-            <Text size="xs" c="dimmed">
-              {`Round ${String(view.shape.round)} · updated ${shortAgo(view.shape.updatedAt, now)}`}
-            </Text>
-            {changes.length === 0 ? null : (
-              <>
-                <Text size="xs" c="dimmed" aria-hidden="true">
-                  ·
-                </Text>
-                <Button
-                  variant="subtle"
-                  size="compact-xs"
-                  aria-pressed={filtering}
-                  onClick={() => {
-                    setChangesOnly((on) => !on);
-                  }}
-                >
-                  {`${String(changes.length)} ${changes.length === 1 ? 'change' : 'changes'}`}
-                </Button>
-              </>
-            )}
-          </Group>
-        )}
         {reviewLine === '' ? null : (
           <Text size="xs" c="dimmed" role="status" aria-label="Review">
             {reviewLine}
           </Text>
         )}
         {summaryHere ? (
-          <SummaryLine groups={groupProposals(view?.proposals ?? [])} onJump={jump} />
+          <SummaryLine
+            groups={groupProposals(view?.proposals ?? [])}
+            onJump={jump}
+            lead={
+              view === undefined || view.shape.round === 0
+                ? null
+                : `Round ${String(view.shape.round)}`
+            }
+            tail={
+              view === undefined || view.shape.round === 0
+                ? null
+                : shortAgo(view.shape.updatedAt, now)
+            }
+            link={
+              changes.length === 0 ? null : (
+                <Anchor
+                  component="button"
+                  type="button"
+                  fz={12}
+                  c="dimmed"
+                  underline={filtering ? 'always' : 'hover'}
+                  aria-pressed={filtering}
+                  onClick={() => {
+                    setChangesOnly((on) => !on);
+                  }}
+                >
+                  {`${String(changes.length)} ${changes.length === 1 ? 'change' : 'changes'}`}
+                </Anchor>
+              )
+            }
+          />
         ) : null}
         {change.isError ? (
           <Alert color="red" title="Couldn't change the row">

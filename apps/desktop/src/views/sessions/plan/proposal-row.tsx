@@ -313,7 +313,7 @@ export function ProposalRow({
     />
   );
   const region = opened ? (
-    <Box id={regionId} role="region" aria-label={`${title} details`} px={14} pt={4} pb={8}>
+    <Box id={regionId} role="region" aria-label={`${title} details`} px={12} pt={4} pb={8}>
       {editing ? (
         <RowEditor
           row={row}
@@ -327,7 +327,6 @@ export function ProposalRow({
         <RowDetails
           row={row}
           sizes={sizes}
-          laneTime={lane}
           notes={
             review === undefined ? undefined : (
               <ReviewNotes
@@ -374,16 +373,19 @@ export function ProposalRow({
     </Box>
   ) : null;
 
+  const wrap = opened ? classes['opened'] : undefined;
   if (head)
     return (
       <>
-        {line}
-        {region}
+        <div className={wrap}>
+          {line}
+          {region}
+        </div>
         {children}
       </>
     );
   return (
-    <li style={{ listStyle: 'none' }}>
+    <li className={wrap} style={{ listStyle: 'none' }}>
       {line}
       {region}
       {children}

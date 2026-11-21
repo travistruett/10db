@@ -75,7 +75,7 @@ export function ProposedList({
     const review = reviewOf?.(goal);
     const own = sizesOf(goal);
     return (
-      <Box component="ul" m={0} p={0} pl={12} style={{ listStyle: 'none' }}>
+      <Box component="ul" m={0} p={0} style={{ listStyle: 'none' }}>
         {goal.body.tasks.map((task) => (
           <GoalTaskRow
             key={task.key}
@@ -148,10 +148,10 @@ export function ProposedList({
               onClick={() => {
                 setEarlierOpen((o) => !o);
               }}
-              px={14}
+              px={12}
               mb={8}
             >
-              <Text fz={13} c="dimmed" component="span">
+              <Text fz={13} fw={600} c="dimmed" component="span">
                 {earlierOpen ? (
                   <IconChevronDown size={14} stroke={1.5} aria-hidden="true" />
                 ) : (
