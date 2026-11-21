@@ -4,6 +4,7 @@ import {
   DaemonEvent,
   EventsHead,
   EventType,
+  TaskId,
   GithubLoginEndedData,
 } from '@10db/contracts';
 import { useQueryClient, type QueryKey } from '@tanstack/react-query';
@@ -163,8 +164,6 @@ export const EVENT_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly Qu
   'task.message_added': [passKeys.turnsAll, passKeys.live, liveKeys.all],
   // A picture of a task's page was kept: its thread and its drawer show it.
   'task.screen_added': [screenKeys.all],
-  // A lane's design check, or its verdict, was kept (the event carries `designCheckId`).
-  'task.changed': [designCheckKeys.all],
   // A notice that asks nothing joined Activity, and its task's drawer lists it.
   'notice.posted': [activityKeys.all],
   // A turn began or ended: what streams is read again, so an item that finished leaves it, and what the turn
@@ -228,6 +227,11 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
       ])
         void queryClient.invalidateQueries({ queryKey });
       applyInboxEvent(queryClient, client, event);
+      // A lane's design check, or its verdict, was kept: only that task's drawer asks again.
+      if (event.type === EventType.TaskChanged && typeof event.data['designCheckId'] === 'string')
+        void queryClient.invalidateQueries({
+          queryKey: designCheckKeys.of(TaskId.parse(event.entityId)),
+        });
       if (event.type === EventType.AccountLoginEnded) {
         const ended = AccountLoginEndedData.safeParse(event.data);
         if (ended.success)

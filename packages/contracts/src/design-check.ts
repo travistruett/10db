@@ -45,10 +45,11 @@ export const DesignCheckDto = z.object({
 });
 export type DesignCheckDto = z.infer<typeof DesignCheckDto>;
 
-/** `GET /tasks/:taskId/design-checks`: the task's newest check, for its drawer. */
+/** `GET /tasks/:taskId/design-checks`: the checks of the task's newest call, for its drawer. */
 export const TaskDesignCheckDto = z.object({
   taskId: TaskId,
-  newest: DesignCheckDto.nullable(),
+  /** One per mock-up the call drew; empty when the task has none. */
+  checks: z.array(DesignCheckDto),
 });
 export type TaskDesignCheckDto = z.infer<typeof TaskDesignCheckDto>;
 

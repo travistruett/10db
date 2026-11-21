@@ -75,7 +75,10 @@ function laneTools(
   }));
   // A task with an approved mock-up is also offered the tool that shows it beside the app.
   if (deps.pictures !== undefined && offersDesignCheck(deps.state.db, workstreamId)) {
-    const check = checkDesignTool({ state: deps.state, pictures: deps.pictures }, workstreamId);
+    const check = checkDesignTool(
+      { state: deps.state, pictures: deps.pictures, sessionId },
+      workstreamId,
+    );
     tools.push({
       name: check.name,
       description: check.description,

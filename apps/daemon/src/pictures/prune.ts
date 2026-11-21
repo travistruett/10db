@@ -1,6 +1,15 @@
-import { ScreenKind, type DesignCheckId, type TaskId, type TaskScreenId } from '@10db/contracts';
+import { rmSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  ScreenKind,
+  type DesignCheckId,
+  type ShapeId,
+  type TaskId,
+  type TaskScreenId,
+} from '@10db/contracts';
 import {
   deleteDesignChecks,
+  designCheckNames,
   listDesignChecksForPruning,
   listFinishedTurnScreens,
   listPrunedHashes,
@@ -19,6 +28,9 @@ import { removeUnnamed } from './picture-files';
 
 /** How long a turn picture is kept after its task is done or cancelled. */
 const TURN_PICTURES_KEPT_MS = 14 * 24 * 60 * 60_000;
+
+/** A file this young is left alone: a check that will name it may not be written yet. */
+const NEW_FILE_KEPT_MS = 10 * 60_000;
 
 /** How often the sweep runs after the one at start-up. */
 const PRUNE_EVERY_MS = 24 * 60 * 60_000;
@@ -60,6 +72,8 @@ export function prunableDesignChecks(
 }
 
 export interface PruningDeps {
+  /** A plan's folder, where a Design review copies its pictures; absent, none are removed. */
+  readonly planFilesDir?: (shapeId: ShapeId) => string;
   readonly state: StateStore;
   readonly dataDir: string;
   readonly clock: Clock;
@@ -71,6 +85,7 @@ export interface PruningDeps {
  * so a file whose removal failed on an earlier sweep goes on a later one.
  */
 function sweep(deps: PruningDeps): void {
+  const now = deps.clock.now().getTime();
   const rows = listFinishedTurnScreens(deps.state.db);
   const doneAt = new Map(rows.map((r) => [r.taskId, r.doneAt]));
   const pruned = prunableTurnScreens(rows, doneAt, deps.clock.now().getTime());
@@ -78,15 +93,22 @@ function sweep(deps: PruningDeps): void {
     deps.state.write((ctx) => {
       markScreensPruned(ctx, pruned);
     });
-  const checks = prunableDesignChecks(
-    listDesignChecksForPruning(deps.state.db),
-    deps.clock.now().getTime(),
-  );
-  const checkHashes =
-    checks.length === 0 ? [] : deps.state.write((ctx) => deleteDesignChecks(ctx, checks));
+  const checks = prunableDesignChecks(listDesignChecksForPruning(deps.state.db), now);
+  const gone =
+    checks.length === 0
+      ? { hashes: [], planCopies: [] }
+      : deps.state.write((ctx) => deleteDesignChecks(ctx, checks));
+  const checkHashes = gone.hashes;
+  // A Design review's pictures were copied into its plan's folder: they go on the same day, unless a
+  // check still names them.
+  for (const copy of gone.planCopies)
+    if (deps.planFilesDir !== undefined && !designCheckNames(deps.state.db, copy.sha256))
+      rmSync(join(deps.planFilesDir(copy.shapeId), 'design', `${copy.sha256}.png`), {
+        force: true,
+      });
   let removed = 0;
   for (const sha of new Set([...listPrunedHashes(deps.state.db), ...checkHashes]))
-    if (removeUnnamed(deps.state.db, deps.dataDir, sha)) removed += 1;
+    if (removeUnnamed(deps.state.db, deps.dataDir, sha, now - NEW_FILE_KEPT_MS)) removed += 1;
   if (pruned.length > 0 || removed > 0)
     deps.logger.info({ pruned: pruned.length, filesRemoved: removed }, 'pruned turn pictures');
 }

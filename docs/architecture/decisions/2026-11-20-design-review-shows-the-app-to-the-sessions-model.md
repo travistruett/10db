@@ -11,6 +11,12 @@
   pictures still stay on the Mac (or go to a pull request only when `prPictures` is on).
 - A Design review copies its PNGs into the plan's folder, which the session and its reviewers already read.
   `check_design` answers the PNGs as image blocks, so a lane reads nothing under the data directory.
+- **What leaves the Mac, exactly.** The shots are taken signed in, through the project's dev login, so
+  pages that show the builder's signed-in data go to the model, not just public pages. The plan-folder
+  copies of a Design review's pictures stay there up to 14 days (`<data>/shapes/<plan>/design/`), and any
+  later session of that plan can read them, including one on another provider after an account switch. A
+  lane's `check_design` sends its pictures as image blocks in that call's result, within the account's
+  picture limits, and they stay in that session's history.
 - A mock-up is drawn with JavaScript off, no network and the window's own policy (`MOCKUP_CSP`).
 - The pictures and verdict are kept in `design_checks` for 14 days after the task is done, so a later
   step (a pull request, Slack, Linear) reads that row.
@@ -19,7 +25,7 @@
 ## Why
 
 The builder asked for a design reviewer that sees the app; a model cannot judge a layout it never sees.
-The pictures are the builder's own app on their own Mac, sent to the model they already run the session on.
+The pictures are the builder's own app, sent to the model they already run the session on; the builder who does not want signed-in pages sent leaves the project's dev login command empty, and the shots then show the sign-in page.
 
 ## Cost if wrong
 

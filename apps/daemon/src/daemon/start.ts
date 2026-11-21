@@ -906,12 +906,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // Started once recovery is through; a launch before then waits for no before picture.
   let pictures: Pictures | null = null;
   // The on-demand pictures of a Design review and `check_design`, which run well after the pictures start.
-  const picturesNow: Pick<Pictures, 'shootNow' | 'drawMockup'> = {
+  const picturesNow: Pick<Pictures, 'shootNow' | 'drawMockup' | 'bytesOf'> = {
     shootNow: (input) =>
       pictures?.shootNow(input) ?? Promise.reject(new Error('Pictures have not started yet')),
     drawMockup: (projectId, html) =>
       pictures?.drawMockup(projectId, html) ??
       Promise.reject(new Error('Pictures have not started yet')),
+    bytesOf: (sha256) => pictures?.bytesOf(sha256) ?? 0,
   };
   let preview: Preview | null = null;
   // The API's port, once it listens: an app address may not name it, and no picture is taken before.
@@ -2287,6 +2288,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // Turn pictures go 14 days after their task is done: swept now and once a day.
   const picturePruning = startPruning({
+    planFilesDir: (shapeId) => join(shapesDir, shapeId),
     state,
     dataDir: opts.dataDir,
     clock,

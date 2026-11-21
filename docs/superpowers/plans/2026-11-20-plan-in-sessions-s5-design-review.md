@@ -46,7 +46,7 @@ generated last, after the final merge of `main`.
 | | Claude (plan, Bedrock, API key) | Codex |
 | --- | --- | --- |
 | Design review | a `tendb-design` subagent Reads the PNGs and `DESIGN.md` | in the session: the note names the PNG paths, which `view_image` reads (PNG is supported), and says it ran without a separate reviewer |
-| `check_design` | the tool's result names the PNG paths; the agent Reads them | the same paths, read with `view_image` |
+| `check_design` | the tool's result carries the PNGs as image blocks (a lane reads nothing under the data directory), within the account's picture limits, with `DESIGN.md`'s path | the same image blocks |
 
 ## Parts
 
