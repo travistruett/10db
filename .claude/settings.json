@@ -22,5 +22,15 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(git fetch -q origin)",
+      "Bash(git fetch origin)",
+      "Bash(make check-changed)",
+      "Bash(make precheck)",
+      "Bash(pnpm exec prettier --check *)",
+      "Bash(pnpm exec vitest run *)"
+    ]
   }
 }
