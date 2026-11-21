@@ -50,9 +50,11 @@ the status.
   if you moved the issue yourself. Being an agent, it can still word things oddly. That is the accepted cost of
   not maintaining mappings.
 - **It leaks a secret.** The guard scans every Linear write for secrets (keys, tokens, credential
-  assignments) and refuses a hit; the rest of the run goes on. Screenshots are not scanned.
-- **Linear goes quiet.** If the reporter can't reach Linear, one Inbox item per project stays open with a
-  count of the updates waiting, and closes when a run gets through. The task is never held.
+  assignments) and refuses a hit; that update is withheld and named in the Inbox. Screenshots are not
+  scanned.
+- **Linear goes quiet.** If a reporter run fails for any reason, it retries with backoff, and after five tries
+  the update is marked failed. One Inbox item per project stays open with a count of the updates waiting,
+  failed or withheld, and closes when nothing is left. The task is never held.
 
 **Calls you might disagree with.**
 1. **Agent-driven, not mapped.** **Decided** by the builder: start intelligent, a little non-deterministic.
@@ -93,11 +95,13 @@ projects and one per project both fall out of this.
   `packages/contracts`.
 - A project with no binding doesn't use that service. Slack sends from a project with no Slack binding stay in
   the Inbox, as they do today with Slack off.
+- While there is exactly one Slack sign-in, every project, new ones included, is bound to it unless the builder
+  turns that off, so adding a project never quietly drops Slack.
 - Who Answers stays where it is (Project › Planning). Slack's sends still go to people's DMs; there is no
   project channel.
 - **Slack in part 1:** today there is one token (`slack-bot`, `apps/daemon/src/environment/keychain.ts:16`) and
   one connection state (`apps/daemon/src/stakeholders/slack-connection.ts`). Part 1 moves the token to an entry
-  keyed by its team id and writes each existing project's binding to that workspace. Signing in to a second
+  keyed by its team id (writing the new entry before removing the old one). Signing in to a second
   workspace, and a contact who answers in two (`person_contacts.person_id` is unique,
   `packages/db/src/schema.ts:1085`), wait for a second workspace.
 - **GitHub later:** `gh` holds several accounts and gives the token for a named one
@@ -159,11 +163,13 @@ entry the builder configures.
 | pending | 30 s pass, no reporter running for the task | running (takes all pending rows) |
 | running | new event | running; the new row stays pending |
 | running | reporter records its rows | idle, or pending if rows arrived meanwhile |
-| running | session ends without recording, or the daemon stops | pending: the rows are retried; posts already made are found by their footer |
-| running | workspace check fails or Linear unreachable | pending with backoff (5 min, doubling to 6 h); the project's one Inbox item is opened or its count raised |
+| running | the daemon stops | pending: retried on startup; posts already made are found by their footer |
+| running | any failure: session ends without recording, workspace check fails, Linear unreachable | pending with backoff (5 min, doubling to 6 h); the project's one Inbox item is opened or its count raised |
+| pending | its fifth failed run | failed: shown on the card's Linear tab and counted in the Inbox item; a later event on the task starts fresh |
+| running | the scan refuses a write | that row recorded as withheld, with the pattern's name, and counted in the Inbox item |
 | any | task unlinked, binding removed or reporter turned off | pending rows dropped; a running reporter's later writes are refused |
 | any | task deleted | its rows are deleted |
-| running, after a failure | a run gets through | the Inbox item closes |
+| any | the project has no pending, failed or withheld rows left, or the builder dismisses them | the Inbox item closes |
 
 ### What it is handed
 
@@ -180,7 +186,8 @@ entry the builder configures.
   files. Then record each row through a 10db tool, `report_linear_post` (event ids, comment ids, the status
   set, the attachment URL).
 - Each comment ends with `10db · <event> · attempt N · <event id>`. Before writing, the reporter reads the
-  issue's comments; an event whose id already appears is recorded without posting again.
+  issue's comments; an event whose id already appears is recorded without posting again. It finds its
+  attachment by its URL on the linked issue, so one created but never recorded is updated, not duplicated.
 
 ### Where it runs
 
@@ -188,7 +195,9 @@ entry the builder configures.
   the project's account. It loads 10db's tools and the account's Linear server only: it is 10db's own errand,
   not the builder's work, and every other server is a way for task data to leave.
 - The first thing it does is report through `report_linear_workspace` the workspace and team it sees. Until
-  that matches the binding, the guard refuses every Linear write.
+  that matches the binding, the guard refuses every Linear write. This guards against an account signed in to
+  the wrong workspace, not a misbehaving agent; the plan reads the workspace from the Linear tool's own result
+  if the provider's hooks expose it.
 - After that, the guard allows a Linear write only when its issue is the linked identifier or the issue id
   saved with the link, or its comment or attachment id is one this task's rows recorded. Everything else is
   refused. The reason is a hard limit: sending data out to somewhere the builder didn't choose
@@ -197,8 +206,8 @@ entry the builder configures.
 - The guard scans every Linear write's text fields (body, title, subtitle, description) with the outbound
   scan's secret patterns only. The URL, code-fence and file-path patterns of
   `apps/daemon/src/stakeholders/outbound-scan.ts` are left out: the reporter posts links and commands by
-  design. A hit refuses that call, names the pattern, and the run continues. Uploaded screenshots are not
-  scanned.
+  design. A hit refuses that call and names the pattern; the reporter records the row as withheld and the run
+  goes on. Uploaded screenshots are not scanned.
 
 ### Rules in its brief
 
@@ -211,7 +220,7 @@ entry the builder configures.
 
 - `tasks`: `external_kind`, `external_id`, `external_issue_id` (Linear's id) and `external_url`, all nullable,
   with a unique index on `(project_id, external_kind, external_id)`.
-- `linear_posts`: id, task, event kind, attempt, state (pending or recorded), session, comment ids, the status
+- `linear_posts`: id, task, event kind, attempt, state (pending, recorded, withheld or failed), tries, session, comment ids, the status
   set, the attachment URL, created and recorded at. This is the reporter's queue and log, and the card's
   Linear tab reads it.
 - Bindings in `app_settings`, so no table for them.
