@@ -157,7 +157,7 @@ export interface McpDeps {
   /** The tools of a chat's session; absent, such a session is refused. */
   readonly chatTools?: ChatToolsFor;
   /** Draws a mock-up and shoots the app for `check_design`; absent, a lane is not offered it. */
-  readonly pictures?: Pick<Pictures, 'shootNow' | 'drawMockup'>;
+  readonly pictures?: Pick<Pictures, 'shootNow' | 'drawMockup' | 'bytesOf'>;
 }
 
 /** What a build step that plans first is told once its plan is recorded. */

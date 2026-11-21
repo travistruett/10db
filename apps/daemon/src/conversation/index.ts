@@ -43,7 +43,12 @@ export {
   unmeasuredRead,
   type ReadKind,
 } from './inline-budget';
-export { inlineImageIds, pathImageReasons, pathReasonText } from './picture-budget';
+export {
+  imagesWithinBudget,
+  inlineImageIds,
+  pathImageReasons,
+  pathReasonText,
+} from './picture-budget';
 export {
   STRICTEST_LIMITS,
   pictureLimitsFor,

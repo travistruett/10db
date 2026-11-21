@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import {
   APP_URL_IS_DAEMON,
   BrowserState,
@@ -35,7 +35,7 @@ import {
 import {
   findPass,
   getDesignCheck,
-  latestTaskDesignCheck,
+  latestTaskDesignChecks,
   getPassTurn,
   getProject,
   getTask,
@@ -163,10 +163,21 @@ export interface PicturesDeps {
    */
   readonly devUi: { readonly origin: string; readonly token: string } | null;
   /**
-   * Keeps the project's app up for an on-demand shot and says whether it answers; absent, the shot
-   * goes ahead at whatever answers.
+   * Keeps the project's app up for an on-demand shot (renewed before each route) and says whether it
+   * answers, else why not; absent, the shot goes ahead at whatever answers.
    */
-  readonly holdApp?: (projectId: ProjectId, say?: (line: string) => void) => Promise<boolean>;
+  readonly holdApp?: (
+    projectId: ProjectId,
+    say?: (line: string) => void,
+  ) => Promise<{ readonly up: true } | { readonly up: false; readonly why: string }>;
+}
+
+/** An on-demand picture was asked of, or overtaken by, a daemon that is stopping. */
+export class PicturesStoppedError extends Error {
+  override readonly name = 'PicturesStoppedError';
+  constructor() {
+    super('The daemon is stopping, so no picture is taken.');
+  }
 }
 
 export interface Pictures {
@@ -185,6 +196,8 @@ export interface Pictures {
   shootNow(input: ShootNowInput): Promise<ShotsNow>;
   /** Draws a mock-up's HTML in the first viewport and theme of the project's matrix, cached by what it drew. */
   drawMockup(projectId: ProjectId, html: string): Promise<MockupDrawn>;
+  /** The size of a kept picture's file by its hash; 0 when there is none. */
+  bytesOf(sha256: string): number;
   screens(taskId: TaskId): TaskScreensDto;
   /** The task's newest design check. */
   designCheck(taskId: TaskId): TaskDesignCheckDto;
@@ -743,6 +756,11 @@ export function startPictures(deps: PicturesDeps): Pictures {
   const drawnMockups = new Map<string, string>();
   /** On-demand draws and shots under way, aborted by `stop`. */
   const nowRuns = new Set<AbortController>();
+  let stopping = false;
+  /** An on-demand run begins only while the service runs, and its answer is dropped once it stops. */
+  const whileRunning = (): void => {
+    if (stopping) throw new PicturesStoppedError();
+  };
 
   /** The first viewport and theme of the project's matrix: what an on-demand picture is taken in. */
   function firstOfMatrix(project: ProjectDto): { viewport: ScreenViewport; theme: ScreenTheme } {
@@ -755,6 +773,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
   }
 
   async function drawMockup(projectId: ProjectId, html: string): Promise<MockupDrawn> {
+    whileRunning();
     const { viewport, theme } = firstOfMatrix(getProject(db, projectId));
     const key = createHash('sha256')
       .update(JSON.stringify([html, viewport, theme]))
@@ -774,9 +793,11 @@ export function startPictures(deps: PicturesDeps): Pictures {
       drawnMockups.set(key, file.sha256);
       return { sha256: file.sha256, path: file.storedPath };
     } catch (error) {
+      if (error instanceof PicturesStoppedError) throw error;
       return { missing: abort.signal.aborted ? 'the daemon is stopping' : errorText(error) };
     } finally {
       nowRuns.delete(abort);
+      whileRunning();
     }
   }
 
@@ -796,6 +817,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
   }
 
   async function shootNow(input: ShootNowInput): Promise<ShotsNow> {
+    whileRunning();
     const project = getProject(db, input.projectId);
     const { viewport, theme } = firstOfMatrix(project);
     const none = (reason: string): ShotsNow => ({
@@ -820,12 +842,10 @@ export function startPictures(deps: PicturesDeps): Pictures {
     const abort = new AbortController();
     nowRuns.add(abort);
     try {
-      if (deps.holdApp && !(await deps.holdApp(project.id, input.say)))
-        return none(
-          project.previewCommand === null
-            ? `nothing answers at ${appUrl}, and the project has no preview command to start it`
-            : `nothing answered at ${appUrl} in time`,
-        );
+      if (deps.holdApp) {
+        const held = await deps.holdApp(project.id, input.say);
+        if (!held.up) return none(held.why);
+      }
       const devUi = devUiFor(appUrl, port);
       let storageState = readStorageState(deps.dataDir, project.id);
       if (storageState === null && project.devLoginCommand !== null)
@@ -834,6 +854,14 @@ export function startPictures(deps: PicturesDeps): Pictures {
       const shots: NowShot[] = [];
       const missing: { route: string | null; reason: string }[] = [...unloadable];
       for (const route of routes) {
+        // A long review renews the hold before each shot, so its preview is not taken away part-way.
+        if (deps.holdApp) {
+          const held = await deps.holdApp(project.id, input.say);
+          if (!held.up) {
+            missing.push({ route, reason: held.why });
+            continue;
+          }
+        }
         const shoot = (state: StorageState | null): Promise<Shot> =>
           deps.camera.shoot({
             appUrl,
@@ -869,15 +897,24 @@ export function startPictures(deps: PicturesDeps): Pictures {
       }
       return { viewport, theme, shots, missing };
     } catch (error) {
+      if (error instanceof PicturesStoppedError) throw error;
       return none(abort.signal.aborted ? 'the daemon is stopping' : errorText(error));
     } finally {
       nowRuns.delete(abort);
+      whileRunning();
     }
   }
 
   return {
     shootNow,
     drawMockup,
+    bytesOf(sha256) {
+      try {
+        return statSync(picturePath(deps.dataDir, sha256)).size;
+      } catch {
+        return 0;
+      }
+    },
     async awaitBefore(task, signal) {
       askBefore(task, task.passId ?? null);
       if (!beforePending(task.id)) return;
@@ -912,7 +949,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
     },
     designCheck(taskId) {
       getTask(db, taskId);
-      return { taskId, newest: latestTaskDesignCheck(db, taskId) };
+      return { taskId, checks: latestTaskDesignChecks(db, taskId) };
     },
     designCheckFile(checkId, part) {
       const check = getDesignCheck(db, checkId);
@@ -934,6 +971,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
       }
     },
     async stop() {
+      stopping = true;
       unsubscribe();
       apply({ kind: 'shutdown' });
       for (const abort of nowRuns) abort.abort();

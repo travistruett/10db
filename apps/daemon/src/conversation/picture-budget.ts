@@ -93,3 +93,25 @@ export function pathImageReasons(
   }
   return reasons;
 }
+
+/**
+ * Which of `sizes` (PNG bytes, in the order they matter) a tool result may carry as image blocks after
+ * `spent` bytes were sent earlier: each within the per-image cap, and together within the per-message cap and
+ * what is left of the conversation's. A resumed session resends every image, so one past the request limit
+ * would fail every later turn. Answers the indexes sent; the rest are left out.
+ */
+export function imagesWithinBudget(
+  sizes: readonly number[],
+  spent: number,
+  limits: PictureLimits,
+): number[] {
+  const room = Math.min(limits.messageMaxBytes, limits.inlineMaxBytes - spent);
+  let used = 0;
+  const sent: number[] = [];
+  sizes.forEach((bytes, index) => {
+    if (bytes > limits.imageMaxBytes || used + bytes > room) return;
+    used += bytes;
+    sent.push(index);
+  });
+  return sent;
+}

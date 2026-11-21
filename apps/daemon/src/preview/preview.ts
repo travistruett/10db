@@ -79,6 +79,9 @@ export interface PreviewDeps {
   readonly timing?: Partial<PreviewTiming>;
 }
 
+/** What a hold found: the app answers, or why it does not. */
+export type HoldAnswer = { readonly up: true } | { readonly up: false; readonly why: string };
+
 export interface Preview {
   /** Starts or stops the project's preview to match its pass and settings. */
   ensure(projectId: ProjectId): Promise<void>;
@@ -91,10 +94,10 @@ export interface Preview {
   restart(projectId: ProjectId): Promise<void>;
   /**
    * Keeps the project's preview up with no pass open, for the hold's length past this ask, and answers
-   * whether the app answers within its deadline (false at once when there is no app address, or no
-   * command to serve it and nothing answering). `say` is told what a pass's header would show.
+   * whether the app answers within its deadline, else why not (at once when there is no app address, or
+   * nothing can serve it). Each ask renews the hold. `say` is told what a pass's header would show.
    */
-  hold(projectId: ProjectId, say?: (line: string) => void): Promise<boolean>;
+  hold(projectId: ProjectId, say?: (line: string) => void): Promise<HoldAnswer>;
   /** Stops every preview and follows nothing more. */
   stop(): Promise<void>;
 }
@@ -386,25 +389,46 @@ export function startPreview(deps: PreviewDeps): Preview {
     launch(project, command, appUrl);
   }
 
-  /** Looks at the address until it answers or the hold's deadline passes; stops early when nothing runs to serve it. */
-  async function waitForApp(projectId: ProjectId): Promise<boolean> {
-    let appUrl: string | null;
+  /**
+   * Looks at the address until it answers or the hold's deadline passes. It goes on while the preview is
+   * wanted and has not given up, a restart between two runs included; it stops at once when nothing can
+   * serve the address.
+   */
+  async function waitForApp(projectId: ProjectId): Promise<HoldAnswer> {
+    let project: ProjectDto;
     try {
-      appUrl = getProject(db, projectId).appUrl;
+      project = getProject(db, projectId);
     } catch {
-      return false;
+      return { up: false, why: 'the project is gone' };
     }
-    if (appUrl === null) return false;
+    const appUrl = project.appUrl;
+    if (appUrl === null) return { up: false, why: 'the project has no app address' };
     const deadline = Date.now() + timing.holdAnswerWithinMs;
     while (!stopped()) {
-      if (await answers(appUrl)) return true;
-      if (!runs.has(projectId) || Date.now() >= deadline) return false;
+      if (await answers(appUrl)) return { up: true };
+      if (project.previewCommand === null)
+        return {
+          up: false,
+          why: `nothing answers at ${appUrl}, and the project has no preview command to start it`,
+        };
+      if (!project.sandboxLoopback)
+        return {
+          up: false,
+          why: `nothing answers at ${appUrl}, and the preview needs Allow loopback in Project Settings › General`,
+        };
+      if (gaveUp.get(projectId) === project.previewCommand)
+        return {
+          up: false,
+          why: "the preview stopped after exiting repeatedly; Restart Preview in the project's header starts it again",
+        };
+      if (Date.now() >= deadline)
+        return { up: false, why: `nothing answered at ${appUrl} in time` };
       await new Promise<void>((resolve) => {
         // A real timer on purpose, as the other preview timers; not tracked, so a stop never strands this wait.
         setTimeout(resolve, timing.probeEveryMs);
       });
     }
-    return false;
+    return { up: false, why: 'the daemon is stopping' };
   }
 
   function ensure(projectId: ProjectId): Promise<void> {

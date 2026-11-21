@@ -6,155 +6,151 @@
       "type": "string",
       "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
     },
-    "newest": {
-      "anyOf": [
-        {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string",
-              "pattern": "^dck_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            },
-            "projectId": {
-              "type": "string",
-              "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            },
-            "shapeId": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "pattern": "^shp_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "taskId": {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "attachmentId": {
-              "type": "string",
-              "pattern": "^sat_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
-            },
-            "purpose": {
-              "type": "string",
-              "enum": [
-                "plan_review",
-                "lane_check"
-              ]
-            },
-            "mockupSha256": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "shots": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "route": {
-                    "type": "string"
-                  },
-                  "viewport": {
-                    "type": "object",
-                    "properties": {
-                      "width": {
-                        "type": "integer",
-                        "minimum": 320,
-                        "maximum": 3840
-                      },
-                      "height": {
-                        "type": "integer",
-                        "minimum": 320,
-                        "maximum": 2400
-                      }
-                    },
-                    "required": [
-                      "width",
-                      "height"
-                    ]
-                  },
-                  "theme": {
-                    "type": "string",
-                    "enum": [
-                      "default",
-                      "light",
-                      "dark"
-                    ]
-                  },
-                  "sha256": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  },
-                  "missing": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
-                  }
-                },
-                "required": [
-                  "route",
-                  "viewport",
-                  "theme",
-                  "sha256",
-                  "missing"
-                ]
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^dck_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "projectId": {
+            "type": "string",
+            "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "shapeId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^shp_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
               }
-            },
-            "designMdPath": {
-              "type": [
-                "string",
-                "null"
+            ]
+          },
+          "taskId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "attachmentId": {
+            "type": "string",
+            "pattern": "^sat_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "purpose": {
+            "type": "string",
+            "enum": [
+              "plan_review",
+              "lane_check"
+            ]
+          },
+          "mockupSha256": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "shots": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "route": {
+                  "type": "string"
+                },
+                "viewport": {
+                  "type": "object",
+                  "properties": {
+                    "width": {
+                      "type": "integer",
+                      "minimum": 320,
+                      "maximum": 3840
+                    },
+                    "height": {
+                      "type": "integer",
+                      "minimum": 320,
+                      "maximum": 2400
+                    }
+                  },
+                  "required": [
+                    "width",
+                    "height"
+                  ]
+                },
+                "theme": {
+                  "type": "string",
+                  "enum": [
+                    "default",
+                    "light",
+                    "dark"
+                  ]
+                },
+                "sha256": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "missing": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "route",
+                "viewport",
+                "theme",
+                "sha256",
+                "missing"
               ]
-            },
-            "verdict": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "createdAt": {
-              "type": "string",
-              "format": "date-time",
-              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
             }
           },
-          "required": [
-            "id",
-            "projectId",
-            "shapeId",
-            "taskId",
-            "attachmentId",
-            "purpose",
-            "mockupSha256",
-            "shots",
-            "designMdPath",
-            "verdict",
-            "createdAt"
-          ]
+          "designMdPath": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "verdict": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
         },
-        {
-          "type": "null"
-        }
-      ]
+        "required": [
+          "id",
+          "projectId",
+          "shapeId",
+          "taskId",
+          "attachmentId",
+          "purpose",
+          "mockupSha256",
+          "shots",
+          "designMdPath",
+          "verdict",
+          "createdAt"
+        ]
+      }
     }
   },
   "required": [
     "taskId",
-    "newest"
+    "checks"
   ]
 }

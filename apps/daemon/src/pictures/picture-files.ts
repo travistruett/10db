@@ -1,5 +1,13 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  statSync,
+  readdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { InvalidError } from '@10db/contracts';
 import {
@@ -101,10 +109,19 @@ export function keepScreen(
 }
 
 /** Removes the file of `sha256` when no unpruned picture or design check names it; answers whether it did. */
-export function removeUnnamed(db: DbReader, dataDir: string, sha256: string): boolean {
+export function removeUnnamed(
+  db: DbReader,
+  dataDir: string,
+  sha256: string,
+  /** A file written after this time (ms) stays: a row about to name it may not be written yet. */
+  notNewerThan?: number,
+): boolean {
   if (hashNamed(db, sha256) || designCheckNames(db, sha256)) return false;
   const path = picturePath(dataDir, sha256);
   if (!existsSync(path)) return false;
+  if (notNewerThan !== undefined && statSync(path).mtimeMs > notNewerThan) return false;
+  // Asked again at the last moment: a check may have named it while the file was read.
+  if (hashNamed(db, sha256) || designCheckNames(db, sha256)) return false;
   rmSync(path, { force: true });
   return true;
 }

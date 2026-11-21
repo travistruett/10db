@@ -74,15 +74,38 @@ export function getDesignCheck(db: DbReader, id: DesignCheckId): DesignCheckDto 
   return toDto(row);
 }
 
-/** The task's newest check, or null. */
-export function latestTaskDesignCheck(db: DbReader, taskId: TaskId): DesignCheckDto | null {
-  const row = db
+/** Every check the task's newest `check_design` call made (one per mock-up), oldest first; empty when none. */
+export function latestTaskDesignChecks(db: DbReader, taskId: TaskId): DesignCheckDto[] {
+  const rows = db
     .select()
     .from(schema.designChecks)
     .where(eq(schema.designChecks.taskId, taskId))
     .orderBy(desc(schema.designChecks.createdAt), desc(schema.designChecks.id))
-    .get();
-  return row ? toDto(row) : null;
+    .all();
+  const newest = rows[0]?.createdAt;
+  return rows
+    .filter((r) => r.createdAt === newest)
+    .reverse()
+    .map(toDto);
+}
+
+/** Every check of the task, newest first, for what its calls have already sent. */
+export function listTaskDesignChecks(db: DbReader, taskId: TaskId): DesignCheckDto[] {
+  return db
+    .select()
+    .from(schema.designChecks)
+    .where(eq(schema.designChecks.taskId, taskId))
+    .orderBy(desc(schema.designChecks.createdAt), desc(schema.designChecks.id))
+    .all()
+    .map(toDto);
+}
+
+/** Keeps a lane call's checks in one write, so they share a time and read back as one call. */
+export function insertDesignChecks(
+  ctx: WriteContext,
+  inputs: readonly NewDesignCheck[],
+): DesignCheckDto[] {
+  return inputs.map((input) => insertDesignCheck(ctx, input));
 }
 
 /** Records what the agent says still differs, on the check it just ran. */
@@ -150,9 +173,18 @@ export function listDesignChecksForPruning(db: DbReader): {
     }));
 }
 
-/** Deletes checks; answers the hashes their rows named, whose files may now go. */
-export function deleteDesignChecks(ctx: WriteContext, ids: readonly DesignCheckId[]): string[] {
-  if (ids.length === 0) return [];
+/**
+ * Deletes checks; answers the hashes their rows named, whose files may now go, and the plan folders
+ * that were given a copy of one (a Design review's).
+ */
+export function deleteDesignChecks(
+  ctx: WriteContext,
+  ids: readonly DesignCheckId[],
+): {
+  readonly hashes: string[];
+  readonly planCopies: { readonly shapeId: ShapeId; readonly sha256: string }[];
+} {
+  if (ids.length === 0) return { hashes: [], planCopies: [] };
   const rows = ctx.tx
     .select()
     .from(schema.designChecks)
@@ -162,12 +194,15 @@ export function deleteDesignChecks(ctx: WriteContext, ids: readonly DesignCheckI
     .delete(schema.designChecks)
     .where(inArray(schema.designChecks.id, [...ids]))
     .run();
-  return [
-    ...new Set(
-      rows.flatMap((r) => [
-        ...(r.mockupSha256 === null ? [] : [r.mockupSha256]),
-        ...r.shots.flatMap((s) => (s.sha256 === null ? [] : [s.sha256])),
-      ]),
-    ),
+  const shas = (r: DesignCheckRow): string[] => [
+    ...(r.mockupSha256 === null ? [] : [r.mockupSha256]),
+    ...r.shots.flatMap((s) => (s.sha256 === null ? [] : [s.sha256])),
   ];
+  return {
+    hashes: [...new Set(rows.flatMap(shas))],
+    planCopies: rows.flatMap((r) => {
+      const shapeId = r.shapeId;
+      return shapeId === null ? [] : shas(r).map((sha256) => ({ shapeId, sha256 }));
+    }),
+  };
 }
