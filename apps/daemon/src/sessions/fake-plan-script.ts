@@ -144,9 +144,10 @@ export function scriptedShapeBehaviour(): FakeShapeBehaviour {
         BUILDER_MESSAGE_ID,
         '',
       );
-      // The two review turns the Review menu sends. The script reports as the reviewers do; its MCP calls
+      // The three review turns the Review menu sends. The script reports as the reviewers do; its MCP calls
       // bypass the session's hook, which stamps the reviewer from the subagent's type.
-      const trimmed = text.trim();
+      // The plan's `[note]` and `[file]` lines (an approval, an edit, a drop) go ahead of the ask.
+      const trimmed = text.replace(/^(?:\[(?:note|file)\] .*\n)+/, '').trim();
       if (trimmed.startsWith('Plan review:')) {
         const efforts = [...trimmed.matchAll(REVIEW_EFFORT)].map((m) => m[1] ?? '');
         for (const effortKey of efforts)
