@@ -24,7 +24,7 @@ function LaneBar({
       style={{
         position: 'relative',
         borderRadius: 3,
-        background: 'var(--tendb-color-card)',
+        background: 'var(--tendb-color-column)',
         overflow: 'hidden',
       }}
     >
@@ -40,7 +40,7 @@ function LaneBar({
             background: item.critical
               ? 'var(--mantine-color-blue-filled)'
               : 'var(--mantine-color-dimmed)',
-            borderRight: '2px solid var(--tendb-color-column)',
+            borderRight: '2px solid var(--tendb-color-card)',
           }}
         />
       ))}
@@ -68,7 +68,7 @@ export function PreviewPanel({ preview }: { readonly preview: ShapePreviewDto })
       aria-label="How it would run"
       mt="md"
       p="xs"
-      style={{ borderRadius: 'var(--mantine-radius-md)', background: 'var(--tendb-color-column)' }}
+      style={{ borderRadius: 'var(--mantine-radius-md)', background: 'var(--tendb-color-card)' }}
     >
       <UnstyledButton
         aria-expanded={opened}

@@ -10,8 +10,8 @@ export interface PlanCardProps {
 }
 
 /**
- * A card of the Plan: one tone down from the panel, no outline, radius md. The panel paints the Board's
- * card tone and the card the Board's tray tone, so in both schemes the card sits recessed in it.
+ * A card of the Plan: the Board's card tone, raised one tone above the panel, which keeps the
+ * conversation's surface. No outline, radius md.
  */
 export function PlanCard({ head, children, label }: PlanCardProps) {
   return (
@@ -22,7 +22,7 @@ export function PlanCard({ head, children, label }: PlanCardProps) {
       style={{
         listStyle: 'none',
         borderRadius: 'var(--mantine-radius-md)',
-        background: 'var(--tendb-color-column)',
+        background: 'var(--tendb-color-card)',
       }}
     >
       {head}

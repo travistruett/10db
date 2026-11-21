@@ -9,7 +9,7 @@
 }
 
 .row:hover {
-  background: var(--tendb-color-card);
+  background: var(--mantine-color-default-hover);
 }
 
 /* The title button covers the whole row, so a click anywhere opens it; what sits above it lifts itself. */

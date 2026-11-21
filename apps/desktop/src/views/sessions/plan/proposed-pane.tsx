@@ -200,8 +200,6 @@ export function ProposedPane({
       component="section"
       aria-label="Plan"
       h="100%"
-      // The panel takes the Board's card tone, so its cards (the Board's tray tone) sit one tone down.
-      bg="var(--tendb-color-card)"
       style={{ display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 }}
     >
       <Stack gap={6} px="md" pt="md" pb="xs" style={{ flex: 'none' }}>

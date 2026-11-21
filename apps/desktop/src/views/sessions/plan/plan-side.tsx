@@ -102,8 +102,6 @@ export function PlanSide({
           display: 'flex',
           flexDirection: 'column',
           borderLeft: '1px solid var(--mantine-color-default-border)',
-          // The panel's cards are one tone down from this, the Board's card tone.
-          background: 'var(--tendb-color-card)',
           // The panel's own px md plus this is the 20 px the conversation keeps between its text and the divider.
           paddingLeft: GUTTER_EXTRA_PX,
         }}
