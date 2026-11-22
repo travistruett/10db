@@ -216,7 +216,9 @@ import type {
   SlackConnectionDto,
   SlackMemberDto,
   SlackTokenInput,
+  LinearCheckInput,
   ProjectIntegrationsDto,
+  ProjectLinearDto,
   ProjectIntegrationsInput,
   LinearSignInsDto,
   StakeholderSendDto,
@@ -890,6 +892,9 @@ export interface ApiServices extends PlanRecordServices {
   removeSlackToken(): Promise<SlackConnectionDto>;
   /** The GitHub login a project uses and its Slack workspace (the only one while there is exactly one). */
   projectIntegrations(projectId: ProjectId): Promise<ProjectIntegrationsDto>;
+  /** Opens the session that reads the workspace and looks the team up; ConflictError, in words, when the account has no Linear. */
+  checkLinearTeam(projectId: ProjectId, input: LinearCheckInput): Promise<ProjectLinearDto>;
+  unlinkLinear(projectId: ProjectId): ProjectLinearDto;
   /** Binds a project to a signed-in Slack workspace, or turns Slack off for it with a null team. */
   setProjectIntegrations(
     projectId: ProjectId,

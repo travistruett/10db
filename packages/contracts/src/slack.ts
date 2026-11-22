@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { SECRET_CHARACTERS } from './accounts';
+import { ProjectLinearDto } from './external';
 import { GoalId, InboxItemId, PersonId, StakeholderSendId, TaskId } from './ids';
 import { QuestionCategory, SendState } from './states';
 import { PersonDto } from './team';
@@ -147,6 +148,7 @@ export type ProjectSlackDto = z.infer<typeof ProjectSlackDto>;
 export const ProjectIntegrationsDto = z.strictObject({
   github: z.strictObject({ login: z.string().nullable() }),
   slack: ProjectSlackDto,
+  linear: ProjectLinearDto,
 });
 export type ProjectIntegrationsDto = z.infer<typeof ProjectIntegrationsDto>;
 
