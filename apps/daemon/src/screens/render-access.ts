@@ -69,6 +69,8 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/health': 'Open to every caller; it needs no token.',
   '/shapes/:shapeId/screens/:name':
     "A kept screenshot is for the conversation's transcript, not for a screen.",
+  '/tasks/:taskId/linear-posts':
+    "A task's Linear updates are for the task's drawer, not for a screen.",
   '/tasks/:taskId/screens':
     "A picture of the builder's app is for the UI Workbench and the drawer, not for a screen.",
   '/tasks/:taskId/design-checks':

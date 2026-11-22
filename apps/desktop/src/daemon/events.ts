@@ -41,6 +41,7 @@ import { passKeys, writePassActivity } from './pass-queries';
 import { folderKeys } from './project-folder-queries';
 import { queryKeys } from './queries';
 import { shapeKeys } from './shape-queries';
+import { linearPostKeys } from './linear-queries';
 import { designCheckKeys, screenKeys } from './screen-queries';
 import { skipKeys } from './skip-queries';
 import { statusKeys } from './status-queries';
@@ -165,6 +166,8 @@ export const EVENT_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly Qu
   'task.message_added': [passKeys.turnsAll, passKeys.live, liveKeys.all],
   // A picture of a task's page was kept: its thread and its drawer show it.
   'task.screen_added': [screenKeys.all],
+  // The reporter's update on a task's Linear issue was owed, recorded, withheld or failed.
+  'linear_post.changed': [linearPostKeys.all],
   // A notice that asks nothing joined Activity, and its task's drawer lists it.
   'notice.posted': [activityKeys.all],
   // A turn began or ended: what streams is read again, so an item that finished leaves it, and what the turn

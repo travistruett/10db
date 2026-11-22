@@ -108,18 +108,32 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   // A new project starts with an Icebox column for parked work. While it is empty it is folded to a rail.
   await expect(page.getByRole('group', { name: 'Icebox, collapsed' })).toBeVisible();
 
-  // Create two tasks; the only area is preselected. The first never runs.
-  for (const title of [OTHER, TASK]) {
-    await page.getByRole('button', { name: 'New Task' }).click();
-    const taskDialog = page.getByRole('dialog', { name: 'New Task' });
-    await taskDialog.getByLabel('Title').fill(title);
-    if (title === OTHER) await expectAccessible(page, 'new task, dark');
-    await taskDialog
-      .getByLabel('Acceptance Criteria', { exact: true })
-      .fill('src/greeting/hello.txt exists');
-    await taskDialog.getByRole('button', { name: 'Create Task' }).click();
-    await expect(taskDialog).toBeHidden();
-  }
+  // Create two tasks; the only area is preselected. The first never runs. The second is made through the
+  // API so that it carries a Linear link, whose issue the reporter then writes to once the task is done.
+  await page.getByRole('button', { name: 'New Task' }).click();
+  const taskDialog = page.getByRole('dialog', { name: 'New Task' });
+  await taskDialog.getByLabel('Title').fill(OTHER);
+  await expectAccessible(page, 'new task, dark');
+  await taskDialog
+    .getByLabel('Acceptance Criteria', { exact: true })
+    .fill('src/greeting/hello.txt exists');
+  await taskDialog.getByRole('button', { name: 'Create Task' }).click();
+  await expect(taskDialog).toBeHidden();
+  const linked = await request.post(`${daemonUrl}/projects/${projectId}/tasks`, {
+    headers: { Authorization: `Bearer ${E2E_TOKEN}` },
+    data: {
+      title: TASK,
+      acceptanceCriteria: ['src/greeting/hello.txt exists'],
+      areas: ['greeting'],
+      external: {
+        kind: 'linear',
+        id: 'AMP-7',
+        issueId: 'e2e-linear-issue-1',
+        url: 'https://linear.app/ampsio/issue/AMP-7',
+      },
+    },
+  });
+  expect(linked.ok()).toBe(true);
 
   // Reorder with the keyboard, and check that it persisted.
   const ready = page.getByRole('list', { name: 'Ready tasks' });
@@ -237,7 +251,30 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(report.getByText('Wrote src/greeting/hello.txt and committed it.')).toBeVisible();
   await taskDrawer.getByRole('tab', { name: /Reviews/ }).click();
   await expect(taskDrawer.getByTestId('review-phase').first()).toHaveText('Review');
+
+  // The task is linked to a Linear issue, so the reporter writes to it. Its updates are due 30 s after the
+  // events, on the daemon's real clock; the Linear tab lists them and settles with none left waiting.
+  await taskDrawer.getByRole('tab', { name: 'Linear' }).click();
+  const updates = taskDrawer.getByRole('list', { name: 'Linear updates' });
+  await expect(updates.getByRole('listitem', { name: 'Run Ended' })).toBeVisible({
+    timeout: 90_000,
+  });
+  await expect(updates.getByText('Waiting', { exact: true })).toHaveCount(0, { timeout: 90_000 });
+  await expect(updates.getByText('Failed', { exact: true })).toHaveCount(0);
+  await expect(
+    updates.getByRole('listitem', { name: 'Run Ended' }).getByText('Recorded'),
+  ).toBeVisible();
   await page.keyboard.press('Escape');
+
+  // Settings › Integrations: Report To Linear is on for the project; turning it off says why it is off.
+  await page.goto('/settings/integrations');
+  const reportSwitch = page.getByRole('switch', { name: 'Report To Linear for e2e', exact: true });
+  await expect(reportSwitch).toBeChecked();
+  await reportSwitch.click();
+  await expect(reportSwitch).not.toBeChecked();
+  // Another project's row never reads this, so one line says it.
+  await expect(page.getByText('Off: Report To Linear is off.')).toHaveCount(1);
+  await open(page, 'Board');
 
   // Knowledge: a decision written through the API (as Claude Code would) appears in the open view
   // without a reload, with where it came from.

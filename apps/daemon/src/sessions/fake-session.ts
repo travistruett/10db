@@ -307,7 +307,7 @@ export function runFakeLaneSession(
     }
   };
 
-  const taskRefs = new FakeTaskRefs();
+  const taskRefs = new FakeTaskRefs(spec.prompt);
 
   const callMcp = async (
     tool: string,

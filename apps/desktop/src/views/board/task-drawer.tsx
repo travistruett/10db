@@ -74,6 +74,7 @@ import {
 import { sameSetting } from '../settings/model-setting-options';
 import { ModelSettingSelect } from '../settings/model-setting-select';
 import { KeptWork } from './kept-work';
+import { LinearTab } from './linear-tab';
 import { TaskPictures } from './task-pictures';
 import { TaskPlan } from './task-plan';
 import { TaskReport } from './task-report';
@@ -106,7 +107,7 @@ import {
   taskNotices,
 } from './task-state';
 
-type DrawerTab = 'overview' | 'reviews' | 'edit';
+type DrawerTab = 'overview' | 'reviews' | 'linear' | 'edit';
 
 export interface TaskDrawerProps {
   readonly task: TaskDto;
@@ -365,7 +366,13 @@ export function TaskDrawer({
         <Tabs
           value={tab}
           onChange={(value) => {
-            if (value === 'overview' || value === 'reviews' || value === 'edit') setTab(value);
+            if (
+              value === 'overview' ||
+              value === 'reviews' ||
+              value === 'linear' ||
+              value === 'edit'
+            )
+              setTab(value);
           }}
           // Only the open tab is drawn. What was typed lives in this component, so it survives a switch.
           keepMounted={false}
@@ -384,6 +391,7 @@ export function TaskDrawer({
             >
               Reviews
             </Tabs.Tab>
+            {task.external == null ? null : <Tabs.Tab value="linear">Linear</Tabs.Tab>}
             <Tabs.Tab value="edit">Edit</Tabs.Tab>
           </Tabs.List>
           <Tabs.Panel value="overview" pt="md">
@@ -465,6 +473,9 @@ export function TaskDrawer({
                 Nobody has reviewed this task yet.
               </Text>
             )}
+          </Tabs.Panel>
+          <Tabs.Panel value="linear" pt="md">
+            <LinearTab task={task} />
           </Tabs.Panel>
           <Tabs.Panel value="edit" pt="md">
             <Stack gap="lg">
