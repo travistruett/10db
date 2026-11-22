@@ -169,7 +169,7 @@ export function takeLinearPosts(ctx: WriteContext, ids: readonly LinearPostId[],
 export function recordLinearPosts(ctx: WriteContext, ids: readonly LinearPostId[], outcome: ReportLinearPostInput['outcome']): void;
 /** tries+1; at `maxTries` the row is failed, else due again at `dueAt`. */
 export function failLinearPosts(ctx: WriteContext, ids: readonly LinearPostId[], error: string, dueAt: string, maxTries: number): void;
-export function dropPendingLinearPosts(ctx: WriteContext, filter: { taskId?: TaskId; projectId?: ProjectId }): number;
+export function dropPendingLinearPosts(ctx: WriteContext, filter: { taskId: TaskId } | { projectId: ProjectId }): number;
 export function dismissLinearPosts(ctx: WriteContext, projectId: ProjectId): void;   // failed + withheld, not yet dismissed
 export function linearPostCounts(db: DbReader, projectId: ProjectId): { waiting: number; failed: number; withheld: number };
 // waiting = pending with tries > 0; failed/withheld count undismissed rows only.

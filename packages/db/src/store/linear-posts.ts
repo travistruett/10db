@@ -1,5 +1,6 @@
 import {
   EventType,
+  InvalidError,
   LinearPostState,
   mintId,
   type LinearEventKind,
@@ -228,7 +229,7 @@ export function dropPendingLinearPosts(
   const where: SQL[] = [eq(schema.linearPosts.state, LinearPostState.Pending)];
   if (taskId !== undefined) where.push(eq(schema.linearPosts.taskId, taskId));
   else if (projectId !== undefined) where.push(eq(schema.linearPosts.projectId, projectId));
-  else throw new Error('dropPendingLinearPosts needs a taskId or a projectId');
+  else throw new InvalidError('dropPendingLinearPosts needs a taskId or a projectId');
   const dropped = ctx.tx
     .delete(schema.linearPosts)
     .where(and(...where))
