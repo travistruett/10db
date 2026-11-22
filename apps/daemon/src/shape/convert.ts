@@ -510,12 +510,32 @@ export function convertProposals(
           .filter((t) => t.dependsOnOutside.length > 0)
           .map((t) => [t.key, t.dependsOnOutside]),
       );
+      // A task whose issue is already on the Board is left out of the brief: its key stands for that card, as a
+      // loose task's does, so what waits on it waits on the card.
+      const skipped = new Map<string, TaskId>();
+      for (const t of goal.tasks) {
+        const linked =
+          t.external === undefined ? null : getTaskByExternal(ctx.tx, project.id, t.external);
+        if (linked !== null) skipped.set(t.key, linked.id);
+      }
+      if (skipped.size === goal.tasks.length)
+        throw new InvalidError(
+          `${row.key}: every task of this goal is already on the Board, so there is nothing to make`,
+        );
+      for (const [key, id] of skipped) taskIds.set(key, id);
+      const brief = goalBrief(goal);
+      const kept = brief.tasks
+        .filter((t) => !skipped.has(t.key))
+        .map((t) => ({ ...t, depends_on: t.depends_on.filter((key) => !skipped.has(key)) }));
+      for (const t of goal.tasks)
+        for (const key of t.depends_on)
+          if (skipped.has(key)) outside[t.key] = [...(outside[t.key] ?? []), key];
       // A goal task may take a removed task's key, which `taskIds` still maps to the cancelled task;
       // that key is the brief's own, not an outside one. A live key stays outside, so the store
       // still refuses a collision the check above missed rather than writing a second task.
       const briefKeys = new Set(goal.tasks.map((t) => t.key));
       const written = insertGoal(ctx, project.id, {
-        brief: goalBrief(goal),
+        brief: { ...brief, tasks: kept },
         placeTask: (areas) => proposePlacement(project, { areas, kinds: [] }),
         outsideKeys: new Map(
           [...taskIds].filter(([key]) => !(briefKeys.has(key) && removed.has(key))),

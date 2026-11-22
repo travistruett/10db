@@ -522,7 +522,10 @@ export const tasks = sqliteTable(
   (t) => [
     index('tasks_project_idx').on(t.projectId),
     // One issue is one task in a project; a NULL kind or id never collides.
-    uniqueIndex('tasks_external_idx').on(t.projectId, t.externalKind, t.externalId),
+    // A removed (cancelled) task keeps its link for history and no longer holds the issue.
+    uniqueIndex('tasks_external_idx')
+      .on(t.projectId, t.externalKind, t.externalId)
+      .where(sql`${t.status} <> 'cancelled'`),
     index('tasks_goal_idx').on(t.goalId),
     index('tasks_landing_group_idx').on(t.landingGroupId),
   ],

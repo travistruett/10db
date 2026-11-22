@@ -224,7 +224,7 @@ export function insertTask(
   });
 }
 
-/** The task of a project that was made from the issue, or null: one issue is one task. */
+/** The live task of a project that was made from the issue, or null: one issue is one live task. */
 export function getTaskByExternal(
   db: DbReader,
   projectId: ProjectId,
@@ -238,6 +238,7 @@ export function getTaskByExternal(
         eq(schema.tasks.projectId, projectId),
         eq(schema.tasks.externalKind, link.kind),
         eq(schema.tasks.externalId, link.id),
+        ne(schema.tasks.status, TaskStatus.Cancelled),
       ),
     )
     .get();

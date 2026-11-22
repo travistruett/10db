@@ -397,6 +397,53 @@ describe('Convert and a linked issue', () => {
     store.write((ctx) => undoAccept(ctx, shapeId, second));
     expect(getTask(store.db, existing).status).not.toBe(TaskStatus.Cancelled);
 
+    // A removed task no longer holds its issue: Undo Accept, then Accept again, makes a new task.
+    const third = accept(store, shapeId, { looseTasks: [task('c', { external: link('AMP-3') })] });
+    store.write((ctx) => undoAccept(ctx, shapeId, third));
+    accept(store, shapeId, { looseTasks: [task('c2', { external: link('AMP-3') })] });
+    const live = store.db
+      .select()
+      .from(schema.tasks)
+      .all()
+      .filter((t) => t.externalId === 'AMP-3' && t.status !== TaskStatus.Cancelled);
+    expect(live).toHaveLength(1);
+
+    // A goal task whose issue is on the Board is left out of the goal; the rest goes ahead, waiting on that card.
+    accept(store, shapeId, {
+      goals: [
+        {
+          key: 'g',
+          title: 'Goal G',
+          objective: 'Ship G',
+          ceremony: 'direct',
+          tasks: [
+            {
+              key: 'g1',
+              title: 'G one',
+              areas: ['api'],
+              size: 'S',
+              external: link('AMP-1'),
+            },
+            { key: 'g2', title: 'G two', areas: ['api'], size: 'S', depends_on: ['g1'] },
+          ],
+        },
+      ],
+    });
+    const g2 = store.db
+      .select()
+      .from(schema.tasks)
+      .all()
+      .find((t) => t.title === 'G two');
+    expect(g2).toBeDefined();
+    expect(getTask(store.db, g2?.id ?? existing).dependsOn).toEqual([existing]);
+    expect(
+      store.db
+        .select()
+        .from(schema.tasks)
+        .all()
+        .filter((t) => t.externalId === 'AMP-1'),
+    ).toHaveLength(1);
+
     expect(() =>
       store.write((ctx) =>
         insertTask(ctx, projectId, {

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "71ae60b9-206b-41a0-9bd0-25e7cc7a1419",
+  "id": "0fcf1000-b2b3-4d93-80ce-e126e478298b",
   "prevId": "24a4b019-735a-4d46-8aea-cc86f787ba93",
   "tables": {
     "aa_models": {
@@ -9840,7 +9840,8 @@
             "external_kind",
             "external_id"
           ],
-          "isUnique": true
+          "isUnique": true,
+          "where": "\"tasks\".\"status\" <> 'cancelled'"
         },
         "tasks_goal_idx": {
           "name": "tasks_goal_idx",
