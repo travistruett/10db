@@ -11,9 +11,9 @@ import {
   isMetered,
   mintId,
   needsSecret,
-  OPENROUTER_CANT_RUN_AGENTS,
   NotFoundError,
   parseAccountSettings,
+  requireHarness,
   type AccountDto,
   type AccountSettings,
 } from '@10db/contracts';
@@ -82,10 +82,10 @@ function refuseTakenLabel(db: DbReader, label: string, except: AccountId | null)
   if (taken) throw new ConflictError(`An account is already called "${label}"`);
 }
 
-/** An OpenRouter account answers decisions only: no project may run its agents, or back up, on one. */
-export function refuseOpenRouterForAgents(db: DbReader, id: AccountId): void {
-  if (getAccountRow(db, id).kind === AccountKind.OpenRouter)
-    throw new InvalidError(OPENROUTER_CANT_RUN_AGENTS);
+/** A project's account or backup must run a harness; a kind with none is refused with `requireHarness`'s message. */
+export function refuseAccountWithoutHarness(db: DbReader, id: AccountId): void {
+  const account = toDto(db, getAccountRow(db, id));
+  requireHarness(account);
 }
 
 export function findAccountRow(db: DbReader, id: AccountId): AccountRow | undefined {

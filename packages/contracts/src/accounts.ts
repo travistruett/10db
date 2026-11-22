@@ -15,7 +15,7 @@ export const AccountKind = {
   Gateway: 'gateway',
   OpenaiApiKey: 'openai_api_key',
   CodexSignin: 'codex_signin',
-  /** Runs 10db's own decisions, never an agent. */
+  /** Runs 10db's own decisions; no harness runs it yet. */
   OpenRouter: 'openrouter',
 } as const;
 export type AccountKind = ValueOf<typeof AccountKind>;
@@ -31,44 +31,34 @@ export const SUPPORTED_ACCOUNT_KINDS = [
 ] as const;
 export type SupportedAccountKind = (typeof SUPPORTED_ACCOUNT_KINDS)[number];
 
-/** The kinds a session can run on; an OpenRouter account only answers decisions. */
-export const AGENT_ACCOUNT_KINDS = [
-  AccountKind.ClaudeSubscription,
-  AccountKind.AnthropicApiKey,
-  AccountKind.Bedrock,
-  AccountKind.Gateway,
-  AccountKind.CodexSignin,
-] as const;
-export type AgentAccountKind = (typeof AGENT_ACCOUNT_KINDS)[number];
+/** The harnesses each kind may run, first is the default; a kind with none can't be a project's account. */
+export const HARNESSES_OF_KIND = {
+  [AccountKind.ClaudeSubscription]: [Provider.Claude],
+  [AccountKind.AnthropicApiKey]: [Provider.Claude],
+  [AccountKind.Bedrock]: [Provider.Claude],
+  [AccountKind.Gateway]: [Provider.Claude],
+  [AccountKind.CodexSignin]: [Provider.Codex],
+  [AccountKind.OpenRouter]: [],
+} as const satisfies Readonly<Record<SupportedAccountKind, readonly Provider[]>>;
 
-export function runsAgents(kind: SupportedAccountKind): kind is AgentAccountKind {
-  return kind !== AccountKind.OpenRouter;
+/** The harness the account runs: its stored `settings.harness`, else the kind's first; null when the kind has none. */
+export function harnessOf(account: {
+  readonly kind: SupportedAccountKind;
+  readonly settings: AccountSettings;
+}): Provider | null {
+  const allowed: readonly Provider[] = HARNESSES_OF_KIND[account.kind];
+  return account.settings.harness ?? allowed[0] ?? null;
 }
 
-/** Why a project may not name an OpenRouter account as its account or backup. */
-export const OPENROUTER_CANT_RUN_AGENTS = "OpenRouter can't run agents yet";
-
-/**
- * The kind of an account a project runs agents on. A project is never bound to an OpenRouter account
- * (the store refuses it), so reaching one here is a broken invariant.
- */
-export function agentKind(kind: SupportedAccountKind): AgentAccountKind {
-  if (!runsAgents(kind)) throw new InvalidError(OPENROUTER_CANT_RUN_AGENTS);
-  return kind;
-}
-
-/** The adapter id of the agent that runs a session on each kind: a new kind is one row. */
-const ADAPTER_OF_KIND = {
-  [AccountKind.ClaudeSubscription]: Provider.Claude,
-  [AccountKind.AnthropicApiKey]: Provider.Claude,
-  [AccountKind.Bedrock]: Provider.Claude,
-  [AccountKind.Gateway]: Provider.Claude,
-  [AccountKind.CodexSignin]: Provider.Codex,
-} as const satisfies Readonly<Record<AgentAccountKind, Provider>>;
-
-/** The agent that runs a session on the kind. */
-export function providerOf(kind: AgentAccountKind): Provider {
-  return ADAPTER_OF_KIND[kind];
+/** The harness, or InvalidError `no harness runs ${label} yet` (the store's and the launcher's refusal). */
+export function requireHarness(account: {
+  readonly kind: SupportedAccountKind;
+  readonly label: string;
+  readonly settings: AccountSettings;
+}): Provider {
+  const harness = harnessOf(account);
+  if (harness === null) throw new InvalidError(`no harness runs ${account.label} yet`);
+  return harness;
 }
 
 /** Whether the account's credential is a saved login that the builder signs in to: a Claude subscription or a ChatGPT plan. */
@@ -169,17 +159,21 @@ const BaseUrl = z.url({ protocol: /^https$/ }).refine(
   { message: 'an https URL with no credentials, query or fragment' },
 );
 
-export const SubscriptionSettings = z.strictObject({ ...modelChoice });
-export const ApiKeySettings = z.strictObject({ ...modelChoice });
+/** The agent harness that runs the account's sessions; absent means the kind's first (`harnessOf`). */
+const harness = { harness: z.enum(Provider).optional() };
+
+export const SubscriptionSettings = z.strictObject({ ...modelChoice, ...harness });
+export const ApiKeySettings = z.strictObject({ ...modelChoice, ...harness });
 export const BedrockSettings = z.strictObject({
   ...modelChoice,
+  ...harness,
   region: AwsRegion,
   /** The AWS profile the session uses; null means a bearer token from the Keychain. */
   awsProfile: AwsProfile.nullable(),
 });
 /** An OpenRouter account has a key and nothing else to set. */
-export const OpenRouterSettings = z.strictObject({});
-export const GatewaySettings = z.strictObject({ ...modelChoice, baseUrl: BaseUrl });
+export const OpenRouterSettings = z.strictObject({ ...harness });
+export const GatewaySettings = z.strictObject({ ...modelChoice, ...harness, baseUrl: BaseUrl });
 export type SubscriptionSettings = z.infer<typeof SubscriptionSettings>;
 export type ApiKeySettings = z.infer<typeof ApiKeySettings>;
 export type BedrockSettings = z.infer<typeof BedrockSettings>;
@@ -205,7 +199,19 @@ const SETTINGS_BY_KIND = {
 
 /** Stored or submitted settings, checked against the account's own kind. */
 export function parseAccountSettings(kind: SupportedAccountKind, raw: unknown): AccountSettings {
-  return SETTINGS_BY_KIND[kind].parse(raw);
+  return harnessOfKind(kind, SETTINGS_BY_KIND[kind]).parse(raw);
+}
+
+/** The settings schema with a harness outside the kind's list refused. */
+function harnessOfKind<T extends z.ZodType<{ readonly harness?: Provider | undefined }>>(
+  kind: SupportedAccountKind,
+  schema: T,
+) {
+  const allowed: readonly Provider[] = HARNESSES_OF_KIND[kind];
+  return schema.refine(
+    (settings) => settings.harness === undefined || allowed.includes(settings.harness),
+    { message: `${kind} cannot run that harness`, path: ['harness'] },
+  );
 }
 
 /** Whether the account's credential is a Keychain secret: an API key, a gateway token or a Bedrock bearer token. */
@@ -249,32 +255,32 @@ export const AccountInput = z.discriminatedUnion(
     z.strictObject({
       kind: z.literal(AccountKind.ClaudeSubscription),
       ...common,
-      settings: SubscriptionSettings.default({}),
+      settings: harnessOfKind(AccountKind.ClaudeSubscription, SubscriptionSettings).default({}),
     }),
     z.strictObject({
       kind: z.literal(AccountKind.AnthropicApiKey),
       ...common,
       ...metered,
       ...organization,
-      settings: ApiKeySettings.default({}),
+      settings: harnessOfKind(AccountKind.AnthropicApiKey, ApiKeySettings).default({}),
     }),
     z.strictObject({
       kind: z.literal(AccountKind.Bedrock),
       ...common,
       ...metered,
       ...organization,
-      settings: BedrockSettings,
+      settings: harnessOfKind(AccountKind.Bedrock, BedrockSettings),
     }),
     z.strictObject({
       kind: z.literal(AccountKind.Gateway),
       ...common,
       ...metered,
-      settings: GatewaySettings,
+      settings: harnessOfKind(AccountKind.Gateway, GatewaySettings),
     }),
     z.strictObject({
       kind: z.literal(AccountKind.CodexSignin),
       ...common,
-      settings: SubscriptionSettings.default({}),
+      settings: harnessOfKind(AccountKind.CodexSignin, SubscriptionSettings).default({}),
     }),
     z.strictObject({
       kind: z.literal(AccountKind.OpenRouter),
