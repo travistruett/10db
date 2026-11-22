@@ -31,7 +31,6 @@ function run(over: Partial<ReporterRun> = {}): ReporterRun {
     link,
     prUrl: PR,
     workspaceConfirmed: true,
-    knownCommentIds: new Set(['c-1']),
     identityResults: [],
     uploads: [],
     withheld: new Set(),
@@ -113,16 +112,11 @@ describe('judgeReporterCall', () => {
       call(`${L}save_comment`, { issueId: 'iss-119', body: 'see https://a.test\n```\nx\n```' }),
       'allow',
     ],
+    ['edit by id', run(), call(`${L}save_comment`, { id: 'c-1', body: 'edit' }), 'deny'],
     [
-      'edit of a known comment',
+      'a read carrying a key',
       run(),
-      call(`${L}save_comment`, { id: 'c-1', body: 'edit' }),
-      'allow',
-    ],
-    [
-      'edit of an unknown comment',
-      run(),
-      call(`${L}save_comment`, { id: 'c-9', body: 'edit' }),
+      call(`${L}get_issue`, { id: 'sk-ant-abcdefghijklmnopqrstuvwx' }),
       'deny',
     ],
     [
@@ -149,12 +143,26 @@ describe('judgeReporterCall', () => {
 });
 
 describe('confirmWorkspace', () => {
-  const seen = run({ identityResults: ['workspace ws-1', 'team team-1'] });
+  const seen = run({
+    identityResults: [
+      { tool: 'get_workspace', text: 'workspace ws-1' },
+      { tool: 'get_team', text: 'team team-1' },
+    ],
+  });
   it('confirms ids that were seen', () => {
     expect(confirmWorkspace(seen, { workspaceId: 'ws-1', teamId: 'team-1' })).toBe('confirmed');
   });
   it('says not_seen when the reads never showed them', () => {
     expect(confirmWorkspace(run(), { workspaceId: 'ws-1', teamId: 'team-1' })).toBe('not_seen');
+  });
+  it('does not take an id inside a longer one', () => {
+    const longer = run({
+      identityResults: [
+        { tool: 'whoami', text: 'ws-10' },
+        { tool: 'get_team', text: 'team-1' },
+      ],
+    });
+    expect(confirmWorkspace(longer, { workspaceId: 'ws-1', teamId: 'team-1' })).toBe('not_seen');
   });
   it('says mismatch for another workspace', () => {
     expect(confirmWorkspace(seen, { workspaceId: 'ws-2', teamId: 'team-1' })).toBe('mismatch');
