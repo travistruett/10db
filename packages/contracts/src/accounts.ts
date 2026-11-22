@@ -58,6 +58,21 @@ export function requireHarness(account: {
   return harness;
 }
 
+/** The kinds whose API answers 10db's decisions. */
+export const DECISION_ACCOUNT_KINDS = [
+  AccountKind.OpenRouter,
+  AccountKind.AnthropicApiKey,
+  AccountKind.Bedrock,
+] as const;
+
+/** Whether the account's API can answer a decision; a plan login has none. */
+export function powersDecisions(kind: SupportedAccountKind): boolean {
+  return (DECISION_ACCOUNT_KINDS as readonly SupportedAccountKind[]).includes(kind);
+}
+
+/** Why a plan login can't be the account decisions run on. */
+export const PLAN_LOGIN_CANT_DECIDE = 'a plan login has no API for quick decisions';
+
 /** Whether the account's credential is a saved login that the builder signs in to: a Claude subscription or a ChatGPT plan. */
 export function signsInWithLogin(
   kind: SupportedAccountKind,

@@ -59,7 +59,7 @@ function judgeFor(apiKey: string): Judge {
     state: createStateStore(store, createEventBus()),
     clock: systemClock,
     fetch,
-    readKey: () => Promise.resolve(apiKey),
+    readCredential: () => Promise.resolve({ kind: 'openrouter', key: apiKey }),
     decisionModelIds: () => null,
     off: false,
     logger: silentLogger,

@@ -4002,7 +4002,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         .map((message) => message.body)
         .filter((body) => FLOOR_PREFIXES.some((prefix) => body.startsWith(prefix)));
     const RULES_FLOOR_NOTICE =
-      "10db's rules judge this session: 10db's judge needs an OpenRouter key and its Limits switch on in Settings › Decisions. A call those rules can't settle is skipped, not asked about.";
+      "10db's rules judge this session: 10db's judge needs an account that can power Decisions and its Limits switch on in Settings › Decisions. A call those rules can't settle is skipped, not asked about.";
 
     it('a subscription lane on claude-sonnet-5-5 leaves a deploy to its judge, and the project’s live systems reach the spec', async () => {
       const { specs, task, workstream } = await start(PLAN);

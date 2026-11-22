@@ -110,13 +110,13 @@ describe('floorNoticeText', () => {
         'no judge, attended',
         FloorReason.NoJudge,
         true,
-        "10db's rules judge this session: 10db's judge needs an OpenRouter key and its Limits switch on in Settings › Decisions. A call those rules can't settle waits on a card.",
+        "10db's rules judge this session: 10db's judge needs an account that can power Decisions and its Limits switch on in Settings › Decisions. A call those rules can't settle waits on a card.",
       ],
       [
         'no judge, in a lane',
         FloorReason.NoJudge,
         false,
-        "10db's rules judge this session: 10db's judge needs an OpenRouter key and its Limits switch on in Settings › Decisions. A call those rules can't settle is skipped, not asked about.",
+        "10db's rules judge this session: 10db's judge needs an account that can power Decisions and its Limits switch on in Settings › Decisions. A call those rules can't settle is skipped, not asked about.",
       ],
       [
         'the judge unavailable',
