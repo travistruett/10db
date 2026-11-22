@@ -10,10 +10,8 @@ import {
   type AskedDecision,
 } from '@10db/contracts';
 import { findAccountRow, type AccountRow } from './accounts';
-import { getAppSetting, setAppSetting } from './settings';
+import { getAppSetting, JUDGE_SETTING_KEY, setAppSetting } from './settings';
 import type { DbReader, WriteContext } from './store';
-
-const JUDGE_SETTING_KEY = 'judge';
 
 /** The stored config, or the defaults when it is missing or does not parse. */
 export function getJudgeConfig(db: DbReader): JudgeConfig {

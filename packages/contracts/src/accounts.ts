@@ -64,9 +64,11 @@ export const DECISION_ACCOUNT_KINDS = [
   AccountKind.Bedrock,
 ] as const;
 
+const DECISION_KINDS: ReadonlySet<SupportedAccountKind> = new Set(DECISION_ACCOUNT_KINDS);
+
 /** Whether the account's API can answer a decision; a plan login has none. */
 export function powersDecisions(kind: SupportedAccountKind): boolean {
-  return (DECISION_ACCOUNT_KINDS as readonly SupportedAccountKind[]).includes(kind);
+  return DECISION_KINDS.has(kind);
 }
 
 /** Why a plan login can't be the account decisions run on. */

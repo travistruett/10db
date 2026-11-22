@@ -50,12 +50,14 @@ export function decisionModelNumbers(
             stat.costedCalls > 0 ? (stat.totalCostUsd / stat.costedCalls) * 1_000_000 : 0,
           costSource: DecisionNumberSource.YourCalls,
         }
-      : {
-          costPerMillionUsd: model.inputUsdPerMillion * typicalTokens,
-          costSource: tokensAreFallback
-            ? DecisionNumberSource.Assumed
-            : DecisionNumberSource.OpenRouterPrice,
-        };
+      : model.inputUsdPerMillion === null
+        ? { costPerMillionUsd: null, costSource: null }
+        : {
+            costPerMillionUsd: model.inputUsdPerMillion * typicalTokens,
+            costSource: tokensAreFallback
+              ? DecisionNumberSource.Assumed
+              : DecisionNumberSource.OpenRouterPrice,
+          };
   if (stat?.medianLatencyMs != null)
     return {
       ...cost,

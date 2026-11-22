@@ -29,8 +29,9 @@ function Body({
           </Text>
         )}
         <Text size="sm" c="dimmed">
-          Price per 1M tokens: {formatDecisionUsd(model.inputUsdPerMillion)} in ·{' '}
-          {formatDecisionUsd(model.outputUsdPerMillion)} out
+          {model.inputUsdPerMillion === null || model.outputUsdPerMillion === null
+            ? 'Price unknown'
+            : `Price per 1M tokens: ${formatDecisionUsd(model.inputUsdPerMillion)} in · ${formatDecisionUsd(model.outputUsdPerMillion)} out`}
         </Text>
         <Text size="sm">
           Cost per million decisions{' '}

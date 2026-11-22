@@ -21,7 +21,7 @@ import {
 import { and, asc, eq, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import * as schema from '../schema';
-import { getAppSetting, setAppSetting } from './settings';
+import { getAppSetting, JUDGE_SETTING_KEY, setAppSetting } from './settings';
 import type { DbReader, WriteContext } from './store';
 
 export type AccountRow = typeof schema.accounts.$inferSelect;
@@ -220,7 +220,7 @@ export function archiveAccount(ctx: WriteContext, id: AccountId): AccountDto {
       `"${row.label}" is the default account for new projects, so it can't be archived`,
     );
   // Read through the settings directly: `judge-config.ts` imports this module.
-  const decisions = JudgeConfig.safeParse(getAppSetting(ctx.tx, 'judge'));
+  const decisions = JudgeConfig.safeParse(getAppSetting(ctx.tx, JUDGE_SETTING_KEY));
   if (decisions.success && decisions.data.accountId === id)
     throw new ConflictError(
       `"${row.label}" answers Decisions: switch Decisions to another account first`,
