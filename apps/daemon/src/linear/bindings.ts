@@ -77,7 +77,7 @@ export function createLinearBindings(deps: {
         throw new ConflictError('A Linear check is already running for this project.');
       const accountId = project.accountId;
       const row = (await deps.signIns.list()).rows.find((r) => r.accountId === accountId);
-      if (row?.via === LinearVia.None)
+      if (row?.via === LinearVia.None && !row.unchecked)
         throw new ConflictError(row.note ?? "This project's account has no Linear sign-in.");
       const chat = deps.chat.create({
         projectId,

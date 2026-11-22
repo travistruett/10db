@@ -61,7 +61,7 @@ export function createLinearSignIns(deps: {
           ? (await deps.mcpSignIns.list()).rows
           : [];
       const rows = accounts.map((account): LinearSignInRowDto => {
-        const base = { accountId: account.id, accountLabel: account.label };
+        const base = { accountId: account.id, accountLabel: account.label, unchecked: false };
         if (account.harness === Provider.Codex) {
           const own = codexRows.filter(
             (r) => r.accountId === account.id && servers.includes(r.name),
@@ -84,7 +84,13 @@ export function createLinearSignIns(deps: {
             return { ...base, via: LinearVia.Server, signedIn: null, note: null };
           const note =
             names === undefined ? NOT_CHECKED : names === null ? NOT_READ : HINT_CLAUDE_PLAN;
-          return { ...base, via: LinearVia.None, signedIn: null, note };
+          return {
+            ...base,
+            via: LinearVia.None,
+            signedIn: null,
+            note,
+            unchecked: names === undefined || names === null,
+          };
         }
         return servers.length > 0
           ? { ...base, via: LinearVia.Server, signedIn: null, note: null }

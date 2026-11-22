@@ -13,6 +13,8 @@ export const LinearSignInRowDto = z.strictObject({
   /** The server's sign-in state when `via` is `server`; null when it is not read. */
   signedIn: z.boolean().nullable(),
   note: z.string().nullable(),
+  /** True when the account's connectors were not read (or the read failed): `none` is then a maybe, not a no. */
+  unchecked: z.boolean(),
 });
 export type LinearSignInRowDto = z.infer<typeof LinearSignInRowDto>;
 

@@ -97,8 +97,8 @@ test('routes a question to someone outside Slack from its card, and the table sh
   // The project's Integrations: with no workspace signed in, its Slack says nothing is sent from it.
   await page.goto('/settings/project-integrations');
   await expect(page.getByRole('heading', { name: 'Integrations', level: 1 })).toBeVisible();
-  await expect(page.getByText('No workspace signed in')).toBeVisible();
-  await expect(page.getByText('Questions for other people stay in the Inbox')).toBeVisible();
+  await expect(page.getByText(/No Slack workspace signed in/)).toBeVisible();
+  await expect(page.getByText(/questions for other people stay in the Inbox/)).toBeVisible();
 
   // Settings › People: add Priya, who is not in Slack. With Slack off the modal opens on a name.
   await page.goto('/settings/people');
