@@ -94,3 +94,4 @@ export { ClaudeOAuth } from './claude-oauth';
 export { connectorProbeRoot, sweepConnectorProbeRoot } from './claude-connectors';
 export { McpServerName } from './mcp-server-name';
 export { toolCallActivity, type ToolTarget } from './tool-target';
+export { mcpToolPrefix } from './mcp-tool-names';

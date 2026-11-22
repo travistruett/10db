@@ -59,6 +59,9 @@ export type ConversationApiServices = Pick<
 const TASK_STATE =
   "A task's conversation runs in its lane: its page's Stop and its runner's queue are where it is driven.";
 
+const REPORTER_STATE =
+  "A task's Linear reporter runs on its own; its conversation takes no messages.";
+
 /** The pictures each message of a page of items carries. */
 function filesOf(
   db: DbReader,
@@ -121,6 +124,8 @@ export function createConversationServices(deps: {
         return { kind: 'task', taskId: TaskId.parse(conv.ownerId) };
       case ConversationOwnerKind.Chat:
         return { kind: 'chat' };
+      case ConversationOwnerKind.Reporter:
+        throw new ConflictError(REPORTER_STATE);
     }
   };
   /** The explore engine's conversation; ConflictError for a task's, whose state is the runner's. */

@@ -1,0 +1,56 @@
+import {
+  ConflictError,
+  LinearVia,
+  type ChatDto,
+  type LinearSignInsDto,
+  type ProjectId,
+} from '@10db/contracts';
+import { getProject } from '@10db/db';
+import type { ChatService } from '../chat';
+import type { StateStore } from '../events';
+
+export interface LinearImport {
+  /** From Linear: a Plan session on the project's account that asks which issues to import; ConflictError when the account has no Linear. */
+  startImport(projectId: ProjectId): Promise<ChatDto>;
+}
+
+/**
+ * Import from Linear: a Plan session that reaches Linear through the project's own account sign-in. It refuses only
+ * on a definite "no Linear" for the account (that row's hint); an unchecked account goes ahead.
+ */
+export function createLinearImport(deps: {
+  readonly state: StateStore;
+  readonly chat: Pick<ChatService, 'create' | 'send' | 'open'>;
+  /** How each account reaches Linear, from cached reads. */
+  readonly signIns: { list(): Promise<LinearSignInsDto> };
+}): LinearImport {
+  const refuseSignedOut = async (projectId: ProjectId): Promise<void> => {
+    const accountId = getProject(deps.state.db, projectId).accountId;
+    const row = (await deps.signIns.list()).rows.find((r) => r.accountId === accountId);
+    if (row?.via === LinearVia.None && !row.unchecked)
+      throw new ConflictError(row.note ?? "This project's account has no Linear sign-in.");
+  };
+
+  return {
+    async startImport(projectId) {
+      await refuseSignedOut(projectId);
+      const chat = deps.chat.create({
+        projectId,
+        model: null,
+        tabPosition: deps.chat.open().length,
+        plan: true,
+      });
+      deps.chat.send(chat.conversationId, { text: IMPORT_BRIEF, mentions: [], pictures: [] });
+      return chat;
+    },
+  };
+}
+
+/** What an import's Plan session is told: how a draft carries its issue and what blocks means. */
+const IMPORT_BRIEF = [
+  'Import Linear issues as tasks.',
+  'Ask me which issues I want, for example "my ready AMP issues". Read them with Linear\'s tools (list_issues, get_issue) and change nothing in Linear.',
+  "Draft each issue as one task, following the 10db-task drafting rules: a title that is the precise promise, a headline, why, a description, acceptance criteria and areas. Put the issue on the draft as external: { kind: \"linear\", id: the issue's identifier such as AMP-120, issueId: Linear's own id, url: the issue's url }. 10db skips an issue that is already a task on the Board.",
+  'When one issue blocks another and both are in this import, the blocked task lists the blocking one in dependsOn.',
+  'Start by asking which issues to import.',
+].join('\n\n');

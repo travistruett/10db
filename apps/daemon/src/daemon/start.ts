@@ -108,8 +108,16 @@ import {
 import { createBenchmarkServices } from './benchmark-services';
 import { createSizingService } from '../sizing';
 import { createJudgeCredentialReader, createJudgeServices } from './judge-services';
-import { createLinearBindings } from '../linear';
+import {
+  createLinearImport,
+  createLinearReporter,
+  dismissReporterPosts,
+  reporterConversations,
+  reporterHooks,
+  subscribeLinearEvents,
+} from '../linear';
 import { createLinearSignIns } from './linear-sign-ins';
+import { createReporterLaunch } from './reporter-launch';
 import { createStakeholderApiServices } from './stakeholder-services';
 import {
   cleanUpSlackSignIns,
@@ -319,7 +327,11 @@ import { createChatApiServices } from './chat-services';
 import { createChatChanges } from './chat-changes';
 import { createChatMove } from './chat-move';
 import { createChatWorktrees } from './chat-worktrees';
-import { createShapePreparer, createTakeoverPreparer } from './shape-session-tools';
+import {
+  createReporterPreparer,
+  createShapePreparer,
+  createTakeoverPreparer,
+} from './shape-session-tools';
 import {
   applyCheckAnswer,
   applyPlanAnswer,
@@ -1033,14 +1045,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     onParkAnswer: parkAnswers,
     log: logger,
-    onFlagAnswerInWrite: (ctx, item, answer) =>
-      applySkippedChoice(ctx, item, answer)
+    onFlagAnswerInWrite: (ctx, item, answer) => {
+      dismissReporterPosts(ctx, item);
+      return applySkippedChoice(ctx, item, answer)
         ? () => {
             startFollowUps();
           }
         : chatWorkRef === null
           ? undefined
-          : applyChatWorkAnswer(chatWorkRef, logger, ctx, item, answer),
+          : applyChatWorkAnswer(chatWorkRef, logger, ctx, item, answer);
+    },
     onCheckAnswer: (ctx, item, answer) => {
       const signOffPage = startPageSignOff;
       if (!runner || !signOffPage) throw new RunnerNotStartedError();
@@ -2466,12 +2480,53 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     mcpSignIns,
     connectorNames: (account) => adapter.cachedConnectorNames?.(account),
   });
-  const linearBindings = createLinearBindings({
+  // The Linear reporter: one short session of its own per task with updates owed, on the explore engine.
+  const linearReporter = createLinearReporter({
     state,
-    chat,
+    clock,
+    log: logger.child({ component: 'linear-reporter' }),
+    engine: exploreEngine,
+    conversations: reporterConversations(state),
     signIns: linearSignIns,
-    log: logger.child({ component: 'linear' }),
+    inbox,
   });
+  exploreEngine.register(
+    ConversationOwnerKind.Reporter,
+    reporterHooks({
+      state,
+      log: logger.child({ component: 'linear-reporter' }),
+      mcp: {
+        get url() {
+          return mcpUrl;
+        },
+      },
+      runs: linearReporter,
+      signIns: linearSignIns,
+      launch: createReporterLaunch({ db, launcher }),
+      prepare: createReporterPreparer({
+        state,
+        inbox,
+        git,
+        logger: logger.child({ component: 'linear-reporter' }),
+        laneSandbox,
+        protectedPaths: guarded,
+        projectEnv: () => launcher.projectEnv(),
+        exportAwsCredentials,
+        builderHome,
+        laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
+        worktreeBase: worktreeRoot,
+        codexLaneTempRoot: (sandboxRoots ?? namedSandboxRoots({}, homedir())).codexLanes,
+      }),
+    }),
+  );
+  // The reporter's owed updates, from the events of tasks linked to Linear issues.
+  const unsubscribeLinearEvents = subscribeLinearEvents(bus, {
+    state,
+    clock,
+    reporter: linearReporter,
+    log: logger.child({ component: 'linear-reporter' }),
+  });
+  const linearImport = createLinearImport({ state, chat, signIns: linearSignIns });
   const openWhenBusyDeps: OpenWhenBusyDeps = {
     folderHold,
     pendingOpens,
@@ -2561,7 +2616,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       fetch: opts.fetch ?? fetch,
       reconnect: () => replyWatch.reconnect(),
       githubLogin: () => Promise.resolve(github.cachedLogin()),
-      linear: linearBindings,
+      linear: linearImport,
+      reporter: linearReporter,
     }),
     shape: createShapeServices({
       shape,
@@ -2902,6 +2958,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       dependencyChanges,
       shapeTools: shape.toolsFor,
       pictures: picturesNow,
+      reporter: linearReporter,
       chatTools: createChatTools({
         state,
         bus,
@@ -2910,7 +2967,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         clock,
         builder: createBuilderTools(services),
         getTask: (id) => services.getTask(id),
-        linear: linearBindings,
         gitTools: {
           git,
           folderHold,
@@ -2941,6 +2997,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // A move the daemon lost keeps its session's starts held until `finishMoves` has made its worktree.
   chatWork.holdMoving();
   await exploreEngine.recover();
+  // After recovery, which cools a reporter conversation a crash cut off: its rows are due, and run.
+  linearReporter.start();
   // A takeover the daemon lost while it was opening left files for a chat that is not in the terminal.
   takeover.recover();
   await finishSeals({
@@ -3047,6 +3105,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         logger.warn({ err: error }, 'could not stop the sign-in');
       });
       unsubscribeShip();
+      unsubscribeLinearEvents();
       unsubscribePassSettles();
       sizing.stop();
       unsubscribeSignOffWaits();
@@ -3102,6 +3161,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // A probe in flight writes to the database; the runner can ask for another while it stops.
       await preparer.idle();
       await shape.close();
+      // Its rows stay as they are; a run the engine's close cuts is picked up again at the next start.
+      await linearReporter.stop();
       await exploreEngine.close();
       await createdRunner.stopAll('shutdown');
       // After the runner: a lane or gate held for load ends on its own stop, and nothing samples again.

@@ -54,6 +54,7 @@ import { menuMoves, resolveDrop, startedDependents, type DropTarget } from './dr
 import { landingLine } from './landing-draft';
 import { NewTaskForm } from './new-task-form';
 import { InboxLink } from './inbox-link';
+import { TaskExternalLink } from './task-external-link';
 import { withFixTaskTitles } from './ci-line';
 import { placementLabel, placementOpen } from './placement';
 import { queuePlaces } from './queue-place';
@@ -341,7 +342,14 @@ function BoardColumns({
               />
             );
           }}
-          renderLink={(task) => (noteOf(task)?.inbox ? <InboxLink /> : null)}
+          renderLink={(task) =>
+            task.external == null && !noteOf(task)?.inbox ? null : (
+              <Group gap="sm">
+                <TaskExternalLink task={task} />
+                {noteOf(task)?.inbox ? <InboxLink /> : null}
+              </Group>
+            )
+          }
           summary={(task) => {
             const { workstream: ws, batch } = runOf(task);
             return cardSummary(

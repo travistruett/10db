@@ -1,6 +1,6 @@
-import type { ConversationOwnerKind } from '@10db/contracts';
 import {
   ConflictError,
+  ConversationOwnerKind,
   ConversationItemAuthor,
   ConversationItemKind,
   ConversationProfile,
@@ -88,7 +88,10 @@ const COUNTED_UNDER_HOLD: ReadonlySet<ExploreEvent['type']> = new Set([
 ]);
 
 export interface ExploreEngine {
-  register(kind: typeof ConversationOwnerKind.Chat, hooks: ExploreOwnerHooks): void;
+  register(
+    kind: typeof ConversationOwnerKind.Chat | typeof ConversationOwnerKind.Reporter,
+    hooks: ExploreOwnerHooks,
+  ): void;
   /** A turn starter was stored; reduces `builder_message`, or parks it behind a hold. */
   queued(id: ConversationId): void;
   stop(id: ConversationId): Promise<void>;
@@ -102,7 +105,10 @@ export interface ExploreEngine {
   releaseStarts(id: ConversationId): boolean;
   view(id: ConversationId): ConversationDto;
   live(id: ConversationId): ConversationLiveDto;
-  /** Conversations `starting`, `running`, `waiting_card` or `stopping`: what an update drain waits for. */
+  /**
+   * Conversations `starting`, `running`, `waiting_card` or `stopping`: what an update drain waits for. A
+   * Linear reporter's is left out: a run the drain cuts leaves its rows pending.
+   */
   busy(): readonly ConversationId[];
   /** A queue waits on a hold; Plan's view reads it for `waitingForUpdate`. */
   parked(id: ConversationId): boolean;
@@ -171,6 +177,9 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
   };
   const capabilitiesOf = (conv: ConversationRow) =>
     adapter.capabilities(accountOf(conv), conv.model);
+
+  const isReporter = (rt: Runtime): boolean =>
+    conversation(rt.id).ownerKind === ConversationOwnerKind.Reporter;
 
   const runtimeOf = (id: ConversationId): Runtime => {
     let rt = runtimes.get(id);
@@ -245,7 +254,8 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
    * longest, never one in a turn, with no notice (it resumes on its next message).
    */
   const enforceWarmCap = (): void => {
-    const all = [...runtimes.values()];
+    // A reporter's session is 10db's own errand: it never counts against a builder's chats, or closes one.
+    const all = [...runtimes.values()].filter((rt) => !isReporter(rt));
     const busy = all.filter((rt) => BUSY.has(rt.state) && rt.session !== null).length;
     const idle = all.flatMap((rt) =>
       rt.state === S.IdleWarm && rt.idleSince !== null
@@ -763,7 +773,10 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
         waitingForFolder: false,
       };
     },
-    busy: () => [...runtimes.values()].filter((rt) => BUSY.has(rt.state)).map((rt) => rt.id),
+    busy: () =>
+      [...runtimes.values()]
+        .filter((rt) => BUSY.has(rt.state) && !isReporter(rt))
+        .map((rt) => rt.id),
     parked: (id) => runtimeOf(id).parked,
     settled,
     async retire(id) {

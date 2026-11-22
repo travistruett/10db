@@ -1,7 +1,7 @@
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { BlockList, isIPv6 } from 'node:net';
 import { homedir } from 'node:os';
-import { DeniedBy, Provider, type ProjectDto } from '@10db/contracts';
+import { DeniedBy, InvalidError, Provider, type ProjectDto, type ProjectId } from '@10db/contracts';
 import { getProject, listPermissionRules, listProjects } from '@10db/db';
 import { allCheckouts, projectAtCheckout } from '../delivery';
 import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
@@ -33,6 +33,8 @@ import {
 } from '../sessions';
 import type { TakeoverServers } from '../takeover';
 import { privateHostProblem, type ShapePrepareInput, type ShapePrepared } from '../shape';
+import type { ReporterPrepared } from '../linear';
+import { isLinearServer } from './linear-sign-ins';
 
 /** What a Plan conversation's session is told when one of the project's servers is left out. */
 const INSTEAD = 'Work without them, and tell the builder when the plan needs one.';
@@ -127,7 +129,7 @@ export interface SessionReadDeps {
 }
 
 /** What a session's reads share: the project's servers as the config reads them, and the setup and the builder's servers planned. */
-function sessionReads(deps: SessionReadDeps) {
+function sessionReads(deps: Omit<SessionReadDeps, 'laneSandbox'>) {
   const { state, inbox, logger } = deps;
   const reader = createProjectMcpReader({
     state,
@@ -456,5 +458,73 @@ export function createShapePreparer(
       sandboxed.dispose();
       throw error;
     }
+  };
+}
+
+/**
+ * Prepares a Linear reporter's session: the account's `mcp.linear.app` servers as a session plans them, and,
+ * where there is a sandbox, a read-only one with no repo server, so a Codex session's shell reads at most. No
+ * plugin, skill or instruction comes along, and nothing of the repository's own servers starts. Without a
+ * sandbox a Claude session has no built-in tool to need one, and a Codex session is refused.
+ */
+export function createReporterPreparer(
+  deps: Omit<SessionReadDeps, 'laneSandbox'> & { readonly laneSandbox: LaneSandbox | null },
+): (input: {
+  readonly projectId: ProjectId;
+  readonly harness: Provider;
+  readonly env: Readonly<Record<string, string>>;
+}) => Promise<ReporterPrepared> {
+  const { state } = deps;
+  const { plan } = sessionReads(deps);
+  return async (input) => {
+    const project = getProject(state.db, input.projectId);
+    const { yours, yourServers } = await plan(project);
+    const linear = new Set(
+      Object.entries(yours.remote)
+        .filter(([, remote]) => isLinearServer(remote.url))
+        .map(([name]) => name),
+    );
+    const yourMcpServers = Object.fromEntries(
+      Object.entries(yourServers(undefined)).filter(([name]) => linear.has(name)),
+    );
+    let session: LaneSession | null = null;
+    if (deps.laneSandbox !== null)
+      session = await deps.laneSandbox.forSession({
+        project,
+        env: input.env,
+        rules: [],
+        resumeProviderSessionId: null,
+        configDir: sessionConfigDir(input.harness, input.env, homedir()),
+        checkouts: allCheckouts(state.db),
+        mcpServers: {},
+        readOnly: true,
+        provider: input.harness,
+        ...(input.harness === Provider.Codex ? { tempRoot: deps.codexLaneTempRoot } : {}),
+      });
+    else if (input.harness === Provider.Codex)
+      throw new InvalidError('A ChatGPT session needs the sandbox, which this Mac has none of.');
+    const sandboxed = session;
+    let tracked = false;
+    return {
+      sandbox: sandboxed?.spec ?? null,
+      yourMcpServers,
+      credentialsExpireAt: null,
+      track: (pid) => {
+        tracked = true;
+        void sandboxed?.trackProcesses({ pid, startedAt: null });
+      },
+      release: async () => {
+        try {
+          if (tracked) await sandboxed?.endProcesses();
+        } catch (error) {
+          deps.logger.warn(
+            { err: error, projectId: project.id },
+            'a reporter session left processes',
+          );
+        } finally {
+          sandboxed?.dispose();
+        }
+      },
+    };
   };
 }

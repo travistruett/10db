@@ -307,7 +307,7 @@ export function runFakeLaneSession(
     }
   };
 
-  const taskRefs = new FakeTaskRefs();
+  const taskRefs = new FakeTaskRefs(spec.prompt);
 
   const callMcp = async (
     tool: string,
@@ -402,7 +402,10 @@ export function runFakeLaneSession(
         }
         const effective = decision.updatedInput ?? input;
         applyFileEffect(step.toolName, effective);
-        for (const event of toolCalls.result(toolUseId, { isError: false, content: '' }))
+        for (const event of toolCalls.result(toolUseId, {
+          isError: false,
+          content: step.result ?? '',
+        }))
           emit(event);
         observe(index, 'tool_allowed', {
           toolName: step.toolName,

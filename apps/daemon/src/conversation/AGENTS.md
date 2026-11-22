@@ -50,3 +50,4 @@
   refuses first for a taken-over conversation and touches nothing. A message body may carry `purpose: 'brief'` (the
   brief request, which digests skip), and a notice may carry `handedTo` (the task the chat became).
 - `openTerminal`, `handBack` and `terminalFailed` move a conversation to and from `taken_over` (the reducer's rows, `explore-state.ts`); a message sent while taken over is stored held, with `holdStarts` keeping its turn from starting until Hand Back parks it on the folder (`releaseStarts` if Hand Back fails).
+- A Linear reporter's conversation (`ConversationOwnerKind.Reporter`, registered like a chat's owner) is 10db's own errand: `busy()` and the warm cap leave it out, so an update drain never waits on it and it never evicts a builder's chat.

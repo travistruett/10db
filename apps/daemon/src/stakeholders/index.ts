@@ -1,4 +1,4 @@
-export { OUTBOUND_PATTERNS, scanOutbound } from './outbound-scan';
+export { OUTBOUND_PATTERNS, SECRET_PATTERN_NAMES, scanOutbound } from './outbound-scan';
 export { createTriage } from './triage';
 export { draftOnOpen, previewDraft, sweepDrafts } from './drafts';
 export { createStakeholderSends, type StakeholderSends } from './sends';

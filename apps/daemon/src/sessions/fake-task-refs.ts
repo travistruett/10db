@@ -1,11 +1,20 @@
 // A book script cannot know the ids the daemon mints, so a step names a task by title: `$task:<title>`
 // in an `mcp` step's arguments becomes the id a tool result showed for that title (a created task's
-// `taskId`, or a task list's `id`).
+// `taskId`, or a task list's `id`). The Linear reporter's script names the updates its brief lists by
+// `$owed`, an array element that becomes the post ids the prompt's brief lists as owed.
 
 const REF = /^\$task:(.+)$/s;
+const OWED = '$owed';
+// A line of the brief's owed updates: `- <post id>: <event>, attempt <n>, {detail}`; a recorded one has `comments [` instead.
+const OWED_LINE = /^- (lnp_[0-9a-f-]{36}): [a-z_]+, attempt \d+, \{/gm;
 
 export class FakeTaskRefs {
   private readonly ids = new Map<string, string>();
+  private readonly owed: string[];
+
+  constructor(prompt = '') {
+    this.owed = [...prompt.matchAll(OWED_LINE)].map((m) => m[1] ?? '');
+  }
 
   /** Remembers each title and id pair in a tool result's JSON; a result that is not JSON teaches nothing. */
   learn(text: string): void {
@@ -30,7 +39,8 @@ export class FakeTaskRefs {
       const title = REF.exec(value)?.[1];
       return (title === undefined ? undefined : this.ids.get(title)) ?? value;
     }
-    if (Array.isArray(value)) return value.map((item: unknown) => this.swap(item));
+    if (Array.isArray(value))
+      return value.flatMap((item: unknown) => (item === OWED ? this.owed : [this.swap(item)]));
     if (typeof value === 'object' && value !== null) return this.resolve({ ...value });
     return value;
   }

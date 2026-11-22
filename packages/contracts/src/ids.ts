@@ -61,6 +61,7 @@ const ID_SCHEMAS = {
   Pass: idSchema(['pas'], 'PassId'),
   PassTurn: idSchema(['ptn'], 'PassTurnId'),
   TaskScreen: idSchema(['tsc'], 'TaskScreenId'),
+  LinearPost: idSchema(['lnp'], 'LinearPostId'),
   DesignCheck: idSchema(['dck'], 'DesignCheckId'),
   PassPreviewMark: idSchema(['ppm'], 'PassPreviewMarkId'),
   TaskPageReport: idSchema(['tpr'], 'TaskPageReportId'),
@@ -118,6 +119,7 @@ const ID_PREFIX = {
   Pass: 'pas',
   PassTurn: 'ptn',
   TaskScreen: 'tsc',
+  LinearPost: 'lnp',
   DesignCheck: 'dck',
   PassPreviewMark: 'ppm',
   TaskPageReport: 'tpr',
@@ -239,6 +241,8 @@ export const PassTurnId = ID_SCHEMAS.PassTurn;
 export type PassTurnId = IdOf<'PassTurn'>;
 export const TaskScreenId = ID_SCHEMAS.TaskScreen;
 export type TaskScreenId = IdOf<'TaskScreen'>;
+export const LinearPostId = ID_SCHEMAS.LinearPost;
+export type LinearPostId = IdOf<'LinearPost'>;
 export const DesignCheckId = ID_SCHEMAS.DesignCheck;
 export type DesignCheckId = IdOf<'DesignCheck'>;
 export const PassPreviewMarkId = ID_SCHEMAS.PassPreviewMark;

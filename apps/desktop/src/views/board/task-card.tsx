@@ -1,4 +1,3 @@
-import { TaskExternalLink } from './task-external-link';
 import {
   areaLabel,
   BoardStatus,
@@ -253,15 +252,6 @@ export function TaskCard({
         <Text size="sm" fw={500} pr={28} lineClamp={3}>
           {task.headline || task.title}
         </Text>
-        {task.external == null ? null : (
-          <Box
-            onClick={(event) => {
-              event.stopPropagation();
-            }}
-          >
-            <TaskExternalLink task={task} />
-          </Box>
-        )}
         {task.why ? (
           <Text size="xs" c="dimmed" lineClamp={2} data-testid="task-card-why">
             {task.why}
@@ -303,8 +293,8 @@ export function TaskCard({
           </Group>
         ) : null}
         <IndicatorRow indicators={indicators} />
-        {/* The Inbox link is laid over this space by the board, outside the card's button. */}
-        {startNote?.inbox ? <div style={{ height: 20 }} /> : null}
+        {/* The Inbox link and the tracker link are laid over this space by the board, outside the card's button. */}
+        {startNote?.inbox || task.external != null ? <div style={{ height: 20 }} /> : null}
       </Stack>
     </Paper>
   );

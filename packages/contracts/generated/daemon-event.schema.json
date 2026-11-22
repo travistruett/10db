@@ -59,6 +59,7 @@
         "person.saved",
         "person.removed",
         "stakeholder_send.changed",
+        "linear_post.changed",
         "slack.connection.changed",
         "stakeholder_timers.changed",
         "inbox.triaged",

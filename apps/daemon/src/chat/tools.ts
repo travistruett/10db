@@ -33,7 +33,6 @@ import type { EventBus, StateStore } from '../events';
 import { ParkedError, type InboxService } from '../inbox';
 import type { ChatToolHandlers, ChatToolsFor } from '../mcp';
 import { z } from 'zod';
-import type { LinearBindings } from '../linear';
 import type { ChatLiveSessions } from './live-sessions';
 import { chatGitTools, type ChatGitToolsDeps } from './git-tools';
 import { CHAT_TOOL_POLICY, ChatToolPolicy } from './tool-policy';
@@ -55,8 +54,6 @@ export interface ChatToolsDeps {
   readonly getTask: (id: TaskId) => TaskDto;
   /** What the tools that change git in Your folder act through. */
   readonly gitTools: ChatGitToolsDeps;
-  /** The Linear binding check a chat may be the session of. */
-  readonly linear: Pick<LinearBindings, 'submit'>;
 }
 
 /** What a tool says when the builder kept their work. */
@@ -317,17 +314,6 @@ export function createChatTools(deps: ChatToolsDeps): ChatToolsFor {
       [ChatToolName.ListProposals]: (args) =>
         run(BuilderToolName.ListProposals, inProject(args, projectId)),
       ...chatGitTools(deps.gitTools, session),
-      [ChatToolName.LinkLinearTeam]: (args) => {
-        const bound = deps.linear.submit(
-          projectId,
-          chatId,
-          ChatToolInputs.link_linear_team.parse(args),
-        );
-        return Promise.resolve({
-          linked: bound.binding !== null,
-          ...(bound.check?.state === 'refused' ? { refused: bound.check.reason } : {}),
-        });
-      },
       [ChatToolName.SetTitle]: (args) => {
         const title = cutTitle(ChatToolInputs.set_title.parse(args).title);
         const previousTitle = chatView(state.db, chatId).title;

@@ -10,6 +10,7 @@ import { RENDER_READS } from './render-access';
 export const DEV_UI_READS: readonly string[] = [
   ...RENDER_READS.map((r) => r.route),
   '/tasks/:taskId/screens',
+  '/tasks/:taskId/linear-posts',
   '/screens/:screenId',
   '/tasks/:taskId/design-checks',
   '/design-checks/:checkId/mockup',
