@@ -12,6 +12,7 @@ import {
   priceSessionAtListing,
   updateSessionUsage,
 } from '@10db/db';
+import { cacheReadPriceOf } from '../catalogue';
 import type { Clock } from '../clock';
 import type { LiveFrames, StateStore } from '../events';
 import type { Logger } from '../log';
@@ -171,7 +172,7 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
               cachedTokens: event.cachedTokens,
               costUsd: event.costUsd,
             });
-            priceSessionAtListing(ctx, sessionId);
+            priceSessionAtListing(ctx, sessionId, cacheReadPriceOf);
           },
         });
         sink.turnComplete(event);

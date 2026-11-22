@@ -80,11 +80,19 @@ function namedMaker(id: string, catalogue: Catalogue): string | null {
  * joins runs when its maker is the runtime's, and is refused when the maker is another or the catalogue cannot
  * name it. One that joins nothing is refused when its ID names another lab, listed or not, or when another
  * provider of the catalogue lists it under another maker; otherwise it is unknown, and stays choosable by hand.
+ * Through a router (`viaRouter`) a model that joins nothing is always unknown.
  */
-export function runnability(id: string, provider: Provider, catalogue: Catalogue): Runnability {
+export function runnability(
+  id: string,
+  provider: Provider,
+  catalogue: Catalogue,
+  viaRouter = false,
+): Runnability {
   const entry = joinModel(id, provider, catalogue);
   const maker = RUNTIME_MAKER[provider];
   if (entry) return entry.maker === maker ? 'runs' : 'refused';
+  // A router serves any maker's model through the runtime: it is unranked, not refused.
+  if (viaRouter) return 'unknown';
   const named = namedMaker(id, catalogue);
   if (named !== null) return named === maker ? 'unknown' : 'refused';
   const [vendor, rest] = id.includes('/') ? [id.split('/')[0], id.slice(id.indexOf('/') + 1)] : [];

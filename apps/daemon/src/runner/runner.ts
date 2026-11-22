@@ -200,7 +200,7 @@ import {
   type ModelListWait,
   type StartGate,
 } from '../accounts';
-import { clearModelMark, markModelUnusable } from '../catalogue';
+import { cacheReadPriceOf, clearModelMark, markModelUnusable } from '../catalogue';
 import type { Clock, Timer } from '../clock';
 import {
   allCheckouts,
@@ -3819,7 +3819,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 cachedTokens: event.cachedTokens,
                 costUsd: event.costUsd,
               });
-              priceSessionAtListing(ctx, session.id);
+              priceSessionAtListing(ctx, session.id, cacheReadPriceOf);
             });
             // A parked or limited session may still finish its interrupted turn before it exits.
             if (st.outcome || st.parkedFor) break;

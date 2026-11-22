@@ -35,9 +35,16 @@ describe('toolModelsOf', () => {
         id: 'openai/gpt-5.1',
         inputPrice: 1.25,
         outputPrice: 10,
+        cacheReadPrice: null,
         inputModalities: ['text', 'image'],
       },
-      { id: 'vendor/free:free', inputPrice: 0, outputPrice: 0, inputModalities: [] },
+      {
+        id: 'vendor/free:free',
+        inputPrice: 0,
+        outputPrice: 0,
+        cacheReadPrice: null,
+        inputModalities: [],
+      },
     ]);
   });
 

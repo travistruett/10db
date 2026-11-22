@@ -73,7 +73,11 @@ const PriceString = z.string().regex(/^\d*\.?\d+(e-?\d+)?$/i);
 const ToolModelItem = z.looseObject({
   id: z.string().min(1),
   supported_parameters: z.array(z.string()).optional(),
-  pricing: z.looseObject({ prompt: PriceString, completion: PriceString }),
+  pricing: z.looseObject({
+    prompt: PriceString,
+    completion: PriceString,
+    input_cache_read: PriceString.optional(),
+  }),
   architecture: z
     .looseObject({ input_modalities: z.array(z.string()).optional() })
     .nullable()
@@ -220,6 +224,8 @@ export interface ToolModel {
   /** Dollars per million tokens, as OpenRouter lists them (it states them per token). */
   readonly inputPrice: number;
   readonly outputPrice: number;
+  /** What a cached input token costs, when the model lists one. */
+  readonly cacheReadPrice: number | null;
   readonly inputModalities: readonly string[];
 }
 
@@ -241,6 +247,8 @@ export function toolModelsOf(body: unknown): ToolModel[] | null {
       id: m.id,
       inputPrice: perMillion(m.pricing.prompt),
       outputPrice: perMillion(m.pricing.completion),
+      cacheReadPrice:
+        m.pricing.input_cache_read === undefined ? null : perMillion(m.pricing.input_cache_read),
       inputModalities: m.architecture?.input_modalities ?? [],
     }));
 }

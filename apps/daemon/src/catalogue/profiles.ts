@@ -1,4 +1,11 @@
-import { Effort, knownEfforts, ModelStatus, harnessOf, type Provider } from '@10db/contracts';
+import {
+  AccountKind,
+  Effort,
+  knownEfforts,
+  ModelStatus,
+  harnessOf,
+  type Provider,
+} from '@10db/contracts';
 import {
   listAccountModels,
   listAccounts,
@@ -68,7 +75,12 @@ function collectOffers(ctx: WriteContext, catalogue: Catalogue): Offer[] {
       rows.length === 0
         ? assumedOffers(provider, catalogue, !withList.has(provider))
         : rows.map((row) => {
-            const fit = runnability(row.model, provider, catalogue);
+            const fit = runnability(
+              row.model,
+              provider,
+              catalogue,
+              account.kind === AccountKind.OpenRouter,
+            );
             return {
               provider,
               model: row.model,

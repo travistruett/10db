@@ -1,4 +1,5 @@
 import {
+  AccountKind,
   harnessOf,
   Effort,
   ModelStatus,
@@ -153,7 +154,15 @@ export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
       profiles.length === 0 &&
       offered.every((o) => {
         const provider = providerOfAccount(o.accountId);
-        return provider !== null && runnability(o.model, provider, catalogue) === 'refused';
+        return (
+          provider !== null &&
+          runnability(
+            o.model,
+            provider,
+            catalogue,
+            live.get(o.accountId)?.kind === AccountKind.OpenRouter,
+          ) === 'refused'
+        );
       });
     const status = profileStatus ?? (refused ? ModelStatus.NotRunnable : ModelStatus.Unknown);
 

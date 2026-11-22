@@ -198,18 +198,25 @@ export function updateSessionUsage(
 
 /**
  * Sets an OpenRouter session's cost to its tokens at the price its account's list gives the model, per million
- * tokens; cached tokens are charged as input. Codex reports tokens, not dollars, so this is the session's only
- * cost. A session on another kind, or on a model the list gives no price, keeps what it has.
+ * tokens. The session's input tokens exclude the cached ones, which are charged at `cacheReadPrice`, else as
+ * input (an overestimate). Codex reports tokens, not dollars, so this is the session's only cost. A session on
+ * another kind, or on a model the list gives no price, keeps what it has.
  */
-export function priceSessionAtListing(ctx: WriteContext, id: SessionId): void {
+export function priceSessionAtListing(
+  ctx: WriteContext,
+  id: SessionId,
+  cacheReadPrice?: (accountId: AccountId, launchId: string) => number | undefined,
+): void {
   const session = getSession(ctx.tx, id);
   if (getAccountRow(ctx.tx, session.accountId).kind !== AccountKind.OpenRouter) return;
   const listed = listAccountModels(ctx.tx, session.accountId).find(
     (m) => m.launchId === session.model || m.model === session.model,
   );
   if (listed === undefined || listed.inputPrice === null || listed.outputPrice === null) return;
+  const cached = cacheReadPrice?.(session.accountId, listed.launchId) ?? listed.inputPrice;
   const costUsd =
-    ((session.inputTokens + session.cachedTokens) * listed.inputPrice +
+    (session.inputTokens * listed.inputPrice +
+      session.cachedTokens * cached +
       session.outputTokens * listed.outputPrice) /
     1_000_000;
   ctx.tx
