@@ -104,7 +104,7 @@ export function PlanPanel({ shapeId, onWhy, onAskForChanges, full = false }: Pla
   );
 }
 
-/** The ⋯ menu's Plan section: Export, and Undo Accept once something was accepted. */
+/** The ⋯ menu's Plan section: Export, and Undo Accept, which says why when it is off. */
 function PlanItems({
   view,
   onExport,
@@ -132,21 +132,21 @@ function PlanItems({
       <Menu.Item leftSection={<IconFileExport size={14} stroke={1.5} />} onClick={onExport}>
         Export Plan to Folder
       </Menu.Item>
-      {accept === null ? null : (
-        <Menu.Item
-          leftSection={<IconArrowBackUp size={14} stroke={1.5} />}
-          disabled={started !== undefined}
-          onClick={onUndo}
-        >
-          {started === undefined ? (
-            'Undo Accept'
-          ) : (
-            <MenuHint hint={`${started.title} has started; cancel its run first`}>
-              Undo Accept
-            </MenuHint>
-          )}
-        </Menu.Item>
-      )}
+      <Menu.Item
+        leftSection={<IconArrowBackUp size={14} stroke={1.5} />}
+        disabled={accept === null || started !== undefined}
+        onClick={onUndo}
+      >
+        {accept === null ? (
+          <MenuHint hint="Nothing accepted yet">Undo Accept</MenuHint>
+        ) : started === undefined ? (
+          'Undo Accept'
+        ) : (
+          <MenuHint hint={`${started.title} has started; cancel its run first`}>
+            Undo Accept
+          </MenuHint>
+        )}
+      </Menu.Item>
     </>
   );
 }

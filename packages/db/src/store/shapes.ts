@@ -10,6 +10,7 @@ import {
   idUuid,
   mintId,
   NotFoundError,
+  ShapeProposalState,
   ShapeState,
   type ChatId,
   type ConversationId,
@@ -200,6 +201,23 @@ export function planOfChat(db: DbReader, id: ChatId): ShapeId | null {
       .from(schema.shapes)
       .where(eq(schema.shapes.chatId, id))
       .get()?.id ?? null
+  );
+}
+
+/** How many of a chat's plan's rows wait for Accept: pending, neither accepted nor dropped. Zero without a plan. */
+export function planWaitingOfChat(db: DbReader, id: ChatId): number {
+  return (
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(schema.shapeProposals)
+      .innerJoin(schema.shapes, eq(schema.shapes.id, schema.shapeProposals.shapeId))
+      .where(
+        and(
+          eq(schema.shapes.chatId, id),
+          eq(schema.shapeProposals.state, ShapeProposalState.Pending),
+        ),
+      )
+      .get()?.n ?? 0
   );
 }
 

@@ -18,6 +18,8 @@ export const RowMark = {
   Paused: 'paused',
   PullRequest: 'pull_request',
   Merged: 'merged',
+  /** The session's Plan has rows waiting for Accept. */
+  PlanWaiting: 'plan_waiting',
 } as const;
 export type RowMark = (typeof RowMark)[keyof typeof RowMark];
 
@@ -28,6 +30,8 @@ export interface RowStateInput {
   readonly place: WorkPlace | null;
   /** The pull request's state, known only for the session on screen. */
   readonly pullRequest: 'open' | 'merged' | null;
+  /** How many of the session's Plan's rows wait for Accept. */
+  readonly planWaiting?: number;
 }
 
 export interface RowState {
@@ -58,10 +62,11 @@ function iconOf({ tab, place }: RowStateInput): RowIcon {
 /**
  * What a panel row shows: where the session works, and the first mark that holds. A card to answer, a
  * choice of where to work or an error comes before a spinner, since the builder is needed and the spinner
- * would hide it; then a turn or a move, an open pull request, a merged one and an unseen reply.
+ * would hide it; then a turn or a move, an open pull request, a merged one, a Plan waiting for Accept
+ * (which keeps an unseen reply's bold title) and an unseen reply.
  */
 export function rowState(input: RowStateInput, detail: TabDetail = {}): RowState {
-  const { tab, place, pullRequest } = input;
+  const { tab, place, pullRequest, planWaiting = 0 } = input;
   const icon = iconOf(input);
   const words = tabWords(tab, detail);
   const base = { icon, bold: false, dim: tab === TabState.InTerminal };
@@ -76,6 +81,15 @@ export function rowState(input: RowStateInput, detail: TabDetail = {}): RowState
   if (pullRequest === 'open')
     return { ...base, mark: RowMark.PullRequest, spoken: 'pull request open' };
   if (pullRequest === 'merged') return { ...base, mark: RowMark.Merged, spoken: 'merged' };
+  if (planWaiting > 0) {
+    const waiting = `plan: ${String(planWaiting)} ${planWaiting === 1 ? 'row waits' : 'rows wait'} for Accept`;
+    return {
+      ...base,
+      mark: RowMark.PlanWaiting,
+      bold: tab === TabState.NewReply,
+      spoken: tab === TabState.NewReply ? `${words.spoken}, ${waiting}` : waiting,
+    };
+  }
   if (tab === TabState.NewReply) return { ...base, mark: null, bold: true, spoken: words.spoken };
   return { ...base, mark: null, spoken: words.spoken };
 }

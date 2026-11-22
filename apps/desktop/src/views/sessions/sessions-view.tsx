@@ -156,6 +156,7 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
               tab: info.state,
               place: row.chat.work?.place ?? null,
               pullRequest: mine === null ? null : mine.merged ? 'merged' : 'open',
+              planWaiting: row.chat.planWaiting,
             },
             info.detail,
           ),

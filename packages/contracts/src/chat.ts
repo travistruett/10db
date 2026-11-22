@@ -53,6 +53,8 @@ export const ChatDto = z.object({
   work: ChatWork.nullable(),
   /** The session's Plan; null while it has none. */
   planId: ShapeId.nullable(),
+  /** How many of the Plan's rows wait for Accept; 0 without a Plan. */
+  planWaiting: z.int().nonnegative(),
 });
 export type ChatDto = z.infer<typeof ChatDto>;
 

@@ -6,6 +6,7 @@ import {
   IconAlertTriangle,
   IconCheck,
   IconGitPullRequest,
+  IconListCheck,
   IconPlayerPause,
   IconPlus,
   IconX,
@@ -35,6 +36,8 @@ function MarkIcon({ mark }: { readonly mark: RowMark }): ReactNode {
       return <IconGitPullRequest size={14} stroke={1.5} color="var(--mantine-color-dimmed)" />;
     case RowMark.Merged:
       return <IconCheck size={14} stroke={1.5} color="var(--mantine-color-green-filled)" />;
+    case RowMark.PlanWaiting:
+      return <IconListCheck size={14} stroke={1.5} color="var(--mantine-color-blue-filled)" />;
   }
 }
 

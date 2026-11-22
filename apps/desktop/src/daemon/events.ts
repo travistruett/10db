@@ -93,8 +93,9 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   decision: [...KNOWLEDGE, goalKeys.all, shapeKeys.all],
   principle: [...KNOWLEDGE, shapeKeys.all],
   proposal: KNOWLEDGE,
-  // A conversation's transcript, proposals, round and turn all change under this one event.
-  shape: [shapeKeys.all],
+  // A conversation's transcript, proposals, round and turn all change under this one event, and a
+  // round changes how many rows wait in the sidebar.
+  shape: [shapeKeys.all, chatKeys.all],
   // An explore conversation stored or changed an item, or moved state: its items and its state.
   conversation: [conversationKeys.all, chatKeys.all],
   // A chat was created, renamed, moved, archived or touched: the open tabs and Recent.
