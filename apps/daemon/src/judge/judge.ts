@@ -17,6 +17,7 @@ import type { Clock } from '../clock';
 import type { StateStore } from '../events';
 import type { Logger } from '../log';
 import { askModel } from './ask';
+import type { BedrockClientFactory } from './bedrock';
 import { ModelApi, modelApi, optionsText, type ModelAnswer } from './openrouter';
 import { secretsOf, type JudgeCredential } from './credential';
 import { untilAborted } from './until-aborted';
@@ -92,6 +93,8 @@ export interface JudgeDeps {
    * The credential of the account `accountId`, read fresh for every call; null when there is none: no account,
    * an archived or unable account, or a secret that is missing or changed.
    */
+  /** Builds Bedrock's runtime client; the SDK's own when absent. */
+  readonly bedrockClient?: BedrockClientFactory;
   readonly readCredential: (accountId: AccountId | null) => Promise<JudgeCredential | null>;
   /** The ids of OpenRouter's decision models, which say which endpoint a model answers on; null when unknown. Never waits. */
   readonly decisionModelIds: () => ReadonlySet<string> | null;
@@ -180,6 +183,7 @@ export function createJudge(deps: JudgeDeps): JudgeService {
         options: q.options,
         ...(q.criteria === undefined ? {} : { criteria: q.criteria }),
         credential,
+        ...(deps.bedrockClient === undefined ? {} : { bedrockClient: deps.bedrockClient }),
         fetch: deps.fetch,
         signal: controller.signal,
       });

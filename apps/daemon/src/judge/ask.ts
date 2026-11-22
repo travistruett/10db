@@ -1,6 +1,6 @@
 import { AccountKind } from '@10db/contracts';
 import { askAnthropic } from './anthropic';
-import { askBedrock } from './bedrock';
+import { askBedrock, type BedrockClientFactory } from './bedrock';
 import type { JudgeCredential } from './credential';
 import {
   askOpenRouter,
@@ -20,13 +20,13 @@ export interface ModelQuestion extends Omit<OpenRouterQuestion, 'key' | 'api'> {
     readonly inputUsdPerMillion: number;
     readonly outputUsdPerMillion: number;
   };
-  /** Replaces Bedrock's regional endpoint. */
-  readonly bedrockEndpoint?: string;
+  /** Builds Bedrock's runtime client; the SDK's own when absent. */
+  readonly bedrockClient?: BedrockClientFactory;
 }
 
 /** One call on the API the credential's account speaks. Throws a typed JudgeCallError or OpenRouterError, or what the transport throws. */
 export function askModel(q: ModelQuestion): Promise<ModelAnswer> {
-  const { credential, api, price, bedrockEndpoint, ...rest } = q;
+  const { credential, api, price, bedrockClient, ...rest } = q;
   switch (credential.kind) {
     case AccountKind.OpenRouter:
       return askOpenRouter({ ...rest, api, key: credential.key });
@@ -40,7 +40,7 @@ export function askModel(q: ModelQuestion): Promise<ModelAnswer> {
       return askBedrock({
         ...rest,
         ...(price === undefined ? {} : { price }),
-        ...(bedrockEndpoint === undefined ? {} : { endpoint: bedrockEndpoint }),
+        ...(bedrockClient === undefined ? {} : { client: bedrockClient }),
         region: credential.region,
         awsProfile: credential.awsProfile,
         bearerToken: credential.bearerToken,

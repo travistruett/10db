@@ -1,5 +1,6 @@
 import { createServer, type Http2ServerRequest } from 'node:http2';
 import type { AddressInfo } from 'node:net';
+import { BedrockRuntimeClient } from '@aws-sdk/client-bedrock-runtime';
 import { AccountKind } from '@10db/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 import { askModel, type ModelQuestion } from './ask';
@@ -52,6 +53,7 @@ describe('an Anthropic API key account', () => {
     expect(seen?.url).toBe('https://api.anthropic.com/v1/messages');
     expect(seen?.headers.get('x-api-key')).toBe('sk-ant-test');
     expect(JSON.stringify(seen?.body)).toContain('"enum":["review","skip"]');
+    expect(seen?.body).not.toHaveProperty('temperature');
     // Casing is matched to the options, and a confidence past 1 is clamped.
     expect(answer).toEqual({
       choice: 'skip',
@@ -114,13 +116,15 @@ describe('a Bedrock account', () => {
         awsProfile: null,
         bearerToken: 'bedrock-token',
       },
-      bedrockEndpoint: endpoint,
+      bedrockClient: (config) => new BedrockRuntimeClient({ ...config, endpoint }),
     };
     const answer = await askModel(question);
     expect(seen.url).toContain('/model/us.anthropic.claude-haiku-4-5-v1%3A0/invoke');
     expect(seen.auth).toBe('Bearer bedrock-token');
     expect(seen.body).toContain('"anthropic_version":"bedrock-2023-05-31"');
     expect(seen.body).toContain('"enum":["review","skip"]');
+    // Current models refuse `temperature` with a 400.
+    expect(seen.body).not.toContain('temperature');
     expect(answer).toMatchObject({ choice: 'review', confidence: 0.8, costUsd: null });
     text = '{"choice":"review"}';
     await expect(askModel(question)).rejects.toBeInstanceOf(JudgeCallError);
