@@ -2113,7 +2113,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // one, and a send that was mid-post is looked for in Slack.
   for (const after of state.write((ctx) => sweepDrafts(ctx, draftOpts))) after();
   // Slack tokens are kept by workspace: the old single item and contacts of no signed-in workspace go.
-  if (slackClient !== null) cleanUpSlackSignIns({ state, keychain: judgeKeychain });
+  if (slackClient !== null) cleanUpSlackSignIns({ state, keychain: judgeKeychain, log: logger });
   const slackConnection = createSlackConnection({
     state,
     initial: slackClient === null ? 'off' : 'none',
@@ -2538,7 +2538,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       clock,
       fetch: opts.fetch ?? fetch,
       reconnect: () => replyWatch.reconnect(),
-      githubLogin: async () => (await github.githubStatus(false)).login,
+      githubLogin: () => Promise.resolve(github.cachedLogin()),
     }),
     shape: createShapeServices({
       shape,

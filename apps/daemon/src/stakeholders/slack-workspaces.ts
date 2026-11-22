@@ -65,17 +65,32 @@ export function setProjectSlack(
 }
 
 /**
- * At startup: deletes the Slack token an earlier 10db kept under one name for every workspace, and the Slack
- * contact of every person whose workspace is not signed in. The builder pastes the token again, which stores it
- * under its workspace.
+ * At startup, once: an earlier 10db kept the Slack token under one name for every workspace. When that item is
+ * found, the Slack contact of every person whose workspace is not signed in is deleted, then the item. With no
+ * such item nothing is deleted. A Keychain that can't be read (locked, timed out) leaves both for the next start.
  */
 export function cleanUpSlackSignIns(deps: {
   readonly state: StateStore;
   readonly keychain: Keychain;
+  readonly log: { warn(fields: object, message: string): void };
 }): void {
-  deps.keychain.remove(LEGACY_SLACK_BOT_ACCOUNT);
+  let legacy: string | null;
+  try {
+    legacy = deps.keychain.read(LEGACY_SLACK_BOT_ACCOUNT);
+  } catch (error) {
+    deps.log.warn({ error: errorName(error) }, 'the old Slack token could not be looked for');
+    return;
+  }
+  if (legacy === null) return;
   const signedIn = readSlackWorkspaces(deps.state.db).map((w) => w.teamId);
   deps.state.write((ctx) => {
     deleteContactsOutsideWorkspaces(ctx, signedIn);
   });
+  try {
+    deps.keychain.remove(LEGACY_SLACK_BOT_ACCOUNT);
+  } catch (error) {
+    deps.log.warn({ error: errorName(error) }, 'the old Slack token could not be removed');
+  }
 }
+
+const errorName = (error: unknown): string => (error instanceof Error ? error.name : 'Error');

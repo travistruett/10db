@@ -50,7 +50,7 @@ export function ProjectIntegrationsSection({ project }: { readonly project: Proj
             <Text fw={600}>GitHub</Text>
             <Text size="sm" c="dimmed">
               {github.login === null
-                ? 'Not signed in. Pull requests wait until gh is signed in.'
+                ? 'No GitHub login read yet. Check Sign-ins; pull requests wait until gh is signed in.'
                 : `Pull requests open and checks are watched as ${github.login}.`}
             </Text>
           </Stack>

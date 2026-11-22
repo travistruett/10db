@@ -3,7 +3,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { ManualClock } from '../clock';
 import { slackBotAccount, LEGACY_SLACK_BOT_ACCOUNT } from '../environment';
 import { createEventBus, createStateStore } from '../events';
-import { cleanUpSlackSignIns, createSlackConnection, readSlackWorkspaces } from '../stakeholders';
+import { silentLogger } from '../log';
+import {
+  cleanUpSlackSignIns,
+  createSlackConnection,
+  createStakeholderSends,
+  readSlackWorkspaces,
+} from '../stakeholders';
 import { createMemoryKeychain } from '../../test/fixtures';
 import { createStakeholderApiServices } from './stakeholder-services';
 
@@ -46,7 +52,7 @@ describe('Slack sign-ins by workspace', () => {
       state,
       keychain,
       slack: null,
-      sends: {} as never,
+      sends: createStakeholderSends({ state, slack: null, clock, log: silentLogger }),
       connection: createSlackConnection({ state }),
       clock,
       fetch: fetchAuth,
@@ -58,7 +64,7 @@ describe('Slack sign-ins by workspace', () => {
     expect(keychain.read(slackBotAccount('T-NEW'))).toBe('xoxb-new');
     expect(readSlackWorkspaces(state.db)).toEqual([{ teamId: 'T-NEW', teamName: 'Acme' }]);
 
-    cleanUpSlackSignIns({ state, keychain });
+    cleanUpSlackSignIns({ state, keychain, log: silentLogger });
 
     expect(keychain.read(LEGACY_SLACK_BOT_ACCOUNT)).toBeNull();
     expect(keychain.read(slackBotAccount('T-NEW'))).toBe('xoxb-new');
@@ -68,5 +74,27 @@ describe('Slack sign-ins by workspace', () => {
         ['ana', false],
       ]),
     );
+  });
+
+  it('keeps every contact when there is no old token to clear, and tries again when the Keychain is unreadable', () => {
+    const { state, keychain } = world();
+    state.write((ctx) => {
+      insertPerson(ctx, withContact('cy', 'T-GONE'));
+    });
+    // Disconnected (no workspaces) and no old item: nothing is deleted.
+    cleanUpSlackSignIns({ state, keychain, log: silentLogger });
+    expect(listPeople(state.db).every((p) => p.slack !== null)).toBe(true);
+
+    // A Keychain that throws neither stops the start nor deletes anything.
+    const locked = {
+      ...keychain,
+      read: () => {
+        throw new Error('locked');
+      },
+    };
+    expect(() => {
+      cleanUpSlackSignIns({ state, keychain: locked, log: silentLogger });
+    }).not.toThrow();
+    expect(listPeople(state.db).every((p) => p.slack !== null)).toBe(true);
   });
 });
