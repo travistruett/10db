@@ -1,4 +1,4 @@
-import { AccountKind, isMetered, runsAgents, type AccountId } from '@10db/contracts';
+import { AccountKind, HARNESSES_OF_KIND, isMetered, type AccountId } from '@10db/contracts';
 import { SegmentedControl, Stack, Text, TextInput } from '@mantine/core';
 import { ACCOUNT_KIND_LABEL } from '../account-kind-label';
 import type { AccountFormValues } from './account-form-values';
@@ -56,7 +56,7 @@ export function AccountFields({
         error={errors['payer']}
         onChange={text('payer')}
       />
-      {runsAgents(values.kind) ? (
+      {HARNESSES_OF_KIND[values.kind].length > 0 ? (
         <TextInput
           size="md"
           label="Lane cap"
@@ -148,7 +148,7 @@ export function AccountFields({
           }}
         />
       ) : null}
-      {mode === 'edit' && accountId !== null && runsAgents(values.kind) ? (
+      {mode === 'edit' && accountId !== null && HARNESSES_OF_KIND[values.kind].length > 0 ? (
         <TierOverrides
           accountId={accountId}
           values={values}

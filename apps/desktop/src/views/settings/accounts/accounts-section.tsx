@@ -1,4 +1,4 @@
-import { AccountKind, runsAgents, type AccountDto, type AccountId } from '@10db/contracts';
+import { AccountKind, harnessOf, type AccountDto, type AccountId } from '@10db/contracts';
 import {
   Accordion,
   Alert,
@@ -28,7 +28,7 @@ import { settingsSearch } from '../focus-target';
 import { MARK_OF_KIND, RowMarkIcon } from '../row-mark';
 import { ACCOUNT_STATUS_LABEL, AccountStatus, accountStatus } from './account-status';
 import { capShare, formatTokens, formatUsd } from './usage-text';
-import { CANT_RUN_AGENTS, accountUsedBy, usedByText } from './used-by';
+import { accountUsedBy, harnessLine, usedByText } from './used-by';
 
 /** The same tones Overview's account rows use: ready works, anything missing needs the builder, archived is off. */
 const STATUS_TONE: Readonly<Record<AccountStatus, ConnectionTone>> = {
@@ -103,16 +103,16 @@ function AccountRow({
               </Badge>
             ) : null}
           </Group>
-          {runsAgents(account.kind) ? (
+          {harnessOf(account) !== null ? (
             <Text size="xs" c="dimmed">
               {account.expectedIdentity ?? 'No identity yet'}
             </Text>
           ) : null}
           <Text size="xs" c="dimmed">
             {usedByText(usedBy)}
-            {runsAgents(account.kind) ? '' : ` · ${CANT_RUN_AGENTS}`}
+            {` · ${harnessLine(account)}`}
           </Text>
-          {account.archived || !runsAgents(account.kind) ? null : (
+          {account.archived || harnessOf(account) === null ? null : (
             <AccountPause account={account} />
           )}
         </Stack>

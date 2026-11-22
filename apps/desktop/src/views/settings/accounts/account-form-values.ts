@@ -152,7 +152,7 @@ export function formValuesOf(account: AccountDto): AccountFormValues {
     bedrockAuth: 'awsProfile' in settings && settings.awsProfile === null ? 'bearer' : 'profile',
     awsProfile: 'awsProfile' in settings ? (settings.awsProfile ?? '') : '',
     baseUrl: 'baseUrl' in settings ? settings.baseUrl : '',
-    tierOverrides: settings.tierOverrides ?? {},
+    tierOverrides: 'tierOverrides' in settings ? (settings.tierOverrides ?? {}) : {},
   };
 }
 

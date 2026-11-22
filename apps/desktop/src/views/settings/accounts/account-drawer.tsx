@@ -1,7 +1,7 @@
 import {
   accountDisplayName,
   needsSecret,
-  runsAgents,
+  harnessOf,
   signsInWithLogin,
   type AccountDto,
   type AccountId,
@@ -18,7 +18,7 @@ import { IdentityCheck } from './identity-check';
 import { SecretForm } from './secret-form';
 import { SignInSteps } from './sign-in-steps';
 import { TestAccount } from './test-account';
-import { CANT_RUN_AGENTS, accountUsedBy, usedByText } from './used-by';
+import { accountUsedBy, harnessLine, usedByText } from './used-by';
 import { UsageByProject } from './usage-by-project';
 
 function noop() {
@@ -45,14 +45,14 @@ function AccountDrawerBody({
   }, []);
   const projects = useProjects();
   const judge = useJudgeStatus();
-  const agents = runsAgents(account.kind);
+  const agents = harnessOf(account) !== null;
   return (
     <Stack gap="lg">
       <Stack gap={2}>
         <Text size="sm">{usedByText(accountUsedBy(account, projects.data ?? [], judge.data))}</Text>
         {agents ? null : (
           <Text size="sm" c="dimmed">
-            {CANT_RUN_AGENTS}
+            {harnessLine(account)}
           </Text>
         )}
       </Stack>

@@ -1,13 +1,22 @@
 import {
   AccountKind,
-  runsAgents,
+  harnessOf,
   type AccountDto,
   type AccountId,
   type ProjectDto,
 } from '@10db/contracts';
 
-/** What an account says it can't do yet; the text Billing and Accounts show beside it. */
-export const CANT_RUN_AGENTS = "Can't run agents yet";
+/** The account's harness as a card and a drawer say it; a kind with none says no harness runs it yet. */
+export function harnessLine(account: Pick<AccountDto, 'kind' | 'label' | 'settings'>): string {
+  switch (harnessOf(account)) {
+    case 'claude':
+      return 'Runs Claude Code';
+    case 'codex':
+      return 'Runs Codex';
+    case null:
+      return `No harness runs ${account.label} yet`;
+  }
+}
 
 /** What a non-OpenRouter account says in Paid by: decisions have one provider for now. */
 export const DECISIONS_RUN_ON_OPENROUTER = 'Decisions run on OpenRouter for now';
@@ -38,9 +47,11 @@ export function usedByText(used: readonly string[]): string {
   return used.length === 0 ? 'Used by nothing' : `Used by: ${used.join(', ')}`;
 }
 
-/** Billing's rule for an account select: a project runs agents, and an OpenRouter account can't yet. */
-export function cantRunAgents(account: Pick<AccountDto, 'kind'>): string | null {
-  return runsAgents(account.kind) ? null : CANT_RUN_AGENTS;
+/** Billing's rule for an account select: a project's account must have a harness to run its sessions. */
+export function cantRunAgents(
+  account: Pick<AccountDto, 'kind' | 'label' | 'settings'>,
+): string | null {
+  return harnessOf(account) === null ? harnessLine(account) : null;
 }
 
 /** Decisions' rule for its select: they run on OpenRouter for now, so every other kind is refused. */
