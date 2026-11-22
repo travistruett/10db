@@ -43,6 +43,7 @@ import {
   TaskMessageKind,
   type TaskLanding,
   type WorkstreamId,
+  type LinearSignInsDto,
 } from '@10db/contracts';
 import {
   closeTask,
@@ -379,6 +380,7 @@ export function createServices(deps: {
   readonly trust: TrustServices;
   /** Settings › Trust's MCP sign-ins. */
   readonly mcpSignIns: McpSignIns;
+  readonly linearSignIns: { list(): Promise<LinearSignInsDto> };
 }): ApiServices & TaskRemovalServices & TaskLookupServices {
   const db = deps.state.db;
   const restarts = createFailedRestarts(deps);
@@ -857,6 +859,7 @@ export function createServices(deps: {
     ...deps.stakeholders,
     ...deps.trust,
     mcpSignIns: () => deps.mcpSignIns.list(),
+    linearSignIns: () => deps.linearSignIns.list(),
     startMcpSignIn: (input) => deps.mcpSignIns.start(input),
     ...createPlaybookServices(deps.state),
     ...deps.shape,

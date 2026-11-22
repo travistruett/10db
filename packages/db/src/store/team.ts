@@ -12,14 +12,14 @@ import {
   type PersonId,
   type PersonInput,
 } from '@10db/contracts';
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, notInArray } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
 
 /** The person running this app: every card nobody else owns goes to them (spec §7). */
 export const BUILDER_HANDLE = 'me';
 
-/** The name the builder has until they pick their Slack member in Settings › Integrations. */
+/** The name the builder has until they pick their Slack member in Settings › Sign-ins. */
 export const SEED_BUILDER_NAME = 'You';
 
 type PersonaRow = typeof schema.personas.$inferSelect;
@@ -116,6 +116,21 @@ function contactOf(db: DbReader, personId: PersonId): ContactRow | undefined {
     .from(schema.personContacts)
     .where(eq(schema.personContacts.personId, personId))
     .get();
+}
+
+/** Deletes the Slack contact of every person whose workspace is not in `teamIds`; returns how many went. */
+export function deleteContactsOutsideWorkspaces(
+  ctx: WriteContext,
+  teamIds: readonly string[],
+): number {
+  const rows =
+    teamIds.length === 0
+      ? ctx.tx.delete(schema.personContacts).returning({ id: schema.personContacts.id })
+      : ctx.tx
+          .delete(schema.personContacts)
+          .where(notInArray(schema.personContacts.teamId, [...teamIds]))
+          .returning({ id: schema.personContacts.id });
+  return rows.all().length;
 }
 
 /** Writes the person's Slack contact: none removes it; a change of Slack user forgets the DM channel. */

@@ -223,6 +223,10 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): AgentAdapter {
     ...(connectors === undefined ? {} : { connectors }),
   };
   return {
+    cachedConnectorNames: (account) => {
+      const cached = connectors?.peek(account.id);
+      return cached === undefined || cached === null ? cached : cached.map((c) => c.name);
+    },
     stop: async () => {
       await connectors?.stop();
     },

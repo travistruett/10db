@@ -27,11 +27,11 @@ import { IntegrationCard } from './integration-card';
 import { SLACK_APPS_URL, SLACK_MANIFEST } from './slack-manifest';
 import { WhichIsYou } from './which-is-you';
 
-/** "Ampsio · posts as @10db · you're @Travis Truett": the connection in one line. */
-function ConnectedStatus({ connection }: { readonly connection: SlackConnectionDto }) {
+/** "posts as @10db · you're @Travis Truett": the connection in one line; the card's title is the workspace. */
+function ConnectedStatus() {
   const builder = usePeople().data?.find((p) => p.isBuilder);
   const member = useSlackMember(builder?.slack?.userId ?? null);
-  const parts = [connection.teamName ?? 'Slack', 'posts as @10db'];
+  const parts = ['posts as @10db'];
   if (builder?.slack) parts.push(`you're @${member?.name ?? builder.name}`);
   return <ConnectionStatus tone={ConnectionTone.Works} label={parts.join(' · ')} />;
 }
@@ -48,7 +48,7 @@ function StateLine({
   if (!connection) return null;
   switch (connection.state) {
     case 'connected':
-      return <ConnectedStatus connection={connection} />;
+      return <ConnectedStatus />;
     case 'none':
       return <ConnectionStatus tone={ConnectionTone.NeedsYou} label="Not connected" />;
     case 'refused':
@@ -148,7 +148,7 @@ function TokenField({ setter }: { readonly setter: ReturnType<typeof useSetSlack
 }
 
 /**
- * Settings › Integrations › Slack. Not connected, it is the three setup steps; connected, one line,
+ * Settings › Sign-ins › Slack. Not connected, it is the three setup steps; connected, one line,
  * with Change Who You Are and Disconnect in a small menu. Until the builder picks their own member,
  * the card holds a callout to finish setup.
  */
@@ -170,7 +170,7 @@ export function SlackCard() {
   return (
     <IntegrationCard
       mark={<IconBrandSlack size={20} stroke={1.5} aria-hidden />}
-      name="Slack"
+      name={data?.state === 'connected' && data.teamName !== null ? data.teamName : 'Slack'}
       focusName="slack"
       status={<StateLine connection={data} failed={connection.isError} />}
       purpose="Asks the people who answer your questions, and reads their replies."

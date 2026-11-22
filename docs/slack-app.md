@@ -177,10 +177,10 @@ up. Paste the answers, with the token and ids removed, at the end of
 
 ## 4. In 10db (once built)
 
-1. **Settings › Integrations**: on the Slack card, paste the `xoxb-` token and press **Connect**. 10db checks it
+1. **Settings › Sign-ins**: on the Slack card, paste the `xoxb-` token and press **Connect**. 10db checks it
    with Slack, and the card asks you to finish setup: under **Which one is you?**, pick yourself and press
-   **That's Me**, so every message carries your name. The card then reads "<workspace> · posts as @10db ·
-   you're @you".
+   **That's Me**, so every message carries your name. The card, titled by the workspace, then reads
+   "posts as @10db · you're @you".
 2. **Settings › People › Add Person**: find your stakeholder among the workspace's members. Under "Before 10db
    messages them", keep **Show me each message first** for now: you see every message before it goes. "Up to
    10 new questions a day" can be set to **No limit**; it counts only a new question that starts a thread,
@@ -215,6 +215,6 @@ check like section 3's against such a person.
 
 ## Disconnecting
 
-**Disconnect**, in the Slack card's menu in **Settings › Integrations**, stops 10db from sending and reading at once. To revoke it for
+**Disconnect**, in the Slack card's menu in **Settings › Sign-ins**, stops 10db from sending and reading at once. To revoke it for
 good, open the app at <https://api.slack.com/apps> and press **Uninstall App** under Install App (or delete the
 app): the token stops working everywhere.

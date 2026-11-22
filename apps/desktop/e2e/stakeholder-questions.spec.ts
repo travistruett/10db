@@ -86,11 +86,19 @@ test('routes a question to someone outside Slack from its card, and the table sh
   seedQuestion(project);
   await claudeIsInstalled(page);
 
-  // Settings › Integrations: this daemon runs with Slack and the benchmarks off, and each card says so.
+  // Settings › Sign-ins: this daemon runs with Slack and the benchmarks off, and each card says so.
+  // The old address lands on Sign-ins.
   await page.goto('/settings/integrations');
+  await expect(page).toHaveURL(/\/settings\/sign-ins/);
   await expect(page.getByText('Off: 10db was started with TENDB_SLACK=off')).toBeVisible();
   await expect(page.getByText('Off: 10db was started with TENDB_BENCHMARKS=off')).toBeVisible();
-  await expectAccessible(page, 'integrations, dark');
+  await expectAccessible(page, 'sign-ins, dark');
+
+  // The project's Integrations: with no workspace signed in, its Slack says nothing is sent from it.
+  await page.goto('/settings/project-integrations');
+  await expect(page.getByRole('heading', { name: 'Integrations', level: 1 })).toBeVisible();
+  await expect(page.getByText('No workspace signed in')).toBeVisible();
+  await expect(page.getByText('Questions for other people stay in the Inbox')).toBeVisible();
 
   // Settings › People: add Priya, who is not in Slack. With Slack off the modal opens on a name.
   await page.goto('/settings/people');

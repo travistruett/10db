@@ -69,6 +69,7 @@ import {
   PersonId,
   SendInput,
   SlackTokenInput,
+  ProjectIntegrationsInput,
   StakeholderTimersDto,
   PersonaId,
   PersonaInput,
@@ -1589,6 +1590,21 @@ export function createApp(deps: ApiDeps) {
       async (c) => c.json(await deps.services.setSlackToken(c.req.valid('json'))),
     )
     .delete('/slack/token', async (c) => c.json(await deps.services.removeSlackToken()))
+    .get('/projects/:projectId/integrations', async (c) =>
+      c.json(await deps.services.projectIntegrations(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .put(
+      '/projects/:projectId/integrations',
+      validator('json', (value): ProjectIntegrationsInput => ProjectIntegrationsInput.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.setProjectIntegrations(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .get('/settings/sign-ins/linear', async (c) => c.json(await deps.services.linearSignIns()))
     .get('/slack/members', async (c) =>
       c.json(await deps.services.listSlackMembers(c.req.query('query') ?? '')),
     )

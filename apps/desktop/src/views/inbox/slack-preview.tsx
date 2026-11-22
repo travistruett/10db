@@ -146,11 +146,11 @@ export function SlackPreview({
                 <Link
                   {...props}
                   to="/settings/$section"
-                  params={{ section: SettingsSectionKey.Integrations }}
+                  params={{ section: SettingsSectionKey.SignIns }}
                 />
               )}
             >
-              Open Integrations
+              Open Sign-ins
             </Anchor>
             <Button variant="default" onClick={onAnswerMyself}>
               Answer Myself
@@ -221,6 +221,12 @@ export function SlackPreview({
         {send.heldBy === 'scan' && hold !== undefined ? (
           <Alert color="yellow" variant="light">
             {`This looks like ${patternWords(hold)} (line ${String(hold.line)}). Edit it before it goes to ${names}.`}
+          </Alert>
+        ) : null}
+        {send.heldBy === 'slack_off' ? (
+          <Alert color="yellow" variant="light">
+            Slack is off for this project, so this question stays in your Inbox. Turn it on under
+            Settings › Integrations.
           </Alert>
         ) : null}
         {limitHeld ? (

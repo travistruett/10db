@@ -19,6 +19,7 @@ export function createRoutedAdapter(
     mcpAuthStatus: (spec) => by(spec).mcpAuthStatus(spec),
     takeoverCommand: (spec) => by(spec).takeoverCommand(spec),
     takeoverNotes: (account) => by(account).takeoverNotes(account),
+    cachedConnectorNames: (account) => by(account).cachedConnectorNames?.(account),
     readClientUuids: (spec) => by(spec.account).readClientUuids(spec),
     stop: async () => {
       await Promise.all(

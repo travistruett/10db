@@ -1,12 +1,14 @@
 import { Stack, Text } from '@mantine/core';
 import { AaCard } from './aa-card';
 import { GithubCard } from './github-card';
+import { LinearCard } from './linear-card';
 import { SlackCard } from './slack-card';
 
 /**
- * Settings › Integrations: one card per outside service that isn't a model, each set up once.
+ * Settings › Sign-ins: one card per outside service that isn't a model, each signed in once for every
+ * project. Which project uses which is in the project's own Integrations.
  */
-export function IntegrationsSection() {
+export function SignInsSection() {
   return (
     <Stack>
       <Text c="dimmed" size="sm">
@@ -14,6 +16,7 @@ export function IntegrationsSection() {
       </Text>
       <GithubCard />
       <SlackCard />
+      <LinearCard />
       <AaCard />
     </Stack>
   );

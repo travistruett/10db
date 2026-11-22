@@ -8,7 +8,8 @@ export const SettingsSectionKey = {
   Billing: 'billing',
   ProjectTrust: 'project-trust',
   Team: 'team',
-  Integrations: 'integrations',
+  SignIns: 'sign-ins',
+  ProjectIntegrations: 'project-integrations',
   People: 'people',
   RoutingRules: 'routing-rules',
   KeepAwake: 'keep-awake',
@@ -76,6 +77,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   ),
   section(SettingsSectionKey.ProjectTrust, Project, 'Agents', 'Trust'),
   section(SettingsSectionKey.NetworkHosts, Project, 'Agents', 'Network hosts'),
+  section(SettingsSectionKey.ProjectIntegrations, Project, 'Connections', 'Integrations'),
   section(SettingsSectionKey.Overview, App, null, 'Overview'),
   section(SettingsSectionKey.Accounts, App, 'AI', 'Accounts'),
   section(SettingsSectionKey.Models, App, 'AI', 'Models'),
@@ -83,7 +85,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   section(SettingsSectionKey.LanePermissions, App, 'Agents', 'Lane permissions'),
   section(SettingsSectionKey.Trust, App, 'Agents', 'Trust'),
   section(SettingsSectionKey.Sessions, App, 'Agents', 'Sessions'),
-  section(SettingsSectionKey.Integrations, App, 'Connections', 'Integrations'),
+  section(SettingsSectionKey.SignIns, App, 'Connections', 'Sign-ins'),
   section(SettingsSectionKey.People, App, 'Connections', 'People'),
   section(SettingsSectionKey.Appearance, App, 'App', 'Appearance'),
   section(SettingsSectionKey.Updates, App, 'App', 'Updates'),
@@ -96,6 +98,7 @@ const KEYS = new Set<string>(Object.values(SettingsSectionKey));
 /** Sections that no longer exist, by the address they had, and the section their content moved to. */
 const RETIRED_SECTIONS: Readonly<Record<string, SettingsSectionKey>> = {
   'personas-and-flows': SettingsSectionKey.Models,
+  integrations: SettingsSectionKey.SignIns,
 };
 
 /** Where an address that is not a section now lands: the section that took over its content, else General. */

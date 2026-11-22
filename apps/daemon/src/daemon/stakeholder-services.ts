@@ -1,11 +1,14 @@
 import {
   ConflictError,
   InvalidError,
+  type ProjectId,
+  type ProjectIntegrationsDto,
   type SlackConnectionDto,
   type SlackMemberDto,
 } from '@10db/contracts';
 import {
   getInboxItem,
+  getProject,
   getPerson,
   getStakeholderTimers,
   questionRoutesForTask,
@@ -15,10 +18,18 @@ import {
 } from '@10db/db';
 import type { ApiServices } from '../api';
 import type { Clock } from '../clock';
-import { KeychainError, SLACK_BOT_ACCOUNT, type Keychain } from '../environment';
+import { KeychainError, slackBotAccount, type Keychain } from '../environment';
 import type { StateStore } from '../events';
 import { createSlackClient, SlackError, type SlackClient } from '../slack';
-import { previewDraft, type SlackConnection, type StakeholderSends } from '../stakeholders';
+import {
+  previewDraft,
+  projectSlack,
+  readSlackWorkspaces,
+  setProjectSlack,
+  writeSlackWorkspaces,
+  type SlackConnection,
+  type StakeholderSends,
+} from '../stakeholders';
 
 /** The stakeholder side of the HTTP API: the Slack connection, people, timers, routes and sends. */
 export type StakeholderApiServices = Pick<
@@ -26,6 +37,8 @@ export type StakeholderApiServices = Pick<
   | 'slackStatus'
   | 'setSlackToken'
   | 'removeSlackToken'
+  | 'projectIntegrations'
+  | 'setProjectIntegrations'
   | 'listSlackMembers'
   | 'updatePerson'
   | 'removePerson'
@@ -77,7 +90,17 @@ export function createStakeholderApiServices(deps: {
   readonly fetch: typeof fetch;
   /** Starts the reply watch again after a new token was saved. */
   readonly reconnect: () => Promise<void>;
+  /** The login `gh` is signed in as, from its last check; null when signed out. */
+  readonly githubLogin: () => Promise<string | null>;
 }): StakeholderApiServices {
+  const integrationsOf = async (projectId: ProjectId): Promise<ProjectIntegrationsDto> => {
+    getProject(deps.state.db, projectId);
+    return {
+      github: { login: await deps.githubLogin() },
+      slack: projectSlack(deps.state.db, projectId),
+    };
+  };
+
   let members: { readonly at: number; readonly list: SlackMemberDto[] } | null = null;
 
   async function allMembers(client: SlackClient): Promise<SlackMemberDto[]> {
@@ -117,8 +140,19 @@ export function createStakeholderApiServices(deps: {
           );
         throw new InvalidError(refusalWords(error));
       }
+      // Written and read back under the workspace's own entry before anything else changes.
       await keychainConflict(() => {
-        deps.keychain.write(SLACK_BOT_ACCOUNT, input.token);
+        deps.keychain.write(slackBotAccount(identity.teamId), input.token);
+      });
+      // One workspace is signed in at a time: a token for another one replaces it.
+      const replaced = readSlackWorkspaces(deps.state.db).filter(
+        (w) => w.teamId !== identity.teamId,
+      );
+      deps.state.write((ctx) => {
+        writeSlackWorkspaces(ctx, [{ teamId: identity.teamId, teamName: identity.teamName }]);
+      });
+      await keychainConflict(() => {
+        for (const old of replaced) deps.keychain.remove(slackBotAccount(old.teamId));
       });
       members = null;
       deps.connection.set('connected', { identity });
@@ -126,9 +160,27 @@ export function createStakeholderApiServices(deps: {
       return deps.connection.get();
     },
 
+    projectIntegrations: integrationsOf,
+
+    async setProjectIntegrations(projectId, input) {
+      getProject(deps.state.db, projectId);
+      const { teamId } = input.slack;
+      // Only a signed-in workspace can be chosen; null is the builder's "off".
+      if (teamId !== null && !readSlackWorkspaces(deps.state.db).some((w) => w.teamId === teamId))
+        throw new InvalidError('That Slack workspace is not signed in');
+      deps.state.write((ctx) => {
+        setProjectSlack(ctx, projectId, teamId);
+      });
+      return integrationsOf(projectId);
+    },
+
     async removeSlackToken() {
+      const signedIn = readSlackWorkspaces(deps.state.db);
       await keychainConflict(() => {
-        deps.keychain.remove(SLACK_BOT_ACCOUNT);
+        for (const workspace of signedIn) deps.keychain.remove(slackBotAccount(workspace.teamId));
+      });
+      deps.state.write((ctx) => {
+        writeSlackWorkspaces(ctx, []);
       });
       members = null;
       deps.connection.set('none');

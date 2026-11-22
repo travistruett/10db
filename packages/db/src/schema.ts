@@ -1110,7 +1110,7 @@ export const stakeholderSends = sqliteTable(
     hits: text('hits', { mode: 'json' }).$type<OutboundHit[]>().notNull(),
     /** Set when the builder released a hold, so its thread's follow-ups skip review. */
     reviewed: integer('reviewed', { mode: 'boolean' }).notNull().default(false),
-    heldBy: text('held_by').$type<'review' | 'first_send' | 'limit' | 'scan'>(),
+    heldBy: text('held_by').$type<'review' | 'first_send' | 'limit' | 'scan' | 'slack_off'>(),
     textSha256: text('text_sha256'),
     channelId: text('channel_id'),
     threadTs: text('thread_ts'),

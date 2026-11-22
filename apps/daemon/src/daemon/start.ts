@@ -108,15 +108,19 @@ import {
 import { createBenchmarkServices } from './benchmark-services';
 import { createSizingService } from '../sizing';
 import { createJudgeCredentialReader, createJudgeServices } from './judge-services';
+import { createLinearSignIns } from './linear-sign-ins';
 import { createStakeholderApiServices } from './stakeholder-services';
 import {
+  cleanUpSlackSignIns,
   createReplyWatch,
   createSlackConnection,
   createStakeholderSends,
   createTimerWatch,
   createTriage,
   draftOnOpen,
+  projectSlack,
   routedAway,
+  slackTokenReader,
   sweepDrafts,
 } from '../stakeholders';
 import { createSlackClient, type SlackClient } from '../slack';
@@ -187,7 +191,6 @@ import {
   createLauncher,
   exportAwsCredentials,
   REQUIRED_TOOLS,
-  SLACK_BOT_ACCOUNT,
   unavailableKeychain,
   type AgentTools,
   type Keychain,
@@ -969,7 +972,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     opts.slack === true
       ? createSlackClient({
           fetch: opts.fetch ?? fetch,
-          token: () => judgeKeychain.readAsync(SLACK_BOT_ACCOUNT),
+          token: slackTokenReader(state, judgeKeychain),
           clock,
           timeoutMs: SLACK_TIMEOUT_MS,
         })
@@ -979,7 +982,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     slack: slackClient,
     clock,
     log: logger.child({ component: 'stakeholder-sends' }),
-    hasToken: async () => (await judgeKeychain.readAsync(SLACK_BOT_ACCOUNT)) !== null,
+    hasToken: async () => (await slackTokenReader(state, judgeKeychain)()) !== null,
+    slackFor: (projectId) => projectSlack(state.db, projectId).teamId !== null,
     parkFor: (id) => {
       runner?.parkFor(id);
     },
@@ -2128,6 +2132,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // A card a crash left waiting for triage takes the lane's rule, a routed card without its message gets
   // one, and a send that was mid-post is looked for in Slack.
   for (const after of state.write((ctx) => sweepDrafts(ctx, draftOpts))) after();
+  // Slack tokens are kept by workspace: the old single item and contacts of no signed-in workspace go.
+  if (slackClient !== null) cleanUpSlackSignIns({ state, keychain: judgeKeychain, log: logger });
   const slackConnection = createSlackConnection({
     state,
     initial: slackClient === null ? 'off' : 'none',
@@ -2453,6 +2459,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     plan: appMcpPlan,
     logger: logger.child({ component: 'mcp-sign-ins' }),
   });
+  const linearSignIns = createLinearSignIns({
+    state,
+    plan: appMcpPlan,
+    mcpSignIns,
+    connectorNames: (account) => adapter.cachedConnectorNames?.(account),
+  });
   const openWhenBusyDeps: OpenWhenBusyDeps = {
     folderHold,
     pendingOpens,
@@ -2520,6 +2532,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     openRouterOn: () => openRouterSync !== null && liveOpenRouterAccounts().length > 0,
     trust,
     mcpSignIns,
+    linearSignIns,
     judge: createJudgeServices({
       state,
       keychain: judgeKeychain,
@@ -2540,6 +2553,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       clock,
       fetch: opts.fetch ?? fetch,
       reconnect: () => replyWatch.reconnect(),
+      githubLogin: () => Promise.resolve(github.cachedLogin()),
     }),
     shape: createShapeServices({
       shape,

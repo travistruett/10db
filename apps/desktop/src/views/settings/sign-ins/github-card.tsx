@@ -85,7 +85,7 @@ function Header({
   }
 }
 
-/** Settings › Integrations › GitHub: the gh login 10db opens pull requests and watches checks with. */
+/** Settings › Sign-ins › GitHub: the gh login 10db opens pull requests and watches checks with. */
 export function GithubCard() {
   const query = useGithubStatus();
   const recheck = useRecheckGithub();

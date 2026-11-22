@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "github": {
+      "type": "object",
+      "properties": {
+        "login": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "login"
+      ],
+      "additionalProperties": false
+    },
+    "slack": {
+      "type": "object",
+      "properties": {
+        "teamId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "teamName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "auto": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "teamId",
+        "teamName",
+        "auto"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "github",
+    "slack"
+  ],
+  "additionalProperties": false
+}
