@@ -1847,6 +1847,9 @@ export function createApp(deps: ApiDeps) {
     })
     // Pictures of the builder's app (Workbench spec §10): a task's, one picture's bytes, and Settings'
     // status line for a project's browser and sign-in.
+    .get('/tasks/:taskId/linear-posts', (c) =>
+      c.json(deps.services.taskLinearPosts(TaskId.parse(c.req.param('taskId')))),
+    )
     .get('/tasks/:taskId/screens', (c) =>
       c.json(deps.services.taskScreens(TaskId.parse(c.req.param('taskId')))),
     )

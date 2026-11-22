@@ -521,5 +521,73 @@
       { "do": "say", "text": "Back from the terminal." },
       { "do": "turn_complete" }
     ]
+  ],
+  "Chat: Report the pending Linear updates.": [
+    [
+      {
+        "do": "tool",
+        "toolName": "mcp__linear__save_comment",
+        "input": { "issueId": "e2e-linear-issue-1", "body": "Update from 10db." },
+        "result": "{\"id\":\"e2e-comment-1\"}"
+      },
+      {
+        "do": "mcp",
+        "tool": "report_linear_post",
+        "args": {
+          "postIds": ["$owed"],
+          "outcome": {
+            "state": "recorded",
+            "commentIds": ["e2e-comment-1"],
+            "statusSet": null,
+            "attachmentUrl": null
+          }
+        }
+      },
+      { "do": "turn_complete" }
+    ],
+    [
+      {
+        "do": "tool",
+        "toolName": "mcp__linear__save_comment",
+        "input": { "issueId": "e2e-linear-issue-1", "body": "Update from 10db." },
+        "result": "{\"id\":\"e2e-comment-1\"}"
+      },
+      {
+        "do": "mcp",
+        "tool": "report_linear_post",
+        "args": {
+          "postIds": ["$owed"],
+          "outcome": {
+            "state": "recorded",
+            "commentIds": ["e2e-comment-1"],
+            "statusSet": null,
+            "attachmentUrl": null
+          }
+        }
+      },
+      { "do": "turn_complete" }
+    ],
+    [
+      {
+        "do": "tool",
+        "toolName": "mcp__linear__save_comment",
+        "input": { "issueId": "e2e-linear-issue-1", "body": "Update from 10db." },
+        "result": "{\"id\":\"e2e-comment-1\"}"
+      },
+      {
+        "do": "mcp",
+        "tool": "report_linear_post",
+        "args": {
+          "postIds": ["$owed"],
+          "outcome": {
+            "state": "recorded",
+            "commentIds": ["e2e-comment-1"],
+            "statusSet": null,
+            "attachmentUrl": null
+          }
+        }
+      },
+      { "do": "turn_complete" }
+    ]
   ]
 }
