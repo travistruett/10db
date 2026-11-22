@@ -45,7 +45,7 @@ attachment by URL), "Rules in its brief"; "States" (the Inbox rows); the brief's
     withheld (anthropic_key). Latest: <lastError>").
   - It is called after every settle and every drop. A dismiss goes through `onFlagAnswerInWrite` in
     `daemon/start.ts`: an item with `detail.linearReporter` calls `dismissLinearPosts`.
-- `docs/architecture/decisions/2026-11-22-the-linear-reporter-is-10dbs-own-errand-with-its-own-guard.md`: the
+- A new decision record in `docs/architecture/decisions/`, dated 2026-11-22 and titled "The Linear reporter is 10db's own errand with its own guard": the
   Reporter owner kind, no judge, the rule's allow-list, the workspace check by a seen result, the secret-only
   scan, and why there's no visible chat (index calls 1, 3 and 4). Format per the decisions README.
 - `apps/daemon/src/linear/AGENTS.md`: a paragraph on the reporter's modules.
