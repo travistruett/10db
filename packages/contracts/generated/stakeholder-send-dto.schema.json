@@ -162,7 +162,8 @@
             "review",
             "first_send",
             "limit",
-            "scan"
+            "scan",
+            "slack_off"
           ]
         },
         {

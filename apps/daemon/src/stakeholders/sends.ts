@@ -197,7 +197,6 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
 
   async function afterDraft(cardId: InboxItemId): Promise<void> {
     if (slack === null) return;
-    if (deps.slackFor?.(getInboxItem(state.db, cardId).projectId) === false) return;
     const reserved = state.write((ctx) => {
       const card = getInboxItem(ctx.tx, cardId);
       const draft = liveSend(cardId, ctx.tx);
@@ -216,6 +215,11 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
         })),
       });
       // A message from a builder who is still called "You" would read "You's build": he reviews it.
+      // A project with Slack off keeps its draft in the Inbox, and the card says why before Send is pressed.
+      if (deps.slackFor?.(card.projectId) === false) {
+        setHeldBy(ctx, draft.id, 'slack_off');
+        return null;
+      }
       const reason = held ?? (builderUnnamed(card, ctx.tx) ? 'review' : null);
       setHeldBy(ctx, draft.id, reason);
       if (reason !== null) return null;
@@ -240,6 +244,8 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
       if (!row) return;
       const { inboxItemId, text } = sendSummary(state.db, sendId);
       const card = getInboxItem(state.db, inboxItemId);
+      // A project with Slack off posts nothing; the send waits until it is bound again.
+      if (deps.slackFor?.(card.projectId) === false) return;
       if (card.state !== InboxState.Open) {
         // The card closed before anything was posted: there is nothing to open and nothing to say.
         const reason = closeReasonOf(card, true) ?? 'cancelled';
@@ -447,7 +453,7 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
       closeSend(ctx, sendId, reason);
       return true;
     });
-    if (!closed || slack === null) return;
+    if (!closed || slack === null || deps.slackFor?.(card.projectId) === false) return;
     const builder = draftContext(state.db, card).builderName;
     const line = closingLine(reason, builder, letterOf(card));
     const said = new Set<string>();
@@ -475,7 +481,8 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
     afterDraft,
 
     async send(cardId, input) {
-      if (slack === null) throw new ConflictError('Slack is not connected');
+      if (slack === null || (await deps.hasToken?.()) === false)
+        throw new ConflictError('Slack is not connected');
       const card = getInboxItem(state.db, cardId);
       if (deps.slackFor?.(card.projectId) === false) throw new ConflictError(SLACK_OFF_FOR_PROJECT);
       const stored = liveSend(cardId) ?? redraftFailed(card);
@@ -601,6 +608,8 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
       if (client === null) return;
       for (const pending of sendingSends(state.db)) {
         if (inFlight.has(pending.id)) continue;
+        const owner = getInboxItem(state.db, sendSummary(state.db, pending.id).inboxItemId);
+        if (deps.slackFor?.(owner.projectId) === false) continue;
         if (pending.channelId === null) {
           await continueSending(pending.id);
           continue;

@@ -16,7 +16,7 @@ export interface HoldInput {
   readonly thread: { readonly reviewed: boolean } | null;
 }
 
-export type Held = 'review' | 'first_send' | 'limit' | 'scan';
+export type Held = 'review' | 'first_send' | 'limit' | 'scan' | 'slack_off';
 
 /**
  * Why a drafted question waits for the builder, or null when it may go at once. First match wins: scan,
