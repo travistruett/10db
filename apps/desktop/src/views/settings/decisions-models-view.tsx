@@ -20,7 +20,7 @@ import { RaisedPanel } from './raised-panel';
 import { SettingsSectionKey } from './sections';
 
 const OFF_WORDS =
-  "Decisions are off: 10db was started with TENDB_JUDGE=off, so it never calls OpenRouter and its models aren't read.";
+  "Decisions are off: 10db was started with TENDB_JUDGE=off, so it never calls a model and its models aren't read.";
 const NO_ACCOUNT_WORDS =
   'Add an OpenRouter account to compare the models that make 10db’s decisions by time and cost.';
 
@@ -86,7 +86,7 @@ export function DecisionsModelsView() {
         <Group gap="xs">
           <Loader size="xs" />
           <Text size="sm" c="dimmed">
-            Reading OpenRouter’s decision models…
+            Reading the account’s decision models…
           </Text>
         </Group>
       );

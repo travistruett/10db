@@ -80,7 +80,7 @@ export const JUDGE_LABELS: Readonly<Record<JudgeKind, string>> = {
 
 /** A tendb row while 10db's judge can't answer: no key, or a switch off. */
 export const TENDB_NOT_READY_LABEL =
-  "10db's rules: add an OpenRouter key in Settings › Decisions for 10db's judge";
+  "10db's rules: pick an account in Settings › Decisions for 10db's judge";
 
 /** The Judge list's note: who 10db's judge judges. */
 export const JUDGE_LIST_NOTE = "Accounts without auto mode, and Codex, use 10db's judge.";

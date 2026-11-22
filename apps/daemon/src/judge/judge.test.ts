@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { silentLogger } from '../log';
-import { createJudge, type JudgeRequest } from './index';
+import { createJudge, type JudgeCredential, type JudgeRequest } from './index';
 
 const KEY = 'router-test-key-0123';
 const SYSTEM_ONE_URL = 'https://openrouter.ai/api/v1/systemone';
@@ -80,12 +80,12 @@ function build(options: { off?: boolean } = {}) {
       seen.push(entry);
       return handler(entry, init?.signal ?? undefined);
     },
-    readKey: (accountId) => {
+    readCredential: (accountId) => {
       keyReads += 1;
       keyAsked.push(accountId);
       if (keyError) return Promise.reject(keyError);
-      if (keyHangs) return new Promise<string | null>(() => undefined);
-      return Promise.resolve(key);
+      if (keyHangs) return new Promise<JudgeCredential | null>(() => undefined);
+      return Promise.resolve(key === null ? null : { kind: 'openrouter', key });
     },
     decisionModelIds: () => decisionModels,
     off: options.off ?? false,

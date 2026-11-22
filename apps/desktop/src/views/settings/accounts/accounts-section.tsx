@@ -1,4 +1,11 @@
-import { AccountKind, harnessOf, type AccountDto, type AccountId } from '@10db/contracts';
+import {
+  AccountKind,
+  harnessOf,
+  PLAN_LOGIN_CANT_DECIDE,
+  powersDecisions,
+  type AccountDto,
+  type AccountId,
+} from '@10db/contracts';
 import {
   Accordion,
   Alert,
@@ -111,6 +118,11 @@ function AccountRow({
           <Text size="xs" c="dimmed">
             {usedByText(usedBy)}
             {` · ${harnessLine(account)}`}
+          </Text>
+          <Text size="xs" c="dimmed">
+            {powersDecisions(account.kind)
+              ? 'Can answer decisions'
+              : `Can't answer decisions: ${PLAN_LOGIN_CANT_DECIDE}`}
           </Text>
           {account.archived || harnessOf(account) === null ? null : (
             <AccountPause account={account} />

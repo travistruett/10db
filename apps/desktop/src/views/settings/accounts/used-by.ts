@@ -1,6 +1,8 @@
 import {
   AccountKind,
   harnessOf,
+  PLAN_LOGIN_CANT_DECIDE,
+  powersDecisions,
   type AccountDto,
   type AccountId,
   type ProjectDto,
@@ -17,9 +19,6 @@ export function harnessLine(account: Pick<AccountDto, 'kind' | 'label' | 'settin
       return `No harness runs ${account.label} yet`;
   }
 }
-
-/** What a non-OpenRouter account says in Paid by: decisions have one provider for now. */
-export const DECISIONS_RUN_ON_OPENROUTER = 'Decisions run on OpenRouter for now';
 
 /** "Renewals'" for a name ending in s, "Billing's" for any other. */
 const possessive = (name: string): string => (name.endsWith('s') ? `${name}'` : `${name}'s`);
@@ -54,7 +53,12 @@ export function cantRunAgents(
   return harnessOf(account) === null ? harnessLine(account) : null;
 }
 
-/** Decisions' rule for its select: they run on OpenRouter for now, so every other kind is refused. */
+/** Decisions' rule for its select: an account with an API answers them; a plan login says why it can't. */
 export function cantRunDecisions(account: Pick<AccountDto, 'kind'>): string | null {
-  return account.kind === AccountKind.OpenRouter ? null : DECISIONS_RUN_ON_OPENROUTER;
+  if (powersDecisions(account.kind)) return null;
+  return account.kind === AccountKind.ClaudeSubscription || account.kind === AccountKind.CodexSignin
+    ? sentence(PLAN_LOGIN_CANT_DECIDE)
+    : "Can't power decisions";
 }
+
+const sentence = (text: string): string => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;

@@ -8,6 +8,7 @@ import {
   DEFAULT_ACCOUNT_LANE_CAP,
   EventType,
   InvalidError,
+  JudgeConfig,
   isMetered,
   mintId,
   needsSecret,
@@ -228,13 +229,19 @@ export function patchAccount(ctx: WriteContext, id: AccountId, patch: AccountPat
   return getAccount(ctx.tx, id);
 }
 
-/** Archiving is refused while a project binds the account, and for the default account. */
+/** Archiving is refused while a project binds the account, and for the default account and the one Decisions run on. */
 export function archiveAccount(ctx: WriteContext, id: AccountId): AccountDto {
   const row = getAccountRow(ctx.tx, id);
   if (row.archived) return getAccount(ctx.tx, id);
   if (defaultAccountId(ctx.tx) === id)
     throw new ConflictError(
       `"${row.label}" is the default account for new projects, so it can't be archived`,
+    );
+  // Read through the settings directly: `judge-config.ts` imports this module.
+  const decisions = JudgeConfig.safeParse(getAppSetting(ctx.tx, 'judge'));
+  if (decisions.success && decisions.data.accountId === id)
+    throw new ConflictError(
+      `"${row.label}" answers Decisions: switch Decisions to another account first`,
     );
   const bound = ctx.tx
     .select({ name: schema.projects.name })

@@ -749,7 +749,7 @@ describe('judgeHookCall with the session judge', () => {
                   ),
                 );
               },
-              readKey: () => Promise.resolve('router-key-0123'),
+              readCredential: () => Promise.resolve({ kind: 'openrouter', key: 'router-key-0123' }),
               decisionModelIds: () => new Set(['typesafe/jev-1.13']),
               off: false,
               logger: silentLogger,

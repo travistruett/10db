@@ -104,7 +104,8 @@ function judge() {
       if (model === null || model === 'no_key') throw new Error('no request was expected');
       return Promise.resolve(json(answering(model.choice, model.p)));
     },
-    readKey: () => Promise.resolve(model === 'no_key' ? null : 'router-key-0123'),
+    readCredential: () =>
+      Promise.resolve(model === 'no_key' ? null : { kind: 'openrouter', key: 'router-key-0123' }),
     decisionModelIds: () => new Set(['typesafe/jev-1.13']),
     off: false,
     logger: silentLogger,
@@ -441,7 +442,7 @@ describe('the hook judge, attended', () => {
   it('the floor calls onFloor with its detail', async () => {
     model = 'no_key';
     await run(hookJudge(), bash(DEPLOY));
-    expect(floors).toEqual(['No OpenRouter key is set']);
+    expect(floors).toEqual(['No key or credential is set for the account Decisions run on']);
   });
 
   it("a grant added mid-session reaches the next call's state, and one removed is gone from it", async () => {
