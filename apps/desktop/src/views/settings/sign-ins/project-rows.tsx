@@ -1,5 +1,5 @@
 import { LinearVia, type LinearSignInRowDto, type ProjectDto } from '@10db/contracts';
-import { Button, Group, Stack, Switch, Text, TextInput } from '@mantine/core';
+import { Button, Divider, Group, Stack, Switch, Text, TextInput } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import { useState, type ReactNode } from 'react';
 import { useSlackConnection } from '../../../daemon/people';
@@ -11,24 +11,35 @@ import {
   useUnlinkLinear,
 } from '../../../daemon/sign-in-queries';
 
-/** One project on an integration's card: its name on the left, at most one control on the right. */
-function ProjectRow({
+/** One project on an integration's card, on one line: its name on the left, what it has on the right. */
+export function ProjectRow({
   name,
   control,
   children,
 }: {
   readonly name: string;
   readonly control?: ReactNode;
+  /** Under the line, for a failure only. */
   readonly children?: ReactNode;
 }) {
   return (
-    <Stack gap={4}>
-      <Group justify="space-between" wrap="nowrap" mih={30}>
+    <Stack gap={2}>
+      <Group justify="space-between" wrap="nowrap" mih={36}>
         <Text size="sm" fw={500}>
           {name}
         </Text>
         {control}
       </Group>
+      {children}
+    </Stack>
+  );
+}
+
+/** The projects of a card: a thin divider above the first, then one row each. */
+export function ProjectRows({ children }: { readonly children: ReactNode }) {
+  return (
+    <Stack gap={0}>
+      <Divider mb={4} />
       {children}
     </Stack>
   );
@@ -95,102 +106,87 @@ export function LinearProjectRow({
         ? cancel.error.message
         : null;
   const bound = linear.binding;
+  const key = (
+    <Group gap="xs" wrap="nowrap">
+      <TextInput
+        size="xs"
+        aria-label={`Linear team key for ${project.name}`}
+        placeholder="Team key, such as AMP"
+        value={teamKey}
+        onChange={(event) => {
+          setTeamKey(event.currentTarget.value);
+        }}
+      />
+      <Button
+        size="xs"
+        loading={check.isPending}
+        disabled={teamKey.trim() === ''}
+        onClick={() => {
+          check.mutate(teamKey);
+        }}
+      >
+        {refused === null && ended === null ? 'Link' : 'Link again'}
+      </Button>
+    </Group>
+  );
+  const button = (label: string, loading: boolean, onClick: () => void) => (
+    <Button variant="default" size="xs" loading={loading} onClick={onClick}>
+      {label}
+    </Button>
+  );
   let control: ReactNode;
   if (bound !== null)
     control = (
-      <Button
-        variant="default"
-        size="xs"
-        loading={unlink.isPending}
-        onClick={() => {
+      <Group gap="sm" wrap="nowrap">
+        <Text size="sm" c="dimmed">
+          {bound.workspaceName} · {bound.teamKey}
+        </Text>
+        {button('Unlink', unlink.isPending, () => {
           unlink.mutate();
-        }}
-      >
-        Unlink
-      </Button>
-    );
-  else if (checking !== null)
-    control = (
-      <Button
-        variant="default"
-        size="xs"
-        loading={cancel.isPending}
-        onClick={() => {
-          cancel.mutate();
-        }}
-      >
-        Cancel
-      </Button>
-    );
-  let line: ReactNode = null;
-  if (bound !== null)
-    line = (
-      <Text size="sm" c="dimmed">
-        {bound.workspaceName} · {bound.teamKey}
-      </Text>
+        })}
+      </Group>
     );
   else if (none)
-    line = (
-      <Text size="sm" c="dimmed">
+    control = (
+      <Text size="sm" c="dimmed" ta="right" maw={420}>
         {row.note ?? "This project's account has no Linear sign-in."}
       </Text>
     );
   else if (checking !== null)
-    line = (
-      <Text size="sm" c="dimmed">
-        Checking {checking.teamKey} in{' '}
-        <Link to="/sessions" search={{ chat: checking.chatId }}>
-          its session
-        </Link>
-        .
-      </Text>
+    control = (
+      <Group gap="sm" wrap="nowrap">
+        <Text size="sm" c="dimmed">
+          <Link to="/sessions" search={{ chat: checking.chatId }}>
+            Checking {checking.teamKey}…
+          </Link>
+        </Text>
+        {button('Cancel', cancel.isPending, () => {
+          cancel.mutate();
+        })}
+      </Group>
     );
-  else if (ended !== null)
-    line = (
-      <Text size="sm" c="red">
+  else control = key;
+  const note =
+    ended !== null ? (
+      <Text size="xs" c="red">
         The check ended without an answer.{' '}
         <Link to="/sessions" search={{ chat: ended.chatId }}>
           Open its session
         </Link>
         .
       </Text>
-    );
-  else if (refused !== null)
-    line = (
-      <Text size="sm" c="red">
+    ) : refused !== null ? (
+      <Text size="xs" c="red">
         {refused.reason}
       </Text>
-    );
-  const asksForTeam = bound === null && !none && checking === null;
+    ) : failure !== null ? (
+      <Text size="xs" c="red">
+        {failure}
+      </Text>
+    ) : null;
   return (
     <ProjectRow name={project.name} control={control}>
-      {line}
-      {asksForTeam ? (
-        <Group gap="xs" wrap="nowrap">
-          <TextInput
-            aria-label={`Linear team key for ${project.name}`}
-            placeholder="Team key, such as AMP"
-            value={teamKey}
-            onChange={(event) => {
-              setTeamKey(event.currentTarget.value);
-            }}
-          />
-          <Button
-            loading={check.isPending}
-            disabled={teamKey.trim() === ''}
-            onClick={() => {
-              check.mutate(teamKey);
-            }}
-          >
-            {refused === null && ended === null ? 'Link' : 'Link again'}
-          </Button>
-        </Group>
-      ) : null}
-      {failure === null ? null : (
-        <Text size="xs" c="red">
-          {failure}
-        </Text>
-      )}
+      {note}
     </ProjectRow>
   );
 }

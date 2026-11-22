@@ -13,7 +13,8 @@ export function IntegrationsSection() {
   return (
     <Stack>
       <Text c="dimmed" size="sm">
-        Outside services 10db uses that aren't models. Model access is in Accounts.
+        Outside services 10db uses that aren't models. Without one, what needs it waits or stays in
+        your Inbox. Model access is in Accounts.
       </Text>
       <GithubCard />
       <SlackCard />

@@ -3,46 +3,46 @@ import type { ReactNode } from 'react';
 import { useFocusTarget } from '../focus-target';
 
 /**
- * One outside service in Settings › Integrations, in four parts: the service's mark and name with its state
- * and identity beside them, what 10db uses it for, its actions, and what stops without it. A link with
- * `?focus=<focusName>` lands on the card.
+ * One outside service on Settings › Integrations: the service's mark and name on the left, at most one control
+ * on the right (a ⋯ menu, a button), then its one dim state line and whatever the service needs under it. A link
+ * with `?focus=<focusName>` lands on the card.
  */
 export function IntegrationCard({
   mark,
   name,
-  status,
-  purpose,
-  withoutIt,
+  control,
   focusName,
   children,
 }: {
   readonly mark: ReactNode;
   readonly name: string;
-  /** The state and identity: a `ConnectionStatus`, or dimmed words while the state is still being read. */
-  readonly status: ReactNode;
-  readonly purpose: string;
-  readonly withoutIt: string;
+  readonly control?: ReactNode;
   readonly focusName: string;
-  /** The actions: connect, replace, remove. */
+  /** The state line, then anything the card needs under it. */
   readonly children?: ReactNode;
 }) {
   const { ref } = useFocusTarget<HTMLDivElement>(focusName);
   return (
     <Paper ref={ref} withBorder radius="md" p="md" aria-label={name} role="group">
-      <Stack gap="sm">
-        <Group justify="space-between" wrap="nowrap" align="flex-start">
+      <Stack gap="xs">
+        <Group justify="space-between" wrap="nowrap" mih={30}>
           <Group gap="sm" wrap="nowrap">
             {mark}
             <Text fw={600}>{name}</Text>
           </Group>
-          {status}
+          {control}
         </Group>
-        <Text size="sm">{purpose}</Text>
         {children}
-        <Text size="xs" c="dimmed">
-          {`Without it: ${withoutIt}`}
-        </Text>
       </Stack>
     </Paper>
+  );
+}
+
+/** The card's one state line. */
+export function StateText({ children }: { readonly children: ReactNode }) {
+  return (
+    <Text size="sm" c="dimmed">
+      {children}
+    </Text>
   );
 }
