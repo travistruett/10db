@@ -20,7 +20,7 @@ const LINEAR_HOST = 'mcp.linear.app';
 const HINT_CLAUDE_PLAN = 'Sign in to Linear in Claude Code: `/mcp`.';
 const HINT_CLAUDE_OTHER = "Add Linear's server to Claude Code, then `/mcp`.";
 const HINT_CODEX = 'Sign in in Settings › Trust.';
-const NOT_CHECKED = 'Your Linear sign-in is checked when you link a team.';
+const NOT_CHECKED = 'Your Linear sign-in is checked when the agent first uses it.';
 const NOT_READ = "Couldn't read this account's claude.ai connectors.";
 
 /** Whether a remote server's url is Linear's own host. */

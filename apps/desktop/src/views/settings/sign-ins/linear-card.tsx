@@ -24,8 +24,8 @@ export function LinearCard() {
         </Alert>
       ) : (
         <StateText>
-          Sign in inside Claude Code (`/mcp`, or the claude.ai Linear connector) or in Codex
-          (Settings › Trust).
+          Sign in inside Claude Code (/mcp, or the claude.ai Linear connector) or in Codex (Settings
+          › Trust).
         </StateText>
       )}
       {list.length === 0 ? null : (

@@ -7,14 +7,12 @@ import {
   type SlackMemberDto,
 } from '@10db/contracts';
 import {
-  dropPendingLinearPosts,
   getInboxItem,
   getProject,
   getPerson,
   getStakeholderTimers,
   questionRoutesForTask,
   removePerson,
-  setAppSetting,
   setStakeholderTimers,
   updatePerson,
 } from '@10db/db';
@@ -35,8 +33,8 @@ import {
 import {
   reporterBlockedBy,
   reporterSettings,
-  reporterSettingsKey,
   type LinearImport,
+  type LinearReporter,
 } from '../linear';
 
 /** The stakeholder side of the HTTP API: the Slack connection, people, timers, routes and sends. */
@@ -103,6 +101,7 @@ export function createStakeholderApiServices(deps: {
   /** The login `gh` is signed in as, from its last check; null when signed out. */
   readonly githubLogin: () => Promise<string | null>;
   readonly linear: LinearImport;
+  readonly reporter: Pick<LinearReporter, 'setSettings'>;
 }): StakeholderApiServices {
   const integrationsOf = async (projectId: ProjectId): Promise<ProjectIntegrationsDto> => {
     getProject(deps.state.db, projectId);
@@ -180,11 +179,7 @@ export function createStakeholderApiServices(deps: {
 
     setLinearReporter: async (projectId, input) => {
       getProject(deps.state.db, projectId);
-      deps.state.write((ctx) => {
-        setAppSetting(ctx, reporterSettingsKey(projectId), input);
-        // Setting writes emit no event, so the owed updates are dropped here.
-        if (!input.on) dropPendingLinearPosts(ctx, { projectId });
-      });
+      deps.reporter.setSettings(projectId, input);
       return integrationsOf(projectId);
     },
 

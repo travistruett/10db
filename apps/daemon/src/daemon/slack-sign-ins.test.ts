@@ -59,6 +59,7 @@ describe('Slack sign-ins by workspace', () => {
       reconnect: () => Promise.resolve(),
       githubLogin: () => Promise.resolve(null),
       linear: { startImport: () => Promise.reject(new Error('not used')) },
+      reporter: { setSettings: () => undefined },
     });
     await services.setSlackToken({ token: 'xoxb-new' });
 

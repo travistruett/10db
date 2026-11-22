@@ -43,7 +43,7 @@ export const LinearPostDto = z.strictObject({
 });
 export type LinearPostDto = z.infer<typeof LinearPostDto>;
 
-/** `linear-reporter.<projectId>` in app_settings; absent reads as { on: false, note: '' }; a new link writes on. */
+/** `linear-reporter.<projectId>` in app_settings; absent reads as { on: true, note: '' }; a malformed value reads as off. */
 export const LinearReporterSettings = z.strictObject({
   on: z.boolean(),
   note: z.string().max(4000),
@@ -61,6 +61,8 @@ export const ReportLinearPostInput = z.strictObject({
     }),
     /** Only accepted when the guard refused a write with this pattern in this run. */
     z.strictObject({ state: z.literal('withheld'), pattern: z.string() }),
+    /** A Linear error that stopped the update, such as an issue that was not found; the row is tried again later. */
+    z.strictObject({ state: z.literal('failed'), reason: z.string().min(1).max(500) }),
   ]),
 });
 export type ReportLinearPostInput = z.infer<typeof ReportLinearPostInput>;
