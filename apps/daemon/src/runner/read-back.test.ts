@@ -101,7 +101,7 @@ function message(body: string, uuids: readonly string[] | 'by id'): TaskMessageI
 function thread(held: readonly string[] | string) {
   const reads: ConversationReadSpec[] = [];
   const adapter: Pick<AgentAdapter, 'readClientUuids' | 'capabilities'> = {
-    capabilities: (a, model) => capabilitiesOf(a.kind, model),
+    capabilities: (a, model) => capabilitiesOf(a, model),
     readClientUuids: (spec) => {
       reads.push(spec);
       return typeof held === 'string'
@@ -318,7 +318,7 @@ describe('reading a Codex thread back before it is resumed', () => {
     const m = message('m', [U1]);
     const stop = new AbortController();
     const adapter: Pick<AgentAdapter, 'readClientUuids' | 'capabilities'> = {
-      capabilities: (a, model) => capabilitiesOf(a.kind, model),
+      capabilities: (a, model) => capabilitiesOf(a, model),
       readClientUuids: (spec) =>
         new Promise((_, reject) => {
           spec.signal?.addEventListener('abort', () => {

@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AccountKind, idUuid, mintId, type TaskId } from '@10db/contracts';
+import { AccountKind, idUuid, mintId, Provider, type TaskId } from '@10db/contracts';
 import {
   createTestStore,
   getTaskMessageRow,
@@ -82,6 +82,7 @@ function startSession(adapter: FakeAdapter): SessionHandle {
       accountId: mintId('Account'),
       label: 'Claude plan',
       kind: AccountKind.ClaudeSubscription,
+      harness: Provider.Claude,
       identity: null,
     },
     projectMcpServers: {},

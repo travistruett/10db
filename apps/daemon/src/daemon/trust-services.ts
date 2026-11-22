@@ -6,8 +6,7 @@ import {
   YourMcpServerState,
   YourMcpSource,
   Provider,
-  agentKind,
-  providerOf,
+  requireHarness,
   type LiveSystemsDto,
   type ProjectId,
   type ProjectTrustDto,
@@ -234,8 +233,7 @@ export function createTrustServices(deps: {
           }
         : await deps.laneSandbox.judgeSetup(project, plan.input, checkouts);
     // Codex takes a plugin's skills and nothing else of it: the preview says what the session gets.
-    const codex =
-      providerOf(agentKind(getAccountRow(db, project.accountId).kind)) === Provider.Codex;
+    const codex = requireHarness(getAccountRow(db, project.accountId)) === Provider.Codex;
     return {
       skills: [...judged.loaded.skills, ...projectSkills(plan.input.projectFiles)],
       plugins: judged.loaded.plugins.map((id) => (codex ? `${id} (its skills only)` : id)),

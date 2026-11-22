@@ -60,6 +60,11 @@ export const CHAT_TOOL_DESCRIPTIONS: Readonly<Record<ChatToolName, string>> = Ob
         name,
         'Name this session in at most 28 characters, in sentence case, with no trailing period. Call it once, after your first reply.',
       ];
+    if (name === ChatToolName.LinkLinearTeam)
+      return [
+        name,
+        "Reports the Linear workspace this sign-in reaches and the team a link check asked for, once, when the builder pressed Link on the project's Linear card. team is null when the workspace has no such team. Refused in any session that is not that check.",
+      ];
     const git = GIT_DESCRIPTIONS[name];
     if (git !== undefined) return [name, git];
     const words = BUILDER_DESCRIPTIONS.get(name) ?? '';

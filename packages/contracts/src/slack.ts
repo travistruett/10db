@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { SECRET_CHARACTERS } from './accounts';
+import { ProjectLinearDto } from './external';
 import { GoalId, InboxItemId, PersonId, StakeholderSendId, TaskId } from './ids';
 import { QuestionCategory, SendState } from './states';
 import { PersonDto } from './team';
@@ -43,7 +44,7 @@ export const StakeholderSendDto = z.object({
   returnedAt: z.iso.datetime().nullable(),
   returnedReason: z.enum(['timer', 'disagreed']).nullable(),
   /** Why a draft waits for the builder. */
-  heldBy: z.enum(['review', 'first_send', 'limit', 'scan']).nullable(),
+  heldBy: z.enum(['review', 'first_send', 'limit', 'scan', 'slack_off']).nullable(),
   /** The option a settled conversation landed on, waiting for a recipient to approve it. */
   proposal: z.object({ choice: z.string(), confidence: z.number() }).nullable(),
   askedWhichWay: z.boolean(),
@@ -122,3 +123,37 @@ export type SlackTokenInput = z.infer<typeof SlackTokenInput>;
 /** `GET /inbox/:id/compose`: the message a question would be for these people, and what the scan holds. */
 export const ComposePreviewDto = z.object({ text: z.string(), hits: z.array(OutboundHit) });
 export type ComposePreviewDto = z.infer<typeof ComposePreviewDto>;
+
+/** One signed-in Slack workspace; its bot token is in the Keychain under the workspace's team id. */
+export const SlackWorkspace = z.strictObject({ teamId: z.string().min(1), teamName: z.string() });
+export type SlackWorkspace = z.infer<typeof SlackWorkspace>;
+
+/** The `slack.workspaces` setting: every signed-in workspace. */
+export const SlackWorkspaces = z.array(SlackWorkspace);
+export type SlackWorkspaces = z.infer<typeof SlackWorkspaces>;
+
+/** A project's `slack.<projectId>` setting: the workspace it sends through, or null for the builder's "off". */
+export const ProjectSlackSetting = z.strictObject({ teamId: z.string().min(1).nullable() });
+export type ProjectSlackSetting = z.infer<typeof ProjectSlackSetting>;
+
+/** What Slack is for a project: its workspace, and whether that is the automatic binding to the only one. */
+export const ProjectSlackDto = z.strictObject({
+  teamId: z.string().nullable(),
+  teamName: z.string().nullable(),
+  auto: z.boolean(),
+});
+export type ProjectSlackDto = z.infer<typeof ProjectSlackDto>;
+
+/** `GET /projects/:projectId/integrations`: the GitHub login the project uses and its Slack workspace. */
+export const ProjectIntegrationsDto = z.strictObject({
+  github: z.strictObject({ login: z.string().nullable() }),
+  slack: ProjectSlackDto,
+  linear: ProjectLinearDto,
+});
+export type ProjectIntegrationsDto = z.infer<typeof ProjectIntegrationsDto>;
+
+/** `PUT /projects/:projectId/integrations`: the workspace the project sends through, or null for off. */
+export const ProjectIntegrationsInput = z.strictObject({
+  slack: ProjectSlackSetting,
+});
+export type ProjectIntegrationsInput = z.infer<typeof ProjectIntegrationsInput>;

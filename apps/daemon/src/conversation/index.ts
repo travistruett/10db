@@ -52,6 +52,7 @@ export {
 export {
   STRICTEST_LIMITS,
   pictureLimitsFor,
+  rememberOpenRouterInputs,
   poolBytes,
   type PictureLimits,
 } from './picture-limits';

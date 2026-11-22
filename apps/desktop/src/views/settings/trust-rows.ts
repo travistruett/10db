@@ -19,7 +19,7 @@ const ROWS: Readonly<Record<TrustSwitchKey, Omit<TrustRow, 'key'>>> = {
     label: 'Web',
     description: `Lets sessions search and fetch the web. ${NEXT}`,
     providers:
-      "On: Claude in auto mode judges each search and fetch, with no card; Claude through a gateway, or on a model auto mode doesn't run, is judged by 10db's judge. Off: no session searches or fetches without asking.",
+      "On: Claude in auto mode judges each search and fetch, with no card; Claude on a model auto mode doesn't run is judged by 10db's judge. Off: no session searches or fetches without asking.",
     whileOn:
       "Codex searches the web live on OpenAI's servers, so 10db's judge doesn't see a search or page URL before it is fetched.",
   },
@@ -54,7 +54,7 @@ const ROWS: Readonly<Record<TrustSwitchKey, Omit<TrustRow, 'key'>>> = {
     label: 'Your MCP servers',
     description: `The MCP servers in your ~/.claude.json, ~/.codex/config.toml and plugins. Each runs as Claude Code runs it, outside 10db's sandbox, from your home folder, and every call to it is judged. ${NEXT}`,
     providers:
-      "Claude and Codex sessions both get every approved server. Tool filters from config.toml apply in Codex sessions only. Servers that sign in with OAuth use the sign-in Claude Code or Codex keeps. On a Gateway account they don't run yet. Sessions on a Claude plan also get your claude.ai connectors. API key, Bedrock and Codex sessions don't, yet.",
+      "Claude and Codex sessions both get every approved server. Tool filters from config.toml apply in Codex sessions only. Servers that sign in with OAuth use the sign-in Claude Code or Codex keeps. Sessions on a Claude plan also get your claude.ai connectors. API key, Bedrock and Codex sessions don't, yet.",
     whileOn: null,
   },
   projectSkills: {
@@ -80,7 +80,7 @@ export const JUDGE_LABELS: Readonly<Record<JudgeKind, string>> = {
 
 /** A tendb row while 10db's judge can't answer: no key, or a switch off. */
 export const TENDB_NOT_READY_LABEL =
-  "10db's rules: add an OpenRouter key in Settings › Decisions for 10db's judge";
+  "10db's rules: pick an account in Settings › Decisions for 10db's judge";
 
 /** The Judge list's note: who 10db's judge judges. */
 export const JUDGE_LIST_NOTE = "Accounts without auto mode, and Codex, use 10db's judge.";

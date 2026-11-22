@@ -1,7 +1,7 @@
 import type { BenchmarkStatusDto } from '@10db/contracts';
 import { Button, Group, PasswordInput, Skeleton, Stack, Text } from '@mantine/core';
 import { IconGauge } from '@tabler/icons-react';
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { removeBenchmarkKey, sendBenchmarkKey } from '../../../daemon/benchmark-secret';
 import {
   benchmarkKeys,
@@ -13,36 +13,20 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ConfirmModal } from '../../../shell/confirm-modal';
 import { shortAgo } from '../../factory/short-ago';
 import { ArtificialAnalysisCredit } from '../artificial-analysis-credit';
-import { ConnectionStatus, ConnectionTone } from '../connection-status';
-import { IntegrationCard } from './integration-card';
+import { IntegrationCard, StateText } from './integration-card';
 
 const KEY_FIELD = 'Artificial Analysis key';
 const LAST_GOOD = 'Routing uses the last good scores.';
 
-/** The state and identity on the card's header. */
-function headline(status: BenchmarkStatusDto): ReactNode {
-  if (status.off)
-    return (
-      <ConnectionStatus
-        tone={ConnectionTone.Off}
-        label="Off: 10db was started with TENDB_BENCHMARKS=off"
-      />
-    );
-  if (!status.keyConfigured)
-    return <ConnectionStatus tone={ConnectionTone.NeedsYou} label="No key" />;
-  if (status.syncing)
-    return (
-      <Text size="sm" c="dimmed">
-        Checking the key…
-      </Text>
-    );
-  if (status.outcome === 'unauthorized')
-    return <ConnectionStatus tone={ConnectionTone.NeedsYou} label="AA refused this key" />;
-  const synced =
-    status.lastSuccessAt === null
-      ? 'Key set'
-      : `Key set · synced ${shortAgo(status.lastSuccessAt)} · ${String(status.models)} models`;
-  return <ConnectionStatus tone={ConnectionTone.Works} label={synced} />;
+/** The card's state line, in words. */
+function headline(status: BenchmarkStatusDto): string {
+  if (status.off) return 'Off: 10db was started with TENDB_BENCHMARKS=off';
+  if (!status.keyConfigured) return 'No key.';
+  if (status.syncing) return 'Checking the key…';
+  if (status.outcome === 'unauthorized') return 'AA refused this key.';
+  return status.lastSuccessAt === null
+    ? 'Key set'
+    : `Key set · synced ${shortAgo(status.lastSuccessAt)} · ${String(status.models)} models`;
 }
 
 /** A sync that failed or was limited, said quietly: the key itself is fine. */
@@ -186,28 +170,18 @@ export function AaCard() {
   const status = query.data;
   const note = status ? syncNote(status) : null;
   // The card appears once its state is read, so a link's focus lands on its controls.
-  if (!status && !query.isError) return <Skeleton height={160} radius="md" />;
+  if (!status && !query.isError) return <Skeleton height={90} radius="md" />;
   return (
     <IntegrationCard
       mark={<IconGauge size={20} stroke={1.5} aria-hidden />}
       name="Artificial Analysis"
       focusName="artificial-analysis"
-      status={
-        status ? (
-          headline(status)
-        ) : (
-          <ConnectionStatus tone={ConnectionTone.NeedsYou} label="Couldn't read this" />
-        )
-      }
-      purpose="Scores each model's intelligence and speed, so 10db can pick a model for each role."
-      withoutIt="Models are compared without scores: each role takes its tier's model at its default effort."
     >
+      <StateText>
+        {status ? headline(status) : "Couldn't read this."}
+        {note === null ? '' : ` ${note}`}
+      </StateText>
       {status && !status.off ? <Actions status={status} /> : null}
-      {note ? (
-        <Text size="xs" c="dimmed">
-          {note}
-        </Text>
-      ) : null}
       <Text size="xs" c="dimmed">
         <ArtificialAnalysisCredit />
       </Text>

@@ -26,8 +26,7 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
   (stored, else snapshot) before it returns, whatever `catalogueSync` says, so a daemon that never fetches still plans
   and launches on real models. Every launcher that sets `TENDB_CATALOGUE=off` also sets this to
   `test/fixtures/catalogue.json`, and `tests/repo/src/benchmarks-off.test.ts` checks it.
-- `TENDB_JUDGE=off` keeps a daemon from reading any OpenRouter account's key (or the `openrouter-api-key` item
-  that `moveOpenRouterKey` moves into an account at start) and from calling OpenRouter (`judgeOff` in
+- `TENDB_JUDGE=off` keeps a daemon from reading any OpenRouter account's key and from calling OpenRouter (`judgeOff` in
   `daemonOptionsFromEnv`; every decision then keeps today's rule), and keeps the OpenRouter sync (`benchmarks/openrouter-sync.ts`) from running. Only the installed app's daemon asks models;
   the e2e web server, the live acceptance daemon and `scripts/dev.sh` set it, and
   `tests/repo/src/benchmarks-off.test.ts` checks they do. A new launcher of a throwaway daemon sets it too.

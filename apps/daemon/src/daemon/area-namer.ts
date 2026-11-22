@@ -1,11 +1,18 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { agentKind, isModelTier, ModelTier, providerOf, StepRole } from '@10db/contracts';
+import {
+  harnessOf,
+  isModelTier,
+  ModelTier,
+  Provider,
+  requireHarness,
+  StepRole,
+} from '@10db/contracts';
 import { defaultAccountId, getAccountRow, listAccountModels, type DbReader } from '@10db/db';
 import type { Launcher } from '../environment';
 import type { AreaNamer } from '../folders';
 import { chooseModel } from '../routing';
-import { CompletionError, type AgentAdapter } from '../sessions';
+import { CODEX_NO_QUESTIONS, CompletionError, type AgentAdapter } from '../sessions';
 import { routingInputs } from '../team';
 
 /** The tier that names areas: a cheap, quick model, since naming and merging a few dozen candidates needs no more. */
@@ -20,18 +27,26 @@ export interface AreaNamerDeps {
 }
 
 /**
- * Asks the default account's model to name and merge area candidates. The question starts in a new
+ * Asks a model of the project's account (the default account for a folder that is not yet a project) to name
+ * and merge area candidates. The question starts in a new
  * empty folder of 10db's own and carries paths as text: the model gets no tool and no project file,
  * so nothing of the repository is read or run on its behalf.
  */
 export function createAreaNamer(deps: AreaNamerDeps): AreaNamer {
-  return async (prompt, signal) => {
-    const id = defaultAccountId(deps.db);
+  return async (prompt, signal, accountId) => {
+    let id = accountId ?? defaultAccountId(deps.db);
     if (id === null) throw new CompletionError('There is no default account to ask.');
+    // A Codex adapter answers no one-shot question, so the default account is asked in its place.
+    if (harnessOf(getAccountRow(deps.db, id)) === Provider.Codex) {
+      const fallback = defaultAccountId(deps.db);
+      if (fallback === null || harnessOf(getAccountRow(deps.db, fallback)) === Provider.Codex)
+        throw new CompletionError(CODEX_NO_QUESTIONS);
+      id = fallback;
+    }
     const account = getAccountRow(deps.db, id);
     // The tier's model on this account, by the tier's default and never by score, so naming is never refused.
     const choice = chooseModel({
-      ...routingInputs(deps.db, { accountId: id, provider: providerOf(agentKind(account.kind)) }),
+      ...routingInputs(deps.db, { accountId: id, provider: requireHarness(account) }),
       def: { role: StepRole.Plan, need: 0 },
       requirements: [{ kind: 'automatic' }],
       effort: null,

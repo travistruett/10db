@@ -41,9 +41,8 @@ function seed(): void {
   sql(`INSERT INTO app_settings (key, value, updated_at) VALUES ('playbook.moved', 'true', ?)`, AT);
   sql(
     `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, created_at, updated_at)
-     VALUES ('acc_a', 'gateway', 'both', 'me', ?, 2, ?, ?)`,
+     VALUES ('acc_a', 'anthropic_api_key', 'both', 'me', ?, 2, ?, ?)`,
     JSON.stringify({
-      baseUrl: 'https://gw.example/api',
       tierOverrides: { fast: 'small', balanced: 'mid', strongest: 'large' },
     }),
     AT,
@@ -57,8 +56,8 @@ function seed(): void {
   );
   sql(
     `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, created_at, updated_at)
-     VALUES ('acc_c', 'gateway', 'one', 'me', ?, 2, ?, ?)`,
-    JSON.stringify({ baseUrl: 'https://gw.example/api', tierOverrides: { strongest: 'only' } }),
+     VALUES ('acc_c', 'anthropic_api_key', 'one', 'me', ?, 2, ?, ?)`,
+    JSON.stringify({ tierOverrides: { strongest: 'only' } }),
     AT,
     AT,
   );
@@ -271,7 +270,6 @@ describe('the migration that turns three model tiers into four rungs', () => {
         [
           'acc_a',
           {
-            baseUrl: 'https://gw.example/api',
             tierOverrides: {
               balanced: 'mid',
               efficient: 'small',
@@ -284,7 +282,6 @@ describe('the migration that turns three model tiers into four rungs', () => {
         [
           'acc_c',
           {
-            baseUrl: 'https://gw.example/api',
             tierOverrides: { capable: 'only', frontier: 'only' },
           },
         ],

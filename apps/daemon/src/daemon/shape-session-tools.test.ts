@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { AccountKind, mintId, ShapeOrigin } from '@10db/contracts';
+import { mintId, Provider, ShapeOrigin } from '@10db/contracts';
 import { createTestStore, insertPlanSession, seedProject, shapeConversation } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
@@ -111,7 +111,7 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
       shapeId: shape.id,
       conversationId: shapeConversation(state.db, shape.id).id,
       sessionId: mintId('Session'),
-      accountKind: AccountKind.AnthropicApiKey,
+      harness: Provider.Claude,
       env: {
         PATH: '/usr/bin:/bin',
         HOME: homeDir.path,

@@ -69,6 +69,8 @@ import {
   PersonId,
   SendInput,
   SlackTokenInput,
+  LinearCheckInput,
+  ProjectIntegrationsInput,
   StakeholderTimersDto,
   PersonaId,
   PersonaInput,
@@ -1589,6 +1591,41 @@ export function createApp(deps: ApiDeps) {
       async (c) => c.json(await deps.services.setSlackToken(c.req.valid('json'))),
     )
     .delete('/slack/token', async (c) => c.json(await deps.services.removeSlackToken()))
+    .get('/projects/:projectId/integrations', async (c) =>
+      c.json(await deps.services.projectIntegrations(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .put(
+      '/projects/:projectId/integrations',
+      validator('json', (value): ProjectIntegrationsInput => ProjectIntegrationsInput.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.setProjectIntegrations(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .post(
+      '/projects/:projectId/integrations/linear/check',
+      validator('json', (value): LinearCheckInput => LinearCheckInput.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.checkLinearTeam(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .post('/projects/:projectId/integrations/linear/import', async (c) =>
+      c.json(await deps.services.importFromLinear(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .delete('/projects/:projectId/integrations/linear/check', async (c) =>
+      c.json(await deps.services.cancelLinearCheck(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .delete('/projects/:projectId/integrations/linear', (c) =>
+      c.json(deps.services.unlinkLinear(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .get('/settings/sign-ins/linear', async (c) => c.json(await deps.services.linearSignIns()))
     .get('/slack/members', async (c) =>
       c.json(await deps.services.listSlackMembers(c.req.query('query') ?? '')),
     )

@@ -61,7 +61,7 @@ function seed(): void {
   sql(`INSERT INTO app_settings (key, value, updated_at) VALUES ('playbook.moved', 'true', ?)`, AT);
   sql(
     `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, created_at, updated_at)
-     VALUES ('acc_x', 'gateway', 'gw', 'me', ?, 2, ?, ?)`,
+     VALUES ('acc_x', 'anthropic_api_key', 'gw', 'me', ?, 2, ?, ?)`,
     JSON.stringify({
       baseUrl: 'https://gw.example/api',
       modelMap: { sonnet: 'gw-sonnet' },

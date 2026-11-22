@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { CHAT_MCP_TOOLS, chatProfile } from './hooks';
 import { CHAT_TOOL_POLICY } from './tool-policy';
 
-// Sessions spec §6.6: every builder tool is on a chat's server, plus set_title and the git tools; four ask the builder.
+// Sessions spec §6.6: every builder tool is on a chat's server, plus set_title, link_linear_team and the git tools; four ask the builder.
 
 const ASKS = ['remove_task', 'retire_knowledge', 'withdraw_knowledge', 'supersede_knowledge'];
 
@@ -18,6 +18,7 @@ describe('the chat tool policy', () => {
     [
       ...Object.values(BuilderToolName),
       ChatToolName.SetTitle,
+      ChatToolName.LinkLinearTeam,
       ...Object.values(ChatGitToolName),
     ].map((name) => ({ name })),
   )('$name has its policy', ({ name }) => {
@@ -28,7 +29,12 @@ describe('the chat tool policy', () => {
 
   it('names every builder tool, set_title and the git tools, and nothing else', () => {
     expect(new Set(Object.values(ChatToolName))).toEqual(
-      new Set([...Object.values(BuilderToolName), 'set_title', ...Object.values(ChatGitToolName)]),
+      new Set([
+        ...Object.values(BuilderToolName),
+        'set_title',
+        'link_linear_team',
+        ...Object.values(ChatGitToolName),
+      ]),
     );
     expect(new Set(Object.keys(CHAT_TOOL_POLICY))).toEqual(new Set(Object.values(ChatToolName)));
   });

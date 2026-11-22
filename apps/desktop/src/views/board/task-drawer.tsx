@@ -83,6 +83,7 @@ import { placementOpen } from './placement';
 import { PlacementBadge } from './placement-badge';
 import { PlacementChoice } from './placement-choice';
 import { ExternalLink, PullRequestLink } from './pull-request-link';
+import { TaskExternalLink } from './task-external-link';
 import { ordinal, runNextNote } from './queue-place';
 import { canRunNext } from './run-next';
 import { QuestionRoutesLine } from './question-routes-line';
@@ -800,6 +801,7 @@ function StatusLine({
             </>
           ) : null}
           {batch?.prUrl ? <PullRequestLink url={batch.prUrl} /> : null}
+          <TaskExternalLink task={task} />
           {ciLink ? <ExternalLink url={ciLink.url} label={ciLink.label} /> : null}
         </Group>
         <Group gap="xs">

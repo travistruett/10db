@@ -18,9 +18,10 @@ import { formatDecisionUsd } from './decision-numbers';
 function priceText(
   model: Pick<DecisionModelDto, 'inputUsdPerMillion' | 'outputUsdPerMillion'>,
 ): string {
+  if (model.inputUsdPerMillion === null) return 'Price unknown';
   if (model.inputUsdPerMillion === 0 && model.outputUsdPerMillion === 0) return 'Free';
   const input = `${formatDecisionUsd(model.inputUsdPerMillion)} per million input tokens`;
-  return model.outputUsdPerMillion === 0
+  return model.outputUsdPerMillion === 0 || model.outputUsdPerMillion === null
     ? input
     : `${input} · ${formatDecisionUsd(model.outputUsdPerMillion)} per million output tokens`;
 }
@@ -32,7 +33,7 @@ function byline(model: DecisionModelDto): string {
   return `${what} · ${priceText(model)}`;
 }
 
-/** The models by maker; a saved model OpenRouter no longer lists as a decision model stays pickable on its own. */
+/** The models by maker; a saved model the account no longer lists stays pickable on its own. */
 function optionGroups(
   models: readonly DecisionModelDto[],
   saved: string,
@@ -50,7 +51,7 @@ function optionGroups(
 }
 
 /**
- * A decision's model, picked from OpenRouter's decision models with each one's price. The daemon saves a pick only
+ * A decision's model, picked from the Decisions account's models with each one's price. The daemon saves a pick only
  * once the model has answered a test decision, so the field shows the pick while it is asked and the saved model
  * again when it is refused.
  */
@@ -81,8 +82,8 @@ export function DecisionModelPicker({
         {status.off ? null : (
           <Text size="xs" c="dimmed">
             {status.account === null
-              ? 'Add an OpenRouter key to pick another model: choose an account under Paid by.'
-              : 'Add an OpenRouter key to pick another model: set the key of the account decisions run on.'}
+              ? 'Pick another model once an account answers decisions: choose one under Paid by.'
+              : 'Pick another model once the account decisions run on has its key set.'}
           </Text>
         )}
       </Stack>
@@ -93,7 +94,7 @@ export function DecisionModelPicker({
       <Stack gap={2} align="flex-start">
         {savedText}
         <Text size="xs" c="red" role="alert">
-          OpenRouter&apos;s decision models could not be read.{' '}
+          The account&apos;s models could not be read.{' '}
           {models.error instanceof DaemonRequestError ? models.error.message : ''}
         </Text>
         <Button
@@ -133,7 +134,7 @@ export function DecisionModelPicker({
               <Stack gap={0} miw={0}>
                 <Text size="sm">{option.label}</Text>
                 <Text size="xs" c="dimmed" truncate>
-                  {model === undefined ? 'Not one of OpenRouter’s decision models' : byline(model)}
+                  {model === undefined ? 'Not one of the account’s models' : byline(model)}
                 </Text>
               </Stack>
               {checked === true ? (

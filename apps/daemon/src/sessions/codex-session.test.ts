@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AccountKind, JudgeKind, mintId } from '@10db/contracts';
+import { AccountKind, JudgeKind, mintId, Provider } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { testPolicy } from '../../test/fixtures';
 import { ManualClock } from '../clock';
@@ -118,6 +118,7 @@ function specOf(over: Partial<LaneSessionSpec> = {}): LaneSessionSpec {
       accountId: mintId('Account'),
       label: 'ChatGPT plan',
       kind: AccountKind.CodexSignin,
+      harness: Provider.Codex,
       identity: 'me@example.com · ws-1',
     },
     projectMcpServers: {},

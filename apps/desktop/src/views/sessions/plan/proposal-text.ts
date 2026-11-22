@@ -69,6 +69,7 @@ export function convertedLine(row: ShapeProposalDto, liveLine?: string): string 
       return 'Accepted · stored, sent when people arrive';
     case 'goal':
     case 'task':
+      if (row.converted?.alreadyOnBoard === true) return 'Already on the Board';
       return liveLine === undefined ? 'Accepted · on the Board' : `On the Board · ${liveLine}`;
     case 'change_task':
     case 'remove_task':
@@ -114,7 +115,8 @@ export function markText(row: ShapeProposalDto): string | null {
 export function kindChip(row: ShapeProposalDto): string | null {
   switch (row.kind) {
     case 'task':
-      return row.body.goalId === undefined ? null : 'Added';
+      // An issue drafted from Linear names its issue; a task added to a goal says so.
+      return row.body.external?.id ?? (row.body.goalId === undefined ? null : 'Added');
     case 'principle':
       return 'Principle';
     case 'remove_task':

@@ -85,11 +85,14 @@ export function GithubSignIn({
   label,
   filled,
   extra,
+  hideButton = false,
 }: {
   readonly label: 'Sign In' | 'Switch Account';
   /** The primary action of its surface: a filled button. */
   readonly filled: boolean;
   readonly extra?: ReactNode;
+  /** Show only the wait and gh's failure line: the card's menu starts the sign-in. */
+  readonly hideButton?: boolean;
 }) {
   const status = useGithubStatus().data;
   const start = useStartGithubSignin();
@@ -117,7 +120,7 @@ export function GithubSignIn({
           </Text>
         ) : null}
       </div>
-      {signingIn === null ? (
+      {signingIn === null && !hideButton ? (
         <Group gap="sm">
           <Button
             size="xs"

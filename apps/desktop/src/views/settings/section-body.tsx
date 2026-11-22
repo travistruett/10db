@@ -6,7 +6,7 @@ import { AgentSkillSection } from './agent-skill-section';
 import { AgentCopiesSection } from './agent-copies-section';
 import { BoardColumnsSection } from './board-columns-section';
 import { DecisionsSection } from './decisions-section';
-import { IntegrationsSection } from './integrations/integrations-section';
+import { IntegrationsSection } from './integrations-section';
 import { AppearanceSection } from './appearance-section';
 import { KeepAwakeSection } from './keep-awake-section';
 import { LanePermissionsSection } from './lane-permissions-section';

@@ -23,6 +23,7 @@ import {
   getDecision,
   getPrinciple,
   getShape,
+  getTaskByExternal,
   listRehearsals,
   listShapeAttachments,
   latestShapeAccept,
@@ -89,9 +90,28 @@ function convertedOf(
   const principleId = mine.find((l) => l.principleId !== null)?.principleId ?? null;
   const questionId = mine.find((l) => l.questionId !== null)?.questionId ?? null;
   const principle = principleId === null ? null : getPrinciple(db, principleId);
+  const taskIds = mine.flatMap((l) => (l.taskId === null ? [] : [l.taskId]));
+  // A task whose issue was already on the Board was skipped by Convert and has no link of its own.
+  const externals =
+    row.kind === 'task'
+      ? [ShapeProposalBody.task.parse(row.body).external]
+      : row.kind === 'goal'
+        ? ShapeProposalBody.goal.parse(row.body).tasks.map((t) => t.external)
+        : [];
+  const onBoard =
+    mine.length === 0 && externals.length > 0
+      ? externals.flatMap((external) =>
+          external === undefined
+            ? []
+            : (getTaskByExternal(db, getShape(db, row.shapeId).projectId, external) ?? []),
+        )
+      : [];
+  // Every task of the row is an issue already on the Board.
+  const skippedFor = onBoard.length > 0 && onBoard.length === externals.length ? onBoard : null;
   return {
     goalId: mine.find((l) => l.goalId !== null)?.goalId ?? null,
-    taskIds: mine.flatMap((l) => (l.taskId === null ? [] : [l.taskId])),
+    taskIds: skippedFor === null ? taskIds : skippedFor.map((t) => t.id),
+    ...(skippedFor === null ? {} : { alreadyOnBoard: true }),
     decisionId,
     ...(principleId === null ? {} : { principleId }),
     ...(questionId === null ? {} : { questionId }),

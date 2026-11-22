@@ -1,5 +1,4 @@
 import {
-  agentKind,
   ACCOUNT_CARD_DETAIL,
   AccountCardChoice,
   AccountKind,
@@ -8,6 +7,8 @@ import {
   accountDisplayName,
   BedrockSettings,
   needsSecret,
+  Provider,
+  requireHarness,
   signsInWithLogin,
   type AccountDto,
   type AccountId,
@@ -54,8 +55,8 @@ function detail(
 }
 
 /** The agent that runs the account's sessions, as a card names it; an account that runs none has no card. */
-const agentOf = (account: Pick<AccountRow, 'kind'>): string =>
-  agentKind(account.kind) === AccountKind.CodexSignin ? 'Codex' : 'Claude Code';
+const agentOf = (account: Pick<AccountRow, 'kind' | 'label' | 'settings'>): string =>
+  requireHarness(account) === Provider.Codex ? 'Codex' : 'Claude Code';
 
 function signInAgain(account: AccountRow): string {
   if (signsInWithLogin(account.kind)) return `Sign in again with: ${signInCommandFor(account)}`;

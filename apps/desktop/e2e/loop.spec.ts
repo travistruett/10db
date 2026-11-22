@@ -363,6 +363,30 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
     accounts.getByRole('row', { name: /Client B/ }).getByText('Needs a secret'),
   ).toBeVisible();
 
+  // An OpenRouter account runs Codex, so a project's Billing picker offers it. Saving its key would write
+  // the login Keychain, so the key's request is dropped: the account exists, and says its key wasn't saved.
+  await page.route(/\/accounts\/[^/]+\/secret$/, (route) => route.abort());
+  await page.getByRole('button', { name: 'Add Account' }).click();
+  await addAccount.getByLabel('Kind').click();
+  await page.getByRole('option', { name: 'OpenRouter key' }).click();
+  await addAccount.getByRole('textbox', { name: 'Label' }).fill('Router C');
+  await addAccount.getByLabel('OpenRouter key').fill('not-a-key');
+  await addAccount.getByRole('button', { name: 'Create' }).click();
+  await expect(addAccount.getByRole('alert')).toContainText("key wasn't saved");
+  await addAccount.getByRole('button', { name: 'Open Account' }).click();
+  await expect(addAccount).toBeHidden();
+  const routerC = page.getByRole('dialog', { name: /Router C/ });
+  await expect(routerC.getByText('No secret yet')).toBeVisible();
+  await routerC.getByRole('button', { name: 'Close' }).click();
+  await expect(accounts.getByRole('row', { name: /Router C/ })).toContainText('Runs Codex');
+  await page.unroute(/\/accounts\/[^/]+\/secret$/);
+  await chooseScope(page, 'This Project');
+  await page.getByRole('link', { name: /Billing/ }).click();
+  await page.getByRole('combobox', { name: 'Account', exact: true }).click();
+  await expect(page.getByRole('option', { name: /Router C/ })).toBeEnabled();
+  await page.keyboard.press('Escape');
+  await chooseScope(page, 'All Projects');
+
   await open(page, 'Board');
   // The new column is empty, so the Board folds it to a rail.
   await expect(page.getByRole('group', { name: 'Exploring, collapsed' })).toBeVisible();

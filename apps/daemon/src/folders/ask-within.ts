@@ -1,3 +1,4 @@
+import type { AccountId } from '@10db/contracts';
 import type { AreaNamer } from './propose-areas';
 
 /**
@@ -10,6 +11,7 @@ export async function askWithin(
   prompt: string,
   ms: number,
   caller?: AbortSignal,
+  accountId?: AccountId,
 ): Promise<string | null> {
   if (caller?.aborted === true) return null;
   const question = new AbortController();
@@ -28,7 +30,7 @@ export async function askWithin(
     );
   });
   try {
-    const asked = asker(prompt, question.signal);
+    const asked = asker(prompt, question.signal, accountId);
     asked.catch(() => undefined);
     return await Promise.race([asked, ended]);
   } catch {

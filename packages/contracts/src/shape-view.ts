@@ -50,6 +50,8 @@ export const ShapeConvertedDto = z.object({
   superseded: z.boolean().optional(),
   /** The converted principle was retired from the Knowledge view; absent for every other kind. */
   retired: z.boolean().optional(),
+  /** The task's issue was already a task on the Board, so Convert skipped it and `taskIds` holds that card. */
+  alreadyOnBoard: z.boolean().optional(),
 });
 export type ShapeConvertedDto = z.infer<typeof ShapeConvertedDto>;
 

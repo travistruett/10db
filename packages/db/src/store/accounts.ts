@@ -8,19 +8,20 @@ import {
   DEFAULT_ACCOUNT_LANE_CAP,
   EventType,
   InvalidError,
+  JudgeConfig,
   isMetered,
   mintId,
   needsSecret,
-  OPENROUTER_CANT_RUN_AGENTS,
   NotFoundError,
   parseAccountSettings,
+  requireHarness,
   type AccountDto,
   type AccountSettings,
 } from '@10db/contracts';
-import { and, asc, eq, ne } from 'drizzle-orm';
+import { and, asc, eq, isNull, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import * as schema from '../schema';
-import { getAppSetting, setAppSetting } from './settings';
+import { getAppSetting, JUDGE_SETTING_KEY, setAppSetting } from './settings';
 import type { DbReader, WriteContext } from './store';
 
 export type AccountRow = typeof schema.accounts.$inferSelect;
@@ -82,10 +83,9 @@ function refuseTakenLabel(db: DbReader, label: string, except: AccountId | null)
   if (taken) throw new ConflictError(`An account is already called "${label}"`);
 }
 
-/** An OpenRouter account answers decisions only: no project may run its agents, or back up, on one. */
-export function refuseOpenRouterForAgents(db: DbReader, id: AccountId): void {
-  if (getAccountRow(db, id).kind === AccountKind.OpenRouter)
-    throw new InvalidError(OPENROUTER_CANT_RUN_AGENTS);
+/** A project's account or backup must run a harness; a kind with none is refused with `requireHarness`'s message. */
+export function refuseAccountWithoutHarness(db: DbReader, id: AccountId): void {
+  requireHarness(getAccountRow(db, id));
 }
 
 export function findAccountRow(db: DbReader, id: AccountId): AccountRow | undefined {
@@ -118,8 +118,7 @@ export function insertAccount(
   const config = AccountInput.parse(input);
   refuseTakenLabel(ctx.tx, config.label, null);
   const id = mintId('Account');
-  // An OpenRouter account runs no session, so it has no directory and no lanes; the column is NOT NULL.
-  const settings = config.kind === AccountKind.OpenRouter ? {} : config.settings;
+  const settings = config.settings;
   const row: AccountRow = {
     id,
     kind: config.kind,
@@ -127,13 +126,13 @@ export function insertAccount(
     payer: config.payer,
     expectedIdentity: 'expectedIdentity' in config ? config.expectedIdentity : null,
     // Keyed kinds too: a session on the default account's directory would read its saved login and config.
-    configDir: config.kind === AccountKind.OpenRouter ? null : opts.configDirFor(id),
+    configDir: opts.configDirFor(id),
     secretRef: needsSecret(config.kind, parseAccountSettings(config.kind, settings))
       ? accountSecretRef(id)
       : null,
     secretFingerprint: null,
     settings,
-    laneCap: 'laneCap' in config ? config.laneCap : 0,
+    laneCap: config.laneCap,
     monthlyCapUsd: 'monthlyCapUsd' in config ? config.monthlyCapUsd : null,
     archived: false,
     createdAt: ctx.now,
@@ -142,6 +141,32 @@ export function insertAccount(
   ctx.tx.insert(schema.accounts).values(row).run();
   saved(ctx, id, ['created']);
   return toDto(ctx.tx, row);
+}
+
+/**
+ * Gives each stored OpenRouter row that has no `config_dir` its own directory and the default lane cap, in one
+ * write: the builder's Decisions account was made before an OpenRouter account ran sessions. Returns the rows
+ * it changed, for the caller to make their directories.
+ */
+export function giveOpenRouterAccountsAHome(
+  ctx: WriteContext,
+  configDirFor: (id: AccountId) => string,
+): AccountRow[] {
+  const rows = ctx.tx
+    .select()
+    .from(schema.accounts)
+    .where(and(eq(schema.accounts.kind, AccountKind.OpenRouter), isNull(schema.accounts.configDir)))
+    .all();
+  return rows.map((row) => {
+    const configDir = configDirFor(row.id);
+    ctx.tx
+      .update(schema.accounts)
+      .set({ configDir, laneCap: DEFAULT_ACCOUNT_LANE_CAP, updatedAt: ctx.now })
+      .where(eq(schema.accounts.id, row.id))
+      .run();
+    saved(ctx, row.id, ['configDir', 'laneCap']);
+    return { ...row, configDir, laneCap: DEFAULT_ACCOUNT_LANE_CAP };
+  });
 }
 
 /** Settings checked against the account's own kind; a mismatch is the caller's mistake (400). */
@@ -162,15 +187,15 @@ export function patchAccount(ctx: WriteContext, id: AccountId, patch: AccountPat
   const row = getAccountRow(ctx.tx, id);
   if (row.archived) throw new ConflictError(`Account "${row.label}" is archived`);
   if (changes.label !== undefined) refuseTakenLabel(ctx.tx, changes.label, id);
-  if (changes.laneCap !== undefined && row.kind === AccountKind.OpenRouter)
-    throw new InvalidError('An OpenRouter account runs no lanes, so it has no lane cap');
   if (typeof changes.monthlyCapUsd === 'number' && !isMetered(row.kind))
-    throw new InvalidError('Only API-key, Bedrock and gateway accounts take a monthly dollar cap');
+    throw new InvalidError(
+      'Only metered accounts (an API key, Bedrock or OpenRouter) take a monthly dollar cap',
+    );
+  if (typeof changes.expectedIdentity === 'string' && row.kind === AccountKind.OpenRouter)
+    throw new InvalidError(
+      'An OpenRouter key is identified by its fingerprint, so it has no expected identity',
+    );
   if (typeof changes.expectedIdentity === 'string') {
-    if (row.kind === AccountKind.Gateway)
-      throw new InvalidError(
-        'A gateway account is identified by its key, not an expected identity',
-      );
     if (
       row.kind === AccountKind.ClaudeSubscription &&
       !Email.safeParse(changes.expectedIdentity).success
@@ -210,13 +235,19 @@ export function patchAccount(ctx: WriteContext, id: AccountId, patch: AccountPat
   return getAccount(ctx.tx, id);
 }
 
-/** Archiving is refused while a project binds the account, and for the default account. */
+/** Archiving is refused while a project binds the account, and for the default account and the one Decisions run on. */
 export function archiveAccount(ctx: WriteContext, id: AccountId): AccountDto {
   const row = getAccountRow(ctx.tx, id);
   if (row.archived) return getAccount(ctx.tx, id);
   if (defaultAccountId(ctx.tx) === id)
     throw new ConflictError(
       `"${row.label}" is the default account for new projects, so it can't be archived`,
+    );
+  // Read through the settings directly: `judge-config.ts` imports this module.
+  const decisions = JudgeConfig.safeParse(getAppSetting(ctx.tx, JUDGE_SETTING_KEY));
+  if (decisions.success && decisions.data.accountId === id)
+    throw new ConflictError(
+      `"${row.label}" answers Decisions: switch Decisions to another account first`,
     );
   const bound = ctx.tx
     .select({ name: schema.projects.name })

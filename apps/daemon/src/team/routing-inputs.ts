@@ -1,10 +1,4 @@
-import {
-  providerOf,
-  runsAgents,
-  type KindDto,
-  type ProjectDto,
-  type ProjectId,
-} from '@10db/contracts';
+import { harnessOf, type KindDto, type ProjectDto, type ProjectId } from '@10db/contracts';
 import {
   getAccount,
   getPlaybook,
@@ -25,13 +19,14 @@ export function routingInputs(
   project: Pick<ProjectDto, 'accountId' | 'provider'>,
 ): Pick<ChooseInput, 'profiles' | 'tierOverrides' | 'accountModels'> {
   const account = getAccount(db, project.accountId);
-  // The account decides which models a step can run on; the project's own provider only covers a kind
-  // 10db can no longer run.
-  const provider = runsAgents(account.kind) ? providerOf(account.kind) : project.provider;
+  // The account's harness decides which models a step can run on; the project's own provider only covers
+  // an account no harness runs.
+  const provider = harnessOf(account) ?? project.provider;
   const accountModels = listAccountModels(db, account.id);
   return {
     profiles: offeredProfiles(listModelProfiles(db), accountModels, provider),
-    tierOverrides: account.settings.tierOverrides ?? {},
+    tierOverrides:
+      'tierOverrides' in account.settings ? (account.settings.tierOverrides ?? {}) : {},
     accountModels,
   };
 }

@@ -82,6 +82,11 @@ export interface ConnectorDirectory {
     accountId: AccountId,
     env: Readonly<Record<string, string>>,
   ): Promise<readonly ClaudeConnector[] | null>;
+  /**
+   * The connectors the last probe of this account read, without starting one: undefined when none ran or the
+   * answer has expired, null when the last probe failed.
+   */
+  peek(accountId: AccountId): readonly ClaudeConnector[] | null | undefined;
   /** The MCP config that last refused this account's probe, or null when none did. */
   refusedPath(accountId: AccountId): string | null;
   /** Closes a probe in flight and empties the probe folder. */
@@ -325,6 +330,10 @@ export function createConnectorDirectory(deps: {
         });
       inFlight.set(accountId, started);
       return started;
+    },
+    peek(accountId) {
+      const cached = cache.get(accountId);
+      return cached !== undefined && cached.until > nowMs() ? cached.connectors : undefined;
     },
     refusedPath(accountId) {
       return cache.get(accountId)?.refusedPath ?? null;

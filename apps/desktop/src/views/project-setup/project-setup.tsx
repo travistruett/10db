@@ -1,4 +1,4 @@
-import { AccountId, Delivery, runsAgents, ToolName, type ProjectDto } from '@10db/contracts';
+import { AccountId, Delivery, harnessOf, ToolName, type ProjectDto } from '@10db/contracts';
 import { Stack, TextInput } from '@mantine/core';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
@@ -168,8 +168,8 @@ export function useProjectSetup(
   const block =
     inspection === null || !system.isSuccess ? null : pullRequestBlock({ ghLogin, inspection });
   const delivery = block !== null ? Delivery.Local : (deliveryChoice ?? Delivery.PullRequest);
-  // A project never runs on an OpenRouter account, so it neither defaults to one nor counts as a choice.
-  const agentAccounts = accounts.filter((a) => runsAgents(a.kind));
+  // A project never runs on an account no harness runs, so it neither defaults to one nor counts as a choice.
+  const agentAccounts = accounts.filter((a) => harnessOf(a) !== null);
   const accountId =
     accountChoice ?? agentAccounts.find((a) => a.isDefault)?.id ?? agentAccounts[0]?.id ?? null;
   const chooseAccount = agentAccounts.length > 1;

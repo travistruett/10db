@@ -8,7 +8,7 @@ import { AddAccountModal } from '../settings/accounts/add-account-modal';
 import { useProjectSetup } from '../project-setup/project-setup';
 import { useGithubLoginEnd } from '../../daemon/github-queries';
 import { useRecheckSystem } from '../../daemon/queries';
-import { GithubSignIn } from '../settings/integrations/github-sign-in';
+import { GithubSignIn } from '../settings/sign-ins/github-sign-in';
 import { SetupItem, SetupSection } from './setup-check';
 import { useSetupCheck } from './use-setup-check';
 

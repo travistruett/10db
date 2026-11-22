@@ -1,4 +1,4 @@
-import { AccountKind, Provider, providerOf, type AccountId, type SessionId } from '@10db/contracts';
+import { AccountKind, Provider, type AccountId, type SessionId } from '@10db/contracts';
 import type { AccountExpectation } from '../environment';
 import { onProfile } from './agent-profile';
 import { checkAccount, type SeenAccount } from './account-check';
@@ -73,13 +73,6 @@ function expectedSeen(expect: AccountExpectation): SeenAccount {
         apiProvider: 'bedrock',
         organization: expect.identity ?? undefined,
       };
-    case AccountKind.Gateway:
-      return {
-        ...NOTHING_SEEN,
-        apiProvider: 'firstParty',
-        apiKeySource: 'none',
-        tokenSource: 'ANTHROPIC_AUTH_TOKEN',
-      };
     case AccountKind.CodexSignin:
       return {
         ...NOTHING_SEEN,
@@ -87,6 +80,8 @@ function expectedSeen(expect: AccountExpectation): SeenAccount {
         subscriptionType: 'pro',
         apiProvider: 'chatgpt',
       };
+    case AccountKind.OpenRouter:
+      return NOTHING_SEEN;
   }
 }
 
@@ -211,8 +206,11 @@ export class FakeAdapter implements AgentAdapter {
   /** What the fake says it can do, over the agent's own: a test stages another agent's row. */
   capabilityOverrides: Partial<AgentCapabilities> = {};
 
-  capabilities(account: Pick<AccountExpectation, 'kind'>, model: string | null): AgentCapabilities {
-    return { ...capabilitiesOf(account.kind, model), ...this.capabilityOverrides };
+  capabilities(
+    account: Pick<AccountExpectation, 'kind' | 'harness'>,
+    model: string | null,
+  ): AgentCapabilities {
+    return { ...capabilitiesOf(account, model), ...this.capabilityOverrides };
   }
 
   /**
@@ -280,7 +278,7 @@ export class FakeAdapter implements AgentAdapter {
     return Promise.resolve({
       // Codex names the page to open; Claude Code opens the browser itself.
       authUrl:
-        providerOf(spec.kind) === Provider.Codex
+        spec.harness === Provider.Codex
           ? 'https://auth.openai.com/oauth/authorize?state=fake'
           : null,
       outcome,

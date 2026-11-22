@@ -23,7 +23,6 @@ export interface AccountFormValues {
   readonly region: string;
   readonly bedrockAuth: 'profile' | 'bearer';
   readonly awsProfile: string;
-  readonly baseUrl: string;
   /** The model ID the account runs for each tier; a tier that is absent or blank is chosen automatically. */
   readonly tierOverrides: Readonly<Partial<Record<ModelTier, string>>>;
 }
@@ -39,7 +38,6 @@ export function emptyAccountForm(kind: SupportedAccountKind): AccountFormValues 
     region: '',
     bedrockAuth: 'profile',
     awsProfile: '',
-    baseUrl: '',
     tierOverrides: {},
   };
 }
@@ -59,6 +57,7 @@ function settingsOf(values: AccountFormValues): Record<string, unknown> {
     case AccountKind.ClaudeSubscription:
     case AccountKind.AnthropicApiKey:
     case AccountKind.CodexSignin:
+    case AccountKind.OpenRouter:
       return choice;
     case AccountKind.Bedrock:
       return {
@@ -66,17 +65,10 @@ function settingsOf(values: AccountFormValues): Record<string, unknown> {
         region: values.region.trim(),
         awsProfile: values.bedrockAuth === 'profile' ? values.awsProfile.trim() : null,
       };
-    case AccountKind.Gateway:
-      return { ...choice, baseUrl: values.baseUrl.trim() };
-    case AccountKind.OpenRouter:
-      return {};
   }
 }
 
 function inputOf(values: AccountFormValues): Record<string, unknown> {
-  // An OpenRouter account holds a key and nothing else: no lanes, cap, identity or settings.
-  if (values.kind === AccountKind.OpenRouter)
-    return { kind: values.kind, label: values.label, payer: values.payer };
   const cap = values.monthlyCapUsd.trim();
   const organization = values.organization.trim();
   return {
@@ -85,7 +77,7 @@ function inputOf(values: AccountFormValues): Record<string, unknown> {
     payer: values.payer,
     laneCap: Number(values.laneCap.trim()),
     ...(isMetered(values.kind) && cap !== '' ? { monthlyCapUsd: Number(cap) } : {}),
-    ...(values.kind !== AccountKind.Gateway && isMetered(values.kind) && organization !== ''
+    ...(isMetered(values.kind) && values.kind !== AccountKind.OpenRouter && organization !== ''
       ? { expectedIdentity: organization }
       : {}),
     settings: settingsOf(values),
@@ -104,7 +96,6 @@ const FIELD_MESSAGE: Readonly<Record<string, string>> = {
   organization: 'Enter an organization of up to 200 characters, or leave it empty',
   region: 'Enter an AWS region such as us-west-2',
   awsProfile: 'Enter an AWS profile name: letters, digits, dots, dashes or underscores',
-  baseUrl: 'Enter an https URL with no credentials, query or fragment',
   tierOverrides: 'Enter a model ID of up to 200 characters, not a tier name',
 };
 const EMPTY_LABEL_MESSAGE = 'Enter a label';
@@ -151,8 +142,7 @@ export function formValuesOf(account: AccountDto): AccountFormValues {
     region: 'region' in settings ? settings.region : '',
     bedrockAuth: 'awsProfile' in settings && settings.awsProfile === null ? 'bearer' : 'profile',
     awsProfile: 'awsProfile' in settings ? (settings.awsProfile ?? '') : '',
-    baseUrl: 'baseUrl' in settings ? settings.baseUrl : '',
-    tierOverrides: settings.tierOverrides ?? {},
+    tierOverrides: 'tierOverrides' in settings ? (settings.tierOverrides ?? {}) : {},
   };
 }
 

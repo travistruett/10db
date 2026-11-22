@@ -8,7 +8,7 @@ import { sendAccountSecret } from './account-secret';
 
 describe('sendAccountSecret', () => {
   it('puts the secret to the account with the bearer token and parses the answer', async () => {
-    const account = accountDto({ kind: 'gateway', secretSet: true });
+    const account = accountDto({ kind: 'anthropic_api_key', secretSet: true });
     const seen: { path: string; auth: string | null; body: unknown }[] = [];
     server.use(
       http.put(daemonUrl('/accounts/:accountId/secret'), async ({ request, params }) => {

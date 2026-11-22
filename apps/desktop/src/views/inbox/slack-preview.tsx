@@ -223,6 +223,12 @@ export function SlackPreview({
             {`This looks like ${patternWords(hold)} (line ${String(hold.line)}). Edit it before it goes to ${names}.`}
           </Alert>
         ) : null}
+        {send.heldBy === 'slack_off' ? (
+          <Alert color="yellow" variant="light">
+            Slack is off for this project, so this question stays in your Inbox. Turn it on under
+            Settings › Integrations.
+          </Alert>
+        ) : null}
         {limitHeld ? (
           <Alert color="yellow" variant="light">
             {`${names} ${recipientCount > 1 ? 'have' : 'has'} had ${limit === null ? 'their limit of' : String(limit)} new questions today.`}

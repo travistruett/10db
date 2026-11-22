@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { Headline, Title, Why } from './entities';
+import { ExternalLink } from './external';
 import {
   DecisionId,
   DeviationId,
@@ -73,6 +74,8 @@ export const GoalBriefTask = z.object({
   criteria: z.array(z.string().min(1)).default([]),
   areas: z.array(z.string().min(1)).min(1),
   depends_on: z.array(BriefKey).default([]),
+  /** The tracker issue the task is made from. */
+  external: ExternalLink.optional(),
 });
 export type GoalBriefTask = z.infer<typeof GoalBriefTask>;
 

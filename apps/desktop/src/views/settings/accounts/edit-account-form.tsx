@@ -28,7 +28,6 @@ function mergedValues(
     region: pick('region'),
     bedrockAuth: pick('bedrockAuth'),
     awsProfile: pick('awsProfile'),
-    baseUrl: pick('baseUrl'),
     tierOverrides: pick('tierOverrides'),
   };
 }

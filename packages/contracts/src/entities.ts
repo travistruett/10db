@@ -3,6 +3,7 @@ import { USAGE_HANDOFF_AT, USAGE_HANDOFF_MAX, USAGE_HANDOFF_MIN } from './accoun
 import { AllowedCommands } from './allowed-commands';
 import { ModelSetting } from './catalogue';
 import { BranchName, PrTitlePrefix } from './git-names';
+import { ExternalLink } from './external';
 import { HyphenatedKey } from './keys';
 import { AreaRole, AreaRoute, PageLabel, areaRolesProblem } from './page-areas';
 import { EffectiveRigorSource, Rigor, RigorSource, TaskKind } from './rigor';
@@ -834,6 +835,8 @@ export const TaskInput = z.object({
   landing: TaskLanding.optional(),
   /** Where the task works; absent takes the project's default. A copy needs pull request delivery. */
   workspaceMode: z.enum(WorkspaceMode).optional(),
+  /** The tracker issue the task was made from; one issue is one task in a project. */
+  external: ExternalLink.optional(),
 });
 export type TaskInput = z.input<typeof TaskInput>;
 export type TaskConfig = z.output<typeof TaskInput>;
@@ -904,6 +907,8 @@ export const TaskDto = z.object({
    * puts back; absent or false for none.
    */
   keptWork: z.boolean().optional(),
+  /** The tracker issue the task was made from; absent or null for a task made by hand. */
+  external: ExternalLink.nullable().optional(),
   /** The builder's own model setting for this task; null is no override, and Automatic is a setting. */
   modelSetting: ModelSetting.nullable(),
   createdAt: Timestamp,

@@ -1,6 +1,7 @@
 import {
   AccountKind,
   AccountProblem,
+  harnessOf,
   signsInWithLogin,
   type AccountDto,
   type AccountIdentityDto,
@@ -45,7 +46,6 @@ function identityOffer(account: AccountDto, result: AccountIdentityDto): Offer |
       };
     return null;
   }
-  // A gateway never takes an expected identity; the daemon refuses it.
   if (account.kind === AccountKind.AnthropicApiKey || account.kind === AccountKind.Bedrock) {
     const { organization } = result;
     if (refusal !== null || organization === null || account.expectedIdentity !== null) return null;
@@ -114,8 +114,7 @@ export function IdentityCheck({
       </Button>
       {check.isPending ? (
         <Text size="sm" c="dimmed">
-          Starting {account.kind === AccountKind.CodexSignin ? 'Codex' : 'Claude Code'} to read the
-          account…
+          Starting {harnessOf(account) === 'codex' ? 'Codex' : 'Claude Code'} to read the account…
         </Text>
       ) : null}
       {check.isError ? (

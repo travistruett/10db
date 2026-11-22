@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { Headline, Title, Why } from './entities';
+import { ExternalLink } from './external';
 import { BriefKey, GoalBrief, GoalBriefTask } from './goals';
 import {
   DecisionId,
@@ -153,6 +154,8 @@ export type PlanGoal = z.infer<typeof PlanGoal>;
 
 const looseTaskFields = {
   key: BriefKey,
+  /** The tracker issue the task is made from. */
+  external: ExternalLink.optional(),
   title: Title,
   headline: Headline.default(''),
   why: Why.default(''),

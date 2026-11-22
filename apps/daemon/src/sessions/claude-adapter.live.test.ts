@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { agentKind, idUuid, mintId, type ToolCallView } from '@10db/contracts';
+import { idUuid, mintId, type ToolCallView } from '@10db/contracts';
 import type { AccountRow } from '@10db/db';
 import { HARNESS_PLUGIN_DIR } from '@10db/harness';
 import { describe, expect, it } from 'vitest';
@@ -12,6 +12,7 @@ import {
   createLauncher,
   ensureAgent,
   systemKeychain,
+  accountAgentOf,
 } from '../environment';
 import { createLogger, silentLogger } from '../log';
 import { createClaudeAdapter } from './index';
@@ -71,7 +72,7 @@ async function liveSession(spec: {
     updatedAt: new Date(0).toISOString(),
   };
   const seen = await adapter.probeAccount({
-    kind: agentKind(defaultAccount.kind),
+    ...accountAgentOf(defaultAccount),
     cwd: repo.path,
     env: launcher.probe(defaultAccount).env,
   });
@@ -150,7 +151,7 @@ async function livePlanSession(spec: { readonly prompt: string; readonly model?:
     updatedAt: new Date(0).toISOString(),
   };
   const seen = await adapter.probeAccount({
-    kind: agentKind(defaultAccount.kind),
+    ...accountAgentOf(defaultAccount),
     cwd: repo.path,
     env: launcher.probe(defaultAccount).env,
   });

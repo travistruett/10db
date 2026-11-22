@@ -96,6 +96,8 @@ const KEYS = new Set<string>(Object.values(SettingsSectionKey));
 /** Sections that no longer exist, by the address they had, and the section their content moved to. */
 const RETIRED_SECTIONS: Readonly<Record<string, SettingsSectionKey>> = {
   'personas-and-flows': SettingsSectionKey.Models,
+  'sign-ins': SettingsSectionKey.Integrations,
+  'project-integrations': SettingsSectionKey.Integrations,
 };
 
 /** Where an address that is not a section now lands: the section that took over its content, else General. */

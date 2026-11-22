@@ -70,7 +70,7 @@ export function useDecisionStats() {
   });
 }
 
-/** OpenRouter's decision models, through the daemon; only asked for when `enabled` (a key is set). */
+/** The Decisions account's models, through the daemon; only asked for when `enabled` (its credential is set). */
 export function useDecisionModels(enabled: boolean) {
   const { client } = useDaemon();
   return useQuery({
@@ -89,6 +89,8 @@ export function usePatchJudge() {
       readJson(await client.judge.$patch({ json: patch }), JudgeStatusDto),
     onSuccess: (status) => {
       queryClient.setQueryData(judgeKeys.status, status);
+      // A switch of account changes whose models the picker offers.
+      void queryClient.invalidateQueries({ queryKey: judgeKeys.models });
       return queryClient.invalidateQueries({ queryKey: judgeKeys.status });
     },
   });

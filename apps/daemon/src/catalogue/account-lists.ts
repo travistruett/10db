@@ -1,4 +1,4 @@
-import type { AccountId, AgentAccountKind } from '@10db/contracts';
+import type { AccountId, Provider, SupportedAccountKind } from '@10db/contracts';
 import { replaceAccountModels } from '@10db/db';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
@@ -15,7 +15,11 @@ export interface AccountLists {
    * account: a signed-out process still answers a listing, so an unchecked list proves nothing. It never throws.
    */
   record(
-    account: { readonly id: AccountId; readonly kind: AgentAccountKind },
+    account: {
+      readonly id: AccountId;
+      readonly kind: SupportedAccountKind;
+      readonly harness: Provider;
+    },
     seen: SeenAccount,
   ): void;
   /**
@@ -46,7 +50,7 @@ export function createAccountLists(deps: {
           const changed = replaceAccountModels(
             ctx,
             account.id,
-            offerFromList(account.kind, models, catalogue),
+            offerFromList(account, models, catalogue),
           );
           if (changed) reconcileProfiles(ctx, catalogue);
         });

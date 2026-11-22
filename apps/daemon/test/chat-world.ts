@@ -1,7 +1,9 @@
 import {
   AccountKind,
   JudgeKind,
-  type AgentAccountKind,
+  Provider,
+  requireHarness,
+  type SupportedAccountKind,
   type ChatDto,
   type ChatId,
   type ConversationId,
@@ -103,7 +105,7 @@ export interface ChatWorld {
     setupNotes: string[];
   };
   /** Moves the project to an account of this kind: the next launch and the next `models` see it. */
-  launchOn(kind: AgentAccountKind): void;
+  launchOn(kind: SupportedAccountKind): void;
   /** Puts a chat where it works in the builder's checkout, as a choice of Here does. */
   here(chatId: ChatDto['id']): void;
   /** A chat in its tab at `tabPosition`. */
@@ -161,7 +163,10 @@ export function chatWorld(
     onFlagAnswerInWrite: (ctx, item, answer) =>
       workRef === null ? undefined : applyChatWorkAnswer(workRef, silentLogger, ctx, item, answer),
   });
-  const launched = { kind: AccountKind.ClaudeSubscription as AgentAccountKind };
+  const launched: { kind: SupportedAccountKind; harness: Provider } = {
+    kind: AccountKind.ClaudeSubscription,
+    harness: Provider.Claude,
+  };
   const engine = createExploreEngine({
     state,
     adapter,
@@ -182,12 +187,13 @@ export function chatWorld(
     model: model ?? 'claude-opus-5-5',
     modelId: model ?? 'claude-opus-5-5',
     effort: effort ?? 'high',
-    agentModels: shapeAgentModels(launched.kind),
+    agentModels: shapeAgentModels(launched.kind, launched.harness),
     env: {},
     account: {
       accountId: project.accountId,
       label: 'Claude plan',
       kind: launched.kind,
+      harness: launched.harness,
       identity: null,
     },
     access: {
@@ -246,8 +252,8 @@ export function chatWorld(
       ...(opts.prepare === undefined ? {} : { prepare: opts.prepare }),
       limitsFor: pictureLimitsFor,
       judgeOf: () => opts.judge ?? JudgeKind.Native,
-      webSearchOf: (kind, model) => adapter.capabilities({ kind }, model).webSearch,
-      subagentsOf: (kind, model) => adapter.capabilities({ kind }, model).subagents,
+      webSearchOf: (account, model) => adapter.capabilities(account, model).webSearch,
+      subagentsOf: (account, model) => adapter.capabilities(account, model).subagents,
       clock,
       firstChange: (chatId) => {
         work.firstChange(chatId);
@@ -273,7 +279,7 @@ export function chatWorld(
         { model: 'claude-sonnet-5-5', tier: null },
       ],
     }),
-    webSearchOf: () => adapter.capabilities({ kind: launched.kind }, null).webSearch,
+    webSearchOf: () => adapter.capabilities(launched, null).webSearch,
     takeover: () => takeoverService,
     reopenBranch: (chatId) => work.reopen(chatId),
     ...(opts.worktrees === undefined ? {} : { worktrees: opts.worktrees({ state }) }),
@@ -315,6 +321,7 @@ export function chatWorld(
       // As production's: the session's root, which a branch session's worktree is.
       cwd: sourceRoot(conv.id),
       kind: launched.kind,
+      harness: launched.harness,
       model: 'claude-opus-5-5',
       effort: 'high',
       launch: {
@@ -390,6 +397,7 @@ export function chatWorld(
     terminal,
     launchOn(kind) {
       launched.kind = kind;
+      launched.harness = requireHarness({ kind, label: 'account', settings: {} });
     },
     here(chatId) {
       store.write((ctx) => setChatWork(ctx, chatId, null, { place: 'here' }));

@@ -1,11 +1,10 @@
 import {
+  AccountKind,
   Effort,
   knownEfforts,
   ModelStatus,
-  providerOf,
-  AGENT_ACCOUNT_KINDS,
+  harnessOf,
   type Provider,
-  type AgentAccountKind,
 } from '@10db/contracts';
 import {
   listAccountModels,
@@ -36,9 +35,6 @@ interface Offer {
   ranked: boolean;
 }
 
-const isSupported = (kind: string): kind is AgentAccountKind =>
-  AGENT_ACCOUNT_KINDS.some((supported) => supported === kind);
-
 /** The models an account with no list yet is assumed to run: its maker's own, retired ones left out. */
 function assumedOffers(provider: Provider, catalogue: Catalogue, ranked: boolean): Offer[] {
   const own = catalogue.providers[RUNTIME_MAKER[provider]]?.models ?? [];
@@ -59,24 +55,32 @@ function assumedOffers(provider: Provider, catalogue: Catalogue, ranked: boolean
 
 /** Every model any account offers, once per provider and model, with the efforts of all the accounts joined. */
 function collectOffers(ctx: WriteContext, catalogue: Catalogue): Offer[] {
-  const accounts = listAccounts(ctx.tx).filter((account) => isSupported(account.kind));
-  const lists = new Map(accounts.map((a) => [a.id, listAccountModels(ctx.tx, a.id)]));
+  // An account no harness runs offers no model a session could run.
+  const accounts = listAccounts(ctx.tx).flatMap((account) => {
+    const provider = harnessOf(account);
+    return provider === null ? [] : [{ account, provider }];
+  });
+  const lists = new Map(
+    accounts.map((a) => [a.account.id, listAccountModels(ctx.tx, a.account.id)]),
+  );
   const withList = new Set<Provider>();
-  for (const account of accounts) {
-    if (isSupported(account.kind) && (lists.get(account.id)?.length ?? 0) > 0)
-      withList.add(providerOf(account.kind));
+  for (const { account, provider } of accounts) {
+    if ((lists.get(account.id)?.length ?? 0) > 0) withList.add(provider);
   }
 
   const offers = new Map<string, Offer>();
-  for (const account of accounts) {
-    if (!isSupported(account.kind)) continue;
-    const provider = providerOf(account.kind);
+  for (const { account, provider } of accounts) {
     const rows = lists.get(account.id) ?? [];
     const found: Offer[] =
       rows.length === 0
         ? assumedOffers(provider, catalogue, !withList.has(provider))
         : rows.map((row) => {
-            const fit = runnability(row.model, provider, catalogue);
+            const fit = runnability(
+              row.model,
+              provider,
+              catalogue,
+              account.kind === AccountKind.OpenRouter,
+            );
             return {
               provider,
               model: row.model,

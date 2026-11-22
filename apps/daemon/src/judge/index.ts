@@ -9,3 +9,4 @@ export {
 export { fenced } from './fenced-text';
 export { createDecisionModelList, type DecisionModelList } from './decision-model-list';
 export { decisionModelNumbers, typicalDecisionTokens } from './decision-model-numbers';
+export { NO_DECISION_CREDENTIAL, type JudgeCredential } from './credential';

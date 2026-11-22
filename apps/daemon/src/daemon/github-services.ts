@@ -18,6 +18,8 @@ export type GithubApiServices = Pick<
 >;
 
 export interface GithubServices extends GithubApiServices {
+  /** The login gh last probed, from memory only: it never runs gh. Null when none was read or gh is signed out. */
+  cachedLogin(): string | null;
   /** Stops a running sign-in's gh when the daemon stops. */
   stop(): void;
 }
@@ -121,6 +123,7 @@ export function createGithubServices(deps: {
     cancelGithubSignin() {
       login.cancel();
     },
+    cachedLogin: () => cached?.login ?? null,
     stop() {
       login.stop();
     },

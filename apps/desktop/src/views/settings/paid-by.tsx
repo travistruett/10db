@@ -1,4 +1,4 @@
-import { AccountId, AccountKind, type JudgeStatusDto } from '@10db/contracts';
+import { AccountId, AccountKind, powersDecisions, type JudgeStatusDto } from '@10db/contracts';
 import { Anchor, Button, Group, Loader, Stack, Text } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
@@ -46,12 +46,28 @@ function PaidByState({
 }) {
   if (account.secretState === 'set')
     return (
-      <Group gap="sm">
-        <ConnectionStatus tone={off ? ConnectionTone.Off : ConnectionTone.Works} label="Key set" />
-        <AccountLink account={account}>View account</AccountLink>
-      </Group>
+      <Stack gap={2}>
+        <Group gap="sm">
+          <ConnectionStatus
+            tone={off ? ConnectionTone.Off : ConnectionTone.Works}
+            label={
+              account.awsProfile ? `Signs in with AWS profile ${account.awsProfile}` : 'Key set'
+            }
+          />
+          <AccountLink account={account}>View account</AccountLink>
+        </Group>
+        {off || !account.fallback ? null : (
+          <ConnectionStatus
+            tone={ConnectionTone.NeedsYou}
+            label={`Decisions are falling back to rules: ${account.fallback}`}
+          />
+        )}
+      </Stack>
     );
-  const problem = account.secretState === 'changed' ? 'Key changed outside 10db' : 'No key';
+  const problem =
+    account.secretState === 'changed'
+      ? 'Key changed outside 10db: decisions use 10db’s rules until it is set again'
+      : 'No key: decisions use 10db’s rules until one is set';
   return (
     <Stack gap={2}>
       <ConnectionStatus tone={ConnectionTone.NeedsYou} label={problem} />
@@ -60,7 +76,7 @@ function PaidByState({
   );
 }
 
-/** Which account pays for decisions: an OpenRouter account's key is what 10db sends. */
+/** Which account answers decisions: an OpenRouter, Anthropic API key or Bedrock account, whose credential 10db signs them with. */
 export function PaidBy({
   status,
   disabled,
@@ -73,12 +89,12 @@ export function PaidBy({
   const { ref } = useFocusTarget<HTMLDivElement>('paid-by');
   const [adding, setAdding] = useState(false);
   const live = (accounts.data ?? []).filter((a) => !a.archived);
-  const hasRouter = live.some((a) => a.kind === AccountKind.OpenRouter);
+  const canDecide = live.some((a) => powersDecisions(a.kind));
   return (
     <div ref={ref}>
       <SettingRow
         label="Paid by"
-        description="The account whose OpenRouter key 10db sends decisions with."
+        description="The account whose API answers 10db’s decisions: OpenRouter, an Anthropic API key or Bedrock. A plan login has no API for quick decisions."
       >
         {accounts.isPending ? (
           <Loader size="sm" aria-label="Loading accounts" />
@@ -86,7 +102,7 @@ export function PaidBy({
           <Text size="sm" c="red" role="alert">
             Accounts could not be loaded. Check that the daemon is running.
           </Text>
-        ) : hasRouter ? (
+        ) : canDecide ? (
           <Stack gap={4}>
             <AccountSelect
               aria-label="Paid by"

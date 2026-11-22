@@ -60,14 +60,14 @@ export function DecisionsSection() {
             }}
           />
           <Text size="xs" c="dimmed" ta="right" maw={360}>
-            When off, 10db makes every decision the way it did before and never calls OpenRouter.
+            When off, 10db makes every decision the way it did before and never calls a model.
           </Text>
           <PaidBy status={status.data} disabled={disabled} />
         </Stack>
       </Group>
       {off ? (
         <Alert color="yellow" title="Decisions are off">
-          The daemon was started with TENDB_JUDGE=off, so it never calls OpenRouter. Restart 10db
+          The daemon was started with TENDB_JUDGE=off, so it never calls a model. Restart 10db
           without it to change these.
         </Alert>
       ) : null}

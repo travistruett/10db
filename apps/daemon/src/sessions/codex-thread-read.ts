@@ -2,7 +2,7 @@ import type { z } from 'zod';
 import { systemClock } from '../clock';
 import { CODEX_CLIENT_INFO } from './codex-account-read';
 import type { CodexAdapterOptions } from './codex-adapter';
-import type { CodexHome } from './codex-home';
+import { codexHomeProviderOf, type CodexHome, type CodexHomeProvider } from './codex-home';
 import { InitializeResponse, MODEL_ITEMS, ThreadTurnsPage } from './codex-protocol';
 import { CodexRpcError, createCodexRpc, spawnAppServer } from './codex-rpc';
 import { ConversationUnreadError, type ConversationReadSpec } from './types';
@@ -29,7 +29,7 @@ const NOTHING_SENT_YET = /is not materialized yet; .*before first user message/;
 
 export interface ThreadReadDeps extends CodexAdapterOptions {
   /** The home for an account's `CODEX_HOME`. */
-  readonly homes: (path: string) => CodexHome;
+  readonly homes: (path: string, provider: CodexHomeProvider) => CodexHome;
 }
 
 type Turn = z.infer<typeof ThreadTurnsPage>['data'][number];
@@ -73,7 +73,7 @@ export async function readThreadClientUuids(
     );
   const codexHome = spec.env['CODEX_HOME'];
   if (codexHome === undefined || codexHome === '') throw unread('the account has no CODEX_HOME');
-  const home = deps.homes(codexHome);
+  const home = deps.homes(codexHome, codexHomeProviderOf(spec.account.kind));
   try {
     // As a session's start does: the checkout is pinned untrusted before the process starts.
     await home.prepare(spec.cwd);

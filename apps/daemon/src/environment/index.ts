@@ -1,3 +1,4 @@
+export { accountAgentOf, type AccountAgent } from './account-agent';
 export { readAccountSecretAsync, type AccountSecret } from './account-secret';
 export {
   AA_KEY_ACCOUNT,
@@ -5,7 +6,8 @@ export {
   KeychainError,
   keychainWith,
   OPENROUTER_KEY_ACCOUNT,
-  SLACK_BOT_ACCOUNT,
+  LEGACY_SLACK_BOT_ACCOUNT,
+  slackBotAccount,
   secretFingerprint,
   systemKeychain,
   unavailableKeychain,

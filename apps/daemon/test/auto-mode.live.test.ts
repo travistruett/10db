@@ -15,7 +15,6 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import {
-  agentKind,
   mintId,
   PermissionChoice,
   ToolAccess,
@@ -36,6 +35,7 @@ import {
   createLauncher,
   ensureAgent,
   systemKeychain,
+  accountAgentOf,
 } from '../src/environment';
 import { createEventBus, createStateStore } from '../src/events';
 import { createGit } from '../src/git';
@@ -441,7 +441,7 @@ async function drive(spec: RowSpec, checkout: string, dataDir: string): Promise<
     updatedAt: new Date(0).toISOString(),
   };
   const seen = await adapter.probeAccount({
-    kind: agentKind(defaultAccount.kind),
+    ...accountAgentOf(defaultAccount),
     cwd: checkout,
     env: launcher.probe(defaultAccount).env,
   });

@@ -18,9 +18,9 @@ import {
   noOpenRouterSync,
   PROTOCOL_VERSION,
   RoutedBy,
-  agentKind,
   AgentSkillNotInstallable,
-  providerOf,
+  harnessOf,
+  requireHarness,
   WorkstreamId,
   WorkstreamState,
   type InboxAnswer,
@@ -52,7 +52,6 @@ import {
   listAccountModels,
   listAccounts,
   getAppSetting,
-  findAccountRow,
   getJudgeConfig,
   getProject,
   listPermissionRules,
@@ -60,6 +59,7 @@ import {
   migrateDatabase,
   openDatabase,
   patchAccount,
+  refuseGatewayAccounts,
   seedDefaultAccount,
   setAppSetting,
 } from '@10db/db';
@@ -78,7 +78,8 @@ import {
   createMcpSignIns,
   createMoveBack,
   MoveCause,
-  moveOpenRouterKey,
+  giveOpenRouterHomes,
+  removeLegacyOpenRouterKey,
   createStartGate,
   createUsageReports,
   type AccountLimits,
@@ -106,16 +107,21 @@ import {
 } from '../judge';
 import { createBenchmarkServices } from './benchmark-services';
 import { createSizingService } from '../sizing';
-import { createJudgeKeyReader, createJudgeServices } from './judge-services';
+import { createJudgeCredentialReader, createJudgeServices } from './judge-services';
+import { createLinearBindings } from '../linear';
+import { createLinearSignIns } from './linear-sign-ins';
 import { createStakeholderApiServices } from './stakeholder-services';
 import {
+  cleanUpSlackSignIns,
   createReplyWatch,
   createSlackConnection,
   createStakeholderSends,
   createTimerWatch,
   createTriage,
   draftOnOpen,
+  projectSlack,
   routedAway,
+  slackTokenReader,
   sweepDrafts,
 } from '../stakeholders';
 import { createSlackClient, type SlackClient } from '../slack';
@@ -186,12 +192,12 @@ import {
   createLauncher,
   exportAwsCredentials,
   REQUIRED_TOOLS,
-  SLACK_BOT_ACCOUNT,
   unavailableKeychain,
   type AgentTools,
   type Keychain,
   type GhLoginProbe,
   type ResolvedTools,
+  accountAgentOf,
 } from '../environment';
 import {
   createEventBus,
@@ -369,6 +375,7 @@ import {
   type SelfUpdate,
 } from '../self-update';
 import {
+  codexHomeProviderOf,
   codexHomes,
   connectorProbeRoot,
   markOnboarded,
@@ -685,6 +692,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     await backupDatabase(db, backupsDir, 'pre-migrate', startedAt);
   }
   migrateDatabase(db, migrationsDir);
+  // Before anything parses an account: a retired kind would fail there with no hint of what to remove.
+  refuseGatewayAccounts(db);
   // An index out of step with its table is rebuilt and logged; one that can't be rebuilt leaves search
   // off (the list route says so) and the daemon running. No card: it asks the builder nothing.
   const knowledgeIndex = repairKnowledgeIndex(db, logger.child({ component: 'knowledge' }));
@@ -808,7 +817,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   const judgeKeychain = opts.keychain ?? unavailableKeychain;
   const decisionModels = createDecisionModelList({ fetch: opts.fetch ?? fetch, clock });
-  const readJudgeKey = createJudgeKeyReader({
+  const readJudgeCredential = createJudgeCredentialReader({
     state,
     keychain: judgeKeychain,
     off: opts.judgeOff === true,
@@ -818,10 +827,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     clock,
     fetch: opts.fetch ?? fetch,
     decisionModelIds: () => decisionModels.ids(),
-    readKey: readJudgeKey,
+    readCredential: readJudgeCredential,
     off: opts.judgeOff === true,
     logger: logger.child({ component: 'judge' }),
   });
+  /** The live OpenRouter accounts, the one Decisions run on first. */
+  const liveOpenRouterAccounts = (): AccountId[] => {
+    const decisions = getJudgeConfig(state.db).accountId;
+    return listAccounts(state.db)
+      .filter((a) => !a.archived && a.kind === AccountKind.OpenRouter)
+      .map((a) => a.id)
+      .sort((a, b) => Number(b === decisions) - Number(a === decisions));
+  };
   // OpenRouter's scores and speeds are read with the decisions account's key, and never under either kill switch.
   const openRouterSync: OpenRouterSync | null =
     opts.openRouterSync === true && opts.judgeOff !== true && opts.benchmarksOff !== true
@@ -829,7 +846,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           state,
           clock,
           fetch: opts.fetch ?? fetch,
-          readKey: () => readJudgeKey(getJudgeConfig(state.db).accountId),
+          readKey: async () => {
+            // The Decisions account's key when it is an OpenRouter account, else any live OpenRouter account's; an
+            // Anthropic key or a Bedrock token must never go to openrouter.ai.
+            for (const id of liveOpenRouterAccounts()) {
+              const credential = await readJudgeCredential(id);
+              if (credential?.kind === AccountKind.OpenRouter) return credential.key;
+            }
+            return null;
+          },
           offered: () => {
             const live = new Set(
               listAccounts(state.db)
@@ -855,14 +880,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           logger: logger.child({ component: 'benchmarks' }),
         })
       : null;
-  // With the judge off no Keychain item is read, `openrouter-api-key` included.
-  if (opts.judgeOff !== true)
-    await moveOpenRouterKey({
-      state,
-      keychain: judgeKeychain,
-      logger: logger.child({ component: 'judge' }),
-    });
-  // After the key move, so the first run sees the account a key left in the old item became.
+  giveOpenRouterHomes(state, join(opts.dataDir, 'accounts'));
+  // The key an older version kept in its own item is not used any more; an OpenRouter account holds its own.
+  if (opts.judgeOff !== true) removeLegacyOpenRouterKey(judgeKeychain, logger);
   openRouterSync?.start();
   state.write((ctx) =>
     deleteJudgeCallsBefore(
@@ -953,7 +973,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     opts.slack === true
       ? createSlackClient({
           fetch: opts.fetch ?? fetch,
-          token: () => judgeKeychain.readAsync(SLACK_BOT_ACCOUNT),
+          token: slackTokenReader(state, judgeKeychain),
           clock,
           timeoutMs: SLACK_TIMEOUT_MS,
         })
@@ -963,7 +983,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     slack: slackClient,
     clock,
     log: logger.child({ component: 'stakeholder-sends' }),
-    hasToken: async () => (await judgeKeychain.readAsync(SLACK_BOT_ACCOUNT)) !== null,
+    hasToken: async () => (await slackTokenReader(state, judgeKeychain)()) !== null,
+    slackFor: (projectId) => projectSlack(state.db, projectId).teamId !== null,
     parkFor: (id) => {
       runner?.parkFor(id);
     },
@@ -1080,7 +1101,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       reconcileProfiles(ctx, from);
     });
     modelWait.release((id) => {
-      const provider = providerOf(agentKind(getAccountRow(db, id).kind));
+      const provider = harnessOf(getAccountRow(db, id));
       return listModelProfiles(db).some((p) => p.provider === provider);
     });
   }
@@ -1562,6 +1583,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     startGate,
     lists: accountLists,
     dataDir: opts.dataDir,
+    fetch: opts.fetch ?? fetch,
     logger: logger.child({ component: 'catalogue' }),
   });
   // What runs after every fetch of the catalogue: each account's list is read again through the identity probe, then
@@ -1686,7 +1708,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       model: session.model,
       modelId,
       effort: run.effort,
-      agentModels: shapeAgentModels(agentKind(row.kind)),
+      agentModels: shapeAgentModels(row.kind, requireHarness(row)),
       env: session.env,
       account: session.expect,
       access: {
@@ -1761,7 +1783,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     modelsOf: conversationModels,
     webSearchOf: (projectId) =>
       adapter.capabilities(
-        { kind: agentKind(getAccountRow(db, getProject(db, projectId).accountId).kind) },
+        accountAgentOf(getAccountRow(db, getProject(db, projectId).accountId)),
         null,
       ).webSearch,
     takeover: () => takeoverService,
@@ -1781,18 +1803,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     const row = getAccountRow(db, project.accountId);
     const run = conversationRun(db, project, conv.model, conv.effort);
     if (run === undefined) throw new ConflictError(`${row.label} offers no model for a chat`);
-    const kind = agentKind(row.kind);
+    const agent = accountAgentOf(row);
     try {
       const launch = launcher.takeover(row, run.model, listAccountModels(db, row.id));
       const chatRow = chatOfConversation(db, conv.id);
       return {
         // Where the session works: its worktree on a branch, the checkout otherwise.
         cwd: chatRow === null ? project.repoPath : chatRoot(chatRow, project).root,
-        kind,
+        ...agent,
         model: launch.model,
         effort: run.effort,
         launch,
-        web: adapter.capabilities({ kind }, run.model).webSearch,
+        web: adapter.capabilities(agent, run.model).webSearch,
       };
     } catch (error) {
       if (error instanceof AccountLaunchError || error instanceof ModelNotLaunchableError)
@@ -1857,21 +1879,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
               project,
               folder,
               env,
-              configDir: sessionConfigDir(agentKind(row.kind), env, homedir()),
+              configDir: sessionConfigDir(requireHarness(row), env, homedir()),
             });
           },
           onboard: async (source) => {
             const claudeDir = source.launch.set['CLAUDE_CONFIG_DIR'];
             if (claudeDir !== undefined) await markOnboarded(claudeDir, source.cwd);
             const codexDir = source.launch.set['CODEX_HOME'];
-            if (codexDir !== undefined) await takeoverCodexHomes(codexDir).prepare(source.cwd);
+            if (codexDir !== undefined)
+              await takeoverCodexHomes(codexDir, codexHomeProviderOf(source.kind)).prepare(
+                source.cwd,
+              );
           },
           newSetId: () => randomBytes(5).toString('hex'),
         },
         input,
         signal,
       ),
-    notesOf: (kind) => adapter.takeoverNotes({ kind }),
+    notesOf: (source) => adapter.takeoverNotes(source),
     setupNotes: () => (takeoverServers === null ? [NO_SANDBOX_NOTE] : []),
     changedPaths: (checkout) => git.changedPaths(checkout),
   });
@@ -1921,9 +1946,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       ...(conversationPrepare === undefined ? {} : { prepare: conversationPrepare }),
       plan: shape.planParts,
       limitsFor: pictureLimitsFor,
-      judgeOf: (kind, model) => adapter.capabilities({ kind }, model).judge,
-      webSearchOf: (kind, model) => adapter.capabilities({ kind }, model).webSearch,
-      subagentsOf: (kind, model) => adapter.capabilities({ kind }, model).subagents,
+      judgeOf: (account, model) => adapter.capabilities(account, model).judge,
+      webSearchOf: (account, model) => adapter.capabilities(account, model).webSearch,
+      subagentsOf: (account, model) => adapter.capabilities(account, model).subagents,
       clock,
       judge,
       firstChange: (chatId) => {
@@ -2108,6 +2133,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // A card a crash left waiting for triage takes the lane's rule, a routed card without its message gets
   // one, and a send that was mid-post is looked for in Slack.
   for (const after of state.write((ctx) => sweepDrafts(ctx, draftOpts))) after();
+  // Slack tokens are kept by workspace: the old single item and contacts of no signed-in workspace go.
+  if (slackClient !== null) cleanUpSlackSignIns({ state, keychain: judgeKeychain, log: logger });
   const slackConnection = createSlackConnection({
     state,
     initial: slackClient === null ? 'off' : 'none',
@@ -2433,6 +2460,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     plan: appMcpPlan,
     logger: logger.child({ component: 'mcp-sign-ins' }),
   });
+  const linearSignIns = createLinearSignIns({
+    state,
+    plan: appMcpPlan,
+    mcpSignIns,
+    connectorNames: (account) => adapter.cachedConnectorNames?.(account),
+  });
+  const linearBindings = createLinearBindings({
+    state,
+    chat,
+    signIns: linearSignIns,
+    log: logger.child({ component: 'linear' }),
+  });
   const openWhenBusyDeps: OpenWhenBusyDeps = {
     folderHold,
     pendingOpens,
@@ -2496,15 +2535,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     refreshModels,
     catalogueOn: modelRefreshOn,
     openRouterOff: opts.judgeOff === true || opts.benchmarksOff === true,
-    // Without an OpenRouter account for decisions the rows are Artificial Analysis's alone.
-    openRouterOn: () => {
-      if (openRouterSync === null) return false;
-      const accountId = getJudgeConfig(state.db).accountId;
-      const account = accountId === null ? undefined : findAccountRow(state.db, accountId);
-      return account !== undefined && !account.archived && account.kind === AccountKind.OpenRouter;
-    },
+    // Without a live OpenRouter account the rows are Artificial Analysis's alone.
+    openRouterOn: () => openRouterSync !== null && liveOpenRouterAccounts().length > 0,
     trust,
     mcpSignIns,
+    linearSignIns,
     judge: createJudgeServices({
       state,
       keychain: judgeKeychain,
@@ -2525,6 +2560,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       clock,
       fetch: opts.fetch ?? fetch,
       reconnect: () => replyWatch.reconnect(),
+      githubLogin: () => Promise.resolve(github.cachedLogin()),
+      linear: linearBindings,
     }),
     shape: createShapeServices({
       shape,
@@ -2873,6 +2910,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         clock,
         builder: createBuilderTools(services),
         getTask: (id) => services.getTask(id),
+        linear: linearBindings,
         gitTools: {
           git,
           folderHold,

@@ -74,7 +74,7 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
   [JudgeDecision.CrossesLimit]: {
     group: DecisionGroup.Trust,
     label: 'Limits',
-    asks: 'Check calls against the four limits. On accounts without Claude Code’s auto mode (a gateway, Codex, an older model), 10db’s judge decides whether each call crosses a limit.',
+    asks: 'Check calls against the four limits. On accounts without Claude Code’s auto mode (Codex, an older model), 10db’s judge decides whether each call crosses a limit.',
     onAnswer:
       'Allow: the call runs. A limit, or unsure: a card asks you, or a lane nobody watches skips the call.',
     whenUnsure: 'Treated as a limit.',
