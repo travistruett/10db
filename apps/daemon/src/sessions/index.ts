@@ -1,5 +1,5 @@
 export { markOnboarded } from './claude-onboarding';
-export { codexHomes } from './codex-home';
+export { codexHomeProviderOf, codexHomes } from './codex-home';
 export { createClaudeAdapter } from './claude-adapter';
 export { claudeTakeoverNotes } from './claude-takeover';
 export { claudeTakeoverMcp, codexTakeoverServers } from './takeover-servers';

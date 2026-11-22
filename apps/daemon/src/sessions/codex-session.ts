@@ -20,8 +20,10 @@ import {
 import {
   CODEX_HOOK_TIMEOUT_SECONDS,
   codexChildHome,
+  codexHomeProviderOf,
   GUARD_HOOK_EVENT,
   type CodexHome,
+  type CodexHomeProvider,
 } from './codex-home';
 import { codexDeveloperInstructions, codexThreadConfig, LANE_PROFILE } from './codex-lane-config';
 import { CODEX_MCP_STATUS_BOUND_MS, McpAuthState, readCodexMcpAuth } from './codex-mcp-auth';
@@ -66,7 +68,7 @@ import {
 
 export interface CodexSessionDeps extends CodexAdapterOptions {
   /** The home for an account's `CODEX_HOME`. */
-  readonly homes: (path: string) => CodexHome;
+  readonly homes: (path: string, provider: CodexHomeProvider) => CodexHome;
 }
 
 /** How long one call of the start sequence may take before the session ends. */
@@ -975,7 +977,7 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
     if (codexHome === undefined || codexHome === '')
       throw sandboxRefused('The session has no CODEX_HOME, so Codex would run in the shared home.');
 
-    const home = deps.homes(codexHome);
+    const home = deps.homes(codexHome, codexHomeProviderOf(spec.account.kind));
     try {
       await home.prepare(spec.cwd);
     } catch (error) {

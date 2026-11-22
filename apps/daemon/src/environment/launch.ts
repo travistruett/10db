@@ -6,6 +6,7 @@ import {
   harnessOf,
   isModelTier,
   Provider,
+  OpenRouterSettings,
   SubscriptionSettings,
   type AccountId,
   type AccountModelDto,
@@ -44,13 +45,19 @@ const AWS_LOGIN_VARS: readonly string[] = [
   'AWS_CONTAINER_AUTHORIZATION_TOKEN',
   'AWS_ENDPOINT_URL_BEDROCK_RUNTIME',
 ];
-/** A ChatGPT sign-in session takes its credential from its own CODEX_HOME only, never from the login shell. */
+/** The variable Codex reads an OpenRouter key from (`env_key` in its home's config). */
+const OPENROUTER_KEY_VAR = 'OPENROUTER_API_KEY';
+/**
+ * A Codex session takes its credential from its own CODEX_HOME (a ChatGPT sign-in) or its account's Keychain
+ * secret (an OpenRouter key), never from the login shell.
+ */
 const CODEX_LOGIN_VARS: readonly string[] = [
   'OPENAI_API_KEY',
   'CODEX_API_KEY',
   'OPENAI_BASE_URL',
   'CODEX_ACCESS_TOKEN',
   'CODEX_HOME',
+  OPENROUTER_KEY_VAR,
 ];
 /** The families of provider switches a terminal clears, with 10db's own variables. */
 const UNSET_PREFIXES: readonly string[] = [...BILLING_SWITCH_PREFIXES, OWN_PREFIX];
@@ -325,9 +332,20 @@ export function createLauncher(opts: {
     return loginConfigDirOf(opts.base) ?? '';
   }
 
+  /** An OpenRouter account runs in its own Codex home, never the builder's `~/.codex`. */
+  function refuseSharedHome(account: AccountRow): void {
+    if (account.kind === AccountKind.OpenRouter && account.configDir === null)
+      throw new AccountLaunchError(
+        account.id,
+        AccountProblem.CannotBill,
+        `Account "${account.label}" has no Codex folder of its own, so Codex would use the builder's`,
+      );
+  }
+
   function build(account: AccountRow): Record<string, string> {
     const kind = account.kind;
     const harness = harnessFor(account);
+    refuseSharedHome(account);
     const login = projectEnv();
     const env: Record<string, string> = {
       ...withoutVars(login, kind, harness),
@@ -363,8 +381,11 @@ export function createLauncher(opts: {
         SubscriptionSettings.parse(account.settings);
         return env;
       }
-      case AccountKind.OpenRouter:
-        throw noHarness(account);
+      case AccountKind.OpenRouter: {
+        OpenRouterSettings.parse(account.settings);
+        env[OPENROUTER_KEY_VAR] = secretOf(account);
+        return env;
+      }
     }
   }
 
@@ -372,6 +393,7 @@ export function createLauncher(opts: {
   function takeoverOf(account: AccountRow): Omit<TakeoverLaunch, 'unset' | 'model'> {
     const kind = account.kind;
     const harness = harnessFor(account);
+    refuseSharedHome(account);
     const set: Record<string, string> = {};
     if (account.configDir !== null)
       set[harness === Provider.Codex ? 'CODEX_HOME' : 'CLAUDE_CONFIG_DIR'] = account.configDir;
@@ -417,7 +439,15 @@ export function createLauncher(opts: {
         SubscriptionSettings.parse(account.settings);
         return { set, unsetPrefixes: UNSET_PREFIXES, ...none };
       case AccountKind.OpenRouter:
-        throw noHarness(account);
+        OpenRouterSettings.parse(account.settings);
+        // As a Bedrock bearer token: the key sits in Codex's environment and is kept from its shells.
+        return {
+          set,
+          unsetPrefixes: UNSET_PREFIXES,
+          keychain: [{ variable: OPENROUTER_KEY_VAR, account: keyRef() }],
+          apiKeyHelperAccount: null,
+          scrub: true,
+        };
     }
   }
 

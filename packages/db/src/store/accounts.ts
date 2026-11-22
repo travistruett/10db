@@ -17,7 +17,7 @@ import {
   type AccountDto,
   type AccountSettings,
 } from '@10db/contracts';
-import { and, asc, eq, ne } from 'drizzle-orm';
+import { and, asc, eq, isNull, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import * as schema from '../schema';
 import { getAppSetting, setAppSetting } from './settings';
@@ -117,8 +117,7 @@ export function insertAccount(
   const config = AccountInput.parse(input);
   refuseTakenLabel(ctx.tx, config.label, null);
   const id = mintId('Account');
-  // An OpenRouter account runs no session, so it has no directory and no lanes; the column is NOT NULL.
-  const settings = config.kind === AccountKind.OpenRouter ? {} : config.settings;
+  const settings = config.settings;
   const row: AccountRow = {
     id,
     kind: config.kind,
@@ -126,13 +125,13 @@ export function insertAccount(
     payer: config.payer,
     expectedIdentity: 'expectedIdentity' in config ? config.expectedIdentity : null,
     // Keyed kinds too: a session on the default account's directory would read its saved login and config.
-    configDir: config.kind === AccountKind.OpenRouter ? null : opts.configDirFor(id),
+    configDir: opts.configDirFor(id),
     secretRef: needsSecret(config.kind, parseAccountSettings(config.kind, settings))
       ? accountSecretRef(id)
       : null,
     secretFingerprint: null,
     settings,
-    laneCap: 'laneCap' in config ? config.laneCap : 0,
+    laneCap: config.laneCap,
     monthlyCapUsd: 'monthlyCapUsd' in config ? config.monthlyCapUsd : null,
     archived: false,
     createdAt: ctx.now,
@@ -141,6 +140,32 @@ export function insertAccount(
   ctx.tx.insert(schema.accounts).values(row).run();
   saved(ctx, id, ['created']);
   return toDto(ctx.tx, row);
+}
+
+/**
+ * Gives each stored OpenRouter row that has no `config_dir` its own directory and the default lane cap, in one
+ * write: the builder's Decisions account was made before an OpenRouter account ran sessions. Returns the rows
+ * it changed, for the caller to make their directories.
+ */
+export function giveOpenRouterAccountsAHome(
+  ctx: WriteContext,
+  configDirFor: (id: AccountId) => string,
+): AccountRow[] {
+  const rows = ctx.tx
+    .select()
+    .from(schema.accounts)
+    .where(and(eq(schema.accounts.kind, AccountKind.OpenRouter), isNull(schema.accounts.configDir)))
+    .all();
+  return rows.map((row) => {
+    const configDir = configDirFor(row.id);
+    ctx.tx
+      .update(schema.accounts)
+      .set({ configDir, laneCap: DEFAULT_ACCOUNT_LANE_CAP, updatedAt: ctx.now })
+      .where(eq(schema.accounts.id, row.id))
+      .run();
+    saved(ctx, row.id, ['configDir', 'laneCap']);
+    return { ...row, configDir, laneCap: DEFAULT_ACCOUNT_LANE_CAP };
+  });
 }
 
 /** Settings checked against the account's own kind; a mismatch is the caller's mistake (400). */
@@ -161,8 +186,6 @@ export function patchAccount(ctx: WriteContext, id: AccountId, patch: AccountPat
   const row = getAccountRow(ctx.tx, id);
   if (row.archived) throw new ConflictError(`Account "${row.label}" is archived`);
   if (changes.label !== undefined) refuseTakenLabel(ctx.tx, changes.label, id);
-  if (changes.laneCap !== undefined && row.kind === AccountKind.OpenRouter)
-    throw new InvalidError('An OpenRouter account runs no lanes, so it has no lane cap');
   if (typeof changes.monthlyCapUsd === 'number' && !isMetered(row.kind))
     throw new InvalidError('Only API-key and Bedrock accounts take a monthly dollar cap');
   if (typeof changes.expectedIdentity === 'string') {

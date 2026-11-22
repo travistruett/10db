@@ -35,7 +35,7 @@ export const HARNESSES_OF_KIND = {
   [AccountKind.AnthropicApiKey]: [Provider.Claude],
   [AccountKind.Bedrock]: [Provider.Claude],
   [AccountKind.CodexSignin]: [Provider.Codex],
-  [AccountKind.OpenRouter]: [],
+  [AccountKind.OpenRouter]: [Provider.Codex],
 } as const satisfies Readonly<Record<SupportedAccountKind, readonly Provider[]>>;
 
 /** The harness the account runs: its stored `settings.harness`, else the kind's first; null when the kind has none. */
@@ -149,7 +149,7 @@ export const BedrockSettings = z.strictObject({
   /** The AWS profile the session uses; null means a bearer token from the Keychain. */
   awsProfile: AwsProfile.nullable(),
 });
-/** An OpenRouter account has a key and nothing else to set. */
+/** An OpenRouter account's harness; the model choice comes with the model list. */
 export const OpenRouterSettings = z.strictObject({ ...harness });
 export type SubscriptionSettings = z.infer<typeof SubscriptionSettings>;
 export type ApiKeySettings = z.infer<typeof ApiKeySettings>;
@@ -247,8 +247,8 @@ export const AccountInput = z.discriminatedUnion(
     }),
     z.strictObject({
       kind: z.literal(AccountKind.OpenRouter),
-      label: Label,
-      payer: Payer.default(''),
+      ...common,
+      settings: harnessOfKind(AccountKind.OpenRouter, OpenRouterSettings).default({}),
     }),
   ],
   {

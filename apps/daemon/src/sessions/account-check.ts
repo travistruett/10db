@@ -29,6 +29,8 @@ export interface SeenAccount {
   readonly tokenSource: string | undefined;
   readonly apiKeySource: string | undefined;
   readonly apiProvider: string | undefined;
+  /** Whether Codex says the account needs an OpenAI sign-in; false once a home's custom provider is in effect. Undefined from Claude Code. */
+  readonly requiresOpenaiAuth?: boolean | undefined;
   /** The models the account lists, when the agent could list them; absent when it could not. */
   readonly models?: readonly SeenModel[];
 }
@@ -98,7 +100,8 @@ function credentialsMatch(kind: SupportedAccountKind, seen: SeenAccount): boolea
     case AccountKind.CodexSignin:
       return seen.apiProvider === 'chatgpt' && Boolean(seen.subscriptionType);
     case AccountKind.OpenRouter:
-      return false;
+      // Without the home's custom provider Codex falls back to OpenAI's, which reports true.
+      return seen.apiProvider === undefined && seen.requiresOpenaiAuth === false;
   }
 }
 

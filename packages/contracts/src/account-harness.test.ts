@@ -32,9 +32,9 @@ describe('the harness an account runs', () => {
       }).success,
     ).toBe(false);
 
-    // A kind with no harness has none to run and is refused with the launcher's words.
+    // OpenRouter runs on Codex.
     const openRouter = { kind: AccountKind.OpenRouter, label: 'OpenRouter', settings: {} };
-    expect(harnessOf(openRouter)).toBeNull();
-    expect(() => requireHarness(openRouter)).toThrow('no harness runs OpenRouter yet');
+    expect(harnessOf(openRouter)).toBe(Provider.Codex);
+    expect(requireHarness(openRouter)).toBe(Provider.Codex);
   });
 });

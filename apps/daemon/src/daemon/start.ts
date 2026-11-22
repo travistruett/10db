@@ -79,6 +79,7 @@ import {
   createMcpSignIns,
   createMoveBack,
   MoveCause,
+  giveOpenRouterHomes,
   moveOpenRouterKey,
   createStartGate,
   createUsageReports,
@@ -371,6 +372,7 @@ import {
   type SelfUpdate,
 } from '../self-update';
 import {
+  codexHomeProviderOf,
   codexHomes,
   connectorProbeRoot,
   markOnboarded,
@@ -859,10 +861,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           logger: logger.child({ component: 'benchmarks' }),
         })
       : null;
+  giveOpenRouterHomes(state, join(opts.dataDir, 'accounts'));
   // With the judge off no Keychain item is read, `openrouter-api-key` included.
   if (opts.judgeOff !== true)
     await moveOpenRouterKey({
       state,
+      accountsRoot: join(opts.dataDir, 'accounts'),
       keychain: judgeKeychain,
       logger: logger.child({ component: 'judge' }),
     });
@@ -1868,7 +1872,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
             const claudeDir = source.launch.set['CLAUDE_CONFIG_DIR'];
             if (claudeDir !== undefined) await markOnboarded(claudeDir, source.cwd);
             const codexDir = source.launch.set['CODEX_HOME'];
-            if (codexDir !== undefined) await takeoverCodexHomes(codexDir).prepare(source.cwd);
+            if (codexDir !== undefined)
+              await takeoverCodexHomes(codexDir, codexHomeProviderOf(source.kind)).prepare(
+                source.cwd,
+              );
           },
           newSetId: () => randomBytes(5).toString('hex'),
         },

@@ -1,5 +1,5 @@
-import { chmodSync, mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { accountConfigDir, makePrivate } from './account-homes';
 import {
   AccountKind,
   AccountPauseReason,
@@ -7,7 +7,6 @@ import {
   AccountSecretInput,
   EventType,
   harnessOf,
-  Provider,
   requireHarness,
   signsInWithLogin,
   ConflictError,
@@ -100,13 +99,6 @@ export interface AccountService {
    * pause while spend is still at the cap (raise the cap first).
    */
   resume(id: AccountId): AccountPauseDto[];
-}
-
-/** The directory and every level 10db made above it: readable by the builder only (accounts spec §4). */
-function makePrivate(root: string, dir: string): void {
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  // mkdir's mode passes through the umask, so each level is set explicitly.
-  for (const path of [root, dirname(dir), dir]) chmodSync(path, 0o700);
 }
 
 const nothingSeen = (id: AccountId): Omit<AccountIdentityDto, 'refusal'> => ({
@@ -227,15 +219,10 @@ export function createAccountService(deps: {
       const account = deps.state.write((ctx) => {
         const created = insertAccount(ctx, input, {
           configDirFor: (id) =>
-            join(
+            accountConfigDir(
               root,
               id,
-              harnessOf({
-                kind: input.kind,
-                settings: 'settings' in input ? input.settings : {},
-              }) === Provider.Codex
-                ? 'codex'
-                : 'claude',
+              harnessOf({ kind: input.kind, settings: 'settings' in input ? input.settings : {} }),
             ),
         });
         // Every created account, keyed kinds too, gets one. Inside the transaction: a directory that

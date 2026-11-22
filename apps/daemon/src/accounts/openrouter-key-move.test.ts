@@ -1,4 +1,7 @@
 import type { ExecFileSyncOptionsWithStringEncoding } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { AccountId } from '@10db/contracts';
 import {
   createTestStore,
@@ -27,12 +30,15 @@ const KEY = 'sk-or-v1-0123456789abcdef-OLD-ITEM';
 let store: Store;
 let close: () => void;
 let state: StateStore;
+let accountsRoot: string;
 beforeEach(() => {
+  accountsRoot = mkdtempSync(join(tmpdir(), '10db-key-move-'));
   ({ store, close } = createTestStore());
   state = createStateStore(store, createEventBus());
 });
 afterEach(() => {
   close();
+  rmSync(accountsRoot, { recursive: true, force: true });
 });
 
 interface Faults {
@@ -109,7 +115,7 @@ describe('moveOpenRouterKey', () => {
   it('moves the key into an account of its own, then removes the `openrouter-api-key` item', async () => {
     const items = new Map([[OPENROUTER_KEY_ACCOUNT, KEY]]);
     const { keychain } = keychainOver(items);
-    await moveOpenRouterKey({ state, keychain, logger });
+    await moveOpenRouterKey({ state, accountsRoot, keychain, logger });
     const [account] = openRouterAccounts();
     expect(openRouterAccounts()).toHaveLength(1);
     expect(account).toMatchObject({ label: 'OpenRouter', secretSet: true, archived: false });
@@ -123,7 +129,7 @@ describe('moveOpenRouterKey', () => {
   it('does nothing when there is no `openrouter-api-key` item', async () => {
     const items = new Map<string, string>();
     const { keychain, calls } = keychainOver(items);
-    await moveOpenRouterKey({ state, keychain, logger });
+    await moveOpenRouterKey({ state, accountsRoot, keychain, logger });
     expect(openRouterAccounts()).toEqual([]);
     expect(calls).toEqual([`find-generic-password ${OPENROUTER_KEY_ACCOUNT}`]);
   });
@@ -132,7 +138,7 @@ describe('moveOpenRouterKey', () => {
     const items = new Map([[OPENROUTER_KEY_ACCOUNT, KEY]]);
     const existing = openRouterAccount('My router', 'sk-or-v1-a-different-key');
     const { keychain } = keychainOver(items);
-    await moveOpenRouterKey({ state, keychain, logger });
+    await moveOpenRouterKey({ state, accountsRoot, keychain, logger });
     expect(openRouterAccounts().map((a) => a.id)).toEqual([existing]);
     expect(items.get(OPENROUTER_KEY_ACCOUNT)).toBe(KEY);
     expect(getJudgeConfig(store.db).accountId).toBeNull();
@@ -144,7 +150,7 @@ describe('moveOpenRouterKey', () => {
   ])('leaves no account behind and keeps the item when $name', async ({ faults }) => {
     const items = new Map([[OPENROUTER_KEY_ACCOUNT, KEY]]);
     const { keychain } = keychainOver(items, faults);
-    await moveOpenRouterKey({ state, keychain, logger });
+    await moveOpenRouterKey({ state, accountsRoot, keychain, logger });
     expect(openRouterAccounts()).toEqual([]);
     expect(getJudgeConfig(store.db).accountId).toBeNull();
     expect(items.get(OPENROUTER_KEY_ACCOUNT)).toBe(KEY);
@@ -156,7 +162,7 @@ describe('moveOpenRouterKey', () => {
   it('keeps everything and creates nothing when the item cannot be read', async () => {
     const items = new Map([[OPENROUTER_KEY_ACCOUNT, KEY]]);
     const { keychain } = keychainOver(items, { failReadOld: true });
-    await moveOpenRouterKey({ state, keychain, logger });
+    await moveOpenRouterKey({ state, accountsRoot, keychain, logger });
     expect(openRouterAccounts()).toEqual([]);
     expect(items.get(OPENROUTER_KEY_ACCOUNT)).toBe(KEY);
   });
@@ -164,11 +170,11 @@ describe('moveOpenRouterKey', () => {
   it('is idempotent after a partial run: a start that crashed before the removal makes no second account', async () => {
     const items = new Map([[OPENROUTER_KEY_ACCOUNT, KEY]]);
     const crashed = keychainOver(items, { failRemove: true });
-    await moveOpenRouterKey({ state, keychain: crashed.keychain, logger });
+    await moveOpenRouterKey({ state, accountsRoot, keychain: crashed.keychain, logger });
     expect(openRouterAccounts()).toHaveLength(1);
     expect(items.has(OPENROUTER_KEY_ACCOUNT)).toBe(true);
     const next = keychainOver(items);
-    await moveOpenRouterKey({ state, keychain: next.keychain, logger });
+    await moveOpenRouterKey({ state, accountsRoot, keychain: next.keychain, logger });
     expect(openRouterAccounts()).toHaveLength(1);
     expect(items.has(OPENROUTER_KEY_ACCOUNT)).toBe(false);
   });
@@ -182,7 +188,7 @@ describe('moveOpenRouterKey', () => {
       const items = new Map([[OPENROUTER_KEY_ACCOUNT, KEY]]);
       openRouterAccount('OpenRouter', KEY, archived);
       const { keychain } = keychainOver(items);
-      await moveOpenRouterKey({ state, keychain, logger });
+      await moveOpenRouterKey({ state, accountsRoot, keychain, logger });
       expect(openRouterAccounts()).toHaveLength(1);
       expect(items.has(OPENROUTER_KEY_ACCOUNT)).toBe(false);
       expect(getJudgeConfig(store.db).accountId).toBeNull();
@@ -193,7 +199,7 @@ describe('moveOpenRouterKey', () => {
     const items = new Map([[OPENROUTER_KEY_ACCOUNT, KEY]]);
     openRouterAccount('OpenRouter', 'sk-or-v1-an-older-key', true);
     const { keychain } = keychainOver(items);
-    await moveOpenRouterKey({ state, keychain, logger });
+    await moveOpenRouterKey({ state, accountsRoot, keychain, logger });
     expect(
       openRouterAccounts()
         .map((a) => a.label)
@@ -212,7 +218,7 @@ describe('moveOpenRouterKey', () => {
       );
     const items = new Map([[OPENROUTER_KEY_ACCOUNT, KEY]]);
     const { keychain } = keychainOver(items);
-    await moveOpenRouterKey({ state, keychain, logger });
+    await moveOpenRouterKey({ state, accountsRoot, keychain, logger });
     expect(openRouterAccounts().map((a) => a.label)).toEqual([expected]);
   });
 
@@ -221,7 +227,7 @@ describe('moveOpenRouterKey', () => {
     state.write((ctx) => patchJudgeConfig(ctx, { accountId: chosen }));
     const items = new Map([[OPENROUTER_KEY_ACCOUNT, KEY]]);
     const { keychain } = keychainOver(items);
-    await moveOpenRouterKey({ state, keychain, logger });
+    await moveOpenRouterKey({ state, accountsRoot, keychain, logger });
     expect(getJudgeConfig(store.db).accountId).toBe(chosen);
     expect(listAccounts(store.db).filter((a) => a.kind === 'openrouter')).toHaveLength(1);
   });
@@ -232,7 +238,7 @@ describe('moveOpenRouterKey', () => {
     store.db.$client.prepare('UPDATE accounts SET archived = 1 WHERE id = ?').run(chosen);
     const items = new Map([[OPENROUTER_KEY_ACCOUNT, KEY]]);
     const { keychain } = keychainOver(items);
-    await moveOpenRouterKey({ state, keychain, logger });
+    await moveOpenRouterKey({ state, accountsRoot, keychain, logger });
     const made = listAccounts(store.db).find((a) => a.kind === 'openrouter' && !a.archived);
     expect(made).toBeDefined();
     expect(getJudgeConfig(store.db).accountId).toBe(made?.id);
@@ -247,6 +253,8 @@ describe('moveOpenRouterKey', () => {
       write: () => undefined,
       remove: () => undefined,
     };
-    await expect(moveOpenRouterKey({ state, keychain, logger })).resolves.toBeUndefined();
+    await expect(
+      moveOpenRouterKey({ state, accountsRoot, keychain, logger }),
+    ).resolves.toBeUndefined();
   });
 });

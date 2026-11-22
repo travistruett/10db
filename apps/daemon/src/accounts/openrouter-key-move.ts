@@ -1,4 +1,4 @@
-import { AccountKind } from '@10db/contracts';
+import { AccountKind, Provider } from '@10db/contracts';
 import {
   accountSecretRef,
   findAccountRow,
@@ -16,6 +16,7 @@ import {
   type Keychain,
 } from '../environment';
 import type { StateStore } from '../events';
+import { accountConfigDir, makePrivate } from './account-homes';
 import type { Logger } from '../log';
 
 /** The labels tried for the account the `openrouter-api-key` item's key moves into, in order, then "OpenRouter 2", "OpenRouter 3"... */
@@ -46,6 +47,8 @@ function freeLabel(taken: ReadonlySet<string>): string {
  */
 export async function moveOpenRouterKey(deps: {
   readonly state: StateStore;
+  /** The folder every account's directory lives under. */
+  readonly accountsRoot: string;
   readonly keychain: Keychain;
   readonly logger: Pick<Logger, 'warn'>;
 }): Promise<void> {
@@ -90,8 +93,9 @@ export async function moveOpenRouterKey(deps: {
         const created = insertAccount(
           ctx,
           { kind: AccountKind.OpenRouter, label: freeLabel(taken) },
-          { configDirFor: () => '' },
+          { configDirFor: (id) => accountConfigDir(deps.accountsRoot, id, Provider.Codex) },
         );
+        if (created.configDir !== null) makePrivate(deps.accountsRoot, created.configDir);
         const ref = accountSecretRef(created.id);
         written.ref = ref;
         deps.keychain.write(ref, moved);

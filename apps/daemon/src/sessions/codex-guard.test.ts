@@ -507,7 +507,7 @@ describe.skipIf(SANDBOXED || !existsSync('/usr/bin/curl'))(
       const dir = await shortDir();
       const checkout = join(dir, 'c');
       await mkdir(checkout);
-      await codexHomes()(join(dir, 'h')).prepare(checkout);
+      await codexHomes()(join(dir, 'h'), 'chatgpt').prepare(checkout);
       return join(dir, 'h', 'guard-hook.sh');
     }
 

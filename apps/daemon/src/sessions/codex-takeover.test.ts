@@ -68,7 +68,10 @@ describe('codexTakeoverCommand', () => {
     );
     const overrides = overridesOf(command.argv);
     expect(command.sources).toEqual(['/data/takeover/sealed.env']);
-    expect(overrides['shell_environment_policy.exclude']).toEqual(['TENDB_MCP_TOKEN_*']);
+    expect(overrides['shell_environment_policy.exclude']).toEqual([
+      'TENDB_MCP_TOKEN_*',
+      'OPENROUTER_API_KEY',
+    ]);
     expect(overrides['mcp_servers.linear']).toEqual({
       url: 'https://mcp.linear.app/mcp',
       env_http_headers: { Authorization: 'TENDB_MCP_TOKEN_1_0' },
