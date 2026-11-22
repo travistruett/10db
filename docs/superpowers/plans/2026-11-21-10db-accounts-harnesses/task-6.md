@@ -31,7 +31,7 @@ Decisions and Benchmarks rows); "Provider parity follow-up".
   OpenRouter account's, else off.
 - Settings › Decisions, when every call is falling back because the account's secret is missing or fails, says so
   with the reason (the status DTO already carries `secretState`; show it).
-- Part 3's decision record, `docs/architecture/decisions/2026-11-21-decisions-run-on-any-api-account.md`, amending
+- Part 3's decision record, `2026-11-21-decisions-run-on-any-api-account.md` in `docs/architecture/decisions/`, amending
   `decisions/2026-10-31-openrouter-makes-routine-decisions.md`. Update `apps/daemon/src/judge/AGENTS.md` if it
   exists, else the nearest.
 - When done, file the provider-parity follow-up with the `10db-task` skill's CLI on the 10db project: "Decisions

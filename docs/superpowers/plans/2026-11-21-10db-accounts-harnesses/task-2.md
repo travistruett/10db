@@ -19,7 +19,7 @@
   and start again.` Read the row's kind with a raw query so the narrowed type never parses it. Put it beside the
   daemon's other startup checks in `apps/daemon/src/daemon/start.ts` or a small module of its own.
 - `packages/agent-skill/src/commands.ts:49`: drop the stale `modelMap` key.
-- Part 1's decision record, `docs/architecture/decisions/2026-11-21-accounts-store-their-harness.md`: the harness
+- Part 1's decision record, `2026-11-21-accounts-store-their-harness.md` in `docs/architecture/decisions/`: the harness
   is stored on the account and is the only Claude-or-Codex question; Gateway is removed and a stored one refuses
   startup. Cite the spec. Update docs that describe Gateway (`grep -rln -i gateway docs/architecture apps/*/AGENTS.md
   apps/daemon/src/**/AGENTS.md`), past specs and plans excepted.

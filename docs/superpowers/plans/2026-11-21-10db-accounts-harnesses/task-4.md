@@ -35,7 +35,7 @@ and the 402) and "Web search".
   shows).
 - **10db's errands** on an OpenRouter project run Codex on the Efficient tier model (follows from card 1 and the
   model list; confirm).
-- Part 2's decision record, `docs/architecture/decisions/2026-11-21-openrouter-runs-agents-on-codex.md`,
+- Part 2's decision record, `2026-11-21-openrouter-runs-agents-on-codex.md` in `docs/architecture/decisions/`,
   **Supersedes** the refusal in `decisions/2026-10-31-openrouter-makes-routine-decisions.md`; cite spike 18.
   Update `apps/daemon/src/accounts/AGENTS.md` and docs that say OpenRouter can't run agents.
 
