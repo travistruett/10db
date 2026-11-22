@@ -1,4 +1,5 @@
 import {
+  AccountKind,
   EventType,
   isMetered,
   mintId,
@@ -15,6 +16,7 @@ import {
 } from '@10db/contracts';
 import { and, asc, count, desc, eq, isNull, sql } from 'drizzle-orm';
 import * as schema from '../schema';
+import { listAccountModels } from './account-models';
 import { getAccountRow } from './accounts';
 import { planOfConversation } from './shapes';
 import type { DbReader, WriteContext } from './store';
@@ -190,6 +192,29 @@ export function updateSessionUsage(
           }),
       updatedAt: ctx.now,
     })
+    .where(eq(schema.sessions.id, id))
+    .run();
+}
+
+/**
+ * Sets an OpenRouter session's cost to its tokens at the price its account's list gives the model, per million
+ * tokens; cached tokens are charged as input. Codex reports tokens, not dollars, so this is the session's only
+ * cost. A session on another kind, or on a model the list gives no price, keeps what it has.
+ */
+export function priceSessionAtListing(ctx: WriteContext, id: SessionId): void {
+  const session = getSession(ctx.tx, id);
+  if (getAccountRow(ctx.tx, session.accountId).kind !== AccountKind.OpenRouter) return;
+  const listed = listAccountModels(ctx.tx, session.accountId).find(
+    (m) => m.launchId === session.model || m.model === session.model,
+  );
+  if (listed === undefined || listed.inputPrice === null || listed.outputPrice === null) return;
+  const costUsd =
+    ((session.inputTokens + session.cachedTokens) * listed.inputPrice +
+      session.outputTokens * listed.outputPrice) /
+    1_000_000;
+  ctx.tx
+    .update(schema.sessions)
+    .set({ costUsd, updatedAt: ctx.now })
     .where(eq(schema.sessions.id, id))
     .run();
 }

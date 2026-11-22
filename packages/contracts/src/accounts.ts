@@ -80,7 +80,11 @@ export function signsInWithLogin(
   return kind === AccountKind.ClaudeSubscription || kind === AccountKind.CodexSignin;
 }
 
-const METERED: readonly AccountKind[] = [AccountKind.AnthropicApiKey, AccountKind.Bedrock];
+const METERED: readonly AccountKind[] = [
+  AccountKind.AnthropicApiKey,
+  AccountKind.Bedrock,
+  AccountKind.OpenRouter,
+];
 
 /** Billed per token: the SDK's dollars are real, and a monthly cap applies. */
 export function isMetered(kind: AccountKind): boolean {
@@ -164,8 +168,7 @@ export const BedrockSettings = z.strictObject({
   /** The AWS profile the session uses; null means a bearer token from the Keychain. */
   awsProfile: AwsProfile.nullable(),
 });
-/** An OpenRouter account's harness; the model choice comes with the model list. */
-export const OpenRouterSettings = z.strictObject({ ...harness });
+export const OpenRouterSettings = z.strictObject({ ...modelChoice, ...harness });
 export type SubscriptionSettings = z.infer<typeof SubscriptionSettings>;
 export type ApiKeySettings = z.infer<typeof ApiKeySettings>;
 export type BedrockSettings = z.infer<typeof BedrockSettings>;
@@ -263,6 +266,7 @@ export const AccountInput = z.discriminatedUnion(
     z.strictObject({
       kind: z.literal(AccountKind.OpenRouter),
       ...common,
+      ...metered,
       settings: harnessOfKind(AccountKind.OpenRouter, OpenRouterSettings).default({}),
     }),
   ],

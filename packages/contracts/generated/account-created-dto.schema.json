@@ -121,6 +121,23 @@
             {
               "type": "object",
               "properties": {
+                "tierOverrides": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string",
+                    "enum": [
+                      "efficient",
+                      "balanced",
+                      "capable",
+                      "frontier"
+                    ]
+                  },
+                  "additionalProperties": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
                 "harness": {
                   "type": "string",
                   "enum": [

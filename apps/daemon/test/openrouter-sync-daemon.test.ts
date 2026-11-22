@@ -1,7 +1,7 @@
 import { AccountCreatedDto, AccountDto, BenchmarkStatusDto, JudgeStatusDto } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RunningDaemon } from '../src/daemon';
-import { OPENROUTER_KEY_ACCOUNT, type Keychain } from '../src/environment';
+import type { Keychain } from '../src/environment';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
@@ -110,14 +110,5 @@ describe('the OpenRouter sync in a daemon', () => {
     );
     expect(keyed.length).toBeGreaterThan(0);
     expect(keyed.every((r) => r.authorization === `Bearer ${KEY}`)).toBe(true);
-  });
-
-  it('reads at the first boot with the key an older version left in its own Keychain item', async () => {
-    const api = await start({ keychain: createMemoryKeychain({ [OPENROUTER_KEY_ACCOUNT]: KEY }) });
-    const status = await waitForAsync(async () => {
-      const s = await openRouterStatus(api);
-      return s.outcome === null ? undefined : s;
-    });
-    expect(status).toMatchObject({ outcome: 'ok', keyConfigured: true });
   });
 });

@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { mkdir, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
-import { AccountProblem, type AccountRefusal } from '@10db/contracts';
+import { AccountKind, AccountProblem, type AccountRefusal } from '@10db/contracts';
 import { z } from 'zod';
 import { systemClock, type Clock } from '../clock';
 import { CODEX_VERIFIED_ON } from '../environment';
@@ -118,8 +118,31 @@ const TurnEnd = {
   UsageLimit: 'usage_limit',
   SignedOut: 'signed_out',
   ModelRefused: 'model_refused',
+  CannotBill: 'cannot_bill',
 } as const;
 type TurnEnd = (typeof TurnEnd)[keyof typeof TurnEnd];
+
+/** A custom provider's model that Codex has no metadata for: a warning in an `error` item, not a failure. */
+const METADATA_WARNING = 'Model metadata for';
+
+const ErrorItem = z.looseObject({
+  item: z.looseObject({ type: z.literal('error'), message: z.string() }),
+});
+
+/** OpenRouter answers 402 when the account's credit is spent. */
+const PAYMENT_REQUIRED = 402;
+
+const HttpFailure = z.looseObject({ httpStatusCode: z.number().optional() });
+
+/** Whether a failed turn's error is a 402: Codex names the status in `codexErrorInfo`, else only the text has it. */
+function isPaymentRequired(info: unknown, message: string): boolean {
+  if (typeof info === 'object' && info !== null) {
+    for (const value of Object.values(info)) {
+      if (HttpFailure.safeParse(value).data?.httpStatusCode === PAYMENT_REQUIRED) return true;
+    }
+  }
+  return /\b402\b|payment required/i.test(message);
+}
 
 /** `codexErrorInfo` is a bare name (`"unauthorized"`) or an object keyed by it (`{ "httpConnectionFailed": {} }`). */
 function errorKind(info: unknown): string | null {
@@ -636,6 +659,11 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
     }
   };
 
+  /** The text of the turn that ended the session on a refused payment. */
+  let failedText = '';
+  /** Whether the session has logged Codex's missing-metadata warning: it repeats every turn. */
+  let warnedMetadata = false;
+
   /** What a failed turn ends the session on, when it names one. */
   const endOfTurn = (params: unknown): TurnEnd | null => {
     const parsed = TurnCompleted.safeParse(params);
@@ -643,6 +671,14 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
     const kind = errorKind(parsed.data.turn.error?.codexErrorInfo);
     if (kind === 'usageLimitExceeded') return TurnEnd.UsageLimit;
     if (kind === 'unauthorized') return TurnEnd.SignedOut;
+    const error = parsed.data.turn.error;
+    if (
+      spec.account.kind === AccountKind.OpenRouter &&
+      isPaymentRequired(error?.codexErrorInfo, error?.message ?? '')
+    ) {
+      failedText = error?.message ?? 'payment required';
+      return TurnEnd.CannotBill;
+    }
     // Codex accepts an unknown model at thread/start, so a model the account cannot run fails only here.
     if (kind === 'badRequest' && refusesModel(parsed.data.turn.error?.message ?? ''))
       return TurnEnd.ModelRefused;
@@ -655,6 +691,15 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
       case TurnEnd.ModelRefused:
         finish(SessionEndReason.ModelRefused, modelRefusal(model));
         return;
+      case TurnEnd.CannotBill: {
+        const message = `OpenRouter refused the turn for account "${spec.account.label}": ${failedText}`;
+        finish(SessionEndReason.AccountRefused, message, {
+          problem: AccountProblem.CannotBill,
+          message,
+          seenIdentity: null,
+        });
+        return;
+      }
       case TurnEnd.SignedOut: {
         const message = `Codex says account "${spec.account.label}" is signed out.`;
         finish(SessionEndReason.AccountRefused, message, {
@@ -694,6 +739,16 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
         if (begun.success && starting !== null) {
           handTo(begun.data.turn.id, starting);
           starting = null;
+        }
+      }
+      if (n.method === 'item/completed') {
+        const warning = ErrorItem.safeParse(n.params);
+        if (warning.success && warning.data.item.message.startsWith(METADATA_WARNING)) {
+          if (!warnedMetadata) {
+            warnedMetadata = true;
+            log.warn({ message: warning.data.item.message }, 'codex has no metadata for the model');
+          }
+          return;
         }
       }
       let ended: string | null = null;

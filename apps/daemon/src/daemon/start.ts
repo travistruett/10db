@@ -79,7 +79,7 @@ import {
   createMoveBack,
   MoveCause,
   giveOpenRouterHomes,
-  moveOpenRouterKey,
+  removeLegacyOpenRouterKey,
   createStartGate,
   createUsageReports,
   type AccountLimits,
@@ -877,15 +877,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         })
       : null;
   giveOpenRouterHomes(state, join(opts.dataDir, 'accounts'));
-  // With the judge off no Keychain item is read, `openrouter-api-key` included.
-  if (opts.judgeOff !== true)
-    await moveOpenRouterKey({
-      state,
-      accountsRoot: join(opts.dataDir, 'accounts'),
-      keychain: judgeKeychain,
-      logger: logger.child({ component: 'judge' }),
-    });
-  // After the key move, so the first run sees the account a key left in the old item became.
+  // The key an older version kept in its own item is not used any more; an OpenRouter account holds its own.
+  if (opts.judgeOff !== true) removeLegacyOpenRouterKey(judgeKeychain, logger);
   openRouterSync?.start();
   state.write((ctx) =>
     deleteJudgeCallsBefore(
@@ -1585,6 +1578,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     startGate,
     lists: accountLists,
     dataDir: opts.dataDir,
+    fetch: opts.fetch ?? fetch,
     logger: logger.child({ component: 'catalogue' }),
   });
   // What runs after every fetch of the catalogue: each account's list is read again through the identity probe, then

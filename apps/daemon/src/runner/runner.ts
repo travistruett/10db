@@ -159,6 +159,7 @@ import {
   type DbReader,
   transitionWorkstream,
   updateSessionUsage,
+  priceSessionAtListing,
   type RetryLimitFindings,
   type WorkstreamRow,
   type WriteContext,
@@ -3814,6 +3815,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 cachedTokens: event.cachedTokens,
                 costUsd: event.costUsd,
               });
+              priceSessionAtListing(ctx, session.id);
             });
             // A parked or limited session may still finish its interrupted turn before it exits.
             if (st.outcome || st.parkedFor) break;

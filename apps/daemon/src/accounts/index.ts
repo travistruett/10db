@@ -11,6 +11,5 @@ export { createAccountLimits, type AccountLimits } from './limits';
 export { createMoveBack } from './move-back';
 export { createListRefresh } from './list-refresh';
 export { createModelListWait, MODEL_LIST_WAIT_MS, type ModelListWait } from './model-list-wait';
-export { giveOpenRouterHomes } from './account-homes';
-export { moveOpenRouterKey } from './openrouter-key-move';
+export { giveOpenRouterHomes, removeLegacyOpenRouterKey } from './account-homes';
 export { createMcpSignIns, type McpSignIns } from './mcp-sign-ins';

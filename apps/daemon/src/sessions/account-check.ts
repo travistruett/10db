@@ -19,6 +19,9 @@ export interface SeenModel {
   readonly resolvedId: string | null;
   /** The efforts it reports that 10db knows; empty when it reports none. */
   readonly efforts: readonly Effort[];
+  /** Dollars per million tokens, when the list states them (an OpenRouter account's does). */
+  readonly inputPrice?: number;
+  readonly outputPrice?: number;
 }
 
 /** What Claude Code reports about the account a session runs on (`accountInfo()`). */

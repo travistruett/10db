@@ -6,7 +6,12 @@ import {
   type SessionId,
 } from '@10db/contracts';
 import { taskKind } from './background-task-kind';
-import { markSessionStarted, patchConversation, updateSessionUsage } from '@10db/db';
+import {
+  markSessionStarted,
+  patchConversation,
+  priceSessionAtListing,
+  updateSessionUsage,
+} from '@10db/db';
 import type { Clock } from '../clock';
 import type { LiveFrames, StateStore } from '../events';
 import type { Logger } from '../log';
@@ -166,6 +171,7 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
               cachedTokens: event.cachedTokens,
               costUsd: event.costUsd,
             });
+            priceSessionAtListing(ctx, sessionId);
           },
         });
         sink.turnComplete(event);

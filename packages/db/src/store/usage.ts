@@ -33,45 +33,31 @@ export function accountSpendUsd(db: DbReader, id: AccountId, window: UsageWindow
     .from(schema.sessions)
     .where(inWindow(id, window))
     .get();
-  return row?.total ?? 0;
+  return (row?.total ?? 0) + decisionSpendUsd(db, id, window);
 }
 
 /**
- * An OpenRouter account runs no session, so its month is the dollars of the decisions made on it: the judge's call
- * log, kept 30 days. A call records no account, so only the account decisions run on has a figure; any other is null.
+ * The dollars of the decisions made on an OpenRouter account in the window: the judge's call log, kept 30 days.
+ * A call records no account, so only the account decisions run on has a figure; any other kind or account is 0.
  */
-function decisionUsage(db: DbReader, id: AccountId, window: UsageWindow): AccountUsageDto {
-  const account = getAccountRow(db, id);
-  const runsDecisions = getJudgeConfig(db).accountId === id;
-  const spent = runsDecisions
-    ? db
-        .select({ total: sql<number | null>`sum(${schema.judgeCalls.costUsd})` })
-        .from(schema.judgeCalls)
-        .where(
-          and(
-            gte(schema.judgeCalls.createdAt, window.start),
-            lt(schema.judgeCalls.createdAt, window.end),
-          ),
-        )
-        .get()
-    : undefined;
-  return {
-    accountId: id,
-    month: window.month,
-    total: {
-      tokensIn: 0,
-      tokensOut: 0,
-      tokensCached: 0,
-      costUsd: runsDecisions ? (spent?.total ?? 0) : null,
-    },
-    monthlyCapUsd: account.monthlyCapUsd,
-    byProject: [],
-  };
+function decisionSpendUsd(db: DbReader, id: AccountId, window: UsageWindow): number {
+  if (getAccountRow(db, id).kind !== AccountKind.OpenRouter) return 0;
+  if (getJudgeConfig(db).accountId !== id) return 0;
+  const row = db
+    .select({ total: sql<number | null>`sum(${schema.judgeCalls.costUsd})` })
+    .from(schema.judgeCalls)
+    .where(
+      and(
+        gte(schema.judgeCalls.createdAt, window.start),
+        lt(schema.judgeCalls.createdAt, window.end),
+      ),
+    )
+    .get();
+  return row?.total ?? 0;
 }
 
 export function accountUsage(db: DbReader, id: AccountId, window: UsageWindow): AccountUsageDto {
   const account = getAccountRow(db, id);
-  if (account.kind === AccountKind.OpenRouter) return decisionUsage(db, id, window);
   const metered = isMetered(account.kind);
   const rows = db
     .select({
@@ -135,10 +121,12 @@ export function accountUsage(db: DbReader, id: AccountId, window: UsageWindow): 
     }),
     zero,
   );
+  // Decisions are not a project's: they join the account's total, and no project's row.
+  const spent = total.costUsd === null ? null : total.costUsd + decisionSpendUsd(db, id, window);
   return {
     accountId: id,
     month: window.month,
-    total,
+    total: { ...total, costUsd: spent },
     monthlyCapUsd: account.monthlyCapUsd,
     byProject,
   };

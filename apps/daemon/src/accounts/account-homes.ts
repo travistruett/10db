@@ -2,7 +2,9 @@ import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { Provider, type AccountId } from '@10db/contracts';
 import { giveOpenRouterAccountsAHome } from '@10db/db';
+import { OPENROUTER_KEY_ACCOUNT, type Keychain } from '../environment';
 import type { StateStore } from '../events';
+import type { Logger } from '../log';
 
 /** Where an account keeps its agent's login and config: under its own folder, named for the harness. */
 export function accountConfigDir(root: string, id: AccountId, harness: Provider | null): string {
@@ -28,4 +30,16 @@ export function giveOpenRouterHomes(state: StateStore, root: string): void {
       if (row.configDir !== null) makePrivate(root, row.configDir);
     }
   });
+}
+
+/** Removes the Keychain item an older version kept the OpenRouter key in; a key lives in its account's own item. */
+export function removeLegacyOpenRouterKey(keychain: Keychain, logger: Pick<Logger, 'warn'>): void {
+  try {
+    keychain.remove(OPENROUTER_KEY_ACCOUNT);
+  } catch (error) {
+    logger.warn(
+      { err: error instanceof Error ? error.name : 'error' },
+      'could not remove the old OpenRouter key item',
+    );
+  }
 }

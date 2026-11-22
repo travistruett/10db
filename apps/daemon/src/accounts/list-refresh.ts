@@ -1,5 +1,6 @@
-import { harnessOf, type AccountId } from '@10db/contracts';
+import { AccountKind, harnessOf, type AccountId } from '@10db/contracts';
 import { getAccountRow, listAccountModels, listAccounts } from '@10db/db';
+import { fetchToolModels } from '../benchmarks';
 import type { AccountLists } from '../catalogue';
 import type { Clock } from '../clock';
 import type { Launcher } from '../environment';
@@ -37,6 +38,7 @@ export function createListRefresh(deps: {
   readonly startGate: StartGate;
   readonly lists: AccountLists;
   readonly dataDir: string;
+  readonly fetch: typeof fetch;
   readonly logger: Pick<Logger, 'warn'>;
 }): ListRefresh {
   const db = deps.state.db;
@@ -59,7 +61,7 @@ export function createListRefresh(deps: {
 
   async function probeAndRecord(id: AccountId): Promise<void> {
     const row = getAccountRow(db, id);
-    // An account no harness runs lists no models: there is nothing to probe.
+    // An account no harness runs has no session to probe.
     if (harnessOf(row) === null) return;
     const launch = deps.launcher.probe(row);
     const release = await deps.startGate.acquire(id);
@@ -74,8 +76,33 @@ export function createListRefresh(deps: {
     } finally {
       release();
     }
-    if (checkAccount(launch.expect, seen) === null)
-      deps.lists.record({ id: row.id, kind: row.kind, harness: launch.expect.harness }, seen);
+    if (checkAccount(launch.expect, seen) !== null) return;
+    const account = { id: row.id, kind: row.kind, harness: launch.expect.harness };
+    if (row.kind !== AccountKind.OpenRouter) {
+      deps.lists.record(account, seen);
+      return;
+    }
+    // Codex lists no models on a custom provider: OpenRouter's own list, with its prices, is the account's.
+    const key = launch.env['OPENROUTER_API_KEY'];
+    if (key === undefined) return;
+    const listed = await fetchToolModels({ fetch: deps.fetch, key });
+    if (listed.kind !== 'ok') {
+      deps.logger.warn(
+        { accountId: id, outcome: listed.kind },
+        'could not read the models OpenRouter lists; keeping the last list',
+      );
+      return;
+    }
+    deps.lists.record(account, {
+      ...seen,
+      models: listed.value.map((m) => ({
+        id: m.id,
+        resolvedId: null,
+        efforts: [],
+        inputPrice: m.inputPrice,
+        outputPrice: m.outputPrice,
+      })),
+    });
   }
 
   function readOne(id: AccountId): Promise<void> {

@@ -7,6 +7,7 @@ import {
 import type { NewAccountModel } from '@10db/db';
 import type { SeenModel } from '../sessions';
 import { BEDROCK, joinModel, RUNTIME_MAKER } from './join';
+import { joinOpenRouterEntry, openRouterProvider } from './openrouter-join';
 import type { Catalogue, CatalogueModel } from './source';
 
 type Prices = Pick<NewAccountModel, 'inputPrice' | 'outputPrice'>;
@@ -28,6 +29,7 @@ function priceOf(
   catalogue: Catalogue,
 ): Prices {
   switch (account.kind) {
+    // An OpenRouter list states its own prices, which `offerFromList` takes from each listed model.
     case AccountKind.ClaudeSubscription:
     case AccountKind.CodexSignin:
     case AccountKind.OpenRouter:
@@ -122,7 +124,14 @@ export function offerFromList(
   for (const m of models) {
     if (someResolved && m.resolvedId === null) continue;
     const launchId = m.resolvedId ?? m.id;
-    const entry = joinModel(launchId, provider, catalogue);
+    const viaRouter = account.kind === AccountKind.OpenRouter;
+    // A router id is `maker/model`: only the runtime's own maker is joined, so the other makers' models stay
+    // under their router id, runnable through a tier override but unranked.
+    const entry = viaRouter
+      ? openRouterProvider(launchId) === provider
+        ? joinOpenRouterEntry(launchId, catalogue)
+        : null
+      : joinModel(launchId, provider, catalogue);
     const model = entry?.id ?? launchId;
     if (rows.has(model)) continue;
     listed.set(model, { entry, launchId });
@@ -131,7 +140,9 @@ export function offerFromList(
       family: entry?.family ?? null,
       launchId,
       efforts: [...m.efforts],
-      ...priceOf(account, entry, launchId, catalogue),
+      ...(viaRouter
+        ? { inputPrice: m.inputPrice ?? null, outputPrice: m.outputPrice ?? null }
+        : priceOf(account, entry, launchId, catalogue)),
     });
   }
   const added =

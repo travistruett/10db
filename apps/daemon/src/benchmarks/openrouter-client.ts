@@ -69,6 +69,17 @@ const ModelItem = z.looseObject({
   canonical_slug: z.string().min(1).nullable().optional(),
 });
 
+const PriceString = z.string().regex(/^\d*\.?\d+(e-?\d+)?$/i);
+const ToolModelItem = z.looseObject({
+  id: z.string().min(1),
+  supported_parameters: z.array(z.string()).optional(),
+  pricing: z.looseObject({ prompt: PriceString, completion: PriceString }),
+  architecture: z
+    .looseObject({ input_modalities: z.array(z.string()).optional() })
+    .nullable()
+    .optional(),
+});
+
 interface Request {
   readonly fetch: typeof fetch;
   readonly signal?: AbortSignal | undefined;
@@ -201,6 +212,47 @@ export async function fetchOpenRouterModels(
     kind: 'ok',
     value: found.map((m) => ({ id: m.id, canonicalSlug: m.canonical_slug ?? null })),
   };
+}
+
+/** A model OpenRouter lists that takes tool calls: what an OpenRouter account can run. */
+export interface ToolModel {
+  readonly id: string;
+  /** Dollars per million tokens, as OpenRouter lists them (it states them per token). */
+  readonly inputPrice: number;
+  readonly outputPrice: number;
+  readonly inputModalities: readonly string[];
+}
+
+const PER_MILLION = 1_000_000;
+/** Float noise from the per-token string, such as 0.000003 * 1e6, is rounded away. */
+const perMillion = (perToken: string): number =>
+  Number((Number(perToken) * PER_MILLION).toPrecision(12));
+
+/**
+ * The models in a models-API body that list tool support, each with its listed price. A model that lists no
+ * tools, or a price that is not a plain number (a router's `-1`), is left out.
+ */
+export function toolModelsOf(body: unknown): ToolModel[] | null {
+  const found = items(body, ToolModelItem);
+  if (found === null) return null;
+  return found
+    .filter((m) => m.supported_parameters?.includes('tools') === true)
+    .map((m) => ({
+      id: m.id,
+      inputPrice: perMillion(m.pricing.prompt),
+      outputPrice: perMillion(m.pricing.completion),
+      inputModalities: m.architecture?.input_modalities ?? [],
+    }));
+}
+
+/** Every tool-capable model OpenRouter lists, read with the account's key. */
+export async function fetchToolModels(
+  deps: Request & { readonly key: string },
+): Promise<OpenRouterOutcome<ToolModel[]>> {
+  const res = await getJson(OPENROUTER_MODELS_URL, deps);
+  if (res.kind !== 'ok') return res;
+  const models = toolModelsOf(res.value);
+  return models === null ? failed(NOT_UNDERSTOOD) : { kind: 'ok', value: models };
 }
 
 /** A p50 that is not positive is OpenRouter's "no sample", not a measurement. */

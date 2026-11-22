@@ -271,7 +271,7 @@ describe.skipIf(SANDBOXED)('Settings › Trust over HTTP', () => {
       'claude-sonnet-4-5',
     );
     const codex = await accountOn({ kind: 'codex_signin', label: 'ChatGPT' }, 'gpt-5.5');
-    // An OpenRouter account answers decisions only: it runs no session, so it has no judge to list.
+    // An OpenRouter account runs Codex, so it is judged by 10db's judge like a ChatGPT plan.
     const openRouter = (
       await api().post('/accounts', AccountCreatedDto, { kind: 'openrouter', label: 'OpenRouter' })
     ).account;
@@ -305,8 +305,8 @@ describe.skipIf(SANDBOXED)('Settings › Trust over HTTP', () => {
       judge: JudgeKind.Tendb,
       why: null,
     });
-    expect(byId.has(openRouter.id)).toBe(false);
-    expect(judges).toHaveLength(4);
+    expect(byId.get(openRouter.id)).toMatchObject({ judge: JudgeKind.Tendb, why: null });
+    expect(judges).toHaveLength(5);
   });
 });
 
