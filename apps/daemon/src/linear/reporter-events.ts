@@ -29,7 +29,6 @@ import type { Clock } from '../clock';
 import type { EventBus, StateStore } from '../events';
 import type { Logger } from '../log';
 import { trustSwitchesFor } from '../permissions';
-import { linearBindingOf } from './bindings';
 import { reporterSettings } from './reporter-settings';
 
 /** How long an event waits before it is posted, so a burst becomes one update. */
@@ -174,10 +173,8 @@ export function attemptOf(db: DbReader, workstreamId: WorkstreamId): number {
   return Math.max(1, runs.findIndex((w) => w.id === workstreamId) + 1);
 }
 
-/** Why the project doesn't report (no binding, switched off, Your MCP servers off), or null. */
+/** Why the project doesn't report (switched off, Your MCP servers off), or null. */
 export function reporterBlockedBy(db: DbReader, projectId: ProjectId): string | null {
-  if (linearBindingOf(db, projectId) === null)
-    return 'Off: this project is not linked to a Linear team.';
   if (!reporterSettings(db, projectId).on) return 'Off: Report To Linear is off.';
   if (!trustSwitchesFor(db, projectId, () => undefined).yourMcpServers)
     return 'Off: Your MCP servers is off in Trust.';

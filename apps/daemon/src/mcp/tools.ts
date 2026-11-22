@@ -124,6 +124,7 @@ import {
 } from './claim-wait';
 import { createPlanToolHandlers, PLAN_TOOL_DESCRIPTIONS } from './plan-tools';
 import { judgeReportedRoutes } from './report-pages';
+import type { LinearReporter } from '../linear';
 import type { ChatToolsFor } from './chat-tools';
 import type { ShapeToolsFor } from './shape-tools';
 import { answerAway, routedToPerson, type AwayLane } from '../trust';
@@ -156,6 +157,8 @@ export interface McpDeps {
   readonly shapeTools?: ShapeToolsFor;
   /** The tools of a chat's session; absent, such a session is refused. */
   readonly chatTools?: ChatToolsFor;
+  /** The Linear reporter's two tools, offered only to a session of its own. */
+  readonly reporter?: Pick<LinearReporter, 'reportPost'>;
   /** Draws a mock-up and shoots the app for `check_design`; absent, a lane is not offered it. */
   readonly pictures?: Pick<Pictures, 'shootNow' | 'drawMockup' | 'bytesOf'>;
 }

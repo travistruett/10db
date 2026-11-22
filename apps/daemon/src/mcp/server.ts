@@ -9,6 +9,9 @@ import {
   DomainError,
   McpToolInputs,
   McpToolName,
+  REPORTER_TOOL_DESCRIPTIONS,
+  ReporterToolInputs,
+  ReporterToolName,
   ShapeToolInputs,
   ShapeToolName,
   type ConversationId,
@@ -132,10 +135,32 @@ function chatTools(deps: McpDeps, session: SessionRow, chat: ChatSession): Regis
   }));
 }
 
+/** The Linear reporter's two tools, held to the session whose conversation is its own. */
+function reporterTools(deps: McpDeps, session: SessionRow): RegisteredTool[] | null {
+  const { reporter } = deps;
+  if (reporter === undefined) return null;
+  const sessionId = session.id;
+  return [
+    {
+      name: ReporterToolName.ReportLinearPost,
+      description: REPORTER_TOOL_DESCRIPTIONS[ReporterToolName.ReportLinearPost],
+      schema: ReporterToolInputs[ReporterToolName.ReportLinearPost],
+      run: (input) =>
+        Promise.resolve(
+          reporter.reportPost(
+            sessionId,
+            ReporterToolInputs[ReporterToolName.ReportLinearPost].parse(input),
+          ),
+        ),
+    },
+  ];
+}
+
 /** A chat's session's tools: the chat's, and Plan's beside them whether or not the chat has a plan yet. */
 function conversationTools(deps: McpDeps, session: SessionRow): RegisteredTool[] | null {
   if (session.conversationId === null) return null;
   const conv = getConversation(deps.state.db, session.conversationId);
+  if (conv.ownerKind === ConversationOwnerKind.Reporter) return reporterTools(deps, session);
   if (conv.ownerKind !== ConversationOwnerKind.Chat) return null;
   const chat: ChatSession = {
     // The owner id of a chat's conversation is a ChatId; parsed, as text read from the database.
