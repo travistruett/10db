@@ -35,6 +35,9 @@
 
 ## Done when
 
+Before you report, click through Settings › Accounts (add-account choices, an account card's "Runs ..." label) and
+a project's Billing picker against the real daemon (the `10db-dev-window` skill, or `make dev` and the dev UI), and
+save screenshots to your scratch folder; name them in the report. 
 `grep -rn "Gateway\|gateway" apps packages --include='*.ts' --include='*.tsx'` finds only the startup refusal,
 its test and unrelated words (an "AI gateway" in copy is unrelated only if it isn't the account kind); checks as
 card 1.

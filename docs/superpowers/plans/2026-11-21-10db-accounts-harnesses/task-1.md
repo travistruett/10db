@@ -6,8 +6,10 @@ and who powers them" (the errands row: area naming on the project's account).
 
 ## Files
 
-- `packages/contracts/src/accounts.ts`: `HARNESSES_OF_KIND`, the `harness` field on every kind's settings (refused
-  outside the kind's list), `harnessOf`, `requireHarness`; remove `providerOf`, `runsAgents`, `agentKind`,
+- `packages/contracts/src/accounts.ts`: `HARNESSES_OF_KIND`, the `harness` field on every kind's settings, refused
+  outside the kind's list **per kind** in `parseAccountSettings` and in each `AccountInput` branch (a Claude plan and
+  a ChatGPT plan share `SubscriptionSettings`, so a schema-only check can't refuse `harness: 'codex'` on a Claude
+  plan), `harnessOf`, `requireHarness`; remove `providerOf`, `runsAgents`, `agentKind`,
   `AGENT_ACCOUNT_KINDS`, `AgentAccountKind`, `OPENROUTER_CANT_RUN_AGENTS`. In this card the OpenRouter row is `[]`;
   card 3 makes it `[Provider.Codex]`.
 - `packages/db/src/store/accounts.ts`, `store/projects.ts`: binding a project's account or backup refuses a kind

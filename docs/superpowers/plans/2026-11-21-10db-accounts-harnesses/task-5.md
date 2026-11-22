@@ -11,9 +11,14 @@
   endpoints (`openrouter.ts`, its `ModelApi` choice unchanged), Anthropic and Bedrock to the new files.
 - `apps/daemon/src/judge/anthropic.ts`: one Messages call to `https://api.anthropic.com/v1/messages` with the key,
   the state and question as the user turn, the options and criteria as in `optionsText`, and structured output as a
-  JSON schema `{ choice: enum(options), confidence: number 0..1 }`. Check the request shape against Anthropic's
-  structured-outputs docs (`platform.claude.com/docs/en/build-with-claude/structured-outputs`) before writing it,
-  and quote the field names you used in your report. zod-parse the answer; `confidence` is the answer's own.
+  JSON schema `{ choice: enum(options), confidence: number }`. Verified by the coordinator from
+  `platform.claude.com/docs/en/build-with-claude/structured-outputs` on 2026-11-21: the body carries
+  `output_config: { format: { type: "json_schema", schema } }`, header `anthropic-version: 2026-10-21`; every object
+  needs `additionalProperties: false` and every property in `required`; **numeric `minimum`/`maximum` are refused
+  with a 400**, so clamp `confidence` to 0..1 in code, not in the schema; **enum casing is not guaranteed**, so
+  match `choice` to the options case-insensitively; `stop_reason: "refusal"` or `"max_tokens"` is no answer
+  (throw `JudgeCallError`). The answer is JSON in the first text block. zod-parse it; `confidence` is the answer's
+  own. The same body works on Bedrock's runtime (the docs list Bedrock as supported).
   `costUsd` from `usage` and the account's listed price when the catalogue has it, else null.
 - `apps/daemon/src/judge/bedrock.ts`: the same body through Bedrock's runtime `InvokeModel` (Anthropic's Bedrock
   body: `anthropic_version: "bedrock-2023-05-31"`), the model id from the account's list (already Bedrock ids),
@@ -28,6 +33,11 @@
 - `apps/daemon/src/daemon/judge-services.ts:88` (`createJudgeKeyReader`): becomes `createJudgeCredentialReader`,
   returning a credential for a live `openrouter`, `anthropic_api_key` or `bedrock` account (profile Bedrock needs
   no Keychain read), null otherwise. Card 6 changes the services' account checks; this card changes only the reader.
+- `apps/daemon/src/daemon/start.ts:811-832`: `openRouterSync`'s `readKey` calls the judge's reader today. It must
+  return a key **only for an OpenRouter credential** (`kind === AccountKind.OpenRouter`), else null: an Anthropic
+  key or Bedrock token must never be sent to openrouter.ai. Card 6 adds the fallback to another OpenRouter account.
+- `judge.ts:129` scrubs the key from logged text; scrub every secret in the credential (the Bedrock
+  `bearerToken` too).
 - Errors: a typed `JudgeCallError` (name, message naming the provider and HTTP status, never the key) replaces
   `OpenRouterError` at the dispatch boundary, or sits beside it.
 

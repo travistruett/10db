@@ -21,6 +21,8 @@ later is a table row.
 **What could go wrong, and how we'd know.**
 - *A site still reads the kind as "runs Codex"* and launches an OpenRouter session as Claude Code. Card 1 replaces
   every site before card 3 lets OpenRouter run; card 1's review greps for `CodexSignin` outside the kind tables.
+- *An Anthropic key sent to openrouter.ai* by the benchmarks sync once Decisions can sit on an Anthropic account.
+  Card 5 narrows that reader to OpenRouter credentials.
 - *The key reaches a shell Codex runs.* The spike showed it does by default. Card 3 adds one test that a lane's
   and a takeover's Codex config keep `OPENROUTER_API_KEY` from shells.
 - *Switching the Decisions account breaks judgment.* The switch is refused unless the new default model answers
@@ -119,6 +121,10 @@ readonly readCredential: (accountId: AccountId | null) => Promise<JudgeCredentia
 // apps/daemon/src/judge/ask.ts: one call on the credential's API. Throws a typed JudgeCallError, or what fetch throws.
 export function askModel(q: ModelQuestion): Promise<ModelAnswer>;
 
+// apps/daemon/src/sessions/codex-home.ts (card 3); both writers pass it: codex-adapter.ts:93, start.ts:1831
+export type CodexHomeProvider = 'chatgpt' | 'openrouter';
+export function codexHomes(): (path: string, provider: CodexHomeProvider) => CodexHome;
+
 // apps/daemon/src/sessions/account-check.ts (card 3): credentialsMatch's OpenRouter case
 case AccountKind.OpenRouter:
   return seen.apiProvider === undefined && seen.requiresOpenaiAuth === false;
@@ -129,6 +135,8 @@ case AccountKind.OpenRouter:
 | State | Event | Result |
 |---|---|---|
 | daemon starting | a stored `gateway` account | refuse to start; the message names the account's label and id and says to remove it (card 2) |
+| daemon starting | a stored OpenRouter row with no `configDir` | given its own dir and the default lane cap (card 3) |
+| OpenRouter session launching | no `configDir` | refused; never the builder's `~/.codex` (card 3) |
 | daemon starting | the `openrouter-api-key` Keychain item exists | item removed; no account is created (card 4) |
 | project bound to an account | its kind has no harness | refused at bind and at launch: `no harness runs <label> yet` (card 1) |
 | OpenRouter session launching | key missing or changed outside 10db | refused as for other keyed kinds (`SecretMissing`, `SecretChanged`) (card 3) |
@@ -137,6 +145,7 @@ case AccountKind.OpenRouter:
 | account over its monthly cap | a decision is asked on it | the decision runs; new sessions stop and move to the backup (card 4) |
 | a decision call in flight | the Decisions account is switched | the call finishes on the old account; the next uses the new (card 6) |
 | any | the Decisions account's secret is cleared or fails | every call falls back to rules with the reason logged; Settings › Decisions says so (card 6) |
+| any | switch Decisions to an account whose model list hasn't loaded | refused: check the account first (card 6) |
 | any | archive the Decisions account | refused: switch Decisions first (card 6) |
 | any | switch Decisions to an account | refused unless the new account's default decision model answers the test decision; on success every decision's model is that default (card 6) |
 

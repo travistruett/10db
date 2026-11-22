@@ -12,6 +12,8 @@ and the 402) and "Web search".
   `supported_parameters` include `tools`, each with OpenRouter's listed price; zod at the boundary. Tiers resolve as
   for any account with a list, with tier overrides (`tier-overrides.tsx` offers the list). Reuse the client in
   `apps/daemon/src/benchmarks/openrouter-client.ts` if it already reads the models API.
+- **Settings:** `OpenRouterSettings` gains `...modelChoice` (tier overrides), and the OpenRouter `AccountInput`
+  branch takes `settings: OpenRouterSettings.default({})`.
 - **Spend and cap:** `contracts/accounts.ts`: OpenRouter is metered (`METERED`) and its `AccountInput` branch takes
   `laneCap` and `monthlyCapUsd` like other keyed kinds; `store/accounts.ts:122-136`, `:165` accept them. Spend is
   session cost plus `judge_calls` cost (`packages/db/src/store/usage.ts:43-74`); a cap pause stops new sessions and
@@ -48,6 +50,10 @@ and the 402) and "Web search".
 
 ## Tests
 
+- Extend `apps/desktop/e2e/loop.spec.ts`'s Settings › Accounts step (near `:321-334`), on the fake adapter: add an
+  OpenRouter account with a key, its row says "Runs Codex", and a project's Billing picker can select it. This is
+  the user-visible check `testing.md` asks for; no rendered-component tests.
+- Before you report, click through the same against the real daemon and save screenshots to your scratch folder.
 - One test of the model list's filter and price parse from a recorded models-API body (parser, core rule).
 - Update the tests of the deleted move and of the removed refusals; add no others. The cap rule is existing
   behaviour applied to one more kind; no new test.

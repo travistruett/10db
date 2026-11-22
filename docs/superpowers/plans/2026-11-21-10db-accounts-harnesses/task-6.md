@@ -27,7 +27,7 @@ Decisions and Benchmarks rows); "Provider parity follow-up".
   plan logins with `PLAN_LOGIN_CANT_DECIDE`), `accounts-section.tsx:52`, `:106-115` (each account card says whether
   it can power Decisions), `usage-by-project.tsx:13`, `account-kind-label.ts:10`, `team/routing-inputs.ts:30`,
   `accounts/list-refresh.ts:101`.
-- Benchmarks key (`daemon/start.ts:2499-2504`): the Decisions account's key when it is OpenRouter, else any live
+- Benchmarks key (`daemon/start.ts:811-832`, the `openRouterSync` `readKey` card 5 narrowed, and `:2499-2504`): the Decisions account's key when it is OpenRouter, else any live
   OpenRouter account's, else off.
 - Settings › Decisions, when every call is falling back because the account's secret is missing or fails, says so
   with the reason (the status DTO already carries `secretState`; show it).
@@ -52,6 +52,8 @@ export const PLAN_LOGIN_CANT_DECIDE = 'a plan login has no API for quick decisio
 
 ## State-table rows
 
+- switch Decisions to an Anthropic or Bedrock account whose model list hasn't loaded → refused:
+  `"<label>" has no model list yet; check the account in Settings › Accounts first`.
 - a decision call in flight / the account is switched → finishes on the old account (the credential is read per
   call; confirm nothing caches it).
 - the Decisions account's secret is cleared or fails → rules, reason logged, Settings › Decisions says so.
@@ -61,8 +63,8 @@ export const PLAN_LOGIN_CANT_DECIDE = 'a plan login has no API for quick decisio
 
 ## Tests
 
-- One test through `createJudgeServices` on a real SQLite file with the judge's `test` faked at the network
-  boundary: a switch whose default model fails the test is refused and leaves the config unchanged; one that passes
+- One test through `createJudgeServices` on a real SQLite file with the **real `createJudge`** and only `fetch`
+  faked (never fake 10db's own judge): a switch whose default model fails the test is refused and leaves the config unchanged; one that passes
   sets the account and every decision's model (core: who answers `crosses_limit`). Update existing tests that
   assumed OpenRouter; add no others.
 
