@@ -7,7 +7,7 @@ export { tomlString } from './codex-takeover';
 export { setupPromptText } from './setup-prompt';
 export { codexTakeoverNotes } from './codex-takeover';
 export { capabilitiesOf, claudeCapabilities, codexCapabilities } from './capabilities';
-export { createCodexAdapter } from './codex-adapter';
+export { CODEX_NO_QUESTIONS, createCodexAdapter } from './codex-adapter';
 export { McpAuthState } from './codex-mcp-auth';
 export { CODEX_COMMANDS } from './codex-commands';
 export { readCheckoutText } from './before-text';

@@ -42,7 +42,8 @@ export interface CodexAdapterOptions {
 /** How long a probe waits for the app-server to say who the account is. */
 const PROBE_MS = 30_000;
 
-const NO_QUESTIONS = 'A ChatGPT account does not answer one-shot questions.';
+/** Why a Codex account can't answer a one-shot question: its adapter has no such call. */
+export const CODEX_NO_QUESTIONS = "Codex accounts don't answer 10db's one-shot questions yet.";
 
 async function readAccount(rpc: CodexRpc): Promise<SeenAccount> {
   await rpc.call('initialize', { clientInfo: CODEX_CLIENT_INFO }, InitializeResponse);
@@ -99,7 +100,7 @@ export function createCodexAdapter(opts: CodexAdapterOptions): AgentAdapter {
     startLogin: (login) => startCodexLogin(login, opts),
     startMcpSignIn: (spec) => startCodexMcpSignIn(spec, { ...opts, homes }),
     mcpAuthStatus: (spec) => codexMcpAuthStatus(spec, { ...opts, homes }),
-    complete: () => Promise.reject(new CompletionError(NO_QUESTIONS)),
+    complete: () => Promise.reject(new CompletionError(CODEX_NO_QUESTIONS)),
     // A lane and an explore conversation open the same session: the sandbox, the guard hook and the
     // judge come with the spec (sessions spec §5.5, the attended profile).
     open: (spec) => startCodexSession(spec, { ...opts, homes }),

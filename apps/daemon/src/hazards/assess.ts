@@ -9,6 +9,7 @@ import type { StateStore } from '../events';
 import type { AreaNamer } from '../folders';
 import type { Git } from '../git';
 import type { Logger } from '../log';
+import { CODEX_NO_QUESTIONS, CompletionError } from '../sessions';
 import { checkAssessment, staleAdditions, type CheckInput } from './check';
 import { assessmentPrompt } from './prompt';
 import { readRepoText } from './repo-text';
@@ -88,7 +89,9 @@ async function answer(
     // An asker that ignores its signal still must not hold the look past the bound.
     asked.catch(() => undefined);
     return await Promise.race([asked, ended]);
-  } catch {
+  } catch (error) {
+    // Why no question can be asked is not a slow model: the caller says it.
+    if (error instanceof CompletionError && error.message === CODEX_NO_QUESTIONS) throw error;
     return null;
   } finally {
     clearTimeout(timer);
@@ -138,7 +141,11 @@ export function createHazardAssessor(deps: AssessorDeps): HazardAssessor {
       deps.askMs ?? ASSESS_MS,
       signal,
       project.accountId,
-    );
+    ).catch((error: unknown) => {
+      if (error instanceof CompletionError && error.message === CODEX_NO_QUESTIONS) return error;
+      throw error;
+    });
+    if (reply instanceof CompletionError) return fail(`${reply.message} Nothing changed.`);
     if (reply === null) return fail('The model was not available in time, so nothing changed.');
     const checked = checkAssessment(reply, input);
     if (checked === null) return fail("The model's answer could not be used, so nothing changed.");
