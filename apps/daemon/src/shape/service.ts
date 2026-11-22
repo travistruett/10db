@@ -14,6 +14,7 @@ import {
   ShapeMessageKind,
   ShapeOrigin,
   ShapeProposalState,
+  type AccountId,
   type AccountKind,
   type ConversationId,
   type ConversationItemId,
@@ -165,7 +166,10 @@ export interface ShapeServiceDeps {
    * The picture limits of an account kind (§5.4); `pictureLimitsFor` by default. A test gives smaller round
    * figures to exercise the budget without dropping tens of megabytes.
    */
-  readonly limitsFor?: (kind: AccountKind) => PictureLimits;
+  readonly limitsFor?: (
+    kind: AccountKind,
+    on?: { readonly accountId: AccountId; readonly launchId: string },
+  ) => PictureLimits;
   /** Holds new turns back, as a waiting update's drain does; given to the engine the service runs. */
   readonly hold?: Hold;
   /** Draws a mock-up and shoots the app's pages for a Design review; absent, the press is refused. */
@@ -441,7 +445,11 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   const launchLimits = (shapeId: ShapeId): PictureLimits => {
     try {
       const shape = getShape(state.db, shapeId);
-      return limitsFor(deps.launch(shape.projectId, shape.model, shape.effort).account.kind);
+      const launch = deps.launch(shape.projectId, shape.model, shape.effort);
+      return limitsFor(launch.account.kind, {
+        accountId: getProject(state.db, shape.projectId).accountId,
+        launchId: launch.model,
+      });
     } catch {
       return STRICTEST_LIMITS;
     }

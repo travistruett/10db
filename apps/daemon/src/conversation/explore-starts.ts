@@ -122,7 +122,12 @@ export function createStarts(core: EngineCore, turns: ExploreTurns): ExploreStar
     // A fresh session after the agent has spoken is told what came before; the digest is kept with the
     // session's row, so a start that fails or is cancelled stores none.
     const digest = fresh && turns.spoke(rt) ? hooks.digest(conv) : null;
-    const limits: PictureLimits = hooks.limits?.(conv) ?? pictureLimitsFor(account.kind);
+    const limits: PictureLimits =
+      hooks.limits?.(conv) ??
+      pictureLimitsFor(account.kind, {
+        accountId: account.id,
+        launchId: hooks.describeModel(conv, conv.model).launchId,
+      });
     const out = combined(
       items.map((item) => hooks.outgoing(conv, item, { fresh, digest, limits })),
     );

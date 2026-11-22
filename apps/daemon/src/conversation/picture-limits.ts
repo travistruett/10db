@@ -1,4 +1,4 @@
-import { AccountKind } from '@10db/contracts';
+import { AccountKind, type AccountId } from '@10db/contracts';
 
 // Shape spec §5.4. How many picture and PDF bytes a conversation's session may carry, worked out from the
 // request limit of the account it runs on. A resumed session resends every earlier picture with each request,
@@ -88,17 +88,48 @@ export const STRICTEST_LIMITS: PictureLimits = {
   limitText: 'the 20 MB request limit 10db assumes for this account (the smallest it knows)',
 };
 
-/** The limits of the account a session runs on. */
-export function pictureLimitsFor(kind: AccountKind): PictureLimits {
+/**
+ * What an OpenRouter account's models take as input, by account and launch ID, from the last read of its list.
+ * It is held in memory only, so after a restart nothing is known until the list is read again.
+ */
+const openRouterInputs = new Map<AccountId, ReadonlyMap<string, readonly string[]>>();
+
+/** Replaces what is known of the account's models: each launch ID with the input modalities it lists. */
+export function rememberOpenRouterInputs(
+  accountId: AccountId,
+  models: readonly { readonly id: string; readonly inputModalities: readonly string[] }[],
+): void {
+  openRouterInputs.set(accountId, new Map(models.map((m) => [m.id, m.inputModalities])));
+}
+
+/** No picture fits: a model that takes no image, or one whose listing is not known, reads none. */
+const NO_PICTURES: PictureLimits = {
+  ...STRICTEST_LIMITS,
+  limitText: "this OpenRouter model's listing doesn't say it reads pictures, so none are sent",
+  imageMaxBytes: 0,
+  messageMaxBytes: 0,
+  inlineMaxBytes: 0,
+  readReserveBytes: 0,
+};
+
+/** The limits of the account a session runs on; `on` names the OpenRouter model, whose listing decides. */
+export function pictureLimitsFor(
+  kind: AccountKind,
+  on?: { readonly accountId: AccountId; readonly launchId: string },
+): PictureLimits {
   switch (kind) {
     case AccountKind.ClaudeSubscription:
     case AccountKind.AnthropicApiKey:
       return CLAUDE_LIMITS;
     case AccountKind.Bedrock:
       return BEDROCK_LIMITS;
+    case AccountKind.OpenRouter:
+      return on !== undefined &&
+        openRouterInputs.get(on.accountId)?.get(on.launchId)?.includes('image') === true
+        ? STRICTEST_LIMITS
+        : NO_PICTURES;
     case AccountKind.OpenaiApiKey:
     case AccountKind.CodexSignin:
-    case AccountKind.OpenRouter:
       return STRICTEST_LIMITS;
   }
 }

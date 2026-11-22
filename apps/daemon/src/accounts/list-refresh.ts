@@ -1,6 +1,7 @@
 import { AccountKind, harnessOf, type AccountId } from '@10db/contracts';
 import { getAccountRow, listAccountModels, listAccounts } from '@10db/db';
 import { fetchToolModels } from '../benchmarks';
+import { rememberOpenRouterInputs } from '../conversation';
 import type { AccountLists } from '../catalogue';
 import type { Clock } from '../clock';
 import type { Launcher } from '../environment';
@@ -93,6 +94,7 @@ export function createListRefresh(deps: {
       );
       return;
     }
+    rememberOpenRouterInputs(row.id, listed.value);
     deps.lists.record(account, {
       ...seen,
       models: listed.value.map((m) => ({

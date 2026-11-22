@@ -2506,7 +2506,6 @@ export function createRunner(opts: RunnerOptions): Runner {
     // A builder message to act on (Workbench spec §6.3): a resumed session is handed it, and a fresh
     // one starts from the handoff, then the thread's digest, then the message. Its pictures go as
     // blocks while they fit the account's limits and what the thread's budget has left.
-    const limits = pictureLimitsFor(account.kind);
     // A Codex lane can open no stored picture by its path (its guard refuses `view_image`, its
     // sandbox the data directory), so Codex is sent every picture as its file, every time.
     const readsPictureFiles = provider === Provider.Codex;
@@ -2525,6 +2524,11 @@ export function createRunner(opts: RunnerOptions): Runner {
     // step was planned or last ran, or the account may have stopped offering the planned model.
     const accountModels = listAccountModels(db, account.id);
     const launchStep = resolvedStep(id, ctl, row, step, account, accountModels);
+    const limits = pictureLimitsFor(account.kind, {
+      accountId: account.id,
+      launchId:
+        accountModels.find((m) => m.model === launchStep.model)?.launchId ?? launchStep.model,
+    });
     if (isModelTier(launchStep.model)) {
       // Before the catalogue is first read no profile of this provider exists, which says nothing about the account.
       if (!listModelProfiles(db).some((p) => p.provider === provider))
