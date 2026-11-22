@@ -14,6 +14,8 @@ export const FakeStep = z.discriminatedUnion('do', [
     input: z.record(z.string(), Json),
     /** The permission mode the agent reports with the call, as Claude Code's hook does; absent reports none. */
     reportedMode: z.enum(['auto', 'other']).optional(),
+    /** What the tool answers when the call is allowed, as its result text; absent answers nothing. */
+    result: z.string().optional(),
   }),
   /**
    * The agent writes a file as a Write call: the guard is asked for the path resolved from the
