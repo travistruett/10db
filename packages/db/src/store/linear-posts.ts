@@ -256,6 +256,19 @@ export function dismissLinearPosts(ctx: WriteContext, projectId: ProjectId): voi
   emitChanged(ctx, dismissed);
 }
 
+/** The rows a project's Inbox card counts: pending on a retry, and failed or withheld and not dismissed. */
+const needsBuilder = (projectId: ProjectId): SQL | undefined =>
+  and(
+    eq(schema.linearPosts.projectId, projectId),
+    or(
+      and(eq(schema.linearPosts.state, LinearPostState.Pending), gt(schema.linearPosts.tries, 0)),
+      and(
+        inArray(schema.linearPosts.state, [LinearPostState.Failed, LinearPostState.Withheld]),
+        isNull(schema.linearPosts.dismissedAt),
+      ),
+    ),
+  );
+
 /** waiting = pending with tries > 0; failed and withheld count undismissed rows only. */
 export function linearPostCounts(
   db: DbReader,
@@ -267,21 +280,7 @@ export function linearPostCounts(
       n: sql<number>`count(*)`,
     })
     .from(schema.linearPosts)
-    .where(
-      and(
-        eq(schema.linearPosts.projectId, projectId),
-        or(
-          and(
-            eq(schema.linearPosts.state, LinearPostState.Pending),
-            gt(schema.linearPosts.tries, 0),
-          ),
-          and(
-            inArray(schema.linearPosts.state, [LinearPostState.Failed, LinearPostState.Withheld]),
-            isNull(schema.linearPosts.dismissedAt),
-          ),
-        ),
-      ),
-    )
+    .where(needsBuilder(projectId))
     .groupBy(schema.linearPosts.state)
     .all();
   const count = (state: LinearPostState): number => rows.find((r) => r.state === state)?.n ?? 0;
@@ -290,4 +289,16 @@ export function linearPostCounts(
     failed: count(LinearPostState.Failed),
     withheld: count(LinearPostState.Withheld),
   };
+}
+
+/** The newest row `linearPostCounts` counts, for the Inbox card's latest reason; null when none. */
+export function latestLinearPostProblem(db: DbReader, projectId: ProjectId): LinearPostDto | null {
+  const row = db
+    .select()
+    .from(schema.linearPosts)
+    .where(needsBuilder(projectId))
+    .orderBy(desc(schema.linearPosts.createdAt), desc(schema.linearPosts.id))
+    .limit(1)
+    .get();
+  return row === undefined ? null : toDto(row);
 }

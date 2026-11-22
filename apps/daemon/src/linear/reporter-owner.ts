@@ -5,9 +5,9 @@ import {
   LinearVia,
   parseItemBody,
   ReporterToolName,
+  TaskId,
   TrustSurface,
   type Effort,
-  type LinearPostDto,
   type LinearSignInsDto,
   type Provider,
   type ProjectId,
@@ -22,6 +22,7 @@ import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
 import type { LaneSandboxSpec } from '../sandbox';
 import type { YourSessionServer } from '../sessions';
 import { buildTrustPolicy } from '../trust';
+import { readReporterFacts, reporterBrief } from './reporter-brief';
 import { linearToolPrefixes } from './reporter-guard';
 import type { LinearReporter, LinearReporterRuns } from './reporter';
 
@@ -81,13 +82,6 @@ export interface ReporterHooksDeps {
   }): Promise<ReporterPrepared>;
 }
 
-/** The rows a run reports, one line each; the facts of the task come with the brief. */
-function rowLines(posts: readonly LinearPostDto[]): string {
-  return posts
-    .map((p) => `- ${p.id}: ${p.event}, attempt ${String(p.attempt)}, ${JSON.stringify(p.detail)}`)
-    .join('\n');
-}
-
 export function reporterHooks(deps: ReporterHooksDeps): ExploreOwnerHooks {
   const { state } = deps;
   const describe = (projectId: ProjectId) => {
@@ -123,7 +117,7 @@ export function reporterHooks(deps: ReporterHooksDeps): ExploreOwnerHooks {
           launch.account.kind === AccountKind.ClaudeSubscription &&
           row !== undefined &&
           (row.via === LinearVia.Connector || (row.via === LinearVia.None && row.unchecked));
-        const { posts, run } = deps.runs.begin({
+        const { posts } = deps.runs.begin({
           conversationId: conv.id,
           sessionId: start.sessionId,
           linearPrefixes: linearToolPrefixes({
@@ -144,7 +138,7 @@ export function reporterHooks(deps: ReporterHooksDeps): ExploreOwnerHooks {
           claudeConnectors: connector,
         });
         const prompt = [
-          `These updates are owed on the linked issue (${run.link.id}, Linear id ${run.link.issueId}, ${run.link.url}):\n${rowLines(posts)}`,
+          reporterBrief(readReporterFacts(state.db, TaskId.parse(conv.ownerId), posts)),
           start.first.text,
         ].join('\n\n');
         return {

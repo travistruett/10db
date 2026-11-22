@@ -35,6 +35,7 @@ import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import type { ShapeToolRequest, ShapeVerdict } from '../sessions';
 import { reporterBlockedBy } from './reporter-events';
+import { refreshReporterCard } from './reporter-inbox';
 import { judgeReporterCall, type ReporterRun } from './reporter-guard';
 import { reporterSettings, reporterSettingsKey } from './reporter-settings';
 
@@ -172,10 +173,19 @@ export function createLinearReporter(
     timers.set(taskId, timer);
   };
 
+  const refreshCard = (projectId: ProjectId): void => {
+    try {
+      refreshReporterCard({ state, inbox: deps.inbox }, projectId);
+    } catch (error) {
+      log.error({ err: error, projectId }, 'the Linear reporter could not refresh its Inbox card');
+    }
+  };
+
   const dropProject = (projectId: ProjectId): void => {
     state.write((ctx) => {
       dropPendingLinearPosts(ctx, { projectId });
     });
+    refreshCard(projectId);
   };
 
   const pickup = async (taskId: TaskId): Promise<void> => {
@@ -199,6 +209,7 @@ export function createLinearReporter(
     // An unchecked row is a maybe (after a restart) and goes ahead.
     if (row?.via === LinearVia.None && !row.unchecked) {
       fail(due, row.note ?? "This account's agent has no Linear.");
+      refreshCard(task.projectId);
       arm(taskId);
       return;
     }
@@ -272,6 +283,7 @@ export function createLinearReporter(
           );
         });
       else fail(open, reason);
+      refreshCard(flight.projectId);
     } catch (error) {
       log.error({ err: error, taskId: flight.taskId }, 'a reporter run could not be settled');
     }
@@ -434,6 +446,7 @@ export function createLinearReporter(
         setAppSetting(ctx, reporterSettingsKey(projectId), input);
         if (!input.on) dropPendingLinearPosts(ctx, { projectId });
       });
+      refreshCard(projectId);
     },
   };
 }
