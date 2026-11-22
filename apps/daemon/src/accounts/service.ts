@@ -269,7 +269,8 @@ export function createAccountService(deps: {
       const row = getAccountRow(db, id);
       // Nothing to probe: no harness runs the account, so it has no login or organization to report.
       const harness = harnessOf(row);
-      if (harness === null) throw new InvalidError('OpenRouter accounts have no identity to check');
+      if (harness === null)
+        throw new InvalidError(`${row.label} runs no harness, so it has no identity to check`);
       let launch;
       try {
         launch = deps.launcher.probe(row);

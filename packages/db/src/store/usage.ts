@@ -1,10 +1,4 @@
-import {
-  AccountKind,
-  isMetered,
-  type AccountId,
-  type AccountUsageDto,
-  type UsageTotals,
-} from '@10db/contracts';
+import { isMetered, type AccountId, type AccountUsageDto, type UsageTotals } from '@10db/contracts';
 import { and, asc, eq, gte, isNull, lt, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getAccountRow } from './accounts';
@@ -37,11 +31,10 @@ export function accountSpendUsd(db: DbReader, id: AccountId, window: UsageWindow
 }
 
 /**
- * The dollars of the decisions made on an OpenRouter account in the window: the judge's call log, kept 30 days.
- * A call records no account, so only the account decisions run on has a figure; any other kind or account is 0.
+ * The dollars of the decisions made on the account in the window: the judge's call log, kept 30 days. A call
+ * records no account, so only the account decisions run on has a figure; any other account is 0.
  */
 function decisionSpendUsd(db: DbReader, id: AccountId, window: UsageWindow): number {
-  if (getAccountRow(db, id).kind !== AccountKind.OpenRouter) return 0;
   if (getJudgeConfig(db).accountId !== id) return 0;
   const row = db
     .select({ total: sql<number | null>`sum(${schema.judgeCalls.costUsd})` })

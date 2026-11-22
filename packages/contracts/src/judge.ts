@@ -132,6 +132,8 @@ export const JudgeStatusDto = z.object({
       secretState: z.enum(['set', 'missing', 'changed']),
       /** Why the account's latest decision fell back to rules (a rejected key, an expired profile); absent when it answered. */
       fallback: z.string().nullable().optional(),
+      /** The AWS profile a Bedrock account signs with; it keeps no key. Absent for any other account. */
+      awsProfile: z.string().nullable().optional(),
     })
     .nullable(),
   /** The daemon was started with `TENDB_JUDGE=off`: it never reads the key or calls OpenRouter. */

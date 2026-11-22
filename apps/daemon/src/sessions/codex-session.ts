@@ -134,14 +134,12 @@ const PAYMENT_REQUIRED = 402;
 
 const HttpFailure = z.looseObject({ httpStatusCode: z.number().optional() });
 
-/** Whether a failed turn's error is a 402: Codex names the status in `codexErrorInfo`, else only the text has it. */
-function isPaymentRequired(info: unknown, message: string): boolean {
-  if (typeof info === 'object' && info !== null) {
-    for (const value of Object.values(info)) {
-      if (HttpFailure.safeParse(value).data?.httpStatusCode === PAYMENT_REQUIRED) return true;
-    }
-  }
-  return /\b402\b|payment required/i.test(message);
+/** Whether a failed turn's error is a 402, by the status Codex names in `codexErrorInfo`. */
+function isPaymentRequired(info: unknown): boolean {
+  if (typeof info !== 'object' || info === null) return false;
+  return Object.values(info).some(
+    (value) => HttpFailure.safeParse(value).data?.httpStatusCode === PAYMENT_REQUIRED,
+  );
 }
 
 /** `codexErrorInfo` is a bare name (`"unauthorized"`) or an object keyed by it (`{ "httpConnectionFailed": {} }`). */
@@ -672,10 +670,7 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
     if (kind === 'usageLimitExceeded') return TurnEnd.UsageLimit;
     if (kind === 'unauthorized') return TurnEnd.SignedOut;
     const error = parsed.data.turn.error;
-    if (
-      spec.account.kind === AccountKind.OpenRouter &&
-      isPaymentRequired(error?.codexErrorInfo, error?.message ?? '')
-    ) {
+    if (spec.account.kind === AccountKind.OpenRouter && isPaymentRequired(error?.codexErrorInfo)) {
       failedText = error?.message ?? 'payment required';
       return TurnEnd.CannotBill;
     }

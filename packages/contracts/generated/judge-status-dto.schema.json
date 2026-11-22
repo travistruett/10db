@@ -329,6 +329,12 @@
                 "string",
                 "null"
               ]
+            },
+            "awsProfile": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [

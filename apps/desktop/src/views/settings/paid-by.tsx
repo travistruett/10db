@@ -50,7 +50,9 @@ function PaidByState({
         <Group gap="sm">
           <ConnectionStatus
             tone={off ? ConnectionTone.Off : ConnectionTone.Works}
-            label="Key set"
+            label={
+              account.awsProfile ? `Signs in with AWS profile ${account.awsProfile}` : 'Key set'
+            }
           />
           <AccountLink account={account}>View account</AccountLink>
         </Group>

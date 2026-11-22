@@ -65,6 +65,13 @@ export type JudgeApiServices = Pick<
 >;
 
 /** The models a patch sets that differ from the ones saved, each once. */
+/** The AWS profile a Bedrock account signs with, or null when it has none or is another kind. */
+function awsProfileOf(account: AccountRow): string | null {
+  if (account.kind !== AccountKind.Bedrock) return null;
+  const settings = BedrockSettings.safeParse(account.settings);
+  return settings.success ? settings.data.awsProfile : null;
+}
+
 function newModels(config: JudgeConfig, patch: JudgeConfigPatch): string[] {
   const models = new Set<string>();
   for (const [decision, now] of Object.entries(config.decisions)) {
@@ -206,6 +213,7 @@ export function createJudgeServices(deps: {
         secretSet: secret.state === 'set',
         secretState: secret.state,
         fallback: deps.judge.lastFallback(row.id),
+        awsProfile: awsProfileOf(row),
       },
       off: deps.off,
     };

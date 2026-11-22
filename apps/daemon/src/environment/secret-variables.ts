@@ -9,4 +9,5 @@ export const SECRET_VARIABLES: readonly string[] = [
   'AWS_SECRET_ACCESS_KEY',
   'AWS_SESSION_TOKEN',
   'CLAUDE_CODE_OAUTH_TOKEN',
+  'OPENROUTER_API_KEY',
 ];

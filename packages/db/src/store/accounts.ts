@@ -188,7 +188,13 @@ export function patchAccount(ctx: WriteContext, id: AccountId, patch: AccountPat
   if (row.archived) throw new ConflictError(`Account "${row.label}" is archived`);
   if (changes.label !== undefined) refuseTakenLabel(ctx.tx, changes.label, id);
   if (typeof changes.monthlyCapUsd === 'number' && !isMetered(row.kind))
-    throw new InvalidError('Only API-key and Bedrock accounts take a monthly dollar cap');
+    throw new InvalidError(
+      'Only metered accounts (an API key, Bedrock or OpenRouter) take a monthly dollar cap',
+    );
+  if (typeof changes.expectedIdentity === 'string' && row.kind === AccountKind.OpenRouter)
+    throw new InvalidError(
+      'An OpenRouter key is identified by its fingerprint, so it has no expected identity',
+    );
   if (typeof changes.expectedIdentity === 'string') {
     if (
       row.kind === AccountKind.ClaudeSubscription &&

@@ -1,4 +1,5 @@
 import {
+  AccountKind,
   harnessOf,
   PLAN_LOGIN_CANT_DECIDE,
   powersDecisions,
@@ -106,7 +107,7 @@ function AccountRow({
               </Badge>
             ) : null}
           </Group>
-          {harnessOf(account) !== null ? (
+          {harnessOf(account) !== null && account.kind !== AccountKind.OpenRouter ? (
             <Text size="xs" c="dimmed">
               {account.expectedIdentity ?? 'No identity yet'}
             </Text>
