@@ -55,7 +55,8 @@ function PostRow({
           {STATE_LABELS[post.state]}
         </Badge>
         <Text size="xs" c="dimmed" component="time" dateTime={at} title={absoluteTime(at)}>
-          {fromNow(at, now)}
+          {/* Every time here is past: one stamped after the clock's last tick reads as just now. */}
+          {fromNow(at, Math.max(now, Date.parse(at)))}
         </Text>
       </Group>
       {post.commentIds.map((id) => (
