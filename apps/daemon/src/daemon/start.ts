@@ -108,7 +108,7 @@ import {
 import { createBenchmarkServices } from './benchmark-services';
 import { createSizingService } from '../sizing';
 import { createJudgeCredentialReader, createJudgeServices } from './judge-services';
-import { createLinearBindings } from '../linear';
+import { createLinearBindings, subscribeLinearEvents } from '../linear';
 import { createLinearSignIns } from './linear-sign-ins';
 import { createStakeholderApiServices } from './stakeholder-services';
 import {
@@ -2339,6 +2339,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     if (!pageLabelsAbort.signal.aborted) logger.warn({ err: error }, 'page labels not guessed');
   });
   const unsubscribeShip = subscribeShipTrigger(bus, state.db, shipper);
+  // The Linear reporter's owed updates; its pickup is armed by `poke` once the reporter exists.
+  const unsubscribeLinearEvents = subscribeLinearEvents(bus, {
+    state,
+    clock,
+    reporter: { poke: () => undefined },
+    log: logger.child({ component: 'linear-reporter' }),
+  });
   // A pass that closes unsettled gets its Move card, and each closed pass is looked at again; a
   // started task's saved work goes once its work lands.
   const unsubscribePassSettles = subscribePassSettles(bus, delivery);
@@ -3047,6 +3054,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         logger.warn({ err: error }, 'could not stop the sign-in');
       });
       unsubscribeShip();
+      unsubscribeLinearEvents();
       unsubscribePassSettles();
       sizing.stop();
       unsubscribeSignOffWaits();
