@@ -9,7 +9,7 @@ function Item({ project }: { readonly project: ProjectDto }) {
   const start = useImportFromLinear(project.id);
   const open = useOpenSession();
   const row = signIns.data?.rows.find((r) => r.accountId === project.accountId);
-  // Only a definite none stops the import; a maybe goes ahead, .
+  // Only a definite none stops the import; a maybe goes ahead.
   if (row?.via === LinearVia.None && !row.unchecked)
     return (
       <>

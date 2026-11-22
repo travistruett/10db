@@ -26,7 +26,7 @@ import {
 } from '@10db/db';
 import { reporterSettings } from './reporter-settings';
 
-// What the Linear reporter is handed and told (Linear reporter plan, card 5): the facts 10db recorded
+// What the Linear reporter is handed and told the facts 10db recorded
 // about a task, read once into a plain value, and the brief that renders them with the reporter's rules.
 // The reporter never reads the repository or 10db's database, so the brief is all it knows.
 
@@ -94,6 +94,17 @@ function cap(text: string): Capped {
     : { text: text.slice(0, TEXT_CHARS), cut: text.length - TEXT_CHARS };
 }
 
+/** The task's pull request: the newest batch of its runs that has one. The guard and the brief both read it. */
+export function taskPrUrl(db: DbReader, taskId: TaskId): string | null {
+  let prUrl: string | null = null;
+  for (const run of listWorkstreams(db, { projectId: getTask(db, taskId).projectId })) {
+    if (run.taskId !== taskId) continue;
+    const { batchId } = getWorkstream(db, run.id);
+    if (batchId !== null) prUrl = getBatch(db, batchId).prUrl ?? prUrl;
+  }
+  return prUrl;
+}
+
 export function readReporterFacts(
   db: DbReader,
   taskId: TaskId,
@@ -106,10 +117,8 @@ export function readReporterFacts(
   const runs = listWorkstreams(db, { projectId: task.projectId }).filter(
     (w) => w.taskId === taskId,
   );
-  let prUrl: string | null = null;
   const workstreams = runs.map((run, index): WorkstreamFacts => {
     const ws = getWorkstream(db, run.id);
-    if (ws.batchId !== null) prUrl = getBatch(db, ws.batchId).prUrl ?? prUrl;
     const rounds = reviewRounds(ws.steps);
     const report = implementationReportFor(ws.steps, ws.steps.length);
     const evidence = listEvidence(db, ws.id);
@@ -164,7 +173,7 @@ export function readReporterFacts(
         attachmentUrl: p.attachmentUrl,
       })),
     workstreams,
-    prUrl,
+    prUrl: taskPrUrl(db, taskId),
     screens: listTaskScreens(db, taskId).map((s) => ({
       id: s.id,
       shows: `${s.kind}, ${s.route}, ${String(s.viewport.width)}x${String(s.viewport.height)}, ${s.theme} theme`,
@@ -181,7 +190,7 @@ const RULES = [
   'Open findings and unverified checks are named in the comment and block a Ready for Release-like status.',
   'One comment per update. Each ends with `10db · <event> · attempt N · <post id>`.',
   'When the PR opens, add one link titled `10db` to the PR with `save_issue` `links`, unless the issue already has a `10db` link to that URL. Links are append-only, so there is no in-place update; the live state is in the comments and the status.',
-  "After posting, call `report_linear_post` once per outcome. A write refused as withheld is reported as withheld with the pattern's name.",
+  "After posting, call `report_linear_post` once per outcome. A write refused as withheld is reported as withheld with the pattern's name. When Linear itself fails the update (the issue is not found, you may not write it), report it as failed with the error's words.",
   'Change nothing but this issue. Say nothing else.',
 ];
 

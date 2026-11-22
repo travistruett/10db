@@ -9,7 +9,7 @@ import {
 import type { StateStore } from '../events';
 import { BY_ANSWER, CardTier, type InboxService } from '../inbox';
 
-// The project's one Inbox card for Linear updates that need the builder (Linear reporter plan, card 5):
+// The project's one Inbox card for Linear updates that need the builder:
 // what waits on a retry, failed for good or was withheld by the secret scan.
 
 /** The detail key that marks a card as the reporter's, holding the project id. */

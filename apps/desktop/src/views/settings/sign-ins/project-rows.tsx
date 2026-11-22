@@ -133,7 +133,8 @@ export function LinearProjectRow({
           if (note !== linear.note) save.mutate({ on: linear.on, note });
         }}
       />
-      {linear.blockedBy === null ? null : (
+      {/* The switch already says off; only the Trust reason needs a line. */}
+      {linear.blockedBy === null || !linear.on ? null : (
         <Text size="xs" c="dimmed">
           {linear.blockedBy}
         </Text>

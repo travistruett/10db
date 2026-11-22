@@ -1,7 +1,7 @@
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { BlockList, isIPv6 } from 'node:net';
 import { homedir } from 'node:os';
-import { DeniedBy, Provider, type ProjectDto, type ProjectId } from '@10db/contracts';
+import { DeniedBy, InvalidError, Provider, type ProjectDto, type ProjectId } from '@10db/contracts';
 import { getProject, listPermissionRules, listProjects } from '@10db/db';
 import { allCheckouts, projectAtCheckout } from '../delivery';
 import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
@@ -502,7 +502,7 @@ export function createReporterPreparer(
         ...(input.harness === Provider.Codex ? { tempRoot: deps.codexLaneTempRoot } : {}),
       });
     else if (input.harness === Provider.Codex)
-      throw new Error('A ChatGPT session needs the sandbox, which this Mac has none of.');
+      throw new InvalidError('A ChatGPT session needs the sandbox, which this Mac has none of.');
     const sandboxed = session;
     let tracked = false;
     return {

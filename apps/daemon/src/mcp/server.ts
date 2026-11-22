@@ -135,7 +135,7 @@ function chatTools(deps: McpDeps, session: SessionRow, chat: ChatSession): Regis
   }));
 }
 
-/** The Linear reporter's two tools, held to the session whose conversation is its own. */
+/** The Linear reporter's tool, held to the session whose conversation is its own. */
 function reporterTools(deps: McpDeps, session: SessionRow): RegisteredTool[] | null {
   const { reporter } = deps;
   if (reporter === undefined) return null;
