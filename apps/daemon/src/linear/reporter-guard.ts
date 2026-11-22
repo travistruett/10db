@@ -1,4 +1,4 @@
-import type { ExternalLink, LinearBinding } from '@10db/contracts';
+import type { ExternalLink, LinearBinding, ReportLinearWorkspaceInput } from '@10db/contracts';
 import { Provider } from '@10db/contracts';
 import type { GuardVerdict } from '../guard';
 import { mcpToolPrefix } from '../sessions';
@@ -28,19 +28,13 @@ const LINEAR_READS: ReadonlySet<string> = new Set([
 /** The keys each allowed Linear write may carry; any other key refuses the call. */
 const WRITE_KEYS: Readonly<Record<string, readonly string[]>> = {
   save_issue: ['id', 'state', 'links'],
-  save_comment: ['issueId', 'id', 'body'],
+  save_comment: ['issueId', 'body'],
   prepare_attachment_upload: ['issue', 'filename', 'contentType', 'size', 'title', 'subtitle'],
   create_attachment_from_upload: ['issue', 'assetUrl', 'title', 'subtitle'],
 };
 
 const NEEDS_CONFIRMATION =
   'Confirm the workspace first: call get_workspace and get_team, then report_linear_workspace.';
-
-/** The workspace and team ids a call names; card 1's `ReportLinearWorkspaceInput` has the same shape. */
-interface WorkspaceClaim {
-  readonly workspaceId: string;
-  readonly teamId: string;
-}
 
 export interface ReporterRun {
   readonly linearPrefixes: readonly string[];
@@ -49,10 +43,8 @@ export interface ReporterRun {
   /** The task's PR: the only URL a `10db` link may point at. */
   readonly prUrl: string | null;
   workspaceConfirmed: boolean;
-  /** From the task's recorded rows, plus this run's. */
-  readonly knownCommentIds: Set<string>;
-  /** Successful `whoami`, `get_workspace`, `get_team` and `list_teams` result texts. */
-  readonly identityResults: string[];
+  /** Successful `whoami`, `get_workspace`, `get_team` and `list_teams` results, by tool. */
+  readonly identityResults: { tool: string; text: string }[];
   readonly uploads: { url: string; headers: Record<string, string>; assetUrl: string }[];
   /** Pattern names refused this run. */
   readonly withheld: Set<string>;
@@ -85,20 +77,20 @@ function* stringsIn(value: unknown): Generator<string> {
     for (const item of Object.values(value)) yield* stringsIn(item);
 }
 
-/** The Linear writes' bodies, checked against the issue this run reports on. */
+/** Why a write is not the one this run may make, or null. Every key must be in the tool's list. */
 function judgeWrite(
   run: Readonly<ReporterRun>,
   tool: string,
+  allowed: readonly string[],
   input: Record<string, unknown>,
 ): string | null {
   const issueId = run.link.issueId;
-  const keys = Object.keys(input);
+  if (!Object.keys(input).every((k) => allowed.includes(k))) return 'unlisted key';
   switch (tool) {
     case 'save_issue': {
       if (field(input, 'id') !== issueId) return 'wrong issue';
-      if (!keys.every((k) => ['id', 'state', 'links'].includes(k))) return 'unlisted key';
-      if (field(input, 'state') !== undefined && typeof field(input, 'state') !== 'string')
-        return 'unlisted key';
+      const state = field(input, 'state');
+      if (state !== undefined && typeof state !== 'string') return 'unlisted key';
       if ('links' in input) {
         const links = field(input, 'links');
         const entry = Array.isArray(links) && links.length === 1 ? asRecord(links[0]) : null;
@@ -113,29 +105,25 @@ function judgeWrite(
       }
       return null;
     }
-    case 'save_comment': {
-      if (typeof field(input, 'body') !== 'string') return 'unlisted key';
-      const own =
-        keys.every((k) => k === 'issueId' || k === 'body') && field(input, 'issueId') === issueId;
-      const editId = field(input, 'id');
-      const edit =
-        keys.every((k) => k === 'id' || k === 'body') &&
-        typeof editId === 'string' &&
-        run.knownCommentIds.has(editId);
-      return own || edit ? null : 'wrong issue';
-    }
-    case 'prepare_attachment_upload':
-    case 'create_attachment_from_upload':
-      return field(input, 'issue') === issueId &&
-        keys.every((k) => WRITE_KEYS[tool]?.includes(k) === true)
+    case 'save_comment':
+      return typeof field(input, 'body') === 'string' && field(input, 'issueId') === issueId
         ? null
         : 'wrong issue';
     default:
-      return 'tool';
+      return field(input, 'issue') === issueId ? null : 'wrong issue';
   }
 }
 
-/** Pure: the rule for one call of the reporter. Card 4 applies `withheld` to the run. */
+/** The first secret pattern any string in a call's input hits. */
+function secretIn(input: unknown): string | null {
+  for (const text of stringsIn(input)) {
+    const pattern = scanSecrets(text);
+    if (pattern !== null) return pattern;
+  }
+  return null;
+}
+
+/** Pure: the rule for one call of the reporter. The caller applies `withheld` to the run. */
 export function judgeReporterCall(
   run: Readonly<ReporterRun>,
   call: { toolName: string; input: unknown },
@@ -158,35 +146,62 @@ export function judgeReporterCall(
     };
   }
   const tool = toolName.slice(prefix.length);
-  if (LINEAR_READS.has(tool)) return { verdict: allow() };
+  const secret = secretIn(call.input);
+  if (LINEAR_READS.has(tool)) {
+    return {
+      verdict:
+        secret === null
+          ? allow()
+          : deny(`The call carries text that matches ${secret}; it is refused.`),
+    };
+  }
   const refusal = `This call is refused: the reporter may only update the linked issue ${run.link.issueId}.`;
-  if (!(tool in WRITE_KEYS)) return { verdict: deny(refusal) };
+  const allowed = Object.hasOwn(WRITE_KEYS, tool) ? WRITE_KEYS[tool] : undefined;
+  if (allowed === undefined) return { verdict: deny(refusal) };
   if (!run.workspaceConfirmed) return { verdict: deny(NEEDS_CONFIRMATION) };
   const input = asRecord(call.input);
-  if (input === null || judgeWrite(run, tool, input) !== null) return { verdict: deny(refusal) };
-  for (const text of stringsIn(input)) {
-    const pattern = scanSecrets(text);
-    if (pattern !== null) {
-      return {
-        verdict: deny(
-          `Withheld: the text matches ${pattern}. Record the update as withheld with report_linear_post.`,
-        ),
-        withheld: pattern,
-      };
-    }
+  if (input === null || judgeWrite(run, tool, allowed, input) !== null)
+    return { verdict: deny(refusal) };
+  if (secret !== null) {
+    return {
+      verdict: deny(
+        `Withheld: the text matches ${secret}. Record the update as withheld with report_linear_post.`,
+      ),
+      withheld: secret,
+    };
   }
   return { verdict: allow() };
+}
+
+/** Whether `id` appears in `text` as a whole id, not inside a longer token. */
+function hasId(text: string, id: string): boolean {
+  let at = text.indexOf(id);
+  while (at !== -1) {
+    const before = text[at - 1];
+    const after = text[at + id.length];
+    if (
+      (before === undefined || !/[A-Za-z0-9-]/.test(before)) &&
+      (after === undefined || !/[A-Za-z0-9-]/.test(after))
+    )
+      return true;
+    at = text.indexOf(id, at + 1);
+  }
+  return false;
 }
 
 /** Whether the ids the reporter claims are the binding's, and were seen in its own reads. */
 export function confirmWorkspace(
   run: Readonly<ReporterRun>,
-  input: WorkspaceClaim,
+  input: ReportLinearWorkspaceInput,
 ): 'confirmed' | 'not_seen' | 'mismatch' {
   if (input.workspaceId !== run.binding.workspaceId || input.teamId !== run.binding.teamId)
     return 'mismatch';
-  const seen = (id: string): boolean => run.identityResults.some((text) => text.includes(id));
-  return seen(input.workspaceId) && seen(input.teamId) ? 'confirmed' : 'not_seen';
+  const seen = (tools: readonly string[], id: string): boolean =>
+    run.identityResults.some((r) => tools.includes(r.tool) && hasId(r.text, id));
+  return seen(['whoami', 'get_workspace'], input.workspaceId) &&
+    seen(['get_team', 'list_teams'], input.teamId)
+    ? 'confirmed'
+    : 'not_seen';
 }
 
 /**

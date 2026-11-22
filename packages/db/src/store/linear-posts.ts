@@ -10,7 +10,7 @@ import {
   type SessionId,
   type TaskId,
 } from '@10db/contracts';
-import { and, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import type { Json } from '../json';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
@@ -221,12 +221,14 @@ export function failLinearPosts(
 /** Deletes pending rows of a task or project (the reporter was switched off); answers how many. */
 export function dropPendingLinearPosts(
   ctx: WriteContext,
-  filter: { taskId?: TaskId; projectId?: ProjectId },
+  filter: { taskId: TaskId; projectId?: never } | { projectId: ProjectId; taskId?: never },
 ): number {
+  // Widened so the runtime check below covers callers that bypass the type.
+  const { taskId, projectId }: { taskId?: TaskId; projectId?: ProjectId } = filter;
   const where: SQL[] = [eq(schema.linearPosts.state, LinearPostState.Pending)];
-  if (filter.taskId !== undefined) where.push(eq(schema.linearPosts.taskId, filter.taskId));
-  if (filter.projectId !== undefined)
-    where.push(eq(schema.linearPosts.projectId, filter.projectId));
+  if (taskId !== undefined) where.push(eq(schema.linearPosts.taskId, taskId));
+  else if (projectId !== undefined) where.push(eq(schema.linearPosts.projectId, projectId));
+  else throw new Error('dropPendingLinearPosts needs a taskId or a projectId');
   const dropped = ctx.tx
     .delete(schema.linearPosts)
     .where(and(...where))
@@ -267,8 +269,16 @@ export function linearPostCounts(
     .where(
       and(
         eq(schema.linearPosts.projectId, projectId),
-        sql`(${schema.linearPosts.state} = ${LinearPostState.Pending} and ${schema.linearPosts.tries} > 0)
-          or (${schema.linearPosts.state} in (${LinearPostState.Failed}, ${LinearPostState.Withheld}) and ${schema.linearPosts.dismissedAt} is null)`,
+        or(
+          and(
+            eq(schema.linearPosts.state, LinearPostState.Pending),
+            gt(schema.linearPosts.tries, 0),
+          ),
+          and(
+            inArray(schema.linearPosts.state, [LinearPostState.Failed, LinearPostState.Withheld]),
+            isNull(schema.linearPosts.dismissedAt),
+          ),
+        ),
       ),
     )
     .groupBy(schema.linearPosts.state)
