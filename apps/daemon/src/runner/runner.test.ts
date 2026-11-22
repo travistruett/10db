@@ -64,6 +64,7 @@ import {
   listTaskThread,
   listWorkstreams,
   patchAccount,
+  replaceAccountModels,
   patchProject,
   patchTask,
   patchWorkstream,
@@ -4204,6 +4205,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     const start = async (
       setup: Parameters<typeof createTestEngine>[3] = RULES_FLOOR_ACCOUNT,
       project: Parameters<typeof createTestEngine>[1] = {},
+      launchId?: string,
     ) => {
       const probe = sandboxProbe();
       engine = await createTestEngine(
@@ -4217,6 +4219,20 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
           patchAccount(ctx, engine.project.accountId, { expectedIdentity: 'me@example.com' }),
         );
       if (setup === RULES_FLOOR_ACCOUNT) confirmRulesFloorIdentity();
+      // The account launches the planned model under an older id, which auto mode does not judge.
+      if (launchId !== undefined)
+        engine.state.write((ctx) =>
+          replaceAccountModels(ctx, engine.project.accountId, [
+            {
+              model: 'claude-sonnet-5-5',
+              family: null,
+              launchId,
+              efforts: [],
+              inputPrice: null,
+              outputPrice: null,
+            },
+          ]),
+        );
       const specs = recordSpecs();
       const { task, workstream } = engine.addTask('Alpha');
       engine.launch(workstream.id);
@@ -4254,9 +4270,23 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       answer = () => 'allow';
     });
 
-    it('a rules-floor lane runs pnpm test and WebFetch after the judge allows them, with no card, in default mode, sends a grep -rn over a checkout holding .env to the model, and its deploy is a tendb_judge skip, with no Inbox card', async () => {
-      const { spec, judgeCall, workstream } = await start();
+    // A Claude Code lane auto mode does not judge: Bedrock on a model older than auto mode supports.
+    const CLAUDE_JUDGED_ACCOUNT: Parameters<typeof createTestEngine>[3] = {
+      account: {
+        kind: 'bedrock',
+        label: 'Bedrock',
+        settings: { region: 'us-west-2', awsProfile: 'dev' },
+      },
+    };
+
+    it('a Claude Code lane auto mode does not judge runs pnpm test and WebFetch after the judge allows them, with no card, in default mode, sends a grep -rn over a checkout holding .env to the model, and its deploy is a tendb_judge skip, with no Inbox card', async () => {
+      const { spec, judgeCall, workstream } = await start(
+        CLAUDE_JUDGED_ACCOUNT,
+        {},
+        'claude-sonnet-4-5',
+      );
       expect(spec.profile.lanePermissionMode).toBe('default');
+      expect(spec.prompt).toContain("10db's judge checks each call against four limits");
       expect(await hook(spec, judgeCall, bash('pnpm test', 'toolu_1'))).toEqual({
         decision: 'allow',
         settled: "Allowed by 10db's judge",
