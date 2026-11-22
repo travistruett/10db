@@ -1,10 +1,10 @@
-import { Provider } from '@10db/contracts';
+import { mintId, Provider } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { checkAccount, seenFrom } from './account-check';
 
 describe('an OpenRouter account check', () => {
   const expectation = {
-    accountId: 'acc_1',
+    accountId: mintId('Account'),
     label: 'Router',
     kind: 'openrouter',
     harness: Provider.Codex,

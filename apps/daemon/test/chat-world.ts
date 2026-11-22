@@ -187,7 +187,7 @@ export function chatWorld(
     model: model ?? 'claude-opus-5-5',
     modelId: model ?? 'claude-opus-5-5',
     effort: effort ?? 'high',
-    agentModels: shapeAgentModels(launched.kind),
+    agentModels: shapeAgentModels(launched.kind, launched.harness),
     env: {},
     account: {
       accountId: project.accountId,

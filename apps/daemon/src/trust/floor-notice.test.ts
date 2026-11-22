@@ -76,6 +76,15 @@ describe('floorReason', () => {
         false,
         null,
       ],
+      // Whatever model it names, a Codex harness is judged by 10db: the harness sets the floor, not the kind.
+      [
+        'OpenRouter on Codex, on a model auto mode would run',
+        AccountKind.OpenRouter,
+        'claude-sonnet-5-5',
+        true,
+        false,
+        FloorReason.NoJudge,
+      ],
       ['Codex with a ready judge', AccountKind.CodexSignin, 'gpt-5.5', true, true, null],
       ['Codex without one', AccountKind.CodexSignin, 'gpt-5.5', true, false, FloorReason.NoJudge],
       ['Codex, setting off', AccountKind.CodexSignin, 'gpt-5.5', false, true, FloorReason.Setting],

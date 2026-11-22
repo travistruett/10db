@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mintId, PermissionChoice, ShapeOrigin } from '@10db/contracts';
+import { mintId, PermissionChoice, Provider, ShapeOrigin } from '@10db/contracts';
 import {
   createTestStore,
   insertPlanSession,
@@ -40,7 +40,11 @@ import {
 import { createTempRepo, testPolicy } from './fixtures';
 
 /** The prompt for a subscription, whose agents take every alias. */
-const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(shapeAgentModels('claude_subscription'), true, true);
+const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(
+  shapeAgentModels('claude_subscription', Provider.Claude),
+  true,
+  true,
+);
 
 // Shape spec §5.2, §15: a Plan session's commands, in its read-only lane sandbox and through the lanes'
 // broker, on the real SDK and the real srt. Runs on the builder's Max subscription through the

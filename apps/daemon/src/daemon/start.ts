@@ -1694,7 +1694,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       model: session.model,
       modelId,
       effort: run.effort,
-      agentModels: shapeAgentModels(row.kind),
+      agentModels: shapeAgentModels(row.kind, requireHarness(row)),
       env: session.env,
       account: session.expect,
       access: {
