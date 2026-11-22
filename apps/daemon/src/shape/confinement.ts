@@ -21,7 +21,7 @@ import type { ShapeReviewTurn } from './review-turn';
 // Shape spec §5.2. A Shape session's file tools read the project's checkout and its conversation's
 // dropped files, and nothing else; this judge refuses the rest with no card. In its read-only lane
 // sandbox it also runs commands: a read-only one without asking, any other through the lanes'
-// permission broker (`ask`), as the conversation's calls to the project's MCP servers are. The
+// permission broker (`ask`); a call to an MCP server's tool goes to the session's judge, and asks only without one. The
 // sandbox, not this judge, keeps every command from writing the checkout.
 
 /** What each of Plan's agents' names starts with; the stored reviewer is the rest. */
@@ -196,7 +196,11 @@ function judgeCommand(call: ShapeCall, access: ShapeAccess): GuardVerdict {
   return verdict;
 }
 
-/** A tool of one of the project's approved MCP servers: the conversation's own, asked about on each call. */
+/**
+ * A tool of an MCP server the session runs (a repo's approved one, the builder's own, a claude.ai connector): the
+ * conversation's own. On a judge that runs it is a bare allow, which is no decision: 10db's judge or Claude's auto
+ * mode reads the call, as for a lane's. Without one the builder is asked on each call.
+ */
 function judgeProjectTool(call: ShapeCall, access: ShapeAccess): GuardVerdict {
   if (access.commands === undefined)
     return deny(`${call.toolName} is not available: this planning session has 10db's tools only.`);
@@ -204,6 +208,7 @@ function judgeProjectTool(call: ShapeCall, access: ShapeAccess): GuardVerdict {
     return deny(
       `${call.toolName} is the conversation's to call: an agent it launches reaches no MCP server.`,
     );
+  if (access.judge === JudgeKind.Tendb || access.judge === JudgeKind.Native) return ALLOW;
   return ask(`${call.toolName} reaches a project MCP server; 10db judges every call.`);
 }
 

@@ -909,6 +909,16 @@ describe('judgeShapeCall by the session’s judge', () => {
     expect(judgeShapeCall(make(), { ...sandboxed, judge: 'rules' }).decision).toBe(today);
   });
 
+  it("sends a builder's MCP tool to the session's judge: a bare allow on 10db's judge and auto mode, a card on rules", () => {
+    const linear = call('mcp__claude_ai_Linear__list_teams', {});
+    // Exactly this: a `settled` or a rewrite would skip the judge or the classifier.
+    expect(judgeShapeCall(linear, { ...sandboxed, judge: 'tendb' })).toEqual({ decision: 'allow' });
+    expect(judgeShapeCall(linear, { ...sandboxed, judge: 'native' })).toEqual({
+      decision: 'allow',
+    });
+    expect(judgeShapeCall(linear, { ...sandboxed, judge: 'rules' }).decision).toBe('ask');
+  });
+
   it('says Plan writes no code when it refuses an edit, on every judge', () => {
     for (const judge of ['native', 'rules', 'tendb'] as const) {
       const verdict = judgeShapeCall(call('Edit', { file_path: path('checkout/src/a.ts') }), {
