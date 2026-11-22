@@ -187,12 +187,8 @@ const RULES = [
 
 /** Text written by an agent or the builder, fenced so nothing in it can close its block or pass as a rule. */
 const data = (name: string, text: string): string => {
-  // Repeated, so removing one `</data>` cannot join the halves of another.
-  let clean = text;
-  for (let before = ''; before !== clean;) {
-    before = clean;
-    clean = clean.replaceAll('</data>', '');
-  }
+  // Every angle bracket is escaped, so no spelling of a tag inside the text opens or closes a block.
+  const clean = text.replaceAll('<', '&lt;').replaceAll('>', '&gt;');
   return `<data name="${name}">\n${clean}\n</data>`;
 };
 
