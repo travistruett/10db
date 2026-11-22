@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { useFocusTarget } from '../focus-target';
 
 /**
- * One outside service in Settings › Sign-ins, in four parts: the service's mark and name with its state
+ * One outside service in Settings › Integrations, in four parts: the service's mark and name with its state
  * and identity beside them, what 10db uses it for, its actions, and what stops without it. A link with
  * `?focus=<focusName>` lands on the card.
  */

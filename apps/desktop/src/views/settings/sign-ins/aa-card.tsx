@@ -180,7 +180,7 @@ function Actions({ status }: { readonly status: BenchmarkStatusDto }) {
   );
 }
 
-/** Settings › Sign-ins › Artificial Analysis: the key behind the scores 10db picks models by. */
+/** Settings › Integrations › Artificial Analysis: the key behind the scores 10db picks models by. */
 export function AaCard() {
   const query = useBenchmarkStatus();
   const status = query.data;

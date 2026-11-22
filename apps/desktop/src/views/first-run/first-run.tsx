@@ -21,7 +21,7 @@ const DRAG_STRIP_HEIGHT = 44;
 const RAIL_WIDTH = 290;
 const CONTENT_PADDING = 48;
 
-/** The gh row's Sign In: the same flow as Settings › Sign-ins, and the tools are checked again when it ends. */
+/** The gh row's Sign In: the same flow as Settings › Integrations, and the tools are checked again when it ends. */
 function GhSignIn() {
   const end = useGithubLoginEnd();
   const { mutate: recheck } = useRecheckSystem();

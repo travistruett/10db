@@ -3,6 +3,7 @@ import {
   ActionIcon,
   Alert,
   Button,
+  Divider,
   Group,
   List,
   Menu,
@@ -13,6 +14,7 @@ import {
 } from '@mantine/core';
 import { IconBrandSlack, IconDots } from '@tabler/icons-react';
 import { useState } from 'react';
+import { useProjects } from '../../../daemon/queries';
 import {
   usePeople,
   useRemoveSlackToken,
@@ -24,6 +26,7 @@ import { ConfirmModal } from '../../../shell/confirm-modal';
 import { ExternalLink } from '../../board/pull-request-link';
 import { ConnectionStatus, ConnectionTone } from '../connection-status';
 import { IntegrationCard } from './integration-card';
+import { SlackProjectRow } from './project-rows';
 import { SLACK_APPS_URL, SLACK_MANIFEST } from './slack-manifest';
 import { WhichIsYou } from './which-is-you';
 
@@ -147,8 +150,23 @@ function TokenField({ setter }: { readonly setter: ReturnType<typeof useSetSlack
   );
 }
 
+/** One row per project, each with its own switch for sending questions through the signed-in workspace. */
+function SlackProjects() {
+  const projects = useProjects();
+  const list = projects.data ?? [];
+  if (list.length === 0) return null;
+  return (
+    <Stack gap="xs">
+      <Divider />
+      {list.map((project) => (
+        <SlackProjectRow key={project.id} project={project} />
+      ))}
+    </Stack>
+  );
+}
+
 /**
- * Settings › Sign-ins › Slack. Not connected, it is the three setup steps; connected, one line,
+ * Settings › Integrations › Slack. Not connected, it is the three setup steps; connected, one line,
  * with Change Who You Are and Disconnect in a small menu. Until the builder picks their own member,
  * the card holds a callout to finish setup.
  */
@@ -230,6 +248,7 @@ export function SlackCard() {
       {state === 'unreachable' ? (
         <Text size="sm">Slack can't be reached. 10db keeps trying, once a minute.</Text>
       ) : null}
+      {state === 'connected' ? <SlackProjects /> : null}
       {data?.error ? (
         <Text size="xs" c="dimmed">
           {data.error}

@@ -1,23 +1,31 @@
 import { LinearVia, type LinearSignInRowDto } from '@10db/contracts';
-import { Alert, Skeleton, Stack, Text } from '@mantine/core';
+import { Alert, Divider, Skeleton, Stack, Text } from '@mantine/core';
 import { IconListDetails } from '@tabler/icons-react';
+import { useProjects } from '../../../daemon/queries';
 import { useLinearSignIns } from '../../../daemon/sign-in-queries';
-import { ConnectionStatus, ConnectionTone } from '../connection-status';
 import { IntegrationCard } from './integration-card';
+import { LinearProjectRow } from './project-rows';
 
-function RowStatus({ row }: { readonly row: LinearSignInRowDto }) {
-  if (row.via === LinearVia.None)
-    return <ConnectionStatus tone={ConnectionTone.Off} label="Not set up" />;
-  const how = row.via === LinearVia.Connector ? 'claude.ai connector' : 'your server';
-  if (row.signedIn === false)
-    return <ConnectionStatus tone={ConnectionTone.NeedsYou} label={`Not signed in · ${how}`} />;
-  return <ConnectionStatus tone={ConnectionTone.Works} label={`Through ${how}`} />;
+/** How one account reaches Linear, as a line: the way, or the words that say how to set it up. */
+function lineOf(row: LinearSignInRowDto): string {
+  if (row.via === LinearVia.None) return row.note ?? 'No Linear sign-in.';
+  const how = row.via === LinearVia.Connector ? 'the claude.ai connector' : 'your Linear server';
+  return row.signedIn === false
+    ? `Through ${how}; not signed in. ${row.note ?? ''}`.trim()
+    : `Agents reach Linear through ${how}.`;
 }
 
-/** Settings › Sign-ins › Linear: one line per agent account saying how it reaches Linear, or how to set that up. */
+/**
+ * Settings › Integrations › Linear: how agents reach Linear (one line while the accounts agree, one per
+ * account when they differ), then one row per project with its team.
+ */
 export function LinearCard() {
   const linear = useLinearSignIns();
+  const projects = useProjects();
   if (linear.isPending) return <Skeleton height={120} radius="md" />;
+  const rows = linear.data?.rows ?? [];
+  const lines = rows.map((row) => ({ row, line: lineOf(row) }));
+  const agree = new Set(lines.map((l) => l.line)).size <= 1;
   return (
     <IntegrationCard
       mark={<IconListDetails size={20} stroke={1.5} aria-hidden />}
@@ -33,23 +41,28 @@ export function LinearCard() {
         </Alert>
       ) : (
         <Stack gap="xs">
-          {linear.data.rows.length === 0 ? (
+          {rows.length === 0 ? (
             <Text size="sm" c="dimmed">
               No account runs agents yet. Add one under Accounts.
             </Text>
-          ) : null}
-          {linear.data.rows.map((row) => (
-            <Stack key={row.accountId} gap={2}>
-              <Text size="sm" fw={500}>
-                {row.accountLabel}
+          ) : agree ? (
+            <Text size="sm" c="dimmed">
+              {lines[0]?.line}
+            </Text>
+          ) : (
+            lines.map(({ row, line }) => (
+              <Text key={row.accountId} size="sm" c="dimmed">
+                {row.accountLabel}: {line}
               </Text>
-              <RowStatus row={row} />
-              {row.note === null ? null : (
-                <Text size="xs" c="dimmed">
-                  {row.note}
-                </Text>
-              )}
-            </Stack>
+            ))
+          )}
+          {(projects.data ?? []).length === 0 ? null : <Divider />}
+          {(projects.data ?? []).map((project) => (
+            <LinearProjectRow
+              key={project.id}
+              project={project}
+              row={rows.find((r) => r.accountId === project.accountId)}
+            />
           ))}
         </Stack>
       )}
