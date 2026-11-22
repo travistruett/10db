@@ -60,6 +60,11 @@ export const OUTBOUND_PATTERNS: readonly OutboundPattern[] = [
   },
 ];
 
+/** The `hold` patterns that are secrets: every hold except `url` and `code_block`. */
+export const SECRET_PATTERN_NAMES: readonly string[] = OUTBOUND_PATTERNS.filter(
+  (p) => p.severity === 'hold' && p.name !== 'url' && p.name !== 'code_block',
+).map((p) => p.name);
+
 /**
  * The patterns a drafted message hits, one hit per pattern per line, in line order. A hit names the
  * pattern and the line and never repeats what matched, so a secret is not copied into a card.
