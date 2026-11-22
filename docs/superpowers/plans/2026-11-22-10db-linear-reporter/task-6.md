@@ -9,31 +9,20 @@ integration branch.
 
 - Routes in `apps/daemon/src/api/app.ts` and services:
   - `GET /tasks/:taskId/linear-posts` → `LinearPostDto[]`;
-  - `GET` and `PUT /projects/:projectId/integrations/linear/reporter` → `LinearReporterSettings & { blockedBy }`.
-    PUT with `on: false` drops pending rows and refreshes the Inbox card.
   - Contracts are in card 1; add the response schema beside them.
 - `apps/desktop/src/daemon/`: the query and mutation hooks, as in `sign-in-queries.ts`. Invalidate on
   `linear_post.changed`.
-- `apps/desktop/src/views/settings/sign-ins/project-rows.tsx` `LinearProjectRow`, in the bound branch:
-  - a **Report To Linear** switch (the Slack row's switch is the model);
-  - a **How To Update Linear** textarea that saves on blur;
-  - the `blockedBy` line, dim, when set (e.g. "Off: Your MCP servers is off in Trust.").
-  - Keep the card's shape: one control on the line, the rest under it.
-- `apps/desktop/src/views/settings/sign-ins/linear-card.tsx`, the card's state line: say plainly where the sign-in
-  lives. "10db uses your agent's own Linear sign-in and never stores a Linear login. Sign in inside Claude Code
-  (`/mcp`, or the claude.ai Linear connector) or in Codex (Settings › Trust)." Keep it one dim line, wrapped if
-  needed. The per-row hints stay as they are.
+- The Settings row, its routes and the sign-in copy moved to card 8.
 - `apps/desktop/src/views/board/task-drawer.tsx`: a **Linear** tab, shown only when `task.external` is set. It
   lists the rows newest first: event, attempt, state, when, then a link to the comment when there is one, the
   status set, the withheld pattern or the last error. Put the tab's body in its own file
   (`views/board/linear-tab.tsx`).
 - `apps/desktop/e2e`: extend flow 2 (`loop.spec.ts`), or the Plan flow that already makes `AMP-1`
   (`sessions.spec.ts`), whichever reaches a linked task's run with less setup.
-  - Bind the project. Use the fake script for the binding check, or the route the check's tool writes through.
   - Run the linked task to Done with a fake reporter script (`get_workspace` with a scripted result, then
     `report_linear_workspace`, `save_comment`, `report_linear_post`).
   - Wait on the condition, with a 90 s deadline (the reporter's 30 s delay runs on the daemon's real clock), until the drawer's Linear tab shows the run's rows as recorded.
-  - Turn Report To Linear off on the Integrations row and check that it says Off.
+  - Turn Report To Linear off on the Integrations row (card 8's) and check that it says Off.
   - No new spec file.
 - `apps/daemon/src/sessions/fake-*`: the script entry for the reporter's brief, keyed as the fake adapter keys
   chats (the brief's first line).

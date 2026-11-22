@@ -10,26 +10,27 @@ per-project "How to update Linear" note and the reporter switch.
 
 ## Brief
 
-**What changes for you.** On a project linked to a Linear team, a task that carries a Linear issue keeps that issue
-up to date:
+**What changes for you.** Linear needs no link any more (card 8, the builder's call). A project uses Linear whenever
+its account's agent is signed in to it: From Linear shows, and import filters in words. A task that carries a Linear
+issue keeps that issue up to date:
 - A run starting moves it to In Progress.
 - A review verdict, a wait on you, the run's end and the PR opening or merging each get one comment with the
   attempt, the evidence and what is unverified.
 - Once the PR opens, one "10db" link on the issue points at it.
 
-You do nothing. The Linear card's project row in Settings › Integrations gains a **Report To Linear** switch and a
-**How To Update Linear** note. Linking a team turns the switch on. The task drawer gains a **Linear** tab listing every update:
+You do nothing. The Linear card's project row in Settings › Integrations loses its team key and Link, and gains a
+**Report To Linear** switch (on; you turn it off) and a **How To Update Linear** note. The card says plainly that
+10db uses your agent's own sign-in and stores no Linear login. The task drawer gains a **Linear** tab listing every update:
 sent, waiting, withheld or failed.
 
 **What it buys.** The pilot's hand steps are gone: no more copying the verification comment or moving the status
 by hand.
 
 **What could go wrong, and how we'd know.**
-- **It writes to the wrong place.** The run starts in the wrong workspace, or it touches another issue. Its first
-  step must report the workspace. 10db accepts that report only when the ids match the binding *and* appeared in
-  a successful `get_workspace`/`get_team` result in that session. Until then every Linear write is refused.
-  Afterwards it may write only the linked issue, named by Linear's own id (team keys repeat across workspaces),
-  with an exact list of fields per tool. It reads no files, runs no commands, has no web, and any other MCP tool
+- **It writes to the wrong place.** It may write only the task's issue, named by Linear's own id, which exists in
+  exactly one workspace (team keys repeat across workspaces, so the `AMP-119` identifier is refused), with an exact
+  list of fields per tool. A sign-in that has moved to another workspace can't find the issue, and that update
+  fails with the reason in the Inbox. It reads no files, runs no commands, has no web, and any other MCP tool
   is denied. Card 2's rule table is the unit test. A refusal
   shows on the Linear tab and in the project's one Inbox item.
 - **It leaks a secret.** Every Linear write's text is scanned with the outbound scan's secret patterns. A hit
@@ -48,9 +49,8 @@ by hand.
 1. **The reporter is invisible.** It runs as its own kind of conversation, one per linked task, with no chat tab.
    A visible chat per update would bury your sessions. You see its results on the Linear tab, and its session ids
    are in the rows. Cost if wrong: a "show the reporter's transcript" link later.
-2. **Report To Linear is on for a new link, and off for a project you linked before this lands.** Nothing posts to
-   your Linear until you link a team or turn the switch on, so the first post is one you chose. Cost if wrong: one
-   switch to flip on Ampsio.
+2. **Report To Linear is on by default** (you turn it off). Consent is per task: a task carries a Linear issue only
+   because you imported it. Any task already imported posts on its next run.
 3. **The reporter may only comment, set the status, and add one `10db` link** (`save_issue` with `id`, `state`
    and `links` only). It may not touch assignees, labels, parents or relations, and it never deletes. Linear's
    links are append-only, so the "10db" attachment is a link to the PR, added once, not a live card. The live
@@ -85,8 +85,8 @@ or re-link), an optional note, and your agent signed in to Linear's workspace.
 - **The reporter is not a chat.** It is 10db's own errand. The chat judge decision
   (`decisions/2026-11-21-a-conversations-mcp-calls-go-to-its-judge.md`) does not apply to it, and its calls never go
   to a judge.
-- Labels are Title Case (Knowledge rule pri_01a20402). Don't edit `views/sessions/plan/*`, `sessions-panel.tsx`,
-  `from-linear-item.tsx` or `proposal-text.ts`: another session owns them.
+- Labels are Title Case (Knowledge rule pri_01a20402). Don't edit `views/sessions/plan/*`, `sessions-panel.tsx` or
+  `proposal-text.ts` (another session's). Card 8 may edit `from-linear-item.tsx`.
 - Tests: only those named on the card, each with a value card in its commit (`.claude/rules/testing.md`).
 - While working, run `pnpm vitest related <files> --maxWorkers=2` plus typecheck and lint of the packages
   changed. Before you hand back, run `make precheck`. Never the full suite, never `make check-changed` (this is an
@@ -304,6 +304,9 @@ in.
   - [Card 6](2026-11-22-10db-linear-reporter/task-6.md): Settings row, Linear tab, routes, the e2e extension,
     docs. Starts after #742 (Title Case sweep) lands and is merged in. *Review group 2.*
 - **Track B** (worktree `linear-reporter-b`, beside track A from the start):
+  - [Card 8](2026-11-22-10db-linear-reporter/task-8.md): Linear without linking (the builder's call): part 2's
+    link removed, From Linear by detection, the Settings row with Report To Linear, the note and the sign-in copy.
+    Feature. *Review group 2b.*
   - [Card 2](2026-11-22-10db-linear-reporter/task-2.md): the reporter's rule table, Linear tool naming per
     provider, secret-only scan. Pure, so it needs only card 1's contracts. It may start at once and stub the two
     zod types locally until card 1 merges.
