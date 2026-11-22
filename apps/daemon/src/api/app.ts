@@ -1616,6 +1616,9 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
+    .post('/projects/:projectId/integrations/linear/import', (c) =>
+      c.json(deps.services.importFromLinear(ProjectId.parse(c.req.param('projectId')))),
+    )
     .delete('/projects/:projectId/integrations/linear', (c) =>
       c.json(deps.services.unlinkLinear(ProjectId.parse(c.req.param('projectId')))),
     )

@@ -87,6 +87,7 @@ export function convertedLine(row: ShapeProposalDto, liveLine?: string): string 
       return 'Accepted · stored, sent when people arrive';
     case 'goal':
     case 'task':
+      if (row.converted?.alreadyOnBoard === true) return 'Already on the Board';
       return liveLine === undefined ? 'Accepted · on the Board' : `On the Board · ${liveLine}`;
     case 'change_task':
     case 'remove_task':
@@ -139,7 +140,11 @@ export function rowMeta(row: ShapeProposalDto): string {
     case 'goal':
       return taskCount(row.body.tasks.length);
     case 'task':
-      return [row.body.size ?? 'sized by history', row.body.areas.join(', ')].join(' · ');
+      return [
+        ...(row.body.external === undefined ? [] : [row.body.external.id]),
+        row.body.size ?? 'sized by history',
+        row.body.areas.join(', '),
+      ].join(' · ');
     case 'landing':
       return `${taskCount(row.body.keys.length)} · 1 pull request`;
     case 'question':

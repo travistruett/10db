@@ -274,6 +274,9 @@
                       },
                       "retired": {
                         "type": "boolean"
+                      },
+                      "alreadyOnBoard": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -841,6 +844,9 @@
                       },
                       "retired": {
                         "type": "boolean"
+                      },
+                      "alreadyOnBoard": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -1178,6 +1184,9 @@
                       },
                       "retired": {
                         "type": "boolean"
+                      },
+                      "alreadyOnBoard": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -1430,6 +1439,9 @@
                       },
                       "retired": {
                         "type": "boolean"
+                      },
+                      "alreadyOnBoard": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -1613,6 +1625,9 @@
                         "type": "boolean"
                       },
                       "retired": {
+                        "type": "boolean"
+                      },
+                      "alreadyOnBoard": {
                         "type": "boolean"
                       }
                     },
@@ -1930,6 +1945,9 @@
                       },
                       "retired": {
                         "type": "boolean"
+                      },
+                      "alreadyOnBoard": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -2154,6 +2172,9 @@
                       },
                       "retired": {
                         "type": "boolean"
+                      },
+                      "alreadyOnBoard": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -2350,6 +2371,9 @@
                         "type": "boolean"
                       },
                       "retired": {
+                        "type": "boolean"
+                      },
+                      "alreadyOnBoard": {
                         "type": "boolean"
                       }
                     },

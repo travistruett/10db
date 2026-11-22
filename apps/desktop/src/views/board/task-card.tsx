@@ -1,3 +1,4 @@
+import { TaskExternalLink } from './task-external-link';
 import {
   areaLabel,
   BoardStatus,
@@ -252,6 +253,15 @@ export function TaskCard({
         <Text size="sm" fw={500} pr={28} lineClamp={3}>
           {task.headline || task.title}
         </Text>
+        {task.external == null ? null : (
+          <Box
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            <TaskExternalLink task={task} />
+          </Box>
+        )}
         {task.why ? (
           <Text size="xs" c="dimmed" lineClamp={2} data-testid="task-card-why">
             {task.why}

@@ -895,6 +895,8 @@ export interface ApiServices extends PlanRecordServices {
   /** Opens the session that reads the workspace and looks the team up; ConflictError, in words, when the account has no Linear. */
   checkLinearTeam(projectId: ProjectId, input: LinearCheckInput): Promise<ProjectLinearDto>;
   unlinkLinear(projectId: ProjectId): ProjectLinearDto;
+  /** From Linear: a Plan session that imports issues of the linked team; ConflictError when none is linked. */
+  importFromLinear(projectId: ProjectId): ChatDto;
   /** Binds a project to a signed-in Slack workspace, or turns Slack off for it with a null team. */
   setProjectIntegrations(
     projectId: ProjectId,

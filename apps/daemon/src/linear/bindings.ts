@@ -3,6 +3,7 @@ import {
   InvalidError,
   LinearBinding,
   LinearVia,
+  type ChatDto,
   type ChatId,
   type LinearSignInsDto,
   type LinkLinearTeamInput,
@@ -28,6 +29,8 @@ export interface LinearBindings {
   /** `link_linear_team`: writes the binding, or records the refusal, for the check this chat is. */
   submit(projectId: ProjectId, chatId: ChatId, input: LinkLinearTeamInput): ProjectLinearDto;
   unlink(projectId: ProjectId): ProjectLinearDto;
+  /** From Linear: a Plan session whose opening brief names the linked workspace and team; ConflictError when none is linked. */
+  startImport(projectId: ProjectId): ChatDto;
 }
 
 type Check =
@@ -129,6 +132,24 @@ export function createLinearBindings(deps: {
       return view(projectId);
     },
 
+    startImport(projectId) {
+      const binding = stored(projectId);
+      if (binding === null)
+        throw new ConflictError('Link this project to a Linear team before importing from it.');
+      const chat = deps.chat.create({
+        projectId,
+        model: null,
+        tabPosition: deps.chat.open().length,
+        plan: true,
+      });
+      deps.chat.send(chat.conversationId, {
+        text: importBrief(binding),
+        mentions: [],
+        pictures: [],
+      });
+      return chat;
+    },
+
     unlink(projectId) {
       getProject(deps.state.db, projectId);
       deps.state.write((ctx) => {
@@ -147,5 +168,16 @@ function openingMessage(teamKey: string): string {
     "Use Linear's tools to read which workspace this sign-in reaches (whoami or get_workspace) and to find the team with the key " +
       `${teamKey} (list_teams or get_team). Change nothing in Linear.`,
     `Then call link_linear_team once with the workspace's id and name and the team's id, key and name, or with team null when the workspace has no team ${teamKey}. Say nothing else.`,
+  ].join('\n\n');
+}
+
+/** What an import's Plan session is told: where the issues are, how a draft carries its issue and what blocks means. */
+function importBrief(binding: LinearBinding): string {
+  return [
+    `Import Linear issues from the team ${binding.teamKey} (${binding.teamName}) in the workspace ${binding.workspaceName} (workspace id ${binding.workspaceId}, team id ${binding.teamId}) as tasks.`,
+    'Ask me which issues I want, for example "the ready AMP ones". Read them with Linear\'s tools (list_issues, get_issue) and change nothing in Linear.',
+    `Draft each issue as one task, following the 10db-task drafting rules: a title that is the precise promise, a headline, why, a description, acceptance criteria and areas. Put the issue on the draft as external: { kind: "linear", id: the issue's identifier such as ${binding.teamKey}-120, issueId: Linear's own id, url: the issue's url }. 10db skips an issue that is already a task on the Board.`,
+    'When one issue blocks another and both are in this import, the blocked task lists the blocking one in dependsOn.',
+    'Start by asking which issues to import.',
   ].join('\n\n');
 }

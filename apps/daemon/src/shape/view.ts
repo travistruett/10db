@@ -23,6 +23,7 @@ import {
   getDecision,
   getPrinciple,
   getShape,
+  getTaskByExternal,
   listRehearsals,
   listShapeAttachments,
   latestShapeAccept,
@@ -89,9 +90,18 @@ function convertedOf(
   const principleId = mine.find((l) => l.principleId !== null)?.principleId ?? null;
   const questionId = mine.find((l) => l.questionId !== null)?.questionId ?? null;
   const principle = principleId === null ? null : getPrinciple(db, principleId);
+  const taskIds = mine.flatMap((l) => (l.taskId === null ? [] : [l.taskId]));
+  // A task whose issue was already on the Board was skipped by Convert and has no link of its own.
+  const external =
+    row.kind === 'task' ? ShapeProposalBody.task.parse(row.body).external : undefined;
+  const skippedFor =
+    taskIds.length === 0 && external !== undefined
+      ? getTaskByExternal(db, getShape(db, row.shapeId).projectId, external)
+      : null;
   return {
     goalId: mine.find((l) => l.goalId !== null)?.goalId ?? null,
-    taskIds: mine.flatMap((l) => (l.taskId === null ? [] : [l.taskId])),
+    taskIds: skippedFor === null ? taskIds : [skippedFor.id],
+    ...(skippedFor === null ? {} : { alreadyOnBoard: true }),
     decisionId,
     ...(principleId === null ? {} : { principleId }),
     ...(questionId === null ? {} : { questionId }),

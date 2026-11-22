@@ -10,7 +10,7 @@ export const ExternalLink = z.object({
   kind: z.enum(ExternalKind),
   id: z.string().min(1).max(64),
   issueId: z.string().min(1).max(128),
-  url: z.url().max(2048),
+  url: z.url({ protocol: /^https$/ }).max(2048),
 });
 export type ExternalLink = z.infer<typeof ExternalLink>;
 

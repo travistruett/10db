@@ -138,6 +138,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     projectIntegrations: none,
     checkLinearTeam: none,
     unlinkLinear: none,
+    importFromLinear: none,
     setProjectIntegrations: none,
     listSlackMembers: track('listSlackMembers'),
     getStakeholderTimers: track('getStakeholderTimers'),

@@ -1,4 +1,5 @@
 import {
+  ChatDto,
   LinearSignInsDto,
   ProjectIntegrationsDto,
   ProjectLinearDto,
@@ -6,6 +7,7 @@ import {
   type ProjectIntegrationsInput,
 } from '@10db/contracts';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { chatKeys } from './chat-queries';
 import { readJson } from './client';
 import { SLACK_KEY } from './people';
 import { useDaemon } from './provider';
@@ -44,6 +46,22 @@ export function useCheckLinearTeam(projectId: ProjectId) {
         ProjectLinearDto,
       ),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: projectIntegrationsKey(projectId) }),
+  });
+}
+
+/** From Linear: a Plan session that imports the linked team's issues. */
+export function useImportFromLinear(projectId: ProjectId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      readJson(
+        await client.projects[':projectId'].integrations.linear.import.$post({
+          param: { projectId },
+        }),
+        ChatDto,
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: chatKeys.all }),
   });
 }
 
