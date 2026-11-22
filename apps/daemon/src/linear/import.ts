@@ -49,8 +49,9 @@ export function createLinearImport(deps: {
 /** What an import's Plan session is told: how a draft carries its issue and what blocks means. */
 const IMPORT_BRIEF = [
   'Import Linear issues as tasks.',
-  'Ask me which issues I want, for example "my ready AMP issues". Read them with Linear\'s tools (list_issues, get_issue) and change nothing in Linear.',
+  'Ask me which issues I want, for example "my ready AMP issues" or "the Onboarding project". Read them with Linear\'s tools (list_issues, get_issue, list_projects, get_project) and change nothing in Linear.',
   "Draft each issue as one task, following the 10db-task drafting rules: a title that is the precise promise, a headline, why, a description, acceptance criteria and areas. Put the issue on the draft as external: { kind: \"linear\", id: the issue's identifier such as AMP-120, issueId: Linear's own id, url: the issue's url }. 10db skips an issue that is already a task on the Board.",
   'When one issue blocks another and both are in this import, the blocked task lists the blocking one in dependsOn.',
+  "When I name a Linear project, draft it as one goal: the project's name as its title, its description (or its summary, when it has none) as the goal's objective, and one task per issue in it, each carrying its external link as above. A blocks relation between two of its issues becomes the task's depends_on inside the goal. Issues I ask for outside any project stay loose tasks.",
   'Start by asking which issues to import.',
 ].join('\n\n');
