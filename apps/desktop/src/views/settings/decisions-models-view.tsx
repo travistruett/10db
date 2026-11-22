@@ -22,7 +22,7 @@ import { SettingsSectionKey } from './sections';
 const OFF_WORDS =
   "Decisions are off: 10db was started with TENDB_JUDGE=off, so it never calls a model and its models aren't read.";
 const NO_ACCOUNT_WORDS =
-  'Add an OpenRouter account to compare the models that make 10db’s decisions by time and cost.';
+  'Pick an account under Paid by to compare the models that make 10db’s decisions by time and cost.';
 
 /** What replaces the chart and the list when they cannot be drawn, and why; the link goes to where the account is picked. */
 function Unavailable({ text, link }: { readonly text: string; readonly link: boolean }) {

@@ -130,6 +130,8 @@ export const JudgeStatusDto = z.object({
       secretSet: z.boolean(),
       /** Whether the account's key is recorded, missing from the Keychain, or changed since it was recorded. */
       secretState: z.enum(['set', 'missing', 'changed']),
+      /** Why the account's latest decision fell back to rules (a rejected key, an expired profile); absent when it answered. */
+      fallback: z.string().nullable().optional(),
     })
     .nullable(),
   /** The daemon was started with `TENDB_JUDGE=off`: it never reads the key or calls OpenRouter. */

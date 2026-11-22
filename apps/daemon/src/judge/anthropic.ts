@@ -153,7 +153,7 @@ export async function askAnthropic(
   if (!response.ok) {
     const message = ErrorBody.safeParse(value);
     const why = message.success
-      ? `: ${message.data.error.message.slice(0, ERROR_DETAIL_CHARS)}`
+      ? `: ${scrubbed(message.data.error.message, q.key).slice(0, ERROR_DETAIL_CHARS)}`
       : '';
     throw new JudgeCallError(
       scrubbed(`Anthropic answered HTTP ${String(response.status)}${why}`, q.key),

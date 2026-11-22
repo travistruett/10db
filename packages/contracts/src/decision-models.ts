@@ -12,9 +12,9 @@ export const DecisionModelDto = z.object({
   /** A router id that always resolves to the maker's newest model of the family (`~maker/...-latest`). */
   latest: z.boolean(),
   /** US dollars per million input tokens. */
-  inputUsdPerMillion: z.number().nonnegative(),
+  inputUsdPerMillion: z.number().nonnegative().nullable(),
   /** US dollars per million output tokens; decision models answer in a few tokens and most charge nothing. */
-  outputUsdPerMillion: z.number().nonnegative(),
+  outputUsdPerMillion: z.number().nonnegative().nullable(),
   /** Why 10db can't call it yet, in the builder's words; null when it can. */
   cantCall: z.string().nullable(),
   /** US dollars per million decisions; null when nothing measures it. */

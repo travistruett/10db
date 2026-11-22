@@ -54,7 +54,7 @@ function PaidByAccount() {
     ? 'Reading…'
     : judge.isError
       ? judge.error.message
-      : 'No OpenRouter account';
+      : 'No account picked';
   return (
     // WebKit shows no tooltip on a disabled control, so the hint sits on a wrapper around it.
     <Tooltip label="Change it under Settings › Decisions" position="bottom">
