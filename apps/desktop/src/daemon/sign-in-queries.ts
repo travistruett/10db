@@ -2,7 +2,7 @@ import {
   ChatDto,
   LinearSignInsDto,
   ProjectIntegrationsDto,
-  ProjectLinearDto,
+  type LinearReporterSettings,
   type ProjectId,
   type ProjectIntegrationsInput,
 } from '@10db/contracts';
@@ -26,30 +26,10 @@ export function useProjectIntegrations(projectId: ProjectId) {
         await client.projects[':projectId'].integrations.$get({ param: { projectId } }),
         ProjectIntegrationsDto,
       ),
-    // A Linear check runs in a session of its own; the card follows it until it links or refuses.
-    refetchInterval: (query) =>
-      query.state.data?.linear.check?.state === 'checking' ? 2000 : false,
   });
 }
 
-/** Link: opens the session that checks the team key against the builder's Linear sign-in. */
-export function useCheckLinearTeam(projectId: ProjectId) {
-  const { client } = useDaemon();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (teamKey: string) =>
-      readJson(
-        await client.projects[':projectId'].integrations.linear.check.$post({
-          param: { projectId },
-          json: { teamKey },
-        }),
-        ProjectLinearDto,
-      ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: projectIntegrationsKey(projectId) }),
-  });
-}
-
-/** From Linear: a Plan session that imports the linked team's issues. */
+/** From Linear: a Plan session that imports issues through the project's account. */
 export function useImportFromLinear(projectId: ProjectId) {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
@@ -65,33 +45,22 @@ export function useImportFromLinear(projectId: ProjectId) {
   });
 }
 
-/** Cancel: ends the Linear check in flight. */
-export function useCancelLinearCheck(projectId: ProjectId) {
+/** Report To Linear and How To Update Linear: saves the project's reporter settings. */
+export function useSetLinearReporter(projectId: ProjectId) {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async () =>
+    mutationFn: async (input: LinearReporterSettings) =>
       readJson(
-        await client.projects[':projectId'].integrations.linear.check.$delete({
+        await client.projects[':projectId'].integrations.linear.$put({
           param: { projectId },
+          json: input,
         }),
-        ProjectLinearDto,
+        ProjectIntegrationsDto,
       ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: projectIntegrationsKey(projectId) }),
-  });
-}
-
-/** Unlink: clears the project's Linear binding. */
-export function useUnlinkLinear(projectId: ProjectId) {
-  const { client } = useDaemon();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async () =>
-      readJson(
-        await client.projects[':projectId'].integrations.linear.$delete({ param: { projectId } }),
-        ProjectLinearDto,
-      ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: projectIntegrationsKey(projectId) }),
+    onSuccess: (saved) => {
+      queryClient.setQueryData(projectIntegrationsKey(projectId), saved);
+    },
   });
 }
 

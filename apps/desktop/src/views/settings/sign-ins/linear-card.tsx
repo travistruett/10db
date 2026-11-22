@@ -5,7 +5,7 @@ import { useLinearSignIns } from '../../../daemon/sign-in-queries';
 import { IntegrationCard, StateText } from './integration-card';
 import { LinearProjectRow, ProjectRows } from './project-rows';
 
-/** Settings › Integrations › Linear: how agents reach Linear, then one row per project with its team. */
+/** Settings › Integrations › Linear: one row per project with its Report To Linear switch. */
 export function LinearCard() {
   const linear = useLinearSignIns();
   const projects = useProjects();
@@ -24,7 +24,8 @@ export function LinearCard() {
         </Alert>
       ) : (
         <StateText>
-          Through each account's own Linear sign-in; checked when you link a team.
+          Sign in inside Claude Code (`/mcp`, or the claude.ai Linear connector) or in Codex
+          (Settings › Trust).
         </StateText>
       )}
       {list.length === 0 ? null : (

@@ -7,12 +7,14 @@ import {
   type SlackMemberDto,
 } from '@10db/contracts';
 import {
+  dropPendingLinearPosts,
   getInboxItem,
   getProject,
   getPerson,
   getStakeholderTimers,
   questionRoutesForTask,
   removePerson,
+  setAppSetting,
   setStakeholderTimers,
   updatePerson,
 } from '@10db/db';
@@ -30,7 +32,12 @@ import {
   type SlackConnection,
   type StakeholderSends,
 } from '../stakeholders';
-import type { LinearBindings } from '../linear';
+import {
+  reporterBlockedBy,
+  reporterSettings,
+  reporterSettingsKey,
+  type LinearImport,
+} from '../linear';
 
 /** The stakeholder side of the HTTP API: the Slack connection, people, timers, routes and sends. */
 export type StakeholderApiServices = Pick<
@@ -39,10 +46,8 @@ export type StakeholderApiServices = Pick<
   | 'setSlackToken'
   | 'removeSlackToken'
   | 'projectIntegrations'
-  | 'checkLinearTeam'
-  | 'unlinkLinear'
   | 'importFromLinear'
-  | 'cancelLinearCheck'
+  | 'setLinearReporter'
   | 'setProjectIntegrations'
   | 'listSlackMembers'
   | 'updatePerson'
@@ -97,14 +102,17 @@ export function createStakeholderApiServices(deps: {
   readonly reconnect: () => Promise<void>;
   /** The login `gh` is signed in as, from its last check; null when signed out. */
   readonly githubLogin: () => Promise<string | null>;
-  readonly linear: Pick<LinearBindings, 'get' | 'check' | 'unlink' | 'startImport' | 'cancel'>;
+  readonly linear: LinearImport;
 }): StakeholderApiServices {
   const integrationsOf = async (projectId: ProjectId): Promise<ProjectIntegrationsDto> => {
     getProject(deps.state.db, projectId);
     return {
       github: { login: await deps.githubLogin() },
       slack: projectSlack(deps.state.db, projectId),
-      linear: deps.linear.get(projectId),
+      linear: {
+        ...reporterSettings(deps.state.db, projectId),
+        blockedBy: reporterBlockedBy(deps.state.db, projectId),
+      },
     };
   };
 
@@ -168,10 +176,17 @@ export function createStakeholderApiServices(deps: {
     },
 
     projectIntegrations: integrationsOf,
-    checkLinearTeam: (projectId, input) => deps.linear.check(projectId, input.teamKey),
-    unlinkLinear: (projectId) => deps.linear.unlink(projectId),
     importFromLinear: (projectId) => deps.linear.startImport(projectId),
-    cancelLinearCheck: (projectId) => deps.linear.cancel(projectId),
+
+    setLinearReporter: async (projectId, input) => {
+      getProject(deps.state.db, projectId);
+      deps.state.write((ctx) => {
+        setAppSetting(ctx, reporterSettingsKey(projectId), input);
+        // Setting writes emit no event, so the owed updates are dropped here.
+        if (!input.on) dropPendingLinearPosts(ctx, { projectId });
+      });
+      return integrationsOf(projectId);
+    },
 
     async setProjectIntegrations(projectId, input) {
       getProject(deps.state.db, projectId);

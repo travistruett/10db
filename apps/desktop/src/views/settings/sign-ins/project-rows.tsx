@@ -1,14 +1,11 @@
 import { LinearVia, type LinearSignInRowDto, type ProjectDto } from '@10db/contracts';
-import { Button, Divider, Group, Stack, Switch, Text, TextInput } from '@mantine/core';
-import { Link } from '@tanstack/react-router';
-import { useState, type ReactNode } from 'react';
+import { Divider, Group, Stack, Switch, Text, Textarea } from '@mantine/core';
+import type { ReactNode } from 'react';
 import { useSlackConnection } from '../../../daemon/people';
 import {
-  useCancelLinearCheck,
-  useCheckLinearTeam,
   useProjectIntegrations,
+  useSetLinearReporter,
   useSetProjectIntegrations,
-  useUnlinkLinear,
 } from '../../../daemon/sign-in-queries';
 
 /** One project on an integration's card, on one line: its name on the left, what it has on the right. */
@@ -77,7 +74,10 @@ export function SlackProjectRow({ project }: { readonly project: ProjectDto }) {
   );
 }
 
-/** A project's Linear: its team, or the key field and Link, or the check in flight, or why it can't. */
+/**
+ * A project's Linear: when its account reaches Linear, or might, the Report To Linear switch and the note the
+ * reporter follows; when the account definitely has none, the row's hint.
+ */
 export function LinearProjectRow({
   project,
   row,
@@ -87,106 +87,62 @@ export function LinearProjectRow({
   readonly row: LinearSignInRowDto | undefined;
 }) {
   const integrations = useProjectIntegrations(project.id);
-  const check = useCheckLinearTeam(project.id);
-  const unlink = useUnlinkLinear(project.id);
-  const cancel = useCancelLinearCheck(project.id);
-  const [teamKey, setTeamKey] = useState('');
+  const save = useSetLinearReporter(project.id);
   const linear = integrations.data?.linear;
   if (linear === undefined) return <ProjectRow name={project.name} />;
-  // Only a definite none hides Link: an account whose connectors were not read yet may have Linear.
+  // Only a definite none hides the switch: an account whose connectors were not read yet may have Linear.
   const none = row?.via === LinearVia.None && !row.unchecked;
-  const checking = linear.check?.state === 'checking' ? linear.check : null;
-  const refused = linear.check?.state === 'refused' ? linear.check : null;
-  const ended = linear.check?.state === 'ended' ? linear.check : null;
-  const failure = check.isError
-    ? check.error.message
-    : unlink.isError
-      ? unlink.error.message
-      : cancel.isError
-        ? cancel.error.message
-        : null;
-  const bound = linear.binding;
-  const key = (
-    <Group gap="xs" wrap="nowrap">
-      <TextInput
+  if (none)
+    return (
+      <ProjectRow
+        name={project.name}
+        control={
+          <Text size="sm" c="dimmed" ta="right" maw={420}>
+            {row.note ?? "This project's account has no Linear sign-in."}
+          </Text>
+        }
+      />
+    );
+  return (
+    <ProjectRow
+      name={project.name}
+      control={
+        <Switch
+          aria-label={`Report To Linear for ${project.name}`}
+          label="Report To Linear"
+          labelPosition="left"
+          checked={linear.on}
+          disabled={save.isPending}
+          onChange={(event) => {
+            save.mutate({ on: event.currentTarget.checked, note: linear.note });
+          }}
+        />
+      }
+    >
+      <Textarea
+        // Keyed by the saved note, so a save from elsewhere replaces what the field shows.
+        key={linear.note}
         size="xs"
-        aria-label={`Linear team key for ${project.name}`}
-        placeholder="Team key, such as AMP"
-        value={teamKey}
-        onChange={(event) => {
-          setTeamKey(event.currentTarget.value);
+        autosize
+        minRows={2}
+        label="How To Update Linear"
+        aria-label={`How To Update Linear for ${project.name}`}
+        defaultValue={linear.note}
+        onBlur={(event) => {
+          const note = event.currentTarget.value;
+          if (note !== linear.note) save.mutate({ on: linear.on, note });
         }}
       />
-      <Button
-        size="xs"
-        loading={check.isPending}
-        disabled={teamKey.trim() === ''}
-        onClick={() => {
-          check.mutate(teamKey);
-        }}
-      >
-        {refused === null && ended === null ? 'Link' : 'Link Again'}
-      </Button>
-    </Group>
-  );
-  const button = (label: string, loading: boolean, onClick: () => void) => (
-    <Button variant="default" size="xs" loading={loading} onClick={onClick}>
-      {label}
-    </Button>
-  );
-  let control: ReactNode;
-  if (bound !== null)
-    control = (
-      <Group gap="sm" wrap="nowrap">
-        <Text size="sm" c="dimmed">
-          {bound.workspaceName} · {bound.teamKey}
+      {linear.blockedBy === null ? null : (
+        <Text size="xs" c="dimmed">
+          {linear.blockedBy}
         </Text>
-        {button('Unlink', unlink.isPending, () => {
-          unlink.mutate();
-        })}
-      </Group>
-    );
-  else if (none)
-    control = (
-      <Text size="sm" c="dimmed" ta="right" maw={420}>
-        {row.note ?? "This project's account has no Linear sign-in."}
-      </Text>
-    );
-  else if (checking !== null)
-    control = (
-      <Group gap="sm" wrap="nowrap">
-        <Text size="sm" c="dimmed">
-          <Link to="/sessions" search={{ chat: checking.chatId }}>
-            Checking {checking.teamKey}…
-          </Link>
+      )}
+      {save.isError ? (
+        <Text size="xs" c="red">
+          {save.error.message}
         </Text>
-        {button('Cancel', cancel.isPending, () => {
-          cancel.mutate();
-        })}
-      </Group>
-    );
-  else control = key;
-  const note =
-    ended !== null ? (
-      <Text size="xs" c="red">
-        The check ended without an answer.{' '}
-        <Link to="/sessions" search={{ chat: ended.chatId }}>
-          Open Its Session
-        </Link>
-        .
-      </Text>
-    ) : refused !== null ? (
-      <Text size="xs" c="red">
-        {refused.reason}
-      </Text>
-    ) : failure !== null ? (
-      <Text size="xs" c="red">
-        {failure}
-      </Text>
-    ) : null;
-  return (
-    <ProjectRow name={project.name} control={control}>
-      {note}
+      ) : null}
     </ProjectRow>
   );
 }

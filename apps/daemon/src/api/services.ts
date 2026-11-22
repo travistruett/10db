@@ -216,11 +216,10 @@ import type {
   SlackConnectionDto,
   SlackMemberDto,
   SlackTokenInput,
-  LinearCheckInput,
   ProjectIntegrationsDto,
-  ProjectLinearDto,
   ProjectIntegrationsInput,
   LinearSignInsDto,
+  LinearReporterSettings,
   StakeholderSendDto,
   StakeholderTimersDto,
   TaskMessageDto,
@@ -892,13 +891,13 @@ export interface ApiServices extends PlanRecordServices {
   removeSlackToken(): Promise<SlackConnectionDto>;
   /** The GitHub login a project uses and its Slack workspace (the only one while there is exactly one). */
   projectIntegrations(projectId: ProjectId): Promise<ProjectIntegrationsDto>;
-  /** Opens the session that reads the workspace and looks the team up; ConflictError, in words, when the account has no Linear. */
-  checkLinearTeam(projectId: ProjectId, input: LinearCheckInput): Promise<ProjectLinearDto>;
-  unlinkLinear(projectId: ProjectId): ProjectLinearDto;
-  /** From Linear: a Plan session that imports issues of the linked team; ConflictError when none is linked. */
+  /** From Linear: a Plan session that imports issues through the project's account; ConflictError when the account has no Linear. */
   importFromLinear(projectId: ProjectId): Promise<ChatDto>;
-  /** Cancel: ends the Linear check in flight and archives its session. */
-  cancelLinearCheck(projectId: ProjectId): Promise<ProjectLinearDto>;
+  /** Turns the project's Linear reporting on or off and keeps its note; off drops the updates still owed. */
+  setLinearReporter(
+    projectId: ProjectId,
+    input: LinearReporterSettings,
+  ): Promise<ProjectIntegrationsDto>;
   /** Binds a project to a signed-in Slack workspace, or turns Slack off for it with a null team. */
   setProjectIntegrations(
     projectId: ProjectId,
