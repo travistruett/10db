@@ -950,6 +950,8 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await page.getByRole('button', { name: 'More session actions' }).click();
   await page.getByRole('menuitem', { name: 'Close Plan' }).click();
   await expect(plain).toHaveCount(0);
+  // With the Plan closed the Sessions panel is back, and the session's row says its Plan waits for Accept.
+  await expect(page.locator('[role="option"][data-state="plan_waiting"]')).toHaveCount(1);
   await sendLine(page, 'propose it again');
   await expect(page.getByText('Here is the plan.', { exact: true })).toHaveCount(2);
   await expect(plain).toHaveCount(0);

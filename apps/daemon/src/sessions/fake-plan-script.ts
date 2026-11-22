@@ -15,7 +15,7 @@ const MAX_HEARD_CHARS = 80;
 /** What the project's areas are, when a draft names one it hasn't got: "(it has src, ui)". */
 const AREAS_OF_THE_PROJECT = /\(it has ([^)]+)\)/;
 
-/** A Plan review turn lists `- effortKey <key> · <title>`; a Check for Questions turn `- effortKey <e> · taskKey <t> · taskHash <h>`. */
+/** A Plan review turn lists `- effortKey <key> · <title>`; a Find Open Questions turn `- effortKey <e> · taskKey <t> · taskHash <h>`. */
 const REVIEW_EFFORT = /^- effortKey (\S+)/gm;
 const REHEARSE_TASK = /^- effortKey (\S+) · taskKey (\S+) · taskHash (\S+)/gm;
 /** A Design review turn lists `- effortKey <e> · taskKey <t>` for each task it compares. */

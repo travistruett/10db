@@ -66,6 +66,7 @@ import {
   type ConversationItemRow,
   planIdOfChat,
   planOfChat,
+  planWaitingOfChat,
 } from '@10db/db';
 import type { Clock } from '../clock';
 import { keepBuilderMessage, type ExploreEngine, type PastedFile } from '../conversation';
@@ -263,6 +264,7 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
       ...view,
       conversation: engine.view(view.conversationId),
       planId: planOfChat(state.db, id),
+      planWaiting: planWaitingOfChat(state.db, id),
     };
   };
 

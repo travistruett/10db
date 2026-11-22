@@ -223,7 +223,7 @@ function messageText(message: DeliverableMessage, blocks: ReadonlySet<string>): 
   return [`[m:${message.id}] ${message.body}`, ...paths].join('\n');
 }
 
-/** The review a turn starter asks for, or null when it asks for none: a Plan review, Check for Questions or Design review press. */
+/** The review a turn starter asks for, or null when it asks for none: a Plan review, Find Open Questions or Design review press. */
 function reviewOf(
   item: ConversationItemRow,
 ): { kind: ReviewTurnKind; ask: string; inSession: string } | null {

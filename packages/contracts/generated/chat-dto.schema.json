@@ -463,6 +463,11 @@
           "type": "null"
         }
       ]
+    },
+    "planWaiting": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
     }
   },
   "required": [
@@ -482,6 +487,7 @@
     "lastReplyAt",
     "tasksFiled",
     "work",
-    "planId"
+    "planId",
+    "planWaiting"
   ]
 }

@@ -20,7 +20,7 @@ export interface ShapeReviewTurn {
 
 /**
  * The input of a finding the main session reports while the `reviews` it has been sent are live, with
- * `reviewer` set from them. A Check for Questions reports as the rehearsal, which is the report that names
+ * `reviewer` set from them. A Find Open Questions reports as the rehearsal, which is the report that names
  * `rehearsal` or carries a `taskHash` (or the only one live); a Plan review names the lens it reads
  * through, scope or engineering, which is bookkeeping and no limit; a Design review reports as `design`.
  */
