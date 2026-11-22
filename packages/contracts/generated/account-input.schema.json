@@ -44,6 +44,13 @@
                 "minLength": 1,
                 "maxLength": 200
               }
+            },
+            "harness": {
+              "type": "string",
+              "enum": [
+                "claude",
+                "codex"
+              ]
             }
           },
           "additionalProperties": false
@@ -124,6 +131,13 @@
                 "minLength": 1,
                 "maxLength": 200
               }
+            },
+            "harness": {
+              "type": "string",
+              "enum": [
+                "claude",
+                "codex"
+              ]
             }
           },
           "additionalProperties": false
@@ -203,6 +217,13 @@
                 "minLength": 1,
                 "maxLength": 200
               }
+            },
+            "harness": {
+              "type": "string",
+              "enum": [
+                "claude",
+                "codex"
+              ]
             },
             "region": {
               "type": "string",
@@ -290,6 +311,13 @@
                 "maxLength": 200
               }
             },
+            "harness": {
+              "type": "string",
+              "enum": [
+                "claude",
+                "codex"
+              ]
+            },
             "baseUrl": {
               "type": "string",
               "format": "uri"
@@ -351,6 +379,13 @@
                 "minLength": 1,
                 "maxLength": 200
               }
+            },
+            "harness": {
+              "type": "string",
+              "enum": [
+                "claude",
+                "codex"
+              ]
             }
           },
           "additionalProperties": false

@@ -57,6 +57,13 @@
                 "maxLength": 200
               }
             },
+            "harness": {
+              "type": "string",
+              "enum": [
+                "claude",
+                "codex"
+              ]
+            },
             "region": {
               "type": "string",
               "pattern": "^[a-z]{2}(-[a-z]+)+-\\d+$"
@@ -99,6 +106,13 @@
                 "maxLength": 200
               }
             },
+            "harness": {
+              "type": "string",
+              "enum": [
+                "claude",
+                "codex"
+              ]
+            },
             "baseUrl": {
               "type": "string",
               "format": "uri"
@@ -128,13 +142,28 @@
                 "minLength": 1,
                 "maxLength": 200
               }
+            },
+            "harness": {
+              "type": "string",
+              "enum": [
+                "claude",
+                "codex"
+              ]
             }
           },
           "additionalProperties": false
         },
         {
           "type": "object",
-          "properties": {},
+          "properties": {
+            "harness": {
+              "type": "string",
+              "enum": [
+                "claude",
+                "codex"
+              ]
+            }
+          },
           "additionalProperties": false
         }
       ]
