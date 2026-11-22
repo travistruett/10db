@@ -12,7 +12,6 @@ export const AccountKind = {
   ClaudeSubscription: 'claude_subscription',
   AnthropicApiKey: 'anthropic_api_key',
   Bedrock: 'bedrock',
-  Gateway: 'gateway',
   OpenaiApiKey: 'openai_api_key',
   CodexSignin: 'codex_signin',
   /** Runs 10db's own decisions; no harness runs it yet. */
@@ -25,7 +24,6 @@ export const SUPPORTED_ACCOUNT_KINDS = [
   AccountKind.ClaudeSubscription,
   AccountKind.AnthropicApiKey,
   AccountKind.Bedrock,
-  AccountKind.Gateway,
   AccountKind.CodexSignin,
   AccountKind.OpenRouter,
 ] as const;
@@ -36,7 +34,6 @@ export const HARNESSES_OF_KIND = {
   [AccountKind.ClaudeSubscription]: [Provider.Claude],
   [AccountKind.AnthropicApiKey]: [Provider.Claude],
   [AccountKind.Bedrock]: [Provider.Claude],
-  [AccountKind.Gateway]: [Provider.Claude],
   [AccountKind.CodexSignin]: [Provider.Codex],
   [AccountKind.OpenRouter]: [],
 } as const satisfies Readonly<Record<SupportedAccountKind, readonly Provider[]>>;
@@ -68,11 +65,7 @@ export function signsInWithLogin(
   return kind === AccountKind.ClaudeSubscription || kind === AccountKind.CodexSignin;
 }
 
-const METERED: readonly AccountKind[] = [
-  AccountKind.AnthropicApiKey,
-  AccountKind.Bedrock,
-  AccountKind.Gateway,
-];
+const METERED: readonly AccountKind[] = [AccountKind.AnthropicApiKey, AccountKind.Bedrock];
 
 /** Billed per token: the SDK's dollars are real, and a monthly cap applies. */
 export function isMetered(kind: AccountKind): boolean {
@@ -144,21 +137,6 @@ const modelChoice = {
 };
 const AwsRegion = z.string().regex(/^[a-z]{2}(-[a-z]+)+-\d+$/, 'an AWS region such as us-west-2');
 const AwsProfile = z.string().regex(/^[A-Za-z0-9._-]{1,64}$/, 'an AWS profile name');
-/** A gateway's endpoint. Credentials in it would land in the database, so it may carry none. */
-const BaseUrl = z.url({ protocol: /^https$/ }).refine(
-  (url) => {
-    const parsed = URL.parse(url);
-    return (
-      parsed !== null &&
-      parsed.username === '' &&
-      parsed.password === '' &&
-      parsed.search === '' &&
-      parsed.hash === ''
-    );
-  },
-  { message: 'an https URL with no credentials, query or fragment' },
-);
-
 /** The agent harness that runs the account's sessions; absent means the kind's first (`harnessOf`). */
 const harness = { harness: z.enum(Provider).optional() };
 
@@ -173,26 +151,18 @@ export const BedrockSettings = z.strictObject({
 });
 /** An OpenRouter account has a key and nothing else to set. */
 export const OpenRouterSettings = z.strictObject({ ...harness });
-export const GatewaySettings = z.strictObject({ ...modelChoice, ...harness, baseUrl: BaseUrl });
 export type SubscriptionSettings = z.infer<typeof SubscriptionSettings>;
 export type ApiKeySettings = z.infer<typeof ApiKeySettings>;
 export type BedrockSettings = z.infer<typeof BedrockSettings>;
-export type GatewaySettings = z.infer<typeof GatewaySettings>;
 export type OpenRouterSettings = z.infer<typeof OpenRouterSettings>;
 
-export const AccountSettings = z.union([
-  BedrockSettings,
-  GatewaySettings,
-  SubscriptionSettings,
-  OpenRouterSettings,
-]);
+export const AccountSettings = z.union([BedrockSettings, SubscriptionSettings, OpenRouterSettings]);
 export type AccountSettings = z.infer<typeof AccountSettings>;
 
 const SETTINGS_BY_KIND = {
   [AccountKind.ClaudeSubscription]: SubscriptionSettings,
   [AccountKind.AnthropicApiKey]: ApiKeySettings,
   [AccountKind.Bedrock]: BedrockSettings,
-  [AccountKind.Gateway]: GatewaySettings,
   [AccountKind.CodexSignin]: SubscriptionSettings,
   [AccountKind.OpenRouter]: OpenRouterSettings,
 } as const satisfies Record<SupportedAccountKind, z.ZodType>;
@@ -214,14 +184,13 @@ function harnessOfKind<T extends z.ZodType<{ readonly harness?: Provider | undef
   );
 }
 
-/** Whether the account's credential is a Keychain secret: an API key, a gateway token or a Bedrock bearer token. */
+/** Whether the account's credential is a Keychain secret: an API key or a Bedrock bearer token. */
 export function needsSecret(kind: SupportedAccountKind, settings: AccountSettings): boolean {
   switch (kind) {
     case AccountKind.ClaudeSubscription:
     case AccountKind.CodexSignin:
       return false;
     case AccountKind.AnthropicApiKey:
-    case AccountKind.Gateway:
     case AccountKind.OpenRouter:
       return true;
     case AccountKind.Bedrock:
@@ -247,7 +216,7 @@ const organization = { expectedIdentity: Organization.nullable().default(null) }
 
 /**
  * `POST /accounts`. A subscription's identity is confirmed after it signs in, so it takes none here;
- * a gateway is identified by its key's fingerprint, so it never takes one.
+ * an OpenRouter key is identified by its fingerprint, so it never takes one.
  */
 export const AccountInput = z.discriminatedUnion(
   'kind',
@@ -272,12 +241,6 @@ export const AccountInput = z.discriminatedUnion(
       settings: harnessOfKind(AccountKind.Bedrock, BedrockSettings),
     }),
     z.strictObject({
-      kind: z.literal(AccountKind.Gateway),
-      ...common,
-      ...metered,
-      settings: harnessOfKind(AccountKind.Gateway, GatewaySettings),
-    }),
-    z.strictObject({
       kind: z.literal(AccountKind.CodexSignin),
       ...common,
       settings: harnessOfKind(AccountKind.CodexSignin, SubscriptionSettings).default({}),
@@ -290,7 +253,7 @@ export const AccountInput = z.discriminatedUnion(
   ],
   {
     error:
-      'Choose claude_subscription, anthropic_api_key, bedrock, gateway, codex_signin or openrouter; openai_api_key is reserved until a Codex API-key adapter exists',
+      'Choose claude_subscription, anthropic_api_key, bedrock, codex_signin or openrouter; openai_api_key is reserved until a Codex API-key adapter exists',
   },
 );
 export type AccountInput = z.input<typeof AccountInput>;

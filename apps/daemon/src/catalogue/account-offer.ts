@@ -18,7 +18,7 @@ const pricesOf = (entry: CatalogueModel): Prices => ({
 });
 
 /**
- * What this account pays for the model. A flat-rate plan pays nothing per token; an API key and a gateway pay
+ * What this account pays for the model. A flat-rate plan pays nothing per token; an API key pays
  * the maker's list price when the catalogue has the maker's own entry; Bedrock prices its own copy of the model.
  */
 function priceOf(
@@ -33,7 +33,6 @@ function priceOf(
     case AccountKind.OpenRouter:
       return NO_PRICE;
     case AccountKind.AnthropicApiKey:
-    case AccountKind.Gateway:
       return entry?.provider === RUNTIME_MAKER[account.harness] ? pricesOf(entry) : NO_PRICE;
     case AccountKind.Bedrock: {
       const copy = catalogue.providers[BEDROCK]?.models.find((m) => m.id === launchId);

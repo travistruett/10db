@@ -46,7 +46,6 @@ function identityOffer(account: AccountDto, result: AccountIdentityDto): Offer |
       };
     return null;
   }
-  // A gateway never takes an expected identity; the daemon refuses it.
   if (account.kind === AccountKind.AnthropicApiKey || account.kind === AccountKind.Bedrock) {
     const { organization } = result;
     if (refusal !== null || organization === null || account.expectedIdentity !== null) return null;

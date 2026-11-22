@@ -30,7 +30,7 @@ export type ProviderSpeedDto = z.infer<typeof ProviderSpeedDto>;
 export const ModelMeasuresDto = z.object({
   /** The OpenRouter ids the rows are joined from, sorted; empty when the model joins to none. */
   openRouterIds: z.array(z.string()),
-  /** The provider the account's speed is measured on; null for a gateway or no account. */
+  /** The provider the account's speed is measured on; null for an OpenRouter account or none. */
   accountProvider: z.string().nullable(),
   evals: z.array(ModelEvalDto),
   /** Fastest p50 first. */

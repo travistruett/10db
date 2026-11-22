@@ -73,13 +73,6 @@ function expectedSeen(expect: AccountExpectation): SeenAccount {
         apiProvider: 'bedrock',
         organization: expect.identity ?? undefined,
       };
-    case AccountKind.Gateway:
-      return {
-        ...NOTHING_SEEN,
-        apiProvider: 'firstParty',
-        apiKeySource: 'none',
-        tokenSource: 'ANTHROPIC_AUTH_TOKEN',
-      };
     case AccountKind.CodexSignin:
       return {
         ...NOTHING_SEEN,

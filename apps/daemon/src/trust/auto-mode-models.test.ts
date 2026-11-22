@@ -24,7 +24,6 @@ describe('autoModeRuns', () => {
       ['bedrock', null, false],
       ['bedrock', 'haiku', false],
       ['bedrock', 'us.anthropic.claude-fable-5-1', true],
-      ['gateway', 'claude-opus-5-5', false],
       ['codex_signin', 'gpt-5.5', false],
     ];
     for (const [kind, model, runs] of rows) {

@@ -225,7 +225,7 @@ export function chooseModel(input: ChooseInput): ModelChoice {
 
     /**
      * The account's override for the tier, as a choice, when it has one that applies. An override naming a model
-     * with no profile at all (a gateway that lists none) is launched as named; one whose model is retired is not.
+     * with no profile at all (an account that lists none) is launched as named; one whose model is retired is not.
      */
     const overrideFor = (tier: ModelTier, note: string): ModelChoice | undefined => {
       // Capable and Frontier were one tier with one override, so an unset Frontier override is the Capable one.

@@ -270,10 +270,6 @@ describe.skipIf(SANDBOXED)('Settings › Trust over HTTP', () => {
       },
       'claude-sonnet-4-5',
     );
-    const gateway = await accountOn(
-      { kind: 'gateway', label: 'Gateway', settings: { baseUrl: 'https://gateway.example.com' } },
-      'claude-opus-5-5',
-    );
     const codex = await accountOn({ kind: 'codex_signin', label: 'ChatGPT' }, 'gpt-5.5');
     // An OpenRouter account answers decisions only: it runs no session, so it has no judge to list.
     const openRouter = (
@@ -302,13 +298,6 @@ describe.skipIf(SANDBOXED)('Settings › Trust over HTTP', () => {
       judge: JudgeKind.Tendb,
       why: null,
     });
-    expect(byId.get(gateway.id)).toEqual({
-      accountId: gateway.id,
-      label: 'Gateway',
-      model: 'claude-opus-5-5',
-      judge: JudgeKind.Tendb,
-      why: null,
-    });
     expect(byId.get(codex.id)).toEqual({
       accountId: codex.id,
       label: 'ChatGPT',
@@ -317,7 +306,7 @@ describe.skipIf(SANDBOXED)('Settings › Trust over HTTP', () => {
       why: null,
     });
     expect(byId.has(openRouter.id)).toBe(false);
-    expect(judges).toHaveLength(5);
+    expect(judges).toHaveLength(4);
   });
 });
 

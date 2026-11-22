@@ -59,7 +59,6 @@ export function autoModeRuns(kind: SupportedAccountKind, model: string | null): 
       if (ALIASES.has(alias)) return BEDROCK_ALIASES.has(alias);
       return meetsFloor(model, BEDROCK_FLOORS);
     }
-    case AccountKind.Gateway:
     case AccountKind.CodexSignin:
     case AccountKind.OpenRouter:
       return false;

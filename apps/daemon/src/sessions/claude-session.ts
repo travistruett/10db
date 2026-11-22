@@ -521,8 +521,6 @@ function signedOutText(name: string, where: McpSignInWhere): string {
       return `${name} isn't signed in. Sign in to it in Claude Code: run \`claude\`, then \`/mcp\`.`;
     case McpSignInWhere.ThisAccount:
       return `${name} isn't signed in for this account. Settings › Trust shows how to sign in.`;
-    case McpSignInWhere.NotYet:
-      return `${name} signs in with OAuth, which 10db doesn't run on a Gateway account yet.`;
   }
 }
 
@@ -1074,7 +1072,7 @@ function startSession(
             yourServersNote(
               yourFailed,
               yourNeedAuth,
-              mcpSignInWhere(spec.account.kind, spec.env, opts.loginConfigDir?.() ?? null),
+              mcpSignInWhere(spec.env, opts.loginConfigDir?.() ?? null),
             ),
           ]
         : []),

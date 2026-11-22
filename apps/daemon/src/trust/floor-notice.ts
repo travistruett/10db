@@ -17,7 +17,7 @@ export type FloorReason = ValueOf<typeof FloorReason>;
 /**
  * The reason a session starts on the rules floor, or null when it starts on a judge. `autoMode` is
  * whether the lane asks for auto mode (the app-wide setting); `tendbReady` whether 10db's judge can answer,
- * for an account auto mode doesn't judge (a gateway, the Codex harness, a model auto mode doesn't run on).
+ * for an account auto mode doesn't judge (the Codex harness, a model auto mode doesn't run on).
  */
 export function floorReason(input: {
   kind: SupportedAccountKind;

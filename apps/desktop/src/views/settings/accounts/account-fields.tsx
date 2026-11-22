@@ -136,25 +136,8 @@ export function AccountFields({
           ) : null}
         </>
       ) : null}
-      {values.kind === AccountKind.Gateway ? (
-        <TextInput
-          size="md"
-          label="Base URL"
-          description="The gateway's https endpoint, with no credentials in it."
-          value={values.baseUrl}
-          error={errors['baseUrl']}
-          onChange={(e) => {
-            onChange({ ...values, baseUrl: e.currentTarget.value });
-          }}
-        />
-      ) : null}
       {mode === 'edit' && accountId !== null && HARNESSES_OF_KIND[values.kind].length > 0 ? (
-        <TierOverrides
-          accountId={accountId}
-          values={values}
-          onChange={onChange}
-          error={errors['tierOverrides']}
-        />
+        <TierOverrides accountId={accountId} values={values} onChange={onChange} />
       ) : null}
     </Stack>
   );

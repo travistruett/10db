@@ -5,8 +5,7 @@
 - `launch.ts` is the only place that sets or reads `CLAUDE_SECURESTORAGE_CONFIG_DIR` and `CLAUDE_CONFIG_DIR` values: an
   API-key or Bedrock session sets the first to the builder's own entry (`sharedEntryDir`), `session-env.ts` only lists
   both to strip them from the login env, and `connectorProbeEnv` and `staleNeedsAuthCache` are the one rule for the
-  connector probe's env and the cache a keyed session clears. A Gateway account never gets the shared entry
-  (`docs/architecture/decisions/2026-11-14-mcp-sign-ins-stay-in-each-agents-own-store.md`).
+  connector probe's env and the cache a keyed session clears. (`docs/architecture/decisions/2026-11-14-mcp-sign-ins-stay-in-each-agents-own-store.md`).
 - `Launcher.takeover` is the environment of the builder's own terminal on an account: what to set, which names and
   prefixes to unset from the builder's shell (`BILLING_SWITCH_VARS`, `NESTED_SESSION_VARS`, the kind's dropped login
   variables, minus what the account sets), and where a key is read. It checks a keyed account's secret and holds no

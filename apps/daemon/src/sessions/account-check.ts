@@ -55,7 +55,6 @@ const NEEDS: Readonly<Record<SupportedAccountKind, string>> = {
   [AccountKind.ClaudeSubscription]: 'a Claude subscription',
   [AccountKind.AnthropicApiKey]: 'an Anthropic API key',
   [AccountKind.Bedrock]: 'Bedrock',
-  [AccountKind.Gateway]: 'a gateway token',
   [AccountKind.CodexSignin]: 'a ChatGPT sign-in',
   [AccountKind.OpenRouter]: 'an OpenRouter key',
 };
@@ -80,12 +79,12 @@ function described(seen: SeenAccount): string {
 
 /**
  * Whether Claude Code bills the credential the kind needs. Only values a real session has shown are
- * accepted (spike 12 for the gateway), so a renamed variable fails loudly instead of billing someone else.
+ * accepted so a renamed variable fails loudly instead of billing someone else.
  */
 function credentialsMatch(kind: SupportedAccountKind, seen: SeenAccount): boolean {
   switch (kind) {
     case AccountKind.ClaudeSubscription:
-      // A plan's name is never compared; a gateway also looks first-party, so its token source rules it out.
+      // A plan's name is never compared.
       return (
         noKey(seen.apiKeySource) &&
         seen.apiProvider === 'firstParty' &&
@@ -96,12 +95,6 @@ function credentialsMatch(kind: SupportedAccountKind, seen: SeenAccount): boolea
       return seen.apiKeySource === 'ANTHROPIC_API_KEY' && seen.apiProvider === 'firstParty';
     case AccountKind.Bedrock:
       return seen.apiProvider === 'bedrock';
-    case AccountKind.Gateway:
-      return (
-        seen.tokenSource === 'ANTHROPIC_AUTH_TOKEN' &&
-        seen.apiProvider === 'firstParty' &&
-        noKey(seen.apiKeySource)
-      );
     case AccountKind.CodexSignin:
       return seen.apiProvider === 'chatgpt' && Boolean(seen.subscriptionType);
     case AccountKind.OpenRouter:
@@ -127,7 +120,7 @@ const same = (a: string, b: string): boolean => a.trim().toLowerCase() === b.tri
 /** Before the prompt (accounts spec §5): who the agent is, and the credential it bills. */
 export function checkAccount(expect: AccountExpectation, seen: SeenAccount): AccountRefusal | null {
   const who = `account "${expect.label}"`;
-  // A third-party provider or a gateway token reports no email or plan either, and signing in cannot fix
+  // A third-party provider reports no email or plan either, and signing in cannot fix
   // that: only a first-party report with nothing in it is a signed-out directory.
   const tool = TOOL[expect.harness].name;
   const codex = expect.kind === AccountKind.CodexSignin;
@@ -312,7 +305,7 @@ function namesToken(text: string, id: string): boolean {
 
 /**
  * Whether an assistant error at a session's first reply means the account cannot run the model it was launched on,
- * and what the answer rests on. Claude Code names that case `model_not_found`: `error`, final. A gateway or Bedrock
+ * and what the answer rests on. Claude Code names that case `model_not_found`: `error`, final. Bedrock
  * may report it as an invalid request or an unknown error instead, so those count only when the text names the
  * launched model ID as a whole token and says the model is missing or off limits: `wording`, which cannot tell a
  * config error that names the model first ("Tool use with model X is not supported") from a real refusal ("Model X

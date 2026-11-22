@@ -35,8 +35,6 @@ function secretLabel(kind: SupportedAccountKind): string {
   switch (kind) {
     case AccountKind.AnthropicApiKey:
       return 'API key';
-    case AccountKind.Gateway:
-      return 'Gateway token';
     case AccountKind.Bedrock:
       return 'Bedrock bearer token';
     case AccountKind.OpenRouter:

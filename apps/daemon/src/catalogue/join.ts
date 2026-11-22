@@ -3,7 +3,7 @@ import type { Catalogue, CatalogueModel } from './source';
 
 /**
  * The lab whose models a runtime can run. Claude Code runs Anthropic's models wherever it is pointed,
- * Bedrock and gateways included, and Codex runs OpenAI's; this is a fact about the runtime, not a list of models.
+ * Bedrock included, and Codex runs OpenAI's; this is a fact about the runtime, not a list of models.
  */
 export const RUNTIME_MAKER: Readonly<Record<Provider, string>> = {
   [Provider.Claude]: 'anthropic',

@@ -14,8 +14,8 @@ import type { QueryFn } from './claude-session';
 import { initMessage } from './claude-test-support';
 import type { LaneSessionSpec, SessionEvent } from './types';
 
-/** A lane's spec on a gateway account, which holds a token and no saved login. */
-function gatewaySpec(): LaneSessionSpec {
+/** A lane's spec on an API-key account, which holds a key and no saved login. */
+function keyedSpec(): LaneSessionSpec {
   return {
     sessionId: mintId('Session'),
     conversationId: null,
@@ -28,8 +28,8 @@ function gatewaySpec(): LaneSessionSpec {
     env: { PATH: '/usr/bin:/bin', CLAUDE_AGENT_SDK_CLIENT_APP: '10db/0.1.0' },
     account: {
       accountId: mintId('Account'),
-      label: 'OpenRouter',
-      kind: 'gateway',
+      label: 'API key',
+      kind: 'anthropic_api_key',
       harness: 'claude',
       identity: null,
     },
@@ -98,7 +98,7 @@ function fakeQuery(
 }
 
 describe('the account check', () => {
-  it('refuses a gateway session that bills a saved login instead of its token', async () => {
+  it('refuses a keyed session that bills a saved login instead of its key', async () => {
     const fake = fakeQuery([initMessage()], {
       apiProvider: 'firstParty',
       subscriptionType: 'Claude Max',
@@ -115,7 +115,7 @@ describe('the account check', () => {
       signInCheck: () => Promise.resolve('signed_in'),
     });
     const events: SessionEvent[] = [];
-    for await (const event of adapter.open(gatewaySpec()).events) events.push(event);
+    for await (const event of adapter.open(keyedSpec()).events) events.push(event);
     expect(events.at(-1)).toMatchObject({
       reason: 'account_refused',
       refusal: { problem: 'wrong_credentials' },

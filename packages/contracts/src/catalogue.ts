@@ -102,9 +102,9 @@ export const AccountModelDto = z.object({
    * to again, and the next session on it either clears the mark or makes it final.
    */
   wordingMarkEndsAt: Timestamp.nullable(),
-  /** The price of this account's own offer; null for a flat-rate plan or a gateway with no catalogue entry. */
+  /** The price of this account's own offer; null for a flat-rate plan or an account with no catalogue entry. */
   inputPrice: z.number().min(0).nullable(),
-  /** The price of this account's own offer; null for a flat-rate plan or a gateway with no catalogue entry. */
+  /** The price of this account's own offer; null for a flat-rate plan or an account with no catalogue entry. */
   outputPrice: z.number().min(0).nullable(),
   lastSeenAt: Timestamp,
 });

@@ -3,7 +3,6 @@ import {
   AccountProblem,
   ApiKeySettings,
   BedrockSettings,
-  GatewaySettings,
   harnessOf,
   isModelTier,
   Provider,
@@ -180,7 +179,6 @@ export function staleNeedsAuthCache(env: Readonly<Record<string, string>>): stri
 export const McpSignInWhere = {
   BuildersClaudeCode: 'builders_claude_code',
   ThisAccount: 'this_account',
-  NotYet: 'not_yet',
 } as const;
 export type McpSignInWhere = (typeof McpSignInWhere)[keyof typeof McpSignInWhere];
 
@@ -208,17 +206,14 @@ export function connectorProbeEnv(
 }
 
 /**
- * Where a Claude session's servers get signed in, from its launch environment: not at all on a Gateway
- * account, in the builder's own Claude Code when the session reads that entry (the default folder, the login
+ * Where a Claude session's servers get signed in, from its launch environment: in the builder's own Claude Code when the session reads that entry (the default folder, the login
  * shell's folder, or a keyed account), and in the account's own folder otherwise. `loginConfigDir` is the
  * login shell's absolute `CLAUDE_CONFIG_DIR`, or null.
  */
 export function mcpSignInWhere(
-  kind: SupportedAccountKind,
   env: Readonly<Record<string, string>>,
   loginConfigDir: string | null,
 ): McpSignInWhere {
-  if (kind === AccountKind.Gateway) return McpSignInWhere.NotYet;
   const dir = env['CLAUDE_CONFIG_DIR'];
   if (dir !== undefined && dir === loginConfigDir) return McpSignInWhere.BuildersClaudeCode;
   if (dir !== undefined && !Object.hasOwn(env, 'CLAUDE_SECURESTORAGE_CONFIG_DIR'))
@@ -364,12 +359,6 @@ export function createLauncher(opts: {
         env['CLAUDE_SECURESTORAGE_CONFIG_DIR'] = sharedEntryDir();
         return env;
       }
-      case AccountKind.Gateway: {
-        const settings = GatewaySettings.parse(account.settings);
-        env['ANTHROPIC_BASE_URL'] = settings.baseUrl;
-        env['ANTHROPIC_AUTH_TOKEN'] = secretOf(account);
-        return env;
-      }
       case AccountKind.CodexSignin: {
         SubscriptionSettings.parse(account.settings);
         return env;
@@ -422,16 +411,6 @@ export function createLauncher(opts: {
           keychain: [{ variable: 'AWS_BEARER_TOKEN_BEDROCK', account: keyRef() }],
           apiKeyHelperAccount: null,
           scrub: true,
-        };
-      }
-      case AccountKind.Gateway: {
-        const settings = GatewaySettings.parse(account.settings);
-        set['ANTHROPIC_BASE_URL'] = settings.baseUrl;
-        return {
-          set,
-          unsetPrefixes: UNSET_PREFIXES,
-          ...none,
-          apiKeyHelperAccount: keyRef(),
         };
       }
       case AccountKind.CodexSignin:

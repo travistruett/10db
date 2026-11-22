@@ -16,7 +16,7 @@ export type AgentCapabilities = AgentCapabilitiesDto;
 const IMAGES = [ImageFormat.Png, ImageFormat.Jpeg, ImageFormat.Webp];
 
 /**
- * Claude Code: auto mode judges a call where it runs on the kind and the model; elsewhere (a gateway,
+ * Claude Code: auto mode judges a call where it runs on the kind and the model; elsewhere (a Codex-harness account,
  * an older or unreadable model) 10db's judge does (trust line §4, §10). Whether it is ready is the session's
  * to read as it starts: a session on 10db's judge without a key starts on the rules.
  */

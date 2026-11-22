@@ -1,5 +1,5 @@
-import { isModelTier, ModelTier, type AccountId, type ModelRowDto } from '@10db/contracts';
-import { Select, Stack, Text, TextInput } from '@mantine/core';
+import { ModelTier, type AccountId, type ModelRowDto } from '@10db/contracts';
+import { Select, Stack, Text } from '@mantine/core';
 import { useModelOffers, useModels } from '../../../daemon/model-queries';
 import { TIER_LABEL } from '../model-labels';
 import { modelLabel, offeredModelGroups, unlistedLabel } from '../model-setting-options';
@@ -14,13 +14,7 @@ const TIERS: readonly ModelTier[] = [
 
 /** The select value of a tier left to 10db. A model's value carries a prefix, so no model ID can equal it. */
 const AUTOMATIC = 'automatic';
-/** The longest model ID an account's settings take. */
-const MAX_MODEL_ID = 200;
 const MODEL_PREFIX = 'model:';
-
-/** A typed model ID the account's settings refuse: over the limit, or a tier's name. */
-const isInvalidModelId = (typed: string | undefined): boolean =>
-  typed !== undefined && (typed.trim().length > MAX_MODEL_ID || isModelTier(typed.trim()));
 
 function TierSelect({
   label,
@@ -77,20 +71,16 @@ function TierSelect({
 
 /**
  * One field per tier for the model the account runs there instead of 10db's automatic choice: a dropdown of
- * the models the account offers, grouped by tier, or a text field when the account reports no list (a gateway
- * that lists none), where only the builder knows the IDs.
+ * the models the account offers, grouped by tier. An account that has reported no list shows none.
  */
 export function TierOverrides({
   accountId,
   values,
   onChange,
-  error,
 }: {
   readonly accountId: AccountId;
   readonly values: AccountFormValues;
   readonly onChange: (next: AccountFormValues) => void;
-  /** What is wrong with the overrides, shown on each field whose ID is too long. */
-  readonly error: string | undefined;
 }) {
   const models = useModels(null);
   const offers = useModelOffers();
@@ -98,6 +88,7 @@ export function TierOverrides({
     onChange({ ...values, tierOverrides: { ...values.tierOverrides, [tier]: model } });
   };
   const hasList = offers.data?.some((offer) => offer.accountId === accountId);
+  if (models.data === undefined || !hasList) return null;
   return (
     <Stack gap="xs">
       <div>
@@ -109,35 +100,18 @@ export function TierOverrides({
           instead. Frontier model: leave blank to use the Capable model.
         </Text>
       </div>
-      {models.data === undefined || hasList === undefined
-        ? null
-        : TIERS.map((tier) =>
-            hasList ? (
-              <TierSelect
-                key={tier}
-                label={`${TIER_LABEL[tier]} model`}
-                accountId={accountId}
-                models={models.data}
-                current={values.tierOverrides[tier]?.trim() ?? ''}
-                onChange={(model) => {
-                  set(tier, model);
-                }}
-              />
-            ) : (
-              <TextInput
-                key={tier}
-                size="md"
-                label={`${TIER_LABEL[tier]} model`}
-                placeholder="Automatic"
-                description="The model ID this account runs for the tier. Leave empty for Automatic."
-                value={values.tierOverrides[tier] ?? ''}
-                {...(isInvalidModelId(values.tierOverrides[tier]) && error ? { error } : {})}
-                onChange={(e) => {
-                  set(tier, e.currentTarget.value);
-                }}
-              />
-            ),
-          )}
+      {TIERS.map((tier) => (
+        <TierSelect
+          key={tier}
+          label={`${TIER_LABEL[tier]} model`}
+          accountId={accountId}
+          models={models.data}
+          current={values.tierOverrides[tier]?.trim() ?? ''}
+          onChange={(model) => {
+            set(tier, model);
+          }}
+        />
+      ))}
     </Stack>
   );
 }

@@ -273,6 +273,18 @@ const transitions = (id: Parameters<typeof getWorkstream>[1]) =>
       [e.data['from'], e.data['to']].map((s) => (typeof s === 'string' ? s : '?')).join('->'),
     );
 
+/** An account judged by 10db's rules floor and 10db's judge rather than auto mode: a ChatGPT plan. */
+const RULES_FLOOR_ACCOUNT: Parameters<typeof createTestEngine>[3] = {
+  account: { kind: 'codex_signin', label: 'ChatGPT plan' },
+};
+
+/** Confirms the ChatGPT sign-in a lane on `RULES_FLOOR_ACCOUNT` needs before it starts. */
+function confirmRulesFloorIdentity(): void {
+  engine.state.write((ctx) =>
+    patchAccount(ctx, engine.project.accountId, { expectedIdentity: 'chatgpt@example.com · ws-1' }),
+  );
+}
+
 describe('runner', () => {
   it('runs a one-commit task with no stored steps to DONE with gate evidence from the session environment, logs and records the gate, and blocks an out-of-claim write', async () => {
     const gateCommand = 'test -z "$TENDB_PROBE" && test "$GATE_MARK" = yes';
@@ -3865,21 +3877,15 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     };
 
     // T4 call 2: on the rules floor a web call is a skip, recorded by its call id, and the lane goes on.
-    it("a gateway lane's WebFetch is skipped and recorded, and the lane goes on to its end", async () => {
+    it("a rules-floor lane's WebFetch is skipped and recorded, and the lane goes on to its end", async () => {
       const probe = sandboxProbe();
       engine = await createTestEngine(
         { Alpha: [[{ do: 'tool', ...fetchCall }, turn]] },
         {},
         { laneSandbox: probe.laneSandbox, codexLaneTempRoot: probe.codexLanes },
-        {
-          account: {
-            kind: 'gateway',
-            label: 'Gateway',
-            settings: { baseUrl: 'https://gateway.example.com' },
-          },
-          secret: 'sk-gateway-test-key',
-        },
+        RULES_FLOOR_ACCOUNT,
       );
+      confirmRulesFloorIdentity();
       const specs = recordSpecs();
       const { workstream } = engine.addTask('Alpha');
       engine.launch(workstream.id);
@@ -3958,14 +3964,6 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       input: { command: 'npx vercel deploy --prod --yes' },
       reportedMode: 'auto' as const,
     };
-    const GATEWAY: Parameters<typeof createTestEngine>[3] = {
-      account: {
-        kind: 'gateway',
-        label: 'Gateway',
-        settings: { baseUrl: 'https://gateway.example.com' },
-      },
-      secret: 'sk-gateway-test-key',
-    };
     const PLAN: Parameters<typeof createTestEngine>[3] = {
       account: { kind: 'claude_subscription', label: 'Plan' },
     };
@@ -3987,6 +3985,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
           patchAccount(ctx, engine.project.accountId, { expectedIdentity: 'me@example.com' }),
         );
       }
+      if (setup === RULES_FLOOR_ACCOUNT) confirmRulesFloorIdentity();
       const specs = recordSpecs();
       const { task, workstream } = engine.addTask(
         'Alpha',
@@ -4002,7 +4001,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       listTaskThread(engine.store.db, taskId)
         .map((message) => message.body)
         .filter((body) => FLOOR_PREFIXES.some((prefix) => body.startsWith(prefix)));
-    const GATEWAY_NOTICE =
+    const RULES_FLOOR_NOTICE =
       "10db's rules judge this session: 10db's judge needs an OpenRouter key and its Limits switch on in Settings › Decisions. A call those rules can't settle is skipped, not asked about.";
 
     it('a subscription lane on claude-sonnet-5-5 leaves a deploy to its judge, and the project’s live systems reach the spec', async () => {
@@ -4095,9 +4094,9 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       expect(listSkipsForWorkstream(engine.store.db, workstream.id)).toHaveLength(1);
     });
 
-    it('a gateway lane refuses the same deploy and says why once', async () => {
+    it('a rules-floor lane refuses the same deploy and says why once', async () => {
       const { specs, task, workstream } = await start(
-        GATEWAY,
+        RULES_FLOOR_ACCOUNT,
         {},
         {
           Alpha: [
@@ -4122,7 +4121,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         if (ws(workstream.id).state !== 'DONE') engine.launch(workstream.id);
       }
       expect(listSessions(engine.store.db, workstream.id).length).toBeGreaterThan(1);
-      expect(floorNotices(task.id)).toEqual([GATEWAY_NOTICE]);
+      expect(floorNotices(task.id)).toEqual([RULES_FLOOR_NOTICE]);
     });
 
     it('with lane auto mode off, a subscription lane refuses it', async () => {
@@ -4173,14 +4172,6 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
   });
 
   describe("a lane on 10db's judge", () => {
-    const GATEWAY: Parameters<typeof createTestEngine>[3] = {
-      account: {
-        kind: 'gateway',
-        label: 'Gateway',
-        settings: { baseUrl: 'https://gateway.example.com' },
-      },
-      secret: 'sk-gateway-test-key',
-    };
     let states: string[];
     /** What 10db's judge's model answers for a state: a choice, or `fail` for an HTTP failure. */
     let answer: (state: string) => string;
@@ -4211,7 +4202,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       );
     };
     const start = async (
-      setup: Parameters<typeof createTestEngine>[3] = GATEWAY,
+      setup: Parameters<typeof createTestEngine>[3] = RULES_FLOOR_ACCOUNT,
       project: Parameters<typeof createTestEngine>[1] = {},
     ) => {
       const probe = sandboxProbe();
@@ -4225,6 +4216,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         engine.state.write((ctx) =>
           patchAccount(ctx, engine.project.accountId, { expectedIdentity: 'me@example.com' }),
         );
+      if (setup === RULES_FLOOR_ACCOUNT) confirmRulesFloorIdentity();
       const specs = recordSpecs();
       const { task, workstream } = engine.addTask('Alpha');
       engine.launch(workstream.id);
@@ -4262,10 +4254,9 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       answer = () => 'allow';
     });
 
-    it('a gateway lane runs pnpm test and WebFetch after the judge allows them, with no card, in default mode, sends a grep -rn over a checkout holding .env to the model, and its deploy is a tendb_judge skip, with no Inbox card', async () => {
+    it('a rules-floor lane runs pnpm test and WebFetch after the judge allows them, with no card, in default mode, sends a grep -rn over a checkout holding .env to the model, and its deploy is a tendb_judge skip, with no Inbox card', async () => {
       const { spec, judgeCall, workstream } = await start();
       expect(spec.profile.lanePermissionMode).toBe('default');
-      expect(spec.prompt).toContain("10db's judge checks each call against four limits");
       expect(await hook(spec, judgeCall, bash('pnpm test', 'toolu_1'))).toEqual({
         decision: 'allow',
         settled: "Allowed by 10db's judge",
@@ -4303,8 +4294,8 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       await engine.runner.idle();
     });
 
-    it("a gateway lane's call the project's allowed commands cover runs with no model; the step's own list settles nothing", async () => {
-      const { spec, judgeCall } = await start(GATEWAY, { allowedCommands: ['psql'] });
+    it("a rules-floor lane's call the project's allowed commands cover runs with no model; the step's own list settles nothing", async () => {
+      const { spec, judgeCall } = await start(RULES_FLOOR_ACCOUNT, { allowedCommands: ['psql'] });
       expect(await hook(spec, judgeCall, bash('psql -c "select 1"', 'toolu_20'))).toEqual({
         decision: 'allow',
         settled: "The builder's allow rule covers this call, so it runs, as in Claude Code.",

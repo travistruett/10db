@@ -542,18 +542,18 @@ describe('chooseModel: the account’s override after a scored choice', () => {
     ).toBe('big@high');
   });
 
-  it('launches an override that has no profile, as a gateway with no list does', () => {
+  it('launches an override that has no profile, as an account with no model list does', () => {
     const choice = chooseModel(
       input({
         profiles,
         def: { role: 'review', need: 48 },
-        tierOverrides: { capable: 'gateway-model' },
+        tierOverrides: { capable: 'listless-model' },
       }),
     );
     expect(choice.profile).toBeNull();
-    expect(choice.model).toBe('gateway-model');
+    expect(choice.model).toBe('listless-model');
     expect(choice.tier).toBe(ModelTier.Capable);
-    expect(choice.reason).toContain("the account's capable model gateway-model");
+    expect(choice.reason).toContain("the account's capable model listless-model");
   });
 });
 

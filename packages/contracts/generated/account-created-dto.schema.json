@@ -15,7 +15,6 @@
             "claude_subscription",
             "anthropic_api_key",
             "bedrock",
-            "gateway",
             "codex_signin",
             "openrouter"
           ]
@@ -86,43 +85,6 @@
               "required": [
                 "region",
                 "awsProfile"
-              ],
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {
-                "tierOverrides": {
-                  "type": "object",
-                  "propertyNames": {
-                    "type": "string",
-                    "enum": [
-                      "efficient",
-                      "balanced",
-                      "capable",
-                      "frontier"
-                    ]
-                  },
-                  "additionalProperties": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 200
-                  }
-                },
-                "harness": {
-                  "type": "string",
-                  "enum": [
-                    "claude",
-                    "codex"
-                  ]
-                },
-                "baseUrl": {
-                  "type": "string",
-                  "format": "uri"
-                }
-              },
-              "required": [
-                "baseUrl"
               ],
               "additionalProperties": false
             },
