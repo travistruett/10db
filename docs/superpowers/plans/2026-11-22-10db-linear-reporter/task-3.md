@@ -21,14 +21,16 @@
   The task reports only if its `external` is a Linear link. The reason is the Settings row's line.
 - **The events.** Each carries a dedupe key and a `detail`. Read what the event doesn't carry from the rows: the
   workstream's `failureKind`, and the Inbox item's targets and title.
-  - **RunStarted:** `workstream.changed` to STARTING. Key `run_started:<workstreamId>:<event seq>`, so a Retry
-    of the same workstream posts again. Detail `{ workstreamId, from, reason }`.
+  - **RunStarted:** `workstream.changed` to STARTING. Key `run_started:<workstreamId>:<ends>`, where `<ends>` is
+    the number of Ended rows already written for that workstream. A re-entry after a rate-limit pause, a crash
+    recovery or a gate send-back has no end between, so it dedupes. A builder's Retry of a FAILED run comes after
+    an end, so it posts. Detail `{ workstreamId, from, reason }`.
   - **Waiting:** `inbox.opened` whose item's targets name a workstream of a linked task (`targetTaskIds`). Key
     `waiting:<inboxItemId>`. Detail `{ workstreamId, title, kind }`.
   - **Verdict:** `step.changed` with a non-null `verdict`. Key `verdict:<workstreamId>:<stepIndex>:<at>`, where
     `at` is the step result's `at`. Detail `{ workstreamId, stepIndex, role, verdict }`.
-  - **Ended:** `workstream.changed` to DONE, FAILED or CANCELLED. Key `ended:<workstreamId>:<event seq>`, so DONE
-    after a Retry of a FAILED run posts. Detail `{ workstreamId, to, failureKind, reason }`.
+  - **Ended:** `workstream.changed` to DONE, FAILED or CANCELLED. Key `ended:<workstreamId>:<ends>`, with the same
+    count, so DONE after a Retry of a FAILED run posts. Detail `{ workstreamId, to, failureKind, reason }`.
   - **PrOpened:** `batch.updated` to SHIPPED. One row per linked task whose workstream is in the batch
     (`listWorkstreams(db, { batchId })`). Key `pr_opened:<batchId>`. Detail `{ workstreamId, prUrl }`.
   - **PrMerged:** `batch.updated` whose `changed` includes `pr` and whose `getBatch(...).pr?.state` is merged.
@@ -60,8 +62,10 @@ lands, pass a no-op `poke`).
 
 One pure table test of `linearRowOf`, the rule that decides which event is a row and under which key. Each row is
 one event, and an extra event read in place of the db. Cases:
-- STARTING → `run_started`, with a key carrying the event seq;
-- FAILED, then STARTING and DONE on the same workstream (a Retry) → two distinct `ended` keys;
+- STARTING with no end yet → `run_started:<ws>:0`;
+- STARTING again after a pause, with no end between → the same key, so no new row;
+- FAILED, then STARTING and DONE on the same workstream (a Retry) → `ended:<ws>:0`, `run_started:<ws>:1` and
+  `ended:<ws>:1`;
 - a `step.changed` with `verdict: null` → nothing;
 - `batch.updated { changed: ['pr'] }` with the PR open → nothing; with it merged → `pr_merged`.
 

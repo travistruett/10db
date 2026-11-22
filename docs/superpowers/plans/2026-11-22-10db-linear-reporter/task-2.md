@@ -34,7 +34,7 @@ It is pure: it returns `{ verdict, withheld? }` and mutates nothing. Card 4 appl
    `run.link.issueId` (Linear's own id, which another workspace doesn't have), never by the `AMP-119` identifier:
    team keys repeat across workspaces.
    - `save_issue`: keys `{id, state, links}`. `id === link.issueId`. `links`, if present, is one entry whose
-     `title` is `10db` and whose `url` is `https:`. That entry is the "10db" link attachment; Linear's links are
+     `title` is `10db` and whose `url` equals `run.prUrl` (with no PR, `links` is denied). That entry is the "10db" link attachment; Linear's links are
      append-only, so the brief adds it once, for the PR.
    - `save_comment`: keys `{issueId, body}` with `issueId === link.issueId`, or `{id, body}` with `id` in
      `run.knownCommentIds` (an edit of its own comment).

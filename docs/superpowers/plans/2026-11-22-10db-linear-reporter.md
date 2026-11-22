@@ -179,6 +179,7 @@ export interface ReporterRun {
   readonly linearPrefixes: readonly string[];         // e.g. ['mcp__claude_ai_Linear__']
   readonly binding: LinearBinding;
   readonly link: ExternalLink;                         // the task's
+  readonly prUrl: string | null;                       // the task's PR, the only URL a `10db` link may point at
   workspaceConfirmed: boolean;
   readonly knownCommentIds: Set<string>;               // from this task's recorded rows, plus this run's
   readonly identityResults: string[];                  // successful whoami/get_workspace/get_team/list_teams result texts
@@ -209,7 +210,7 @@ export function reporterBlockedBy(db: DbReader, projectId: ProjectId): string | 
 // apps/daemon/src/linear/reporter.ts (card 4)
 export interface LinearReporter {
   start(): void;                          // startup pickup: arms a timer per task with pending rows
-  stop(): Promise<void>;                  // awaits in-flight settles
+  stop(): Promise<void>;                  // cancels timers; leaves rows as they are; never awaits the engine
   poke(taskId: TaskId): void;             // a row was enqueued
   /** report_linear_workspace / report_linear_post, from a reporter session only. */
   reportWorkspace(sessionId: SessionId, input: ReportLinearWorkspaceInput): { ok: true };
@@ -262,7 +263,8 @@ export function refreshReporterCard(deps: { state: StateStore; inbox: InboxServi
 | idle | event on a linked task, reporter on | pending: row written, due in 30 s, unless a row of the task is due later on backoff, then that later time (card 3) |
 | idle | event on an unlinked task, a task of an unbound project, reporter off, or Your MCP servers off | nothing written (card 3) |
 | idle | the same event again (a repeat `batch.updated`, a second `step.changed` for one result) | nothing: the dedupe key exists (card 1, 3) |
-| idle | a Retry of a FAILED run starts and ends DONE | two new rows: the keys carry the event's seq (card 3) |
+| idle | a Retry of a FAILED run starts and ends DONE | two new rows: the keys count the run's earlier ends (card 3) |
+| idle | a run re-enters STARTING after a pause, recovery or send-back | nothing: no end between, so the key repeats (card 3) |
 | pending | due, no run for the task | running: takes every pending row of the task due now or earlier (card 4) |
 | pending | due, account has no Linear (`LinearVia.None`, checked) | failure, as below; the Inbox line is the row's note (card 4) |
 | pending | due, the sign-ins row is unchecked (after a restart) | runs: a maybe goes ahead (card 4) |

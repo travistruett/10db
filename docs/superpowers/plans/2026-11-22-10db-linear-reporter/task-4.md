@@ -90,8 +90,9 @@ session of 10db's own, no repository write access, Efficient tier, 10db's tools 
      2^(tries before this failure), 6 h), MAX_TRIES)` and the reason seen: the mismatch, "the session ended
      without recording", or the end's message.
    - Then drop the in-memory run and refresh the Inbox card (card 5).
-   - **Off the effect chain** (`void engine.retire(id).then(() => rearm(taskId)).catch(log)`): the hook must not
-     await `retire`, which awaits the chain the hook is on.
+   - **Off the effect chain and out of `reduce`**: schedule `engine.retire(id).then(() => rearm(taskId))` on a
+     zero-delay `clock.setTimeout`, with a catch that logs. The hook must not await `retire`, which awaits the
+     chain the hook is on, and `onState` runs inside `reduce`.
 7. **`stop()`** cancels the timers, and leaves every row as it is, pending rows pending, per the "daemon stops"
    row. It never awaits the engine.
 
