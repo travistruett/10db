@@ -1,5 +1,5 @@
 import type { ShapeProposalDto, ShapeTaskSizeDto } from '@10db/contracts';
-import { Stack, Text } from '@mantine/core';
+import { Group, Stack, Text } from '@mantine/core';
 import { IconClockExclamation } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { CodeSpans } from './record/code-spans';
@@ -67,6 +67,8 @@ export interface DetailBlockProps {
   /** Links that end the dim line, such as Why?. */
   readonly links?: readonly ReactNode[] | undefined;
   readonly attachments?: ReactNode;
+  /** The row's own controls, Edit and ⋯, at the right of the facts line. */
+  readonly actions?: ReactNode;
 }
 
 /** The opened row's block, in its one order. */
@@ -79,6 +81,7 @@ export function DetailBlock({
   flagged = false,
   links = [],
   attachments,
+  actions,
 }: DetailBlockProps) {
   return (
     <Stack gap={16}>
@@ -89,33 +92,36 @@ export function DetailBlock({
       )}
       <Items label="Acceptance Criteria" items={criteria} />
       {more}
-      <Text fz={12} c="dimmed" component="div">
-        {[
-          ...(facts.length === 0
-            ? []
-            : [
-                <span key="facts">
-                  {facts.join(' · ')}
-                  {flagged ? (
-                    <>
-                      {' '}
-                      <IconClockExclamation
-                        size={14}
-                        stroke={1.5}
-                        role="img"
-                        aria-label="Outside its size by more than one bucket"
-                        style={{ verticalAlign: '-2px' }}
-                      />
-                    </>
-                  ) : null}
-                </span>,
-              ]),
-          ...links,
-        ].flatMap((part, index) => [
-          ...(index === 0 ? [] : [<span key={`dot-${String(index)}`}>{' · '}</span>]),
-          part,
-        ])}
-      </Text>
+      <Group gap={8} wrap="nowrap" align="center">
+        <Text fz={12} c="dimmed" component="div" style={{ flex: 1, minWidth: 0 }}>
+          {[
+            ...(facts.length === 0
+              ? []
+              : [
+                  <span key="facts">
+                    {facts.join(' · ')}
+                    {flagged ? (
+                      <>
+                        {' '}
+                        <IconClockExclamation
+                          size={14}
+                          stroke={1.5}
+                          role="img"
+                          aria-label="Outside its size by more than one bucket"
+                          style={{ verticalAlign: '-2px' }}
+                        />
+                      </>
+                    ) : null}
+                  </span>,
+                ]),
+            ...links,
+          ].flatMap((part, index) => [
+            ...(index === 0 ? [] : [<span key={`dot-${String(index)}`}>{' · '}</span>]),
+            part,
+          ])}
+        </Text>
+        {actions}
+      </Group>
       {attachments}
       {notes}
     </Stack>
@@ -140,11 +146,12 @@ export interface RowDetailsProps {
   readonly notes?: ReactNode;
   readonly links?: readonly ReactNode[] | undefined;
   readonly attachments?: ReactNode;
+  readonly actions?: ReactNode;
 }
 
 /** An opened row of a card: what its kind says, in the block's order. */
-export function RowDetails({ row, sizes, notes, links, attachments }: RowDetailsProps) {
-  const block = { notes, links, attachments };
+export function RowDetails({ row, sizes, notes, links, attachments, actions }: RowDetailsProps) {
+  const block = { notes, links, attachments, actions };
   switch (row.kind) {
     case 'goal': {
       const off = sizes.filter((s) => s.missized).length;

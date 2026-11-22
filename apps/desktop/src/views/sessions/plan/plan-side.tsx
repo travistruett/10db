@@ -7,9 +7,9 @@ import { PlanPanel } from './plan-panel';
 import classes from './plan-side.module.css';
 
 /** The conversation keeps at least this much of the tab when the panel sits beside it. */
-export const CONVERSATION_MIN_PX = 520;
+export const CONVERSATION_MIN_PX = 380;
 /** The panel beside the conversation: the builder drags it between these, from its default. */
-const PANEL_MIN_PX = 420;
+const PANEL_MIN_PX = 340;
 const PANEL_MAX_PX = 960;
 const PANEL_PX = 440;
 /** The divider between the two. */

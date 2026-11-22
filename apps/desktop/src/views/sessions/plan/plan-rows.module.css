@@ -43,11 +43,12 @@
   min-width: 0;
 }
 
-/* A row of the Plan: a grid of the title, its facts and its size column, with its sub-lines under all three. */
+/* A row of the Plan: a grid of the title, its facts, its size column and its chevron, with its sub-lines
+   under them all. */
 .row {
   position: relative;
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto auto auto;
   align-items: start;
   column-gap: 8px;
   padding: 8px 12px;
@@ -58,19 +59,18 @@
   background: color-mix(in srgb, var(--tendb-color-panel) 60%, transparent);
 }
 
-/* An opened row and its region are the one raised block of the list, on the panel tone. */
-.opened {
-  margin: 8px 0;
-  padding-bottom: 16px;
-  border-radius: var(--mantine-radius-md);
+/* An opened row and its region are the one raised block of the list, on the panel tone. Its line keeps
+   the closed row's box, so opening it moves nothing above or beside the title. */
+.item {
+  border-radius: var(--mantine-radius-sm);
+  transition: background-color 150ms ease;
+}
+
+.item[data-open] {
   background: var(--tendb-color-panel);
 }
 
-.opened .row {
-  padding-top: 12px;
-}
-
-.opened .row:hover {
+.item[data-open] .row:hover {
   background: transparent;
 }
 
@@ -106,20 +106,10 @@
   min-width: 0;
 }
 
-.slot {
+.chips {
   position: relative;
   z-index: 1;
-  display: grid;
-  align-items: center;
-  justify-items: end;
   min-height: 20px;
-}
-
-.slot > * {
-  grid-area: 1 / 1;
-}
-
-.chips {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -134,6 +124,27 @@
 .actions {
   display: flex;
   align-items: center;
+  margin-left: auto;
+}
+
+/* The chevron says a row opens; it shows on hover or focus, and stays, turned, while the row is open. */
+.rowChevron {
+  margin-top: 3px;
+  color: var(--mantine-color-dimmed);
+  opacity: 0;
+  transition:
+    opacity 120ms ease,
+    transform 150ms ease;
+}
+
+.row:hover .rowChevron,
+.row:focus-within .rowChevron,
+.rowChevron[data-open] {
+  opacity: 1;
+}
+
+.rowChevron[data-open] {
+  transform: rotate(180deg);
 }
 
 /* The size column: S, M or L, and a goal's lane time when it needs more. */

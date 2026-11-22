@@ -8,7 +8,7 @@ import { RowChips } from './row-chips';
 import { DetailBlock, taskFacts } from './row-details';
 import classes from './plan-rows.module.css';
 import { RowLine, moveRowFocus, type OpenRow } from './row-line';
-import { Box } from '@mantine/core';
+import { Box, Collapse } from '@mantine/core';
 
 type GoalProposal = Extract<ShapeProposalDto, { kind: 'goal' }>;
 
@@ -47,7 +47,11 @@ export function GoalTaskRow({
     if (delta !== null && moveRowFocus(event.currentTarget, delta)) event.preventDefault();
   };
   return (
-    <li className={opened ? classes['opened'] : undefined} style={{ listStyle: 'none' }}>
+    <li
+      className={classes['item']}
+      {...(opened ? { 'data-open': '' } : {})}
+      style={{ listStyle: 'none' }}
+    >
       <RowLine
         title={task.title}
         chips={<RowChips facts={{ notes: questions.length }} />}
@@ -60,8 +64,15 @@ export function GoalTaskRow({
         }}
         onKeyDown={onKeyDown}
       />
-      {opened ? (
-        <Box id={regionId} role="region" aria-label={`${task.title} details`} px={12} pt={4} pb={8}>
+      <Collapse expanded={opened} keepMounted={false} transitionDuration={150}>
+        <Box
+          id={regionId}
+          role="region"
+          aria-label={`${task.title} details`}
+          px={12}
+          pt={4}
+          pb={16}
+        >
           <DetailBlock
             description={task.description}
             notes={
@@ -75,7 +86,7 @@ export function GoalTaskRow({
             attachments={<RowAttachments row={goal} title={task.title} task={{ key: task.key }} />}
           />
         </Box>
-      ) : null}
+      </Collapse>
     </li>
   );
 }

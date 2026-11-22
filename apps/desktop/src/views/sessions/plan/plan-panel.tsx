@@ -5,7 +5,7 @@ import {
   type ShapeViewDto,
 } from '@10db/contracts';
 import { ActionIcon, Button, Group, Menu, Modal, Stack, Text, Tooltip } from '@mantine/core';
-import { IconArrowBackUp, IconArrowsMaximize, IconDots, IconFileExport } from '@tabler/icons-react';
+import { IconArrowBackUp, IconArrowsMaximize, IconFileExport } from '@tabler/icons-react';
 import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useTasks } from '../../../daemon/queries';
@@ -28,13 +28,15 @@ export interface PlanPanelProps {
 
 /**
  * The session's Plan: its rows beside the conversation, with Accept, an expand button that opens the
- * Plan page (the same rows, then its record), and Export and Undo Accept in ⋯.
+ * Plan page (the same rows, then its record), and ⋯ holding the reviews, Export and Undo Accept.
  */
 export function PlanPanel({ shapeId, onWhy, onAskForChanges, full = false }: PlanPanelProps) {
   const query = useShapeView(shapeId);
   const navigate = useNavigate();
   const error = query.isError ? query.error.message : null;
   const view = query.data;
+  const [exporting, setExporting] = useState(false);
+  const [undoing, setUndoing] = useState(false);
   return (
     <>
       <ProposedPane
@@ -45,41 +47,73 @@ export function PlanPanel({ shapeId, onWhy, onAskForChanges, full = false }: Pla
         titled={!full}
         onWhy={onWhy}
         onAskForChanges={onAskForChanges}
-        menu={
-          view === undefined ? null : (
-            <>
-              {full ? null : (
-                <Tooltip label="Open the Plan full page, with its documents, decisions and reviews">
-                  <ActionIcon
-                    variant="subtle"
-                    color="gray"
-                    size="input-xs"
-                    aria-label="Open Plan Page"
-                    onClick={() => {
-                      void navigate({
-                        to: '/sessions/record/$shapeId',
-                        params: { shapeId: view.shape.id },
-                      });
-                    }}
-                  >
-                    <IconArrowsMaximize size={16} stroke={1.5} />
-                  </ActionIcon>
-                </Tooltip>
-              )}
-              <PlanMenu view={view} />
-            </>
+        expand={
+          view === undefined || full ? null : (
+            <Tooltip label="Open the Plan full page, with its documents, decisions and reviews">
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="input-xs"
+                aria-label="Open Plan Page"
+                onClick={() => {
+                  void navigate({
+                    to: '/sessions/record/$shapeId',
+                    params: { shapeId: view.shape.id },
+                  });
+                }}
+              >
+                <IconArrowsMaximize size={16} stroke={1.5} />
+              </ActionIcon>
+            </Tooltip>
+          )
+        }
+        planItems={
+          view === undefined ? undefined : (
+            <PlanItems
+              view={view}
+              onExport={() => {
+                setExporting(true);
+              }}
+              onUndo={() => {
+                setUndoing(true);
+              }}
+            />
           )
         }
       />
       <RoundAnnouncer view={query.data} />
+      {view === undefined ? null : (
+        <>
+          <UndoAcceptModal
+            shapeId={view.shape.id}
+            accept={undoing ? view.lastAccept : null}
+            onClose={() => {
+              setUndoing(false);
+            }}
+          />
+          <ExportModal
+            shapeId={view.shape.id}
+            opened={exporting}
+            onClose={() => {
+              setExporting(false);
+            }}
+          />
+        </>
+      )}
     </>
   );
 }
 
-function PlanMenu({ view }: { readonly view: ShapeViewDto }) {
-  const shapeId = view.shape.id;
-  const [exporting, setExporting] = useState(false);
-  const [undoing, setUndoing] = useState(false);
+/** The ⋯ menu's Plan section: Export, and Undo Accept once something was accepted. */
+function PlanItems({
+  view,
+  onExport,
+  onUndo,
+}: {
+  readonly view: ShapeViewDto;
+  readonly onExport: () => void;
+  readonly onUndo: () => void;
+}) {
   const accept = view.lastAccept;
   // Whether a task of the Accept has a run, from the tasks the Board reads. The daemon refuses on its own,
   // so this is only the hint that disables the item.
@@ -95,81 +129,51 @@ function PlanMenu({ view }: { readonly view: ShapeViewDto }) {
         );
   return (
     <>
-      <Menu position="bottom-end" withinPortal>
-        <Menu.Target>
-          <Tooltip label="More">
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              size="input-xs"
-              aria-label="More Plan actions"
-            >
-              <IconDots size={16} stroke={1.5} />
-            </ActionIcon>
-          </Tooltip>
-        </Menu.Target>
-        <Menu.Dropdown>
-          <Menu.Item
-            leftSection={<IconFileExport size={14} stroke={1.5} />}
-            onClick={() => {
-              setExporting(true);
-            }}
-          >
-            Export Plan to Folder
-          </Menu.Item>
-          {accept === null ? null : (
-            <Menu.Item
-              leftSection={<IconArrowBackUp size={14} stroke={1.5} />}
-              disabled={started !== undefined}
-              onClick={() => {
-                setUndoing(true);
-              }}
-            >
-              {started === undefined ? (
-                'Undo Accept'
-              ) : (
-                <MenuHint hint={`${started.title} has started; cancel its run first`}>
-                  Undo Accept
-                </MenuHint>
-              )}
-            </Menu.Item>
+      <Menu.Item leftSection={<IconFileExport size={14} stroke={1.5} />} onClick={onExport}>
+        Export Plan to Folder
+      </Menu.Item>
+      {accept === null ? null : (
+        <Menu.Item
+          leftSection={<IconArrowBackUp size={14} stroke={1.5} />}
+          disabled={started !== undefined}
+          onClick={onUndo}
+        >
+          {started === undefined ? (
+            'Undo Accept'
+          ) : (
+            <MenuHint hint={`${started.title} has started; cancel its run first`}>
+              Undo Accept
+            </MenuHint>
           )}
-        </Menu.Dropdown>
-      </Menu>
-      <UndoAcceptModal
-        shapeId={shapeId}
-        accept={undoing ? accept : null}
-        onClose={() => {
-          setUndoing(false);
-        }}
-      />
-      <Modal
-        opened={exporting}
-        onClose={() => {
-          setExporting(false);
-        }}
-        title="Export Plan"
-        size="sm"
-        centered
-      >
-        <Stack gap="md">
-          <Text size="sm">
-            Saves this plan's documents, decisions, reviews and checks as Markdown files in a folder
-            you choose.
-          </Text>
-          <Group justify="flex-end" gap={8} align="flex-start">
-            <Button
-              variant="default"
-              onClick={() => {
-                setExporting(false);
-              }}
-            >
-              Cancel
-            </Button>
-            <ExportButton shapeId={shapeId} label="Choose Folder" primary />
-          </Group>
-        </Stack>
-      </Modal>
+        </Menu.Item>
+      )}
     </>
+  );
+}
+
+function ExportModal({
+  shapeId,
+  opened,
+  onClose,
+}: {
+  readonly shapeId: ShapeId;
+  readonly opened: boolean;
+  readonly onClose: () => void;
+}) {
+  return (
+    <Modal opened={opened} onClose={onClose} title="Export Plan" size="sm" centered>
+      <Stack gap="md">
+        <Text size="sm">
+          Saves this plan's documents, decisions, reviews and checks as Markdown files in a folder
+          you choose.
+        </Text>
+        <Group justify="flex-end" gap={8} align="flex-start">
+          <Button variant="default" onClick={onClose}>
+            Cancel
+          </Button>
+          <ExportButton shapeId={shapeId} label="Choose Folder" primary />
+        </Group>
+      </Stack>
+    </Modal>
   );
 }

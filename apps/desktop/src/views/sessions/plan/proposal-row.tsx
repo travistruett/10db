@@ -5,7 +5,7 @@ import {
   type ShapeProposalDto,
   type ShapeTaskSizeDto,
 } from '@10db/contracts';
-import { ActionIcon, Anchor, Box, Group, Menu, Stack, Text } from '@mantine/core';
+import { ActionIcon, Anchor, Box, Collapse, Group, Menu, Stack, Text } from '@mantine/core';
 import { IconDots, IconPencil } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 import { useRef, type KeyboardEvent, type ReactNode } from 'react';
@@ -260,6 +260,42 @@ export function ProposalRow({
       </Anchor>,
     );
 
+  const controls = (
+    <Group gap={2} wrap="nowrap">
+      {canEdit ? (
+        <ActionIcon
+          variant="subtle"
+          color="gray"
+          size="sm"
+          aria-label={`Edit ${title}`}
+          onClick={startEditing}
+        >
+          <IconPencil size={16} stroke={1.5} />
+        </ActionIcon>
+      ) : null}
+      <Menu position="bottom-end" withinPortal>
+        <Menu.Target>
+          <ActionIcon
+            variant="subtle"
+            color="gray"
+            size="sm"
+            className={classes['menu']}
+            aria-label={`Actions for ${title}`}
+          >
+            <IconDots size={16} stroke={1.5} />
+          </ActionIcon>
+        </Menu.Target>
+        <Menu.Dropdown>
+          {menu.map((action) => (
+            <Menu.Item key={action.label} onClick={action.onSelect}>
+              {action.label}
+            </Menu.Item>
+          ))}
+        </Menu.Dropdown>
+      </Menu>
+    </Group>
+  );
+
   const line = (
     <RowLine
       title={title}
@@ -280,41 +316,6 @@ export function ProposalRow({
           }}
         />
       }
-      actions={
-        <Group gap={2} wrap="nowrap">
-          {canEdit ? (
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              size="sm"
-              aria-label={`Edit ${title}`}
-              onClick={startEditing}
-            >
-              <IconPencil size={16} stroke={1.5} />
-            </ActionIcon>
-          ) : null}
-          <Menu position="bottom-end" withinPortal>
-            <Menu.Target>
-              <ActionIcon
-                variant="subtle"
-                color="gray"
-                size="sm"
-                className={classes['menu']}
-                aria-label={`Actions for ${title}`}
-              >
-                <IconDots size={16} stroke={1.5} />
-              </ActionIcon>
-            </Menu.Target>
-            <Menu.Dropdown>
-              {menu.map((action) => (
-                <Menu.Item key={action.label} onClick={action.onSelect}>
-                  {action.label}
-                </Menu.Item>
-              ))}
-            </Menu.Dropdown>
-          </Menu>
-        </Group>
-      }
       trailing={trailing}
       trailingLabel={
         row.kind === 'task' && sizes[0] !== undefined
@@ -332,72 +333,75 @@ export function ProposalRow({
       onKeyDown={onKeyDown}
     />
   );
-  const region = opened ? (
-    <Box id={regionId} role="region" aria-label={`${title} details`} px={12} pt={8}>
-      {editing ? (
-        <RowEditor
-          row={row}
-          onCancel={stopEditing}
-          onSave={(fields) => {
-            change({ kind: 'edit', fields });
-            stopEditing();
-          }}
-        />
-      ) : (
-        <RowDetails
-          row={row}
-          sizes={sizes}
-          notes={
-            review === undefined ? undefined : (
-              <ReviewNotes
-                ceremony={review.ceremony}
-                findings={findings}
-                questions={ownQuestions}
-                settled={review.settled}
-                onDismiss={handlers.onDismiss}
-                onCeremony={(c) => {
-                  change(
-                    c === 'skip'
-                      ? { kind: 'edit', fields: { ceremony: 'direct' } }
-                      : { kind: 'unpin', field: 'ceremony' },
-                  );
+  const region = (
+    <Collapse expanded={opened} keepMounted={false} transitionDuration={150}>
+      <Box id={regionId} role="region" aria-label={`${title} details`} px={12} pt={4} pb={16}>
+        {editing ? (
+          <RowEditor
+            row={row}
+            onCancel={stopEditing}
+            onSave={(fields) => {
+              change({ kind: 'edit', fields });
+              stopEditing();
+            }}
+          />
+        ) : (
+          <RowDetails
+            row={row}
+            sizes={sizes}
+            notes={
+              review === undefined ? undefined : (
+                <ReviewNotes
+                  ceremony={review.ceremony}
+                  findings={findings}
+                  questions={ownQuestions}
+                  settled={review.settled}
+                  onDismiss={handlers.onDismiss}
+                  onCeremony={(c) => {
+                    change(
+                      c === 'skip'
+                        ? { kind: 'edit', fields: { ceremony: 'direct' } }
+                        : { kind: 'unpin', field: 'ceremony' },
+                    );
+                  }}
+                />
+              )
+            }
+            links={[
+              <MetaLink
+                key="why"
+                onClick={() => {
+                  handlers.onWhy(row);
                 }}
-              />
-            )
-          }
-          links={[
-            <MetaLink
-              key="why"
-              onClick={() => {
-                handlers.onWhy(row);
-              }}
-            >
-              Show in Conversation
-            </MetaLink>,
-            ...(earlier
-              ? [
-                  <MetaLink
-                    key="restore"
-                    onClick={() => {
-                      change({ kind: 'restore' });
-                    }}
-                  >
-                    Restore
-                  </MetaLink>,
-                ]
-              : []),
-          ]}
-          attachments={<RowAttachments row={row} title={title} />}
-        />
-      )}
-    </Box>
-  ) : null;
+              >
+                Show in Conversation
+              </MetaLink>,
+              ...(earlier
+                ? [
+                    <MetaLink
+                      key="restore"
+                      onClick={() => {
+                        change({ kind: 'restore' });
+                      }}
+                    >
+                      Restore
+                    </MetaLink>,
+                  ]
+                : []),
+            ]}
+            attachments={<RowAttachments row={row} title={title} />}
+            actions={controls}
+          />
+        )}
+      </Box>
+    </Collapse>
+  );
 
-  const wrap = opened ? classes['opened'] : undefined;
+  const wrap = { className: classes['item'], ...(opened ? { 'data-open': '' } : {}) };
   if (head)
     return (
       <>
-        <div className={wrap}>
+        <div {...wrap}>
           {line}
           {region}
         </div>
@@ -405,7 +409,7 @@ export function ProposalRow({
       </>
     );
   return (
-    <li className={wrap} style={{ listStyle: 'none' }}>
+    <li {...wrap} style={{ listStyle: 'none' }}>
       {line}
       {region}
       {children}

@@ -651,9 +651,8 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   // "propose it": the scripted plan fills the panel, with no Propose press.
   await sendLine(page, 'propose it');
   await expect(panel.getByText('Board polish')).toBeVisible();
-  await expect(panel.getByRole('group', { name: 'Summary' })).toContainText(
-    '1 goal · 2 tasks · 1 to record',
-  );
+  // A first proposal has no summary line: the list under the head says it all.
+  await expect(panel.getByRole('group', { name: 'Summary' })).toHaveCount(0);
   await expectAccessible(page, 'the plan beside the conversation');
 
   // ↑/↓ move between rows and Enter opens one in place.
@@ -684,12 +683,12 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await expect(pinned).toBeVisible();
   await expect(panel.getByText('Drop the Abandon strip', { exact: true })).toHaveCount(0);
 
-  // Review ▾: Plan Review puts a finding on its row and Find Open Questions a question; Accept only warns.
-  await panel.getByRole('button', { name: 'Review' }).click();
+  // ⋯'s Review section: Plan Review puts a finding on its row and Find Open Questions a question; Accept only warns.
+  await panel.getByRole('button', { name: 'More Plan actions' }).click();
   await page.getByRole('menuitem', { name: 'Plan Review' }).click();
   await panel.getByRole('button', { name: 'Board polish', exact: true }).click();
   await expect(panel.getByText('The scope is wider than one pull request.').first()).toBeVisible();
-  await panel.getByRole('button', { name: 'Review' }).click();
+  await panel.getByRole('button', { name: 'More Plan actions' }).click();
   await page.getByRole('menuitem', { name: 'Find Open Questions' }).click();
   await panel.getByRole('button', { name: 'Compact card density', exact: true }).click();
   await expect(panel.getByText('Which screen does this change first?').first()).toBeVisible();
@@ -708,7 +707,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
 
   // Design Review reads each task that has a mock-up and a page area; with no browser in this daemon the
   // pictures are missing, the review still runs, and its finding lands on the row.
-  await panel.getByRole('button', { name: 'Review' }).click();
+  await panel.getByRole('button', { name: 'More Plan actions' }).click();
   await page.getByRole('menuitem', { name: 'Design Review' }).click();
   await panel.getByRole('button', { name: 'Board polish', exact: true }).click();
   await expect(panel.getByText('The mock-up leaves out the empty state.').first()).toBeVisible();
@@ -825,7 +824,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await page.keyboard.press('Escape');
 
   // Under the side-by-side width the panel is a drawer, which Close Plan closes and the title's Plan reopens.
-  await page.setViewportSize({ width: 900, height: 900 });
+  await page.setViewportSize({ width: 760, height: 900 });
   const drawer = page.getByRole('dialog', { name: 'Plan' });
   await expect(drawer).toBeVisible();
   await expectAccessible(page, 'the plan as a drawer', ['iframe']);
