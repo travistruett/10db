@@ -16,6 +16,7 @@ import { chatRoot } from './work-root';
 /** How long a checkout's tracked files are reused before git is asked again. */
 const TRACKED_FILES_TTL_MS = 30_000;
 
+const REPORTER_FILES = "A reporter's conversation takes no files.";
 export const TASK_FILES_LATER = 'Files for a task come with Do It.';
 
 export function createConversationFiles(deps: {
@@ -38,6 +39,8 @@ export function createConversationFiles(deps: {
     switch (conv.ownerKind) {
       case ConversationOwnerKind.Task:
         throw new ConflictError(TASK_FILES_LATER);
+      case ConversationOwnerKind.Reporter:
+        throw new ConflictError(REPORTER_FILES);
       case ConversationOwnerKind.Chat: {
         // A session on its own branch mentions the files of its worktree.
         const project = getProject(deps.state.db, conv.projectId);

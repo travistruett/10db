@@ -28,7 +28,8 @@
               "type": "string",
               "enum": [
                 "chat",
-                "task"
+                "task",
+                "reporter"
               ]
             },
             "id": {

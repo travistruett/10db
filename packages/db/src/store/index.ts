@@ -57,6 +57,7 @@ export * from './shape-accepts';
 export * from './shape-state';
 export * from './shapes';
 export * from './store';
+export * from './linear-posts';
 export * from './stakeholder-sends';
 export * from './stakeholder-timers';
 export * from './waiting-on';
