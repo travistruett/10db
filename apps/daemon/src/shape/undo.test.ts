@@ -369,7 +369,7 @@ describe('Undo Accept', () => {
 
 describe('Convert and a linked issue', () => {
   const link = (id: string) => ({
-    kind: 'linear',
+    kind: 'linear' as const,
     id,
     issueId: `lin-${id}`,
     url: `https://linear.app/acme/issue/${id}`,
