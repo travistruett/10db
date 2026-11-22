@@ -36,6 +36,19 @@ const decisionModel = {
 };
 
 function answer(url: string): Response {
+  if (url.endsWith('/systemone'))
+    return Response.json({
+      model: 'typesafe/jev-1.13',
+      answers: {
+        decision: {
+          type: 'choice',
+          choice: 'review',
+          confidence: 0.9,
+          probabilities: { review: 0.9 },
+        },
+      },
+      usage: { input_tokens: 10, output_tokens: 2, cost: 0 },
+    });
   if (url === DECISION_LIST) return Response.json({ data: [decisionModel] });
   if (url === `${BENCHMARKS}?source=artificial-analysis`)
     return Response.json({

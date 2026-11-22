@@ -23,6 +23,8 @@ let daemon: RunningDaemon | null;
 let held: { readonly rigor: boolean; answer(): void }[];
 /** Once set, a question is answered as it arrives: at most four are asked at once, so the rest follow. */
 let answering: boolean;
+/** While true, a question is the test decision a switch of decisions' account asks. */
+let testDecision = false;
 const answerAll = (): void => {
   answering = true;
   for (const call of held) call.answer();
@@ -62,7 +64,7 @@ async function start(sizingWaitMs: number, extra: Record<string, unknown> = {}) 
         const call = {
           rigor,
           answer: () => {
-            const choice = rigor ? 'critical' : 'no';
+            const choice = testDecision ? 'review' : rigor ? 'critical' : 'no';
             resolve(
               Response.json({
                 model: 'typesafe/jev-1.13',
@@ -91,7 +93,13 @@ async function start(sizingWaitMs: number, extra: Record<string, unknown> = {}) 
   await api.put(`/accounts/${account.id}/secret`, AccountDto, {
     secret: 'a-fake-key-for-the-test',
   });
+  // Switching decisions to the account asks it a test decision first; it is answered, then forgotten.
+  answering = true;
+  testDecision = true;
   await api.patch('/judge', JudgeStatusDto, { accountId: account.id });
+  answering = false;
+  testDecision = false;
+  held.length = 0;
   const created = await api.post('/projects', ProjectDto, {
     name: 'demo',
     repoPath: repo.path,
