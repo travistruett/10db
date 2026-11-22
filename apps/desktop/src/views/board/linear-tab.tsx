@@ -60,7 +60,12 @@ function PostRow({
         </Text>
       </Group>
       {post.commentIds.map((id) => (
-        <ExternalLink key={id} url={`${issueUrl}#comment-${id}`} label="Comment" size="xs" />
+        <ExternalLink
+          key={id}
+          url={`${issueUrl}#comment-${id.slice(0, 8)}`}
+          label="Comment"
+          size="xs"
+        />
       ))}
       {post.statusSet === null ? null : (
         <Text size="xs" c="dimmed">
@@ -84,8 +89,15 @@ function PostRow({
 /** What the reporter owes a task's Linear issue and has posted to it, newest first. */
 export function LinearTab({ task }: { readonly task: Pick<TaskDto, 'id' | 'external'> }) {
   const now = useNow();
-  const posts = useTaskLinearPosts(task.id).data ?? [];
-  if (task.external == null) return null;
+  const query = useTaskLinearPosts(task.id);
+  const posts = query.data ?? [];
+  if (task.external == null || query.isPending) return null;
+  if (query.isError)
+    return (
+      <Text size="sm" c="red">
+        Couldn't read the Linear updates: {query.error.message}
+      </Text>
+    );
   if (posts.length === 0)
     return (
       <Text size="sm" c="dimmed">
