@@ -57,6 +57,7 @@ function settingsOf(values: AccountFormValues): Record<string, unknown> {
     case AccountKind.ClaudeSubscription:
     case AccountKind.AnthropicApiKey:
     case AccountKind.CodexSignin:
+    case AccountKind.OpenRouter:
       return choice;
     case AccountKind.Bedrock:
       return {
@@ -64,15 +65,10 @@ function settingsOf(values: AccountFormValues): Record<string, unknown> {
         region: values.region.trim(),
         awsProfile: values.bedrockAuth === 'profile' ? values.awsProfile.trim() : null,
       };
-    case AccountKind.OpenRouter:
-      return {};
   }
 }
 
 function inputOf(values: AccountFormValues): Record<string, unknown> {
-  // An OpenRouter account holds a key and nothing else: no lanes, cap, identity or settings.
-  if (values.kind === AccountKind.OpenRouter)
-    return { kind: values.kind, label: values.label, payer: values.payer };
   const cap = values.monthlyCapUsd.trim();
   const organization = values.organization.trim();
   return {
@@ -81,7 +77,9 @@ function inputOf(values: AccountFormValues): Record<string, unknown> {
     payer: values.payer,
     laneCap: Number(values.laneCap.trim()),
     ...(isMetered(values.kind) && cap !== '' ? { monthlyCapUsd: Number(cap) } : {}),
-    ...(isMetered(values.kind) && organization !== '' ? { expectedIdentity: organization } : {}),
+    ...(isMetered(values.kind) && values.kind !== AccountKind.OpenRouter && organization !== ''
+      ? { expectedIdentity: organization }
+      : {}),
     settings: settingsOf(values),
   };
 }

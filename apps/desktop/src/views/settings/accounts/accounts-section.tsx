@@ -1,5 +1,4 @@
 import {
-  AccountKind,
   harnessOf,
   PLAN_LOGIN_CANT_DECIDE,
   powersDecisions,
@@ -55,9 +54,6 @@ function UsageCell({ account }: { readonly account: AccountDto }) {
       </Text>
     );
   const { total, monthlyCapUsd } = usage.data;
-  // An OpenRouter account runs no session: its month is its decisions' dollars, or a dash when none are its own.
-  if (account.kind === AccountKind.OpenRouter)
-    return <Text size="sm">{total.costUsd === null ? '—' : formatUsd(total.costUsd)}</Text>;
   if (total.costUsd === null)
     return <Text size="sm">{formatTokens(total.tokensIn + total.tokensOut)} tokens</Text>;
   const share = capShare(usage.data);
