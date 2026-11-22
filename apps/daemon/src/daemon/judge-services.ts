@@ -4,6 +4,8 @@ import {
   ConflictError,
   InvalidError,
   JudgeConfigPatch,
+  needsSecret,
+  parseAccountSettings,
   powersDecisions,
   UpstreamError,
   type AccountId,
@@ -187,9 +189,15 @@ export function createJudgeServices(deps: {
     if (!row || row.archived) return { config, account: null, off: deps.off };
     // Read off the event loop: the status is asked for on every visit to Settings. A daemon with the judge
     // off goes by the recorded fingerprint alone.
-    const secret: Pick<AccountSecret, 'state'> = deps.off
-      ? { state: row.secretFingerprint === null ? 'missing' : 'set' }
-      : await keychainConflict(() => readAccountSecretAsync(row, deps.keychain));
+    // An account that signs with an AWS profile keeps no secret, so none can be missing.
+    const secret: Pick<AccountSecret, 'state'> = !needsSecret(
+      row.kind,
+      parseAccountSettings(row.kind, row.settings),
+    )
+      ? { state: 'set' }
+      : deps.off
+        ? { state: row.secretFingerprint === null ? 'missing' : 'set' }
+        : await keychainConflict(() => readAccountSecretAsync(row, deps.keychain));
     return {
       config,
       account: {

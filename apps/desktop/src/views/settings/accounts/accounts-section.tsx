@@ -1,4 +1,11 @@
-import { AccountKind, runsAgents, type AccountDto, type AccountId } from '@10db/contracts';
+import {
+  AccountKind,
+  PLAN_LOGIN_CANT_DECIDE,
+  powersDecisions,
+  runsAgents,
+  type AccountDto,
+  type AccountId,
+} from '@10db/contracts';
 import {
   Accordion,
   Alert,
@@ -111,6 +118,11 @@ function AccountRow({
           <Text size="xs" c="dimmed">
             {usedByText(usedBy)}
             {runsAgents(account.kind) ? '' : ` · ${CANT_RUN_AGENTS}`}
+          </Text>
+          <Text size="xs" c="dimmed">
+            {powersDecisions(account.kind)
+              ? 'Can answer decisions'
+              : `Can't answer decisions: ${PLAN_LOGIN_CANT_DECIDE}`}
           </Text>
           {account.archived || !runsAgents(account.kind) ? null : (
             <AccountPause account={account} />
