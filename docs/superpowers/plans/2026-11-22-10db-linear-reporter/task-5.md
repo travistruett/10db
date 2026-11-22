@@ -29,7 +29,8 @@ attachment by URL), "Rules in its brief"; "States" (the Inbox rows); the brief's
   2. Name the issue by its Linear id (given) in every write, never by its identifier.
   3. Read the issue (`get_issue`) and its comments (`list_comments`). An update whose id already appears in a
      comment's footer is recorded without posting again.
-  4. Read the team's statuses with their types and positions. Never move to an earlier position or a lower type.
+  4. Read the statuses of the issue's own team (from `get_issue`, which may differ from the bound team), with their
+     types and positions. Never move to an earlier position or a lower type.
   5. If the status changed since the last recorded row's `statusSet`, and it isn't what 10db set, comment only.
   6. No completed-type status unless the note says so.
   7. Open findings and unverified checks are named in the comment and block a Ready for Release–like status.
