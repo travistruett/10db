@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { BuilderToolInputs, BuilderToolName } from './builder-mcp-tools';
 import { TaskPatchFields } from './entities';
-import { LinkLinearTeamInput } from './external';
 import { TaskId } from './ids';
 import { TaskLanding } from './landing';
 import { StartShapeInput } from './shape-files';
@@ -23,7 +22,6 @@ export const ChatGitToolName = {
 export const ChatToolName = {
   ...BuilderToolName,
   SetTitle: 'set_title',
-  LinkLinearTeam: 'link_linear_team',
   ...ChatGitToolName,
 } as const;
 export type ChatToolName = (typeof ChatToolName)[keyof typeof ChatToolName];
@@ -54,7 +52,6 @@ export const ChatToolInputs = {
   [ChatToolName.WithdrawKnowledge]: BuilderToolInputs.withdraw_knowledge,
   [ChatToolName.ListProposals]: BuilderToolInputs.list_proposals.omit({ projectId: true }),
   [ChatToolName.SetTitle]: z.object({ title: z.string().trim().min(1).max(80) }),
-  [ChatToolName.LinkLinearTeam]: LinkLinearTeamInput,
   [ChatToolName.MakeBranch]: z.object({ name: z.string().min(1).max(200) }),
   [ChatToolName.SwitchBranch]: z.object({ name: z.string().min(1).max(200) }),
   [ChatToolName.Pull]: z.object({}),

@@ -109,7 +109,7 @@ import { createBenchmarkServices } from './benchmark-services';
 import { createSizingService } from '../sizing';
 import { createJudgeCredentialReader, createJudgeServices } from './judge-services';
 import {
-  createLinearBindings,
+  createLinearImport,
   createLinearReporter,
   reporterConversations,
   reporterHooks,
@@ -2524,12 +2524,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     reporter: linearReporter,
     log: logger.child({ component: 'linear-reporter' }),
   });
-  const linearBindings = createLinearBindings({
-    state,
-    chat,
-    signIns: linearSignIns,
-    log: logger.child({ component: 'linear' }),
-  });
+  const linearImport = createLinearImport({ state, chat, signIns: linearSignIns });
   const openWhenBusyDeps: OpenWhenBusyDeps = {
     folderHold,
     pendingOpens,
@@ -2619,7 +2614,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       fetch: opts.fetch ?? fetch,
       reconnect: () => replyWatch.reconnect(),
       githubLogin: () => Promise.resolve(github.cachedLogin()),
-      linear: linearBindings,
+      linear: linearImport,
     }),
     shape: createShapeServices({
       shape,
@@ -2969,7 +2964,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         clock,
         builder: createBuilderTools(services),
         getTask: (id) => services.getTask(id),
-        linear: linearBindings,
         gitTools: {
           git,
           folderHold,

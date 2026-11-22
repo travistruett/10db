@@ -1,5 +1,6 @@
-export { createLinearBindings, type LinearBindings } from './bindings';
-export { subscribeLinearEvents } from './reporter-events';
+export { createLinearImport, type LinearImport } from './import';
+export { reporterBlockedBy, subscribeLinearEvents } from './reporter-events';
+export { reporterSettings, reporterSettingsKey } from './reporter-settings';
 export { createLinearReporter, type LinearReporter } from './reporter';
 export { reporterHooks, type ReporterLaunch, type ReporterPrepared } from './reporter-owner';
 export { reporterConversations } from './reporter-conversation';

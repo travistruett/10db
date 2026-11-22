@@ -5,6 +5,10 @@
 (`2026-11-19-10db-plan-in-sessions-design.md`) and the implementation report on steps (PR #729, #732).
 **Evidence:** the manual Ampsio AMP-119 pilot, run by Codex on 2026-11-21.
 
+**Amended 2026-11-22:** a project is no longer linked to a Linear team, so the "Linear binding check" and the
+Linear row's team link below are removed. A project uses its account's Linear sign-in
+(`docs/architecture/decisions/2026-11-22-linear-needs-no-link.md`). The rest of the text is as written.
+
 ## Brief
 
 **What changes for you.** A project can be linked to a Linear team. You pull issues into 10db from a session
