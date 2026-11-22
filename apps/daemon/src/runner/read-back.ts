@@ -1,4 +1,5 @@
-import { agentKind, type NextAction, type TaskId, type WorkstreamId } from '@10db/contracts';
+import type { NextAction, TaskId, WorkstreamId } from '@10db/contracts';
+import { accountAgentOf } from '../environment';
 import {
   insertSystemNotice,
   listUndeliveredTaskMessages,
@@ -61,10 +62,7 @@ export async function readBackThread(
   const { action } = input;
   const thread = resumedSessionOf(action);
   const unchanged: ReadBack = { kind: 'read', action };
-  if (
-    thread === null ||
-    !deps.adapter.capabilities({ kind: agentKind(input.account.kind) }, null).readBack
-  )
+  if (thread === null || !deps.adapter.capabilities(accountAgentOf(input.account), null).readBack)
     return unchanged;
   // Rule 5 through the library: the uuids of the task's messages pushed and never seen taken.
   const ask = readBackAsk(listUndeliveredTaskMessages(deps.state.db, input.taskId));

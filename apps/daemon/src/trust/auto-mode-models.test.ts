@@ -1,10 +1,10 @@
-import type { AgentAccountKind } from '@10db/contracts';
+import type { SupportedAccountKind } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { autoModeRuns } from './auto-mode-models';
 
 describe('autoModeRuns', () => {
   it('runs auto mode only on the account kinds and models that support it', () => {
-    const rows: [AgentAccountKind, string | null, boolean][] = [
+    const rows: [SupportedAccountKind, string | null, boolean][] = [
       ['claude_subscription', 'claude-opus-5-5', true],
       ['claude_subscription', 'claude-sonnet-4-6', true],
       ['claude_subscription', 'claude-sonnet-4-5', false],
@@ -24,7 +24,6 @@ describe('autoModeRuns', () => {
       ['bedrock', null, false],
       ['bedrock', 'haiku', false],
       ['bedrock', 'us.anthropic.claude-fable-5-1', true],
-      ['gateway', 'claude-opus-5-5', false],
       ['codex_signin', 'gpt-5.5', false],
     ];
     for (const [kind, model, runs] of rows) {

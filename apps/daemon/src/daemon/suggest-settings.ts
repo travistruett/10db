@@ -80,6 +80,7 @@ export type SettingsProject = Pick<
   | 'sandboxDocker'
   | 'sandboxDockerOptOut'
   | 'areas'
+  | 'accountId'
 >;
 
 export interface SuggestedSettings {
@@ -161,6 +162,7 @@ function devLoginSource(found: readonly DevLogin[], scripts: ReadonlyMap<string,
 
 async function devLogin(
   deps: SuggestSettingsDeps,
+  project: SettingsProject,
   files: readonly string[],
   packages: ReadonlyMap<string, string>,
   read: Reader,
@@ -177,6 +179,7 @@ async function devLogin(
     devLoginPrompt(found, evidence),
     deps.askMs ?? NAMING_MS,
     signal,
+    project.accountId,
   );
   const command = text === null ? null : devLoginAnswer(text, found, devLoginWords(found, scripts));
   if (command === null) return null;
@@ -302,7 +305,7 @@ export async function suggestSettings(
       ? appAddress(deps, project.repoPath, files, read, uiUnit, signal).catch(() => null)
       : null,
     project.devLoginCommand === null && tracking !== null
-      ? devLogin(deps, files, packages, read, signal).catch(() => null)
+      ? devLogin(deps, project, files, packages, read, signal).catch(() => null)
       : null,
   ]);
   const found =

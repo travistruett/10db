@@ -5,7 +5,6 @@ import {
   ConversationState,
   mintId,
   ModelMarkBasis,
-  providerOf,
   SessionMode,
   type ConversationItemId,
 } from '@10db/contracts';
@@ -123,7 +122,12 @@ export function createStarts(core: EngineCore, turns: ExploreTurns): ExploreStar
     // A fresh session after the agent has spoken is told what came before; the digest is kept with the
     // session's row, so a start that fails or is cancelled stores none.
     const digest = fresh && turns.spoke(rt) ? hooks.digest(conv) : null;
-    const limits: PictureLimits = hooks.limits?.(conv) ?? pictureLimitsFor(account.kind);
+    const limits: PictureLimits =
+      hooks.limits?.(conv) ??
+      pictureLimitsFor(account.kind, {
+        accountId: account.id,
+        launchId: hooks.describeModel(conv, conv.model).launchId,
+      });
     const out = combined(
       items.map((item) => hooks.outgoing(conv, item, { fresh, digest, limits })),
     );
@@ -138,7 +142,7 @@ export function createStarts(core: EngineCore, turns: ExploreTurns): ExploreStar
       insertSession(ctx, {
         id: sessionId,
         conversationId: rt.id,
-        provider: providerOf(account.kind),
+        provider: account.harness,
         model: running.launchId,
         effort: running.effort,
         mode: SessionMode.Managed,

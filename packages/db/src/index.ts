@@ -1,3 +1,4 @@
+export { GatewayAccountError, refuseGatewayAccounts } from './gateway-accounts';
 export {
   DB_MIGRATIONS_DIR,
   DanglingRowsError,

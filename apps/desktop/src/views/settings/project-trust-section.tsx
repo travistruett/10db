@@ -1,4 +1,5 @@
 import {
+  AccountKind,
   LIVE_SYSTEM_MAX_CHARS,
   LIVE_SYSTEMS_MAX,
   TrustOverrides,
@@ -20,6 +21,7 @@ import {
 } from '@mantine/core';
 import { useId, useState, type ReactNode } from 'react';
 import { z } from 'zod';
+import { useAccounts } from '../../daemon/account-queries';
 import { DaemonRequestError } from '../../daemon/client';
 import {
   useLiveSystems,
@@ -280,11 +282,17 @@ function AllowedInProject({ projectId }: { readonly projectId: ProjectDto['id'] 
   );
 }
 
+/** What Codex's search does through OpenRouter, which the spike found live and absent from the transcript. */
+const OPENROUTER_WEB = "On OpenRouter, web search is live and doesn't show in the transcript.";
+
 /** A project's Trust: each switch as the app has it, or on or off for this project alone. */
 export function ProjectTrustSection({ project }: { readonly project: ProjectDto }) {
   const trust = useProjectTrust(project.id);
   const app = useTrust();
   const set = useSetProjectTrust(project.id);
+  const accounts = useAccounts();
+  const onOpenRouter =
+    accounts.data?.find((a) => a.id === project.accountId)?.kind === AccountKind.OpenRouter;
   const overrides = trust.data?.overrides;
   const plugins = app.data?.plugins ?? [];
   const mcpServers = (app.data?.mcpServers ?? []).filter(
@@ -300,7 +308,11 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
             label={row.label}
             description={
               <TrustRowText
-                description={row.description}
+                description={
+                  row.key === 'web' && onOpenRouter
+                    ? `${row.description} ${OPENROUTER_WEB}`
+                    : row.description
+                }
                 providers={row.providers}
                 whileOn={
                   (overrides?.[row.key] ?? app.data?.switches[row.key]) === true

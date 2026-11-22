@@ -105,10 +105,9 @@ describe('accounts over HTTP', () => {
     try {
       const { api, keychain, state } = await start();
       const { account, signIn } = await api.post('/accounts', AccountCreatedDto, {
-        kind: 'gateway',
-        label: 'OpenRouter',
+        kind: 'anthropic_api_key',
+        label: 'API key',
         monthlyCapUsd: 100,
-        settings: { baseUrl: 'https://openrouter.ai/api' },
       });
       expect(signIn).toBeNull();
       expect(account.secretSet).toBe(false);

@@ -38,6 +38,7 @@ const PUBLIC_RESEARCH = [
   'spike-15-gh-ci-checks.md',
   'spike-16-codex-app-server.md',
   'spike-17-account-model-lists.md',
+  'spike-18-codex-on-openrouter.md',
 ];
 
 /** The numbered log is closed: parallel branches collided on the next number. */

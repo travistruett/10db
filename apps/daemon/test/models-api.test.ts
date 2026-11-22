@@ -1,4 +1,10 @@
-import { AccountCreatedDto, JudgeStatusDto, ModelRowDto, type Effort } from '@10db/contracts';
+import {
+  AccountCreatedDto,
+  AccountDto,
+  JudgeStatusDto,
+  ModelRowDto,
+  type Effort,
+} from '@10db/contracts';
 import {
   findModelProfile,
   listAccountModels,
@@ -10,7 +16,7 @@ import { z } from 'zod';
 import { startDaemon, type RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
-import { tempDir, waitFor } from './fixtures';
+import { createMemoryKeychain, tempDir, waitFor } from './fixtures';
 import { readModelsDevFixture } from './models-dev-fixture';
 
 const QUIET = { caffeinate: () => null, watch: false } as const;
@@ -54,7 +60,25 @@ async function start(
     ...(opts.openRouterSync === undefined ? {} : { openRouterSync: opts.openRouterSync }),
     ...(opts.judgeOff === true ? { judgeOff: true } : {}),
     ...(opts.benchmarksOff === true ? { benchmarksOff: true } : {}),
-    fetch: () => {
+    keychain: createMemoryKeychain(),
+    fetch: (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      // The test decision a switch of decisions' account asks.
+      if (url.endsWith('/systemone'))
+        return Promise.resolve(
+          Response.json({
+            model: 'typesafe/jev-1.13',
+            answers: {
+              decision: {
+                type: 'choice',
+                choice: 'review',
+                confidence: 0.9,
+                probabilities: { review: 0.9 },
+              },
+            },
+            usage: { input_tokens: 10, output_tokens: 2, cost: 0 },
+          }),
+        );
       if (opts.offline?.value === true) return Promise.reject(new Error('offline'));
       return Promise.resolve(new Response(JSON.stringify(readModelsDevFixture())));
     },
@@ -110,6 +134,7 @@ describe('the model list over HTTP', () => {
       kind: 'openrouter',
       label: 'OpenRouter',
     });
+    await api.put(`/accounts/${openRouter.id}/secret`, AccountDto, { secret: 'a-fake-key' });
     await api.patch('/judge', JudgeStatusDto, { accountId: openRouter.id });
     const rows = await api.get(`/models?account=${account.id}`, z.array(ModelRowDto));
     expect(rows.find((r) => r.model === 'claude-opus-5-5')).toMatchObject({

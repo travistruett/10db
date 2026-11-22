@@ -1,7 +1,7 @@
 import { Provider } from '@10db/contracts';
 import type { OpenRouterMeasure } from '@10db/db';
 import { joinModel, RUNTIME_MAKER } from './join';
-import type { Catalogue } from './source';
+import type { Catalogue, CatalogueModel } from './source';
 
 const DATE_SUFFIX = /-\d{8}$/;
 
@@ -21,10 +21,15 @@ export function openRouterProvider(id: string): Provider | null {
  * or by normalised form, or places on two entries, is null. There is no fuzzy match.
  */
 export function joinOpenRouterId(id: string, catalogue: Catalogue): string | null {
+  return joinOpenRouterEntry(id, catalogue)?.id ?? null;
+}
+
+/** The catalogue entry `joinOpenRouterId` names, or null. */
+export function joinOpenRouterEntry(id: string, catalogue: Catalogue): CatalogueModel | null {
   const provider = openRouterProvider(id);
   if (provider === null) return null;
   const model = id.slice(id.indexOf('/') + 1).replace(DATE_SUFFIX, '');
-  return joinModel(model, provider, catalogue)?.id ?? null;
+  return joinModel(model, provider, catalogue);
 }
 
 /** OpenRouter's rows grouped by the catalogue model each joins to; a row that joins nothing is dropped. */

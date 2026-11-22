@@ -39,7 +39,7 @@ const readConfig = (home: string): z.infer<typeof TestConfig> =>
 describe('codex home', () => {
   it('writes the template and the guard hook', async () => {
     const { home, checkout } = setup();
-    await codexHomes()(home).prepare(checkout);
+    await codexHomes()(home, 'chatgpt').prepare(checkout);
     const config = readConfig(home);
     expect(config).toMatchObject({
       forced_login_method: 'chatgpt',
@@ -83,11 +83,11 @@ describe('codex home', () => {
   it('replaces a trusted entry Codex wrote with untrusted', async () => {
     const { home, checkout } = setup();
     const homes = codexHomes();
-    await homes(home).prepare(checkout);
+    await homes(home, 'chatgpt').prepare(checkout);
     const config = readConfig(home);
     config.projects[checkout] = { trust_level: 'trusted' };
     writeFileSync(join(home, 'config.toml'), stringify(config));
-    await homes(home).prepare(checkout);
+    await homes(home, 'chatgpt').prepare(checkout);
     expect(readConfig(home).projects[checkout]).toEqual({ trust_level: 'untrusted' });
   });
 });

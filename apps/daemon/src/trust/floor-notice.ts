@@ -1,4 +1,4 @@
-import { AccountKind, type AgentAccountKind } from '@10db/contracts';
+import { Provider, type SupportedAccountKind } from '@10db/contracts';
 import { autoModeRuns } from './auto-mode-models';
 
 type ValueOf<T> = T[keyof T];
@@ -6,7 +6,7 @@ type ValueOf<T> = T[keyof T];
 /** Why a session, or a call, is judged by 10db's rules and not by a judge. */
 export const FloorReason = {
   Setting: 'setting',
-  /** The account's judge is 10db's, and it isn't ready: no OpenRouter key, or a switch off. */
+  /** The account's judge is 10db's, and it isn't ready: no account that can power Decisions, or a switch off. */
   NoJudge: 'no_judge',
   /** 10db's judge timed out or failed mid-session, so its calls meet the rules for a while. */
   JudgeUnavailable: 'judge_unavailable',
@@ -17,16 +17,17 @@ export type FloorReason = ValueOf<typeof FloorReason>;
 /**
  * The reason a session starts on the rules floor, or null when it starts on a judge. `autoMode` is
  * whether the lane asks for auto mode (the app-wide setting); `tendbReady` whether 10db's judge can answer,
- * for an account auto mode doesn't judge (a gateway, Codex, a model auto mode doesn't run on).
+ * for an account auto mode doesn't judge (the Codex harness, a model auto mode doesn't run on).
  */
 export function floorReason(input: {
-  kind: AgentAccountKind;
+  kind: SupportedAccountKind;
+  harness: Provider;
   model: string | null;
   autoMode: boolean;
   tendbReady: boolean;
 }): FloorReason | null {
   if (!input.autoMode) return FloorReason.Setting;
-  const tendb = input.kind === AccountKind.CodexSignin || !autoModeRuns(input.kind, input.model);
+  const tendb = input.harness === Provider.Codex || !autoModeRuns(input.kind, input.model);
   return tendb && !input.tendbReady ? FloorReason.NoJudge : null;
 }
 
@@ -39,7 +40,7 @@ function floorCause(reason: FloorReason, detail: string): string {
     case FloorReason.Setting:
       return '"Lanes decide routine permissions" is off in Settings';
     case FloorReason.NoJudge:
-      return "10db's judge needs an OpenRouter key and its Limits switch on in Settings › Decisions";
+      return "10db's judge needs an account that can power Decisions and its Limits switch on in Settings › Decisions";
     case FloorReason.JudgeUnavailable:
       return `10db's judge didn't answer (${detail})`;
     case FloorReason.LeftAutoMode:

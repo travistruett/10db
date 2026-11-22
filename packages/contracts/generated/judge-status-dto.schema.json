@@ -323,6 +323,18 @@
                 "missing",
                 "changed"
               ]
+            },
+            "fallback": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "awsProfile": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [

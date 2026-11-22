@@ -1,7 +1,7 @@
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { BlockList, isIPv6 } from 'node:net';
 import { homedir } from 'node:os';
-import { DeniedBy, Provider, providerOf, type ProjectDto } from '@10db/contracts';
+import { DeniedBy, Provider, type ProjectDto } from '@10db/contracts';
 import { getProject, listPermissionRules, listProjects } from '@10db/db';
 import { allCheckouts, projectAtCheckout } from '../delivery';
 import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
@@ -332,17 +332,15 @@ export function createShapePreparer(
         // A conversation has no workstream: only the project's own rules hold.
         rules: listPermissionRules(state.db, project.id, null),
         resumeProviderSessionId: input.resumeProviderSessionId,
-        configDir: sessionConfigDir(input.accountKind, input.env, homedir()),
+        configDir: sessionConfigDir(input.harness, input.env, homedir()),
         checkouts: allCheckouts(state.db),
         mcpServers: servers.stdio,
         yourMcpServers: yours.stdio,
         readOnly: input.writes !== true,
         ...(input.planFiles === undefined ? {} : { planFiles: input.planFiles }),
         // The agent that runs the session, and a ChatGPT session's temp root, as its lane's would be.
-        provider: providerOf(input.accountKind),
-        ...(providerOf(input.accountKind) === Provider.Codex
-          ? { tempRoot: deps.codexLaneTempRoot }
-          : {}),
+        provider: input.harness,
+        ...(input.harness === Provider.Codex ? { tempRoot: deps.codexLaneTempRoot } : {}),
       });
     } catch (error) {
       logger.warn({ err: error, projectId: project.id }, 'a Plan sandbox could not be built');

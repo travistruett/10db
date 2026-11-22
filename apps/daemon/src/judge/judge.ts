@@ -1,4 +1,5 @@
 import {
+  AccountKind,
   JUDGE_TIMEOUT_MS,
   mintId,
   type AccountId,
@@ -11,11 +12,14 @@ import {
   type TaskId,
   type WorkstreamId,
 } from '@10db/contracts';
-import { getJudgeConfig, insertJudgeCall } from '@10db/db';
+import { getJudgeConfig, insertJudgeCall, listAccountModels } from '@10db/db';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
 import type { Logger } from '../log';
-import { askModel, modelApi, optionsText, type ModelAnswer } from './openrouter';
+import { askModel, type ModelQuestion } from './ask';
+import type { BedrockClientFactory } from './bedrock';
+import { ModelApi, modelApi, optionsText, type ModelAnswer } from './openrouter';
+import { NO_DECISION_CREDENTIAL, secretsOf, type JudgeCredential } from './credential';
 import { untilAborted } from './until-aborted';
 
 /** Logged calls are kept this long; older rows are deleted when the daemon starts. */
@@ -79,6 +83,11 @@ export interface JudgeService extends Judge {
    * model when none is given) answers a decision 10db can use. Logs nothing.
    */
   test(account: AccountId, model?: string): Promise<JudgeTestResultDto>;
+  /**
+   * Why the account's latest call fell back to rules (a rejected key, an expired profile, a timeout, no credential),
+   * or null when its latest call answered or none ran since the daemon started.
+   */
+  lastFallback(account: AccountId): string | null;
 }
 
 export interface JudgeDeps {
@@ -86,10 +95,12 @@ export interface JudgeDeps {
   readonly clock: Clock;
   readonly fetch: typeof fetch;
   /**
-   * The OpenRouter key of `accountId`, read fresh for every call; null when there is none: no account,
-   * an archived or other kind of account, or a secret that is missing or changed.
+   * The credential of the account `accountId`, read fresh for every call; null when there is none: no account,
+   * an archived or unable account, or a secret that is missing or changed.
    */
-  readonly readKey: (accountId: AccountId | null) => Promise<string | null>;
+  /** Builds Bedrock's runtime client; the SDK's own when absent. */
+  readonly bedrockClient?: BedrockClientFactory;
+  readonly readCredential: (accountId: AccountId | null) => Promise<JudgeCredential | null>;
   /** The ids of OpenRouter's decision models, which say which endpoint a model answers on; null when unknown. Never waits. */
   readonly decisionModelIds: () => ReadonlySet<string> | null;
   /** The daemon was started with `TENDB_JUDGE=off`: no key is read and nothing is sent. */
@@ -125,9 +136,24 @@ function messageOf(error: unknown): string {
 }
 
 export function createJudge(deps: JudgeDeps): JudgeService {
-  /** Replaces the key wherever it appears, so a server that echoes it back cannot put it in a log. */
-  function scrub(text: string, key: string | null): string {
-    return key === null || key.length === 0 ? text : text.split(key).join('[key]');
+  /** Replaces every secret wherever it appears, so a server that echoes one back cannot put it in a log. */
+  function scrub(text: string, credential: JudgeCredential | null): string {
+    return secretsOf(credential).reduce(
+      (out, secret) => (secret.length === 0 ? out : out.split(secret).join('[key]')),
+      text,
+    );
+  }
+
+  /** The latest outcome of a call on each account: the reason it fell back, or null when it answered. */
+  const lastFallbacks = new Map<AccountId, string | null>();
+
+  /** What the account lists as the model's price per million tokens; undefined when it lists none. */
+  function listedPrice(accountId: AccountId | null, model: string): ModelQuestion['price'] {
+    if (accountId === null) return undefined;
+    const row = listAccountModels(deps.state.db, accountId).find((m) => m.launchId === model);
+    return row?.inputPrice == null || row.outputPrice === null
+      ? undefined
+      : { inputUsdPerMillion: row.inputPrice, outputUsdPerMillion: row.outputPrice };
   }
 
   /** One call to `model`, bounded by `timeoutMs` on the injected clock and by the caller's signal. */
@@ -150,30 +176,41 @@ export function createJudge(deps: JudgeDeps): JudgeService {
     q.signal?.addEventListener('abort', onCallerAbort, { once: true });
     const started = deps.clock.now().getTime();
     const elapsed = (): number => deps.clock.now().getTime() - started;
-    let key: string | null = null;
+    let credential: JudgeCredential | null = null;
     try {
-      // The key read is part of the call: a slow Keychain counts against the same timeout.
-      key = await untilAborted(deps.readKey(accountId), controller.signal);
+      // The credential read is part of the call: a slow Keychain counts against the same timeout.
+      credential = await untilAborted(deps.readCredential(accountId), controller.signal);
       // A call cut short while the key was read sends nothing.
       controller.signal.throwIfAborted();
-      if (key === null)
+      if (credential === null)
         return {
           kind: 'fallback',
           reason: 'no_key',
-          detail: 'No OpenRouter key is set',
+          detail: NO_DECISION_CREDENTIAL,
           latencyMs: null,
         };
-      const answer = await askModel({
-        model,
-        api: modelApi(model, deps.decisionModelIds),
-        state: q.state,
-        question: q.question,
-        options: q.options,
-        ...(q.criteria === undefined ? {} : { criteria: q.criteria }),
-        key,
-        fetch: deps.fetch,
-        signal: controller.signal,
-      });
+      const price =
+        credential.kind === AccountKind.OpenRouter ? undefined : listedPrice(accountId, model);
+      const answer = await untilAborted(
+        askModel({
+          model,
+          api:
+            credential.kind === AccountKind.OpenRouter
+              ? modelApi(model, deps.decisionModelIds)
+              : ModelApi.Chat,
+          state: q.state,
+          question: q.question,
+          options: q.options,
+          ...(q.criteria === undefined ? {} : { criteria: q.criteria }),
+          ...(price === undefined ? {} : { price }),
+          credential,
+          ...(deps.bedrockClient === undefined ? {} : { bedrockClient: deps.bedrockClient }),
+          fetch: deps.fetch,
+          signal: controller.signal,
+        }),
+        // A credential lookup the SDK makes before it reads the signal (an SSO profile) is bounded too.
+        controller.signal,
+      );
       return { kind: 'answered', answer, latencyMs: elapsed() };
     } catch (error) {
       if (timeout.fired)
@@ -194,7 +231,7 @@ export function createJudge(deps: JudgeDeps): JudgeService {
       return {
         kind: 'fallback',
         reason: 'error',
-        detail: scrub(messageOf(error), key),
+        detail: scrub(messageOf(error), credential),
         latencyMs: elapsed(),
       };
     } finally {
@@ -262,6 +299,9 @@ export function createJudge(deps: JudgeDeps): JudgeService {
         req,
         deps.timeoutMs ?? JUDGE_TIMEOUT_MS,
       );
+      // A decision's own calls say whether the account is answering; a test of another model does not.
+      if (config.accountId !== null && !(result.kind === 'fallback' && result.reason === 'stopped'))
+        lastFallbacks.set(config.accountId, result.kind === 'fallback' ? result.detail : null);
       if (result.kind === 'fallback')
         return fallback(result.reason, result.detail, result.latencyMs);
       const { answer } = result;
@@ -304,8 +344,11 @@ export function createJudge(deps: JudgeDeps): JudgeService {
     try {
       const config = getJudgeConfig(deps.state.db);
       if (!config.enabled || !config.decisions[decision].enabled) return false;
-      const key = await untilAborted(deps.readKey(config.accountId), controller.signal);
-      return key !== null && key.length > 0;
+      const credential = await untilAborted(
+        deps.readCredential(config.accountId),
+        controller.signal,
+      );
+      return credential !== null;
     } catch {
       // A key read that throws or doesn't answer in time means no call could run now.
       return false;
@@ -325,7 +368,7 @@ export function createJudge(deps: JudgeDeps): JudgeService {
     if (result.kind === 'fallback')
       return {
         ok: false,
-        error: result.reason === 'no_key' ? 'No OpenRouter key is set' : result.detail,
+        error: result.reason === 'no_key' ? NO_DECISION_CREDENTIAL : result.detail,
       };
     return {
       ok: true,
@@ -335,5 +378,11 @@ export function createJudge(deps: JudgeDeps): JudgeService {
     };
   }
 
-  return { off: deps.off, choose, ready, test };
+  return {
+    off: deps.off,
+    choose,
+    ready,
+    test,
+    lastFallback: (account) => lastFallbacks.get(account) ?? null,
+  };
 }

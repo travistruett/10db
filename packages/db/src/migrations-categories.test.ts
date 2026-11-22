@@ -31,7 +31,7 @@ it('carries a stored environment card and route over to access, and leaves the r
   db.$client.pragma('foreign_keys = OFF');
   run(
     `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, created_at, updated_at)
-     VALUES ('acc_x', 'gateway', 'gw', 'me', '{}', 2, ?, ?)`,
+     VALUES ('acc_x', 'anthropic_api_key', 'gw', 'me', '{}', 2, ?, ?)`,
     AT,
     AT,
   );

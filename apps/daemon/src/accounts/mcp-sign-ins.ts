@@ -1,5 +1,7 @@
 import {
   AccountKind,
+  harnessOf,
+  Provider,
   ConflictError,
   EventType,
   McpSignInState,
@@ -139,7 +141,8 @@ export function createMcpSignIns(deps: {
     });
     const read = deps.adapter
       .mcpAuthStatus({
-        kind: AccountKind.CodexSignin,
+        kind: row.kind,
+        harness: Provider.Codex,
         env,
         servers: Object.fromEntries(candidates.map((c) => [c.name, c.server])),
       })
@@ -218,7 +221,7 @@ export function createMcpSignIns(deps: {
     const candidates = signInCandidates(deps.plan());
     if (candidates.length === 0) return { rows: [], terminal: [] };
     const accounts = listAccounts(db);
-    const codex = accounts.filter((account) => account.kind === AccountKind.CodexSignin);
+    const codex = accounts.filter((account) => harnessOf(account) === Provider.Codex);
     const reads = await Promise.all(codex.map((account) => statusOf(account.id, candidates)));
     return {
       rows: codex.flatMap((account, index) => {
@@ -272,7 +275,7 @@ export function createMcpSignIns(deps: {
       throw new NotFoundError('account', input.accountId);
     const candidate = signInCandidates(deps.plan()).find((c) => c.key === input.key);
     if (candidate === undefined) throw new NotFoundError('mcp server', input.key);
-    if (account.kind !== AccountKind.CodexSignin)
+    if (harnessOf(account) !== Provider.Codex)
       throw new ConflictError(
         'Only a Codex account signs in to a server here. Sign a Claude account in with its own Claude Code.',
       );
@@ -298,7 +301,8 @@ export function createMcpSignIns(deps: {
     const launch = async (): Promise<void> => {
       try {
         const handle = await deps.adapter.startMcpSignIn({
-          kind: AccountKind.CodexSignin,
+          kind: account.kind,
+          harness: Provider.Codex,
           env,
           name: candidate.name,
           server: candidate.server,

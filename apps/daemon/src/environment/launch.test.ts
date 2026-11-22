@@ -80,37 +80,62 @@ describe('the project env', () => {
   });
 });
 
-describe('a session launch', () => {
-  it('refuses an OpenRouter account without reading the Keychain, session and probe alike', () => {
-    let reads = 0;
-    const memory = createMemoryKeychain({ 'account:o': SECRET });
-    const watching = createLauncher({
-      base: BASE,
+describe('an OpenRouter launch', () => {
+  const KEY = 'sk-or-v1-account-key';
+  const CODEX_DIR = '/d/acc/codex-or';
+  const row = (overrides: Partial<AccountRow> = {}): AccountRow =>
+    account({
+      kind: 'openrouter',
+      expectedIdentity: null,
+      secretRef: 'account:o',
+      secretFingerprint: secretFingerprint(KEY),
+      configDir: CODEX_DIR,
+      ...overrides,
+    });
+  const over = (reads?: { count: number }) => {
+    const memory = createMemoryKeychain({ 'account:o': KEY });
+    return createLauncher({
+      base: { ...BASE, OPENROUTER_API_KEY: 'sk-or-from-zshrc' },
       clientApp: '10db/0.1.0',
       keychain: {
         ...memory,
         read: (name) => {
-          reads += 1;
+          if (reads) reads.count += 1;
           return memory.read(name);
         },
       },
     });
-    const row = account({
-      kind: 'openrouter',
-      expectedIdentity: null,
-      secretRef: 'account:o',
-      secretFingerprint: secretFingerprint(SECRET),
-      configDir: null,
-      laneCap: 0,
-    });
+  };
+
+  it('runs Codex in its own home with the account key, never the builder keys or home', () => {
+    const { env } = over().session(row(), 'openai/gpt-5', []);
+    expect(env['OPENROUTER_API_KEY']).toBe(KEY);
+    expect(env['CODEX_HOME']).toBe(CODEX_DIR);
+    for (const name of ['OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'CODEX_ACCESS_TOKEN'])
+      expect(env).not.toHaveProperty(name);
+  });
+
+  it('hands a takeover the key through the Keychain, with the builder keys unset', () => {
+    const launch = over().takeover(row(), 'openai/gpt-5', []);
+    expect(launch.set['CODEX_HOME']).toBe(CODEX_DIR);
+    expect(launch.keychain).toEqual([{ variable: 'OPENROUTER_API_KEY', account: 'account:o' }]);
+    expect(launch.scrub).toBe(true);
+    expect(launch.unset).toContain('OPENAI_API_KEY');
+    expect(JSON.stringify(launch)).not.toContain(KEY);
+  });
+
+  it('refuses a row with no home of its own, before it reads the Keychain: never ~/.codex', () => {
+    const reads = { count: 0 };
+    const stray = row({ configDir: null, laneCap: 0 });
     for (const launch of [
-      () => watching.session(row, 'claude-sonnet-5-5', []),
-      () => watching.probe(row),
+      () => over(reads).session(stray, 'openai/gpt-5', []),
+      () => over(reads).probe(stray),
+      () => over(reads).takeover(stray, 'openai/gpt-5', []),
     ])
       expect(launch).toThrow(
-        expect.objectContaining({ name: 'AccountLaunchError', accountId: row.id }) as Error,
+        expect.objectContaining({ name: 'AccountLaunchError', accountId: stray.id }) as Error,
       );
-    expect(reads).toBe(0);
+    expect(reads.count).toBe(0);
   });
 });
 

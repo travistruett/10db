@@ -62,7 +62,11 @@ const NO_PAGE =
 
 function limitsOf(db: DbReader, sessionId: DesignCheckDeps['sessionId']): PictureLimits {
   try {
-    return pictureLimitsFor(getAccount(db, getSession(db, sessionId).accountId).kind);
+    const session = getSession(db, sessionId);
+    return pictureLimitsFor(getAccount(db, session.accountId).kind, {
+      accountId: session.accountId,
+      launchId: session.model,
+    });
   } catch {
     return STRICTEST_LIMITS;
   }

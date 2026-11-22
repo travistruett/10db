@@ -336,13 +336,12 @@ describe('resolveStep', () => {
     expect.soft(ran(held), 'other effort: runs').toBe('big@high');
   });
 
-  it('launches a tier override only when it is offered, or typed on a gateway that lists no models', () => {
+  it('launches a tier override only when the account offers it', () => {
     const rows: {
       name: string;
       rows: AccountModelDto[];
       overrides: Partial<Record<ModelTier, string>>;
       setting: ModelSetting;
-      gateway?: boolean;
       want: string;
       profile: boolean;
     }[] = [
@@ -362,24 +361,13 @@ describe('resolveStep', () => {
         want: 'big',
         profile: true,
       },
-      {
-        name: 'a model typed against a tier on a gateway that lists none is launched',
-        rows: [],
-        overrides: { balanced: 'my-gateway/model' },
-        setting: tier(ModelTier.Balanced),
-        gateway: true,
-        want: 'my-gateway/model',
-        profile: false,
-      },
     ];
-    for (const { name, rows: listed, overrides, setting, gateway, want, profile } of rows) {
-      const { rows: offered, profiles } = gateway ? { rows: [], profiles: [] } : offering(listed);
-      const step = gateway
-        ? planned('mid@high', { model: ModelTier.Balanced, profileId: null, setting })
-        : planned('mid@high', { setting });
+    for (const { name, rows: listed, overrides, setting, want, profile } of rows) {
+      const { rows: offered, profiles } = offering(listed);
+      const step = planned('mid@high', { setting });
       const out = resolveStep(
         step,
-        gateway ? { label: 'Gateway' } : ACCOUNT,
+        ACCOUNT,
         profiles,
         offered,
         context({ tierOverrides: overrides }),

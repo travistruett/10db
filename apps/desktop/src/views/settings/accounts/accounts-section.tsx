@@ -1,4 +1,11 @@
-import { AccountKind, runsAgents, type AccountDto, type AccountId } from '@10db/contracts';
+import {
+  AccountKind,
+  harnessOf,
+  PLAN_LOGIN_CANT_DECIDE,
+  powersDecisions,
+  type AccountDto,
+  type AccountId,
+} from '@10db/contracts';
 import {
   Accordion,
   Alert,
@@ -28,7 +35,7 @@ import { settingsSearch } from '../focus-target';
 import { MARK_OF_KIND, RowMarkIcon } from '../row-mark';
 import { ACCOUNT_STATUS_LABEL, AccountStatus, accountStatus } from './account-status';
 import { capShare, formatTokens, formatUsd } from './usage-text';
-import { CANT_RUN_AGENTS, accountUsedBy, usedByText } from './used-by';
+import { accountUsedBy, harnessLine, usedByText } from './used-by';
 
 /** The same tones Overview's account rows use: ready works, anything missing needs the builder, archived is off. */
 const STATUS_TONE: Readonly<Record<AccountStatus, ConnectionTone>> = {
@@ -48,9 +55,6 @@ function UsageCell({ account }: { readonly account: AccountDto }) {
       </Text>
     );
   const { total, monthlyCapUsd } = usage.data;
-  // An OpenRouter account runs no session: its month is its decisions' dollars, or a dash when none are its own.
-  if (account.kind === AccountKind.OpenRouter)
-    return <Text size="sm">{total.costUsd === null ? '—' : formatUsd(total.costUsd)}</Text>;
   if (total.costUsd === null)
     return <Text size="sm">{formatTokens(total.tokensIn + total.tokensOut)} tokens</Text>;
   const share = capShare(usage.data);
@@ -103,16 +107,21 @@ function AccountRow({
               </Badge>
             ) : null}
           </Group>
-          {runsAgents(account.kind) ? (
+          {harnessOf(account) !== null && account.kind !== AccountKind.OpenRouter ? (
             <Text size="xs" c="dimmed">
               {account.expectedIdentity ?? 'No identity yet'}
             </Text>
           ) : null}
           <Text size="xs" c="dimmed">
             {usedByText(usedBy)}
-            {runsAgents(account.kind) ? '' : ` · ${CANT_RUN_AGENTS}`}
+            {` · ${harnessLine(account)}`}
           </Text>
-          {account.archived || !runsAgents(account.kind) ? null : (
+          <Text size="xs" c="dimmed">
+            {powersDecisions(account.kind)
+              ? 'Can answer decisions'
+              : `Can't answer decisions: ${PLAN_LOGIN_CANT_DECIDE}`}
+          </Text>
+          {account.archived || harnessOf(account) === null ? null : (
             <AccountPause account={account} />
           )}
         </Stack>

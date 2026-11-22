@@ -1,6 +1,5 @@
 import type { ConversationOwnerKind } from '@10db/contracts';
 import {
-  agentKind,
   ConflictError,
   ConversationItemAuthor,
   ConversationItemKind,
@@ -28,6 +27,7 @@ import {
   type ConversationItemRow,
   type ConversationRow,
 } from '@10db/db';
+import { accountAgentOf } from '../environment';
 import { pushedAgainAfter } from './delivery-rules';
 import type { ExploreOwnerHooks } from './explore-hooks';
 import { settleRestart } from './explore-recovery';
@@ -166,11 +166,11 @@ export function createExploreEngine(deps: ExploreEngineDeps): ExploreEngine {
     const project = getProject(state.db, conv.projectId);
     return {
       id: project.accountId,
-      kind: agentKind(getAccountRow(state.db, project.accountId).kind),
+      ...accountAgentOf(getAccountRow(state.db, project.accountId)),
     };
   };
   const capabilitiesOf = (conv: ConversationRow) =>
-    adapter.capabilities({ kind: accountOf(conv).kind }, conv.model);
+    adapter.capabilities(accountOf(conv), conv.model);
 
   const runtimeOf = (id: ConversationId): Runtime => {
     let rt = runtimes.get(id);

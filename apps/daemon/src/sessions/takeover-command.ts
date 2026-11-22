@@ -1,4 +1,4 @@
-import type { AgentAccountKind, Effort } from '@10db/contracts';
+import type { Effort, Provider, SupportedAccountKind } from '@10db/contracts';
 import type { TakeoverLaunch } from '../environment';
 
 // What the builder's own terminal runs to continue a chat in the agent's TUI: a description a pure renderer turns
@@ -57,8 +57,10 @@ export type CodexTakeoverServer =
  * to resume, and the setup the chat ran with. Files are the takeover folder's own; nothing here is a secret.
  */
 export interface TakeoverSpec {
-  /** The account's kind, which says which agent runs. */
-  readonly kind: AgentAccountKind;
+  /** The account's kind, which says what credential it holds. */
+  readonly kind: SupportedAccountKind;
+  /** The harness that runs it. */
+  readonly harness: Provider;
   /** The pinned agent binary. */
   readonly binary: string;
   readonly cwd: string;

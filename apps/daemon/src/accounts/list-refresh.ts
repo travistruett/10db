@@ -1,6 +1,8 @@
-import { runsAgents, type AccountId } from '@10db/contracts';
+import { AccountKind, harnessOf, type AccountId } from '@10db/contracts';
 import { getAccountRow, listAccountModels, listAccounts } from '@10db/db';
-import type { AccountLists } from '../catalogue';
+import { fetchToolModels } from '../benchmarks';
+import { rememberOpenRouterInputs } from '../conversation';
+import { rememberCacheReadPrices, type AccountLists } from '../catalogue';
 import type { Clock } from '../clock';
 import type { Launcher } from '../environment';
 import type { StateStore } from '../events';
@@ -37,6 +39,7 @@ export function createListRefresh(deps: {
   readonly startGate: StartGate;
   readonly lists: AccountLists;
   readonly dataDir: string;
+  readonly fetch: typeof fetch;
   readonly logger: Pick<Logger, 'warn'>;
 }): ListRefresh {
   const db = deps.state.db;
@@ -59,22 +62,50 @@ export function createListRefresh(deps: {
 
   async function probeAndRecord(id: AccountId): Promise<void> {
     const row = getAccountRow(db, id);
-    // An OpenRouter account lists no models and runs no agent: there is nothing to probe.
-    if (!runsAgents(row.kind)) return;
+    // An account no harness runs has no session to probe.
+    if (harnessOf(row) === null) return;
     const launch = deps.launcher.probe(row);
     const release = await deps.startGate.acquire(id);
     let seen: SeenAccount;
     try {
       seen = await deps.adapter.probeAccount({
         kind: row.kind,
+        harness: launch.expect.harness,
         cwd: deps.dataDir,
         env: launch.env,
       });
     } finally {
       release();
     }
-    if (checkAccount(launch.expect, seen) === null)
-      deps.lists.record({ id: row.id, kind: row.kind }, seen);
+    if (checkAccount(launch.expect, seen) !== null) return;
+    const account = { id: row.id, kind: row.kind, harness: launch.expect.harness };
+    if (row.kind !== AccountKind.OpenRouter) {
+      deps.lists.record(account, seen);
+      return;
+    }
+    // Codex lists no models on a custom provider: OpenRouter's own list, with its prices, is the account's.
+    const key = launch.env['OPENROUTER_API_KEY'];
+    if (key === undefined) return;
+    const listed = await fetchToolModels({ fetch: deps.fetch, key });
+    if (listed.kind !== 'ok') {
+      deps.logger.warn(
+        { accountId: id, outcome: listed.kind },
+        'could not read the models OpenRouter lists; keeping the last list',
+      );
+      return;
+    }
+    rememberOpenRouterInputs(row.id, listed.value);
+    rememberCacheReadPrices(row.id, listed.value);
+    deps.lists.record(account, {
+      ...seen,
+      models: listed.value.map((m) => ({
+        id: m.id,
+        resolvedId: null,
+        efforts: [],
+        inputPrice: m.inputPrice,
+        outputPrice: m.outputPrice,
+      })),
+    });
   }
 
   function readOne(id: AccountId): Promise<void> {
@@ -98,7 +129,7 @@ export function createListRefresh(deps: {
     async readAll({ staleOnly = false } = {}) {
       for (const account of listAccounts(db)) {
         if (stopped) return;
-        if (!runsAgents(account.kind)) continue;
+        if (harnessOf(account) === null) continue;
         if (staleOnly && !stale(account.id)) continue;
         await readOne(account.id);
       }

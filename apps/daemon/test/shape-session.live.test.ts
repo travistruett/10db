@@ -13,7 +13,7 @@ import {
 import type { AddressInfo } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { agentKind, mintId } from '@10db/contracts';
+import { mintId, Provider } from '@10db/contracts';
 import {
   createTestStore,
   insertSession,
@@ -32,6 +32,7 @@ import {
   createLauncher,
   ensureAgent,
   systemKeychain,
+  accountAgentOf,
 } from '../src/environment';
 import { createEventBus, createStateStore } from '../src/events';
 import { createGit } from '../src/git';
@@ -55,7 +56,11 @@ import { noisePng, pngImage } from './png';
 import { READ_CHARGE_MAX_BYTES } from '../src/conversation';
 
 /** The prompt for a subscription, whose agents take every alias. */
-const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(shapeAgentModels('claude_subscription'), true, true);
+const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(
+  shapeAgentModels('claude_subscription', Provider.Claude),
+  true,
+  true,
+);
 
 // Shape spec §5.2, §15: the confinement holds on the real SDK. Runs on the builder's Max
 // subscription through the logged-in claude; never in CI and never in `make gate`
@@ -105,7 +110,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       updatedAt: new Date(0).toISOString(),
     };
     const seen = await adapter.probeAccount({
-      kind: agentKind(account.kind),
+      ...accountAgentOf(account),
       cwd: checkout,
       env: launcher.probe(account).env,
     });
@@ -283,7 +288,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       updatedAt: new Date(0).toISOString(),
     };
     const seen = await adapter.probeAccount({
-      kind: agentKind(account.kind),
+      ...accountAgentOf(account),
       cwd: checkout,
       env: launcher.probe(account).env,
     });
@@ -406,7 +411,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       updatedAt: new Date(0).toISOString(),
     };
     const seen = await adapter.probeAccount({
-      kind: agentKind(defaultAccount.kind),
+      ...accountAgentOf(defaultAccount),
       cwd: checkout,
       env: launcher.probe(defaultAccount).env,
     });
@@ -630,7 +635,7 @@ async function readInSession(
     updatedAt: new Date(0).toISOString(),
   };
   const seen = await adapter.probeAccount({
-    kind: agentKind(account.kind),
+    ...accountAgentOf(account),
     cwd: checkout,
     env: launcher.probe(account).env,
   });

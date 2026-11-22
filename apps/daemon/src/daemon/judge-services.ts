@@ -1,15 +1,20 @@
 import {
   AccountKind,
+  BedrockSettings,
   ConflictError,
   InvalidError,
+  JudgeConfigPatch,
+  needsSecret,
+  parseAccountSettings,
+  powersDecisions,
   UpstreamError,
   type AccountId,
   type DecisionModelListDto,
   type JudgeConfig,
-  type JudgeConfigPatch,
   type JudgeStatusDto,
 } from '@10db/contracts';
 import {
+  checkDecisionAccount,
   findAccountRow,
   getAccountRow,
   getJudgeConfig,
@@ -19,7 +24,14 @@ import {
   listOpenRouterMeasures,
   pageJudgeCalls,
   patchJudgeConfig,
+  type AccountRow,
+  type DbReader,
 } from '@10db/db';
+import {
+  defaultDecisionModel,
+  offeredDecisionModels,
+  accountDecisionModelList,
+} from './decision-offer';
 import type { ApiServices } from '../api';
 import { openRouterLatencyMs } from '../catalogue';
 import type { Clock } from '../clock';
@@ -35,6 +47,8 @@ import {
   JUDGE_LOG_RETENTION_MS,
   typicalDecisionTokens,
   type DecisionModelList,
+  NO_DECISION_CREDENTIAL,
+  type JudgeCredential,
   type JudgeService,
 } from '../judge';
 
@@ -51,6 +65,13 @@ export type JudgeApiServices = Pick<
 >;
 
 /** The models a patch sets that differ from the ones saved, each once. */
+/** The AWS profile a Bedrock account signs with, or null when it has none or is another kind. */
+function awsProfileOf(account: AccountRow): string | null {
+  if (account.kind !== AccountKind.Bedrock) return null;
+  const settings = BedrockSettings.safeParse(account.settings);
+  return settings.success ? settings.data.awsProfile : null;
+}
+
 function newModels(config: JudgeConfig, patch: JudgeConfigPatch): string[] {
   const models = new Set<string>();
   for (const [decision, now] of Object.entries(config.decisions)) {
@@ -60,6 +81,58 @@ function newModels(config: JudgeConfig, patch: JudgeConfigPatch): string[] {
     if (model !== undefined && model !== now.model) models.add(model);
   }
   return [...models];
+}
+
+/** Every distinct model a patch leaves the decisions on, once. */
+function decisionModels(config: JudgeConfig, patch: JudgeConfigPatch): string[] {
+  const changes: Record<string, { readonly model?: string | undefined } | undefined> =
+    patch.decisions ?? {};
+  return [
+    ...new Set(
+      Object.entries(config.decisions).map(
+        ([decision, now]) => changes[decision]?.model ?? now.model,
+      ),
+    ),
+  ];
+}
+
+/** A decision may name only a model the account offers; an OpenRouter account's test decision is its check. */
+function refuseUnoffered(db: DbReader, account: AccountRow, models: readonly string[]): void {
+  const offered = offeredDecisionModels(db, account);
+  if (offered === null) return;
+  const unknown = models.find((m) => !offered.has(m));
+  if (unknown !== undefined) throw new InvalidError(`"${account.label}" does not offer ${unknown}`);
+}
+
+/**
+ * The patch that moves every decision to the account: each decision's model is the account's default unless the
+ * patch names one the account offers.
+ */
+function switchedTo(
+  db: DbReader,
+  account: AccountRow,
+  config: JudgeConfig,
+  patch: JudgeConfigPatch,
+): JudgeConfigPatch {
+  const named: Record<string, { readonly model?: string | undefined } | undefined> =
+    patch.decisions ?? {};
+  refuseUnoffered(
+    db,
+    account,
+    Object.values(named).flatMap((c) => (c?.model === undefined ? [] : [c.model])),
+  );
+  const fallback = defaultDecisionModel(db, account);
+  if (fallback === null)
+    throw new InvalidError(
+      `"${account.label}" has no model list yet; check the account in Settings › Accounts first`,
+    );
+  const decisions = Object.fromEntries(
+    Object.keys(config.decisions).map((decision) => [
+      decision,
+      { ...named[decision], model: named[decision]?.model ?? fallback },
+    ]),
+  );
+  return JudgeConfigPatch.parse({ ...patch, decisions });
 }
 
 /** A Keychain that refuses is a conflict the builder can act on, not a server fault. */
@@ -73,28 +146,40 @@ async function keychainConflict<T>(fn: () => T | Promise<T>): Promise<T> {
 }
 
 /**
- * The key a decision sends: the secret of the OpenRouter account decisions run on, through the same check
- * every account secret passes. No account, an archived or other kind of account, a missing or changed secret,
- * and a daemon started with the judge off, all mean no key.
+ * What a decision call is signed with: the secret of an OpenRouter or Anthropic API key account, through the same
+ * check every account secret passes, or a Bedrock account's region with its profile or bearer token (a profile reads
+ * no Keychain item). No account, an archived or other kind of account, a missing or changed secret, and a daemon
+ * started with the judge off, all mean no credential.
  */
-export function createJudgeKeyReader(deps: {
+export function createJudgeCredentialReader(deps: {
   readonly state: StateStore;
   readonly keychain: Keychain;
   readonly off: boolean;
-}): (accountId: AccountId | null) => Promise<string | null> {
+}): (accountId: AccountId | null) => Promise<JudgeCredential | null> {
   return async (accountId) => {
     if (deps.off || accountId === null) return null;
     const account = findAccountRow(deps.state.db, accountId);
-    if (!account || account.archived || account.kind !== AccountKind.OpenRouter) return null;
+    if (!account || account.archived) return null;
+    if (account.kind === AccountKind.OpenRouter || account.kind === AccountKind.AnthropicApiKey) {
+      const secret = await readAccountSecretAsync(account, deps.keychain);
+      return secret.state === 'set' ? { kind: account.kind, key: secret.secret } : null;
+    }
+    if (account.kind !== AccountKind.Bedrock) return null;
+    const settings = BedrockSettings.safeParse(account.settings);
+    if (!settings.success) return null;
+    const { region, awsProfile } = settings.data;
+    if (awsProfile !== null) return { kind: account.kind, region, awsProfile, bearerToken: null };
     const secret = await readAccountSecretAsync(account, deps.keychain);
-    return secret.state === 'set' ? secret.secret : null;
+    return secret.state === 'set'
+      ? { kind: account.kind, region, awsProfile: null, bearerToken: secret.secret }
+      : null;
   };
 }
 
 export function createJudgeServices(deps: {
   readonly state: StateStore;
   readonly keychain: Keychain;
-  readonly judge: Pick<JudgeService, 'test'>;
+  readonly judge: Pick<JudgeService, 'test' | 'lastFallback'>;
   /** OpenRouter's decision models, for the picker. */
   readonly models: Pick<DecisionModelList, 'list'>;
   /** Started with `TENDB_JUDGE=off`: no Keychain item is read, even to say whether it is set. */
@@ -111,9 +196,15 @@ export function createJudgeServices(deps: {
     if (!row || row.archived) return { config, account: null, off: deps.off };
     // Read off the event loop: the status is asked for on every visit to Settings. A daemon with the judge
     // off goes by the recorded fingerprint alone.
-    const secret: Pick<AccountSecret, 'state'> = deps.off
-      ? { state: row.secretFingerprint === null ? 'missing' : 'set' }
-      : await keychainConflict(() => readAccountSecretAsync(row, deps.keychain));
+    // An account that signs with an AWS profile keeps no secret, so none can be missing.
+    const secret: Pick<AccountSecret, 'state'> = !needsSecret(
+      row.kind,
+      parseAccountSettings(row.kind, row.settings),
+    )
+      ? { state: 'set' }
+      : deps.off
+        ? { state: row.secretFingerprint === null ? 'missing' : 'set' }
+        : await keychainConflict(() => readAccountSecretAsync(row, deps.keychain));
     return {
       config,
       account: {
@@ -121,6 +212,8 @@ export function createJudgeServices(deps: {
         label: row.label,
         secretSet: secret.state === 'set',
         secretState: secret.state,
+        fallback: deps.judge.lastFallback(row.id),
+        awsProfile: awsProfileOf(row),
       },
       off: deps.off,
     };
@@ -157,11 +250,21 @@ export function createJudgeServices(deps: {
   return {
     judgeStatus: status,
     async patchJudge(patch) {
-      // A model is saved only once it has answered a test decision with the key decisions will run on, so a setting
-      // is never left naming a model 10db can't use.
+      // A model is saved only once it has answered a test decision with the credential decisions will run on, so a
+      // setting is never left naming a model 10db can't use.
       const config = getJudgeConfig(deps.state.db);
       const accountId = patch.accountId === undefined ? config.accountId : patch.accountId;
-      const models = newModels(config, patch);
+      const account =
+        patch.accountId === undefined || patch.accountId === null
+          ? null
+          : checkDecisionAccount(deps.state.db, patch.accountId);
+      const switching = account !== null && account.id !== config.accountId;
+      const current =
+        accountId === null ? null : (account ?? findAccountRow(deps.state.db, accountId) ?? null);
+      let next: JudgeConfigPatch = patch;
+      if (switching) next = switchedTo(deps.state.db, account, config, patch);
+      const models = switching ? decisionModels(config, next) : newModels(config, patch);
+      if (current !== null && !switching) refuseUnoffered(deps.state.db, current, models);
       if (deps.off && models.length > 0)
         throw new ConflictError(
           'This daemon was started with TENDB_JUDGE=off, so it cannot test a model',
@@ -169,23 +272,29 @@ export function createJudgeServices(deps: {
       for (const model of models) {
         const result =
           accountId === null
-            ? { ok: false as const, error: 'No OpenRouter key is set' }
+            ? { ok: false as const, error: NO_DECISION_CREDENTIAL }
             : await keychainConflict(() => deps.judge.test(accountId, model));
         if (!result.ok)
           throw new InvalidError(
             `${model} didn't answer a test decision, so it wasn't saved: ${result.error}`,
           );
       }
-      deps.state.write((ctx) => patchJudgeConfig(ctx, patch));
+      deps.state.write((ctx) => patchJudgeConfig(ctx, next));
       if (accountId !== config.accountId) deps.onAccountChanged?.();
       return status();
     },
     testAccount(id) {
       const account = getAccountRow(deps.state.db, id);
-      if (account.kind !== AccountKind.OpenRouter)
-        throw new InvalidError(`Account "${account.label}" is not an OpenRouter account`);
+      if (!powersDecisions(account.kind))
+        throw new InvalidError(`Account "${account.label}" can't answer decisions`);
       if (deps.off) throw new ConflictError('This daemon was started with TENDB_JUDGE=off');
-      return keychainConflict(() => deps.judge.test(id));
+      // Each account is tried on its own default model: another account's model id means nothing to it.
+      const model = defaultDecisionModel(deps.state.db, account);
+      if (model === null)
+        throw new InvalidError(
+          `"${account.label}" has no model list yet; check the account in Settings › Accounts first`,
+        );
+      return keychainConflict(() => deps.judge.test(id, model));
     },
     listJudgeCalls: (limit) => listJudgeCalls(deps.state.db, limit),
     pageJudgeCalls: (query) => pageJudgeCalls(deps.state.db, query),
@@ -195,6 +304,13 @@ export function createJudgeServices(deps: {
     },
     async listDecisionModels() {
       if (deps.off) throw new ConflictError('This daemon was started with TENDB_JUDGE=off');
+      const { accountId } = getJudgeConfig(deps.state.db);
+      const account = accountId === null ? undefined : findAccountRow(deps.state.db, accountId);
+      if (account && !account.archived && account.kind !== AccountKind.OpenRouter)
+        return withNumbers({
+          models: accountDecisionModelList(deps.state.db, account),
+          fetchedAt: deps.clock.now().toISOString(),
+        });
       let list: DecisionModelListDto;
       try {
         list = await deps.models.list();

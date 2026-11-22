@@ -340,7 +340,11 @@ export async function createTestEngine(
         state,
         clock,
         fetch: setup.openRouter.fetch,
-        readKey: () => Promise.resolve(setup.openRouter?.key ?? 'test-key-0123456789'),
+        readCredential: () =>
+          Promise.resolve({
+            kind: 'openrouter',
+            key: setup.openRouter?.key ?? 'test-key-0123456789',
+          }),
         // Triage asks TypeSafe's models, which never need OpenRouter's decision list.
         decisionModelIds: () => null,
         off: false,

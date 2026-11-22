@@ -10,7 +10,7 @@ import {
   type ProjectDto,
   type ProjectId,
   type ProjectPatch,
-  runsAgents,
+  harnessOf,
 } from '@10db/contracts';
 import {
   findOpenByFoldKey,
@@ -88,7 +88,7 @@ export function moveTargets(
   isPaused: (id: AccountId) => boolean,
 ): AccountDto[] {
   return listAccounts(db).filter(
-    (a) => runsAgents(a.kind) && a.id !== project.accountId && !isPaused(a.id),
+    (a) => harnessOf(a) !== null && a.id !== project.accountId && !isPaused(a.id),
   );
 }
 

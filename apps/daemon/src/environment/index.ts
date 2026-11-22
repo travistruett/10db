@@ -1,3 +1,4 @@
+export { accountAgentOf, type AccountAgent } from './account-agent';
 export { readAccountSecretAsync, type AccountSecret } from './account-secret';
 export {
   AA_KEY_ACCOUNT,

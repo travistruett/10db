@@ -25,7 +25,7 @@ it('reads a rigor stored before sources as the builder’s, and leaves a task wi
   db.$client
     .prepare(
       `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, created_at, updated_at)
-       VALUES ('acc_x', 'gateway', 'gw', 'me', '{}', 2, ?, ?)`,
+       VALUES ('acc_x', 'anthropic_api_key', 'gw', 'me', '{}', 2, ?, ?)`,
     )
     .run(AT, AT);
   db.$client

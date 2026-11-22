@@ -31,7 +31,6 @@ const MARK_ICON: Readonly<Record<RowMark, Icon>> = {
 export const MARK_OF_KIND: Readonly<Record<AccountDto['kind'], RowMark>> = {
   claude_subscription: 'claude',
   anthropic_api_key: 'key',
-  gateway: 'key',
   bedrock: 'aws',
   codex_signin: 'openai',
   openrouter: 'key',

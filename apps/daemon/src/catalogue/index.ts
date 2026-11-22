@@ -10,3 +10,4 @@ export { buildModelRows } from './model-rows';
 export { groupMeasuresByModel, joinOpenRouterId } from './openrouter-join';
 export { openRouterLatencyMs, speedProviderFor } from './model-facts';
 export { modelMeasures } from './model-measures';
+export { cacheReadPriceOf, rememberCacheReadPrices } from './openrouter-cache-prices';
