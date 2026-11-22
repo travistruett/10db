@@ -116,7 +116,7 @@ export function DocumentsTab({
   if (doc === undefined)
     return (
       <Text size="sm" c="dimmed">
-        This Plan has no documents.
+        No documents yet. A spec the agent writes for this plan shows here.
       </Text>
     );
   const latest = doc.revisions.at(-1);

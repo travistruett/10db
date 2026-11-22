@@ -1,5 +1,6 @@
 import type { ShapeAttachmentDto, ShapeId, ShapeProposalDto } from '@10db/contracts';
-import { Button, Group, Stack, Text } from '@mantine/core';
+import { Anchor, Button, Group, Stack, Text } from '@mantine/core';
+import { IconCheck } from '@tabler/icons-react';
 import { createContext, use } from 'react';
 import { useApproveAttachment } from '../../../../daemon/shape-queries';
 import { AttachmentView } from './attachment-view';
@@ -19,7 +20,7 @@ export const AttachmentsContext = createContext<{
   onAskForChanges: () => undefined,
 });
 
-const KIND_LABEL = { mermaid: 'Diagram', chart: 'Chart', mockup: 'Mockup' } as const;
+const KIND_LABEL = { mermaid: 'Diagram', chart: 'Chart', mockup: 'Mock-up' } as const;
 
 /** One task of a goal, by its key in the goal's body. */
 export interface GoalTaskRef {
@@ -64,16 +65,28 @@ export function RowAttachments({
     <Stack gap={10}>
       {mine.map((a) => (
         <Stack key={a.id} gap={4}>
-          <Text fz={12} c="dimmed">
-            {KIND_LABEL[a.attachment.kind]}
-            {a.approved ? ' · approved' : ''}
-          </Text>
+          <Group gap={8} wrap="nowrap">
+            <Text fz={12} fw={600} c="dimmed">
+              {KIND_LABEL[a.attachment.kind]}
+            </Text>
+            {a.approved ? (
+              <Text fz={12} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <IconCheck
+                  size={14}
+                  stroke={2}
+                  color="var(--mantine-color-green-filled)"
+                  aria-hidden="true"
+                />
+                Approved
+              </Text>
+            ) : null}
+          </Group>
           <AttachmentView attachment={a.attachment} title={title} />
           {a.attachment.kind === 'mockup' &&
           a.goalId === null &&
           !(row.kind === 'goal' && a.key === row.key) ? (
             <Group gap={8} mt={8}>
-              <ApproveButton shapeId={shapeId} attachment={a} title={title} />
+              {a.approved ? null : <ApproveButton shapeId={shapeId} attachment={a} title={title} />}
               <Button
                 variant="default"
                 size="xs"
@@ -84,6 +97,12 @@ export function RowAttachments({
               >
                 Ask for Changes
               </Button>
+              {/* Approved, the undo is a quiet link at the right: the state is what matters. */}
+              {a.approved ? (
+                <Group ml="auto">
+                  <ApproveButton shapeId={shapeId} attachment={a} title={title} />
+                </Group>
+              ) : null}
             </Group>
           ) : null}
         </Stack>
@@ -103,20 +122,32 @@ function ApproveButton({
   readonly title: string;
 }) {
   const approve = useApproveAttachment(shapeId);
-  const label = attachment.approved ? 'Undo Approval' : 'Approve';
+  if (attachment.approved)
+    return (
+      <Anchor
+        component="button"
+        type="button"
+        fz={12}
+        c="dimmed"
+        aria-label={`Remove approval of mock-up: ${title}`}
+        onClick={() => {
+          approve.mutate({ attachmentId: attachment.id, approved: false });
+        }}
+      >
+        Remove Approval
+      </Anchor>
+    );
   return (
     <Button
-      variant={attachment.approved ? 'default' : 'light'}
+      variant="light"
       size="xs"
       loading={approve.isPending}
-      aria-label={
-        attachment.approved ? `Undo approval of mock-up: ${title}` : `Approve mock-up: ${title}`
-      }
+      aria-label={`Approve mock-up: ${title}`}
       onClick={() => {
-        approve.mutate({ attachmentId: attachment.id, approved: !attachment.approved });
+        approve.mutate({ attachmentId: attachment.id, approved: true });
       }}
     >
-      {label}
+      Approve
     </Button>
   );
 }

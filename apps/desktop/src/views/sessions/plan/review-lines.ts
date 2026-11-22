@@ -99,11 +99,11 @@ export function convertWarnings(
     ...(questions === 0
       ? []
       : [
-          `${String(questions)} rehearsal ${plural(questions, 'question is', 'questions are')} open`,
+          `${String(questions)} open ${plural(questions, 'question is', 'questions are')} still unanswered`,
         ]),
     ...(findings === 0
       ? []
-      : [`${String(findings)} review ${plural(findings, 'finding is', 'findings are')} open`]),
+      : [`${String(findings)} review ${plural(findings, 'note is', 'notes are')} still open`]),
     ...missing.map((key) => `${key} needs a spec and has none`),
   ];
 }

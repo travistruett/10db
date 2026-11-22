@@ -1,3 +1,4 @@
+import classes from './plan-rows.module.css';
 import type { ShapeProposalDto, ShapeProposalId, ShapeViewDto } from '@10db/contracts';
 import type { OpenRow } from './row-line';
 import {
@@ -94,6 +95,8 @@ export function ProposedPane({
   const [changesOnly, setChangesOnly] = useState(false);
   // The sections the builder folded: a goal's id, a kind's section, or the run preview.
   const [folded, setFolded] = useState<ReadonlySet<string>>(FOLDED_AT_FIRST);
+  // The Review menu is open: its tooltip stays down so it never covers the menu.
+  const [reviewMenu, setReviewMenu] = useState(false);
   // The panel's one open row; Accept's Read Them opens the first row with notes.
   const [openRow, setOpenRow] = useState<OpenRow | null>(null);
   const [goalToRemove, setGoalToRemove] = useState<RemoveDraftGoalTarget | null>(null);
@@ -213,13 +216,14 @@ export function ProposedPane({
     <SummaryLine
       groups={groupProposals(view?.proposals ?? [])}
       onJump={jump}
+      // The first proposal has no number; each one after it is a revision.
       lead={
-        view === undefined || view.shape.round === 0 ? null : `Round ${String(view.shape.round)}`
+        view === undefined || view.shape.round < 2 ? null : `Revision ${String(view.shape.round)}`
       }
       tail={
         view === undefined || view.shape.round === 0
           ? null
-          : `updated ${shortAgo(view.shape.updatedAt, now)}`
+          : `${view.shape.round === 1 ? 'proposed' : 'revised'} ${shortAgo(view.shape.updatedAt, now)}`
       }
       link={
         // Every row changed filters nothing, so the link shows only when some rows stayed put.
@@ -248,13 +252,17 @@ export function ProposedPane({
       h="100%"
       style={{ display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 }}
     >
-      {/* The head is its own band, ruled off from the list edge to edge, so the summary belongs to it. */}
+      {/* Beside the conversation the head is its own band, ruled off from the list edge to edge, so the
+          summary belongs to it; on the Plan page the tabs' rule is above it, and a second would stack. */}
       <Stack
         gap={4}
         px={inset}
-        pt={20}
-        pb={16}
-        style={{ flex: 'none', borderBottom: '1px solid var(--mantine-color-default-border)' }}
+        pt={titled ? 20 : 12}
+        pb={titled ? 16 : 4}
+        style={{
+          flex: 'none',
+          ...(titled ? { borderBottom: '1px solid var(--mantine-color-default-border)' } : {}),
+        }}
       >
         <Group justify="space-between" wrap="nowrap">
           {titled ? (
@@ -267,9 +275,12 @@ export function ProposedPane({
             <span />
           )}
           <Group gap={8} wrap="nowrap">
-            <Menu position="bottom-end" withinPortal>
+            <Menu position="bottom-end" withinPortal opened={reviewMenu} onChange={setReviewMenu}>
               <Menu.Target>
-                <Tooltip label="Have reviewers read the plan before you accept it">
+                <Tooltip
+                  label="Have reviewers read the plan before you accept it"
+                  disabled={reviewMenu}
+                >
                   <Button
                     variant="default"
                     size="xs"
@@ -298,7 +309,7 @@ export function ProposedPane({
                   }}
                 >
                   <MenuHint hint="Answer now what a builder would stop to ask, so tasks run straight through">
-                    Check for Questions
+                    Find Open Questions
                   </MenuHint>
                 </Menu.Item>
                 <Menu.Item
@@ -352,10 +363,15 @@ export function ProposedPane({
       </Stack>
       <ScrollArea
         style={{ flex: 1, minHeight: 0 }}
-        viewportProps={{ tabIndex: 0, role: 'group', 'aria-label': 'Plan rows' }}
+        viewportProps={{
+          tabIndex: 0,
+          role: 'group',
+          'aria-label': 'Plan rows',
+          className: classes['viewport'],
+        }}
         viewportRef={listRef}
       >
-        <Box px={inset - ROW_INSET_PX} pt={20} pb="md">
+        <Box px={inset - ROW_INSET_PX} pt={titled ? 20 : 8} pb={24}>
           {error !== null ? (
             <Alert color="red" title="Couldn't load the proposals">
               {error}
@@ -409,9 +425,15 @@ export function ProposedPane({
             onReadNotes={(id) => {
               setConverting(false);
               setOpenRow({ id, editing: false });
-              requestAnimationFrame(() => {
-                document.getElementById(`shape-row-${id}`)?.scrollIntoView({ block: 'nearest' });
-              });
+              // Once the row has opened, bring its notes into view: they end the opened row, often below
+              // the fold, and the builder asked for them.
+              window.setTimeout(() => {
+                const notes = document.querySelector<HTMLElement>(
+                  `#shape-row-${id} [aria-label="Review notes"]`,
+                );
+                notes?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                notes?.focus({ preventScroll: true });
+              }, 50);
             }}
           />
           <RemoveDraftGoalModal
@@ -491,7 +513,7 @@ function ConvertPanel({
 
 const REVIEW_NAMES: Record<ReviewKind, string> = {
   review: 'Plan Review',
-  rehearse: 'Check for Questions',
+  rehearse: 'Find Open Questions',
   design_review: 'Design Review',
 };
 

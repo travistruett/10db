@@ -78,7 +78,11 @@ export function QuestionsTab({ shapeId }: { readonly shapeId: ShapeId }) {
     },
   ];
   return (
-    <RecordListStates query={query} what="questions">
+    <RecordListStates
+      query={query}
+      what="questions"
+      none={{ narrowed: narrowing.q.trim() !== '', text: 'No open questions.' }}
+    >
       <KnowledgeTable
         label="Questions"
         storeKey="plan-record-questions"

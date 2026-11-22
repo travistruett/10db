@@ -1,17 +1,6 @@
 import type { ShapeFindingDto, ShapeFindingId } from '@10db/contracts';
-import {
-  ActionIcon,
-  Anchor,
-  Box,
-  Button,
-  Group,
-  Stack,
-  Text,
-  Tooltip,
-  UnstyledButton,
-} from '@mantine/core';
+import { Anchor, Box, Button, Group, Text } from '@mantine/core';
 import { useState } from 'react';
-import { IconX } from '@tabler/icons-react';
 import classes from './plan-rows.module.css';
 import { CodeSpans } from './record/code-spans';
 import { ceremonyLine, type RowReview } from './review-lines';
@@ -31,6 +20,9 @@ const capital = (word: string): string => word.charAt(0).toUpperCase() + word.sl
 /** An opened row shows this many notes until Show More. */
 const NOTES_SHOWN = 3;
 
+/** A note long enough that three lines cut it. */
+const LONG_NOTE = 240;
+
 function NoteLine({
   finding,
   onDismiss,
@@ -41,49 +33,47 @@ function NoteLine({
   const isQuestion = finding.kind === 'question';
   const label = isQuestion
     ? 'Question'
-    : `${capital(finding.reviewer)}${finding.severity === null ? '' : ` · ${capital(finding.severity)}`}`;
-  // A long note shows three lines until it is clicked.
+    : `${capital(finding.reviewer)} Review${finding.severity === null ? '' : ` · ${capital(finding.severity)}`}`;
+  // A medium or high note's rule is drawn in the warning colour; a low one keeps the border's.
+  const serious = finding.severity === 'medium' || finding.severity === 'high';
+  const long = finding.text.length > LONG_NOTE;
+  // A long note shows three lines until More.
   const [whole, setWhole] = useState(false);
   return (
-    <Group
-      component="li"
-      className={classes['note']}
-      gap={6}
-      wrap="nowrap"
-      align="flex-start"
-      style={{ listStyle: 'none' }}
-    >
-      <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
+    <Box component="li" className={classes['note']} data-serious={serious || undefined}>
+      <Group gap={8} wrap="nowrap" justify="space-between" align="center">
         <Text fz={12} c="dimmed">
           {label}
         </Text>
-        <UnstyledButton
-          aria-expanded={whole}
-          onClick={() => {
-            setWhole((on) => !on);
-          }}
-          style={{ textAlign: 'left', cursor: whole ? 'default' : 'pointer' }}
-        >
-          <Text fz={13} c="dimmed" {...(whole ? {} : { lineClamp: 3 })}>
-            <CodeSpans text={finding.text} />
-          </Text>
-        </UnstyledButton>
-      </Stack>
-      <Tooltip label="Dismiss">
-        <ActionIcon
+        <Button
           variant="subtle"
           color="gray"
-          size="xs"
-          className={classes['dismiss']}
+          size="compact-xs"
           aria-label={`Dismiss ${isQuestion ? 'question' : 'finding'}: ${finding.text}`}
           onClick={() => {
             onDismiss(finding.id);
           }}
         >
-          <IconX size={12} stroke={1.5} />
-        </ActionIcon>
-      </Tooltip>
-    </Group>
+          Dismiss
+        </Button>
+      </Group>
+      <Text fz={13} {...(whole ? {} : { lineClamp: 3 })}>
+        <CodeSpans text={finding.text} />
+      </Text>
+      {long ? (
+        <Anchor
+          component="button"
+          type="button"
+          fz={12}
+          aria-expanded={whole}
+          onClick={() => {
+            setWhole((on) => !on);
+          }}
+        >
+          {whole ? 'Less' : 'More'}
+        </Anchor>
+      ) : null}
+    </Box>
   );
 }
 
@@ -109,13 +99,14 @@ export function ReviewNotes({
     <Box
       component="ul"
       aria-label="Review notes"
+      tabIndex={-1}
       m={0}
       p={0}
       style={{ listStyle: 'none', display: 'grid', gap: 12 }}
     >
       {notes.length === 0 ? null : (
         <Text component="li" fz={12} fw={600} c="dimmed" style={{ listStyle: 'none' }}>
-          {`Review notes ${String(notes.length)}`}
+          {`Review Notes · ${String(notes.length)}`}
         </Text>
       )}
       {line === null || ceremony === undefined ? null : (

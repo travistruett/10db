@@ -24,10 +24,11 @@ export const RECORD_TABS: readonly {
   { tab: RecordTab.Plan, label: 'Plan', count: () => 0 },
   { tab: RecordTab.Documents, label: 'Documents', count: (r) => r.documents.length },
   { tab: RecordTab.Decisions, label: 'Decisions', count: (r) => r.counts.decisions },
-  { tab: RecordTab.Evidence, label: 'Evidence', count: (r) => r.counts.evidence },
-  { tab: RecordTab.Reviews, label: 'Reviews', count: (r) => r.counts.reviews },
+  { tab: RecordTab.Evidence, label: 'Sources', count: (r) => r.counts.evidence },
+  { tab: RecordTab.Reviews, label: 'Review Notes', count: (r) => r.counts.reviews },
   { tab: RecordTab.Questions, label: 'Questions', count: (r) => r.counts.questions },
-  { tab: RecordTab.Tasks, label: 'Tasks', count: (r) => r.counts.tasks },
+  // What Accept put on the Board, apart from the Plan's own proposed tasks.
+  { tab: RecordTab.Tasks, label: 'On the Board', count: (r) => r.counts.tasks },
 ];
 
 export interface RecordSearch {

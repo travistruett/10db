@@ -24,7 +24,6 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  padding-bottom: var(--shell-content-padding-block, 0px);
 }
 
 .aside {

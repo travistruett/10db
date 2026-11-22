@@ -242,7 +242,7 @@ export function LiveList({
           Start ready tasks from the Board, or plan new work.
         </Text>
         <Button onClick={newPlan} size="xs" mt={4}>
-          New Plan
+          New Session
         </Button>
       </Stack>
     );

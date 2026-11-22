@@ -1,5 +1,5 @@
 import { Text, Tooltip } from '@mantine/core';
-import { IconMessage, IconPin } from '@tabler/icons-react';
+import { IconPin } from '@tabler/icons-react';
 import classes from './plan-rows.module.css';
 
 /** What a row's chips say; each part is left out when it has nothing to say. */
@@ -45,7 +45,7 @@ export function RowChips({ facts }: { readonly facts: RowChipFacts }) {
       )}
       {spec ? (
         <Text span fz={12} c="dimmed">
-          Spec required
+          Spec first
         </Text>
       ) : null}
       {pinned ? (
@@ -58,17 +58,9 @@ export function RowChips({ facts }: { readonly facts: RowChipFacts }) {
         />
       ) : null}
       {notes === 0 ? null : (
-        <Tooltip label={plural(notes, 'note')}>
-          <Text
-            span
-            fz={12}
-            c="dimmed"
-            role="img"
-            aria-label={plural(notes, 'note')}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}
-          >
-            <IconMessage size={14} stroke={1.5} aria-hidden="true" />
-            {notes}
+        <Tooltip label="Open review notes: open the row to read them">
+          <Text span fz={12} role="img" aria-label={plural(notes, 'note')}>
+            {plural(notes, 'note')}
           </Text>
         </Tooltip>
       )}

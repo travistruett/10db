@@ -8,15 +8,23 @@ export interface EditableField {
   readonly name: string;
   readonly label: string;
   readonly control: 'text' | 'long' | 'select';
-  readonly options?: readonly string[];
+  /** A select's choices: what the edit sends, and the words the builder reads. */
+  readonly options?: readonly { readonly value: string; readonly label: string }[];
   readonly value: string;
   /** The daemon refuses an empty value. */
   readonly required: boolean;
 }
 
 /** XL is not offered: a task that big is split (§6). */
-const SIZES = ['S', 'M', 'L'] as const;
-const CEREMONIES = ['direct', 'spec'] as const;
+const SIZES = [
+  { value: 'S', label: 'Small (about half an hour)' },
+  { value: 'M', label: 'Medium (a few hours)' },
+  { value: 'L', label: 'Large (a day or more)' },
+] as const;
+const CEREMONIES = [
+  { value: 'direct', label: 'Build directly' },
+  { value: 'spec', label: 'Write a spec first' },
+] as const;
 
 const text = (name: string, label: string, value: string, required = true): EditableField => ({
   name,
@@ -36,12 +44,12 @@ const choice = (
   name: string,
   label: string,
   value: string,
-  options: readonly string[],
+  options: readonly { readonly value: string; readonly label: string }[],
 ): EditableField => ({ name, label, control: 'select', options, value, required: true });
 
 /** A task that is sized by finished tasks it resembles (`basis`) has no size to set by hand. */
 const sizeField = (name: string, size: string | undefined): EditableField[] =>
-  size === undefined ? [] : [choice(name, 'Size', size, SIZES)];
+  size === undefined ? [] : [choice(name, 'Estimated Size', size, SIZES)];
 
 export function editableFields(row: ShapeProposalDto): EditableField[] {
   switch (row.kind) {
@@ -50,13 +58,13 @@ export function editableFields(row: ShapeProposalDto): EditableField[] {
         text('title', 'Title', row.body.title),
         long('description', 'Description', row.body.description, false),
         ...sizeField('size', row.body.size),
-        choice('ceremony', 'Ceremony', row.body.ceremony, CEREMONIES),
+        choice('ceremony', "How It's Built", row.body.ceremony, CEREMONIES),
       ];
     case 'goal':
       return [
         text('title', 'Title', row.body.title),
         long('objective', 'Objective', row.body.objective),
-        choice('ceremony', 'Ceremony', row.body.ceremony, CEREMONIES),
+        choice('ceremony', "How It's Built", row.body.ceremony, CEREMONIES),
         ...row.body.tasks.flatMap((task) => [
           text(`tasks.${task.key}.title`, `${task.title}: title`, task.title),
           ...sizeField(`tasks.${task.key}.size`, task.size).map((f) => ({

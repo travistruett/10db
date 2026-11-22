@@ -309,22 +309,44 @@ export function ConvertModal({
           </Text>
         ) : (
           <Stack gap="xs">
-            {listed.map((row) => (
-              <div key={row.id}>
-                <Checkbox
-                  checked={!unticked.has(row.id)}
-                  onChange={(event) => {
-                    const next = new Set(unticked);
-                    if (event.currentTarget.checked) next.delete(row.id);
-                    else next.add(row.id);
-                    setUnticked(next);
-                  }}
-                  label={proposalTitle(row)}
-                  description={destination(row)}
-                />
-              </div>
-            ))}
+            {/* Ticks only when there is a choice to make: one row is simply what Accept takes. */}
+            {listed.length === 1 && rows.length === 1 ? null : (
+              <Text size="xs" fw={600} c="dimmed">
+                Choose what to accept
+              </Text>
+            )}
+            {listed.map((row) =>
+              listed.length === 1 && rows.length === 1 ? (
+                <div key={row.id}>
+                  <Text size="sm">{proposalTitle(row)}</Text>
+                  <Text size="xs" c="dimmed">
+                    {destination(row)}
+                  </Text>
+                </div>
+              ) : (
+                <div key={row.id}>
+                  <Checkbox
+                    checked={!unticked.has(row.id)}
+                    onChange={(event) => {
+                      const next = new Set(unticked);
+                      if (event.currentTarget.checked) next.delete(row.id);
+                      else next.add(row.id);
+                      setUnticked(next);
+                    }}
+                    label={proposalTitle(row)}
+                    description={destination(row)}
+                  />
+                </div>
+              ),
+            )}
           </Stack>
+        )}
+        {rows.length === 0 || after !== null ? null : (
+          <Text size="xs" c="dimmed">
+            {startsAny
+              ? 'Accept puts it on the Board and starts nothing. Accept and Start also starts the work now.'
+              : 'Accept puts it on the Board. Nothing is ready to start yet.'}
+          </Text>
         )}
       </Stack>
     </FormModal>

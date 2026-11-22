@@ -100,7 +100,7 @@ export function RowEditor({ row, onSave, onCancel }: RowEditorProps) {
         ) : null}
         <Group justify="space-between" wrap="nowrap">
           <Text size="xs" c="dimmed">
-            An edited field is pinned: the next round leaves it as you set it.
+            The agent keeps what you edit here when it revises the plan.
           </Text>
           <Group gap="xs" wrap="nowrap">
             <Button variant="default" size="xs" onClick={onCancel} onKeyDown={onKeyDown}>

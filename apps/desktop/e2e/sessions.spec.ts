@@ -608,7 +608,8 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   }, projectId);
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  // ⌘⇧N from the Board opens a New Plan tab in the rail's project, then the title's switcher opens a second one: each is a session tab with the Plan panel open and empty.
+  // ⌘⇧N from the Board opens a new session with its Plan open in the rail's project, then the title's switcher opens a second
+  // New Session, whose Plan toggle opens it before the first message: each has the Plan panel open and empty.
   await page.goto('/board');
   await expect(page.getByRole('button', { name: /^Project: sessions-plan/ })).toBeVisible();
   await page.keyboard.press('Meta+Shift+n');
@@ -616,8 +617,9 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   const panel = page.getByRole('complementary', { name: 'Plan' });
   await expect(panel.getByText('Talk it through, or drop a document.')).toBeVisible();
   await page.getByRole('button', { name: 'Switch session' }).click();
-  await page.getByRole('menuitem', { name: 'New Plan' }).click();
-  await expect(page.getByRole('button', { name: 'Switch session' })).toContainText('New Plan');
+  await page.getByRole('menuitem', { name: 'New Session' }).click();
+  await expect(page.getByRole('button', { name: 'Switch session' })).toContainText('New Session');
+  await page.getByRole('button', { name: 'Plan', exact: true, pressed: false }).click();
   await expect(panel.getByText('Talk it through, or drop a document.')).toBeVisible();
 
   // A dropped file and a first message make the session; the reply names the file and Heard so far echoes.
@@ -682,13 +684,13 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await expect(pinned).toBeVisible();
   await expect(panel.getByText('Drop the Abandon strip', { exact: true })).toHaveCount(0);
 
-  // Review ▾: Plan Review puts a finding on its row and Check for Questions a question; Accept only warns.
+  // Review ▾: Plan Review puts a finding on its row and Find Open Questions a question; Accept only warns.
   await panel.getByRole('button', { name: 'Review' }).click();
   await page.getByRole('menuitem', { name: 'Plan Review' }).click();
   await panel.getByRole('button', { name: 'Board polish', exact: true }).click();
   await expect(panel.getByText('The scope is wider than one pull request.').first()).toBeVisible();
   await panel.getByRole('button', { name: 'Review' }).click();
-  await page.getByRole('menuitem', { name: 'Check for Questions' }).click();
+  await page.getByRole('menuitem', { name: 'Find Open Questions' }).click();
   await panel.getByRole('button', { name: 'Compact card density', exact: true }).click();
   await expect(panel.getByText('Which screen does this change first?').first()).toBeVisible();
 
@@ -696,7 +698,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await sendLine(page, 'mock it up');
   await expect(page.getByText('Here is a mock-up.', { exact: true })).toBeVisible();
   await panel.getByRole('button', { name: /^Approve mock-up/ }).click();
-  await expect(panel.getByRole('button', { name: /^Undo approval of mock-up/ })).toBeVisible();
+  await expect(panel.getByRole('button', { name: /^Remove approval of mock-up/ })).toBeVisible();
   // Ask for Changes puts a draft naming the task in the composer and sends nothing.
   await panel.getByRole('button', { name: /^Ask for changes to mock-up/ }).click();
   const composer = page.getByRole('textbox', { name: 'Message' });

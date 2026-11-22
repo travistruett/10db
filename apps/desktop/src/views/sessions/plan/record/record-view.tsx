@@ -24,6 +24,7 @@ import { DocumentsTab } from './documents-tab';
 import { EvidenceTab } from './evidence-tab';
 import { ExportButton } from './export-button';
 import { PlanPanel } from '../plan-panel';
+import { proposalTitle } from '../proposal-text';
 import { draftKey, sessionDrafts } from '../../session-drafts';
 import { QuestionsTab } from './questions-tab';
 import { RECORD_TABS, RecordTab, type RecordSearch } from './record-tabs';
@@ -68,6 +69,8 @@ function panelOf(
     readonly search: RecordSearch;
     readonly onSearch: (next: RecordSearch) => void;
     readonly plan: ReactNode;
+    readonly titles: ReadonlyMap<string, string>;
+    readonly onAskToFix: (text: string) => void;
   },
 ): ReactNode {
   switch (tab) {
@@ -81,7 +84,7 @@ function panelOf(
       return <EvidenceTab shapeId={props.shapeId} />;
     case RecordTab.Reviews:
       return (
-        <ReviewsTab shapeId={props.shapeId} documents={props.record.documents.map((d) => d.key)} />
+        <ReviewsTab shapeId={props.shapeId} titles={props.titles} onAskToFix={props.onAskToFix} />
       );
     case RecordTab.Questions:
       return <QuestionsTab shapeId={props.shapeId} />;
@@ -103,6 +106,8 @@ function RecordTabs({
   search,
   onSearch,
   plan,
+  titles,
+  onAskToFix,
 }: {
   readonly shapeId: ShapeId;
   readonly record: PlanRecordDto;
@@ -110,6 +115,8 @@ function RecordTabs({
   readonly search: RecordSearch;
   readonly onSearch: (next: RecordSearch) => void;
   readonly plan: ReactNode;
+  readonly titles: ReadonlyMap<string, string>;
+  readonly onAskToFix: (text: string) => void;
 }) {
   return (
     <Tabs
@@ -146,7 +153,7 @@ function RecordTabs({
               t.tab === RecordTab.Documents || t.tab === RecordTab.Plan ? 'hidden' : 'auto',
           }}
         >
-          {panelOf(t.tab, { shapeId, record, search, onSearch, plan })}
+          {panelOf(t.tab, { shapeId, record, search, onSearch, plan, titles, onAskToFix })}
         </Tabs.Panel>
       ))}
     </Tabs>
@@ -163,28 +170,33 @@ export function RecordView({
   readonly onSearch: (next: RecordSearch) => void;
 }) {
   const record = usePlanRecord(shapeId);
-  const chatId = useShapeView(shapeId).data?.chatId ?? null;
+  const view = useShapeView(shapeId).data;
+  const chatId = view?.chatId ?? null;
+  // What each key the record names is called on the Plan: a row's title, and a goal's tasks' titles.
+  const titles = new Map(
+    (view?.proposals ?? []).flatMap((row) => [
+      [row.key, proposalTitle(row)] as const,
+      ...(row.kind === 'goal' ? row.body.tasks.map((t) => [t.key, t.title] as const) : []),
+    ]),
+  );
   const { open, notice } = useOpenSessionNotice();
   const tab = search.tab ?? RecordTab.Plan;
   const back = (): void => {
     if (chatId !== null) open(chatId);
   };
+  // Hands words to the session as the start of the builder's reply, and goes back to it.
+  const toSession = (text: string): void => {
+    if (chatId === null) return;
+    const key = draftKey.chat(chatId);
+    const now = sessionDrafts.get(key);
+    sessionDrafts.set(key, { ...now, text: now.text === '' ? text : `${now.text}\n${text}` });
+    back();
+  };
   // The Plan's rows, as the panel shows them. Where it came from and Ask for Changes go back to the
   // session, the second with its words in the session's draft.
   const plan = (
-    <Box h="100%" style={{ minHeight: 0 }}>
-      <PlanPanel
-        shapeId={shapeId}
-        full
-        onWhy={back}
-        onAskForChanges={(text) => {
-          if (chatId === null) return;
-          const key = draftKey.chat(chatId);
-          const now = sessionDrafts.get(key);
-          sessionDrafts.set(key, { ...now, text: now.text === '' ? text : `${now.text}\n${text}` });
-          back();
-        }}
-      />
+    <Box maw={760} h="100%" style={{ minHeight: 0 }}>
+      <PlanPanel shapeId={shapeId} full onWhy={back} onAskForChanges={toSession} />
     </Box>
   );
   const imported = record.data === undefined ? null : importedLine(record.data);
@@ -212,10 +224,15 @@ export function RecordView({
                 <IconArrowLeft size={16} stroke={1.5} />
               </ActionIcon>
             </Tooltip>
-            <span>Plan</span>
+            {/* The page's name and the session's title share one baseline. */}
+            <Group gap={8} align="baseline" wrap="nowrap" style={{ minWidth: 0 }}>
+              <span>Plan</span>
+              <Text component="span" fz={12} fw={400} c="dimmed" truncate="end">
+                {record.data?.title}
+              </Text>
+            </Group>
           </Group>
         }
-        {...(record.data === undefined ? {} : { meta: record.data.title })}
         actions={<ExportButton shapeId={shapeId} />}
       />
       {notice}
@@ -238,6 +255,8 @@ export function RecordView({
           search={search}
           onSearch={onSearch}
           plan={plan}
+          titles={titles}
+          onAskToFix={toSession}
         />
       )}
     </Stack>

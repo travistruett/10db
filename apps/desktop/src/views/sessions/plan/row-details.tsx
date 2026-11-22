@@ -38,8 +38,8 @@ export function Items({
 }) {
   if (items.length === 0) return null;
   return (
-    <Stack gap={2}>
-      <Text fz={12} c="dimmed">
+    <Stack gap={6}>
+      <Text fz={12} fw={600} c="dimmed">
         {label}
       </Text>
       {/* Each item its own bullet, so long ones don't run together. */}
@@ -81,7 +81,7 @@ export function DetailBlock({
   attachments,
 }: DetailBlockProps) {
   return (
-    <Stack gap={12}>
+    <Stack gap={16}>
       {description === '' ? null : (
         <Text fz={13} style={{ whiteSpace: 'pre-wrap' }}>
           <CodeSpans text={description} />
@@ -89,12 +89,7 @@ export function DetailBlock({
       )}
       <Items label="Acceptance Criteria" items={criteria} />
       {more}
-      <Text
-        fz={12}
-        c="dimmed"
-        component="div"
-        style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}
-      >
+      <Text fz={12} c="dimmed" component="div">
         {[
           ...(facts.length === 0
             ? []
@@ -117,7 +112,7 @@ export function DetailBlock({
               ]),
           ...links,
         ].flatMap((part, index) => [
-          ...(index === 0 ? [] : [<span key={`dot-${String(index)}`}>·</span>]),
+          ...(index === 0 ? [] : [<span key={`dot-${String(index)}`}>{' · '}</span>]),
           part,
         ])}
       </Text>
@@ -127,7 +122,7 @@ export function DetailBlock({
   );
 }
 
-/** A task's facts, once: "repo · ~0.5 h", then what it depends on. */
+/** A task's facts, once: "Area: repo · about 0.5 h of agent time", then what it depends on. */
 export function taskFacts(
   areas: readonly string[],
   size: ShapeTaskSizeDto | undefined,

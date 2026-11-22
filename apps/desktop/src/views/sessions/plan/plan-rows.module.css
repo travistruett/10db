@@ -143,17 +143,19 @@
   line-height: 20px;
 }
 
-/* A note hangs off a rule at its left; its Dismiss shows on hover or focus of the note. */
+/* A note hangs off a rule at its left, in the warning colour for a medium or high one. */
 .note {
+  list-style: none;
   border-left: 2px solid var(--mantine-color-default-border);
   padding-left: 10px;
 }
 
-.note .dismiss {
-  opacity: 0;
+.note[data-serious] {
+  border-left-color: var(--mantine-color-yellow-filled);
 }
 
-.note:hover .dismiss,
-.note:focus-within .dismiss {
-  opacity: 1;
+/* The list's scroll box takes focus for the arrow keys; it draws no box around the list. */
+.viewport:focus,
+.viewport:focus-visible {
+  outline: none;
 }

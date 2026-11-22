@@ -121,7 +121,14 @@ export function TasksTab({
     },
   ];
   return (
-    <RecordListStates query={query} what="tasks">
+    <RecordListStates
+      query={query}
+      what="tasks"
+      none={{
+        narrowed: narrowing.q.trim() !== '',
+        text: 'Nothing from this Plan is on the Board yet. Accept puts its tasks there.',
+      }}
+    >
       <KnowledgeTable
         label="Tasks"
         storeKey="plan-record-tasks"
@@ -135,7 +142,7 @@ export function TasksTab({
           query,
           narrowing.q.trim() !== '',
           'tasks',
-          'Nothing was converted from this Plan yet.',
+          'Nothing from this Plan is on the Board yet. Accept puts its tasks there.',
         )}
       />
     </RecordListStates>

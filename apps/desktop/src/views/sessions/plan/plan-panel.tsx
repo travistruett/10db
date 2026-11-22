@@ -4,7 +4,7 @@ import {
   type ShapeProposalDto,
   type ShapeViewDto,
 } from '@10db/contracts';
-import { ActionIcon, Menu, Modal, Stack, Text, Tooltip } from '@mantine/core';
+import { ActionIcon, Button, Group, Menu, Modal, Stack, Text, Tooltip } from '@mantine/core';
 import { IconArrowBackUp, IconArrowsMaximize, IconDots, IconFileExport } from '@tabler/icons-react';
 import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
@@ -97,7 +97,7 @@ function PlanMenu({ view }: { readonly view: ShapeViewDto }) {
     <>
       <Menu position="bottom-end" withinPortal>
         <Menu.Target>
-          <Tooltip label="Export and Undo Accept">
+          <Tooltip label="More">
             <ActionIcon
               variant="subtle"
               color="gray"
@@ -115,7 +115,7 @@ function PlanMenu({ view }: { readonly view: ShapeViewDto }) {
               setExporting(true);
             }}
           >
-            Export Record to Folder
+            Export Plan to Folder
           </Menu.Item>
           {accept === null ? null : (
             <Menu.Item
@@ -148,15 +148,26 @@ function PlanMenu({ view }: { readonly view: ShapeViewDto }) {
         onClose={() => {
           setExporting(false);
         }}
-        title="Export Record"
+        title="Export Plan"
         size="sm"
+        centered
       >
         <Stack gap="md">
           <Text size="sm">
             Saves this plan's documents, decisions, reviews and checks as Markdown files in a folder
             you choose.
           </Text>
-          <ExportButton shapeId={shapeId} label="Choose Folder" />
+          <Group justify="flex-end" gap={8} align="flex-start">
+            <Button
+              variant="default"
+              onClick={() => {
+                setExporting(false);
+              }}
+            >
+              Cancel
+            </Button>
+            <ExportButton shapeId={shapeId} label="Choose Folder" primary />
+          </Group>
         </Stack>
       </Modal>
     </>

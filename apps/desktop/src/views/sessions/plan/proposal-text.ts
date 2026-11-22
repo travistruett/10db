@@ -26,24 +26,26 @@ export function proposalTitle(row: ShapeProposalDto): string {
   }
 }
 
-/** Where Convert puts a row, as the Convert modal says it. */
+/** What Accept does with a row, as the Accept dialog says it. */
 export function destination(row: ShapeProposalDto): string {
   switch (row.kind) {
     case 'goal':
-      return `draft goal, its ${taskCount(row.body.tasks.length)} to Backlog`;
+      return `Becomes a draft goal; its ${taskCount(row.body.tasks.length)} go to the Board's Backlog`;
     case 'task':
-      return row.body.goalId === undefined ? 'to Backlog' : 'to Backlog, under its goal';
+      return row.body.goalId === undefined
+        ? "Goes to the Board's Backlog"
+        : "Goes to the Board's Backlog, under its goal";
     case 'change_task':
-      return 'changes a task on the Board';
+      return 'Changes a task on the Board';
     case 'remove_task':
-      return 'removes a task from the Board';
+      return 'Removes a task from the Board';
     case 'decision':
     case 'principle':
-      return 'to Knowledge';
+      return 'Goes to Knowledge';
     case 'landing':
-      return 'its tasks share one pull request';
+      return 'Its tasks share one pull request';
     case 'question':
-      return 'stored; sent when people arrive';
+      return 'Kept, and asked when people join';
   }
 }
 

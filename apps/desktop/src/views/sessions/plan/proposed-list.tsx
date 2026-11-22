@@ -90,6 +90,11 @@ export function ProposedList({
 }: ProposedListProps) {
   const sizesOf = (row: ShapeProposalDto) => sizes.filter((s) => s.proposalId === row.id);
   const blocks = blocksOf(groups);
+  const sole =
+    groups.goals.length === 0 &&
+    blocks.length === 1 &&
+    groups.earlier.length === 0 &&
+    preview.tasks < 2;
   // The Tab key reaches the first row on screen: a goal's head, or the first open section's first row.
   const firstId = (groups.goals[0] ?? blocks.find((b) => !folded.has(b.section))?.rows[0])?.id;
   // A converted row is marked apart, so "N accepted" lands on it whichever kind it is and a kind's
@@ -145,22 +150,31 @@ export function ProposedList({
           {rowOf(goal, SectionKey.Goals, tasksOf(goal))}
         </Box>
       ))}
-      {blocks.map((block) => (
-        <PlanSection
-          key={block.section}
-          name={block.name}
-          count={block.rows.length}
-          {...(block.note === undefined ? {} : { note: block.note })}
-          folded={folded.has(block.section)}
-          onFold={() => {
-            onFold(block.section);
-          }}
-        >
-          <Box component="ul" m={0} p={0} style={{ listStyle: 'none' }}>
-            {block.rows.map((row) => rowOf(row, block.section))}
+      {blocks.map((block) =>
+        sole ? (
+          // A plan of one kind of row needs no section head: the summary line already counts it.
+          <Box component="li" key={block.section} className={classes['section']}>
+            <Box component="ul" m={0} p={0} style={{ listStyle: 'none' }}>
+              {block.rows.map((row) => rowOf(row, block.section))}
+            </Box>
           </Box>
-        </PlanSection>
-      ))}
+        ) : (
+          <PlanSection
+            key={block.section}
+            name={block.name}
+            count={block.rows.length}
+            {...(block.note === undefined ? {} : { note: block.note })}
+            folded={folded.has(block.section)}
+            onFold={() => {
+              onFold(block.section);
+            }}
+          >
+            <Box component="ul" m={0} p={0} style={{ listStyle: 'none' }}>
+              {block.rows.map((row) => rowOf(row, block.section))}
+            </Box>
+          </PlanSection>
+        ),
+      )}
       <PreviewPanel
         preview={preview}
         folded={folded.has(RUN_SECTION)}

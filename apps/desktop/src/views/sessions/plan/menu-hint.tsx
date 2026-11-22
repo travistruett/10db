@@ -11,7 +11,9 @@ export function MenuHint({
 }) {
   return (
     <Stack gap={0}>
-      <Text size="sm">{children}</Text>
+      <Text size="sm" fw={500} c="var(--mantine-color-text)">
+        {children}
+      </Text>
       <Text size="xs" c="dimmed" maw={260}>
         {hint}
       </Text>

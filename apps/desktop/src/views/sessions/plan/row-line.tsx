@@ -98,9 +98,10 @@ export function RowLine({
           <div className={classes['chips']}>{chips}</div>
         )}
       </div>
-      <Tooltip label={trailingLabel} disabled={trailingLabel === undefined}>
+      {/* An opened row says its time in its facts line, so its title keeps the width. */}
+      <Tooltip label={trailingLabel} disabled={trailingLabel === undefined || opened}>
         <Text fz={12} c="dimmed" className={classes['trail']}>
-          {trailing}
+          {opened ? null : trailing}
         </Text>
       </Tooltip>
       {subs === undefined ? null : <div className={classes['subs']}>{subs}</div>}

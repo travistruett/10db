@@ -11,9 +11,12 @@ import { canChooseFolder, chooseFolder } from '../../../../desktop/choose-folder
 export function ExportButton({
   shapeId,
   label = 'Export to Folder',
+  primary = false,
 }: {
   readonly shapeId: ShapeId;
   readonly label?: string;
+  /** The one action of a dialog: filled, at the size of the dialog's other buttons. */
+  readonly primary?: boolean;
 }) {
   const exported = useExportPlan(shapeId);
   const [typing, setTyping] = useState(false);
@@ -45,9 +48,9 @@ export function ExportButton({
       <Popover opened={typing} onChange={setTyping} position="bottom-end" trapFocus>
         <Popover.Target>
           <Button
-            variant="default"
-            size="xs"
-            leftSection={<IconFileExport size={14} stroke={1.5} />}
+            variant={primary ? 'filled' : 'default'}
+            size={primary ? 'sm' : 'xs'}
+            leftSection={primary ? undefined : <IconFileExport size={14} stroke={1.5} />}
             loading={exported.isPending}
             onClick={() => {
               void pick();

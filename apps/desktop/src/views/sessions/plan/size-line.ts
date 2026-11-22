@@ -28,13 +28,14 @@ export function goalHours(sizes: readonly ShapeTaskSizeDto[]): string | null {
 }
 
 /**
- * What an opened task says about its size, once: "repo · ~0.5 h", then "size set by you" and, when it
- * has finished, the lane time it took.
+ * What an opened task says about its size, once: "Area: repo · about 0.5 h of agent time", then "size
+ * set by you" and, when it has finished, the lane time it took.
  */
 export function sizeFacts(areas: readonly string[], size: ShapeTaskSizeDto | undefined): string {
-  const parts = [areas.join(', ')];
+  const parts =
+    areas.length === 0 ? [] : [`${areas.length === 1 ? 'Area' : 'Areas'}: ${areas.join(', ')}`];
   if (size !== undefined) {
-    parts.push(`~${hoursText(size.hours)} h`);
+    parts.push(`about ${hoursText(size.hours)} h of agent time`);
     if (size.from === SizeSource.Pinned) parts.push('size set by you');
     if (size.actualHours !== null) parts.push(`took ${hoursText(size.actualHours)} h of lane time`);
   }

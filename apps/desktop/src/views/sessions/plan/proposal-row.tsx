@@ -29,7 +29,7 @@ import { RowDetails } from './row-details';
 import { RowEditor } from './row-editor';
 import { useLiveWords } from './use-live-words';
 import { hoursText } from './preview-text';
-import { goalHours, sizeLine } from './size-line';
+import { goalHours } from './size-line';
 import classes from './plan-rows.module.css';
 import { editableFields } from './row-editing';
 
@@ -82,7 +82,7 @@ function MetaLink({
   readonly children: string;
 }) {
   return (
-    <Anchor component="button" type="button" fz={12} c="dimmed" underline="hover" onClick={onClick}>
+    <Anchor component="button" type="button" fz={12} underline="hover" onClick={onClick}>
       {children}
     </Anchor>
   );
@@ -183,9 +183,16 @@ export function ProposalRow({
           },
         ]
       : []),
-    ...(mutable && !earlier ? [{ label: pinned ? 'Unpin' : 'Pin', onSelect: togglePin }] : []),
+    ...(mutable && !earlier
+      ? [
+          {
+            label: pinned ? 'Let the Agent Change It' : 'Keep My Version',
+            onSelect: togglePin,
+          },
+        ]
+      : []),
     {
-      label: 'Where It Came From',
+      label: 'Show in Conversation',
       onSelect: () => {
         handlers.onWhy(row);
       },
@@ -193,7 +200,7 @@ export function ProposalRow({
     ...(mutable
       ? [
           {
-            label: 'Drop',
+            label: 'Remove from Plan',
             onSelect: () => {
               change({ kind: 'drop' });
             },
@@ -310,7 +317,9 @@ export function ProposalRow({
       }
       trailing={trailing}
       trailingLabel={
-        row.kind === 'task' && sizes[0] !== undefined ? sizeLine(sizes[0]).text : undefined
+        row.kind === 'task' && sizes[0] !== undefined
+          ? `About ${hoursText(sizes[0].hours)} of agent time`
+          : undefined
       }
       section={section}
       opened={opened}
@@ -363,7 +372,7 @@ export function ProposalRow({
                 handlers.onWhy(row);
               }}
             >
-              Where it came from
+              Show in Conversation
             </MetaLink>,
             ...(earlier
               ? [
