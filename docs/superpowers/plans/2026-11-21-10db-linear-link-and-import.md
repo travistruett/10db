@@ -30,7 +30,7 @@ reporter (part 3, Core) and `linear_posts` are not in this plan.
 **What could go wrong, and how we'd know.**
 - **Linear's calls in a chat or Plan session were carded one by one.** You chose "Judge, like lanes": card 1 sends
   those calls to the project's judge (10db's judge or auto mode), as a lane's go, so reads run and a risky write
-  is carded. With no judge they are still carded, and one answer can allow the whole server. A wrong judge call
+  is carded. With no judge (the rare floor) they are still carded per tool. A wrong judge call
   would show as a Linear write that ran unasked; the judge's verdicts are in the session's log.
 - **The binding points at the wrong workspace.** The binding stores the workspace and team ids that the session
   read through your sign-in. Part 3 checks them again before each write.
