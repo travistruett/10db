@@ -23,7 +23,8 @@ const HINT_CODEX = 'Sign in in Settings › Trust.';
 const NOT_CHECKED = 'Your Linear sign-in is checked when you link a team.';
 const NOT_READ = "Couldn't read this account's claude.ai connectors.";
 
-function isLinearServer(url: string): boolean {
+/** Whether a remote server's url is Linear's own host. */
+export function isLinearServer(url: string): boolean {
   try {
     return new URL(url).host === LINEAR_HOST;
   } catch {
