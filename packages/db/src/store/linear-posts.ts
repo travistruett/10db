@@ -167,7 +167,7 @@ export function takeLinearPosts(
 export function recordLinearPosts(
   ctx: WriteContext,
   ids: readonly LinearPostId[],
-  outcome: ReportLinearPostInput['outcome'],
+  outcome: Exclude<ReportLinearPostInput['outcome'], { state: 'failed' }>,
 ): void {
   const rows = pendingByIds(ctx, ids);
   if (rows.length === 0) return;
@@ -297,7 +297,14 @@ export function latestLinearPostProblem(db: DbReader, projectId: ProjectId): Lin
     .select()
     .from(schema.linearPosts)
     .where(needsBuilder(projectId))
-    .orderBy(desc(schema.linearPosts.createdAt), desc(schema.linearPosts.id))
+    .orderBy(
+      // No row keeps when it failed: a withheld row has its record time, a pending one the due time its
+      // last failure set, and a failed one only its creation.
+      desc(
+        sql`coalesce(${schema.linearPosts.recordedAt}, ${schema.linearPosts.dueAt}, ${schema.linearPosts.createdAt})`,
+      ),
+      desc(schema.linearPosts.id),
+    )
     .limit(1)
     .get();
   return row === undefined ? null : toDto(row);

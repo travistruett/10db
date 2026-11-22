@@ -21,7 +21,6 @@ import {
   getProject,
   getTask,
   insertItem,
-  listLinearPosts,
   pendingLinearPosts,
   recordLinearPosts,
   setAppSetting,
@@ -36,10 +35,11 @@ import type { Logger } from '../log';
 import type { ShapeToolRequest, ShapeVerdict } from '../sessions';
 import { reporterBlockedBy } from './reporter-events';
 import { refreshReporterCard } from './reporter-inbox';
+import { taskPrUrl } from './reporter-brief';
 import { judgeReporterCall, type ReporterRun } from './reporter-guard';
 import { reporterSettings, reporterSettingsKey } from './reporter-settings';
 
-// The Linear reporter's run (Linear reporter plan, card 4): one timer per task, one short session per run,
+// The Linear reporter's run: one timer per task, one short session per run,
 // and the in-memory run the session's tools and guard answer from. A run is a Reporter conversation's
 // session; its rows are `linear_posts`, which are the only state that outlives the daemon.
 
@@ -67,8 +67,6 @@ export interface LinearReporter {
   reportPost(sessionId: SessionId, input: ReportLinearPostInput): { ok: true };
   /** The reporter's preToolUse for its own session. */
   verdict(sessionId: SessionId, req: ShapeToolRequest): ShapeVerdict;
-  /** A Linear tool result the session saw; `toolName` is the full `mcp__` name. */
-  observe(sessionId: SessionId, toolName: string, resultText: string): void;
   settings(projectId: ProjectId): LinearReporterSettings & { blockedBy: string | null };
   /** Off drops the project's pending rows. */
   setSettings(projectId: ProjectId, input: LinearReporterSettings): void;
@@ -85,6 +83,8 @@ export interface LinearReporterRuns {
     readonly sessionId: SessionId;
     readonly linearPrefixes: readonly string[];
   }): { readonly posts: readonly LinearPostDto[]; readonly run: Readonly<ReporterRun> };
+  /** The session could not be made (its launch, sandbox or sign-in check threw): the run fails with this reason. */
+  startFailed(conversationId: ConversationId, message: string): void;
   /** The conversation's turn ended. */
   turnEnded(conv: ConversationRow, end: TurnEnd): void;
   /** The conversation's state changed: settles a run whose session left without a turn end. */
@@ -95,7 +95,6 @@ export interface LinearReporterDeps {
   readonly state: StateStore;
   readonly clock: Clock;
   readonly log: Logger;
-  readonly dataDir: string;
   readonly engine: Pick<ExploreEngine, 'queued' | 'retire' | 'unretire' | 'stop'>;
   /** The task's reporter conversation, made when it has none. */
   readonly conversations: { reporterOf(taskId: TaskId, projectId: ProjectId): ConversationId };
@@ -109,7 +108,13 @@ interface Flight {
   readonly projectId: ProjectId;
   readonly conversationId: ConversationId;
   sessionId: SessionId | null;
+  /** The rows due when the run was triggered: what fails when the session never takes any. */
+  readonly due: ReadonlySet<LinearPostId>;
   taken: ReadonlySet<LinearPostId>;
+  /** Rows the session reported failed; the settle leaves them be. */
+  readonly failedByAgent: Set<LinearPostId>;
+  /** The error that stopped the run, when it is known; the rows fail with it. */
+  error: string | null;
   guard: ReporterRun | null;
   /** The conversation was seen in a turn state, so a later departure from it is the run's end. */
   busySeen: boolean;
@@ -166,6 +171,17 @@ export function createLinearReporter(
         timers.delete(taskId);
         pickup(taskId).catch((error: unknown) => {
           log.error({ err: error, taskId }, 'the Linear reporter could not pick up a task');
+          // Its due rows fail with the error and back off, and the task is armed again.
+          try {
+            const now = clock.now().getTime();
+            fail(
+              pendingLinearPosts(state.db, { taskId }).filter((p) => dueAtMs(p) <= now),
+              error instanceof Error ? error.message : String(error),
+            );
+          } catch (failure) {
+            log.error({ err: failure, taskId }, 'the Linear reporter could not fail its rows');
+          }
+          arm(taskId);
         });
       },
       Math.max(0, due - clock.now().getTime()),
@@ -213,17 +229,20 @@ export function createLinearReporter(
       arm(taskId);
       return;
     }
-    trigger(taskId, task.projectId);
+    trigger(taskId, task.projectId, due);
   };
 
-  const trigger = (taskId: TaskId, projectId: ProjectId): void => {
+  const trigger = (taskId: TaskId, projectId: ProjectId, due: readonly LinearPostDto[]): void => {
     const conversationId = deps.conversations.reporterOf(taskId, projectId);
     const flight: Flight = {
       taskId,
       projectId,
       conversationId,
       sessionId: null,
+      due: new Set(due.map((p) => p.id)),
       taken: new Set(),
+      failedByAgent: new Set(),
+      error: null,
       guard: null,
       busySeen: false,
       settled: false,
@@ -265,13 +284,16 @@ export function createLinearReporter(
    * fail otherwise. The conversation is retired, and the task re-armed, off the engine's effect chain.
    */
   const settle = (flight: Flight, reason: string): void => {
-    if (flight.settled) return;
+    // A stopped reporter leaves every row as it is, for the next start to pick up.
+    if (flight.settled || stopped) return;
     flight.settled = true;
     flight.deadline?.cancel();
     try {
       const guard = flight.guard;
-      const open = pendingLinearPosts(state.db, { taskId: flight.taskId }).filter((p) =>
-        flight.taken.has(p.id),
+      // What the session took; when it never got that far, what was due when the run was triggered.
+      const owned = flight.taken.size > 0 ? flight.taken : flight.due;
+      const open = pendingLinearPosts(state.db, { taskId: flight.taskId }).filter(
+        (p) => owned.has(p.id) && !flight.failedByAgent.has(p.id),
       );
       const [pattern] = guard === null ? [] : [...guard.withheld];
       if (pattern !== undefined)
@@ -282,7 +304,7 @@ export function createLinearReporter(
             { state: 'withheld', pattern },
           );
         });
-      else fail(open, reason);
+      else fail(open, flight.error ?? reason);
       refreshCard(flight.projectId);
     } catch (error) {
       log.error({ err: error, taskId: flight.taskId }, 'a reporter run could not be settled');
@@ -326,7 +348,10 @@ export function createLinearReporter(
       timers.clear();
       for (const timer of afters) timer.cancel();
       afters.clear();
-      for (const flight of flights.values()) flight.deadline?.cancel();
+      for (const flight of flights.values()) {
+        flight.deadline?.cancel();
+        flight.deadline = null;
+      }
       return Promise.resolve();
     },
 
@@ -344,9 +369,6 @@ export function createLinearReporter(
       const link = getTask(state.db, flight.taskId).external;
       if (link?.kind !== ExternalKind.Linear)
         throw new ConflictError('The task is not linked to a Linear issue.');
-      const prUrl = listLinearPosts(state.db, flight.taskId)
-        .map((p) => p.detail['prUrl'])
-        .find((url) => typeof url === 'string');
       state.write((ctx) => {
         takeLinearPosts(
           ctx,
@@ -357,7 +379,7 @@ export function createLinearReporter(
       const guard: ReporterRun = {
         linearPrefixes: input.linearPrefixes,
         link,
-        prUrl: typeof prUrl === 'string' ? prUrl : null,
+        prUrl: taskPrUrl(state.db, flight.taskId),
         uploads: [],
         withheld: new Set(),
       };
@@ -366,6 +388,11 @@ export function createLinearReporter(
       flight.guard = guard;
       bySession.set(input.sessionId, flight);
       return { posts, run: guard };
+    },
+
+    startFailed(conversationId, message) {
+      const flight = byConversation.get(conversationId);
+      if (flight !== undefined) flight.error = message;
     },
 
     turnEnded(conv, end) {
@@ -409,9 +436,19 @@ export function createLinearReporter(
         throw new ConflictError('No write of this run was refused for that pattern.');
       const { outcome } = input;
       // A row dropped meanwhile is skipped by the store: no error.
+      if (outcome.state === 'failed') {
+        const rows = pendingLinearPosts(state.db, { taskId: flight.taskId }).filter((p) =>
+          input.postIds.includes(p.id),
+        );
+        fail(rows, outcome.reason);
+        for (const row of rows) flight.failedByAgent.add(row.id);
+        refreshCard(flight.projectId);
+        return { ok: true };
+      }
       state.write((ctx) => {
         recordLinearPosts(ctx, input.postIds, outcome);
       });
+      refreshCard(flight.projectId);
       return { ok: true };
     },
 
@@ -430,10 +467,6 @@ export function createLinearReporter(
         : judged.verdict;
     },
 
-    observe() {
-      // The seam for what a Linear tool result gives the run (an attachment's signed upload url).
-    },
-
     settings(projectId) {
       return {
         ...reporterSettings(state.db, projectId),
@@ -446,6 +479,7 @@ export function createLinearReporter(
         setAppSetting(ctx, reporterSettingsKey(projectId), input);
         if (!input.on) dropPendingLinearPosts(ctx, { projectId });
       });
+      refreshCard(projectId);
       refreshCard(projectId);
     },
   };

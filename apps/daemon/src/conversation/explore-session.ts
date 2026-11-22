@@ -126,13 +126,10 @@ export function openSession(deps: OpenSessionDeps): OpenSession {
         if (event.pid !== null) deps.launch.track(event.pid);
         sink.started(event.providerSessionId);
         return;
-      case 'tool_call':
-        items.record(event);
-        deps.launch.observeToolCall?.(event);
-        return;
       case 'text_delta':
       case 'reasoning_delta':
       case 'message':
+      case 'tool_call':
       case 'plan_update':
         items.record(event);
         return;

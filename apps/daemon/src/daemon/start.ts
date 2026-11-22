@@ -2485,7 +2485,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     clock,
     log: logger.child({ component: 'linear-reporter' }),
-    dataDir: opts.dataDir,
     engine: exploreEngine,
     conversations: reporterConversations(state),
     signIns: linearSignIns,
@@ -2618,6 +2617,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       reconnect: () => replyWatch.reconnect(),
       githubLogin: () => Promise.resolve(github.cachedLogin()),
       linear: linearImport,
+      reporter: linearReporter,
     }),
     shape: createShapeServices({
       shape,

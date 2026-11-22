@@ -57,6 +57,8 @@ let mcpUrl: string;
 let server: ReturnType<typeof serve>;
 let reporter: LinearReporter;
 let repo: { path: string; cleanup(): void };
+/** Makes the next launch throw, as an account with no model to run would. */
+let launchError: Error | null = null;
 
 function recordingScript(postId: LinearPostId): FakeStep[] {
   return [
@@ -91,7 +93,6 @@ function makeReporter(): LinearReporter {
     state,
     clock,
     log: silentLogger,
-    dataDir: repo.path,
     engine,
     conversations: reporterConversations(state),
     signIns: {
@@ -133,20 +134,23 @@ function makeReporter(): LinearReporter {
             ],
           }),
       },
-      launch: () => ({
-        cwd: repo.path,
-        model: 'claude-sonnet-5-5',
-        modelId: 'claude-sonnet-5-5',
-        effort: 'low',
-        env: {},
-        account: {
-          accountId: project.accountId,
-          label: 'Claude plan',
-          kind: AccountKind.ClaudeSubscription,
-          harness: Provider.Claude,
-          identity: null,
-        },
-      }),
+      launch: () => {
+        if (launchError !== null) throw launchError;
+        return {
+          cwd: repo.path,
+          model: 'claude-sonnet-5-5',
+          modelId: 'claude-sonnet-5-5',
+          effort: 'low',
+          env: {},
+          account: {
+            accountId: project.accountId,
+            label: 'Claude plan',
+            kind: AccountKind.ClaudeSubscription,
+            harness: Provider.Claude,
+            identity: null,
+          },
+        };
+      },
       prepare: () =>
         Promise.resolve({
           sandbox: null,
@@ -172,6 +176,7 @@ function makeReporter(): LinearReporter {
 }
 
 beforeEach(async () => {
+  launchError = null;
   ({ store, close: closeStore } = createTestStore());
   repo = tempDir('reporter');
   const bus = createEventBus();
@@ -292,5 +297,23 @@ describe('the Linear reporter', () => {
     reporter.start();
     clock.advance(5 * 60_000);
     await expect.poll(() => rows()[0]?.state, { timeout: 10_000 }).toBe(LinearPostState.Recorded);
+  });
+
+  it('fails the rows of a run whose session cannot be made, and does not run again before the backoff', async () => {
+    oweOne();
+    launchError = new Error('no model to run');
+    const first = clock.now().getTime() + 30_000;
+    clock.advance(30_000);
+    await expect.poll(() => rows()[0]?.tries, { timeout: 10_000 }).toBe(1);
+    expect(rows()[0]).toMatchObject({
+      state: LinearPostState.Pending,
+      lastError: 'no model to run',
+      dueAt: new Date(first + 5 * 60_000).toISOString(),
+    });
+    // The settle's retire and re-arm run on the clock; the row is not due, so nothing starts again.
+    clock.advance(0);
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(rows()[0]?.tries).toBe(1);
   });
 });
