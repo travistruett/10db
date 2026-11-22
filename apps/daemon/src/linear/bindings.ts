@@ -11,13 +11,27 @@ import {
   type ProjectId,
   type ProjectLinearDto,
 } from '@10db/contracts';
-import { deleteAppSetting, getAppSetting, getProject, setAppSetting } from '@10db/db';
+import {
+  deleteAppSetting,
+  dropPendingLinearPosts,
+  getAppSetting,
+  getProject,
+  setAppSetting,
+  type DbReader,
+} from '@10db/db';
 import type { ChatService } from '../chat';
 import type { StateStore } from '../events';
 import type { Logger } from '../log';
+import { reporterSettings, reporterSettingsKey } from './reporter-settings';
 
 /** Where a project's Linear binding is stored, in the `trust.<project>` pattern. */
 const bindingKey = (projectId: ProjectId): string => `linear.${projectId}`;
+
+/** The project's stored binding, or null when it has none or the stored value is not one. */
+export function linearBindingOf(db: DbReader, projectId: ProjectId): LinearBinding | null {
+  const parsed = LinearBinding.safeParse(getAppSetting(db, bindingKey(projectId)));
+  return parsed.success ? parsed.data : null;
+}
 
 /** How long a finished check's session stays open, so the tool's own answer reaches it first. */
 const ARCHIVE_AFTER_MS = 2_000;
@@ -75,10 +89,8 @@ export function createLinearBindings(deps: {
   const clock = deps.now ?? Date.now;
   const checks = new Map<ProjectId, Check>();
 
-  const stored = (projectId: ProjectId): LinearBinding | null => {
-    const parsed = LinearBinding.safeParse(getAppSetting(deps.state.db, bindingKey(projectId)));
-    return parsed.success ? parsed.data : null;
-  };
+  const stored = (projectId: ProjectId): LinearBinding | null =>
+    linearBindingOf(deps.state.db, projectId);
   /**
    * The check as it stands: one whose session was archived, or whose turn ended without the call, is over. A
    * session that never showed a turn is given `NO_TURN_MS` before it counts.
@@ -189,6 +201,11 @@ export function createLinearBindings(deps: {
             teamKey: team.key.toUpperCase(),
             teamName: team.name,
           });
+          // A new link reports by default; a note the builder kept stays.
+          setAppSetting(ctx, reporterSettingsKey(projectId), {
+            on: true,
+            note: reporterSettings(ctx.tx, projectId).note,
+          });
         });
         checks.delete(projectId);
       }
@@ -219,6 +236,8 @@ export function createLinearBindings(deps: {
       getProject(deps.state.db, projectId);
       deps.state.write((ctx) => {
         deleteAppSetting(ctx, bindingKey(projectId));
+        // Setting writes emit no event, so the owed updates are dropped here.
+        dropPendingLinearPosts(ctx, { projectId });
       });
       checks.delete(projectId);
       return view(projectId);
