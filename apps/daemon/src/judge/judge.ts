@@ -19,7 +19,7 @@ import type { Logger } from '../log';
 import { askModel } from './ask';
 import type { BedrockClientFactory } from './bedrock';
 import { ModelApi, modelApi, optionsText, type ModelAnswer } from './openrouter';
-import { secretsOf, type JudgeCredential } from './credential';
+import { NO_DECISION_CREDENTIAL, secretsOf, type JudgeCredential } from './credential';
 import { untilAborted } from './until-aborted';
 
 /** Logged calls are kept this long; older rows are deleted when the daemon starts. */
@@ -169,7 +169,7 @@ export function createJudge(deps: JudgeDeps): JudgeService {
         return {
           kind: 'fallback',
           reason: 'no_key',
-          detail: 'No OpenRouter key is set',
+          detail: NO_DECISION_CREDENTIAL,
           latencyMs: null,
         };
       const answer = await askModel({
@@ -341,7 +341,7 @@ export function createJudge(deps: JudgeDeps): JudgeService {
     if (result.kind === 'fallback')
       return {
         ok: false,
-        error: result.reason === 'no_key' ? 'No OpenRouter key is set' : result.detail,
+        error: result.reason === 'no_key' ? NO_DECISION_CREDENTIAL : result.detail,
       };
     return {
       ok: true,

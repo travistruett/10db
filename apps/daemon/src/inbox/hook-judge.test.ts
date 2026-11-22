@@ -442,7 +442,7 @@ describe('the hook judge, attended', () => {
   it('the floor calls onFloor with its detail', async () => {
     model = 'no_key';
     await run(hookJudge(), bash(DEPLOY));
-    expect(floors).toEqual(['No OpenRouter key is set']);
+    expect(floors).toEqual(['No key or credential is set for the account Decisions run on']);
   });
 
   it("a grant added mid-session reaches the next call's state, and one removed is gone from it", async () => {

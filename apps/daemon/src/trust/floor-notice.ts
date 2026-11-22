@@ -6,7 +6,7 @@ type ValueOf<T> = T[keyof T];
 /** Why a session, or a call, is judged by 10db's rules and not by a judge. */
 export const FloorReason = {
   Setting: 'setting',
-  /** The account's judge is 10db's, and it isn't ready: no OpenRouter key, or a switch off. */
+  /** The account's judge is 10db's, and it isn't ready: no account that can power Decisions, or a switch off. */
   NoJudge: 'no_judge',
   /** 10db's judge timed out or failed mid-session, so its calls meet the rules for a while. */
   JudgeUnavailable: 'judge_unavailable',
@@ -39,7 +39,7 @@ function floorCause(reason: FloorReason, detail: string): string {
     case FloorReason.Setting:
       return '"Lanes decide routine permissions" is off in Settings';
     case FloorReason.NoJudge:
-      return "10db's judge needs an OpenRouter key and its Limits switch on in Settings › Decisions";
+      return "10db's judge needs an account that can power Decisions and its Limits switch on in Settings › Decisions";
     case FloorReason.JudgeUnavailable:
       return `10db's judge didn't answer (${detail})`;
     case FloorReason.LeftAutoMode:

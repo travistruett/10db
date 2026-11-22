@@ -52,7 +52,6 @@ import {
   listAccountModels,
   listAccounts,
   getAppSetting,
-  findAccountRow,
   getJudgeConfig,
   getProject,
   listPermissionRules,
@@ -822,6 +821,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     off: opts.judgeOff === true,
     logger: logger.child({ component: 'judge' }),
   });
+  /** The live OpenRouter accounts, the one Decisions run on first. */
+  const liveOpenRouterAccounts = (): AccountId[] => {
+    const decisions = getJudgeConfig(state.db).accountId;
+    return listAccounts(state.db)
+      .filter((a) => !a.archived && a.kind === AccountKind.OpenRouter)
+      .map((a) => a.id)
+      .sort((a, b) => Number(b === decisions) - Number(a === decisions));
+  };
   // OpenRouter's scores and speeds are read with the decisions account's key, and never under either kill switch.
   const openRouterSync: OpenRouterSync | null =
     opts.openRouterSync === true && opts.judgeOff !== true && opts.benchmarksOff !== true
@@ -830,9 +837,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           clock,
           fetch: opts.fetch ?? fetch,
           readKey: async () => {
-            const credential = await readJudgeCredential(getJudgeConfig(state.db).accountId);
-            // An Anthropic key or a Bedrock token must never go to openrouter.ai.
-            return credential?.kind === AccountKind.OpenRouter ? credential.key : null;
+            // The Decisions account's key when it is an OpenRouter account, else any live OpenRouter account's; an
+            // Anthropic key or a Bedrock token must never go to openrouter.ai.
+            for (const id of liveOpenRouterAccounts()) {
+              const credential = await readJudgeCredential(id);
+              if (credential?.kind === AccountKind.OpenRouter) return credential.key;
+            }
+            return null;
           },
           offered: () => {
             const live = new Set(
@@ -2500,13 +2511,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     refreshModels,
     catalogueOn: modelRefreshOn,
     openRouterOff: opts.judgeOff === true || opts.benchmarksOff === true,
-    // Without an OpenRouter account for decisions the rows are Artificial Analysis's alone.
-    openRouterOn: () => {
-      if (openRouterSync === null) return false;
-      const accountId = getJudgeConfig(state.db).accountId;
-      const account = accountId === null ? undefined : findAccountRow(state.db, accountId);
-      return account !== undefined && !account.archived && account.kind === AccountKind.OpenRouter;
-    },
+    // Without a live OpenRouter account the rows are Artificial Analysis's alone.
+    openRouterOn: () => openRouterSync !== null && liveOpenRouterAccounts().length > 0,
     trust,
     mcpSignIns,
     judge: createJudgeServices({

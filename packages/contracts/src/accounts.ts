@@ -57,6 +57,21 @@ export function agentKind(kind: SupportedAccountKind): AgentAccountKind {
   return kind;
 }
 
+/** The kinds whose API answers 10db's decisions. */
+export const DECISION_ACCOUNT_KINDS = [
+  AccountKind.OpenRouter,
+  AccountKind.AnthropicApiKey,
+  AccountKind.Bedrock,
+] as const;
+
+/** Whether the account's API can answer a decision; a plan login has none. */
+export function powersDecisions(kind: SupportedAccountKind): boolean {
+  return (DECISION_ACCOUNT_KINDS as readonly SupportedAccountKind[]).includes(kind);
+}
+
+/** Why a plan login can't be the account decisions run on. */
+export const PLAN_LOGIN_CANT_DECIDE = 'a plan login has no API for quick decisions';
+
 /** The adapter id of the agent that runs a session on each kind: a new kind is one row. */
 const ADAPTER_OF_KIND = {
   [AccountKind.ClaudeSubscription]: Provider.Claude,

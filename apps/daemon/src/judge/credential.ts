@@ -12,6 +12,10 @@ export type JudgeCredential =
       readonly bearerToken: string | null;
     };
 
+/** What a decision says when the account it runs on has no key or credential to sign with. */
+export const NO_DECISION_CREDENTIAL =
+  'No key or credential is set for the account Decisions run on';
+
 /** Every secret the credential holds, for scrubbing from text that might echo one. */
 export function secretsOf(credential: JudgeCredential | null): readonly string[] {
   if (credential === null) return [];
