@@ -4,6 +4,7 @@ import {
   dropPendingLinearPosts,
   enqueueLinearPost,
   failLinearPosts,
+  linearPostCounts,
   listLinearPosts,
   pendingLinearPosts,
   recordLinearPosts,
@@ -92,5 +93,18 @@ describe('the Linear post queue', () => {
         .map((r) => r.state)
         .sort(),
     ).toEqual(['failed', 'recorded', 'withheld']);
+  });
+
+  it('counts failed rows of one project only', () => {
+    const { project, enqueue } = seed();
+    const other = seed();
+    const own = enqueue('a');
+    const foreign = other.enqueue('a');
+    if (own === null || foreign === null) throw new Error('not enqueued');
+    store.write((ctx) => {
+      failLinearPosts(ctx, [foreign.id], 'down', ctx.now, 1);
+    });
+    expect(linearPostCounts(store.db, project.id)).toEqual({ waiting: 0, failed: 0, withheld: 0 });
+    expect(linearPostCounts(store.db, other.project.id).failed).toBe(1);
   });
 });
