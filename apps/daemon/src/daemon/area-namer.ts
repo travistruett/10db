@@ -1,6 +1,6 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { agentKind, isModelTier, ModelTier, providerOf, StepRole } from '@10db/contracts';
+import { isModelTier, ModelTier, requireHarness, StepRole } from '@10db/contracts';
 import { defaultAccountId, getAccountRow, listAccountModels, type DbReader } from '@10db/db';
 import type { Launcher } from '../environment';
 import type { AreaNamer } from '../folders';
@@ -20,18 +20,19 @@ export interface AreaNamerDeps {
 }
 
 /**
- * Asks the default account's model to name and merge area candidates. The question starts in a new
+ * Asks a model of the project's account (the default account for a folder that is not yet a project) to name
+ * and merge area candidates. The question starts in a new
  * empty folder of 10db's own and carries paths as text: the model gets no tool and no project file,
  * so nothing of the repository is read or run on its behalf.
  */
 export function createAreaNamer(deps: AreaNamerDeps): AreaNamer {
-  return async (prompt, signal) => {
-    const id = defaultAccountId(deps.db);
+  return async (prompt, signal, accountId) => {
+    const id = accountId ?? defaultAccountId(deps.db);
     if (id === null) throw new CompletionError('There is no default account to ask.');
     const account = getAccountRow(deps.db, id);
     // The tier's model on this account, by the tier's default and never by score, so naming is never refused.
     const choice = chooseModel({
-      ...routingInputs(deps.db, { accountId: id, provider: providerOf(agentKind(account.kind)) }),
+      ...routingInputs(deps.db, { accountId: id, provider: requireHarness(account) }),
       def: { role: StepRole.Plan, need: 0 },
       requirements: [{ kind: 'automatic' }],
       effort: null,

@@ -2,7 +2,6 @@ import type { ConversationOwnerKind, JudgeKind } from '@10db/contracts';
 import {
   ConversationState,
   type AccountId,
-  type AgentAccountKind,
   type AgentCapabilitiesDto,
   type ConversationId,
   type ConversationItemId,
@@ -12,6 +11,7 @@ import {
 } from '@10db/contracts';
 import type { ConversationItemRow, ConversationRow } from '@10db/db';
 import type { Clock, Timer } from '../clock';
+import type { AccountAgent } from '../environment';
 import type { EventBus, LiveFrames, StateStore } from '../events';
 import type { Logger } from '../log';
 import { SessionEndReason, type AgentAdapter, type InterruptReceipt } from '../sessions';
@@ -224,7 +224,7 @@ export interface EngineCore {
   isClosed(): boolean;
   conversation(id: ConversationId): ConversationRow;
   hooksOf(conv: ConversationRow): ExploreOwnerHooks;
-  accountOf(conv: ConversationRow): { id: AccountId; kind: AgentAccountKind };
+  accountOf(conv: ConversationRow): AccountAgent & { id: AccountId };
   capabilitiesOf(conv: ConversationRow): AgentCapabilitiesDto;
   runtimeOf(id: ConversationId): Runtime;
   /** Convert's hold or the update hold keeps new turns from starting. */

@@ -19,6 +19,7 @@ const NONE: TakeoverLaunch = {
 function spec(launch: TakeoverLaunch): TakeoverSpec {
   return {
     kind: 'claude_subscription',
+    harness: 'claude',
     binary: '/pinned/claude',
     cwd: '/work/repo',
     providerSessionId: 'abc-123',

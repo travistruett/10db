@@ -1,10 +1,4 @@
-import {
-  providerOf,
-  Provider,
-  type AgentAccountKind,
-  type Effort,
-  type ProjectDto,
-} from '@10db/contracts';
+import { Provider, type SupportedAccountKind, type Effort, type ProjectDto } from '@10db/contracts';
 import type { TakeoverLaunch } from '../environment';
 import {
   claudeTakeoverMcp,
@@ -26,7 +20,9 @@ import { unlinkSync } from 'node:fs';
 /** What the chat's session ran with, resolved from its project's account and its conversation. */
 export interface TakeoverSource {
   readonly cwd: string;
-  readonly kind: AgentAccountKind;
+  readonly kind: SupportedAccountKind;
+  /** The harness the account runs. */
+  readonly harness: Provider;
   /** The model as the agent is launched with it. */
   readonly model: string;
   readonly effort: Effort;
@@ -108,8 +104,11 @@ export async function prepareTakeover(
       written.push(path);
       return path;
     };
-    const codex = providerOf(source.kind) === Provider.Codex;
-    const notes = [...deps.adapter.takeoverNotes({ kind: source.kind }), ...servers.notes];
+    const codex = source.harness === Provider.Codex;
+    const notes = [
+      ...deps.adapter.takeoverNotes({ kind: source.kind, harness: source.harness }),
+      ...servers.notes,
+    ];
     let mcpConfigFile: string | null = null;
     let sealedEnvFile: string | null = null;
     let codexServers: ReturnType<typeof codexTakeoverServers>['servers'] = [];
@@ -140,6 +139,7 @@ export async function prepareTakeover(
           );
     const command = deps.adapter.takeoverCommand({
       kind: source.kind,
+      harness: source.harness,
       cwd: source.cwd,
       providerSessionId: input.providerSessionId,
       model: source.model,

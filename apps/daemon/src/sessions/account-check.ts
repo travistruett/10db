@@ -2,10 +2,11 @@ import {
   AccountKind,
   AccountProblem,
   ModelMarkBasis,
+  Provider,
   signsInWithLogin,
   type AccountRefusal,
   type Effort,
-  type AgentAccountKind,
+  type SupportedAccountKind,
 } from '@10db/contracts';
 import type { AccountExpectation } from '../environment';
 import type { SignInState } from './sign-in-check';
@@ -50,21 +51,19 @@ export function seenFrom(info: {
   };
 }
 
-const NEEDS: Readonly<Record<AgentAccountKind, string>> = {
+const NEEDS: Readonly<Record<SupportedAccountKind, string>> = {
   [AccountKind.ClaudeSubscription]: 'a Claude subscription',
   [AccountKind.AnthropicApiKey]: 'an Anthropic API key',
   [AccountKind.Bedrock]: 'Bedrock',
   [AccountKind.Gateway]: 'a gateway token',
   [AccountKind.CodexSignin]: 'a ChatGPT sign-in',
+  [AccountKind.OpenRouter]: 'an OpenRouter key',
 };
 
-/** The tool a kind's sessions run on, and its own sign-in status command, so a card names the right one. */
-const TOOL: Readonly<Record<AgentAccountKind, { name: string; status: string }>> = {
-  [AccountKind.ClaudeSubscription]: { name: 'Claude Code', status: 'claude auth status' },
-  [AccountKind.AnthropicApiKey]: { name: 'Claude Code', status: 'claude auth status' },
-  [AccountKind.Bedrock]: { name: 'Claude Code', status: 'claude auth status' },
-  [AccountKind.Gateway]: { name: 'Claude Code', status: 'claude auth status' },
-  [AccountKind.CodexSignin]: { name: 'Codex', status: 'codex login status' },
+/** The tool each harness runs as, and its own sign-in status command, so a card names the right one. */
+const TOOL: Readonly<Record<Provider, { name: string; status: string }>> = {
+  [Provider.Claude]: { name: 'Claude Code', status: 'claude auth status' },
+  [Provider.Codex]: { name: 'Codex', status: 'codex login status' },
 };
 
 /** A ChatGPT account's identity: the email and the workspace, since one email can sign in to several. */
@@ -83,7 +82,7 @@ function described(seen: SeenAccount): string {
  * Whether Claude Code bills the credential the kind needs. Only values a real session has shown are
  * accepted (spike 12 for the gateway), so a renamed variable fails loudly instead of billing someone else.
  */
-function credentialsMatch(kind: AgentAccountKind, seen: SeenAccount): boolean {
+function credentialsMatch(kind: SupportedAccountKind, seen: SeenAccount): boolean {
   switch (kind) {
     case AccountKind.ClaudeSubscription:
       // A plan's name is never compared; a gateway also looks first-party, so its token source rules it out.
@@ -105,6 +104,8 @@ function credentialsMatch(kind: AgentAccountKind, seen: SeenAccount): boolean {
       );
     case AccountKind.CodexSignin:
       return seen.apiProvider === 'chatgpt' && Boolean(seen.subscriptionType);
+    case AccountKind.OpenRouter:
+      return false;
   }
 }
 
@@ -117,7 +118,7 @@ function chatgptIdentity(seen: SeenAccount): string | undefined {
 }
 
 /** What a login account is confirmed as: a ChatGPT plan's email and workspace, a subscription's email. */
-export function loginIdentity(kind: AgentAccountKind, seen: SeenAccount): string | undefined {
+export function loginIdentity(kind: SupportedAccountKind, seen: SeenAccount): string | undefined {
   return kind === AccountKind.CodexSignin ? chatgptIdentity(seen) : seen.email;
 }
 
@@ -128,7 +129,7 @@ export function checkAccount(expect: AccountExpectation, seen: SeenAccount): Acc
   const who = `account "${expect.label}"`;
   // A third-party provider or a gateway token reports no email or plan either, and signing in cannot fix
   // that: only a first-party report with nothing in it is a signed-out directory.
-  const tool = TOOL[expect.kind].name;
+  const tool = TOOL[expect.harness].name;
   const codex = expect.kind === AccountKind.CodexSignin;
   const providerOfLogin = codex ? 'chatgpt' : 'firstParty';
   const firstParty = seen.apiProvider === undefined || seen.apiProvider === providerOfLogin;
@@ -175,7 +176,7 @@ export function missingAccountRefusal(
   signIn?: SignInState,
 ): AccountRefusal | null {
   if (!signsInWithLogin(expect.kind)) return null;
-  const { status } = TOOL[expect.kind];
+  const { status } = TOOL[expect.harness];
   const tail = printed ? `. ${printed}` : '';
   const who = `${why} for account "${expect.label}"`;
   // The tool's status command settles it: only "not signed in" is a sign-out. Anything else is a slow start.
@@ -215,18 +216,18 @@ function oneLine(raw: string): string {
 /**
  * What a session start that got no account from Claude Code says: how long it waited, how many starts
  * got nothing, and what they printed, so the builder can tell a slow start from a real sign-out.
- * `printed` holds one entry per start, the text its stderr held; `kind` picks the tool the text names.
+ * `printed` holds one entry per start, the text its stderr held; `harness` picks the tool the text names.
  */
 export function noAccountWhy(
   waitMs: number | readonly number[],
   printed: readonly string[],
-  kind: AgentAccountKind,
+  harness: Provider,
 ): { readonly why: string; readonly printed: string } {
   const starts = printed.length;
   const waits = typeof waitMs === 'number' ? [waitMs] : [...new Set(waitMs)];
   const seconds = waits.map((ms) => `${String(ms / 1_000)} s`);
   const last = seconds.pop();
-  const tool = TOOL[kind].name;
+  const tool = TOOL[harness].name;
   const said = `${tool} reported no account`;
   const wait =
     seconds.length === 0
@@ -253,7 +254,7 @@ export function checkInitCredentials(
     ? null
     : {
         problem: AccountProblem.WrongCredentials,
-        message: `account "${expect.label}" needs ${NEEDS[expect.kind]} but ${TOOL[expect.kind].name} started with ${described(seen)}`,
+        message: `account "${expect.label}" needs ${NEEDS[expect.kind]} but ${TOOL[expect.harness].name} started with ${described(seen)}`,
         seenIdentity: null,
       };
 }

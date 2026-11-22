@@ -64,8 +64,6 @@ import {
   PassTurnId,
   JudgeKind,
   Provider,
-  agentKind,
-  providerOf,
   TakeOutStep,
   type PassId,
   type TaskId,
@@ -231,6 +229,7 @@ import {
   type AwsCredentialsExporter,
   type Launcher,
   type SessionLaunch,
+  accountAgentOf,
 } from '../environment';
 import { createPassGitSession, type Git } from '../git';
 import { anotherWritersRound, readStartDirt, withoutStartDirt } from './start-dirt';
@@ -2498,7 +2497,8 @@ export function createRunner(opts: RunnerOptions): Runner {
     // Read before the briefing: the briefing follows the account this session runs on, which can
     // differ from the last session's when the project moved. Reading has no side effects.
     const account = getAccountRow(db, ctl.accountId);
-    const provider = providerOf(agentKind(account.kind));
+    const agent = accountAgentOf(account);
+    const provider = agent.harness;
     // The persona's craft skills, then those of the task's kinds, so every step of such a task loads them.
     const plansFirst = step.plansFirst === true;
     const skills = stepSkills(persona, kindsOfTask(task.kinds, listKinds(db)), { plansFirst });
@@ -2627,7 +2627,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         ? await opts.startGate.acquire(account.id)
         : () => undefined;
     // Where Claude Code keeps this account's sessions, and with them each one's saved tool results.
-    const configDir = sessionConfigDir(agentKind(account.kind), launch.env, homedir());
+    const configDir = sessionConfigDir(agent.harness, launch.env, homedir());
     let laneSession: LaneSession | null = null;
     if (opts.laneSandbox) {
       try {
@@ -2645,7 +2645,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           taskFiles: taskFilesDir(opts.dataDir, task.id),
           // The builder is in a pass: a Read of the checkout's `.env` asks them instead of failing.
           attended: pass !== null,
-          ...(account.kind === AccountKind.CodexSignin ? { tempRoot: opts.codexLaneTempRoot } : {}),
+          ...(agent.harness === Provider.Codex ? { tempRoot: opts.codexLaneTempRoot } : {}),
         });
       } catch (error) {
         releaseStart();
@@ -2769,7 +2769,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       laneSession === null
         ? null
         : floorReason({
-            kind: agentKind(account.kind),
+            ...agent,
             model: launch.model,
             autoMode: lanePermissionMode === 'auto',
             tendbReady,
@@ -2968,7 +2968,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       session = opts.state.write((ctx) => {
         const s = insertSession(ctx, {
           workstreamId: id,
-          provider: providerOf(agentKind(account.kind)),
+          provider: agent.harness,
           model: launchStep.model,
           effort: launchStep.effort,
           mode: 'managed',

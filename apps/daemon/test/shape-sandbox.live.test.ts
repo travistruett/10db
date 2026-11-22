@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { agentKind, mintId, PermissionChoice, ShapeOrigin } from '@10db/contracts';
+import { mintId, PermissionChoice, ShapeOrigin } from '@10db/contracts';
 import {
   createTestStore,
   insertPlanSession,
@@ -20,6 +20,7 @@ import {
   createLauncher,
   ensureAgent,
   systemKeychain,
+  accountAgentOf,
 } from '../src/environment';
 import { createEventBus, createStateStore } from '../src/events';
 import { judgeChatCall } from '../src/chat';
@@ -95,7 +96,7 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
       updatedAt: new Date(0).toISOString(),
     };
     const seen = await adapter.probeAccount({
-      kind: agentKind(account.kind),
+      ...accountAgentOf(account),
       cwd: checkout,
       env: launcher.probe(account).env,
     });
@@ -156,7 +157,7 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
       conversationId: shapeConversation(state.db, shape.id).id,
       shapeId: shape.id,
       sessionId: mintId('Session'),
-      accountKind: agentKind(account.kind),
+      harness: accountAgentOf(account).harness,
       env: launch.env,
       resumeProviderSessionId: null,
       signal: new AbortController().signal,

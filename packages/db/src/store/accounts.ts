@@ -84,8 +84,7 @@ function refuseTakenLabel(db: DbReader, label: string, except: AccountId | null)
 
 /** A project's account or backup must run a harness; a kind with none is refused with `requireHarness`'s message. */
 export function refuseAccountWithoutHarness(db: DbReader, id: AccountId): void {
-  const account = toDto(db, getAccountRow(db, id));
-  requireHarness(account);
+  requireHarness(getAccountRow(db, id));
 }
 
 export function findAccountRow(db: DbReader, id: AccountId): AccountRow | undefined {

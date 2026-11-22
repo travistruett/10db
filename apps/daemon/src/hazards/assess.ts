@@ -1,4 +1,4 @@
-import type { HazardRemoval, ProjectId } from '@10db/contracts';
+import type { AccountId, HazardRemoval, ProjectId } from '@10db/contracts';
 import {
   applyHazardAdditions,
   getProject,
@@ -65,6 +65,7 @@ async function answer(
   prompt: string,
   ms: number,
   caller: AbortSignal | undefined,
+  accountId: AccountId,
 ): Promise<string | null> {
   if (caller?.aborted === true) return null;
   const question = new AbortController();
@@ -83,7 +84,7 @@ async function answer(
     );
   });
   try {
-    const asked = asker(prompt, question.signal);
+    const asked = asker(prompt, question.signal, accountId);
     // An asker that ignores its signal still must not hold the look past the bound.
     asked.catch(() => undefined);
     return await Promise.race([asked, ended]);
@@ -136,6 +137,7 @@ export function createHazardAssessor(deps: AssessorDeps): HazardAssessor {
       }),
       deps.askMs ?? ASSESS_MS,
       signal,
+      project.accountId,
     );
     if (reply === null) return fail('The model was not available in time, so nothing changed.');
     const checked = checkAssessment(reply, input);

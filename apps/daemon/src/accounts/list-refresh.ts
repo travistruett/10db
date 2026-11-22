@@ -1,4 +1,4 @@
-import { runsAgents, type AccountId } from '@10db/contracts';
+import { harnessOf, type AccountId } from '@10db/contracts';
 import { getAccountRow, listAccountModels, listAccounts } from '@10db/db';
 import type { AccountLists } from '../catalogue';
 import type { Clock } from '../clock';
@@ -59,14 +59,15 @@ export function createListRefresh(deps: {
 
   async function probeAndRecord(id: AccountId): Promise<void> {
     const row = getAccountRow(db, id);
-    // An OpenRouter account lists no models and runs no agent: there is nothing to probe.
-    if (!runsAgents(row.kind)) return;
+    // An account no harness runs lists no models: there is nothing to probe.
+    if (harnessOf(row) === null) return;
     const launch = deps.launcher.probe(row);
     const release = await deps.startGate.acquire(id);
     let seen: SeenAccount;
     try {
       seen = await deps.adapter.probeAccount({
         kind: row.kind,
+        harness: launch.expect.harness,
         cwd: deps.dataDir,
         env: launch.env,
       });
@@ -74,7 +75,7 @@ export function createListRefresh(deps: {
       release();
     }
     if (checkAccount(launch.expect, seen) === null)
-      deps.lists.record({ id: row.id, kind: row.kind }, seen);
+      deps.lists.record({ id: row.id, kind: row.kind, harness: launch.expect.harness }, seen);
   }
 
   function readOne(id: AccountId): Promise<void> {
@@ -98,7 +99,7 @@ export function createListRefresh(deps: {
     async readAll({ staleOnly = false } = {}) {
       for (const account of listAccounts(db)) {
         if (stopped) return;
-        if (!runsAgents(account.kind)) continue;
+        if (harnessOf(account) === null) continue;
         if (staleOnly && !stale(account.id)) continue;
         await readOne(account.id);
       }

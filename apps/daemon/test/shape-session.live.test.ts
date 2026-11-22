@@ -13,7 +13,7 @@ import {
 import type { AddressInfo } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { agentKind, mintId } from '@10db/contracts';
+import { mintId } from '@10db/contracts';
 import {
   createTestStore,
   insertSession,
@@ -32,6 +32,7 @@ import {
   createLauncher,
   ensureAgent,
   systemKeychain,
+  accountAgentOf,
 } from '../src/environment';
 import { createEventBus, createStateStore } from '../src/events';
 import { createGit } from '../src/git';
@@ -105,7 +106,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       updatedAt: new Date(0).toISOString(),
     };
     const seen = await adapter.probeAccount({
-      kind: agentKind(account.kind),
+      ...accountAgentOf(account),
       cwd: checkout,
       env: launcher.probe(account).env,
     });
@@ -283,7 +284,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       updatedAt: new Date(0).toISOString(),
     };
     const seen = await adapter.probeAccount({
-      kind: agentKind(account.kind),
+      ...accountAgentOf(account),
       cwd: checkout,
       env: launcher.probe(account).env,
     });
@@ -406,7 +407,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       updatedAt: new Date(0).toISOString(),
     };
     const seen = await adapter.probeAccount({
-      kind: agentKind(defaultAccount.kind),
+      ...accountAgentOf(defaultAccount),
       cwd: checkout,
       env: launcher.probe(defaultAccount).env,
     });
@@ -630,7 +631,7 @@ async function readInSession(
     updatedAt: new Date(0).toISOString(),
   };
   const seen = await adapter.probeAccount({
-    kind: agentKind(account.kind),
+    ...accountAgentOf(account),
     cwd: checkout,
     env: launcher.probe(account).env,
   });

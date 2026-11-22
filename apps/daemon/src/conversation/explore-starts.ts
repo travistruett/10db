@@ -5,7 +5,6 @@ import {
   ConversationState,
   mintId,
   ModelMarkBasis,
-  providerOf,
   SessionMode,
   type ConversationItemId,
 } from '@10db/contracts';
@@ -138,7 +137,7 @@ export function createStarts(core: EngineCore, turns: ExploreTurns): ExploreStar
       insertSession(ctx, {
         id: sessionId,
         conversationId: rt.id,
-        provider: providerOf(account.kind),
+        provider: account.harness,
         model: running.launchId,
         effort: running.effort,
         mode: SessionMode.Managed,

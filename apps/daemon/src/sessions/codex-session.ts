@@ -372,7 +372,7 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
    */
   const failUnreadAccount = async (unread: AccountUnread): Promise<never> => {
     const signIn = await signInCheck(childEnv());
-    const { why, printed } = noAccountWhy(START_CALL_MS, [stderrTail], spec.account.kind);
+    const { why, printed } = noAccountWhy(START_CALL_MS, [stderrTail], spec.account.harness);
     const refusal =
       signIn === 'signed_out' ? missingAccountRefusal(spec.account, why, printed, signIn) : null;
     if (refusal !== null)
@@ -1064,7 +1064,7 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
     if (error instanceof CodexRpcError) {
       finish(
         failed,
-        `Codex could not start the session. ${noAccountWhy(START_CALL_MS, [stderrTail], spec.account.kind).printed}.${unlessStarted(started)}`,
+        `Codex could not start the session. ${noAccountWhy(START_CALL_MS, [stderrTail], spec.account.harness).printed}.${unlessStarted(started)}`,
       );
       return;
     }

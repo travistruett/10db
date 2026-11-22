@@ -18,9 +18,9 @@ import {
   noOpenRouterSync,
   PROTOCOL_VERSION,
   RoutedBy,
-  agentKind,
   AgentSkillNotInstallable,
-  providerOf,
+  harnessOf,
+  requireHarness,
   WorkstreamId,
   WorkstreamState,
   type InboxAnswer,
@@ -192,6 +192,7 @@ import {
   type Keychain,
   type GhLoginProbe,
   type ResolvedTools,
+  accountAgentOf,
 } from '../environment';
 import {
   createEventBus,
@@ -1080,7 +1081,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       reconcileProfiles(ctx, from);
     });
     modelWait.release((id) => {
-      const provider = providerOf(agentKind(getAccountRow(db, id).kind));
+      const provider = harnessOf(getAccountRow(db, id));
       return listModelProfiles(db).some((p) => p.provider === provider);
     });
   }
@@ -1686,7 +1687,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       model: session.model,
       modelId,
       effort: run.effort,
-      agentModels: shapeAgentModels(agentKind(row.kind)),
+      agentModels: shapeAgentModels(row.kind),
       env: session.env,
       account: session.expect,
       access: {
@@ -1761,7 +1762,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     modelsOf: conversationModels,
     webSearchOf: (projectId) =>
       adapter.capabilities(
-        { kind: agentKind(getAccountRow(db, getProject(db, projectId).accountId).kind) },
+        accountAgentOf(getAccountRow(db, getProject(db, projectId).accountId)),
         null,
       ).webSearch,
     takeover: () => takeoverService,
@@ -1781,18 +1782,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     const row = getAccountRow(db, project.accountId);
     const run = conversationRun(db, project, conv.model, conv.effort);
     if (run === undefined) throw new ConflictError(`${row.label} offers no model for a chat`);
-    const kind = agentKind(row.kind);
+    const agent = accountAgentOf(row);
     try {
       const launch = launcher.takeover(row, run.model, listAccountModels(db, row.id));
       const chatRow = chatOfConversation(db, conv.id);
       return {
         // Where the session works: its worktree on a branch, the checkout otherwise.
         cwd: chatRow === null ? project.repoPath : chatRoot(chatRow, project).root,
-        kind,
+        ...agent,
         model: launch.model,
         effort: run.effort,
         launch,
-        web: adapter.capabilities({ kind }, run.model).webSearch,
+        web: adapter.capabilities(agent, run.model).webSearch,
       };
     } catch (error) {
       if (error instanceof AccountLaunchError || error instanceof ModelNotLaunchableError)
@@ -1857,7 +1858,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
               project,
               folder,
               env,
-              configDir: sessionConfigDir(agentKind(row.kind), env, homedir()),
+              configDir: sessionConfigDir(requireHarness(row), env, homedir()),
             });
           },
           onboard: async (source) => {
@@ -1871,7 +1872,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         input,
         signal,
       ),
-    notesOf: (kind) => adapter.takeoverNotes({ kind }),
+    notesOf: (source) => adapter.takeoverNotes(source),
     setupNotes: () => (takeoverServers === null ? [NO_SANDBOX_NOTE] : []),
     changedPaths: (checkout) => git.changedPaths(checkout),
   });
@@ -1921,9 +1922,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       ...(conversationPrepare === undefined ? {} : { prepare: conversationPrepare }),
       plan: shape.planParts,
       limitsFor: pictureLimitsFor,
-      judgeOf: (kind, model) => adapter.capabilities({ kind }, model).judge,
-      webSearchOf: (kind, model) => adapter.capabilities({ kind }, model).webSearch,
-      subagentsOf: (kind, model) => adapter.capabilities({ kind }, model).subagents,
+      judgeOf: (account, model) => adapter.capabilities(account, model).judge,
+      webSearchOf: (account, model) => adapter.capabilities(account, model).webSearch,
+      subagentsOf: (account, model) => adapter.capabilities(account, model).subagents,
       clock,
       judge,
       firstChange: (chatId) => {

@@ -1,4 +1,9 @@
-import { AccountKind, knownEfforts, providerOf, type AgentAccountKind } from '@10db/contracts';
+import {
+  AccountKind,
+  knownEfforts,
+  type Provider,
+  type SupportedAccountKind,
+} from '@10db/contracts';
 import type { NewAccountModel } from '@10db/db';
 import type { SeenModel } from '../sessions';
 import { BEDROCK, joinModel, RUNTIME_MAKER } from './join';
@@ -17,18 +22,19 @@ const pricesOf = (entry: CatalogueModel): Prices => ({
  * the maker's list price when the catalogue has the maker's own entry; Bedrock prices its own copy of the model.
  */
 function priceOf(
-  kind: AgentAccountKind,
+  account: { readonly kind: SupportedAccountKind; readonly harness: Provider },
   entry: CatalogueModel | null,
   launchId: string,
   catalogue: Catalogue,
 ): Prices {
-  switch (kind) {
+  switch (account.kind) {
     case AccountKind.ClaudeSubscription:
     case AccountKind.CodexSignin:
+    case AccountKind.OpenRouter:
       return NO_PRICE;
     case AccountKind.AnthropicApiKey:
     case AccountKind.Gateway:
-      return entry?.provider === RUNTIME_MAKER[providerOf(kind)] ? pricesOf(entry) : NO_PRICE;
+      return entry?.provider === RUNTIME_MAKER[account.harness] ? pricesOf(entry) : NO_PRICE;
     case AccountKind.Bedrock: {
       const copy = catalogue.providers[BEDROCK]?.models.find((m) => m.id === launchId);
       return copy ? pricesOf(copy) : NO_PRICE;
@@ -52,10 +58,10 @@ function regionPrefix(launchIds: readonly string[], maker: string): string | nul
  * A family the list lacks is left alone: there is nothing to be newer than.
  */
 function bedrockAdditions(
+  provider: Provider,
   listed: ReadonlyMap<string, { entry: CatalogueModel | null; launchId: string }>,
   catalogue: Catalogue,
 ): NewAccountModel[] {
-  const provider = providerOf(AccountKind.Bedrock);
   const maker = RUNTIME_MAKER[provider];
   const prefix = regionPrefix(
     [...listed.values()].map((l) => l.launchId),
@@ -105,11 +111,11 @@ function bedrockAdditions(
  * lacks keeps the ID it was listed under, with no family and no price.
  */
 export function offerFromList(
-  kind: AgentAccountKind,
+  account: { readonly kind: SupportedAccountKind; readonly harness: Provider },
   models: readonly SeenModel[],
   catalogue: Catalogue,
 ): NewAccountModel[] {
-  const provider = providerOf(kind);
+  const provider = account.harness;
   const rows = new Map<string, NewAccountModel>();
   const listed = new Map<string, { entry: CatalogueModel | null; launchId: string }>();
   // An alias with no concrete model cannot be joined; beside rows that resolved, it is left out.
@@ -126,9 +132,10 @@ export function offerFromList(
       family: entry?.family ?? null,
       launchId,
       efforts: [...m.efforts],
-      ...priceOf(kind, entry, launchId, catalogue),
+      ...priceOf(account, entry, launchId, catalogue),
     });
   }
-  const added = kind === AccountKind.Bedrock ? bedrockAdditions(listed, catalogue) : [];
+  const added =
+    account.kind === AccountKind.Bedrock ? bedrockAdditions(provider, listed, catalogue) : [];
   return [...rows.values(), ...added];
 }

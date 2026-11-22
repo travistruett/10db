@@ -6,7 +6,9 @@ import {
   AccountProblem,
   AccountSecretInput,
   EventType,
-  runsAgents,
+  harnessOf,
+  Provider,
+  requireHarness,
   signsInWithLogin,
   ConflictError,
   InvalidError,
@@ -225,7 +227,16 @@ export function createAccountService(deps: {
       const account = deps.state.write((ctx) => {
         const created = insertAccount(ctx, input, {
           configDirFor: (id) =>
-            join(root, id, input.kind === AccountKind.CodexSignin ? 'codex' : 'claude'),
+            join(
+              root,
+              id,
+              harnessOf({
+                kind: input.kind,
+                settings: 'settings' in input ? input.settings : {},
+              }) === Provider.Codex
+                ? 'codex'
+                : 'claude',
+            ),
         });
         // Every created account, keyed kinds too, gets one. Inside the transaction: a directory that
         // can't be made leaves no row behind.
@@ -269,9 +280,9 @@ export function createAccountService(deps: {
     },
     async identity(id) {
       const row = getAccountRow(db, id);
-      // Nothing to probe: the account runs no agent, so it has no login or organization to report.
-      if (!runsAgents(row.kind))
-        throw new InvalidError('OpenRouter accounts have no identity to check');
+      // Nothing to probe: no harness runs the account, so it has no login or organization to report.
+      const harness = harnessOf(row);
+      if (harness === null) throw new InvalidError('OpenRouter accounts have no identity to check');
       let launch;
       try {
         launch = deps.launcher.probe(row);
@@ -293,6 +304,7 @@ export function createAccountService(deps: {
         try {
           seen = await deps.adapter.probeAccount({
             kind: row.kind,
+            harness,
             cwd: deps.dataDir,
             env: launch.env,
           });
@@ -307,7 +319,7 @@ export function createAccountService(deps: {
         );
       }
       const refusal = checkAccount(launch.expect, seen);
-      if (refusal === null) deps.lists.record({ id: row.id, kind: row.kind }, seen);
+      if (refusal === null) deps.lists.record({ id: row.id, kind: row.kind, harness }, seen);
       const unconfirmed =
         signsInWithLogin(row.kind) && row.expectedIdentity === null
           ? {
@@ -368,6 +380,7 @@ export function createAccountService(deps: {
       try {
         login = await deps.adapter.startLogin({
           kind: row.kind,
+          harness: requireHarness(row),
           cwd: deps.dataDir,
           env: launch.env,
         });

@@ -939,7 +939,7 @@ function startSession(
     const { why, printed } = noAccountWhy(
       attempt.waitedMs,
       [...attempt.earlier, stderrTail],
-      spec.account.kind,
+      spec.account.harness,
     );
     // A signed-out subscription may answer nothing: the account waits for its sign-in, the lane doesn't fail.
     const signedOut = missingAccountRefusal(spec.account, why, printed, signIn);

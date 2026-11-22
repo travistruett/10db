@@ -9,7 +9,6 @@ import {
   TerminalApp,
   UpstreamError,
   WorkPlace,
-  type AgentAccountKind,
   type ChatId,
   type ProjectDto,
   type TakeoverCommandDto,
@@ -77,7 +76,7 @@ export interface TakeoverServiceDeps {
   /** Writes one set of files for the chat's terminal. */
   prepare(input: PrepareInput, signal: AbortSignal): Promise<PreparedTakeover>;
   /** What the agent's terminal does and doesn't have, in words. */
-  notesOf(kind: AgentAccountKind): string[];
+  notesOf(source: Pick<TakeoverSource, 'kind' | 'harness'>): string[];
   /** What the daemon's setup lacks whatever the chat, known without preparing a set (no sandbox runtime). */
   setupNotes(): readonly string[];
   /** The paths of the checkout that differ from HEAD, relative to it. */
@@ -217,8 +216,8 @@ export function createTakeoverService(deps: TakeoverServiceDeps): TakeoverServic
 
   const notesFor = (chat: ChatRow, extra: readonly string[] = []): string[] => {
     const conv = getConversation(state.db, chat.conversationId);
-    const kind = deps.sourceOf(conv, getProject(state.db, chat.projectId)).kind;
-    return [...deps.notesOf(kind), ...extra];
+    const source = deps.sourceOf(conv, getProject(state.db, chat.projectId));
+    return [...deps.notesOf(source), ...extra];
   };
 
   async function launch(

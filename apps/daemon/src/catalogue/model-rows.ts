@@ -1,7 +1,6 @@
 import {
-  providerOf,
+  harnessOf,
   Effort,
-  runsAgents,
   ModelStatus,
   type AccountDto,
   type AccountId,
@@ -18,7 +17,7 @@ import { effortFacts, modelSpeed, speedProviderFor } from './model-facts';
 import type { Catalogue, CatalogueModel } from './source';
 
 /** What the list needs to know of an account: which it is, and whether it still counts. */
-export type ModelRowAccount = Pick<AccountDto, 'id' | 'kind' | 'archived'>;
+export type ModelRowAccount = Pick<AccountDto, 'id' | 'kind' | 'settings' | 'archived'>;
 
 export interface ModelRowsInput {
   readonly profiles: readonly ModelProfileDto[];
@@ -112,9 +111,9 @@ function firstSeen(profiles: readonly ModelProfileDto[]): string | null {
  */
 export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
   const { catalogue } = input;
-  // An OpenRouter account offers no agent model, so it never counts as a place to run one.
+  // An account no harness runs offers no agent model, so it never counts as a place to run one.
   const live = new Map(
-    input.accounts.filter((a) => !a.archived && runsAgents(a.kind)).map((a) => [a.id, a]),
+    input.accounts.filter((a) => !a.archived && harnessOf(a) !== null).map((a) => [a.id, a]),
   );
   const offers = input.offers.filter((o) => live.has(o.accountId));
   const listing = new Set(offers.map((o) => o.accountId));
@@ -130,7 +129,7 @@ export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
     const described = profiles.find((p) => p.maker !== null) ?? null;
     const providerOfAccount = (id: AccountId): Provider | null => {
       const account = live.get(id);
-      return account === undefined || !runsAgents(account.kind) ? null : providerOf(account.kind);
+      return account === undefined ? null : harnessOf(account);
     };
 
     // An account with no list is assumed to run its maker's models that are not retired.
@@ -143,7 +142,7 @@ export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
       described.maker === RUNTIME_MAKER[described.provider] &&
       assumedEntry !== null &&
       !assumedEntry.deprecated
-        ? withoutList.filter((a) => runsAgents(a.kind) && providerOf(a.kind) === described.provider)
+        ? withoutList.filter((a) => harnessOf(a) === described.provider)
         : [];
 
     const profileStatus = profiles.find((p) => p.status !== null)?.status ?? null;
@@ -178,8 +177,7 @@ export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
     const accountOffers = account
       ? input.offers.filter((o) => o.accountId === account.id)
       : undefined;
-    const accountProvider =
-      account && runsAgents(account.kind) ? providerOf(account.kind) : undefined;
+    const accountProvider = account ? (harnessOf(account) ?? undefined) : undefined;
     const offeredToAccount =
       accountOffers !== undefined &&
       (accountOffers.length === 0
