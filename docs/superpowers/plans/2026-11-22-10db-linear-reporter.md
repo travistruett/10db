@@ -15,10 +15,10 @@ up to date:
 - A run starting moves it to In Progress.
 - A review verdict, a wait on you, the run's end and the PR opening or merging each get one comment with the
   attempt, the evidence and what is unverified.
-- One "10db" attachment links the PR or the card.
+- Once the PR opens, one "10db" link on the issue points at it.
 
-You do nothing. The Linear card's project row in Settings › Integrations gains a **Report To Linear** switch (on
-by default) and a **How To Update Linear** note. The task drawer gains a **Linear** tab listing every update:
+You do nothing. The Linear card's project row in Settings › Integrations gains a **Report To Linear** switch and a
+**How To Update Linear** note. Linking a team turns the switch on. The task drawer gains a **Linear** tab listing every update:
 sent, waiting, withheld or failed.
 
 **What it buys.** The pilot's hand steps are gone: no more copying the verification comment or moving the status
@@ -26,9 +26,11 @@ by hand.
 
 **What could go wrong, and how we'd know.**
 - **It writes to the wrong place.** The run starts in the wrong workspace, or it touches another issue. Its first
-  step must report the workspace. 10db accepts that report only when the id matches the binding *and* appeared in
-  a Linear tool result in that session. Until then every Linear write is refused, and afterwards only the linked
-  issue (and the comments and attachment it made) can be written. Card 2's rule table is the unit test. A refusal
+  step must report the workspace. 10db accepts that report only when the ids match the binding *and* appeared in
+  a successful `get_workspace`/`get_team` result in that session. Until then every Linear write is refused.
+  Afterwards it may write only the linked issue, named by Linear's own id (team keys repeat across workspaces),
+  with an exact list of fields per tool. It reads no files, runs no commands, has no web, and any other MCP tool
+  is denied. Card 2's rule table is the unit test. A refusal
   shows on the Linear tab and in the project's one Inbox item.
 - **It leaks a secret.** Every Linear write's text is scanned with the outbound scan's secret patterns. A hit
   refuses the write, and the row is shown as withheld with the pattern's name.
@@ -46,16 +48,23 @@ by hand.
 1. **The reporter is invisible.** It runs as its own kind of conversation, one per linked task, with no chat tab.
    A visible chat per update would bury your sessions. You see its results on the Linear tab, and its session ids
    are in the rows. Cost if wrong: a "show the reporter's transcript" link later.
-2. **Report To Linear is on by default**, including for a project you already linked in part 2. Your first linked
-   task run after this merges posts to Linear. Turn it off on the card if you want to QA first.
-3. **The reporter may change only an issue's status** (`save_issue` with `id` and `state` only). It may not touch
-   assignees, labels, parents or relations, and it never deletes. Cost if wrong: a later widening.
+2. **Report To Linear is on for a new link, and off for a project you linked before this lands.** Nothing posts to
+   your Linear until you link a team or turn the switch on, so the first post is one you chose. Cost if wrong: one
+   switch to flip on Ampsio.
+3. **The reporter may only comment, set the status, and add one `10db` link** (`save_issue` with `id`, `state`
+   and `links` only). It may not touch assignees, labels, parents or relations, and it never deletes. Linear's
+   links are append-only, so the "10db" attachment is a link to the PR, added once, not a live card. The live
+   state is in the comments. Cost if wrong: a later widening.
 4. **10db uploads the screenshots itself**, to the signed URL Linear's `prepare_attachment_upload` returns (card 6).
-   Pushing a PNG through the model as base64 would cost about a token per 3 bytes. 10db PUTs only to a URL that
-   appeared in that session's Linear results. Card 6 can be cut, and comments then go without pictures.
-5. **A cancelled task keeps its Linear history.** Its pending rows are dropped, but its sent, withheld and failed
-   rows stay, as its link does. The spec said "deleted"; tasks are never deleted in 10db, only cancelled.
-6. **"Attempt N" is the run's number among the task's runs** (its workstream's position by creation, from 1).
+   Pushing a PNG through the model as base64 would cost about a token per 3 bytes. 10db PUTs only to the signed
+   URL of a `prepare_attachment_upload` call in that session, on Linear's storage host. Card 6 can be cut, and comments then go without pictures.
+5. **A cancelled task keeps its Linear history,** and its cancel is reported like any other end. The spec said a
+   deleted task's rows go too, but 10db never deletes tasks, only cancels them. There is also no way to unlink a
+   task yet, so that spec row has nothing to act on.
+6. **"Attempt N" is the run's number among the task's runs** (its workstream's position by creation, from 1). A
+   Retry reuses its workstream, so it keeps its number.
+7. **Each run is a short agent session on the project's account at its Efficient tier.** A busy task runs a few
+   sessions a day; on a metered account they cost cents.
 
 **What is needed from you.** Nothing to start. For the live QA once it lands: Ampsio linked to AMP (done in part 2,
 or re-link), an optional note, and your agent signed in to Linear's workspace.
@@ -99,7 +108,10 @@ or re-link), an optional note, and your agent signed in to Linear's workspace.
 - The workspace is read from Linear's own tool result on every provider: from the session's `tool_call` events,
   which carry the MCP result for Claude and Codex alike. It is not read from Claude-only PostToolUse.
 - On a Claude plan every connector loads (it can't be narrowed), so the rule denies every `mcp__` tool that is not
-  Linear's or 10db's reporter tools.
+  Linear's or 10db's reporter tools. After a restart the connector list is unread, so the reporter treats an
+  unchecked row as a maybe and goes ahead.
+- Codex's web search runs at OpenAI with no hook call, so the reporter's Codex session sets `webSearch:
+  'disabled'` whatever the Web switch says. On Claude the web tools are denied by the rule.
 - Trust › **Your MCP servers** off (`trustSwitchesFor(...).yourMcpServers`) reads as the reporter off: pending
   rows are dropped and the card's row says why.
 
@@ -131,7 +143,7 @@ export const LinearPostDto = z.strictObject({
   attachmentUrl: z.string().nullable(), dismissedAt: z.iso.datetime().nullable(),
   createdAt: z.iso.datetime(), recordedAt: z.iso.datetime().nullable(),
 });
-/** `linear-reporter.<projectId>` in app_settings; absent reads as { on: true, note: '' }. */
+/** `linear-reporter.<projectId>` in app_settings; absent reads as { on: false, note: '' }; a new link writes on. */
 export const LinearReporterSettings = z.strictObject({ on: z.boolean(), note: z.string().max(4000) });
 export const ReportLinearWorkspaceInput = z.strictObject({ workspaceId: z.string().min(1), teamId: z.string().min(1) });
 export const ReportLinearPostInput = z.strictObject({
@@ -169,11 +181,15 @@ export interface ReporterRun {
   readonly link: ExternalLink;                         // the task's
   workspaceConfirmed: boolean;
   readonly knownCommentIds: Set<string>;               // from this task's recorded rows, plus this run's
-  readonly knownAttachmentUrl: string | null;
-  readonly seenResults: string[];                      // text of every Linear tool result this session
+  readonly identityResults: string[];                  // successful whoami/get_workspace/get_team/list_teams result texts
+  readonly uploads: { url: string; headers: Record<string, string>; assetUrl: string }[];  // card 7
   readonly withheld: Set<string>;                      // pattern names refused this run
 }
-export function judgeReporterCall(run: ReporterRun, call: { toolName: string; input: unknown }): GuardVerdict;
+/** Pure: card 4 applies `withheld` to the run. */
+export function judgeReporterCall(run: Readonly<ReporterRun>, call: { toolName: string; input: unknown }):
+  { verdict: GuardVerdict; withheld?: string };
+export function confirmWorkspace(run: Readonly<ReporterRun>, input: ReportLinearWorkspaceInput):
+  'confirmed' | 'not_seen' | 'mismatch';
 export function linearToolPrefixes(via: { connector: boolean; entries: readonly string[]; harness: Provider }): string[];
 /** The outbound scan's secret patterns only (no url, code_block, file_path). */
 export function scanSecrets(text: string): string | null;                // first pattern name hit
@@ -185,6 +201,10 @@ export function subscribeLinearEvents(bus: EventBus, deps: {
 }): () => void;
 /** The run's number among the task's runs (workstreams by created_at), from 1. */
 export function attemptOf(db: DbReader, workstreamId: WorkstreamId): number;
+/** Pure: which rows one event makes, from the event and what the listener read for it. */
+export function linearRowOf(event: DaemonEvent, read: LinearEventRead): LinearRowDraft[];
+/** Why the project doesn't report (no binding, switched off, Your MCP servers off), or null. */
+export function reporterBlockedBy(db: DbReader, projectId: ProjectId): string | null;
 
 // apps/daemon/src/linear/reporter.ts (card 4)
 export interface LinearReporter {
@@ -205,8 +225,24 @@ export const REPORT_DELAY_MS = 30_000;
 export const BACKOFF_MS = { first: 5 * 60_000, max: 6 * 60 * 60_000 } as const;
 export const MAX_TRIES = 5;
 export const RUN_DEADLINE_MS = 15 * 60_000;
+export function createLinearReporter(deps: {
+  state: StateStore; clock: Clock; log: Logger; dataDir: string;
+  engine: Pick<ExploreEngine, 'queued' | 'retire' | 'unretire' | 'stop'>;
+  conversations: { reporterOf(taskId: TaskId, projectId: ProjectId): ConversationId };  // get or create
+  signIns: { list(): Promise<LinearSignInsDto> };
+  inbox: InboxService;
+}): LinearReporter;
+
+// apps/daemon/src/conversation/explore-hooks.ts (card 4)
+// ExploreLaunch gains: readonly observeToolCall?: (event: Extract<SessionEvent, { type: 'tool_call' }>) => void;
+
+// packages/contracts/src/reporter-tools.ts (card 4; card 7 adds upload_linear_screen)
+export const ReporterToolName = { ReportLinearWorkspace: 'report_linear_workspace', ReportLinearPost: 'report_linear_post' } as const;
+// apps/daemon/src/mcp/server.ts: McpDeps gains `reporter?: Pick<LinearReporter, 'reportWorkspace' | 'reportPost'>`
 
 // apps/daemon/src/linear/reporter-brief.ts (card 5): pure over read facts
+/** The task, link, binding names, note, rows, and per workstream its report, verdicts, findings, evidence, gaps, PR and screens. */
+export interface ReporterFacts { /* card 5 defines the fields */ }
 export function reporterBrief(facts: ReporterFacts): string;
 export function readReporterFacts(db: DbReader, dataDir: string, taskId: TaskId, posts: readonly LinearPostDto[]): ReporterFacts;
 
@@ -225,23 +261,28 @@ export function refreshReporterCard(deps: { state: StateStore; inbox: InboxServi
 |---|---|---|
 | idle | event on a linked task, reporter on | pending: row written, due in 30 s, unless a row of the task is due later on backoff, then that later time (card 3) |
 | idle | event on an unlinked task, a task of an unbound project, reporter off, or Your MCP servers off | nothing written (card 3) |
-| idle | the same event again (a retry re-entering STARTING, a repeat `batch.updated`) | nothing: the dedupe key exists (card 1, 3) |
+| idle | the same event again (a repeat `batch.updated`, a second `step.changed` for one result) | nothing: the dedupe key exists (card 1, 3) |
+| idle | a Retry of a FAILED run starts and ends DONE | two new rows: the keys carry the event's seq (card 3) |
 | pending | due, no run for the task | running: takes every pending row of the task due now or earlier (card 4) |
-| pending | due, account has no Linear (`LinearVia.None`) | failure, as below; the Inbox line is the row's note (card 4) |
+| pending | due, account has no Linear (`LinearVia.None`, checked) | failure, as below; the Inbox line is the row's note (card 4) |
+| pending | due, the sign-ins row is unchecked (after a restart) | runs: a maybe goes ahead (card 4) |
 | running | new event | the row stays pending for the next run (card 4) |
-| running | `report_linear_workspace` matches the binding and was seen in a result | writes open (card 2, 4) |
-| running | `report_linear_workspace` doesn't match, or the id was never seen | the run fails with "signed in to <workspace>, linked to <bound>"; every write stays refused (card 2, 4) |
+| running | `report_linear_workspace` matches the binding and both ids were seen in successful identity results | writes open (card 2, 4) |
+| running | the ids match but weren't seen yet | answered "not seen yet, call again"; writes stay refused (card 2, 4) |
+| running | the ids don't match the binding | the reason "reaches <reported>, linked to <bound>" is kept; writes stay refused; the run fails at settle (card 2, 4) |
 | running | a Linear write before the workspace is confirmed, to another issue, a relation field, a delete, or any other `mcp__` tool | denied with a reason; the run goes on (card 2) |
 | running | a write's text hits a secret pattern | denied naming the pattern; the run records the row as withheld (card 2, 4) |
 | running | `report_linear_post` for rows not taken by this session, or withheld with a pattern the guard didn't refuse | refused (card 4) |
-| running | the turn ends | rows recorded or withheld stay so; the rest fail; the session closes (card 4) |
+| running | the turn ends | rows recorded or withheld stay so; unrecorded rows are withheld if the guard withheld a write, else they fail; the session closes off the effect chain (card 4) |
+| running | the start fails, or the account pauses | settled from `onState` as a failure (card 4) |
 | running | no turn end within 15 min | stopped; the rows fail (card 4) |
-| running | the daemon stops | rows stay pending (the take only stamps the session); on startup they are due now, and posts already made are found by their footer (card 4) |
+| running | the daemon stops | rows stay pending (the take only stamps the session); recovery cools the conversation, the rows are due now, and posts already made are found by their footer (card 4) |
 | pending | failure, tries < 5 | due again after 5 min × 2^(tries−1), at most 6 h; the Inbox count rises (card 4, 5) |
 | pending | its fifth failure | failed: shown on the Linear tab, counted in the Inbox (card 4, 5) |
 | failed | a later event on the task | a new row starts fresh at tries 0 (card 3) |
 | any | binding removed, reporter turned off, or Your MCP servers off at pickup | the project's pending rows are dropped; a running session's later writes are refused (card 3, 4) |
-| any | task cancelled | its pending rows are dropped; the rest are kept (card 3) |
+| any | task cancelled | nothing special: its workstream's CANCELLED end is reported, and its rows are kept (card 3) |
+| any | task unlinked | no path exists yet (the link is written only at creation); nothing to do |
 | any | the project has no waiting, failed or withheld rows left | the Inbox item is withdrawn (card 5) |
 | any | the builder dismisses the Inbox item | the project's failed and withheld rows are marked dismissed and stop counting (card 5) |
 

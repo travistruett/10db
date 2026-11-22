@@ -28,7 +28,7 @@ integration branch.
   - Bind the project. Use the fake script for the binding check, or the route the check's tool writes through.
   - Run the linked task to Done with a fake reporter script (`get_workspace` with a scripted result, then
     `report_linear_workspace`, `save_comment`, `report_linear_post`).
-  - Wait on the condition, with a 60 s deadline, until the drawer's Linear tab shows the run's rows as recorded.
+  - Wait on the condition, with a 90 s deadline (the reporter's 30 s delay runs on the daemon's real clock), until the drawer's Linear tab shows the run's rows as recorded.
   - Turn Report To Linear off on the Integrations row and check that it says Off.
   - No new spec file.
 - `apps/daemon/src/sessions/fake-*`: the script entry for the reporter's brief, keyed as the fake adapter keys

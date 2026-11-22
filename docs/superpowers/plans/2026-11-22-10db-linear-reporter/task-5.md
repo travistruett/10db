@@ -8,7 +8,9 @@ attachment by URL), "Rules in its brief"; "States" (the Inbox rows); the brief's
 
 - `apps/daemon/src/linear/reporter-brief.ts` (new): `readReporterFacts` and `reporterBrief`, quoted in the index.
   The facts:
-  - the task (title, headline, acceptance criteria), its link and the binding;
+  - the task (title, headline, acceptance criteria), its link (identifier, Linear's issue id, url), and the
+    binding's workspace and team **names and team key only**, never their ids: the agent must read the ids
+    from Linear for the workspace check to mean anything;
   - the project's note (`LinearReporterSettings.note`);
   - the rows this run takes (id, event, attempt, detail) and the task's recorded rows (comment ids, last status
     set, attachment URL);
@@ -22,21 +24,22 @@ attachment by URL), "Rules in its brief"; "States" (the Inbox rows); the brief's
 
   Cap long text, the report and the findings, at about 4,000 characters each, saying what was cut.
 - The brief's rules, as numbered lines:
-  1. Call `get_workspace`, then `report_linear_workspace` with the workspace's and team's ids, before anything
-     else.
-  2. Read the issue (`get_issue`) and its comments (`list_comments`). An update whose id already appears in a
+  1. Before anything else: call `get_workspace` and `get_team` with the team key, then `report_linear_workspace`
+     with the ids they show. If 10db says not seen, call them again; if it says mismatch, stop.
+  2. Name the issue by its Linear id (given) in every write, never by its identifier.
+  3. Read the issue (`get_issue`) and its comments (`list_comments`). An update whose id already appears in a
      comment's footer is recorded without posting again.
-  3. Read the team's statuses with their types and positions. Never move to an earlier position or a lower type.
-  4. If the status changed since the last recorded row's `statusSet`, and it isn't what 10db set, comment only.
-  5. No completed-type status unless the note says so.
-  6. Open findings and unverified checks are named in the comment and block a Ready for Release–like status.
-  7. One comment per update. Each ends with `10db · <event> · attempt N · <post id>`.
-  8. Find your attachment by its URL on the issue and update it, never add a second one. Its title is "10db". Its
-     subtitle is the state, and its URL is the PR's or the card's. A card link is
-     `tendb://tasks/<taskId>`; if the app has no such link scheme, use the PR URL only and say so.
-  9. After posting, call `report_linear_post` once per outcome. A write refused as withheld is reported as
+  4. Read the team's statuses with their types and positions. Never move to an earlier position or a lower type.
+  5. If the status changed since the last recorded row's `statusSet`, and it isn't what 10db set, comment only.
+  6. No completed-type status unless the note says so.
+  7. Open findings and unverified checks are named in the comment and block a Ready for Release–like status.
+  8. One comment per update. Each ends with `10db · <event> · attempt N · <post id>`.
+  9. When the PR opens, add one link titled `10db` to the PR with `save_issue` `links`, unless the issue already
+     has a `10db` link to that URL. Linear's links are append-only, so there is no in-place update; the live
+     state is in the comments and the status.
+  10. After posting, call `report_linear_post` once per outcome. A write refused as withheld is reported as
      withheld with the pattern's name.
-  10. Change nothing but this issue. Say nothing else.
+  11. Change nothing but this issue. Say nothing else.
 - `apps/daemon/src/linear/reporter-inbox.ts` (new): `linearReporterFoldKey` and `refreshReporterCard`.
   - Counts come from `linearPostCounts`. With nothing left, `withdraw` the open card.
   - Otherwise `flag` with `refresh: true`: tier Status, `closesWhen: BY_ANSWER`, `workstreamId: null`, detail

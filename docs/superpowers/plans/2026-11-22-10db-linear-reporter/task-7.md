@@ -10,16 +10,18 @@
   headers: Record<string, string> })` → `{ assetUrl: string }`.
 - `apps/daemon/src/linear/reporter-upload.ts` (new): the handler.
   - The screen must belong to the run's task (`getTaskScreenRow`).
-  - `uploadUrl` must be `https:` and must appear, verbatim, in one of the run's `seenResults`, so only a URL
-    Linear's `prepare_attachment_upload` or `prepare_file_upload` returned is accepted.
-  - The headers are only those that same result named. Read the result text for them, and refuse any other.
+  - `uploadUrl` must be the `uploadRequest.url` of a successful `prepare_attachment_upload` result in this run
+    (card 4 keeps those results, per call, apart from every other Linear result). Text from issues and comments
+    never counts. The URL is `https:`, and its host is the one that result names, which Linear signs as a
+    Google Cloud Storage URL today (`storage.googleapis.com`). Pin that host; another host is refused.
+  - The headers are exactly that result's `uploadRequest.headers`, sent verbatim. Any other header is refused.
+  - The signed URL lasts 60 s, so the brief has the agent prepare, upload and attach one screenshot at a time.
   - Then `PUT` the file (`picturePath(dataDir, sha256)`) with `fetch`, a 30 s timeout and no redirects, and
     answer the asset URL the result named.
   - Never log the URL's query string.
 - `linear/reporter-guard.ts`: allow `mcp__10db__upload_linear_screen` once the workspace is confirmed.
-- `linear/reporter-brief.ts`: the screenshot step. Call `prepare_attachment_upload` for the issue, then
-  `upload_linear_screen`, then `create_attachment_from_upload`, or embed the asset URL in the comment as Linear's
-  docs say.
+- `linear/reporter-brief.ts`: the screenshot step. For each screenshot, one at a time: call
+  `prepare_attachment_upload` for the issue, then `upload_linear_screen`, then `create_attachment_from_upload`.
 
 ## State-table rows
 

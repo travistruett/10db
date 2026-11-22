@@ -14,7 +14,7 @@
 - `packages/contracts/src/events.ts`: `EventType.LinearPostChanged = 'linear_post.changed'`.
 - `packages/contracts/src/conversation.ts`: `ConversationOwnerKind.Reporter = 'reporter'`. Fix every exhaustive
   switch the compiler then flags. A Reporter conversation is not a chat: `mcp/server.ts` `conversationTools`
-  already returns null for non-Chat owners, so no chat tool reaches it. Make sure no chat list, search or sidebar
+  already returns null for non-Chat owners, so no chat tool reaches it. Make sure no chat list, search, Recent or sidebar
   query picks it up (grep `ownerKind` and `ConversationOwnerKind.Chat` in `packages/db/src/store` and
   `apps/daemon/src/chat`).
 - `packages/db/src/schema.ts`: `linearPosts` table `linear_posts`. Columns: `id`, `task_id` (FK tasks),
@@ -33,6 +33,10 @@
 Implements `enqueueLinearPost`, `listLinearPosts`, `pendingLinearPosts`, `takeLinearPosts`, `recordLinearPosts`,
 `failLinearPosts`, `dropPendingLinearPosts`, `dismissLinearPosts` and `linearPostCounts`, quoted in the index.
 `failLinearPosts` sets `state = failed` and `due_at = null` once `tries` reaches `maxTries`.
+`recordLinearPosts` and `failLinearPosts` skip rows that are no longer pending (dropped or settled meanwhile): a
+no-op, not a throw.
+`LinearReporterSettings` read rule: an absent key reads as `{ on: false, note: '' }`, so a project linked before
+the reporter existed stays off until the builder turns it on. Card 3 makes a new link write `on: true`.
 `recordLinearPosts` sets `recorded_at`. A withheld outcome sets `state = withheld` and `withheld_pattern`.
 
 ## State-table rows
