@@ -55,6 +55,9 @@ import type {
   KindId,
   KnowledgeScope,
   LandingGroupId,
+  LinearEventKind,
+  LinearPostId,
+  LinearPostState,
   JudgeDecision,
   JudgeOutcome,
   McpVerdict,
@@ -1194,6 +1197,45 @@ export const stakeholderSendPeople = sqliteTable(
     position: integer('position').notNull(),
   },
   (t) => [primaryKey({ columns: [t.sendId, t.userId] })],
+);
+
+/** What the Linear reporter owes or has written on a task's issue, one row per event; the queue and its record. */
+export const linearPosts = sqliteTable(
+  'linear_posts',
+  {
+    id: text('id').$type<LinearPostId>().primaryKey(),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id),
+    event: text('event').$type<LinearEventKind>().notNull(),
+    /** Names the moment, so the same event twice writes one row. */
+    dedupeKey: text('dedupe_key').notNull(),
+    attempt: integer('attempt').notNull(),
+    detail: text('detail', { mode: 'json' }).$type<Record<string, Json>>().notNull(),
+    state: text('state').$type<LinearPostState>().notNull(),
+    tries: integer('tries').notNull().default(0),
+    dueAt: text('due_at'),
+    lastError: text('last_error'),
+    withheldPattern: text('withheld_pattern'),
+    sessionId: text('session_id')
+      .$type<SessionId>()
+      .references(() => sessions.id),
+    commentIds: text('comment_ids', { mode: 'json' }).$type<string[]>().notNull(),
+    statusSet: text('status_set'),
+    attachmentUrl: text('attachment_url'),
+    dismissedAt: text('dismissed_at'),
+    createdAt: createdAt(),
+    recordedAt: text('recorded_at'),
+  },
+  (t) => [
+    uniqueIndex('linear_posts_dedupe_unique').on(t.taskId, t.dedupeKey),
+    index('linear_posts_state_due_idx').on(t.state, t.dueAt),
+  ],
 );
 
 export const modelProfiles = sqliteTable(

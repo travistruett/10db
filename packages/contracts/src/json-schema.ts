@@ -281,6 +281,7 @@ import {
   StakeholderSendDto,
 } from './slack';
 import { LinearSignInsDto } from './linear-sign-ins';
+import { LinearPostDto, LinearReporterSettings } from './linear-posts';
 import { StepPlanDto } from './steps';
 import { WorkstreamChangesDto } from './workstream-changes';
 import {
@@ -522,6 +523,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'project-integrations-dto': ProjectIntegrationsDto,
   'project-integrations-input': ProjectIntegrationsInput,
   'linear-sign-ins-dto': LinearSignInsDto,
+  'linear-post-dto': LinearPostDto,
+  'linear-reporter-settings': LinearReporterSettings,
   'compose-preview-dto': ComposePreviewDto,
   'step-plan-dto': StepPlanDto,
   'workstream-changes-dto': WorkstreamChangesDto,
