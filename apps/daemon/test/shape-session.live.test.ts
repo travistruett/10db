@@ -13,7 +13,7 @@ import {
 import type { AddressInfo } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mintId, Provider } from '@10db/contracts';
+import { ChatToolName, JudgeKind, mintId, Provider } from '@10db/contracts';
 import {
   createTestStore,
   insertSession,
@@ -40,7 +40,7 @@ import { protectedPaths } from '../src/guard';
 import { createInboxService } from '../src/inbox';
 import { createLogger, silentLogger } from '../src/log';
 import { judgeChatCall } from '../src/chat';
-import { createMcpHandler, mintSessionToken, ToolImages } from '../src/mcp';
+import { createMcpHandler, mintSessionToken, ToolImages, type ChatToolHandlers } from '../src/mcp';
 import {
   SHAPE_AGENTS,
   SHAPE_ALLOWED_TOOLS,
@@ -70,13 +70,22 @@ const live = loadEnv(process.env).TENDB_LIVE_CLAUDE === '1';
 // as an error and stores no page, so there is nothing to measure.
 const hasPdftoppm = spawnSync('pdftoppm', ['-v']).error === undefined;
 
+/** A chat's tools, none of which these tests call: the full record, built from the enum. */
+const refuse =
+  (name: ChatToolName): ChatToolHandlers[ChatToolName] =>
+  () =>
+    Promise.reject(new Error(`${name} is not offered in this test`));
+const notOffered = Object.fromEntries(
+  Object.values(ChatToolName).map((name) => [name, refuse(name)]),
+) as ChatToolHandlers;
+
 interface Judged {
   readonly req: ShapeToolRequest;
   readonly decision: 'allow' | 'deny' | 'ask';
 }
 
 describe.skipIf(!live)('a Shape session, live', () => {
-  it('lets only the researcher search and fetch, and refuses its reads, on the real SDK', async () => {
+  it('lets the researcher search and fetch, and refuses its reads, on the real SDK', async () => {
     const login = await captureLoginEnv({ inherited: process.env });
     const claudePath = await ensureAgent(AgentTool.Claude);
     const repo = createTempRepo();
@@ -125,6 +134,8 @@ describe.skipIf(!live)('a Shape session, live', () => {
       protectedReads: [],
       filesDir,
       sandboxRoots: [realpathSync(tmpdir())],
+      // A Claude-plan session in auto mode is judged natively, and only then is it offered the researcher.
+      judge: JudgeKind.Native,
     };
 
     const judged: Judged[] = [];
@@ -141,11 +152,8 @@ describe.skipIf(!live)('a Shape session, live', () => {
         agents: SHAPE_AGENTS,
       },
       cwd: checkout,
-      prompt: [
-        `Do these two things in order, calling the tool each time even if you expect it to fail:`,
-        `1. Use the WebSearch tool yourself, not through an agent, to search for "vega-lite".`,
-        `2. Launch the tendb-researcher agent to find out what Vega-Lite is, and report its answer and its URLs.`,
-      ].join('\n'),
+      prompt:
+        'Launch the tendb-researcher agent to find out what Vega-Lite is, and report its answer and its URLs. Call the tool even if you expect it to fail.',
       model: launch.model,
       effort: 'low',
       resumeProviderSessionId: null,
@@ -179,14 +187,11 @@ describe.skipIf(!live)('a Shape session, live', () => {
 
     try {
       const web = judged.filter((c) => ['WebSearch', 'WebFetch'].includes(c.req.toolName));
-      // The main session's own web call was refused; the researcher, a subagent of that type, reached it.
-      for (const call of web) {
-        const decision = call.req.agentType === 'tendb-researcher' ? 'allow' : 'deny';
-        expect(
-          call.decision,
-          `${call.req.toolName} by ${call.req.agentType ?? 'the session'}`,
-        ).toBe(decision);
-      }
+      // The researcher's agent type reaches the hook, and its web calls pass. The session's own go on to
+      // auto mode on a native judge, so their verdict is not 10db's to check here.
+      for (const call of web)
+        if (call.req.agentType === 'tendb-researcher')
+          expect(call.decision, `${call.req.toolName} by ${call.req.agentType}`).toBe('allow');
       expect(
         web.some((c) => c.req.agentType === 'tendb-researcher' && c.decision === 'allow'),
       ).toBe(true);
@@ -248,6 +253,8 @@ describe.skipIf(!live)('a Shape session, live', () => {
         waitObserverFor: () => undefined,
         askedToHandOff: () => undefined,
         sessionSignal: () => undefined,
+        // A plan's session is a chat's: the endpoint serves a chat's conversation only with its chat tools.
+        chatTools: () => notOffered,
         shapeTools: () => ({
           see_screen: () =>
             Promise.resolve(
