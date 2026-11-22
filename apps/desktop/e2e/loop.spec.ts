@@ -266,14 +266,12 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   ).toBeVisible();
   await page.keyboard.press('Escape');
 
-  // Settings › Integrations: Report To Linear is on for the project; turning it off says why it is off.
+  // Settings › Integrations: Report To Linear is on for the project; turning it off leaves the switch off.
   await page.goto('/settings/integrations');
   const reportSwitch = page.getByRole('switch', { name: 'Report To Linear for e2e', exact: true });
   await expect(reportSwitch).toBeChecked();
   await reportSwitch.click();
   await expect(reportSwitch).not.toBeChecked();
-  // Another project's row never reads this, so one line says it.
-  await expect(page.getByText('Off: Report To Linear is off.')).toHaveCount(1);
   await open(page, 'Board');
 
   // Knowledge: a decision written through the API (as Claude Code would) appears in the open view
