@@ -50,12 +50,6 @@ export const LinearReporterSettings = z.strictObject({
 });
 export type LinearReporterSettings = z.infer<typeof LinearReporterSettings>;
 
-export const ReportLinearWorkspaceInput = z.strictObject({
-  workspaceId: z.string().min(1),
-  teamId: z.string().min(1),
-});
-export type ReportLinearWorkspaceInput = z.infer<typeof ReportLinearWorkspaceInput>;
-
 export const ReportLinearPostInput = z.strictObject({
   postIds: z.array(LinearPostId).min(1),
   outcome: z.discriminatedUnion('state', [

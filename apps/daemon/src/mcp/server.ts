@@ -142,18 +142,6 @@ function reporterTools(deps: McpDeps, session: SessionRow): RegisteredTool[] | n
   const sessionId = session.id;
   return [
     {
-      name: ReporterToolName.ReportLinearWorkspace,
-      description: REPORTER_TOOL_DESCRIPTIONS[ReporterToolName.ReportLinearWorkspace],
-      schema: ReporterToolInputs[ReporterToolName.ReportLinearWorkspace],
-      run: (input) =>
-        Promise.resolve(
-          reporter.reportWorkspace(
-            sessionId,
-            ReporterToolInputs[ReporterToolName.ReportLinearWorkspace].parse(input),
-          ),
-        ),
-    },
-    {
       name: ReporterToolName.ReportLinearPost,
       description: REPORTER_TOOL_DESCRIPTIONS[ReporterToolName.ReportLinearPost],
       schema: ReporterToolInputs[ReporterToolName.ReportLinearPost],

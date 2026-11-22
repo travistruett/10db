@@ -12,7 +12,6 @@ import {
   type LinearSignInsDto,
   type ProjectId,
   type ReportLinearPostInput,
-  type ReportLinearWorkspaceInput,
   type SessionId,
   type TaskId,
 } from '@10db/contracts';
@@ -35,9 +34,8 @@ import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import type { ShapeToolRequest, ShapeVerdict } from '../sessions';
-import { linearBindingOf } from './bindings';
 import { reporterBlockedBy } from './reporter-events';
-import { confirmWorkspace, judgeReporterCall, type ReporterRun } from './reporter-guard';
+import { judgeReporterCall, type ReporterRun } from './reporter-guard';
 import { reporterSettings, reporterSettingsKey } from './reporter-settings';
 
 // The Linear reporter's run (Linear reporter plan, card 4): one timer per task, one short session per run,
@@ -56,14 +54,6 @@ export const REPORTER_STARTER = 'Report the pending Linear updates.';
 
 const ALLOWED_BY_RULE = "10db's reporter rule allows this call.";
 const SESSION_OVER = 'This reporter run is over; nothing it calls is recorded.';
-const NOT_SEEN =
-  'Not seen in a Linear result yet: call get_workspace and get_team, then report again';
-const IDENTITY_TOOLS: ReadonlySet<string> = new Set([
-  'whoami',
-  'get_workspace',
-  'get_team',
-  'list_teams',
-]);
 
 export interface LinearReporter {
   /** Startup pickup: arms a timer per task with pending rows. */
@@ -72,13 +62,11 @@ export interface LinearReporter {
   stop(): Promise<void>;
   /** A row was enqueued. */
   poke(taskId: TaskId): void;
-  /** `report_linear_workspace`, from a reporter session only. */
-  reportWorkspace(sessionId: SessionId, input: ReportLinearWorkspaceInput): { ok: true };
   /** `report_linear_post`, from a reporter session only. */
   reportPost(sessionId: SessionId, input: ReportLinearPostInput): { ok: true };
   /** The reporter's preToolUse for its own session. */
   verdict(sessionId: SessionId, req: ShapeToolRequest): ShapeVerdict;
-  /** A Linear tool result the session saw, for the workspace check; `toolName` is the full `mcp__` name. */
+  /** A Linear tool result the session saw; `toolName` is the full `mcp__` name. */
   observe(sessionId: SessionId, toolName: string, resultText: string): void;
   settings(projectId: ProjectId): LinearReporterSettings & { blockedBy: string | null };
   /** Off drops the project's pending rows. */
@@ -122,8 +110,6 @@ interface Flight {
   sessionId: SessionId | null;
   taken: ReadonlySet<LinearPostId>;
   guard: ReporterRun | null;
-  /** The reason a workspace report didn't match, which the settle gives the rows. */
-  mismatch: string | null;
   /** The conversation was seen in a turn state, so a later departure from it is the run's end. */
   busySeen: boolean;
   settled: boolean;
@@ -228,7 +214,6 @@ export function createLinearReporter(
       sessionId: null,
       taken: new Set(),
       guard: null,
-      mismatch: null,
       busySeen: false,
       settled: false,
       deadline: null,
@@ -286,7 +271,7 @@ export function createLinearReporter(
             { state: 'withheld', pattern },
           );
         });
-      else fail(open, flight.mismatch ?? reason);
+      else fail(open, reason);
     } catch (error) {
       log.error({ err: error, taskId: flight.taskId }, 'a reporter run could not be settled');
     }
@@ -344,10 +329,9 @@ export function createLinearReporter(
         (p) => dueAtMs(p) <= now,
       );
       if (posts.length === 0) throw new ConflictError('No Linear update is owed any more.');
-      const binding = linearBindingOf(state.db, flight.projectId);
       const link = getTask(state.db, flight.taskId).external;
-      if (binding === null || link?.kind !== ExternalKind.Linear)
-        throw new ConflictError('The task is not linked to a Linear issue of a linked project.');
+      if (link?.kind !== ExternalKind.Linear)
+        throw new ConflictError('The task is not linked to a Linear issue.');
       const prUrl = listLinearPosts(state.db, flight.taskId)
         .map((p) => p.detail['prUrl'])
         .find((url) => typeof url === 'string');
@@ -360,11 +344,8 @@ export function createLinearReporter(
       });
       const guard: ReporterRun = {
         linearPrefixes: input.linearPrefixes,
-        binding,
         link,
         prUrl: typeof prUrl === 'string' ? prUrl : null,
-        workspaceConfirmed: false,
-        identityResults: [],
         uploads: [],
         withheld: new Set(),
       };
@@ -407,20 +388,6 @@ export function createLinearReporter(
       );
     },
 
-    reportWorkspace(sessionId, input) {
-      const { flight, guard } = runOf(sessionId);
-      const verdict = confirmWorkspace(guard, input);
-      if (verdict === 'confirmed') {
-        guard.workspaceConfirmed = true;
-        return { ok: true };
-      }
-      if (verdict === 'not_seen') throw new ConflictError(NOT_SEEN);
-      const bound = guard.binding;
-      const reason = `This agent's Linear sign-in reaches ${input.workspaceId}, but the project is linked to ${bound.workspaceName} / ${bound.teamKey}`;
-      flight.mismatch = reason;
-      throw new ConflictError(reason);
-    },
-
     reportPost(sessionId, input) {
       const { flight, guard } = runOf(sessionId);
       const foreign = input.postIds.filter((id) => !flight.taken.has(id));
@@ -451,14 +418,8 @@ export function createLinearReporter(
         : judged.verdict;
     },
 
-    observe(sessionId, toolName, resultText) {
-      const flight = bySession.get(sessionId);
-      const guard = flight?.guard;
-      if (flight === undefined || flight.settled || guard === null || guard === undefined) return;
-      const prefix = guard.linearPrefixes.find((p) => toolName.startsWith(p));
-      if (prefix === undefined) return;
-      const tool = toolName.slice(prefix.length);
-      if (IDENTITY_TOOLS.has(tool)) guard.identityResults.push({ tool, text: resultText });
+    observe() {
+      // The seam for what a Linear tool result gives the run (an attachment's signed upload url).
     },
 
     settings(projectId) {

@@ -1,22 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { Provider, type ExternalLink, type LinearBinding } from '@10db/contracts';
-import {
-  confirmWorkspace,
-  judgeReporterCall,
-  linearToolPrefixes,
-  type ReporterRun,
-} from './reporter-guard';
+import { Provider, type ExternalLink } from '@10db/contracts';
+import { judgeReporterCall, linearToolPrefixes, type ReporterRun } from './reporter-guard';
 
 const L = 'mcp__claude_ai_Linear__';
 const PR = 'https://github.com/acme/app/pull/7';
 
-const binding: LinearBinding = {
-  workspaceId: 'ws-1',
-  workspaceName: 'Acme',
-  teamId: 'team-1',
-  teamKey: 'AMP',
-  teamName: 'Amp',
-};
 const link: ExternalLink = {
   kind: 'linear',
   id: 'AMP-119',
@@ -27,11 +15,8 @@ const link: ExternalLink = {
 function run(over: Partial<ReporterRun> = {}): ReporterRun {
   return {
     linearPrefixes: [L],
-    binding,
     link,
     prUrl: PR,
-    workspaceConfirmed: true,
-    identityResults: [],
     uploads: [],
     withheld: new Set(),
     ...over,
@@ -44,12 +29,6 @@ const decision = (r: ReporterRun, c: { toolName: string; input: unknown }) =>
 
 describe('judgeReporterCall', () => {
   const rows: [string, ReporterRun, { toolName: string; input: unknown }, 'allow' | 'deny'][] = [
-    [
-      'comment before confirmation',
-      run({ workspaceConfirmed: false }),
-      call(`${L}save_comment`, { issueId: 'iss-119', body: 'hi' }),
-      'deny',
-    ],
     [
       'comment by issueId',
       run(),
@@ -119,12 +98,7 @@ describe('judgeReporterCall', () => {
       call(`${L}get_issue`, { id: 'sk-ant-abcdefghijklmnopqrstuvwx' }),
       'deny',
     ],
-    [
-      'a read',
-      run({ workspaceConfirmed: false }),
-      call(`${L}get_issue`, { id: 'iss-119' }),
-      'allow',
-    ],
+    ['a read', run(), call(`${L}get_issue`, { id: 'iss-119' }), 'allow'],
     ['report tool', run(), call('mcp__10db__report_linear_post', {}), 'allow'],
     ['another 10db tool', run(), call('mcp__10db__commit', {}), 'deny'],
   ];
@@ -139,33 +113,6 @@ describe('judgeReporterCall', () => {
     );
     expect(out.verdict.decision).toBe('deny');
     expect(out.withheld).toBe('anthropic_key');
-  });
-});
-
-describe('confirmWorkspace', () => {
-  const seen = run({
-    identityResults: [
-      { tool: 'get_workspace', text: 'workspace ws-1' },
-      { tool: 'get_team', text: 'team team-1' },
-    ],
-  });
-  it('confirms ids that were seen', () => {
-    expect(confirmWorkspace(seen, { workspaceId: 'ws-1', teamId: 'team-1' })).toBe('confirmed');
-  });
-  it('says not_seen when the reads never showed them', () => {
-    expect(confirmWorkspace(run(), { workspaceId: 'ws-1', teamId: 'team-1' })).toBe('not_seen');
-  });
-  it('does not take an id inside a longer one', () => {
-    const longer = run({
-      identityResults: [
-        { tool: 'whoami', text: 'ws-10' },
-        { tool: 'get_team', text: 'team-1' },
-      ],
-    });
-    expect(confirmWorkspace(longer, { workspaceId: 'ws-1', teamId: 'team-1' })).toBe('not_seen');
-  });
-  it('says mismatch for another workspace', () => {
-    expect(confirmWorkspace(seen, { workspaceId: 'ws-2', teamId: 'team-1' })).toBe('mismatch');
   });
 });
 

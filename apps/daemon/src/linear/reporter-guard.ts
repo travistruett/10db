@@ -1,4 +1,4 @@
-import type { ExternalLink, LinearBinding, ReportLinearWorkspaceInput } from '@10db/contracts';
+import type { ExternalLink } from '@10db/contracts';
 import { Provider } from '@10db/contracts';
 import type { GuardVerdict } from '../guard';
 import { mcpToolPrefix } from '../sessions';
@@ -7,10 +7,7 @@ import { OUTBOUND_PATTERNS, SECRET_PATTERN_NAMES } from '../stakeholders';
 /** The claude.ai connector's prefix, used whenever the connector list is unread. */
 const CONNECTOR_PREFIX = 'mcp__claude_ai_Linear__';
 
-const REPORT_TOOLS: ReadonlySet<string> = new Set([
-  'mcp__10db__report_linear_workspace',
-  'mcp__10db__report_linear_post',
-]);
+const REPORT_TOOLS: ReadonlySet<string> = new Set(['mcp__10db__report_linear_post']);
 
 /** Linear tools that only read. `extract_images` is left out: it fetches URLs. */
 const LINEAR_READS: ReadonlySet<string> = new Set([
@@ -33,18 +30,11 @@ const WRITE_KEYS: Readonly<Record<string, readonly string[]>> = {
   create_attachment_from_upload: ['issue', 'assetUrl', 'title', 'subtitle'],
 };
 
-const NEEDS_CONFIRMATION =
-  'Confirm the workspace first: call get_workspace and get_team, then report_linear_workspace.';
-
 export interface ReporterRun {
   readonly linearPrefixes: readonly string[];
-  readonly binding: LinearBinding;
   readonly link: ExternalLink;
   /** The task's PR: the only URL a `10db` link may point at. */
   readonly prUrl: string | null;
-  workspaceConfirmed: boolean;
-  /** Successful `whoami`, `get_workspace`, `get_team` and `list_teams` results, by tool. */
-  readonly identityResults: { tool: string; text: string }[];
   readonly uploads: { url: string; headers: Record<string, string>; assetUrl: string }[];
   /** Pattern names refused this run. */
   readonly withheld: Set<string>;
@@ -158,7 +148,6 @@ export function judgeReporterCall(
   const refusal = `This call is refused: the reporter may only update the linked issue ${run.link.issueId}.`;
   const allowed = Object.hasOwn(WRITE_KEYS, tool) ? WRITE_KEYS[tool] : undefined;
   if (allowed === undefined) return { verdict: deny(refusal) };
-  if (!run.workspaceConfirmed) return { verdict: deny(NEEDS_CONFIRMATION) };
   const input = asRecord(call.input);
   if (input === null || judgeWrite(run, tool, allowed, input) !== null)
     return { verdict: deny(refusal) };
@@ -171,37 +160,6 @@ export function judgeReporterCall(
     };
   }
   return { verdict: allow() };
-}
-
-/** Whether `id` appears in `text` as a whole id, not inside a longer token. */
-function hasId(text: string, id: string): boolean {
-  let at = text.indexOf(id);
-  while (at !== -1) {
-    const before = text[at - 1];
-    const after = text[at + id.length];
-    if (
-      (before === undefined || !/[A-Za-z0-9-]/.test(before)) &&
-      (after === undefined || !/[A-Za-z0-9-]/.test(after))
-    )
-      return true;
-    at = text.indexOf(id, at + 1);
-  }
-  return false;
-}
-
-/** Whether the ids the reporter claims are the binding's, and were seen in its own reads. */
-export function confirmWorkspace(
-  run: Readonly<ReporterRun>,
-  input: ReportLinearWorkspaceInput,
-): 'confirmed' | 'not_seen' | 'mismatch' {
-  if (input.workspaceId !== run.binding.workspaceId || input.teamId !== run.binding.teamId)
-    return 'mismatch';
-  const seen = (tools: readonly string[], id: string): boolean =>
-    run.identityResults.some((r) => tools.includes(r.tool) && hasId(r.text, id));
-  return seen(['whoami', 'get_workspace'], input.workspaceId) &&
-    seen(['get_team', 'list_teams'], input.teamId)
-    ? 'confirmed'
-    : 'not_seen';
 }
 
 /**

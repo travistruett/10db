@@ -40,8 +40,6 @@ import { reporterHooks } from './reporter-owner';
 
 type FakeStep = FakeScriptBook[string][number][number];
 
-const WORKSPACE = 'ws-1';
-const TEAM = 'team-1';
 const ISSUE = 'issue-uuid-1';
 const PREFIX = 'mcp__linear__';
 const KEY = `Chat: ${REPORTER_STARTER}`;
@@ -60,23 +58,8 @@ let server: ReturnType<typeof serve>;
 let reporter: LinearReporter;
 let repo: { path: string; cleanup(): void };
 
-/** A scripted Linear read, whose result carries the ids the binding names. */
-const read = (tool: string, result: unknown): FakeStep => ({
-  do: 'tool',
-  toolName: `${PREFIX}${tool}`,
-  input: {},
-  result: JSON.stringify(result),
-});
-
 function recordingScript(postId: LinearPostId): FakeStep[] {
   return [
-    read('get_workspace', { id: WORKSPACE, name: 'Ampsio' }),
-    read('get_team', { id: TEAM, key: 'AMP' }),
-    {
-      do: 'mcp',
-      tool: 'report_linear_workspace',
-      args: { workspaceId: WORKSPACE, teamId: TEAM },
-    },
     {
       do: 'tool',
       toolName: `${PREFIX}save_comment`,
@@ -211,13 +194,6 @@ beforeEach(async () => {
     }),
   ).value;
   store.write((ctx) => {
-    setAppSetting(ctx, `linear.${project.id}`, {
-      workspaceId: WORKSPACE,
-      workspaceName: 'Ampsio',
-      teamId: TEAM,
-      teamKey: 'AMP',
-      teamName: 'Amp',
-    });
     setAppSetting(ctx, `linear-reporter.${project.id}`, { on: true, note: '' });
   });
   engine = createExploreEngine({
@@ -245,7 +221,6 @@ beforeEach(async () => {
       askedToHandOff: () => undefined,
       // Reads the reporter at call time: a test swaps it for a new one over the same store.
       reporter: {
-        reportWorkspace: (id, input) => reporter.reportWorkspace(id, input),
         reportPost: (id, input) => reporter.reportPost(id, input),
       },
     }),
@@ -296,7 +271,7 @@ describe('the Linear reporter', () => {
     // The write by the team key was refused by the guard; the one by Linear's own id went through.
     const guarded = adapter.observations.filter((o) => o.kind === 'denied_by_guard');
     expect(guarded).toHaveLength(1);
-    expect(adapter.observations.filter((o) => o.kind === 'tool_allowed')).toHaveLength(3);
+    expect(adapter.observations.filter((o) => o.kind === 'tool_allowed')).toHaveLength(1);
     // A reporter's run never holds an update drain.
     expect(engine.busy()).toEqual([]);
   });

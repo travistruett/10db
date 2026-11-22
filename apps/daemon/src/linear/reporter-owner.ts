@@ -38,8 +38,7 @@ const REPORTER_TOOLS: readonly string[] = Object.values(ReporterToolName).map(
 
 const SYSTEM_PROMPT = [
   "You are 10db's Linear reporter. You keep one Linear issue up to date from the facts you are given.",
-  "You have Linear's tools and two of 10db's: report_linear_workspace and report_linear_post. Nothing else works.",
-  'Start with get_workspace and get_team, then call report_linear_workspace with the ids they returned. Until 10db accepts that report, every Linear write is refused.',
+  "You have Linear's tools and one of 10db's: report_linear_post. Nothing else works.",
   'Write only to the linked issue, named by its Linear id. When you have finished an update, record it with report_linear_post.',
 ].join('\n');
 
@@ -124,7 +123,7 @@ export function reporterHooks(deps: ReporterHooksDeps): ExploreOwnerHooks {
           launch.account.kind === AccountKind.ClaudeSubscription &&
           row !== undefined &&
           (row.via === LinearVia.Connector || (row.via === LinearVia.None && row.unchecked));
-        const { posts } = deps.runs.begin({
+        const { posts, run } = deps.runs.begin({
           conversationId: conv.id,
           sessionId: start.sessionId,
           linearPrefixes: linearToolPrefixes({
@@ -145,7 +144,7 @@ export function reporterHooks(deps: ReporterHooksDeps): ExploreOwnerHooks {
           claudeConnectors: connector,
         });
         const prompt = [
-          `These updates are owed on the linked issue:\n${rowLines(posts)}`,
+          `These updates are owed on the linked issue (${run.link.id}, Linear id ${run.link.issueId}, ${run.link.url}):\n${rowLines(posts)}`,
           start.first.text,
         ].join('\n\n');
         return {
