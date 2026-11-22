@@ -44,7 +44,7 @@ function Unavailable({ text, link }: { readonly text: string; readonly link: boo
               />
             )}
           >
-            Paid by
+            Paid By
           </Anchor>
         </>
       ) : null}
@@ -96,7 +96,7 @@ export function DecisionsModelsView() {
       <>
         <Stack gap="xs">
           <Title order={4} size="md" fw={600}>
-            Time and cost
+            Time and Cost
           </Title>
           <RaisedPanel>
             <DecisionModelsChart
@@ -116,7 +116,7 @@ export function DecisionsModelsView() {
         </Stack>
         <Stack gap="xs">
           <Title order={4} size="md" fw={600}>
-            All decision models
+            All Decision Models
           </Title>
           <DecisionModelsTable
             models={modelList}
@@ -136,7 +136,7 @@ export function DecisionsModelsView() {
     <Stack gap="lg">
       <Stack gap="xs">
         <Title order={4} size="md" fw={600}>
-          Which model each decision uses
+          Which Model Each Decision Uses
         </Title>
         <DecisionsTable
           status={judge}

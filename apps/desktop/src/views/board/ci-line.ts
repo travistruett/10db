@@ -80,12 +80,12 @@ export function withFixTaskTitles(
 /** The pull request's checks page, or null unless the pull request is an https github.com address. */
 function checksLink(prUrl: string): CiLink | null {
   const url = githubUrl(prUrl);
-  return url === null ? null : { url: `${url}/checks`, label: 'CI checks' };
+  return url === null ? null : { url: `${url}/checks`, label: 'CI Checks' };
 }
 
 function jobLink(jobs: readonly RequiredCheckJobDto[], prUrl: string): CiLink | null {
   const url = jobs.map((j) => githubUrl(j.link)).find((u) => u !== null);
-  return url ? { url, label: 'CI job' } : checksLink(prUrl);
+  return url ? { url, label: 'CI Job' } : checksLink(prUrl);
 }
 
 /**
@@ -132,7 +132,7 @@ export function ciLine(batch: BatchDto | undefined, batches: readonly BatchDto[]
     return {
       line: 'Pull request open · queued to merge',
       color: 'blue',
-      link: githubUrl(batch.prUrl) ? { url: batch.prUrl, label: 'Pull request' } : null,
+      link: githubUrl(batch.prUrl) ? { url: batch.prUrl, label: 'Pull Request' } : null,
     };
   if (required === null || required.state === RequiredChecksState.None) return null;
   if (batch.pr?.state === PullRequestState.Merged)
@@ -146,7 +146,7 @@ export function ciLine(batch: BatchDto | undefined, batches: readonly BatchDto[]
     return {
       line: `Pull request open · ${how} ${base}`,
       color: 'red',
-      link: githubUrl(batch.prUrl) ? { url: batch.prUrl, label: 'Pull request' } : null,
+      link: githubUrl(batch.prUrl) ? { url: batch.prUrl, label: 'Pull Request' } : null,
     };
   }
   switch (required.state) {

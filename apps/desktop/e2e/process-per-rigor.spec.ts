@@ -78,13 +78,13 @@ test('a rigor row shows its process in its drawer, and an edit changes the row h
   await main.getByRole('button', { name: 'Critical steps' }).click();
   const critical = page.getByRole('dialog', { name: 'Critical: process' });
   await expect(
-    critical.getByRole('radiogroup', { name: 'Review rounds' }).getByRole('radio', { name: '2' }),
+    critical.getByRole('radiogroup', { name: 'Review Rounds' }).getByRole('radio', { name: '2' }),
   ).toBeChecked();
-  await expect(critical.getByRole('combobox', { name: 'A send-back is fixed by' })).toHaveValue(
+  await expect(critical.getByRole('combobox', { name: 'A Send-Back Is Fixed By' })).toHaveValue(
     'A fresh build session',
   );
   await expect(
-    critical.getByRole('switch', { name: 'The builder approves the plan' }),
+    critical.getByRole('switch', { name: 'The Builder Approves the Plan' }),
   ).toBeChecked();
   // The drawer fades in as it slides; axe would measure contrast mid-fade.
   await expect(critical).toHaveCSS('opacity', '1');
@@ -95,14 +95,14 @@ test('a rigor row shows its process in its drawer, and an edit changes the row h
   await standard.click();
   const drawer = page.getByRole('dialog', { name: 'Standard: process' });
   await drawer
-    .getByRole('radiogroup', { name: 'Review rounds' })
+    .getByRole('radiogroup', { name: 'Review Rounds' })
     .getByText('2', { exact: true })
     .click();
   await expect(standard).toContainText('2 rounds · resumed fix');
   await drawer.getByRole('button', { name: 'Reset: review rounds' }).click();
   await expect(standard).toContainText('1 round · resumed fix');
   await expect(
-    drawer.getByRole('radiogroup', { name: 'Review rounds' }).getByRole('radio', { name: '1' }),
+    drawer.getByRole('radiogroup', { name: 'Review Rounds' }).getByRole('radio', { name: '1' }),
   ).toBeChecked();
 });
 
@@ -144,7 +144,7 @@ test('Send Back needs a note, and with one plans again', async ({ page, request 
   await page.getByRole('button', { name: 'Send Back', exact: true }).click();
   const send = page.getByRole('button', { name: 'Send It Back' });
   await expect(send).toBeDisabled();
-  await page.getByLabel('What needs to change in the plan').fill('Add a header to the file.');
+  await page.getByLabel('What Needs to Change in the Plan').fill('Add a header to the file.');
   await send.click();
 
   // Plan runs again with the note, and Plan Review approves it; the new plan is a new card, whose

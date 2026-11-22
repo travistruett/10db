@@ -29,7 +29,7 @@ function blocksOf(groups: ProposedGroups): Block[] {
     {
       section: SectionKey.Tasks,
       // Tasks under no goal: beside goals they are the other tasks, and otherwise simply the tasks.
-      name: groups.goals.length === 0 ? 'Tasks' : 'Other tasks',
+      name: groups.goals.length === 0 ? 'Tasks' : 'Other Tasks',
       rows: groups.looseTasks,
     },
     { section: SectionKey.Changes, name: 'Changes', rows: groups.changes },
@@ -37,7 +37,7 @@ function blocksOf(groups: ProposedGroups): Block[] {
     { section: SectionKey.Records, name: 'Decisions', rows: groups.records },
     {
       section: SectionKey.Questions,
-      name: 'Questions for others',
+      name: 'Questions for Others',
       rows: groups.questions,
       note: 'Sent when people arrive (goals phase 3)',
     },

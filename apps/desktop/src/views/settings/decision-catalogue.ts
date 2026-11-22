@@ -22,7 +22,7 @@ export const DECISION_GROUP_LABEL: Readonly<Record<DecisionGroup, string>> = {
   [DecisionGroup.Trust]: 'Trust',
   [DecisionGroup.Sizing]: 'Sizing',
   [DecisionGroup.Plan]: 'Plan',
-  [DecisionGroup.Stakeholders]: 'Stakeholder questions',
+  [DecisionGroup.Stakeholders]: 'Stakeholder Questions',
 };
 
 /** Acting decisions change what 10db does; shadow ones only log answers to be scored. */
@@ -53,7 +53,7 @@ const SHADOW_NOTE =
 export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
   [JudgeDecision.ReviewSize]: {
     group: DecisionGroup.Delivery,
-    label: 'Skip review for small changes',
+    label: 'Skip Review for Small Changes',
     asks: 'After a step’s checks pass: is this change small and well tested enough to skip the independent review?',
     onAnswer: 'Skip: the review is skipped. Review: it runs.',
     whenUnsure: 'The review runs.',
@@ -62,7 +62,7 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
   },
   [JudgeDecision.TestValue]: {
     group: DecisionGroup.Delivery,
-    label: 'Tests a step added',
+    label: 'Tests a Step Added',
     asks: 'For each test a step’s commits added: does it earn its place, or does it duplicate a test that exists, fold into one, or belong at a cheaper level?',
     onAnswer:
       'Keep: nothing happens. Anything else: a task with no review gets one follow-up task for each; with a review, the reviewer is told. It never blocks or fails a step.',
@@ -84,7 +84,7 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
   },
   [JudgeDecision.TaskRigor]: {
     group: DecisionGroup.Sizing,
-    label: 'How much process a task needs',
+    label: 'How Much Process a Task Needs',
     asks: 'How much process does this task need?',
     onAnswer: 'Sets the task’s rigor, unless it was set by you or an agent.',
     whenUnsure: 'The rules and the project’s default decide.',
@@ -93,7 +93,7 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
   },
   [JudgeDecision.TaskKinds]: {
     group: DecisionGroup.Sizing,
-    label: 'What a task touches',
+    label: 'What a Task Touches',
     asks: 'Does this task touch this kind of work? Asked once for each kind.',
     onAnswer: 'Yes: the task gets the kind, unless you took it off. No: it doesn’t.',
     whenUnsure: 'The rules decide.',
@@ -102,7 +102,7 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
   },
   [JudgeDecision.ShapeReady]: {
     group: DecisionGroup.Plan,
-    label: 'Enough to propose',
+    label: 'Enough to Propose',
     asks: 'After each message, until the first Propose: have you said enough to propose?',
     onAnswer: SHADOW_ON_ANSWER,
     whenUnsure: SHADOW_WHEN_UNSURE,
@@ -112,7 +112,7 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
   },
   [JudgeDecision.ShapeRecord]: {
     group: DecisionGroup.Plan,
-    label: 'Record as a decision?',
+    label: 'Record as a Decision?',
     asks: 'Does this message state a decision or principle worth recording?',
     onAnswer: SHADOW_ON_ANSWER,
     whenUnsure: SHADOW_WHEN_UNSURE,
@@ -122,7 +122,7 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
   },
   [JudgeDecision.ShapeElsewhere]: {
     group: DecisionGroup.Plan,
-    label: 'Question for someone else?',
+    label: 'Question for Someone Else?',
     asks: 'Is this a question only someone else can answer?',
     onAnswer: SHADOW_ON_ANSWER,
     whenUnsure: SHADOW_WHEN_UNSURE,
@@ -132,7 +132,7 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
   },
   [JudgeDecision.QuestionRoute]: {
     group: DecisionGroup.Stakeholders,
-    label: 'Who a question goes to',
+    label: 'Who a Question Goes To',
     asks: 'Which of the project’s routes a question an agent asked belongs to, or nobody.',
     onAnswer: 'A route: the card goes to its people. Nobody: it stays with you.',
     whenUnsure: 'It stays with you, with the top route’s people suggested under Ask Someone.',
@@ -141,7 +141,7 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
   },
   [JudgeDecision.ThreadAnswer]: {
     group: DecisionGroup.Stakeholders,
-    label: 'Which option a conversation chose',
+    label: 'Which Option a Conversation Chose',
     asks: 'Once a Slack conversation settles: which option did it land on?',
     onAnswer: '10db posts "Sounds like B" in the thread for the asker to approve.',
     whenUnsure: '10db asks the asker which way it should go.',
@@ -150,7 +150,7 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
   },
   [JudgeDecision.ReplyMatch]: {
     group: DecisionGroup.Stakeholders,
-    label: 'Which question a reply answers',
+    label: 'Which Question a Reply Answers',
     asks: 'A reply typed outside a thread, with several questions open: which one does it answer?',
     onAnswer: 'The reply joins that question’s conversation.',
     whenUnsure: '10db asks "Which one is this for?" with a numbered list.',
@@ -159,7 +159,7 @@ export const DECISIONS: Readonly<Record<JudgeDecision, DecisionEntry>> = {
   },
   [JudgeDecision.ApprovalRead]: {
     group: DecisionGroup.Stakeholders,
-    label: 'Whether a reply approves',
+    label: 'Whether a Reply Approves',
     asks: 'Does this reply approve the proposed answer?',
     onAnswer: 'Approves: the card is answered as the asker.',
     whenUnsure: 'A short list of words (yes, ok, sounds good…) is read instead.',

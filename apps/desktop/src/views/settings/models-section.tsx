@@ -65,7 +65,7 @@ function PaidByAccount() {
           w={240}
           leftSection={
             <Text size="xs" c="dimmed">
-              Paid by
+              Paid By
             </Text>
           }
           leftSectionWidth={72}
@@ -221,7 +221,7 @@ export function ModelsSection() {
               />
             )}
           >
-            Add an account
+            Add an Account
           </Anchor>{' '}
           to see what each role gets.
         </Text>

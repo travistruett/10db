@@ -193,7 +193,7 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
           />
         </SettingRow>
         <SettingRow
-          label="Gate command"
+          label="Gate Command"
           description={
             values.gateCommand.trim() === ''
               ? 'No automatic check: each finished task waits for you.'
@@ -201,7 +201,7 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
           }
         >
           <TextInput
-            aria-label="Gate command"
+            aria-label="Gate Command"
             styles={MONO_INPUT}
             value={values.gateCommand}
             error={errors.gateCommand}
@@ -211,11 +211,11 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
           />
         </SettingRow>
         <SettingRow
-          label="Check after each step"
+          label="Check After Each Step"
           description="Optional. Runs after each step instead of the gate command; the gate command still runs before the push."
         >
           <TextInput
-            aria-label="Check after each step"
+            aria-label="Check After Each Step"
             styles={MONO_INPUT}
             value={values.changedCheckCommand}
             error={errors.changedCheckCommand}
@@ -225,11 +225,11 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
           />
         </SettingRow>
         <SettingRow
-          label="Pre-check command"
+          label="Pre-Check Command"
           description="Runs on the Mac in place of the gate when the pull request's base branch has required checks on GitHub. Leave it empty to keep running the gate."
         >
           <TextInput
-            aria-label="Pre-check command"
+            aria-label="Pre-Check Command"
             styles={MONO_INPUT}
             value={values.precheckCommand}
             error={errors.precheckCommand}
@@ -239,11 +239,11 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
           />
         </SettingRow>
         <SettingRow
-          label="App address"
+          label="App Address"
           description="Where your dev server answers, such as http://localhost:5173. The UI Workbench's Open in Browser opens a page's route here, and pictures of pages are taken here; an https server with a self-signed certificate gets no pictures."
         >
           <TextInput
-            aria-label="App address"
+            aria-label="App Address"
             placeholder="http://localhost:5173"
             styles={MONO_INPUT}
             value={values.appUrl}
@@ -254,11 +254,11 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
           />
         </SettingRow>
         <SettingRow
-          label="Preview command"
+          label="Preview Command"
           description="Optional. Starts your dev server at the app address while pages are open in the UI Workbench, and stops it once they are finished or abandoned, so you never run it yourself. It runs under the gate's sandbox, which needs Allow loopback."
         >
           <TextInput
-            aria-label="Preview command"
+            aria-label="Preview Command"
             placeholder="pnpm dev"
             styles={MONO_INPUT}
             value={values.previewCommand}
@@ -270,13 +270,13 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         </SettingRow>
       </SettingsCard>
 
-      <SettingsCard title="Pictures of pages">
+      <SettingsCard title="Pictures of Pages">
         <SettingRow
-          label="Dev login command"
+          label="Dev Login Command"
           description="Optional. Prints an address on the app that signs a browser in, for pictures of pages that need a sign-in. It runs under the gate's sandbox."
         >
           <Textarea
-            aria-label="Dev login command"
+            aria-label="Dev Login Command"
             autosize
             minRows={1}
             styles={MONO_INPUT}
@@ -288,7 +288,7 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
           />
         </SettingRow>
         <SettingRow
-          label="Screenshot matrix"
+          label="Screenshot Matrix"
           description="Each page is pictured in each viewport and theme: at most 4 pictures a route."
         >
           <ScreensMatrixField
@@ -300,12 +300,12 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
           />
         </SettingRow>
         <SettingRow
-          label="Pictures in pull requests"
+          label="Pictures in Pull Requests"
           description="A UI Workbench pull request shows each signed-off page before and after. The pictures are pushed to a 10db-pictures branch on GitHub, so anyone who can see the repository can see them, data on the page included."
         >
           <Group justify="flex-end">
             <Switch
-              aria-label="Pictures in pull requests"
+              aria-label="Pictures in Pull Requests"
               checked={values.prPictures}
               onChange={(e) => {
                 set({ prPictures: e.currentTarget.checked });
@@ -316,7 +316,7 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         <PicturesStatus projectId={project.id} />
       </SettingsCard>
 
-      <SettingsCard title="When work is finished">
+      <SettingsCard title="When Work Is Finished">
         <SettingRow
           label="Delivery"
           description={
@@ -330,8 +330,8 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
             fullWidth
             value={values.delivery}
             data={[
-              { value: Delivery.PullRequest, label: 'Pull request' },
-              { value: Delivery.Local, label: 'Commit directly' },
+              { value: Delivery.PullRequest, label: 'Pull Request' },
+              { value: Delivery.Local, label: 'Commit Directly' },
             ]}
             onChange={(value) => {
               const delivery =
@@ -347,11 +347,11 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         </SettingRow>
         {showPrFields ? (
           <SettingRow
-            label="Base branch"
+            label="Base Branch"
             description="Pull requests start from and merge into this branch."
           >
             <TextInput
-              aria-label="Base branch"
+              aria-label="Base Branch"
               styles={MONO_INPUT}
               value={values.baseBranch}
               error={errors.baseBranch}
@@ -363,7 +363,7 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         ) : null}
         {pullRequests ? (
           <SettingRow
-            label="When checks pass"
+            label="When Checks Pass"
             description={
               values.landing === ProjectLanding.Hold
                 ? 'Pull requests wait for you to merge them. A task can choose to merge.'
@@ -371,16 +371,16 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
             }
           >
             <SegmentedControl
-              aria-label="When checks pass"
+              aria-label="When Checks Pass"
               fullWidth
               value={values.landing}
               data={[
                 {
                   value: ProjectLanding.Merge,
-                  label: `Merge into ${values.baseBranch.trim() || 'the base branch'}`,
+                  label: `Merge Into ${values.baseBranch.trim() || 'the base branch'}`,
                 },
-                { value: ProjectLanding.Branch, label: 'Merge into a branch' },
-                { value: ProjectLanding.Hold, label: 'Hold for my review' },
+                { value: ProjectLanding.Branch, label: 'Merge Into a Branch' },
+                { value: ProjectLanding.Hold, label: 'Hold for My Review' },
               ]}
               onChange={(value) => {
                 set({ landing: landingChoice(value) });
@@ -390,11 +390,11 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         ) : null}
         {pullRequests && values.landing === ProjectLanding.Branch ? (
           <SettingRow
-            label="New tasks land in"
+            label="New Tasks Land In"
             description="A branch on origin, such as an integration branch. Each new task starts out landing there; a task can choose another place."
           >
             <TextInput
-              aria-label="New tasks land in"
+              aria-label="New Tasks Land In"
               placeholder="next"
               styles={MONO_INPUT}
               value={values.landingBranch}
@@ -407,11 +407,11 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         ) : null}
         {showPrFields ? (
           <SettingRow
-            label="Pull request title"
+            label="Pull Request Title"
             description="Optional. Starts every title, as a commit type and scope: feat(desktop). Left empty, 10db writes <type>(<scope>): <subject> from the batch's tasks and the paths it changed."
           >
             <TextInput
-              aria-label="Pull request title"
+              aria-label="Pull Request Title"
               placeholder="feat(app)"
               styles={MONO_INPUT}
               value={values.prTitlePrefix}
@@ -424,13 +424,13 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         ) : null}
       </SettingsCard>
 
-      <SettingsCard title="Running tasks">
+      <SettingsCard title="Running Tasks">
         <SettingRow
-          label="Most tasks at once"
+          label="Most Tasks at Once"
           description="10db runs fewer when tasks change the same areas or a usage limit is near."
         >
           <NumberInput
-            aria-label="Most tasks at once"
+            aria-label="Most Tasks at Once"
             min={1}
             max={16}
             value={values.maxLanes}
@@ -442,7 +442,7 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         </SettingRow>
         {pullRequests ? (
           <SettingRow
-            label="Default for new tasks"
+            label="Default for New Tasks"
             description={`${
               values.workspaceMode === WorkspaceMode.Worktree
                 ? 'Separate copy: each new task works in its own copy of the repository under ~/.10db/worktrees, so any tasks can run together. Your checkout is left alone. You see the work in its pull request.'
@@ -450,12 +450,12 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
             } ${DEFAULT_CHANGE_NOTE}`}
           >
             <SegmentedControl
-              aria-label="Default for new tasks"
+              aria-label="Default for New Tasks"
               fullWidth
               value={values.workspaceMode}
               data={[
-                { value: WorkspaceMode.Shared, label: 'Your folder' },
-                { value: WorkspaceMode.Worktree, label: 'Separate copy' },
+                { value: WorkspaceMode.Shared, label: 'Your Folder' },
+                { value: WorkspaceMode.Worktree, label: 'Separate Copy' },
               ]}
               onChange={(value) => {
                 set({
@@ -470,11 +470,11 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         ) : null}
         {pullRequests ? (
           <SettingRow
-            label="Separate copy for these areas"
+            label="Separate Copy for These Areas"
             description="Area and hazard names, such as migrations or deps. A new task that names one is proposed a separate copy, and its card says why. Changing the list moves no task that already exists."
           >
             <TagsInput
-              aria-label="Separate copy for these areas"
+              aria-label="Separate Copy for These Areas"
               value={[...values.isolate]}
               error={errors.isolate}
               onChange={(isolate) => {
@@ -485,11 +485,11 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         ) : null}
         {pullRequests ? (
           <SettingRow
-            label="Copy into each task's copy"
+            label="Copy Into Each Task's Copy"
             description="Ignored folders, such as node_modules, copied from this checkout."
           >
             <TagsInput
-              aria-label="Copy into each task's copy"
+              aria-label="Copy Into Each Task's Copy"
               value={[...values.worktreeSeed]}
               error={errors.worktreeSeed}
               onChange={(worktreeSeed) => {
@@ -499,11 +499,11 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
           </SettingRow>
         ) : null}
         <SettingRow
-          label="Fresh session"
+          label="Fresh Session"
           description="When a session's memory is this full, it writes a handoff note and a fresh one carries on."
         >
           <NumberInput
-            aria-label="Fresh session"
+            aria-label="Fresh Session"
             suffix="%"
             min={5}
             max={95}
@@ -537,11 +537,11 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         <Collapse expanded={advanced}>
           <SettingsCard>
             <SettingRow
-              label="Firm reminder"
+              label="Firm Reminder"
               description="If a session hasn't handed off by this much memory, it is told again, firmly."
             >
               <NumberInput
-                aria-label="Firm reminder"
+                aria-label="Firm Reminder"
                 suffix="%"
                 min={6}
                 max={98}
@@ -553,11 +553,11 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
               />
             </SettingRow>
             <SettingRow
-              label="Wait for your answer"
+              label="Wait for Your Answer"
               description="After this long, a waiting task pauses and frees its place; it resumes when you answer."
             >
               <NumberInput
-                aria-label="Wait for your answer"
+                aria-label="Wait for Your Answer"
                 suffix=" min"
                 min={1}
                 max={240}
@@ -569,11 +569,11 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
               />
             </SettingRow>
             <SettingRow
-              label="Spending limit per task"
+              label="Spending Limit per Task"
               description="Leave empty for no limit. Models that cost more per task aren't used."
             >
               <NumberInput
-                aria-label="Spending limit per task"
+                aria-label="Spending Limit per Task"
                 min={0}
                 decimalScale={2}
                 prefix="$"
@@ -586,12 +586,12 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
               />
             </SettingRow>
             <SettingRow
-              label="Commands that don't ask"
+              label="Commands That Don't Ask"
               description="One per line, such as pnpm test. Tasks run these without asking you; 10db still checks each one."
               stacked
             >
               <Textarea
-                aria-label="Commands that don't ask"
+                aria-label="Commands That Don't Ask"
                 styles={MONO_INPUT}
                 autosize
                 minRows={1}

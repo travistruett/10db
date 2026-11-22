@@ -89,7 +89,7 @@ export function OpeningPictures({
   return (
     <Stack gap={4}>
       <Text size="xs" c="dimmed">
-        Earlier in this goal
+        Earlier in This Goal
       </Text>
       <Group gap="xs" align="flex-start" wrap="wrap">
         {fromGoal.map((screen) => (

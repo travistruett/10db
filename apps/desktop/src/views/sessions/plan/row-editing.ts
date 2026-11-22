@@ -17,13 +17,13 @@ export interface EditableField {
 
 /** XL is not offered: a task that big is split (§6). */
 const SIZES = [
-  { value: 'S', label: 'Small (about half an hour)' },
-  { value: 'M', label: 'Medium (a few hours)' },
-  { value: 'L', label: 'Large (a day or more)' },
+  { value: 'S', label: 'Small (About Half an Hour)' },
+  { value: 'M', label: 'Medium (A Few Hours)' },
+  { value: 'L', label: 'Large (A Day or More)' },
 ] as const;
 const CEREMONIES = [
-  { value: 'direct', label: 'Build directly' },
-  { value: 'spec', label: 'Write a spec first' },
+  { value: 'direct', label: 'Build Directly' },
+  { value: 'spec', label: 'Write a Spec First' },
 ] as const;
 
 const text = (name: string, label: string, value: string, required = true): EditableField => ({

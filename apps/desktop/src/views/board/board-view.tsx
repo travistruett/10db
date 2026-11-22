@@ -579,7 +579,7 @@ export function BoardView() {
                   w="clamp(96px, 20vw, 220px)"
                   allowDeselect={false}
                   data={[
-                    { value: ALL_GOALS, label: 'All goals' },
+                    { value: ALL_GOALS, label: 'All Goals' },
                     ...goalList.map((g) => ({ value: g.goal.id, label: g.goal.title })),
                   ]}
                   value={filterGoal?.goal.id ?? ALL_GOALS}

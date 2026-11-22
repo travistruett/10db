@@ -53,5 +53,5 @@ export function ExternalLink({
 
 /** A batch's pull request. */
 export function PullRequestLink({ url }: { readonly url: string }) {
-  return <ExternalLink url={url} label="Pull request" />;
+  return <ExternalLink url={url} label="Pull Request" />;
 }

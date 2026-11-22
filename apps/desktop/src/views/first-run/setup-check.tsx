@@ -5,7 +5,7 @@ import type { SetupMark, SetupRow } from './claude-row';
 
 const MARK_LABEL: Readonly<Record<SetupMark, string>> = {
   ok: 'Ready',
-  warn: 'Needs attention',
+  warn: 'Needs Attention',
   bad: 'Problem',
   pending: 'Checking',
 };

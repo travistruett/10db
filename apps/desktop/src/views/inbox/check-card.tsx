@@ -66,7 +66,7 @@ function Criteria({
   return (
     <Stack gap={4}>
       <Text size="sm" fw={500}>
-        Acceptance criteria
+        Acceptance Criteria
       </Text>
       <List size="sm" spacing={2}>
         {criteria.map((criterion, index) => (
@@ -243,7 +243,7 @@ export function CheckCard({
         {sendingBack ? (
           <Textarea
             ref={noteRef}
-            label="What needs to change"
+            label="What Needs to Change"
             description="The agent gets this note with the work."
             autosize
             minRows={2}

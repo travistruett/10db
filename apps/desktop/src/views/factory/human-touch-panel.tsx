@@ -63,7 +63,7 @@ export function HumanTouchPanel({ projectId }: { readonly projectId: ProjectId |
   const touch = useHumanTouch(projectId);
   return (
     <Stack gap="xs">
-      <Title order={3}>Human touch</Title>
+      <Title order={3}>Human Touch</Title>
       <Text size="sm" c="dimmed">
         Cards raised each day, cards per task that ran, minutes work waited on an answer, and
         minutes a failed run waited for a retry, counted apart (UTC days)

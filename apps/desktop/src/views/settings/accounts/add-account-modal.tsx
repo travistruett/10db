@@ -153,7 +153,7 @@ function AddAccountForm({
               size="md"
               type="password"
               name={KEY_FIELD}
-              label="OpenRouter key"
+              label="OpenRouter Key"
               placeholder="sk-or-..."
               description="Stored in your login Keychain, never in 10db's database. It can't be shown again."
               autoComplete="new-password"
@@ -161,7 +161,7 @@ function AddAccountForm({
               autoCapitalize="off"
             />
             <Checkbox
-              label="Run decisions on this account"
+              label="Run Decisions on This Account"
               checked={runsDecisions}
               onChange={(event) => {
                 setRunDecisions(event.currentTarget.checked);

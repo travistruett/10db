@@ -16,7 +16,7 @@ it('names the base branch the form shows in the merge choice', async () => {
   );
   renderApp('/settings/general');
   await screen.findByLabelText('Name');
-  expect(screen.getByRole('radio', { name: 'Merge into develop' })).toBeTruthy();
+  expect(screen.getByRole('radio', { name: 'Merge Into develop' })).toBeTruthy();
   expect(
     screen.getByText(
       'GitHub merges each pull request into develop by itself once its required checks pass. A task can choose another branch, or hold.',

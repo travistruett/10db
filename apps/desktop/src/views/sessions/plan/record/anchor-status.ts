@@ -25,7 +25,7 @@ export function checkStatus(check: AnchorCheckDto | undefined, anchor: PlanAncho
       color: 'gray',
       detail: null,
     };
-  if (check === undefined) return { label: 'Not checked', color: 'gray', detail: null };
+  if (check === undefined) return { label: 'Not Checked', color: 'gray', detail: null };
   return resultStatus(check);
 }
 
@@ -47,9 +47,9 @@ export function resultStatus(check: AnchorCheckDto): AnchorStatus {
     case AnchorResult.Changed:
       return { label: 'Changed', color: 'red', detail: detail('not found') };
     case AnchorResult.Unchecked:
-      return { label: 'Not checked', color: 'gray', detail: detail(check.note) };
+      return { label: 'Not Checked', color: 'gray', detail: detail(check.note) };
     case AnchorResult.Url:
-      return { label: 'Page, not fetched', color: 'gray', detail: null };
+      return { label: 'Page, Not Fetched', color: 'gray', detail: null };
   }
 }
 

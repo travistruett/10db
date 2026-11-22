@@ -25,7 +25,7 @@ test('a fresh install walks Welcome, the setup check and Add a project, and land
   await expectAccessible(page, 'welcome');
 
   await page.getByRole('button', { name: 'Get Started' }).click();
-  await expect(page.getByRole('heading', { name: 'Check your setup' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Check Your Setup' })).toBeVisible();
   await expect(page.getByText(/^Tasks will run as /)).toBeVisible();
   await expectAccessible(page, 'check your setup');
 

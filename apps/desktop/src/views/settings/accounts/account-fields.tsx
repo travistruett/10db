@@ -50,7 +50,7 @@ export function AccountFields({
       />
       <TextInput
         size="md"
-        label="Paid by"
+        label="Paid By"
         description="Who pays for this account, such as a client. Leave empty if you do."
         value={values.payer}
         error={errors['payer']}
@@ -58,7 +58,7 @@ export function AccountFields({
       />
       <TextInput
         size="md"
-        label="Lane cap"
+        label="Lane Cap"
         description="The most sessions that run on this account at once."
         inputMode="numeric"
         value={values.laneCap}
@@ -68,7 +68,7 @@ export function AccountFields({
       {metered ? (
         <TextInput
           size="md"
-          label="Monthly cap (USD)"
+          label="Monthly Cap (USD)"
           description="10db stops starting sessions on this account at this spend each month. Leave empty for no cap."
           inputMode="decimal"
           value={values.monthlyCapUsd}
@@ -99,15 +99,15 @@ export function AccountFields({
           />
           <Stack gap={4}>
             <Text size="sm" fw={500}>
-              Sign in with
+              Sign In With
             </Text>
             <SegmentedControl
               size="md"
-              aria-label="Sign in with"
+              aria-label="Sign In With"
               value={values.bedrockAuth}
               data={[
-                { value: 'profile', label: 'AWS profile' },
-                { value: 'bearer', label: 'Bearer token' },
+                { value: 'profile', label: 'AWS Profile' },
+                { value: 'bearer', label: 'Bearer Token' },
               ]}
               onChange={(next) => {
                 onChange({ ...values, bedrockAuth: next === 'bearer' ? 'bearer' : 'profile' });
@@ -123,7 +123,7 @@ export function AccountFields({
           {values.bedrockAuth === 'profile' ? (
             <TextInput
               size="md"
-              label="AWS profile"
+              label="AWS Profile"
               description="The profile name in your AWS config that sessions use."
               value={values.awsProfile}
               error={errors['awsProfile']}

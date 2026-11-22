@@ -122,7 +122,7 @@ export function DecisionsTable({
     },
     {
       accessor: 'floor',
-      title: 'Sure enough',
+      title: 'Sure Enough',
       noWrap: true,
       render: (row) =>
         ofDecision(row, (d) => `${String(Math.round(config.decisions[d].floor * 100))}%`),

@@ -204,10 +204,10 @@ export function menuMoves(
   const last = column.tasks.length - 1;
   const at = (i: number): DropTarget | null => (i === index ? null : { key: column.key, index: i });
   const moves: MenuMove[] = [
-    { label: 'Move to top', target: at(0) },
-    { label: 'Move up', target: index > 0 ? at(index - 1) : null },
-    { label: 'Move down', target: index < last ? at(index + 1) : null },
-    { label: 'Move to bottom', target: at(last) },
+    { label: 'Move to Top', target: at(0) },
+    { label: 'Move Up', target: index > 0 ? at(index - 1) : null },
+    { label: 'Move Down', target: index < last ? at(index + 1) : null },
+    { label: 'Move to Bottom', target: at(last) },
   ].map((m) => ({ ...m, refusal: refusalFor(column.key) }));
   for (const other of layout) {
     if (other.key.kind !== 'human' || sameColumn(other.key, column.key)) continue;

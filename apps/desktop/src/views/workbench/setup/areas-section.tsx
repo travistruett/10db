@@ -78,7 +78,7 @@ export function AreasSection({ project, areas, result, unticked, onTick }: Areas
       {areas.kept.length === 0 ? null : (
         <Stack gap={4}>
           <Text size="sm" fw={500}>
-            Kept as they are
+            Kept as They Are
           </Text>
           {areas.kept.map((kept) => (
             <Text key={kept.name} size="sm" c="dimmed">
@@ -114,7 +114,7 @@ export function AreasSection({ project, areas, result, unticked, onTick }: Areas
       {areas.skipped.length === 0 ? null : (
         <Stack gap={4}>
           <Text size="sm" fw={500}>
-            Left out
+            Left Out
           </Text>
           {areas.skipped.map((skip) => (
             <Text key={`${skip.name}:${skip.reason}`} size="sm" c="dimmed">

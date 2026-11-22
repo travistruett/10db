@@ -56,9 +56,9 @@ export function landingOptions(baseBranch: string): readonly {
   readonly label: string;
 }[] {
   return [
-    { value: 'base', label: `Merge into ${baseBranch}` },
-    { value: 'branch', label: 'Merge into another branch' },
-    { value: 'hold', label: 'Hold for my review' },
+    { value: 'base', label: `Merge Into ${baseBranch}` },
+    { value: 'branch', label: 'Merge Into Another Branch' },
+    { value: 'hold', label: 'Hold for My Review' },
   ];
 }
 

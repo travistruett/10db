@@ -7,7 +7,7 @@ import type { ScreensValues, ViewportValues } from './general-values';
 
 const MAX_VIEWPORTS = 3;
 const THEMES = [
-  { value: ScreenTheme.Default, label: "The app's own" },
+  { value: ScreenTheme.Default, label: "The App's Own" },
   { value: ScreenTheme.Light, label: 'Light' },
   { value: ScreenTheme.Dark, label: 'Dark' },
 ] as const;

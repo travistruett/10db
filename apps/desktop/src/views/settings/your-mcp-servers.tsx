@@ -277,7 +277,7 @@ export function YourMcpServers() {
   if (data === undefined) return null;
   const master = data.switches.yourMcpServers;
   return (
-    <SettingsCard title="Your MCP servers">
+    <SettingsCard title="Your MCP Servers">
       {data.mcpNotice === null ? null : (
         <Text size="sm" c="dimmed" px="md" py="sm">
           {data.mcpNotice}

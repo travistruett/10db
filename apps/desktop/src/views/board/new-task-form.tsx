@@ -130,7 +130,7 @@ export function NewTaskForm({
           }}
         />
         <Box>
-          <LabelWithHelp label="Acceptance criteria" htmlFor={criteriaId}>
+          <LabelWithHelp label="Acceptance Criteria" htmlFor={criteriaId}>
             <Stack gap="xs">
               <Text size="sm">
                 What must be true when the task is done. The agent works until each one holds, a
@@ -185,7 +185,7 @@ export function NewTaskForm({
           </Box>
         ) : null}
         <MultiSelect
-          label="Depends on"
+          label="Depends On"
           data={dependencyOptions}
           value={dependsOn}
           onChange={setDependsOn}

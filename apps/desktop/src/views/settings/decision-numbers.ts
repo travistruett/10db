@@ -120,11 +120,11 @@ export function previewText(
 
 /** What 10db did, in the builder's words, for the outcomes that fall back to today's rule. */
 const FALLBACK_PREFIX = {
-  [JudgeOutcome.BelowFloor]: 'Not sure enough',
-  [JudgeOutcome.FallbackOff]: 'Decisions were off',
-  [JudgeOutcome.FallbackNoKey]: 'No key',
-  [JudgeOutcome.FallbackTimeout]: 'Timed out',
-  [JudgeOutcome.FallbackError]: 'The call failed',
+  [JudgeOutcome.BelowFloor]: 'Not Sure Enough',
+  [JudgeOutcome.FallbackOff]: 'Decisions Were Off',
+  [JudgeOutcome.FallbackNoKey]: 'No Key',
+  [JudgeOutcome.FallbackTimeout]: 'Timed Out',
+  [JudgeOutcome.FallbackError]: 'The Call Failed',
 } as const;
 
 /** The answer and the outcome together: "acted" means different things per decision. */
@@ -163,7 +163,7 @@ function limitOutcomeText(call: Pick<JudgeCallDto, 'outcome' | 'answer' | 'model
   if (call.model === AUTO_MODE_MODEL) return 'Auto mode stopped it';
   if (call.outcome === JudgeOutcome.BelowFloor) return 'Not sure enough; treated as a limit';
   if (call.outcome === JudgeOutcome.Acted)
-    return call.answer === 'allow' ? 'Allowed' : 'Stopped at a limit';
+    return call.answer === 'allow' ? 'Allowed' : 'Stopped at a Limit';
   return null;
 }
 

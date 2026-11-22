@@ -123,7 +123,7 @@ export function ReviewNotes({
                 onCeremony('use');
               }}
             >
-              Use spec
+              Use Spec
             </Button>
           ) : ceremony.reasons.length > 0 ? (
             <Button
@@ -134,7 +134,7 @@ export function ReviewNotes({
                 onCeremony('skip');
               }}
             >
-              Skip spec
+              Skip Spec
             </Button>
           ) : null}
         </Group>

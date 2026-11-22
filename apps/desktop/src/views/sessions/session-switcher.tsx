@@ -70,7 +70,7 @@ export function SessionSwitcher({
         {closed.length === 0 ? null : (
           <>
             <Menu.Divider />
-            <Menu.Label>Recently closed</Menu.Label>
+            <Menu.Label>Recently Closed</Menu.Label>
             {closed.map((entry) => (
               <Menu.Item
                 key={entry.chatId}

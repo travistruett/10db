@@ -35,7 +35,7 @@ it('shows the account’s pause with a Resume that lifts a refusal', async () =>
   const dialog = await screen.findByRole('dialog', {
     name: (name) => name.startsWith('Claude plan'),
   });
-  expect(await within(dialog).findByText(/Sessions refused/)).toBeTruthy();
+  expect(await within(dialog).findByText(/Sessions Refused/)).toBeTruthy();
   expect(within(dialog).getByText(new RegExp(`since ${formatMoment(pause.since)}`))).toBeTruthy();
   fireEvent.click(within(dialog).getByRole('button', { name: 'Resume Claude plan' }));
   await waitFor(() => {

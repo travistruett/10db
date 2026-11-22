@@ -74,7 +74,7 @@ export function WhoAnswersSection({ project }: { readonly project: ProjectDto })
               <Table.Th>Scope</Table.Th>
               <Table.Th>For</Table.Th>
               <Table.Th>Questions</Table.Th>
-              <Table.Th>Goes to</Table.Th>
+              <Table.Th>Goes To</Table.Th>
               <Table.Th />
             </Table.Tr>
           </Table.Thead>

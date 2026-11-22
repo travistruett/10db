@@ -75,7 +75,7 @@ export function UnsavedGuardProvider({ children }: { readonly children: ReactNod
   return (
     <UnsavedGuardContext value={guard}>
       {children}
-      <Modal opened={asking} onClose={keep} title="Discard your changes?" centered size="sm">
+      <Modal opened={asking} onClose={keep} title="Discard Your Changes?" centered size="sm">
         <Group justify="flex-end" gap="sm">
           <Button variant="default" onClick={discard}>
             Discard

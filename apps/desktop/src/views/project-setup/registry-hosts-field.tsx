@@ -10,7 +10,7 @@ export function RegistryHostsField({ hosts }: { readonly hosts: readonly FoundHo
   return (
     <Stack gap="xs">
       <Text size="sm" fw={500}>
-        Network hosts
+        Network Hosts
       </Text>
       <Text size="xs" c="dimmed">
         The project's own files name these package registries, so it allows them. You can change

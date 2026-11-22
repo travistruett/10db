@@ -51,8 +51,8 @@ export function DecisionsSection() {
         </Text>
         <Stack gap="xs" align="flex-end" miw={360}>
           <Switch
-            aria-label="Fast-model decisions"
-            label="Fast-model decisions"
+            aria-label="Fast-Model Decisions"
+            label="Fast-Model Decisions"
             checked={config.enabled}
             disabled={disabled}
             onChange={(event) => {

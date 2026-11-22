@@ -86,16 +86,16 @@ export function PlanMeasures() {
   return (
     <Stack
       component="section"
-      aria-label="How Plan is doing"
+      aria-label="How Plan Is Doing"
       gap="sm"
       style={{ flex: '0 1 280px' }}
     >
       <Group gap="xs" align="baseline">
         <Text component="h3" fw={600} size="sm" m={0}>
-          How Plan is doing
+          How Plan Is Doing
         </Text>
         <Text size="xs" c="dimmed">
-          All projects
+          All Projects
         </Text>
       </Group>
       <SizingRow sizing={measures.data.sizing} />

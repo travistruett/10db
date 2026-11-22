@@ -323,7 +323,7 @@ export function shippedAnywayAndClosed(
 
 const SENT_BACK_LABEL: Readonly<Record<StepRole, string>> = {
   plan: 'Planner',
-  plan_review: 'Plan review',
+  plan_review: 'Plan Review',
   implement: 'Implementer',
   review: 'Review',
   qa: 'QA',

@@ -26,7 +26,7 @@ export function WhichIsYou({
     <Stack gap="xs">
       <Group align="flex-end" gap="sm" wrap="nowrap">
         <div style={{ flex: 1 }}>
-          <MemberSelect label="Which one is you?" value={picked} onPick={setPicked} />
+          <MemberSelect label="Which One Is You?" value={picked} onPick={setPicked} />
         </div>
         {changing ? (
           <Button variant="default" onClick={onDone}>

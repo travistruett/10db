@@ -74,7 +74,7 @@ export function GoalTasks({ goalId, rows, loading, error }: GoalTasksProps) {
                 {row.running ? <ContextGauge pct={row.running.contextPct} /> : null}
                 {row.shared ? (
                   <Badge size="sm" variant="light" color="gray" tt="none" fw={500}>
-                    Shared branch
+                    Shared Branch
                   </Badge>
                 ) : null}
                 {row.prUrl ? <PullRequestLink url={row.prUrl} /> : null}

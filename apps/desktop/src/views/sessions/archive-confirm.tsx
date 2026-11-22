@@ -15,7 +15,7 @@ export function ArchiveConfirm({ preview, pending, onCancel, onConfirm }: Archiv
     <Modal
       opened={preview !== null}
       onClose={onCancel}
-      title="Archive this session?"
+      title="Archive This Session?"
       centered
       closeButtonProps={{ 'aria-label': 'Close' }}
     >

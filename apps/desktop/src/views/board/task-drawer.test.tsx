@@ -51,9 +51,9 @@ describe('TaskDrawer', () => {
     const headline = within(d).getByRole('heading', { name: "Odd files can't freeze 10db" });
     const why = within(d).getByText('A FIFO could hang every lane.');
     const status = within(d).getByTestId('status-line');
-    expect(within(status).getByRole('link', { name: 'Pull request' })).toBeTruthy();
+    expect(within(status).getByRole('link', { name: 'Pull Request' })).toBeTruthy();
     const tabs = within(d).getByRole('tablist');
-    const promises = within(d).getByText('What it promises');
+    const promises = within(d).getByText('What It Promises');
     const title = within(d).getByText(FIFO);
     const abandon = within(d).getByRole('button', { name: 'Abandon' });
     expect(within(status).getByText('Queued')).toBeTruthy();
@@ -72,7 +72,7 @@ describe('TaskDrawer', () => {
       ).toBe(true);
     }
     // The pull request link is on the status line alone: not again in the shared branch.
-    expect(within(d).getAllByRole('link', { name: 'Pull request' })).toHaveLength(1);
+    expect(within(d).getAllByRole('link', { name: 'Pull Request' })).toHaveLength(1);
     // The form is on the Edit tab, and the tab selected is Overview.
     expect(within(d).getByRole('tab', { name: 'Overview' }).getAttribute('aria-selected')).toBe(
       'true',

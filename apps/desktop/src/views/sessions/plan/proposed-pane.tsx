@@ -316,7 +316,7 @@ export function ProposedPane({
                   </Tooltip>
                 </Menu.Target>
                 <Menu.Dropdown>
-                  <Menu.Label>Review before you accept</Menu.Label>
+                  <Menu.Label>Review Before You Accept</Menu.Label>
                   {REVIEW_ITEMS.map((item) => (
                     <Menu.Item
                       key={item.kind}

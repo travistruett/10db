@@ -105,9 +105,9 @@ export function PageList({ pages, tasks, areas, ticks, onTicks, now }: PageListP
         })}
       </Stack>
       {tasks.length === 0 ? null : (
-        <Stack gap="xs" role="group" aria-label="Open UI tasks">
+        <Stack gap="xs" role="group" aria-label="Open UI Tasks">
           <Text size="sm" fw={600}>
-            Open UI tasks
+            Open UI Tasks
           </Text>
           {tasks.map((task) => {
             const checked = ticks.tasks.some((t) => t.taskId === task.taskId);

@@ -192,7 +192,7 @@ function NoticeRow(props: NoticeRowProps) {
               </Button>
             </Menu.Target>
             <Menu.Dropdown>
-              <Menu.Label>Which page's agent?</Menu.Label>
+              <Menu.Label>Which Page's Agent?</Menu.Label>
               {pages.map((page) => (
                 <Menu.Item
                   key={page.taskId}

@@ -19,20 +19,20 @@ const ANY_DECISION = 'any';
 const ANY_OUTCOME = 'any';
 
 const DECISION_CHOICES = [
-  { value: ANY_DECISION, label: 'Any decision' },
+  { value: ANY_DECISION, label: 'Any Decision' },
   ...Object.values(JudgeDecision).map((value) => ({ value, label: DECISIONS[value].label })),
 ];
 
 const OUTCOME_CHOICES = [
-  { value: ANY_OUTCOME, label: 'Any outcome' },
+  { value: ANY_OUTCOME, label: 'Any Outcome' },
   { value: JudgeOutcome.Acted, label: 'Acted' },
-  { value: JudgeOutcome.BelowFloor, label: 'Not sure enough' },
+  { value: JudgeOutcome.BelowFloor, label: 'Not Sure Enough' },
   { value: JudgeOutcome.Overridden, label: 'Overridden' },
   { value: JudgeOutcome.Shadow, label: 'Shadow' },
-  { value: JudgeOutcome.FallbackOff, label: 'Fell back: off' },
-  { value: JudgeOutcome.FallbackNoKey, label: 'Fell back: no key' },
-  { value: JudgeOutcome.FallbackTimeout, label: 'Fell back: timed out' },
-  { value: JudgeOutcome.FallbackError, label: 'Fell back: failed' },
+  { value: JudgeOutcome.FallbackOff, label: 'Fell Back: Off' },
+  { value: JudgeOutcome.FallbackNoKey, label: 'Fell Back: No Key' },
+  { value: JudgeOutcome.FallbackTimeout, label: 'Fell Back: Timed Out' },
+  { value: JudgeOutcome.FallbackError, label: 'Fell Back: Failed' },
   { value: JudgeOutcome.Stopped, label: 'Stopped' },
 ];
 
@@ -139,7 +139,7 @@ export function RecentDecisions({
         call.taskId === null ? null : (
           <Text size="xs" component="span">
             <Link to="/board" search={{ task: call.taskId }}>
-              Open on the board
+              Open on the Board
             </Link>
           </Text>
         ),
@@ -150,7 +150,7 @@ export function RecentDecisions({
   return (
     <Stack gap="xs">
       <Text component="h5" fw={600} size="sm" m={0}>
-        Recent decisions
+        Recent Decisions
       </Text>
       <DataTable<JudgeCallDto>
         aria-label={

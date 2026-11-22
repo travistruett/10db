@@ -96,7 +96,7 @@ export function SignInSteps({
         aria-expanded={terminal}
         onClick={toggle}
       >
-        Sign in from Terminal instead
+        Sign In from Terminal Instead
       </Button>
       <Collapse expanded={terminal}>
         {terminal ? <TerminalSteps account={account} /> : null}

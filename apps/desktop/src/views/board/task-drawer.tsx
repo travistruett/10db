@@ -324,7 +324,7 @@ export function TaskDrawer({
                 setTab('edit');
               }}
             >
-              Add a headline
+              Add a Headline
             </Anchor>
           )}
         </Stack>
@@ -390,7 +390,7 @@ export function TaskDrawer({
             <Stack gap="lg">
               {hasHeadline || task.acceptanceCriteria.length > 0 ? (
                 <Stack gap={4}>
-                  <SectionLabel>What it promises</SectionLabel>
+                  <SectionLabel>What It Promises</SectionLabel>
                   {/* Without a headline the title is the header above; saying it twice is noise. */}
                   {hasHeadline ? <Text size="sm">{task.title}</Text> : null}
                   {task.acceptanceCriteria.length > 0 ? (
@@ -405,7 +405,7 @@ export function TaskDrawer({
               <QuestionRoutesLine task={task} />
               {waitsOn.length > 0 ? (
                 <Stack gap={4} data-testid="waits-on">
-                  <SectionLabel>Waits on</SectionLabel>
+                  <SectionLabel>Waits On</SectionLabel>
                   {waitsOn.map((waitTitle, index) => (
                     <Text key={`${String(index)}:${waitTitle}`} size="sm">
                       {waitTitle}
@@ -427,11 +427,11 @@ export function TaskDrawer({
               <TaskPlan steps={workstream?.steps ?? []} label={<SectionLabel>Plan</SectionLabel>} />
               <TaskReport
                 steps={workstream?.steps ?? []}
-                label={<SectionLabel>Implementation report</SectionLabel>}
+                label={<SectionLabel>Implementation Report</SectionLabel>}
               />
               {latestRound ? (
                 <Group gap="xs" data-testid="latest-review">
-                  <SectionLabel>Latest review</SectionLabel>
+                  <SectionLabel>Latest Review</SectionLabel>
                   <Text size="sm" c={roundVerdict(workstream?.steps ?? [], latestRound).color}>
                     {`${roundVerdict(workstream?.steps ?? [], latestRound).label} by ${roundReviewer(latestRound)}`}
                   </Text>
@@ -511,7 +511,7 @@ export function TaskDrawer({
                 }}
               />
               <Textarea
-                label="Acceptance criteria"
+                label="Acceptance Criteria"
                 description="One per line. A reviewer agent checks each one and asks for a test that proves it."
                 autosize
                 minRows={2}
@@ -569,7 +569,7 @@ export function TaskDrawer({
               ) : (
                 <Stack gap={2}>
                   <Text size="sm" fw={500}>
-                    Where it lands
+                    Where It Lands
                   </Text>
                   <Text size="sm">{landingLine(task, batch, pullRequestBase)}</Text>
                 </Stack>
@@ -636,7 +636,7 @@ export function TaskDrawer({
         onClose={() => {
           setConfirmingDiscard(false);
         }}
-        title="Discard your changes to this task?"
+        title="Discard Your Changes to This Task?"
         centered
         size="sm"
       >
@@ -897,7 +897,7 @@ function StatusLine({
                 startOver.mutate(taskId);
               }}
             >
-              Start over
+              Start Over
             </Button>
           ) : null}
           {onCancelRun && workstream && canCancelRun(task, workstream) ? (
@@ -923,7 +923,7 @@ function StatusLine({
                 closeTask.mutate(taskId, { onSuccess: onClosed });
               }}
             >
-              Close task
+              Close Task
             </Button>
           ) : null}
         </Group>
@@ -948,7 +948,7 @@ function StatusLine({
       ) : null}
       {retryable ? (
         <Textarea
-          label="Note for the next session"
+          label="Note for the Next Session"
           placeholder="Optional"
           description="The session the retry starts gets this note, and the review’s findings too when a review sent the work back."
           size="xs"
@@ -1024,7 +1024,7 @@ function ClosedPullRequest({
               onClosed();
             }}
           >
-            Start again
+            Start Again
           </Button>
         ) : (
           <Button
@@ -1036,7 +1036,7 @@ function ClosedPullRequest({
               reopen.mutate(taskId, { onSuccess: onClosed });
             }}
           >
-            Reopen task
+            Reopen Task
           </Button>
         )}
         <Button
@@ -1048,7 +1048,7 @@ function ClosedPullRequest({
             closeTask.mutate(taskId, { onSuccess: onClosed });
           }}
         >
-          Close task
+          Close Task
         </Button>
       </Group>
       <Text size="xs" c="dimmed">

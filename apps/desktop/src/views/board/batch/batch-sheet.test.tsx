@@ -45,7 +45,7 @@ describe('BatchSheet', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'More board actions' }));
     // The item is disabled until the tasks load, so wait for the count before clicking it.
     fireEvent.click(await screen.findByRole('menuitem', { name: /\d+ ready/, hidden: true }));
-    const sheet = await screen.findByRole('dialog', { name: 'Start a batch' });
+    const sheet = await screen.findByRole('dialog', { name: 'Start a Batch' });
 
     expect(await within(sheet).findByRole('checkbox', { name: 'One' })).toHaveProperty(
       'checked',
@@ -55,7 +55,7 @@ describe('BatchSheet', () => {
     expect(within(sheet).getByText('Area src is shared with One, picked before it')).toBeTruthy();
     expect(within(sheet).getByText('make gate')).toBeTruthy();
     expect(within(sheet).getByText(/The PM review isn’t built yet/)).toBeTruthy();
-    expect(within(sheet).queryByLabelText('Batch title')).toBeNull();
+    expect(within(sheet).queryByLabelText('Batch Title')).toBeNull();
     // No ticked task names a page area, so none can go to the Workbench.
     expect(within(sheet).queryByRole('button', { name: 'Work on These' })).toBeNull();
     expect(sizes[0]).toBe(2);
@@ -66,7 +66,7 @@ describe('BatchSheet', () => {
       expect(sent).toEqual([`/tasks/${one.id}/start`, `/tasks/${two.id}/start`]);
     });
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: 'Start a batch' })).toBeNull();
+      expect(screen.queryByRole('dialog', { name: 'Start a Batch' })).toBeNull();
     });
   });
 });

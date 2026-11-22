@@ -32,8 +32,8 @@ export const RemoveWhy = { NoLongerApplies: 'no-longer-applies', Mistake: 'mista
 export type RemoveWhy = (typeof RemoveWhy)[keyof typeof RemoveWhy];
 
 const REMOVE_WHY_LABELS: Readonly<Record<RemoveWhy, string>> = {
-  [RemoveWhy.NoLongerApplies]: 'It no longer applies',
-  [RemoveWhy.Mistake]: 'It was recorded by mistake',
+  [RemoveWhy.NoLongerApplies]: 'It No Longer Applies',
+  [RemoveWhy.Mistake]: 'It Was Recorded by Mistake',
 };
 
 const WHYS: readonly string[] = Object.values(RemoveWhy);
@@ -142,7 +142,7 @@ function RemoveReason({
       choice={
         canRetire ? (
           <Radio.Group
-            label="Why remove it?"
+            label="Why Remove It?"
             value={chosen ?? ''}
             onChange={(next) => {
               if (isWhy(next)) setChosen(next);

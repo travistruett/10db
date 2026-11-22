@@ -138,7 +138,7 @@ export function ModelMenu({
               {more.length === 0 ? null : (
                 <Menu.Sub openDelay={80} closeDelay={150}>
                   <Menu.Sub.Target>
-                    <Menu.Sub.Item>More models</Menu.Sub.Item>
+                    <Menu.Sub.Item>More Models</Menu.Sub.Item>
                   </Menu.Sub.Target>
                   <Menu.Sub.Dropdown>
                     <Menu.Search

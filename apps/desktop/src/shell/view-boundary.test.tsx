@@ -27,7 +27,7 @@ describe('ViewBoundary', () => {
     expect(marked?.getAttribute('data-view-crash')).toBe('Factory');
     expect(marked?.getAttribute('data-view-crash-message')).toBe('kaboom');
     shouldCrash.mockReturnValue(false);
-    fireEvent.click(screen.getByRole('button', { name: 'Reload view' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reload View' }));
     expect(screen.getByText('Back to normal')).toBeTruthy();
     quiet.mockRestore();
   });
