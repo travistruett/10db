@@ -172,7 +172,7 @@ export function createJudgeCredentialReader(deps: {
 export function createJudgeServices(deps: {
   readonly state: StateStore;
   readonly keychain: Keychain;
-  readonly judge: Pick<JudgeService, 'test'>;
+  readonly judge: Pick<JudgeService, 'test' | 'lastFallback'>;
   /** OpenRouter's decision models, for the picker. */
   readonly models: Pick<DecisionModelList, 'list'>;
   /** Started with `TENDB_JUDGE=off`: no Keychain item is read, even to say whether it is set. */
@@ -205,6 +205,7 @@ export function createJudgeServices(deps: {
         label: row.label,
         secretSet: secret.state === 'set',
         secretState: secret.state,
+        fallback: deps.judge.lastFallback(row.id),
       },
       off: deps.off,
     };
@@ -279,13 +280,9 @@ export function createJudgeServices(deps: {
       if (!powersDecisions(account.kind))
         throw new InvalidError(`Account "${account.label}" can't answer decisions`);
       if (deps.off) throw new ConflictError('This daemon was started with TENDB_JUDGE=off');
-      // An OpenRouter account is tried on the review decision's model; the others on their own default, since
-      // another account's model id means nothing to them.
-      const model =
-        account.kind === AccountKind.OpenRouter
-          ? undefined
-          : (defaultDecisionModel(deps.state.db, account) ?? undefined);
-      if (account.kind !== AccountKind.OpenRouter && model === undefined)
+      // Each account is tried on its own default model: another account's model id means nothing to it.
+      const model = defaultDecisionModel(deps.state.db, account);
+      if (model === null)
         throw new InvalidError(
           `"${account.label}" has no model list yet; check the account in Settings › Accounts first`,
         );

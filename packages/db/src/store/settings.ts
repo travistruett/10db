@@ -31,3 +31,6 @@ export function setAppSetting(ctx: WriteContext, key: string, value: Json): void
 export function deleteAppSetting(ctx: WriteContext, key: string): void {
   ctx.tx.delete(schema.appSettings).where(eq(schema.appSettings.key, key)).run();
 }
+
+/** The app setting that holds the Decisions config. */
+export const JUDGE_SETTING_KEY = 'judge';

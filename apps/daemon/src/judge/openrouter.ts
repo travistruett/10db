@@ -129,7 +129,7 @@ async function post(
   if (!response.ok) {
     const message = ErrorBody.safeParse(value);
     const why = message.success
-      ? `: ${message.data.error.message.slice(0, ERROR_DETAIL_CHARS)}`
+      ? `: ${message.data.error.message.split(q.key).join('[key]').slice(0, ERROR_DETAIL_CHARS)}`
       : '';
     throw new OpenRouterError(`OpenRouter answered HTTP ${String(response.status)}${why}`);
   }

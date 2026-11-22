@@ -18,9 +18,10 @@ import { formatDecisionUsd } from './decision-numbers';
 function priceText(
   model: Pick<DecisionModelDto, 'inputUsdPerMillion' | 'outputUsdPerMillion'>,
 ): string {
+  if (model.inputUsdPerMillion === null) return 'Price unknown';
   if (model.inputUsdPerMillion === 0 && model.outputUsdPerMillion === 0) return 'Free';
   const input = `${formatDecisionUsd(model.inputUsdPerMillion)} per million input tokens`;
-  return model.outputUsdPerMillion === 0
+  return model.outputUsdPerMillion === 0 || model.outputUsdPerMillion === null
     ? input
     : `${input} · ${formatDecisionUsd(model.outputUsdPerMillion)} per million output tokens`;
 }

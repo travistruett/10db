@@ -12,11 +12,11 @@ import {
   type TaskId,
   type WorkstreamId,
 } from '@10db/contracts';
-import { getJudgeConfig, insertJudgeCall } from '@10db/db';
+import { getJudgeConfig, insertJudgeCall, listAccountModels } from '@10db/db';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
 import type { Logger } from '../log';
-import { askModel } from './ask';
+import { askModel, type ModelQuestion } from './ask';
 import type { BedrockClientFactory } from './bedrock';
 import { ModelApi, modelApi, optionsText, type ModelAnswer } from './openrouter';
 import { NO_DECISION_CREDENTIAL, secretsOf, type JudgeCredential } from './credential';
@@ -83,6 +83,11 @@ export interface JudgeService extends Judge {
    * model when none is given) answers a decision 10db can use. Logs nothing.
    */
   test(account: AccountId, model?: string): Promise<JudgeTestResultDto>;
+  /**
+   * Why the account's latest call fell back to rules (a rejected key, an expired profile, a timeout, no credential),
+   * or null when its latest call answered or none ran since the daemon started.
+   */
+  lastFallback(account: AccountId): string | null;
 }
 
 export interface JudgeDeps {
@@ -139,6 +144,18 @@ export function createJudge(deps: JudgeDeps): JudgeService {
     );
   }
 
+  /** The latest outcome of a call on each account: the reason it fell back, or null when it answered. */
+  const lastFallbacks = new Map<AccountId, string | null>();
+
+  /** What the account lists as the model's price per million tokens; undefined when it lists none. */
+  function listedPrice(accountId: AccountId | null, model: string): ModelQuestion['price'] {
+    if (accountId === null) return undefined;
+    const row = listAccountModels(deps.state.db, accountId).find((m) => m.launchId === model);
+    return row?.inputPrice == null || row.outputPrice === null
+      ? undefined
+      : { inputUsdPerMillion: row.inputPrice, outputUsdPerMillion: row.outputPrice };
+  }
+
   /** One call to `model`, bounded by `timeoutMs` on the injected clock and by the caller's signal. */
   async function attempt(
     model: string,
@@ -172,21 +189,28 @@ export function createJudge(deps: JudgeDeps): JudgeService {
           detail: NO_DECISION_CREDENTIAL,
           latencyMs: null,
         };
-      const answer = await askModel({
-        model,
-        api:
-          credential.kind === AccountKind.OpenRouter
-            ? modelApi(model, deps.decisionModelIds)
-            : ModelApi.Chat,
-        state: q.state,
-        question: q.question,
-        options: q.options,
-        ...(q.criteria === undefined ? {} : { criteria: q.criteria }),
-        credential,
-        ...(deps.bedrockClient === undefined ? {} : { bedrockClient: deps.bedrockClient }),
-        fetch: deps.fetch,
-        signal: controller.signal,
-      });
+      const price =
+        credential.kind === AccountKind.OpenRouter ? undefined : listedPrice(accountId, model);
+      const answer = await untilAborted(
+        askModel({
+          model,
+          api:
+            credential.kind === AccountKind.OpenRouter
+              ? modelApi(model, deps.decisionModelIds)
+              : ModelApi.Chat,
+          state: q.state,
+          question: q.question,
+          options: q.options,
+          ...(q.criteria === undefined ? {} : { criteria: q.criteria }),
+          ...(price === undefined ? {} : { price }),
+          credential,
+          ...(deps.bedrockClient === undefined ? {} : { bedrockClient: deps.bedrockClient }),
+          fetch: deps.fetch,
+          signal: controller.signal,
+        }),
+        // A credential lookup the SDK makes before it reads the signal (an SSO profile) is bounded too.
+        controller.signal,
+      );
       return { kind: 'answered', answer, latencyMs: elapsed() };
     } catch (error) {
       if (timeout.fired)
@@ -275,6 +299,9 @@ export function createJudge(deps: JudgeDeps): JudgeService {
         req,
         deps.timeoutMs ?? JUDGE_TIMEOUT_MS,
       );
+      // A decision's own calls say whether the account is answering; a test of another model does not.
+      if (config.accountId !== null && !(result.kind === 'fallback' && result.reason === 'stopped'))
+        lastFallbacks.set(config.accountId, result.kind === 'fallback' ? result.detail : null);
       if (result.kind === 'fallback')
         return fallback(result.reason, result.detail, result.latencyMs);
       const { answer } = result;
@@ -351,5 +378,11 @@ export function createJudge(deps: JudgeDeps): JudgeService {
     };
   }
 
-  return { off: deps.off, choose, ready, test };
+  return {
+    off: deps.off,
+    choose,
+    ready,
+    test,
+    lastFallback: (account) => lastFallbacks.get(account) ?? null,
+  };
 }

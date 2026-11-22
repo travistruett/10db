@@ -46,10 +46,21 @@ function PaidByState({
 }) {
   if (account.secretState === 'set')
     return (
-      <Group gap="sm">
-        <ConnectionStatus tone={off ? ConnectionTone.Off : ConnectionTone.Works} label="Key set" />
-        <AccountLink account={account}>View account</AccountLink>
-      </Group>
+      <Stack gap={2}>
+        <Group gap="sm">
+          <ConnectionStatus
+            tone={off ? ConnectionTone.Off : ConnectionTone.Works}
+            label="Key set"
+          />
+          <AccountLink account={account}>View account</AccountLink>
+        </Group>
+        {off || !account.fallback ? null : (
+          <ConnectionStatus
+            tone={ConnectionTone.NeedsYou}
+            label={`Decisions are falling back to rules: ${account.fallback}`}
+          />
+        )}
+      </Stack>
     );
   const problem =
     account.secretState === 'changed'
