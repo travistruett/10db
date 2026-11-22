@@ -1,4 +1,5 @@
-import type { ShapeProposalDto, ShapeViewDto } from '@10db/contracts';
+import type { ShapeProposalDto, ShapeProposalId, ShapeViewDto } from '@10db/contracts';
+import type { OpenRow } from './row-line';
 import {
   Alert,
   Anchor,
@@ -61,12 +62,16 @@ export interface ProposedPaneProps {
    */
   readonly jumpRequest?: { readonly section: SectionKey; readonly nonce: number } | null;
   readonly onJumped?: () => void;
+  /** Whether the head names the Plan; the Plan page names it in its own title row. */
+  readonly titled?: boolean;
 }
 
 /** The panel's text starts this far from its edges, as the conversation's does from the divider. */
-const PANEL_INSET_PX = 24;
+const PANEL_INSET_PX = 40;
 /** A row's own inset, inside which its hover tone is drawn. */
 const ROW_INSET_PX = 12;
+/** On the Plan page, where text lines up with the tabs' labels and the chevrons hang inside. */
+const PAGE_INSET_PX = 24;
 
 /** The sidebar: a header, a pinned summary line and the list of proposals, each editable in place. */
 export function ProposedPane({
@@ -79,13 +84,18 @@ export function ProposedPane({
   onAskForChanges,
   jumpRequest = null,
   onJumped,
+  titled = true,
 }: ProposedPaneProps) {
+  // On the Plan page the page's padding does most of the inset; beside the conversation the panel keeps its own.
+  const inset = titled ? PANEL_INSET_PX : PAGE_INSET_PX;
   const now = useNow();
   const listRef = useRef<HTMLDivElement>(null);
   const [converting, setConverting] = useState(false);
   const [changesOnly, setChangesOnly] = useState(false);
   // The sections the builder folded: a goal's id, a kind's section, or the run preview.
   const [folded, setFolded] = useState<ReadonlySet<string>>(FOLDED_AT_FIRST);
+  // The panel's one open row; Accept's Read Them opens the first row with notes.
+  const [openRow, setOpenRow] = useState<OpenRow | null>(null);
   const [goalToRemove, setGoalToRemove] = useState<RemoveDraftGoalTarget | null>(null);
   const [decisionToWithdraw, setDecisionToWithdraw] = useState<WithdrawTarget | null>(null);
   const [principleToWithdraw, setPrincipleToWithdraw] = useState<PrincipleWithdrawTarget | null>(
@@ -199,6 +209,38 @@ export function ProposedPane({
     return [];
   };
 
+  const summary = (
+    <SummaryLine
+      groups={groupProposals(view?.proposals ?? [])}
+      onJump={jump}
+      lead={
+        view === undefined || view.shape.round === 0 ? null : `Round ${String(view.shape.round)}`
+      }
+      tail={
+        view === undefined || view.shape.round === 0
+          ? null
+          : `updated ${shortAgo(view.shape.updatedAt, now)}`
+      }
+      link={
+        // Every row changed filters nothing, so the link shows only when some rows stayed put.
+        changes.length === 0 || changes.length === (view?.proposals.length ?? 0) ? null : (
+          <Anchor
+            component="button"
+            type="button"
+            fz={12}
+            c="dimmed"
+            underline={filtering ? 'always' : 'hover'}
+            aria-pressed={filtering}
+            onClick={() => {
+              setChangesOnly((on) => !on);
+            }}
+          >
+            {`${String(changes.length)} changed this round`}
+          </Anchor>
+        )
+      }
+    />
+  );
   return (
     <Box
       component="section"
@@ -206,19 +248,32 @@ export function ProposedPane({
       h="100%"
       style={{ display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 }}
     >
-      <Stack gap={6} px={PANEL_INSET_PX} pt="md" pb={20} style={{ flex: 'none' }}>
+      {/* The head is its own band, ruled off from the list edge to edge, so the summary belongs to it. */}
+      <Stack
+        gap={4}
+        px={inset}
+        pt={20}
+        pb={16}
+        style={{ flex: 'none', borderBottom: '1px solid var(--mantine-color-default-border)' }}
+      >
         <Group justify="space-between" wrap="nowrap">
-          <Text fz={16} fw={600}>
-            Plan
-          </Text>
-          <Group gap="xs" wrap="nowrap">
+          {titled ? (
+            <Text fz={18} fw={600} c="bright">
+              Plan
+            </Text>
+          ) : summaryHere ? (
+            summary
+          ) : (
+            <span />
+          )}
+          <Group gap={8} wrap="nowrap">
             <Menu position="bottom-end" withinPortal>
               <Menu.Target>
                 <Tooltip label="Have reviewers read the plan before you accept it">
                   <Button
-                    variant="subtle"
-                    color="gray"
+                    variant="default"
                     size="xs"
+                    h={28}
                     rightSection={<IconChevronDown size={14} stroke={1.5} />}
                     loading={review.isPending && review.variables !== 'design_review'}
                     disabled={view === undefined || rows.length === 0 || takingPictures}
@@ -233,8 +288,8 @@ export function ProposedPane({
                     review.mutate('review');
                   }}
                 >
-                  <MenuHint hint="Scope and engineering reviewers read each goal and loose task">
-                    Plan review
+                  <MenuHint hint="Catch scope gaps and engineering risks before anything is built">
+                    Plan Review
                   </MenuHint>
                 </Menu.Item>
                 <Menu.Item
@@ -242,7 +297,7 @@ export function ProposedPane({
                     review.mutate('rehearse');
                   }}
                 >
-                  <MenuHint hint="Reads each task as the agent who will build it, for what it would have to ask">
+                  <MenuHint hint="Answer now what a builder would stop to ask, so tasks run straight through">
                     Check for Questions
                   </MenuHint>
                 </Menu.Item>
@@ -251,8 +306,8 @@ export function ProposedPane({
                     review.mutate('design_review');
                   }}
                 >
-                  <MenuHint hint="Compares each task's mock-up with the app as it is now and DESIGN.md">
-                    Design review
+                  <MenuHint hint="Catch mock-ups that drift from the app or DESIGN.md before they're built">
+                    Design Review
                   </MenuHint>
                 </Menu.Item>
               </Menu.Dropdown>
@@ -261,11 +316,12 @@ export function ProposedPane({
               label={
                 view === undefined || rows.length === 0
                   ? 'Nothing to accept'
-                  : 'Put the pending rows on the Board; you choose whether they start'
+                  : 'Put the plan on the Board'
               }
             >
               <Button
                 size="xs"
+                h={28}
                 disabled={view === undefined || rows.length === 0}
                 onClick={() => {
                   setConverting(true);
@@ -282,39 +338,7 @@ export function ProposedPane({
             {reviewLine}
           </Text>
         )}
-        {summaryHere ? (
-          <SummaryLine
-            groups={groupProposals(view?.proposals ?? [])}
-            onJump={jump}
-            lead={
-              view === undefined || view.shape.round === 0
-                ? null
-                : `Round ${String(view.shape.round)}`
-            }
-            tail={
-              view === undefined || view.shape.round === 0
-                ? null
-                : shortAgo(view.shape.updatedAt, now)
-            }
-            link={
-              changes.length === 0 ? null : (
-                <Anchor
-                  component="button"
-                  type="button"
-                  fz={12}
-                  c="dimmed"
-                  underline={filtering ? 'always' : 'hover'}
-                  aria-pressed={filtering}
-                  onClick={() => {
-                    setChangesOnly((on) => !on);
-                  }}
-                >
-                  {`${String(changes.length)} ${changes.length === 1 ? 'change' : 'changes'}`}
-                </Anchor>
-              )
-            }
-          />
-        ) : null}
+        {summaryHere && titled ? summary : null}
         {change.isError ? (
           <Alert color="red" title="Couldn't change the row">
             {change.error.message}
@@ -331,7 +355,7 @@ export function ProposedPane({
         viewportProps={{ tabIndex: 0, role: 'group', 'aria-label': 'Plan rows' }}
         viewportRef={listRef}
       >
-        <Box px={PANEL_INSET_PX - ROW_INSET_PX} pb="md">
+        <Box px={inset - ROW_INSET_PX} pt={20} pb="md">
           {error !== null ? (
             <Alert color="red" title="Couldn't load the proposals">
               {error}
@@ -363,6 +387,9 @@ export function ProposedPane({
                 actionsFor={actionsFor}
                 reviewOf={reviewOf}
                 handlers={handlers}
+                open={openRow}
+                onOpenChange={setOpenRow}
+                round={view.shape.round}
               />
             </AttachmentsContext>
           ) : (
@@ -378,6 +405,13 @@ export function ProposedPane({
             opened={converting}
             onClose={() => {
               setConverting(false);
+            }}
+            onReadNotes={(id) => {
+              setConverting(false);
+              setOpenRow({ id, editing: false });
+              requestAnimationFrame(() => {
+                document.getElementById(`shape-row-${id}`)?.scrollIntoView({ block: 'nearest' });
+              });
             }}
           />
           <RemoveDraftGoalModal
@@ -411,11 +445,13 @@ function ConvertPanel({
   rows,
   opened,
   onClose,
+  onReadNotes,
 }: {
   readonly view: ShapeViewDto;
   readonly rows: readonly ShapeProposalDto[];
   readonly opened: boolean;
   readonly onClose: () => void;
+  readonly onReadNotes: (id: ShapeProposalId) => void;
 }) {
   const convert = useConvertShape(view.shape.id);
   const [refusals, setRefusals] = useState<readonly string[]>([]);
@@ -428,6 +464,10 @@ function ConvertPanel({
     <ConvertModal
       opened={opened}
       onClose={close}
+      onReadNotes={(id) => {
+        close();
+        onReadNotes(id);
+      }}
       rows={rows}
       view={view}
       pending={convert.isPending}
@@ -450,9 +490,9 @@ function ConvertPanel({
 }
 
 const REVIEW_NAMES: Record<ReviewKind, string> = {
-  review: 'Plan review',
+  review: 'Plan Review',
   rehearse: 'Check for Questions',
-  design_review: 'Design review',
+  design_review: 'Design Review',
 };
 
 /** What a press that found nothing to read says. */

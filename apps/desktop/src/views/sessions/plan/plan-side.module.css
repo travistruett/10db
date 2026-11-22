@@ -1,8 +1,12 @@
-/* The conversation and the Plan panel beside it. */
+/* The conversation and the Plan panel beside it. The split takes the whole frame, out to its edges, so the
+   divider runs its full height; the conversation gives the frame's padding back, and the panel insets its own
+   content as far from the divider and the frame's edge as the conversation's text is from the frame's. */
 .split {
   flex: 1;
   min-width: 0;
   min-height: 0;
+  margin: calc(-1 * var(--shell-content-padding-block, 0px))
+    calc(-1 * var(--shell-content-padding-inline, 0px));
 }
 
 .conversation {
@@ -11,6 +15,7 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  padding: var(--shell-content-padding-block, 0px) var(--shell-content-padding-inline, 0px);
 }
 
 .side {
@@ -19,6 +24,7 @@
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+  padding-bottom: var(--shell-content-padding-block, 0px);
 }
 
 .aside {

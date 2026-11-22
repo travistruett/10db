@@ -72,7 +72,7 @@ export function RowAttachments({
           {a.attachment.kind === 'mockup' &&
           a.goalId === null &&
           !(row.kind === 'goal' && a.key === row.key) ? (
-            <Group gap={8}>
+            <Group gap={8} mt={8}>
               <ApproveButton shapeId={shapeId} attachment={a} title={title} />
               <Button
                 variant="default"
@@ -103,13 +103,15 @@ function ApproveButton({
   readonly title: string;
 }) {
   const approve = useApproveAttachment(shapeId);
-  const label = attachment.approved ? 'Unapprove' : 'Approve';
+  const label = attachment.approved ? 'Undo Approval' : 'Approve';
   return (
     <Button
-      variant="default"
+      variant={attachment.approved ? 'default' : 'light'}
       size="xs"
       loading={approve.isPending}
-      aria-label={`${label} mock-up: ${title}`}
+      aria-label={
+        attachment.approved ? `Undo approval of mock-up: ${title}` : `Approve mock-up: ${title}`
+      }
       onClick={() => {
         approve.mutate({ attachmentId: attachment.id, approved: !attachment.approved });
       }}

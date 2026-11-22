@@ -1,0 +1,43 @@
+/* A mock-up's thumbnail: scaled down, fading at its foot, with an expand mark, so it reads as a preview. */
+.thumb {
+  position: relative;
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  border-radius: var(--mantine-radius-sm);
+  border: 1px solid var(--mantine-color-default-border);
+  cursor: zoom-in;
+}
+
+.fade {
+  position: absolute;
+  inset: auto 0 0;
+  height: 48px;
+  background: linear-gradient(to bottom, transparent, var(--tendb-color-panel));
+  pointer-events: none;
+}
+
+.expand {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--mantine-radius-sm);
+  background: color-mix(in srgb, var(--mantine-color-body) 85%, transparent);
+  color: var(--mantine-color-text);
+  pointer-events: none;
+  transition: opacity 120ms ease;
+  opacity: 0.85;
+}
+
+.thumb:hover .expand,
+.thumb:focus-visible .expand {
+  opacity: 1;
+}
+
+.thumb:hover {
+  border-color: var(--mantine-color-default-hover);
+}

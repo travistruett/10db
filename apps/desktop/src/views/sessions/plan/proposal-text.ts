@@ -7,8 +7,10 @@ import { isConverted } from './proposed-groups';
 /** The row's title: what the builder reads it by. */
 export function proposalTitle(row: ShapeProposalDto): string {
   switch (row.kind) {
-    case 'goal':
     case 'task':
+      // As the Board does: a task is named by its headline, a few plain words, when it has one.
+      return row.body.headline === '' ? row.body.title : row.body.headline;
+    case 'goal':
     case 'landing':
       return row.body.title;
     case 'decision':

@@ -1,10 +1,11 @@
 import { SectionSlug, ShapeAttachmentId, type PlanRecordDto } from '@10db/contracts';
 import { z } from 'zod';
 
-// The Record view's tabs and its address: which tab, document, revision and section are open. Each
+// The Plan page's tabs and its address: which tab, document, revision and section are open. Each
 // part of the address is kept only when it parses, so a hand-edited link opens what it can.
 
 export const RecordTab = {
+  Plan: 'plan',
   Documents: 'documents',
   Decisions: 'decisions',
   Evidence: 'evidence',
@@ -19,6 +20,8 @@ export const RECORD_TABS: readonly {
   readonly label: string;
   readonly count: (record: PlanRecordDto) => number;
 }[] = [
+  // The Plan itself, its rows as the panel shows them; the record's tabs follow.
+  { tab: RecordTab.Plan, label: 'Plan', count: () => 0 },
   { tab: RecordTab.Documents, label: 'Documents', count: (r) => r.documents.length },
   { tab: RecordTab.Decisions, label: 'Decisions', count: (r) => r.counts.decisions },
   { tab: RecordTab.Evidence, label: 'Evidence', count: (r) => r.counts.evidence },

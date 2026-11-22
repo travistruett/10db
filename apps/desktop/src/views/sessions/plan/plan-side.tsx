@@ -14,11 +14,6 @@ const PANEL_MAX_PX = 960;
 const PANEL_PX = 440;
 /** The divider between the two. */
 const HAIRLINE = 1;
-/**
- * What the conversation's pane adds to its list's own 16 px inset, so its text is 24 px from the divider,
- * as the panel's is, and its scrollbar sits in that gutter rather than on the line.
- */
-const CONVERSATION_GUTTER_PX = 8;
 /** The panel as a drawer over a tab too narrow to hold both. */
 const DRAWER_PX = 560;
 
@@ -131,7 +126,6 @@ export function PlanSide({
           defaultSize={100}
           min={px(CONVERSATION_MIN_PX)}
           className={classes['conversation']}
-          style={sideBy ? { paddingRight: CONVERSATION_GUTTER_PX } : undefined}
         >
           {children}
         </Splitter.Pane>

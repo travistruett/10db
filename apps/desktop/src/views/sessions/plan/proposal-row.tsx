@@ -28,7 +28,8 @@ import { goalLiveLine } from './live-state';
 import { RowDetails } from './row-details';
 import { RowEditor } from './row-editor';
 import { useLiveWords } from './use-live-words';
-import { goalHours } from './size-line';
+import { hoursText } from './preview-text';
+import { goalHours, sizeLine } from './size-line';
 import classes from './plan-rows.module.css';
 import { editableFields } from './row-editing';
 
@@ -66,6 +67,8 @@ export interface ProposalRowProps {
   /** The panel's one open row; this row is open when it is its. */
   readonly open: OpenRow | null;
   readonly onOpenChange: (next: OpenRow | null) => void;
+  /** The Plan's first round, where every row is new, so no row is marked New. */
+  readonly firstRound?: boolean;
   /** Rows below the line, inside the same list item: a goal's tasks. */
   readonly children?: ReactNode;
 }
@@ -103,6 +106,7 @@ export function ProposalRow({
   handlers,
   open,
   onOpenChange,
+  firstRound = false,
   children,
 }: ProposalRowProps) {
   const opened = open?.id === row.id;
@@ -181,7 +185,7 @@ export function ProposalRow({
       : []),
     ...(mutable && !earlier ? [{ label: pinned ? 'Unpin' : 'Pin', onSelect: togglePin }] : []),
     {
-      label: 'Why?',
+      label: 'Where It Came From',
       onSelect: () => {
         handlers.onWhy(row);
       },
@@ -208,7 +212,9 @@ export function ProposalRow({
     row.kind === 'goal'
       ? (lane ?? undefined)
       : row.kind === 'task'
-        ? (sizes[0]?.size ?? row.body.size)
+        ? sizes[0] === undefined
+          ? row.body.size
+          : `~${hoursText(sizes[0].hours)}`
         : rowChipMeta(row);
   const ceremony = review?.ceremony;
   const spec = ceremony?.ceremony === 'spec' && !ceremony.skippedByYou;
@@ -249,7 +255,6 @@ export function ProposalRow({
 
   const line = (
     <RowLine
-      dot={dot}
       title={title}
       head={head}
       dim={converted !== null}
@@ -257,7 +262,10 @@ export function ProposalRow({
       chips={
         <RowChips
           facts={{
-            mark: mark === null || row.mark === null ? null : { text: mark, kind: row.mark },
+            mark:
+              mark === null || row.mark === null || firstRound
+                ? null
+                : { text: mark, kind: row.mark, dot: dot?.color ?? null },
             kind: kindChip(row),
             spec,
             notes: findings.length + ownQuestions.length,
@@ -301,6 +309,9 @@ export function ProposalRow({
         </Group>
       }
       trailing={trailing}
+      trailingLabel={
+        row.kind === 'task' && sizes[0] !== undefined ? sizeLine(sizes[0]).text : undefined
+      }
       section={section}
       opened={opened}
       regionId={regionId}
@@ -313,7 +324,7 @@ export function ProposalRow({
     />
   );
   const region = opened ? (
-    <Box id={regionId} role="region" aria-label={`${title} details`} px={12} pt={4} pb={8}>
+    <Box id={regionId} role="region" aria-label={`${title} details`} px={12} pt={8}>
       {editing ? (
         <RowEditor
           row={row}
@@ -352,7 +363,7 @@ export function ProposalRow({
                 handlers.onWhy(row);
               }}
             >
-              Why?
+              Where it came from
             </MetaLink>,
             ...(earlier
               ? [

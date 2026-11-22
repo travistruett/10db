@@ -5,7 +5,7 @@ import type {
   ShapeTaskSizeDto,
 } from '@10db/contracts';
 import { Box } from '@mantine/core';
-import { useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { GoalTaskRow } from './goal-task-row';
 import { PlanSection } from './plan-section';
 import classes from './plan-rows.module.css';
@@ -26,7 +26,12 @@ interface Block {
 /** The sections after the goals, each holding one kind of row. */
 function blocksOf(groups: ProposedGroups): Block[] {
   return [
-    { section: SectionKey.Tasks, name: 'Loose tasks', rows: groups.looseTasks },
+    {
+      section: SectionKey.Tasks,
+      // Tasks under no goal: beside goals they are the other tasks, and otherwise simply the tasks.
+      name: groups.goals.length === 0 ? 'Tasks' : 'Other tasks',
+      rows: groups.looseTasks,
+    },
     { section: SectionKey.Changes, name: 'Changes', rows: groups.changes },
     { section: SectionKey.Landings, name: 'Landings', rows: groups.landings },
     { section: SectionKey.Records, name: 'Decisions', rows: groups.records },
@@ -57,6 +62,11 @@ export interface ProposedListProps {
   readonly reviewOf?: (row: ShapeProposalDto) => RowReview | undefined;
   /** Edit, pin, restore, drop and Why? on a row. */
   readonly handlers: RowHandlers;
+  /** The Plan's round: in the first, every row is new, so none is marked. */
+  readonly round: number;
+  /** The panel's one open row: opening another closes it. */
+  readonly open: OpenRow | null;
+  readonly onOpenChange: (next: OpenRow | null) => void;
 }
 
 /**
@@ -74,10 +84,11 @@ export function ProposedList({
   actionsFor,
   reviewOf,
   handlers,
+  open,
+  onOpenChange: setOpen,
+  round,
 }: ProposedListProps) {
   const sizesOf = (row: ShapeProposalDto) => sizes.filter((s) => s.proposalId === row.id);
-  // One row of the panel is open at a time: opening another closes it.
-  const [open, setOpen] = useState<OpenRow | null>(null);
   const blocks = blocksOf(groups);
   // The Tab key reaches the first row on screen: a goal's head, or the first open section's first row.
   const firstId = (groups.goals[0] ?? blocks.find((b) => !folded.has(b.section))?.rows[0])?.id;
@@ -109,6 +120,7 @@ export function ProposedList({
   };
   const rowOf = (row: ShapeProposalDto, own: SectionKey, children?: ReactNode) => (
     <ProposalRow
+      firstRound={round <= 1}
       projectId={projectId}
       key={row.id}
       row={row}
@@ -169,6 +181,7 @@ export function ProposedList({
           <Box component="ul" m={0} p={0} style={{ listStyle: 'none' }}>
             {groups.earlier.map((row) => (
               <ProposalRow
+                firstRound={round <= 1}
                 projectId={projectId}
                 key={row.id}
                 row={row}

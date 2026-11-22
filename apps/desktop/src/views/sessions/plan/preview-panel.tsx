@@ -3,9 +3,10 @@ import { Box, Group, Stack, Text } from '@mantine/core';
 import { PlanSection } from './plan-section';
 import { landingsLine, foldedSummary, hoursText } from './preview-text';
 
-// Shape spec §10.2: how the project's lanes would run the draft, a folding section after the rows. Work already
-// running or queued holds its lane first; a lane with no task is not drawn; the critical path is one
-// dim line; a clash is the daemon's one line; the end is marked "estimate". A preview is read, never written.
+// Shape spec §10.2: how the project's lanes would run the draft, a folding section after the rows. A plan of
+// one task has nothing to schedule and shows none. Work already running or queued holds its lane first; a
+// lane with no task is not drawn; the critical path is one dim line when there are lanes to choose between;
+// a clash is the daemon's one line; the end reads "About", as an estimate. A preview is read, never written.
 
 /** A lane's bar: each task a segment placed by its hours, the critical ones in the accent. */
 function LaneBar({
@@ -19,7 +20,7 @@ function LaneBar({
     <Box
       aria-hidden="true"
       h={6}
-      my={4}
+      my={8}
       style={{
         position: 'relative',
         borderRadius: 3,
@@ -59,7 +60,7 @@ export function PreviewPanel({
   readonly folded: boolean;
   readonly onFold: () => void;
 }) {
-  if (preview.tasks === 0) return null;
+  if (preview.tasks < 2) return null;
   const titles = new Map(preview.lanes.flatMap((l) => l.items.map((i) => [i.key, i.title])));
   const path = preview.criticalPath.map((key) => titles.get(key) ?? key);
   // The simulation returns one entry per lane the project allows, so a draft that fits in fewer leaves
@@ -73,18 +74,18 @@ export function PreviewPanel({
   return (
     <PlanSection
       name="How it would run"
-      aside={foldedSummary(preview)}
+      {...(folded ? { aside: foldedSummary(preview) } : {})}
       folded={folded}
       onFold={onFold}
     >
-      <Stack component="section" aria-label="How it would run" gap={8} px={12} pt={2} pb={4}>
+      <Stack component="section" aria-label="How it would run" gap={16} px={12} pt={4} pb={4}>
         <Text size="xs" c="dimmed">
-          {`Ends in about ${hoursText(preview.endEstimateHours)} (estimate) · ${landingsLine(preview.landings)}`}
+          {`About ${hoursText(preview.endEstimateHours)} · ${landingsLine(preview.landings)}`}
         </Text>
         {lanes.map((lane, index) => (
           <Box key={lane.items[0]?.key ?? index}>
             {lanes.length === 1 ? null : (
-              <Text size="xs" c="dimmed">
+              <Text size="xs" fw={600} c="dimmed">
                 {`Lane ${String(index + 1)}`}
               </Text>
             )}
@@ -116,7 +117,7 @@ export function PreviewPanel({
             </Box>
           </Box>
         ))}
-        {path.length === 0 ? null : (
+        {path.length === 0 || lanes.length < 2 ? null : (
           <Text size="xs" c="dimmed">{`Critical path: ${path.join(' → ')}`}</Text>
         )}
         {preview.clashes.map((clash) => (

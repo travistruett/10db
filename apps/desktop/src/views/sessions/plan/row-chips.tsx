@@ -1,10 +1,15 @@
 import { Text, Tooltip } from '@mantine/core';
 import { IconMessage, IconPin } from '@tabler/icons-react';
+import classes from './plan-rows.module.css';
 
 /** What a row's chips say; each part is left out when it has nothing to say. */
 export interface RowChipFacts {
-  /** The round's mark in words ("New", "Changed", "Moved to Earlier"). */
-  readonly mark?: { readonly text: string; readonly kind: string } | null;
+  /** The round's mark in words ("New", "Changed", "Moved to Earlier"), after its dot's colour when it has one. */
+  readonly mark?: {
+    readonly text: string;
+    readonly kind: string;
+    readonly dot?: string | null;
+  } | null;
   /** What the row is when its card names something else: "Added", "Principle", "Removal". */
   readonly kind?: string | null;
   /** The spec the row's ceremony asks for. */
@@ -22,7 +27,14 @@ export function RowChips({ facts }: { readonly facts: RowChipFacts }) {
   return (
     <>
       {mark === null ? null : (
-        <Text span fz={12} c="dimmed" data-mark={mark.kind}>
+        <Text span fz={12} c="dimmed" data-mark={mark.kind} className={classes['mark']}>
+          {mark.dot === undefined || mark.dot === null ? null : (
+            <span
+              className={classes['markDot']}
+              style={{ background: `var(--mantine-color-${mark.dot}-filled)` }}
+              aria-hidden="true"
+            />
+          )}
           {mark.text}
         </Text>
       )}

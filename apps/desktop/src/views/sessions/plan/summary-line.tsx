@@ -14,8 +14,8 @@ export interface SummaryLineProps {
 }
 
 /**
- * The head's one dim line, always on screen: "Round 2 · 1 goal · 2 loose · 1 to record · just now ·
- * 4 changes". Each count jumps to its section. It is kept outside the scrolling list, so it stays pinned.
+ * The head's one dim line, always on screen: "Round 2 · 1 goal · 2 tasks · 1 to record · updated just
+ * now · 4 changed this round". Each count jumps to its section. It is kept outside the scrolling list, so it stays pinned.
  */
 export function SummaryLine({
   groups,

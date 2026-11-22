@@ -43,17 +43,23 @@ export function PlanSection({
         {...(section === undefined ? {} : { 'data-section': section })}
       >
         <IconChevronRight
-          size={12}
-          stroke={2}
+          size={14}
+          stroke={1.5}
           aria-hidden="true"
           className={classes['chevron']}
           data-open={folded ? undefined : true}
         />
-        <Text component="span" fz={13} fw={600} c="dimmed">
+        <Text component="span" fz={12} fw={600} c="dimmed">
           {name}
         </Text>
         {count === undefined ? null : (
-          <Text component="span" fz={12} c="dimmed">
+          <Text
+            component="span"
+            fz={12}
+            fw={500}
+            c="dimmed"
+            style={{ fontVariantNumeric: 'tabular-nums' }}
+          >
             {count}
           </Text>
         )}

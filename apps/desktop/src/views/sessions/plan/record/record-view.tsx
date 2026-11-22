@@ -1,6 +1,18 @@
 import type { PlanRecordDto, ShapeId } from '@10db/contracts';
-import { Alert, Badge, Button, Loader, Stack, Tabs, Text, VisuallyHidden } from '@mantine/core';
-import { IconMessages } from '@tabler/icons-react';
+import {
+  ActionIcon,
+  Alert,
+  Badge,
+  Box,
+  Group,
+  Loader,
+  Stack,
+  Tabs,
+  Text,
+  Tooltip,
+  VisuallyHidden,
+} from '@mantine/core';
+import { IconArrowLeft } from '@tabler/icons-react';
 import dayjs from 'dayjs';
 import type { ReactNode } from 'react';
 import { usePlanRecord } from '../../../../daemon/plan-record-queries';
@@ -11,13 +23,15 @@ import { DecisionsTab } from './decisions-tab';
 import { DocumentsTab } from './documents-tab';
 import { EvidenceTab } from './evidence-tab';
 import { ExportButton } from './export-button';
+import { PlanPanel } from '../plan-panel';
+import { draftKey, sessionDrafts } from '../../session-drafts';
 import { QuestionsTab } from './questions-tab';
 import { RECORD_TABS, RecordTab, type RecordSearch } from './record-tabs';
 import { ReviewsTab } from './reviews-tab';
 import { TasksTab } from './tasks-tab';
 
-// A Plan's record, beside its conversation: the documents an effort wrote, what it decided, the
-// evidence it read, its reviews, what it left open and the tasks made from it.
+// The Plan page: the Plan the session's panel shows, full width, then its record: the documents an effort
+// wrote, what it decided, the evidence it read, its reviews, what it left open and the tasks made from it.
 
 const ORIGIN_LABELS: Readonly<Record<NonNullable<PlanRecordDto['origin']>['kind'], string>> = {
   claude_code: 'Claude Code',
@@ -53,9 +67,12 @@ function panelOf(
     readonly record: PlanRecordDto;
     readonly search: RecordSearch;
     readonly onSearch: (next: RecordSearch) => void;
+    readonly plan: ReactNode;
   },
 ): ReactNode {
   switch (tab) {
+    case RecordTab.Plan:
+      return props.plan;
     case RecordTab.Documents:
       return <DocumentsTab {...props} />;
     case RecordTab.Decisions:
@@ -85,12 +102,14 @@ function RecordTabs({
   tab,
   search,
   onSearch,
+  plan,
 }: {
   readonly shapeId: ShapeId;
   readonly record: PlanRecordDto;
   readonly tab: RecordTab;
   readonly search: RecordSearch;
   readonly onSearch: (next: RecordSearch) => void;
+  readonly plan: ReactNode;
 }) {
   return (
     <Tabs
@@ -123,10 +142,11 @@ function RecordTabs({
             minHeight: 0,
             display: 'flex',
             flexDirection: 'column',
-            overflowY: t.tab === RecordTab.Documents ? 'hidden' : 'auto',
+            overflowY:
+              t.tab === RecordTab.Documents || t.tab === RecordTab.Plan ? 'hidden' : 'auto',
           }}
         >
-          {panelOf(t.tab, { shapeId, record, search, onSearch })}
+          {panelOf(t.tab, { shapeId, record, search, onSearch, plan })}
         </Tabs.Panel>
       ))}
     </Tabs>
@@ -145,40 +165,63 @@ export function RecordView({
   const record = usePlanRecord(shapeId);
   const chatId = useShapeView(shapeId).data?.chatId ?? null;
   const { open, notice } = useOpenSessionNotice();
-  const tab = search.tab ?? RecordTab.Documents;
+  const tab = search.tab ?? RecordTab.Plan;
+  const back = (): void => {
+    if (chatId !== null) open(chatId);
+  };
+  // The Plan's rows, as the panel shows them. Where it came from and Ask for Changes go back to the
+  // session, the second with its words in the session's draft.
+  const plan = (
+    <Box h="100%" style={{ minHeight: 0 }}>
+      <PlanPanel
+        shapeId={shapeId}
+        full
+        onWhy={back}
+        onAskForChanges={(text) => {
+          if (chatId === null) return;
+          const key = draftKey.chat(chatId);
+          const now = sessionDrafts.get(key);
+          sessionDrafts.set(key, { ...now, text: now.text === '' ? text : `${now.text}\n${text}` });
+          back();
+        }}
+      />
+    </Box>
+  );
+  const imported = record.data === undefined ? null : importedLine(record.data);
   return (
     <Stack
       component="section"
-      aria-label="Record"
+      aria-label="Plan page"
       gap="sm"
       p="md"
       // A flex item of the shell's main column, as Plan's split pane is, so its height is the window's.
       style={{ flex: '1 1 0px', minHeight: 420 }}
     >
+      {/* Where the builder is: a back button to the session the plan belongs to, then the page's name. */}
       <TitleRow
-        title="Record"
-        meta={record.data?.title}
-        actions={
-          <>
-            <Button
-              variant="default"
-              size="xs"
-              leftSection={<IconMessages size={14} stroke={1.5} />}
-              disabled={chatId === null}
-              onClick={() => {
-                if (chatId !== null) open(chatId);
-              }}
-            >
-              Session
-            </Button>
-            <ExportButton shapeId={shapeId} />
-          </>
+        title={
+          <Group gap={12} wrap="nowrap">
+            <Tooltip label={`Back to ${record.data?.title ?? 'the session'}`}>
+              <ActionIcon
+                variant="default"
+                size={28}
+                aria-label="Back to the session"
+                disabled={chatId === null}
+                onClick={back}
+              >
+                <IconArrowLeft size={16} stroke={1.5} />
+              </ActionIcon>
+            </Tooltip>
+            <span>Plan</span>
+          </Group>
         }
+        {...(record.data === undefined ? {} : { meta: record.data.title })}
+        actions={<ExportButton shapeId={shapeId} />}
       />
       {notice}
-      {record.data === undefined ? null : (
+      {imported === null ? null : (
         <Text size="xs" c="dimmed">
-          {importedLine(record.data)}
+          {imported}
         </Text>
       )}
       {record.isError ? (
@@ -194,6 +237,7 @@ export function RecordView({
           tab={tab}
           search={search}
           onSearch={onSearch}
+          plan={plan}
         />
       )}
     </Stack>

@@ -1,137 +1,20 @@
 import type { ShapeFindingDto, ShapeFindingId } from '@10db/contracts';
-import { ActionIcon, Box, Button, Group, Stack, Text, Tooltip } from '@mantine/core';
-import { IconHelpCircle, IconMessageExclamation, IconX } from '@tabler/icons-react';
+import {
+  ActionIcon,
+  Anchor,
+  Box,
+  Button,
+  Group,
+  Stack,
+  Text,
+  Tooltip,
+  UnstyledButton,
+} from '@mantine/core';
+import { useState } from 'react';
+import { IconX } from '@tabler/icons-react';
 import classes from './plan-rows.module.css';
+import { CodeSpans } from './record/code-spans';
 import { ceremonyLine, type RowReview } from './review-lines';
-
-export interface ReviewLinesProps {
-  readonly review: RowReview;
-  /** Say which tasks the rehearsal has not read (the Convert modal does; the sidebar stays quiet). */
-  readonly showRehearsal?: boolean;
-  /** Left padding, in pixels. */
-  readonly pl?: number;
-  /** Dismiss on a finding or question; absent, they are read-only. */
-  readonly onDismiss?: (id: ShapeFindingId) => void;
-  /** Skip a forced spec (pins `direct`), or take it back (unpins). Absent, the line has no button. */
-  readonly onCeremony?: (change: 'skip' | 'use') => void;
-}
-
-function FindingLine({
-  finding,
-  label,
-  onDismiss,
-}: {
-  readonly finding: ShapeFindingDto;
-  readonly label: string | null;
-  readonly onDismiss: ReviewLinesProps['onDismiss'];
-}) {
-  const isQuestion = finding.kind === 'question';
-  const Icon = isQuestion ? IconHelpCircle : IconMessageExclamation;
-  return (
-    <Group component="li" gap={6} wrap="nowrap" align="flex-start" style={{ listStyle: 'none' }}>
-      <Icon size={14} stroke={1.5} aria-hidden="true" style={{ flex: 'none', marginTop: 3 }} />
-      <Text size="xs" c="dimmed" style={{ flex: 1, minWidth: 0 }}>
-        {isQuestion
-          ? null
-          : `${finding.reviewer}${finding.severity === null ? '' : ` · ${finding.severity}`} · `}
-        {label === null ? null : <b>{label}: </b>}
-        {finding.text}
-      </Text>
-      {onDismiss === undefined ? null : (
-        <Button
-          variant="subtle"
-          size="compact-xs"
-          aria-label={`Dismiss ${isQuestion ? 'question' : 'finding'}: ${finding.text}`}
-          onClick={() => {
-            onDismiss(finding.id);
-          }}
-        >
-          Dismiss
-        </Button>
-      )}
-    </Group>
-  );
-}
-
-/**
- * What the review has to say under a goal or task row (spec §7): the ceremony and whether the spec is
- * written, the scope and engineering reviewers' open findings, and the rehearsal's open questions under
- * the task they are about. Resolved and dismissed ones are counted, not listed.
- */
-export function ReviewLines({
-  review,
-  showRehearsal,
-  pl = 0,
-  onDismiss,
-  onCeremony,
-}: ReviewLinesProps) {
-  const ceremony = review.ceremony === undefined ? null : ceremonyLine(review.ceremony);
-  const named = review.tasks.length > 1;
-  const unread = showRehearsal === true ? review.tasks.filter((t) => t.state !== 'rehearsed') : [];
-  const questions = review.tasks.flatMap((t) => t.questions.map((q) => ({ task: t.key, q })));
-  const empty =
-    ceremony === null &&
-    unread.length === 0 &&
-    questions.length === 0 &&
-    review.findings.length === 0 &&
-    review.settled === 0;
-  if (empty) return null;
-  return (
-    <Box
-      component="ul"
-      m={0}
-      pt={2}
-      style={{ listStyle: 'none', padding: `2px 0 0 ${String(pl)}px` }}
-    >
-      {ceremony === null ? null : (
-        <Group component="li" gap="xs" wrap="nowrap" style={{ listStyle: 'none' }}>
-          <Text size="xs" c="dimmed">
-            {ceremony}
-          </Text>
-          {onCeremony === undefined || review.ceremony === undefined ? null : review.ceremony
-              .skippedByYou ? (
-            <Button
-              variant="subtle"
-              size="compact-xs"
-              onClick={() => {
-                onCeremony('use');
-              }}
-            >
-              Use spec
-            </Button>
-          ) : review.ceremony.reasons.length > 0 ? (
-            <Button
-              variant="subtle"
-              size="compact-xs"
-              onClick={() => {
-                onCeremony('skip');
-              }}
-            >
-              Skip spec
-            </Button>
-          ) : null}
-        </Group>
-      )}
-      {unread.map((t) => (
-        <Text key={t.key} component="li" size="xs" c="dimmed" style={{ listStyle: 'none' }}>
-          {named ? `${t.key}: ` : ''}
-          {t.state === 'rehearsing' ? 'Rehearsing…' : 'Not rehearsed'}
-        </Text>
-      ))}
-      {review.findings.map((f) => (
-        <FindingLine key={f.id} finding={f} label={null} onDismiss={onDismiss} />
-      ))}
-      {questions.map(({ task, q }) => (
-        <FindingLine key={q.id} finding={q} label={named ? task : null} onDismiss={onDismiss} />
-      ))}
-      {review.settled === 0 ? null : (
-        <Text component="li" size="xs" c="dimmed" style={{ listStyle: 'none' }}>
-          {`${String(review.settled)} resolved or dismissed`}
-        </Text>
-      )}
-    </Box>
-  );
-}
 
 export interface ReviewNotesProps {
   readonly ceremony?: RowReview['ceremony'];
@@ -145,6 +28,9 @@ export interface ReviewNotesProps {
 
 const capital = (word: string): string => word.charAt(0).toUpperCase() + word.slice(1);
 
+/** An opened row shows this many notes until Show More. */
+const NOTES_SHOWN = 3;
+
 function NoteLine({
   finding,
   onDismiss,
@@ -155,7 +41,9 @@ function NoteLine({
   const isQuestion = finding.kind === 'question';
   const label = isQuestion
     ? 'Question'
-    : `${capital(finding.reviewer)}${finding.severity === null ? '' : ` · ${finding.severity}`}`;
+    : `${capital(finding.reviewer)}${finding.severity === null ? '' : ` · ${capital(finding.severity)}`}`;
+  // A long note shows three lines until it is clicked.
+  const [whole, setWhole] = useState(false);
   return (
     <Group
       component="li"
@@ -165,11 +53,21 @@ function NoteLine({
       align="flex-start"
       style={{ listStyle: 'none' }}
     >
-      <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
+      <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
         <Text fz={12} c="dimmed">
           {label}
         </Text>
-        <Text fz={13}>{finding.text}</Text>
+        <UnstyledButton
+          aria-expanded={whole}
+          onClick={() => {
+            setWhole((on) => !on);
+          }}
+          style={{ textAlign: 'left', cursor: whole ? 'default' : 'pointer' }}
+        >
+          <Text fz={13} c="dimmed" {...(whole ? {} : { lineClamp: 3 })}>
+            <CodeSpans text={finding.text} />
+          </Text>
+        </UnstyledButton>
       </Stack>
       <Tooltip label="Dismiss">
         <ActionIcon
@@ -201,11 +99,25 @@ export function ReviewNotes({
   onDismiss,
   onCeremony,
 }: ReviewNotesProps) {
+  const [all, setAll] = useState(false);
   const line = ceremony === undefined ? null : ceremonyLine(ceremony);
   if (line === null && findings.length === 0 && questions.length === 0 && settled === 0)
     return null;
+  const notes = [...findings, ...questions];
+  const shown = all ? notes : notes.slice(0, NOTES_SHOWN);
   return (
-    <Box component="ul" m={0} p={0} style={{ listStyle: 'none', display: 'grid', gap: 8 }}>
+    <Box
+      component="ul"
+      aria-label="Review notes"
+      m={0}
+      p={0}
+      style={{ listStyle: 'none', display: 'grid', gap: 12 }}
+    >
+      {notes.length === 0 ? null : (
+        <Text component="li" fz={12} fw={600} c="dimmed" style={{ listStyle: 'none' }}>
+          {`Review notes ${String(notes.length)}`}
+        </Text>
+      )}
       {line === null || ceremony === undefined ? null : (
         <Group component="li" gap="xs" wrap="nowrap" style={{ listStyle: 'none' }}>
           <Text fz={12} c="dimmed">
@@ -236,9 +148,23 @@ export function ReviewNotes({
           ) : null}
         </Group>
       )}
-      {[...findings, ...questions].map((f) => (
+      {shown.map((f) => (
         <NoteLine key={f.id} finding={f} onDismiss={onDismiss} />
       ))}
+      {shown.length === notes.length ? null : (
+        <Box component="li" style={{ listStyle: 'none' }}>
+          <Anchor
+            component="button"
+            type="button"
+            fz={12}
+            onClick={() => {
+              setAll(true);
+            }}
+          >
+            {`Show ${String(notes.length - shown.length)} More`}
+          </Anchor>
+        </Box>
+      )}
       {settled === 0 ? null : (
         <Text component="li" fz={12} c="dimmed" style={{ listStyle: 'none' }}>
           {`${String(settled)} resolved or dismissed`}

@@ -5,10 +5,16 @@ import { useState } from 'react';
 import { useExportPlan } from '../../../../daemon/plan-record-queries';
 import { canChooseFolder, chooseFolder } from '../../../../desktop/choose-folder';
 
-// Export as Markdown: the builder picks a folder (the native panel in the app, a typed path in a
+// Export to a folder, as Markdown: the builder picks a folder (the native panel in the app, a typed path in a
 // browser) and the daemon writes the record there, or says why it won't.
 
-export function ExportButton({ shapeId }: { readonly shapeId: ShapeId }) {
+export function ExportButton({
+  shapeId,
+  label = 'Export to Folder',
+}: {
+  readonly shapeId: ShapeId;
+  readonly label?: string;
+}) {
   const exported = useExportPlan(shapeId);
   const [typing, setTyping] = useState(false);
   const [path, setPath] = useState('');
@@ -47,7 +53,7 @@ export function ExportButton({ shapeId }: { readonly shapeId: ShapeId }) {
               void pick();
             }}
           >
-            Export as Markdown…
+            {label}
           </Button>
         </Popover.Target>
         <Popover.Dropdown>

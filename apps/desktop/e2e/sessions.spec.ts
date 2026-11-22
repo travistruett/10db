@@ -169,7 +169,7 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   const card = page.getByRole('region', { name: 'Waiting for your answer' });
   await expect(card).toBeVisible();
   await expect(sessionRow(page, /Login fails after sleep/)).toHaveAttribute(
-    'data-ring',
+    'data-state',
     'needs_you',
   );
   await expect(sessionsBadge(page)).toContainText('1 session needs you');
@@ -210,7 +210,10 @@ test('a chat end to end: a mention, a reply, the tasks it files, a judge’s car
   // Deny in the session: the ring and the badge clear, the builder's task stays and the turn ends.
   await card.getByRole('radio', { name: /Deny/ }).check();
   await card.getByRole('button', { name: 'Send Answer' }).click();
-  await expect(sessionRow(page, /Login fails after sleep/)).not.toHaveAttribute('data-ring', /.+/);
+  await expect(sessionRow(page, /Login fails after sleep/)).not.toHaveAttribute(
+    'data-state',
+    'needs_you',
+  );
   await expect(sessionsBadge(page)).not.toContainText('need');
   await expect(page.getByText('I left the other task alone.')).toBeVisible();
   const listed = Tasks.parse(
@@ -430,12 +433,18 @@ test('the question survives a reload: the bar and the Inbox card are there again
   await expect(workBar(page)).toBeVisible();
   await page.reload();
   await expect(workBar(page)).toBeVisible();
-  await expect(sessionRow(page, /Choose after a reload/)).toHaveAttribute('data-ring', 'needs_you');
+  await expect(sessionRow(page, /Choose after a reload/)).toHaveAttribute(
+    'data-state',
+    'needs_you',
+  );
   // The daemon holds the question, not the page: its restart is the daemon test's, since the e2e daemon
   // is the runner's to start and stop.
   await page.keyboard.press('2');
   await expect(page.getByText('Wrote the later notes.')).toBeVisible();
-  await expect(sessionRow(page, /Choose after a reload/)).not.toHaveAttribute('data-ring', /.+/);
+  await expect(sessionRow(page, /Choose after a reload/)).not.toHaveAttribute(
+    'data-state',
+    'needs_you',
+  );
 });
 
 test('Archive on a dirty worktree lists what would be lost, deletes it on the builder’s word, and Reopen brings the session back', async ({
@@ -641,7 +650,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await sendLine(page, 'propose it');
   await expect(panel.getByText('Board polish')).toBeVisible();
   await expect(panel.getByRole('group', { name: 'Summary' })).toContainText(
-    '1 goal · 2 loose · 1 to record',
+    '1 goal · 2 tasks · 1 to record',
   );
   await expectAccessible(page, 'the plan beside the conversation');
 
@@ -657,7 +666,9 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await page.keyboard.press('Enter');
   await expect(panel.getByRole('region', { name: 'Board polish details' })).toBeVisible();
 
-  // Pin a loose task by editing its title; the next round leaves it as it is.
+  // Pin a task by editing its title; the next round leaves it as it is. A row's Edit and ⋯ are in the
+  // opened row.
+  await panel.getByRole('button', { name: 'Drop the Abandon strip', exact: true }).click();
   await panel.getByRole('button', { name: 'Edit Drop the Abandon strip' }).click();
   const edit = panel.getByRole('form', { name: 'Edit row' });
   await edit.getByRole('textbox', { name: 'Title' }).fill('Drop the Abandon strip, keep Retry');
@@ -671,9 +682,9 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await expect(pinned).toBeVisible();
   await expect(panel.getByText('Drop the Abandon strip', { exact: true })).toHaveCount(0);
 
-  // Review ▾: Plan review puts a finding on its row and Check for Questions a question; Accept only warns.
+  // Review ▾: Plan Review puts a finding on its row and Check for Questions a question; Accept only warns.
   await panel.getByRole('button', { name: 'Review' }).click();
-  await page.getByRole('menuitem', { name: 'Plan review' }).click();
+  await page.getByRole('menuitem', { name: 'Plan Review' }).click();
   await panel.getByRole('button', { name: 'Board polish', exact: true }).click();
   await expect(panel.getByText('The scope is wider than one pull request.').first()).toBeVisible();
   await panel.getByRole('button', { name: 'Review' }).click();
@@ -685,7 +696,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await sendLine(page, 'mock it up');
   await expect(page.getByText('Here is a mock-up.', { exact: true })).toBeVisible();
   await panel.getByRole('button', { name: /^Approve mock-up/ }).click();
-  await expect(panel.getByRole('button', { name: /^Unapprove mock-up/ })).toBeVisible();
+  await expect(panel.getByRole('button', { name: /^Undo approval of mock-up/ })).toBeVisible();
   // Ask for Changes puts a draft naming the task in the composer and sends nothing.
   await panel.getByRole('button', { name: /^Ask for changes to mock-up/ }).click();
   const composer = page.getByRole('textbox', { name: 'Message' });
@@ -693,16 +704,17 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await expect(composer).toBeFocused();
   await composer.fill('');
 
-  // Design review reads each task that has a mock-up and a page area; with no browser in this daemon the
+  // Design Review reads each task that has a mock-up and a page area; with no browser in this daemon the
   // pictures are missing, the review still runs, and its finding lands on the row.
   await panel.getByRole('button', { name: 'Review' }).click();
-  await page.getByRole('menuitem', { name: 'Design review' }).click();
+  await page.getByRole('menuitem', { name: 'Design Review' }).click();
   await panel.getByRole('button', { name: 'Board polish', exact: true }).click();
   await expect(panel.getByText('The mock-up leaves out the empty state.').first()).toBeVisible();
 
-  // The run preview is folded; opened it draws only the lanes that have a task.
+  // The run preview is folded; opened it draws only the lanes that have a task, and with one lane no
+  // critical path, which would only repeat it.
   await panel.getByRole('button', { name: 'How it would run' }).click();
-  await expect(panel.getByText('Critical path:')).toBeVisible();
+  await expect(panel.getByText('Critical path:')).toHaveCount(0);
   await expect(panel.getByText('Lane 2')).toHaveCount(0);
   await expect(
     panel
@@ -710,14 +722,17 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
       .getByText('Compact card density', { exact: true }),
   ).toBeVisible();
 
-  // Accept lists the rows, says nothing starts, and writes the ticked ones to the Board.
+  // Accept lists the rows, counts what Accept and Start would start, and Accept alone writes the ticked
+  // ones to the Board without starting them.
   const before = (await titles()).length;
   await panel.getByRole('button', { name: 'Accept', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'Accept' });
-  await expect(dialog.getByText('Nothing starts. Tasks wait on the Board.')).toBeVisible();
+  const dialog = page.getByRole('dialog', { name: 'Accept Plan' });
+  await expect(
+    dialog.getByRole('status').filter({ hasText: /start now|wait for a lane/ }),
+  ).toBeVisible();
   // The mock-up's sandboxed frame runs no script, so a scan can't reach into it.
   await expectAccessible(page, 'accept', ['iframe']);
-  await dialog.getByRole('button', { name: 'Accept 4' }).click();
+  await dialog.getByRole('button', { name: 'Accept', exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(panel.getByText('On the Board · 2 ready', { exact: true })).toHaveCount(1);
   await expect(panel.getByText('On the Board · Ready', { exact: true })).toHaveCount(2);
@@ -748,6 +763,8 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await taskPage.close();
 
   // Remove Draft Goal takes the goal and its tasks back, and the goal is proposed again.
+  const polish = panel.locator('button[data-shape-row]', { hasText: /^Board polish$/ });
+  if ((await polish.getAttribute('aria-expanded')) !== 'true') await polish.click();
   await panel.getByRole('button', { name: 'Actions for Board polish' }).click();
   await page.getByRole('menuitem', { name: 'Remove Draft Goal' }).click();
   await page
@@ -768,7 +785,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
       ).json(),
     );
   await panel.getByRole('button', { name: 'Accept', exact: true }).click();
-  await dialog.getByRole('button', { name: 'Accept 1' }).click();
+  await dialog.getByRole('button', { name: 'Accept', exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(goalRow.getByText('On the Board · 2 ready', { exact: true })).toBeVisible();
   expect(await goalTitles()).toContain('Board polish');
@@ -784,15 +801,14 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   expect(await goalTitles()).not.toContain('Board polish');
   expect(await titles()).toHaveLength(before + 2);
 
-  // Accept's Start switch: the confirm counts what starts, and the goal's tasks get runs.
+  // Accept and Start: the confirm counts what starts, and the goal's tasks get runs.
   await panel.getByRole('button', { name: 'Accept', exact: true }).click();
-  const startDialog = page.getByRole('dialog', { name: 'Accept' });
-  await startDialog.getByRole('switch', { name: 'Start the tasks that are ready' }).click();
+  const startDialog = page.getByRole('dialog', { name: 'Accept Plan' });
   await expect(
     startDialog.getByRole('status').filter({ hasText: /start now|wait for a lane/ }),
   ).toBeVisible();
-  await expect(startDialog.getByRole('button', { name: 'Accept and Start 1' })).toBeVisible();
-  await startDialog.getByRole('button', { name: 'Accept and Start 1' }).click();
+  await expect(startDialog.getByRole('button', { name: 'Accept and Start' })).toBeVisible();
+  await startDialog.getByRole('button', { name: 'Accept and Start' }).click();
   await expect(startDialog).toBeHidden();
   await expect(goalRow.getByText(/On the Board/)).toHaveText(
     /queued|running|needs you|in review|done/i,
@@ -802,9 +818,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await panel.getByRole('button', { name: 'More Plan actions' }).click();
   const undoItem = page.getByRole('menuitem', { name: /Undo Accept/ });
   await expect(undoItem).toBeDisabled();
-  await expect(undoItem).toContainText(
-    'has started; cancel its run and remove it from the Board first',
-  );
+  await expect(undoItem).toContainText('has started; cancel its run first');
 
   await page.keyboard.press('Escape');
 
@@ -886,10 +900,10 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await expect(page.getByText(/^Noted \d+ things?\. I have notes\.md\.$/)).toBeVisible();
   await expect(plain.getByText('Heard so far')).toBeVisible();
 
-  // A proposal fills the panel, and its rows are dotted as new.
+  // A proposal fills the panel. It is the first round, where every row is new, so none is marked New.
   await sendLine(page, 'propose it');
   await expect(plain.getByText('Board polish')).toBeVisible();
-  await expect(plain.getByRole('img', { name: 'New this round' }).first()).toBeVisible();
+  await expect(plain.locator('[data-mark="new"]')).toHaveCount(0);
 
   // The builder closed the panel: a round that lands leaves it closed, and the menu offers Show Plan.
   await page.getByRole('button', { name: 'More session actions' }).click();

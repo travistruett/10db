@@ -1,4 +1,4 @@
-import { ColorSwatch, Text, Tooltip, UnstyledButton } from '@mantine/core';
+import { Text, Tooltip, UnstyledButton } from '@mantine/core';
 import type { KeyboardEvent, ReactNode, Ref } from 'react';
 import classes from './plan-rows.module.css';
 
@@ -23,8 +23,6 @@ export function moveRowFocus(from: HTMLElement, delta: 1 | -1): boolean {
 }
 
 export interface RowLineProps {
-  /** The round's dot before the title; absent when the round left the row alone. */
-  readonly dot?: { readonly label: string; readonly color: string } | null;
   readonly title: string;
   /** A goal's head: a card title. */
   readonly head?: boolean;
@@ -32,11 +30,13 @@ export interface RowLineProps {
   readonly dim?: boolean;
   /** Dimmed lines under the title: a goal's objective, what Convert made of the row. */
   readonly subs?: ReactNode;
-  /** The facts at the right; hover or focus swaps them for `actions`. */
+  /** The facts at the right; the opened row shows `actions` in their place. */
   readonly chips: ReactNode;
   readonly actions?: ReactNode;
   /** The size column: a size, or a goal's lane time. */
   readonly trailing?: string | undefined;
+  /** The size column's words on hover. */
+  readonly trailingLabel?: string | undefined;
   readonly section?: string;
   readonly opened: boolean;
   readonly regionId: string;
@@ -47,11 +47,10 @@ export interface RowLineProps {
 }
 
 /**
- * One line of the Plan: the title as a button that covers the row, then its facts, which hover or
- * keyboard focus swap for the row's actions, then the size column.
+ * One line of the Plan: the title as a button that covers the row, then its facts, which the opened row
+ * shows its actions in place of, then the size column.
  */
 export function RowLine({
-  dot,
   title,
   head = false,
   dim = false,
@@ -59,6 +58,7 @@ export function RowLine({
   chips,
   actions,
   trailing,
+  trailingLabel,
   section,
   opened,
   regionId,
@@ -69,17 +69,6 @@ export function RowLine({
 }: RowLineProps) {
   return (
     <div className={classes['row']}>
-      {dot === undefined || dot === null ? null : (
-        <Tooltip label={dot.label}>
-          <ColorSwatch
-            size={6}
-            color={`var(--mantine-color-${dot.color}-filled)`}
-            aria-label={dot.label}
-            role="img"
-            className={classes['dot']}
-          />
-        </Tooltip>
-      )}
       <UnstyledButton
         ref={buttonRef}
         className={classes['hit']}
@@ -94,21 +83,26 @@ export function RowLine({
       >
         <Text
           fz={14}
-          fw={head ? 600 : 400}
+          fw={head || opened ? 600 : 400}
           lh="20px"
-          {...(dim ? { c: 'dimmed' } : head ? { c: 'bright' } : {})}
+          {...(dim ? { c: 'dimmed' } : head || opened ? { c: 'bright' } : {})}
           {...(opened ? {} : { lineClamp: 2 })}
         >
           {title}
         </Text>
       </UnstyledButton>
       <div className={classes['slot']}>
-        <div className={classes['chips']}>{chips}</div>
-        {actions === undefined ? null : <div className={classes['actions']}>{actions}</div>}
+        {opened && actions !== undefined ? (
+          <div className={classes['actions']}>{actions}</div>
+        ) : (
+          <div className={classes['chips']}>{chips}</div>
+        )}
       </div>
-      <Text fz={12} c="dimmed" className={classes['trail']}>
-        {trailing}
-      </Text>
+      <Tooltip label={trailingLabel} disabled={trailingLabel === undefined}>
+        <Text fz={12} c="dimmed" className={classes['trail']}>
+          {trailing}
+        </Text>
+      </Tooltip>
       {subs === undefined ? null : <div className={classes['subs']}>{subs}</div>}
     </div>
   );

@@ -2,11 +2,13 @@ import type { ShapeProposalDto, ShapeTaskSizeDto } from '@10db/contracts';
 import { Stack, Text } from '@mantine/core';
 import { IconClockExclamation } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
+import { CodeSpans } from './record/code-spans';
 import { sizeFacts } from './size-line';
 
-// What an opened row says. Text is plain: nothing a model wrote is rendered as markup. An opened row is
-// one block with one left edge, in one order: the description, the notes, what it is done when, one
-// dim line of facts and links, and the attachments. Everything in it is 13 px, its labels 12 px dim.
+// What an opened row says. Text is plain: nothing a model wrote is rendered as markup, though its backtick
+// spans read as code. An opened row is one block with one left edge, in one order: the description, its
+// acceptance criteria, one dim line of facts and links, the attachments, and last the review's notes, which
+// are about the task rather than part of it. Everything in it is 13 px, its labels 12 px dim.
 
 export function Labelled({
   label,
@@ -40,10 +42,11 @@ export function Items({
       <Text fz={12} c="dimmed">
         {label}
       </Text>
-      <Stack component="ul" gap={2} m={0} p={0} style={{ listStyle: 'none' }}>
+      {/* Each item its own bullet, so long ones don't run together. */}
+      <Stack component="ul" gap={4} m={0} p={0} pl={16} style={{ listStyle: 'disc' }}>
         {items.map((item) => (
           <Text key={item} component="li" fz={13}>
-            {item}
+            <CodeSpans text={item} />
           </Text>
         ))}
       </Stack>
@@ -78,14 +81,13 @@ export function DetailBlock({
   attachments,
 }: DetailBlockProps) {
   return (
-    <Stack gap={10}>
+    <Stack gap={12}>
       {description === '' ? null : (
         <Text fz={13} style={{ whiteSpace: 'pre-wrap' }}>
-          {description}
+          <CodeSpans text={description} />
         </Text>
       )}
-      {notes}
-      <Items label="Done when" items={criteria} />
+      <Items label="Acceptance Criteria" items={criteria} />
       {more}
       <Text
         fz={12}
@@ -120,6 +122,7 @@ export function DetailBlock({
         ])}
       </Text>
       {attachments}
+      {notes}
     </Stack>
   );
 }
