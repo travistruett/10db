@@ -24,6 +24,9 @@ const DESIGN_TASK = /^- effortKey (\S+) · taskKey (\S+)/gm;
 const MOCK_IT_UP = /\bmock it up\b/i;
 const MOCKUP_HTML = '<main><h1>Dense board</h1><p>Cards sit closer together.</p></main>';
 
+/** A message naming Linear: the scripted agent drafts one loose task carrying the issue AMP-1. */
+const ASKS_FOR_LINEAR = /\blinear\b/i;
+
 /** "show a fence" asks for a reply with a code fence and a link, which the UI draws as markdown. */
 const SHOW_A_FENCE = /\bshow a fence\b/i;
 const FENCE_REPLY = [
@@ -38,6 +41,34 @@ const FENCE_REPLY = [
 
 /** "see the board", "see the task tsk_…", each with an optional "at 900": a look at one of the app's screens. */
 const SEE_SCREEN = /\bsee the (factory|board|inbox|plan|task (\S+))(?: at (\d+))?/i;
+
+/** The one task an import drafts: loose, linked to the Linear issue AMP-1. */
+function linearDraft(
+  area: string,
+  sources: readonly string[],
+  round: number,
+): Record<string, unknown> {
+  return {
+    looseTasks: [
+      {
+        // A new key each time, so stating the issue again is a new draft, not the converted row.
+        key: `import-amp-1-${String(round)}`,
+        title: 'Show the Linear id on a card',
+        criteria: ['The card shows AMP-1'],
+        areas: [area],
+        size: 'S',
+        ceremony: 'direct',
+        sourceMessageIds: sources,
+        external: {
+          kind: 'linear',
+          id: 'AMP-1',
+          issueId: 'lin-issue-1',
+          url: 'https://linear.app/acme/issue/AMP-1',
+        },
+      },
+    ],
+  };
+}
 
 /** What the scripted draft proposes, citing the builder's messages; every task is in `area`. */
 function scriptedDraft(area: string, sources: readonly string[]): Record<string, unknown> {
@@ -197,15 +228,20 @@ export function scriptedShapeBehaviour(): FakeShapeBehaviour {
         });
         return { text: answer.isError ? 'I could not attach it.' : 'Here is a mock-up.' };
       }
-      if (ASKS_TO_PROPOSE.test(text)) {
+      if (ASKS_TO_PROPOSE.test(text) || ASKS_FOR_LINEAR.test(text)) {
         if (ids.length === 0) return { text: 'There is nothing to propose from yet.' };
+        // The import cites this message alone; an earlier id may belong to a message the plan no longer holds.
+        const draftOf = ASKS_FOR_LINEAR.test(text)
+          ? (a: string, sources: readonly string[]) =>
+              linearDraft(a, sources.slice(-1), sources.length)
+          : scriptedDraft;
         let area = 'repo';
-        let answer = await call('propose_plan', { draft: scriptedDraft(area, ids) });
+        let answer = await call('propose_plan', { draft: draftOf(area, ids) });
         const names = AREAS_OF_THE_PROJECT.exec(answer.text)?.[1];
         const first = names?.split(',')[0]?.trim();
         if (answer.isError && first !== undefined && first !== '') {
           area = first;
-          answer = await call('propose_plan', { draft: scriptedDraft(area, ids) });
+          answer = await call('propose_plan', { draft: draftOf(area, ids) });
         }
         return { text: answer.isError ? 'I could not state a plan.' : 'Here is the plan.' };
       }
