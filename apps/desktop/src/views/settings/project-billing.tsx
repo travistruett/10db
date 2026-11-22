@@ -47,11 +47,11 @@ export function ProjectBilling({ project }: { readonly project: ProjectDto }) {
           />
         </SettingRow>
         <SettingRow
-          label="Backup account"
+          label="Backup Account"
           description="Used when this account reaches its usage limit. A pay-as-you-go backup needs a monthly cap."
         >
           <AccountSelect
-            aria-label="Backup account"
+            aria-label="Backup Account"
             placeholder="None"
             // The project's own account is never offered, but after 10db moved the project onto its fallback
             // the recorded fallback is that account, and it still shows.
@@ -69,11 +69,11 @@ export function ProjectBilling({ project }: { readonly project: ProjectDto }) {
           />
         </SettingRow>
         <SettingRow
-          label="Switch at"
+          label="Switch At"
           description="On a Claude plan, how much of the usage limit to use before running tasks hand off and move to the backup."
         >
           <NumberInput
-            aria-label="Switch at"
+            aria-label="Switch At"
             suffix="%"
             min={MIN_PCT}
             max={MAX_PCT}

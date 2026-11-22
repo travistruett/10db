@@ -67,7 +67,7 @@ export function settingSummary(
     case 'tier':
       return TIER_LABEL[setting.tier];
     case 'top_of_tier':
-      return setting.tier === undefined ? 'Top of tier' : `Top of ${TIER_LABEL[setting.tier]}`;
+      return setting.tier === undefined ? 'Top of Tier' : `Top of ${TIER_LABEL[setting.tier]}`;
     case 'model':
       return names.get(setting.model) ?? setting.model;
   }
@@ -114,7 +114,7 @@ export const modelLabel = (model: ModelRowDto): string => {
 
 /** The heading of a tier's models in a list; models the catalogue does not rank go under "Unknown tier". */
 export const tierGroupLabel = (tier: ModelTier | null): string =>
-  tier === null ? 'Unknown tier' : `${TIER_LABEL[tier]} models`;
+  tier === null ? 'Unknown Tier' : `${TIER_LABEL[tier]} models`;
 
 /** The tiers in the order lists show them, the models with none last. */
 export const LIST_TIER_ORDER: readonly (ModelTier | null)[] = [...TIER_ORDER, null];
@@ -193,7 +193,7 @@ export function settingChoices(input: {
   if (current?.kind === 'model' && !settings.has(settingValue(current))) {
     const row = (input.models ?? []).find((m) => m.model === current.model);
     groups.push({
-      group: 'Current setting',
+      group: 'Current Setting',
       items: [item(current, unlistedLabel(current.model, row, input.models === null))],
     });
   }

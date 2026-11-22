@@ -23,7 +23,7 @@ describe('AccountsSection', () => {
     if (!row) throw new Error('no row for Claude plan');
     expect(within(row).getByText('builder@example.com')).toBeTruthy();
     expect(within(row).getByText('Default')).toBeTruthy();
-    expect(within(row).getByText('Claude subscription')).toBeTruthy();
+    expect(within(row).getByText('Claude Subscription')).toBeTruthy();
     expect(within(row).getByText('Ready')).toBeTruthy();
     expect(await within(row).findByText('2K tokens')).toBeTruthy();
     expect(within(row).queryByText(/\$/)).toBeNull();

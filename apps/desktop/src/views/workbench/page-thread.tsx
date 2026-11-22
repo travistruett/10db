@@ -132,7 +132,7 @@ function PageNotice({
           send.mutate({ taskId, noticeId: id }, { onSuccess: markSent });
         }}
       >
-        {offer === 'allow_this' ? 'Allow this' : 'Ask Agent to Fix'}
+        {offer === 'allow_this' ? 'Allow This' : 'Ask Agent to Fix'}
       </Button>
     </Group>
   );

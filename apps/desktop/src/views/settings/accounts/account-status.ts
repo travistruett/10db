@@ -11,7 +11,7 @@ export type AccountStatus = (typeof AccountStatus)[keyof typeof AccountStatus];
 export const ACCOUNT_STATUS_LABEL: Readonly<Record<AccountStatus, string>> = {
   [AccountStatus.Ready]: 'Ready',
   [AccountStatus.NeedsSignIn]: 'Needs sign-in',
-  [AccountStatus.NeedsSecret]: 'Needs a secret',
+  [AccountStatus.NeedsSecret]: 'Needs a Secret',
   [AccountStatus.Archived]: 'Archived',
 };
 

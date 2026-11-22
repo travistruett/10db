@@ -16,7 +16,7 @@ export function CancelRunModal({ run, onClose }: CancelRunModalProps) {
     onClose();
   };
   return (
-    <Modal opened={run !== null} onClose={close} title="Cancel this workstream?">
+    <Modal opened={run !== null} onClose={close} title="Cancel This Workstream?">
       <Stack>
         <Text size="sm">
           The session stops and its claims are released. {run ? `Task: ${run.taskTitle}` : ''}
@@ -28,7 +28,7 @@ export function CancelRunModal({ run, onClose }: CancelRunModalProps) {
         ) : null}
         <Group justify="flex-end">
           <Button variant="default" onClick={close}>
-            Keep running
+            Keep Running
           </Button>
           <Button
             color="red"
@@ -38,7 +38,7 @@ export function CancelRunModal({ run, onClose }: CancelRunModalProps) {
               cancel.mutate(run.id, { onSuccess: close });
             }}
           >
-            Cancel workstream
+            Cancel Workstream
           </Button>
         </Group>
       </Stack>

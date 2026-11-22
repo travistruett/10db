@@ -11,9 +11,9 @@ import { ROLES } from './role-labels';
 /** The switches a kind has on, as the short words the list shows. */
 function switchesOf(kind: KindDto): string[] {
   return [
-    kind.alwaysReviewed ? 'Always reviewed' : null,
-    kind.failsAtLimit ? 'Fails at limit' : null,
-    kind.ownCopy ? 'Own copy' : null,
+    kind.alwaysReviewed ? 'Always Reviewed' : null,
+    kind.failsAtLimit ? 'Fails at Limit' : null,
+    kind.ownCopy ? 'Own Copy' : null,
     kind.toInbox ? 'Inbox' : null,
   ].filter((word) => word !== null);
 }
@@ -49,7 +49,7 @@ export function KindsSection() {
     },
     {
       accessor: 'minimumRigor',
-      title: 'Minimum rigor',
+      title: 'Minimum Rigor',
       noWrap: true,
       render: (kind) => (kind.minimumRigor === null ? 'None' : rigorLabel(kind.minimumRigor)),
     },
@@ -78,7 +78,7 @@ export function KindsSection() {
     },
     {
       accessor: 'impliedBy',
-      title: 'Implied by',
+      title: 'Implied By',
       noWrap: true,
       render: (kind) => kind.impliedBy.join(', '),
     },

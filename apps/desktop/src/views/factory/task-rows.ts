@@ -157,7 +157,7 @@ export function taskRows(input: TaskRowsInput): TaskRow[] {
             : 'Ready'
           : waits > 0
             ? `Waits on ${String(waits)}`
-            : 'Not started';
+            : 'Not Started';
       return {
         ...common,
         color: 'gray',
@@ -201,7 +201,7 @@ export function taskRows(input: TaskRowsInput): TaskRow[] {
       state = ws.batchId ? 'Merged' : 'Done';
       color = 'green';
     } else {
-      state = bucket === 'in_review' ? 'In review' : 'In progress';
+      state = bucket === 'in_review' ? 'In Review' : 'In Progress';
     }
     return {
       ...common,

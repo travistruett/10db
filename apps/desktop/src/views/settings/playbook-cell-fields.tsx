@@ -38,7 +38,7 @@ function MinimumField({
   };
   return (
     <NumberInput
-      label="At least"
+      label="At Least"
       aria-label="Minimum Intelligence"
       description="The lowest Intelligence score 10db will accept."
       min={0}
@@ -130,7 +130,7 @@ export function CellFields({
           {...lists}
           allowDeselect={false}
           data={[
-            { value: ANY_TIER, label: 'Any tier' },
+            { value: ANY_TIER, label: 'Any Tier' },
             ...TOP_OF_TIERS.map((tier) => ({ value: tier, label: TIER_LABEL[tier] })),
           ]}
           value={model.tier ?? ANY_TIER}

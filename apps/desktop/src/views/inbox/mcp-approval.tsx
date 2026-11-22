@@ -16,7 +16,7 @@ export function mcpReview(item: InboxItemDto): McpServerReview | null {
 
 /** The words for an approval card's two stable choices. */
 export const MCP_APPROVAL_LABELS: Readonly<Record<string, string>> = {
-  [McpApprovalChoice.Approve]: 'Approve for this project',
+  [McpApprovalChoice.Approve]: 'Approve for This Project',
   [McpApprovalChoice.Deny]: 'Deny',
 };
 
@@ -34,10 +34,10 @@ export function McpApprovalDetails({
   const reads = review.variables.length > 0 ? review.variables.join('\n') : 'Nothing';
   return (
     <Stack gap="xs">
-      <Listing label="What approving runs">{body}</Listing>
-      <Listing label="Reads these variables from your environment">{reads}</Listing>
+      <Listing label="What Approving Runs">{body}</Listing>
+      <Listing label="Reads These Variables from Your Environment">{reads}</Listing>
       {review.transport === McpTransport.Stdio ? (
-        <Listing label="Reaches these hosts">
+        <Listing label="Reaches These Hosts">
           {review.hosts.length > 0 ? review.hosts.join('\n') : 'No host'}
         </Listing>
       ) : null}

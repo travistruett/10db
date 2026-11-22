@@ -59,7 +59,7 @@ function DeleteColumn({
           <>
             <Text size="sm">{`${column.name} holds ${String(parked)} task${parked === 1 ? '' : 's'}. Where should ${parked === 1 ? 'it' : 'they'} go?`}</Text>
             <Select
-              label="Move its tasks to"
+              label="Move Its Tasks To"
               data={[
                 ...others.map((c) => ({ value: c.id, label: c.name })),
                 { value: PLANNED, label: 'Planned (Backlog or Ready)' },
@@ -284,7 +284,7 @@ export function BoardColumnsSection({ project }: { readonly project: ProjectDto 
       ) : null}
       <Group align="flex-end">
         <TextInput
-          label="New column"
+          label="New Column"
           value={name}
           error={nameError}
           onChange={(e) => {

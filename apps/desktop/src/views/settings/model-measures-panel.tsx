@@ -31,12 +31,12 @@ function Read({ at, now }: { readonly at: string; readonly now: number }) {
 
 function Evals({ evals, now }: { readonly evals: readonly ModelEvalDto[]; readonly now: number }) {
   return (
-    <Table aria-label="Eval costs" verticalSpacing="xs">
+    <Table aria-label="Eval Costs" verticalSpacing="xs">
       <Table.Thead>
         <Table.Tr>
           <Table.Th>Benchmark</Table.Th>
           <Table.Th ta="right">Accuracy</Table.Th>
-          <Table.Th ta="right">Average cost per task</Table.Th>
+          <Table.Th ta="right">Average Cost per Task</Table.Th>
           <Table.Th>Read</Table.Th>
         </Table.Tr>
       </Table.Thead>
@@ -68,11 +68,11 @@ function Speeds({
   readonly now: number;
 }) {
   return (
-    <Table aria-label="Speed by provider" verticalSpacing="xs">
+    <Table aria-label="Speed by Provider" verticalSpacing="xs">
       <Table.Thead>
         <Table.Tr>
           <Table.Th>Provider</Table.Th>
-          <Table.Th ta="right">Tokens a second</Table.Th>
+          <Table.Th ta="right">Tokens a Second</Table.Th>
           <Table.Th ta="right">Latency</Table.Th>
           <Table.Th>Read</Table.Th>
         </Table.Tr>
@@ -127,7 +127,7 @@ export function ModelMeasuresPanel({
   return (
     <>
       <Stack gap="xs">
-        <Title order={4}>Eval costs (OpenRouter)</Title>
+        <Title order={4}>Eval Costs (OpenRouter)</Title>
         {evals.length === 0 ? (
           <Text size="sm" c="dimmed">
             {evalsMissing ?? 'Not read from OpenRouter yet.'}
@@ -142,7 +142,7 @@ export function ModelMeasuresPanel({
         )}
       </Stack>
       <Stack gap="xs">
-        <Title order={4}>Speed by provider</Title>
+        <Title order={4}>Speed by Provider</Title>
         {speeds.length === 0 ? (
           <Text size="sm" c="dimmed">
             {speedsMissing ?? 'Not read from OpenRouter yet.'}

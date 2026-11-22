@@ -125,7 +125,7 @@ export function LinearProjectRow({
           check.mutate(teamKey);
         }}
       >
-        {refused === null && ended === null ? 'Link' : 'Link again'}
+        {refused === null && ended === null ? 'Link' : 'Link Again'}
       </Button>
     </Group>
   );
@@ -171,7 +171,7 @@ export function LinearProjectRow({
       <Text size="xs" c="red">
         The check ended without an answer.{' '}
         <Link to="/sessions" search={{ chat: ended.chatId }}>
-          Open its session
+          Open Its Session
         </Link>
         .
       </Text>

@@ -64,7 +64,7 @@ describe('AddAccountModal', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Add Account' });
     fireEvent.click(within(dialog).getByRole('combobox', { name: 'Kind' }));
     fireEvent.click(
-      await screen.findByRole('option', { name: 'Claude subscription', hidden: true }),
+      await screen.findByRole('option', { name: 'Claude Subscription', hidden: true }),
     );
     fireEvent.change(within(dialog).getByRole('textbox', { name: 'Label' }), {
       target: { value: 'Company A' },
@@ -72,7 +72,7 @@ describe('AddAccountModal', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
     const drawer = await screen.findByRole('dialog', { name: /Company A/ });
     fireEvent.click(
-      await within(drawer).findByRole('button', { name: 'Sign in from Terminal instead' }),
+      await within(drawer).findByRole('button', { name: 'Sign In from Terminal Instead' }),
     );
     expect(await within(drawer).findByText('1. In Terminal, run')).toBeTruthy();
     expect(posts).toEqual([

@@ -146,7 +146,7 @@ function PersonForm({
                 set({ byName: true, member: null });
               }}
             >
-              Not on Slack? Add them by name
+              Not on Slack? Add Them by Name
             </Anchor>
           ) : null}
           {showName ? (
@@ -180,7 +180,7 @@ function PersonForm({
         </Stack>
         {askedInSlack ? (
           <Radio.Group
-            label="Before 10db messages them"
+            label="Before 10db Messages Them"
             description="The first message is always shown to you."
             value={form.sendMode}
             onChange={(value) => {
@@ -188,8 +188,8 @@ function PersonForm({
             }}
           >
             <Stack gap="xs" mt="xs">
-              <Radio value={SendMode.Review} label="Show me each message first" />
-              <Radio value={SendMode.Auto} label="Send on its own" />
+              <Radio value={SendMode.Review} label="Show Me Each Message First" />
+              <Radio value={SendMode.Auto} label="Send on Its Own" />
             </Stack>
           </Radio.Group>
         ) : null}
@@ -212,7 +212,7 @@ function PersonForm({
               <Text size="sm">new questions a day</Text>
               <Checkbox
                 ml="md"
-                label="No limit"
+                label="No Limit"
                 checked={form.dailyLimit === null}
                 onChange={(event) => {
                   set({ dailyLimit: event.currentTarget.checked ? null : DEFAULT_DAILY_LIMIT });

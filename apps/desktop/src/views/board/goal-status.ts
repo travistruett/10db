@@ -12,13 +12,13 @@ interface GoalStatusLook {
  */
 export const GOAL_STATUS_LOOK: Readonly<Record<GoalStatus, GoalStatusLook>> = {
   [GoalStatus.Failed]: { color: 'red', label: 'Failed' },
-  [GoalStatus.WaitingOnYou]: { color: 'yellow', label: 'Waiting on you' },
-  [GoalStatus.WaitingOnSomeone]: { color: 'yellow', label: 'Waiting on someone' },
+  [GoalStatus.WaitingOnYou]: { color: 'yellow', label: 'Waiting on You' },
+  [GoalStatus.WaitingOnSomeone]: { color: 'yellow', label: 'Waiting on Someone' },
   [GoalStatus.Paused]: { color: 'orange', label: 'Paused' },
   [GoalStatus.Running]: { color: 'blue', label: 'Running' },
   [GoalStatus.Queued]: { color: 'gray', label: 'Queued' },
   [GoalStatus.Shipping]: { color: 'blue', label: 'Shipping' },
   [GoalStatus.Idle]: { color: 'gray', label: 'Idle' },
-  [GoalStatus.NotStarted]: { color: 'gray', label: 'Not started' },
+  [GoalStatus.NotStarted]: { color: 'gray', label: 'Not Started' },
   [GoalStatus.Done]: { color: 'green', label: 'Done' },
 };

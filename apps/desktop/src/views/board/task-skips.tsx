@@ -39,7 +39,7 @@ export function TaskSkips({ workstreamId }: { readonly workstreamId: WorkstreamI
   return (
     <Stack gap={4}>
       <Text size="xs" fw={600} c="dimmed" tt="uppercase">
-        Skipped while nobody was watching
+        Skipped While Nobody Was Watching
       </Text>
       {skipped.length > 0 ? (
         <Stack gap={6} role="list" aria-label="Skipped calls">
@@ -51,9 +51,9 @@ export function TaskSkips({ workstreamId }: { readonly workstreamId: WorkstreamI
       {asked.length > 0 ? (
         <>
           <Text size="xs" fw={600} c="dimmed">
-            Questions it would have asked
+            Questions It Would Have Asked
           </Text>
-          <Stack gap={6} role="list" aria-label="Questions it would have asked">
+          <Stack gap={6} role="list" aria-label="Questions It Would Have Asked">
             {asked.map((skip) => (
               <SkipRow key={skip.id} skip={skip} now={now} />
             ))}

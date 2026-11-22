@@ -34,7 +34,7 @@ function rowName(person: PersonDto): string {
 function howSent(person: PersonDto): string {
   if (person.isBuilder) return '—';
   if (person.slack === null) return 'You pass it on';
-  return person.slack.sendMode === 'auto' ? 'Sent on its own' : 'Shown to you first';
+  return person.slack.sendMode === 'auto' ? 'Sent on Its Own' : 'Shown to You First';
 }
 
 /** How 10db reaches someone, as a small chip: "Slack @Mark Ellis", or "Not on Slack". */
@@ -116,7 +116,7 @@ export function PeopleSection() {
           <Table.Thead>
             <Table.Tr>
               <Table.Th>Name</Table.Th>
-              <Table.Th>How it's sent</Table.Th>
+              <Table.Th>How It's Sent</Table.Th>
               <Table.Th>Answers</Table.Th>
               <Table.Th>
                 <Group justify="flex-end">

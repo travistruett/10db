@@ -41,7 +41,7 @@ function TierSelect({
       ? []
       : [
           {
-            group: 'Current setting',
+            group: 'Current Setting',
             items: [
               {
                 value: `${MODEL_PREFIX}${current}`,
@@ -93,7 +93,7 @@ export function TierOverrides({
     <Stack gap="xs">
       <div>
         <Text size="sm" fw={500}>
-          Model for each tier
+          Model for Each Tier
         </Text>
         <Text size="xs" c="dimmed">
           Automatic lets 10db choose the model for each tier. Pick one to run that tier on it

@@ -181,9 +181,9 @@ function useOverviewRows(): OverviewRow[] {
 }
 
 const GROUP_TITLE: Readonly<Record<OverviewGroup, string>> = {
-  [OverviewGroup.Access]: 'Model access',
+  [OverviewGroup.Access]: 'Model Access',
   [OverviewGroup.Services]: 'Services',
-  [OverviewGroup.Data]: 'Data and downloads',
+  [OverviewGroup.Data]: 'Data and Downloads',
 };
 
 const GROUPS: readonly OverviewGroup[] = [

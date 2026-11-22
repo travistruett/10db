@@ -20,7 +20,7 @@ export function GateField({ value, candidates, onChange }: GateFieldProps) {
   return (
     <Stack gap="xs">
       <TextInput
-        label="Gate command"
+        label="Gate Command"
         description={
           <>
             The command that checks the work, such as your tests. A task counts as done only when it

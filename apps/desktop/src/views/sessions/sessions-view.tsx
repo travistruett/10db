@@ -386,7 +386,7 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
         onClose={() => {
           setEndingTakeover(null);
         }}
-        title="End takeover and archive?"
+        title="End Takeover and Archive?"
         centered
       >
         <Text size="sm">

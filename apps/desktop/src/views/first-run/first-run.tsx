@@ -52,7 +52,7 @@ function CheckYourSetup({ check }: { readonly check: ReturnType<typeof useSetupC
   return (
     <Stack gap="lg">
       <Title order={2} mb="xs">
-        Check your setup
+        Check Your Setup
       </Title>
       <SetupSection
         title="Agents"
@@ -177,8 +177,8 @@ export function FirstRun({ onCreated }: { readonly onCreated: (project: ProjectD
             size="sm"
           >
             <Stepper.Step label="Welcome" description="What 10db does" />
-            <Stepper.Step label="Check your setup" description="Claude, git, gh" />
-            <Stepper.Step label="Add a project" description="A repository on this Mac" />
+            <Stepper.Step label="Check Your Setup" description="Claude, git, gh" />
+            <Stepper.Step label="Add a Project" description="A repository on this Mac" />
           </Stepper>
         </Stack>
 
@@ -189,7 +189,7 @@ export function FirstRun({ onCreated }: { readonly onCreated: (project: ProjectD
             {active === ADD_PROJECT ? (
               <Stack gap="lg">
                 <Title order={2} mb="xs">
-                  Add a project
+                  Add a Project
                 </Title>
                 {setup.fields}
               </Stack>

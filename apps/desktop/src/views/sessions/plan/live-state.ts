@@ -25,9 +25,9 @@ export function taskLiveWord(
     case BoardStatus.InProgress:
       return { word: 'Running', color: 'blue' };
     case BoardStatus.InReview:
-      return { word: 'In review', color: 'violet' };
+      return { word: 'In Review', color: 'violet' };
     case BoardStatus.Blocked:
-      return { word: 'Needs you', color: 'orange' };
+      return { word: 'Needs You', color: 'orange' };
     case BoardStatus.Done:
       return { word: 'Done', color: 'teal' };
     case BoardStatus.Ready:

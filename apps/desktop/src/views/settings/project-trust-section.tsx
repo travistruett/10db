@@ -46,7 +46,7 @@ const Choice = { App: 'app', On: 'on', Off: 'off' } as const;
 type Choice = (typeof Choice)[keyof typeof Choice];
 
 const CHOICES = [
-  { value: Choice.App, label: 'As app' },
+  { value: Choice.App, label: 'As App' },
   { value: Choice.On, label: 'On' },
   { value: Choice.Off, label: 'Off' },
 ];
@@ -151,7 +151,7 @@ function ComesAlong({ preview }: { readonly preview: SetupPreviewDto | undefined
   return (
     <Stack gap="xs" role="region" aria-labelledby={headingId}>
       <Title order={5} id={headingId}>
-        Comes along
+        Comes Along
       </Title>
       {preview === undefined ? null : (
         <>
@@ -171,7 +171,7 @@ function ComesAlong({ preview }: { readonly preview: SetupPreviewDto | undefined
           )}
           {preview.leftOut.length === 0 ? null : (
             <>
-              <Title order={5}>Left out</Title>
+              <Title order={5}>Left Out</Title>
               <FoldedList title="Left out" count={preview.leftOut.length}>
                 <List size="sm">
                   {preview.leftOut.map((item) => (
@@ -219,9 +219,9 @@ function LiveSystems({ projectId }: { readonly projectId: ProjectDto['id'] }) {
   const shown = set.isPending ? set.variables : (saved ?? []);
   return (
     <SettingsCard>
-      <SettingRow label="Live systems" description={LIVE_SYSTEMS_DESCRIPTION} stacked>
+      <SettingRow label="Live Systems" description={LIVE_SYSTEMS_DESCRIPTION} stacked>
         <TagsInput
-          aria-label="Live systems"
+          aria-label="Live Systems"
           value={[...shown]}
           maxTags={LIVE_SYSTEMS_MAX}
           maxLength={LIVE_SYSTEM_MAX_CHARS}
@@ -245,7 +245,7 @@ function AllowedInProject({ projectId }: { readonly projectId: ProjectDto['id'] 
   return (
     <Stack gap="xs" role="region" aria-labelledby={headingId}>
       <Title order={5} id={headingId}>
-        Allowed in this project
+        Allowed in This Project
       </Title>
       <Text size="sm" c="dimmed">
         {GRANTS_DESCRIPTION}
@@ -337,7 +337,7 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
         ))}
       </SettingsCard>
       {plugins.length === 0 ? null : (
-        <SettingsCard title="Your plugins in this project">
+        <SettingsCard title="Your Plugins in This Project">
           {plugins.map((plugin) => (
             <SettingRow key={plugin.id} label={plugin.id} description={plugin.version}>
               <SegmentedControl
@@ -356,7 +356,7 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
         </SettingsCard>
       )}
       {mcpServers.length === 0 ? null : (
-        <SettingsCard title="Your MCP servers in this project">
+        <SettingsCard title="Your MCP Servers in This Project">
           {mcpServers.map((server) => (
             <SettingRow
               key={server.key}

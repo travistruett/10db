@@ -41,7 +41,7 @@ const FIX_BY_OPTIONS = Object.values(FixBy).map((value) => ({
 }));
 const NO_REVIEW = 'Only for a review the change forces';
 const SHIPS_OPTIONS = [
-  { value: Ships.WithGoal, label: 'With its goal' },
+  { value: Ships.WithGoal, label: 'With Its Goal' },
   { value: Ships.Alone, label: 'Alone' },
 ];
 
@@ -80,11 +80,11 @@ function ProcessField({
           <Button
             size="compact-xs"
             variant="subtle"
-            aria-label={`${inProject ? 'Use global' : 'Reset'}: ${name}`}
+            aria-label={`${inProject ? 'Use Global' : 'Reset'}: ${name}`}
             disabled={source !== scope || busy}
             onClick={onReset}
           >
-            {inProject ? 'Use global' : 'Reset'}
+            {inProject ? 'Use Global' : 'Reset'}
           </Button>
         </Group>
       </Group>
@@ -167,7 +167,7 @@ export function PlaybookRowDrawer({
             </Stack>
           </ProcessField>
           <ProcessField
-            title="Review rounds"
+            title="Review Rounds"
             name="review rounds"
             source={row.reviewRounds.source}
             scope={scope}
@@ -178,7 +178,7 @@ export function PlaybookRowDrawer({
             }}
           >
             <SegmentedControl
-              aria-label="Review rounds"
+              aria-label="Review Rounds"
               data={ROUNDS}
               value={String(row.reviewRounds.value)}
               disabled={set.isPending}
@@ -188,7 +188,7 @@ export function PlaybookRowDrawer({
             />
           </ProcessField>
           <ProcessField
-            title="A send-back is fixed by"
+            title="A Send-Back Is Fixed By"
             name="send-back fix"
             source={row.fixBy.source}
             scope={scope}
@@ -199,7 +199,7 @@ export function PlaybookRowDrawer({
             }}
           >
             <Select
-              aria-label="A send-back is fixed by"
+              aria-label="A Send-Back Is Fixed By"
               data={FIX_BY_OPTIONS}
               value={row.fixBy.value}
               allowDeselect={false}
@@ -211,7 +211,7 @@ export function PlaybookRowDrawer({
             />
           </ProcessField>
           <ProcessField
-            title="Plan approval"
+            title="Plan Approval"
             name="plan approval"
             source={row.approvesPlan.source}
             scope={scope}
@@ -222,7 +222,7 @@ export function PlaybookRowDrawer({
             }}
           >
             <Switch
-              label="The builder approves the plan"
+              label="The Builder Approves the Plan"
               description="Build starts when you approve it in the Inbox."
               checked={row.approvesPlan.value && hasPlan}
               disabled={!hasPlan || set.isPending}
@@ -232,7 +232,7 @@ export function PlaybookRowDrawer({
             />
           </ProcessField>
           <ProcessField
-            title="Plan in the Build session"
+            title="Plan in the Build Session"
             name="plan in the build session"
             source={row.plansInBuild.source}
             scope={scope}
@@ -243,7 +243,7 @@ export function PlaybookRowDrawer({
             }}
           >
             <Switch
-              label="The Build session writes the plan first"
+              label="The Build Session Writes the Plan First"
               description="No separate Plan step runs: Build plans in its own session, and the task shows its plan."
               checked={row.plansInBuild.value && !keepsPlanStep(row)}
               disabled={keepsPlanStep(row) || set.isPending}

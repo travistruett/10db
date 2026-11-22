@@ -38,7 +38,7 @@ export function AddFixTask({ batch, workstreams, opened, onClose }: AddFixTaskPr
     onClose();
   };
   return (
-    <Modal opened={opened} onClose={close} title="Add a fix task">
+    <Modal opened={opened} onClose={close} title="Add a Fix Task">
       <Stack>
         <Text size="sm" c="dimmed">
           {`The task joins ${batch.title} and works in its worktree.`}
@@ -69,7 +69,7 @@ export function AddFixTask({ batch, workstreams, opened, onClose }: AddFixTaskPr
               );
             }}
           >
-            Add fix task
+            Add Fix Task
           </Button>
         </Group>
       </Stack>

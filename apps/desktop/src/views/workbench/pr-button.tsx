@@ -148,18 +148,18 @@ export function PrFoot({ view }: { readonly view: PassViewDto }) {
 /** "PR #633"; the address itself when it names no number. */
 function prName(url: string): string {
   const number = /\/pull\/(\d+)/.exec(url)?.[1];
-  return number === undefined ? 'Pull request' : `PR #${number}`;
+  return number === undefined ? 'Pull Request' : `PR #${number}`;
 }
 
 /** The gate on the pushed tip, in a word or two; null before anything was pushed. */
 function gateWord(view: PassViewDto): { readonly text: string; readonly color: string } | null {
   switch (view.checks.gate.state) {
     case 'running':
-      return { text: 'Checks running', color: 'blue' };
+      return { text: 'Checks Running', color: 'blue' };
     case 'passed':
-      return { text: 'Checks passed', color: 'green' };
+      return { text: 'Checks Passed', color: 'green' };
     case 'failed':
-      return { text: 'Checks failed', color: 'red' };
+      return { text: 'Checks Failed', color: 'red' };
     case 'not_run':
       return null;
   }

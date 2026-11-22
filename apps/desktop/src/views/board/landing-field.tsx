@@ -22,7 +22,7 @@ export function LandingField({
   return (
     <Stack gap="xs">
       <Radio.Group
-        label="Where it lands"
+        label="Where It Lands"
         description="Merging happens on GitHub, once the pull request's required checks pass."
         value={value.kind}
         onChange={(kind) => {
@@ -43,7 +43,7 @@ export function LandingField({
       </Radio.Group>
       {value.kind === 'branch' ? (
         <TextInput
-          label="Branch to merge into"
+          label="Branch to Merge Into"
           description="It has to exist on origin. The task is built from it, and its pull request merges into it."
           placeholder="feature/search"
           disabled={disabled}

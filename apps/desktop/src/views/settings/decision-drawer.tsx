@@ -86,10 +86,10 @@ function DrawerBody({
         keyed={status.account !== null && status.account.secretState === 'set'}
       />
       <Text size="sm">{entry.asks}</Text>
-      <Section title="On each answer">
+      <Section title="On Each Answer">
         <Text size="sm">{entry.onAnswer}</Text>
       </Section>
-      <Section title="When it isn’t sure">
+      <Section title="When It Isn’t Sure">
         <Text size="sm">{entry.whenUnsure}</Text>
       </Section>
       {entry.mode === DecisionMode.Shadow ? (
@@ -104,7 +104,7 @@ function DrawerBody({
           </Text>
           {shadow?.canShow ? (
             <Badge size="xs" variant="light" w="fit-content">
-              Ready to show
+              Ready to Show
             </Badge>
           ) : null}
         </Stack>
@@ -128,7 +128,7 @@ function DrawerBody({
       <Section title="Model">
         <DecisionModelPicker decision={decision} status={status} disabled={disabled} />
       </Section>
-      <Section title="Sure enough">
+      <Section title="Sure Enough">
         <SureEnough
           decision={decision}
           floor={config.floor}
@@ -138,7 +138,7 @@ function DrawerBody({
           disabled={disabled}
         />
       </Section>
-      <Section title="Last 30 days">
+      <Section title="Last 30 Days">
         <Text size="sm">
           {stats === undefined
             ? '—'

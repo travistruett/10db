@@ -43,7 +43,7 @@ export function CardTypesPanel({ projectId }: { readonly projectId: ProjectId | 
   const types = useCardTypes(projectId);
   return (
     <Stack gap="xs">
-      <Title order={3}>Inbox card types</Title>
+      <Title order={3}>Inbox Card Types</Title>
       <Text size="sm" c="dimmed">
         Cards raised, answered with a real choice, dismissed and withdrawn by 10db, per type of
         card. A type mostly dismissed or withdrawn is marked noisy.
@@ -61,7 +61,7 @@ export function CardTypesPanel({ projectId }: { readonly projectId: ProjectId | 
           </Text>
         ) : (
           <Table.ScrollContainer minWidth={720}>
-            <Table aria-label="Inbox card types" striped withTableBorder>
+            <Table aria-label="Inbox Card Types" striped withTableBorder>
               <Table.Thead>
                 <Table.Tr>
                   {COLUMNS.map((name, index) => (

@@ -142,7 +142,7 @@ export function NeedsYou({
   const failed = rows.flatMap((row) => (row.failed ? [{ row, ws: row.failed }] : []));
   if (cards.length === 0 && failed.length === 0) return null;
   return (
-    <Zone title="Needs you">
+    <Zone title="Needs You">
       <Stack gap={4}>
         {cards.map((card) => (
           <Group key={card.inboxItemId} gap="xs" wrap="nowrap" justify="space-between">
@@ -202,7 +202,7 @@ export function NeedsYou({
 export function WaitingOnOthers({ digest }: { readonly digest: GoalDigestDto }) {
   if (digest.waitingOnSomeone.length === 0) return null;
   return (
-    <Zone title="Waiting on others">
+    <Zone title="Waiting on Others">
       <Stack gap={4}>
         {digest.waitingOnSomeone.map((card) => (
           <Group key={card.inboxItemId} gap="xs" wrap="nowrap" justify="space-between">
@@ -305,7 +305,7 @@ export function SinceYouLooked({ opened }: { readonly opened: OpenedDigest }) {
     : [];
   const title =
     since === null
-      ? 'Since you last looked'
+      ? 'Since You Last Looked'
       : `Since you last looked (${shortAgo(since, now).replace(' ago', '')})`;
   const summary = window ? (counts.length === 0 ? 'nothing new' : counts.join(' · ')) : undefined;
   return (
@@ -341,7 +341,7 @@ export function SinceYouLooked({ opened }: { readonly opened: OpenedDigest }) {
 /** The collapsed "About this goal" section: the objective and the criteria, read-only. */
 export function AboutGoal({ goal }: { readonly goal: GoalDto }) {
   return (
-    <Disclosure title="About this goal" summary="objective, criteria">
+    <Disclosure title="About This Goal" summary="objective, criteria">
       <Stack gap="xs">
         <Zone title="Objective">
           <Text size="sm">{goal.objective}</Text>

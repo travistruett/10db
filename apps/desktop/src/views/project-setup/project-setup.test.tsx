@@ -20,7 +20,7 @@ it('shows only the folder control at first', async () => {
   renderWithDaemon(<Harness />);
   await screen.findByRole('textbox', { name: 'Folder path' });
   expect(screen.queryByRole('textbox', { name: 'Name' })).toBeNull();
-  expect(screen.queryByRole('textbox', { name: 'Gate command' })).toBeNull();
+  expect(screen.queryByRole('textbox', { name: 'Gate Command' })).toBeNull();
   expect(screen.getByRole('button', { name: 'Create Project' }).hasAttribute('disabled')).toBe(
     true,
   );

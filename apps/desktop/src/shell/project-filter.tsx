@@ -23,7 +23,7 @@ export function ProjectFilter({
       w={200}
       allowDeselect={false}
       data={[
-        { value: ALL, label: 'All projects' },
+        { value: ALL, label: 'All Projects' },
         ...projects.map((p) => ({ value: p.id, label: p.name })),
       ]}
       value={value ?? ALL}

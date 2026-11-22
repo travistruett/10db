@@ -48,7 +48,7 @@ describe('MCP approval card', () => {
     expect(queryText(/declares this stdio server/)).toBeNull();
     expect(getText('LOG_LEVEL')).toBeTruthy();
     expect(queryText(/Environment it gets/)).toBeNull();
-    expect(screen.getByRole('radio', { name: /Approve for this project/ })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: /Approve for This Project/ })).toBeTruthy();
     expect(screen.getByRole('radio', { name: /Deny/ })).toBeTruthy();
   });
 });

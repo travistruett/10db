@@ -88,9 +88,9 @@ export function rowDot(
   if (isConverted(row)) return null;
   switch (row.mark) {
     case 'new':
-      return { label: 'New this round', color: 'blue' };
+      return { label: 'New This Round', color: 'blue' };
     case 'changed':
-      return { label: 'Changed this round', color: 'blue' };
+      return { label: 'Changed This Round', color: 'blue' };
     case 'moved':
     case null:
       return null;

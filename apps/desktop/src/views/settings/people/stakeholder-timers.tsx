@@ -39,9 +39,9 @@ export function StakeholderTimers() {
   const back = typed.back ?? current.returnAfterHours;
   return (
     <Stack gap="xs">
-      <SettingsCard title="When someone hasn't answered">
+      <SettingsCard title="When Someone Hasn't Answered">
         <SettingRow
-          label="Remind them after"
+          label="Remind Them After"
           description="One reminder in their thread. Turn it off to never nudge."
         >
           <Group gap="sm" justify="flex-end" wrap="nowrap">
@@ -80,7 +80,7 @@ export function StakeholderTimers() {
           </Group>
         </SettingRow>
         <SettingRow
-          label="Bring it back to you after"
+          label="Bring It Back to You After"
           description="The question comes back to your Inbox, where you answer it or keep waiting."
         >
           <Group gap="sm" justify="flex-end" wrap="nowrap">

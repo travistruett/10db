@@ -24,10 +24,10 @@ import { categoryWord } from '../inbox/route-line';
 import { ruleInputs } from './route-rows';
 
 const Scope = {
-  Project: 'The whole project',
+  Project: 'The Whole Project',
   Goal: 'A goal',
   Task: 'A task',
-  Area: 'An area',
+  Area: 'An Area',
   Topic: 'A topic',
 } as const;
 type Scope = (typeof Scope)[keyof typeof Scope];
@@ -150,7 +150,7 @@ function RouteForm({
       ) : null}
       {isTopic ? (
         <TextInput
-          label="What it's about, in a few words"
+          label="What It's About, in a Few Words"
           description="A topic route is project-wide."
           value={topic}
           onChange={(event) => {
