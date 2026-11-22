@@ -5,7 +5,7 @@ import { NativeSelect, Stack, Text, TextInput } from '@mantine/core';
 export type RoleChoice = AreaRole | '';
 
 const ROLE_OPTIONS = [
-  { value: '', label: 'No role' },
+  { value: '', label: 'No Role' },
   { value: AreaRole.Page, label: 'Page' },
   { value: AreaRole.Shared, label: 'Shared' },
 ];

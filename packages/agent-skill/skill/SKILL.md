@@ -141,9 +141,9 @@ When the builder asks you to check a project, or after one is added or changed, 
 
 - **gate**: `gate.command` is the command the repo's own docs say proves a change (its AGENTS.md or Makefile), and
   runs from the repo root. `changedCheck` and `precheck` are optional faster checks; null is fine.
-- **delivery and landing**: `delivery.label` is "Open a pull request" or "Commit directly". Under pull requests,
+- **delivery and landing**: `delivery.label` is "Open a Pull Request" or "Commit Directly". Under pull requests,
   `baseBranch` exists on origin and is the branch the repo opens PRs to, and `landing.label` says whether GitHub
-  merges by itself or holds for the builder. Under "Commit directly", Settings hides both and `note` says so.
+  merges by itself or holds for the builder. Under "Commit Directly", Settings hides both and `note` says so.
 - **account**: `account.label` is the account the builder meant for this repo; `fallbackAccount` takes over when it
   runs out, or is null.
 - **defaultRigor**: what a task gets when no rule or kind sizes it.

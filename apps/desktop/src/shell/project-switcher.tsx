@@ -69,7 +69,7 @@ export function ProjectSwitcher() {
       >
         <div className={classes['tileHost']}>
           <Tooltip
-            label={project?.name ?? 'Choose a project'}
+            label={project?.name ?? 'Choose a Project'}
             position="right"
             disabled={combobox.dropdownOpened || labels}
           >
@@ -85,7 +85,7 @@ export function ProjectSwitcher() {
                   <>
                     <ProjectTile name={project?.name ?? '?'} size={20} />
                     <span className={classes['projectName']}>
-                      {project?.name ?? 'Choose a project'}
+                      {project?.name ?? 'Choose a Project'}
                     </span>
                     <IconChevronDown size={12} stroke={1.8} aria-hidden />
                   </>

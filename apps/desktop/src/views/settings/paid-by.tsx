@@ -54,7 +54,7 @@ function PaidByState({
               account.awsProfile ? `Signs in with AWS profile ${account.awsProfile}` : 'Key set'
             }
           />
-          <AccountLink account={account}>View account</AccountLink>
+          <AccountLink account={account}>View Account</AccountLink>
         </Group>
         {off || !account.fallback ? null : (
           <ConnectionStatus
@@ -71,7 +71,7 @@ function PaidByState({
   return (
     <Stack gap={2}>
       <ConnectionStatus tone={ConnectionTone.NeedsYou} label={problem} />
-      <AccountLink account={account}>Set the key again in Accounts</AccountLink>
+      <AccountLink account={account}>Set the Key Again in Accounts</AccountLink>
     </Stack>
   );
 }
@@ -93,7 +93,7 @@ export function PaidBy({
   return (
     <div ref={ref}>
       <SettingRow
-        label="Paid by"
+        label="Paid By"
         description="The account whose API answers 10db’s decisions: OpenRouter, an Anthropic API key or Bedrock. A plan login has no API for quick decisions."
       >
         {accounts.isPending ? (
@@ -105,7 +105,7 @@ export function PaidBy({
         ) : canDecide ? (
           <Stack gap={4}>
             <AccountSelect
-              aria-label="Paid by"
+              aria-label="Paid By"
               placeholder="Pick an account"
               accounts={live}
               isDisabled={cantRunDecisions}

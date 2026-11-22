@@ -217,7 +217,7 @@ export function AccountsSection() {
             <Table.Th w={220}>Kind</Table.Th>
             <Table.Th w={140}>Status</Table.Th>
             <Table.Th w={220} ta="right">
-              This month
+              This Month
             </Table.Th>
           </Table.Tr>
         </Table.Thead>

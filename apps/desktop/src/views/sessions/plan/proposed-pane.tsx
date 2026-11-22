@@ -74,8 +74,11 @@ export interface ProposedPaneProps {
 const PANEL_INSET_PX = 40;
 /** A row's own inset, inside which its hover tone is drawn. */
 const ROW_INSET_PX = 12;
-/** On the Plan page, where text lines up with the tabs' labels and the chevrons hang inside. */
-const PAGE_INSET_PX = 24;
+/**
+ * On the Plan page: a row's text starts where the tabs' labels and the record tables' first column do
+ * (Mantine's tab and table padding, 16 px); a section's chevron hangs in the 4 px left over.
+ */
+const PAGE_INSET_PX = 16;
 
 /** The sidebar: a header, a pinned summary line and the list of proposals, each editable in place. */
 export function ProposedPane({
@@ -313,7 +316,7 @@ export function ProposedPane({
                   </Tooltip>
                 </Menu.Target>
                 <Menu.Dropdown>
-                  <Menu.Label>Review before you accept</Menu.Label>
+                  <Menu.Label>Review Before You Accept</Menu.Label>
                   {REVIEW_ITEMS.map((item) => (
                     <Menu.Item
                       key={item.kind}

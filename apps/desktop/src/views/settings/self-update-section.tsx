@@ -122,7 +122,7 @@ export function SelfUpdateSection() {
       ) : null}
       {data !== undefined ? (
         <SettingRow
-          label="Pause lanes for a waiting update"
+          label="Pause Lanes for a Waiting Update"
           description="When a newer build has waited this many minutes for an idle moment, 10db stops starting new steps and lets the running ones finish, then installs and restarts. Nothing running is stopped. 0 pauses at once."
         >
           <WaitLimit key={data.waitMinutes} minutes={data.waitMinutes} />

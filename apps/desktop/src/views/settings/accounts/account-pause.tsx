@@ -10,9 +10,9 @@ export function formatMoment(iso: string): string {
 }
 
 const REASON_LABEL: Readonly<Record<AccountPauseReason, string>> = {
-  [AccountPauseReason.Refused]: 'Sessions refused',
-  [AccountPauseReason.MonthlyCap]: 'Monthly cap reached',
-  [AccountPauseReason.UsageLimit]: 'Usage limit reached',
+  [AccountPauseReason.Refused]: 'Sessions Refused',
+  [AccountPauseReason.MonthlyCap]: 'Monthly Cap Reached',
+  [AccountPauseReason.UsageLimit]: 'Usage Limit Reached',
 };
 
 /** Only a usage-limit pause ends by itself; the other two wait until the builder lifts them. */

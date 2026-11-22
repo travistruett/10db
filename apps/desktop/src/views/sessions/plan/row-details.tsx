@@ -160,7 +160,7 @@ export function RowDetails({ row, sizes, notes, links, attachments, actions }: R
           {...block}
           criteria={row.body.criteria.map((c) => `${c.text} (${c.check})`)}
           facts={[
-            row.body.ceremony === 'spec' ? 'Spec first' : 'Direct, no spec',
+            row.body.ceremony === 'spec' ? 'Spec First' : 'Direct, No Spec',
             ...(off === 0 ? [] : [`${String(off)} mis-sized`]),
           ]}
         />
@@ -193,10 +193,10 @@ export function RowDetails({ row, sizes, notes, links, attachments, actions }: R
         <DetailBlock {...block} more={<Labelled label="Why">{row.body.rationale}</Labelled>} />
       );
     case 'question':
-      return <DetailBlock {...block} more={<Labelled label="Asked of">{row.body.for}</Labelled>} />;
+      return <DetailBlock {...block} more={<Labelled label="Asked Of">{row.body.for}</Labelled>} />;
     case 'landing':
       return (
-        <DetailBlock {...block} more={<Items label="Lands together" items={row.body.keys} />} />
+        <DetailBlock {...block} more={<Items label="Lands Together" items={row.body.keys} />} />
       );
     case 'change_task':
       return (

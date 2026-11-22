@@ -14,5 +14,5 @@ export const STATUS_LABEL: Readonly<Record<ModelStatus, string>> = {
   [ModelStatus.Superseded]: 'Superseded',
   [ModelStatus.Retired]: 'Retired',
   [ModelStatus.Unknown]: 'Unknown',
-  [ModelStatus.NotRunnable]: 'Not runnable',
+  [ModelStatus.NotRunnable]: 'Not Runnable',
 };

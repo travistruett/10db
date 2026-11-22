@@ -113,7 +113,7 @@ export function ConnectAccount({
               });
             }}
           >
-            Replace this login
+            Replace This Login
           </Button>
           <Button
             size="md"

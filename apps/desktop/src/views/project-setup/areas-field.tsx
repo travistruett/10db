@@ -124,7 +124,7 @@ export function AreasField({ drafts, note, onChange }: AreasFieldProps) {
                     </ActionIcon>
                   </Menu.Target>
                   <Menu.Dropdown>
-                    <Menu.Label>Merge into</Menu.Label>
+                    <Menu.Label>Merge Into</Menu.Label>
                     {others.map((other) => (
                       <Menu.Item
                         key={other.key}
@@ -187,7 +187,7 @@ export function AreasField({ drafts, note, onChange }: AreasFieldProps) {
             onChange(addDraft(drafts));
           }}
         >
-          Add area
+          Add Area
         </Button>
       </Group>
     </Stack>

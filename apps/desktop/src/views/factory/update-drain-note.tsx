@@ -24,13 +24,13 @@ function noteFor(status: SelfUpdateStatusDto): Note | null {
   const waitsFor = updateWaitsFor(status);
   if (status.draining && status.drainingSince !== null)
     return {
-      label: 'Update draining the factory',
+      label: 'Update Draining the Factory',
       text: `Lanes are paused since ${absoluteTime(status.drainingSince)} for an update to ${build}: what is running finishes, then 10db installs and restarts, and lanes resume. ${waitsFor}`,
       color: 'var(--mantine-color-yellow-6)',
     };
   if (status.waitingSince !== null)
     return {
-      label: 'Update waiting',
+      label: 'Update Waiting',
       text: `An update to ${build} is waiting since ${absoluteTime(status.waitingSince)} for a moment when nothing is mid-session. If none comes within ${String(status.waitMinutes)} minutes, lanes pause until it has installed. ${waitsFor}`.trimEnd(),
       color: 'var(--mantine-color-dimmed)',
     };
@@ -60,7 +60,7 @@ export function UpdateDrainNote() {
             />
           )}
         >
-          Update settings
+          Update Settings
         </Anchor>
       </Text>
     </Group>

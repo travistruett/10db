@@ -67,7 +67,7 @@ export function TargetSelect({
 }) {
   return (
     <Select
-      label="Applies to"
+      label="Applies To"
       allowDeselect={false}
       checkIconPosition="right"
       data={[

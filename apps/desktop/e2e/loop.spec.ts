@@ -115,7 +115,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
     await taskDialog.getByLabel('Title').fill(title);
     if (title === OTHER) await expectAccessible(page, 'new task, dark');
     await taskDialog
-      .getByLabel('Acceptance criteria', { exact: true })
+      .getByLabel('Acceptance Criteria', { exact: true })
       .fill('src/greeting/hello.txt exists');
     await taskDialog.getByRole('button', { name: 'Create Task' }).click();
     await expect(taskDialog).toBeHidden();
@@ -175,7 +175,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   // Start through the batch sheet. The project delivers locally, so it starts each ticked task.
   await page.getByRole('button', { name: 'More board actions' }).click();
   await page.getByRole('menuitem', { name: /Start Ready Tasks/ }).click();
-  const sheet = page.getByRole('dialog', { name: 'Start a batch' });
+  const sheet = page.getByRole('dialog', { name: 'Start a Batch' });
   // Planning the other task put it at the top of Ready, so board order proposes it. Both claim the
   // only area, so the picker leaves this task out and says why.
   await expect(sheet.getByRole('checkbox', { name: OTHER })).toBeChecked();
@@ -205,7 +205,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await away.click();
   // The row's own second line quotes the card's first words, so the card is read in the content beside it.
   const content = page.getByRole('main');
-  await expect(content.getByText('Questions it would have asked:')).toBeVisible();
+  await expect(content.getByText('Questions It Would Have Asked:')).toBeVisible();
   await expect(content.getByText(QUESTION)).toBeVisible();
   await expectAccessible(page, 'inbox, skipped while away, dark');
   await page.getByRole('radio', { name: /Dismiss/ }).check();
@@ -233,7 +233,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(taskDrawer).toBeVisible();
   // What the build wrote last is on the card under its own phase, apart from the review's verdict.
   const report = taskDrawer.getByTestId('task-report');
-  await expect(report.getByText('Implementation report')).toBeVisible();
+  await expect(report.getByText('Implementation Report')).toBeVisible();
   await expect(report.getByText('Wrote src/greeting/hello.txt and committed it.')).toBeVisible();
   await taskDrawer.getByRole('tab', { name: /Reviews/ }).click();
   await expect(taskDrawer.getByTestId('review-phase').first()).toHaveText('Review');
@@ -257,7 +257,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(decisions.getByText('hello.txt')).toBeVisible();
   await expectAccessible(page, 'knowledge, decisions, dark');
   await decisions.getByRole('button', { name: /^Where .* came from$/ }).click();
-  const provenance = page.getByRole('dialog', { name: 'Where it came from' });
+  const provenance = page.getByRole('dialog', { name: 'Where It Came From' });
   await expect(provenance.getByText('Claude Code')).toBeVisible();
   await expect(provenance.getByText('keep it hello.txt')).toBeVisible();
   await expectAccessible(page, 'knowledge, provenance, dark');
@@ -307,7 +307,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expectAccessible(page, 'settings, overview, dark');
   await chooseScope(page, 'This Project');
   await page.getByRole('link', { name: /Board columns/ }).click();
-  await page.getByLabel('New column').fill('Exploring');
+  await page.getByLabel('New Column').fill('Exploring');
   const addColumn = page.getByRole('button', { name: 'Add Column' });
   await addColumn.click();
   await expect(
@@ -333,7 +333,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await addAccount.getByRole('button', { name: 'Create' }).click();
   await expect(addAccount).toBeHidden();
   const drawer = page.getByRole('dialog', { name: 'Company A' });
-  await drawer.getByRole('button', { name: 'Sign in from Terminal instead' }).click();
+  await drawer.getByRole('button', { name: 'Sign In from Terminal Instead' }).click();
   await expect(drawer.getByText(/CLAUDE_CONFIG_DIR=.* claude \/login/)).toBeVisible();
   await drawer.getByRole('button', { name: 'Check sign-in' }).click();
   await drawer.getByRole('button', { name: 'Confirm' }).click();
@@ -347,20 +347,20 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(companyA.getByText('Ready')).toBeVisible();
 
   // An API key account starts without a secret. Saving one would write the login Keychain, so the
-  // end to end run stops at "No secret yet".
+  // end to end run stops at "No Secret Yet".
   await page.getByRole('button', { name: 'Add Account' }).click();
   await addAccount.getByLabel('Kind').click();
   await page.getByRole('option', { name: 'Anthropic API key' }).click();
   await addAccount.getByRole('textbox', { name: 'Label' }).fill('Client B');
-  await addAccount.getByRole('textbox', { name: 'Monthly cap (USD)' }).fill('500');
+  await addAccount.getByRole('textbox', { name: 'Monthly Cap (USD)' }).fill('500');
   await addAccount.getByRole('button', { name: 'Create' }).click();
   await expect(addAccount).toBeHidden();
   const clientB = page.getByRole('dialog', { name: /Client B/ });
-  await expect(clientB.getByText('No secret yet')).toBeVisible();
+  await expect(clientB.getByText('No Secret Yet')).toBeVisible();
   await clientB.getByRole('button', { name: 'Close' }).click();
   await expect(clientB).toBeHidden();
   await expect(
-    accounts.getByRole('row', { name: /Client B/ }).getByText('Needs a secret'),
+    accounts.getByRole('row', { name: /Client B/ }).getByText('Needs a Secret'),
   ).toBeVisible();
 
   // An OpenRouter account runs Codex, so a project's Billing picker offers it. Saving its key would write
@@ -368,15 +368,15 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await page.route(/\/accounts\/[^/]+\/secret$/, (route) => route.abort());
   await page.getByRole('button', { name: 'Add Account' }).click();
   await addAccount.getByLabel('Kind').click();
-  await page.getByRole('option', { name: 'OpenRouter key' }).click();
+  await page.getByRole('option', { name: 'OpenRouter Key' }).click();
   await addAccount.getByRole('textbox', { name: 'Label' }).fill('Router C');
-  await addAccount.getByLabel('OpenRouter key').fill('not-a-key');
+  await addAccount.getByLabel('OpenRouter Key').fill('not-a-key');
   await addAccount.getByRole('button', { name: 'Create' }).click();
   await expect(addAccount.getByRole('alert')).toContainText("key wasn't saved");
   await addAccount.getByRole('button', { name: 'Open Account' }).click();
   await expect(addAccount).toBeHidden();
   const routerC = page.getByRole('dialog', { name: /Router C/ });
-  await expect(routerC.getByText('No secret yet')).toBeVisible();
+  await expect(routerC.getByText('No Secret Yet')).toBeVisible();
   await routerC.getByRole('button', { name: 'Close' }).click();
   await expect(accounts.getByRole('row', { name: /Router C/ })).toContainText('Runs Codex');
   await page.unroute(/\/accounts\/[^/]+\/secret$/);
@@ -455,7 +455,7 @@ test('records, edits, retires and withdraws knowledge, and a reload loses nothin
     .getByRole('row', { name: /Never sleep in tests/ })
     .getByRole('button', { name: /^Where .* came from$/ })
     .click();
-  const drawer = page.getByRole('dialog', { name: 'Where it came from' });
+  const drawer = page.getByRole('dialog', { name: 'Where It Came From' });
   await expect(drawer.getByText('The app')).toBeVisible();
   await drawer.getByRole('button', { name: 'Replaced by: Tests never sleep' }).click();
   await expect(
@@ -485,7 +485,7 @@ test('records, edits, retires and withdraws knowledge, and a reload loses nothin
     'Remove',
   );
   const retire = page.getByRole('dialog', { name: 'Remove Principle' });
-  await retire.getByRole('radio', { name: 'It no longer applies' }).check();
+  await retire.getByRole('radio', { name: 'It No Longer Applies' }).check();
   await retire.getByRole('button', { name: 'Remove' }).click();
   await expect(retire.getByText('Say why.')).toBeVisible();
   await retire.getByLabel('Reason').fill('Fake timers make waiting free');

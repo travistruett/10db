@@ -62,7 +62,7 @@ function CloseLists({ view, preview, choices, onChoices, disabled }: ListsProps)
   return (
     <Stack gap="lg">
       {preview.unfinished.length === 0 ? null : (
-        <Section title="Not committed">
+        <Section title="Not Committed">
           {preview.unfinished.map((page) => {
             const label = labelOf(page.taskId, page.title);
             const choice = pageChoice(choices, page.taskId);
@@ -117,7 +117,7 @@ function CloseLists({ view, preview, choices, onChoices, disabled }: ListsProps)
         </Section>
       )}
       {preview.unowned.length === 0 ? null : (
-        <Section title="Edits no page owns">
+        <Section title="Edits No Page Owns">
           {preview.unowned.map((file) => (
             <Group key={file.path} gap="sm" wrap="nowrap" justify="space-between">
               <Stack gap={0} style={{ minWidth: 0 }}>
@@ -156,7 +156,7 @@ function CloseLists({ view, preview, choices, onChoices, disabled }: ListsProps)
         </Section>
       )}
       {preview.foreignCommits.length === 0 ? null : (
-        <Section title="Commits 10db did not make">
+        <Section title="Commits 10db Did Not Make">
           <Text size="sm">These commits ride the pull request:</Text>
           <List size="sm" spacing={2}>
             {preview.foreignCommits.map((commit) => (

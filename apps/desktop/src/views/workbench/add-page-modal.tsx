@@ -90,7 +90,7 @@ export function AddPageModal({
             inPass={view.pages.map((page) => page.area)}
           />
           <Textarea
-            label="First message"
+            label="First Message"
             description="Sent to each new page. Left empty, each waits for yours."
             autosize
             minRows={1}

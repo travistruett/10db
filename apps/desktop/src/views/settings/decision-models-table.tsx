@@ -136,7 +136,7 @@ export function DecisionModelsTable({
     )),
     {
       accessor: 'usedBy',
-      title: 'Used by',
+      title: 'Used By',
       render: (m) => {
         const names = (usedBy.get(m.id) ?? []).map((d) => DECISIONS[d].label).join(', ');
         return (

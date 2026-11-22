@@ -162,7 +162,7 @@ function indicatorsOf(
     sharedWith > 1
       ? {
           kind: 'shared-branch',
-          label: 'Shared branch',
+          label: 'Shared Branch',
           color: 'gray',
           tooltip: `${String(sharedWith)} tasks share this branch`,
         }
@@ -175,7 +175,7 @@ function indicatorsOf(
         }
       : null,
     waits.length > 0
-      ? { kind: 'waits-on', label: 'Waits on', color: 'gray', tooltip: waits.join(', ') }
+      ? { kind: 'waits-on', label: 'Waits On', color: 'gray', tooltip: waits.join(', ') }
       : null,
     task.status === TaskStatus.Cancelled
       ? { kind: 'cancelled', label: 'Cancelled', color: 'gray' }

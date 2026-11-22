@@ -113,7 +113,7 @@ export function useDismissFinding(shapeId: ShapeId | null) {
   });
 }
 
-/** Which review a press asks for: Plan review, Check for Questions (the rehearsal), or Design review. */
+/** Which review a press asks for: Plan review, Find Open Questions (the rehearsal), or Design review. */
 export type ReviewKind = 'review' | 'rehearse' | 'design_review';
 
 /**

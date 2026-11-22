@@ -25,9 +25,9 @@ export function StartFrom({
 }) {
   if (starts.length === 0) return null;
   return (
-    <Stack gap={4} component="section" aria-label="Start from">
+    <Stack gap={4} component="section" aria-label="Start From">
       <Text size="xs" fw={600} c="dimmed">
-        Start from
+        Start From
       </Text>
       {starts.map((start) => (
         <Button

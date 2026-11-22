@@ -137,7 +137,7 @@ export function IdentityCheck({
           )}
           {result.models.length === 0 ? null : (
             <Stack gap={2}>
-              <Text size="sm">Models this account offers</Text>
+              <Text size="sm">Models This Account Offers</Text>
               {result.models.map((model) => (
                 <Text key={model} size="sm" c="dimmed">
                   {model}

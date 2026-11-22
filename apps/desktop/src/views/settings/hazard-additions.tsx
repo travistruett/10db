@@ -81,7 +81,7 @@ export function HazardAdditions({ project }: { readonly project: ProjectDto }) {
             look.mutate();
           }}
         >
-          Look again
+          Look Again
         </Button>
       </Group>
       {look.data?.ok === true ? (

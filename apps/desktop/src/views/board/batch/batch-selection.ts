@@ -26,7 +26,7 @@ export function orderedSelection(
 }
 
 const WHERE: Record<WorkspaceMode, string> = {
-  [WorkspaceMode.Shared]: 'Your folder',
+  [WorkspaceMode.Shared]: 'Your Folder',
   [WorkspaceMode.Worktree]: 'a separate copy',
 };
 

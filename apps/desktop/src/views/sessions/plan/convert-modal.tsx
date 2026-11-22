@@ -312,7 +312,7 @@ export function ConvertModal({
             {/* Ticks only when there is a choice to make: one row is simply what Accept takes. */}
             {listed.length === 1 && rows.length === 1 ? null : (
               <Text size="xs" fw={600} c="dimmed">
-                Choose what to accept
+                Choose What to Accept
               </Text>
             )}
             {listed.map((row) =>

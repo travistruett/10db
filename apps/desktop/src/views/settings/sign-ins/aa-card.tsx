@@ -147,7 +147,7 @@ function Actions({ status }: { readonly status: BenchmarkStatusDto }) {
       ) : null}
       <ConfirmModal
         opened={removing}
-        title="Remove the Artificial Analysis key?"
+        title="Remove the Artificial Analysis Key?"
         confirmLabel="Remove Key"
         destructive
         loading={busy}

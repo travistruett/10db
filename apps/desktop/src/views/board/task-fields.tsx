@@ -31,7 +31,7 @@ export function RigorSelect({ value, projectId, kindKeys, onChange, ...props }: 
           value: FOLLOW,
           label:
             projectDefault === undefined
-              ? 'Project default'
+              ? 'Project Default'
               : projectDefaultLabel(kinds, kindKeys, projectDefault),
         },
         ...options.map((o) => ({ value: o.value, label: o.label, disabled: o.disabled })),

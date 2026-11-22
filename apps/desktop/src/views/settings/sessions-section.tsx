@@ -18,11 +18,11 @@ export function SessionsSection() {
   return (
     <SettingsCard>
       <SettingRow
-        label="Notify when a chat replies"
+        label="Notify When a Chat Replies"
         description="While 10db is behind another app, a chat's reply raises a notification with its first line."
       >
         <Switch
-          aria-label="Notify when a chat replies"
+          aria-label="Notify When a Chat Replies"
           checked={settings.data?.notifyReplies ?? true}
           disabled={settings.data === undefined}
           onChange={(event) => {
@@ -31,11 +31,11 @@ export function SessionsSection() {
         />
       </SettingRow>
       <SettingRow
-        label="Open sessions in"
+        label="Open Sessions In"
         description="Open in Terminal continues a chat in this app. Copy the Command opens nothing and gives you a line for zsh or bash, to paste into any terminal, such as Ghostty, Warp or kitty."
       >
         <SegmentedControl
-          aria-label="Open sessions in"
+          aria-label="Open Sessions In"
           data={TERMINAL_CHOICES.map((choice) => ({ ...choice }))}
           value={settings.data?.terminalApp ?? TerminalApp.Terminal}
           disabled={settings.data === undefined}

@@ -121,7 +121,7 @@ function Choices({ project, proposal, onStarted }: ChoicesProps) {
       {mode.kind === 'new_batch' ? (
         <>
           <TextInput
-            label="Batch title"
+            label="Batch Title"
             description="The pull request's title, after the project's prefix."
             value={batchTitle}
             onChange={(e) => {
@@ -229,12 +229,12 @@ export function BatchSheet({ project, opened, onClose, goal }: BatchSheetProps) 
       onClose={onClose}
       position="right"
       size="xl"
-      title="Start a batch"
+      title="Start a Batch"
       closeButtonProps={{ 'aria-label': 'Close' }}
     >
       <Stack>
         <NumberInput
-          label="Batch size"
+          label="Batch Size"
           min={1}
           max={PICK_MAX}
           value={size}

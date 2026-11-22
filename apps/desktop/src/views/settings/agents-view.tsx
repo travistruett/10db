@@ -31,8 +31,8 @@ import { ROLES } from './role-labels';
 const NO_FILTER: ModelFilter = { query: '', tiers: [], accountId: null };
 
 const DOTS_LABELS = [
-  { value: DotsMode.Every, label: 'Every effort' },
-  { value: DotsMode.Frontier, label: 'Frontier only' },
+  { value: DotsMode.Every, label: 'Every Effort' },
+  { value: DotsMode.Frontier, label: 'Frontier Only' },
 ] as const;
 
 const isDotsMode = (value: string): value is DotsMode =>
@@ -127,7 +127,7 @@ export function AgentsView({ account }: { readonly account: AccountDto }) {
       <Stack gap="xs">
         <Group justify="space-between">
           <Title order={4} size="md" fw={600}>
-            Intelligence and cost
+            Intelligence and Cost
           </Title>
           <Group gap="xs" wrap="nowrap">
             <Select
@@ -176,7 +176,7 @@ export function AgentsView({ account }: { readonly account: AccountDto }) {
       </Stack>
       <Stack gap="xs">
         <Title order={4} size="md" fw={600}>
-          All models
+          All Models
         </Title>
         {everyModel.length === 0 ? (
           <Text c="dimmed">

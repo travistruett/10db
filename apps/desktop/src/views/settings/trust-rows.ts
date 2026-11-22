@@ -24,41 +24,41 @@ const ROWS: Readonly<Record<TrustSwitchKey, Omit<TrustRow, 'key'>>> = {
       "Codex searches the web live on OpenAI's servers, so 10db's judge doesn't see a search or page URL before it is fetched.",
   },
   projectInstructions: {
-    label: 'Project instructions',
+    label: 'Project Instructions',
     description: `The project's AGENTS.md, CLAUDE.md and .claude/rules, in each session's instructions. ${NEXT}`,
     providers:
       'Claude: in the system prompt. Codex: as developer instructions, since Codex reads no AGENTS.md in a checkout 10db keeps untrusted.',
     whileOn: null,
   },
   yourInstructions: {
-    label: 'Your instructions',
+    label: 'Your Instructions',
     description: `Your ~/.claude/CLAUDE.md, after the project's. ${NEXT}`,
     providers: "Claude and Codex: after the project's instructions, in the same place.",
     whileOn: null,
   },
   yourSkills: {
-    label: 'Your skills',
+    label: 'Your Skills',
     description: `The skills in ~/.claude/skills and ~/.agents/skills, which sessions read but never change. ${NEXT}`,
     providers:
       'A skill kept directly in your home (~/x), under a hidden folder (~/.something) or in a project folder is left out; Comes along says why.',
     whileOn: null,
   },
   yourPlugins: {
-    label: 'Your plugins',
+    label: 'Your Plugins',
     description: `The plugins Claude Code has installed for you, each switchable below. ${NEXT}`,
     providers:
       "Claude: skills, agents, commands and hooks, as Claude Code runs them. Their MCP servers are listed under Your MCP servers. Codex: skills, and the plugins' MCP servers.",
     whileOn: null,
   },
   yourMcpServers: {
-    label: 'Your MCP servers',
+    label: 'Your MCP Servers',
     description: `The MCP servers in your ~/.claude.json, ~/.codex/config.toml and plugins. Each runs as Claude Code runs it, outside 10db's sandbox, from your home folder, and every call to it is judged. ${NEXT}`,
     providers:
       "Claude and Codex sessions both get every approved server. Tool filters from config.toml apply in Codex sessions only. Servers that sign in with OAuth use the sign-in Claude Code or Codex keeps. Sessions on a Claude plan also get your claude.ai connectors. API key, Bedrock and Codex sessions don't, yet.",
     whileOn: null,
   },
   projectSkills: {
-    label: 'Project skills, commands and agents',
+    label: 'Project Skills, Commands and Agents',
     description: `The project's .claude/skills, commands and agents, copied with only the frontmatter that describes them. ${NEXT}`,
     providers: 'Codex: skills only.',
     whileOn: null,
@@ -94,10 +94,10 @@ export const LIVE_SYSTEMS_DESCRIPTION = `Hosts, cloud profiles and namespaces th
 
 /** A grant's limit as the project's Allowed in this project list names it; null is any limit. */
 export const GRANT_LIMIT_LABELS: Readonly<Record<LimitName, string>> = {
-  destroys_data: "Destroying data it didn't create",
-  sends_data_out: 'Sending data out',
-  reads_secrets: 'Reading secrets',
-  writes_live: 'Writing to live systems',
+  destroys_data: "Destroying Data It Didn't Create",
+  sends_data_out: 'Sending Data Out',
+  reads_secrets: 'Reading Secrets',
+  writes_live: 'Writing to Live Systems',
 };
 
 export const GRANTS_DESCRIPTION =

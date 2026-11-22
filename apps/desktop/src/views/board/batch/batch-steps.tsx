@@ -28,7 +28,7 @@ export function BatchSteps({
               <Text size="sm" ff="monospace">{`${step.model}@${step.effort}`}</Text>
               {plan.overBudget.includes(i) ? (
                 <Badge size="xs" color="red" variant="light">
-                  Over budget
+                  Over Budget
                 </Badge>
               ) : null}
             </Table.Td>

@@ -65,9 +65,9 @@ describe('Settings › project Trust', () => {
     };
     const { removed } = serve([grant]);
     renderApp('/settings/project-trust');
-    const region = await screen.findByRole('region', { name: 'Allowed in this project' });
+    const region = await screen.findByRole('region', { name: 'Allowed in This Project' });
     expect(await within(region).findByText('deploys to staging with vercel')).toBeTruthy();
-    expect(within(region).getByText(/^Writing to live systems · /)).toBeTruthy();
+    expect(within(region).getByText(/^Writing to Live Systems · /)).toBeTruthy();
     fireEvent.click(
       within(region).getByRole('button', { name: 'Remove deploys to staging with vercel' }),
     );

@@ -531,7 +531,7 @@ test('a chat goes to the builder’s terminal and back: the banner, a held messa
     await expect(popover.getByText(/runs outside 10db's sandbox/)).toBeVisible();
     await expect(popover.getByText('Your folder is held until you hand back.')).toBeVisible();
     await popover.getByRole('button', { name: 'Copy the Command' }).click();
-    const banner = page.getByRole('region', { name: 'In your terminal' });
+    const banner = page.getByRole('region', { name: 'In Your Terminal' });
     await expect(banner).toBeVisible();
     await expect(page.getByText(/ · in your terminal since \d\d:\d\d$/)).toBeVisible();
     await expect(banner.getByRole('button', { name: 'Hand Back' })).toBeFocused();
@@ -644,7 +644,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await expect(page).toHaveURL(/\/sessions\?chat=/);
   await expect(page.getByText('I have notes.md.')).toBeVisible();
   await expect(page.getByText('I have scores.csv.')).toBeVisible();
-  await expect(panel.getByText('Heard so far')).toBeVisible();
+  await expect(panel.getByText('Heard So Far')).toBeVisible();
   // The echo starts with the session's own intake line, then names the dropped file.
   await expect(panel.getByText('The builder opened this session to plan')).toBeVisible();
 
@@ -939,7 +939,7 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   });
   await sendLine(page, 'Thin out the scrollbars');
   await expect(page.getByText(/^Noted \d+ things?\. I have notes\.md\.$/)).toBeVisible();
-  await expect(plain.getByText('Heard so far')).toBeVisible();
+  await expect(plain.getByText('Heard So Far')).toBeVisible();
 
   // A proposal fills the panel. It is the first round, where every row is new, so none is marked New.
   await sendLine(page, 'propose it');
@@ -950,6 +950,8 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await page.getByRole('button', { name: 'More session actions' }).click();
   await page.getByRole('menuitem', { name: 'Close Plan' }).click();
   await expect(plain).toHaveCount(0);
+  // With the Plan closed the Sessions panel is back, and the session's row says its Plan waits for Accept.
+  await expect(page.locator('[role="option"][data-state="plan_waiting"]')).toHaveCount(1);
   await sendLine(page, 'propose it again');
   await expect(page.getByText('Here is the plan.', { exact: true })).toHaveCount(2);
   await expect(plain).toHaveCount(0);

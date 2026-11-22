@@ -47,7 +47,7 @@ export function TerminalBanner({
   return (
     <Box
       role="region"
-      aria-label="In your terminal"
+      aria-label="In Your Terminal"
       mx="md"
       mb="xs"
       p="sm"
@@ -63,7 +63,7 @@ export function TerminalBanner({
         <Stack gap={4} style={{ minWidth: 0, flex: 1 }}>
           <Text size="sm" fw={600}>
             {since === null
-              ? 'In your terminal'
+              ? 'In Your Terminal'
               : `In your terminal since ${dayjs(since).format('HH:mm')}`}
           </Text>
           <Text size="sm">

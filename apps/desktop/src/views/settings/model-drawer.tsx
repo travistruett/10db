@@ -62,14 +62,14 @@ function Mark({ offer, now }: { readonly offer: AccountModelDto; readonly now: n
   if (offer.wordingMarkEndsAt === null)
     return offer.unusable ? (
       <Badge size="sm" variant="light" color="gray">
-        Refused by this account
+        Refused by This Account
       </Badge>
     ) : null;
   const ends = fromNow(offer.wordingMarkEndsAt, now);
   return (
     <Stack gap={2}>
       <Badge size="sm" variant="light" color="gray">
-        Marked from an error’s wording
+        Marked from an Error’s Wording
       </Badge>
       <Text size="xs" c="dimmed" title={absoluteTime(offer.wordingMarkEndsAt)}>
         {offer.unusable
@@ -100,7 +100,7 @@ function Accounts({
         <Table.Tr>
           <Table.Th>Account</Table.Th>
           <Table.Th>Launch ID</Table.Th>
-          <Table.Th>Price per 1M tokens</Table.Th>
+          <Table.Th>Price per 1M Tokens</Table.Th>
           <Table.Th>Read</Table.Th>
         </Table.Tr>
       </Table.Thead>
@@ -149,9 +149,9 @@ function Efforts({ row }: { readonly row: ModelRowDto }) {
         <Table.Tr>
           <Table.Th>Effort</Table.Th>
           <Table.Th ta="right">Intelligence</Table.Th>
-          <Table.Th ta="right">Cost per task</Table.Th>
-          <Table.Th ta="right">Steps run</Table.Th>
-          <Table.Th ta="right">First pass</Table.Th>
+          <Table.Th ta="right">Cost per Task</Table.Th>
+          <Table.Th ta="right">Steps Run</Table.Th>
+          <Table.Th ta="right">First Pass</Table.Th>
         </Table.Tr>
       </Table.Thead>
       <Table.Tbody>
@@ -291,7 +291,7 @@ function DrawerBody({
         )}
       </Stack>
       <Stack gap="xs">
-        <Title order={4}>What each effort buys</Title>
+        <Title order={4}>What Each Effort Buys</Title>
         <RightsizingChart
           result={{
             ...plot,
@@ -313,7 +313,7 @@ function DrawerBody({
       </Stack>
       <ModelMeasuresPanel model={row.model} account={account} />
       <Stack gap="xs">
-        <Title order={4}>Offered by</Title>
+        <Title order={4}>Offered By</Title>
         <Accounts row={row} offers={mine} accounts={accountList} now={now} />
       </Stack>
     </Stack>

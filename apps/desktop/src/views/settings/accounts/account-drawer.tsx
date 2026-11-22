@@ -70,7 +70,7 @@ function AccountDrawerBody({
         )}
       </Stack>
       <Stack gap="xs">
-        <Title order={4}>Usage this month</Title>
+        <Title order={4}>Usage This Month</Title>
         <UsageByProject account={account} />
       </Stack>
       {account.archived ? null : (

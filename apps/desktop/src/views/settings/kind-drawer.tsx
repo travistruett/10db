@@ -107,20 +107,20 @@ const SWITCHES: readonly {
   readonly label: string;
   readonly about: string;
 }[] = [
-  { field: 'alwaysReviewed', label: 'Always reviewed', about: 'The review step is never skipped.' },
+  { field: 'alwaysReviewed', label: 'Always Reviewed', about: 'The review step is never skipped.' },
   {
     field: 'failsAtLimit',
-    label: 'Fails at the round limit',
+    label: 'Fails at the Round Limit',
     about: 'A send-back at the round limit fails the task instead of shipping it.',
   },
   {
     field: 'ownCopy',
-    label: 'Works in its own copy',
+    label: 'Works in Its Own Copy',
     about: 'Placement puts the task in its own copy of the project.',
   },
   {
     field: 'toInbox',
-    label: 'Proposals go to the Inbox',
+    label: 'Proposals Go to the Inbox',
     about: 'A lane’s proposal of this kind waits in the Inbox, not the Icebox.',
   },
 ];
@@ -226,7 +226,7 @@ export function KindDrawer({
           }}
         />
         <Select
-          label="Minimum rigor"
+          label="Minimum Rigor"
           description="A task of this kind never runs below it."
           allowDeselect={false}
           data={[
@@ -252,7 +252,7 @@ export function KindDrawer({
           ))}
         </Stack>
         <TagsInput
-          label="Implied by"
+          label="Implied By"
           description="A new task whose areas include one of these names gets this kind. Area and hazard names."
           data={impliers}
           value={[...draft.impliedBy]}
@@ -270,7 +270,7 @@ export function KindDrawer({
           }}
         />
         <Checkbox.Group
-          label="Adds steps"
+          label="Adds Steps"
           description="Steps this kind runs even when its rigor does not."
           value={[...draft.addsSteps]}
           onChange={(values) => {

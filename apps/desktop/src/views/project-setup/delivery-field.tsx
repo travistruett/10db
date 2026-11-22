@@ -55,7 +55,7 @@ export function DeliveryField({
   return (
     <Stack gap="lg">
       <Radio.Group
-        label="When work is finished"
+        label="When Work Is Finished"
         value={delivery}
         onChange={(value) => {
           onDelivery(value === Delivery.PullRequest ? Delivery.PullRequest : Delivery.Local);
@@ -64,16 +64,16 @@ export function DeliveryField({
         <Stack mt="xs" gap="xs">
           <ChoiceCard
             value={Delivery.PullRequest}
-            title="Open a pull request"
+            title="Open a Pull Request"
             line={pullRequestBlock ?? PULL_REQUEST_LINE}
             disabled={pullRequestBlock !== null}
           />
-          <ChoiceCard value={Delivery.Local} title="Commit directly" line={LOCAL_LINE} />
+          <ChoiceCard value={Delivery.Local} title="Commit Directly" line={LOCAL_LINE} />
         </Stack>
       </Radio.Group>
       {delivery === Delivery.PullRequest ? (
         <Select
-          label="Base branch"
+          label="Base Branch"
           description="Pull requests start from and merge into this branch."
           searchable
           required

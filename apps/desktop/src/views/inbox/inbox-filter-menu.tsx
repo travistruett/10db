@@ -83,7 +83,7 @@ export function InboxFilterMenu({
       <Menu.Dropdown mah={420} style={{ overflowY: 'auto' }}>
         <FilterGroup label="Project">
           <Choice
-            label="All projects"
+            label="All Projects"
             checked={search.project === undefined}
             onChoose={() => {
               onChange(withFilter(search, 'project', null));

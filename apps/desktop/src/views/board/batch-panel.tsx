@@ -150,7 +150,7 @@ export function BatchPanel({ batch, workstreams, gateCommand, onOpenWorkbench }:
           ) : null}
           {batch.gateLogPath ? (
             <Anchor size="xs" href={`file://${batch.gateLogPath}`} title={batch.gateLogPath}>
-              Gate log
+              Gate Log
             </Anchor>
           ) : null}
         </Stack>
@@ -164,12 +164,12 @@ export function BatchPanel({ batch, workstreams, gateCommand, onOpenWorkbench }:
           ) : null}
           {canShipAnyway ? (
             <Button size="xs" variant="light" loading={ship.isPending} onClick={shipBatch}>
-              Ship anyway
+              Ship Anyway
             </Button>
           ) : null}
           {canAddFix ? (
             <Button size="xs" variant="light" onClick={fix.open}>
-              Add a fix task
+              Add a Fix Task
             </Button>
           ) : null}
           {canAbandon ? (

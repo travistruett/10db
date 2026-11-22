@@ -95,7 +95,7 @@ export function GithubCard() {
               start.mutate();
             }}
           >
-            Sign in
+            Sign In
           </Button>
         ) : status ? (
           <Menu position="bottom-end">
@@ -111,7 +111,7 @@ export function GithubCard() {
                     start.mutate();
                   }}
                 >
-                  {status.state === 'signed_in' ? 'Switch account' : 'Sign in'}
+                  {status.state === 'signed_in' ? 'Switch Account' : 'Sign In'}
                 </Menu.Item>
               ) : null}
               <Menu.Item
@@ -119,7 +119,7 @@ export function GithubCard() {
                   recheck.mutate();
                 }}
               >
-                Check again
+                Check Again
               </Menu.Item>
             </Menu.Dropdown>
           </Menu>

@@ -246,7 +246,7 @@ export function ReviewsTab({
     <RecordListStates
       query={query}
       what="reviews"
-      none={{ narrowed, text: 'No review notes yet. Review ▾ on the Plan has reviewers read it.' }}
+      none={{ narrowed, text: 'No review notes yet. Ask for a review from ⋯ on the Plan.' }}
     >
       <KnowledgeTable
         label="Review Notes"
@@ -261,7 +261,7 @@ export function ReviewsTab({
           query,
           narrowed,
           'findings',
-          'No review notes yet. Review ▾ on the Plan has reviewers read it.',
+          'No review notes yet. Ask for a review from ⋯ on the Plan.',
         )}
       />
     </RecordListStates>

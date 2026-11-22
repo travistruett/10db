@@ -190,7 +190,7 @@ export function TrustSection() {
           </SettingRow>
         ))}
       </SettingsCard>
-      <SettingsCard title="Your plugins">
+      <SettingsCard title="Your Plugins">
         {switches !== undefined && plugins.length === 0 ? (
           <Text size="sm" c="dimmed" px="md" py="sm">
             Claude Code lists no plugins installed for you.

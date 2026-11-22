@@ -51,7 +51,7 @@ export class ViewBoundary extends Component<ViewBoundaryProps, ViewBoundaryState
               this.setState({ error: null });
             }}
           >
-            Reload view
+            Reload View
           </Button>
         </Stack>
       </Alert>

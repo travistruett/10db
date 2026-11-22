@@ -236,7 +236,7 @@ export function ProjectAreas({ project }: { readonly project: ProjectDto }) {
               ]);
             }}
           >
-            Add area
+            Add Area
           </Button>
         </Group>
       </Stack>
@@ -261,7 +261,7 @@ export function ProjectAreas({ project }: { readonly project: ProjectDto }) {
                 setOutdated(false);
               }}
             >
-              Discard my edits and show the latest
+              Discard My Edits and Show the Latest
             </Button>
           </Alert>
         ) : null}
@@ -336,7 +336,7 @@ export function ProjectAreas({ project }: { readonly project: ProjectDto }) {
               setHazards((all) => [...all, { name: '', paths: '', commands: '', perCopy: false }]);
             }}
           >
-            Add hazard
+            Add Hazard
           </Button>
         </Group>
       </Stack>
@@ -353,7 +353,7 @@ export function ProjectAreas({ project }: { readonly project: ProjectDto }) {
       ) : null}
       <Group>
         <Button disabled={!changed || patch.isPending} loading={patch.isPending} onClick={save}>
-          Save areas and hazards
+          Save Areas and Hazards
         </Button>
       </Group>
     </Stack>

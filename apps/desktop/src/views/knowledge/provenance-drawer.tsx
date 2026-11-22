@@ -93,7 +93,7 @@ export function ProvenanceDrawer({
       opened={record !== null}
       onClose={onClose}
       position="right"
-      title="Where it came from"
+      title="Where It Came From"
       size="min(480px, 50vw)"
       closeButtonProps={{ 'aria-label': 'Close' }}
     >

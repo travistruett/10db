@@ -50,7 +50,7 @@ export function FullReview({ summary }: { readonly summary: string }) {
           setShown((was) => !was);
         }}
       >
-        {shown ? 'Hide the full review' : 'Show the full review'}
+        {shown ? 'Hide the Full Review' : 'Show the Full Review'}
       </Button>
       {shown ? (
         <Code block style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', width: '100%' }}>

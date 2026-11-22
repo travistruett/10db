@@ -45,7 +45,7 @@ export function RecordDecision({
   return (
     <Group gap="sm" align="flex-end">
       <Checkbox
-        label="Record as a decision"
+        label="Record as a Decision"
         checked={value !== null}
         onChange={(e) => {
           onChange(e.currentTarget.checked ? { scope: KnowledgeScope.Project, area: null } : null);

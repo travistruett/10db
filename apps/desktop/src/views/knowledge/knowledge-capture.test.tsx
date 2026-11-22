@@ -57,7 +57,7 @@ describe('recording', () => {
     fireEvent.change(within(dialog).getByLabelText('Rationale'), {
       target: { value: 'Typed client' },
     });
-    await choose(dialog, 'Applies to', 'Only in api');
+    await choose(dialog, 'Applies To', 'Only in api');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Record' }));
     await waitFor(() => {
       expect(posted).toEqual([

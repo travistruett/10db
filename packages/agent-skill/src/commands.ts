@@ -48,8 +48,8 @@ export interface CommandDeps {
 // Only these settings keys may change here; secrets live in the Keychain and never pass through.
 const ACCOUNT_SETTING_KEYS = ['awsProfile', 'region'];
 const DELIVERY_LABELS: Record<string, string> = {
-  pull_request: 'Open a pull request',
-  local: 'Commit directly',
+  pull_request: 'Open a Pull Request',
+  local: 'Commit Directly',
 };
 
 type Command = (args: readonly string[], deps: CommandDeps) => Promise<void>;
@@ -216,11 +216,11 @@ const context: Command = async (args, deps) => {
 function landingLabel(p: ProjectView): string {
   switch (p.landing) {
     case 'merge':
-      return `Merge into ${p.baseBranch}`;
+      return `Merge Into ${p.baseBranch}`;
     case 'branch':
-      return `Merge into ${p.landingBranch ?? 'a branch'}`;
+      return `Merge Into ${p.landingBranch ?? 'a branch'}`;
     case 'hold':
-      return 'Hold for my review';
+      return 'Hold for My Review';
     default:
       return p.landing;
   }
@@ -263,7 +263,7 @@ const projectSettings: Command = async ([ref], deps) => {
     ...(p.delivery === 'pull_request'
       ? {}
       : {
-          note: 'Settings shows the base branch and landing only under "Open a pull request"; these are the stored values.',
+          note: 'Settings shows the base branch and landing only under "Open a Pull Request"; these are the stored values.',
         }),
     account: account(p.accountId),
     fallbackAccount: account(p.fallbackAccountId),

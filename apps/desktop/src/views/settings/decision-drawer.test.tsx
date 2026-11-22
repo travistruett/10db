@@ -36,10 +36,10 @@ it('says what the decision asks and what 10db does', async () => {
     accounts: [work],
   });
   await renderWithDaemonAndRouter(<Harness />);
-  const dialog = await screen.findByRole('dialog', { name: 'Who a question goes to' });
+  const dialog = await screen.findByRole('dialog', { name: 'Who a Question Goes To' });
   expect(within(dialog).getByText(/Which of the project’s routes a question/)).toBeTruthy();
-  expect(within(dialog).getByText('On each answer')).toBeTruthy();
+  expect(within(dialog).getByText('On Each Answer')).toBeTruthy();
   expect(within(dialog).getByText(/the card goes to its people/)).toBeTruthy();
-  expect(within(dialog).getByText('When it isn’t sure')).toBeTruthy();
+  expect(within(dialog).getByText('When It Isn’t Sure')).toBeTruthy();
   expect(within(dialog).getByText(/suggested under Ask Someone/)).toBeTruthy();
 });

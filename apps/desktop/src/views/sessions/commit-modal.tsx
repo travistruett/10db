@@ -89,7 +89,7 @@ export function CommitModal({
               loading={pending}
               disabled={message.trim() === '' || paths.length === 0}
             >
-              {waitsForTurn ? 'Waits for the turn to end' : 'Commit'}
+              {waitsForTurn ? 'Waits for the Turn to End' : 'Commit'}
             </Button>
           </Group>
         </Stack>

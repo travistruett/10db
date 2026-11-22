@@ -21,8 +21,8 @@ export function roundVerdict(
   const step = steps[round.stepIndex];
   const shippedAtLimit = step?.shippedAtLimit !== undefined && step.result === round.result;
   return shippedAtLimit
-    ? { label: 'Open at the limit', color: 'orange' }
-    : { label: 'Sent back', color: 'red' };
+    ? { label: 'Open at the Limit', color: 'orange' }
+    : { label: 'Sent Back', color: 'red' };
 }
 
 /** Who gave a round's verdict: the reviewer's name, else its role. */

@@ -17,11 +17,11 @@ export function ProjectPlaybook({ project }: { readonly project: ProjectDto }) {
     <Stack gap="lg">
       <SettingsCard>
         <SettingRow
-          label="Default rigor"
+          label="Default Rigor"
           description="The rigor a task gets when nothing sets its own. A kind's minimum can raise it."
         >
           <Select
-            aria-label="Default rigor"
+            aria-label="Default Rigor"
             allowDeselect={false}
             data={RIGORS.map((r) => ({ value: r, label: rigorLabel(r) }))}
             value={project.defaultRigor}

@@ -104,7 +104,7 @@ export function PlanCard({
         {sendingBack ? (
           <Textarea
             ref={noteRef}
-            label="What needs to change in the plan"
+            label="What Needs to Change in the Plan"
             description="The planner gets this note and plans again."
             autosize
             minRows={2}

@@ -232,7 +232,7 @@ export function ModelsTable({
     },
     {
       accessor: 'usedBy',
-      title: 'Used by',
+      title: 'Used By',
       noWrap: true,
       render: (row) => {
         const own = (usedBy.get(row.model) ?? []).join(', ');

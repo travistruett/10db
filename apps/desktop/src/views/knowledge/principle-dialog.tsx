@@ -136,7 +136,7 @@ export function PrincipleDialog({
             }}
           />
           <Radio.Group
-            label="How agents use it"
+            label="How Agents Use It"
             value={kind}
             onChange={(next) => {
               if (isKind(next)) setKind(next);

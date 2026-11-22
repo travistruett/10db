@@ -14,7 +14,7 @@ export function CardContext({ item }: { readonly item: InboxItemDto }) {
   return (
     <Stack gap={4}>
       <Text size="xs" fw={600} c="dimmed">
-        Last messages
+        Last Messages
       </Text>
       {messages.map((message) => (
         <Text key={`${message.at}:${message.author}:${message.text}`} size="sm" lineClamp={2}>
