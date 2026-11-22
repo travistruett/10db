@@ -26,7 +26,7 @@ import {
 } from '@10db/db';
 import { reporterSettings } from './reporter-settings';
 
-// What the Linear reporter is handed and told the facts 10db recorded
+// What the Linear reporter is handed and told: the facts 10db recorded
 // about a task, read once into a plain value, and the brief that renders them with the reporter's rules.
 // The reporter never reads the repository or 10db's database, so the brief is all it knows.
 

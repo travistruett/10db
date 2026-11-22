@@ -437,8 +437,9 @@ export function createLinearReporter(
       const { outcome } = input;
       // A row dropped meanwhile is skipped by the store: no error.
       if (outcome.state === 'failed') {
-        const rows = pendingLinearPosts(state.db, { taskId: flight.taskId }).filter((p) =>
-          input.postIds.includes(p.id),
+        // A row the agent already failed this run is not failed again, so a loop can't spend its tries.
+        const rows = pendingLinearPosts(state.db, { taskId: flight.taskId }).filter(
+          (p) => input.postIds.includes(p.id) && !flight.failedByAgent.has(p.id),
         );
         fail(rows, outcome.reason);
         for (const row of rows) flight.failedByAgent.add(row.id);
@@ -479,7 +480,6 @@ export function createLinearReporter(
         setAppSetting(ctx, reporterSettingsKey(projectId), input);
         if (!input.on) dropPendingLinearPosts(ctx, { projectId });
       });
-      refreshCard(projectId);
       refreshCard(projectId);
     },
   };
