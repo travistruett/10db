@@ -60,6 +60,7 @@ import {
   migrateDatabase,
   openDatabase,
   patchAccount,
+  refuseGatewayAccounts,
   seedDefaultAccount,
   setAppSetting,
 } from '@10db/db';
@@ -686,6 +687,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     await backupDatabase(db, backupsDir, 'pre-migrate', startedAt);
   }
   migrateDatabase(db, migrationsDir);
+  // Before anything parses an account: a retired kind would fail there with no hint of what to remove.
+  refuseGatewayAccounts(db);
   // An index out of step with its table is rebuilt and logged; one that can't be rebuilt leaves search
   // off (the list route says so) and the daemon running. No card: it asks the builder nothing.
   const knowledgeIndex = repairKnowledgeIndex(db, logger.child({ component: 'knowledge' }));
