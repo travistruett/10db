@@ -15,7 +15,7 @@ export const FreshTab = z.object({
   effort: z.enum(Effort).nullable().default(null),
   /** Where the tab sits in the strip, which the chat made from it takes. */
   position: z.int().nonnegative(),
-  /** New Plan: the session this tab becomes starts with its Plan. */
+  /** The Plan toggle is on: the session this tab becomes starts with its Plan. */
   plan: z.boolean().default(false),
 });
 export type FreshTab = z.infer<typeof FreshTab>;
@@ -75,6 +75,15 @@ export function setFreshModel(
   effort: Effort | null,
 ): readonly FreshTab[] {
   return tabs.map((tab) => (tab.id === id ? { ...tab, model, effort } : tab));
+}
+
+/** The Plan toggle on a tab before its first message: the session it becomes starts with a Plan or not. */
+export function setFreshPlan(
+  tabs: readonly FreshTab[],
+  id: string,
+  plan: boolean,
+): readonly FreshTab[] {
+  return tabs.map((tab) => (tab.id === id ? { ...tab, plan } : tab));
 }
 
 /** Removing a tab shifts nothing else. */

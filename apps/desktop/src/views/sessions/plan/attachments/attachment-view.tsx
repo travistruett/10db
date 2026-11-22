@@ -1,6 +1,9 @@
 import { mockupDocument, type ShapeAttachment } from '@10db/contracts';
-import { Box, Skeleton, Text, useComputedColorScheme } from '@mantine/core';
+import { Box, Modal, Skeleton, Text, UnstyledButton, useComputedColorScheme } from '@mantine/core';
+import { useDisclosure, useElementSize } from '@mantine/hooks';
+import { IconArrowsMaximize } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
+import classes from './attachment-view.module.css';
 import { chartRefusal, chartSvg, mermaidSvg, svgDataUrl } from './safe-render';
 
 // Shape spec §10.3: one attachment, rendered inert. See safe-render.ts for what makes each safe.
@@ -76,7 +79,15 @@ function ChartView({
   return <Drawing drawn={drawn} label={`Chart: ${title}`} />;
 }
 
-function MockupFrame({ html, title }: { readonly html: string; readonly title: string }) {
+function Frame({
+  html,
+  title,
+  height,
+}: {
+  readonly html: string;
+  readonly title: string;
+  readonly height: number | string;
+}) {
   return (
     <Box
       component="iframe"
@@ -87,13 +98,55 @@ function MockupFrame({ html, title }: { readonly html: string; readonly title: s
       referrerPolicy="no-referrer"
       loading="lazy"
       w="100%"
-      h={320}
-      style={{
-        border: '1px solid var(--mantine-color-default-border)',
-        borderRadius: 'var(--mantine-radius-sm)',
-        background: 'white',
-      }}
+      h={height}
+      style={{ border: 0, display: 'block', background: 'white' }}
     />
+  );
+}
+
+/** The width a mock-up is drawn at before its thumbnail scales it down to the row. */
+const MOCKUP_WIDTH = 960;
+/** The thumbnail's height in the row. */
+const THUMB_HEIGHT = 160;
+
+/**
+ * A thumbnail of a mock-up: the page drawn at a desktop width and scaled down to the row, fading out at
+ * its foot, with an expand mark in its corner, so it reads as a preview; a click opens it full size. The
+ * frame itself takes no clicks.
+ */
+function MockupFrame({ html, title }: { readonly html: string; readonly title: string }) {
+  const [full, { open, close }] = useDisclosure(false);
+  const { ref, width } = useElementSize();
+  const scale = width === 0 ? 1 : width / MOCKUP_WIDTH;
+  return (
+    <>
+      <UnstyledButton
+        ref={ref}
+        aria-label={`Open mock-up full size: ${title}`}
+        onClick={open}
+        className={classes['thumb']}
+        h={THUMB_HEIGHT}
+      >
+        <Box
+          w={MOCKUP_WIDTH}
+          h={THUMB_HEIGHT / scale}
+          style={{
+            transform: `scale(${String(scale)})`,
+            transformOrigin: 'top left',
+            pointerEvents: 'none',
+          }}
+        >
+          <Frame html={html} title={title} height="100%" />
+        </Box>
+        <span className={classes['fade']} aria-hidden="true" />
+        <span className={classes['expand']} aria-hidden="true">
+          <IconArrowsMaximize size={14} stroke={1.75} />
+        </span>
+      </UnstyledButton>
+      <Modal opened={full} onClose={close} title={`Mock-up: ${title}`} size="xl">
+        <Frame html={html} title={title} height="70vh" />
+      </Modal>
+    </>
   );
 }
 

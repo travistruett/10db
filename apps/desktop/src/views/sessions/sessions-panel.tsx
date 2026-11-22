@@ -50,7 +50,6 @@ export interface SessionsPanelProps {
   readonly onSelect: (row: PanelRow) => void;
   readonly onClose: (row: PanelRow) => void;
   readonly onNew: () => void;
-  readonly onNewPlan: () => void;
   readonly onRename: (row: PanelRow) => void;
   readonly onArchive: (row: PanelRow) => void;
   readonly onOpenInTerminal: (row: PanelRow) => void;
@@ -349,16 +348,6 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
               onClick={props.onNew}
             >
               New Session
-            </Menu.Item>
-            <Menu.Item
-              rightSection={
-                <Text size="xs" c="dimmed">
-                  ⌘⇧N
-                </Text>
-              }
-              onClick={props.onNewPlan}
-            >
-              New Plan
             </Menu.Item>
             <FromLinearItem />
           </Menu.Dropdown>

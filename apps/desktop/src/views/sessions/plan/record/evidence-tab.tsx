@@ -201,7 +201,14 @@ export function EvidenceTab({ shapeId }: { readonly shapeId: ShapeId }) {
     },
   ];
   return (
-    <RecordListStates query={query} what="evidence">
+    <RecordListStates
+      query={query}
+      what="evidence"
+      none={{
+        narrowed,
+        text: 'No sources yet. Files and pages the agent read to write this plan show here.',
+      }}
+    >
       <KnowledgeTable
         label="Evidence"
         storeKey="plan-record-evidence"

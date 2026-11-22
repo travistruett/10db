@@ -35,7 +35,7 @@ function Item({ project }: { readonly project: ProjectDto }) {
   );
 }
 
-/** From Linear, beside New Plan: shown for a project linked to a Linear team; opens a Plan session that imports its issues. */
+/** From Linear, beside New Session: shown for a project linked to a Linear team; opens a Plan session that imports its issues. */
 export function FromLinearItem() {
   const { project } = useSelectedProject();
   return project === null ? null : <Item project={project} />;

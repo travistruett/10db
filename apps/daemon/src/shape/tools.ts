@@ -85,13 +85,15 @@ const round = (n: number): number => Math.round(n * 100) / 100;
 const SIMILAR_LIMIT = 10;
 const RECORDS_LIMIT = 10;
 
-/** The draft's size in the words the transcript's dimmed line uses: "1 goal, 3 loose". */
+/** The draft's size in the words the transcript's dimmed line uses: "1 goal, 3 tasks". */
 function describeDraft(draft: PlanDraft): string {
   const parts = [
     draft.goals.length > 0
       ? plural(draft.goals.length, draft.goals.length === 1 ? 'goal' : 'goals')
       : '',
-    draft.looseTasks.length > 0 ? plural(draft.looseTasks.length, 'loose') : '',
+    draft.looseTasks.length > 0
+      ? plural(draft.looseTasks.length, draft.looseTasks.length === 1 ? 'task' : 'tasks')
+      : '',
     draft.records.length > 0
       ? plural(draft.records.length, draft.records.length === 1 ? 'record' : 'records')
       : '',

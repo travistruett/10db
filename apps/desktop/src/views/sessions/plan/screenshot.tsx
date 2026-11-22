@@ -1,5 +1,6 @@
 import type { ScreenMessageBody } from '@10db/contracts';
-import { Text } from '@mantine/core';
+import { Box, Text } from '@mantine/core';
+import { ZoomablePicture } from '../../../conversation';
 import { useShapeScreen } from '../../../daemon/shape-queries';
 import { SCREEN_LABEL } from '../../../screens/draw-screen';
 import { useRenderMode } from '../../../screens/render-context';
@@ -12,7 +13,8 @@ interface ScreenshotProps {
 const inSentence = (label: string): string => label.replace(/^The /, 'the ');
 
 /**
- * A screenshot Plan took with `see_screen`, as the builder sees it in the conversation (Shape spec §5.5).
+ * A screenshot Plan took with `see_screen`, as the builder sees it in the conversation (Shape spec §5.5),
+ * a step under its tool line; a click opens it at the size the window allows.
  * A Plan screen drawn for Plan shows a line in its place: the render token reads no kept picture, and
  * pictures inside a picture would only spend what one picture may hold.
  */
@@ -44,18 +46,19 @@ function KeptScreenshot({ shapeId, screen }: ScreenshotProps) {
       </Text>
     );
   return (
-    <img
-      src={image.data}
-      alt={`${label} at ${size}, as Plan saw it`}
-      width={screen.width}
-      height={screen.height}
-      style={{
-        display: 'block',
-        maxWidth: '100%',
-        height: 'auto',
-        border: '1px solid var(--mantine-color-default-border)',
-        borderRadius: 'var(--mantine-radius-sm)',
-      }}
-    />
+    <Box mt={8}>
+      <ZoomablePicture
+        src={image.data}
+        alt={`${label} at ${size}, as Plan saw it`}
+        style={{
+          display: 'block',
+          maxWidth: '100%',
+          aspectRatio: `${String(screen.width)} / ${String(screen.height)}`,
+          height: 'auto',
+          border: '1px solid var(--mantine-color-default-border)',
+          borderRadius: 'var(--mantine-radius-sm)',
+        }}
+      />
+    </Box>
   );
 }

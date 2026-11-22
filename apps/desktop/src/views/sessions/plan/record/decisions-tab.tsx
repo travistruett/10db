@@ -152,7 +152,14 @@ export function DecisionsTab({ shapeId }: { readonly shapeId: ShapeId }) {
     },
   ];
   return (
-    <RecordListStates query={query} what="decisions">
+    <RecordListStates
+      query={query}
+      what="decisions"
+      none={{
+        narrowed,
+        text: 'No decisions yet. Choices you and the agent settle while planning show here.',
+      }}
+    >
       <KnowledgeTable
         label="Decisions"
         storeKey="plan-record-decisions"

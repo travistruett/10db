@@ -1,14 +1,16 @@
 import type { ShapeProposalDto } from '@10db/contracts';
 import { isConverted } from './proposed-groups';
 
-// The words the Proposed list uses for a row: its title, what it becomes, and the dimmed line that
-// says Convert has made it.
+// The words the Plan uses for a row: its title, what it becomes, and the dimmed line that says Convert
+// has made it.
 
 /** The row's title: what the builder reads it by. */
 export function proposalTitle(row: ShapeProposalDto): string {
   switch (row.kind) {
-    case 'goal':
     case 'task':
+      // As the Board does: a task is named by its headline, a few plain words, when it has one.
+      return row.body.headline === '' ? row.body.title : row.body.headline;
+    case 'goal':
     case 'landing':
       return row.body.title;
     case 'decision':
@@ -24,46 +26,26 @@ export function proposalTitle(row: ShapeProposalDto): string {
   }
 }
 
-/** The small label in the narrow left column. */
-export function kindLabel(row: ShapeProposalDto): string {
-  switch (row.kind) {
-    case 'goal':
-      return 'Goal';
-    case 'task':
-      return row.body.goalId === undefined ? 'Task' : 'Added';
-    case 'change_task':
-      return 'Change';
-    case 'remove_task':
-      return 'Remove';
-    case 'landing':
-      return 'Landing';
-    case 'decision':
-      return 'Decision';
-    case 'principle':
-      return 'Principle';
-    case 'question':
-      return 'Ask';
-  }
-}
-
-/** Where Convert puts a row, as the Convert modal says it. */
+/** What Accept does with a row, as the Accept dialog says it. */
 export function destination(row: ShapeProposalDto): string {
   switch (row.kind) {
     case 'goal':
-      return `draft goal, its ${taskCount(row.body.tasks.length)} to Backlog`;
+      return `Becomes a draft goal; its ${taskCount(row.body.tasks.length)} go to the Board's Backlog`;
     case 'task':
-      return row.body.goalId === undefined ? 'to Backlog' : 'to Backlog, under its goal';
+      return row.body.goalId === undefined
+        ? "Goes to the Board's Backlog"
+        : "Goes to the Board's Backlog, under its goal";
     case 'change_task':
-      return 'changes a task on the Board';
+      return 'Changes a task on the Board';
     case 'remove_task':
-      return 'removes a task from the Board';
+      return 'Removes a task from the Board';
     case 'decision':
     case 'principle':
-      return 'to Knowledge';
+      return 'Goes to Knowledge';
     case 'landing':
-      return 'its tasks share one pull request';
+      return 'Its tasks share one pull request';
     case 'question':
-      return 'stored; sent when people arrive';
+      return 'Kept, and asked when people join';
   }
 }
 
@@ -96,55 +78,61 @@ export function convertedLine(row: ShapeProposalDto, liveLine?: string): string 
   }
 }
 
-/** What the latest round did to a row, until the next round (spec §6); null when it did nothing. */
-export function markText(row: ShapeProposalDto): string | null {
-  switch (row.mark) {
-    case 'new':
-      return 'new';
-    case 'changed':
-      return 'changed';
-    case 'moved':
-      return 'moved to Earlier';
-    case null:
-      return null;
-  }
-}
-
-/** The state dot before a row's title: the first of accepted, the round's mark, pinned, else proposed. */
+/**
+ * The dot before a row's title: blue for what the latest round created or changed, the one color the
+ * Plan draws. Every other row has none; the mark's words (`markText`) say it too.
+ */
 export function rowDot(
   row: ShapeProposalDto,
-  live: 'running' | 'done' | null = null,
-): { readonly label: string; readonly color: string } {
-  if (isConverted(row)) {
-    if (live === 'running') return { label: 'Running', color: 'blue' };
-    if (live === 'done') return { label: 'Done', color: 'teal' };
-    return { label: 'Accepted', color: 'teal' };
-  }
+): { readonly label: string; readonly color: string } | null {
+  if (isConverted(row)) return null;
   switch (row.mark) {
     case 'new':
       return { label: 'New this round', color: 'blue' };
     case 'changed':
       return { label: 'Changed this round', color: 'blue' };
     case 'moved':
-      return { label: 'Moved to Earlier', color: 'gray' };
     case null:
-      return row.pinned.length > 0
-        ? { label: 'Pinned', color: 'yellow' }
-        : { label: 'Proposed', color: 'gray' };
+      return null;
   }
 }
 
-/** The short facts shown after a title on a collapsed row. */
-export function rowMeta(row: ShapeProposalDto): string {
+/** What the latest round did to a row, until the next round (spec §6); null when it did nothing. */
+export function markText(row: ShapeProposalDto): string | null {
+  switch (row.mark) {
+    case 'new':
+      return 'New';
+    case 'changed':
+      return 'Changed';
+    case 'moved':
+      return 'Moved to Earlier';
+    case null:
+      return null;
+  }
+}
+
+/** What a row is when its card names something else: an addition under Loose tasks, a principle under Decisions. */
+export function kindChip(row: ShapeProposalDto): string | null {
   switch (row.kind) {
-    case 'goal':
-      return taskCount(row.body.tasks.length);
     case 'task':
-      return [
-        ...(row.body.external === undefined ? [] : [row.body.external.id]),
-        row.body.size ?? 'sized by history',
-        row.body.areas.join(', '),
-      ].join(' · ');
+      // An issue drafted from Linear names its issue; a task added to a goal says so.
+      return row.body.external?.id ?? (row.body.goalId === undefined ? null : 'Added');
+    case 'principle':
+      return 'Principle';
+    case 'remove_task':
+      return 'Removal';
+    case 'goal':
+    case 'decision':
+    case 'question':
+    case 'landing':
+    case 'change_task':
+      return null;
+  }
+}
+
+/** The short fact a row's chip carries when it has no size: a decision's scope, who a question is for. */
+export function rowChipMeta(row: ShapeProposalDto): string {
+  switch (row.kind) {
     case 'landing':
       return `${taskCount(row.body.keys.length)} · 1 pull request`;
     case 'question':
@@ -152,6 +140,8 @@ export function rowMeta(row: ShapeProposalDto): string {
     case 'decision':
     case 'principle':
       return row.body.scope === 'area' ? `area ${row.body.area ?? ''}` : row.body.scope;
+    case 'goal':
+    case 'task':
     case 'change_task':
     case 'remove_task':
       return '';

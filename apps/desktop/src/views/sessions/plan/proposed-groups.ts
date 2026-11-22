@@ -97,7 +97,7 @@ const pending = (rows: readonly ShapeProposalDto[]): number =>
   rows.filter((r) => !isConverted(r)).length;
 
 /**
- * The counts under the Proposed header: "1 goal · 3 loose · 2 to record". A count is of what is
+ * The counts under the Proposed header: "1 goal · 3 tasks · 2 to record". A count is of what is
  * still pending; what Convert already made is counted apart, last.
  */
 export function summaryParts(groups: ProposedGroups): SummaryPart[] {
@@ -108,7 +108,7 @@ export function summaryParts(groups: ProposedGroups): SummaryPart[] {
   const goals = pending(groups.goals);
   add(goals, plural(goals, 'goal'), SectionKey.Goals);
   const loose = pending(groups.looseTasks);
-  add(loose, `${String(loose)} loose`, SectionKey.Tasks);
+  add(loose, plural(loose, 'task'), SectionKey.Tasks);
   const changes = pending(groups.changes);
   add(changes, plural(changes, 'change'), SectionKey.Changes);
   const landings = pending(groups.landings);

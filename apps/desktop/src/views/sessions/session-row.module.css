@@ -27,15 +27,6 @@
   color: var(--mantine-color-bright);
 }
 
-/* A row that needs the builder keeps a ring around it, in the primary colour. */
-.row[data-ring='needs_you'] {
-  box-shadow: inset 0 0 0 1px var(--mantine-color-yellow-filled);
-}
-
-.row[data-ring='error'] {
-  box-shadow: inset 0 0 0 1px var(--mantine-color-red-filled);
-}
-
 .icon {
   flex: none;
   display: grid;

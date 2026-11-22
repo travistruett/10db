@@ -21,8 +21,23 @@ export function sizeLine(size: ShapeTaskSizeDto): SizeLine {
   return { text: parts.join(' · '), flagged: size.missized };
 }
 
-/** A goal's hours are its tasks' sum; null when none of them is sized yet. */
-export function goalHoursLine(sizes: readonly ShapeTaskSizeDto[]): string | null {
+/** A goal's lane time is its tasks' sum, as "~1 h"; null when none of them is sized yet. */
+export function goalHours(sizes: readonly ShapeTaskSizeDto[]): string | null {
   if (sizes.length === 0) return null;
-  return `~${hoursText(sizes.reduce((sum, s) => sum + s.hours, 0))} h of lane time`;
+  return `~${hoursText(sizes.reduce((sum, s) => sum + s.hours, 0))} h`;
+}
+
+/**
+ * What an opened task says about its size, once: "Area: repo · about 0.5 h of agent time", then "size
+ * set by you" and, when it has finished, the lane time it took.
+ */
+export function sizeFacts(areas: readonly string[], size: ShapeTaskSizeDto | undefined): string {
+  const parts =
+    areas.length === 0 ? [] : [`${areas.length === 1 ? 'Area' : 'Areas'}: ${areas.join(', ')}`];
+  if (size !== undefined) {
+    parts.push(`about ${hoursText(size.hours)} h of agent time`);
+    if (size.from === SizeSource.Pinned) parts.push('size set by you');
+    if (size.actualHours !== null) parts.push(`took ${hoursText(size.actualHours)} h of lane time`);
+  }
+  return parts.join(' · ');
 }

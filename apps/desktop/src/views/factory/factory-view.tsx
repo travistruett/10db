@@ -93,7 +93,7 @@ export function FactoryView() {
               }}
             />
             <Button onClick={newPlan} size="xs">
-              New Plan
+              New Session
             </Button>
           </Group>
         }

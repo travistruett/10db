@@ -115,7 +115,7 @@ function RecordPage() {
   const navigate = recordRoute.useNavigate();
   const id = ShapeId.safeParse(shapeId);
   return (
-    <ViewBoundary name="Record">
+    <ViewBoundary name="Plan">
       {id.success ? (
         <RecordView
           shapeId={id.data}

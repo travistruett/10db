@@ -63,7 +63,7 @@ export interface SessionRowProps {
 
 /**
  * One 32 px row of the panel: its title and one state mark (where the session works is its title row's line). Hovered, × takes the mark's
- * place. A ring stays around a row that needs the builder; no state is told by colour alone.
+ * place; the mark alone tells a state, by its shape as well as its colour.
  */
 export function SessionRow({
   rowKey,
@@ -109,8 +109,6 @@ export function SessionRow({
       }
     }
   };
-  const ring =
-    state?.mark === RowMark.NeedsYou ? 'needs_you' : state?.mark === RowMark.Error ? 'error' : null;
   return (
     <Tooltip
       openDelay={500}
@@ -138,7 +136,6 @@ export function SessionRow({
         className={`${classes['row'] ?? ''} ${classes['nested'] ?? ''}${fresh ? ` ${CREATE_SLOT_CLASS}` : ''}`}
         data-session-row={rowKey}
         data-selected={selected ? '' : undefined}
-        data-ring={ring ?? undefined}
         data-state={state?.mark ?? 'idle'}
         data-place={state?.icon}
         aria-describedby={sortable.attributes['aria-describedby']}

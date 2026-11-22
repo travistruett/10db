@@ -5,7 +5,8 @@ import {
   type PlanReviewRow,
   type ShapeId,
 } from '@10db/contracts';
-import { Badge, Group, Stack, Text } from '@mantine/core';
+import { Button, Group, Stack, Text } from '@mantine/core';
+import { useDismissFinding } from '../../../../daemon/shape-queries';
 import type { DataTableColumn } from 'mantine-datatable';
 import { useState, type ReactNode } from 'react';
 import { KnowledgeTable } from '../../../knowledge/knowledge-table';
@@ -14,8 +15,9 @@ import { NOT_NARROWED, useRecordPage } from './record-paging';
 import { emptyLine, RecordListStates } from './record-states';
 import { CodeSpans } from './code-spans';
 
-// Reviews: every finding of the effort, grouped by the document, revision and round it was made on,
-// each in its reviewer's own words, with the outcome as the effort wrote it.
+// Review Notes: every finding of the effort, grouped by what it reviewed (named by its title) and the
+// review, each in its reviewer's own words, with the outcome once there is one. An open note can be
+// dismissed here, or handed back to the session to fix.
 
 const STATE_LABELS: Readonly<Record<ShapeFindingState, string>> = {
   [ShapeFindingState.Open]: 'Open',
@@ -28,23 +30,32 @@ const STATE_OPTIONS = Object.values(ShapeFindingState).map((value) => ({
   label: STATE_LABELS[value],
 }));
 
-const SEVERITY_COLORS: Readonly<Record<ShapeFindingSeverity, string>> = {
-  [ShapeFindingSeverity.High]: 'red',
-  [ShapeFindingSeverity.Medium]: 'yellow',
-  [ShapeFindingSeverity.Low]: 'gray',
+const SEVERITY_LABELS: Readonly<Record<ShapeFindingSeverity, string>> = {
+  [ShapeFindingSeverity.High]: 'High',
+  [ShapeFindingSeverity.Medium]: 'Medium',
+  [ShapeFindingSeverity.Low]: 'Low',
 };
 
-/** "p1 · revision 1 · round 1 · 9 high, 13 low", counted over the whole filtered list. */
-export function groupLine(group: PlanReviewGroup): string {
+const capital = (word: string): string => word.charAt(0).toUpperCase() + word.slice(1);
+
+/**
+ * "An empty Done column says what goes in it · revision 1 · second review · 9 high, 13 low", counted
+ * over the whole filtered list; what it reviewed is named by its title when the Plan has one for it.
+ */
+export function groupLine(
+  group: PlanReviewGroup,
+  titles: ReadonlyMap<string, string> = new Map(),
+): string {
   const counts = (['high', 'medium', 'low'] as const)
     .filter((s) => group[s] > 0)
     .map((s) => `${String(group[s])} ${s}`);
   const unrated = group.total - group.high - group.medium - group.low;
   if (unrated > 0) counts.push(`${String(unrated)} questions`);
   return [
-    group.document,
+    titles.get(group.document) ?? group.document,
     group.revision === null ? null : `revision ${String(group.revision)}`,
-    `round ${String(group.round)}`,
+    // The first review needs no number; a later one says which it was.
+    group.round <= 1 ? null : `review ${String(group.round)}`,
     counts.join(', '),
   ]
     .filter((part) => part !== null && part !== '')
@@ -80,14 +91,22 @@ const NO_SORT = { columnAccessor: 'reviewer', direction: 'asc' } as const;
 
 export function ReviewsTab({
   shapeId,
-  documents,
+  titles,
+  onAskToFix,
 }: {
   readonly shapeId: ShapeId;
-  /** The Plan's document keys, for the Document filter. */
-  readonly documents: readonly string[];
+  /** The Plan's row titles by key, so a group is named by what it reviewed. */
+  readonly titles: ReadonlyMap<string, string>;
+  /** Ask to Fix: hands the note to the session as the start of the builder's reply. */
+  readonly onAskToFix: (text: string) => void;
 }) {
   const [narrowing, setNarrowing] = useState(NOT_NARROWED);
+  const dismiss = useDismissFinding(shapeId);
   const { query, page, paging } = useRecordPage(shapeId, 'reviews', narrowing);
+  // Outcome is shown once a note on the page has one.
+  const hasOutcome = (page?.rows ?? []).some(
+    (row) => row.outcomeText !== null || row.how !== null || row.howDetail !== null,
+  );
   const narrowed =
     narrowing.q.trim() !== '' || narrowing.state !== ANY || narrowing.document !== ANY;
   const finding = (render: (row: PlanReviewRow) => ReactNode) => (line: Line) =>
@@ -96,63 +115,36 @@ export function ReviewsTab({
     {
       accessor: 'reviewer',
       title: 'Reviewer',
-      width: 180,
+      width: 110,
       resizable: true,
       render: (line) =>
         line.kind === 'group' ? (
           <Text size="sm" fw={600} c="bright" style={{ whiteSpace: 'nowrap' }}>
-            {groupLine(line.group)}
+            {groupLine(line.group, titles)}
           </Text>
         ) : (
-          <Text size="sm">{line.row.reviewer}</Text>
+          <Text size="sm">{capital(line.row.reviewer)}</Text>
         ),
-    },
-    {
-      accessor: 'document',
-      title: 'Document',
-      width: 140,
-      toggleable: true,
-      filtering: narrowing.document !== ANY,
-      filter: (
-        <ChoiceFilter
-          label="Document"
-          value={narrowing.document}
-          options={documents.map((key) => ({ value: key, label: key }))}
-          onChange={(document) => {
-            setNarrowing({ ...narrowing, document });
-          }}
-        />
-      ),
-      render: finding((row) => (
-        <Text size="xs" ff="monospace" c="dimmed">
-          {row.section === null ? row.document : `${row.document}#${row.section}`}
-        </Text>
-      )),
     },
     {
       accessor: 'severity',
       title: 'Severity',
-      width: 170,
+      width: 90,
       toggleable: true,
       render: finding((row) => (
-        <Group gap={6} wrap="nowrap">
+        <Stack gap={2}>
           {row.severity === null ? null : (
-            <Badge
-              size="sm"
-              variant="light"
-              color={SEVERITY_COLORS[row.severity]}
-              style={{ flex: 'none' }}
-            >
-              {row.severity}
-            </Badge>
+            <Text size="sm" c="dimmed">
+              {SEVERITY_LABELS[row.severity]}
+            </Text>
           )}
           {row.severityText === null ? null : <Text size="xs">{row.severityText}</Text>}
-        </Group>
+        </Stack>
       )),
     },
     {
       accessor: 'text',
-      title: 'Finding',
+      title: 'Note',
       resizable: true,
       filtering: narrowing.q.trim() !== '',
       filter: (
@@ -174,6 +166,7 @@ export function ReviewsTab({
       title: 'Outcome',
       resizable: true,
       toggleable: true,
+      hidden: !hasOutcome,
       render: finding((row) => (
         <Stack gap={2}>
           {row.outcomeText === null ? null : (
@@ -195,7 +188,7 @@ export function ReviewsTab({
     {
       accessor: 'state',
       title: 'State',
-      width: 120,
+      width: 90,
       toggleable: true,
       filtering: narrowing.state !== ANY,
       filter: (
@@ -214,11 +207,49 @@ export function ReviewsTab({
         </Text>
       )),
     },
+    {
+      accessor: 'actions',
+      title: '',
+      width: 190,
+      // An open note is acted on here: settled by Dismiss, or handed to the session by Ask to Fix.
+      render: finding((row) =>
+        row.state !== ShapeFindingState.Open ? null : (
+          <Group gap={4} wrap="nowrap" justify="flex-end">
+            <Button
+              variant="subtle"
+              color="gray"
+              size="compact-xs"
+              loading={dismiss.isPending && dismiss.variables.findingId === row.id}
+              aria-label={`Dismiss: ${row.text}`}
+              onClick={() => {
+                dismiss.mutate({ findingId: row.id });
+              }}
+            >
+              Dismiss
+            </Button>
+            <Button
+              variant="light"
+              size="compact-xs"
+              aria-label={`Ask to fix: ${row.text}`}
+              onClick={() => {
+                onAskToFix(`Please address this review note: ${row.text}`);
+              }}
+            >
+              Ask to Fix
+            </Button>
+          </Group>
+        ),
+      ),
+    },
   ];
   return (
-    <RecordListStates query={query} what="reviews">
+    <RecordListStates
+      query={query}
+      what="reviews"
+      none={{ narrowed, text: 'No review notes yet. Review ▾ on the Plan has reviewers read it.' }}
+    >
       <KnowledgeTable
-        label="Reviews"
+        label="Review Notes"
         storeKey="plan-record-reviews"
         records={linesOf(page?.rows ?? [], page?.groups ?? [])}
         columns={columns}
@@ -226,7 +257,12 @@ export function ReviewsTab({
         sort={NO_SORT}
         onSort={() => undefined}
         paging={paging}
-        empty={emptyLine(query, narrowed, 'findings', 'This Plan records no reviews.')}
+        empty={emptyLine(
+          query,
+          narrowed,
+          'findings',
+          'No review notes yet. Review ▾ on the Plan has reviewers read it.',
+        )}
       />
     </RecordListStates>
   );

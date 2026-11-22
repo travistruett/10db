@@ -1,0 +1,172 @@
+/* The Plan's sections: each goal, then each kind of row, the run preview and Earlier, apart by space alone. */
+.sections {
+  list-style: none;
+  display: grid;
+  gap: 24px;
+}
+
+.section {
+  list-style: none;
+  min-width: 0;
+}
+
+/* A section's head lines its name up with the rows' titles; the chevron hangs in the gutter before it. */
+.sectionHead {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  padding: 0 12px 4px;
+  border-radius: var(--mantine-radius-sm);
+}
+
+.chevron {
+  position: absolute;
+  left: -6px;
+  top: 2px;
+  color: var(--mantine-color-dimmed);
+  transition: transform 120ms ease;
+}
+
+.chevron[data-open] {
+  transform: rotate(90deg);
+}
+
+.sectionHead:hover .chevron,
+.sectionHead:focus-visible .chevron {
+  color: var(--mantine-color-text);
+}
+
+.aside {
+  margin-left: auto;
+  min-width: 0;
+}
+
+/* A row of the Plan: a grid of the title, its facts, its size column and its chevron, with its sub-lines
+   under them all. */
+.row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  align-items: start;
+  column-gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--mantine-radius-sm);
+}
+
+.row:hover {
+  background: color-mix(in srgb, var(--tendb-color-panel) 60%, transparent);
+}
+
+/* An opened row and its region are the one raised block of the list, on the panel tone. Its line keeps
+   the closed row's box, so opening it moves nothing above or beside the title. */
+.item {
+  border-radius: var(--mantine-radius-sm);
+  transition: background-color 150ms ease;
+}
+
+.item[data-open] {
+  background: var(--tendb-color-panel);
+}
+
+.item[data-open] .row:hover {
+  background: transparent;
+}
+
+/* The round's mark: its dot, then its word. */
+.mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.markDot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* The title button covers the whole row, so a click anywhere opens it; what sits above it lifts itself. */
+.hit::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+.lift {
+  position: relative;
+  z-index: 1;
+}
+
+/* Lines under the title run the whole width of the row. */
+.subs {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.chips {
+  position: relative;
+  z-index: 1;
+  min-height: 20px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+/* Only the icons answer the pointer, for their tooltips; a click elsewhere opens the row. */
+.chips [role='img'] {
+  pointer-events: auto;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+}
+
+/* The chevron says a row opens; it shows on hover or focus, and stays, turned, while the row is open. */
+.rowChevron {
+  margin-top: 3px;
+  color: var(--mantine-color-dimmed);
+  opacity: 0;
+  transition:
+    opacity 120ms ease,
+    transform 150ms ease;
+}
+
+.row:hover .rowChevron,
+.row:focus-within .rowChevron,
+.rowChevron[data-open] {
+  opacity: 1;
+}
+
+.rowChevron[data-open] {
+  transform: rotate(180deg);
+}
+
+/* The size column: S, M or L, and a goal's lane time when it needs more. */
+.trail {
+  min-width: 16px;
+  text-align: right;
+  line-height: 20px;
+}
+
+/* A note hangs off a rule at its left, in the warning colour for a medium or high one. */
+.note {
+  list-style: none;
+  border-left: 2px solid var(--mantine-color-default-border);
+  padding-left: 10px;
+}
+
+.note[data-serious] {
+  border-left-color: var(--mantine-color-yellow-filled);
+}
+
+/* The list's scroll box takes focus for the arrow keys; it draws no box around the list. */
+.viewport:focus,
+.viewport:focus-visible {
+  outline: none;
+}

@@ -1,7 +1,10 @@
-import type { ShapeProposalDto, ShapeViewDto } from '@10db/contracts';
+import classes from './plan-rows.module.css';
+import type { ShapeProposalDto, ShapeProposalId, ShapeViewDto } from '@10db/contracts';
+import type { OpenRow } from './row-line';
 import {
   ActionIcon,
   Alert,
+  Anchor,
   Box,
   Button,
   Group,
@@ -12,7 +15,7 @@ import {
   Text,
   Tooltip,
 } from '@mantine/core';
-import { IconChevronDown, IconX } from '@tabler/icons-react';
+import { IconDots } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -22,15 +25,14 @@ import {
   type ReviewKind,
   useRowChange,
 } from '../../../daemon/shape-queries';
-import { SplitButton } from '../../../shell/split-button';
 import { shortAgo } from '../../factory/short-ago';
 import { useNow } from '../../../shell/relative';
 import { ConvertModal, convertibleRows } from './convert-modal';
 import { AttachmentsContext } from './attachments/row-attachments';
 import { HeardSoFar } from './heard-so-far';
-import { PreviewPanel } from './preview-panel';
+import { MenuHint } from './menu-hint';
 import type { RowAction, RowHandlers } from './proposal-row';
-import { ProposedList } from './proposed-list';
+import { FOLDED_AT_FIRST, ProposedList } from './proposed-list';
 import { groupProposals, roundChanges, type SectionKey } from './proposed-groups';
 import { rowReview } from './review-lines';
 import { SummaryLine } from './summary-line';
@@ -49,10 +51,10 @@ export interface ProposedPaneProps {
   readonly error: string | null;
   /** Whether the summary line sits here; in the drawer layout the view keeps it always on screen. */
   readonly summaryHere: boolean;
-  /** The head's controls after Accept: the panel's ⋯ menu. */
-  readonly menu?: ReactNode;
-  /** Closes the panel; absent when the drawer around it has its own close. */
-  readonly onClose?: () => void;
+  /** The head's button after Accept that opens the Plan page; the page itself has none. */
+  readonly expand?: ReactNode;
+  /** The ⋯ menu's Plan section, under its Review section: Export and Undo Accept. */
+  readonly planItems?: ReactNode;
   /** Why?: scrolls the conversation to the messages a row came from and highlights them. */
   readonly onWhy: (row: ShapeProposalDto) => void;
   /** Ask for Changes on a mock-up: the session's composer takes the words. */
@@ -64,7 +66,16 @@ export interface ProposedPaneProps {
    */
   readonly jumpRequest?: { readonly section: SectionKey; readonly nonce: number } | null;
   readonly onJumped?: () => void;
+  /** Whether the head names the Plan; the Plan page names it in its own title row. */
+  readonly titled?: boolean;
 }
+
+/** The panel's text starts this far from its edges, as the conversation's does from the divider. */
+const PANEL_INSET_PX = 40;
+/** A row's own inset, inside which its hover tone is drawn. */
+const ROW_INSET_PX = 12;
+/** On the Plan page, where text lines up with the tabs' labels and the chevrons hang inside. */
+const PAGE_INSET_PX = 24;
 
 /** The sidebar: a header, a pinned summary line and the list of proposals, each editable in place. */
 export function ProposedPane({
@@ -72,17 +83,26 @@ export function ProposedPane({
   loading,
   error,
   summaryHere,
-  menu,
-  onClose,
+  expand,
+  planItems,
   onWhy,
   onAskForChanges,
   jumpRequest = null,
   onJumped,
+  titled = true,
 }: ProposedPaneProps) {
+  // On the Plan page the page's padding does most of the inset; beside the conversation the panel keeps its own.
+  const inset = titled ? PANEL_INSET_PX : PAGE_INSET_PX;
   const now = useNow();
   const listRef = useRef<HTMLDivElement>(null);
-  const [converting, setConverting] = useState<'accept' | 'start' | null>(null);
+  const [converting, setConverting] = useState(false);
   const [changesOnly, setChangesOnly] = useState(false);
+  // The sections the builder folded: a goal's id, a kind's section, or the run preview.
+  const [folded, setFolded] = useState<ReadonlySet<string>>(FOLDED_AT_FIRST);
+  // The ⋯ menu is open: its tooltip stays down so it never covers the menu.
+  const [menuOpen, setMenuOpen] = useState(false);
+  // The panel's one open row; Accept's Read Them opens the first row with notes.
+  const [openRow, setOpenRow] = useState<OpenRow | null>(null);
   const [goalToRemove, setGoalToRemove] = useState<RemoveDraftGoalTarget | null>(null);
   const [decisionToWithdraw, setDecisionToWithdraw] = useState<WithdrawTarget | null>(null);
   const [principleToWithdraw, setPrincipleToWithdraw] = useState<PrincipleWithdrawTarget | null>(
@@ -102,7 +122,11 @@ export function ProposedPane({
   const takingPictures = review.isPending && review.variables === 'design_review';
   // "Is running" is true only while a turn runs or waits; it goes when the review's turn ends.
   const turning = view !== undefined && (view.turn.running || view.turn.queued > 0);
-  const reviewLine = review.isError ? review.error.message : reviewWords(review.data, turning);
+  const reviewLine = review.isError
+    ? review.error.message
+    : takingPictures
+      ? 'Design Review is taking pictures of the app.'
+      : reviewWords(review.data, turning);
   const handlers: RowHandlers = {
     onChange: (row, action) => {
       change.mutate({ id: row.id, action });
@@ -124,19 +148,20 @@ export function ProposedPane({
     target?.scrollIntoView({ block: 'nearest' });
     return target != null;
   };
-  // The filter can hide what a count points at (it always hides converted rows): the jump lifts
-  // it, and lands once the full list has rendered. A section the filter shows leaves it on.
-  const jumpAfterFilter = useRef<SectionKey | null>(null);
+  // The filter or a folded section can hide what a count points at (the filter always hides converted
+  // rows): the jump lifts the filter, unfolds every section, and lands once the list has rendered.
+  const pendingJump = useRef<SectionKey | null>(null);
   const jump = (section: SectionKey): void => {
-    if (focusSection(section) || !filtering) return;
-    jumpAfterFilter.current = section;
+    if (focusSection(section)) return;
+    pendingJump.current = section;
     setChangesOnly(false);
+    setFolded(new Set());
   };
   useEffect(() => {
-    if (filtering || jumpAfterFilter.current === null) return;
-    focusSection(jumpAfterFilter.current);
-    jumpAfterFilter.current = null;
-  }, [filtering]);
+    if (pendingJump.current === null) return;
+    focusSection(pendingJump.current);
+    pendingJump.current = null;
+  }, [filtering, folded]);
 
   // The rows exist once the view has loaded; until then the request waits.
   const ready = view !== undefined && !loading && error === null;
@@ -195,6 +220,34 @@ export function ProposedPane({
     return [];
   };
 
+  // A first proposal's line would only repeat the list below it; a revision's says what changed and when.
+  const summary =
+    view === undefined || view.shape.round < 2 ? null : (
+      <SummaryLine
+        groups={groupProposals(view.proposals)}
+        onJump={jump}
+        lead={`Revision ${String(view.shape.round)}`}
+        tail={`revised ${shortAgo(view.shape.updatedAt, now)}`}
+        link={
+          // Every row changed filters nothing, so the link shows only when some rows stayed put.
+          changes.length === 0 || changes.length === view.proposals.length ? null : (
+            <Anchor
+              component="button"
+              type="button"
+              fz={12}
+              c="dimmed"
+              underline={filtering ? 'always' : 'hover'}
+              aria-pressed={filtering}
+              onClick={() => {
+                setChangesOnly((on) => !on);
+              }}
+            >
+              {`${String(changes.length)} changed this round`}
+            </Anchor>
+          )
+        }
+      />
+    );
   return (
     <Box
       component="section"
@@ -202,132 +255,93 @@ export function ProposedPane({
       h="100%"
       style={{ display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 }}
     >
-      <Stack gap={6} px="md" pt="md" pb="xs" style={{ flex: 'none' }}>
+      {/* Beside the conversation the head is its own band, ruled off from the list edge to edge, so the
+          summary belongs to it; on the Plan page the tabs' rule is above it, and a second would stack. */}
+      <Stack
+        gap={4}
+        px={inset}
+        pt={titled ? 20 : 12}
+        pb={titled ? 16 : 4}
+        style={{
+          flex: 'none',
+          ...(titled ? { borderBottom: '1px solid var(--mantine-color-default-border)' } : {}),
+        }}
+      >
         <Group justify="space-between" wrap="nowrap">
-          <Text fz={13} fw={600}>
-            Plan
-          </Text>
-          <Group gap="xs" wrap="nowrap">
-            <Menu position="bottom-end" withinPortal>
-              <Menu.Target>
-                <Tooltip label="Have reviewers read the plan before you accept it">
-                  <Button
-                    variant="subtle"
-                    color="gray"
-                    size="xs"
-                    rightSection={<IconChevronDown size={14} stroke={1.5} />}
-                    loading={review.isPending && review.variables !== 'design_review'}
-                    disabled={view === undefined || rows.length === 0 || takingPictures}
-                  >
-                    {takingPictures ? 'Taking pictures' : 'Review'}
-                  </Button>
-                </Tooltip>
-              </Menu.Target>
-              <Menu.Dropdown>
-                <Menu.Item
-                  onClick={() => {
-                    review.mutate('review');
-                  }}
-                >
-                  <ReviewItem hint="Scope and engineering reviewers read each goal and loose task">
-                    Plan review
-                  </ReviewItem>
-                </Menu.Item>
-                <Menu.Item
-                  onClick={() => {
-                    review.mutate('rehearse');
-                  }}
-                >
-                  <ReviewItem hint="Reads each task as the agent who will build it, for what it would have to ask">
-                    Check for Questions
-                  </ReviewItem>
-                </Menu.Item>
-                <Menu.Item
-                  onClick={() => {
-                    review.mutate('design_review');
-                  }}
-                >
-                  <ReviewItem hint="Compares each task's mock-up with the app as it is now and DESIGN.md">
-                    Design review
-                  </ReviewItem>
-                </Menu.Item>
-              </Menu.Dropdown>
-            </Menu>
-            <SplitButton
-              size="xs"
-              disabledReason={view === undefined || rows.length === 0 ? 'Nothing to accept' : null}
-              onClick={() => {
-                setConverting('accept');
-              }}
-              hint="Put the pending rows on the Board. Nothing starts."
-              menuLabel="More ways to accept"
-              menu={
-                <>
-                  <Menu.Item
-                    onClick={() => {
-                      setConverting('accept');
-                    }}
-                  >
-                    Accept
-                  </Menu.Item>
-                  <Menu.Item
-                    onClick={() => {
-                      setConverting('start');
-                    }}
-                  >
-                    <ReviewItem hint="Also starts the accepted tasks that are ready">
-                      Accept and Start
-                    </ReviewItem>
-                  </Menu.Item>
-                </>
+          {titled ? (
+            <Text fz={18} fw={600} c="bright">
+              Plan
+            </Text>
+          ) : summaryHere && summary !== null ? (
+            summary
+          ) : (
+            <span />
+          )}
+          <Group gap={8} wrap="nowrap">
+            <Tooltip
+              label={
+                view === undefined || rows.length === 0
+                  ? 'Nothing to accept'
+                  : 'Put the plan on the Board'
               }
             >
-              Accept
-            </SplitButton>
-            <Group gap={4} wrap="nowrap">
-              {menu}
-              {onClose === undefined ? null : (
-                <Tooltip label="Close Plan">
-                  <ActionIcon
-                    variant="subtle"
-                    color="gray"
-                    size="input-xs"
-                    aria-label="Close Plan"
-                    onClick={onClose}
-                  >
-                    <IconX size={16} stroke={1.5} />
-                  </ActionIcon>
-                </Tooltip>
-              )}
-            </Group>
+              <Button
+                size="xs"
+                h={28}
+                disabled={view === undefined || rows.length === 0}
+                onClick={() => {
+                  setConverting(true);
+                }}
+              >
+                Accept
+              </Button>
+            </Tooltip>
+            {expand}
+            {view === undefined ? null : (
+              <Menu position="bottom-end" withinPortal opened={menuOpen} onChange={setMenuOpen}>
+                <Menu.Target>
+                  <Tooltip label="Review, export and more" disabled={menuOpen}>
+                    <ActionIcon
+                      variant="subtle"
+                      color="gray"
+                      size="input-xs"
+                      aria-label="More Plan actions"
+                      loading={review.isPending}
+                    >
+                      <IconDots size={16} stroke={1.5} />
+                    </ActionIcon>
+                  </Tooltip>
+                </Menu.Target>
+                <Menu.Dropdown>
+                  <Menu.Label>Review before you accept</Menu.Label>
+                  {REVIEW_ITEMS.map((item) => (
+                    <Menu.Item
+                      key={item.kind}
+                      disabled={rows.length === 0 || review.isPending}
+                      onClick={() => {
+                        review.mutate(item.kind);
+                      }}
+                    >
+                      <MenuHint hint={item.hint}>{REVIEW_NAMES[item.kind]}</MenuHint>
+                    </Menu.Item>
+                  ))}
+                  {planItems === undefined ? null : (
+                    <>
+                      <Menu.Divider />
+                      {planItems}
+                    </>
+                  )}
+                </Menu.Dropdown>
+              </Menu>
+            )}
           </Group>
         </Group>
-        {view === undefined || view.shape.round === 0 ? null : (
-          <Text size="xs" c="dimmed">
-            {`Round ${String(view.shape.round)} · updated ${shortAgo(view.shape.updatedAt, now)}`}
-          </Text>
-        )}
         {reviewLine === '' ? null : (
           <Text size="xs" c="dimmed" role="status" aria-label="Review">
             {reviewLine}
           </Text>
         )}
-        {summaryHere ? (
-          <SummaryLine groups={groupProposals(view?.proposals ?? [])} onJump={jump} />
-        ) : null}
-        {changes.length === 0 || view === undefined ? null : (
-          <Button
-            variant="subtle"
-            size="compact-xs"
-            style={{ alignSelf: 'flex-start' }}
-            aria-pressed={filtering}
-            onClick={() => {
-              setChangesOnly((on) => !on);
-            }}
-          >
-            {`${String(changes.length)} ${changes.length === 1 ? 'change' : 'changes'} in round ${String(view.shape.round)}`}
-          </Button>
-        )}
+        {summaryHere && titled ? summary : null}
         {change.isError ? (
           <Alert color="red" title="Couldn't change the row">
             {change.error.message}
@@ -341,10 +355,15 @@ export function ProposedPane({
       </Stack>
       <ScrollArea
         style={{ flex: 1, minHeight: 0 }}
-        viewportProps={{ tabIndex: 0, role: 'group', 'aria-label': 'Plan rows' }}
+        viewportProps={{
+          tabIndex: 0,
+          role: 'group',
+          'aria-label': 'Plan rows',
+          className: classes['viewport'],
+        }}
         viewportRef={listRef}
       >
-        <Box px="md" pb="md">
+        <Box px={inset - ROW_INSET_PX} pt={titled ? 20 : 8} pb={24}>
           {error !== null ? (
             <Alert color="red" title="Couldn't load the proposals">
               {error}
@@ -363,11 +382,23 @@ export function ProposedPane({
                 projectId={view.shape.projectId}
                 groups={groups}
                 sizes={view.sizes}
+                preview={view.preview}
+                folded={folded}
+                onFold={(key) => {
+                  setFolded((now) => {
+                    const next = new Set(now);
+                    if (next.has(key)) next.delete(key);
+                    else next.add(key);
+                    return next;
+                  });
+                }}
                 actionsFor={actionsFor}
                 reviewOf={reviewOf}
                 handlers={handlers}
+                open={openRow}
+                onOpenChange={setOpenRow}
+                round={view.shape.round}
               />
-              <PreviewPanel preview={view.preview} />
             </AttachmentsContext>
           ) : (
             <HeardSoFar heard={view?.heard ?? []} />
@@ -379,10 +410,22 @@ export function ProposedPane({
           <ConvertPanel
             view={view}
             rows={rows}
-            opened={converting !== null}
-            start={converting === 'start'}
+            opened={converting}
             onClose={() => {
-              setConverting(null);
+              setConverting(false);
+            }}
+            onReadNotes={(id) => {
+              setConverting(false);
+              setOpenRow({ id, editing: false });
+              // Once the row has opened, bring its notes into view: they end the opened row, often below
+              // the fold, and the builder asked for them.
+              window.setTimeout(() => {
+                const notes = document.querySelector<HTMLElement>(
+                  `#shape-row-${id} [aria-label="Review notes"]`,
+                );
+                notes?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                notes?.focus({ preventScroll: true });
+              }, 50);
             }}
           />
           <RemoveDraftGoalModal
@@ -415,14 +458,14 @@ function ConvertPanel({
   view,
   rows,
   opened,
-  start,
   onClose,
+  onReadNotes,
 }: {
   readonly view: ShapeViewDto;
   readonly rows: readonly ShapeProposalDto[];
   readonly opened: boolean;
-  readonly start: boolean;
   readonly onClose: () => void;
+  readonly onReadNotes: (id: ShapeProposalId) => void;
 }) {
   const convert = useConvertShape(view.shape.id);
   const [refusals, setRefusals] = useState<readonly string[]>([]);
@@ -435,7 +478,10 @@ function ConvertPanel({
     <ConvertModal
       opened={opened}
       onClose={close}
-      start={start}
+      onReadNotes={(id) => {
+        close();
+        onReadNotes(id);
+      }}
       rows={rows}
       view={view}
       pending={convert.isPending}
@@ -457,10 +503,23 @@ function ConvertPanel({
   );
 }
 
+/** The ⋯ menu's Review section, each with what it buys. */
+const REVIEW_ITEMS: readonly { readonly kind: ReviewKind; readonly hint: string }[] = [
+  { kind: 'review', hint: 'Catch scope gaps and engineering risks before anything is built' },
+  {
+    kind: 'rehearse',
+    hint: 'Answer now what a builder would stop to ask, so tasks run straight through',
+  },
+  {
+    kind: 'design_review',
+    hint: "Catch mock-ups that drift from the app or DESIGN.md before they're built",
+  },
+];
+
 const REVIEW_NAMES: Record<ReviewKind, string> = {
-  review: 'Plan review',
-  rehearse: 'Check for Questions',
-  design_review: 'Design review',
+  review: 'Plan Review',
+  rehearse: 'Find Open Questions',
+  design_review: 'Design Review',
 };
 
 /** What a press that found nothing to read says. */
@@ -483,16 +542,4 @@ function reviewWords(
   if (answer.result.status === 'running')
     return 'A review is already running; press again when it ends.';
   return NOTHING_TO_SAY[answer.kind];
-}
-
-/** A menu item's name with a dimmed line saying what it does. */
-function ReviewItem({ hint, children }: { readonly hint: string; readonly children: ReactNode }) {
-  return (
-    <Stack gap={0}>
-      <Text size="sm">{children}</Text>
-      <Text size="xs" c="dimmed" maw={260}>
-        {hint}
-      </Text>
-    </Stack>
-  );
 }

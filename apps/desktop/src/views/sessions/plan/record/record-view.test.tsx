@@ -13,11 +13,11 @@ function Holder({ initial = {} }: { readonly initial?: RecordSearch }) {
   return <RecordView shapeId={RECORD_SHAPE_ID} search={search} onSearch={setSearch} />;
 }
 
-it('the record opens on Documents with the latest revision rendered', async () => {
+it("the record's Documents tab renders the latest revision", async () => {
   server.use(...planRecordHandlers(), ...baseHandlers());
   await renderWithDaemonAndRouter(
     <FrameSlots>
-      <Holder />
+      <Holder initial={{ tab: 'documents' }} />
     </FrameSlots>,
   );
   expect(await screen.findByText('Revoke it over the tailnet.')).toBeTruthy();

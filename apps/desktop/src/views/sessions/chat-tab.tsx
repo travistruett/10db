@@ -575,243 +575,9 @@ export function ChatTab({
       ref={sizeRef}
       style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'row' }}
     >
-      {/* The measured box keeps its width; this one gives the drawer's share of the surface up. */}
-      <Box
-        style={{
-          flex: 1,
-          minWidth: 0,
-          minHeight: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          paddingRight: changesOpen && !planOpen && width >= BESIDE_PX ? DRAWER_WIDTH : 0,
-        }}
-      >
-        <SessionTitle
-          chat={chat}
-          conversation={conversation}
-          steps={
-            <>
-              {work.data === undefined || removed ? null : (
-                <GitStepButton
-                  chatId={chat.id}
-                  state={work.data}
-                  title={chat.title}
-                  turnRunning={working}
-                  onError={setGitError}
-                />
-              )}
-            </>
-          }
-          switcherFor={switcherFor}
-          {...(offersPlan
-            ? { plan: { open: planOpen, onToggle: togglePlan, pending: showPlan.isPending } }
-            : {})}
-          projectPath={project?.repoPath ?? null}
-          actions={{
-            ...actions,
-            ...(offersPlan ? { onTogglePlan: togglePlan, planOpen } : {}),
-          }}
-          {...(renaming === undefined ? {} : { renaming })}
-          {...(onRenamed === undefined ? {} : { onRenamed })}
-          {...(openingTerminal === undefined ? {} : { openingTerminal })}
-          {...(onTerminalAsked === undefined ? {} : { onTerminalAsked })}
-          onTerminalUncopied={setUncopied}
-        />
-        {gitError === null ? null : (
-          <Alert
-            role="alert"
-            color="red"
-            mx="md"
-            mt="xs"
-            py={6}
-            withCloseButton
-            closeButtonLabel="Dismiss"
-            onClose={() => {
-              setGitError(null);
-            }}
-          >
-            {gitError}
-          </Alert>
-        )}
-        <ConversationLayout
-          label="Conversation"
-          header={<JudgeLine judge={caps.judge} />}
-          footer={
-            <>
-              {caps.plan ? (
-                <TodoList
-                  steps={latestTodos(items)}
-                  working={working}
-                  cardWaiting={open.length > 0}
-                />
-              ) : null}
-              <WorkingLine
-                conversation={conversation}
-                streaming={streaming}
-                {...(tool === undefined ? {} : { tool })}
-              />
-              <PermissionRequest items={open} />
-              <BackgroundTasks
-                capabilities={caps}
-                tasks={conversation.backgroundTasks}
-                cardWaiting={open.length > 0}
-              />
-              {inTerminal ? (
-                <TerminalBanner
-                  label={caps.label}
-                  since={takeover.data?.since ?? null}
-                  notes={takeover.data?.notes ?? []}
-                  onHandBack={() => {
-                    setUncopied(null);
-                    setLastCommand(null);
-                    handBack.mutate(chat.conversationId);
-                  }}
-                  handingBack={handBack.isPending}
-                  onCopyCommand={() => {
-                    takeoverCommand.mutate(chat.conversationId, {
-                      onSuccess: ({ line }) => {
-                        setLastCommand(line);
-                        clipboard.copy(line);
-                      },
-                    });
-                  }}
-                  copied={clipboard.copied}
-                  line={uncopied ?? (clipboard.error === null ? null : lastCommand)}
-                  error={handBack.error?.message ?? takeoverCommand.error?.message ?? null}
-                />
-              ) : null}
-              {waiting ? (
-                <FolderWait holders={keeping} branch={checkoutBranch} onStop={stopNow} />
-              ) : null}
-              {asking && !removed && conversation.state !== 'sealed' ? (
-                <WorkBar
-                  key={askedAt ?? 'asked'}
-                  agentLabel={caps.label}
-                  branch={checkoutBranch}
-                  state={work.data}
-                  pending={choose.isPending}
-                  settled={shownSettled}
-                  error={choose.error?.message ?? null}
-                  onHide={() => {
-                    barHidden.set(chat.id, askedAt);
-                    setHiddenFor(askedAt);
-                    input.current?.focus();
-                  }}
-                  onChoose={(next) => {
-                    choose.mutate(
-                      { chatId: chat.id, place: next },
-                      {
-                        onSuccess: (answer) => {
-                          setSettled(answer.chosen ? null : { work: answer.work, askedAt });
-                          // The bar goes with the answer, and the focus it held goes to the composer.
-                          input.current?.focus();
-                        },
-                      },
-                    );
-                  }}
-                />
-              ) : null}
-              {!asking && shownSettled !== null ? (
-                <Text size="xs" c="dimmed" px="md" role="status">
-                  {settledWords(shownSettled)}
-                </Text>
-              ) : null}
-              {conversation.state === 'sealed' ? (
-                <>
-                  <HandedOffLine chat={chat} />
-                  <Box px="md">{strip}</Box>
-                </>
-              ) : removed ? (
-                <>
-                  <Text size="sm" c="dimmed" px="md" py="md">
-                    This project was removed from 10db.
-                  </Text>
-                  <Box px="md">{strip}</Box>
-                </>
-              ) : (
-                <Composer
-                  draft={draft}
-                  onDraft={(next) => {
-                    setSendError(null);
-                    setDraft(next);
-                  }}
-                  capabilities={caps}
-                  mentions={{
-                    files: (q, signal) =>
-                      fetchConversationFiles(client, chat.conversationId, q, signal),
-                    commands: conversation.commands,
-                  }}
-                  phase={phase}
-                  disabledReason={disabledReason}
-                  error={sendError}
-                  inputRef={input}
-                  modelControl={
-                    <Group gap={4} wrap="nowrap">
-                      {caps.modelSwitch === 'none' || offered.length === 0 ? (
-                        named === null ? null : (
-                          <Text size="xs" c="dimmed">
-                            {nameOf(
-                              named,
-                              new Map((modelRows.data ?? []).map((r) => [r.model, r])),
-                            )}
-                          </Text>
-                        )
-                      ) : (
-                        <ModelMenu
-                          offered={offered}
-                          default={models.data?.default ?? null}
-                          picked={conversation.model}
-                          effort={conversation.effort}
-                          busy={working}
-                          pending={patch.isPending}
-                          error={modelRefusal}
-                          onPick={changeModel}
-                        />
-                      )}
-                    </Group>
-                  }
-                  {...(planId === null
-                    ? {}
-                    : {
-                        uploads: {
-                          onFiles: (files: File[]) => {
-                            void dropIntoPlan(files);
-                          },
-                          refused: refusedFiles,
-                          onDismiss: () => {
-                            setRefusedFiles([]);
-                          },
-                        },
-                      })}
-                  onSend={post}
-                  onStop={stopNow}
-                  onRedo={async (d) => {
-                    await redo.mutateAsync({ conversationId: chat.conversationId, text: d.text });
-                  }}
-                  notes={strip}
-                />
-              )}
-            </>
-          }
-        >
-          {loading ? (
-            <Box px="md" pt="md">
-              <PageLoading shape={PageLoadingShape.Lines} label="Loading the conversation" />
-            </Box>
-          ) : null}
-          <ConversationList
-            entries={shown}
-            highlight={why}
-            loadFull={loadFull}
-            onAllow={allow}
-            agentLabel={caps.label}
-            busy={streaming !== null}
-          />
-        </ConversationLayout>
-      </Box>
       <PlanSide
         open={planOpen}
-        beside={besidePlan}
+        width={width}
         shapeId={planId}
         onClose={() => {
           planChoice.set(chat.id, false);
@@ -848,7 +614,242 @@ export function ChatTab({
               ),
             }
           : {})}
-      />
+      >
+        {/* The measured box keeps its width; this one gives the drawer's share of the surface up. */}
+        <Box
+          style={{
+            flex: 1,
+            minWidth: 0,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            paddingRight: changesOpen && !planOpen && width >= BESIDE_PX ? DRAWER_WIDTH : 0,
+          }}
+        >
+          <SessionTitle
+            chat={chat}
+            conversation={conversation}
+            steps={
+              <>
+                {work.data === undefined || removed ? null : (
+                  <GitStepButton
+                    chatId={chat.id}
+                    state={work.data}
+                    title={chat.title}
+                    turnRunning={working}
+                    onError={setGitError}
+                  />
+                )}
+              </>
+            }
+            switcherFor={switcherFor}
+            {...(offersPlan
+              ? { plan: { open: planOpen, onToggle: togglePlan, pending: showPlan.isPending } }
+              : {})}
+            projectPath={project?.repoPath ?? null}
+            actions={{
+              ...actions,
+              ...(offersPlan ? { onTogglePlan: togglePlan, planOpen } : {}),
+            }}
+            {...(renaming === undefined ? {} : { renaming })}
+            {...(onRenamed === undefined ? {} : { onRenamed })}
+            {...(openingTerminal === undefined ? {} : { openingTerminal })}
+            {...(onTerminalAsked === undefined ? {} : { onTerminalAsked })}
+            onTerminalUncopied={setUncopied}
+          />
+          {gitError === null ? null : (
+            <Alert
+              role="alert"
+              color="red"
+              mx="md"
+              mt="xs"
+              py={6}
+              withCloseButton
+              closeButtonLabel="Dismiss"
+              onClose={() => {
+                setGitError(null);
+              }}
+            >
+              {gitError}
+            </Alert>
+          )}
+          <ConversationLayout
+            label="Conversation"
+            header={<JudgeLine judge={caps.judge} />}
+            footer={
+              <>
+                {caps.plan ? (
+                  <TodoList
+                    steps={latestTodos(items)}
+                    working={working}
+                    cardWaiting={open.length > 0}
+                  />
+                ) : null}
+                <WorkingLine
+                  conversation={conversation}
+                  streaming={streaming}
+                  {...(tool === undefined ? {} : { tool })}
+                />
+                <PermissionRequest items={open} />
+                <BackgroundTasks
+                  capabilities={caps}
+                  tasks={conversation.backgroundTasks}
+                  cardWaiting={open.length > 0}
+                />
+                {inTerminal ? (
+                  <TerminalBanner
+                    label={caps.label}
+                    since={takeover.data?.since ?? null}
+                    notes={takeover.data?.notes ?? []}
+                    onHandBack={() => {
+                      setUncopied(null);
+                      setLastCommand(null);
+                      handBack.mutate(chat.conversationId);
+                    }}
+                    handingBack={handBack.isPending}
+                    onCopyCommand={() => {
+                      takeoverCommand.mutate(chat.conversationId, {
+                        onSuccess: ({ line }) => {
+                          setLastCommand(line);
+                          clipboard.copy(line);
+                        },
+                      });
+                    }}
+                    copied={clipboard.copied}
+                    line={uncopied ?? (clipboard.error === null ? null : lastCommand)}
+                    error={handBack.error?.message ?? takeoverCommand.error?.message ?? null}
+                  />
+                ) : null}
+                {waiting ? (
+                  <FolderWait holders={keeping} branch={checkoutBranch} onStop={stopNow} />
+                ) : null}
+                {asking && !removed && conversation.state !== 'sealed' ? (
+                  <WorkBar
+                    key={askedAt ?? 'asked'}
+                    agentLabel={caps.label}
+                    branch={checkoutBranch}
+                    state={work.data}
+                    pending={choose.isPending}
+                    settled={shownSettled}
+                    error={choose.error?.message ?? null}
+                    onHide={() => {
+                      barHidden.set(chat.id, askedAt);
+                      setHiddenFor(askedAt);
+                      input.current?.focus();
+                    }}
+                    onChoose={(next) => {
+                      choose.mutate(
+                        { chatId: chat.id, place: next },
+                        {
+                          onSuccess: (answer) => {
+                            setSettled(answer.chosen ? null : { work: answer.work, askedAt });
+                            // The bar goes with the answer, and the focus it held goes to the composer.
+                            input.current?.focus();
+                          },
+                        },
+                      );
+                    }}
+                  />
+                ) : null}
+                {!asking && shownSettled !== null ? (
+                  <Text size="xs" c="dimmed" px="md" role="status">
+                    {settledWords(shownSettled)}
+                  </Text>
+                ) : null}
+                {conversation.state === 'sealed' ? (
+                  <>
+                    <HandedOffLine chat={chat} />
+                    <Box px="md">{strip}</Box>
+                  </>
+                ) : removed ? (
+                  <>
+                    <Text size="sm" c="dimmed" px="md" py="md">
+                      This project was removed from 10db.
+                    </Text>
+                    <Box px="md">{strip}</Box>
+                  </>
+                ) : (
+                  <Composer
+                    draft={draft}
+                    onDraft={(next) => {
+                      setSendError(null);
+                      setDraft(next);
+                    }}
+                    capabilities={caps}
+                    mentions={{
+                      files: (q, signal) =>
+                        fetchConversationFiles(client, chat.conversationId, q, signal),
+                      commands: conversation.commands,
+                    }}
+                    phase={phase}
+                    disabledReason={disabledReason}
+                    error={sendError}
+                    inputRef={input}
+                    modelControl={
+                      <Group gap={4} wrap="nowrap">
+                        {caps.modelSwitch === 'none' || offered.length === 0 ? (
+                          named === null ? null : (
+                            <Text size="xs" c="dimmed">
+                              {nameOf(
+                                named,
+                                new Map((modelRows.data ?? []).map((r) => [r.model, r])),
+                              )}
+                            </Text>
+                          )
+                        ) : (
+                          <ModelMenu
+                            offered={offered}
+                            default={models.data?.default ?? null}
+                            picked={conversation.model}
+                            effort={conversation.effort}
+                            busy={working}
+                            pending={patch.isPending}
+                            error={modelRefusal}
+                            onPick={changeModel}
+                          />
+                        )}
+                      </Group>
+                    }
+                    {...(planId === null
+                      ? {}
+                      : {
+                          uploads: {
+                            onFiles: (files: File[]) => {
+                              void dropIntoPlan(files);
+                            },
+                            refused: refusedFiles,
+                            onDismiss: () => {
+                              setRefusedFiles([]);
+                            },
+                          },
+                        })}
+                    onSend={post}
+                    onStop={stopNow}
+                    onRedo={async (d) => {
+                      await redo.mutateAsync({ conversationId: chat.conversationId, text: d.text });
+                    }}
+                    notes={strip}
+                  />
+                )}
+              </>
+            }
+          >
+            {loading ? (
+              <Box px="md" pt="md">
+                <PageLoading shape={PageLoadingShape.Lines} label="Loading the conversation" />
+              </Box>
+            ) : null}
+            <ConversationList
+              entries={shown}
+              highlight={why}
+              loadFull={loadFull}
+              onAllow={allow}
+              agentLabel={caps.label}
+              busy={streaming !== null}
+            />
+          </ConversationLayout>
+        </Box>
+      </PlanSide>
       <ChangesDrawer
         opened={changesOpen && !planOpen}
         onClose={() => {

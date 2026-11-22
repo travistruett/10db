@@ -10,13 +10,22 @@ import type { ReactNode } from 'react';
 export function RecordListStates({
   query,
   what,
+  none,
   children,
 }: {
   readonly query: UseQueryResult<PlanRecordPage>;
   readonly what: string;
+  /** The Plan has none at all and nothing narrows the list: one dim line in place of an empty table. */
+  readonly none?: { readonly narrowed: boolean; readonly text: string };
   readonly children: ReactNode;
 }) {
   if (query.isPending) return <Loader size="sm" aria-label={`Loading ${what}`} />;
+  if (none !== undefined && !none.narrowed && query.data?.total === 0)
+    return (
+      <Text size="sm" c="dimmed">
+        {none.text}
+      </Text>
+    );
   return <>{children}</>;
 }
 

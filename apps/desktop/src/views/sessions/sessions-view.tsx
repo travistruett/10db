@@ -1,6 +1,7 @@
 import { ConversationState, type ChatDto, type ProjectId } from '@10db/contracts';
 import { useNavigate } from '@tanstack/react-router';
-import { Box, Button, Group, Modal, Paper, Text } from '@mantine/core';
+import { Box, Button, Group, Modal, Paper, Text, Tooltip } from '@mantine/core';
+import { IconLayoutSidebarRight } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArchiveConfirm } from './archive-confirm';
 import { useOpenChats, usePatchChat, useUnarchiveChat } from '../../daemon/chat-queries';
@@ -16,6 +17,7 @@ import {
   readFreshTabs,
   removeFreshTab,
   setFreshModel,
+  setFreshPlan,
   setFreshProject,
   writeFreshTabs,
   type FreshTab as FreshTabState,
@@ -344,9 +346,6 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
       onNew={() => {
         newTab();
       }}
-      onNewPlan={() => {
-        newTab(true);
-      }}
     />
   );
 
@@ -363,9 +362,6 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
           onClose={closing.close}
           onNew={() => {
             newTab();
-          }}
-          onNewPlan={() => {
-            newTab(true);
           }}
           onRename={(row) => {
             select_(row);
@@ -430,7 +426,27 @@ export function SessionsView({ search, onSearch }: SessionsViewProps) {
         }}
       />
       {selected?.kind === 'fresh' ? (
-        <TitleRow title={switcherFor(selected.tab.plan ? 'New Plan' : 'New Session')} />
+        <TitleRow
+          title={switcherFor('New Session')}
+          actions={
+            // Before the first message the Plan toggle decides whether the session starts with a Plan.
+            <Tooltip label={selected.tab.plan ? 'Close Plan' : 'Show Plan'}>
+              <Button
+                variant={selected.tab.plan ? 'light' : 'default'}
+                size="xs"
+                aria-pressed={selected.tab.plan}
+                leftSection={<IconLayoutSidebarRight size={14} stroke={1.5} />}
+                onClick={() => {
+                  const id = selected.tab.id;
+                  const on = !selected.tab.plan;
+                  setFresh((tabsNow) => setFreshPlan(tabsNow, id, on));
+                }}
+              >
+                Plan
+              </Button>
+            </Tooltip>
+          }
+        />
       ) : null}
       {closing.notice === null ? null : (
         <Paper role="status" withBorder px="sm" py={6} mx="md" mt="xs">

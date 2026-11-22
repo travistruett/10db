@@ -352,7 +352,9 @@ function Rows({
         style={
           highlighted
             ? {
-                background: 'var(--mantine-color-default-hover)',
+                // Plainly marked: the messages a Plan row came from, tinted and ruled in the accent.
+                background: 'var(--mantine-primary-color-light)',
+                boxShadow: 'inset 2px 0 0 var(--mantine-primary-color-filled)',
                 borderRadius: 'var(--mantine-radius-sm)',
                 margin: '0 calc(var(--mantine-spacing-xs) * -1)',
                 padding: '0 var(--mantine-spacing-xs)',

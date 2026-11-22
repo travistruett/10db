@@ -7,14 +7,13 @@ import {
   type ShapeStartCountsDto,
   type ShapeViewDto,
 } from '@10db/contracts';
-import { Button, Checkbox, Group, Radio, ScrollArea, Stack, Text } from '@mantine/core';
+import { Anchor, Button, Checkbox, Group, Radio, ScrollArea, Stack, Text } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useStartCounts, type ConvertShapeResult } from '../../../daemon/shape-queries';
 import { FormModal } from '../../../shell/form-modal';
 import { destination, proposalTitle } from './proposal-text';
 import { isConverted } from './proposed-groups';
-import { ReviewLines } from './review-notes';
 import { convertWarnings, rowReview } from './review-lines';
 
 const MARKS = [
@@ -28,7 +27,7 @@ export function convertibleRows(proposals: readonly ShapeProposalDto[]): ShapePr
   return proposals.filter((p) => p.state === 'pending' && !isConverted(p));
 }
 
-/** The counts line of Accept and Start's confirm; a part that is zero drops out. */
+/** What Accept and Start would do, counted; a part that is zero drops out. */
 export function startCountsLine(counts: ShapeStartCountsDto): string {
   const waits = [
     counts.forLane === 0 ? null : `${String(counts.forLane)} wait for a lane`,
@@ -44,10 +43,16 @@ export function startCountsLine(counts: ShapeStartCountsDto): string {
     .join('; ');
 }
 
+/** A row's open review notes, counted as its row in the panel counts them. */
+function notesCount(view: ShapeViewDto, row: ShapeProposalDto): number {
+  if (row.kind !== 'goal' && row.kind !== 'task') return 0;
+  const review = rowReview(view, row);
+  const questions = row.kind === 'goal' ? 0 : review.tasks.flatMap((t) => t.questions).length;
+  return review.findings.length + questions;
+}
+
 export interface ConvertModalProps {
   readonly opened: boolean;
-  /** Accept and Start: the confirm says what starts, and Convert also starts it. */
-  readonly start: boolean;
   readonly onClose: () => void;
   readonly rows: readonly ShapeProposalDto[];
   /** What the review has to say: ceremony, findings and the rehearsal's marks and questions. */
@@ -57,6 +62,8 @@ export interface ConvertModalProps {
   readonly refusals: readonly string[];
   /** The daemon's words when the request itself failed. */
   readonly failure: string | null;
+  /** Read Them: closes the modal and opens this row, the first ticked one with notes, in the panel. */
+  readonly onReadNotes?: (id: ShapeProposalId) => void;
   readonly onConvert: (
     ids: readonly ShapeProposalId[],
     options?: { readonly cut?: readonly MilestoneCut[]; readonly start?: boolean },
@@ -64,18 +71,21 @@ export interface ConvertModalProps {
 }
 
 /**
- * A form modal with a checkbox per pending proposal and where it goes, the line that says nothing
- * starts, and the primary Accept n. Accept never starts or stops a turn. Open questions and findings warn and never block.
+ * A form modal with a checkbox per pending proposal and where it goes, then Accept, which only puts them
+ * on the Board, and the primary Accept and Start, which also starts what is ready; a line counts what
+ * would wait only when something would. With nothing that would start, Accept is the one primary. Open
+ * notes warn, with Read Them, which opens the first row that has some in the panel. Accept never
+ * starts or stops a turn. Open questions and findings warn and never block.
  */
 export function ConvertModal({
   opened,
-  start,
   onClose,
   rows,
   view,
   pending,
   refusals,
   failure,
+  onReadNotes,
   onConvert,
 }: ConvertModalProps) {
   const [unticked, setUnticked] = useState<ReadonlySet<ShapeProposalId>>(new Set());
@@ -101,11 +111,10 @@ export function ConvertModal({
   const counts = useStartCounts(
     view.shape.id,
     chosen.map((r) => r.id),
-    opened && start,
+    opened,
   ).data;
-  // Nothing in what is ticked would start: the button is a plain Accept and sends no start.
+  // Nothing in what is ticked would start: Accept and Start is not offered.
   const startsAny = counts === undefined || counts.now + counts.forLane + counts.forOthers > 0;
-  const starting = start && startsAny;
   // After an Accept the start could not follow, or had nothing new: the modal stays until Done.
   const [after, setAfter] = useState<{ readonly line: string; readonly refused: boolean } | null>(
     null,
@@ -117,8 +126,9 @@ export function ConvertModal({
     .flatMap((r) => rowReview(view, r).tasks)
     .filter((t) => t.state === 'rehearsing').length;
   const warnings = convertWarnings(view, chosen, rehearsing);
+  const withNotes = chosen.find((r) => notesCount(view, r) > 0);
 
-  const convert = async (): Promise<void> => {
+  const convert = async (starting: boolean): Promise<void> => {
     const ids = chosen.map((r) => r.id);
     const cut = cutting
       ? milestones.flatMap((m): MilestoneCut[] => {
@@ -144,8 +154,8 @@ export function ConvertModal({
     <FormModal
       opened={opened}
       onClose={onClose}
-      title={start ? 'Accept and Start' : 'Accept'}
-      size="lg"
+      title="Accept Plan"
+      size="md"
       actions={
         <>
           {after?.refused === true ? (
@@ -172,14 +182,26 @@ export function ConvertModal({
                 Cancel
               </Button>
               <Button
+                variant={startsAny ? 'default' : 'filled'}
                 loading={pending}
                 disabled={chosen.length === 0 || unmarked.length > 0}
                 onClick={() => {
-                  void convert();
+                  void convert(false);
                 }}
               >
-                {`${starting ? 'Accept and Start' : 'Accept'} ${String(chosen.length)}`}
+                Accept
               </Button>
+              {startsAny ? (
+                <Button
+                  loading={pending}
+                  disabled={chosen.length === 0 || unmarked.length > 0 || counts === undefined}
+                  onClick={() => {
+                    void convert(true);
+                  }}
+                >
+                  Accept and Start
+                </Button>
+              ) : null}
             </>
           ) : (
             <Button onClick={onClose}>Done</Button>
@@ -188,21 +210,19 @@ export function ConvertModal({
       }
     >
       <Stack gap="md">
-        {start ? (
-          <>
-            {counts === undefined ? null : (
-              <Text size="sm" role="status">
-                {startsAny ? startCountsLine(counts) : 'Nothing to start'}
-              </Text>
-            )}
-            {counts?.stay.map((t, i) => (
+        {/* Said only when Accept and Start would not start everything at once. */}
+        {counts === undefined ||
+        (counts.forLane + counts.forOthers === 0 && counts.stay.length === 0) ? null : (
+          <Stack gap={2}>
+            <Text size="sm" c="dimmed" role="status">
+              {`Accept and Start: ${startCountsLine(counts)}`}
+            </Text>
+            {counts.stay.map((t, i) => (
               <Text key={`${String(i)}-${t.title}`} size="xs" c="dimmed">
                 {`${t.title} stays on the Board: ${t.why}`}
               </Text>
             ))}
-          </>
-        ) : (
-          <Text size="sm">Nothing starts. Tasks wait on the Board.</Text>
+          </Stack>
         )}
         {after === null || after.refused ? null : (
           <Text size="sm" role="status">
@@ -221,15 +241,34 @@ export function ConvertModal({
         ) : null}
         {warnings.length === 0 ? null : (
           <Stack gap={2} aria-label="Before you accept">
-            {warnings.map((line) => (
+            {warnings.map((line, index) => (
               <Text key={line} size="xs" c="dimmed">
                 <IconAlertTriangle
                   size={14}
                   stroke={1.5}
+                  color="var(--mantine-color-yellow-filled)"
                   aria-hidden="true"
                   style={{ verticalAlign: '-2px' }}
                 />{' '}
                 {line}
+                {/* Read Them ends the last warning's line. */}
+                {index !== warnings.length - 1 ||
+                withNotes === undefined ||
+                onReadNotes === undefined ? null : (
+                  <>
+                    {' · '}
+                    <Anchor
+                      component="button"
+                      type="button"
+                      fz="xs"
+                      onClick={() => {
+                        onReadNotes(withNotes.id);
+                      }}
+                    >
+                      Read Them
+                    </Anchor>
+                  </>
+                )}
               </Text>
             ))}
           </Stack>
@@ -270,25 +309,44 @@ export function ConvertModal({
           </Text>
         ) : (
           <Stack gap="xs">
-            {listed.map((row) => (
-              <div key={row.id}>
-                <Checkbox
-                  checked={!unticked.has(row.id)}
-                  onChange={(event) => {
-                    const next = new Set(unticked);
-                    if (event.currentTarget.checked) next.delete(row.id);
-                    else next.add(row.id);
-                    setUnticked(next);
-                  }}
-                  label={proposalTitle(row)}
-                  description={destination(row)}
-                />
-                {row.kind === 'goal' || row.kind === 'task' ? (
-                  <ReviewLines review={rowReview(view, row)} pl={28} />
-                ) : null}
-              </div>
-            ))}
+            {/* Ticks only when there is a choice to make: one row is simply what Accept takes. */}
+            {listed.length === 1 && rows.length === 1 ? null : (
+              <Text size="xs" fw={600} c="dimmed">
+                Choose what to accept
+              </Text>
+            )}
+            {listed.map((row) =>
+              listed.length === 1 && rows.length === 1 ? (
+                <div key={row.id}>
+                  <Text size="sm">{proposalTitle(row)}</Text>
+                  <Text size="xs" c="dimmed">
+                    {destination(row)}
+                  </Text>
+                </div>
+              ) : (
+                <div key={row.id}>
+                  <Checkbox
+                    checked={!unticked.has(row.id)}
+                    onChange={(event) => {
+                      const next = new Set(unticked);
+                      if (event.currentTarget.checked) next.delete(row.id);
+                      else next.add(row.id);
+                      setUnticked(next);
+                    }}
+                    label={proposalTitle(row)}
+                    description={destination(row)}
+                  />
+                </div>
+              ),
+            )}
           </Stack>
+        )}
+        {rows.length === 0 || after !== null ? null : (
+          <Text size="xs" c="dimmed">
+            {startsAny
+              ? 'Accept puts it on the Board and starts nothing. Accept and Start also starts the work now.'
+              : 'Accept puts it on the Board. Nothing is ready to start yet.'}
+          </Text>
         )}
       </Stack>
     </FormModal>

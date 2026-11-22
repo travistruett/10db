@@ -16,7 +16,7 @@ import {
 } from '../../daemon/chat-queries';
 import { useUploadShapeFile } from '../../daemon/shape-queries';
 import { dropNotes } from './plan/drop-notes';
-import { PlanSide, planBeside } from './plan/plan-side';
+import { PlanSide } from './plan/plan-side';
 import { planChoice, usePlanOpen } from './plan/plan-choice';
 import type { FreshTab as FreshTabState } from './fresh-tabs';
 import { RecentSessions } from './recent-sessions';
@@ -161,129 +161,136 @@ export function FreshTab({
   });
   const chosen = create.isPending;
 
+  const conversation = (
+    <Box style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: 'auto' }}>
+      <Box maw={CONVERSATION_WIDTH} mx="auto" px="md" pt="12vh" pb="xl">
+        <Text size="sm" c="dimmed" mb="md">
+          {tab.plan
+            ? `Plan in ${name}: talk it through, or drop a document. The plan fills in beside the conversation.`
+            : web
+              ? `A chat reads ${name}, runs commands and searches the web.`
+              : `A chat reads ${name} and runs commands.`}
+        </Text>
+        <Group gap="sm" mb={4} wrap="wrap">
+          <Select
+            aria-label="Project"
+            placeholder="Find a project"
+            size="xs"
+            w={220}
+            searchable
+            allowDeselect={false}
+            disabled={chosen}
+            data={projects.map((p) => ({ value: p.id, label: p.name }))}
+            value={tab.projectId}
+            onChange={(value) => {
+              const next = projects.find((p) => p.id === value);
+              if (next !== undefined) onProject(next.id);
+            }}
+          />
+        </Group>
+        <Text size="xs" c="dimmed" mb="sm">
+          {web
+            ? `Uses ${name}'s account. Reads the code, runs commands and searches the web. Asks before anything that crosses a limit.`
+            : `Uses ${name}'s account. Reads the code and runs commands. Asks before anything that crosses a limit.`}
+        </Text>
+        <Box mx="calc(var(--mantine-spacing-md) * -1)">
+          <Composer
+            draft={draft}
+            onDraft={changeDraft}
+            capabilities={{ images: [] }}
+            phase={phase}
+            disabledReason={null}
+            error={null}
+            // The alert under the composer says why, once, and offers Try Again.
+            onFailure={setCreateError}
+            inputRef={input}
+            {...(tab.plan
+              ? {
+                  uploads: {
+                    onFiles: (files: File[]) => {
+                      setCreateError(null);
+                      ensureChat(null, files).catch((error: unknown) => {
+                        setCreateError(error instanceof Error ? error.message : String(error));
+                      });
+                    },
+                    refused: [],
+                    onDismiss: () => undefined,
+                  },
+                }
+              : {})}
+            modelControl={
+              models.data === undefined ? null : (
+                <ModelMenu
+                  offered={models.data.offered}
+                  default={models.data.default}
+                  picked={tab.model}
+                  effort={tab.effort}
+                  busy={false}
+                  pending={chosen}
+                  onPick={onModel}
+                />
+              )
+            }
+            onSend={async (sent) => {
+              await ensureChat({ draft: sent });
+            }}
+            onStop={() => undefined}
+            onRedo={() => undefined}
+          />
+        </Box>
+        {held.length === 0 ? null : (
+          <Text size="xs" c="dimmed" mt="xs" aria-label="Files waiting for the session">
+            {held.map((f) => f.name).join(' · ')}
+          </Text>
+        )}
+        {createError === null ? null : (
+          <Alert color="red" mt="sm" py={6} role="alert">
+            <Group justify="space-between" wrap="nowrap">
+              <Text size="sm">{createError}</Text>
+              <Button size="compact-xs" variant="default" loading={chosen} onClick={tryAgain}>
+                Try Again
+              </Button>
+            </Group>
+          </Alert>
+        )}
+        {tab.plan ? null : (
+          <>
+            <Box mt="md">
+              <StartFrom
+                starts={starts}
+                onPick={(text) => {
+                  setDraft({ ...draft, text });
+                  input.current?.focus();
+                }}
+              />
+            </Box>
+            <Box mt="lg">
+              <RecentSessions chats={recent} onOpen={onOpenRecent} />
+            </Box>
+          </>
+        )}
+      </Box>
+    </Box>
+  );
+
   return (
     <Box ref={sizeRef} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'row' }}>
-      <Box style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: 'auto' }}>
-        <Box maw={CONVERSATION_WIDTH} mx="auto" px="md" pt="12vh" pb="xl">
-          <Text size="sm" c="dimmed" mb="md">
-            {tab.plan
-              ? `Plan in ${name}: talk it through, or drop a document. The plan fills in beside the conversation.`
-              : web
-                ? `A chat reads ${name}, runs commands and searches the web.`
-                : `A chat reads ${name} and runs commands.`}
-          </Text>
-          <Group gap="sm" mb={4} wrap="wrap">
-            <Select
-              aria-label="Project"
-              placeholder="Find a project"
-              size="xs"
-              w={220}
-              searchable
-              allowDeselect={false}
-              disabled={chosen}
-              data={projects.map((p) => ({ value: p.id, label: p.name }))}
-              value={tab.projectId}
-              onChange={(value) => {
-                const next = projects.find((p) => p.id === value);
-                if (next !== undefined) onProject(next.id);
-              }}
-            />
-          </Group>
-          <Text size="xs" c="dimmed" mb="sm">
-            {web
-              ? `Uses ${name}'s account. Reads the code, runs commands and searches the web. Asks before anything that crosses a limit.`
-              : `Uses ${name}'s account. Reads the code and runs commands. Asks before anything that crosses a limit.`}
-          </Text>
-          <Box mx="calc(var(--mantine-spacing-md) * -1)">
-            <Composer
-              draft={draft}
-              onDraft={changeDraft}
-              capabilities={{ images: [] }}
-              phase={phase}
-              disabledReason={null}
-              error={null}
-              // The alert under the composer says why, once, and offers Try Again.
-              onFailure={setCreateError}
-              inputRef={input}
-              {...(tab.plan
-                ? {
-                    uploads: {
-                      onFiles: (files: File[]) => {
-                        setCreateError(null);
-                        ensureChat(null, files).catch((error: unknown) => {
-                          setCreateError(error instanceof Error ? error.message : String(error));
-                        });
-                      },
-                      refused: [],
-                      onDismiss: () => undefined,
-                    },
-                  }
-                : {})}
-              modelControl={
-                models.data === undefined ? null : (
-                  <ModelMenu
-                    offered={models.data.offered}
-                    default={models.data.default}
-                    picked={tab.model}
-                    effort={tab.effort}
-                    busy={false}
-                    pending={chosen}
-                    onPick={onModel}
-                  />
-                )
-              }
-              onSend={async (sent) => {
-                await ensureChat({ draft: sent });
-              }}
-              onStop={() => undefined}
-              onRedo={() => undefined}
-            />
-          </Box>
-          {held.length === 0 ? null : (
-            <Text size="xs" c="dimmed" mt="xs" aria-label="Files waiting for the session">
-              {held.map((f) => f.name).join(' · ')}
-            </Text>
-          )}
-          {createError === null ? null : (
-            <Alert color="red" mt="sm" py={6} role="alert">
-              <Group justify="space-between" wrap="nowrap">
-                <Text size="sm">{createError}</Text>
-                <Button size="compact-xs" variant="default" loading={chosen} onClick={tryAgain}>
-                  Try Again
-                </Button>
-              </Group>
-            </Alert>
-          )}
-          {tab.plan ? null : (
-            <>
-              <Box mt="md">
-                <StartFrom
-                  starts={starts}
-                  onPick={(text) => {
-                    setDraft({ ...draft, text });
-                    input.current?.focus();
-                  }}
-                />
-              </Box>
-              <Box mt="lg">
-                <RecentSessions chats={recent} onOpen={onOpenRecent} />
-              </Box>
-            </>
-          )}
-        </Box>
-      </Box>
       {tab.plan ? (
         <PlanSide
           open={planOpen}
-          beside={planBeside(width)}
+          width={width}
           shapeId={null}
           onClose={() => {
             planChoice.set(tab.id, false);
           }}
           onWhy={() => undefined}
           onAskForChanges={() => undefined}
-        />
-      ) : null}
+        >
+          {conversation}
+        </PlanSide>
+      ) : (
+        conversation
+      )}
     </Box>
   );
 }
