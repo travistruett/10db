@@ -444,6 +444,32 @@ describe('Convert and a linked issue', () => {
         .filter((t) => t.externalId === 'AMP-1'),
     ).toHaveLength(1);
 
+    // A goal whose every task is on the Board makes no goal, and the loose task beside it still lands.
+    const goalsBefore = store.db.select().from(schema.goals).all().length;
+    const onlyLinked = accept(store, shapeId, {
+      goals: [
+        {
+          key: 'gone',
+          title: 'Goal gone',
+          objective: 'Nothing to make',
+          ceremony: 'direct',
+          tasks: [
+            { key: 'h1', title: 'H one', areas: ['api'], size: 'S', external: link('AMP-1') },
+          ],
+        },
+      ],
+      looseTasks: [task('beside', { external: link('AMP-4') })],
+    });
+    expect(onlyLinked).not.toBeNull();
+    expect(store.db.select().from(schema.goals).all()).toHaveLength(goalsBefore);
+    expect(
+      store.db
+        .select()
+        .from(schema.tasks)
+        .all()
+        .filter((t) => t.externalId === 'AMP-4'),
+    ).toHaveLength(1);
+
     expect(() =>
       store.write((ctx) =>
         insertTask(ctx, projectId, {

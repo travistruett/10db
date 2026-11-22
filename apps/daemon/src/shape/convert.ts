@@ -518,11 +518,12 @@ export function convertProposals(
           t.external === undefined ? null : getTaskByExternal(ctx.tx, project.id, t.external);
         if (linked !== null) skipped.set(t.key, linked.id);
       }
-      if (skipped.size === goal.tasks.length)
-        throw new InvalidError(
-          `${row.key}: every task of this goal is already on the Board, so there is nothing to make`,
-        );
       for (const [key, id] of skipped) taskIds.set(key, id);
+      // Every task already on the Board: there is no goal to make, and the rest of the Accept goes ahead.
+      if (skipped.size === goal.tasks.length) {
+        made.set(row.id, { taskIds: [...skipped.values()] });
+        continue;
+      }
       const brief = goalBrief(goal);
       const kept = brief.tasks
         .filter((t) => !skipped.has(t.key))

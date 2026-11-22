@@ -16,7 +16,7 @@ const ExternalLinkFields = z.object({
 const TRACKER_HOST: Readonly<Record<ExternalKind, string>> = { linear: 'linear.app' };
 
 export const ExternalLink = ExternalLinkFields.refine(
-  (link) => new URL(link.url).hostname === TRACKER_HOST[link.kind],
+  (link) => URL.canParse(link.url) && new URL(link.url).hostname === TRACKER_HOST[link.kind],
   { message: 'The url must be on the tracker named by kind', path: ['url'] },
 );
 export type ExternalLink = z.infer<typeof ExternalLinkFields>;
