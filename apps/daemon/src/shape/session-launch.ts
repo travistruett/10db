@@ -1,8 +1,8 @@
 import type {
-  AgentAccountKind,
   ConversationId,
   Effort,
   ProjectId,
+  Provider,
   SessionId,
   ShapeId,
 } from '@10db/contracts';
@@ -41,8 +41,8 @@ export interface ShapePrepareInput {
   /** The Plan the conversation is, when it is one. */
   readonly shapeId?: ShapeId;
   readonly sessionId: SessionId;
-  /** The kind of the account the session runs on, which names where its login is kept. */
-  readonly accountKind: AgentAccountKind;
+  /** The harness the account runs, which names where its login is kept. */
+  readonly harness: Provider;
   /** The session's launch env, which the sandbox and the project's servers are built from. */
   readonly env: Readonly<Record<string, string>>;
   readonly resumeProviderSessionId: string | null;

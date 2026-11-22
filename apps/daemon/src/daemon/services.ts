@@ -18,9 +18,8 @@ import {
   Delivery,
   TaskStatus,
   InvalidError,
-  agentKind,
   NotFoundError,
-  providerOf,
+  requireHarness,
   isDaemonAddress,
   kindsOfTask,
   refuseRigorBelowKinds,
@@ -911,7 +910,7 @@ export function createServices(deps: {
         accountId,
         picks: rolePicks(
           {
-            ...routingInputs(db, { accountId, provider: providerOf(agentKind(account.kind)) }),
+            ...routingInputs(db, { accountId, provider: requireHarness(account) }),
             playbook: playbookInputs(db, projectId ?? null).playbook,
           },
           rigor,

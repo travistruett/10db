@@ -2,11 +2,10 @@ import {
   AccountKind,
   LinearVia,
   McpSignInState,
+  harnessOf,
   Provider,
-  providerOf,
-  runsAgents,
   type AccountId,
-  type AgentAccountKind,
+  type SupportedAccountKind,
   type LinearSignInRowDto,
   type LinearSignInsDto,
 } from '@10db/contracts';
@@ -44,7 +43,8 @@ export function createLinearSignIns(deps: {
   /** The connector names an account last read: undefined when never read, null when the read failed. */
   readonly connectorNames: (account: {
     readonly id: AccountId;
-    readonly kind: AgentAccountKind;
+    readonly kind: SupportedAccountKind;
+    readonly harness: Provider;
   }) => readonly string[] | null | undefined;
 }): { list(): Promise<LinearSignInsDto> } {
   return {
@@ -52,16 +52,17 @@ export function createLinearSignIns(deps: {
       const servers = Object.entries(deps.plan().remote)
         .filter(([, remote]) => isLinearServer(remote.url))
         .map(([name]) => name);
-      const accounts = listAccounts(deps.state.db).flatMap((account) =>
-        runsAgents(account.kind) ? [{ ...account, kind: account.kind }] : [],
-      );
+      const accounts = listAccounts(deps.state.db).flatMap((account) => {
+        const harness = harnessOf(account);
+        return harness === null ? [] : [{ ...account, harness }];
+      });
       const codexRows =
-        servers.length > 0 && accounts.some((a) => a.kind === AccountKind.CodexSignin)
+        servers.length > 0 && accounts.some((a) => a.harness === Provider.Codex)
           ? (await deps.mcpSignIns.list()).rows
           : [];
       const rows = accounts.map((account): LinearSignInRowDto => {
         const base = { accountId: account.id, accountLabel: account.label };
-        if (providerOf(account.kind) === Provider.Codex) {
+        if (account.harness === Provider.Codex) {
           const own = codexRows.filter(
             (r) => r.accountId === account.id && servers.includes(r.name),
           );

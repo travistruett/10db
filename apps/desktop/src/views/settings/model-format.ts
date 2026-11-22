@@ -28,11 +28,7 @@ export function formatCost(value: number | null): string {
 }
 
 /** The kinds that pay per token, whose own prices come with the account's list. */
-const METERED_KINDS: readonly AccountKind[] = [
-  AccountKind.AnthropicApiKey,
-  AccountKind.Bedrock,
-  AccountKind.Gateway,
-];
+const METERED_KINDS: readonly AccountKind[] = [AccountKind.AnthropicApiKey, AccountKind.Bedrock];
 
 /**
  * What a cost per task is at. Without an account it is the maker's API list price; an account that lists its own

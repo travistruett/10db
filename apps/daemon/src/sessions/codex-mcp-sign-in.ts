@@ -1,10 +1,16 @@
 import { execFile } from 'node:child_process';
+import type { SupportedAccountKind } from '@10db/contracts';
 import { z } from 'zod';
 import { systemClock, type Clock } from '../clock';
 import type { Logger } from '../log';
 import { CODEX_CLIENT_INFO, type CodexCall } from './codex-account-read';
 import { PORT_IN_USE } from './codex-connect';
-import { codexChildHome, type CodexHome } from './codex-home';
+import {
+  codexChildHome,
+  codexHomeProviderOf,
+  type CodexHome,
+  type CodexHomeProvider,
+} from './codex-home';
 import { readCodexMcpAuth, type McpAuthState } from './codex-mcp-auth';
 import { InitializeResponse } from './codex-protocol';
 import {
@@ -32,7 +38,7 @@ export interface McpSignInDeps {
   readonly spawn?: CodexSpawn;
   readonly clock?: Clock;
   /** The account homes; `ensureConfig` runs on one before a process uses it. */
-  readonly homes: (path: string) => CodexHome;
+  readonly homes: (path: string, provider: CodexHomeProvider) => CodexHome;
   /** Opens a page in the builder's browser; defaults to `/usr/bin/open`. Tests record. */
   readonly openPage?: (url: string) => Promise<void>;
 }
@@ -99,6 +105,7 @@ interface OpenHome {
  */
 export async function openCodexHome(
   deps: McpSignInDeps,
+  kind: SupportedAccountKind,
   env: Readonly<Record<string, string>>,
   servers: Readonly<Record<string, YourSessionServer>>,
   startMs: number = START_MS,
@@ -106,7 +113,7 @@ export async function openCodexHome(
   const clock = deps.clock ?? systemClock;
   const { codexHome, home } = codexChildHome(env);
   try {
-    await deps.homes(codexHome).ensureConfig();
+    await deps.homes(codexHome, codexHomeProviderOf(kind)).ensureConfig();
   } catch (error) {
     deps.logger.error(
       { errName: error instanceof Error ? error.name : 'unknown' },
@@ -177,7 +184,7 @@ export async function codexMcpAuthStatus(
   deps: McpSignInDeps,
 ): Promise<Readonly<Record<string, McpAuthState>>> {
   const clock = deps.clock ?? systemClock;
-  const opened = await openCodexHome(deps, spec.env, spec.servers, STATUS_START_MS);
+  const opened = await openCodexHome(deps, spec.kind, spec.env, spec.servers, STATUS_START_MS);
   let timer: { cancel(): void } = { cancel: () => undefined };
   const deadline = new Promise<never>((_, reject) => {
     timer = clock.setTimeout(() => {
@@ -213,7 +220,7 @@ export async function startCodexMcpSignIn(
 ): Promise<McpSignIn> {
   const clock = deps.clock ?? systemClock;
   const openPage = deps.openPage ?? openWithSystem;
-  const opened = await openCodexHome(deps, spec.env, { [spec.name]: spec.server });
+  const opened = await openCodexHome(deps, spec.kind, spec.env, { [spec.name]: spec.server });
   const { rpc, threadId } = opened;
 
   let settled = false;

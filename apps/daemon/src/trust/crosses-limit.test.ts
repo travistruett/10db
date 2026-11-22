@@ -60,7 +60,7 @@ function judge() {
       seen.push({ url, body });
       return reply(init?.signal ?? undefined);
     },
-    readKey: () => Promise.resolve(key),
+    readCredential: () => Promise.resolve(key === null ? null : { kind: 'openrouter', key }),
     decisionModelIds: () => new Set(['typesafe/jev-1.13']),
     off: false,
     logger: silentLogger,

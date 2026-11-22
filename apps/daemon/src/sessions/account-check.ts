@@ -2,10 +2,11 @@ import {
   AccountKind,
   AccountProblem,
   ModelMarkBasis,
+  Provider,
   signsInWithLogin,
   type AccountRefusal,
   type Effort,
-  type AgentAccountKind,
+  type SupportedAccountKind,
 } from '@10db/contracts';
 import type { AccountExpectation } from '../environment';
 import type { SignInState } from './sign-in-check';
@@ -18,6 +19,9 @@ export interface SeenModel {
   readonly resolvedId: string | null;
   /** The efforts it reports that 10db knows; empty when it reports none. */
   readonly efforts: readonly Effort[];
+  /** Dollars per million tokens, when the list states them (an OpenRouter account's does). */
+  readonly inputPrice?: number;
+  readonly outputPrice?: number;
 }
 
 /** What Claude Code reports about the account a session runs on (`accountInfo()`). */
@@ -28,6 +32,8 @@ export interface SeenAccount {
   readonly tokenSource: string | undefined;
   readonly apiKeySource: string | undefined;
   readonly apiProvider: string | undefined;
+  /** Whether Codex says the account needs an OpenAI sign-in; false once a home's custom provider is in effect. Undefined from Claude Code. */
+  readonly requiresOpenaiAuth?: boolean | undefined;
   /** The models the account lists, when the agent could list them; absent when it could not. */
   readonly models?: readonly SeenModel[];
 }
@@ -50,21 +56,18 @@ export function seenFrom(info: {
   };
 }
 
-const NEEDS: Readonly<Record<AgentAccountKind, string>> = {
+const NEEDS: Readonly<Record<SupportedAccountKind, string>> = {
   [AccountKind.ClaudeSubscription]: 'a Claude subscription',
   [AccountKind.AnthropicApiKey]: 'an Anthropic API key',
   [AccountKind.Bedrock]: 'Bedrock',
-  [AccountKind.Gateway]: 'a gateway token',
   [AccountKind.CodexSignin]: 'a ChatGPT sign-in',
+  [AccountKind.OpenRouter]: 'an OpenRouter key',
 };
 
-/** The tool a kind's sessions run on, and its own sign-in status command, so a card names the right one. */
-const TOOL: Readonly<Record<AgentAccountKind, { name: string; status: string }>> = {
-  [AccountKind.ClaudeSubscription]: { name: 'Claude Code', status: 'claude auth status' },
-  [AccountKind.AnthropicApiKey]: { name: 'Claude Code', status: 'claude auth status' },
-  [AccountKind.Bedrock]: { name: 'Claude Code', status: 'claude auth status' },
-  [AccountKind.Gateway]: { name: 'Claude Code', status: 'claude auth status' },
-  [AccountKind.CodexSignin]: { name: 'Codex', status: 'codex login status' },
+/** The tool each harness runs as, and its own sign-in status command, so a card names the right one. */
+const TOOL: Readonly<Record<Provider, { name: string; status: string }>> = {
+  [Provider.Claude]: { name: 'Claude Code', status: 'claude auth status' },
+  [Provider.Codex]: { name: 'Codex', status: 'codex login status' },
 };
 
 /** A ChatGPT account's identity: the email and the workspace, since one email can sign in to several. */
@@ -81,12 +84,12 @@ function described(seen: SeenAccount): string {
 
 /**
  * Whether Claude Code bills the credential the kind needs. Only values a real session has shown are
- * accepted (spike 12 for the gateway), so a renamed variable fails loudly instead of billing someone else.
+ * accepted so a renamed variable fails loudly instead of billing someone else.
  */
-function credentialsMatch(kind: AgentAccountKind, seen: SeenAccount): boolean {
+function credentialsMatch(kind: SupportedAccountKind, seen: SeenAccount): boolean {
   switch (kind) {
     case AccountKind.ClaudeSubscription:
-      // A plan's name is never compared; a gateway also looks first-party, so its token source rules it out.
+      // A plan's name is never compared.
       return (
         noKey(seen.apiKeySource) &&
         seen.apiProvider === 'firstParty' &&
@@ -97,14 +100,11 @@ function credentialsMatch(kind: AgentAccountKind, seen: SeenAccount): boolean {
       return seen.apiKeySource === 'ANTHROPIC_API_KEY' && seen.apiProvider === 'firstParty';
     case AccountKind.Bedrock:
       return seen.apiProvider === 'bedrock';
-    case AccountKind.Gateway:
-      return (
-        seen.tokenSource === 'ANTHROPIC_AUTH_TOKEN' &&
-        seen.apiProvider === 'firstParty' &&
-        noKey(seen.apiKeySource)
-      );
     case AccountKind.CodexSignin:
       return seen.apiProvider === 'chatgpt' && Boolean(seen.subscriptionType);
+    case AccountKind.OpenRouter:
+      // Without the home's custom provider Codex falls back to OpenAI's, which reports true.
+      return seen.apiProvider === undefined && seen.requiresOpenaiAuth === false;
   }
 }
 
@@ -117,7 +117,7 @@ function chatgptIdentity(seen: SeenAccount): string | undefined {
 }
 
 /** What a login account is confirmed as: a ChatGPT plan's email and workspace, a subscription's email. */
-export function loginIdentity(kind: AgentAccountKind, seen: SeenAccount): string | undefined {
+export function loginIdentity(kind: SupportedAccountKind, seen: SeenAccount): string | undefined {
   return kind === AccountKind.CodexSignin ? chatgptIdentity(seen) : seen.email;
 }
 
@@ -126,9 +126,9 @@ const same = (a: string, b: string): boolean => a.trim().toLowerCase() === b.tri
 /** Before the prompt (accounts spec §5): who the agent is, and the credential it bills. */
 export function checkAccount(expect: AccountExpectation, seen: SeenAccount): AccountRefusal | null {
   const who = `account "${expect.label}"`;
-  // A third-party provider or a gateway token reports no email or plan either, and signing in cannot fix
+  // A third-party provider reports no email or plan either, and signing in cannot fix
   // that: only a first-party report with nothing in it is a signed-out directory.
-  const tool = TOOL[expect.kind].name;
+  const tool = TOOL[expect.harness].name;
   const codex = expect.kind === AccountKind.CodexSignin;
   const providerOfLogin = codex ? 'chatgpt' : 'firstParty';
   const firstParty = seen.apiProvider === undefined || seen.apiProvider === providerOfLogin;
@@ -175,7 +175,7 @@ export function missingAccountRefusal(
   signIn?: SignInState,
 ): AccountRefusal | null {
   if (!signsInWithLogin(expect.kind)) return null;
-  const { status } = TOOL[expect.kind];
+  const { status } = TOOL[expect.harness];
   const tail = printed ? `. ${printed}` : '';
   const who = `${why} for account "${expect.label}"`;
   // The tool's status command settles it: only "not signed in" is a sign-out. Anything else is a slow start.
@@ -215,18 +215,18 @@ function oneLine(raw: string): string {
 /**
  * What a session start that got no account from Claude Code says: how long it waited, how many starts
  * got nothing, and what they printed, so the builder can tell a slow start from a real sign-out.
- * `printed` holds one entry per start, the text its stderr held; `kind` picks the tool the text names.
+ * `printed` holds one entry per start, the text its stderr held; `harness` picks the tool the text names.
  */
 export function noAccountWhy(
   waitMs: number | readonly number[],
   printed: readonly string[],
-  kind: AgentAccountKind,
+  harness: Provider,
 ): { readonly why: string; readonly printed: string } {
   const starts = printed.length;
   const waits = typeof waitMs === 'number' ? [waitMs] : [...new Set(waitMs)];
   const seconds = waits.map((ms) => `${String(ms / 1_000)} s`);
   const last = seconds.pop();
-  const tool = TOOL[kind].name;
+  const tool = TOOL[harness].name;
   const said = `${tool} reported no account`;
   const wait =
     seconds.length === 0
@@ -253,7 +253,7 @@ export function checkInitCredentials(
     ? null
     : {
         problem: AccountProblem.WrongCredentials,
-        message: `account "${expect.label}" needs ${NEEDS[expect.kind]} but ${TOOL[expect.kind].name} started with ${described(seen)}`,
+        message: `account "${expect.label}" needs ${NEEDS[expect.kind]} but ${TOOL[expect.harness].name} started with ${described(seen)}`,
         seenIdentity: null,
       };
 }
@@ -311,7 +311,7 @@ function namesToken(text: string, id: string): boolean {
 
 /**
  * Whether an assistant error at a session's first reply means the account cannot run the model it was launched on,
- * and what the answer rests on. Claude Code names that case `model_not_found`: `error`, final. A gateway or Bedrock
+ * and what the answer rests on. Claude Code names that case `model_not_found`: `error`, final. Bedrock
  * may report it as an invalid request or an unknown error instead, so those count only when the text names the
  * launched model ID as a whole token and says the model is missing or off limits: `wording`, which cannot tell a
  * config error that names the model first ("Tool use with model X is not supported") from a real refusal ("Model X

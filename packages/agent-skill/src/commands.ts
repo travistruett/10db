@@ -46,7 +46,7 @@ export interface CommandDeps {
 }
 
 // Only these settings keys may change here; secrets live in the Keychain and never pass through.
-const ACCOUNT_SETTING_KEYS = ['modelMap', 'awsProfile', 'region'];
+const ACCOUNT_SETTING_KEYS = ['awsProfile', 'region'];
 const DELIVERY_LABELS: Record<string, string> = {
   pull_request: 'Open a pull request',
   local: 'Commit directly',

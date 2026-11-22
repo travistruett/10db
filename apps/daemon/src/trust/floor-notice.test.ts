@@ -1,105 +1,107 @@
-import { AccountKind, type AgentAccountKind } from '@10db/contracts';
+import { AccountKind, requireHarness, type SupportedAccountKind } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { FloorReason, floorNoticeText, floorReason } from './floor-notice';
 
 describe('floorReason', () => {
   it("falls to 10db's rules when the setting is off, or when neither auto mode nor a ready judge runs", () => {
-    const rows: [string, AgentAccountKind, string | null, boolean, boolean, FloorReason | null][] =
+    const rows: [
+      string,
+      SupportedAccountKind,
+      string | null,
+      boolean,
+      boolean,
+      FloorReason | null,
+    ][] = [
       [
-        [
-          'a plan on a supported model, setting on',
-          AccountKind.ClaudeSubscription,
-          'sonnet',
-          true,
-          false,
-          null,
-        ],
-        [
-          'a plan on a supported model, setting off',
-          AccountKind.ClaudeSubscription,
-          'sonnet',
-          false,
-          true,
-          FloorReason.Setting,
-        ],
-        [
-          'a plan on an old model with a ready judge',
-          AccountKind.ClaudeSubscription,
-          'claude-sonnet-4-5',
-          true,
-          true,
-          null,
-        ],
-        [
-          'a plan on an old model without one',
-          AccountKind.ClaudeSubscription,
-          'claude-sonnet-4-5',
-          true,
-          false,
-          FloorReason.NoJudge,
-        ],
-        [
-          'a plan on an old model, setting off',
-          AccountKind.ClaudeSubscription,
-          'claude-sonnet-4-5',
-          false,
-          true,
-          FloorReason.Setting,
-        ],
-        [
-          'an API key on an unreadable id without a judge',
-          AccountKind.AnthropicApiKey,
-          'my-model',
-          true,
-          false,
-          FloorReason.NoJudge,
-        ],
-        [
-          'Bedrock with no model pin and no judge',
-          AccountKind.Bedrock,
-          null,
-          true,
-          false,
-          FloorReason.NoJudge,
-        ],
-        [
-          'Bedrock on a supported model without a judge',
-          AccountKind.Bedrock,
-          'us.anthropic.claude-sonnet-5-5-v1:0',
-          true,
-          false,
-          null,
-        ],
-        ['a gateway kind with a ready judge', AccountKind.Gateway, 'sonnet', true, true, null],
-        [
-          'a gateway kind without one',
-          AccountKind.Gateway,
-          'sonnet',
-          true,
-          false,
-          FloorReason.NoJudge,
-        ],
-        [
-          'a gateway kind, setting off',
-          AccountKind.Gateway,
-          'sonnet',
-          false,
-          true,
-          FloorReason.Setting,
-        ],
-        ['Codex with a ready judge', AccountKind.CodexSignin, 'gpt-5.5', true, true, null],
-        ['Codex without one', AccountKind.CodexSignin, 'gpt-5.5', true, false, FloorReason.NoJudge],
-        [
-          'Codex, setting off',
-          AccountKind.CodexSignin,
-          'gpt-5.5',
-          false,
-          true,
-          FloorReason.Setting,
-        ],
-      ];
+        'a plan on a supported model, setting on',
+        AccountKind.ClaudeSubscription,
+        'sonnet',
+        true,
+        false,
+        null,
+      ],
+      [
+        'a plan on a supported model, setting off',
+        AccountKind.ClaudeSubscription,
+        'sonnet',
+        false,
+        true,
+        FloorReason.Setting,
+      ],
+      [
+        'a plan on an old model with a ready judge',
+        AccountKind.ClaudeSubscription,
+        'claude-sonnet-4-5',
+        true,
+        true,
+        null,
+      ],
+      [
+        'a plan on an old model without one',
+        AccountKind.ClaudeSubscription,
+        'claude-sonnet-4-5',
+        true,
+        false,
+        FloorReason.NoJudge,
+      ],
+      [
+        'a plan on an old model, setting off',
+        AccountKind.ClaudeSubscription,
+        'claude-sonnet-4-5',
+        false,
+        true,
+        FloorReason.Setting,
+      ],
+      [
+        'an API key on an unreadable id without a judge',
+        AccountKind.AnthropicApiKey,
+        'my-model',
+        true,
+        false,
+        FloorReason.NoJudge,
+      ],
+      [
+        'Bedrock with no model pin and no judge',
+        AccountKind.Bedrock,
+        null,
+        true,
+        false,
+        FloorReason.NoJudge,
+      ],
+      [
+        'Bedrock on a supported model without a judge',
+        AccountKind.Bedrock,
+        'us.anthropic.claude-sonnet-5-5-v1:0',
+        true,
+        false,
+        null,
+      ],
+      // Whatever model it names, a Codex harness is judged by 10db: the harness sets the floor, not the kind.
+      [
+        'OpenRouter on Codex, on a model auto mode would run',
+        AccountKind.OpenRouter,
+        'claude-sonnet-5-5',
+        true,
+        false,
+        FloorReason.NoJudge,
+      ],
+      ['Codex with a ready judge', AccountKind.CodexSignin, 'gpt-5.5', true, true, null],
+      ['Codex without one', AccountKind.CodexSignin, 'gpt-5.5', true, false, FloorReason.NoJudge],
+      ['Codex, setting off', AccountKind.CodexSignin, 'gpt-5.5', false, true, FloorReason.Setting],
+    ];
     for (const [name, kind, model, autoMode, tendbReady, expected] of rows) {
-      expect.soft(floorReason({ kind, model, autoMode, tendbReady }), name).toBe(expected);
+      expect
+        .soft(
+          floorReason({
+            kind,
+            harness: requireHarness({ kind, label: name, settings: {} }),
+            model,
+            autoMode,
+            tendbReady,
+          }),
+          name,
+        )
+        .toBe(expected);
     }
   });
 });
@@ -117,13 +119,13 @@ describe('floorNoticeText', () => {
         'no judge, attended',
         FloorReason.NoJudge,
         true,
-        "10db's rules judge this session: 10db's judge needs an OpenRouter key and its Limits switch on in Settings › Decisions. A call those rules can't settle waits on a card.",
+        "10db's rules judge this session: 10db's judge needs an account that can power Decisions and its Limits switch on in Settings › Decisions. A call those rules can't settle waits on a card.",
       ],
       [
         'no judge, in a lane',
         FloorReason.NoJudge,
         false,
-        "10db's rules judge this session: 10db's judge needs an OpenRouter key and its Limits switch on in Settings › Decisions. A call those rules can't settle is skipped, not asked about.",
+        "10db's rules judge this session: 10db's judge needs an account that can power Decisions and its Limits switch on in Settings › Decisions. A call those rules can't settle is skipped, not asked about.",
       ],
       [
         'the judge unavailable',

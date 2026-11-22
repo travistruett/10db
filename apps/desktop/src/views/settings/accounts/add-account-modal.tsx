@@ -128,7 +128,7 @@ function AddAccountForm({
           label="Kind"
           description={
             values.kind === AccountKind.OpenRouter
-              ? "Pays for decisions. Can't run agents yet."
+              ? 'Runs Codex; can power decisions.'
               : 'What pays for the sessions.'
           }
           data={KIND_OPTIONS}

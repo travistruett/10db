@@ -17,6 +17,7 @@ const NOTHING: SeenAccount = {
   tokenSource: undefined,
   apiKeySource: undefined,
   apiProvider: undefined,
+  requiresOpenaiAuth: undefined,
 };
 
 /**
@@ -26,10 +27,15 @@ const NOTHING: SeenAccount = {
  * reads the model list, which only informs Settings and the catalogue, so a failed read leaves it unset.
  */
 export async function readSeenAccount(call: CodexCall, withModels: boolean): Promise<SeenAccount> {
-  const { account } = await call('account/read', { refreshToken: false }, AccountReadResponse);
-  if (account === null) return NOTHING;
+  const { account, requiresOpenaiAuth } = await call(
+    'account/read',
+    { refreshToken: false },
+    AccountReadResponse,
+  );
+  if (account === null) return { ...NOTHING, requiresOpenaiAuth };
   // A key or Bedrock login is not a ChatGPT plan; the account check refuses it by its provider.
-  if (account.type !== 'chatgpt') return { ...NOTHING, apiProvider: account.type };
+  if (account.type !== 'chatgpt')
+    return { ...NOTHING, apiProvider: account.type, requiresOpenaiAuth };
   const usage = await call('account/rateLimits/read', undefined, RateLimitsReadResponse);
   if (usage.accountId === null || usage.accountId === undefined)
     throw new AccountProbeError('Codex did not name the workspace');
@@ -39,6 +45,7 @@ export async function readSeenAccount(call: CodexCall, withModels: boolean): Pro
   return {
     ...NOTHING,
     apiProvider: 'chatgpt',
+    requiresOpenaiAuth,
     email: account.email ?? undefined,
     subscriptionType: account.planType,
     organization: usage.accountId,

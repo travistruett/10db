@@ -1,4 +1,4 @@
-import { AccountKind } from '@10db/contracts';
+import { AccountKind, type AccountId } from '@10db/contracts';
 
 // Shape spec §5.4. How many picture and PDF bytes a conversation's session may carry, worked out from the
 // request limit of the account it runs on. A resumed session resends every earlier picture with each request,
@@ -16,7 +16,7 @@ import { AccountKind } from '@10db/contracts';
 
 const MIB = 1024 * 1024;
 
-export type PicturePlatform = 'claude' | 'bedrock' | 'gateway' | 'other';
+export type PicturePlatform = 'claude' | 'bedrock' | 'other';
 
 export interface PictureLimits {
   readonly platform: PicturePlatform;
@@ -79,17 +79,6 @@ const BEDROCK_LIMITS: PictureLimits = {
 };
 
 /**
- * A gateway forwards to a platform 10db can't see, so it is held to the smallest request limit of the
- * platforms it knows (Bedrock's).
- */
-const GATEWAY_LIMITS: PictureLimits = {
-  ...BEDROCK_LIMITS,
-  platform: 'gateway',
-  limitText:
-    'the 20 MB request limit 10db assumes for a gateway (the smallest of the platforms it knows)',
-};
-
-/**
  * What an account of a kind 10db can't place is held to: the smallest request limit of the platforms it knows,
  * worded for an account that is on none of them, so a Codex conversation never names Bedrock.
  */
@@ -99,19 +88,48 @@ export const STRICTEST_LIMITS: PictureLimits = {
   limitText: 'the 20 MB request limit 10db assumes for this account (the smallest it knows)',
 };
 
-/** The limits of the account a session runs on. */
-export function pictureLimitsFor(kind: AccountKind): PictureLimits {
+/**
+ * What an OpenRouter account's models take as input, by account and launch ID, from the last read of its list.
+ * It is held in memory only, so after a restart nothing is known until the list is read again.
+ */
+const openRouterInputs = new Map<AccountId, ReadonlyMap<string, readonly string[]>>();
+
+/** Replaces what is known of the account's models: each launch ID with the input modalities it lists. */
+export function rememberOpenRouterInputs(
+  accountId: AccountId,
+  models: readonly { readonly id: string; readonly inputModalities: readonly string[] }[],
+): void {
+  openRouterInputs.set(accountId, new Map(models.map((m) => [m.id, m.inputModalities])));
+}
+
+/** No picture fits: a model that takes no image, or one whose listing is not known, reads none. */
+const NO_PICTURES: PictureLimits = {
+  ...STRICTEST_LIMITS,
+  limitText: "this OpenRouter model's listing doesn't say it reads pictures, so none are sent",
+  imageMaxBytes: 0,
+  messageMaxBytes: 0,
+  inlineMaxBytes: 0,
+  readReserveBytes: 0,
+};
+
+/** The limits of the account a session runs on; `on` names the OpenRouter model, whose listing decides. */
+export function pictureLimitsFor(
+  kind: AccountKind,
+  on?: { readonly accountId: AccountId; readonly launchId: string },
+): PictureLimits {
   switch (kind) {
     case AccountKind.ClaudeSubscription:
     case AccountKind.AnthropicApiKey:
       return CLAUDE_LIMITS;
     case AccountKind.Bedrock:
       return BEDROCK_LIMITS;
-    case AccountKind.Gateway:
-      return GATEWAY_LIMITS;
+    case AccountKind.OpenRouter:
+      return on !== undefined &&
+        openRouterInputs.get(on.accountId)?.get(on.launchId)?.includes('image') === true
+        ? STRICTEST_LIMITS
+        : NO_PICTURES;
     case AccountKind.OpenaiApiKey:
     case AccountKind.CodexSignin:
-    case AccountKind.OpenRouter:
       return STRICTEST_LIMITS;
   }
 }

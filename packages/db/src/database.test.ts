@@ -14,9 +14,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   DB_MIGRATIONS_DIR,
   DanglingRowsError,
+  GatewayAccountError,
   MigrationIntegrityError,
   migrateDatabase,
   openDatabase,
+  refuseGatewayAccounts,
   schema,
   type TendbDatabase,
 } from './index';
@@ -1009,6 +1011,29 @@ describe('migrating to the inline image count (Shape spec §5.4)', () => {
         { id: 'sfl_told', inline_sent: 1 },
         { id: 'sfl_untold', inline_sent: 0 },
       ],
+    );
+  });
+});
+
+describe('refuseGatewayAccounts', () => {
+  it('refuses a database holding a gateway account, naming it', () => {
+    migrateDatabase(db);
+    expect(() => {
+      refuseGatewayAccounts(db);
+    }).not.toThrow();
+    db.$client
+      .prepare(
+        `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, archived, created_at, updated_at)
+         VALUES ('acc_gw1', 'gateway', 'Work gateway', '', '{}', 2, 0, 'now', 'now')`,
+      )
+      .run();
+    expect(() => {
+      refuseGatewayAccounts(db);
+    }).toThrow(GatewayAccountError);
+    expect(() => {
+      refuseGatewayAccounts(db);
+    }).toThrow(
+      'Account "Work gateway" (acc_gw1) is a Gateway account, which 10db no longer supports. Remove it from the database and start again.',
     );
   });
 });

@@ -58,7 +58,7 @@ export type JudgeOutcome = (typeof JudgeOutcome)[keyof typeof JudgeOutcome];
 
 export const JudgeDecisionConfig = z.object({
   enabled: z.boolean(),
-  /** An OpenRouter model id, e.g. `typesafe/jev-1.13`. */
+  /** A model the Decisions account offers: an OpenRouter id such as `typesafe/jev-1.13`, or the Anthropic or Bedrock id its list holds. */
   model: z.string().trim().min(1),
   /** The confidence an answer must reach before 10db acts on it. */
   floor: z.number().min(0).max(1),
@@ -77,7 +77,7 @@ const shapeDecision = (): z.ZodDefault<typeof JudgeDecisionConfig> =>
 
 export const JudgeConfig = z.object({
   enabled: z.boolean(),
-  /** The OpenRouter account decisions run on; null until the builder picks one. */
+  /** The OpenRouter, Anthropic API key or Bedrock account decisions run on; null until the builder picks one. */
   accountId: AccountId.nullable().default(null),
   decisions: z.object({
     [JudgeDecision.ShapeRecord]: shapeDecision(),
@@ -130,6 +130,10 @@ export const JudgeStatusDto = z.object({
       secretSet: z.boolean(),
       /** Whether the account's key is recorded, missing from the Keychain, or changed since it was recorded. */
       secretState: z.enum(['set', 'missing', 'changed']),
+      /** Why the account's latest decision fell back to rules (a rejected key, an expired profile); absent when it answered. */
+      fallback: z.string().nullable().optional(),
+      /** The AWS profile a Bedrock account signs with; it keeps no key. Absent for any other account. */
+      awsProfile: z.string().nullable().optional(),
     })
     .nullable(),
   /** The daemon was started with `TENDB_JUDGE=off`: it never reads the key or calls OpenRouter. */

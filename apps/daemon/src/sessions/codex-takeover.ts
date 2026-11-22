@@ -146,7 +146,7 @@ export function codexTakeoverCommand(spec: TakeoverSpec): TakeoverCommand {
     ...override('check_for_update_on_startup', false),
     ...override('allow_login_shell', defaults.allowLoginShell),
     ...override('shell_environment_policy.inherit', defaults.shellInherit),
-    ...override('shell_environment_policy.exclude', [`${MCP_TOKEN_PREFIX}*`]),
+    ...override('shell_environment_policy.exclude', [`${MCP_TOKEN_PREFIX}*`, 'OPENROUTER_API_KEY']),
     ...Object.entries(defaults.features).flatMap(([name, on]) => override(`features.${name}`, on)),
     ...override('agents.enabled', defaults.agentsEnabled),
     ...override('skills.include_instructions', defaults.skillsIncludeInstructions),

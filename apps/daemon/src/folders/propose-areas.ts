@@ -2,6 +2,7 @@ import { realpathSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   AreaProposalSource,
+  type AccountId,
   WHOLE_REPOSITORY_GLOBS,
   type AreaProposalResult,
   type ProposedArea,
@@ -16,9 +17,14 @@ const HISTORY_COMMITS = 400;
 /**
  * Asks a model one question and returns its text. The prompt carries paths from the repository as
  * data; the model gets no tool and no file, so it can read and run nothing of the repository's.
- * Aborting `signal` must stop the question and end any process it started.
+ * Aborting `signal` must stop the question and end any process it started. The question runs on `accountId`'s
+ * account, the default account when none is given (a folder not yet a project).
  */
-export type AreaNamer = (prompt: string, signal?: AbortSignal) => Promise<string>;
+export type AreaNamer = (
+  prompt: string,
+  signal?: AbortSignal,
+  accountId?: AccountId,
+) => Promise<string>;
 
 /**
  * How long the model may take to name the areas before they are named from their paths instead.

@@ -20,14 +20,7 @@ import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { PassThrough, type Readable } from 'node:stream';
-import {
-  agentKind,
-  JudgeKind,
-  mintId,
-  Provider,
-  type AccountId,
-  type SessionId,
-} from '@10db/contracts';
+import { JudgeKind, mintId, Provider, type AccountId, type SessionId } from '@10db/contracts';
 import type { AccountRow } from '@10db/db';
 import { parse } from 'smol-toml';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -39,6 +32,7 @@ import {
   createLauncher,
   ensureAgent,
   type Launcher,
+  accountAgentOf,
 } from '../src/environment';
 import { createGit } from '../src/git';
 import { createLogger } from '../src/log';
@@ -1206,16 +1200,16 @@ describe.skipIf(!live)(
           toolTimeoutSec: null,
         },
       };
-      const kind = agentKind(world.account.kind);
+      const agent = accountAgentOf(world.account);
       const status = await signIns.mcpAuthStatus({
-        kind,
+        ...agent,
         env: launch.env,
         servers: { [server.name]: remote },
       });
       liveNote(`L4 status: ${JSON.stringify(status)}`);
       expect(status[server.name]).toBe('not_signed_in');
       const signIn = await signIns.startMcpSignIn({
-        kind,
+        ...agent,
         env: launch.env,
         name: server.name,
         server: remote,

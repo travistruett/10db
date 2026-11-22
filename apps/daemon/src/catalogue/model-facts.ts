@@ -10,8 +10,8 @@ import { OpenRouterMeasureKind, type OpenRouterMeasure } from '@10db/db';
 export const SPEED_STALE_MS = 24 * 60 * 60 * 1000;
 
 /**
- * The OpenRouter provider an account's own runs are served by, whose p50 speed describes the account. A gateway
- * or an OpenRouter account has no single provider.
+ * The OpenRouter provider an account's own runs are served by, whose p50 speed describes the account. An OpenRouter
+ * account has no single provider.
  */
 export function speedProviderFor(kind: AccountKind): string | null {
   switch (kind) {
@@ -23,7 +23,6 @@ export function speedProviderFor(kind: AccountKind): string | null {
     case AccountKind.CodexSignin:
     case AccountKind.OpenaiApiKey:
       return 'OpenAI';
-    case AccountKind.Gateway:
     case AccountKind.OpenRouter:
       return null;
   }

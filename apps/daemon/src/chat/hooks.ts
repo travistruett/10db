@@ -16,12 +16,10 @@ import {
   parseItemBody,
   InvalidError,
   Provider,
-  providerOf,
   ShapeToolName,
   TrustSurface,
   AccountKind,
   type Effort,
-  type AgentAccountKind,
   type ProjectId,
   type ChatId,
   WorkPlace,
@@ -52,6 +50,7 @@ import {
   type PictureLimits,
 } from '../conversation';
 import { storedModelNames } from '../catalogue';
+import type { AccountAgent } from '../environment';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
 import { holderWords, type FolderBlocker, type FolderHold } from '../folder-hold';
@@ -200,13 +199,13 @@ export interface ChatHooksDeps {
   readonly prepare?: (input: ShapePrepareInput) => Promise<ShapePrepared>;
   /** What a chat adds to its session for planning: its folder and agents always, and its prompt, intake and read budget once it has a plan. */
   readonly plan?: PlanParts;
-  /** Whether the agent on an account kind and model runs Plan's agents (`capabilities.subagents`). */
-  readonly subagentsOf: (kind: AgentAccountKind, model: string) => boolean;
+  /** Whether the agent on an account and model runs Plan's agents (`capabilities.subagents`). */
+  readonly subagentsOf: (account: AccountAgent, model: string) => boolean;
   readonly limitsFor: (kind: AccountKind) => PictureLimits;
-  /** Who judges a session's calls on an account kind and model (`capabilities.judge`). */
-  readonly judgeOf: (kind: AgentAccountKind, model: string) => JudgeKind;
-  /** Whether the agent on an account kind and model searches the web (`capabilities.webSearch`). */
-  readonly webSearchOf: (kind: AgentAccountKind, model: string) => boolean;
+  /** Who judges a session's calls on an account and model (`capabilities.judge`). */
+  readonly judgeOf: (account: AccountAgent, model: string) => JudgeKind;
+  /** Whether the agent on an account and model searches the web (`capabilities.webSearch`). */
+  readonly webSearchOf: (account: AccountAgent, model: string) => boolean;
   /** 10db's judge, asked whether it is ready as each session starts; absent, a `tendb` chat is on the rules. */
   readonly judge?: Judge;
   readonly clock: Clock;
@@ -293,7 +292,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
   const subagentsKnown = (conv: ConversationRow): boolean => {
     try {
       const launch = deps.launch(conv.projectId, conv.model, conv.effort);
-      return deps.subagentsOf(launch.account.kind, launch.modelId);
+      return deps.subagentsOf(launch.account, launch.modelId);
     } catch {
       // A launch that can't be read reads as the agent form: the session's own start settles the rest.
       return true;
@@ -302,7 +301,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
   /** The provider the conversation's agent runs on now; Claude when its launch can't be read. */
   const providerKnown = (conv: ConversationRow): Provider => {
     try {
-      return providerOf(deps.launch(conv.projectId, conv.model, conv.effort).account.kind);
+      return deps.launch(conv.projectId, conv.model, conv.effort).account.harness;
     } catch {
       return Provider.Claude;
     }
@@ -480,11 +479,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       const limits = deps.limitsFor(launch.account.kind);
       // A chat asks for its agent's judge, as Plan does; 10db's judge where it is the account's and ready.
       const tendbReady = (await deps.judge?.ready(JudgeDecision.CrossesLimit)) ?? false;
-      const judge = startingJudge(
-        deps.judgeOf(launch.account.kind, launch.modelId),
-        true,
-        tendbReady,
-      );
+      const judge = startingJudge(deps.judgeOf(launch.account, launch.modelId), true, tendbReady);
       const project = getProject(state.db, conv.projectId);
       const { root } = chatRoot(withWorktreeOnDisk(chat), { repoPath: launch.cwd });
       const writable = writesNow(chat, launch.cwd);
@@ -530,7 +525,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
               projectId: conv.projectId,
               conversationId: conv.id,
               sessionId: start.sessionId,
-              accountKind: launch.account.kind,
+              harness: launch.account.harness,
               env: launch.env,
               resumeProviderSessionId: start.resume,
               writes: writable,
@@ -634,9 +629,9 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       // The thread says once per session that 10db's judge stopped answering.
       let saidUnavailable = false;
       const webOn =
-        deps.webSearchOf(launch.account.kind, launch.modelId) &&
-        (providerOf(launch.account.kind) === Provider.Claude || switches.web);
-      const subagents = deps.subagentsOf(launch.account.kind, launch.modelId);
+        deps.webSearchOf(launch.account, launch.modelId) &&
+        (launch.account.harness === Provider.Claude || switches.web);
+      const subagents = deps.subagentsOf(launch.account, launch.modelId);
       noSubagents = !subagents;
       reviewing.set(conv.id, {
         sessionId: start.sessionId,
@@ -646,7 +641,7 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       // The web the session has: the chat's confinement refuses Claude's web tools on any judge but auto
       // mode's, while Codex's own search needs no tool call and runs under the Web switch.
       const web =
-        webOn && (judge === JudgeKind.Native || providerOf(launch.account.kind) === Provider.Codex);
+        webOn && (judge === JudgeKind.Native || launch.account.harness === Provider.Codex);
       // A plan can begin while the session runs, so its read budget is resolved at each call, once per plan.
       const readsOf = new Map<ShapeId, ReturnType<PlanParts['reads']>>();
       const readsNow = (): ReturnType<PlanParts['reads']> | undefined => {

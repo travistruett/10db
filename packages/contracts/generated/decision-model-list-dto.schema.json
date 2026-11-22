@@ -20,12 +20,26 @@
             "type": "boolean"
           },
           "inputUsdPerMillion": {
-            "type": "number",
-            "minimum": 0
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "outputUsdPerMillion": {
-            "type": "number",
-            "minimum": 0
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "cantCall": {
             "type": [

@@ -27,7 +27,6 @@ import {
   type AreaDef,
   type InboxItemDto,
   type ProjectDto,
-  agentKind,
 } from '@10db/contracts';
 import { createTestStore, seedProject, type AccountRow } from '@10db/db';
 import { HARNESS_PLUGIN_DIR } from '@10db/harness';
@@ -43,6 +42,7 @@ import {
   loginConfigDirOf,
   secretFingerprint,
   systemKeychain,
+  accountAgentOf,
 } from '../src/environment';
 import { createEventBus, createStateStore } from '../src/events';
 import { createGit } from '../src/git';
@@ -393,7 +393,7 @@ async function runLane(opts: {
     updatedAt: new Date(0).toISOString(),
   };
   const seen = await adapter.probeAccount({
-    kind: agentKind(defaultAccount.kind),
+    ...accountAgentOf(defaultAccount),
     cwd: opts.checkout,
     env: launcher.probe(defaultAccount).env,
   });

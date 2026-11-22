@@ -19,7 +19,7 @@ export function JudgeLine({ judge }: { readonly judge: JudgeKind }) {
             aria-hidden="true"
             style={{ verticalAlign: '-2px' }}
           />{' '}
-          Judged by 10db’s rules. Add an OpenRouter key in Settings › Decisions for 10db’s judge.
+          Judged by 10db’s rules. Pick an account in Settings › Decisions for 10db’s judge.
         </Text>
       );
   }

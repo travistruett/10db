@@ -64,8 +64,6 @@ import {
   PassTurnId,
   JudgeKind,
   Provider,
-  agentKind,
-  providerOf,
   TakeOutStep,
   type PassId,
   type TaskId,
@@ -161,6 +159,7 @@ import {
   type DbReader,
   transitionWorkstream,
   updateSessionUsage,
+  priceSessionAtListing,
   type RetryLimitFindings,
   type WorkstreamRow,
   type WriteContext,
@@ -201,7 +200,7 @@ import {
   type ModelListWait,
   type StartGate,
 } from '../accounts';
-import { clearModelMark, markModelUnusable } from '../catalogue';
+import { cacheReadPriceOf, clearModelMark, markModelUnusable } from '../catalogue';
 import type { Clock, Timer } from '../clock';
 import {
   allCheckouts,
@@ -231,6 +230,7 @@ import {
   type AwsCredentialsExporter,
   type Launcher,
   type SessionLaunch,
+  accountAgentOf,
 } from '../environment';
 import { createPassGitSession, type Git } from '../git';
 import { anotherWritersRound, readStartDirt, withoutStartDirt } from './start-dirt';
@@ -2498,14 +2498,14 @@ export function createRunner(opts: RunnerOptions): Runner {
     // Read before the briefing: the briefing follows the account this session runs on, which can
     // differ from the last session's when the project moved. Reading has no side effects.
     const account = getAccountRow(db, ctl.accountId);
-    const provider = providerOf(agentKind(account.kind));
+    const agent = accountAgentOf(account);
+    const provider = agent.harness;
     // The persona's craft skills, then those of the task's kinds, so every step of such a task loads them.
     const plansFirst = step.plansFirst === true;
     const skills = stepSkills(persona, kindsOfTask(task.kinds, listKinds(db)), { plansFirst });
     // A builder message to act on (Workbench spec §6.3): a resumed session is handed it, and a fresh
     // one starts from the handoff, then the thread's digest, then the message. Its pictures go as
     // blocks while they fit the account's limits and what the thread's budget has left.
-    const limits = pictureLimitsFor(account.kind);
     // A Codex lane can open no stored picture by its path (its guard refuses `view_image`, its
     // sandbox the data directory), so Codex is sent every picture as its file, every time.
     const readsPictureFiles = provider === Provider.Codex;
@@ -2524,6 +2524,11 @@ export function createRunner(opts: RunnerOptions): Runner {
     // step was planned or last ran, or the account may have stopped offering the planned model.
     const accountModels = listAccountModels(db, account.id);
     const launchStep = resolvedStep(id, ctl, row, step, account, accountModels);
+    const limits = pictureLimitsFor(account.kind, {
+      accountId: account.id,
+      launchId:
+        accountModels.find((m) => m.model === launchStep.model)?.launchId ?? launchStep.model,
+    });
     if (isModelTier(launchStep.model)) {
       // Before the catalogue is first read no profile of this provider exists, which says nothing about the account.
       if (!listModelProfiles(db).some((p) => p.provider === provider))
@@ -2627,7 +2632,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         ? await opts.startGate.acquire(account.id)
         : () => undefined;
     // Where Claude Code keeps this account's sessions, and with them each one's saved tool results.
-    const configDir = sessionConfigDir(agentKind(account.kind), launch.env, homedir());
+    const configDir = sessionConfigDir(agent.harness, launch.env, homedir());
     let laneSession: LaneSession | null = null;
     if (opts.laneSandbox) {
       try {
@@ -2645,7 +2650,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           taskFiles: taskFilesDir(opts.dataDir, task.id),
           // The builder is in a pass: a Read of the checkout's `.env` asks them instead of failing.
           attended: pass !== null,
-          ...(account.kind === AccountKind.CodexSignin ? { tempRoot: opts.codexLaneTempRoot } : {}),
+          ...(agent.harness === Provider.Codex ? { tempRoot: opts.codexLaneTempRoot } : {}),
         });
       } catch (error) {
         releaseStart();
@@ -2769,7 +2774,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       laneSession === null
         ? null
         : floorReason({
-            kind: agentKind(account.kind),
+            ...agent,
             model: launch.model,
             autoMode: lanePermissionMode === 'auto',
             tendbReady,
@@ -2968,7 +2973,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       session = opts.state.write((ctx) => {
         const s = insertSession(ctx, {
           workstreamId: id,
-          provider: providerOf(agentKind(account.kind)),
+          provider: agent.harness,
           model: launchStep.model,
           effort: launchStep.effort,
           mode: 'managed',
@@ -3814,6 +3819,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 cachedTokens: event.cachedTokens,
                 costUsd: event.costUsd,
               });
+              priceSessionAtListing(ctx, session.id, cacheReadPriceOf);
             });
             // A parked or limited session may still finish its interrupted turn before it exits.
             if (st.outcome || st.parkedFor) break;

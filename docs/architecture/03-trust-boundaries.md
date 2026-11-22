@@ -247,7 +247,7 @@ without it):
   - **The web, where auto mode judges it.** In a sandboxed lane whose call is judged by auto mode (see "The judge,
     per call"), with the Web switch on (`GuardInput.webOn`), the guard leaves WebSearch and WebFetch to Claude Code's
     classifier instead of sending them to the broker. No web tool is in `allowedTools`, so no allow rule settles
-    a call before the classifier. A gateway lane, a lane in `default` mode, a model auto mode doesn't support and
+    a call before the classifier. A lane in `default` mode, a model auto mode doesn't support and
     every lane with the Web switch off still card them. The classifier is policy, not a boundary (live check L2:
     its denial names no rule).
 - **Environment.** The sandbox sets, for lane commands, per-lane package caches (`CARGO_HOME` among them), the
@@ -334,7 +334,7 @@ Under the lane sandbox (**built**), the design column holds for the file tools:
 
 #### 10db's judge in the hook
 
-**Built** (trust line T5). Where Claude Code's auto mode doesn't judge a call (a gateway account, a model auto mode
+**Built** (trust line T5). Where Claude Code's auto mode doesn't judge a call (a Codex-harness account, a model auto mode
 doesn't run on, a call reported outside auto mode) the session's `judgeCall` does, after the guard leaves a call
 open: `inbox/hook-judge.ts` runs the fast path (`trust/fast-path.ts`: a read, an edit in the checkout or the temp
 dir, a read-only command, and never a name that may be a secret, a search over a folder, a history or diff dump, or
@@ -1064,7 +1064,7 @@ guard task tests each one.
   test until its tools are reviewed again. A tool no list names still asks under every judge.
 - **The T3 gate ran on the Claude plan only.** Its rows (inline settings, a custom soft deny and its go-ahead, a
   deploy denied with and without an allow rule, the per-call mode, a safety check, a tracked file's delete, an MCP
-  call) passed there; none ran on Bedrock in this build, and the gateway has no judge but the rules.
+  call) passed there; none ran on Bedrock in this build.
 - **Its own account.** A lane's claude process holds its own account's credential. A steered lane can spend
   its account's quota, up to the monthly cap on a metered account.
 - **Its own checkout.** A lane reads and changes everything there except the project's secret files, including

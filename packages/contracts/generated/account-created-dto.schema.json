@@ -15,7 +15,6 @@
             "claude_subscription",
             "anthropic_api_key",
             "bedrock",
-            "gateway",
             "codex_signin",
             "openrouter"
           ]
@@ -60,6 +59,13 @@
                     "maxLength": 200
                   }
                 },
+                "harness": {
+                  "type": "string",
+                  "enum": [
+                    "claude",
+                    "codex"
+                  ]
+                },
                 "region": {
                   "type": "string",
                   "pattern": "^[a-z]{2}(-[a-z]+)+-\\d+$"
@@ -102,14 +108,14 @@
                     "maxLength": 200
                   }
                 },
-                "baseUrl": {
+                "harness": {
                   "type": "string",
-                  "format": "uri"
+                  "enum": [
+                    "claude",
+                    "codex"
+                  ]
                 }
               },
-              "required": [
-                "baseUrl"
-              ],
               "additionalProperties": false
             },
             {
@@ -131,13 +137,15 @@
                     "minLength": 1,
                     "maxLength": 200
                   }
+                },
+                "harness": {
+                  "type": "string",
+                  "enum": [
+                    "claude",
+                    "codex"
+                  ]
                 }
               },
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "properties": {},
               "additionalProperties": false
             }
           ]

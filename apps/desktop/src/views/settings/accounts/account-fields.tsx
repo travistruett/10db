@@ -1,4 +1,4 @@
-import { AccountKind, isMetered, runsAgents, type AccountId } from '@10db/contracts';
+import { AccountKind, isMetered, type AccountId } from '@10db/contracts';
 import { SegmentedControl, Stack, Text, TextInput } from '@mantine/core';
 import { ACCOUNT_KIND_LABEL } from '../account-kind-label';
 import type { AccountFormValues } from './account-form-values';
@@ -56,17 +56,15 @@ export function AccountFields({
         error={errors['payer']}
         onChange={text('payer')}
       />
-      {runsAgents(values.kind) ? (
-        <TextInput
-          size="md"
-          label="Lane cap"
-          description="The most sessions that run on this account at once."
-          inputMode="numeric"
-          value={values.laneCap}
-          error={errors['laneCap']}
-          onChange={text('laneCap')}
-        />
-      ) : null}
+      <TextInput
+        size="md"
+        label="Lane cap"
+        description="The most sessions that run on this account at once."
+        inputMode="numeric"
+        value={values.laneCap}
+        error={errors['laneCap']}
+        onChange={text('laneCap')}
+      />
       {metered ? (
         <TextInput
           size="md"
@@ -136,25 +134,8 @@ export function AccountFields({
           ) : null}
         </>
       ) : null}
-      {values.kind === AccountKind.Gateway ? (
-        <TextInput
-          size="md"
-          label="Base URL"
-          description="The gateway's https endpoint, with no credentials in it."
-          value={values.baseUrl}
-          error={errors['baseUrl']}
-          onChange={(e) => {
-            onChange({ ...values, baseUrl: e.currentTarget.value });
-          }}
-        />
-      ) : null}
-      {mode === 'edit' && accountId !== null && runsAgents(values.kind) ? (
-        <TierOverrides
-          accountId={accountId}
-          values={values}
-          onChange={onChange}
-          error={errors['tierOverrides']}
-        />
+      {mode === 'edit' && accountId !== null ? (
+        <TierOverrides accountId={accountId} values={values} onChange={onChange} />
       ) : null}
     </Stack>
   );

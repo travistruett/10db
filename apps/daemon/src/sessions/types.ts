@@ -1,4 +1,4 @@
-import type { JudgeKind } from '@10db/contracts';
+import type { JudgeKind, Provider } from '@10db/contracts';
 import type {
   AccountId,
   ConversationId,
@@ -7,7 +7,7 @@ import type {
   Effort,
   ModelMarkBasis,
   SessionId,
-  AgentAccountKind,
+  SupportedAccountKind,
   ToolCallView,
   TrustPolicy,
   WorkstreamId,
@@ -490,8 +490,10 @@ export interface ShapeImage {
 }
 
 export interface AccountProbeSpec {
-  /** The account's kind, which picks the agent that reports who it is. */
-  readonly kind: AgentAccountKind;
+  /** The account's kind, which says what credential it holds. */
+  readonly kind: SupportedAccountKind;
+  /** The harness that reports who the account is. */
+  readonly harness: Provider;
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
 }
@@ -586,7 +588,8 @@ export class CompletionError extends Error {
 
 /** One OAuth server of the builder's to sign in, on the account whose env this is. */
 export interface McpSignInSpec {
-  readonly kind: AgentAccountKind;
+  readonly kind: SupportedAccountKind;
+  readonly harness: Provider;
   readonly env: Readonly<Record<string, string>>;
   readonly name: string;
   readonly server: YourSessionServer;
@@ -594,7 +597,8 @@ export interface McpSignInSpec {
 
 /** Whether each of these servers is signed in on the account whose env this is. */
 export interface McpAuthSpec {
-  readonly kind: AgentAccountKind;
+  readonly kind: SupportedAccountKind;
+  readonly harness: Provider;
   readonly env: Readonly<Record<string, string>>;
   readonly servers: Readonly<Record<string, YourSessionServer>>;
 }
@@ -615,7 +619,7 @@ export interface AgentAdapter {
    * was never read (or the agent has no connectors), null when the read failed.
    */
   cachedConnectorNames?(
-    account: Pick<AccountExpectation, 'kind'> & { readonly id: AccountId },
+    account: Pick<AccountExpectation, 'kind' | 'harness'> & { readonly id: AccountId },
   ): readonly string[] | null | undefined;
   /** Closes what the adapter started on its own, such as a connector probe in flight; the daemon calls it as it shuts down. */
   stop?(): Promise<void>;
@@ -623,7 +627,10 @@ export interface AgentAdapter {
    * What this agent can do on the account, and for the model a session opens with (null: none yet).
    * Answers from a table, so it works while the agent's copy is still downloading.
    */
-  capabilities(account: Pick<AccountExpectation, 'kind'>, model: string | null): AgentCapabilities;
+  capabilities(
+    account: Pick<AccountExpectation, 'kind' | 'harness'>,
+    model: string | null,
+  ): AgentCapabilities;
   /** Sends `prompt` to the model once and resolves with its text; rejects with a `CompletionError`. */
   complete(spec: CompletionSpec): Promise<string>;
   /** Opens a session of the spec's profile: a task's lane, or a Shape conversation (Shape spec §5.1). */
@@ -655,5 +662,5 @@ export interface AgentAdapter {
    */
   takeoverCommand(spec: Omit<TakeoverSpec, 'binary'>): TakeoverCommand;
   /** What the builder is told about the agent in their terminal, as text the daemon wrote: first screens and gaps. */
-  takeoverNotes(account: Pick<AccountExpectation, 'kind'>): string[];
+  takeoverNotes(account: Pick<AccountExpectation, 'kind' | 'harness'>): string[];
 }

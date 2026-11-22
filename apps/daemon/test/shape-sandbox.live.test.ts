@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { agentKind, mintId, PermissionChoice, ShapeOrigin } from '@10db/contracts';
+import { mintId, PermissionChoice, Provider, ShapeOrigin } from '@10db/contracts';
 import {
   createTestStore,
   insertPlanSession,
@@ -20,6 +20,7 @@ import {
   createLauncher,
   ensureAgent,
   systemKeychain,
+  accountAgentOf,
 } from '../src/environment';
 import { createEventBus, createStateStore } from '../src/events';
 import { judgeChatCall } from '../src/chat';
@@ -39,7 +40,11 @@ import {
 import { createTempRepo, testPolicy } from './fixtures';
 
 /** The prompt for a subscription, whose agents take every alias. */
-const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(shapeAgentModels('claude_subscription'), true, true);
+const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(
+  shapeAgentModels('claude_subscription', Provider.Claude),
+  true,
+  true,
+);
 
 // Shape spec §5.2, §15: a Plan session's commands, in its read-only lane sandbox and through the lanes'
 // broker, on the real SDK and the real srt. Runs on the builder's Max subscription through the
@@ -95,7 +100,7 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
       updatedAt: new Date(0).toISOString(),
     };
     const seen = await adapter.probeAccount({
-      kind: agentKind(account.kind),
+      ...accountAgentOf(account),
       cwd: checkout,
       env: launcher.probe(account).env,
     });
@@ -156,7 +161,7 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
       conversationId: shapeConversation(state.db, shape.id).id,
       shapeId: shape.id,
       sessionId: mintId('Session'),
-      accountKind: agentKind(account.kind),
+      harness: accountAgentOf(account).harness,
       env: launch.env,
       resumeProviderSessionId: null,
       signal: new AbortController().signal,

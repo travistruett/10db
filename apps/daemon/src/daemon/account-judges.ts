@@ -2,8 +2,7 @@ import {
   isModelTier,
   JudgeKind,
   Rigor,
-  providerOf,
-  runsAgents,
+  harnessOf,
   StepRole,
   type AccountJudgeDto,
 } from '@10db/contracts';
@@ -22,17 +21,18 @@ export function accountJudges(
   db: DbReader,
   adapter: Pick<AgentAdapter, 'capabilities'>,
 ): AccountJudgeDto[] {
-  // An OpenRouter account answers decisions only and never runs a session, so it has no judge.
+  // An account no harness runs never runs a session, so it has no judge.
   return listAccounts(db).flatMap((account) => {
-    const kind = account.kind;
-    if (!runsAgents(kind)) return [];
+    const harness = harnessOf(account);
+    if (harness === null) return [];
+    const agent = { kind: account.kind, harness };
     const build = resolveSteps({
       rigor: Rigor.Standard,
       taskKinds: [],
       ...playbookInputs(db, null),
     }).find((step) => step.role === StepRole.Implement);
     const choice = chooseModel({
-      ...routingInputs(db, { accountId: account.id, provider: providerOf(kind) }),
+      ...routingInputs(db, { accountId: account.id, provider: harness }),
       def: { role: StepRole.Implement, need: build?.need ?? 0 },
       requirements: build?.requirements ?? [{ kind: 'automatic' }],
       effort: build?.effort ?? null,
@@ -44,10 +44,10 @@ export function accountJudges(
     });
     // A tier's name is what a choice says when the account offers no model for it.
     const model = isModelTier(choice.model) ? null : choice.model;
-    const judge = adapter.capabilities({ kind }, model).judge;
+    const judge = adapter.capabilities(agent, model).judge;
     const reason =
       judge === JudgeKind.Rules
-        ? floorReason({ kind, model, autoMode: true, tendbReady: false })
+        ? floorReason({ ...agent, model, autoMode: true, tendbReady: false })
         : null;
     return {
       accountId: account.id,

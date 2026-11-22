@@ -1,12 +1,13 @@
-import { chmodSync, mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
+import { accountConfigDir, makePrivate } from './account-homes';
 import {
   AccountKind,
   AccountPauseReason,
   AccountProblem,
   AccountSecretInput,
   EventType,
-  runsAgents,
+  harnessOf,
+  requireHarness,
   signsInWithLogin,
   ConflictError,
   InvalidError,
@@ -98,13 +99,6 @@ export interface AccountService {
    * pause while spend is still at the cap (raise the cap first).
    */
   resume(id: AccountId): AccountPauseDto[];
-}
-
-/** The directory and every level 10db made above it: readable by the builder only (accounts spec §4). */
-function makePrivate(root: string, dir: string): void {
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  // mkdir's mode passes through the umask, so each level is set explicitly.
-  for (const path of [root, dirname(dir), dir]) chmodSync(path, 0o700);
 }
 
 const nothingSeen = (id: AccountId): Omit<AccountIdentityDto, 'refusal'> => ({
@@ -225,7 +219,11 @@ export function createAccountService(deps: {
       const account = deps.state.write((ctx) => {
         const created = insertAccount(ctx, input, {
           configDirFor: (id) =>
-            join(root, id, input.kind === AccountKind.CodexSignin ? 'codex' : 'claude'),
+            accountConfigDir(
+              root,
+              id,
+              harnessOf({ kind: input.kind, settings: 'settings' in input ? input.settings : {} }),
+            ),
         });
         // Every created account, keyed kinds too, gets one. Inside the transaction: a directory that
         // can't be made leaves no row behind.
@@ -269,9 +267,10 @@ export function createAccountService(deps: {
     },
     async identity(id) {
       const row = getAccountRow(db, id);
-      // Nothing to probe: the account runs no agent, so it has no login or organization to report.
-      if (!runsAgents(row.kind))
-        throw new InvalidError('OpenRouter accounts have no identity to check');
+      // Nothing to probe: no harness runs the account, so it has no login or organization to report.
+      const harness = harnessOf(row);
+      if (harness === null)
+        throw new InvalidError(`${row.label} runs no harness, so it has no identity to check`);
       let launch;
       try {
         launch = deps.launcher.probe(row);
@@ -293,6 +292,7 @@ export function createAccountService(deps: {
         try {
           seen = await deps.adapter.probeAccount({
             kind: row.kind,
+            harness,
             cwd: deps.dataDir,
             env: launch.env,
           });
@@ -307,7 +307,7 @@ export function createAccountService(deps: {
         );
       }
       const refusal = checkAccount(launch.expect, seen);
-      if (refusal === null) deps.lists.record({ id: row.id, kind: row.kind }, seen);
+      if (refusal === null) deps.lists.record({ id: row.id, kind: row.kind, harness }, seen);
       const unconfirmed =
         signsInWithLogin(row.kind) && row.expectedIdentity === null
           ? {
@@ -368,6 +368,7 @@ export function createAccountService(deps: {
       try {
         login = await deps.adapter.startLogin({
           kind: row.kind,
+          harness: requireHarness(row),
           cwd: deps.dataDir,
           env: launch.env,
         });

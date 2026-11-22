@@ -3,20 +3,18 @@ import {
   AccountProblem,
   ApiKeySettings,
   BedrockSettings,
-  GatewaySettings,
+  harnessOf,
   isModelTier,
   Provider,
-  OPENROUTER_CANT_RUN_AGENTS,
-  providerOf,
-  runsAgents,
+  OpenRouterSettings,
   SubscriptionSettings,
   type AccountId,
   type AccountModelDto,
-  type AgentAccountKind,
   type SupportedAccountKind,
 } from '@10db/contracts';
 import { isAbsolute, join } from 'node:path';
 import type { AccountRow } from '@10db/db';
+import type { AccountAgent } from './account-agent';
 import { CLAUDE_CODE_VERIFIED_ON } from './agent-pins';
 import { readAccountSecret } from './account-secret';
 import type { Keychain } from './keychain';
@@ -47,23 +45,28 @@ const AWS_LOGIN_VARS: readonly string[] = [
   'AWS_CONTAINER_AUTHORIZATION_TOKEN',
   'AWS_ENDPOINT_URL_BEDROCK_RUNTIME',
 ];
-/** A ChatGPT sign-in session takes its credential from its own CODEX_HOME only, never from the login shell. */
+/** The variable Codex reads an OpenRouter key from (`env_key` in its home's config). */
+const OPENROUTER_KEY_VAR = 'OPENROUTER_API_KEY';
+/**
+ * A Codex session takes its credential from its own CODEX_HOME (a ChatGPT sign-in) or its account's Keychain
+ * secret (an OpenRouter key), never from the login shell.
+ */
 const CODEX_LOGIN_VARS: readonly string[] = [
   'OPENAI_API_KEY',
   'CODEX_API_KEY',
   'OPENAI_BASE_URL',
   'CODEX_ACCESS_TOKEN',
   'CODEX_HOME',
+  OPENROUTER_KEY_VAR,
 ];
 /** The families of provider switches a terminal clears, with 10db's own variables. */
 const UNSET_PREFIXES: readonly string[] = [...BILLING_SWITCH_PREFIXES, OWN_PREFIX];
 const CLIENT_APP_VAR = 'CLAUDE_AGENT_SDK_CLIENT_APP';
 
 /** What a session on an account must report before its prompt (accounts spec §5). */
-export interface AccountExpectation {
+export interface AccountExpectation extends AccountAgent {
   readonly accountId: AccountId;
   readonly label: string;
-  readonly kind: AgentAccountKind;
   /** The email (subscription) or organization (keyed) Claude Code must report; null compares none. */
   readonly identity: string | null;
 }
@@ -183,7 +186,6 @@ export function staleNeedsAuthCache(env: Readonly<Record<string, string>>): stri
 export const McpSignInWhere = {
   BuildersClaudeCode: 'builders_claude_code',
   ThisAccount: 'this_account',
-  NotYet: 'not_yet',
 } as const;
 export type McpSignInWhere = (typeof McpSignInWhere)[keyof typeof McpSignInWhere];
 
@@ -211,17 +213,14 @@ export function connectorProbeEnv(
 }
 
 /**
- * Where a Claude session's servers get signed in, from its launch environment: not at all on a Gateway
- * account, in the builder's own Claude Code when the session reads that entry (the default folder, the login
+ * Where a Claude session's servers get signed in, from its launch environment: in the builder's own Claude Code when the session reads that entry (the default folder, the login
  * shell's folder, or a keyed account), and in the account's own folder otherwise. `loginConfigDir` is the
  * login shell's absolute `CLAUDE_CONFIG_DIR`, or null.
  */
 export function mcpSignInWhere(
-  kind: AgentAccountKind,
   env: Readonly<Record<string, string>>,
   loginConfigDir: string | null,
 ): McpSignInWhere {
-  if (kind === AccountKind.Gateway) return McpSignInWhere.NotYet;
   const dir = env['CLAUDE_CONFIG_DIR'];
   if (dir !== undefined && dir === loginConfigDir) return McpSignInWhere.BuildersClaudeCode;
   if (dir !== undefined && !Object.hasOwn(env, 'CLAUDE_SECURESTORAGE_CONFIG_DIR'))
@@ -251,34 +250,34 @@ export function signInCommandFor(account: {
 }
 
 /**
- * The directory a session's agent keeps its login in: CODEX_HOME for a Codex kind (default `~/.codex`),
- * CLAUDE_CONFIG_DIR for a Claude kind (default `~/.claude`). A Claude kind ignores CODEX_HOME.
+ * The directory a session's agent keeps its login in: CODEX_HOME for the Codex harness (default `~/.codex`),
+ * CLAUDE_CONFIG_DIR for Claude Code (default `~/.claude`). Claude Code ignores CODEX_HOME.
  */
 export function sessionConfigDir(
-  kind: AgentAccountKind,
+  harness: Provider,
   env: Readonly<Record<string, string>>,
   home: string,
 ): string {
-  return providerOf(kind) === Provider.Codex
+  return harness === Provider.Codex
     ? (env['CODEX_HOME'] ?? join(home, '.codex'))
     : (env['CLAUDE_CONFIG_DIR'] ?? join(home, '.claude'));
 }
 
-/** The names a kind takes from its account only, so a terminal unsets them from the builder's shell. */
-function droppedBy(kind: AgentAccountKind): readonly string[] {
-  return kind === AccountKind.Bedrock
-    ? AWS_LOGIN_VARS
-    : kind === AccountKind.CodexSignin
-      ? CODEX_LOGIN_VARS
-      : [];
+/** The names an account takes from its own settings only, so a terminal unsets them from the builder's shell. */
+function droppedBy(kind: SupportedAccountKind, harness: Provider): readonly string[] {
+  return [
+    ...(kind === AccountKind.Bedrock ? AWS_LOGIN_VARS : []),
+    ...(harness === Provider.Codex ? CODEX_LOGIN_VARS : []),
+  ];
 }
 
 /** The login env minus what the kind takes from its account only. */
 function withoutVars(
   login: Readonly<Record<string, string>>,
-  kind: AgentAccountKind,
+  kind: SupportedAccountKind,
+  harness: Provider,
 ): Record<string, string> {
-  const dropped = droppedBy(kind);
+  const dropped = droppedBy(kind, harness);
   return Object.fromEntries(Object.entries(login).filter(([name]) => !dropped.includes(name)));
 }
 
@@ -309,15 +308,19 @@ export function createLauncher(opts: {
     }
   }
 
-  /** The kind of an account a session can run on; an OpenRouter account is refused before any secret is read. */
-  function agentKindOf(account: AccountRow): AgentAccountKind {
-    if (!runsAgents(account.kind))
-      throw new AccountLaunchError(
-        account.id,
-        AccountProblem.CannotBill,
-        `Account "${account.label}": ${OPENROUTER_CANT_RUN_AGENTS}`,
-      );
-    return account.kind;
+  function noHarness(account: AccountRow): AccountLaunchError {
+    return new AccountLaunchError(
+      account.id,
+      AccountProblem.CannotBill,
+      `no harness runs ${account.label} yet`,
+    );
+  }
+
+  /** The harness an account's sessions run on; a kind with none is refused before any secret is read. */
+  function harnessFor(account: AccountRow): Provider {
+    const harness = harnessOf(account);
+    if (harness === null) throw noHarness(account);
+    return harness;
   }
 
   /**
@@ -329,11 +332,23 @@ export function createLauncher(opts: {
     return loginConfigDirOf(opts.base) ?? '';
   }
 
+  /** An OpenRouter account runs in its own Codex home, never the builder's `~/.codex`. */
+  function refuseSharedHome(account: AccountRow): void {
+    if (account.kind === AccountKind.OpenRouter && account.configDir === null)
+      throw new AccountLaunchError(
+        account.id,
+        AccountProblem.CannotBill,
+        `Account "${account.label}" has no Codex folder of its own, so Codex would use the builder's`,
+      );
+  }
+
   function build(account: AccountRow): Record<string, string> {
-    const kind = agentKindOf(account);
+    const kind = account.kind;
+    const harness = harnessFor(account);
+    refuseSharedHome(account);
     const login = projectEnv();
     const env: Record<string, string> = {
-      ...withoutVars(login, kind),
+      ...withoutVars(login, kind, harness),
       [CLIENT_APP_VAR]: opts.clientApp,
     };
     // Every kind runs on its own directory, so a keyed session never meets the default account's saved login;
@@ -341,8 +356,7 @@ export function createLauncher(opts: {
     // reads the builder's MCP sign-ins, as its own Claude Code does on Bedrock, and runs as its key: the
     // preflight's checkAccount and the init check confirm it.
     if (account.configDir !== null)
-      env[kind === AccountKind.CodexSignin ? 'CODEX_HOME' : 'CLAUDE_CONFIG_DIR'] =
-        account.configDir;
+      env[harness === Provider.Codex ? 'CODEX_HOME' : 'CLAUDE_CONFIG_DIR'] = account.configDir;
     switch (kind) {
       case AccountKind.ClaudeSubscription: {
         SubscriptionSettings.parse(account.settings);
@@ -363,14 +377,13 @@ export function createLauncher(opts: {
         env['CLAUDE_SECURESTORAGE_CONFIG_DIR'] = sharedEntryDir();
         return env;
       }
-      case AccountKind.Gateway: {
-        const settings = GatewaySettings.parse(account.settings);
-        env['ANTHROPIC_BASE_URL'] = settings.baseUrl;
-        env['ANTHROPIC_AUTH_TOKEN'] = secretOf(account);
-        return env;
-      }
       case AccountKind.CodexSignin: {
         SubscriptionSettings.parse(account.settings);
+        return env;
+      }
+      case AccountKind.OpenRouter: {
+        OpenRouterSettings.parse(account.settings);
+        env[OPENROUTER_KEY_VAR] = secretOf(account);
         return env;
       }
     }
@@ -378,11 +391,12 @@ export function createLauncher(opts: {
 
   /** What the account sets for a terminal, and how its key reaches the agent. */
   function takeoverOf(account: AccountRow): Omit<TakeoverLaunch, 'unset' | 'model'> {
-    const kind = agentKindOf(account);
+    const kind = account.kind;
+    const harness = harnessFor(account);
+    refuseSharedHome(account);
     const set: Record<string, string> = {};
     if (account.configDir !== null)
-      set[kind === AccountKind.CodexSignin ? 'CODEX_HOME' : 'CLAUDE_CONFIG_DIR'] =
-        account.configDir;
+      set[harness === Provider.Codex ? 'CODEX_HOME' : 'CLAUDE_CONFIG_DIR'] = account.configDir;
     const none = { keychain: [], apiKeyHelperAccount: null, scrub: false };
     // A key is checked here and read later by whoever uses it; secretRef is set when the secret passes.
     const keyRef = (): string => {
@@ -421,26 +435,27 @@ export function createLauncher(opts: {
           scrub: true,
         };
       }
-      case AccountKind.Gateway: {
-        const settings = GatewaySettings.parse(account.settings);
-        set['ANTHROPIC_BASE_URL'] = settings.baseUrl;
-        return {
-          set,
-          unsetPrefixes: UNSET_PREFIXES,
-          ...none,
-          apiKeyHelperAccount: keyRef(),
-        };
-      }
       case AccountKind.CodexSignin:
         SubscriptionSettings.parse(account.settings);
         return { set, unsetPrefixes: UNSET_PREFIXES, ...none };
+      case AccountKind.OpenRouter:
+        OpenRouterSettings.parse(account.settings);
+        // As a Bedrock bearer token: the key sits in Codex's environment and is kept from its shells.
+        return {
+          set,
+          unsetPrefixes: UNSET_PREFIXES,
+          keychain: [{ variable: OPENROUTER_KEY_VAR, account: keyRef() }],
+          apiKeyHelperAccount: null,
+          scrub: true,
+        };
     }
   }
 
   const expectation = (account: AccountRow): AccountExpectation => ({
     accountId: account.id,
     label: account.label,
-    kind: agentKindOf(account),
+    kind: account.kind,
+    harness: harnessFor(account),
     identity: account.expectedIdentity,
   });
 
@@ -467,7 +482,7 @@ export function createLauncher(opts: {
         ...new Set([
           ...BILLING_SWITCH_VARS,
           ...NESTED_SESSION_VARS,
-          ...droppedBy(agentKindOf(account)),
+          ...droppedBy(account.kind, harnessFor(account)),
         ]),
       ].filter((name) => !owned.has(name));
       return { ...launch, unset, model: own?.launchId ?? model };

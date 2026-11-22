@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { mkdir, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
-import { AccountProblem, type AccountRefusal } from '@10db/contracts';
+import { AccountKind, AccountProblem, type AccountRefusal } from '@10db/contracts';
 import { z } from 'zod';
 import { systemClock, type Clock } from '../clock';
 import { CODEX_VERIFIED_ON } from '../environment';
@@ -20,8 +20,10 @@ import {
 import {
   CODEX_HOOK_TIMEOUT_SECONDS,
   codexChildHome,
+  codexHomeProviderOf,
   GUARD_HOOK_EVENT,
   type CodexHome,
+  type CodexHomeProvider,
 } from './codex-home';
 import { codexDeveloperInstructions, codexThreadConfig, LANE_PROFILE } from './codex-lane-config';
 import { CODEX_MCP_STATUS_BOUND_MS, McpAuthState, readCodexMcpAuth } from './codex-mcp-auth';
@@ -66,7 +68,7 @@ import {
 
 export interface CodexSessionDeps extends CodexAdapterOptions {
   /** The home for an account's `CODEX_HOME`. */
-  readonly homes: (path: string) => CodexHome;
+  readonly homes: (path: string, provider: CodexHomeProvider) => CodexHome;
 }
 
 /** How long one call of the start sequence may take before the session ends. */
@@ -116,8 +118,29 @@ const TurnEnd = {
   UsageLimit: 'usage_limit',
   SignedOut: 'signed_out',
   ModelRefused: 'model_refused',
+  CannotBill: 'cannot_bill',
 } as const;
 type TurnEnd = (typeof TurnEnd)[keyof typeof TurnEnd];
+
+/** A custom provider's model that Codex has no metadata for: a warning in an `error` item, not a failure. */
+const METADATA_WARNING = 'Model metadata for';
+
+const ErrorItem = z.looseObject({
+  item: z.looseObject({ type: z.literal('error'), message: z.string() }),
+});
+
+/** OpenRouter answers 402 when the account's credit is spent. */
+const PAYMENT_REQUIRED = 402;
+
+const HttpFailure = z.looseObject({ httpStatusCode: z.number().optional() });
+
+/** Whether a failed turn's error is a 402, by the status Codex names in `codexErrorInfo`. */
+function isPaymentRequired(info: unknown): boolean {
+  if (typeof info !== 'object' || info === null) return false;
+  return Object.values(info).some(
+    (value) => HttpFailure.safeParse(value).data?.httpStatusCode === PAYMENT_REQUIRED,
+  );
+}
 
 /** `codexErrorInfo` is a bare name (`"unauthorized"`) or an object keyed by it (`{ "httpConnectionFailed": {} }`). */
 function errorKind(info: unknown): string | null {
@@ -372,7 +395,7 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
    */
   const failUnreadAccount = async (unread: AccountUnread): Promise<never> => {
     const signIn = await signInCheck(childEnv());
-    const { why, printed } = noAccountWhy(START_CALL_MS, [stderrTail], spec.account.kind);
+    const { why, printed } = noAccountWhy(START_CALL_MS, [stderrTail], spec.account.harness);
     const refusal =
       signIn === 'signed_out' ? missingAccountRefusal(spec.account, why, printed, signIn) : null;
     if (refusal !== null)
@@ -634,6 +657,11 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
     }
   };
 
+  /** The text of the turn that ended the session on a refused payment. */
+  let failedText = '';
+  /** Whether the session has logged Codex's missing-metadata warning: it repeats every turn. */
+  let warnedMetadata = false;
+
   /** What a failed turn ends the session on, when it names one. */
   const endOfTurn = (params: unknown): TurnEnd | null => {
     const parsed = TurnCompleted.safeParse(params);
@@ -641,6 +669,11 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
     const kind = errorKind(parsed.data.turn.error?.codexErrorInfo);
     if (kind === 'usageLimitExceeded') return TurnEnd.UsageLimit;
     if (kind === 'unauthorized') return TurnEnd.SignedOut;
+    const error = parsed.data.turn.error;
+    if (spec.account.kind === AccountKind.OpenRouter && isPaymentRequired(error?.codexErrorInfo)) {
+      failedText = error?.message ?? 'payment required';
+      return TurnEnd.CannotBill;
+    }
     // Codex accepts an unknown model at thread/start, so a model the account cannot run fails only here.
     if (kind === 'badRequest' && refusesModel(parsed.data.turn.error?.message ?? ''))
       return TurnEnd.ModelRefused;
@@ -653,6 +686,15 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
       case TurnEnd.ModelRefused:
         finish(SessionEndReason.ModelRefused, modelRefusal(model));
         return;
+      case TurnEnd.CannotBill: {
+        const message = `OpenRouter refused the turn for account "${spec.account.label}": ${failedText}`;
+        finish(SessionEndReason.AccountRefused, message, {
+          problem: AccountProblem.CannotBill,
+          message,
+          seenIdentity: null,
+        });
+        return;
+      }
       case TurnEnd.SignedOut: {
         const message = `Codex says account "${spec.account.label}" is signed out.`;
         finish(SessionEndReason.AccountRefused, message, {
@@ -692,6 +734,16 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
         if (begun.success && starting !== null) {
           handTo(begun.data.turn.id, starting);
           starting = null;
+        }
+      }
+      if (n.method === 'item/completed') {
+        const warning = ErrorItem.safeParse(n.params);
+        if (warning.success && warning.data.item.message.startsWith(METADATA_WARNING)) {
+          if (!warnedMetadata) {
+            warnedMetadata = true;
+            log.warn({ message: warning.data.item.message }, 'codex has no metadata for the model');
+          }
+          return;
         }
       }
       let ended: string | null = null;
@@ -975,7 +1027,7 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
     if (codexHome === undefined || codexHome === '')
       throw sandboxRefused('The session has no CODEX_HOME, so Codex would run in the shared home.');
 
-    const home = deps.homes(codexHome);
+    const home = deps.homes(codexHome, codexHomeProviderOf(spec.account.kind));
     try {
       await home.prepare(spec.cwd);
     } catch (error) {
@@ -1064,7 +1116,7 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
     if (error instanceof CodexRpcError) {
       finish(
         failed,
-        `Codex could not start the session. ${noAccountWhy(START_CALL_MS, [stderrTail], spec.account.kind).printed}.${unlessStarted(started)}`,
+        `Codex could not start the session. ${noAccountWhy(START_CALL_MS, [stderrTail], spec.account.harness).printed}.${unlessStarted(started)}`,
       );
       return;
     }

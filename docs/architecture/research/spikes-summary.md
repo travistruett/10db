@@ -18,6 +18,7 @@
 | 13  | Bash sandbox (`Options.sandbox`) as the lane boundary | PARTIAL  | Engages through the SDK and holds every file-read route and the Keychain; Read tool, hooks and MCP stay outside it; unlisted hosts ask `canUseTool`; `make gate` cannot fully pass inside it (`ps`, git repos under the cwd) | [spike-13](spike-13-sandbox.md)               |
 | 16  | `codex app-server` on a ChatGPT plan                  | VERIFIED | One more adapter: a `PreToolUse` hook runs the guard, and a home of the account's own, pinned `untrusted`, holds the sandbox                                                                                                 |
 | 17  | Account model lists and concrete-ID launches          | PARTIAL  | Join models by exact ID and launch by concrete ID without `[1m]`; Bedrock's list is built in and understates what runs, so the catalogue adds the newest model per family; a gateway's list is untried                       | [spike-17](spike-17-account-model-lists.md)   |
+| 18  | Codex on OpenRouter                                   | PARTIAL  | OpenRouter accounts run Codex; identity is the key's fingerprint, since `account/read` reports no account; web search works but emits no item, and `cached` searches live; a paid model and a full lane are untried          | [spike-18](spike-18-codex-on-openrouter.md)   |
 
 ## Constants for M1b
 
