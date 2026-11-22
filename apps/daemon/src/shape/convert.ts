@@ -38,6 +38,7 @@ import {
   getShape,
   getShapeEntry,
   getTask,
+  getTaskByExternal,
   getTaskContext,
   insertDecision,
   insertGoal,
@@ -135,6 +136,7 @@ function goalBrief(goal: PlanGoal): GoalBrief {
       criteria: t.criteria,
       areas: t.areas,
       depends_on: t.depends_on,
+      ...(t.external === undefined ? {} : { external: t.external }),
     })),
   };
 }
@@ -508,12 +510,33 @@ export function convertProposals(
           .filter((t) => t.dependsOnOutside.length > 0)
           .map((t) => [t.key, t.dependsOnOutside]),
       );
+      // A task whose issue is already on the Board is left out of the brief: its key stands for that card, as a
+      // loose task's does, so what waits on it waits on the card.
+      const skipped = new Map<string, TaskId>();
+      for (const t of goal.tasks) {
+        const linked =
+          t.external === undefined ? null : getTaskByExternal(ctx.tx, project.id, t.external);
+        if (linked !== null) skipped.set(t.key, linked.id);
+      }
+      for (const [key, id] of skipped) taskIds.set(key, id);
+      // Every task already on the Board: there is no goal to make, and the rest of the Accept goes ahead.
+      if (skipped.size === goal.tasks.length) {
+        made.set(row.id, { taskIds: [...skipped.values()] });
+        continue;
+      }
+      const brief = goalBrief(goal);
+      const kept = brief.tasks
+        .filter((t) => !skipped.has(t.key))
+        .map((t) => ({ ...t, depends_on: t.depends_on.filter((key) => !skipped.has(key)) }));
+      for (const t of goal.tasks)
+        for (const key of t.depends_on)
+          if (skipped.has(key)) outside[t.key] = [...(outside[t.key] ?? []), key];
       // A goal task may take a removed task's key, which `taskIds` still maps to the cancelled task;
       // that key is the brief's own, not an outside one. A live key stays outside, so the store
       // still refuses a collision the check above missed rather than writing a second task.
       const briefKeys = new Set(goal.tasks.map((t) => t.key));
       const written = insertGoal(ctx, project.id, {
-        brief: goalBrief(goal),
+        brief: { ...brief, tasks: kept },
         placeTask: (areas) => proposePlacement(project, { areas, kinds: [] }),
         outsideKeys: new Map(
           [...taskIds].filter(([key]) => !(briefKeys.has(key) && removed.has(key))),
@@ -549,6 +572,15 @@ export function convertProposals(
       linkShapeAttachments(ctx, shapeId, row.key, { goalId: written.goal.id });
     } else {
       const task: Task = ShapeProposalBody.task.parse(row.body);
+      // An issue already on the Board is skipped. No link is written, so Undo Accept leaves the card
+      // alone, and what other drafts depend on under this key is the existing card.
+      const linked =
+        task.external === undefined ? null : getTaskByExternal(ctx.tx, project.id, task.external);
+      if (linked !== null) {
+        taskIds.set(row.key, linked.id);
+        made.set(row.id, { taskIds: [linked.id] });
+        continue;
+      }
       const base = {
         title: task.title,
         headline: task.headline,
@@ -556,7 +588,12 @@ export function convertProposals(
         description: task.description,
         dependsOn: task.dependsOn.flatMap((key) => taskIds.get(key) ?? []),
       };
-      const input = { ...base, acceptanceCriteria: task.criteria, areas: task.areas };
+      const input = {
+        ...base,
+        acceptanceCriteria: task.criteria,
+        areas: task.areas,
+        ...(task.external === undefined ? {} : { external: task.external }),
+      };
       // The placement rule runs on every task Convert makes (task placement spec, P2).
       const placement = proposePlacement(project, { areas: task.areas, kinds: [] });
       const written =

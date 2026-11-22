@@ -535,7 +535,7 @@ describe('judgeShapeCall', () => {
 
 // Shape spec §5.2: in its read-only sandbox a session runs read-only commands without asking and asks
 // about any other, through the lanes' broker; the code researchers it fans out do the same. Its
-// project MCP servers' tools are the conversation's own, and each call is asked about.
+// MCP servers' tools are the conversation's own: a bare allow on a judge, a card without one.
 describe('judgeShapeCall in the read-only sandbox', () => {
   let sandboxed: ShapeAccess;
   beforeEach(() => {
@@ -907,6 +907,16 @@ describe('judgeShapeCall by the session’s judge', () => {
 
   it.each(ROWS)('on a rules judge… answers %s as today', (_name, make, _native, _tendb, today) => {
     expect(judgeShapeCall(make(), { ...sandboxed, judge: 'rules' }).decision).toBe(today);
+  });
+
+  it("sends a builder's MCP tool to the session's judge: a bare allow on 10db's judge and auto mode, a card on rules", () => {
+    const linear = call('mcp__claude_ai_Linear__list_teams', {});
+    // Exactly this: a `settled` or a rewrite would skip the judge or the classifier.
+    expect(judgeShapeCall(linear, { ...sandboxed, judge: 'tendb' })).toEqual({ decision: 'allow' });
+    expect(judgeShapeCall(linear, { ...sandboxed, judge: 'native' })).toEqual({
+      decision: 'allow',
+    });
+    expect(judgeShapeCall(linear, { ...sandboxed, judge: 'rules' }).decision).toBe('ask');
   });
 
   it('says Plan writes no code when it refuses an edit, on every judge', () => {

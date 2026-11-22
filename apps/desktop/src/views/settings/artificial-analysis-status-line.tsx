@@ -5,7 +5,7 @@ import { useBenchmarkStatus } from '../../daemon/benchmark-queries';
 import { shortAgo } from '../factory/short-ago';
 import { SettingsSectionKey } from './sections';
 
-/** The card these links open, in Settings › Sign-ins. */
+/** The card these links open, in Settings › Integrations. */
 const CARD = 'artificial-analysis';
 
 function sentence(status: BenchmarkStatusDto): { text: string; link: string | null } {
@@ -53,7 +53,7 @@ export function ArtificialAnalysisStatusLine() {
               <Link
                 {...props}
                 to="/settings/$section"
-                params={{ section: SettingsSectionKey.SignIns }}
+                params={{ section: SettingsSectionKey.Integrations }}
                 search={{ focus: CARD }}
               />
             )}

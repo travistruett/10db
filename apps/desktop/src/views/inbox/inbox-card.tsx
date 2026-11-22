@@ -291,12 +291,12 @@ export function InboxCard({
               <Link
                 {...props}
                 to="/settings/$section"
-                params={{ section: SettingsSectionKey.SignIns }}
+                params={{ section: SettingsSectionKey.Integrations }}
                 search={{ focus: integrationsFocusOf(item) ?? undefined }}
               />
             )}
           >
-            Open Sign-ins
+            Open Integrations
           </Anchor>
         )}
         {opens === null ? null : <CardOpensLink opens={opens} />}

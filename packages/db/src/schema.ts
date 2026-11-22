@@ -30,6 +30,7 @@ import type {
   Delivery,
   DeviationId,
   Effort,
+  ExternalKind,
   EventType,
   EvidenceId,
   EvidenceKind,
@@ -508,11 +509,23 @@ export const tasks = sqliteTable(
     madeByPassId: text('made_by_pass_id')
       .$type<PassId>()
       .references((): AnySQLiteColumn => passes.id),
+    /** The tracker the task's issue is in (`ExternalKind`); null for a task made by hand. */
+    externalKind: text('external_kind').$type<ExternalKind>(),
+    /** The issue's readable id (AMP-119). */
+    externalId: text('external_id'),
+    /** The tracker's own id for the issue, which an API call names it by. */
+    externalIssueId: text('external_issue_id'),
+    externalUrl: text('external_url'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     index('tasks_project_idx').on(t.projectId),
+    // One issue is one task in a project; a NULL kind or id never collides.
+    // A removed (cancelled) task keeps its link for history and no longer holds the issue.
+    uniqueIndex('tasks_external_idx')
+      .on(t.projectId, t.externalKind, t.externalId)
+      .where(sql`${t.status} <> 'cancelled'`),
     index('tasks_goal_idx').on(t.goalId),
     index('tasks_landing_group_idx').on(t.landingGroupId),
   ],

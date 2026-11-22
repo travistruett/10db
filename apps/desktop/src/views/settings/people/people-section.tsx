@@ -59,7 +59,7 @@ function ReachChip({ person }: { readonly person: PersonDto }) {
   );
 }
 
-/** Points at Settings › Sign-ins while Slack can't carry questions. */
+/** Points at Settings › Integrations while Slack can't carry questions. */
 function ConnectSlackLine({ builder }: { readonly builder: PersonDto | undefined }) {
   const state = useSlackConnection().data?.state;
   if (state === undefined || state === 'unreachable' || builder === undefined) return null;
@@ -78,7 +78,7 @@ function ConnectSlackLine({ builder }: { readonly builder: PersonDto | undefined
           <Link
             {...props}
             to="/settings/$section"
-            params={{ section: SettingsSectionKey.SignIns }}
+            params={{ section: SettingsSectionKey.Integrations }}
           />
         )}
       >

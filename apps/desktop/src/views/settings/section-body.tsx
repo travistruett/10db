@@ -6,8 +6,7 @@ import { AgentSkillSection } from './agent-skill-section';
 import { AgentCopiesSection } from './agent-copies-section';
 import { BoardColumnsSection } from './board-columns-section';
 import { DecisionsSection } from './decisions-section';
-import { SignInsSection } from './sign-ins/sign-ins-section';
-import { ProjectIntegrationsSection } from './project-integrations-section';
+import { IntegrationsSection } from './integrations-section';
 import { AppearanceSection } from './appearance-section';
 import { KeepAwakeSection } from './keep-awake-section';
 import { LanePermissionsSection } from './lane-permissions-section';
@@ -109,22 +108,11 @@ export function SectionBody({
           {project ? <ProjectBilling key={project.id} project={project} /> : <NoProject />}
         </>
       );
-    case SettingsSectionKey.SignIns:
+    case SettingsSectionKey.Integrations:
       return (
         <>
           {heading}
-          <SignInsSection />
-        </>
-      );
-    case SettingsSectionKey.ProjectIntegrations:
-      return (
-        <>
-          {heading}
-          {project ? (
-            <ProjectIntegrationsSection key={project.id} project={project} />
-          ) : (
-            <NoProject />
-          )}
+          <IntegrationsSection />
         </>
       );
     case SettingsSectionKey.People:

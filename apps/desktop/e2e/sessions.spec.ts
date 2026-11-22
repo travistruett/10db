@@ -813,6 +813,45 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
     page.getByRole('complementary', { name: 'Plan' }).getByText('Board polish'),
   ).toBeVisible();
 
+  // A draft linked to a Linear issue: Accept puts the issue's id on its card, and the same issue stated again
+  // is skipped, its row pointing at the existing card, so the Board holds one AMP-1.
+  const amp = async (): Promise<number> =>
+    z
+      .array(z.looseObject({ external: z.looseObject({ id: z.string() }).nullish() }))
+      .parse(
+        await (
+          await request.get(`${daemonUrl}/projects/${projectId}/tasks`, { headers: auth })
+        ).json(),
+      )
+      .filter((t) => t.external?.id === 'AMP-1').length;
+  const planPanel = page.getByRole('complementary', { name: 'Plan' });
+  await sendLine(page, 'import AMP-1 from linear');
+  const planRows = planPanel.getByRole('list', { name: 'Plan rows' });
+  await expect(planRows.getByText('Show the Linear id on a card')).toBeVisible();
+  await expect(planRows.getByText('AMP-1 · S · repo')).toBeVisible();
+  await planPanel.getByRole('button', { name: 'Accept', exact: true }).click();
+  await page
+    .getByRole('dialog', { name: 'Accept' })
+    .getByRole('button', { name: 'Accept 1' })
+    .click();
+  await expect(planPanel.getByText('On the Board · Ready', { exact: true })).toHaveCount(3);
+  expect(await amp()).toBe(1);
+  const linkPage = await page.context().newPage();
+  await linkPage.addInitScript((id) => {
+    window.localStorage.setItem('tendb.project', JSON.stringify(id));
+  }, projectId);
+  await linkPage.goto('/board');
+  await expect(linkPage.getByRole('link', { name: 'AMP-1' })).toBeVisible();
+  await linkPage.close();
+  await sendLine(page, 'import AMP-1 from linear again');
+  await planPanel.getByRole('button', { name: 'Accept', exact: true }).click();
+  await page
+    .getByRole('dialog', { name: 'Accept' })
+    .getByRole('button', { name: 'Accept 1' })
+    .click();
+  await expect(planPanel.getByText('Already on the Board')).toBeVisible();
+  expect(await amp()).toBe(1);
+
   // A plain session has no plan until Show Plan or a proposal makes one. ⌘T opens a fresh tab in the project.
   // Archive returns once the screen has left the session; where it falls depends on what earlier specs left open.
   const archive = async (): Promise<void> => {

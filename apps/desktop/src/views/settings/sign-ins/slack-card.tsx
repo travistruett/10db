@@ -13,6 +13,7 @@ import {
 } from '@mantine/core';
 import { IconBrandSlack, IconDots } from '@tabler/icons-react';
 import { useState } from 'react';
+import { useProjects } from '../../../daemon/queries';
 import {
   usePeople,
   useRemoveSlackToken,
@@ -22,21 +23,21 @@ import {
 } from '../../../daemon/people';
 import { ConfirmModal } from '../../../shell/confirm-modal';
 import { ExternalLink } from '../../board/pull-request-link';
-import { ConnectionStatus, ConnectionTone } from '../connection-status';
-import { IntegrationCard } from './integration-card';
+import { IntegrationCard, StateText } from './integration-card';
+import { ProjectRows, SlackProjectRow } from './project-rows';
 import { SLACK_APPS_URL, SLACK_MANIFEST } from './slack-manifest';
 import { WhichIsYou } from './which-is-you';
 
-/** "posts as @10db · you're @Travis Truett": the connection in one line; the card's title is the workspace. */
-function ConnectedStatus() {
+/** "Acme · posts as @10db · you're @Travis": the connection in one line. */
+function ConnectedLine({ teamName }: { readonly teamName: string | null }) {
   const builder = usePeople().data?.find((p) => p.isBuilder);
   const member = useSlackMember(builder?.slack?.userId ?? null);
-  const parts = ['posts as @10db'];
+  const parts = [...(teamName === null ? [] : [teamName]), 'posts as @10db'];
   if (builder?.slack) parts.push(`you're @${member?.name ?? builder.name}`);
-  return <ConnectionStatus tone={ConnectionTone.Works} label={parts.join(' · ')} />;
+  return <StateText>{parts.join(' · ')}</StateText>;
 }
 
-/** The state and identity on the card's header. */
+/** The card's one state line. */
 function StateLine({
   connection,
   failed,
@@ -44,24 +45,19 @@ function StateLine({
   readonly connection: SlackConnectionDto | undefined;
   readonly failed: boolean;
 }) {
-  if (failed) return <ConnectionStatus tone={ConnectionTone.NeedsYou} label="Couldn't read this" />;
+  if (failed) return <StateText>Couldn't read this.</StateText>;
   if (!connection) return null;
   switch (connection.state) {
     case 'connected':
-      return <ConnectedStatus />;
+      return <ConnectedLine teamName={connection.teamName} />;
     case 'none':
-      return <ConnectionStatus tone={ConnectionTone.NeedsYou} label="Not connected" />;
+      return <StateText>Not connected.</StateText>;
     case 'refused':
-      return <ConnectionStatus tone={ConnectionTone.NeedsYou} label="Token refused" />;
+      return <StateText>Slack refused 10db's token. Paste a new one to reconnect.</StateText>;
     case 'unreachable':
-      return <ConnectionStatus tone={ConnectionTone.NeedsYou} label="Can't be reached" />;
+      return <StateText>Slack can't be reached. 10db keeps trying, once a minute.</StateText>;
     case 'off':
-      return (
-        <ConnectionStatus
-          tone={ConnectionTone.Off}
-          label="Off: 10db was started with TENDB_SLACK=off"
-        />
-      );
+      return <StateText>Off: 10db was started with TENDB_SLACK=off</StateText>;
   }
 }
 
@@ -147,8 +143,22 @@ function TokenField({ setter }: { readonly setter: ReturnType<typeof useSetSlack
   );
 }
 
+/** One row per project, each with its own switch for sending questions through the signed-in workspace. */
+function SlackProjects() {
+  const projects = useProjects();
+  const list = projects.data ?? [];
+  if (list.length === 0) return null;
+  return (
+    <ProjectRows>
+      {list.map((project) => (
+        <SlackProjectRow key={project.id} project={project} />
+      ))}
+    </ProjectRows>
+  );
+}
+
 /**
- * Settings › Sign-ins › Slack. Not connected, it is the three setup steps; connected, one line,
+ * Settings › Integrations › Slack. Not connected, it is the three setup steps; connected, one line,
  * with Change Who You Are and Disconnect in a small menu. Until the builder picks their own member,
  * the card holds a callout to finish setup.
  */
@@ -166,18 +176,14 @@ export function SlackCard() {
   const bound = builder !== undefined && builder.slack !== null;
 
   // The card appears once its state is read, so a link's focus lands on its controls.
-  if (!data && !connection.isError) return <Skeleton height={160} radius="md" />;
+  if (!data && !connection.isError) return <Skeleton height={90} radius="md" />;
   return (
     <IntegrationCard
       mark={<IconBrandSlack size={20} stroke={1.5} aria-hidden />}
-      name={data?.state === 'connected' && data.teamName !== null ? data.teamName : 'Slack'}
+      name="Slack"
       focusName="slack"
-      status={<StateLine connection={data} failed={connection.isError} />}
-      purpose="Asks the people who answer your questions, and reads their replies."
-      withoutIt="Questions for other people stay in your Inbox; nothing is sent."
-    >
-      {live ? (
-        <Group justify="flex-end">
+      control={
+        live ? (
           <Menu position="bottom-end">
             <Menu.Target>
               <ActionIcon variant="subtle" aria-label="Slack options">
@@ -204,8 +210,10 @@ export function SlackCard() {
               </Menu.Item>
             </Menu.Dropdown>
           </Menu>
-        </Group>
-      ) : null}
+        ) : undefined
+      }
+    >
+      <StateLine connection={data} failed={connection.isError} />
       {connection.isError ? (
         <Alert color="red" title="Couldn't load the Slack connection">
           {connection.error.message}
@@ -221,15 +229,8 @@ export function SlackCard() {
           }}
         />
       ) : null}
-      {state === 'refused' ? (
-        <>
-          <Text size="sm">Slack refused 10db's token. Paste a new one to reconnect.</Text>
-          <TokenField setter={setToken} />
-        </>
-      ) : null}
-      {state === 'unreachable' ? (
-        <Text size="sm">Slack can't be reached. 10db keeps trying, once a minute.</Text>
-      ) : null}
+      {state === 'refused' ? <TokenField setter={setToken} /> : null}
+      {state === 'connected' ? <SlackProjects /> : null}
       {data?.error ? (
         <Text size="xs" c="dimmed">
           {data.error}

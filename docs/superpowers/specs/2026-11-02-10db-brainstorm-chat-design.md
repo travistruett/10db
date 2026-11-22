@@ -253,8 +253,8 @@ lists, the hook and a read-only lane sandbox:
   session stops waiting on it. The conversation shows a line when a call waits on a card.
 - **Project tools.** The servers are resolved from the project env, never the session's own (which holds the
   account's key), and a remote one on this Mac or its network is left out. A call to an approved server's tool
-  (`mcp__<server>__<tool>`, not 10db's) from the session answers `ask`, so each is carded unless the builder
-  allowed that tool always; from any agent it is refused. A session whose servers' AWS credentials are about to
+  (`mcp__<server>__<tool>`, not 10db's) from the session goes to the session's judge (a card only on the rules floor; see
+  `decisions/2026-11-21-a-conversations-mcp-calls-go-to-its-judge.md`); from Plan's own agents it is refused. A session whose servers' AWS credentials are about to
   expire gives way to a fresh one at its next turn. A `.mcp.json` or a sandbox that can't be built leaves the
   session with less (no project server; no command), said in its first message.
   Every command and project tool call shows as a dimmed line naming who made it. What a command or a server

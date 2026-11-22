@@ -108,6 +108,7 @@ import {
 import { createBenchmarkServices } from './benchmark-services';
 import { createSizingService } from '../sizing';
 import { createJudgeCredentialReader, createJudgeServices } from './judge-services';
+import { createLinearBindings } from '../linear';
 import { createLinearSignIns } from './linear-sign-ins';
 import { createStakeholderApiServices } from './stakeholder-services';
 import {
@@ -2465,6 +2466,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     mcpSignIns,
     connectorNames: (account) => adapter.cachedConnectorNames?.(account),
   });
+  const linearBindings = createLinearBindings({
+    state,
+    chat,
+    signIns: linearSignIns,
+    log: logger.child({ component: 'linear' }),
+  });
   const openWhenBusyDeps: OpenWhenBusyDeps = {
     folderHold,
     pendingOpens,
@@ -2554,6 +2561,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       fetch: opts.fetch ?? fetch,
       reconnect: () => replyWatch.reconnect(),
       githubLogin: () => Promise.resolve(github.cachedLogin()),
+      linear: linearBindings,
     }),
     shape: createShapeServices({
       shape,
@@ -2902,6 +2910,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         clock,
         builder: createBuilderTools(services),
         getTask: (id) => services.getTask(id),
+        linear: linearBindings,
         gitTools: {
           git,
           folderHold,

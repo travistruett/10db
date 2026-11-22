@@ -366,3 +366,119 @@ describe('Undo Accept', () => {
     );
   });
 });
+
+describe('Convert and a linked issue', () => {
+  const link = (id: string) => ({
+    kind: 'linear' as const,
+    id,
+    issueId: `lin-${id}`,
+    url: `https://linear.app/acme/issue/${id}`,
+  });
+
+  it('skips a draft whose issue is on the Board, leaves its card to Undo, and refuses a second create', () => {
+    const { store, projectId } = world();
+    const shapeId = newPlan(store, projectId);
+    accept(store, shapeId, { looseTasks: [task('a', { external: link('AMP-1') })] });
+    const existing = taskOf(store, shapeId, 'a');
+    expect(getTask(store.db, existing).external?.id).toBe('AMP-1');
+
+    const second = accept(store, shapeId, {
+      looseTasks: [
+        task('again', { external: link('AMP-1') }),
+        task('fresh', { external: link('AMP-2') }),
+      ],
+    });
+    const tasks = store.db.select().from(schema.tasks).all();
+    expect(tasks.map((t) => t.externalId).sort()).toEqual(['AMP-1', 'AMP-2']);
+    expect(proposal(store, shapeId, 'again').state).toBe(ShapeProposalState.Accepted);
+    expect(listShapeLinks(store.db, shapeId).some((l) => l.key === 'again')).toBe(false);
+
+    // Undo takes back the Accept's own card only; the skipped draft's card stays.
+    store.write((ctx) => undoAccept(ctx, shapeId, second));
+    expect(getTask(store.db, existing).status).not.toBe(TaskStatus.Cancelled);
+
+    // A removed task no longer holds its issue: Undo Accept, then Accept again, makes a new task.
+    const third = accept(store, shapeId, { looseTasks: [task('c', { external: link('AMP-3') })] });
+    store.write((ctx) => undoAccept(ctx, shapeId, third));
+    accept(store, shapeId, { looseTasks: [task('c2', { external: link('AMP-3') })] });
+    const live = store.db
+      .select()
+      .from(schema.tasks)
+      .all()
+      .filter((t) => t.externalId === 'AMP-3' && t.status !== TaskStatus.Cancelled);
+    expect(live).toHaveLength(1);
+
+    // A goal task whose issue is on the Board is left out of the goal; the rest goes ahead, waiting on that card.
+    accept(store, shapeId, {
+      goals: [
+        {
+          key: 'g',
+          title: 'Goal G',
+          objective: 'Ship G',
+          ceremony: 'direct',
+          tasks: [
+            {
+              key: 'g1',
+              title: 'G one',
+              areas: ['api'],
+              size: 'S',
+              external: link('AMP-1'),
+            },
+            { key: 'g2', title: 'G two', areas: ['api'], size: 'S', depends_on: ['g1'] },
+          ],
+        },
+      ],
+    });
+    const g2 = store.db
+      .select()
+      .from(schema.tasks)
+      .all()
+      .find((t) => t.title === 'G two');
+    expect(g2).toBeDefined();
+    expect(getTask(store.db, g2?.id ?? existing).dependsOn).toEqual([existing]);
+    expect(
+      store.db
+        .select()
+        .from(schema.tasks)
+        .all()
+        .filter((t) => t.externalId === 'AMP-1'),
+    ).toHaveLength(1);
+
+    // A goal whose every task is on the Board makes no goal, and the loose task beside it still lands.
+    const goalsBefore = store.db.select().from(schema.goals).all().length;
+    const onlyLinked = accept(store, shapeId, {
+      goals: [
+        {
+          key: 'gone',
+          title: 'Goal gone',
+          objective: 'Nothing to make',
+          ceremony: 'direct',
+          tasks: [
+            { key: 'h1', title: 'H one', areas: ['api'], size: 'S', external: link('AMP-1') },
+          ],
+        },
+      ],
+      looseTasks: [task('beside', { external: link('AMP-4') })],
+    });
+    expect(onlyLinked).not.toBeNull();
+    expect(store.db.select().from(schema.goals).all()).toHaveLength(goalsBefore);
+    expect(
+      store.db
+        .select()
+        .from(schema.tasks)
+        .all()
+        .filter((t) => t.externalId === 'AMP-4'),
+    ).toHaveLength(1);
+
+    expect(() =>
+      store.write((ctx) =>
+        insertTask(ctx, projectId, {
+          title: 'By hand',
+          acceptanceCriteria: ['Done'],
+          areas: ['api'],
+          external: link('AMP-1'),
+        }),
+      ),
+    ).toThrow(/AMP-1 is already the task/);
+  });
+});

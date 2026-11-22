@@ -34,7 +34,7 @@ export function cannotUpdate(
     return {
       kind: 'gh-missing',
       message:
-        'The GitHub command line (gh) is not installed, so 10db cannot ask GitHub for new builds. Install it (brew install gh), restart 10db, then sign in to GitHub in Settings › Sign-ins.',
+        'The GitHub command line (gh) is not installed, so 10db cannot ask GitHub for new builds. Install it (brew install gh), restart 10db, then sign in to GitHub in Settings › Integrations.',
     };
   }
   return null;

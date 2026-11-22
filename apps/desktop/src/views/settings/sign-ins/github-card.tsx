@@ -1,15 +1,15 @@
 import type { GithubLoginEndedData, GithubStatusDto } from '@10db/contracts';
-import { Button, Group, Skeleton, Text } from '@mantine/core';
-import { IconBrandGithub } from '@tabler/icons-react';
+import { ActionIcon, Button, Menu, Skeleton, Text } from '@mantine/core';
+import { IconBrandGithub, IconDots } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 import {
   useGithubLoginEnd,
   useGithubStatus,
   useRecheckGithub,
+  useStartGithubSignin,
 } from '../../../daemon/github-queries';
-import { ConnectionStatus, ConnectionTone } from '../connection-status';
 import { GithubSignIn } from './github-sign-in';
-import { IntegrationCard } from './integration-card';
+import { IntegrationCard, StateText } from './integration-card';
 
 /** How long a fresh sign-in says "just now". */
 const JUST_NOW_MS = 60_000;
@@ -54,96 +54,84 @@ function useJustSignedIn(
 
 const INSTALL_PREFIXES = '/opt/homebrew/bin, /usr/local/bin and /usr/bin';
 
-function Header({
-  status,
-  justNow,
-}: {
-  readonly status: GithubStatusDto;
-  readonly justNow: boolean;
-}) {
+/** The card's state line, in words. */
+function stateOf(status: GithubStatusDto): string {
   switch (status.state) {
     case 'signed_in':
-      return (
-        <Group gap="xs" wrap="nowrap">
-          <ConnectionStatus
-            tone={ConnectionTone.Works}
-            label={`Signed in as ${status.login ?? 'GitHub'}`}
-          />
-          {justNow ? (
-            <Text size="xs" c="dimmed">
-              just now
-            </Text>
-          ) : null}
-        </Group>
-      );
+      return `Signed in as ${status.login ?? 'GitHub'}`;
     case 'signed_out':
-      return <ConnectionStatus tone={ConnectionTone.NeedsYou} label="Not signed in" />;
+      return 'Not signed in.';
     case 'not_installed':
-      return <ConnectionStatus tone={ConnectionTone.NeedsYou} label="gh isn't installed" />;
+      return `gh isn't installed. 10db looks for it in ${INSTALL_PREFIXES}; install it with Homebrew (brew install gh), then Check again.`;
     case 'unreachable':
-      return <ConnectionStatus tone={ConnectionTone.NeedsYou} label="Couldn't reach GitHub" />;
+      return "Couldn't reach GitHub.";
   }
 }
 
-/** Settings › Sign-ins › GitHub: the gh login 10db opens pull requests and watches checks with. */
+/** Settings › Integrations › GitHub: the gh login 10db opens pull requests and watches checks with. */
 export function GithubCard() {
   const query = useGithubStatus();
   const recheck = useRecheckGithub();
+  const start = useStartGithubSignin();
   const end = useGithubLoginEnd();
   const status = query.data;
   const justNow = useJustSignedIn(status, end);
-  const checkAgain = (
-    <Button
-      size="xs"
-      variant="default"
-      loading={recheck.isPending}
-      onClick={() => {
-        recheck.mutate();
-      }}
-    >
-      Check Again
-    </Button>
-  );
   const canSignIn =
     status !== undefined &&
     (status.signingIn !== null || status.state === 'signed_in' || status.state === 'signed_out');
   // The card appears once its state is read, so a link's focus lands on its controls.
-  if (!status && !query.isError) return <Skeleton height={160} radius="md" />;
+  if (!status && !query.isError) return <Skeleton height={90} radius="md" />;
   return (
     <IntegrationCard
       mark={<IconBrandGithub size={20} stroke={1.5} aria-hidden />}
       name="GitHub"
       focusName="github"
-      status={
-        status ? (
-          <Header status={status} justNow={justNow} />
-        ) : (
-          <ConnectionStatus tone={ConnectionTone.NeedsYou} label="Couldn't read this" />
-        )
+      control={
+        status?.state === 'signed_out' && status.signingIn === null ? (
+          <Button
+            size="xs"
+            loading={start.isPending}
+            onClick={() => {
+              start.mutate();
+            }}
+          >
+            Sign in
+          </Button>
+        ) : status ? (
+          <Menu position="bottom-end">
+            <Menu.Target>
+              <ActionIcon variant="subtle" aria-label="GitHub options">
+                <IconDots size={16} />
+              </ActionIcon>
+            </Menu.Target>
+            <Menu.Dropdown>
+              {canSignIn && status.signingIn === null ? (
+                <Menu.Item
+                  onClick={() => {
+                    start.mutate();
+                  }}
+                >
+                  {status.state === 'signed_in' ? 'Switch account' : 'Sign in'}
+                </Menu.Item>
+              ) : null}
+              <Menu.Item
+                onClick={() => {
+                  recheck.mutate();
+                }}
+              >
+                Check again
+              </Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
+        ) : undefined
       }
-      purpose="Opens pull requests, watches their checks, and finds new 10db builds."
-      withoutIt="Pull requests, CI checks and self-update stop; projects can still commit directly."
     >
-      {status?.state === 'signed_in' && !status.signingIn ? (
-        <Text size="xs" c="dimmed">
-          This is gh's own login, the same one your terminal uses.
-        </Text>
-      ) : null}
-      {status?.state === 'not_installed' && !status.signingIn ? (
-        <Text size="sm">
-          {`10db looks for gh in ${INSTALL_PREFIXES}. Install it with Homebrew (brew install gh), then press Check Again.`}
-        </Text>
-      ) : null}
-      {/* One Sign In for every state that can sign in, so a running one keeps its state across them. */}
-      {canSignIn ? (
-        <GithubSignIn
-          label={status.state === 'signed_in' ? 'Switch Account' : 'Sign In'}
-          filled={status.state !== 'signed_in'}
-          extra={checkAgain}
-        />
-      ) : status ? (
-        <Group>{checkAgain}</Group>
-      ) : null}
+      <StateText>
+        {status ? stateOf(status) : "Couldn't read this."}
+        {justNow ? ' · just now' : ''}
+      </StateText>
+      {/* The sign-in wait (code, Open Page Again, Cancel) and gh's own failure line, whichever way it started. */}
+      {canSignIn ? <GithubSignIn label="Sign In" filled={false} hideButton /> : null}
       {recheck.isError ? (
         <Text size="xs" c="dimmed">
           {recheck.error.message}

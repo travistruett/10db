@@ -101,7 +101,7 @@ export function baseHandlers(
     ),
     http.get(daemonUrl('/accounts', base), () => HttpResponse.json([DEFAULT_ACCOUNT])),
     http.get(daemonUrl('/accounts/pauses', base), () => HttpResponse.json([])),
-    // Settings › Sign-ins reads gh's login; signed in, no Sign In running.
+    // Settings › Integrations reads gh's login; signed in, no Sign In running.
     http.get(daemonUrl('/github', base), () => HttpResponse.json(githubStatusDto())),
     http.get(daemonUrl('/projects', base), () => HttpResponse.json([BASE_PROJECT])),
     http.get(daemonUrl('/projects/:projectId/batches', base), () => HttpResponse.json([])),

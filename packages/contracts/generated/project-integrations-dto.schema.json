@@ -42,11 +42,137 @@
         "auto"
       ],
       "additionalProperties": false
+    },
+    "linear": {
+      "type": "object",
+      "properties": {
+        "binding": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "workspaceId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "workspaceName": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "teamId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "teamKey": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "teamName": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "workspaceId",
+                "workspaceName",
+                "teamId",
+                "teamKey",
+                "teamName"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "check": {
+          "anyOf": [
+            {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "const": "checking"
+                    },
+                    "teamKey": {
+                      "type": "string"
+                    },
+                    "chatId": {
+                      "type": "string",
+                      "pattern": "^cht_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "teamKey",
+                    "chatId"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "const": "refused"
+                    },
+                    "teamKey": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "teamKey",
+                    "reason"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "const": "ended"
+                    },
+                    "teamKey": {
+                      "type": "string"
+                    },
+                    "chatId": {
+                      "type": "string",
+                      "pattern": "^cht_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "teamKey",
+                    "chatId"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "binding",
+        "check"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
     "github",
-    "slack"
+    "slack",
+    "linear"
   ],
   "additionalProperties": false
 }

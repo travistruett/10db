@@ -1,3 +1,4 @@
+import { FromLinearItem } from './from-linear-item';
 import {
   CHAT_DEFAULT_TITLE,
   type ChatDto,
@@ -359,6 +360,7 @@ export function SessionsPanel(props: SessionsPanelProps): ReactNode {
             >
               New Plan
             </Menu.Item>
+            <FromLinearItem />
           </Menu.Dropdown>
         </Menu>
       }

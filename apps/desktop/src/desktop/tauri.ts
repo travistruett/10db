@@ -25,7 +25,7 @@ export function isTauri(): boolean {
  * Opens a web page in the default browser, for the desktop app, whose webview follows no
  * `target="_blank"` link. The capability allows only `https://github.com/*` and
  * `https://artificialanalysis.ai/*`, whose credit beside its scores links its site, and Slack's own pages (`api.slack.com`,
- * and a question's thread on the workspace's `slack.com` address), besides the sign-in page
+ * and a question's thread on the workspace's `slack.com` address), and `https://linear.app/*` (a task's issue), besides the sign-in page
  * `openSignInPage` opens and the loopback pages `openAppPage` opens through the shell's own command.
  */
 export function openInBrowser(url: string): Promise<void> {

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { TaskInput, TaskPatchFields } from './entities';
+import { ExternalLink } from './external';
 import { BoardColumnId, DecisionId, PrincipleId, ProjectId, TaskId } from './ids';
 import {
   DecisionEdit,
@@ -134,6 +135,9 @@ export const BuilderToolInputs = {
     /** Honoured only for a task 10db would not already send to a separate copy; the builder overrides that on the task. */
     workspaceMode: z.enum(WorkspaceMode).optional(),
     landing: TaskLanding.optional(),
+    external: ExternalLink.optional().describe(
+      "The tracker issue the task is made from (kind 'linear', its readable id such as AMP-120, the issue's own id and its url). Refused when a task already carries that issue.",
+    ),
   }),
   [BuilderToolName.EditTask]: z
     .object({
@@ -276,7 +280,7 @@ const DESCRIPTIONS: Record<BuilderToolName, string> = {
     "Lists the kinds a task can have (security, auth, migration, ui and others the builder made), each with its key, what it means, the lowest rigor it allows and what it changes: always reviewed, fails at the retry limit, its own copy, and whether a proposal of it goes to the Inbox. Name a task's kinds by key in create_task and edit_task.",
   [BuilderToolName.ListTasks]:
     "Lists a project's open tasks with their status and board position. Finished and removed tasks are left out.",
-  [BuilderToolName.CreateTask]: `Creates a task in a project and returns its id. Do not ask for confirmation first. ${DRAFTING} Areas come from list_projects; naming a hazard from the project's isolate list (such as migrations or deps) among them sends the task to a separate copy, as the migration and dependency kinds do. Add dependsOn only when needed, name the kinds the work touches (keys from list_kinds) and leave rigor out unless the work needs more than the kinds and the project's default give; a rigor below a kind's minimum is refused; omit landing, unless the task's pull request belongs elsewhere than the project's default: {kind:'base'} merges into the base branch, {kind:'branch', branch} into another branch that is on origin, {kind:'hold'} holds the pull request for the builder. Refuses what the New Task form refuses, in the same words.`,
+  [BuilderToolName.CreateTask]: `Creates a task in a project and returns its id. Do not ask for confirmation first. ${DRAFTING} Areas come from list_projects; naming a hazard from the project's isolate list (such as migrations or deps) among them sends the task to a separate copy, as the migration and dependency kinds do. Add dependsOn only when needed, name the kinds the work touches (keys from list_kinds) and leave rigor out unless the work needs more than the kinds and the project's default give; a rigor below a kind's minimum is refused; omit landing, unless the task's pull request belongs elsewhere than the project's default: {kind:'base'} merges into the base branch, {kind:'branch', branch} into another branch that is on origin, {kind:'hold'} holds the pull request for the builder. Refuses what the New Task form refuses, in the same words. To import a tracker issue, read it with the tracker's tools and pass its link as external: one issue is one task in a project.`,
   [BuilderToolName.EditTask]: `Changes a task that has not finished: title, headline, why, description, acceptanceCriteria (replaces the list), rigor (null hands it back to the default), kinds (replaces the list, keys from list_kinds), areas (replaces the list, names from list_projects; only before it starts, so a task refused for having none gets them here) or landing (where its pull request goes: {kind:'base'}, {kind:'branch', branch} or {kind:'hold'}; only before it starts, and a branch must be on origin). ${DRAFTING} Send only the fields to change.`,
   [BuilderToolName.RemoveTask]:
     'Removes a task that has not started, or one with nothing left in it: every run cancelled, in no pass, with no saved work. Refuses any other task that has run, and a task another open task depends on.',

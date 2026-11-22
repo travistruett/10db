@@ -102,6 +102,7 @@ export function insertGoal(
         description: task.description,
         acceptanceCriteria: task.criteria,
         areas: task.areas,
+        external: task.external,
         // inDependencyOrder put every task this one depends on before it.
         dependsOn: [
           ...task.depends_on.flatMap((key) => taskIds.get(key) ?? []),
