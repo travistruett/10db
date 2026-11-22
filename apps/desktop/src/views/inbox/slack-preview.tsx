@@ -146,11 +146,11 @@ export function SlackPreview({
                 <Link
                   {...props}
                   to="/settings/$section"
-                  params={{ section: SettingsSectionKey.Integrations }}
+                  params={{ section: SettingsSectionKey.SignIns }}
                 />
               )}
             >
-              Open Integrations
+              Open Sign-ins
             </Anchor>
             <Button variant="default" onClick={onAnswerMyself}>
               Answer Myself

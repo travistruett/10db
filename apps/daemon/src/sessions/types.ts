@@ -1,5 +1,6 @@
 import type { JudgeKind } from '@10db/contracts';
 import type {
+  AccountId,
   ConversationId,
   AccountRefusal,
   DeniedBy,
@@ -609,6 +610,13 @@ export interface McpSignIn {
 }
 
 export interface AgentAdapter {
+  /**
+   * The names of the claude.ai connectors an account's last probe read, without starting one: undefined when it
+   * was never read (or the agent has no connectors), null when the read failed.
+   */
+  cachedConnectorNames?(
+    account: Pick<AccountExpectation, 'kind'> & { readonly id: AccountId },
+  ): readonly string[] | null | undefined;
   /** Closes what the adapter started on its own, such as a connector probe in flight; the daemon calls it as it shuts down. */
   stop?(): Promise<void>;
   /**

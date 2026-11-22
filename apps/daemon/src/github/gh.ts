@@ -291,7 +291,7 @@ export interface GhTools {
 }
 
 /** What a builder does about a signed-out gh: the card in Settings runs the login, no terminal. */
-export const SIGN_IN_IN_SETTINGS = 'Sign in to GitHub in Settings › Integrations.';
+export const SIGN_IN_IN_SETTINGS = 'Sign in to GitHub in Settings › Sign-ins.';
 
 const notInstalled = (): GhError =>
   new GhError(

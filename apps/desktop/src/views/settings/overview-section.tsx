@@ -97,7 +97,7 @@ function useOverviewRows(): OverviewRow[] {
   const catalogue = useCatalogueStatus();
   const system = useSystemCheck();
   const selfUpdate = useSelfUpdate();
-  const integrations = (focus: string) => ({ section: SettingsSectionKey.Integrations, focus });
+  const integrations = (focus: string) => ({ section: SettingsSectionKey.SignIns, focus });
   const updates = { section: SettingsSectionKey.Updates, focus: null };
   const agentRows: OverviewRow[] =
     system.data === undefined

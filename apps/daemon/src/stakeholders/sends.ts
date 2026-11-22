@@ -9,6 +9,7 @@ import {
   type AskSomeoneInput,
   type InboxItemDto,
   type InboxItemId,
+  type ProjectId,
   type OutboundHit,
   type PersonDto,
   type SendInput,
@@ -73,7 +74,11 @@ export interface SendsDeps {
   readonly parkFor?: (id: InboxItemId) => void;
   /** Whether the bot token is stored; Send is a 409 with the draft kept when it is not. */
   readonly hasToken?: () => Promise<boolean>;
+  /** Whether a project sends through a Slack workspace; one that does not keeps its drafts in the Inbox. */
+  readonly slackFor?: (projectId: ProjectId) => boolean;
 }
+
+export const SLACK_OFF_FOR_PROJECT = 'Slack is off for this project';
 
 export interface StakeholderSends {
   /** A fresh draft goes out at once when nothing holds it, else it is held for the builder. */
@@ -192,6 +197,7 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
 
   async function afterDraft(cardId: InboxItemId): Promise<void> {
     if (slack === null) return;
+    if (deps.slackFor?.(getInboxItem(state.db, cardId).projectId) === false) return;
     const reserved = state.write((ctx) => {
       const card = getInboxItem(ctx.tx, cardId);
       const draft = liveSend(cardId, ctx.tx);
@@ -306,6 +312,7 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
       throw new ConflictError('Slack is not connected');
     if (draft?.state !== 'draft') throw new ConflictError('There is no draft to send');
     const card = getInboxItem(state.db, cardId);
+    if (deps.slackFor?.(card.projectId) === false) throw new ConflictError(SLACK_OFF_FOR_PROJECT);
     const people = recipientsOf(draft);
     const thread = threadFor(card, people);
     let channelId: string;
@@ -470,13 +477,12 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
     async send(cardId, input) {
       if (slack === null) throw new ConflictError('Slack is not connected');
       const card = getInboxItem(state.db, cardId);
+      if (deps.slackFor?.(card.projectId) === false) throw new ConflictError(SLACK_OFF_FOR_PROJECT);
       const stored = liveSend(cardId) ?? redraftFailed(card);
       if (card.state !== InboxState.Open || stored?.state !== 'draft')
         throw new ConflictError('There is no draft to send');
       if (builderUnnamed(card))
-        throw new ConflictError(
-          'Pick yourself in Settings › Integrations before you send a question',
-        );
+        throw new ConflictError('Pick yourself in Settings › Sign-ins before you send a question');
       const draft = input.text === undefined ? recomposed(card, stored) : stored;
       const hits: OutboundHit[] =
         input.text === undefined

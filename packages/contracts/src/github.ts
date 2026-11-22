@@ -52,7 +52,7 @@ export const GithubLoginEndedData = z.object({
 export type GithubLoginEndedData = z.infer<typeof GithubLoginEndedData>;
 
 /**
- * The `detail` key of an Inbox card that sends the builder to a card in Settings › Integrations: its value
+ * The `detail` key of an Inbox card that sends the builder to a card in Settings › Sign-ins: its value
  * is that card's `?focus=` name (`github`). The desktop offers Open Integrations for it.
  */
 export const OPEN_INTEGRATIONS_DETAIL = 'openIntegrations';

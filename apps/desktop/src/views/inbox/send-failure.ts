@@ -6,13 +6,11 @@ const REASONS: Readonly<Record<string, (who: string) => string>> = {
   not_in_channel: () => 'The 10db app is no longer in that conversation.',
   is_archived: () => 'That conversation is archived.',
   ratelimited: () => 'Slack asked 10db to slow down; try again in a minute.',
-  invalid_auth: () =>
-    "10db's Slack token no longer works. Reconnect it in Settings › Integrations.",
-  token_revoked: () =>
-    "10db's Slack token no longer works. Reconnect it in Settings › Integrations.",
+  invalid_auth: () => "10db's Slack token no longer works. Reconnect it in Settings › Sign-ins.",
+  token_revoked: () => "10db's Slack token no longer works. Reconnect it in Settings › Sign-ins.",
   account_inactive: () =>
-    "10db's Slack token no longer works. Reconnect it in Settings › Integrations.",
-  no_token: () => 'Slack is not connected. Connect it in Settings › Integrations.',
+    "10db's Slack token no longer works. Reconnect it in Settings › Sign-ins.",
+  no_token: () => 'Slack is not connected. Connect it in Settings › Sign-ins.',
   unreachable: () => 'Slack could not be reached.',
   timeout: () => 'Slack took too long to answer.',
 };

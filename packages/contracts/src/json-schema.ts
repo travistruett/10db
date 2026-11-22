@@ -271,6 +271,8 @@ import {
 import {
   AskSomeoneInput,
   ComposePreviewDto,
+  ProjectIntegrationsDto,
+  ProjectIntegrationsInput,
   QuestionRouteDto,
   SendInput,
   SlackConnectionDto,
@@ -278,6 +280,7 @@ import {
   SlackTokenInput,
   StakeholderSendDto,
 } from './slack';
+import { LinearSignInsDto } from './linear-sign-ins';
 import { StepPlanDto } from './steps';
 import { WorkstreamChangesDto } from './workstream-changes';
 import {
@@ -516,6 +519,9 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'slack-connection-dto': SlackConnectionDto,
   'slack-member-dto': SlackMemberDto,
   'slack-token-input': SlackTokenInput,
+  'project-integrations-dto': ProjectIntegrationsDto,
+  'project-integrations-input': ProjectIntegrationsInput,
+  'linear-sign-ins-dto': LinearSignInsDto,
   'compose-preview-dto': ComposePreviewDto,
   'step-plan-dto': StepPlanDto,
   'workstream-changes-dto': WorkstreamChangesDto,

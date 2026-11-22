@@ -18,7 +18,7 @@ import { SettingRow, SettingsCard } from './setting-row';
 import { updateWaitsFor } from './update-waits-for';
 
 /** The sentence the daemon's reasons use to send the builder to GitHub's card. */
-const SIGN_IN_SENTENCE = 'Settings › Integrations';
+const SIGN_IN_SENTENCE = 'Settings › Sign-ins';
 
 const SHORT = 7;
 const short = (commit: string): string => commit.slice(0, SHORT);
@@ -112,12 +112,12 @@ export function SelfUpdateSection() {
             <Link
               {...props}
               to="/settings/$section"
-              params={{ section: SettingsSectionKey.Integrations }}
+              params={{ section: SettingsSectionKey.SignIns }}
               search={{ focus: 'github' }}
             />
           )}
         >
-          Open Integrations
+          Open Sign-ins
         </Anchor>
       ) : null}
       {data !== undefined ? (

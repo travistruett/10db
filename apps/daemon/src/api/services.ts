@@ -216,6 +216,9 @@ import type {
   SlackConnectionDto,
   SlackMemberDto,
   SlackTokenInput,
+  ProjectIntegrationsDto,
+  ProjectIntegrationsInput,
+  LinearSignInsDto,
   StakeholderSendDto,
   StakeholderTimersDto,
   TaskMessageDto,
@@ -885,6 +888,15 @@ export interface ApiServices extends PlanRecordServices {
   /** Checks the token with Slack, then keeps it in the Keychain; a refused token is stored nowhere. */
   setSlackToken(input: SlackTokenInput): Promise<SlackConnectionDto>;
   removeSlackToken(): Promise<SlackConnectionDto>;
+  /** The GitHub login a project uses and its Slack workspace (the only one while there is exactly one). */
+  projectIntegrations(projectId: ProjectId): Promise<ProjectIntegrationsDto>;
+  /** Binds a project to a signed-in Slack workspace, or turns Slack off for it with a null team. */
+  setProjectIntegrations(
+    projectId: ProjectId,
+    input: ProjectIntegrationsInput,
+  ): Promise<ProjectIntegrationsDto>;
+  /** How each agent account reaches Linear, from what is already read; it starts no probe. */
+  linearSignIns(): Promise<LinearSignInsDto>;
   /** The workspace's people, optionally filtered; read from Slack at most every ten minutes. */
   listSlackMembers(query: string): Promise<SlackMemberDto[]>;
   getStakeholderTimers(): StakeholderTimersDto;

@@ -12,3 +12,4 @@
   variables, minus what the account sets), and where a key is read. It checks a keyed account's secret and holds no
   value: an API key or gateway key is read by the agent's `apiKeyHelper` from `apiKeyHelperAccount`, a Bedrock key
   by the script (`keychain`) with `scrub` set so the agent keeps it from the commands it runs.
+- The Slack bot token is kept per workspace under Keychain account `slackBotAccount(teamId)` (`slack-bot:<teamId>`), written and read back by `PUT /slack/token` after `auth.test`; the signed-in workspaces are the `slack.workspaces` app setting and a project's binding is `slack.<projectId>` (`stakeholders/slack-workspaces.ts`). At startup `cleanUpSlackSignIns` deletes the old single `slack-bot` item and every Slack contact whose team is not signed in.

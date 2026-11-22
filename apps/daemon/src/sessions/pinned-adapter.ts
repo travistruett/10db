@@ -34,6 +34,7 @@ export function createPinnedAdapter(
     startLogin: (login) => current().startLogin(login),
     startMcpSignIn: (spec) => current().startMcpSignIn(spec),
     mcpAuthStatus: (spec) => current().mcpAuthStatus(spec),
+    cachedConnectorNames: (account) => current().cachedConnectorNames?.(account),
     readClientUuids: (spec) => current().readClientUuids(spec),
     stop: async () => {
       await built?.adapter.stop?.();

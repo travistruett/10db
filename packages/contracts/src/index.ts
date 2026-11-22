@@ -76,6 +76,7 @@ export * from './shape-preview';
 export * from './shape-review';
 export * from './shape-screens';
 export * from './shape-view';
+export * from './linear-sign-ins';
 export * from './slack';
 export * from './rigor';
 export * from './rigor-figures';
