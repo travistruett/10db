@@ -1,5 +1,6 @@
 import {
   AccountKind,
+  BedrockSettings,
   ConflictError,
   InvalidError,
   UpstreamError,
@@ -35,6 +36,7 @@ import {
   JUDGE_LOG_RETENTION_MS,
   typicalDecisionTokens,
   type DecisionModelList,
+  type JudgeCredential,
   type JudgeService,
 } from '../judge';
 
@@ -73,21 +75,33 @@ async function keychainConflict<T>(fn: () => T | Promise<T>): Promise<T> {
 }
 
 /**
- * The key a decision sends: the secret of the OpenRouter account decisions run on, through the same check
- * every account secret passes. No account, an archived or other kind of account, a missing or changed secret,
- * and a daemon started with the judge off, all mean no key.
+ * What a decision call is signed with: the secret of an OpenRouter or Anthropic API key account, through the same
+ * check every account secret passes, or a Bedrock account's region with its profile or bearer token (a profile reads
+ * no Keychain item). No account, an archived or other kind of account, a missing or changed secret, and a daemon
+ * started with the judge off, all mean no credential.
  */
-export function createJudgeKeyReader(deps: {
+export function createJudgeCredentialReader(deps: {
   readonly state: StateStore;
   readonly keychain: Keychain;
   readonly off: boolean;
-}): (accountId: AccountId | null) => Promise<string | null> {
+}): (accountId: AccountId | null) => Promise<JudgeCredential | null> {
   return async (accountId) => {
     if (deps.off || accountId === null) return null;
     const account = findAccountRow(deps.state.db, accountId);
-    if (!account || account.archived || account.kind !== AccountKind.OpenRouter) return null;
+    if (!account || account.archived) return null;
+    if (account.kind === AccountKind.OpenRouter || account.kind === AccountKind.AnthropicApiKey) {
+      const secret = await readAccountSecretAsync(account, deps.keychain);
+      return secret.state === 'set' ? { kind: account.kind, key: secret.secret } : null;
+    }
+    if (account.kind !== AccountKind.Bedrock) return null;
+    const settings = BedrockSettings.safeParse(account.settings);
+    if (!settings.success) return null;
+    const { region, awsProfile } = settings.data;
+    if (awsProfile !== null) return { kind: account.kind, region, awsProfile, bearerToken: null };
     const secret = await readAccountSecretAsync(account, deps.keychain);
-    return secret.state === 'set' ? secret.secret : null;
+    return secret.state === 'set'
+      ? { kind: account.kind, region, awsProfile: null, bearerToken: secret.secret }
+      : null;
   };
 }
 

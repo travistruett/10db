@@ -106,7 +106,7 @@ import {
 } from '../judge';
 import { createBenchmarkServices } from './benchmark-services';
 import { createSizingService } from '../sizing';
-import { createJudgeKeyReader, createJudgeServices } from './judge-services';
+import { createJudgeCredentialReader, createJudgeServices } from './judge-services';
 import { createStakeholderApiServices } from './stakeholder-services';
 import {
   createReplyWatch,
@@ -808,7 +808,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   const judgeKeychain = opts.keychain ?? unavailableKeychain;
   const decisionModels = createDecisionModelList({ fetch: opts.fetch ?? fetch, clock });
-  const readJudgeKey = createJudgeKeyReader({
+  const readJudgeCredential = createJudgeCredentialReader({
     state,
     keychain: judgeKeychain,
     off: opts.judgeOff === true,
@@ -818,7 +818,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     clock,
     fetch: opts.fetch ?? fetch,
     decisionModelIds: () => decisionModels.ids(),
-    readKey: readJudgeKey,
+    readCredential: readJudgeCredential,
     off: opts.judgeOff === true,
     logger: logger.child({ component: 'judge' }),
   });
@@ -829,7 +829,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           state,
           clock,
           fetch: opts.fetch ?? fetch,
-          readKey: () => readJudgeKey(getJudgeConfig(state.db).accountId),
+          readKey: async () => {
+            const credential = await readJudgeCredential(getJudgeConfig(state.db).accountId);
+            // An Anthropic key or a Bedrock token must never go to openrouter.ai.
+            return credential?.kind === AccountKind.OpenRouter ? credential.key : null;
+          },
           offered: () => {
             const live = new Set(
               listAccounts(state.db)

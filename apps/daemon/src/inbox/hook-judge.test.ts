@@ -104,7 +104,8 @@ function judge() {
       if (model === null || model === 'no_key') throw new Error('no request was expected');
       return Promise.resolve(json(answering(model.choice, model.p)));
     },
-    readKey: () => Promise.resolve(model === 'no_key' ? null : 'router-key-0123'),
+    readCredential: () =>
+      Promise.resolve(model === 'no_key' ? null : { kind: 'openrouter', key: 'router-key-0123' }),
     decisionModelIds: () => new Set(['typesafe/jev-1.13']),
     off: false,
     logger: silentLogger,

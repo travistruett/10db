@@ -42,7 +42,7 @@ export const ModelApi = {
 } as const;
 export type ModelApi = (typeof ModelApi)[keyof typeof ModelApi];
 
-export interface ModelQuestion {
+export interface OpenRouterQuestion {
   readonly model: string;
   readonly api: ModelApi;
   readonly state: string;
@@ -107,7 +107,7 @@ const ChatResponse = z.object({
 const ChatAnswer = z.object({ choice: z.string(), confidence: z.number().min(0).max(1) });
 
 async function post(
-  q: ModelQuestion,
+  q: OpenRouterQuestion,
   url: string,
   body: unknown,
 ): Promise<{ readonly value: unknown }> {
@@ -136,13 +136,13 @@ async function post(
   return { value };
 }
 
-function checkOffered(q: ModelQuestion, choice: string): void {
+function checkOffered(q: OpenRouterQuestion, choice: string): void {
   if (!q.options.includes(choice))
     throw new OpenRouterError(`The model chose ${JSON.stringify(choice)}, which was not offered`);
 }
 
 /** A System One or decisions call: one `choice` question about `state`, answered by name. */
-async function askDecision(q: ModelQuestion, url: string): Promise<ModelAnswer> {
+async function askDecision(q: OpenRouterQuestion, url: string): Promise<ModelAnswer> {
   const { value } = await post(q, url, {
     model: q.model,
     state: q.state,
@@ -178,13 +178,13 @@ async function askDecision(q: ModelQuestion, url: string): Promise<ModelAnswer> 
 }
 
 /** The options by name, each with its description on a line of its own when it has one. */
-export function optionsText(q: Pick<ModelQuestion, 'options' | 'criteria'>): string {
+export function optionsText(q: Pick<OpenRouterQuestion, 'options' | 'criteria'>): string {
   if (q.criteria === undefined) return q.options.join(', ');
   const criteria = q.criteria;
   return `\n${q.options.map((o) => (criteria[o] === undefined ? `- ${o}` : `- ${o}: ${criteria[o]}`)).join('\n')}`;
 }
 
-async function askChat(q: ModelQuestion): Promise<ModelAnswer> {
+async function askChat(q: OpenRouterQuestion): Promise<ModelAnswer> {
   const { value } = await post(q, CHAT_URL, {
     model: q.model,
     max_tokens: CHAT_MAX_TOKENS,
@@ -238,8 +238,8 @@ async function askChat(q: ModelQuestion): Promise<ModelAnswer> {
   };
 }
 
-/** One call on the endpoint `q.api` names. Throws OpenRouterError, or what `fetch` throws. */
-export function askModel(q: ModelQuestion): Promise<ModelAnswer> {
+/** One call on the OpenRouter endpoint `q.api` names. Throws OpenRouterError, or what `fetch` throws. */
+export function askOpenRouter(q: OpenRouterQuestion): Promise<ModelAnswer> {
   switch (q.api) {
     case ModelApi.SystemOne:
       return askDecision(q, SYSTEM_ONE_URL);
