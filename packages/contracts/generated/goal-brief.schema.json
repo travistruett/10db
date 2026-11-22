@@ -175,6 +175,38 @@
               "type": "string",
               "pattern": "^[a-z][a-z0-9-]*$"
             }
+          },
+          "external": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "linear"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "issueId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128
+              },
+              "url": {
+                "type": "string",
+                "maxLength": 2048,
+                "format": "uri"
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "issueId",
+              "url"
+            ]
           }
         },
         "required": [

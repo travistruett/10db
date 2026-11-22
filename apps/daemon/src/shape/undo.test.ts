@@ -366,3 +366,46 @@ describe('Undo Accept', () => {
     );
   });
 });
+
+describe('Convert and a linked issue', () => {
+  const link = (id: string) => ({
+    kind: 'linear',
+    id,
+    issueId: `lin-${id}`,
+    url: `https://linear.app/acme/issue/${id}`,
+  });
+
+  it('skips a draft whose issue is on the Board, leaves its card to Undo, and refuses a second create', () => {
+    const { store, projectId } = world();
+    const shapeId = newPlan(store, projectId);
+    accept(store, shapeId, { looseTasks: [task('a', { external: link('AMP-1') })] });
+    const existing = taskOf(store, shapeId, 'a');
+    expect(getTask(store.db, existing).external?.id).toBe('AMP-1');
+
+    const second = accept(store, shapeId, {
+      looseTasks: [
+        task('again', { external: link('AMP-1') }),
+        task('fresh', { external: link('AMP-2') }),
+      ],
+    });
+    const tasks = store.db.select().from(schema.tasks).all();
+    expect(tasks.map((t) => t.externalId).sort()).toEqual(['AMP-1', 'AMP-2']);
+    expect(proposal(store, shapeId, 'again').state).toBe(ShapeProposalState.Accepted);
+    expect(listShapeLinks(store.db, shapeId).some((l) => l.key === 'again')).toBe(false);
+
+    // Undo takes back the Accept's own card only; the skipped draft's card stays.
+    store.write((ctx) => undoAccept(ctx, shapeId, second));
+    expect(getTask(store.db, existing).status).not.toBe(TaskStatus.Cancelled);
+
+    expect(() =>
+      store.write((ctx) =>
+        insertTask(ctx, projectId, {
+          title: 'By hand',
+          acceptanceCriteria: ['Done'],
+          areas: ['api'],
+          external: link('AMP-1'),
+        }),
+      ),
+    ).toThrow(/AMP-1 is already the task/);
+  });
+});

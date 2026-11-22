@@ -8,6 +8,7 @@ import {
   Delivery,
   effectiveRigor,
   EventType,
+  type ExternalLink,
   explainEffectiveRigor,
   InvalidError,
   isTerminal,
@@ -212,6 +213,7 @@ export function insertTask(
     if (deps.some((d) => d.status === TaskStatus.Cancelled))
       throw new InvalidError('A removed task cannot be a dependency');
   }
+  refuseLinkedIssue(ctx.tx, projectId, config.external);
   return writeTask(ctx, projectId, {
     ...config,
     kinds,
@@ -220,6 +222,40 @@ export function insertTask(
     proposalId: null,
     rigorSource: rigorSource ?? RigorSource.Builder,
   });
+}
+
+/** The task of a project that was made from the issue, or null: one issue is one task. */
+export function getTaskByExternal(
+  db: DbReader,
+  projectId: ProjectId,
+  link: Pick<ExternalLink, 'kind' | 'id'>,
+): TaskDto | null {
+  const row = db
+    .select()
+    .from(schema.tasks)
+    .where(
+      and(
+        eq(schema.tasks.projectId, projectId),
+        eq(schema.tasks.externalKind, link.kind),
+        eq(schema.tasks.externalId, link.id),
+      ),
+    )
+    .get();
+  return row === undefined ? null : toTaskDto(db, row);
+}
+
+/** Refuses an issue a task of the project already carries, naming that task. */
+export function refuseLinkedIssue(
+  db: DbReader,
+  projectId: ProjectId,
+  link: ExternalLink | undefined,
+): void {
+  if (link === undefined) return;
+  const existing = getTaskByExternal(db, projectId, link);
+  if (existing !== null)
+    throw new InvalidError(
+      `${link.id} is already the task "${existing.title}" (${existing.id}) in this project`,
+    );
 }
 
 function refuseUnknownAreas(project: ProjectDto, areas: readonly string[]): void {
@@ -249,12 +285,15 @@ export function insertGoalTask(
     readonly acceptanceCriteria: readonly string[];
     readonly areas: readonly string[];
     readonly dependsOn: readonly TaskId[];
+    readonly external?: ExternalLink | undefined;
   },
   placement?: Placement,
 ): TaskDto {
   const project = getProject(ctx.tx, projectId);
   refuseUnknownAreas(project, input.areas);
+  refuseLinkedIssue(ctx.tx, projectId, input.external);
   return writeTask(ctx, projectId, {
+    ...(input.external === undefined ? {} : { external: input.external }),
     title: Title.parse(input.title),
     headline: Headline.parse(input.headline ?? ''),
     why: Why.parse(input.why ?? ''),
@@ -609,6 +648,10 @@ function writeTask(
     workspaceMode: config.workspaceMode,
     placementReason: config.reason,
     goalId: config.goalId ?? null,
+    externalKind: config.external?.kind ?? null,
+    externalId: config.external?.id ?? null,
+    externalIssueId: config.external?.issueId ?? null,
+    externalUrl: config.external?.url ?? null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };
@@ -773,6 +816,18 @@ function toTaskDto(
     passId: row.passId,
     keptWork: row.keptWorkSha !== null,
     modelSetting: row.modelSetting,
+    external:
+      row.externalKind === null ||
+      row.externalId === null ||
+      row.externalIssueId === null ||
+      row.externalUrl === null
+        ? null
+        : {
+            kind: row.externalKind,
+            id: row.externalId,
+            issueId: row.externalIssueId,
+            url: row.externalUrl,
+          },
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

@@ -38,6 +38,7 @@ import {
   getShape,
   getShapeEntry,
   getTask,
+  getTaskByExternal,
   getTaskContext,
   insertDecision,
   insertGoal,
@@ -135,6 +136,7 @@ function goalBrief(goal: PlanGoal): GoalBrief {
       criteria: t.criteria,
       areas: t.areas,
       depends_on: t.depends_on,
+      ...(t.external === undefined ? {} : { external: t.external }),
     })),
   };
 }
@@ -549,6 +551,15 @@ export function convertProposals(
       linkShapeAttachments(ctx, shapeId, row.key, { goalId: written.goal.id });
     } else {
       const task: Task = ShapeProposalBody.task.parse(row.body);
+      // An issue already on the Board is skipped. No link is written, so Undo Accept leaves the card
+      // alone, and what other drafts depend on under this key is the existing card.
+      const linked =
+        task.external === undefined ? null : getTaskByExternal(ctx.tx, project.id, task.external);
+      if (linked !== null) {
+        taskIds.set(row.key, linked.id);
+        made.set(row.id, { taskIds: [linked.id] });
+        continue;
+      }
       const base = {
         title: task.title,
         headline: task.headline,
@@ -556,7 +567,12 @@ export function convertProposals(
         description: task.description,
         dependsOn: task.dependsOn.flatMap((key) => taskIds.get(key) ?? []),
       };
-      const input = { ...base, acceptanceCriteria: task.criteria, areas: task.areas };
+      const input = {
+        ...base,
+        acceptanceCriteria: task.criteria,
+        areas: task.areas,
+        ...(task.external === undefined ? {} : { external: task.external }),
+      };
       // The placement rule runs on every task Convert makes (task placement spec, P2).
       const placement = proposePlacement(project, { areas: task.areas, kinds: [] });
       const written =

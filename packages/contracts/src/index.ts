@@ -21,6 +21,7 @@ export * from './decision-stats';
 export * from './model-measures';
 export * from './entities';
 export * from './errors';
+export * from './external';
 export * from './events';
 export * from './dev-ui-handoff';
 export * from './folder-hold';
