@@ -85,7 +85,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   section(SettingsSectionKey.LanePermissions, App, 'Agents', 'Lane permissions'),
   section(SettingsSectionKey.Trust, App, 'Agents', 'Trust'),
   section(SettingsSectionKey.Sessions, App, 'Agents', 'Sessions'),
-  section(SettingsSectionKey.SignIns, App, 'Connections', 'Integrations'),
+  section(SettingsSectionKey.SignIns, App, 'Connections', 'Sign-ins'),
   section(SettingsSectionKey.People, App, 'Connections', 'People'),
   section(SettingsSectionKey.Appearance, App, 'App', 'Appearance'),
   section(SettingsSectionKey.Updates, App, 'App', 'Updates'),
