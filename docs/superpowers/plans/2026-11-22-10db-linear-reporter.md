@@ -181,8 +181,7 @@ export interface ReporterRun {
   readonly link: ExternalLink;                         // the task's
   readonly prUrl: string | null;                       // the task's PR, the only URL a `10db` link may point at
   workspaceConfirmed: boolean;
-  readonly knownCommentIds: Set<string>;               // from this task's recorded rows, plus this run's
-  readonly identityResults: string[];                  // successful whoami/get_workspace/get_team/list_teams result texts
+  readonly identityResults: { tool: string; text: string }[];  // successful whoami/get_workspace/get_team/list_teams results
   readonly uploads: { url: string; headers: Record<string, string>; assetUrl: string }[];  // card 7
   readonly withheld: Set<string>;                      // pattern names refused this run
 }

@@ -79,13 +79,13 @@ session of 10db's own, no repository write access, Efficient tier, 10db's tools 
      - `mismatch` records the reason "This agent's Linear sign-in reaches <reported>, but the project is linked to
        <binding.workspaceName> / <teamKey>" and leaves writes refused.
    - `reportPost` refuses ids this session didn't take, and a withheld pattern not in `run.withheld`. A row
-     dropped meanwhile is a no-op, not an error. Otherwise it calls `recordLinearPosts`, and the comment ids join
-     `knownCommentIds`.
+     dropped meanwhile is a no-op, not an error. Otherwise it calls `recordLinearPosts`.
    - A session id with no run is refused, so a late call from a closed run writes nothing.
 6. **Settle.** It runs once per run and is idempotent. It is triggered by `onTurnEnded`, by `onState` when an
    in-flight run's conversation leaves the busy states without a turn end (a start failure, a pause for the
    account, an end in error), and by the 15-minute deadline (which stops the conversation first).
-   - Synchronously, in the hook: the run's taken rows still pending become withheld with the first pattern when
+   - Synchronously, in the hook (call `failLinearPosts` once per row, since each row's backoff follows its own
+     `tries`): the run's taken rows still pending become withheld with the first pattern when
      `run.withheld` is non-empty. The rest fail with `failLinearPosts(..., dueAt = now + min(5 min ×
      2^(tries before this failure), 6 h), MAX_TRIES)` and the reason seen: the mismatch, "the session ended
      without recording", or the end's message.

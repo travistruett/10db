@@ -27,7 +27,8 @@ It is pure: it returns `{ verdict, withheld? }` and mutates nothing. Card 4 appl
      keeps it off every protected path without a read judge.
 3. **Linear reads, an exact list:** `whoami`, `get_workspace`, `get_team`, `list_teams`, `get_issue`,
    `list_comments`, `list_issue_statuses`, `get_issue_status` and `get_attachment` → allow. Every other Linear
-   tool not named in rule 5 → deny (`extract_images` included: it fetches URLs).
+   tool not named in rule 5 → deny (`extract_images` included: it fetches URLs). A read's input is scanned like
+   a write's (rule 5), and a hit is denied.
 4. A Linear write while `!run.workspaceConfirmed` → deny: "Confirm the workspace first: call get_workspace and
    get_team, then report_linear_workspace."
 5. **Linear writes.** Each tool has an exact key list; any other key → deny. The issue is named only by
@@ -36,8 +37,8 @@ It is pure: it returns `{ verdict, withheld? }` and mutates nothing. Card 4 appl
    - `save_issue`: keys `{id, state, links}`. `id === link.issueId`. `links`, if present, is one entry whose
      `title` is `10db` and whose `url` equals `run.prUrl` (with no PR, `links` is denied). That entry is the "10db" link attachment; Linear's links are
      append-only, so the brief adds it once, for the PR.
-   - `save_comment`: keys `{issueId, body}` with `issueId === link.issueId`, or `{id, body}` with `id` in
-     `run.knownCommentIds` (an edit of its own comment).
+   - `save_comment`: keys `{issueId, body}` with `issueId === link.issueId`. No edit by comment `id`: the footer
+     handles repeats, and an id the agent names can't be proved to be its own.
    - `prepare_attachment_upload`: keys `{issue, filename, contentType, size, title, subtitle}`, `issue ===
      link.issueId`.
    - `create_attachment_from_upload`: keys `{issue, assetUrl, title, subtitle}`, `issue === link.issueId`.
