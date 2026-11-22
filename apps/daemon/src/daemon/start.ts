@@ -111,6 +111,7 @@ import { createJudgeCredentialReader, createJudgeServices } from './judge-servic
 import {
   createLinearImport,
   createLinearReporter,
+  dismissReporterPosts,
   reporterConversations,
   reporterHooks,
   subscribeLinearEvents,
@@ -1044,14 +1045,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     onParkAnswer: parkAnswers,
     log: logger,
-    onFlagAnswerInWrite: (ctx, item, answer) =>
-      applySkippedChoice(ctx, item, answer)
+    onFlagAnswerInWrite: (ctx, item, answer) => {
+      dismissReporterPosts(ctx, item);
+      return applySkippedChoice(ctx, item, answer)
         ? () => {
             startFollowUps();
           }
         : chatWorkRef === null
           ? undefined
-          : applyChatWorkAnswer(chatWorkRef, logger, ctx, item, answer),
+          : applyChatWorkAnswer(chatWorkRef, logger, ctx, item, answer);
+    },
     onCheckAnswer: (ctx, item, answer) => {
       const signOffPage = startPageSignOff;
       if (!runner || !signOffPage) throw new RunnerNotStartedError();
