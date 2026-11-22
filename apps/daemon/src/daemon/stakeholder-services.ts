@@ -42,6 +42,7 @@ export type StakeholderApiServices = Pick<
   | 'checkLinearTeam'
   | 'unlinkLinear'
   | 'importFromLinear'
+  | 'cancelLinearCheck'
   | 'setProjectIntegrations'
   | 'listSlackMembers'
   | 'updatePerson'
@@ -96,7 +97,7 @@ export function createStakeholderApiServices(deps: {
   readonly reconnect: () => Promise<void>;
   /** The login `gh` is signed in as, from its last check; null when signed out. */
   readonly githubLogin: () => Promise<string | null>;
-  readonly linear: Pick<LinearBindings, 'get' | 'check' | 'unlink' | 'startImport'>;
+  readonly linear: Pick<LinearBindings, 'get' | 'check' | 'unlink' | 'startImport' | 'cancel'>;
 }): StakeholderApiServices {
   const integrationsOf = async (projectId: ProjectId): Promise<ProjectIntegrationsDto> => {
     getProject(deps.state.db, projectId);
@@ -170,6 +171,7 @@ export function createStakeholderApiServices(deps: {
     checkLinearTeam: (projectId, input) => deps.linear.check(projectId, input.teamKey),
     unlinkLinear: (projectId) => deps.linear.unlink(projectId),
     importFromLinear: (projectId) => deps.linear.startImport(projectId),
+    cancelLinearCheck: (projectId) => deps.linear.cancel(projectId),
 
     async setProjectIntegrations(projectId, input) {
       getProject(deps.state.db, projectId);

@@ -65,6 +65,22 @@ export function useImportFromLinear(projectId: ProjectId) {
   });
 }
 
+/** Cancel: ends the Linear check in flight. */
+export function useCancelLinearCheck(projectId: ProjectId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      readJson(
+        await client.projects[':projectId'].integrations.linear.check.$delete({
+          param: { projectId },
+        }),
+        ProjectLinearDto,
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: projectIntegrationsKey(projectId) }),
+  });
+}
+
 /** Unlink: clears the project's Linear binding. */
 export function useUnlinkLinear(projectId: ProjectId) {
   const { client } = useDaemon();

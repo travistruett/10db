@@ -1,14 +1,28 @@
-import type { ProjectId } from '@10db/contracts';
+import { LinearVia, type ProjectDto } from '@10db/contracts';
 import { Menu } from '@mantine/core';
-import { useImportFromLinear, useProjectIntegrations } from '../../daemon/sign-in-queries';
+import {
+  useImportFromLinear,
+  useLinearSignIns,
+  useProjectIntegrations,
+} from '../../daemon/sign-in-queries';
 import { useSelectedProject } from '../../shell/selected-project';
 import { useOpenSession } from './open-session';
 
-function Item({ projectId }: { readonly projectId: ProjectId }) {
-  const integrations = useProjectIntegrations(projectId);
-  const start = useImportFromLinear(projectId);
+function Item({ project }: { readonly project: ProjectDto }) {
+  const integrations = useProjectIntegrations(project.id);
+  const signIns = useLinearSignIns();
+  const start = useImportFromLinear(project.id);
   const open = useOpenSession();
   if (integrations.data?.linear.binding == null) return null;
+  const row = signIns.data?.rows.find((r) => r.accountId === project.accountId);
+  // Only a definite none stops the import; a maybe goes ahead, as Link does.
+  if (row?.via === LinearVia.None && !row.unchecked)
+    return (
+      <>
+        <Menu.Item disabled>From Linear</Menu.Item>
+        <Menu.Label>{row.note ?? "This project's account has no Linear sign-in."}</Menu.Label>
+      </>
+    );
   return (
     <Menu.Item
       disabled={start.isPending}
@@ -24,5 +38,5 @@ function Item({ projectId }: { readonly projectId: ProjectId }) {
 /** From Linear, beside New Plan: shown for a project linked to a Linear team; opens a Plan session that imports its issues. */
 export function FromLinearItem() {
   const { project } = useSelectedProject();
-  return project === null ? null : <Item projectId={project.id} />;
+  return project === null ? null : <Item project={project} />;
 }

@@ -6,13 +6,20 @@ export const ExternalKind = { Linear: 'linear' } as const;
 export type ExternalKind = (typeof ExternalKind)[keyof typeof ExternalKind];
 
 /** The issue a task was made from: its tracker, readable id (AMP-119), the tracker's own id and its page. */
-export const ExternalLink = z.object({
+const ExternalLinkFields = z.object({
   kind: z.enum(ExternalKind),
   id: z.string().min(1).max(64),
   issueId: z.string().min(1).max(128),
   url: z.url({ protocol: /^https$/ }).max(2048),
 });
-export type ExternalLink = z.infer<typeof ExternalLink>;
+/** A link's page lives on its tracker's own host. */
+const TRACKER_HOST: Readonly<Record<ExternalKind, string>> = { linear: 'linear.app' };
+
+export const ExternalLink = ExternalLinkFields.refine(
+  (link) => new URL(link.url).hostname === TRACKER_HOST[link.kind],
+  { message: 'The url must be on the tracker named by kind', path: ['url'] },
+);
+export type ExternalLink = z.infer<typeof ExternalLinkFields>;
 
 /** The Linear workspace and team a project is bound to, as the sign-in read them. */
 export const LinearBinding = z.object({
@@ -33,6 +40,8 @@ export const LinearCheckDto = z.discriminatedUnion('state', [
     chatId: ChatId,
   }),
   z.strictObject({ state: z.literal('refused'), teamKey: z.string(), reason: z.string() }),
+  /** The session ended, or was archived, without calling `link_linear_team`. */
+  z.strictObject({ state: z.literal('ended'), teamKey: z.string(), chatId: ChatId }),
 ]);
 export type LinearCheckDto = z.infer<typeof LinearCheckDto>;
 

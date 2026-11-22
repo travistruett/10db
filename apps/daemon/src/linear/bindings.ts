@@ -1,5 +1,6 @@
 import {
   ConflictError,
+  ConversationState,
   InvalidError,
   LinearBinding,
   LinearVia,
@@ -21,6 +22,17 @@ const bindingKey = (projectId: ProjectId): string => `linear.${projectId}`;
 /** How long a finished check's session stays open, so the tool's own answer reaches it first. */
 const ARCHIVE_AFTER_MS = 2_000;
 
+/** How long a check session may show no turn at all before it counts as over. */
+const NO_TURN_MS = 60_000;
+
+/** The states a conversation is in while a turn is under way. */
+const TURN_STATES: ReadonlySet<string> = new Set([
+  ConversationState.Starting,
+  ConversationState.Running,
+  ConversationState.WaitingCard,
+  ConversationState.Stopping,
+]);
+
 export interface LinearBindings {
   /** The project's binding, and the check in flight or the reason the last one refused. */
   get(projectId: ProjectId): ProjectLinearDto;
@@ -30,11 +42,20 @@ export interface LinearBindings {
   submit(projectId: ProjectId, chatId: ChatId, input: LinkLinearTeamInput): ProjectLinearDto;
   unlink(projectId: ProjectId): ProjectLinearDto;
   /** From Linear: a Plan session whose opening brief names the linked workspace and team; ConflictError when none is linked. */
-  startImport(projectId: ProjectId): ChatDto;
+  startImport(projectId: ProjectId): Promise<ChatDto>;
+  /** Cancel: ends the check in flight and archives its session. */
+  cancel(projectId: ProjectId): Promise<ProjectLinearDto>;
 }
 
 type Check =
-  | { readonly state: 'checking'; readonly teamKey: string; readonly chatId: ChatId }
+  | {
+      readonly state: 'checking';
+      readonly teamKey: string;
+      readonly chatId: ChatId;
+      readonly startedAt: number;
+      sawTurn: boolean;
+    }
+  | { readonly state: 'ended'; readonly teamKey: string; readonly chatId: ChatId }
   | { readonly state: 'refused'; readonly teamKey: string; readonly reason: string };
 
 /**
@@ -44,21 +65,53 @@ type Check =
  */
 export function createLinearBindings(deps: {
   readonly state: StateStore;
-  readonly chat: Pick<ChatService, 'create' | 'send' | 'patch' | 'archive' | 'open'>;
+  readonly chat: Pick<ChatService, 'create' | 'get' | 'send' | 'patch' | 'archive' | 'open'>;
   /** How each account reaches Linear, from cached reads. */
   readonly signIns: { list(): Promise<LinearSignInsDto> };
   readonly log: Logger;
+  /** The clock, in milliseconds. */
+  readonly now?: () => number;
 }): LinearBindings {
+  const clock = deps.now ?? Date.now;
   const checks = new Map<ProjectId, Check>();
 
   const stored = (projectId: ProjectId): LinearBinding | null => {
     const parsed = LinearBinding.safeParse(getAppSetting(deps.state.db, bindingKey(projectId)));
     return parsed.success ? parsed.data : null;
   };
+  /**
+   * The check as it stands: one whose session was archived, or whose turn ended without the call, is over. A
+   * session that never showed a turn is given `NO_TURN_MS` before it counts.
+   */
+  const settle = (projectId: ProjectId): Check | undefined => {
+    const check = checks.get(projectId);
+    if (check?.state !== 'checking') return check;
+    let over = false;
+    try {
+      const chat = deps.chat.get(check.chatId);
+      const state = chat.conversation.state;
+      if (TURN_STATES.has(state)) check.sawTurn = true;
+      else if (check.sawTurn || clock() - check.startedAt > NO_TURN_MS) over = true;
+      if (chat.archivedAt !== null) over = true;
+    } catch {
+      over = true;
+    }
+    if (!over) return check;
+    const ended: Check = { state: 'ended', teamKey: check.teamKey, chatId: check.chatId };
+    checks.set(projectId, ended);
+    return ended;
+  };
   const view = (projectId: ProjectId): ProjectLinearDto => ({
     binding: stored(projectId),
-    check: checks.get(projectId) ?? null,
+    check: settle(projectId) ?? null,
   });
+  /** A definite "no Linear" on the project's account refuses with that row's hint; a maybe goes ahead. */
+  const refuseSignedOut = async (projectId: ProjectId): Promise<void> => {
+    const accountId = getProject(deps.state.db, projectId).accountId;
+    const row = (await deps.signIns.list()).rows.find((r) => r.accountId === accountId);
+    if (row?.via === LinearVia.None && !row.unchecked)
+      throw new ConflictError(row.note ?? "This project's account has no Linear sign-in.");
+  };
   const archiveLater = (chatId: ChatId): void => {
     const timer = setTimeout(() => {
       deps.chat.archive(chatId).catch((error: unknown) => {
@@ -72,19 +125,22 @@ export function createLinearBindings(deps: {
     get: view,
 
     async check(projectId, teamKey) {
-      const project = getProject(deps.state.db, projectId);
-      if (checks.get(projectId)?.state === 'checking')
+      getProject(deps.state.db, projectId);
+      if (settle(projectId)?.state === 'checking')
         throw new ConflictError('A Linear check is already running for this project.');
-      const accountId = project.accountId;
-      const row = (await deps.signIns.list()).rows.find((r) => r.accountId === accountId);
-      if (row?.via === LinearVia.None && !row.unchecked)
-        throw new ConflictError(row.note ?? "This project's account has no Linear sign-in.");
+      await refuseSignedOut(projectId);
       const chat = deps.chat.create({
         projectId,
         model: null,
         tabPosition: deps.chat.open().length,
       });
-      checks.set(projectId, { state: 'checking', teamKey, chatId: chat.id });
+      checks.set(projectId, {
+        state: 'checking',
+        teamKey,
+        chatId: chat.id,
+        startedAt: clock(),
+        sawTurn: false,
+      });
       try {
         await deps.chat.patch(chat.id, { title: `Link Linear team ${teamKey}` });
         deps.chat.send(chat.conversationId, {
@@ -94,8 +150,16 @@ export function createLinearBindings(deps: {
         });
       } catch (error) {
         checks.delete(projectId);
+        archiveLater(chat.id);
         throw error;
       }
+      return view(projectId);
+    },
+
+    async cancel(projectId) {
+      const check = checks.get(projectId);
+      checks.delete(projectId);
+      if (check !== undefined && check.state !== 'refused') await deps.chat.archive(check.chatId);
       return view(projectId);
     },
 
@@ -132,7 +196,8 @@ export function createLinearBindings(deps: {
       return view(projectId);
     },
 
-    startImport(projectId) {
+    async startImport(projectId) {
+      await refuseSignedOut(projectId);
       const binding = stored(projectId);
       if (binding === null)
         throw new ConflictError('Link this project to a Linear team before importing from it.');

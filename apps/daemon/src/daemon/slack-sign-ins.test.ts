@@ -62,9 +62,8 @@ describe('Slack sign-ins by workspace', () => {
         get: () => ({ binding: null, check: null }),
         check: () => Promise.reject(new Error('not used')),
         unlink: () => ({ binding: null, check: null }),
-        startImport: () => {
-          throw new Error('not used');
-        },
+        startImport: () => Promise.reject(new Error('not used')),
+        cancel: () => Promise.reject(new Error('not used')),
       },
     });
     await services.setSlackToken({ token: 'xoxb-new' });

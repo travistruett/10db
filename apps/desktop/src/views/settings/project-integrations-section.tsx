@@ -15,6 +15,7 @@ import { useState, type ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
 import { useSlackConnection } from '../../daemon/people';
 import {
+  useCancelLinearCheck,
   useCheckLinearTeam,
   useLinearSignIns,
   useProjectIntegrations,
@@ -68,6 +69,7 @@ function LinearBlock({
   const signIns = useLinearSignIns();
   const check = useCheckLinearTeam(project.id);
   const unlink = useUnlinkLinear(project.id);
+  const cancel = useCancelLinearCheck(project.id);
   const [teamKey, setTeamKey] = useState('');
   const row = signIns.data?.rows.find((r) => r.accountId === project.accountId);
   // Only a definite none hides Link: an account whose connectors were not read yet may have Linear, and the
@@ -76,12 +78,26 @@ function LinearBlock({
   const hint = row?.via === LinearVia.None ? row.note : null;
   const checking = linear.check?.state === 'checking' ? linear.check : null;
   const refused = linear.check?.state === 'refused' ? linear.check : null;
+  const ended = linear.check?.state === 'ended' ? linear.check : null;
   const failure = check.isError
     ? check.error.message
     : unlink.isError
       ? unlink.error.message
       : null;
   const bound = linear.binding;
+  const cancelButton =
+    checking === null ? undefined : (
+      <Button
+        variant="default"
+        size="xs"
+        loading={cancel.isPending}
+        onClick={() => {
+          cancel.mutate();
+        }}
+      >
+        Cancel
+      </Button>
+    );
   const unlinkButton =
     bound === null ? undefined : (
       <Button
@@ -118,6 +134,16 @@ function LinearBlock({
         .
       </Text>
     );
+  else if (ended !== null)
+    state = (
+      <Text size="sm" c="red">
+        The check ended without an answer.{' '}
+        <Link to="/sessions" search={{ chat: ended.chatId }}>
+          Open its session
+        </Link>
+        .
+      </Text>
+    );
   else if (refused !== null)
     state = (
       <Text size="sm" c="red">
@@ -135,7 +161,7 @@ function LinearBlock({
     <IntegrationCard
       name="Linear"
       icon={<IconListDetails size={20} stroke={1.5} aria-hidden />}
-      control={unlinkButton}
+      control={unlinkButton ?? cancelButton}
     >
       {state}
       {asksForTeam ? (
@@ -155,7 +181,7 @@ function LinearBlock({
               check.mutate(teamKey);
             }}
           >
-            {refused === null ? 'Link' : 'Link again'}
+            {refused === null && ended === null ? 'Link' : 'Link again'}
           </Button>
         </Group>
       ) : null}
