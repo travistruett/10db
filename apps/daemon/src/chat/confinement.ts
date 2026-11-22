@@ -210,7 +210,7 @@ export function judgeChatCall(
       return { decision: 'ask', reason: JUDGED_CHAT_TOOL_ASK };
     return ALLOW;
   }
-  // A tool of one of the project's approved servers is judged as Plan's are.
+  // A tool of an MCP server the session runs goes to the session's judge, as Plan's do.
   if (call.toolName.startsWith('mcp__')) return judgeShapeCall(asSession, access);
   return deny(`${call.toolName} is not a tool this chat uses.`);
 }

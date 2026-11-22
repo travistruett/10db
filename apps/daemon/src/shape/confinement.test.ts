@@ -535,7 +535,7 @@ describe('judgeShapeCall', () => {
 
 // Shape spec §5.2: in its read-only sandbox a session runs read-only commands without asking and asks
 // about any other, through the lanes' broker; the code researchers it fans out do the same. Its
-// project MCP servers' tools are the conversation's own, and each call is asked about.
+// MCP servers' tools are the conversation's own: a bare allow on a judge, a card without one.
 describe('judgeShapeCall in the read-only sandbox', () => {
   let sandboxed: ShapeAccess;
   beforeEach(() => {

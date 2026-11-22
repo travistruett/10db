@@ -21,8 +21,8 @@ import type { ShapeReviewTurn } from './review-turn';
 // Shape spec §5.2. A Shape session's file tools read the project's checkout and its conversation's
 // dropped files, and nothing else; this judge refuses the rest with no card. In its read-only lane
 // sandbox it also runs commands: a read-only one without asking, any other through the lanes'
-// permission broker (`ask`); a call to an MCP server's tool goes to the session's judge, and asks only without one. The
-// sandbox, not this judge, keeps every command from writing the checkout.
+// permission broker (`ask`); a call to an MCP server's tool goes to the session's judge, and asks only
+// without one. The sandbox, not this judge, keeps every command from writing the checkout.
 
 /** What each of Plan's agents' names starts with; the stored reviewer is the rest. */
 const AGENT_PREFIX = 'tendb-';
@@ -465,7 +465,7 @@ export function judgeShapeCall(call: ShapeCall, access: ShapeAccess): ShapeVerdi
   if (call.toolName === 'Agent') return judgeAgent(call, access);
   if (call.toolName.startsWith(MCP_PREFIX)) return judgePlanTool(call);
   if (COMMAND_TOOLS.has(call.toolName)) return judgeCommand(call, access);
-  // A server 10db registered, so one the builder approved for the project.
+  // A tool of an MCP server the session runs: judged by the session's judge, a card only without one.
   if (isProjectTool(call.toolName)) return judgeProjectTool(call, access);
   return deny(
     `${call.toolName} is not available: Plan writes no code, so a Shape session is read-only. It reads the project and talks; it changes nothing.`,
