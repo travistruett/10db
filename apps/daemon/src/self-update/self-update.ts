@@ -14,7 +14,7 @@ import {
   deleteAppSetting,
   findOpenByFoldKey,
   getAppSetting,
-  listProjects,
+  listActiveProjects,
   setAppSetting,
 } from '@10db/db';
 import type { Clock, Timer } from '../clock';
@@ -496,7 +496,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
    * lanes are paused. Every project, because the one that placed the cards could change.
    */
   function closeShapeHoldCards(): void {
-    for (const project of listProjects(state.db)) {
+    for (const project of listActiveProjects(state.db)) {
       try {
         const stale = findOpenByFoldKey(state.db, project.id, SHAPE_HOLD_FOLD_KEY);
         if (stale) inbox.resolve(stale.id, '10db restarted, so that turn is over.');

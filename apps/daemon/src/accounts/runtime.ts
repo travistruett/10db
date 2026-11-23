@@ -10,7 +10,7 @@ import {
   findOpenByFoldKey,
   getAccountRow,
   getProject,
-  listProjects,
+  listActiveProjects,
   type AccountRow,
 } from '@10db/db';
 import type { Clock } from '../clock';
@@ -142,7 +142,7 @@ export function createAccountRuntime(opts: {
       const held = opts.pauses.pausedFor(accountId);
       const ends = held ? held.until : until;
       const foldKey = accountFoldKey(accountId, AccountPauseReason.UsageLimit);
-      const carded = listProjects(db).filter(
+      const carded = listActiveProjects(db).filter(
         (p) => p.accountId === accountId && findOpenByFoldKey(db, p.id, foldKey),
       );
       const projects = new Map(
@@ -172,7 +172,7 @@ export function createAccountRuntime(opts: {
           // The raise it offers follows the spend too, so the option and detail are rewritten with the body.
           const { body, options = [], detail } = capCard(account, cap);
           const foldKey = accountFoldKey(account.id, AccountPauseReason.MonthlyCap);
-          for (const project of listProjects(db)) {
+          for (const project of listActiveProjects(db)) {
             if (project.accountId !== account.id) continue;
             const open = findOpenByFoldKey(db, project.id, foldKey);
             if (open) opts.inbox.reword(open.id, body, { options, detail });

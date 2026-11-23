@@ -53,6 +53,7 @@ import {
   insertPlanSession,
   latestWorkstreamOf,
   moveChatTab,
+  listActiveProjects,
   openChats,
   patchConversation,
   recentChats,
@@ -366,7 +367,12 @@ export function createChatService(deps: ChatServiceDeps): ChatService {
 
     get: dtoOf,
 
-    open: () => openChats(state.db).map((row) => dtoOf(row.id)),
+    open: () => {
+      const live = new Set(listActiveProjects(state.db).map((p) => p.id));
+      return openChats(state.db)
+        .filter((row) => live.has(row.projectId))
+        .map((row) => dtoOf(row.id));
+    },
 
     search(query) {
       const page = searchChats(state.db, {

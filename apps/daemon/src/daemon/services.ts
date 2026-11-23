@@ -91,7 +91,10 @@ import {
   listModelProfiles,
   listPeople,
   listPersonas,
-  listProjects,
+  archiveProject,
+  listActiveProjects,
+  listArchivedProjects,
+  restoreProject,
   listProjectViews,
   listRoutingRules,
   listTasks,
@@ -201,6 +204,7 @@ import {
 } from '../team';
 import type { Pictures } from '../pictures';
 import type { Preview } from '../preview';
+import { refuseArchiveWhileRunning } from '../projects';
 import type { TaskThread } from '../conversation';
 import type { GithubApiServices } from './github-services';
 import type { JudgeApiServices } from './judge-services';
@@ -451,6 +455,21 @@ export function createServices(deps: {
   }
   return {
     listProjects: () => listProjectViews(db),
+    listArchivedProjects: () => listArchivedProjects(db),
+    archiveProject(projectId) {
+      refuseArchiveWhileRunning(db, projectId);
+      // A pass waiting to open holds no work yet, so it is cancelled rather than refused.
+      deps.openWhenBusy.pendingOpens.cancel(projectId);
+      // The preview and the hazard look stop on the change this write announces.
+      deps.state.write((ctx) => {
+        archiveProject(ctx, projectId);
+      });
+    },
+    restoreProject(projectId) {
+      deps.state.write((ctx) => {
+        restoreProject(ctx, projectId);
+      });
+    },
     async createProject(input) {
       const config = ProjectInput.parse(input);
       if (!existsSync(join(config.repoPath, '.git'))) {
@@ -749,7 +768,12 @@ export function createServices(deps: {
     abandonBatch: (id) => deps.shipper.abandon(id),
     adoptGoal: (projectId, input) => adoptGoal(deps, projectId, input),
     getGoal: (id) => getGoal(db, id),
-    listWorkstreams: ({ active }) => listWorkstreams(db, active ? { states: ACTIVE_STATES } : {}),
+    listWorkstreams({ active }) {
+      const live = new Set(listActiveProjects(db).map((p) => p.id));
+      return listWorkstreams(db, active ? { states: ACTIVE_STATES } : {}).filter((w) =>
+        live.has(w.projectId),
+      );
+    },
     async cancelWorkstream(id) {
       await deps.runner.cancel(id);
       return getWorkstream(db, id);
@@ -794,7 +818,7 @@ export function createServices(deps: {
       if (recheck) await deps.agents?.retry();
       const checked = markGhRequired(
         await lastCheck,
-        listProjects(db).some((p) => p.delivery === Delivery.PullRequest),
+        listActiveProjects(db).some((p) => p.delivery === Delivery.PullRequest),
       );
       return {
         // The pinned copies are read per request: they are fetched in the background and upstream moves on.
@@ -1071,7 +1095,7 @@ export function createServices(deps: {
       inspectFolder(
         {
           git: deps.git,
-          projects: listProjects(db),
+          projects: listActiveProjects(db),
           protectedRoots: deps.protectedRoots,
           registryHosts: findRegistryHosts,
         },

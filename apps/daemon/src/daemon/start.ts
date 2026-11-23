@@ -56,6 +56,7 @@ import {
   getJudgeConfig,
   getProject,
   listPermissionRules,
+  listActiveProjects,
   listProjects,
   migrateDatabase,
   openDatabase,
@@ -2860,7 +2861,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         repository: updateRepository,
         enabled: () => selfUpdateSetting(state.db).enabled,
         // A card only needs a project to sit under in the Inbox.
-        cardProject: () => listProjects(state.db)[0]?.id ?? null,
+        cardProject: () => listActiveProjects(state.db)[0]?.id ?? null,
         headOf: opts.selfUpdate?.headOf ?? githubHeadOfMain(ghExec, ghCall),
         isAhead: opts.selfUpdate?.isAhead ?? githubMainIsAhead(ghExec, ghCall),
         stage: (target, running, skip, keep) => installer.stage(target, running, skip, keep),

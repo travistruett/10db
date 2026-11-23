@@ -1,7 +1,7 @@
 import { AreaRole, ProjectId, TaskStatus, type AreaDef } from '@10db/contracts';
 import {
   getAppSetting,
-  listProjects,
+  listActiveProjects,
   listTasks,
   patchProject,
   setAppSetting,
@@ -57,7 +57,7 @@ export function seedPendingPageLabels(state: StateStore): void {
     setAppSetting(
       ctx,
       PAGE_LABELS_PENDING_KEY,
-      listProjects(ctx.tx).map((p) => p.id),
+      listActiveProjects(ctx.tx).map((p) => p.id),
     );
   });
 }
@@ -75,7 +75,7 @@ export async function guessPendingPageLabels(
 ): Promise<void> {
   for (const id of pendingIds(deps.state.db) ?? []) {
     signal?.throwIfAborted();
-    const project = listProjects(deps.state.db).find((p) => p.id === id);
+    const project = listActiveProjects(deps.state.db).find((p) => p.id === id);
     const unlabelled =
       project?.areas.some((a) => a.role === AreaRole.Page && a.label === undefined) === true;
     let proposed: AreaDef[] = [];
@@ -93,7 +93,7 @@ export async function guessPendingPageLabels(
       deps.state.write((ctx) => {
         // Still pending means the builder has not saved the areas while the setup read git.
         if (pendingIds(ctx.tx)?.includes(id) !== true) return;
-        const current = listProjects(ctx.tx).find((p) => p.id === id);
+        const current = listActiveProjects(ctx.tx).find((p) => p.id === id);
         if (current !== undefined) {
           const areas = withGuessedLabels(current.areas, proposed);
           if (areas !== null) patchProject(ctx, id, { areas });

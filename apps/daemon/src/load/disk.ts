@@ -1,7 +1,7 @@
 import { statfsSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { InboxItemId } from '@10db/contracts';
-import { findOpenByFoldKey, listProjects, type DbReader } from '@10db/db';
+import { findOpenByFoldKey, listActiveProjects, type DbReader } from '@10db/db';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { diskCard, DISK_FOLD_KEY } from './card';
@@ -70,7 +70,7 @@ export function createDiskHold(opts: DiskHoldOptions): DiskHold {
   let card: { readonly id: InboxItemId; body: string } | null = null;
   let held = false;
 
-  for (const project of listProjects(opts.db)) {
+  for (const project of listActiveProjects(opts.db)) {
     try {
       const stale = findOpenByFoldKey(opts.db, project.id, DISK_FOLD_KEY);
       if (stale) opts.inbox.withdraw(stale.id);

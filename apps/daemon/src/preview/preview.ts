@@ -345,6 +345,18 @@ export function startPreview(deps: PreviewDeps): Preview {
       // A project removed since: its preview has nothing to serve.
       project = undefined;
     }
+    if (project?.archivedAt) {
+      // An archived project's preview stops, and nothing about it is kept: a restore starts afresh.
+      const hold = holds.get(projectId);
+      if (hold) {
+        clearTimeout(hold.timer);
+        timers.delete(hold.timer);
+        holds.delete(projectId);
+      }
+      gaveUp.delete(projectId);
+      exits.delete(projectId);
+      project = undefined;
+    }
     const pass = project ? findOpenPass(db, projectId) : undefined;
     const command = project?.previewCommand ?? null;
     const appUrl = project?.appUrl ?? null;

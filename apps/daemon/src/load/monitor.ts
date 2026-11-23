@@ -6,7 +6,7 @@ import {
   getWorkstreamRow,
   listBatches,
   listPassCheckPids,
-  listProjects,
+  listActiveProjects,
   listSessions,
   listWorkstreams,
   type DbReader,
@@ -146,7 +146,7 @@ export function createLoadMonitor(opts: LoadMonitorOptions): LoadGuard {
   const processes = opts.processes ?? systemProcessSnapshot();
 
   // A card an earlier version raised and a run left open would say for good that 10db is holding work.
-  for (const project of listProjects(db)) {
+  for (const project of listActiveProjects(db)) {
     try {
       const stale = findOpenByFoldKey(db, project.id, OVERLOAD_FOLD_KEY);
       if (stale) opts.inbox.withdraw(stale.id);

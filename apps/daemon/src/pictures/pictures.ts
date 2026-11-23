@@ -45,7 +45,7 @@ import {
   insertSystemNotice,
   listLivePasses,
   listPassTasks,
-  listProjects,
+  listActiveProjects,
   listSharedChanges,
   listTasks,
   listTaskScreens,
@@ -721,7 +721,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
   if (swept > 0) log.info({ removed: swept }, 'removed pictures a stopped write left half written');
   const logs = sweepLoginLogs(deps.dataDir);
   if (logs > 0) log.info({ removed: logs }, 'removed dev login logs a stopped daemon left');
-  const projects = listProjects(db);
+  const projects = listActiveProjects(db);
   for (const project of projects) {
     appUrls.set(project.id, project.appUrl);
     devLogins.set(project.id, project.devLoginCommand);

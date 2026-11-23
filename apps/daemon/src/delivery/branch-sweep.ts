@@ -9,7 +9,13 @@ import {
   type ProjectDto,
   type ProjectId,
 } from '@10db/contracts';
-import { getPass, getProject, hasAnsweredByFoldKey, listBatches, listProjects } from '@10db/db';
+import {
+  getPass,
+  getProject,
+  hasAnsweredByFoldKey,
+  listBatches,
+  listActiveProjects,
+} from '@10db/db';
 import { PrState } from '../github';
 import { removeBranch, settleBranch } from './branch-cleanup';
 import { batchBranchName } from './branch-name';
@@ -30,7 +36,7 @@ export async function removeMergedBranches(
   ctx: DeliveryContext,
   signal: AbortSignal,
 ): Promise<void> {
-  for (const project of listProjects(ctx.state.db)) {
+  for (const project of listActiveProjects(ctx.state.db)) {
     if (project.delivery !== Delivery.PullRequest || !existsSync(project.repoPath)) continue;
     const merged = listBatches(ctx.state.db, {
       projectId: project.id,
@@ -130,7 +136,7 @@ export async function haveCommit(
  * asked once per project unless some batch's branch is still local. It never rejects.
  */
 export async function settleAbandonedBranches(ctx: DeliveryContext): Promise<void> {
-  for (const project of listProjects(ctx.state.db)) {
+  for (const project of listActiveProjects(ctx.state.db)) {
     if (!existsSync(project.repoPath)) continue;
     const abandoned = listBatches(ctx.state.db, {
       projectId: project.id,
@@ -177,7 +183,7 @@ async function strayBranchesOf(ctx: DeliveryContext, project: ProjectDto): Promi
  * once none is left. It never rejects.
  */
 export async function listStrayBranches(ctx: DeliveryContext): Promise<void> {
-  for (const project of listProjects(ctx.state.db)) {
+  for (const project of listActiveProjects(ctx.state.db)) {
     if (project.delivery !== Delivery.PullRequest || !existsSync(project.repoPath)) continue;
     try {
       const stray = await strayBranchesOf(ctx, project);

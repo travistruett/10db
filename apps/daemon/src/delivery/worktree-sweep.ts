@@ -13,7 +13,7 @@ import {
   deleteAppSetting,
   getBatch,
   getChat,
-  listProjects,
+  listActiveProjects,
   setChatWork,
   type ChatRow,
 } from '@10db/db';
@@ -357,7 +357,7 @@ async function sweepProject(deps: SweepDeps, project: ProjectDto): Promise<strin
  */
 export async function sweepWorktrees(deps: SweepDeps): Promise<string[]> {
   const swept: string[] = [];
-  for (const project of listProjects(deps.state.db)) {
+  for (const project of listActiveProjects(deps.state.db)) {
     if (!existsSync(project.repoPath)) continue;
     try {
       swept.push(...(await sweepProject(deps, project)));

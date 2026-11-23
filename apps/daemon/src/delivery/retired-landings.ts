@@ -8,7 +8,7 @@ import {
   type TaskDto,
   type TaskLanding,
 } from '@10db/contracts';
-import { listBatches, listProjects, listTasks, resetTaskLanding } from '@10db/db';
+import { listBatches, listActiveProjects, listTasks, resetTaskLanding } from '@10db/db';
 import type { DeliveryNotice } from './cards';
 import { networkCall, postIn, type DeliveryContext } from './context';
 import { CardTier } from '../inbox';
@@ -58,7 +58,7 @@ export async function moveRetiredLandings(
   signal: AbortSignal,
 ): Promise<TaskDto[]> {
   const movedAll: TaskDto[] = [];
-  for (const project of listProjects(ctx.state.db)) {
+  for (const project of listActiveProjects(ctx.state.db)) {
     if (project.delivery !== Delivery.PullRequest) continue;
     const byBranch = branchLandings(project, listTasks(ctx.state.db, project.id));
     if (byBranch.size === 0) continue;
