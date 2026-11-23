@@ -72,11 +72,40 @@
         ],
         "additionalProperties": false
       }
+    },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^(?:claude_json|codex_config|plugin:[A-Za-z0-9%._~!*'()-]+):[A-Za-z0-9%._~!*'()-]+$"
+      }
+    },
+    "ownClaudeCode": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "pattern": "^acc_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "accountLabel": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "accountId",
+          "accountLabel"
+        ],
+        "additionalProperties": false
+      }
     }
   },
   "required": [
     "rows",
-    "terminal"
+    "terminal",
+    "candidates",
+    "ownClaudeCode"
   ],
   "additionalProperties": false
 }

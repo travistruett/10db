@@ -34,7 +34,7 @@ export const SIGN_IN_STATUS_TTL_MS = 60_000;
 
 const UNREADABLE = "Couldn't read whether it's signed in.";
 
-/** A server of the builder's that may sign in with OAuth: remote, approved, and sending no headers. */
+/** A server of the builder's that may sign in with OAuth: remote, approved, and sending no Authorization header. */
 export interface SignInCandidate {
   readonly key: YourMcpServerKey;
   readonly name: string;
@@ -42,17 +42,27 @@ export interface SignInCandidate {
   readonly server: YourSessionServer;
 }
 
-/** The planned servers a sign-in can matter for: remote ones that send no headers, in plan order. */
+/**
+ * Whether a server's headers carry its own credential. Only that rules a sign-in out: other headers (Figma's
+ * plugin bundle label) say nothing about how it signs in.
+ */
+function sendsAuthorization(headers: Readonly<Record<string, string>> | null): boolean {
+  return (
+    headers !== null && Object.keys(headers).some((name) => name.toLowerCase() === 'authorization')
+  );
+}
+
+/** The planned servers a sign-in can matter for: remote ones that send no Authorization header, in plan order. */
 function signInCandidates(plan: Pick<YourMcpPlan, 'remote'>): SignInCandidate[] {
   return Object.entries(plan.remote).flatMap(([name, remote]) =>
-    remote.headers === null
+    !sendsAuthorization(remote.headers)
       ? [
           {
             key: remote.key,
             name,
             url: remote.url,
             server: {
-              connect: { type: remote.type, url: remote.url, headers: null },
+              connect: { type: remote.type, url: remote.url, headers: remote.headers },
               claudeName: remote.claudeName,
               claudeOAuth: remote.oauth,
               codex: remote.codex,
@@ -220,8 +230,12 @@ export function createMcpSignIns(deps: {
 
   const list = async (): Promise<McpSignInsDto> => {
     const candidates = signInCandidates(deps.plan());
-    if (candidates.length === 0) return { rows: [], terminal: [] };
+    if (candidates.length === 0)
+      return { rows: [], terminal: [], candidates: [], ownClaudeCode: [] };
     const accounts = listAccounts(db);
+    // The login shell's own folder is the default account's, which signs in in the builder's Claude Code.
+    const ownFolder = (configDir: string | null): boolean =>
+      configDir === null || configDir === deps.launcher.loginConfigDir();
     const codex = accounts.filter((account) => harnessOf(account) === Provider.Codex);
     const reads = await Promise.all(codex.map((account) => statusOf(account.id, candidates)));
     return {
@@ -232,8 +246,7 @@ export function createMcpSignIns(deps: {
       terminal: accounts.flatMap((account) =>
         account.kind === AccountKind.ClaudeSubscription &&
         account.configDir !== null &&
-        // The login shell's own folder is the default account's, which signs in in the builder's Claude Code.
-        account.configDir !== deps.launcher.loginConfigDir()
+        !ownFolder(account.configDir)
           ? [
               {
                 accountId: account.id,
@@ -241,6 +254,12 @@ export function createMcpSignIns(deps: {
                 command: claudeMcpSignInCommand(account.configDir),
               },
             ]
+          : [],
+      ),
+      candidates: candidates.map((candidate) => candidate.key),
+      ownClaudeCode: accounts.flatMap((account) =>
+        account.kind === AccountKind.ClaudeSubscription && ownFolder(account.configDir)
+          ? [{ accountId: account.id, accountLabel: account.label }]
           : [],
       ),
     };

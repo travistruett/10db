@@ -2,6 +2,7 @@ import {
   McpSignInState,
   YourMcpServerState,
   YourMcpSource,
+  type McpSignInOwnClaudeDto,
   type McpSignInRowDto,
   type McpSignInTerminalDto,
   type YourMcpServerDto,
@@ -135,9 +136,12 @@ function TerminalEntry({ entry }: { readonly entry: McpSignInTerminalDto }) {
 function ServerText({
   server,
   signIns,
+  ownClaudeCode,
 }: {
   readonly server: YourMcpServerDto;
   readonly signIns: readonly McpSignInRowDto[];
+  /** The default-folder Claude plan accounts, when the server is one a sign-in matters for. */
+  readonly ownClaudeCode: readonly McpSignInOwnClaudeDto[];
 }) {
   const codexUnused = server.oauth
     .map((entry) => entry.name)
@@ -179,6 +183,12 @@ function ServerText({
       )}
       {signIns.map((row) => (
         <SignInLine key={row.accountId} row={row} />
+      ))}
+      {ownClaudeCode.map((account) => (
+        // 10db holds no sign-in state for these: Claude Code keeps it in its own store.
+        <Text key={account.accountId} size="xs" c="dimmed">
+          {account.accountLabel}: Signs in through your own Claude Code (<Code>/mcp</Code>)
+        </Text>
       ))}
       {server.headerNames.length === 0 ? null : (
         <Text size="xs" c="dimmed">
@@ -299,6 +309,11 @@ export function YourMcpServers() {
               <ServerText
                 server={server}
                 signIns={(signIns.data?.rows ?? []).filter((row) => row.key === server.key)}
+                ownClaudeCode={
+                  signIns.data?.candidates.includes(server.key) === true
+                    ? signIns.data.ownClaudeCode
+                    : []
+                }
               />
             }
           >
