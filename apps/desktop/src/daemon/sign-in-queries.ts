@@ -20,8 +20,9 @@ export const LINEAR_SIGN_INS_KEY = ['sign-ins', 'linear'] as const;
 export const FIGMA_SIGN_INS_KEY = ['sign-ins', 'figma'] as const;
 
 /** Under the Slack key, so a token change or a Slack connection event refetches a project's binding too. */
+export const PROJECT_INTEGRATIONS_KEY = [...SLACK_KEY, 'project'] as const;
 const projectIntegrationsKey = (projectId: ProjectId) =>
-  [...SLACK_KEY, 'project', projectId] as const;
+  [...PROJECT_INTEGRATIONS_KEY, projectId] as const;
 
 /** The GitHub login a project uses and its Slack workspace. */
 export function useProjectIntegrations(projectId: ProjectId) {

@@ -168,9 +168,27 @@ export function createTrustServices(deps: {
       loginEnv: deps.loginEnv(),
       localBinding: getProject(db, projectId).sandboxLoopback,
     });
+    const used = new Set(entries.flatMap((e) => (e.pluginId === null ? [] : [e.pluginId])));
+    const off = installedPlugins(deps.builderHome).filter((plugin) => !used.has(plugin.id));
+    const offEntries =
+      off.length === 0
+        ? []
+        : readYourMcpConfig({
+            home: deps.builderHome,
+            laneWritable: writableRoots().map((root) => root.path),
+            plugins: off,
+          }).entries;
     return {
       servers,
       on: switches.yourMcpServers,
+      offPluginServers: offEntries.flatMap((entry) => {
+        const plugin = off.find((p) => p.id === entry.pluginId);
+        return plugin === undefined ||
+          entry.declared === null ||
+          entry.declared.transport === 'stdio'
+          ? []
+          : [{ pluginName: plugin.name, url: entry.declared.url }];
+      }),
       loaded: Object.fromEntries(
         Object.entries(plan.remote).map(([name, remote]) => [name, remote.key]),
       ),
