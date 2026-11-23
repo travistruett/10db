@@ -20,9 +20,10 @@ import {
   type ProjectId,
   type TaskId,
 } from '@10db/contracts';
-import { and, asc, desc, eq, gte, isNotNull, isNull, ne, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import { insertItem, listItems } from './conversation-items';
+import { ofActiveProject } from './projects';
 import type { DbReader, WriteContext } from './store';
 
 // Sessions spec §7.1, §9.1: a chat's row (a tab of its own over a conversation), its place in the
@@ -82,6 +83,28 @@ export function chatOfConversation(db: DbReader, conversationId: ConversationId)
     db.select().from(schema.chats).where(eq(schema.chats.conversationId, conversationId)).get() ??
     null
   );
+}
+
+/** The project's chats whose conversation has an agent session starting, running, waiting on a card or stopping. */
+export function chatsWithLiveSession(db: DbReader, projectId: ProjectId): ChatRow[] {
+  return db
+    .select({ chat: schema.chats })
+    .from(schema.chats)
+    .innerJoin(schema.conversations, eq(schema.conversations.id, schema.chats.conversationId))
+    .where(
+      and(
+        eq(schema.chats.projectId, projectId),
+        isNull(schema.chats.archivedAt),
+        inArray(schema.conversations.state, [
+          ConversationState.Starting,
+          ConversationState.Running,
+          ConversationState.WaitingCard,
+          ConversationState.Stopping,
+        ]),
+      ),
+    )
+    .all()
+    .map((r) => r.chat);
 }
 
 /** The project's open chats whose conversation is taken over, so their agent runs in the builder's terminal. */
@@ -575,7 +598,7 @@ export function searchChats(
   const rows = db
     .select()
     .from(schema.chats)
-    .where(and(match, after))
+    .where(and(match, after, ofActiveProject(schema.chats.projectId)))
     .orderBy(sql`${at} IS NULL`, desc(at), desc(schema.chats.id))
     .limit(q.limit + 1)
     .all();

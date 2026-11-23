@@ -3,6 +3,7 @@ import { insertInboxItem, listInbox } from './inbox';
 import {
   archiveProject,
   getProject,
+  listActiveProjects,
   listArchivedProjects,
   listProjects,
   restoreProject,
@@ -47,7 +48,9 @@ describe('archiving a project', () => {
     store.write((ctx) => {
       archiveProject(ctx, gone.id);
     });
-    expect(listProjects(store.db).map((p) => p.id)).toEqual([keep.id]);
+    expect(listActiveProjects(store.db).map((p) => p.id)).toEqual([keep.id]);
+    // The guards that read every checkout still see it.
+    expect(listProjects(store.db).map((p) => p.id)).toEqual([gone.id, keep.id]);
     expect(listArchivedProjects(store.db).map((p) => p.id)).toEqual([gone.id]);
     expect(getProject(store.db, gone.id).archivedAt).not.toBeNull();
     expect(listInbox(store.db).map((i) => i.projectId)).toEqual([keep.id]);
@@ -56,7 +59,7 @@ describe('archiving a project', () => {
     store.write((ctx) => {
       restoreProject(ctx, gone.id);
     });
-    expect(listProjects(store.db).map((p) => p.id)).toEqual([gone.id, keep.id]);
+    expect(listActiveProjects(store.db).map((p) => p.id)).toEqual([gone.id, keep.id]);
     expect(listArchivedProjects(store.db)).toEqual([]);
     expect(listInbox(store.db)).toHaveLength(2);
   });

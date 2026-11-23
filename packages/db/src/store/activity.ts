@@ -8,6 +8,7 @@ import {
 import { and, desc, eq, lt, sql, type SQL } from 'drizzle-orm';
 import * as schema from '../schema';
 import { groupNotices, type PostedNotice } from './activity-group';
+import { ofActiveProject } from './projects';
 import type { DbReader } from './store';
 
 const events = schema.events;
@@ -26,6 +27,14 @@ function filterOf(q: ActivityPageQuery): SQL[] {
       sql`((${events.entityType} = 'project' AND ${events.entityId} = ${q.project})
         OR (${events.entityType} = 'task' AND ${events.entityId} IN
           (SELECT ${schema.tasks.id} FROM ${schema.tasks} WHERE ${schema.tasks.projectId} = ${q.project})))`,
+    );
+  } else {
+    // The all-projects list leaves out an archived project's notices and its tasks'.
+    where.push(
+      sql`NOT ((${events.entityType} = 'project' AND ${events.entityId} IN
+          (SELECT ${schema.projects.id} FROM ${schema.projects} WHERE ${schema.projects.archivedAt} IS NOT NULL))
+        OR (${events.entityType} = 'task' AND ${events.entityId} IN
+          (SELECT ${schema.tasks.id} FROM ${schema.tasks} WHERE NOT ${ofActiveProject(schema.tasks.projectId)})))`,
     );
   }
   if (q.q !== undefined) {

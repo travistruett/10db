@@ -24,7 +24,8 @@ import {
   type ProjectId,
   type ProjectViewDto,
 } from '@10db/contracts';
-import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull, sql, type SQL } from 'drizzle-orm';
+import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import * as schema from '../schema';
 import { defaultAccountId, getAccountRow, refuseAccountWithoutHarness } from './accounts';
 import { currentBatch, findUnfinishedBatch, listUnfinishedBatches } from './batches';
@@ -109,14 +110,27 @@ export function getProject(db: DbReader, id: ProjectDto['id']): ProjectDto {
   return row;
 }
 
-/** Live projects only: an archived project is out of every list and every background job. */
+/**
+ * Every project, archived ones included. What guards a checkout (the sandbox's write-deny and trust
+ * lists) reads this, so an archived project's folder stays protected.
+ */
 export function listProjects(db: DbReader): ProjectDto[] {
+  return db.select().from(schema.projects).orderBy(asc(schema.projects.name)).all();
+}
+
+/** Projects the builder sees and 10db works on: archived ones are left out. */
+export function listActiveProjects(db: DbReader): ProjectDto[] {
   return db
     .select()
     .from(schema.projects)
     .where(isNull(schema.projects.archivedAt))
     .orderBy(asc(schema.projects.name))
     .all();
+}
+
+/** The condition that leaves out rows of archived projects, for a cross-project query over `projectId`. */
+export function ofActiveProject(projectId: SQLiteColumn): SQL {
+  return sql`${projectId} not in (select ${schema.projects.id} from ${schema.projects} where ${schema.projects.archivedAt} is not null)`;
 }
 
 export function listArchivedProjects(db: DbReader): ProjectDto[] {
@@ -333,12 +347,12 @@ export function setMoveBack(
 
 /** The projects 10db is to offer the way back to an account they left. */
 export function listMoveBacks(db: DbReader): ProjectDto[] {
-  return listProjects(db).filter((p) => p.movedFromAccountId !== null);
+  return listActiveProjects(db).filter((p) => p.movedFromAccountId !== null);
 }
 
 /** `GET /projects`: each project with the batch its view shows. */
 export function listProjectViews(db: DbReader): ProjectViewDto[] {
-  return listProjects(db).map((p) => ({
+  return listActiveProjects(db).map((p) => ({
     ...p,
     currentBatch: currentBatch(db, p.id),
     openBatches: listUnfinishedBatches(db, p.id),
