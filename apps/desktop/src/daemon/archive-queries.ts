@@ -19,18 +19,17 @@ export function useArchivedProjects() {
 }
 
 /** Archiving or restoring moves every list that spans projects, not only the project lists. */
-function invalidateAcrossProjects(queryClient: QueryClient): Promise<unknown> {
-  return Promise.all(
-    [
-      queryKeys.projects,
-      queryKeys.inbox,
-      ['inbox-rows'],
-      chatKeys.all,
-      ['workstreams'],
-      ['tasks'],
-      activityKeys.all,
-    ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
-  );
+function invalidateAcrossProjects(queryClient: QueryClient): void {
+  for (const queryKey of [
+    queryKeys.projects,
+    queryKeys.inbox,
+    ['inbox-rows'],
+    chatKeys.all,
+    ['workstreams'],
+    ['tasks'],
+    activityKeys.all,
+  ])
+    void queryClient.invalidateQueries({ queryKey });
 }
 
 /** Archives a project; a refusal throws with the daemon's message, which names what is still running. */
@@ -45,7 +44,9 @@ export function useArchiveProject(projectId: ProjectId) {
         z.unknown(),
       );
     },
-    onSuccess: () => invalidateAcrossProjects(queryClient),
+    onSuccess: () => {
+      invalidateAcrossProjects(queryClient);
+    },
   });
 }
 
@@ -59,6 +60,8 @@ export function useRestoreProject() {
         z.unknown(),
       );
     },
-    onSuccess: () => invalidateAcrossProjects(queryClient),
+    onSuccess: () => {
+      invalidateAcrossProjects(queryClient);
+    },
   });
 }
