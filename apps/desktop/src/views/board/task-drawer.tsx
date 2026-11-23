@@ -299,6 +299,7 @@ export function TaskDrawer({
       opened
       onClose={requestClose}
       label="Task"
+      closeOnClickOutside
       actions={<TaskLinks task={task} batch={batch} batches={batches} />}
     >
       <Stack gap="md">

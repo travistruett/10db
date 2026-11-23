@@ -14,8 +14,11 @@ const FULL_UNDER_PX = 640;
 /**
  * A slide-out drawer from the content surface's right edge: half the surface (480 to 760 px, all of it
  * when the surface is under 640), in the surface's own tone with a hairline left edge. It is not modal:
- * the view beside it stays usable, and a click outside leaves it open. Esc while focus is inside it, or
- * its close button, closes it. It slides in over 150 ms, or appears at once with reduced motion.
+ * the view beside it stays usable. A click outside leaves it open unless `closeOnClickOutside` is set;
+ * then a press on the content beside it closes it, except on an element marked `data-keeps-drawer` (a
+ * card that opens its own drawer) or anything outside the content (menus, dialogs, the sidebar). Esc
+ * while focus is inside it, or its close button, closes it. It slides in over 150 ms, or appears at once
+ * with reduced motion.
  */
 export function SurfaceDrawer({
   opened,
@@ -24,6 +27,7 @@ export function SurfaceDrawer({
   closeLabel = 'Close',
   widthPx,
   actions,
+  closeOnClickOutside = false,
   children,
 }: {
   readonly opened: boolean;
@@ -36,6 +40,8 @@ export function SurfaceDrawer({
   readonly widthPx?: number;
   /** Icon buttons for what the drawer shows (links out, copy), on its top edge before the close button. */
   readonly actions?: ReactNode;
+  /** A press on the content beside the drawer closes it. */
+  readonly closeOnClickOutside?: boolean;
   readonly children: ReactNode;
 }): ReactNode {
   const { drawerHost } = useFrameSlots();
@@ -52,6 +58,22 @@ export function SurfaceDrawer({
     };
     // The drawer's element is drawn again once the frame's layer is there, so focus follows it.
   }, [opened, drawerHost]);
+
+  useEffect(() => {
+    if (!opened || !closeOnClickOutside) return;
+    const onPointerDown = (event: PointerEvent): void => {
+      // The drawer sits in its layer, in the frame's drawer host, beside the view in the content box.
+      const content = drawer.current?.parentElement?.parentElement?.parentElement;
+      const target = event.target;
+      if (!(target instanceof Element) || !content?.contains(target)) return;
+      if (drawer.current?.contains(target) || target.closest('[data-keeps-drawer]')) return;
+      onClose();
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+    };
+  }, [opened, closeOnClickOutside, onClose]);
 
   if (!opened) return null;
 

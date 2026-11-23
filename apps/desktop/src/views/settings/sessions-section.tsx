@@ -1,5 +1,5 @@
 import { TerminalApp, TerminalAppSchema } from '@10db/contracts';
-import { Group, SegmentedControl, Switch } from '@mantine/core';
+import { Group, Select, Switch } from '@mantine/core';
 import {
   useSessionsSettings,
   useSetSessionsSettings,
@@ -43,11 +43,13 @@ export function SessionsSection() {
           </HelpText>
         }
       >
-        <SegmentedControl
+        <Select
           aria-label="Open Sessions In"
           data={TERMINAL_CHOICES.map((choice) => ({ ...choice }))}
           value={settings.data?.terminalApp ?? TerminalApp.Terminal}
           disabled={settings.data === undefined}
+          allowDeselect={false}
+          checkIconPosition="right"
           onChange={(value) => {
             const app = TerminalAppSchema.safeParse(value);
             if (app.success) set.mutate({ terminalApp: app.data });

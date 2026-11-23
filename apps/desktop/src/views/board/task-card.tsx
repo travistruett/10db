@@ -186,6 +186,7 @@ export function TaskCard({
       shadow="xs"
       bg="var(--tendb-color-card)"
       data-testid="task-card"
+      data-keeps-drawer
       {...(colored ? { 'data-state-color': state.color } : {})}
       style={
         colored

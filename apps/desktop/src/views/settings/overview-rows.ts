@@ -245,16 +245,14 @@ export type Summary =
   | { readonly kind: 'ok'; readonly count: number }
   | {
       readonly kind: 'needs';
-      readonly names: readonly string[];
-      readonly ids: readonly string[];
+      readonly rows: readonly OverviewRow[];
     };
 
 /** "Is anything broken?": waits for every row, counts a failed read as needing the builder, skips rows that are off. */
 export function summarise(rows: readonly OverviewRow[]): Summary {
   if (rows.some((row) => row.state.kind === 'loading')) return { kind: 'loading' };
   const needs = rows.filter(needsBuilder);
-  if (needs.length > 0)
-    return { kind: 'needs', names: needs.map((r) => r.name), ids: needs.map((r) => r.id) };
+  if (needs.length > 0) return { kind: 'needs', rows: needs };
   const counted = rows.filter(
     (row) => row.state.kind === 'ready' && row.state.tone !== ConnectionTone.Off,
   );

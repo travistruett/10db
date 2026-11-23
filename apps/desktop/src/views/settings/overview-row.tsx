@@ -49,11 +49,13 @@ export function OverviewRowView({ row }: { readonly row: OverviewRow }) {
   return (
     <Box ref={ref}>
       <UnstyledButton
-        display="block"
+        // A flex box, so a row with one line sits in the middle of its height rather than at the top.
+        display="flex"
         w="100%"
         px="md"
         py="sm"
         mih={ROW_HEIGHT}
+        style={{ alignItems: 'center' }}
         renderRoot={(props) => (
           <Link
             {...props}
@@ -63,7 +65,7 @@ export function OverviewRowView({ row }: { readonly row: OverviewRow }) {
           />
         )}
       >
-        <Group gap="md" wrap="nowrap" align="flex-start">
+        <Group gap="md" wrap="nowrap" align="flex-start" flex={1} miw={0}>
           <Name row={row} />
           <Stack gap={2} style={{ flex: 1 }} miw={0}>
             <ConnectionStatus tone={state.tone} label={state.label} />

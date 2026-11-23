@@ -46,7 +46,7 @@ export function useImportFromLinear(projectId: ProjectId) {
   });
 }
 
-/** Report To Linear and How To Update Linear: saves the project's reporter settings. */
+/** Update Linear Issues and How To Update Linear: saves the project's reporter settings. */
 export function useSetLinearReporter(projectId: ProjectId) {
   const { client } = useDaemon();
   const queryClient = useQueryClient();

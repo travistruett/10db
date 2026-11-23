@@ -175,7 +175,7 @@ export function attemptOf(db: DbReader, workstreamId: WorkstreamId): number {
 
 /** Why the project doesn't report (switched off, Your MCP servers off), or null. */
 export function reporterBlockedBy(db: DbReader, projectId: ProjectId): string | null {
-  if (!reporterSettings(db, projectId).on) return 'Off: Report To Linear is off.';
+  if (!reporterSettings(db, projectId).on) return 'Off: Update Linear Issues is off.';
   if (!trustSwitchesFor(db, projectId, () => undefined).yourMcpServers)
     return 'Off: Your MCP servers is off in Trust.';
   return null;
