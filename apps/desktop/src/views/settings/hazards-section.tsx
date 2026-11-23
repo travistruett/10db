@@ -19,9 +19,20 @@ export function HazardsSection({ project }: { readonly project: ProjectDto }) {
   const [removing, setRemoving] = useState<Hazard | null>(null);
   const remove = useListPatch(project);
   const look = useLookAgainAtHazards(project.id);
-  const open = (hazard: Hazard) => {
-    setAdding(false);
-    setEditing(hazard);
+  // Unsaved edits in the open drawer, and the row asked for while they stand.
+  const [dirty, setDirty] = useState(false);
+  const [switchTo, setSwitchTo] = useState<{ readonly to: Hazard | null } | null>(null);
+  const show = (to: Hazard | null) => {
+    setDirty(false);
+    setAdding(to === null);
+    setEditing(to);
+  };
+  const request = (to: Hazard | null) => {
+    if (dirty && (adding || editing !== null) && editing?.name !== to?.name) setSwitchTo({ to });
+    else show(to);
+  };
+  const open = (row: Hazard) => {
+    request(row);
   };
   const columns: DataTableColumn<Hazard>[] = [
     {
@@ -97,8 +108,7 @@ export function HazardsSection({ project }: { readonly project: ProjectDto }) {
             </Button>
             <Button
               onClick={() => {
-                setEditing(null);
-                setAdding(true);
+                request(null);
               }}
             >
               Add Hazard
@@ -130,12 +140,29 @@ export function HazardsSection({ project }: { readonly project: ProjectDto }) {
           key={editing?.name ?? 'new'}
           project={project}
           hazard={editing}
+          onDirty={setDirty}
           onClose={() => {
             setAdding(false);
             setEditing(null);
           }}
         />
       ) : null}
+      <ConfirmModal
+        opened={switchTo !== null}
+        title="Discard Changes"
+        confirmLabel="Discard"
+        cancelLabel="Keep Editing"
+        destructive
+        onCancel={() => {
+          setSwitchTo(null);
+        }}
+        onConfirm={() => {
+          if (switchTo !== null) show(switchTo.to);
+          setSwitchTo(null);
+        }}
+      >
+        {`Discard your changes to ${editing?.name ?? 'the new hazard'}?`}
+      </ConfirmModal>
       <ConfirmModal
         opened={removing !== null}
         title="Remove Hazard"

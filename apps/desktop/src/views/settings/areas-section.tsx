@@ -42,9 +42,20 @@ export function AreasSection({ project }: { readonly project: ProjectDto }) {
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<Area | null>(null);
   const remove = useListPatch(project);
-  const open = (area: Area) => {
-    setAdding(false);
-    setEditing(area);
+  // Unsaved edits in the open drawer, and the row asked for while they stand.
+  const [dirty, setDirty] = useState(false);
+  const [switchTo, setSwitchTo] = useState<{ readonly to: Area | null } | null>(null);
+  const show = (to: Area | null) => {
+    setDirty(false);
+    setAdding(to === null);
+    setEditing(to);
+  };
+  const request = (to: Area | null) => {
+    if (dirty && (adding || editing !== null) && editing?.name !== to?.name) setSwitchTo({ to });
+    else show(to);
+  };
+  const open = (row: Area) => {
+    request(row);
   };
   const columns: DataTableColumn<Area>[] = [
     {
@@ -77,6 +88,9 @@ export function AreasSection({ project }: { readonly project: ProjectDto }) {
         <RowActions
           noun="area"
           name={area.name}
+          {...(project.areas.length <= 1
+            ? { removeBlocked: 'A project keeps at least one area' }
+            : {})}
           onEdit={() => {
             open(area);
           }}
@@ -108,8 +122,7 @@ export function AreasSection({ project }: { readonly project: ProjectDto }) {
         action={
           <Button
             onClick={() => {
-              setEditing(null);
-              setAdding(true);
+              request(null);
             }}
           >
             Add Area
@@ -140,12 +153,29 @@ export function AreasSection({ project }: { readonly project: ProjectDto }) {
           key={editing?.name ?? 'new'}
           project={project}
           area={editing}
+          onDirty={setDirty}
           onClose={() => {
             setAdding(false);
             setEditing(null);
           }}
         />
       ) : null}
+      <ConfirmModal
+        opened={switchTo !== null}
+        title="Discard Changes"
+        confirmLabel="Discard"
+        cancelLabel="Keep Editing"
+        destructive
+        onCancel={() => {
+          setSwitchTo(null);
+        }}
+        onConfirm={() => {
+          if (switchTo !== null) show(switchTo.to);
+          setSwitchTo(null);
+        }}
+      >
+        {`Discard your changes to ${editing?.name ?? 'the new area'}?`}
+      </ConfirmModal>
       <ConfirmModal
         opened={removing !== null}
         title="Remove Area"

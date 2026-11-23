@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, Code, Group, Stack, Text, Tooltip } from '@mantine/core';
+import { ActionIcon, Alert, Badge, Button, Code, Group, Stack, Text, Tooltip } from '@mantine/core';
 import { IconPencil, IconTrash } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { describePathPattern } from './path-pattern';
@@ -60,11 +60,14 @@ export function RowActions({
   name,
   onEdit,
   onRemove,
+  removeBlocked,
 }: {
   readonly noun: 'area' | 'hazard';
   readonly name: string;
   readonly onEdit: () => void;
   readonly onRemove: () => void;
+  /** Why Remove is off, when it is. */
+  readonly removeBlocked?: string;
 }) {
   return (
     <Group gap={4} wrap="nowrap" justify="flex-end">
@@ -81,19 +84,43 @@ export function RowActions({
           <IconPencil size={16} aria-hidden />
         </ActionIcon>
       </Tooltip>
-      <Tooltip label={`Remove ${noun}`}>
-        <ActionIcon
-          variant="subtle"
-          color="gray"
-          aria-label={`Remove ${noun} ${name}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-        >
-          <IconTrash size={16} aria-hidden />
-        </ActionIcon>
+      <Tooltip label={removeBlocked ?? `Remove ${noun}`}>
+        {/* A disabled button gets no pointer events, so the tooltip hangs on its wrapper. */}
+        <span>
+          <ActionIcon
+            variant="subtle"
+            color="gray"
+            aria-label={`Remove ${noun} ${name}`}
+            disabled={removeBlocked !== undefined}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove();
+            }}
+          >
+            <IconTrash size={16} aria-hidden />
+          </ActionIcon>
+        </span>
       </Tooltip>
     </Group>
+  );
+}
+
+/** Said in a drawer when its row was changed elsewhere while it was open. */
+export function ChangedAlert({
+  noun,
+  onShowLatest,
+}: {
+  readonly noun: 'area' | 'hazard';
+  readonly onShowLatest: () => void;
+}) {
+  return (
+    <Alert color="yellow" title={`This ${noun} changed`}>
+      <Group justify="space-between" wrap="nowrap" align="center">
+        <Text size="sm">{`It changed while you were editing, so nothing was saved. Showing the latest replaces your edits.`}</Text>
+        <Button variant="default" size="compact-sm" onClick={onShowLatest}>
+          Show the Latest
+        </Button>
+      </Group>
+    </Alert>
   );
 }

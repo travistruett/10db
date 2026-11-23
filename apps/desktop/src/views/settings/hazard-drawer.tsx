@@ -1,10 +1,10 @@
 import type { ProjectDto } from '@10db/contracts';
 import { Alert, Button, Checkbox, Group, Stack, Textarea, TextInput } from '@mantine/core';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { SurfaceDrawer } from '../../shell/surface-drawer';
-import { EMPTY_HAZARD, hazardDraft, hazardOf, lines, type HazardDraft } from './area-drafts';
+import { EMPTY_HAZARD, hazardDraft, hazardOf, lines, type HazardDraft } from './list-drafts';
 import { HelpHint } from './help-hint';
-import { PathMeanings } from './table-cells';
+import { ChangedAlert, PathMeanings } from './table-cells';
 import { useListPatch } from './use-list-patch';
 
 type StoredHazard = ProjectDto['hazards'][number];
@@ -17,27 +17,51 @@ export function HazardDrawer({
   project,
   hazard,
   onClose,
+  onDirty,
 }: {
   readonly project: ProjectDto;
   readonly hazard: StoredHazard | null;
   readonly onClose: () => void;
+  /** Told whether the draft differs from the row as it was opened. */
+  readonly onDirty: (dirty: boolean) => void;
 }) {
   const [draft, setDraft] = useState<HazardDraft>(() =>
     hazard === null ? EMPTY_HAZARD : hazardDraft(hazard),
   );
-  const { save, saving, problem } = useListPatch(project);
+  const { save, saving, problem, clear } = useListPatch(project);
   const [gone, setGone] = useState(false);
+  // The row as it was when the drawer opened (or last showed the latest); a save is refused when it differs.
+  const [base, setBase] = useState(hazard);
+  const [changed, setChanged] = useState(false);
+  const dirty =
+    JSON.stringify(draft) !== JSON.stringify(base === null ? EMPTY_HAZARD : hazardDraft(base));
+  useEffect(() => {
+    onDirty(dirty);
+  }, [dirty, onDirty]);
+  useEffect(
+    () => () => {
+      onDirty(false);
+    },
+    [onDirty],
+  );
   const change = (next: Partial<HazardDraft>) => {
+    clear();
     setDraft((d) => ({ ...d, ...next }));
   };
   const submit = () => {
     const next = hazardOf(draft);
-    const index = hazard === null ? -1 : project.hazards.findIndex((h) => h.name === hazard.name);
-    if (hazard !== null && index < 0) {
+    const index = base === null ? -1 : project.hazards.findIndex((x) => x.name === base.name);
+    if (base !== null && index < 0) {
       setGone(true);
       return;
     }
+    const current = project.hazards[index];
+    if (base !== null && JSON.stringify(current) !== JSON.stringify(base)) {
+      setChanged(true);
+      return;
+    }
     setGone(false);
+    setChanged(false);
     save(
       {
         hazards:
@@ -46,7 +70,16 @@ export function HazardDrawer({
             : project.hazards.map((h, i) => (i === index ? next : h)),
       },
       onClose,
+      next.name,
     );
+  };
+  const showLatest = () => {
+    const current = project.hazards.find((x) => x.name === base?.name);
+    if (current === undefined) return;
+    clear();
+    setBase(current);
+    setDraft(hazardDraft(current));
+    setChanged(false);
   };
   return (
     <SurfaceDrawer
@@ -106,6 +139,7 @@ export function HazardDrawer({
             something every copy shares, such as a database or a port.
           </HelpHint>
         </Group>
+        {changed ? <ChangedAlert noun="hazard" onShowLatest={showLatest} /> : null}
         {gone ? (
           <Alert color="yellow" title="This hazard changed">
             It was renamed or removed while this was open. Close this and open it again.

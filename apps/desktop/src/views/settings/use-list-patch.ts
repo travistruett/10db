@@ -4,10 +4,23 @@ import { useState } from 'react';
 import { queryKeys, usePatchProject } from '../../daemon/queries';
 
 /** The first thing wrong with a patch, in words that name the field. */
-function firstProblem(error: {
-  readonly issues: readonly { path: PropertyKey[]; message: string }[];
-}) {
+function firstProblem(
+  error: { readonly issues: readonly { path: PropertyKey[]; message: string }[] },
+  body: Pick<ProjectPatch, 'areas' | 'hazards'>,
+  editing: string | undefined,
+) {
   const issue = error.issues[0];
+  const list = issue?.path[0];
+  const index = issue?.path[1];
+  const row =
+    typeof index !== 'number'
+      ? undefined
+      : list === 'areas'
+        ? body.areas?.[index]?.name
+        : list === 'hazards'
+          ? body.hazards?.[index]?.name
+          : undefined;
+  const noun = list === 'areas' ? 'Area' : 'Hazard';
   const field = issue?.path[2];
   const where =
     field === 'globs'
@@ -21,7 +34,8 @@ function firstProblem(error: {
             : field === 'commands'
               ? 'Commands'
               : 'Areas and Hazards';
-  return `${where}: ${issue?.message ?? 'is not valid'}`;
+  const prefix = row !== undefined && row !== editing ? `${noun} ${row}: ` : '';
+  return `${prefix}${where}: ${issue?.message ?? 'is not valid'}`;
 }
 
 /**
@@ -33,10 +47,15 @@ export function useListPatch(project: ProjectDto) {
   const patch = usePatchProject(project.id);
   const queryClient = useQueryClient();
   const [problem, setProblem] = useState<string | null>(null);
-  const save = (body: Pick<ProjectPatch, 'areas' | 'hazards'>, onSaved: () => void) => {
+  const save = (
+    body: Pick<ProjectPatch, 'areas' | 'hazards'>,
+    onSaved: () => void,
+    /** The name of the row being edited, whose own faults need no prefix. */
+    editing?: string,
+  ) => {
     const parsed = ProjectPatch.safeParse(body);
     if (!parsed.success) {
-      setProblem(firstProblem(parsed.error));
+      setProblem(firstProblem(parsed.error, body, editing));
       return;
     }
     setProblem(null);

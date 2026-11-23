@@ -1,11 +1,11 @@
 import type { ProjectDto } from '@10db/contracts';
 import { Alert, Button, Checkbox, Group, Stack, Textarea, TextInput } from '@mantine/core';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { SurfaceDrawer } from '../../shell/surface-drawer';
 import { AreaRoleFields } from './area-role-fields';
-import { areaDraft, areaOf, EMPTY_AREA, lines, type AreaDraft } from './area-drafts';
+import { areaDraft, areaOf, EMPTY_AREA, lines, type AreaDraft } from './list-drafts';
 import { HelpHint } from './help-hint';
-import { PathMeanings } from './table-cells';
+import { ChangedAlert, PathMeanings } from './table-cells';
 import { useListPatch } from './use-list-patch';
 
 type StoredArea = ProjectDto['areas'][number];
@@ -18,17 +18,35 @@ export function AreaDrawer({
   project,
   area,
   onClose,
+  onDirty,
 }: {
   readonly project: ProjectDto;
   readonly area: StoredArea | null;
   readonly onClose: () => void;
+  /** Told whether the draft differs from the row as it was opened. */
+  readonly onDirty: (dirty: boolean) => void;
 }) {
   const [draft, setDraft] = useState<AreaDraft>(() =>
     area === null ? EMPTY_AREA : areaDraft(area),
   );
-  const { save, saving, problem } = useListPatch(project);
+  const { save, saving, problem, clear } = useListPatch(project);
   const [gone, setGone] = useState(false);
+  // The row as it was when the drawer opened (or last showed the latest); a save is refused when it differs.
+  const [base, setBase] = useState(area);
+  const [changed, setChanged] = useState(false);
+  const dirty =
+    JSON.stringify(draft) !== JSON.stringify(base === null ? EMPTY_AREA : areaDraft(base));
+  useEffect(() => {
+    onDirty(dirty);
+  }, [dirty, onDirty]);
+  useEffect(
+    () => () => {
+      onDirty(false);
+    },
+    [onDirty],
+  );
   const change = (next: Partial<AreaDraft>) => {
+    clear();
     setDraft((d) => ({ ...d, ...next }));
   };
   const submit = () => {
@@ -37,18 +55,33 @@ export function AreaDrawer({
     const others = project.areas.map((a) =>
       next.catchAll === true && a.catchAll === true ? { ...a, catchAll: false } : a,
     );
-    const index = area === null ? -1 : project.areas.findIndex((a) => a.name === area.name);
-    if (area !== null && index < 0) {
+    const index = base === null ? -1 : project.areas.findIndex((x) => x.name === base.name);
+    if (base !== null && index < 0) {
       setGone(true);
       return;
     }
+    const current = project.areas[index];
+    if (base !== null && JSON.stringify(current) !== JSON.stringify(base)) {
+      setChanged(true);
+      return;
+    }
     setGone(false);
+    setChanged(false);
     save(
       {
         areas: area === null ? [...others, next] : others.map((a, i) => (i === index ? next : a)),
       },
       onClose,
+      next.name,
     );
+  };
+  const showLatest = () => {
+    const current = project.areas.find((x) => x.name === base?.name);
+    if (current === undefined) return;
+    clear();
+    setBase(current);
+    setDraft(areaDraft(current));
+    setChanged(false);
   };
   return (
     <SurfaceDrawer
@@ -104,6 +137,7 @@ export function AreaDrawer({
           label={draft.label}
           onChange={change}
         />
+        {changed ? <ChangedAlert noun="area" onShowLatest={showLatest} /> : null}
         {gone ? (
           <Alert color="yellow" title="This area changed">
             It was renamed or removed while this was open. Close this and open it again.
