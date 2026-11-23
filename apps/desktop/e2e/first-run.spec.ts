@@ -4,7 +4,7 @@ import { claudeIsInstalled } from './claude-is-installed';
 import { test } from './routed-test';
 import { expectAccessible } from './expect-accessible';
 import { E2E_DIR } from './paths';
-import { createRepository } from './shape-project';
+import { createProject, createRepository } from './shape-project';
 
 // Core flow 1: the first run through to a project on the Board. It runs before every other spec in its
 // shard (files run in name order with one worker), because the first run shows only while the daemon
@@ -14,8 +14,12 @@ import { createRepository } from './shape-project';
 const PROJECT = 'e2e-first-run';
 const REPO = join(E2E_DIR, 'first-run-repo');
 
+// A second project on its own repository, archived and restored at the end of the flow.
+const ARCHIVED = 'e2e-first-run-archive';
+
 test('a fresh install walks Welcome, the setup check and Add a project, and lands on the Board with the project', async ({
   page,
+  request,
 }) => {
   createRepository(REPO, {});
   await claudeIsInstalled(page);
@@ -55,4 +59,31 @@ test('a fresh install walks Welcome, the setup check and Add a project, and land
     'page',
   );
   await expect(page.getByRole('heading', { name: 'Welcome to 10db' })).toBeHidden();
+
+  // Archiving a project takes it out of the switcher; Restore in Settings > Overview brings it back.
+  await createProject(request, ARCHIVED);
+  const archivedOption = page.getByRole('option', { name: new RegExp(ARCHIVED) });
+  const openSwitcher = async () => {
+    await page.getByRole('button', { name: /^Project: .*\. Switch project$/ }).click();
+  };
+  await page.reload();
+  await openSwitcher();
+  await archivedOption.click();
+  await page.goto('/settings/general');
+  await page.getByRole('button', { name: 'Archive', exact: true }).click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Archive', exact: true }).click();
+  await expect(page.getByRole('link', { name: 'Board', exact: true })).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
+  await openSwitcher();
+  await expect(page.getByRole('option', { name: new RegExp(PROJECT) })).toBeVisible();
+  await expect(archivedOption).toHaveCount(0);
+  await page.keyboard.press('Escape');
+
+  await page.goto('/settings/overview');
+  await page.getByRole('button', { name: `Restore ${ARCHIVED}` }).click();
+  await expect(page.getByRole('button', { name: `Restore ${ARCHIVED}` })).toHaveCount(0);
+  await openSwitcher();
+  await expect(archivedOption).toBeVisible();
 });

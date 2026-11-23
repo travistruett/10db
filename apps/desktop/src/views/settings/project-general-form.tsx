@@ -1,6 +1,7 @@
 import { Delivery, ProjectLanding, WorkspaceMode, type ProjectDto } from '@10db/contracts';
 import { NumberInput, SegmentedControl, Select, Stack, TagsInput, TextInput } from '@mantine/core';
 import { asNumber, MONO_INPUT, useProjectFields } from './project-fields-state';
+import { ProjectArchiveCard } from './project-archive-card';
 import { ProjectSaveBar } from './project-save-bar';
 import { SettingRow, SettingsCard } from './setting-row';
 
@@ -353,6 +354,8 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
           />
         </SettingRow>
       </SettingsCard>
+
+      <ProjectArchiveCard project={project} />
 
       <ProjectSaveBar fields={fields} />
     </Stack>

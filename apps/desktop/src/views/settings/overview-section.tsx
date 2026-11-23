@@ -14,6 +14,7 @@ import { useProjects, useSystemCheck } from '../../daemon/queries';
 import { useSelfUpdate } from '../../daemon/self-update-queries';
 import { useNow } from '../../shell/relative';
 import { accountUsedBy } from './accounts/used-by';
+import { ArchivedProjectsCard } from './archived-projects-card';
 import { OverviewRowView } from './overview-row';
 import { PlanMeasures } from './plan-measures';
 import {
@@ -269,6 +270,7 @@ export function OverviewSection() {
           </Stack>
         );
       })}
+      <ArchivedProjectsCard />
       <PlanMeasures />
     </Stack>
   );
