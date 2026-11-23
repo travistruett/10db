@@ -19,9 +19,10 @@ const FIGMA_HOST = 'mcp.figma.com';
 /** What the card says about an account, in plain words. */
 const NOT_SIGNED_IN_CLAUDE = 'Not signed in: run /mcp in Claude Code';
 const NOT_SIGNED_IN_CODEX = 'Not signed in: Settings › Trust';
-const VIA_PLUGIN = "Signed in through Claude Code's Figma plugin";
-const VIA_SERVER = "Signed in through Claude Code's Figma server";
-const VIA_CONNECTOR = 'Signed in through the claude.ai Figma connector';
+// 10db holds no sign-in status for a Claude account, so these say the way in, not that it is signed in.
+const VIA_PLUGIN = "Through Claude Code's Figma plugin; sign in there with /mcp";
+const VIA_SERVER = 'Through your Figma server in Claude Code; sign in there with /mcp';
+const VIA_CONNECTOR = 'Through the claude.ai Figma connector';
 const VIA_CODEX = 'Signed in through Codex';
 const NOT_CHECKED = 'Checked when the agent first uses Figma';
 const NOT_READ = "Couldn't read this account's claude.ai connectors.";
@@ -53,11 +54,12 @@ export function createFigmaSignIns(deps: {
 }): { list(): Promise<FigmaSignInsDto> } {
   return {
     async list() {
-      const servers = Object.entries(deps.plan().remote)
-        .filter(([, remote]) => isFigmaServer(remote.url))
-        .map(([name]) => name);
-      // A plugin's server is registered under `plugin:<plugin>:<server>`.
-      const serverNote = servers.every((name) => name.startsWith('plugin:'))
+      const figma = Object.entries(deps.plan().remote).filter(([, remote]) =>
+        isFigmaServer(remote.url),
+      );
+      const servers = figma.map(([name]) => name);
+      // Only a plugin's server carries a Claude name of its own (`plugin:<plugin>:<server>`).
+      const serverNote = figma.every(([, remote]) => remote.claudeName !== null)
         ? VIA_PLUGIN
         : VIA_SERVER;
       const accounts = listAccounts(deps.state.db).flatMap((account) => {
