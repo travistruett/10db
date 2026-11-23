@@ -1,4 +1,4 @@
-import { mintId, PersonDto, SlackConnectionDto, StakeholderSendDto } from '@10db/contracts';
+import { mintId, PersonDto, SlackStatusDto, StakeholderSendDto } from '@10db/contracts';
 
 const AT = '2026-10-13T12:00:00.000Z';
 
@@ -30,15 +30,27 @@ export function slackContact(
 
 export const BUILDER_PERSON = personDto({ name: 'Travis', handle: 'travis', isBuilder: true });
 
-export function slackConnection(over: Record<string, unknown> = {}): SlackConnectionDto {
-  return SlackConnectionDto.parse({
-    state: 'off',
-    teamId: null,
-    teamName: null,
-    botUserId: null,
-    checkedAt: null,
-    error: null,
-    ...over,
+/**
+ * `GET /slack` for one workspace in the given state. TODO(slack-workspaces): tests build the status they need.
+ * `off` is the daemon with Slack off, `none` no workspace signed in.
+ */
+export function slackConnection(over: Record<string, unknown> = {}): SlackStatusDto {
+  const state = over['state'] ?? 'off';
+  if (state === 'off') return SlackStatusDto.parse({ off: true, workspaces: [] });
+  if (state === 'none') return SlackStatusDto.parse({ off: false, workspaces: [] });
+  return SlackStatusDto.parse({
+    off: false,
+    workspaces: [
+      {
+        teamId: 'T1',
+        teamName: 'Acme',
+        botUserId: null,
+        botName: null,
+        checkedAt: null,
+        error: null,
+        ...over,
+      },
+    ],
   });
 }
 

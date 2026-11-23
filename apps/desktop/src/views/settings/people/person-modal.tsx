@@ -72,7 +72,10 @@ function PersonForm({
   const connection = useSlackConnection();
   const slackReady = connection.data?.state === 'connected';
   const team = connection.data?.teamName ?? 'Slack';
-  const current = useSlackMember(person?.slack[0]?.userId ?? null);
+  const current = useSlackMember(
+    person?.slack[0]?.teamId ?? null,
+    person?.slack[0]?.userId ?? null,
+  );
   const [form, setForm] = useState<FormState>(() => initial(person, slackReady));
   const set = (change: Partial<FormState>): void => {
     setForm((was) => ({ ...was, ...change }));
@@ -129,6 +132,7 @@ function PersonForm({
         <Stack gap="xs">
           {!form.byName && slackReady ? (
             <MemberSelect
+              teamId={connection.data?.teamId ?? null}
               label={isBuilder ? 'Which one is you?' : `Find someone in ${team}`}
               value={member}
               onPick={(picked) => {

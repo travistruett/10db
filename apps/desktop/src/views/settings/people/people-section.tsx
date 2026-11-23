@@ -51,7 +51,7 @@ function howSent(person: PersonDto): string {
 
 /** How 10db reaches someone, as a small chip: "Slack @Mark Ellis", or "Not on Slack". */
 function ReachChip({ person }: { readonly person: PersonDto }) {
-  const member = useSlackMember(person.slack[0]?.userId ?? null);
+  const member = useSlackMember(person.slack[0]?.teamId ?? null, person.slack[0]?.userId ?? null);
   if (person.slack.length === 0)
     return person.isBuilder ? null : (
       <Badge variant="default" size="sm" tt="none" fw={500}>

@@ -154,7 +154,7 @@ import { taskSession } from '../chat';
 import type { Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
-import type { SlackConnection } from '../stakeholders';
+import type { SlackConnections } from '../stakeholders';
 import {
   createTurnFiles,
   goalPassPages,
@@ -220,12 +220,6 @@ import { suggestSettings } from './suggest-settings';
 import { checkoutConflictsWithRoot } from './worktree-root';
 
 /** An account that is still in use: an archived one is as good as unknown to a read that prices on it. */
-/** The one connection's team when it is connected, else none. */
-// TODO(slack-workspaces): replaced by the per-workspace states.
-function connectedTeam(connection: ReturnType<SlackConnection['get']>): string[] {
-  return connection.state === 'connected' && connection.teamId !== null ? [connection.teamId] : [];
-}
-
 function liveAccount(db: DbReader, id: AccountId): AccountDto {
   const account = getAccount(db, id);
   if (account.archived) throw new NotFoundError('account', id);
@@ -294,8 +288,8 @@ export function createServices(deps: {
   readonly runner: Runner;
   readonly scheduler: Scheduler;
   readonly inbox: InboxService;
-  /** Where the Slack connection stands: Open leaves out what Waiting holds only while it is connected. */
-  readonly slackConnection: Pick<SlackConnection, 'get'>;
+  /** Where each Slack workspace stands: Open leaves out what Waiting holds only while its workspace is connected. */
+  readonly slackConnections: Pick<SlackConnections, 'connectedTeams'>;
   readonly keepAwake: KeepAwake;
   readonly agentSkill: AgentSkill;
   /** The one gate in front of new lanes, for Factory's note. */
@@ -774,8 +768,7 @@ export function createServices(deps: {
     listInbox: ({ states }) => listInbox(db, states ? { states } : {}),
     pageInbox: (query) =>
       pageInbox(db, query, {
-        // TODO(slack-workspaces): every connected workspace, from the per-workspace watches.
-        connectedTeams: connectedTeam(deps.slackConnection.get()),
+        connectedTeams: deps.slackConnections.connectedTeams(),
       }),
     pageActivity: (query) => pageActivity(db, query),
     inboxCardContext: (id) => inboxCardContext(db, id, CARD_CONTEXT_MESSAGES),

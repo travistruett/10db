@@ -8,8 +8,8 @@ import {
   type CatalogueStatusDto,
   type GithubStatusDto,
   type SelfUpdateStatusDto,
-  type SlackConnectionDto,
 } from '@10db/contracts';
+import type { FirstWorkspaceConnection } from '../../daemon/people';
 import { shortAgo } from '../factory/short-ago';
 import { fromNow } from '../../shell/relative';
 import { AccountStatus, ACCOUNT_STATUS_LABEL, accountStatus } from './accounts/account-status';
@@ -102,7 +102,7 @@ export function githubState(status: GithubStatusDto): RowState {
 
 const SLACK_WITHOUT = 'Questions for other people stay in your Inbox; nothing is sent.';
 
-export function slackState(connection: SlackConnectionDto): RowState {
+export function slackState(connection: FirstWorkspaceConnection): RowState {
   switch (connection.state) {
     case 'connected':
       return ready(ConnectionTone.Works, `${connection.teamName ?? 'Slack'} · posts as @10db`);

@@ -85,14 +85,14 @@ import { resolveGh } from '../src/github';
 import { startSignOff } from '../src/pass';
 import { createJudge, type Judge } from '../src/judge';
 import {
-  createReplyWatch,
-  createSlackConnection,
+  createReplyWatches,
+  createSlackConnections,
   createStakeholderSends,
   createTimerWatch,
   createTriage,
   draftOnOpen,
   routedAway,
-  type ReplyWatch,
+  type ReplyWatches,
   type StakeholderSends,
   type TimerWatch,
 } from '../src/stakeholders';
@@ -178,7 +178,7 @@ export interface TestEngine {
   readonly laneLive: LiveRegistry;
   /** The stakeholder sends, over the fake Slack the engine was given (none: every draft stays). */
   readonly sends: StakeholderSends;
-  readonly replyWatch: ReplyWatch;
+  readonly replyWatches: ReplyWatches;
   readonly timerWatch: TimerWatch;
   readonly runner: Runner;
   readonly adapter: FakeAdapter;
@@ -448,19 +448,17 @@ export async function createTestEngine(
       answerAccountCard?.(item, answer);
     },
   });
-  const slackConnection = createSlackConnection({
+  const slackConnections = createSlackConnections({ state, off: !setup.slack });
+  const fakeSlack = setup.slack;
+  const replyWatches = createReplyWatches({
     state,
-    initial: setup.slack ? 'connected' : 'off',
-  });
-  const replyWatch = createReplyWatch({
-    state,
-    slack: setup.slack ?? null,
+    slack: fakeSlack ? { clientFor: () => fakeSlack } : null,
     inbox,
     judge: triageJudge,
     sends,
     clock,
     log: silentLogger,
-    connection: slackConnection,
+    connections: slackConnections,
   });
   const timerWatch = createTimerWatch({ state, clock, log: silentLogger });
   const pauses = createAccountPauses({
@@ -635,7 +633,7 @@ export async function createTestEngine(
     frames,
     laneLive,
     sends,
-    replyWatch,
+    replyWatches,
     timerWatch,
     runner: created,
     adapter,

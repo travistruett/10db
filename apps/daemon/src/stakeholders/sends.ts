@@ -21,7 +21,6 @@ import {
   closeSend,
   dropDraft,
   everSent,
-  failSend,
   getInboxItem,
   getPerson,
   insertDraft,
@@ -55,6 +54,7 @@ import { OPTION_LETTERS } from './letters';
 import { scanOutbound } from './outbound-scan';
 import { neutralizeAngles } from './escape';
 import { blocksOf } from './slack-text';
+import { failSendsToBuilder } from './send-returns';
 import { holdFor } from './send-holds';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -316,8 +316,7 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
   /** Marks a send failed and gives its card back to the builder. */
   function fail(sendId: StakeholderSendDto['id'], cardId: InboxItemId, code: string): void {
     state.write((ctx) => {
-      failSend(ctx, sendId, code);
-      toBuilder(ctx, cardId);
+      failSendsToBuilder(ctx, [{ id: sendId, inboxItemId: cardId }], code);
     });
   }
 
@@ -350,8 +349,7 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
           threadTs: thread?.threadTs ?? null,
           startedAt: nowIso(),
         });
-        failSend(ctx, draft.id, code);
-        toBuilder(ctx, cardId);
+        failSendsToBuilder(ctx, [{ id: draft.id, inboxItemId: cardId }], code);
       });
       return;
     }

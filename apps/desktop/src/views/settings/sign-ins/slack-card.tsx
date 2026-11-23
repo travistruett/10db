@@ -1,4 +1,3 @@
-import type { SlackConnectionDto } from '@10db/contracts';
 import {
   ActionIcon,
   Alert,
@@ -16,7 +15,8 @@ import { useState, type ReactNode } from 'react';
 import { useProjects } from '../../../daemon/queries';
 import {
   usePeople,
-  useRemoveSlackToken,
+  useRemoveSlackWorkspace,
+  type FirstWorkspaceConnection,
   useSetSlackToken,
   useSlackConnection,
   useSlackMember,
@@ -31,7 +31,10 @@ import { WhichIsYou } from './which-is-you';
 /** "Acme · posts as @10db · you're @Travis": the connection in one line. */
 function ConnectedLine({ teamName }: { readonly teamName: string | null }) {
   const builder = usePeople().data?.find((p) => p.isBuilder);
-  const member = useSlackMember(builder?.slack[0]?.userId ?? null);
+  const member = useSlackMember(
+    builder?.slack[0]?.teamId ?? null,
+    builder?.slack[0]?.userId ?? null,
+  );
   const parts = [...(teamName === null ? [] : [teamName]), 'posts as @10db'];
   if (builder !== undefined && builder.slack.length > 0)
     parts.push(`you're @${member?.name ?? builder.name}`);
@@ -43,7 +46,7 @@ function StateLine({
   connection,
   failed,
 }: {
-  readonly connection: SlackConnectionDto | undefined;
+  readonly connection: FirstWorkspaceConnection | undefined;
   readonly failed: boolean;
 }) {
   if (failed) return <StateText>Couldn't read this.</StateText>;
@@ -144,18 +147,21 @@ function TokenField({ setter }: { readonly setter: ReturnType<typeof useSetSlack
         loading={setter.isPending}
         onClick={() => {
           setRefusal(null);
-          setter.mutate(token.trim(), {
-            onSuccess: () => {
-              setToken('');
+          setter.mutate(
+            { token: token.trim() },
+            {
+              onSuccess: () => {
+                setToken('');
+              },
+              onError: (failure) => {
+                setRefusal(failure.message);
+              },
+              // The mutation's variables are the token; drop them whichever way it went.
+              onSettled: () => {
+                setter.reset();
+              },
             },
-            onError: (failure) => {
-              setRefusal(failure.message);
-            },
-            // The mutation's variables are the token; drop them whichever way it went.
-            onSettled: () => {
-              setter.reset();
-            },
-          });
+          );
         }}
       >
         Connect
@@ -186,7 +192,7 @@ function SlackProjects() {
 export function SlackCard() {
   const connection = useSlackConnection();
   const people = usePeople();
-  const remove = useRemoveSlackToken();
+  const remove = useRemoveSlackWorkspace();
   const setToken = useSetSlackToken();
   const [changing, setChanging] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
@@ -268,7 +274,9 @@ export function SlackCard() {
           setDisconnecting(false);
         }}
         onConfirm={() => {
-          remove.mutate(undefined, {
+          const teamId = connection.data?.teamId;
+          if (teamId === undefined || teamId === null) return;
+          remove.mutate(teamId, {
             onSuccess: () => {
               setDisconnecting(false);
             },

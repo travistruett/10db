@@ -16,10 +16,10 @@
     `rows` lists each row's key, sort and card ids, `items` holds the cards of the rows on the page, and
     `next` is the last row's sort for `after`. `waiting` is an `OPEN` card whose live send is `sent` with no
     `returnedAt`, under every connection; `resolved` is a `RESOLVED` card.
-  - Placement follows the live Slack connection, read at each request (`services.ts` passes
-    `waitingOut: slackConnection.get().state === 'connected'`): while connected, Open leaves out the sent,
-    unreturned cards Waiting holds; in any other state (`refused`, `none`, `off`, `unreachable`) they stay
-    in Open.
+  - Waiting is per workspace, read at each request (`services.ts` passes
+    `connectedTeams: slackConnections.connectedTeams()`): Open leaves out a sent, unreturned card whose send is
+    in a connected workspace; a send in a workspace that is `refused`, `none`, `unreachable` or `checking`, one
+    signed out, or any send with Slack off, stays in Open.
   - `outcome` follows `inboxOutcome` in contracts, in its order: a Slack answer (`answer.via` is `slack`), then
     10db's close (a `detail.resolution` that `CardResolution` accepts), then `answered` for the rest. The SQL
     is one `CASE` built from `CARD_RESOLUTION`, so change it and `inboxOutcome` together.

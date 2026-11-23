@@ -1,10 +1,10 @@
 import {
   AgentCopyState,
   type AgentCopy,
-  type SlackConnectionDto,
   type SystemCheckDto,
   type ToolName,
 } from '@10db/contracts';
+import type { FirstWorkspaceConnection } from '../../daemon/people';
 import { syncNeedsBuilder } from '../../shell/benchmark-sync-urgency';
 
 export const SystemCardKind = {
@@ -47,7 +47,7 @@ export type SystemCard =
  */
 export function systemCards(
   check: SystemCheckDto | undefined,
-  slack?: SlackConnectionDto,
+  slack?: FirstWorkspaceConnection,
 ): SystemCard[] {
   const refused: SystemCard[] =
     slack?.state === 'refused' ? [{ kind: SystemCardKind.SlackRefused, key: 'slack-refused' }] : [];

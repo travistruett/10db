@@ -31,15 +31,16 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
   `daemonOptionsFromEnv`; every decision then keeps today's rule), and keeps the OpenRouter sync (`benchmarks/openrouter-sync.ts`) from running. Only the installed app's daemon asks models;
   the e2e web server, the live acceptance daemon and `scripts/dev.sh` set it, and
   `tests/repo/src/benchmarks-off.test.ts` checks they do. A new launcher of a throwaway daemon sets it too.
-- `TENDB_SLACK=off` keeps a daemon from reading the Slack bot token (Keychain service `10db`, account
-  `slack-bot`, `SLACK_BOT_ACCOUNT`) and from calling Slack (`slackOnFromEnv`; `DaemonOptions.slack` is off unless
+- `TENDB_SLACK=off` keeps a daemon from reading the Slack bot tokens (Keychain service `10db`, one
+  account per workspace, `slack-bot:<teamId>`, `slackBotAccount`) and from calling Slack (`slackOnFromEnv`; `DaemonOptions.slack` is off unless
   given, so an in-process harness never reaches Slack). Only the installed app's daemon messages people; the e2e
   web server, the live acceptance daemon, `scripts/dev.sh` and every daemon test that spawns the entry set it, and
   `tests/repo/src/benchmarks-off.test.ts` checks they do. A new launcher of a throwaway daemon sets it too.
 - `TENDB_DISK=off` keeps a daemon from reading free disk, so a runner's or container's low disk never holds its
   lanes (`DaemonOptions.disk` is off unless given; the entry point gives it otherwise). The e2e web server sets it.
 - `slack/` is the only module that calls Slack: `createSlackClient` takes an injected `fetch`, token reader and
-  `Clock`, reads parse with zod, and a `SlackError` names the method and a code, never the token. Reads are GETs and
+  `Clock`, reads parse with zod, and a `SlackError` names the method and a code, never the token. A client belongs
+  to one workspace (`stakeholders/slack-clients.ts` makes one per signed-in team). Reads are GETs and
   writes JSON POSTs. `stakeholders/` holds the pure texts and rules around it (compose, escape, scan, read a reply,
   read a conversation); neither module ever sees the token outside `slack/client.ts`.
 - `src/api/` is typechecked by the desktop app too (it imports `AppType`). Code there must not import

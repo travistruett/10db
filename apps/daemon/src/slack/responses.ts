@@ -29,6 +29,8 @@ export interface SlackIdentity {
   readonly teamId: string;
   readonly teamName: string;
   readonly botUserId: string;
+  /** The bot's name in the workspace (auth.test's `user`). */
+  readonly botName: string;
 }
 
 /** Every Slack answer carries `ok`; a failure carries Slack's `error` word and nothing else 10db reads. */
@@ -41,6 +43,7 @@ export const AuthTestReply = z.object({
   team_id: z.string(),
   team: z.string(),
   user_id: z.string(),
+  user: z.string(),
 });
 
 export const ChannelOpenReply = z.object({ channel: z.object({ id: z.string().min(1) }) });

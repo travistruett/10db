@@ -12,13 +12,16 @@ export function MemberSelect({
   value,
   onPick,
   label,
+  teamId,
 }: {
   readonly value: SlackMemberDto | null;
   readonly onPick: (member: SlackMemberDto | null) => void;
   readonly label: string;
+  /** The workspace whose people are searched. */
+  readonly teamId: string | null;
 }) {
   const [query, setQuery] = useState('');
-  const members = useSlackMembers(query, true);
+  const members = useSlackMembers(teamId, query, true);
   const list = members.data ?? [];
   const data: ComboboxItem[] = list.map((m) => ({ value: m.userId, label: describe(m) }));
   if (value !== null && !list.some((m) => m.userId === value.userId))

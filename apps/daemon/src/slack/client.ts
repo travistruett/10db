@@ -180,7 +180,12 @@ export function createSlackClient(deps: SlackClientDeps): SlackClient {
 
   async function authTest(): Promise<SlackIdentity> {
     const reply = await write('auth.test', {}, AuthTestReply);
-    return { teamId: reply.team_id, teamName: reply.team, botUserId: reply.user_id };
+    return {
+      teamId: reply.team_id,
+      teamName: reply.team,
+      botUserId: reply.user_id,
+      botName: reply.user,
+    };
   }
 
   return {

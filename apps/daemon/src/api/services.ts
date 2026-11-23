@@ -213,7 +213,7 @@ import type {
   SendInput,
   GithubSigninDto,
   GithubStatusDto,
-  SlackConnectionDto,
+  SlackStatusDto,
   SlackMemberDto,
   SlackTokenInput,
   ProjectIntegrationsDto,
@@ -899,12 +899,13 @@ export interface ApiServices extends PlanRecordServices {
   startGithubSignin(): Promise<GithubSigninDto>;
   /** Stops the running sign-in; a no-op when none runs. */
   cancelGithubSignin(): void;
-  /** The Slack connection as the reply watch last found it. */
-  slackStatus(): SlackConnectionDto;
-  /** Checks the token with Slack, then keeps it in the Keychain; a refused token is stored nowhere. */
-  setSlackToken(input: SlackTokenInput): Promise<SlackConnectionDto>;
-  removeSlackToken(): Promise<SlackConnectionDto>;
-  /** The GitHub login a project uses and its Slack workspace (the only one while there is exactly one). */
+  /** Every signed-in Slack workspace as its reply watch last found it. */
+  slackStatus(): SlackStatusDto;
+  /** Checks the token with Slack, then keeps it in the Keychain; a refused token, or one for another team than `teamId`, is stored nowhere. */
+  setSlackToken(input: SlackTokenInput): Promise<SlackStatusDto>;
+  /** Signs a workspace out: its token and entry go; its contacts and project bindings stay. */
+  removeSlackWorkspace(teamId: string): Promise<SlackStatusDto>;
+  /** The GitHub login a project uses and the Slack workspace it is bound to. */
   projectIntegrations(projectId: ProjectId): Promise<ProjectIntegrationsDto>;
   /** From Linear: a Plan session that imports issues through the project's account; ConflictError when the account has no Linear. */
   importFromLinear(projectId: ProjectId): Promise<ChatDto>;
@@ -923,8 +924,8 @@ export interface ApiServices extends PlanRecordServices {
   /** Adds, approves and signs in a service's server for the project's account; ConflictError says which step can't run. */
   connectService(service: ConnectableService, projectId: ProjectId): Promise<ConnectServiceDto>;
   figmaSignIns(): Promise<FigmaSignInsDto>;
-  /** The workspace's people, optionally filtered; read from Slack at most every ten minutes. */
-  listSlackMembers(query: string): Promise<SlackMemberDto[]>;
+  /** A workspace's people, optionally filtered; read from Slack at most every ten minutes. 409 when it is not signed in. */
+  listSlackMembers(teamId: string, query: string): Promise<SlackMemberDto[]>;
   getStakeholderTimers(): StakeholderTimersDto;
   setStakeholderTimers(input: StakeholderTimersDto): StakeholderTimersDto;
   /** Who a task's questions go to, by scope. */

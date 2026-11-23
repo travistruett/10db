@@ -67,18 +67,14 @@ export const SendFailure = {
 } as const;
 export type SendFailure = (typeof SendFailure)[keyof typeof SendFailure];
 
-/** The Slack connection as the daemon last saw it; never the token. */
-export const SlackConnectionDto = z.object({
-  state: z.enum(['off', 'none', 'connected', 'refused', 'unreachable']),
-  teamId: z.string().nullable(),
-  teamName: z.string().nullable(),
-  botUserId: z.string().nullable(),
-  checkedAt: z.iso.datetime().nullable(),
-  error: z.string().nullable(),
+/** `GET /slack/members`: the people of one signed-in workspace, optionally filtered. */
+export const SlackMembersQuery = z.object({
+  teamId: z.string().min(1),
+  query: z.string().default(''),
 });
-export type SlackConnectionDto = z.infer<typeof SlackConnectionDto>;
+export type SlackMembersQuery = z.infer<typeof SlackMembersQuery>;
 
-/** A member of the connected workspace, offered when the builder adds a person. */
+/** A member of a signed-in workspace, offered when the builder adds a person. */
 export const SlackMemberDto = z.object({
   userId: z.string(),
   teamId: z.string(),

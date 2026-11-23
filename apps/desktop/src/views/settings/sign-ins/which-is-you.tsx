@@ -1,7 +1,7 @@
 import { SendMode, type PersonDto, type SlackMemberDto } from '@10db/contracts';
 import { Alert, Button, Group, Stack, Text } from '@mantine/core';
 import { useState } from 'react';
-import { useSavePerson } from '../../../daemon/people';
+import { useSavePerson, useSlackConnection } from '../../../daemon/people';
 import { MemberSelect } from '../people/member-select';
 import { DEFAULT_DAILY_LIMIT } from '../people/person-modal';
 
@@ -21,12 +21,19 @@ export function WhichIsYou({
   readonly onDone: () => void;
 }) {
   const save = useSavePerson();
+  // TODO(slack-workspaces): the workspace of the row this opens from.
+  const teamId = useSlackConnection().data?.teamId ?? null;
   const [picked, setPicked] = useState<SlackMemberDto | null>(null);
   const form = (
     <Stack gap="xs">
       <Group align="flex-end" gap="sm" wrap="nowrap">
         <div style={{ flex: 1 }}>
-          <MemberSelect label="Which One Is You?" value={picked} onPick={setPicked} />
+          <MemberSelect
+            label="Which One Is You?"
+            value={picked}
+            onPick={setPicked}
+            teamId={teamId}
+          />
         </div>
         {changing ? (
           <Button variant="default" onClick={onDone}>

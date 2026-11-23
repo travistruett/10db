@@ -136,7 +136,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     cancelGithubSignin: track('cancelGithubSignin'),
     slackStatus: track('slackStatus'),
     setSlackToken: track('setSlackToken'),
-    removeSlackToken: track('removeSlackToken'),
+    removeSlackWorkspace: track('removeSlackWorkspace'),
     projectIntegrations: none,
     importFromLinear: none,
     setLinearReporter: none,
