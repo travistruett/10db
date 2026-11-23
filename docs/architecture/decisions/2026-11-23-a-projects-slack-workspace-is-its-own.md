@@ -30,13 +30,18 @@
   workspace, never through another. When a recipient has none there, or the project is Off, the card stays the
   builder's with **Copy for <name>**, as for anyone not on Slack. Ask Someone and the routes editor say a person
   is "not in <workspace>'s Slack" for that project.
-- **Changing a project's workspace takes its questions back.** Its sends out in the old workspace (sending or
-  sent) fail back to the builder with `workspace_changed`, its drafts are drafted again for the new workspace,
-  and its Copy For cards are asked again. Off keeps drafts held as `slack_off` and takes back what is out.
+- **Changing a project's workspace takes its questions back, in the same write.** The binding changes, its sends
+  out in the old workspace (sending or sent) fail back to the builder with `workspace_changed`, and its drafts are
+  drafted again for the new workspace, all in one transaction. Off keeps drafts held as `slack_off` and takes
+  back what is out. A Copy For card is not asked again; the builder presses Ask Someone. A send whose team
+  differs from its project's stored binding is never posted to; a send whose workspace is merely disconnected
+  waits for it.
 - **A new bot is a new conversation.** When a workspace's token comes from a new bot user (the app was made
   again), that workspace's DM channels and cursors are forgotten and its sending and sent sends fail back to the
-  builder with `bot_changed`. A workspace with no bot on record (one stored before this) records its bot at the
-  next check and forgets its DM channels, which 10db opens again on the next send.
+  builder with `bot_changed`. A workspace with no bot on record (one stored before this, or one connected again
+  after a Disconnect, which forgets the record) records its bot and forgets its DM channels, which 10db opens
+  again on the next send. Threads from before the bot was recorded are never joined by a follow-up: a new
+  question starts a new thread.
 - **Which One Is You is per workspace, and blocks nothing.** The builder may pick their own member in each
   workspace, which fills the row's "you're @name". The first pick still names the builder. A builder still named
   "You" has drafts shown first for review; Send is never refused for it.
@@ -64,7 +69,12 @@ the workspace is fixed by the project, not judged per send.
 - **Taking questions back on a change.** A sent question's replies come in the old workspace, which the project
   no longer uses; reading on there would keep a conversation the builder moved away from. Returning the card is
   one visible step the builder can redo with Send.
-- **A new bot invalidates DM channels.** A DM is between a user and a bot; a recreated app's bot can't open the old
-  channel (`channel_not_found`), and before this a person had to be removed and added again.
+- **A new bot invalidates DM channels and threads.** A DM is between a user and a bot; a recreated app's bot can't
+  read or post in the old channel (`channel_not_found`), and before this a person had to be removed and added
+  again. A follow-up joins the newest thread for the same people and task, so old threads must be out of reach
+  too. Disconnect forgets the bot because the workspace entry is gone; treating a reconnect as a first record
+  costs one fresh thread and never posts into a dead channel.
+- **One write for a change of workspace.** A take-back after the binding's write would leave a window where a
+  watch or a recovery posts in the old workspace for a project that has moved; one transaction leaves none.
 - **The builder's name gate.** The name only changes how a message reads ("You's 10db build"), so it is a review
   hold, not a refusal; with several workspaces a pick in each is optional.
