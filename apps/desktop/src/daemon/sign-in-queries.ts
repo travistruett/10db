@@ -1,5 +1,6 @@
 import {
   ChatDto,
+  FigmaSignInsDto,
   LinearSignInsDto,
   ProjectIntegrationsDto,
   type LinearReporterSettings,
@@ -90,5 +91,14 @@ export function useLinearSignIns() {
     queryKey: ['sign-ins', 'linear'],
     queryFn: async () =>
       readJson(await client.settings['sign-ins'].linear.$get(), LinearSignInsDto),
+  });
+}
+
+/** How each agent account reaches Figma, from what the daemon has already read. */
+export function useFigmaSignIns() {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: ['sign-ins', 'figma'],
+    queryFn: async () => readJson(await client.settings['sign-ins'].figma.$get(), FigmaSignInsDto),
   });
 }

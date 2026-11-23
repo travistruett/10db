@@ -5,19 +5,25 @@ import {
   ShapeMessageKind,
   ShapeProposalBody,
   ShapeProposalKind,
+  type FigmaAction,
+  type FigmaLinkDto,
+  type ShapeAttachmentId,
   type ShapeAttachTarget,
   type ShapeAttachmentDto,
   type ShapeId,
 } from '@10db/contracts';
 import {
   insertShapeAttachment,
+  getShape,
   insertShapeMessage,
   listShapeAttachments,
   listShapeLinks,
   listShapeProposals,
   type DbReader,
+  type ShapeAttachmentRow,
   type WriteContext,
 } from '@10db/db';
+import { fileOf, frameOf } from './figma';
 
 // Shape spec §10.3. The session attaches a Mermaid diagram, a chart or an HTML mockup to a proposed
 // task or goal, or to one this conversation converted. The schema already refused a chart that names a
@@ -87,8 +93,24 @@ function attachmentOf(kind: string, body: string): ShapeAttachment | null {
   return parsed.success ? parsed.data : null;
 }
 
+/** What a mock-up shows of Figma: its frame link, and the press not carried out yet. */
+function figmaOf(
+  db: DbReader,
+  row: ShapeAttachmentRow,
+  pending: (id: ShapeAttachmentId) => FigmaAction | null,
+  fileStored: boolean,
+): FigmaLinkDto | null {
+  if (row.kind !== 'mockup') return null;
+  return { fileUrl: frameOf(db, row.id)?.fileUrl ?? null, pending: pending(row.id), fileStored };
+}
+
 /** The view's attachments: diagrams, charts and mockups, oldest first. */
-export function attachmentsOf(db: DbReader, shapeId: ShapeId): ShapeAttachmentDto[] {
+export function attachmentsOf(
+  db: DbReader,
+  shapeId: ShapeId,
+  pending: (id: ShapeAttachmentId) => FigmaAction | null = () => null,
+): ShapeAttachmentDto[] {
+  const fileStored = fileOf(db, getShape(db, shapeId).projectId) !== null;
   return listShapeAttachments(db, shapeId).flatMap((row) => {
     const attachment = attachmentOf(row.kind, row.body);
     return attachment === null
@@ -101,6 +123,7 @@ export function attachmentsOf(db: DbReader, shapeId: ShapeId): ShapeAttachmentDt
             taskId: row.taskId,
             attachment,
             approved: row.approvedAt !== null,
+            figma: figmaOf(db, row, pending, fileStored),
           },
         ];
   });

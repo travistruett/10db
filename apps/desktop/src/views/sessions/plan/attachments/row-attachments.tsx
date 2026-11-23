@@ -1,8 +1,12 @@
 import type { ShapeAttachmentDto, ShapeId, ShapeProposalDto } from '@10db/contracts';
-import { Anchor, Button, Group, Stack, Text } from '@mantine/core';
-import { IconCheck } from '@tabler/icons-react';
+import { Anchor, Button, Loader, Group, Menu, Stack, Text } from '@mantine/core';
+import { IconCheck, IconChevronDown } from '@tabler/icons-react';
 import { createContext, use } from 'react';
-import { useApproveAttachment } from '../../../../daemon/shape-queries';
+import {
+  useApproveAttachment,
+  useFigmaPress,
+  useOpenFigmaFrame,
+} from '../../../../daemon/shape-queries';
 import { AttachmentView } from './attachment-view';
 
 // Shape spec §10.3: an opened row shows what the session attached to it, each rendered inert. The
@@ -97,6 +101,7 @@ export function RowAttachments({
               >
                 Ask for Changes
               </Button>
+              <FigmaButtons shapeId={shapeId} attachment={a} title={title} />
               {/* Approved, the undo is a quiet link at the right: the state is what matters. */}
               {a.approved ? (
                 <Group ml="auto">
@@ -108,6 +113,107 @@ export function RowAttachments({
         </Stack>
       ))}
     </Stack>
+  );
+}
+
+/**
+ * A mock-up's trip to Figma: one button to send it, then once linked one menu, so the row stays one line. The
+ * menu follows the frame link, brings the frame back as a new version, or sends the mock-up again.
+ */
+function FigmaButtons({
+  shapeId,
+  attachment,
+  title,
+}: {
+  readonly shapeId: ShapeId;
+  readonly attachment: ShapeAttachmentDto;
+  readonly title: string;
+}) {
+  const press = useFigmaPress(shapeId);
+  const open = useOpenFigmaFrame(shapeId);
+  const send = (): void => {
+    press.mutate({ attachmentId: attachment.id, action: 'open' });
+  };
+  const sendToNewFile = (): void => {
+    press.mutate({ attachmentId: attachment.id, action: 'open', newFile: true });
+  };
+  const busy = press.data?.status === 'running' ? 'Another Figma request is still running.' : null;
+  const message = press.isError ? press.error.message : open.isError ? open.error.message : busy;
+  const error =
+    message === null ? null : (
+      <Text size="xs" c="red">
+        {message}
+      </Text>
+    );
+  const pending = attachment.figma?.pending ?? null;
+  if (pending !== null)
+    return (
+      <Group gap={6} wrap="nowrap" role="status">
+        <Loader size={12} />
+        <Text size="xs" c="dimmed">
+          {pending === 'open' ? 'Sending to Figma…' : 'Bringing back from Figma…'}
+        </Text>
+      </Group>
+    );
+  const linked = (attachment.figma?.fileUrl ?? null) !== null;
+  // A project's first send is one plain button; once the project has a Figma file, every mock-up has one
+  // Figma menu, which also offers a new file in case the stored one was lost.
+  if (!linked && attachment.figma?.fileStored !== true)
+    return (
+      <>
+        <Button
+          variant="default"
+          size="xs"
+          loading={press.isPending}
+          aria-label={`Open in Figma: ${title}`}
+          onClick={send}
+        >
+          Open in Figma
+        </Button>
+        {error}
+      </>
+    );
+  return (
+    <>
+      <Menu position="bottom-start" withinPortal>
+        <Menu.Target>
+          <Button
+            variant="default"
+            size="xs"
+            loading={press.isPending}
+            rightSection={<IconChevronDown size={14} stroke={1.5} aria-hidden="true" />}
+            aria-label={`Figma actions for mock-up: ${title}`}
+          >
+            Figma
+          </Button>
+        </Menu.Target>
+        <Menu.Dropdown>
+          {linked ? (
+            <>
+              <Menu.Item
+                onClick={() => {
+                  open.mutate(attachment.id);
+                }}
+              >
+                Open Frame in Figma
+              </Menu.Item>
+              <Menu.Item
+                onClick={() => {
+                  press.mutate({ attachmentId: attachment.id, action: 'bring-back' });
+                }}
+              >
+                Bring Back from Figma
+              </Menu.Item>
+              <Menu.Item onClick={send}>Send Again to Figma</Menu.Item>
+            </>
+          ) : (
+            <Menu.Item onClick={send}>Open in Figma</Menu.Item>
+          )}
+          <Menu.Item onClick={sendToNewFile}>Send to a New Figma File</Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
+      {error}
+    </>
   );
 }
 

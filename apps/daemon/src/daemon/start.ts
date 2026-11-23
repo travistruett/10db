@@ -117,6 +117,7 @@ import {
   subscribeLinearEvents,
 } from '../linear';
 import { createLinearSignIns } from './linear-sign-ins';
+import { createFigmaSignIns } from './figma-sign-ins';
 import { createReporterLaunch } from './reporter-launch';
 import { createStakeholderApiServices } from './stakeholder-services';
 import {
@@ -531,6 +532,8 @@ export interface DaemonOptions {
   /** `TENDB_BENCHMARKS=off`: the key is neither read nor written, and the status says off. */
   readonly benchmarksOff?: boolean;
   readonly fetch?: typeof fetch;
+  /** The `fetch` a Plan session's Figma tools post a mock-up with and read assets with; the real one by default. */
+  readonly figmaFetch?: typeof fetch;
   /**
    * Fetch the model catalogue from models.dev and keep it fresh. Off unless given, so a test never reaches
    * the network; the entry point turns it on unless `TENDB_CATALOGUE=off`.
@@ -1773,6 +1776,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     joiningProblem: (taskId) => starter.joiningProblem(taskId),
     screens,
     pictures: picturesNow,
+    ...(opts.figmaFetch === undefined ? {} : { figmaFetch: opts.figmaFetch }),
     jev: createShapeJev({
       state,
       judge,
@@ -2480,6 +2484,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     mcpSignIns,
     connectorNames: (account) => adapter.cachedConnectorNames?.(account),
   });
+  const figmaSignIns = createFigmaSignIns({
+    state,
+    plan: appMcpPlan,
+    mcpSignIns,
+    connectorNames: (account) => adapter.cachedConnectorNames?.(account),
+  });
   // The Linear reporter: one short session of its own per task with updates owed, on the explore engine.
   const linearReporter = createLinearReporter({
     state,
@@ -2595,6 +2605,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     trust,
     mcpSignIns,
     linearSignIns,
+    figmaSignIns,
     judge: createJudgeServices({
       state,
       keychain: judgeKeychain,

@@ -281,6 +281,7 @@ import {
   StakeholderSendDto,
 } from './slack';
 import { LinearSignInsDto } from './linear-sign-ins';
+import { FigmaPressInput, FigmaSignInsDto } from './figma';
 import { LinearPostDto, LinearReporterSettings } from './linear-posts';
 import { StepPlanDto } from './steps';
 import { WorkstreamChangesDto } from './workstream-changes';
@@ -523,6 +524,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'project-integrations-dto': ProjectIntegrationsDto,
   'project-integrations-input': ProjectIntegrationsInput,
   'linear-sign-ins-dto': LinearSignInsDto,
+  'figma-sign-ins-dto': FigmaSignInsDto,
+  'figma-press-input': FigmaPressInput,
   'linear-post-dto': LinearPostDto,
   'linear-reporter-settings': LinearReporterSettings,
   'compose-preview-dto': ComposePreviewDto,

@@ -46,4 +46,8 @@ export const SHAPE_TOOL_DESCRIPTIONS: Record<ShapeToolName, string> = {
     'Search the decisions and principles that apply to this project, and its earlier conversations. Each hit carries its date and, for a principle, its kind, topic key and scope. Cite what you find, with its date.',
   see_screen:
     "Look at one of 10db's own screens: factory, board, inbox, plan (this conversation), or task with a taskId (that task's drawer), at a window width of 480 to 1600 px (default 1200) and height of 400 to 2000 (default 900). Answers a picture of the screen with this project's real data as it is now. It is only a picture: you cannot click, type or scroll, and taking it changes nothing. A screen that can't be drawn is refused with the reason. Each picture stays in your context and a conversation holds 12 at most, fewer when images dropped into it took the room, so ask for the one screen and size you need. Needs the session's Plan.",
+  send_mockup_to_figma:
+    "Send a Plan mock-up to Figma. Pass the attachmentId and the submitUrl Figma's html_to_figma returned; 10db posts that mock-up's stored HTML to it (only to Figma's html_to_figma submit address) and answers the link to the new frame, which it keeps with the mock-up. Needs the session's Plan.",
+  file_figma_version:
+    "File what you read back from a mock-up's Figma frame as a new version of that mock-up. Pass the attachmentId of the mock-up that was sent and one self-contained HTML document (inline CSS, no scripts, no external URLs except Figma asset URLs, which 10db inlines). Refused for a mock-up that was never sent. Needs the session's Plan.",
 };

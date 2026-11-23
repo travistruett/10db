@@ -46,6 +46,8 @@ export const SHAPE_OFFERED_TOOLS = [
   ShapeToolName.WriteSpec,
   ShapeToolName.ResolveFinding,
   ShapeToolName.SeeScreen,
+  ShapeToolName.SendMockupToFigma,
+  ShapeToolName.FileFigmaVersion,
 ] as const;
 
 /** The only tools a reviewer has: it reads, and it reports (§7). */

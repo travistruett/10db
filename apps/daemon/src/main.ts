@@ -51,6 +51,7 @@ import {
   createPinnedAdapter,
   createRoutedAdapter,
   FakeAdapter,
+  fakeFigmaFetch,
   loadFakeScriptBook,
   scriptedShapeBehaviour,
   type AdapterSource,
@@ -180,6 +181,8 @@ try {
     ...daemonOptionsFromEnv(env),
     dataDir,
     adapter: chooseAdapter(),
+    // With the fake adapter, Figma answers as it did when the round trip was first run: no network.
+    ...(env.TENDB_FAKE_SCRIPTS ? { figmaFetch: fakeFigmaFetch } : {}),
     migrationsDir: resolveMigrationsDir(),
     harnessDir: resolveHarnessDir(),
     agentSkill: agentSkillPlacement(resolveAgentSkillDir(), dataDir, defaultDataDir()),

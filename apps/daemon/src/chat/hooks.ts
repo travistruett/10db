@@ -223,10 +223,13 @@ function messageText(message: DeliverableMessage, blocks: ReadonlySet<string>): 
   return [`[m:${message.id}] ${message.body}`, ...paths].join('\n');
 }
 
-/** The review a turn starter asks for, or null when it asks for none: a Plan review, Find Open Questions or Design review press. */
+/**
+ * The ask of a press that starts a turn, or null when the item is none: a Plan review, Find Open Questions or
+ * Design review (each a review turn), or a Figma press (an ask, with no review turn: its `kind` is null).
+ */
 function reviewOf(
   item: ConversationItemRow,
-): { kind: ReviewTurnKind; ask: string; inSession: string } | null {
+): { kind: ReviewTurnKind | null; ask: string; inSession: string } | null {
   if (item.kind !== ConversationItemKind.ShapeEvent) return null;
   const body = parseItemBody(item.kind, item.body);
   const kind =
@@ -237,7 +240,9 @@ function reviewOf(
         : body.kind === ShapeEventKind.DesignReview
           ? ReviewTurnKind.DesignReview
           : null;
-  if (kind === null || body.prompt === undefined) return null;
+  const figma =
+    body.kind === ShapeEventKind.FigmaOpen || body.kind === ShapeEventKind.FigmaBringBack;
+  if ((kind === null && !figma) || body.prompt === undefined) return null;
   return { kind, ask: body.prompt, inSession: body.promptInSession ?? body.prompt };
 }
 
@@ -868,8 +873,9 @@ export function chatHooks(deps: ChatHooksDeps): ExploreOwnerHooks {
       // A review the session does itself is its review turn from the send until the turn ends.
       const startReview = (): void => {
         const open = reviewing.get(conv.id);
-        if (review !== null && open?.inSession === true)
-          open.live.set(item.id, { kind: review.kind });
+        const reviewKind = review?.kind ?? null;
+        if (reviewKind !== null && open?.inSession === true)
+          open.live.set(item.id, { kind: reviewKind });
       };
       // The plan's lines go ahead of the message, and its pictures join the message's under the one budget.
       const sentAsBlocks = new Set<string>(out.blocks);
