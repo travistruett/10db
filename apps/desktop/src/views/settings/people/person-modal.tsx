@@ -124,9 +124,11 @@ function PersonForm({
   const isBuilder = person?.isBuilder === true;
   const slackReady = connected.length > 0;
   const picked = form.contacts.filter((c) => c.userId !== null);
-  // Someone in Slack needs a member; the builder may have none yet.
-  const reachable = form.byName || picked.length > 0 || isBuilder;
-  const showName = form.byName || isBuilder || picked.length > 0;
+  // A new person in Slack needs a member; the builder may have none yet, and an existing person whose last
+  // contact is removed saves as reached by name.
+  const existing = person !== null;
+  const reachable = form.byName || picked.length > 0 || isBuilder || existing;
+  const showName = form.byName || isBuilder || picked.length > 0 || existing;
   const askedInSlack = !form.byName && !isBuilder;
   const valid = form.name.trim() !== '' && reachable;
   const addable = workspaces.filter((w) => !form.contacts.some((c) => c.teamId === w.teamId));

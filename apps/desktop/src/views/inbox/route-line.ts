@@ -77,7 +77,7 @@ export function reachLabel(person: PersonDto, slack: ProjectSlackDto | undefined
   if (slack === undefined) return `${person.name} · Slack`;
   if (slack.teamId === null) return `${person.name} · Slack is off for this project`;
   if (contactIn(person, slack.teamId) === null)
-    return `${person.name} · not in ${slack.teamName ?? 'this'}'s Slack`;
+    return `${person.name} · not in ${slack.teamName === null ? "this project's Slack" : `${slack.teamName}'s Slack`}`;
   return `${person.name} · Slack`;
 }
 
@@ -85,7 +85,8 @@ export function reachLabel(person: PersonDto, slack: ProjectSlackDto | undefined
 export function copyReason(person: PersonDto, slack: ProjectSlackDto | undefined): string {
   if (person.slack.length === 0) return "isn't on Slack";
   if (slack?.teamId === null) return "can't be messaged: Slack is off for this project";
-  return `isn't in ${slack?.teamName ?? "this project's"}'s Slack`;
+  const name = slack?.teamName ?? null;
+  return name === null ? "isn't in this project's Slack" : `isn't in ${name}'s Slack`;
 }
 
 /** "Mark", "Mark and Ana", "Mark, Ana and Lee". */
