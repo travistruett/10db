@@ -1,5 +1,5 @@
-/* The scope switch on the panel's tone: a track in the window's base tone and an indicator one tone up,
-   in both schemes. Doubled selectors beat Mantine's own single-class rules. */
+/* Every segmented control: a track in the window's base tone and an indicator one tone up, in both schemes,
+   so the choice reads as a control on any surface. Doubled selectors beat Mantine's own single-class rules. */
 .root.root {
   background: var(--mantine-color-body);
 }

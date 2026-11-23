@@ -1,8 +1,8 @@
 import {
   ActionIcon,
-  Anchor,
   Button,
   Group,
+  Paper,
   SegmentedControl,
   Stack,
   Text,
@@ -10,7 +10,8 @@ import {
 } from '@mantine/core';
 import { TitleRow } from '../../shell/title-row';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
-import { IconRefresh } from '@tabler/icons-react';
+import { IconCpu, IconPlus, IconRefresh } from '@tabler/icons-react';
+import { EmptyState } from '../../shell/empty-state';
 import { useJudgeStatus } from '../../daemon/judge-queries';
 import { useRefreshModels } from '../../daemon/model-queries';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
@@ -38,8 +39,9 @@ function DecisionBilling() {
       <Text size="sm" c="dimmed">
         {account === null ? 'No account pays yet' : `Paid by ${account.label}`}
       </Text>
-      <Anchor
-        size="sm"
+      <Button
+        size="xs"
+        variant="default"
         renderRoot={(props) => (
           <Link
             {...props}
@@ -49,8 +51,8 @@ function DecisionBilling() {
           />
         )}
       >
-        {account === null ? 'Pick One' : 'Change'}
-      </Anchor>
+        {account === null ? 'Choose' : 'Change'}
+      </Button>
     </Group>
   );
 }
@@ -122,20 +124,23 @@ export function ModelsSection() {
       );
     if (account === null)
       return (
-        <Text c="dimmed">
-          <Anchor
-            renderRoot={(props) => (
-              <Link
-                {...props}
-                to="/settings/$section"
-                params={{ section: SettingsSectionKey.Accounts }}
-              />
-            )}
-          >
-            Add an Account
-          </Anchor>{' '}
-          to see what each role gets.
-        </Text>
+        <EmptyState
+          icon={IconCpu}
+          title="No account to read models from"
+          action={{
+            label: 'Add an Account',
+            icon: IconPlus,
+            onClick: () => {
+              void navigate({
+                to: '/settings/$section',
+                params: { section: SettingsSectionKey.Accounts },
+              });
+            },
+          }}
+        >
+          Add a Claude or Codex account, and the models it can run show here with what each role
+          gets.
+        </EmptyState>
       );
     return <AgentModelsView account={account} />;
   };
@@ -159,24 +164,27 @@ export function ModelsSection() {
     <Stack gap="xl">
       {header}
       <DataSourcesWarning />
-      <Stack gap="sm">
-        <SegmentedControl
-          aria-label="Kind of model"
-          w="fit-content"
-          data={CLASS_OPTIONS}
-          value={modelClass}
-          onChange={(value) => {
-            if (isModelClass(value))
-              void navigate({
-                to: '/settings/$section',
-                params: { section: SettingsSectionKey.Models },
-                search: (previous) => ({ ...previous, class: value }),
-                replace: true,
-              });
-          }}
-        />
-        {classLine}
-      </Stack>
+      {/* The class switch heads the page in a band of its own, so the page below plainly belongs to it. */}
+      <Paper radius="md" p="md" bg="var(--mantine-color-body)" withBorder>
+        <Stack gap="sm">
+          <SegmentedControl
+            aria-label="Kind of model"
+            w="fit-content"
+            data={CLASS_OPTIONS}
+            value={modelClass}
+            onChange={(value) => {
+              if (isModelClass(value))
+                void navigate({
+                  to: '/settings/$section',
+                  params: { section: SettingsSectionKey.Models },
+                  search: (previous) => ({ ...previous, class: value }),
+                  replace: true,
+                });
+            }}
+          />
+          {classLine}
+        </Stack>
+      </Paper>
       {modelClass === ModelClass.Agent ? agentBody() : <DecisionModelsView />}
     </Stack>
   );

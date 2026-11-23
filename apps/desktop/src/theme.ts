@@ -3,6 +3,7 @@ import {
   defaultVariantColorsResolver,
   MultiSelect,
   NavLink,
+  SegmentedControl,
   Select,
   Switch,
   Tooltip,
@@ -10,6 +11,7 @@ import {
   type MantineColorsTuple,
   type VariantColorsResolver,
 } from '@mantine/core';
+import segmented from './segmented-control.module.css';
 import {
   SelenizedDark,
   SelenizedLight,
@@ -127,6 +129,7 @@ export const theme = createTheme({
     Select: Select.extend({ defaultProps: { checkIconPosition: 'right' } }),
     MultiSelect: MultiSelect.extend({ defaultProps: { checkIconPosition: 'right' } }),
     Switch: Switch.extend({ defaultProps: { withThumbIndicator: false } }),
+    SegmentedControl: SegmentedControl.extend({ classNames: segmented }),
     // A tooltip is the bright ink on the base tone in both schemes, small and tight.
     Tooltip: Tooltip.extend({
       styles: {
