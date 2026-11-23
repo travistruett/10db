@@ -96,7 +96,7 @@ export function DecisionModelsTable({
       accessor: SortColumn.Name,
       title: 'Model',
       sortable: true,
-      width: '100%',
+      noWrap: true,
       render: (m) => (
         <div style={m.cantCall === null ? undefined : { opacity: 0.6 }}>
           <UnstyledButton
@@ -122,13 +122,13 @@ export function DecisionModelsTable({
         </div>
       ),
     }),
-    numeric(SortColumn.Cost, 'Cost per million decisions', (m) => (
+    numeric(SortColumn.Cost, 'Cost per Million Decisions', (m) => (
       <SourcedNumber
         text={costText(m)}
         source={m.costSource === null ? null : decisionSourceText(m.costSource)}
       />
     )),
-    numeric(SortColumn.Time, 'Time per decision', (m) => (
+    numeric(SortColumn.Time, 'Time per Decision', (m) => (
       <SourcedNumber
         text={timeText(m)}
         source={m.timeSource === null ? null : decisionSourceText(m.timeSource)}
@@ -137,6 +137,7 @@ export function DecisionModelsTable({
     {
       accessor: 'usedBy',
       title: 'Used By',
+      noWrap: true,
       render: (m) => {
         const names = (usedBy.get(m.id) ?? []).map((d) => DECISIONS[d].label).join(', ');
         return (
@@ -146,7 +147,7 @@ export function DecisionModelsTable({
         );
       },
     },
-    numeric(SortColumn.Answers, 'Answers (30 days)', (m) => String(answers.get(m.id) ?? 0)),
+    numeric(SortColumn.Answers, 'Answers (30 Days)', (m) => String(answers.get(m.id) ?? 0)),
   ];
   return (
     <DataTable<DecisionModelDto>
