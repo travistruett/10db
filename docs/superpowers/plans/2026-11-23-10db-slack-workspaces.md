@@ -435,3 +435,15 @@ e2e leg. Cards 1 and 2 are sequential (every later card needs their shapes), and
 **Shared files:** `apps/daemon/src/daemon/start.ts` (cards 2, 3), `apps/daemon/test/engine.ts` (cards 1-3),
 `apps/desktop/src/daemon/people.ts` (cards 2, 4, 5) and the e2e spec (cards 4, 5). The coordinator merges them.
 **Builder QA:** on the draft PR once cards 1-5 are merged, as the brief says; card 6 does not wait for it.
+
+## Notes from plan review round 2
+
+- **Upgrade resets thread joining once.** An existing workspace has no `botSince`, so its first check stamps
+  now: the first follow-up per task after the upgrade (or after a Disconnect and reconnect) opens a new thread and
+  may be held for review again. Accepted.
+- **A stored-Off project with questions still out loses them at upgrade.** Their team differs from the stored
+  binding (null), so the first touch fails them back as `workspace_changed`. Accepted: it is the new rule.
+- **Card 6 leaves orphan drafts as drafts.** Statement 3 fails only sending or sent sends it can't place;
+  `failSend` allows nothing else, so a draft is never moved straight to failed.
+- **Card 3 touches `reply-watch.ts`** for the stored-binding check on reminders (card 2 owns the file; only a race
+  reaches it). Card 3 runs after card 2 merges.

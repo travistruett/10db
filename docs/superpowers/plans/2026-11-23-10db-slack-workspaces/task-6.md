@@ -157,3 +157,8 @@ write`.
 The checks in Global Constraints pass and `pnpm --filter @10db/db drift` is clean. A daemon built from `main`, run
 on a throwaway data directory with `TENDB_SLACK=off` and given one workspace entry and a project, then restarted
 on this branch, reads that project bound to the workspace. Never use the real data directory.
+
+## Review note
+
+Orphan **drafts** stay drafts: the migration fails only sending or sent sends it cannot place, since `failSend`
+allows nothing else. A draft with no workspace is redrafted or held by the normal path.

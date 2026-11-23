@@ -297,3 +297,8 @@ why_new=data going out (core); no_claim=Slack's delivery, reply reading`.
 ## Done when
 
 The checks in Global Constraints pass. `grep -rn "TODO(slack-workspaces)" apps/daemon` finds nothing.
+
+## Review note
+
+This card also adds the stored-binding check to reminders in `apps/daemon/src/stakeholders/reply-watch.ts`
+(card 2 owns the file and merges first; only a race reaches the check).
