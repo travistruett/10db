@@ -27,7 +27,9 @@ The Decisions Models tab (`decisions-models-view.tsx`, Settings › Decisions �
   Inbox), Linear (`linear-card.tsx`: one line saying how agents reach Linear from `GET /settings/sign-ins/linear`,
   one per account only when the accounts differ, then one row per project, `project-rows.tsx`: its team with
   Unlink, the key field and Link, the check in flight with Cancel, the ended check, or its account's hint when the
-  account has a definite no Linear) and Artificial Analysis. Settings › People (`views/settings/people/`) is only the people, with
+  account has a definite no Linear), Figma (`figma-card.tsx`: under "Through Your Agent", one line on signing in and
+  one row per project saying how its account reaches Figma, from `GET /settings/sign-ins/figma`; no switch, since
+  the builder starts every send from a mock-up) and Artificial Analysis. Settings › People (`views/settings/people/`) is only the people, with
   how 10db reaches each one, and the timers; Add Person never shows a handle (`person-handle.ts` makes one from
   the name and numbers a clash). Settings › Who Answers (`who-answers-section.tsx`) is the routing table. A question card shows what its
   people will get (`slack-preview.tsx`: the route line under the title with Change, the card's one reroute

@@ -1924,6 +1924,8 @@
                   "rehearse",
                   "review",
                   "design_review",
+                  "figma_open",
+                  "figma_bring_back",
                   "edit",
                   "event",
                   "screen"

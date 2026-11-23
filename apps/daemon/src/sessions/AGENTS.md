@@ -25,7 +25,7 @@
   `started` (`supportedCommands`). The decision is
   `decisions/2026-11-12-agent-output-streams-as-live-frames.md`. The fake is
   `fake-script.ts` (the script book), `fake-session.ts` (one session core with a lane and an explore driver),
-  `fake-plan-script.ts` (the e2e's Plan script) and `fake-adapter.ts` (the adapter and its records).
+  `fake-plan-script.ts` (the e2e's Plan script), `fake-figma-fetch.ts` (the `fetch` that answers the Plan's Figma tools) and `fake-adapter.ts` (the adapter and its records).
   Tests inject a scripted `query`; only `claude-adapter.live.test.ts` runs real Claude Code, behind
   `TENDB_LIVE_CLAUDE=1`; `test/codex.live.test.ts` runs the real `codex` binary against a fake Responses server
   behind `TENDB_LIVE_CODEX=1`, in a checkout outside `/tmp`, and never in CI.

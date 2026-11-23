@@ -705,6 +705,22 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await expect(composer).toBeFocused();
   await composer.fill('');
 
+  // The mock-up goes to Figma and back: Open in Figma has the agent send it and the row gains a Figma menu;
+  // its Bring Back from Figma files what the frame holds as a second version, its asset link inlined.
+  await panel.getByRole('button', { name: /^Open in Figma/ }).click();
+  await expect(page.getByText('Sent to Figma.', { exact: true })).toBeVisible();
+  await panel.getByRole('button', { name: /^Figma actions for mock-up/ }).click();
+  await expect(page.getByRole('menuitem', { name: 'Open Frame in Figma' })).toBeVisible();
+  await page.getByRole('menuitem', { name: 'Bring Back from Figma' }).click();
+  await expect(page.getByText('Brought back from Figma.', { exact: true })).toBeVisible();
+  await expect(panel.getByRole('button', { name: /^Approve mock-up/ })).toBeVisible();
+  const versions = panel.locator('iframe[title^="Mockup"]');
+  await expect(versions).toHaveCount(2);
+  await expect(versions.nth(1).contentFrame().getByText('Dense board, from Figma')).toBeVisible();
+  await expect(
+    versions.nth(1).contentFrame().locator('img[src^="data:image/svg+xml;base64,"]'),
+  ).toHaveCount(1);
+
   // Design Review reads each task that has a mock-up and a page area; with no browser in this daemon the
   // pictures are missing, the review still runs, and its finding lands on the row.
   await panel.getByRole('button', { name: 'More Plan actions' }).click();

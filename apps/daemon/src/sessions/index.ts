@@ -25,6 +25,7 @@ export {
 export { FakeAdapter } from './fake-adapter';
 export { FakeScriptBook, loadFakeScriptBook } from './fake-script';
 export { scriptedShapeBehaviour } from './fake-plan-script';
+export { fakeFigmaFetch } from './fake-figma-fetch';
 export { checkAccount, loginIdentity, type SeenAccount, type SeenModel } from './account-check';
 export {
   AccountLoginError,

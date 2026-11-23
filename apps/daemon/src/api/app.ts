@@ -103,6 +103,7 @@ import {
   ShapeEditInput,
   ShapeFindingId,
   ShapeAcceptId,
+  FigmaPressInput,
   ShapeApprovalInput,
   ShapeId,
   ShapeProposalId,
@@ -910,6 +911,26 @@ export function createApp(deps: ApiDeps) {
       },
     )
     .post(
+      '/shapes/:shapeId/attachments/:attachmentId/figma',
+      validator('json', (value): FigmaPressInput => FigmaPressInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.figmaShapeAttachment(
+            ShapeId.parse(c.req.param('shapeId')),
+            ShapeAttachmentId.parse(c.req.param('attachmentId')),
+            c.req.valid('json'),
+          ),
+          202,
+        ),
+    )
+    .post('/shapes/:shapeId/attachments/:attachmentId/figma/open', async (c) => {
+      await deps.services.openFigmaFrame(
+        ShapeId.parse(c.req.param('shapeId')),
+        ShapeAttachmentId.parse(c.req.param('attachmentId')),
+      );
+      return c.body(null, 204);
+    })
+    .post(
       '/shapes/:shapeId/review',
       validator('json', (value): ShapeRehearseInput => ShapeRehearseInput.parse(value)),
       (c) =>
@@ -1620,6 +1641,7 @@ export function createApp(deps: ApiDeps) {
         ),
     )
     .get('/settings/sign-ins/linear', async (c) => c.json(await deps.services.linearSignIns()))
+    .get('/settings/sign-ins/figma', async (c) => c.json(await deps.services.figmaSignIns()))
     .get('/slack/members', async (c) =>
       c.json(await deps.services.listSlackMembers(c.req.query('query') ?? '')),
     )

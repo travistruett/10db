@@ -3086,6 +3086,47 @@
           },
           "approved": {
             "type": "boolean"
+          },
+          "figma": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "fileUrl": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "pending": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "open",
+                          "bring-back"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "fileStored": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "fileUrl",
+                  "pending",
+                  "fileStored"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -3094,7 +3135,8 @@
           "goalId",
           "taskId",
           "attachment",
-          "approved"
+          "approved",
+          "figma"
         ]
       }
     },

@@ -25,6 +25,8 @@ function shapeEventEntry(item: Item<'shape_event'>, shapeId: ShapeId): Conversat
     case 'rehearse':
     case 'review':
     case 'design_review':
+    case 'figma_open':
+    case 'figma_bring_back':
     case 'event':
       return { kind: 'notice', id, text: item.text, tone: 'info' };
     case 'screen': {

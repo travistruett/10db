@@ -6,6 +6,7 @@ import {
   DecisionId,
   GoalId,
   ProjectId,
+  ShapeAttachmentId,
   ShapeFindingId,
   ShapeId,
   ConversationItemId,
@@ -53,6 +54,10 @@ export const ShapeMessageKind = {
   Review: 'review',
   /** The note that starts a design review turn; like Review it can't be cited as a source. */
   DesignReview: 'design_review',
+  /** The note that asks the agent to send a mock-up to Figma. */
+  FigmaOpen: 'figma_open',
+  /** The note that asks the agent to read a mock-up's Figma frame back as a new version. */
+  FigmaBringBack: 'figma_bring_back',
   Edit: 'edit',
   Digest: 'digest',
   Event: 'event',
@@ -365,6 +370,8 @@ export const ShapeToolName = {
   ResolveFinding: 'resolve_finding',
   FindRecords: 'find_records',
   SeeScreen: 'see_screen',
+  SendMockupToFigma: 'send_mockup_to_figma',
+  FileFigmaVersion: 'file_figma_version',
 } as const;
 export type ShapeToolName = ValueOf<typeof ShapeToolName>;
 
@@ -481,4 +488,6 @@ export const ShapeToolInputs = {
   resolve_finding: z.object({ findingId: ShapeFindingId, how: HowResolved }),
   find_records: z.object({ query: z.string().min(1) }),
   see_screen: SeeScreenInput,
+  send_mockup_to_figma: z.object({ attachmentId: ShapeAttachmentId, submitUrl: z.string().min(1) }),
+  file_figma_version: z.object({ attachmentId: ShapeAttachmentId, html: z.string().min(1) }),
 } as const satisfies Record<ShapeToolName, z.ZodType>;
