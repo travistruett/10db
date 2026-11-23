@@ -19,6 +19,7 @@ import {
 } from '@10db/contracts';
 import {
   BUILDER_HANDLE,
+  COPY_FOR_KEY,
   SEED_BUILDER_NAME,
   closeSend,
   dropDraft,
@@ -43,6 +44,7 @@ import {
   setRoutingRules,
   targetTaskIds,
   updateDraft,
+  updateInboxItem,
   type DbReader,
   type WriteContext,
 } from '@10db/db';
@@ -170,27 +172,47 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
   function redraftFailed(card: InboxItemDto): StakeholderSendDto | null {
     const failed = sendForCard(state.db, card.id);
     if (failed?.state !== 'failed' || card.state !== InboxState.Open) return null;
-    const again = state.write((ctx) => {
+    const outcome = state.write((ctx) => {
       const people = failed.people.flatMap((p) =>
         p.recipient && p.personId ? [getPerson(ctx.tx, p.personId)] : [],
       );
-      // Composed again, not copied: the builder's name or the card may have changed since.
-      const fresh = previewDraft(ctx.tx, card, people);
+      const teamId = deps.slackFor(card.projectId);
+      if (teamId === null) throw new ConflictError(SLACK_OFF_FOR_PROJECT);
       setInboxRecipients(ctx, card.id, {
         assignees: people.map((p) => p.handle),
         routedBy: RoutedBy.Builder,
         suggestion: null,
       });
-      const teamId = deps.slackFor(card.projectId);
-      if (teamId === null) throw new ConflictError(SLACK_OFF_FOR_PROJECT);
-      return insertDraft(ctx, {
-        inboxItemId: card.id,
-        teamId,
-        recipients: people.map((p) => p.id),
-        text: fresh.text,
-        hits: fresh.hits,
-      });
+      const unreachable = people.filter((p) => contactIn(p, teamId) === null);
+      if (unreachable.length > 0) {
+        // As anyone unreachable: the card is the builder's, with Copy for them.
+        setInboxRecipients(ctx, card.id, {
+          assignees: [BUILDER_HANDLE],
+          routedBy: RoutedBy.Builder,
+          suggestion: null,
+        });
+        updateInboxItem(ctx, card.id, {
+          detail: { ...card.detail, [COPY_FOR_KEY]: people.map((p) => p.handle) },
+        });
+        return { missing: unreachable.map((p) => p.name) };
+      }
+      // Composed again, not copied: the builder's name or the card may have changed since.
+      const fresh = previewDraft(ctx.tx, card, people);
+      return {
+        draft: insertDraft(ctx, {
+          inboxItemId: card.id,
+          teamId,
+          recipients: people.map((p) => p.id),
+          text: fresh.text,
+          hits: fresh.hits,
+        }),
+      };
     });
+    if ('missing' in outcome)
+      throw new ConflictError(
+        `${outcome.missing.join(', ')} has no Slack contact in this project's workspace; copy the message for them`,
+      );
+    const again = outcome.draft;
     deps.parkFor?.(card.id);
     return again;
   }

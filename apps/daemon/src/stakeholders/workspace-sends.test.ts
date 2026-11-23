@@ -21,7 +21,7 @@ import { ManualClock } from '../clock';
 import { slackBotAccount } from '../environment';
 import { createEventBus, createStateStore } from '../events';
 import { silentLogger } from '../log';
-import { draftOnOpen } from './drafts';
+import { draftOnOpen, sweepDrafts } from './drafts';
 import { rebindProjectSlack } from './project-binding';
 import { recordBot } from './send-returns';
 import { createStakeholderSends } from './sends';
@@ -121,7 +121,11 @@ function world() {
     });
     return p.id;
   };
-  const person = (handle: string, teams: readonly string[], dailyLimit = 10) =>
+  const person = (
+    handle: string,
+    teams: readonly string[],
+    limits: Readonly<Record<string, number>> = {},
+  ) =>
     state.write((ctx) =>
       insertPerson(ctx, {
         handle,
@@ -130,7 +134,7 @@ function world() {
           teamId,
           userId: `U${teamId.slice(1)}-${handle}`,
           sendMode: 'auto' as const,
-          dailyLimit,
+          dailyLimit: limits[teamId] ?? 10,
         })),
       }),
     );
@@ -280,16 +284,34 @@ describe('a question reaches only its project workspace', () => {
     expect(w.calls()).toEqual([]);
   });
 
-  it("counts a person's limit and first send per workspace", async () => {
+  it("counts a person's limit per workspace", async () => {
     const w = world();
-    const mark = w.person('mark', [A, B], 1);
+    const mark = w.person('mark', [A, B], { [A]: 1, [B]: 1 });
     const p1 = w.project(A);
-    // One new thread to Mark in B already: his B limit of one is reached, and he has never been sent to in A.
-    w.sentTo(w.project(B), mark.id, B, w.clock.now().toISOString());
+    const now = w.clock.now().toISOString();
+    // Sent to in both: A long ago, B just now, so his limit of one is reached in B only.
+    w.sentTo(p1, mark.id, A, '2020-01-01T00:00:00.000Z');
+    w.sentTo(w.project(B), mark.id, B, now);
 
     const card = await w.ask(p1, ['mark']);
 
+    expect(sendState(w, card)).toMatchObject({ state: 'sent', heldBy: null });
+  });
+
+  it("keeps an Off project's held draft through the start sweep", async () => {
+    const w = world();
+    w.person('ana', [A]);
+    const p1 = w.project(A);
+    const card = await w.ask(p1, ['ana']);
     expect(sendState(w, card)).toMatchObject({ state: 'draft', heldBy: 'first_send' });
+    w.state.write((ctx) => {
+      setProjectSlack(ctx, p1, null);
+    });
+
+    w.state.write((ctx) => sweepDrafts(ctx, w.draftOpts));
+
+    expect(sendState(w, card)).toMatchObject({ state: 'draft', teamId: A });
+    expect(getInboxItem(w.state.db, card).assignees).toEqual(['ana']);
   });
 
   it('takes back what is sent in the old workspace in the binding write, and posts a draft in the new one', async () => {

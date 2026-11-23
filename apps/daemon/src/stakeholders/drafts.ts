@@ -264,14 +264,15 @@ export function sweepDrafts(
       );
       continue;
     }
-    const wanted = (recipientsOf(ctx.tx, card, projectSlack(ctx.tx, card.projectId).teamId) ?? [])
-      .map((p) => p.id)
-      .sort();
+    // Off, or a workspace not signed in, leaves the draft as it is: held `slack_off` at its next `afterDraft`.
+    const teamId = projectSlack(ctx.tx, card.projectId).teamId;
+    if (teamId === null) continue;
+    const wanted = (recipientsOf(ctx.tx, card, teamId) ?? []).map((p) => p.id).sort();
     const send = sendForCard(ctx.tx, card.id);
     const have = (send?.people ?? [])
       .flatMap((p) => (p.recipient && p.personId !== null ? p.personId : []))
       .sort();
-    if (wanted.join(',') !== have.join(',')) dropDraft(ctx, draft.id);
+    if (send?.teamId !== teamId || wanted.join(',') !== have.join(',')) dropDraft(ctx, draft.id);
   }
   // A question the builder settled while the daemon was down: its send closes (the line is not posted).
   for (const open of openSends(ctx.tx)) {

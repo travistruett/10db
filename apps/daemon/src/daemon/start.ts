@@ -2156,7 +2156,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   await sweepUnlistedRuns(skippedDeps);
   // A card a crash left waiting for triage takes the lane's rule, a routed card without its message gets
-  // one, and a send that was mid-post is looked for in Slack.
+  // one. A send that was mid-post is looked for by its workspace's reply watch.
   for (const after of state.write((ctx) => sweepDrafts(ctx, draftOpts))) after();
   // Slack tokens are kept by workspace: the old single item and contacts of no signed-in workspace go.
   if (slackClients !== null) cleanUpSlackSignIns({ state, keychain: judgeKeychain, log: logger });

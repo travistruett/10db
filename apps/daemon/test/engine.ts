@@ -255,10 +255,10 @@ function fullFlowSteps(riskTags: readonly string[], criteria: number): StepRole[
   ];
 }
 
-/** A judge that is off: every decision keeps today's rule. */
 /** The workspace the engine's fake Slack stands for; people with a contact in it are reachable. */
 const FAKE_TEAM = 'T1';
 
+/** A judge that is off: every decision keeps today's rule. */
 export const offJudge: Judge = {
   off: true,
   ready: () => Promise.resolve(false),
