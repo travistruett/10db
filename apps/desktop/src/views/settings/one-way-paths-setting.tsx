@@ -6,7 +6,7 @@ import { SettingRow } from './setting-row';
 
 const MONO_INPUT = { input: { fontFamily: 'var(--mantine-font-family-monospace)' } };
 
-export const ONE_WAY_PATHS_LABEL = 'One-way paths';
+export const ONE_WAY_PATHS_LABEL = 'One-Way Paths';
 
 const toLines = (paths: readonly string[]): string => paths.join('\n');
 

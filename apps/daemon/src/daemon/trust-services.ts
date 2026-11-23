@@ -50,6 +50,7 @@ import {
 } from '../session-setup';
 import { projectLiveSystems, setProjectLiveSystems } from '../trust';
 import { accountJudges } from './account-judges';
+import type { ProjectMcpServers } from './connect-service';
 
 export type TrustServices = Pick<
   ApiServices,
@@ -115,6 +116,8 @@ export function createTrustServices(deps: {
 }): TrustServices & {
   /** The builder's servers as a session on the app-wide switches would plan them. */
   readonly appMcpPlan: () => YourMcpPlan;
+  /** The builder's servers as a project's sessions would see them, on its effective switches, read now. */
+  readonly projectMcpServers: (projectId: ProjectId) => ProjectMcpServers;
 } {
   const db = deps.state.db;
   const onInvalid = warnInvalidTrust(deps.log);
@@ -152,6 +155,26 @@ export function createTrustServices(deps: {
       laneWritable: roots,
     });
     return { servers, fileProblems, entries, approvals };
+  };
+
+  const projectMcpServers = (projectId: ProjectId): ProjectMcpServers => {
+    const switches = trustSwitchesFor(db, projectId, onInvalid);
+    const { servers, entries, approvals } = yourServers(switches);
+    const plan = planYourMcp({
+      entries,
+      switches,
+      approvals,
+      projectServerNames: [],
+      loginEnv: deps.loginEnv(),
+      localBinding: getProject(db, projectId).sandboxLoopback,
+    });
+    return {
+      servers,
+      on: switches.yourMcpServers,
+      loaded: Object.fromEntries(
+        Object.entries(plan.remote).map(([name, remote]) => [name, remote.key]),
+      ),
+    };
   };
 
   const appMcpPlan = (): YourMcpPlan => {
@@ -265,6 +288,7 @@ export function createTrustServices(deps: {
 
   return {
     appMcpPlan,
+    projectMcpServers,
     trustSettings,
     async setTrustSwitches(switches) {
       deps.state.write((ctx) => {

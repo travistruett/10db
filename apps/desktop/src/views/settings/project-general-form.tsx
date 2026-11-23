@@ -5,6 +5,7 @@ import {
   Group,
   NumberInput,
   SegmentedControl,
+  Select,
   Stack,
   Switch,
   TagsInput,
@@ -278,7 +279,7 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         </SettingRow>
       </SettingsCard>
 
-      <SettingsCard title="Pictures of Pages">
+      <SettingsCard title="Pictures of Pages" action={<PicturesStatus projectId={project.id} />}>
         <SettingRow
           label="Dev Login Command"
           description="Prints an address that signs a browser in."
@@ -326,7 +327,6 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
             />
           </Group>
         </SettingRow>
-        <PicturesStatus projectId={project.id} />
       </SettingsCard>
 
       <SettingsCard title="When Work Is Finished">
@@ -388,9 +388,10 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
                 : `GitHub merges each pull request into ${(values.landing === ProjectLanding.Branch ? values.landingBranch.trim() : values.baseBranch.trim()) || 'the base branch'} by itself once its required checks pass. A task can choose another branch, or hold.`
             }
           >
-            <SegmentedControl
+            <Select
               aria-label="When Checks Pass"
-              fullWidth
+              allowDeselect={false}
+              checkIconPosition="right"
               value={values.landing}
               data={[
                 {
@@ -401,7 +402,7 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
                 { value: ProjectLanding.Hold, label: 'Hold for My Review' },
               ]}
               onChange={(value) => {
-                set({ landing: landingChoice(value) });
+                if (value !== null) set({ landing: landingChoice(value) });
               }}
             />
           </SettingRow>
@@ -672,6 +673,9 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         // The surface pads its content, and a sticky edge is measured inside that padding: reach over it.
         bottom="calc(var(--shell-content-padding-block) * -1)"
         py="md"
+        // Reaches over the surface's side padding, so the divider runs edge to edge.
+        mx="calc(var(--shell-content-padding-inline) * -1)"
+        px="var(--shell-content-padding-inline)"
         // Reaches over the surface's bottom padding, so the page ends at the bar: no extra scroll below it.
         mb="calc(var(--shell-content-padding-block) * -1)"
         bg="var(--mantine-color-body)"

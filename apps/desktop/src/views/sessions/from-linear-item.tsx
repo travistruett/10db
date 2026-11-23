@@ -14,7 +14,7 @@ function Item({ project }: { readonly project: ProjectDto }) {
     return (
       <>
         <Menu.Item disabled>From Linear</Menu.Item>
-        <Menu.Label>{row.note ?? "This project's account has no Linear sign-in."}</Menu.Label>
+        <Menu.Label>{row.note ?? 'Connect Linear in Settings › Integrations.'}</Menu.Label>
       </>
     );
   return (

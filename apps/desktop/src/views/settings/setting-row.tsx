@@ -86,7 +86,7 @@ export function SettingRow({
       control.setAttribute('aria-describedby', [...ids, descriptionId].join(' '));
   });
   const text = (
-    <Box flex={1} miw={0}>
+    <Box flex={1} miw={240}>
       <Group gap={4} wrap="nowrap">
         <Text size="sm" fw={500}>
           {label}
@@ -110,7 +110,7 @@ export function SettingRow({
       ) : (
         <Group justify="space-between" wrap="nowrap" gap="xl">
           {text}
-          <Box miw={260} style={{ flex: 'none' }}>
+          <Box w={320} style={{ flex: 'none' }}>
             {children}
           </Box>
         </Group>

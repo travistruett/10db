@@ -43,3 +43,6 @@ apps/desktop/test-results/
 apps/desktop/playwright-report/
 # Empty folders Claude Code can leave next to a file it writes.
 **/.cc-writes/
+
+# a connect-service test's scratch home
+apps/daemon/src/daemon/.connect-home-*/

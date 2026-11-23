@@ -26,8 +26,21 @@ Decision Models (`decision-models-view.tsx`, Settings › Models › Decision Mo
   `GET/PUT /projects/:id/integrations`: on binds the signed-in workspace, off keeps the project's sends in the
   Inbox), Linear (`linear-card.tsx`: one line saying how agents reach Linear from `GET /settings/sign-ins/linear`,
   one per account only when the accounts differ, then one row per project, `project-rows.tsx`: its team with
-  Unlink, the key field and Link, the check in flight with Cancel, the ended check, or its account's hint when the
-  account has a definite no Linear), Figma (`figma-card.tsx`: under "Through Your Agent", one line saying the Figma plugin in
+  Unlink, the key field and Link, the check in flight with Cancel, the ended check, or `ConnectServiceButton`
+  (`connect-service-button.tsx`, generic over `ConnectableService`) when the account has a definite no Linear or its
+  server isn't signed in: Connect Linear posts `POST /settings/connect/:service` `{ projectId }`, and the daemon
+  adds the service's server to the builder's own agent config (the pinned Codex `mcp add --url`, or Claude Code
+  `mcp add --transport http --scope user`; a different server already named `linear` is never overwritten),
+  approves that server as Trust's Approve does, and, on Codex, starts the account's sign-in. The row then shows
+  "Signing In in Your Browser…" with Open Page Again (`mcp_sign_in.changed` refetches), and Update Linear Issues
+  turns on for that project when the sign-in ends (the daemon does it, so leaving the page doesn't lose it); the other
+  projects on the account show their switch off. On Claude Code the row shows "Finish in Claude Code: run /mcp and
+  sign in to Linear." with Copy /mcp (a Claude plan account in its own folder gets Trust's terminal command instead)
+  and Done, which turns the switch on through `onConnected`; the card re-reads on window focus. A refusal that
+  names a Trust switch (a server sessions wouldn't load) shows in red with Open Trust. Provider parity: Codex is one click; a Claude
+  plan, API key or Bedrock account is one click plus `/mcp` in Claude Code. A new service is one entry in
+  `CONNECTABLE_SERVICES` (daemon), one in `ConnectableService` and its label (contracts), and its card using the
+  component), Figma (`figma-card.tsx`: under "Through Your Agent", one line saying the Figma plugin in
   Claude Code or Codex manages access, and a row only for a project whose account has no way to Figma
   (`FigmaVia.None`, from `GET /settings/sign-ins/figma`); no switch, since the builder starts every send from a
   mock-up) and Artificial Analysis. Settings › People (`views/settings/people/`) is only the people, with
@@ -44,3 +57,4 @@ Decision Models (`decision-models-view.tsx`, Settings › Models › Decision Mo
   on an option closes it. `e2e/stakeholder-questions.spec.ts` seeds its cards with `apps/daemon/scripts/seed-*.ts`.
 - Settings › Agent skill (`agent-skill-section.tsx`) shows `/settings/agent-skill`: a line and three iconed uses saying what the 10db-task skill lets an agent in any repo do, the switch (disabled when this 10db installs nothing: another data folder, or run from source), then a Status card of badged rows: the skill (Current, Out of Date, Not Installed) and each tool's link with its path in monospace (Linked, Not Linked, or a link of the builder's, shown and left as it is). Integrations' Slack card sets up in three numbered steps (`SetupStep`: a numbered circle, a short title, the step's control under it); Artificial Analysis keeps one key field, and once a key is set its placeholder is dots and Replace Key, Sync Now and Remove Key are icon buttons beside it.
 - This Project pages share one shape: a `Title order={4}` heading with at most one dimmed line, and the long explanation behind a `HelpTip` (`help-tip.tsx`, an info `ActionIcon` opening a `HoverCard`), or, on a row, `SettingRow`'s `help` prop; "Optional" goes in a placeholder. Areas and Hazards (`project-areas.tsx`) is two `mantine-datatable` tables, each under a `SectionHeading` with its action (Add Area; Look Again and Add Hazard), that grow with the page: Areas shows Name, Kind (Page with its route, Shared, Catch-All) and every path, Hazards Name, Scope, a command count and every path, each with Edit and Remove icons. A row opens a `SurfaceDrawer` (`area-drawer.tsx`, `hazard-drawer.tsx`) that saves that one row alone through `useListPatch` (the whole list with one row changed, checked by `ProjectPatch` first, the daemon's refusal shown in full in the drawer and the project read again); Remove asks in a `ConfirmModal`. What a catch-all, a role and a pattern mean is said once, in the heading or label help. `AreaRoleFields` is shared with project setup. Planning's three settings sit in one card, each with its save beside its input. Board Columns and Who Answers scroll their tables sideways instead of squeezing them.
+- `SettingRow` gives its control a fixed 320 px column and its text at least 240 px, so controls share one right edge and a `TagsInput` row never squeezes its label. General's save bar bleeds over the surface's side padding so its top border runs edge to edge, as the task drawer's footer does; When Checks Pass is a `Select`; the picture browser's state is a `ConnectionStatus` in the Pictures of Pages card's `action` slot, its problems behind a `HelpHint`. Planning shows a yellow `Alert` with an Open Decisions button above its card while no account runs decisions. Who Answers and Allowed Hosts show an `EmptyState` with their add action when empty; a project's Trust cards are What Comes Along, Your Plugins, Your MCP Servers and Live Systems, with "Applies from the next session" said once in the scope line.
