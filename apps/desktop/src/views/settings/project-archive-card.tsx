@@ -16,9 +16,9 @@ export function ProjectArchiveCard({ project }: { readonly project: ProjectDto }
     archive.reset();
   };
   return (
-    <SettingsCard title="Archive Project">
+    <SettingsCard title="Archive">
       <SettingRow
-        label="Archive Project"
+        label="Archive This Project"
         description="Hides this project everywhere and stops its activity. Nothing is deleted; restore it from Settings › Overview."
       >
         <Button

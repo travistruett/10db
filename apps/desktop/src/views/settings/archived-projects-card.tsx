@@ -21,7 +21,7 @@ export function ArchivedProjectsCard() {
                   {project.name}
                 </Text>
                 <Text size="xs" c="dimmed" truncate>
-                  {project.repoPath}
+                  {project.repoPath.replace(/^\/Users\/[^/]+/u, '~')}
                 </Text>
               </Stack>
               <Button
