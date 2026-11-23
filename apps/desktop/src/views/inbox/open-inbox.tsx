@@ -185,7 +185,8 @@ export function OpenInbox({
     selected !== null &&
     !myself.has(selected.id) &&
     [StakeholderMode.Draft, StakeholderMode.Failed].some(
-      (m) => m === stakeholderMode(selected, people),
+      // Draft and Failed come before the workspace is read, so none is needed here.
+      (m) => m === stakeholderMode(selected, people, null),
     );
 
   const select = (row: OpenRow): void => {

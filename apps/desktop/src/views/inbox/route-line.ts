@@ -1,10 +1,12 @@
 import {
+  contactIn,
   InboxKind,
   QuestionCategory,
   RoutedBy,
   SendState,
   type InboxItemDto,
   type PersonDto,
+  type ProjectSlackDto,
 } from '@10db/contracts';
 
 /** What the card shows for a question that may go to someone else. */
@@ -40,7 +42,15 @@ export function copyPeople(item: InboxItemDto, people: readonly PersonDto[]): Pe
   });
 }
 
-export function stakeholderMode(item: InboxItemDto, people: readonly PersonDto[]): StakeholderMode {
+/**
+ * What the builder sees for a question, given the project's Slack workspace (`null` for Off): a person
+ * with no contact in it is one the builder passes the message to.
+ */
+export function stakeholderMode(
+  item: InboxItemDto,
+  people: readonly PersonDto[],
+  teamId: string | null,
+): StakeholderMode {
   const copyFor = copyPeople(item, people);
   if (item.kind !== InboxKind.Question) return StakeholderMode.None;
   if (item.routedBy === RoutedBy.TriagePending) return StakeholderMode.Pending;
@@ -48,13 +58,34 @@ export function stakeholderMode(item: InboxItemDto, people: readonly PersonDto[]
   if (item.send?.state === SendState.Failed) return StakeholderMode.Failed;
   // Sending, sent or answered: the Waiting tab and Resolved show it, not this card.
   if (item.send !== null && item.send.state !== SendState.Closed) return StakeholderMode.None;
-  if (item.send === null && copyFor.length > 0 && copyFor.every((p) => p.slack.length === 0))
+  if (
+    item.send === null &&
+    copyFor.length > 0 &&
+    copyFor.every((p) => contactIn(p, teamId) === null)
+  )
     return StakeholderMode.Copy;
   const recipients = recipientsOf(item, people);
   if (recipients.length === 0) return StakeholderMode.Unrouted;
-  return recipients.every((p) => p.slack.length === 0)
+  return recipients.every((p) => contactIn(p, teamId) === null)
     ? StakeholderMode.Copy
     : StakeholderMode.Unrouted;
+}
+
+/** A person as the pickers list them: whether 10db can message them through this project's workspace. */
+export function reachLabel(person: PersonDto, slack: ProjectSlackDto | undefined): string {
+  if (person.slack.length === 0) return `${person.name} · not on Slack`;
+  if (slack === undefined) return `${person.name} · Slack`;
+  if (slack.teamId === null) return `${person.name} · Slack is off for this project`;
+  if (contactIn(person, slack.teamId) === null)
+    return `${person.name} · not in ${slack.teamName ?? 'this'}'s Slack`;
+  return `${person.name} · Slack`;
+}
+
+/** Why 10db can't message someone for this project, as "isn't on Slack" or "isn't in Acme's Slack". */
+export function copyReason(person: PersonDto, slack: ProjectSlackDto | undefined): string {
+  if (person.slack.length === 0) return "isn't on Slack";
+  if (slack?.teamId === null) return "can't be messaged: Slack is off for this project";
+  return `isn't in ${slack?.teamName ?? "this project's"}'s Slack`;
 }
 
 /** "Mark", "Mark and Ana", "Mark, Ana and Lee". */

@@ -83,50 +83,6 @@ export function useSlackStatus() {
   });
 }
 
-/**
- * The first workspace standing for "the connection".
- * TODO(slack-workspaces): readers take every workspace from `useSlackStatus`.
- */
-export interface FirstWorkspaceConnection {
-  readonly state: 'off' | 'none' | 'connected' | 'refused' | 'unreachable';
-  readonly teamId: string | null;
-  readonly teamName: string | null;
-  readonly botUserId: string | null;
-  readonly checkedAt: string | null;
-  readonly error: string | null;
-}
-
-function firstWorkspace(status: SlackStatusDto): FirstWorkspaceConnection {
-  const empty = {
-    teamId: null,
-    teamName: null,
-    botUserId: null,
-    checkedAt: null,
-    error: null,
-  };
-  if (status.off) return { state: 'off', ...empty };
-  const first = status.workspaces.at(0);
-  if (first === undefined) return { state: 'none', ...empty };
-  return {
-    state: first.state === 'checking' ? 'none' : first.state,
-    teamId: first.teamId,
-    teamName: first.teamName,
-    botUserId: first.botUserId,
-    checkedAt: first.checkedAt,
-    error: first.error,
-  };
-}
-
-/** TODO(slack-workspaces): replaced by `useSlackStatus` in the readers. */
-export function useSlackConnection() {
-  const { client } = useDaemon();
-  return useQuery({
-    queryKey: SLACK_KEY,
-    queryFn: async () => readJson(await client.slack.$get(), SlackStatusDto),
-    select: firstWorkspace,
-  });
-}
-
 /** Saves a token after Slack accepts it; a refusal is the mutation's error, in Slack's words. */
 export function useSetSlackToken() {
   const { client } = useDaemon();

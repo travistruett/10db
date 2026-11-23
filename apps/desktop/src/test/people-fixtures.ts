@@ -31,7 +31,7 @@ export function slackContact(
 export const BUILDER_PERSON = personDto({ name: 'Travis', handle: 'travis', isBuilder: true });
 
 /**
- * `GET /slack` for one workspace in the given state. TODO(slack-workspaces): tests build the status they need.
+ * `GET /slack` for one workspace in the given state.
  * `off` is the daemon with Slack off, `none` no workspace signed in.
  */
 export function slackConnection(over: Record<string, unknown> = {}): SlackStatusDto {

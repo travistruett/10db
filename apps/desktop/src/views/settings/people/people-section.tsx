@@ -24,12 +24,7 @@ import {
 import { useNavigate } from '@tanstack/react-router';
 import { EmptyState } from '../../../shell/empty-state';
 import { useState } from 'react';
-import {
-  usePeople,
-  useRemovePerson,
-  useSlackConnection,
-  useSlackMember,
-} from '../../../daemon/people';
+import { usePeople, useRemovePerson, useSlackMember, useSlackStatus } from '../../../daemon/people';
 import { SettingsSectionKey } from '../sections';
 import { PersonAnswers } from './person-answers';
 import { PersonModal } from './person-modal';
@@ -41,23 +36,26 @@ function rowName(person: PersonDto): string {
   return `You · ${person.name}`;
 }
 
+/** The mode every contact shares, or "By Workspace" when they differ. */
 function howSent(person: PersonDto): string {
   if (person.isBuilder) return '—';
-  // TODO(slack-workspaces): the contact in the project's workspace; today the first.
-  const contact = person.slack[0];
-  if (contact === undefined) return 'You pass it on';
-  return contact.sendMode === 'auto' ? 'Sent on Its Own' : 'Shown to You First';
+  const modes = new Set(person.slack.map((c) => c.sendMode));
+  if (modes.size === 0) return 'You pass it on';
+  if (modes.size > 1) return 'By Workspace';
+  return modes.has('auto') ? 'Sent on Its Own' : 'Shown to You First';
 }
 
-/** How 10db reaches someone, as a small chip: "Slack @Mark Ellis", or "Not on Slack". */
-function ReachChip({ person }: { readonly person: PersonDto }) {
-  const member = useSlackMember(person.slack[0]?.teamId ?? null, person.slack[0]?.userId ?? null);
-  if (person.slack.length === 0)
-    return person.isBuilder ? null : (
-      <Badge variant="default" size="sm" tt="none" fw={500}>
-        Not on Slack
-      </Badge>
-    );
+/** One workspace the person is reachable in: the Slack mark, the workspace and their name there. */
+function WorkspaceChip({
+  teamId,
+  userId,
+  teamName,
+}: {
+  readonly teamId: string;
+  readonly userId: string;
+  readonly teamName: string;
+}) {
+  const member = useSlackMember(teamId, userId);
   return (
     <Badge
       variant="default"
@@ -66,24 +64,52 @@ function ReachChip({ person }: { readonly person: PersonDto }) {
       fw={500}
       leftSection={<IconBrandSlack size={12} stroke={1.5} aria-hidden />}
     >
-      {member === null ? 'Slack' : `Slack @${member.name}`}
+      {member === null ? teamName : `${teamName} @${member.name}`}
     </Badge>
   );
 }
 
-/** While Slack can't carry questions: a callout with the one button that fixes it. */
-function ConnectSlack({ builder }: { readonly builder: PersonDto | undefined }) {
-  const state = useSlackConnection().data?.state;
+/** How 10db reaches someone: a chip per signed-in workspace they are in ("Acme @mark"), or "Not on Slack". */
+function ReachChip({ person }: { readonly person: PersonDto }) {
+  const status = useSlackStatus();
+  const signedIn = status.data?.workspaces ?? [];
+  const contacts = person.slack.flatMap((c) => {
+    const workspace = signedIn.find((w) => w.teamId === c.teamId);
+    return workspace === undefined ? [] : [{ contact: c, teamName: workspace.teamName }];
+  });
+  if (contacts.length === 0)
+    return person.isBuilder ? null : (
+      <Badge variant="default" size="sm" tt="none" fw={500}>
+        Not on Slack
+      </Badge>
+    );
+  return (
+    <>
+      {contacts.map(({ contact, teamName }) => (
+        <WorkspaceChip
+          key={contact.teamId}
+          teamId={contact.teamId}
+          userId={contact.userId}
+          teamName={teamName}
+        />
+      ))}
+    </>
+  );
+}
+
+/** While no workspace is connected, Slack can't carry questions: a callout with the one button that fixes it. */
+function ConnectSlack() {
+  const status = useSlackStatus().data;
   const navigate = useNavigate();
-  if (state === undefined || state === 'unreachable' || builder === undefined) return null;
-  const unfinished = state === 'connected' && builder.slack.length === 0;
-  if (state === 'connected' && !unfinished) return null;
+  if (status === undefined || status.workspaces.some((w) => w.state === 'connected')) return null;
+  if (status.workspaces.some((w) => w.state === 'unreachable' || w.state === 'checking'))
+    return null;
   return (
     <Alert
       variant="light"
       color="yellow"
       icon={<IconBrandSlack size={18} stroke={1.5} />}
-      title={unfinished ? "Slack's setup isn't finished" : "Slack isn't connected"}
+      title="Slack isn't connected"
     >
       <Group justify="space-between" wrap="nowrap" gap="md">
         <Text size="sm">
@@ -101,7 +127,7 @@ function ConnectSlack({ builder }: { readonly builder: PersonDto | undefined }) 
             });
           }}
         >
-          {unfinished ? 'Finish Setup' : 'Connect Slack'}
+          Connect Slack
         </Button>
       </Group>
     </Alert>
@@ -151,7 +177,7 @@ export function PeopleSection() {
             </Button>
           )}
         </Group>
-        <ConnectSlack builder={rows.find((p) => p.isBuilder)} />
+        <ConnectSlack />
         {people.isPending ? <Loader size="sm" /> : null}
         {people.isError ? (
           <Alert color="red" title="Couldn't load people">

@@ -11,7 +11,7 @@ import {
   type InboxPageQuery,
   type InboxRowRef,
 } from '@10db/contracts';
-import { and, asc, count, desc, eq, exists, gte, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, exists, gte, inArray, sql, type SQL } from 'drizzle-orm';
 import type { SQLiteColumn } from 'drizzle-orm/sqlite-core';
 import * as schema from '../schema';
 import { toInboxItemDto } from './inbox';
@@ -47,7 +47,12 @@ END`;
 type ListedState = typeof InboxListState.Waiting | typeof InboxListState.Resolved;
 
 /** Every filter of the query, which also counts the list: nothing here depends on where the page starts. */
-function whereOf(db: DbReader, q: InboxPageQuery, state: ListedState): SQL | undefined {
+function whereOf(
+  db: DbReader,
+  q: InboxPageQuery,
+  state: ListedState,
+  placement: InboxPlacement,
+): SQL | undefined {
   const where: (SQL | undefined)[] = [
     eq(items.state, state === InboxListState.Resolved ? InboxState.Resolved : InboxState.Open),
   ];
@@ -61,7 +66,14 @@ function whereOf(db: DbReader, q: InboxPageQuery, state: ListedState): SQL | und
         db
           .select({ one: sql`1` })
           .from(sends)
-          .where(and(eq(sends.inboxItemId, items.id), sendIsOut)),
+          .where(
+            and(
+              eq(sends.inboxItemId, items.id),
+              sendIsOut,
+              // The same rule Open uses: a card is Waiting's only while its send's workspace is connected.
+              inArray(sends.teamId, [...placement.connectedTeams]),
+            ),
+          ),
       ),
     );
   if (q.project !== undefined) where.push(eq(items.projectId, q.project));
@@ -138,7 +150,7 @@ export function pageInbox(
 ): InboxPageDto {
   const state = q.state;
   if (state === InboxListState.Open) return openRowsPage(db, q, placement);
-  const where = whereOf(db, q, state);
+  const where = whereOf(db, q, state, placement);
   const total = db.select({ n: count() }).from(items).where(where).get()?.n ?? 0;
   const keyset = q.after !== undefined || q.card !== undefined;
   const page = keyset ? 1 : Math.min(q.page ?? 1, Math.max(1, Math.ceil(total / q.pageSize)));

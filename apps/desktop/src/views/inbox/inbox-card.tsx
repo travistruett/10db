@@ -44,6 +44,7 @@ import { RecordDecision } from './record-decision';
 import { PRINCIPLE_KIND_LABELS } from '../knowledge/knowledge-labels';
 import { SettingsSectionKey } from '../settings/sections';
 import { usePeople } from '../../daemon/people';
+import { useProjectIntegrations } from '../../daemon/sign-in-queries';
 import { OpenTaskLink } from '../sessions/open-task-link';
 import {
   OpenSessionLink,
@@ -166,7 +167,8 @@ export function InboxCard({
   onAnswerMyself = () => undefined,
 }: InboxCardProps) {
   const people = usePeople().data ?? [];
-  const mode = stakeholderMode(item, people);
+  const slackTeam = useProjectIntegrations(item.projectId).data?.slack.teamId ?? null;
+  const mode = stakeholderMode(item, people, slackTeam);
   const review = mcpReview(item);
   const rejection = reviewRejection(item);
   const principle = usePrincipleOf(item, selected);
