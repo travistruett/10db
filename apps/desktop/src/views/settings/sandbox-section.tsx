@@ -46,13 +46,13 @@ export function SandboxSection({ project }: { readonly project: ProjectDto }) {
           </Group>
         </SettingRow>
         <SettingRow
-          label="Commands That Don't Ask"
+          label="Allowed Commands"
           description="One per line, such as pnpm test."
           help="Tasks run these without asking you; 10db still checks each one."
           stacked
         >
           <Textarea
-            aria-label="Commands That Don't Ask"
+            aria-label="Allowed Commands"
             styles={MONO_INPUT}
             autosize
             minRows={1}

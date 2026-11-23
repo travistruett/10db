@@ -57,11 +57,17 @@ const SHORT: Readonly<Record<TrustSwitchKey, string>> = {
 const Choice = { App: 'app', On: 'on', Off: 'off' } as const;
 type Choice = (typeof Choice)[keyof typeof Choice];
 
-const CHOICES = [
-  { value: Choice.App, label: 'As App' },
-  { value: Choice.On, label: 'On' },
-  { value: Choice.Off, label: 'Off' },
-];
+/** Default follows All Projects › Trust and says what that is now, when it is known. */
+function choices(appValue: boolean | undefined) {
+  return [
+    {
+      value: Choice.App,
+      label: appValue === undefined ? 'Default' : `Default · ${appValue ? 'On' : 'Off'}`,
+    },
+    { value: Choice.On, label: 'On' },
+    { value: Choice.Off, label: 'Off' },
+  ];
+}
 
 function isChoice(value: string): value is Choice {
   return value === Choice.App || value === Choice.On || value === Choice.Off;
@@ -72,7 +78,7 @@ function choiceOf(value: boolean | undefined): Choice {
   return value ? Choice.On : Choice.Off;
 }
 
-/** `record` with `key` set to `value`, or without it when `value` is undefined (As app). */
+/** `record` with `key` set to `value`, or without it when `value` is undefined (Default). */
 function setOrClear<T>(
   record: Readonly<Record<string, T>>,
   key: string,
@@ -348,10 +354,11 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
           >
             <SegmentedControl
               aria-label={row.label}
+              size="xs"
               fullWidth
               disabled={overrides === undefined}
               value={choiceOf(overrides?.[row.key])}
-              data={CHOICES}
+              data={choices(app.data?.switches[row.key])}
               onChange={(value) => {
                 if (isChoice(value))
                   set.mutate((saved) => withSwitch(saved, row.key, boolOf(value)));
@@ -366,10 +373,11 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
             <SettingRow key={plugin.id} label={plugin.id} description={plugin.version}>
               <SegmentedControl
                 aria-label={plugin.id}
+                size="xs"
                 fullWidth
                 disabled={overrides === undefined}
                 value={choiceOf(overrides?.plugins?.[plugin.id])}
-                data={CHOICES}
+                data={choices(plugin.on)}
                 onChange={(value) => {
                   if (isChoice(value))
                     set.mutate((saved) => withPlugin(saved, plugin.id, boolOf(value)));
@@ -385,10 +393,11 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
             <SettingRow key={server.key} label={server.name}>
               <SegmentedControl
                 aria-label={server.name}
+                size="xs"
                 fullWidth
                 disabled={overrides === undefined}
                 value={choiceOf(overrides?.mcpServers?.[server.key])}
-                data={CHOICES}
+                data={choices(undefined)}
                 onChange={(value) => {
                   if (isChoice(value))
                     set.mutate((saved) => withMcpServer(saved, server.key, boolOf(value)));
