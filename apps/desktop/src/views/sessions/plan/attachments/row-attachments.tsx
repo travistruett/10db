@@ -1,6 +1,6 @@
 import type { ShapeAttachmentDto, ShapeId, ShapeProposalDto } from '@10db/contracts';
-import { Anchor, Button, Group, Stack, Text } from '@mantine/core';
-import { IconCheck } from '@tabler/icons-react';
+import { Anchor, Button, Group, Menu, Stack, Text } from '@mantine/core';
+import { IconCheck, IconChevronDown } from '@tabler/icons-react';
 import { createContext, use } from 'react';
 import {
   useApproveAttachment,
@@ -116,7 +116,10 @@ export function RowAttachments({
   );
 }
 
-/** A mock-up's trip to Figma: send it, then once linked, send again, bring it back and follow the frame link. */
+/**
+ * A mock-up's trip to Figma: one button to send it, then once linked one menu, so the row stays one line. The
+ * menu follows the frame link, brings the frame back as a new version, or sends the mock-up again.
+ */
 function FigmaButtons({
   shapeId,
   attachment,
@@ -128,51 +131,62 @@ function FigmaButtons({
 }) {
   const press = useFigmaPress(shapeId);
   const open = useOpenFigmaFrame(shapeId);
-  const linked = attachment.figma !== null;
+  const send = (): void => {
+    press.mutate({ attachmentId: attachment.id, action: 'open' });
+  };
+  const error = press.isError ? (
+    <Text size="xs" c="red">
+      {press.error.message}
+    </Text>
+  ) : null;
+  if (attachment.figma === null)
+    return (
+      <>
+        <Button
+          variant="default"
+          size="xs"
+          loading={press.isPending}
+          aria-label={`Open in Figma: ${title}`}
+          onClick={send}
+        >
+          Open in Figma
+        </Button>
+        {error}
+      </>
+    );
   return (
     <>
-      <Button
-        variant="default"
-        size="xs"
-        loading={press.isPending && press.variables.action === 'open'}
-        aria-label={`${linked ? 'Send again to Figma' : 'Open in Figma'}: ${title}`}
-        onClick={() => {
-          press.mutate({ attachmentId: attachment.id, action: 'open' });
-        }}
-      >
-        {linked ? 'Send Again to Figma' : 'Open in Figma'}
-      </Button>
-      {linked ? (
-        <>
+      <Menu position="bottom-start" withinPortal>
+        <Menu.Target>
           <Button
             variant="default"
             size="xs"
-            loading={press.isPending && press.variables.action === 'bring-back'}
-            aria-label={`Bring back from Figma: ${title}`}
+            loading={press.isPending}
+            rightSection={<IconChevronDown size={14} stroke={1.5} aria-hidden="true" />}
+            aria-label={`Figma actions for mock-up: ${title}`}
+          >
+            Figma
+          </Button>
+        </Menu.Target>
+        <Menu.Dropdown>
+          <Menu.Item
+            onClick={() => {
+              open.mutate(attachment.id);
+            }}
+          >
+            Open Frame in Figma
+          </Menu.Item>
+          <Menu.Item
             onClick={() => {
               press.mutate({ attachmentId: attachment.id, action: 'bring-back' });
             }}
           >
             Bring Back from Figma
-          </Button>
-          <Anchor
-            component="button"
-            type="button"
-            fz={12}
-            aria-label={`Open the Figma frame of mock-up: ${title}`}
-            onClick={() => {
-              open.mutate(attachment.id);
-            }}
-          >
-            Figma Frame
-          </Anchor>
-        </>
-      ) : null}
-      {press.isError ? (
-        <Text size="xs" c="red">
-          {press.error.message}
-        </Text>
-      ) : null}
+          </Menu.Item>
+          <Menu.Item onClick={send}>Send Again to Figma</Menu.Item>
+        </Menu.Dropdown>
+      </Menu>
+      {error}
     </>
   );
 }

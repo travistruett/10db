@@ -705,14 +705,13 @@ test('New Plan: a dropped file and a message fill the panel, a pinned row surviv
   await expect(composer).toBeFocused();
   await composer.fill('');
 
-  // The mock-up goes to Figma and back: Open in Figma has the agent send it and the row shows the frame
-  // link; Bring Back from Figma files what the frame holds as a second version, its asset link inlined.
+  // The mock-up goes to Figma and back: Open in Figma has the agent send it and the row gains a Figma menu;
+  // its Bring Back from Figma files what the frame holds as a second version, its asset link inlined.
   await panel.getByRole('button', { name: /^Open in Figma/ }).click();
   await expect(page.getByText('Sent to Figma.', { exact: true })).toBeVisible();
-  await expect(
-    panel.getByRole('button', { name: /^Open the Figma frame of mock-up/ }),
-  ).toBeVisible();
-  await panel.getByRole('button', { name: /^Bring back from Figma/ }).click();
+  await panel.getByRole('button', { name: /^Figma actions for mock-up/ }).click();
+  await expect(page.getByRole('menuitem', { name: 'Open Frame in Figma' })).toBeVisible();
+  await page.getByRole('menuitem', { name: 'Bring Back from Figma' }).click();
   await expect(page.getByText('Brought back from Figma.', { exact: true })).toBeVisible();
   await expect(panel.getByRole('button', { name: /^Approve mock-up/ })).toBeVisible();
   const versions = panel.locator('iframe[title^="Mockup"]');
