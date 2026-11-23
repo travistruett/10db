@@ -124,7 +124,7 @@ entry the builder configures.
 |---|---|---|---|
 | Claude plan | the claude.ai Linear connector, or an `mcp.linear.app` entry in Claude Code's config | `mcp__claude_ai_Linear__*` or `mcp__<entry>__*` | "Sign in to Linear in Claude Code: `/mcp`." |
 | Claude API key or Bedrock | an `mcp.linear.app` entry in Claude Code's config, signed in with `/mcp` | `mcp__<entry>__*` | "Add Linear's server to Claude Code, then `/mcp`." |
-| ChatGPT/Codex plan | `codex mcp add` for `mcp.linear.app` | the entry's tools | "Sign in in Settings › Trust." |
+| ChatGPT/Codex plan | `codex mcp add` for `mcp.linear.app` | the entry's tools | With no entry: "Add Linear's server to Codex (codex mcp add linear --url https://mcp.linear.app/mcp), then sign in to it under Settings › Trust › Your MCP Servers." With one not signed in: "Sign in to Linear under Settings › Trust › Your MCP Servers." |
 
 - The guard knows a tool is Linear's by its server: the claude.ai connector by name, a configured entry by its
   URL's host, `mcp.linear.app`. The plan confirms how each provider names them.
