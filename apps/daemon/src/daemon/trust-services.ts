@@ -159,7 +159,22 @@ export function createTrustServices(deps: {
 
   const projectMcpServers = (projectId: ProjectId): ProjectMcpServers => {
     const switches = trustSwitchesFor(db, projectId, onInvalid);
-    return { servers: yourServers(switches).servers, on: switches.yourMcpServers };
+    const { servers, entries, approvals } = yourServers(switches);
+    const plan = planYourMcp({
+      entries,
+      switches,
+      approvals,
+      projectServerNames: [],
+      loginEnv: deps.loginEnv(),
+      localBinding: getProject(db, projectId).sandboxLoopback,
+    });
+    return {
+      servers,
+      on: switches.yourMcpServers,
+      loaded: Object.fromEntries(
+        Object.entries(plan.remote).map(([name, remote]) => [name, remote.key]),
+      ),
+    };
   };
 
   const appMcpPlan = (): YourMcpPlan => {

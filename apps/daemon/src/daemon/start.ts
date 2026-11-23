@@ -2651,7 +2651,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       reconnect: () => replyWatch.reconnect(),
       githubLogin: () => Promise.resolve(github.cachedLogin()),
       linear: linearImport,
-      reporter: linearReporter,
+      reporter: {
+        // Turning updates off also drops a Connect still waiting on a sign-in, which would turn them back on.
+        setSettings: (projectId, input) => {
+          if (!input.on) connector.forget('linear', projectId);
+          linearReporter.setSettings(projectId, input);
+        },
+      },
     }),
     shape: createShapeServices({
       shape,

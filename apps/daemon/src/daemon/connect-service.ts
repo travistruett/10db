@@ -80,15 +80,20 @@ const hostOf = (url: string | null): string | null => {
   }
 };
 
-/** Whether a session on the harness reads a server of the builder's from this key's source. */
+/**
+ * Whether an account can use a server of the builder's from this key's source. Every session gets the approved
+ * servers of every source, and Codex signs in any of them; Claude Code's `/mcp` signs in only what its own
+ * config holds.
+ */
 export function harnessReadsServer(harness: Provider, key: YourMcpServerKey): boolean {
-  const codex = key.startsWith(`${YourMcpSource.CodexConfig}:`);
-  return harness === Provider.Codex ? codex : !codex;
+  return harness === Provider.Codex || !key.startsWith(`${YourMcpSource.CodexConfig}:`);
 }
 
 /** The builder's servers as a project's sessions would see them, with the project's switch for them. */
 export interface ProjectMcpServers {
   readonly servers: readonly YourMcpServerDto[];
+  /** The server key each name resolves to in a session of the project: the one that session actually loads. */
+  readonly loaded: Readonly<Record<string, YourMcpServerKey>>;
   /** The project's effective Your MCP servers switch. */
   readonly on: boolean;
 }
@@ -101,6 +106,8 @@ export interface ServiceConnector {
    * including a server the project's sessions would not load.
    */
   connect(service: ConnectableService, projectId: ProjectId): Promise<ConnectServiceDto>;
+  /** Drops a connect still waiting on a sign-in, so its follow-on never runs: the builder turned it off. */
+  forget(service: ConnectableService, projectId: ProjectId): void;
 }
 
 interface Pending {
@@ -131,8 +138,10 @@ export function createServiceConnector(deps: {
   deps.bus.subscribe((event) => {
     if (event.type !== EventType.McpSignInChanged) return;
     const changed = McpSignInChangedData.safeParse(event.data);
-    if (!changed.success || changed.data.state !== McpSignInState.SignedIn) return;
+    if (!changed.success) return;
     const id = `${changed.data.accountId}:${changed.data.key}`;
+    if (changed.data.state === McpSignInState.Failed) pending.delete(id);
+    if (changed.data.state !== McpSignInState.SignedIn) return;
     for (const waiting of pending.get(id) ?? [])
       deps.whenWorks?.(waiting.service, waiting.projectId);
     pending.delete(id);
@@ -176,6 +185,14 @@ export function createServiceConnector(deps: {
   };
 
   return {
+    forget(service, projectId) {
+      for (const [id, waiting] of pending) {
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- one service is connectable today
+        const left = waiting.filter((p) => p.service !== service || p.projectId !== projectId);
+        if (left.length === 0) pending.delete(id);
+        else pending.set(id, left);
+      }
+    },
     async connect(service, projectId) {
       const entry = CONNECTABLE_SERVICES[service];
       const label = CONNECTABLE_SERVICE_LABELS[service];
@@ -185,12 +202,15 @@ export function createServiceConnector(deps: {
       const harness = harnessOf(account);
       if (harness === null) throw new ConflictError(`This project's account can't run ${label}.`);
 
-      // Only a server this account's agent reads counts: Claude Code reads ~/.claude.json and plugins, Codex
-      // reads ~/.codex/config.toml.
-      const own = (): YourMcpServerDto | undefined =>
-        deps
-          .mcp(projectId)
-          .servers.find((s) => hostOf(s.url) === host && harnessReadsServer(harness, s.key));
+      // A server at the entry's host counts when this account can sign in to it: any source for Codex, Claude
+      // Code's own config and plugins for Claude. One a session loads comes first.
+      const own = (): YourMcpServerDto | undefined => {
+        const now = deps.mcp(projectId);
+        const found = now.servers.filter(
+          (s) => hostOf(s.url) === host && harnessReadsServer(harness, s.key),
+        );
+        return found.find((s) => now.loaded[s.name] === s.key) ?? found[0];
+      };
       let server = own();
       if (server === undefined) {
         const source =
@@ -223,11 +243,20 @@ export function createServiceConnector(deps: {
         throw new ConflictError(
           `Your MCP Servers is off for this project, so its sessions won't load ${label}. Turn it on under Settings › Trust.`,
         );
-      const loaded = now.servers.find((s) => s.key === server.key);
-      if (loaded?.on !== true)
+      // The server sessions load under its name: ours, or another source's of the same name.
+      const winnerKey = now.loaded[server.name];
+      if (winnerKey === undefined)
         throw new ConflictError(
           `The ${label} server is switched off, in its switch under Settings › Trust › Your MCP Servers or by enabled = false in its own config, so sessions won't load it. Turn it on there.`,
         );
+      if (winnerKey !== server.key) {
+        const other = now.servers.find((s) => s.key === winnerKey);
+        if (other === undefined || hostOf(other.url) !== host)
+          throw new ConflictError(
+            `A server named ${server.name} from ${other?.source ?? 'another source'} is loaded in its place, so sessions won't get ${label}. Rename or remove it under Settings › Trust › Your MCP Servers.`,
+          );
+        server = other;
+      }
 
       if (harness !== Provider.Codex) return { next: ConnectNext.ClaudeCode };
       const { rows } = await deps.mcpSignIns.list();
