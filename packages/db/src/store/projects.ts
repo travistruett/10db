@@ -24,7 +24,7 @@ import {
   type ProjectId,
   type ProjectViewDto,
 } from '@10db/contracts';
-import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import * as schema from '../schema';
 import { defaultAccountId, getAccountRow, refuseAccountWithoutHarness } from './accounts';
 import { currentBatch, findUnfinishedBatch, listUnfinishedBatches } from './batches';
@@ -65,10 +65,14 @@ function checkFallback(
 export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDto {
   const config = ProjectInput.parse(input);
   const existing = ctx.tx
-    .select({ name: schema.projects.name })
+    .select({ name: schema.projects.name, archivedAt: schema.projects.archivedAt })
     .from(schema.projects)
     .where(eq(schema.projects.repoPath, config.repoPath))
     .get();
+  if (existing?.archivedAt)
+    throw new ConflictError(
+      `Project "${existing.name}" is archived: restore it from Settings › Overview`,
+    );
   if (existing)
     throw new ConflictError(`Project "${existing.name}" already uses ${config.repoPath}`);
   const { accountId: named, ...rest } = config;
@@ -77,6 +81,7 @@ export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDt
   const row: ProjectDto = {
     id: mintId('Project'),
     ...rest,
+    archivedAt: null,
     landingBranch: rest.landing === ProjectLanding.Branch ? rest.landingBranch : null,
     accountId,
     movedFromAccountId: null,
@@ -104,8 +109,46 @@ export function getProject(db: DbReader, id: ProjectDto['id']): ProjectDto {
   return row;
 }
 
+/** Live projects only: an archived project is out of every list and every background job. */
 export function listProjects(db: DbReader): ProjectDto[] {
-  return db.select().from(schema.projects).orderBy(asc(schema.projects.name)).all();
+  return db
+    .select()
+    .from(schema.projects)
+    .where(isNull(schema.projects.archivedAt))
+    .orderBy(asc(schema.projects.name))
+    .all();
+}
+
+export function listArchivedProjects(db: DbReader): ProjectDto[] {
+  return db
+    .select()
+    .from(schema.projects)
+    .where(isNotNull(schema.projects.archivedAt))
+    .orderBy(asc(schema.projects.name))
+    .all();
+}
+
+/** Hides the project everywhere; every row stays, and `getProject` still resolves it. */
+export function archiveProject(ctx: WriteContext, id: ProjectId): void {
+  const project = getProject(ctx.tx, id);
+  if (project.archivedAt) return;
+  ctx.tx
+    .update(schema.projects)
+    .set({ archivedAt: ctx.now, updatedAt: ctx.now })
+    .where(eq(schema.projects.id, id))
+    .run();
+  ctx.emit({ type: EventType.ProjectChanged, entityType: 'project', entityId: id });
+}
+
+export function restoreProject(ctx: WriteContext, id: ProjectId): void {
+  const project = getProject(ctx.tx, id);
+  if (!project.archivedAt) return;
+  ctx.tx
+    .update(schema.projects)
+    .set({ archivedAt: null, updatedAt: ctx.now })
+    .where(eq(schema.projects.id, id))
+    .run();
+  ctx.emit({ type: EventType.ProjectChanged, entityType: 'project', entityId: id });
 }
 
 /**

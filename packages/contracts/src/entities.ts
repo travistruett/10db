@@ -681,6 +681,8 @@ export const ProjectDto = z.object({
   id: ProjectId,
   name: z.string(),
   repoPath: z.string(),
+  /** When the builder archived the project; null while it is live. */
+  archivedAt: Timestamp.nullable(),
   gateCommand: z.string().nullable(),
   changedCheckCommand: z.string().nullable(),
   /** Runs in place of the gate when the base has required checks; null keeps the gate. */

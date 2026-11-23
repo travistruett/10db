@@ -19,7 +19,7 @@ import {
   type WorkstreamId,
   RoutedBy,
 } from '@10db/contracts';
-import { and, asc, desc, eq, inArray, notInArray, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, notInArray, sql, type SQL } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { Json } from '../json';
 import { assigneesFor } from './routing-rules';
@@ -187,6 +187,17 @@ export function listInbox(
   const where: SQL[] = [];
   if (filter.states) where.push(inArray(schema.inboxItems.state, [...filter.states]));
   if (filter.projectId) where.push(eq(schema.inboxItems.projectId, filter.projectId));
+  // The all-projects list leaves out archived projects; asking for one project by id still answers.
+  else
+    where.push(
+      notInArray(
+        schema.inboxItems.projectId,
+        db
+          .select({ id: schema.projects.id })
+          .from(schema.projects)
+          .where(isNotNull(schema.projects.archivedAt)),
+      ),
+    );
   const query = db
     .select()
     .from(schema.inboxItems)
