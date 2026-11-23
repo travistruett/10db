@@ -4,14 +4,16 @@ import {
   Alert,
   Button,
   Group,
+  Indicator,
   Menu,
   PasswordInput,
   Skeleton,
   Stack,
   Text,
   ThemeIcon,
+  Tooltip,
 } from '@mantine/core';
-import { IconBrandSlack, IconCopy, IconDots } from '@tabler/icons-react';
+import { IconBrandSlack, IconCopy, IconDots, IconUserCircle } from '@tabler/icons-react';
 import { useState, type ReactNode } from 'react';
 import { useProjects } from '../../../daemon/queries';
 import {
@@ -26,7 +28,8 @@ import { ExternalLink } from '../../board/pull-request-link';
 import { IntegrationCard, StateText } from './integration-card';
 import { ProjectRows, SlackProjectRow } from './project-rows';
 import { SLACK_APPS_URL, SLACK_MANIFEST } from './slack-manifest';
-import { WhichIsYou } from './which-is-you';
+import { WhichIsYouModal } from './which-is-you';
+import { ConnectionStatus, ConnectionTone } from '../connection-status';
 
 /** What a workspace that is not connected is doing, in a dim line under its row. */
 function stateNote(workspace: SlackWorkspaceStatusDto): string | null {
@@ -209,11 +212,12 @@ function WorkspaceRow({
 }) {
   const remove = useRemoveSlackWorkspace();
   const [replacing, setReplacing] = useState(false);
-  const [changing, setChanging] = useState(false);
+  const [picking, setPicking] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const contact = builder === undefined ? null : contactIn(builder, workspace.teamId);
   const note = stateNote(workspace);
   const connected = workspace.state === 'connected';
+  const youLabel = `Which One Is You in ${workspace.teamName}?`;
   return (
     <Stack gap={4}>
       <Group justify="space-between" wrap="nowrap" mih={30}>
@@ -221,41 +225,50 @@ function WorkspaceRow({
           <WorkspaceLine workspace={workspace} builder={builder} />
           {note === null ? null : <StateText>{note}</StateText>}
         </Stack>
-        {readOnly ? null : (
-          <Menu position="bottom-end">
-            <Menu.Target>
-              <ActionIcon variant="subtle" aria-label={`${workspace.teamName} options`}>
-                <IconDots size={16} />
-              </ActionIcon>
-            </Menu.Target>
-            <Menu.Dropdown>
-              {connected && contact !== null ? (
-                <Menu.Item
+        <Group gap="xs" wrap="nowrap">
+          {connected ? <ConnectionStatus tone={ConnectionTone.Works} label="Connected" /> : null}
+          {!readOnly && connected && builder ? (
+            <Tooltip label={contact === null ? `${youLabel} (optional)` : youLabel}>
+              <Indicator disabled={contact !== null} size={7} offset={5} color="yellow">
+                <ActionIcon
+                  variant="subtle"
+                  aria-label={youLabel}
                   onClick={() => {
-                    setChanging(true);
+                    setPicking(true);
                   }}
                 >
-                  Change Who You Are
+                  <IconUserCircle size={18} />
+                </ActionIcon>
+              </Indicator>
+            </Tooltip>
+          ) : null}
+          {readOnly ? null : (
+            <Menu position="bottom-end">
+              <Menu.Target>
+                <ActionIcon variant="subtle" aria-label={`${workspace.teamName} options`}>
+                  <IconDots size={16} />
+                </ActionIcon>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Item
+                  onClick={() => {
+                    setReplacing(true);
+                  }}
+                >
+                  Replace Token
                 </Menu.Item>
-              ) : null}
-              <Menu.Item
-                onClick={() => {
-                  setReplacing(true);
-                }}
-              >
-                Replace Token
-              </Menu.Item>
-              <Menu.Item
-                color="red"
-                onClick={() => {
-                  setDisconnecting(true);
-                }}
-              >
-                Disconnect
-              </Menu.Item>
-            </Menu.Dropdown>
-          </Menu>
-        )}
+                <Menu.Item
+                  color="red"
+                  onClick={() => {
+                    setDisconnecting(true);
+                  }}
+                >
+                  Disconnect
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
+          )}
+        </Group>
       </Group>
       {!readOnly && (replacing || workspace.state === 'refused') ? (
         <TokenField
@@ -266,13 +279,14 @@ function WorkspaceRow({
           }}
         />
       ) : null}
-      {connected && builder && (contact === null || changing) ? (
-        <WhichIsYou
+      {builder ? (
+        <WhichIsYouModal
+          opened={picking}
           builder={builder}
           teamId={workspace.teamId}
-          changing={contact !== null}
-          onDone={() => {
-            setChanging(false);
+          teamName={workspace.teamName}
+          onClose={() => {
+            setPicking(false);
           }}
         />
       ) : null}
@@ -313,7 +327,18 @@ function SlackProjects() {
   const list = projects.data ?? [];
   if (list.length === 0) return null;
   return (
-    <ProjectRows>
+    <ProjectRows
+      heading={
+        <Stack gap={2} mb="xs">
+          <Text size="sm" fw={600}>
+            Projects
+          </Text>
+          <Text size="xs" c="dimmed">
+            The workspace each project's questions go out through. Off sends nothing to Slack.
+          </Text>
+        </Stack>
+      }
+    >
       {list.map((project) => (
         <SlackProjectRow key={project.id} project={project} />
       ))}
@@ -322,9 +347,9 @@ function SlackProjects() {
 }
 
 /**
- * Settings › Integrations › Slack. One row per signed-in workspace, each with a small menu, and the three
- * setup steps: shown alone while none is signed in, behind Add Workspace after that. A workspace where the
- * builder has no contact holds a Which One Is You under its row.
+ * Settings › Integrations › Slack. One row per signed-in workspace, each with Which One Is You behind a person
+ * icon and a small menu, and the three setup steps: shown alone while none is signed in, behind Add Workspace
+ * after that. Under them, the Select per project.
  */
 export function SlackCard() {
   const status = useSlackStatus();

@@ -19,8 +19,8 @@ import {
   type SlackReaction,
 } from './responses';
 import { compareTs } from './timestamps';
+import { SLACK_API } from './api-address';
 
-const SLACK_API = 'https://slack.com/api';
 /** A conversation read stops after this many pages; a handful of open sends never come near it. */
 const MAX_PAGES = 20;
 const GROUP_MIN = 2;

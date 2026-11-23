@@ -65,6 +65,9 @@ const DaemonEnv = z.object({
   // and no reply is read. Set for every daemon that is not the installed app, as TENDB_JUDGE is, so a
   // throwaway daemon never messages a real person.
   TENDB_SLACK: z.enum(['on', 'off']).optional(),
+  // Dev only: the Slack Web API's address, in place of https://slack.com/api, for the fake Slack that
+  // `TENDB_FAKE_SLACK=on pnpm dev:window` starts (scripts/fake-slack.mjs).
+  TENDB_SLACK_API: z.url().optional(),
   // `off` keeps the daemon from reading free disk, so low disk on a CI runner or in a container never
   // holds new lanes. The installed app reads it.
   TENDB_DISK: z.enum(['on', 'off']).optional(),
