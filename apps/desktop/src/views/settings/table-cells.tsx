@@ -1,4 +1,16 @@
-import { ActionIcon, Alert, Badge, Button, Code, Group, Stack, Text, Tooltip } from '@mantine/core';
+import {
+  ActionIcon,
+  Alert,
+  Badge,
+  Button,
+  Code,
+  Group,
+  HoverCard,
+  ScrollArea,
+  Stack,
+  Text,
+  Tooltip,
+} from '@mantine/core';
 import { IconPencil, IconTrash } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 import { describePathPattern } from './path-pattern';
@@ -26,16 +38,44 @@ export function Pill({
   );
 }
 
-/** Every pattern of a list, one per line in monospace; hovering one says what it means. */
-export function PathLines({ paths }: { readonly paths: readonly string[] }) {
+/** Patterns a table row shows before the rest fold into "+N more". */
+const SHOWN_PATHS = 3;
+
+/**
+ * A row's patterns in brief: the first three in monospace, then "+N more", which lists them all on hover. The
+ * row's drawer holds the full, editable list. Hovering a pattern says what it means.
+ */
+export function PathSummary({ paths }: { readonly paths: readonly string[] }) {
+  const shown = paths.slice(0, SHOWN_PATHS);
+  const rest = paths.length - shown.length;
   return (
-    <Stack gap={2}>
-      {paths.map((glob, index) => (
+    <Group gap={6} wrap="wrap">
+      {shown.map((glob, index) => (
         <Tooltip key={`${String(index)}-${glob}`} label={describePathPattern(glob).words}>
-          <Code style={{ width: 'fit-content' }}>{glob}</Code>
+          <Code>{glob}</Code>
         </Tooltip>
       ))}
-    </Stack>
+      {rest > 0 ? (
+        <HoverCard position="bottom-start" withinPortal>
+          <HoverCard.Target>
+            <Text size="xs" c="dimmed" style={{ cursor: 'default' }}>
+              +{rest} more
+            </Text>
+          </HoverCard.Target>
+          <HoverCard.Dropdown>
+            <ScrollArea.Autosize mah={320}>
+              <Stack gap={2}>
+                {paths.map((glob, index) => (
+                  <Code key={`${String(index)}-${glob}`} style={{ width: 'fit-content' }}>
+                    {glob}
+                  </Code>
+                ))}
+              </Stack>
+            </ScrollArea.Autosize>
+          </HoverCard.Dropdown>
+        </HoverCard>
+      ) : null}
+    </Group>
   );
 }
 

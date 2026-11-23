@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { ConfirmModal } from '../../shell/confirm-modal';
 import { AreaDrawer } from './area-drawer';
 import { SectionHeading } from './section-heading';
-import { PathLines, Pill, RowActions } from './table-cells';
+import { PathSummary, Pill, RowActions } from './table-cells';
 import { useListPatch } from './use-list-patch';
 
 type Area = ProjectDto['areas'][number];
@@ -80,7 +80,7 @@ export function AreasSection({ project }: { readonly project: ProjectDto }) {
     {
       accessor: 'globs',
       title: 'Paths',
-      render: (area) => <PathLines paths={area.globs} />,
+      render: (area) => <PathSummary paths={area.globs} />,
     },
     {
       accessor: 'actions',
