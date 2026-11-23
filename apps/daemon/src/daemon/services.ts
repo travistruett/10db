@@ -206,6 +206,7 @@ import type { GithubApiServices } from './github-services';
 import type { JudgeApiServices } from './judge-services';
 import type { StakeholderApiServices } from './stakeholder-services';
 import type { KnowledgeApiServices } from './knowledge-services';
+import type { ServiceConnector } from './connect-service';
 import type { TrustServices } from './trust-services';
 import { createPlaybookServices } from './playbook-services';
 import type { ShapeApiServices } from './shape-services';
@@ -383,6 +384,7 @@ export function createServices(deps: {
   /** Settings › Trust's MCP sign-ins. */
   readonly mcpSignIns: McpSignIns;
   readonly linearSignIns: { list(): Promise<LinearSignInsDto> };
+  readonly connector: ServiceConnector;
   readonly figmaSignIns: { list(): Promise<FigmaSignInsDto> };
 }): ApiServices & TaskRemovalServices & TaskLookupServices {
   const db = deps.state.db;
@@ -863,6 +865,7 @@ export function createServices(deps: {
     ...deps.trust,
     mcpSignIns: () => deps.mcpSignIns.list(),
     linearSignIns: () => deps.linearSignIns.list(),
+    connectService: (service, projectId) => deps.connector.connect(service, projectId),
     figmaSignIns: () => deps.figmaSignIns.list(),
     startMcpSignIn: (input) => deps.mcpSignIns.start(input),
     ...createPlaybookServices(deps.state),

@@ -70,6 +70,8 @@ import {
   SendInput,
   SlackTokenInput,
   LinearReporterSettings,
+  ConnectableService,
+  ConnectServiceInput,
   ProjectIntegrationsInput,
   StakeholderTimersDto,
   PersonaId,
@@ -1637,6 +1639,17 @@ export function createApp(deps: ApiDeps) {
           await deps.services.setLinearReporter(
             ProjectId.parse(c.req.param('projectId')),
             c.req.valid('json'),
+          ),
+        ),
+    )
+    .post(
+      '/settings/connect/:service',
+      validator('json', (value): ConnectServiceInput => ConnectServiceInput.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.connectService(
+            ConnectableService.parse(c.req.param('service')),
+            c.req.valid('json').projectId,
           ),
         ),
     )
