@@ -1,5 +1,6 @@
 import { HazardEntryKind, type HazardAdditionDto, type ProjectDto } from '@10db/contracts';
 import { Alert, Button, Group, Stack, Text } from '@mantine/core';
+import { HelpTip } from './help-tip';
 import {
   useHazardAssessment,
   useLookAgainAtHazards,
@@ -67,15 +68,21 @@ export function HazardAdditions({ project }: { readonly project: ProjectDto }) {
 
   return (
     <Stack gap="xs">
-      <Group justify="space-between" align="flex-start" wrap="nowrap">
-        <Text size="sm" c="dimmed">
-          10db reads the project&apos;s files (its Makefiles, compose files, package scripts,
-          AGENTS.md and docs) to find the commands that change lockfiles and migrations, and adds
-          them here by itself. Adding a hazard only makes tasks take turns, so you are asked only
-          before one is taken out.
-        </Text>
+      <Group justify="space-between" wrap="nowrap">
+        <Group gap={4}>
+          <Text size="sm" fw={500}>
+            Found by 10db
+          </Text>
+          <HelpTip label="Found by 10db">
+            10db reads the project&apos;s files (its Makefiles, compose files, package scripts,
+            AGENTS.md and docs) to find the commands that change lockfiles and migrations, and adds
+            them here by itself. Adding a hazard only makes tasks take turns, so you are asked only
+            before one is taken out.
+          </HelpTip>
+        </Group>
         <Button
-          variant="light"
+          variant="default"
+          size="compact-sm"
           loading={look.isPending}
           onClick={() => {
             look.mutate();

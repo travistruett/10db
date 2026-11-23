@@ -1,5 +1,6 @@
 import { AreaRole, pageLabel } from '@10db/contracts';
-import { NativeSelect, Stack, Text, TextInput } from '@mantine/core';
+import { Group, NativeSelect, Text, TextInput } from '@mantine/core';
+import { HelpTip } from './help-tip';
 
 /** An area's role as a select holds it: empty for an area with none. */
 export type RoleChoice = AreaRole | '';
@@ -10,13 +11,24 @@ const ROLE_OPTIONS = [
   { value: AreaRole.Shared, label: 'Shared' },
 ];
 
-const WHAT_IT_MEANS: Record<RoleChoice, string> = {
-  '': 'No role: the area works as it always has.',
-  [AreaRole.Page]:
-    'A page: a screen of the app, held by one task while it works on it. Two pages may not share a file.',
-  [AreaRole.Shared]:
-    'Shared: code many pages use, such as components, styles or public files. A file a page also matches is the page’s.',
-};
+/** What each role means; shown once, beside the Role label, not under every area. */
+export function RoleHelp() {
+  return (
+    <HelpTip label="Role">
+      <Text size="sm" mb={4}>
+        No Role: the area works as it always has.
+      </Text>
+      <Text size="sm" mb={4}>
+        Page: a screen of the app, held by one task while it works on it. Two pages may not share a
+        file.
+      </Text>
+      <Text size="sm">
+        Shared: code many pages use, such as components, styles or public files. A file a page also
+        matches is the page’s.
+      </Text>
+    </HelpTip>
+  );
+}
 
 const isRoleChoice = (value: string): value is RoleChoice =>
   value === '' || value === AreaRole.Page || value === AreaRole.Shared;
@@ -41,7 +53,7 @@ export function roleFields(
   };
 }
 
-/** Choose whether an area is a page or shared, and the route of a page. */
+/** Choose whether an area is a page or shared, and the route and label of a page. */
 export function AreaRoleFields({
   index,
   name,
@@ -66,9 +78,10 @@ export function AreaRoleFields({
 }) {
   const n = String(index);
   return (
-    <Stack gap={4}>
+    <Group align="flex-end" gap="sm" wrap="wrap">
       <NativeSelect
         size="xs"
+        label="Role"
         aria-label={`Area ${n} role`}
         data={ROLE_OPTIONS}
         value={role}
@@ -78,12 +91,14 @@ export function AreaRoleFields({
           if (isRoleChoice(value)) onChange({ role: value });
         }}
       />
+      <RoleHelp />
       {role === AreaRole.Page ? (
         <TextInput
           size="xs"
+          label="Route"
           aria-label={`Area ${n} route`}
-          placeholder="/people"
-          description="The path in the app that shows this page. Leave it empty when no single path does."
+          placeholder="/people (optional)"
+          w={200}
           value={route}
           onChange={(e) => {
             onChange({ route: e.currentTarget.value });
@@ -93,19 +108,17 @@ export function AreaRoleFields({
       {role === AreaRole.Page && label !== undefined ? (
         <TextInput
           size="xs"
+          label="Label"
           aria-label={`Area ${n} label`}
           placeholder={pageLabel({ name: name?.trim() ?? '' })}
-          description="What the page is called where you read it. Leave it empty to use its name."
           maxLength={40}
+          w={200}
           value={label}
           onChange={(e) => {
             onChange({ label: e.currentTarget.value });
           }}
         />
       ) : null}
-      <Text size="xs" c="dimmed">
-        {WHAT_IT_MEANS[role]}
-      </Text>
-    </Stack>
+    </Group>
   );
 }
