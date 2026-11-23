@@ -27,13 +27,19 @@ export const figmaFileKey = (projectId: ProjectId): string => `figma-file.${proj
 export const FigmaAction = { Open: 'open', BringBack: 'bring-back' } as const;
 export type FigmaAction = (typeof FigmaAction)[keyof typeof FigmaAction];
 
-export const FigmaPressInput = z.strictObject({ action: z.enum(FigmaAction) });
+/** `newFile` has an Open in Figma start a new draft file in place of the project's stored one. */
+export const FigmaPressInput = z.strictObject({
+  action: z.enum(FigmaAction),
+  newFile: z.boolean().optional(),
+});
 export type FigmaPressInput = z.infer<typeof FigmaPressInput>;
 
 /** What a mock-up shows of Figma: the link to its frame once sent, and the press waiting to be carried out. */
 export const FigmaLinkDto = z.strictObject({
   fileUrl: z.string().nullable(),
   pending: z.enum(FigmaAction).nullable(),
+  /** Whether the project keeps a draft file its mock-ups go to. */
+  fileStored: z.boolean(),
 });
 export type FigmaLinkDto = z.infer<typeof FigmaLinkDto>;
 

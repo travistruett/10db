@@ -169,11 +169,15 @@ export function useFigmaPress(shapeId: ShapeId) {
     mutationFn: async (input: {
       readonly attachmentId: ShapeAttachmentId;
       readonly action: FigmaAction;
+      readonly newFile?: boolean;
     }) =>
       readJson(
         await client.shapes[':shapeId'].attachments[':attachmentId'].figma.$post({
           param: { shapeId, attachmentId: input.attachmentId },
-          json: { action: input.action },
+          json:
+            input.newFile === true
+              ? { action: input.action, newFile: true }
+              : { action: input.action },
         }),
         z.object({ status: z.enum(['started', 'running']) }),
       ),

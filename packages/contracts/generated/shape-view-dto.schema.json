@@ -3121,11 +3121,15 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "fileStored": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
                   "fileUrl",
-                  "pending"
+                  "pending",
+                  "fileStored"
                 ],
                 "additionalProperties": false
               },

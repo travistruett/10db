@@ -10,6 +10,7 @@ import {
   mockupDocument,
   ShapeMessageAuthor,
   ShapeMessageKind,
+  type ConversationItemId,
   type ProjectId,
   type ShapeAttachmentId,
   type ShapeId,
@@ -36,7 +37,8 @@ const ASSET_TIMEOUT_MS = 20_000;
 const ASSET_MAX_BYTES = 5 * 1024 * 1024;
 const ASSETS_MAX_COUNT = 30;
 const ASSETS_MAX_BYTES = 10 * 1024 * 1024;
-const PRESS_TTL_MS = 15 * 60_000;
+/** How long a press stands when no turn ends it. */
+export const FIGMA_PRESS_TTL_MS = 15 * 60_000;
 
 const SUBMIT_HOST = 'mcp.figma.com';
 const SUBMIT_PATH = /^\/mcp\/html_to_figma\/[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\/submit$/i;
@@ -111,42 +113,65 @@ export function openWithSystem(url: string): Promise<void> {
 }
 
 /**
- * The builder's presses that have not been used yet. A press of Open in Figma or Bring Back from Figma
- * leaves one mark for its mock-up and action; the matching tool runs only against a live mark and uses it
- * up, so an agent can never send or file on its own. Kept in memory: a press lost to a restart is pressed
- * again, and a mark that nobody uses lapses after 15 minutes.
+ * The builder's presses. A press of Open in Figma or Bring Back from Figma leaves one mark for its mock-up
+ * and action; the matching tool runs only by taking it, once, before it sends or fetches anything, so an
+ * agent can never send or file on its own and one press is one attempt. The mark stays, spent, until its
+ * turn ends (the row shows the press as pending meanwhile), and lapses after 15 minutes in any case. Kept
+ * in memory: a press lost to a restart is pressed again.
  */
 export interface FigmaPresses {
-  add(shapeId: ShapeId, attachmentId: ShapeAttachmentId, action: FigmaAction): void;
-  holds(shapeId: ShapeId, attachmentId: ShapeAttachmentId, action: FigmaAction): boolean;
-  consume(shapeId: ShapeId, attachmentId: ShapeAttachmentId): void;
-  /** The action pressed on a mock-up and not used yet. */
+  /** Records a press whose ask is the conversation item `itemId`. */
+  add(
+    shapeId: ShapeId,
+    attachmentId: ShapeAttachmentId,
+    action: FigmaAction,
+    itemId: ConversationItemId,
+  ): void;
+  /** Checks and spends a live, unspent press of `action` in one step; false when there is none. */
+  take(shapeId: ShapeId, attachmentId: ShapeAttachmentId, action: FigmaAction): boolean;
+  /** The action pressed on a mock-up and not ended yet, spent or not. */
   pending(shapeId: ShapeId, attachmentId: ShapeAttachmentId): FigmaAction | null;
-  /** Drops a plan's marks, for a plan whose presses are no longer queued or running. */
-  clear(shapeId: ShapeId): void;
+  /** Drops the plan's presses whose ask `ended` names; answers whether any went. */
+  endWhere(shapeId: ShapeId, ended: (itemId: ConversationItemId) => boolean): boolean;
 }
 
 export function createFigmaPresses(now: () => number): FigmaPresses {
-  const marks = new Map<string, { readonly action: FigmaAction; readonly at: number }>();
+  interface Mark {
+    readonly action: FigmaAction;
+    readonly at: number;
+    readonly itemId: ConversationItemId;
+    spent: boolean;
+  }
+  const marks = new Map<string, Mark>();
   const keyOf = (shapeId: ShapeId, attachmentId: ShapeAttachmentId): string =>
     `${shapeId}\0${attachmentId}`;
-  const live = (key: string): FigmaAction | null => {
+  const live = (key: string): Mark | null => {
     const mark = marks.get(key);
     if (mark === undefined) return null;
-    if (now() - mark.at > PRESS_TTL_MS) {
+    if (now() - mark.at > FIGMA_PRESS_TTL_MS) {
       marks.delete(key);
       return null;
     }
-    return mark.action;
+    return mark;
   };
   return {
-    add: (shapeId, attachmentId, action) =>
-      marks.set(keyOf(shapeId, attachmentId), { action, at: now() }),
-    holds: (shapeId, attachmentId, action) => live(keyOf(shapeId, attachmentId)) === action,
-    consume: (shapeId, attachmentId) => marks.delete(keyOf(shapeId, attachmentId)),
-    pending: (shapeId, attachmentId) => live(keyOf(shapeId, attachmentId)),
-    clear(shapeId) {
-      for (const key of marks.keys()) if (key.startsWith(`${shapeId}\0`)) marks.delete(key);
+    add: (shapeId, attachmentId, action, itemId) =>
+      marks.set(keyOf(shapeId, attachmentId), { action, at: now(), itemId, spent: false }),
+    take(shapeId, attachmentId, action) {
+      const mark = live(keyOf(shapeId, attachmentId));
+      if (mark === null || mark.spent || mark.action !== action) return false;
+      mark.spent = true;
+      return true;
+    },
+    pending: (shapeId, attachmentId) => live(keyOf(shapeId, attachmentId))?.action ?? null,
+    endWhere(shapeId, ended) {
+      let any = false;
+      for (const [key, mark] of marks)
+        if (key.startsWith(`${shapeId}\0`) && ended(mark.itemId)) {
+          marks.delete(key);
+          any = true;
+        }
+      return any;
     },
   };
 }
@@ -211,8 +236,9 @@ export function createFigmaTools(deps: FigmaDeps, projectId: ProjectId) {
       input: { readonly attachmentId: ShapeAttachmentId; readonly submitUrl: string },
     ): Promise<{ readonly fileUrl: string; readonly nodeId: string }> {
       const row = mockupOf(shapeId, input.attachmentId);
-      if (!deps.presses.holds(shapeId, row.id, FigmaAction.Open)) throw new InvalidError(NO_PRESS);
       const url = checkedSubmitUrl(input.submitUrl);
+      // One press is one attempt: it is spent here, before anything is posted.
+      if (!deps.presses.take(shapeId, row.id, FigmaAction.Open)) throw new InvalidError(NO_PRESS);
       let answer: z.infer<typeof SubmitAnswer>;
       try {
         const response = await deps.fetch(url, {
@@ -240,7 +266,6 @@ export function createFigmaTools(deps: FigmaDeps, projectId: ProjectId) {
         throw new UpstreamError(
           `Figma answered with another file than this project's draft file, so nothing was kept.`,
         );
-      deps.presses.consume(shapeId, row.id);
       state.write((ctx) => {
         setAppSetting(ctx, figmaFrameKey(row.id), { fileKey, nodeId, fileUrl: answer.fileUrl });
         if (kept === null) setAppSetting(ctx, figmaFileKey(projectId), { fileKey });
@@ -259,8 +284,6 @@ export function createFigmaTools(deps: FigmaDeps, projectId: ProjectId) {
       input: { readonly attachmentId: ShapeAttachmentId; readonly html: string },
     ): Promise<{ readonly attachmentId: ShapeAttachmentId; readonly fileUrl: string }> {
       const row = mockupOf(shapeId, input.attachmentId);
-      if (!deps.presses.holds(shapeId, row.id, FigmaAction.BringBack))
-        throw new InvalidError(NO_PRESS);
       const frame = frameOf(state.db, row.id);
       if (frame === null)
         throw new InvalidError(
@@ -271,11 +294,12 @@ export function createFigmaTools(deps: FigmaDeps, projectId: ProjectId) {
         throw new InvalidError(
           `The HTML names ${String(urls.length)} Figma assets; at most ${String(ASSETS_MAX_COUNT)} are inlined, so nothing was filed.`,
         );
+      if (!deps.presses.take(shapeId, row.id, FigmaAction.BringBack))
+        throw new InvalidError(NO_PRESS);
       const uris = new Map<string, string>();
       const budget = { left: ASSETS_MAX_BYTES };
       for (const url of urls) uris.set(url, await assetDataUri(deps.fetch, url, budget));
       const html = input.html.replace(ASSET_URL, (url) => uris.get(url) ?? url);
-      deps.presses.consume(shapeId, row.id);
       const made = state.write((ctx) => {
         const next = insertShapeAttachment(ctx, {
           shapeId,

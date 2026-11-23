@@ -26,7 +26,7 @@ export function openInFigmaNote(
     '2. Call html_to_figma with that file key and no cssSelector. It answers an upload address (submitUrl).',
     `3. Call send_mockup_to_figma with attachmentId ${mockup.id} and that submitUrl. 10db posts the mock-up to Figma itself; do not fetch or curl the address.`,
     '4. Reply with the frame link in one line.',
-    'If your Figma server is not connected or refuses, say so in one line and file nothing.',
+    "The builder's press allows one attempt: if your Figma server is not connected, or 10db refuses, say so in one line and do not retry; the builder presses again.",
   ].join('\n');
   return { note: `Open in Figma: ${mockup.key}`, instruction };
 }
@@ -45,7 +45,7 @@ export function bringBackNote(
     "2. Turn the code it returns into one self-contained HTML document: inline CSS, no scripts, no external URLs except Figma's asset URLs (https://www.figma.com/api/mcp/asset/…), and fonts mapped to the mock-up's system font stack.",
     `3. Call file_figma_version with attachmentId ${mockup.id} and that HTML. 10db inlines the assets and files it as a new version of the mock-up.`,
     '4. Reply in one line saying what changed from the last version.',
-    'If your Figma server is not connected or its read limit is reached, say so in one line and file nothing.',
+    "The builder's press allows one attempt: if your Figma server is not connected, its read limit is reached or 10db refuses, say so in one line and do not retry; the builder presses again.",
   ].join('\n');
   return { note: `Bring back from Figma: ${mockup.key}`, instruction };
 }

@@ -10,6 +10,7 @@ import {
   NotFoundError,
   parseItemBody,
   FigmaAction,
+  figmaFileKey,
   ShapeEventKind,
   ShapeMessageAuthor,
   ShapeMessageKind,
@@ -42,6 +43,8 @@ import {
 } from '@10db/contracts';
 import {
   countShapeFiles,
+  deleteAppSetting,
+  getItem,
   findShapeLinkOfGoal,
   getOneWayPaths,
   getProject,
@@ -92,7 +95,14 @@ import { convertProposals, type ConvertOutcome, type JoiningProblem } from './co
 import { checkDroppedFile, readyToKeep, storeFile } from './dropped-files';
 import { dropNote, editNote, restoreNote, rowLabel, unpinNote } from './edit-notes';
 import { bringBackNote, openInFigmaNote } from './figma-press';
-import { createFigmaPresses, fileOf, frameOf, isFigmaDesignUrl, openWithSystem } from './figma';
+import {
+  FIGMA_PRESS_TTL_MS,
+  createFigmaPresses,
+  fileOf,
+  frameOf,
+  isFigmaDesignUrl,
+  openWithSystem,
+} from './figma';
 import { designTargets, runDesignReview } from './design-review';
 import { createPlanParts, type PlanParts, type PlanTurnState } from './plan-parts';
 import type { ShapeJev } from './jev';
@@ -569,7 +579,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     }
   };
 
-  const planParts = createPlanParts({
+  const parts = createPlanParts({
     state,
     log,
     filesDir: deps.filesDir,
@@ -577,6 +587,17 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     announce,
     pdfTextComing,
   });
+  // A Figma press ends with the turn that took its ask (or one that has delivered it): the row stops showing it.
+  const planParts: PlanParts = {
+    ...parts,
+    onTurnEnded(shapeId, end) {
+      figmaPresses.endWhere(
+        shapeId,
+        (id) => end.starters.includes(id) || getItem(state.db, id).deliveredAt !== null,
+      );
+      parts.onTurnEnded(shapeId, end);
+    },
+  };
 
   return {
     startFromTerminal(input) {
@@ -783,13 +804,19 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       )
         return { status: 'running' };
       const frame = frameOf(state.db, mockup.id);
+      const newFile = input.action === FigmaAction.Open && input.newFile === true;
       let press;
       if (input.action === FigmaAction.Open) {
+        // A new file forgets the project's draft file, the only way to replace one that was lost.
+        if (newFile)
+          state.write((ctx) => {
+            deleteAppSetting(ctx, figmaFileKey(projectId));
+          });
         press = openInFigmaNote(
           mockup,
           getProject(state.db, projectId).name,
           // A mock-up sent before keeps its frame's file; else the project's draft file.
-          (frame ?? fileOf(state.db, projectId))?.fileKey ?? null,
+          newFile ? null : ((frame ?? fileOf(state.db, projectId))?.fileKey ?? null),
         );
       } else {
         if (frame === null)
@@ -798,9 +825,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           );
         press = bringBackNote(mockup, frame);
       }
-      // The mark is what lets the session's Figma tool run once; it is left before the ask is queued.
-      figmaPresses.add(shapeId, mockup.id, input.action);
-      state.write((ctx) =>
+      const message = state.write((ctx) =>
         insertShapeMessage(ctx, shapeId, {
           author: ShapeMessageAuthor.Note,
           kind,
@@ -808,6 +833,12 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           prompt: press.instruction,
         }),
       );
+      // The mark is what lets the session's Figma tool run, once; it ends with the turn that took the ask,
+      // and lapses by itself when no turn does.
+      figmaPresses.add(shapeId, mockup.id, input.action, message.id);
+      setTimeout(() => {
+        if (figmaPresses.pending(shapeId, mockup.id) === null) announce(shapeId);
+      }, FIGMA_PRESS_TTL_MS + 1000).unref();
       engine.queued(conversationOf(shapeId));
       return { status: 'started' };
     },
@@ -904,13 +935,6 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     view(shapeId) {
       const conversation = conversationOf(shapeId);
       const live = engine.view(conversation);
-      // A press whose ask is no longer queued and whose turn has ended can no longer be carried out.
-      if (
-        !turnRuns(conversation) &&
-        !pressPending(shapeId, ShapeEventKind.FigmaOpen) &&
-        !pressPending(shapeId, ShapeEventKind.FigmaBringBack)
-      )
-        figmaPresses.clear(shapeId);
       return buildShapeView(
         state.db,
         shapeId,

@@ -134,6 +134,9 @@ function FigmaButtons({
   const send = (): void => {
     press.mutate({ attachmentId: attachment.id, action: 'open' });
   };
+  const sendToNewFile = (): void => {
+    press.mutate({ attachmentId: attachment.id, action: 'open', newFile: true });
+  };
   const busy = press.data?.status === 'running' ? 'Another Figma request is still running.' : null;
   const message = press.isError ? press.error.message : open.isError ? open.error.message : busy;
   const error =
@@ -164,6 +167,18 @@ function FigmaButtons({
         >
           Open in Figma
         </Button>
+        {attachment.figma?.fileStored === true ? (
+          <Anchor
+            component="button"
+            type="button"
+            fz={12}
+            c="dimmed"
+            aria-label={`Send to a new Figma file: ${title}`}
+            onClick={sendToNewFile}
+          >
+            Send to a New Figma File
+          </Anchor>
+        ) : null}
         {error}
       </>
     );
@@ -197,6 +212,7 @@ function FigmaButtons({
             Bring Back from Figma
           </Menu.Item>
           <Menu.Item onClick={send}>Send Again to Figma</Menu.Item>
+          <Menu.Item onClick={sendToNewFile}>Send to a New Figma File</Menu.Item>
         </Menu.Dropdown>
       </Menu>
       {error}

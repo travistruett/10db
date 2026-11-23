@@ -1,9 +1,17 @@
-import { FigmaAction, InvalidError, ShapeOrigin, type ProjectId } from '@10db/contracts';
+import {
+  FigmaAction,
+  InvalidError,
+  ShapeMessageAuthor,
+  ShapeMessageKind,
+  ShapeOrigin,
+  type ProjectId,
+} from '@10db/contracts';
 import {
   createTestStore,
   getAppSetting,
   insertPlanSession,
   insertShapeAttachment,
+  insertShapeMessage,
   seedProject,
 } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -66,7 +74,14 @@ describe('send_mockup_to_figma', () => {
     expect(getAppSetting(store.db, `figma-frame.${mockup.id}`)).toBeUndefined();
 
     // A press lets one send through; a second is refused.
-    presses.add(shape.id, mockup.id, FigmaAction.Open);
+    const press = store.write((ctx) =>
+      insertShapeMessage(ctx, shape.id, {
+        author: ShapeMessageAuthor.Note,
+        kind: ShapeMessageKind.FigmaOpen,
+        body: 'Open in Figma',
+      }),
+    ).value;
+    presses.add(shape.id, mockup.id, FigmaAction.Open, press.id);
     await expect(send()).resolves.toMatchObject({ nodeId: '1:2' });
     expect(post).toHaveBeenCalledTimes(1);
     await expect(send()).rejects.toBeInstanceOf(InvalidError);

@@ -8,6 +8,9 @@
         "open",
         "bring-back"
       ]
+    },
+    "newFile": {
+      "type": "boolean"
     }
   },
   "required": [
