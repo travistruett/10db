@@ -33,6 +33,6 @@ describe('Settings › Updates agents', () => {
     const section = await screen.findByRole('region', { name: 'Harnesses' });
     expect(within(section).getByText('Claude Code')).toBeTruthy();
     expect(within(section).getByText('2.1.302')).toBeTruthy();
-    expect(within(section).getByText('2.1.319 Out')).toBeTruthy();
+    expect(within(section).getByText('Latest: 2.1.319')).toBeTruthy();
   });
 });

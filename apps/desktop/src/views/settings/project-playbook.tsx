@@ -41,9 +41,9 @@ export function ProjectPlaybook({ project }: { readonly project: ProjectDto }) {
       ) : null}
       <Stack gap="sm" component="section" aria-label="Project playbook">
         <SectionHeading
-          title="Playbook"
+          title="Rigor"
           line="What each step runs on this project's account."
-          help="A field you set here applies to this project only. Use Global follows All Projects › Models."
+          help="A field you set here applies to this project only. Use Global follows All Projects › Playbook."
         />
         <PlaybookTable projectId={project.id} accountId={project.accountId} />
       </Stack>

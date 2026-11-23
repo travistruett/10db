@@ -142,7 +142,7 @@ export function baseHandlers(
     http.get(daemonUrl('/models', base), () => HttpResponse.json([])),
     // and what each account offers, which an account's tier overrides read; none yet.
     http.get(daemonUrl('/models/offers', base), () => HttpResponse.json([])),
-    // Settings › Models and a project's Models by role read the playbook, the kinds, the personas and what
+    // Settings › Playbook and a project's Playbook read the playbook, the kinds, the personas and what
     // each cell resolves to; 10db's defaults, no kinds and nothing chosen.
     http.get(daemonUrl('/playbook', base), () => HttpResponse.json(playbookDto())),
     http.get(daemonUrl('/projects/:projectId/playbook', base), () =>

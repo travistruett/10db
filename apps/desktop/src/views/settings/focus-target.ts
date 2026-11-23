@@ -4,10 +4,23 @@ import { z } from 'zod';
 
 const FocusParam = z.string().min(1);
 
-/** The `focus` part of a Settings address, kept only when it is a name. */
-export function settingsSearch(search: Record<string, unknown>): { focus?: string } {
+/** The kinds of model a Models page can list; the address says which, and Agent is the default. */
+export const ModelClass = { Agent: 'agent', Decision: 'decision' } as const;
+export type ModelClass = (typeof ModelClass)[keyof typeof ModelClass];
+
+const ClassParam = z.enum([ModelClass.Agent, ModelClass.Decision]);
+
+/** The `focus` and `class` parts of a Settings address, each kept only when it is valid. */
+export function settingsSearch(search: Record<string, unknown>): {
+  focus?: string;
+  class?: ModelClass;
+} {
   const focus = FocusParam.safeParse(search['focus']);
-  return focus.success ? { focus: focus.data } : {};
+  const modelClass = ClassParam.safeParse(search['class']);
+  return {
+    ...(focus.success ? { focus: focus.data } : {}),
+    ...(modelClass.success ? { class: modelClass.data } : {}),
+  };
 }
 
 const FOCUSABLE =

@@ -19,14 +19,13 @@ const SECURITY = kindDto({
 const DOCS = kindDto({ key: 'docs', label: 'Docs', position: 1 });
 
 describe('the kinds list', () => {
-  it('lists each kind with its key, minimum rigor and switches, in order', async () => {
+  it('lists each kind with its minimum rigor and switches, in order', async () => {
     server.use(
       http.get(daemonUrl('/kinds'), () => HttpResponse.json([SECURITY, DOCS])),
       ...baseHandlers(),
     );
     renderWithDaemon(<KindsSection />);
     const security = within(await screen.findByRole('row', { name: /Security/ }));
-    expect(security.getByText('security')).toBeTruthy();
     expect(security.getByText('Careful')).toBeTruthy();
     expect(security.getByText('Always Reviewed')).toBeTruthy();
     expect(security.getByText('Inbox')).toBeTruthy();

@@ -17,6 +17,7 @@ import {
   IconPlug,
   IconPuzzle,
   IconListCheck,
+  IconPlaylist,
   IconRoute,
   IconSettings,
   IconUserPlus,
@@ -24,7 +25,6 @@ import {
 } from '@tabler/icons-react';
 import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useId } from 'react';
-import classes from './settings-nav.module.css';
 import {
   isSettingsSectionKey,
   sectionByKey,
@@ -55,6 +55,7 @@ const SECTION_ICON: Readonly<Record<SettingsSectionKey, typeof IconSettings>> = 
   [SettingsSectionKey.ProjectTrust]: IconLock,
   [SettingsSectionKey.Sessions]: IconMessages,
   [SettingsSectionKey.Accounts]: IconKey,
+  [SettingsSectionKey.Playbook]: IconPlaylist,
   [SettingsSectionKey.Decisions]: IconBolt,
   [SettingsSectionKey.Models]: IconCpu,
 };
@@ -148,11 +149,6 @@ export function SettingsNav() {
         fullWidth
         size="xs"
         mb="sm"
-        classNames={{
-          root: classes['root'],
-          indicator: classes['indicator'],
-          label: classes['label'],
-        }}
         value={scope}
         data={SCOPE_OPTIONS}
         onChange={(value) => {

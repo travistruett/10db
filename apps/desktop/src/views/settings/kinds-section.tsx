@@ -1,10 +1,10 @@
 import type { KindDto } from '@10db/contracts';
-import { ActionIcon, Badge, Button, Group, Stack, Text } from '@mantine/core';
-import { IconArrowDown, IconArrowUp } from '@tabler/icons-react';
+import { Badge, Button, Group, Stack, Text } from '@mantine/core';
 import { DataTable, type DataTableColumn } from 'mantine-datatable';
 import { useState } from 'react';
-import { useKinds, useMoveKind } from '../../daemon/kind-queries';
+import { useKinds } from '../../daemon/kind-queries';
 import { KindDrawer } from './kind-drawer';
+import { TiebreakOrder } from './kind-tiebreak-order';
 import { rigorLabel } from './rigor-labels';
 import { ROLES } from './role-labels';
 import { SectionHeading } from './section-heading';
@@ -57,29 +57,25 @@ const roleName = (role: string): string => ROLES.find((r) => r.role === role)?.l
 
 /**
  * The kinds of work a task can be: each with a minimum rigor, safety switches, extra steps and per-role overrides.
- * A row opens its drawer; the arrows set the order the lists show.
+ * A row opens its drawer; Tiebreak Order sets which kind's override wins when a task has several.
  */
 export function KindsSection() {
   const kinds = useKinds();
-  const move = useMoveKind();
   // The drawer edits this kind, or adds one when `adding`; closing keeps it mounted for its slide out.
   const [editing, setEditing] = useState<KindDto | null>(null);
   const [adding, setAdding] = useState(false);
+  const [ordering, setOrdering] = useState(false);
   const list = kinds.data ?? [];
   const columns: DataTableColumn<KindDto>[] = [
     {
       accessor: 'label',
       title: 'Kind',
       noWrap: true,
+      // The key a task carries is the drawer's to show; here the name is enough.
       render: (kind) => (
-        <Stack gap={0}>
-          <Text size="sm" fw={600}>
-            {kind.label}
-          </Text>
-          <Text size="xs" c="dimmed">
-            {kind.key}
-          </Text>
-        </Stack>
+        <Text size="sm" fw={600}>
+          {kind.label}
+        </Text>
       ),
     },
     {
@@ -112,47 +108,6 @@ export function KindsSection() {
       noWrap: true,
       render: (kind) => <Pills words={Object.keys(kind.overrides).map(roleName)} />,
     },
-    {
-      accessor: 'order',
-      title: 'Order',
-      width: 90,
-      render: (kind) => {
-        const index = list.findIndex((k) => k.id === kind.id);
-        return (
-          <Group
-            gap={2}
-            wrap="nowrap"
-            // The row's own click opens the drawer; the arrows only move the kind.
-            onClick={(e) => {
-              e.stopPropagation();
-            }}
-          >
-            <ActionIcon
-              variant="subtle"
-              size="sm"
-              aria-label={`Move ${kind.label} up`}
-              disabled={index <= 0 || move.isPending}
-              onClick={() => {
-                move.mutate({ kindId: kind.id, position: index - 1 });
-              }}
-            >
-              <IconArrowUp size={14} />
-            </ActionIcon>
-            <ActionIcon
-              variant="subtle"
-              size="sm"
-              aria-label={`Move ${kind.label} down`}
-              disabled={index === list.length - 1 || move.isPending}
-              onClick={() => {
-                move.mutate({ kindId: kind.id, position: index + 1 });
-              }}
-            >
-              <IconArrowDown size={14} />
-            </ActionIcon>
-          </Group>
-        );
-      },
-    },
   ];
   return (
     <Stack gap="sm" component="section" aria-label="Kinds">
@@ -161,24 +116,30 @@ export function KindsSection() {
         line="Sorts of work, each with its own care."
         help="A kind is a sort of work with its own care: a floor under the rigor, switches for safety, and a stronger model for some steps."
         action={
-          <Button
-            onClick={() => {
-              setEditing(null);
-              setAdding(true);
-            }}
-          >
-            Add Kind
-          </Button>
+          <Group gap="xs" wrap="nowrap">
+            <Button
+              variant="subtle"
+              color="gray"
+              onClick={() => {
+                setOrdering(true);
+              }}
+            >
+              Tiebreak Order…
+            </Button>
+            <Button
+              onClick={() => {
+                setEditing(null);
+                setAdding(true);
+              }}
+            >
+              Add Kind
+            </Button>
+          </Group>
         }
       />
       {kinds.isError ? (
         <Text size="sm" c="red" role="alert">
           {kinds.error.message}
-        </Text>
-      ) : null}
-      {move.isError ? (
-        <Text size="sm" c="red" role="alert">
-          {move.error.message}
         </Text>
       ) : null}
       <DataTable<KindDto>
@@ -192,7 +153,7 @@ export function KindsSection() {
         verticalSpacing="xs"
         horizontalSpacing="md"
         // Too narrow a frame scrolls the table sideways instead of squeezing a column.
-        styles={{ table: { minWidth: 1000 } }}
+        styles={{ table: { minWidth: 920 } }}
         highlightOnHover
         fetching={kinds.isPending}
         noRecordsText="No kinds yet"
@@ -200,6 +161,13 @@ export function KindsSection() {
         onRowClick={({ record }) => {
           setAdding(false);
           setEditing(record);
+        }}
+      />
+      <TiebreakOrder
+        kinds={list}
+        opened={ordering}
+        onClose={() => {
+          setOrdering(false);
         }}
       />
       {adding || editing !== null ? (

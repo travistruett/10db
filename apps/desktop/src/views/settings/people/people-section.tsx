@@ -1,18 +1,28 @@
 import type { PersonDto } from '@10db/contracts';
 import {
+  ActionIcon,
   Alert,
-  Anchor,
+  Avatar,
   Badge,
   Button,
   Group,
   Loader,
   Modal,
+  Paper,
   Stack,
   Table,
   Text,
+  Tooltip,
 } from '@mantine/core';
-import { IconBrandSlack } from '@tabler/icons-react';
-import { Link } from '@tanstack/react-router';
+import {
+  IconBrandSlack,
+  IconPencil,
+  IconTrash,
+  IconUserPlus,
+  IconUsers,
+} from '@tabler/icons-react';
+import { useNavigate } from '@tanstack/react-router';
+import { EmptyState } from '../../../shell/empty-state';
 import { useState } from 'react';
 import {
   usePeople,
@@ -59,32 +69,55 @@ function ReachChip({ person }: { readonly person: PersonDto }) {
   );
 }
 
-/** Points at Settings › Integrations while Slack can't carry questions. */
-function ConnectSlackLine({ builder }: { readonly builder: PersonDto | undefined }) {
+/** While Slack can't carry questions: a callout with the one button that fixes it. */
+function ConnectSlack({ builder }: { readonly builder: PersonDto | undefined }) {
   const state = useSlackConnection().data?.state;
+  const navigate = useNavigate();
   if (state === undefined || state === 'unreachable' || builder === undefined) return null;
   const unfinished = state === 'connected' && builder.slack === null;
   if (state === 'connected' && !unfinished) return null;
   return (
-    <Text size="sm" c="dimmed">
-      {unfinished
-        ? "Slack's setup isn't finished, so 10db can't message anyone yet."
-        : "Slack isn't connected, so 10db can't message anyone yet."}{' '}
-      <Anchor
-        size="sm"
-        // Inside a line of text, so it is underlined rather than told apart by color alone.
-        underline="always"
-        renderRoot={(props) => (
-          <Link
-            {...props}
-            to="/settings/$section"
-            params={{ section: SettingsSectionKey.Integrations }}
-          />
-        )}
-      >
-        {unfinished ? 'Finish it in Integrations' : 'Connect it in Integrations'}
-      </Anchor>
-    </Text>
+    <Alert
+      variant="light"
+      color="yellow"
+      icon={<IconBrandSlack size={18} stroke={1.5} />}
+      title={unfinished ? "Slack's setup isn't finished" : "Slack isn't connected"}
+    >
+      <Group justify="space-between" wrap="nowrap" gap="md">
+        <Text size="sm">
+          Until it is, 10db can't message anyone; you pass each question on yourself.
+        </Text>
+        <Button
+          size="xs"
+          variant="default"
+          style={{ flex: 'none' }}
+          onClick={() => {
+            void navigate({
+              to: '/settings/$section',
+              params: { section: SettingsSectionKey.Integrations },
+              search: { focus: 'slack' },
+            });
+          }}
+        >
+          {unfinished ? 'Finish Setup' : 'Connect Slack'}
+        </Button>
+      </Group>
+    </Alert>
+  );
+}
+
+/** A person's initials in a circle; the builder's is the primary color. */
+function Initials({ person }: { readonly person: PersonDto }) {
+  const letters = person.name
+    .split(/\s+/)
+    .map((word) => word[0] ?? '')
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+  return (
+    <Avatar size={28} radius="xl" color={person.isBuilder ? 'primary' : 'gray'} aria-hidden>
+      {letters}
+    </Avatar>
   );
 }
 
@@ -112,7 +145,7 @@ export function PeopleSection() {
             Add Person
           </Button>
         </Group>
-        <ConnectSlackLine builder={rows.find((p) => p.isBuilder)} />
+        <ConnectSlack builder={rows.find((p) => p.isBuilder)} />
         {people.isPending ? <Loader size="sm" /> : null}
         {people.isError ? (
           <Alert color="red" title="Couldn't load people">
@@ -120,64 +153,86 @@ export function PeopleSection() {
           </Alert>
         ) : null}
         {people.isSuccess ? (
-          <Table.ScrollContainer minWidth={640}>
-            <Table verticalSpacing="sm">
-              <Table.Thead>
-                <Table.Tr>
-                  <Table.Th>Name</Table.Th>
-                  <Table.Th>How It's Sent</Table.Th>
-                  <Table.Th>Answers</Table.Th>
-                  <Table.Th aria-label="Actions" />
-                </Table.Tr>
-              </Table.Thead>
-              <Table.Tbody>
-                {rows.map((person) => (
-                  <Table.Tr key={person.id}>
-                    <Table.Td>
-                      <Group gap="xs" wrap="nowrap">
-                        <Text size="sm" style={{ whiteSpace: 'nowrap' }}>
-                          {rowName(person)}
-                        </Text>
-                        <ReachChip person={person} />
-                      </Group>
-                    </Table.Td>
-                    <Table.Td style={{ whiteSpace: 'nowrap' }}>{howSent(person)}</Table.Td>
-                    <Table.Td>
-                      <PersonAnswers person={person} />
-                    </Table.Td>
-                    <Table.Td>
-                      <Group gap="xs" justify="flex-end" wrap="nowrap">
-                        <Button
-                          size="compact-xs"
-                          variant="default"
-                          aria-label={`Edit ${person.name}`}
-                          onClick={() => {
-                            setEditing(person);
-                          }}
-                        >
-                          Edit
-                        </Button>
-                        {person.isBuilder ? null : (
-                          <Button
-                            size="compact-xs"
-                            variant="subtle"
-                            color="red"
-                            aria-label={`Remove ${person.name}`}
-                            loading={remove.isPending && remove.variables === person.id}
-                            onClick={() => {
-                              setRemoving(person);
-                            }}
-                          >
-                            Remove
-                          </Button>
-                        )}
-                      </Group>
-                    </Table.Td>
+          <Paper withBorder radius="md">
+            <Table.ScrollContainer minWidth={640}>
+              <Table verticalSpacing="sm" horizontalSpacing="md">
+                <Table.Thead>
+                  <Table.Tr>
+                    <Table.Th>Name</Table.Th>
+                    <Table.Th>How It's Sent</Table.Th>
+                    <Table.Th>Answers</Table.Th>
+                    <Table.Th aria-label="Actions" />
                   </Table.Tr>
-                ))}
-              </Table.Tbody>
-            </Table>
-          </Table.ScrollContainer>
+                </Table.Thead>
+                <Table.Tbody>
+                  {rows.map((person) => (
+                    <Table.Tr key={person.id}>
+                      <Table.Td>
+                        <Group gap="sm" wrap="nowrap">
+                          <Initials person={person} />
+                          <Text size="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>
+                            {rowName(person)}
+                          </Text>
+                          <ReachChip person={person} />
+                        </Group>
+                      </Table.Td>
+                      <Table.Td style={{ whiteSpace: 'nowrap' }}>{howSent(person)}</Table.Td>
+                      <Table.Td>
+                        <PersonAnswers person={person} />
+                      </Table.Td>
+                      <Table.Td>
+                        <Group gap={4} justify="flex-end" wrap="nowrap">
+                          <Tooltip label="Edit" withArrow>
+                            <ActionIcon
+                              variant="subtle"
+                              color="gray"
+                              aria-label={`Edit ${person.name}`}
+                              onClick={() => {
+                                setEditing(person);
+                              }}
+                            >
+                              <IconPencil size={16} stroke={1.5} />
+                            </ActionIcon>
+                          </Tooltip>
+                          {person.isBuilder ? null : (
+                            <Tooltip label="Remove" withArrow>
+                              <ActionIcon
+                                variant="subtle"
+                                color="red"
+                                aria-label={`Remove ${person.name}`}
+                                loading={remove.isPending && remove.variables === person.id}
+                                onClick={() => {
+                                  setRemoving(person);
+                                }}
+                              >
+                                <IconTrash size={16} stroke={1.5} />
+                              </ActionIcon>
+                            </Tooltip>
+                          )}
+                        </Group>
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Table.ScrollContainer>
+          </Paper>
+        ) : null}
+        {people.isSuccess && rows.every((p) => p.isBuilder) ? (
+          <EmptyState
+            icon={IconUsers}
+            title="Only you answer questions"
+            action={{
+              label: 'Add Person',
+              icon: IconUserPlus,
+              onClick: () => {
+                setEditing(null);
+              },
+            }}
+          >
+            Add a teammate, and 10db can route a project&apos;s product, design or legal questions
+            to them.
+          </EmptyState>
         ) : null}
       </Stack>
       {remove.isError ? (

@@ -19,6 +19,7 @@ export const SettingsSectionKey = {
   Trust: 'trust',
   Sessions: 'sessions',
   Accounts: 'accounts',
+  Playbook: 'playbook',
   Decisions: 'decisions',
   Models: 'models',
 } as const;
@@ -71,15 +72,16 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     SettingsSectionKey.Team,
     Project,
     'Agents',
-    'Models by Role',
+    'Playbook',
     "Not built yet: the project's human members.",
   ),
   section(SettingsSectionKey.ProjectTrust, Project, 'Agents', 'Trust'),
   section(SettingsSectionKey.NetworkHosts, Project, 'Agents', 'Network Hosts'),
   section(SettingsSectionKey.Overview, App, null, 'Overview'),
   section(SettingsSectionKey.Accounts, App, 'AI', 'Accounts'),
-  section(SettingsSectionKey.Models, App, 'AI', 'Models'),
+  section(SettingsSectionKey.Playbook, App, 'AI', 'Playbook'),
   section(SettingsSectionKey.Decisions, App, 'AI', 'Decisions'),
+  section(SettingsSectionKey.Models, App, 'AI', 'Models'),
   section(SettingsSectionKey.LanePermissions, App, 'Agents', 'Lane Permissions'),
   section(SettingsSectionKey.Trust, App, 'Agents', 'Trust'),
   section(SettingsSectionKey.Sessions, App, 'Agents', 'Sessions'),
@@ -95,7 +97,7 @@ const KEYS = new Set<string>(Object.values(SettingsSectionKey));
 
 /** Sections that no longer exist, by the address they had, and the section their content moved to. */
 const RETIRED_SECTIONS: Readonly<Record<string, SettingsSectionKey>> = {
-  'personas-and-flows': SettingsSectionKey.Models,
+  'personas-and-flows': SettingsSectionKey.Playbook,
   'sign-ins': SettingsSectionKey.Integrations,
   'project-integrations': SettingsSectionKey.Integrations,
 };

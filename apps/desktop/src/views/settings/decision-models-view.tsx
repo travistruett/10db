@@ -4,68 +4,54 @@ import {
   type AskedDecision,
   type DecisionModelDto,
 } from '@10db/contracts';
-import { Alert, Anchor, Group, Loader, Stack, Text, Title } from '@mantine/core';
-import { Link } from '@tanstack/react-router';
+import { Alert, Group, Loader, Stack, Text } from '@mantine/core';
+import { IconBolt, IconBoltOff, IconKey } from '@tabler/icons-react';
+import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useDecisionModels, useDecisionStats, useJudgeStatus } from '../../daemon/judge-queries';
+import { EmptyState } from '../../shell/empty-state';
 import { DecisionModelDrawer } from './decision-model-drawer';
 import { answersByModel, decisionModelSeries } from './decision-model-series';
 import { DecisionModelsChart } from './decision-models-chart';
 import { DecisionModelsTable } from './decision-models-table';
 import { RaisedPanel } from './raised-panel';
+import { SectionHeading } from './section-heading';
 import { SettingsSectionKey } from './sections';
 
-const OFF_WORDS =
-  "Decisions are off: 10db was started with TENDB_JUDGE=off, so it never calls a model and its models aren't read.";
-const NO_ACCOUNT_WORDS =
-  'Pick an account under Paid By to compare the models that make 10db’s decisions by time and cost.';
-
-/** What replaces the chart and the list when they cannot be drawn, and why; the link goes to where the account is picked. */
-function Unavailable({
-  text,
-  link,
-  onPickAccount,
-}: {
-  readonly text: string;
-  readonly link: boolean;
-  readonly onPickAccount: (() => void) | undefined;
-}) {
+/** Decision Models with nothing to draw: decisions are off in this daemon, or no account pays for them yet. */
+function Unavailable({ off }: { readonly off: boolean }) {
+  const navigate = useNavigate();
+  if (off)
+    return (
+      <EmptyState icon={IconBoltOff} title="Decisions are off">
+        10db was started with TENDB_JUDGE=off, so it never calls a decision model or reads their
+        list.
+      </EmptyState>
+    );
   return (
-    <Text size="sm" c="dimmed">
-      {text}
-      {link ? (
-        <>
-          {' · '}
-          {onPickAccount === undefined ? (
-            <Anchor
-              size="sm"
-              renderRoot={(props) => (
-                <Link
-                  {...props}
-                  to="/settings/$section"
-                  params={{ section: SettingsSectionKey.Decisions }}
-                  search={{ focus: 'paid-by' }}
-                />
-              )}
-            >
-              Paid By
-            </Anchor>
-          ) : (
-            <Anchor component="button" type="button" size="sm" onClick={onPickAccount}>
-              Paid By
-            </Anchor>
-          )}
-        </>
-      ) : null}
-    </Text>
+    <EmptyState
+      icon={IconBolt}
+      title="No account pays for decisions yet"
+      action={{
+        label: 'Choose an Account',
+        icon: IconKey,
+        onClick: () => {
+          void navigate({
+            to: '/settings/$section',
+            params: { section: SettingsSectionKey.Decisions },
+            search: { focus: 'paid-by' },
+          });
+        },
+      }}
+    >
+      Pick the account that pays for 10db&apos;s quick calls, and its models show here by time and
+      cost.
+    </EmptyState>
   );
 }
 
-/**
- * The decision models by time and cost. `onPickAccount` is where the Paid By link goes when the page
- * that shows this view is also the page that picks the account.
- */
-export function DecisionsModelsView({ onPickAccount }: { readonly onPickAccount?: () => void }) {
+/** Models › Decision Models: the models that make 10db's decisions, by time and cost, then every one of them. */
+export function DecisionModelsView() {
   const status = useJudgeStatus();
   const stats = useDecisionStats();
   const [openModel, setOpenModel] = useState<DecisionModelDto | null>(null);
@@ -83,9 +69,8 @@ export function DecisionsModelsView({ onPickAccount }: { readonly onPickAccount?
       .filter((d) => judge.config.decisions[d].model === model);
 
   const comparison = () => {
-    if (judge.off)
-      return <Unavailable text={OFF_WORDS} link={false} onPickAccount={onPickAccount} />;
-    if (!keyed) return <Unavailable text={NO_ACCOUNT_WORDS} link onPickAccount={onPickAccount} />;
+    if (judge.off) return <Unavailable off />;
+    if (!keyed) return <Unavailable off={false} />;
     if (models.isError)
       return (
         <Text size="sm" c="red" role="alert">
@@ -105,8 +90,8 @@ export function DecisionsModelsView({ onPickAccount }: { readonly onPickAccount?
     const usedBy = new Map(modelList.map((m) => [m.id, decisionsOf(m.id)] as const));
     return (
       <>
-        <Stack gap="xs">
-          <Title order={4}>Time and Cost</Title>
+        <Stack gap="sm">
+          <SectionHeading title="Time and Cost" line="Rings mark the model each decision uses." />
           <RaisedPanel>
             <DecisionModelsChart
               points={series.points}
@@ -116,15 +101,17 @@ export function DecisionsModelsView({ onPickAccount }: { readonly onPickAccount?
             />
           </RaisedPanel>
           <Text size="xs" c="dimmed">
-            Rings: the model each decision uses. Past the dashed line 10db gives up on a model and
-            applies today&apos;s rule.
+            Past the dashed line 10db gives up on a model and applies today&apos;s rule.
             {series.omitted > 0
               ? ` ${String(series.omitted)} ${series.omitted === 1 ? 'model' : 'models'} with no cost or time ${series.omitted === 1 ? 'is' : 'are'} not drawn.`
               : ''}
           </Text>
         </Stack>
-        <Stack gap="xs">
-          <Title order={4}>All Decision Models</Title>
+        <Stack gap="sm">
+          <SectionHeading
+            title="Decision Models"
+            line="Every model the account can run a decision on."
+          />
           <DecisionModelsTable
             models={modelList}
             usedBy={usedBy}
