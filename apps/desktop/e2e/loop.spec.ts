@@ -273,7 +273,8 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
     exact: true,
   });
   await expect(reportSwitch).toBeChecked();
-  await reportSwitch.click();
+  // A switch with no visible label has its track over the input: click the label that holds both, as a person does.
+  await reportSwitch.locator('xpath=..').click();
   await expect(reportSwitch).not.toBeChecked();
   await open(page, 'Board');
 
