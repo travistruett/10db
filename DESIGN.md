@@ -45,9 +45,10 @@ favors legibility and calm over decoration.
   the task has one. Areas, the criteria count, the landing line, the placement badge, the pull request and
   CI links, "Review sent back" and the shipped-at-limit line are not on the face: the task drawer holds
   them, and the card's screen-reader summary still speaks them. The indicator row is one component that
-  takes a list of small labelled badges, so a new kind is another entry in the list: a shared branch (the
-  batch has more than one task), CI passed or failed on a shipped pull request, waits on (the titles of the
-  unfinished dependencies are its tooltip) and Cancelled.
+  takes a list of small labelled badges, and it holds only where the task stands beyond its status line:
+  the goal it serves, CI failed on a shipped pull request, waits on (the titles of the unfinished
+  dependencies are its tooltip) and Cancelled. Rigor, kinds, a passing CI, a shared branch and the
+  Workbench are the drawer's. A done card keeps the plain border: its column says it.
 - **Board depth:** depth comes from tone, not lines, and every tone is a Selenized background. A column
   with cards is a recessed tray (`--tendb-color-column`) under a header band of its own tone, with a soft
   `bg_1` edge; an empty column or rail is an unfilled dashed slot. Cards are the raised tone

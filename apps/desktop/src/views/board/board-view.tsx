@@ -20,7 +20,6 @@ import { IconColumns, IconPlayerPlay, IconPlus } from '@tabler/icons-react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { useGoals } from '../../daemon/goal-queries';
-import { useKinds } from '../../daemon/kind-queries';
 import {
   useAbandonBatch,
   useBatches,
@@ -43,6 +42,7 @@ import { abandonNote } from './batch/abandon-note';
 import { BatchSheet } from './batch/batch-sheet';
 import { closeNote } from './batch/close-note';
 import { batchTaskCount } from './batch/batch-task-count';
+import { TaskExternalLink } from './task-external-link';
 import { BoardColumn } from './board-column';
 import { BoardScroll } from './board-scroll';
 import { columnHint } from './column-hints';
@@ -54,7 +54,6 @@ import { menuMoves, resolveDrop, startedDependents, type DropTarget } from './dr
 import { landingLine } from './landing-draft';
 import { NewTaskForm } from './new-task-form';
 import { InboxLink } from './inbox-link';
-import { TaskExternalLink } from './task-external-link';
 import { withFixTaskTitles } from './ci-line';
 import { placementLabel, placementOpen } from './placement';
 import { queuePlaces } from './queue-place';
@@ -181,7 +180,6 @@ function BoardColumns({
   goalTitles,
 }: BoardColumnsProps) {
   const actions = useBoardActions(projectId);
-  const kinds = useKinds().data ?? [];
   const retry = useRetryWorkstream();
   const abandon = useAbandonBatch();
   const closeTask = useCloseTask();
@@ -332,13 +330,10 @@ function BoardColumns({
                 batch={batch}
                 batches={allBatches}
                 gateCommand={stepCheck}
-                batchTaskCount={batch ? batchTaskCount(batch, workstreams) : 1}
                 startNote={noteOf(task)}
                 place={ws ? places.get(ws.id) : undefined}
                 peers={peers}
                 goalTitle={task.goalId ? goalTitles.get(task.goalId) : undefined}
-                kinds={kinds}
-                defaultRigor={project.defaultRigor}
               />
             );
           }}
