@@ -107,8 +107,8 @@ test('routes a question to someone outside Slack from its card, and the table sh
   await expect(page.getByText('Off: 10db was started with TENDB_BENCHMARKS=off')).toBeVisible();
   // Both workspaces are listed under the Off line, read-only: no menu on a row, no Add Workspace.
   const slackCard = page.getByRole('group', { name: 'Slack', exact: true });
-  await expect(slackCard.getByText('Acme · posts as @10db')).toBeVisible();
-  await expect(slackCard.getByText('Globex · posts as @10db')).toBeVisible();
+  await expect(slackCard.getByText('Acme', { exact: true })).toBeVisible();
+  await expect(slackCard.getByText('Globex', { exact: true })).toBeVisible();
   await expect(slackCard.getByRole('button', { name: /options/ })).toHaveCount(0);
   await expect(slackCard.getByRole('button', { name: 'Add Workspace' })).toHaveCount(0);
   // The project's Slack reads Off; choosing Acme is kept across a reload.

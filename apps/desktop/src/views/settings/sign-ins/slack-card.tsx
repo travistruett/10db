@@ -47,7 +47,10 @@ function stateNote(workspace: SlackWorkspaceStatusDto): string | null {
   }
 }
 
-/** "Acme · posts as @10db · you're @travis": the workspace in one line. */
+/** The bot's name the manifest gives it; the card's byline says it once for every workspace. */
+const BOT_NAME = '10db';
+
+/** "Acme · you're @travis": the workspace in one line, naming its bot only when it is called something else. */
 function WorkspaceLine({
   workspace,
   builder,
@@ -57,7 +60,9 @@ function WorkspaceLine({
 }) {
   const contact = builder === undefined ? null : contactIn(builder, workspace.teamId);
   const member = useSlackMember(workspace.teamId, contact?.userId ?? null);
-  const parts = [workspace.teamName, `posts as @${workspace.botName ?? '10db'}`];
+  const bot = workspace.botName ?? BOT_NAME;
+  const parts = [workspace.teamName];
+  if (bot !== BOT_NAME) parts.push(`posts as @${bot}`);
   if (builder !== undefined && contact !== null)
     parts.push(`you're @${member?.name ?? builder.name}`);
   return (
@@ -371,6 +376,9 @@ export function SlackCard() {
       {status.isError ? <StateText>Couldn't read this.</StateText> : null}
       {off ? <StateText>Off: 10db was started with TENDB_SLACK=off</StateText> : null}
       {data && !off && workspaces.length === 0 ? <StateText>Not connected.</StateText> : null}
+      {!off && workspaces.length > 0 ? (
+        <StateText>10db posts as @{BOT_NAME} in each workspace.</StateText>
+      ) : null}
       {status.isError ? (
         <Alert color="red" title="Couldn't load the Slack connection">
           {status.error.message}
