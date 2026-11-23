@@ -1,0 +1,160 @@
+import { hazardScope, HazardScope, type ProjectDto } from '@10db/contracts';
+import { Button, Group, Stack, Text } from '@mantine/core';
+import { DataTable, type DataTableColumn } from 'mantine-datatable';
+import { useState } from 'react';
+import { useLookAgainAtHazards } from '../../daemon/hazard-queries';
+import { ConfirmModal } from '../../shell/confirm-modal';
+import { HazardAdditions } from './hazard-additions';
+import { HazardDrawer } from './hazard-drawer';
+import { SectionHeading } from './section-heading';
+import { PathLines, Pill, RowActions } from './table-cells';
+import { useListPatch } from './use-list-patch';
+
+type Hazard = ProjectDto['hazards'][number];
+
+/** The project's hazards as a table, with what 10db found by itself under it. */
+export function HazardsSection({ project }: { readonly project: ProjectDto }) {
+  const [editing, setEditing] = useState<Hazard | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [removing, setRemoving] = useState<Hazard | null>(null);
+  const remove = useListPatch(project);
+  const look = useLookAgainAtHazards(project.id);
+  const open = (hazard: Hazard) => {
+    setAdding(false);
+    setEditing(hazard);
+  };
+  const columns: DataTableColumn<Hazard>[] = [
+    {
+      accessor: 'name',
+      title: 'Name',
+      noWrap: true,
+      render: (hazard) => (
+        <Text size="sm" fw={600}>
+          {hazard.name}
+        </Text>
+      ),
+    },
+    {
+      accessor: 'scope',
+      title: 'Scope',
+      noWrap: true,
+      render: (hazard) =>
+        hazardScope(hazard) === HazardScope.Copy ? (
+          <Pill color="teal">Per Copy</Pill>
+        ) : (
+          <Pill>Project</Pill>
+        ),
+    },
+    {
+      accessor: 'commands',
+      title: 'Commands',
+      noWrap: true,
+      textAlign: 'right',
+      render: (hazard) => String(hazard.commands.length),
+    },
+    {
+      accessor: 'globs',
+      title: 'Paths',
+      render: (hazard) => <PathLines paths={hazard.globs} />,
+    },
+    {
+      accessor: 'actions',
+      title: '',
+      width: 90,
+      textAlign: 'right',
+      render: (hazard) => (
+        <RowActions
+          noun="hazard"
+          name={hazard.name}
+          onEdit={() => {
+            open(hazard);
+          }}
+          onRemove={() => {
+            remove.clear();
+            setRemoving(hazard);
+          }}
+        />
+      ),
+    },
+  ];
+  return (
+    <Stack gap="sm" component="section" aria-label="Hazards">
+      <SectionHeading
+        title="Hazards"
+        line="Files and commands that tasks take turns on."
+        help="A hazard is a set of files only one task changes at a time, such as lockfiles or migrations. A task that touches one, or runs one of its commands, waits for the task that holds it. 10db reads the project's files (its Makefiles, compose files, package scripts, AGENTS.md and docs) to find the commands that change lockfiles and migrations, and adds them by itself; you are asked only before one is taken out."
+        action={
+          <Group gap="xs" wrap="nowrap">
+            <Button
+              variant="subtle"
+              color="gray"
+              loading={look.isPending}
+              onClick={() => {
+                look.mutate();
+              }}
+            >
+              Look Again
+            </Button>
+            <Button
+              onClick={() => {
+                setEditing(null);
+                setAdding(true);
+              }}
+            >
+              Add Hazard
+            </Button>
+          </Group>
+        }
+      />
+      <HazardAdditions project={project} look={look} />
+      <DataTable<Hazard>
+        aria-label="Hazards"
+        records={project.hazards}
+        columns={columns}
+        idAccessor="name"
+        withTableBorder
+        backgroundColor="var(--tendb-color-panel)"
+        borderRadius="md"
+        verticalSpacing="xs"
+        horizontalSpacing="md"
+        highlightOnHover
+        noRecordsText="No hazards"
+        rowStyle={() => ({ cursor: 'pointer' })}
+        customRowAttributes={() => ({ 'data-keeps-drawer': '' })}
+        onRowClick={({ record }) => {
+          open(record);
+        }}
+      />
+      {adding || editing !== null ? (
+        <HazardDrawer
+          key={editing?.name ?? 'new'}
+          project={project}
+          hazard={editing}
+          onClose={() => {
+            setAdding(false);
+            setEditing(null);
+          }}
+        />
+      ) : null}
+      <ConfirmModal
+        opened={removing !== null}
+        title="Remove Hazard"
+        confirmLabel="Remove Hazard"
+        destructive
+        loading={remove.saving}
+        error={remove.problem}
+        onCancel={() => {
+          setRemoving(null);
+        }}
+        onConfirm={() => {
+          if (removing === null) return;
+          remove.save({ hazards: project.hazards.filter((h) => h.name !== removing.name) }, () => {
+            setRemoving(null);
+          });
+        }}
+      >
+        {`Remove ${removing?.name ?? 'this hazard'}? Tasks no longer take turns on its files and commands.`}
+      </ConfirmModal>
+    </Stack>
+  );
+}
