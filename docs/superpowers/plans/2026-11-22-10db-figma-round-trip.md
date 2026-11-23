@@ -18,7 +18,7 @@ Figma card under "Through Your Agent", saying how each account reaches Figma and
 hand.
 
 **What could go wrong, and how we'd know.**
-- **The agent's Figma server isn't connected** (signed out, Gateway account, Trust switch off). The agent says so
+- **The agent's Figma server isn't connected** (signed out, Trust switch off). The agent says so
   in the Plan and nothing is filed.
 - **The returned HTML drifts from the frame.** You see it on the new version's thumbnail beside the frame, and you
   don't approve it.
@@ -45,8 +45,6 @@ hand.
 - **Codex:** the same tools, signed in through Settings › Trust once 10db-a2's Sign In change (sign-in blocked
   only by an `Authorization` header) lands. Until then the agent reports Figma as not connected, and the card
   says to sign in there.
-- **Claude Gateway:** OAuth servers don't run there yet (the 2026-11-14 decision), so the card and the agent say
-  Figma isn't available.
 
 ## Parts
 
