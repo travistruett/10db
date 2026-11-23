@@ -17,6 +17,7 @@ import { useDaemon } from './provider';
 import { trustKeys } from './trust-queries';
 
 export const LINEAR_SIGN_INS_KEY = ['sign-ins', 'linear'] as const;
+export const FIGMA_SIGN_INS_KEY = ['sign-ins', 'figma'] as const;
 
 /** Under the Slack key, so a token change or a Slack connection event refetches a project's binding too. */
 const projectIntegrationsKey = (projectId: ProjectId) =>
@@ -117,6 +118,7 @@ export function useConnectService(service: ConnectableService) {
     onSettled: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: LINEAR_SIGN_INS_KEY }),
+        queryClient.invalidateQueries({ queryKey: FIGMA_SIGN_INS_KEY }),
         queryClient.invalidateQueries({ queryKey: trustKeys.app }),
         queryClient.invalidateQueries({ queryKey: trustKeys.signIns }),
       ]);
@@ -128,7 +130,9 @@ export function useConnectService(service: ConnectableService) {
 export function useFigmaSignIns() {
   const { client } = useDaemon();
   return useQuery({
-    queryKey: ['sign-ins', 'figma'],
+    queryKey: FIGMA_SIGN_INS_KEY,
     queryFn: async () => readJson(await client.settings['sign-ins'].figma.$get(), FigmaSignInsDto),
+    // Finishing a sign-in in Claude Code happens outside the app: reading again on return shows it.
+    refetchOnWindowFocus: 'always',
   });
 }

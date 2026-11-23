@@ -32,6 +32,7 @@ interface ConnectableEntry {
 
 export const CONNECTABLE_SERVICES: Readonly<Record<ConnectableService, ConnectableEntry>> = {
   linear: { name: 'linear', url: 'https://mcp.linear.app/mcp' },
+  figma: { name: 'figma', url: 'https://mcp.figma.com/mcp' },
 };
 
 const CLI_TIMEOUT_MS = 30_000;
@@ -187,7 +188,6 @@ export function createServiceConnector(deps: {
   return {
     forget(service, projectId) {
       for (const [id, waiting] of pending) {
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- one service is connectable today
         const left = waiting.filter((p) => p.service !== service || p.projectId !== projectId);
         if (left.length === 0) pending.delete(id);
         else pending.set(id, left);

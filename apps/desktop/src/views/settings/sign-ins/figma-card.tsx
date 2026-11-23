@@ -1,49 +1,38 @@
-import { FigmaVia, type ProjectDto } from '@10db/contracts';
-import { Alert, Skeleton, Text } from '@mantine/core';
+import { Alert, Skeleton } from '@mantine/core';
 import { IconBrandFigma } from '@tabler/icons-react';
 import { useProjects } from '../../../daemon/queries';
 import { useFigmaSignIns } from '../../../daemon/sign-in-queries';
 import { IntegrationCard, StateText } from './integration-card';
-import { ProjectRow, ProjectRows } from './project-rows';
+import { FigmaProjectRow, ProjectRows } from './project-rows';
 
-/** Settings › Integrations › Figma: sign-in lives in the agent; only a project whose account has no way in gets a row. */
+/** Settings › Integrations › Figma: one row per project, Connect Figma where its account can't reach Figma yet. */
 export function FigmaCard() {
   const figma = useFigmaSignIns();
   const projects = useProjects();
   if (figma.isPending) return <Skeleton height={90} radius="md" />;
   const rows = figma.data?.rows ?? [];
-  const list: readonly ProjectDto[] = projects.data ?? [];
-  const missing = list.flatMap((project) => {
-    const row = rows.find((r) => r.accountId === project.accountId);
-    return row?.via === FigmaVia.None && row.note !== null ? [{ project, note: row.note }] : [];
-  });
+  const list = projects.data ?? [];
   return (
     <IntegrationCard
       mark={<IconBrandFigma size={20} stroke={1.5} aria-hidden />}
       name="Figma"
       focusName="figma"
-      help="A mock-up in a Plan opens in Figma and comes back as a new version."
+      help="A mock-up in a Plan opens in Figma and comes back as a new version. Connect Figma sets up Figma's server for the project's account. On Codex it signs in in your browser; on Claude Code you finish with /mcp. A Claude Code account that already has Figma through its plugin or the claude.ai connector shows as connected."
     >
       {figma.isError ? (
         <Alert color="red" title="Couldn't read the Figma sign-ins">
           {figma.error.message}
         </Alert>
       ) : (
-        <StateText>
-          Access is managed by the Figma plugin in Claude Code (/mcp) or by Codex.
-        </StateText>
+        <StateText>Signs in through Claude Code or Codex. A mock-up can open in Figma.</StateText>
       )}
-      {missing.length === 0 ? null : (
+      {list.length === 0 ? null : (
         <ProjectRows>
-          {missing.map(({ project, note }) => (
-            <ProjectRow
+          {list.map((project) => (
+            <FigmaProjectRow
               key={project.id}
-              name={project.name}
-              control={
-                <Text size="sm" c="dimmed" ta="right" maw={420}>
-                  {note}
-                </Text>
-              }
+              project={project}
+              row={rows.find((r) => r.accountId === project.accountId)}
             />
           ))}
         </ProjectRows>

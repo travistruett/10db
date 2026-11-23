@@ -40,10 +40,13 @@ Decision Models (`decision-models-view.tsx`, Settings › Models › Decision Mo
   names a Trust switch (a server sessions wouldn't load) shows in red with Open Trust. Provider parity: Codex is one click; a Claude
   plan, API key or Bedrock account is one click plus `/mcp` in Claude Code. A new service is one entry in
   `CONNECTABLE_SERVICES` (daemon), one in `ConnectableService` and its label (contracts), and its card using the
-  component), Figma (`figma-card.tsx`: under "Through Your Agent", one line saying the Figma plugin in
-  Claude Code or Codex manages access, and a row only for a project whose account has no way to Figma
-  (`FigmaVia.None`, from `GET /settings/sign-ins/figma`); no switch, since the builder starts every send from a
-  mock-up) and Artificial Analysis. Settings › People (`views/settings/people/`) is only the people, with
+  component), Figma (`figma-card.tsx`: one line, then one `FigmaProjectRow` per project from
+  `GET /settings/sign-ins/figma`: `ConnectServiceButton` (`service="figma"`, the same flow as Linear) when its
+  account definitely has none (`FigmaVia.None` and not `unchecked`) or its Codex server isn't signed in, otherwise a
+  teal `ConnectionStatus` ("Connected", or "Through claude.ai" for the connector); an account with Figma through
+  Claude Code's Figma plugin or its own server counts as connected, and Connect finds that server by host and adds
+  no duplicate; no switch, since the builder starts every send from a mock-up; `mcp_sign_in.changed` and a connect
+  refetch the query) and Artificial Analysis. Settings › People (`views/settings/people/`) is only the people, with
   how 10db reaches each one, and the timers; Add Person never shows a handle (`person-handle.ts` makes one from
   the name and numbers a clash). Settings › Who Answers (`who-answers-section.tsx`) is the routing table. A question card shows what its
   people will get (`slack-preview.tsx`: the route line under the title with Change, the card's one reroute

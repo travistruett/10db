@@ -1,4 +1,10 @@
-import { LinearVia, type LinearSignInRowDto, type ProjectDto } from '@10db/contracts';
+import {
+  FigmaVia,
+  LinearVia,
+  type FigmaSignInRowDto,
+  type LinearSignInRowDto,
+  type ProjectDto,
+} from '@10db/contracts';
 import {
   ActionIcon,
   Collapse,
@@ -12,6 +18,7 @@ import {
 } from '@mantine/core';
 import { IconChevronDown, IconChevronUp } from '@tabler/icons-react';
 import { useState, type ReactNode } from 'react';
+import { ConnectionStatus, ConnectionTone } from '../connection-status';
 import { ConnectServiceButton } from './connect-service-button';
 import { useSlackConnection } from '../../../daemon/people';
 import {
@@ -198,5 +205,57 @@ export function LinearProjectRow({
         </Text>
       ) : null}
     </ProjectRow>
+  );
+}
+
+/**
+ * A project's Figma: Connect Figma when its account definitely has none, or its server isn't signed in; otherwise
+ * a quiet connected state. An account whose connectors were not read may have Figma, so it is not asked to connect.
+ */
+export function FigmaProjectRow({
+  project,
+  row,
+}: {
+  readonly project: ProjectDto;
+  /** The project's account's way to Figma. */
+  readonly row: FigmaSignInRowDto | undefined;
+}) {
+  const [connecting, setConnecting] = useState(false);
+  if (row === undefined) return <ProjectRow name={project.name} />;
+  const needsConnect =
+    (row.via === FigmaVia.None && !row.unchecked) ||
+    (row.via === FigmaVia.Server && row.signedIn === false);
+  if (needsConnect || connecting)
+    return (
+      <ProjectRow
+        name={project.name}
+        control={
+          <ConnectServiceButton
+            service="figma"
+            projectId={project.id}
+            accountId={row.accountId}
+            serverKey={row.serverKey}
+            signedIn={row.signedIn}
+            onStarted={() => {
+              setConnecting(true);
+            }}
+            onFinished={() => {
+              setConnecting(false);
+            }}
+          />
+        }
+      />
+    );
+  if (row.via === FigmaVia.None) return <ProjectRow name={project.name} />;
+  return (
+    <ProjectRow
+      name={project.name}
+      control={
+        <ConnectionStatus
+          tone={ConnectionTone.Works}
+          label={row.via === FigmaVia.Connector ? 'Through claude.ai' : 'Connected'}
+        />
+      }
+    />
   );
 }

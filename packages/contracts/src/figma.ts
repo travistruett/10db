@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AccountId, type ProjectId, type ShapeAttachmentId } from './ids';
+import { YourMcpServerKey } from './your-mcp';
 
 // The Figma round trip of a Plan mock-up. A mock-up sent to Figma keeps a link to its frame, and a
 // project keeps the one draft file its mock-ups go to; both live in `app_settings` under these keys.
@@ -56,6 +57,8 @@ export const FigmaSignInRowDto = z.strictObject({
   note: z.string().nullable(),
   /** True when the account's connectors were not read: `none` is then a maybe, not a no. */
   unchecked: z.boolean(),
+  /** The account's Figma server once it has one, for reading its sign-in from Trust's rows. */
+  serverKey: YourMcpServerKey.nullable(),
 });
 export type FigmaSignInRowDto = z.infer<typeof FigmaSignInRowDto>;
 
