@@ -372,12 +372,13 @@ export function SlackCard() {
       mark={<IconBrandSlack size={20} stroke={1.5} aria-hidden />}
       name="Slack"
       focusName="slack"
+      help="10db asks people your tasks' questions in Slack and brings their replies back to the card. Each project uses one workspace, chosen under Projects, or Off to keep its questions in your Inbox. The person icon on a workspace picks which member is you there, so messages carry your name."
     >
       {status.isError ? <StateText>Couldn't read this.</StateText> : null}
       {off ? <StateText>Off: 10db was started with TENDB_SLACK=off</StateText> : null}
       {data && !off && workspaces.length === 0 ? <StateText>Not connected.</StateText> : null}
       {!off && workspaces.length > 0 ? (
-        <StateText>10db posts as @{BOT_NAME} in each workspace.</StateText>
+        <StateText>Questions to people go out from @{BOT_NAME}.</StateText>
       ) : null}
       {status.isError ? (
         <Alert color="red" title="Couldn't load the Slack connection">
