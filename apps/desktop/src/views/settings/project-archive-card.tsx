@@ -1,5 +1,5 @@
 import type { ProjectDto } from '@10db/contracts';
-import { Button } from '@mantine/core';
+import { Button, Group } from '@mantine/core';
 import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useArchiveProject } from '../../daemon/archive-queries';
@@ -21,15 +21,18 @@ export function ProjectArchiveCard({ project }: { readonly project: ProjectDto }
         label="Archive This Project"
         description="Hides this project everywhere and stops its activity. Nothing is deleted; restore it from Settings › Overview."
       >
-        <Button
-          variant="outline"
-          color="red"
-          onClick={() => {
-            setAsking(true);
-          }}
-        >
-          Archive
-        </Button>
+        {/* A button is narrower than the column's inputs; it sits at their right edge. */}
+        <Group justify="flex-end">
+          <Button
+            variant="outline"
+            color="red"
+            onClick={() => {
+              setAsking(true);
+            }}
+          >
+            Archive
+          </Button>
+        </Group>
       </SettingRow>
       <ConfirmModal
         opened={asking}
