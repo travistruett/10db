@@ -168,7 +168,7 @@ export function passPlan(db: DbReader, task: TaskDto): StepPlanDto {
     throw new InvalidError(`The steps of "${task.title}" have no implement step`);
   if (plan.overBudget.includes(at))
     throw new InvalidError(
-      `The implement step of "${task.title}" (need ${String(step.need)} intelligence) has no profile within the budget ceiling: ${step.reason}. Raise the ceiling or lower the need in Settings › Models.`,
+      `The implement step of "${task.title}" (need ${String(step.need)} intelligence) has no profile within the budget ceiling: ${step.reason}. Raise the ceiling or lower the need, or raise Spending Limit per Task in Settings › Billing.`,
     );
   // One page's implement step, whatever the task's rigor: no rigor plans this run.
   return { rigor: null, steps: [step], overBudget: [] };

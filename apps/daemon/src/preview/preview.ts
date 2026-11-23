@@ -376,7 +376,7 @@ export function startPreview(deps: PreviewDeps): Preview {
         projectId,
         pass,
         PassNoticeKind.PreviewStopped,
-        `The preview needs Allow loopback in Project Settings › General: \`${command}\` serves ${appUrl}, and the gate's sandbox lets nothing listen without it.`,
+        `The preview needs Allow localhost in Project Settings › Sandbox: \`${command}\` serves ${appUrl}, and the gate's sandbox lets nothing listen without it.`,
       );
       return;
     }
@@ -414,7 +414,7 @@ export function startPreview(deps: PreviewDeps): Preview {
       if (!project.sandboxLoopback)
         return {
           up: false,
-          why: `nothing answers at ${appUrl}, and the preview needs Allow loopback in Project Settings › General`,
+          why: `nothing answers at ${appUrl}, and the preview needs Allow localhost in Project Settings › Sandbox`,
         };
       if (gaveUp.get(projectId) === project.previewCommand)
         return {

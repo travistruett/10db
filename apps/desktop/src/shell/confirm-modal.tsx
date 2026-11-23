@@ -10,6 +10,7 @@ export function ConfirmModal({
   title,
   children,
   confirmLabel,
+  cancelLabel = 'Cancel',
   loading = false,
   error = null,
   destructive = false,
@@ -21,6 +22,7 @@ export function ConfirmModal({
   /** What the action does, in one or two plain sentences. */
   readonly children: ReactNode;
   readonly confirmLabel: string;
+  readonly cancelLabel?: string;
   readonly loading?: boolean;
   readonly error?: string | null;
   /** The action stops or removes something, so its button is red. */
@@ -39,7 +41,7 @@ export function ConfirmModal({
             </Text>
           )}
           <Button variant="default" data-autofocus onClick={onCancel}>
-            Cancel
+            {cancelLabel}
           </Button>
           <Button {...(destructive ? { color: 'red' } : {})} loading={loading} onClick={onConfirm}>
             {confirmLabel}

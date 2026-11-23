@@ -152,7 +152,7 @@ describe('what the gate’s evidence says about blocked hosts', () => {
     expect(note).toContain(
       "The gate was blocked from reaching index.crates.io and static.crates.io: they are not among the project's allowed network hosts.",
     );
-    expect(note).toContain('Settings › Network hosts');
+    expect(note).toContain('Settings › Sandbox');
     expect(note).toContain('then run the gate again.');
   });
 
@@ -176,7 +176,7 @@ describe('what the gate’s evidence says about blocked hosts', () => {
       expect(note).not.toMatch(/\bgate\b/i);
     }
     expect(blockedHostsNote(['registry.npmjs.org'], BlockedRun.Install)).toContain(
-      'Allow it for the project, from the Inbox or in Settings › Network hosts, then try again.',
+      'Allow it for the project, from the Inbox or in Settings › Sandbox, then try again.',
     );
   });
 });

@@ -429,7 +429,7 @@ describe('the floor’s refusals, listed for a lane nobody watches', () => {
       expect.soft(answer.verdict, command).toEqual({
         decision: 'deny',
         reason:
-          'Skipped: Docker is off for this project. Turning it on is Settings › Project › Docker. Carry on without it and say in your handoff what you skipped.',
+          'Skipped: Docker is off for this project. Turning it on is Settings › Sandbox. Carry on without it and say in your handoff what you skipped.',
       });
     }
   });

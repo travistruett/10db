@@ -15,13 +15,14 @@ import { PlannedRemainder } from './planned-section';
 import { WhoAnswersSection } from './who-answers-section';
 import { ModelsSection } from './models-section';
 import { PlaybookSection } from './playbook-section';
-import { NetworkHostsSection } from './network-hosts-section';
 import { OverviewSection } from './overview-section';
 import { PlanningSection } from './planning-section';
 import { ScopeLine } from './scope-line';
 import { ProjectAreas } from './project-areas';
 import { ProjectBilling } from './project-billing';
 import { ProjectGeneralForm } from './project-general-form';
+import { ProjectPagesForm } from './project-pages-form';
+import { SandboxSection } from './sandbox-section';
 import { ProjectTrustSection } from './project-trust-section';
 import { sectionByKey, SettingsScope, SettingsSectionKey } from './sections';
 import { ProjectPlaybook } from './project-playbook';
@@ -58,13 +59,14 @@ export function SectionBody({
       return (
         <>
           {heading}
-          {project ? (
-            <>
-              <ProjectGeneralForm key={project.id} project={project} />
-            </>
-          ) : (
-            <NoProject />
-          )}
+          {project ? <ProjectGeneralForm key={project.id} project={project} /> : <NoProject />}
+        </>
+      );
+    case SettingsSectionKey.PagesAndPictures:
+      return (
+        <>
+          {heading}
+          {project ? <ProjectPagesForm key={project.id} project={project} /> : <NoProject />}
         </>
       );
     case SettingsSectionKey.Overview:
@@ -99,7 +101,7 @@ export function SectionBody({
       return (
         <>
           {heading}
-          {project ? <NetworkHostsSection key={project.id} project={project} /> : <NoProject />}
+          {project ? <SandboxSection key={project.id} project={project} /> : <NoProject />}
         </>
       );
     case SettingsSectionKey.Billing:

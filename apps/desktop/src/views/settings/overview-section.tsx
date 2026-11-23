@@ -15,6 +15,7 @@ import { useSelfUpdate } from '../../daemon/self-update-queries';
 import { useNow } from '../../shell/relative';
 import { accountUsedBy } from './accounts/used-by';
 import { OverviewRowView } from './overview-row';
+import { PlanMeasures } from './plan-measures';
 import {
   accountState,
   agentState,
@@ -268,6 +269,7 @@ export function OverviewSection() {
           </Stack>
         );
       })}
+      <PlanMeasures />
     </Stack>
   );
 }

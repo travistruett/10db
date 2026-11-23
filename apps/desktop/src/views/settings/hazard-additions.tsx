@@ -1,10 +1,9 @@
 import { HazardEntryKind, type HazardAdditionDto, type ProjectDto } from '@10db/contracts';
 import { Alert, Button, Group, Stack, Text } from '@mantine/core';
-import { HelpHint } from './help-hint';
 import {
   useHazardAssessment,
-  useLookAgainAtHazards,
   useUndoHazardAddition,
+  type useLookAgainAtHazards,
 } from '../../daemon/hazard-queries';
 
 const KIND_WORDS: Readonly<Record<HazardEntryKind, string>> = {
@@ -55,12 +54,18 @@ function Addition({
 
 /**
  * What 10db worked out about the project's hazards from its repository and added by itself, each
- * with the reason and the file it came from and an Undo, and Look again, which reads the project's
- * main checkout once more. Removals are never applied here; they wait on one Inbox card.
+ * with the reason and the file it came from and an Undo, and the result of the heading's Look Again,
+ * which reads the project's main checkout once more. Removals are never applied here; they wait on
+ * one Inbox card.
  */
-export function HazardAdditions({ project }: { readonly project: ProjectDto }) {
+export function HazardAdditions({
+  project,
+  look,
+}: {
+  readonly project: ProjectDto;
+  readonly look: ReturnType<typeof useLookAgainAtHazards>;
+}) {
   const assessment = useHazardAssessment(project.id);
-  const look = useLookAgainAtHazards(project.id);
   const undo = useUndoHazardAddition(project.id);
   const additions = assessment.data?.additions ?? [];
   const waiting = look.data?.ok === true ? look.data.assessment.pendingRemovals : 0;
@@ -68,29 +73,6 @@ export function HazardAdditions({ project }: { readonly project: ProjectDto }) {
 
   return (
     <Stack gap="xs">
-      <Group justify="space-between" wrap="nowrap">
-        <Group gap={4}>
-          <Text size="sm" fw={500}>
-            Found by 10db
-          </Text>
-          <HelpHint label="Found by 10db">
-            10db reads the project&apos;s files (its Makefiles, compose files, package scripts,
-            AGENTS.md and docs) to find the commands that change lockfiles and migrations, and adds
-            them here by itself. Adding a hazard only makes tasks take turns, so you are asked only
-            before one is taken out.
-          </HelpHint>
-        </Group>
-        <Button
-          variant="default"
-          size="compact-sm"
-          loading={look.isPending}
-          onClick={() => {
-            look.mutate();
-          }}
-        >
-          Look Again
-        </Button>
-      </Group>
       {look.data?.ok === true ? (
         <Text size="sm">
           {look.data.added === 0
@@ -113,6 +95,11 @@ export function HazardAdditions({ project }: { readonly project: ProjectDto }) {
           {Math.max(waiting, pending) === 1
             ? '1 change is waiting in the Inbox for your yes.'
             : `${String(Math.max(waiting, pending))} changes are waiting in the Inbox for your yes.`}
+        </Text>
+      ) : null}
+      {additions.length > 0 ? (
+        <Text size="sm" fw={500}>
+          Found by 10db
         </Text>
       ) : null}
       {additions.map((addition) => (

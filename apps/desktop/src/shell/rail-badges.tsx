@@ -55,9 +55,11 @@ export function SessionsBadge() {
     void navigate({ to: '/sessions', search: { chat: next.id } });
   };
   return (
-    // Keyboard users have ⌘J for the same move, so the badge is a pointer shortcut only.
+    // Keyboard users have ⌘J for the same move, so the badge is a pointer shortcut only. The wrapper is
+    // flex, so it has no line box to push the badge below the row's centre.
     // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
     <span
+      style={{ display: 'inline-flex' }}
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();

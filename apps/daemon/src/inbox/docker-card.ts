@@ -56,7 +56,7 @@ export function raiseDockerOnNote(
     body: [
       REASON[input.why],
       'Docker can mount any host folder into a container, so a gate or lane with Docker can reach outside the sandbox.',
-      'Settings › General has the switch; if you turn it off, 10db will not turn it on again.',
+      'Settings › Sandbox has the switch; if you turn it off, 10db will not turn it on again.',
     ].join('\n'),
     options: [
       {
@@ -109,7 +109,7 @@ export function raiseDockerMayBeNeededNote(
     body: [
       'A gate ran docker, which the sandbox refused, and the gate failed. The gate asked for Docker.',
       'Docker is off for this project. It can mount any host folder into a container, so a gate or lane with Docker can reach outside the sandbox, and 10db does not turn it on because a gate asked.',
-      'Settings › General has the switch, or answer here.',
+      'Settings › Sandbox has the switch, or answer here.',
     ].join('\n'),
     options: [
       {
