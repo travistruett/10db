@@ -87,11 +87,11 @@ export function DecisionList({
             open(d);
           }}
         >
-          <Stack gap={2}>
-            <Text size="sm" lineClamp={1}>
+          <Stack component="span" gap={2}>
+            <Text component="span" size="sm" lineClamp={1}>
               {d.question}
             </Text>
-            <Text size="xs" c="dimmed" lineClamp={1}>
+            <Text component="span" size="xs" c="dimmed" lineClamp={1}>
               {d.choice}
             </Text>
           </Stack>

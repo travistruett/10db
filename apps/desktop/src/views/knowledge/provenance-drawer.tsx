@@ -267,6 +267,7 @@ export function ProvenanceDrawer({
       label={kind === KnowledgeItemKind.Decision ? 'Decision' : 'Principle'}
       widthPx={560}
       closeOnClickOutside
+      {...(record ? { showing: record.id } : {})}
       actions={p ? actions(p) : null}
     >
       <Stack gap="sm">

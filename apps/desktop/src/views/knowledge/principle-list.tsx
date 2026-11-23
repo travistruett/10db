@@ -107,7 +107,7 @@ export function PrincipleList({
             open(p);
           }}
         >
-          <Text size="sm" lineClamp={2}>
+          <Text component="span" size="sm" lineClamp={2}>
             {p.statement}
           </Text>
         </OpenRecordText>

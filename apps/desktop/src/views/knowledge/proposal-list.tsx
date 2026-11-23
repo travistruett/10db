@@ -111,7 +111,7 @@ export function ProposalList({
               open(row);
             }}
           >
-            <Text size="sm" lineClamp={2}>
+            <Text component="span" size="sm" lineClamp={2}>
               {row.principle.statement}
             </Text>
           </OpenRecordText>
