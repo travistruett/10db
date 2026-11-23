@@ -1,9 +1,10 @@
 import { TerminalApp, TerminalAppSchema } from '@10db/contracts';
-import { SegmentedControl, Switch } from '@mantine/core';
+import { Group, SegmentedControl, Switch } from '@mantine/core';
 import {
   useSessionsSettings,
   useSetSessionsSettings,
 } from '../../daemon/sessions-settings-queries';
+import { HelpText } from './help-hint';
 import { SettingRow, SettingsCard } from './setting-row';
 
 const TERMINAL_CHOICES: readonly { readonly value: TerminalApp; readonly label: string }[] = [
@@ -19,20 +20,28 @@ export function SessionsSection() {
     <SettingsCard>
       <SettingRow
         label="Notify When a Chat Replies"
-        description="While 10db is behind another app, a chat's reply raises a notification with its first line."
+        description="A notification with the reply's first line, while 10db is behind another app."
       >
-        <Switch
-          aria-label="Notify When a Chat Replies"
-          checked={settings.data?.notifyReplies ?? true}
-          disabled={settings.data === undefined}
-          onChange={(event) => {
-            set.mutate({ notifyReplies: event.currentTarget.checked });
-          }}
-        />
+        <Group justify="flex-end">
+          <Switch
+            aria-label="Notify When a Chat Replies"
+            checked={settings.data?.notifyReplies ?? true}
+            disabled={settings.data === undefined}
+            onChange={(event) => {
+              set.mutate({ notifyReplies: event.currentTarget.checked });
+            }}
+          />
+        </Group>
       </SettingRow>
       <SettingRow
         label="Open Sessions In"
-        description="Open in Terminal continues a chat in this app. Copy the Command opens nothing and gives you a line for zsh or bash, to paste into any terminal, such as Ghostty, Warp or kitty."
+        description="Where Open in Terminal continues a chat."
+        help={
+          <HelpText>
+            Terminal and iTerm continue a chat in that app. Copy the Command opens nothing and gives
+            you a line for zsh or bash, to paste into any terminal, such as Ghostty, Warp or kitty.
+          </HelpText>
+        }
       >
         <SegmentedControl
           aria-label="Open Sessions In"

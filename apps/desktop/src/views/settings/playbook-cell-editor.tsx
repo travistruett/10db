@@ -34,7 +34,7 @@ function costLine(pick: RolePickDto): string {
 }
 
 /**
- * The cell as the table shows it, on two lines that wrap: the model it resolves to, then its effort and the
+ * The cell as the table shows it, on two lines that each stay on one line: the model it resolves to, then its effort and the
  * setting that made it.
  */
 export function PlaybookCellButton({
@@ -65,12 +65,18 @@ export function PlaybookCellButton({
       {...target}
       aria-label={`${rigorLabel(cell.rigor)} ${roleLabel(cell)}: ${model}, ${detail}`}
       onClick={onClick}
-      style={{ display: 'block', width: '100%' }}
+      style={{ display: 'block', width: '100%', maxWidth: 200 }}
     >
-      <Text size="sm" fw={500} {...(pick?.model === null ? { c: 'dimmed' } : {})}>
+      <Text
+        size="sm"
+        fw={500}
+        truncate
+        title={model}
+        {...(pick?.model === null ? { c: 'dimmed' } : {})}
+      >
         {model}
       </Text>
-      <Text size="xs" c="dimmed">
+      <Text size="xs" c="dimmed" truncate title={detail}>
         {detail}
       </Text>
     </UnstyledButton>

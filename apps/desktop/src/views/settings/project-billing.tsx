@@ -31,7 +31,8 @@ export function ProjectBilling({ project }: { readonly project: ProjectDto }) {
       <SettingsCard>
         <SettingRow
           label="Account"
-          description="Whose plan pays for this project's sessions. Running tasks switch at their next session."
+          description="Whose plan pays for this project's sessions."
+          help="Running tasks switch at their next session."
         >
           <AccountSelect
             aria-label="Account"
@@ -48,7 +49,8 @@ export function ProjectBilling({ project }: { readonly project: ProjectDto }) {
         </SettingRow>
         <SettingRow
           label="Backup Account"
-          description="Used when this account reaches its usage limit. A pay-as-you-go backup needs a monthly cap."
+          description="Used when the account reaches its usage limit."
+          help="A pay-as-you-go backup needs a monthly cap."
         >
           <AccountSelect
             aria-label="Backup Account"
@@ -70,7 +72,8 @@ export function ProjectBilling({ project }: { readonly project: ProjectDto }) {
         </SettingRow>
         <SettingRow
           label="Switch At"
-          description="On a Claude plan, how much of the usage limit to use before running tasks hand off and move to the backup."
+          description="How much of a Claude plan's limit to use first."
+          help="On a Claude plan, how much of the usage limit to use before running tasks hand off and move to the backup."
         >
           <NumberInput
             aria-label="Switch At"

@@ -1,4 +1,4 @@
-import { CloseButton } from '@mantine/core';
+import { CloseButton, Group } from '@mantine/core';
 import { useElementSize } from '@mantine/hooks';
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
@@ -23,6 +23,7 @@ export function SurfaceDrawer({
   label,
   closeLabel = 'Close',
   widthPx,
+  actions,
   children,
 }: {
   readonly opened: boolean;
@@ -33,6 +34,8 @@ export function SurfaceDrawer({
   readonly closeLabel?: string;
   /** The width it asks for in a surface that has the room, where the default is half the surface. */
   readonly widthPx?: number;
+  /** Icon buttons for what the drawer shows (links out, copy), on its top edge before the close button. */
+  readonly actions?: ReactNode;
   readonly children: ReactNode;
 }): ReactNode {
   const { drawerHost } = useFrameSlots();
@@ -82,6 +85,11 @@ export function SurfaceDrawer({
         onKeyDown={onKeyDown}
       >
         <div className={classes['head']}>
+          {actions === undefined ? null : (
+            <Group gap={4} wrap="nowrap">
+              {actions}
+            </Group>
+          )}
           <CloseButton aria-label={closeLabel} onClick={onClose} />
         </div>
         <div className={classes['body']}>{children}</div>

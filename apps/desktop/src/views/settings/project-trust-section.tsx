@@ -32,6 +32,7 @@ import {
   useTrust,
   useTrustGrants,
 } from '../../daemon/trust-queries';
+import { HelpHint } from './help-hint';
 import { SettingRow, SettingsCard } from './setting-row';
 import { TrustRowText } from './trust-section';
 import {
@@ -41,6 +42,17 @@ import {
   LIVE_SYSTEMS_DESCRIPTION,
   TRUST_ROWS,
 } from './trust-rows';
+
+/** The one line under each switch; the full account sits behind its info button. */
+const SHORT: Readonly<Record<TrustSwitchKey, string>> = {
+  web: 'Lets sessions search and fetch the web.',
+  projectInstructions: 'AGENTS.md, CLAUDE.md and rules.',
+  yourInstructions: 'Your ~/.claude/CLAUDE.md.',
+  yourSkills: 'Skills from your home folder.',
+  yourPlugins: 'Plugins installed in Claude Code.',
+  yourMcpServers: 'MCP servers you have approved.',
+  projectSkills: "The project's skills, commands and agents.",
+};
 
 const Choice = { App: 'app', On: 'on', Off: 'off' } as const;
 type Choice = (typeof Choice)[keyof typeof Choice];
@@ -150,13 +162,13 @@ function ComesAlong({ preview }: { readonly preview: SetupPreviewDto | undefined
   const loaded = [...(preview?.skills ?? []), ...(preview?.plugins ?? [])];
   return (
     <Stack gap="xs" role="region" aria-labelledby={headingId}>
-      <Title order={5} id={headingId}>
+      <Title order={4} id={headingId}>
         Comes Along
       </Title>
       {preview === undefined ? null : (
         <>
           <Text size="sm" c="dimmed">
-            What the project's next session starts with, as your switches and its overrides stand.
+            What it starts with, as your switches and overrides stand.
           </Text>
           {loaded.length === 0 ? (
             <Text size="sm">Nothing of yours or the project's.</Text>
@@ -219,7 +231,12 @@ function LiveSystems({ projectId }: { readonly projectId: ProjectDto['id'] }) {
   const shown = set.isPending ? set.variables : (saved ?? []);
   return (
     <SettingsCard>
-      <SettingRow label="Live Systems" description={LIVE_SYSTEMS_DESCRIPTION} stacked>
+      <SettingRow
+        label="Live Systems"
+        description="Hosts and profiles the judge treats as live."
+        help={LIVE_SYSTEMS_DESCRIPTION}
+        stacked
+      >
         <TagsInput
           aria-label="Live Systems"
           value={[...shown]}
@@ -244,16 +261,22 @@ function AllowedInProject({ projectId }: { readonly projectId: ProjectDto['id'] 
   const listed = grants.data ?? [];
   return (
     <Stack gap="xs" role="region" aria-labelledby={headingId}>
-      <Title order={5} id={headingId}>
-        Allowed in This Project
-      </Title>
+      <Group gap={4}>
+        <Title order={4} id={headingId}>
+          Allowed in This Project
+        </Title>
+        <HelpHint label="Allowed in this project">{GRANTS_DESCRIPTION}</HelpHint>
+      </Group>
       <Text size="sm" c="dimmed">
-        {GRANTS_DESCRIPTION}
+        Lines you allowed from now on.
       </Text>
       {grants.isError ? <Alert color="red">{grants.error.message}</Alert> : null}
       {remove.isError ? <Alert color="red">{remove.error.message}</Alert> : null}
       {grants.data !== undefined && listed.length === 0 ? (
-        <Text size="sm">{GRANTS_EMPTY}</Text>
+        <Text size="sm" c="dimmed">
+          Nothing yet.
+          <HelpHint label="Allowing a call">{GRANTS_EMPTY}</HelpHint>
+        </Text>
       ) : (
         <SettingsCard>
           {listed.map((grant) => (
@@ -263,9 +286,8 @@ function AllowedInProject({ projectId }: { readonly projectId: ProjectDto['id'] 
               description={grantDescription(grant, new Date(grant.createdAt).toLocaleDateString())}
             >
               <Button
-                variant="subtle"
-                color="red"
-                size="xs"
+                variant="default"
+                size="compact-sm"
                 aria-label={`Remove ${grant.target}`}
                 loading={remove.isPending && remove.variables === grant.id}
                 onClick={() => {
@@ -301,13 +323,15 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
   if (trust.isError) return <Alert color="red">{trust.error.message}</Alert>;
   return (
     <Stack gap="lg">
-      <SettingsCard>
+      <SettingsCard title="Switches">
         {TRUST_ROWS.map((row) => (
           <SettingRow
             key={row.key}
             label={row.label}
-            description={
+            description={SHORT[row.key]}
+            help={
               <TrustRowText
+                label={row.label}
                 description={
                   row.key === 'web' && onOpenRouter
                     ? `${row.description} ${OPENROUTER_WEB}`
@@ -337,7 +361,7 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
         ))}
       </SettingsCard>
       {plugins.length === 0 ? null : (
-        <SettingsCard title="Your Plugins in This Project">
+        <SettingsCard title="Your Plugins">
           {plugins.map((plugin) => (
             <SettingRow key={plugin.id} label={plugin.id} description={plugin.version}>
               <SegmentedControl
@@ -356,7 +380,7 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
         </SettingsCard>
       )}
       {mcpServers.length === 0 ? null : (
-        <SettingsCard title="Your MCP Servers in This Project">
+        <SettingsCard title="Your MCP Servers">
           {mcpServers.map((server) => (
             <SettingRow
               key={server.key}

@@ -68,22 +68,12 @@ describe('joinableTasks', () => {
     expect(joinableTasks([dto], areas).map((t) => t.taskId)).toEqual(joins ? [dto.id] : []);
   });
 
-  it('names a task by its headline, else its title, and holds its page areas', () => {
-    const titled = taskDto({
-      ...open,
-      title: 'feat: form',
-      headline: '',
-      areas: ['settings', 'src'],
-    });
-    const headed = taskDto({
-      ...open,
-      title: 'feat: list',
-      headline: 'Lists breathe',
-      areas: ['people'],
-    });
-    expect(joinableTasks([titled, headed], areas)).toEqual([
-      { taskId: titled.id, title: 'feat: form', pages: ['settings'] },
-      { taskId: headed.id, title: 'Lists breathe', pages: ['people'] },
+  it('names a task by its title and holds its page areas', () => {
+    const form = taskDto({ ...open, title: 'Tighten the form', areas: ['settings', 'src'] });
+    const list = taskDto({ ...open, title: 'Lists breathe', areas: ['people'] });
+    expect(joinableTasks([form, list], areas)).toEqual([
+      { taskId: form.id, title: 'Tighten the form', pages: ['settings'] },
+      { taskId: list.id, title: 'Lists breathe', pages: ['people'] },
     ]);
   });
 });

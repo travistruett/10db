@@ -47,9 +47,9 @@ export function ArchiveAccount({
   return (
     <>
       <Button
-        size="md"
         variant="outline"
         color="red"
+        style={{ alignSelf: 'flex-start' }}
         onClick={() => {
           onConfirmingChange(true);
         }}

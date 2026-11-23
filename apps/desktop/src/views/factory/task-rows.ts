@@ -34,7 +34,7 @@ const RUNNING_STATES: ReadonlySet<WorkstreamState> = new Set([
 
 export interface TaskRow {
   readonly taskId: TaskId;
-  /** The headline, or the title when the task has none. */
+  /** The task's title. */
   readonly label: string;
   readonly color: MantineColor;
   /** The row's one state, such as "In review · Pull request open · checks passing". */
@@ -127,7 +127,7 @@ export function taskRows(input: TaskRowsInput): TaskRow[] {
     const ws = runs.get(task.id);
     const batch = ws?.batchId ? batchById.get(ws.batchId) : undefined;
     const bucket = BUCKET[task.boardStatus];
-    const label = task.headline || task.title;
+    const label = task.title;
     const next = bucket === 'ready' && task.id === input.nextTaskId;
     const shared = ws?.batchId ? (perBatch.get(ws.batchId) ?? 0) > 1 : false;
     let prUrl: string | null = null;

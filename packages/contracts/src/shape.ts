@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Headline, Title, Why } from './entities';
+import { Title, Why } from './entities';
 import { ExternalLink } from './external';
 import { BriefKey, GoalBrief, GoalBriefTask } from './goals';
 import {
@@ -162,7 +162,6 @@ const looseTaskFields = {
   /** The tracker issue the task is made from. */
   external: ExternalLink.optional(),
   title: Title,
-  headline: Headline.default(''),
   why: Why.default(''),
   description: z.string().default(''),
   criteria: z.array(z.string().min(1)).default([]),

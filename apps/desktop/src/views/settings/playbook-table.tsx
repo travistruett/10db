@@ -5,7 +5,7 @@ import {
   type ProjectId,
   type Rigor,
 } from '@10db/contracts';
-import { Button, Group, Stack, Text, UnstyledButton } from '@mantine/core';
+import { Button, Group, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core';
 import { DataTable, type DataTableColumn } from 'mantine-datatable';
 import { useState } from 'react';
 import { useEveryRigorPicks, useModels } from '../../daemon/model-queries';
@@ -54,36 +54,39 @@ export function PlaybookTable({
     {
       accessor: 'rigor',
       title: 'Rigor',
-      width: 210,
+      width: 230,
+      noWrap: true,
       render: (row) => (
-        <UnstyledButton
-          aria-label={`${RIGOR_LABELS[row.rigor].label} steps`}
-          onClick={() => {
-            setDrawerRigor(row.rigor);
-          }}
-        >
-          <Group gap={6} wrap="nowrap">
-            <Text size="sm" fw={600}>
-              {RIGOR_LABELS[row.rigor].label}
-            </Text>
-            {row.steps.source === source ? (
-              <Text size="xs" c="dimmed" title="Steps set here">
-                set here
+        // What the rigor is for is the tooltip; the row shows its name and the process it runs.
+        <Tooltip label={RIGOR_LABELS[row.rigor].about} position="right" openDelay={300}>
+          <UnstyledButton
+            aria-label={`${RIGOR_LABELS[row.rigor].label} steps`}
+            onClick={() => {
+              setDrawerRigor(row.rigor);
+            }}
+          >
+            <Group gap={6} wrap="nowrap">
+              <Text size="sm" fw={600}>
+                {RIGOR_LABELS[row.rigor].label}
               </Text>
-            ) : null}
-          </Group>
-          <Text size="xs" c="dimmed">
-            {RIGOR_LABELS[row.rigor].about}
-          </Text>
-          <Text size="xs" c="dimmed">
-            {processLine(row)}
-          </Text>
-        </UnstyledButton>
+              {row.steps.source === source ? (
+                <Text size="xs" c="dimmed" title="Steps set here">
+                  set here
+                </Text>
+              ) : null}
+            </Group>
+            <Text size="xs" c="dimmed" truncate maw={210}>
+              {processLine(row)}
+            </Text>
+          </UnstyledButton>
+        </Tooltip>
       ),
     },
     ...ROLES.map(({ role, label }): DataTableColumn<PlaybookRowDto> => ({
       accessor: role,
       title: label,
+      noWrap: true,
+      cellsStyle: () => ({ minWidth: 170 }),
       render: (row) => {
         const cell = view.cells.find((c) => c.rigor === row.rigor && c.role === role);
         if (cell === undefined || !row.steps.value.includes(role)) return null;
@@ -128,6 +131,8 @@ export function PlaybookTable({
         borderRadius="md"
         verticalSpacing="xs"
         horizontalSpacing="md"
+        // Too narrow a frame scrolls the table sideways instead of wrapping a model name.
+        styles={{ table: { minWidth: 1000 } }}
       />
       {failed?.isError ? (
         <Group gap="sm">

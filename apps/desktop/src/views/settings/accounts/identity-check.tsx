@@ -103,8 +103,8 @@ export function IdentityCheck({
   return (
     <Stack gap="xs">
       <Button
-        size="md"
         variant="default"
+        style={{ alignSelf: 'flex-start' }}
         loading={check.isPending}
         onClick={() => {
           check.mutate(account.id);
@@ -156,7 +156,6 @@ export function IdentityCheck({
                 {offer.effect}
               </Text>
               <Button
-                size="md"
                 loading={patch.isPending}
                 onClick={() => {
                   patch.mutate(

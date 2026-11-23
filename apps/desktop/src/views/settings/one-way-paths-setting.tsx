@@ -1,8 +1,10 @@
 import type { ProjectDto } from '@10db/contracts';
-import { Button, Stack, Textarea } from '@mantine/core';
+import { Button, Group, Textarea } from '@mantine/core';
 import { useState } from 'react';
 import { useOneWayPaths, useSetOneWayPaths } from '../../daemon/shape-measures-queries';
-import { SettingRow, SettingsCard } from './setting-row';
+import { SettingRow } from './setting-row';
+
+const MONO_INPUT = { input: { fontFamily: 'var(--mantine-font-family-monospace)' } };
 
 export const ONE_WAY_PATHS_LABEL = 'One-way paths';
 
@@ -26,39 +28,41 @@ export function OneWayPathsSetting({ project }: { readonly project: ProjectDto }
   const text = draft ?? saved;
   const changed = draft !== null && draft !== saved;
   return (
-    <SettingsCard>
-      <SettingRow
-        label={ONE_WAY_PATHS_LABEL}
-        description="A task that touches a file matching one of these globs, one per line, makes Plan write a spec with scope and engineering review before Convert. You can still pin a task to direct."
-        stacked
-      >
-        <Stack gap="xs">
-          <Textarea
-            aria-label={ONE_WAY_PATHS_LABEL}
-            autosize
-            minRows={3}
-            value={text}
-            disabled={setting.data === undefined}
-            onChange={(event) => {
-              setDraft(event.currentTarget.value);
-            }}
-          />
-          <Button
-            size="xs"
-            w="fit-content"
-            disabled={!changed || set.isPending}
-            onClick={() => {
-              set.mutate(fromLines(text), {
-                onSuccess: () => {
-                  setDraft(null);
-                },
-              });
-            }}
-          >
-            Save One-Way Paths
-          </Button>
-        </Stack>
-      </SettingRow>
-    </SettingsCard>
+    <SettingRow
+      label={ONE_WAY_PATHS_LABEL}
+      description="Files that make Plan write a spec before Convert."
+      help="A task that touches a file matching one of these globs, one per line, makes Plan write a spec with scope and engineering review before Convert. You can still pin a task to direct."
+      stacked
+    >
+      <Group align="flex-end" wrap="nowrap" gap="sm">
+        <Textarea
+          aria-label={ONE_WAY_PATHS_LABEL}
+          placeholder="One pattern per line, such as packages/db/drizzle/**"
+          styles={MONO_INPUT}
+          style={{ flex: 1 }}
+          autosize
+          minRows={2}
+          value={text}
+          disabled={setting.data === undefined}
+          onChange={(event) => {
+            setDraft(event.currentTarget.value);
+          }}
+        />
+        <Button
+          variant="default"
+          size="compact-md"
+          disabled={!changed || set.isPending}
+          onClick={() => {
+            set.mutate(fromLines(text), {
+              onSuccess: () => {
+                setDraft(null);
+              },
+            });
+          }}
+        >
+          Save One-Way Paths
+        </Button>
+      </Group>
+    </SettingRow>
   );
 }

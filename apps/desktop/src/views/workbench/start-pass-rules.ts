@@ -62,7 +62,7 @@ export function joinableTasks(
     return [
       {
         taskId: task.id,
-        title: task.headline === '' ? task.title : task.headline,
+        title: task.title,
         pages: passHeldAreas(areas, task),
       },
     ];

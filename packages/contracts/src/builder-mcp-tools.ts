@@ -122,7 +122,6 @@ export const BuilderToolInputs = {
   [BuilderToolName.CreateTask]: z.object({
     projectId: ProjectId,
     title: z.string(),
-    headline: z.string().default(''),
     why: z.string().default(''),
     description: z.string().default(''),
     acceptanceCriteria: z.array(z.string()).default([]),
@@ -143,7 +142,6 @@ export const BuilderToolInputs = {
     .object({
       taskId: TaskId,
       title: z.string().optional(),
-      headline: z.string().optional(),
       why: z.string().optional(),
       description: z.string().optional(),
       acceptanceCriteria: z.array(z.string()).optional(),
@@ -242,8 +240,7 @@ export const BUILDER_INSTRUCTIONS = [
   "10db turns the builder's conversations into tasks that managed agent sessions then carry out. Use these tools to file and manage that work.",
   '',
   'Drafting a task (create_task, edit_task):',
-  '- The title is the outcome, in one line under 200 characters. It becomes the pull request title in pull-request delivery.',
-  '- Write a headline on every task: the plain-words what, a few words in one line of at most 80 characters ("Odd files can\'t freeze 10db"). The Board names the task by it; git never sees it.',
+  '- The title is the plain-words what: a few words in one line ("Odd files can\'t freeze 10db"), under 200 characters. It is the task\'s one name, shown everywhere, and becomes the pull request title in pull-request delivery; 10db adds the commit prefix, so leave off "feat:" and the like.',
   '- Write a why on every task: one sentence, one line of at most 200 characters, on why the task matters to the builder, in their words where they gave them. It is what tells the builder later why the task exists, so give the reason, not the change.',
   '- Acceptance criteria are things the builder can see or measure. Never "tests pass": say what the behaviour is, and the agent writes the tests that prove it.',
   "- Areas come from list_projects, for the project the task belongs to. An area marked catchAll holds every file that no other area holds, so a task that adds a new package or folder no other area's globs cover names the catchAll area, even though its globs list only the top of the repository. A hazard (migrations, deps) is not an area an agent works in, but naming one from the project's isolate list (shown by list_projects) among a task's areas sends the task to a separate copy of the repository. Name it for a task that changes migrations or dependencies, with the kind migration or dependency; a task that touches neither names no hazard.",
@@ -271,7 +268,7 @@ const PRINCIPLE_ID =
   'id is a principle (pri_…) from search_knowledge, and must be current: the API refuses any other.';
 
 const DRAFTING =
-  'Draft it as the instructions say: the title is the outcome in one line, a headline on every task says it in plain words (at most 80 characters), a why on every task says why it matters to the builder (one sentence, at most 200 characters), and criteria are seen or measured, never "tests pass".';
+  'Draft it as the instructions say: the title is the plain-words what in a few words on one line, a why on every task says why it matters to the builder (one sentence, at most 200 characters), and criteria are seen or measured, never "tests pass".';
 
 const DESCRIPTIONS: Record<BuilderToolName, string> = {
   [BuilderToolName.ListProjects]:
@@ -281,7 +278,7 @@ const DESCRIPTIONS: Record<BuilderToolName, string> = {
   [BuilderToolName.ListTasks]:
     "Lists a project's open tasks with their status and board position. Finished and removed tasks are left out.",
   [BuilderToolName.CreateTask]: `Creates a task in a project and returns its id. Do not ask for confirmation first. ${DRAFTING} Areas come from list_projects; naming a hazard from the project's isolate list (such as migrations or deps) among them sends the task to a separate copy, as the migration and dependency kinds do. Add dependsOn only when needed, name the kinds the work touches (keys from list_kinds) and leave rigor out unless the work needs more than the kinds and the project's default give; a rigor below a kind's minimum is refused; omit landing, unless the task's pull request belongs elsewhere than the project's default: {kind:'base'} merges into the base branch, {kind:'branch', branch} into another branch that is on origin, {kind:'hold'} holds the pull request for the builder. Refuses what the New Task form refuses, in the same words. To import a tracker issue, read it with the tracker's tools and pass its link as external: one issue is one task in a project.`,
-  [BuilderToolName.EditTask]: `Changes a task that has not finished: title, headline, why, description, acceptanceCriteria (replaces the list), rigor (null hands it back to the default), kinds (replaces the list, keys from list_kinds), areas (replaces the list, names from list_projects; only before it starts, so a task refused for having none gets them here) or landing (where its pull request goes: {kind:'base'}, {kind:'branch', branch} or {kind:'hold'}; only before it starts, and a branch must be on origin). ${DRAFTING} Send only the fields to change.`,
+  [BuilderToolName.EditTask]: `Changes a task that has not finished: title, why, description, acceptanceCriteria (replaces the list), rigor (null hands it back to the default), kinds (replaces the list, keys from list_kinds), areas (replaces the list, names from list_projects; only before it starts, so a task refused for having none gets them here) or landing (where its pull request goes: {kind:'base'}, {kind:'branch', branch} or {kind:'hold'}; only before it starts, and a branch must be on origin). ${DRAFTING} Send only the fields to change.`,
   [BuilderToolName.RemoveTask]:
     'Removes a task that has not started, or one with nothing left in it: every run cancelled, in no pass, with no saved work. Refuses any other task that has run, and a task another open task depends on.',
   [BuilderToolName.StartTask]:

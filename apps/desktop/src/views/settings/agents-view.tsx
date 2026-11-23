@@ -1,6 +1,6 @@
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
 import { RIGORS, Rigor, type AccountDto, type ModelRowDto, type StepRole } from '@10db/contracts';
-import { Button, Group, SegmentedControl, Select, Stack, Text, Title } from '@mantine/core';
+import { Button, Group, SegmentedControl, Select, Stack, Text } from '@mantine/core';
 import { useState } from 'react';
 import { useModelOffers, useModelPicks, useModels } from '../../daemon/model-queries';
 import { usePlaybook } from '../../daemon/playbook-queries';
@@ -27,6 +27,7 @@ import { RaisedPanel } from './raised-panel';
 import { RightsizingChart } from './rightsizing-chart';
 import { DotsMode, rightsizingSeries } from './rightsizing-series';
 import { ROLES } from './role-labels';
+import { SectionHeading } from './section-heading';
 
 const NO_FILTER: ModelFilter = { query: '', tiers: [], accountId: null };
 
@@ -110,26 +111,29 @@ export function AgentsView({ account }: { readonly account: AccountDto }) {
       usedBy.set(pick.model, [...(usedBy.get(pick.model) ?? []), roleLabel(pick.role)]);
   const note = costNote(account, offers.data ?? []);
   return (
-    <Stack gap="lg">
+    <Stack gap="xl">
       <MoveReportNote />
-      <Stack gap="xs" component="section" aria-label="Playbook section">
-        <Title order={4} size="md" fw={600}>
-          Playbook
-        </Title>
-        <Text size="xs" c="dimmed">
-          Each rigor runs the steps in its row. A cell shows the model and effort it resolves to on{' '}
-          {account.label}, and the setting behind it; open a cell to change it, a rigor to change
-          its steps.
-        </Text>
+      <Stack gap="sm" component="section" aria-label="Playbook section">
+        <SectionHeading
+          title="Playbook"
+          line={`What each step runs on ${account.label}.`}
+          help="Each rigor runs the steps in its row. A cell shows the model and effort it resolves to, and the setting behind it. Open a cell to change it, or a rigor to change its steps."
+        />
         <PlaybookTable projectId={null} accountId={accountId} />
       </Stack>
       <KindsSection />
-      <Stack gap="xs">
-        <Group justify="space-between">
-          <Title order={4} size="md" fw={600}>
-            Intelligence and Cost
-          </Title>
-          <Group gap="xs" wrap="nowrap">
+      <Stack gap="sm">
+        <Group justify="space-between" align="flex-start" wrap="nowrap">
+          <SectionHeading
+            title="Intelligence and Cost"
+            line="Blue is the most intelligence for its cost."
+            help={`Blue: the most Intelligence for its cost. Rings: each role's pick on this account at the rigor chosen.${
+              result.omitted > 0
+                ? ` ${String(result.omitted)} ${result.omitted === 1 ? 'effort' : 'efforts'} with no score yet ${result.omitted === 1 ? 'is' : 'are'} not drawn.`
+                : ''
+            }`}
+          />
+          <Group gap="xs" wrap="nowrap" style={{ flex: 'none' }}>
             <Select
               aria-label="Rigor for the rings"
               size="xs"
@@ -166,18 +170,9 @@ export function AgentsView({ account }: { readonly account: AccountDto }) {
             height={300}
           />
         </RaisedPanel>
-        <Text size="xs" c="dimmed">
-          Blue: the most Intelligence for its cost. Rings: each role&apos;s pick on this account at
-          the rigor chosen.
-          {result.omitted > 0
-            ? ` ${String(result.omitted)} ${result.omitted === 1 ? 'effort' : 'efforts'} with no score yet ${result.omitted === 1 ? 'is' : 'are'} not drawn.`
-            : ''}
-        </Text>
       </Stack>
-      <Stack gap="xs">
-        <Title order={4} size="md" fw={600}>
-          All Models
-        </Title>
+      <Stack gap="sm">
+        <SectionHeading title="All Models" line={`Every model ${account.label} runs.`} />
         {everyModel.length === 0 ? (
           <Text c="dimmed">
             No models yet. They appear once an account has been read; the refresh button reads every

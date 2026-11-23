@@ -112,10 +112,20 @@ export const McpSignInTerminalDto = z.strictObject({
 });
 export type McpSignInTerminalDto = z.infer<typeof McpSignInTerminalDto>;
 
+/** A Claude plan account on the default folder: its servers sign in through the builder's own Claude Code. */
+export const McpSignInOwnClaudeDto = z.strictObject({
+  accountId: AccountId,
+  accountLabel: z.string(),
+});
+export type McpSignInOwnClaudeDto = z.infer<typeof McpSignInOwnClaudeDto>;
+
 /** `GET` and `POST /settings/trust/mcp-sign-ins`. */
 export const McpSignInsDto = z.strictObject({
   rows: z.array(McpSignInRowDto),
   terminal: z.array(McpSignInTerminalDto),
+  /** The servers a sign-in can matter for: remote, approved, sending no Authorization header. */
+  candidates: z.array(YourMcpServerKey),
+  ownClaudeCode: z.array(McpSignInOwnClaudeDto),
 });
 export type McpSignInsDto = z.infer<typeof McpSignInsDto>;
 

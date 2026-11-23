@@ -4,7 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { boardColumnDto, projectDto, taskDto } from '../../test/fixtures';
-import { HUMAN_HINT, SYSTEM_HINT } from '../board/column-hints';
+import { SYSTEM_HINT } from '../board/column-hints';
 
 const project = projectDto();
 const icebox = boardColumnDto({ projectId: project.id, name: 'Icebox', position: 0 });
@@ -39,8 +39,8 @@ describe('BoardColumnsSection', () => {
     const rows = within(table).getAllByRole('row').slice(1);
     const names = rows.map((r) => within(r).getAllByRole('cell')[1]?.textContent);
     expect(names).toEqual([
-      `Icebox${HUMAN_HINT}`,
-      `Exploring${HUMAN_HINT}`,
+      'Icebox',
+      'Exploring',
       `Backlog${SYSTEM_HINT.backlog}`,
       `Ready${SYSTEM_HINT.ready}`,
       `In progress${SYSTEM_HINT.in_progress}`,

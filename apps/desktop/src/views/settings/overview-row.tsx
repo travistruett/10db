@@ -12,9 +12,9 @@ const ROW_HEIGHT = 52;
 /** The mark and the name: the left of every row. */
 function Name({ row }: { readonly row: OverviewRow }) {
   return (
-    <Group gap="sm" wrap="nowrap" w={200} style={{ flex: 'none' }}>
+    <Group gap="sm" wrap="nowrap" w={220} style={{ flex: 'none' }}>
       <RowMarkIcon mark={row.mark} />
-      <Text size="sm" fw={500} truncate>
+      <Text size="sm" fw={500}>
         {row.name}
       </Text>
     </Group>
@@ -73,7 +73,11 @@ export function OverviewRowView({ row }: { readonly row: OverviewRow }) {
               </Text>
             )}
           </Stack>
-          <IconChevronRight size={MARK_SIZE} aria-hidden style={{ flex: 'none' }} />
+          <IconChevronRight
+            size={MARK_SIZE}
+            aria-hidden
+            style={{ flex: 'none', alignSelf: 'center' }}
+          />
         </Group>
       </UnstyledButton>
     </Box>

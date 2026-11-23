@@ -4,7 +4,7 @@ import {
   type AccountDto,
   type SupportedAccountKind,
 } from '@10db/contracts';
-import { Alert, Badge, Button, Stack, Text, TextInput } from '@mantine/core';
+import { Alert, Button, Group, Stack, Text, TextInput } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useState, type SubmitEvent } from 'react';
 import { ZodError } from 'zod';
@@ -12,6 +12,7 @@ import { accountKeys } from '../../../daemon/account-queries';
 import { sendAccountSecret } from '../../../daemon/account-secret';
 import { DaemonRequestError } from '../../../daemon/client';
 import { useDaemon } from '../../../daemon/provider';
+import { ConnectionStatus, ConnectionTone } from '../connection-status';
 
 /** All the form keeps: where the request is, never the secret itself. */
 type SecretFormState =
@@ -90,34 +91,38 @@ export function SecretForm({ account }: { readonly account: AccountDto }) {
 
   return (
     <form onSubmit={(event) => void submit(event)}>
-      <Stack gap="xs" align="flex-start">
-        {account.secretSet ? (
-          <Badge color="green">Secret Set</Badge>
-        ) : (
-          <Badge color="yellow">No Secret Yet</Badge>
-        )}
-        <TextInput
-          w="100%"
-          size="md"
-          type="password"
-          name="secret"
-          label={secretLabel(account.kind)}
-          description="Stored in your login Keychain, never in 10db's database. It can't be shown again; paste it again to replace it."
-          autoComplete="new-password"
-          spellCheck={false}
-          autoCapitalize="off"
+      <Stack gap="xs">
+        <ConnectionStatus
+          tone={account.secretSet ? ConnectionTone.Works : ConnectionTone.NeedsYou}
+          label={account.secretSet ? 'Secret Set' : 'No Secret Yet'}
         />
+        <Group gap="xs" align="flex-end" wrap="nowrap">
+          <TextInput
+            flex={1}
+            type="password"
+            name="secret"
+            label={secretLabel(account.kind)}
+            description="Kept in your login Keychain. Never shown again."
+            autoComplete="new-password"
+            spellCheck={false}
+            autoCapitalize="off"
+          />
+          <Button
+            type="submit"
+            variant={account.secretSet ? 'default' : 'filled'}
+            loading={state.kind === 'saving'}
+          >
+            {account.secretSet ? 'Replace Secret' : 'Save Secret'}
+          </Button>
+        </Group>
         {state.kind === 'saved' ? (
           <Text size="sm">Secret saved to your login Keychain.</Text>
         ) : null}
         {state.kind === 'failed' ? (
-          <Alert color="red" role="alert" w="100%">
+          <Alert color="red" role="alert">
             {state.message}
           </Alert>
         ) : null}
-        <Button type="submit" size="md" loading={state.kind === 'saving'}>
-          {account.secretSet ? 'Replace Secret' : 'Save Secret'}
-        </Button>
       </Stack>
     </form>
   );

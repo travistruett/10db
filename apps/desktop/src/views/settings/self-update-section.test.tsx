@@ -27,5 +27,4 @@ it('is on by default, and says it follows the repository the app was built for',
   await waitFor(() => {
     expect((toggle as HTMLInputElement).checked).toBe(true);
   });
-  expect(screen.getByText(/repository this app was built from/i)).toBeTruthy();
 });

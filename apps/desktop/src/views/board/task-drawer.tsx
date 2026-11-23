@@ -32,7 +32,6 @@ import {
   Tabs,
   Text,
   Textarea,
-  TextInput,
   Title,
   Tooltip,
 } from '@mantine/core';
@@ -55,10 +54,9 @@ import {
   useStartTask,
   useStartTaskOver,
 } from '../../daemon/queries';
-import { RelativeTime } from '../factory/relative-time';
 import { StateBadge } from '../factory/state-badge';
 import { canRetry } from '../factory/workstream-state';
-import { ReviewRoundsList, roundReviewer, roundVerdict } from '../review/review-rounds-list';
+import { ReviewRoundsList } from '../review/review-rounds-list';
 import { criteriaLines } from './areas-text';
 import { closeNote } from './batch/close-note';
 import { CopyTaskId } from './copy-task-id';
@@ -84,7 +82,7 @@ import { placementOpen } from './placement';
 import { PlacementBadge } from './placement-badge';
 import { PlacementChoice } from './placement-choice';
 import { ExternalLink, PullRequestLink } from './pull-request-link';
-import { TaskExternalLink } from './task-external-link';
+import { IconExternalLink, IconListCheck } from '@tabler/icons-react';
 import { ordinal, runNextNote } from './queue-place';
 import { canRunNext } from './run-next';
 import { QuestionRoutesLine } from './question-routes-line';
@@ -93,7 +91,7 @@ import { EffortPinSelect, KindSources, KindsSelect, RigorSelect } from './task-f
 import { canCancelRun } from './task-cancel';
 import { holdOption, isHeld, type HoldOption } from './task-hold';
 import { isSpent } from './task-spent';
-import { HeadlineField, WhyField } from './task-words-fields';
+import { TitleField, WhyField } from './task-words-fields';
 import {
   canCloseRun,
   canRetryRun,
@@ -187,9 +185,8 @@ export function TaskDrawer({
   const landingEditable = task.workstreamId === null;
   const initialCriteria = task.acceptanceCriteria.join('\n');
   const [title, setTitle] = useState(task.title);
-  const [headline, setHeadline] = useState(task.headline);
   const [why, setWhy] = useState(task.why);
-  const wordsChanged = headline.trim() !== task.headline || why.trim() !== task.why;
+  const wordsChanged = why.trim() !== task.why;
   const [description, setDescription] = useState(task.description);
   const [criteria, setCriteria] = useState(initialCriteria);
   // Rigor and kinds follow the live task until the builder edits them, so a judge answer that lands while the
@@ -222,15 +219,10 @@ export function TaskDrawer({
   const limitLine = shippedAtLimitLine(workstream);
   // Overview is where a drawer opens; the form and its Save bar are on Edit alone.
   const [tab, setTab] = useState<DrawerTab>('overview');
-  // With a headline the header says it and What it promises says the title; without one the title is
-  // the header and What it promises is only the criteria, so the title shows once.
-  const hasHeadline = task.headline !== '';
   const rounds = reviewRounds(workstream?.steps ?? []);
-  const latestRound = rounds[0];
 
   const dirty =
     title !== task.title ||
-    headline !== task.headline ||
     why !== task.why ||
     description !== task.description ||
     criteria !== initialCriteria ||
@@ -285,7 +277,7 @@ export function TaskDrawer({
           ...(rigor !== task.rigor ? { rigor } : {}),
           ...(kindsChanged ? { kinds } : {}),
           ...(effortPin !== task.effortPin ? { effortPin } : {}),
-          ...(wordsChanged ? { headline: headline.trim(), why: why.trim() } : {}),
+          ...(wordsChanged ? { why: why.trim() } : {}),
           ...(areasChanged ? { areas } : {}),
           ...(modelSettingChanged ? { modelSetting } : {}),
           ...(changesLanding && where.ok ? { landing: where.landing } : {}),
@@ -303,32 +295,13 @@ export function TaskDrawer({
         : null);
 
   return (
-    <SurfaceDrawer opened onClose={requestClose} label="Task">
+    <SurfaceDrawer
+      opened
+      onClose={requestClose}
+      label="Task"
+      actions={<TaskLinks task={task} batch={batch} batches={batches} />}
+    >
       <Stack gap="md">
-        <Stack gap={4}>
-          <Title order={3} size={16} fw={600}>
-            {hasHeadline ? task.headline : task.title}
-          </Title>
-          {task.why ? (
-            <Text size="sm" c="dimmed">
-              {task.why}
-            </Text>
-          ) : null}
-          {hasHeadline ? null : (
-            <Anchor
-              component="button"
-              type="button"
-              size="xs"
-              c="dimmed"
-              style={{ alignSelf: 'flex-start' }}
-              onClick={() => {
-                setTab('edit');
-              }}
-            >
-              Add a Headline
-            </Anchor>
-          )}
-        </Stack>
         <StatusLine
           task={task}
           columnName={columnName}
@@ -341,6 +314,16 @@ export function TaskDrawer({
           onClosed={onClose}
           {...(onCancelRun && batch?.passId == null ? { onCancelRun } : {})}
         />
+        <Stack gap={4}>
+          <Title order={3} size={16} fw={600}>
+            {task.title}
+          </Title>
+          {task.why ? (
+            <Text size="sm" c="dimmed">
+              {task.why}
+            </Text>
+          ) : null}
+        </Stack>
         <TaskNotices
           taskId={task.id}
           notices={[...taskNotices(workstream, batch), ...taskHistory(workstream, batch)]}
@@ -394,13 +377,11 @@ export function TaskDrawer({
             {task.external == null ? null : <Tabs.Tab value="linear">Linear</Tabs.Tab>}
             <Tabs.Tab value="edit">Edit</Tabs.Tab>
           </Tabs.List>
-          <Tabs.Panel value="overview" pt="md">
-            <Stack gap="lg">
-              {hasHeadline || task.acceptanceCriteria.length > 0 ? (
-                <Stack gap={4}>
+          <Tabs.Panel value="overview" pt="lg">
+            <Stack gap="xl">
+              {task.acceptanceCriteria.length > 0 ? (
+                <Stack gap="xs">
                   <SectionLabel>What It Promises</SectionLabel>
-                  {/* Without a headline the title is the header above; saying it twice is noise. */}
-                  {hasHeadline ? <Text size="sm">{task.title}</Text> : null}
                   {task.acceptanceCriteria.length > 0 ? (
                     <List size="sm" spacing={2}>
                       {task.acceptanceCriteria.map((line, index) => (
@@ -412,7 +393,7 @@ export function TaskDrawer({
               ) : null}
               <QuestionRoutesLine task={task} />
               {waitsOn.length > 0 ? (
-                <Stack gap={4} data-testid="waits-on">
+                <Stack gap="xs" data-testid="waits-on">
                   <SectionLabel>Waits On</SectionLabel>
                   {waitsOn.map((waitTitle, index) => (
                     <Text key={`${String(index)}:${waitTitle}`} size="sm">
@@ -422,8 +403,8 @@ export function TaskDrawer({
                 </Stack>
               ) : null}
               {batch ? (
-                <Stack gap={4}>
-                  <SectionLabel>Delivery</SectionLabel>
+                <Stack gap="xs">
+                  <SectionLabel>Branch</SectionLabel>
                   <BatchPanel
                     batch={batch}
                     workstreams={workstreams}
@@ -437,32 +418,12 @@ export function TaskDrawer({
                 steps={workstream?.steps ?? []}
                 label={<SectionLabel>Implementation Report</SectionLabel>}
               />
-              {latestRound ? (
-                <Group gap="xs" data-testid="latest-review">
-                  <SectionLabel>Latest Review</SectionLabel>
-                  <Text size="sm" c={roundVerdict(workstream?.steps ?? [], latestRound).color}>
-                    {`${roundVerdict(workstream?.steps ?? [], latestRound).label} by ${roundReviewer(latestRound)}`}
-                  </Text>
-                  <RelativeTime at={latestRound.result.at} />
-                  <Anchor
-                    component="button"
-                    type="button"
-                    size="sm"
-                    onClick={() => {
-                      setTab('reviews');
-                    }}
-                  >
-                    Reviews <span aria-hidden>›</span>
-                  </Anchor>
-                </Group>
-              ) : null}
               <TaskPictures taskId={task.id} />
               <TaskSkips workstreamId={workstream?.id} />
               <TaskSizeLine taskId={task.id} />
               <PlanContextDisclosure taskId={task.id} />
               {offersPlanSession === true ? <OpenPlanSession target={{ taskId: task.id }} /> : null}
               <OpenTaskLink taskId={task.id} projectId={task.projectId} />
-              <CopyTaskId id={task.id} />
             </Stack>
           </Tabs.Panel>
           <Tabs.Panel value="reviews" pt="md">
@@ -479,20 +440,12 @@ export function TaskDrawer({
           </Tabs.Panel>
           <Tabs.Panel value="edit" pt="md">
             <Stack gap="lg">
-              <HeadlineField value={headline} onChange={setHeadline} />
+              <TitleField value={title} onChange={setTitle} />
               <WhyField value={why} onChange={setWhy} />
-              <TextInput
-                label="Title"
-                fw={600}
-                value={title}
-                onChange={(e) => {
-                  setTitle(e.currentTarget.value);
-                }}
-              />
               {areasEditable ? (
                 <MultiSelect
                   label="Areas"
-                  description="The parts of the project this task works in. They are fixed once it starts."
+                  description="Fixed once the task starts."
                   data={areaNames}
                   value={areas}
                   onChange={setAreas}
@@ -523,7 +476,7 @@ export function TaskDrawer({
               />
               <Textarea
                 label="Acceptance Criteria"
-                description="One per line. A reviewer agent checks each one and asks for a test that proves it."
+                description="One per line. A reviewer checks each."
                 autosize
                 minRows={2}
                 maxRows={16}
@@ -534,7 +487,7 @@ export function TaskDrawer({
               />
               <KindsSelect
                 label="Kinds"
-                description="What the work touches. A kind can raise the rigor and add steps."
+                description="What the work touches."
                 value={kinds}
                 onChange={(next) => {
                   setKindsEdit(next);
@@ -554,7 +507,7 @@ export function TaskDrawer({
               {accountId === undefined ? null : (
                 <ModelSettingSelect
                   label="Model"
-                  description="Overrides the setting for its role and any pattern that matches. No override leaves them in charge."
+                  description="Overrides the playbook for this task."
                   accountIds={[accountId]}
                   value={modelSetting}
                   noneLabel="No override"
@@ -563,7 +516,7 @@ export function TaskDrawer({
               )}
               <EffortPinSelect
                 label="Effort"
-                description="The effort every step runs at. Automatic leaves it to the playbook."
+                description="For every step. Automatic follows the playbook."
                 value={effortPin}
                 onChange={setEffortPin}
               />
@@ -610,14 +563,14 @@ export function TaskDrawer({
               wrap="nowrap"
               pos="sticky"
               mt="xl"
-              mx="calc(var(--mantine-spacing-lg) * -1)"
-              mb="calc(var(--mantine-spacing-lg) * -1)"
-              px="lg"
+              mx="calc(var(--surface-drawer-inset) * -1)"
+              mb="calc(var(--surface-drawer-inset) * -1)"
+              px="var(--surface-drawer-inset)"
               py="md"
               bg="var(--mantine-color-body)"
               style={{
                 // The drawer's body pads its content, and a sticky edge is measured inside that padding.
-                bottom: 'calc(var(--mantine-spacing-lg) * -1)',
+                bottom: 'calc(var(--surface-drawer-inset) * -1)',
                 borderTop: '1px solid var(--mantine-color-default-border)',
                 zIndex: 'var(--mantine-z-index-app)',
               }}
@@ -670,6 +623,44 @@ export function TaskDrawer({
 }
 
 /** The small caps label above an Overview section. */
+/**
+ * The drawer's toolbar: the task's pull request, the CI job behind its checks, the tracker issue it came
+ * from, and its ID to copy. Links the task doesn't have are left out.
+ */
+function TaskLinks({
+  task,
+  batch,
+  batches,
+}: {
+  readonly task: TaskDto;
+  readonly batch: BatchDto | undefined;
+  readonly batches: readonly BatchDto[];
+}) {
+  const ci = ciLine(batch, batches);
+  // A CI link to the pull request itself (queued, conflicting) would repeat the pull request link.
+  const ciLink = ci?.link && ci.link.url !== batch?.prUrl ? ci.link : null;
+  return (
+    <>
+      {batch?.prUrl ? <PullRequestLink url={batch.prUrl} button /> : null}
+      {ciLink ? (
+        <ExternalLink
+          url={ciLink.url}
+          label={ciLink.label}
+          icon={<IconListCheck size={18} stroke={1.5} />}
+        />
+      ) : null}
+      {task.external == null ? null : (
+        <ExternalLink
+          url={task.external.url}
+          label={task.external.id}
+          icon={<IconExternalLink size={18} stroke={1.5} />}
+        />
+      )}
+      <CopyTaskId id={task.id} />
+    </>
+  );
+}
+
 function SectionLabel({ children }: { readonly children: string }) {
   return (
     <Text size="xs" fw={600} c="dimmed" tt="uppercase">
@@ -772,8 +763,6 @@ function StatusLine({
   // A finished run is no state to show: the column says it. A live, held or failed one is.
   const runState = workstream !== undefined && (!isTerminal(workstream.state) || failed);
   const ci = ciLine(batch, batches);
-  // A CI link to the pull request itself (queued, conflicting) would repeat the pull request link.
-  const ciLink = ci?.link && ci.link.url !== batch?.prUrl ? ci.link : null;
   const busy = hold.isPending || start.isPending || startOver.isPending || remove.isPending;
   const refusal = [hold, start, startOver, remove].find((m) => m.error)?.error?.message ?? null;
   return (
@@ -792,9 +781,9 @@ function StatusLine({
           ) : runState ? (
             <StateBadge state={workstream.state} />
           ) : (
-            <Text size="sm" fw={500}>
+            <Badge variant="light" color="gray" size="sm">
               {columnName}
-            </Text>
+            </Badge>
           )}
           {queued && place !== undefined ? (
             <Text size="xs" c="dimmed">
@@ -802,18 +791,16 @@ function StatusLine({
             </Text>
           ) : null}
           {ci ? (
-            <>
-              <Text size="sm" c="dimmed" aria-hidden>
-                ·
-              </Text>
-              <Text size="sm" c={ci.color} data-testid="ci-line" data-color={ci.color}>
-                {ciStatus(ci.line)}
-              </Text>
-            </>
+            <Badge
+              variant="light"
+              color={ci.color}
+              size="sm"
+              data-testid="ci-line"
+              data-color={ci.color}
+            >
+              {ciStatus(ci.line)}
+            </Badge>
           ) : null}
-          {batch?.prUrl ? <PullRequestLink url={batch.prUrl} /> : null}
-          <TaskExternalLink task={task} />
-          {ciLink ? <ExternalLink url={ciLink.url} label={ciLink.label} /> : null}
         </Group>
         <Group gap="xs">
           {queued ? (

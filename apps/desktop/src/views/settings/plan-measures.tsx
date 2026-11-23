@@ -1,5 +1,5 @@
 import type { QuestionMeasureDto, SizingMeasureDto } from '@10db/contracts';
-import { Group, Stack, Text } from '@mantine/core';
+import { Group, Stack, Text, Title } from '@mantine/core';
 import { useShapeMeasures } from '../../daemon/shape-measures-queries';
 
 const percent = (part: number, whole: number): string =>
@@ -16,7 +16,7 @@ function SizingRow({ sizing }: { readonly sizing: SizingMeasureDto }) {
         Sizing
       </Text>
       <Text size="xs" c="dimmed">
-        Finished tasks Plan converted, whose size was within one bucket of the lane time they took.
+        Finished converted tasks sized within one bucket of their lane time.
       </Text>
       <Stack gap={2} role="group" aria-label="Sizing">
         {sizing.n === 0 ? (
@@ -58,8 +58,7 @@ function QuestionsRow({ questions }: { readonly questions: QuestionMeasureDto })
         Questions
       </Text>
       <Text size="xs" c="dimmed">
-        Inbox question cards on tasks Plan converted, against the project's other tasks. Only tasks
-        that started count.
+        Inbox question cards per started task, converted against other tasks.
       </Text>
       <Stack gap={2} role="group" aria-label="Questions">
         {converted.tasks === 0 ? (
@@ -84,16 +83,9 @@ export function PlanMeasures() {
   const measures = useShapeMeasures();
   if (measures.data === undefined) return null;
   return (
-    <Stack
-      component="section"
-      aria-label="How Plan Is Doing"
-      gap="sm"
-      style={{ flex: '0 1 280px' }}
-    >
+    <Stack component="section" aria-label="How Plan Is Doing" gap="sm">
       <Group gap="xs" align="baseline">
-        <Text component="h3" fw={600} size="sm" m={0}>
-          How Plan Is Doing
-        </Text>
+        <Title order={4}>How Plan Is Doing</Title>
         <Text size="xs" c="dimmed">
           All Projects
         </Text>

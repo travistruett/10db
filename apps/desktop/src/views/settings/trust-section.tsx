@@ -7,6 +7,7 @@ import {
 import { Alert, Button, Divider, Group, Paper, Stack, Switch, Text, Title } from '@mantine/core';
 import { Fragment, useId } from 'react';
 import { useSetTrust, useTrust } from '../../daemon/trust-queries';
+import { HelpHint, HelpText } from './help-hint';
 import { SettingRow, SettingsCard } from './setting-row';
 import { YourMcpServers } from './your-mcp-servers';
 import {
@@ -17,29 +18,28 @@ import {
   TRUST_ROWS,
 } from './trust-rows';
 
-/** A row's description with the note on each agent under it. */
+/** A row's one-line description, with the note on each agent behind an info button. */
 export function TrustRowText({
   description,
   providers,
   whileOn,
+  label,
 }: {
   readonly description: string;
   readonly providers: string;
   /** Shown while the switch is on: what a provider still lacks. */
   readonly whileOn: string | null;
+  /** The row's name, which names the info button. */
+  readonly label: string;
 }) {
   return (
-    <>
-      {description}
-      <Text component="span" display="block" size="xs" c="dimmed" mt={4}>
-        {providers}
-      </Text>
-      {whileOn === null ? null : (
-        <Text component="span" display="block" size="xs" c="dimmed" mt={4}>
-          {whileOn}
-        </Text>
-      )}
-    </>
+    <Group gap={4} wrap="nowrap" component="span">
+      <span>{description}</span>
+      <HelpHint label={label}>
+        <HelpText>{providers}</HelpText>
+        {whileOn === null ? null : <HelpText>{whileOn}</HelpText>}
+      </HelpHint>
+    </Group>
   );
 }
 
@@ -74,7 +74,7 @@ function without(plugins: Readonly<Record<string, boolean>>, id: string): Record
 function judgeNote(row: AccountJudgeDto): string | null {
   switch (row.judge) {
     case JudgeKind.Native:
-      return NATIVE_JUDGE_NOTE;
+      return null;
     case JudgeKind.Rules:
       return row.why;
     case JudgeKind.Tendb:
@@ -93,13 +93,20 @@ function JudgeList({
   const headingId = useId();
   return (
     <Stack gap="xs" role="region" aria-labelledby={headingId}>
-      <Title order={5} id={headingId}>
-        Judge
-      </Title>
-      <Text size="sm" c="dimmed">
-        What decides a new task's routine calls on each account, on the model it would run.{' '}
-        {JUDGE_LIST_NOTE}
-      </Text>
+      <Stack gap={2}>
+        <Group gap={4} wrap="nowrap">
+          <Title order={5} id={headingId}>
+            Judge
+          </Title>
+          <HelpHint label="Judge">
+            <HelpText>{JUDGE_LIST_NOTE}</HelpText>
+            <HelpText>{NATIVE_JUDGE_NOTE}</HelpText>
+          </HelpHint>
+        </Group>
+        <Text size="xs" c="dimmed">
+          What decides a new task's routine calls on each account.
+        </Text>
+      </Stack>
       <Paper withBorder radius="md" component="ul" m={0} p={0} style={{ listStyle: 'none' }}>
         {judges.map((row, i) => (
           <Fragment key={row.accountId}>
@@ -145,7 +152,7 @@ function JudgeRow({
           </Text>
         )}
       </Stack>
-      <Text size="sm" ta="right">
+      <Text size="sm" ta="right" maw={280}>
         {row.judge === JudgeKind.Tendb && !tendbReady
           ? TENDB_NOT_READY_LABEL
           : JUDGE_LABELS[row.judge]}
@@ -162,7 +169,7 @@ export function TrustSection() {
   const plugins = trust.data?.plugins ?? [];
   if (trust.isError) return <Alert color="red">{trust.error.message}</Alert>;
   return (
-    <Stack gap="lg">
+    <Stack gap="xl">
       <SettingsCard>
         {TRUST_ROWS.map((row) => (
           <SettingRow
@@ -170,6 +177,7 @@ export function TrustSection() {
             label={row.label}
             description={
               <TrustRowText
+                label={row.label}
                 description={row.description}
                 providers={row.providers}
                 whileOn={switches?.[row.key] === true ? row.whileOn : null}
@@ -190,7 +198,10 @@ export function TrustSection() {
           </SettingRow>
         ))}
       </SettingsCard>
-      <SettingsCard title="Your Plugins">
+      <SettingsCard
+        title="Your Plugins"
+        description="Each follows Claude Code until you switch it here."
+      >
         {switches !== undefined && plugins.length === 0 ? (
           <Text size="sm" c="dimmed" px="md" py="sm">
             Claude Code lists no plugins installed for you.

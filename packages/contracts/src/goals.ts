@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Headline, Title, Why } from './entities';
+import { Title, Why } from './entities';
 import { ExternalLink } from './external';
 import {
   DecisionId,
@@ -65,8 +65,6 @@ export type GoalBriefCriterion = z.infer<typeof GoalBriefCriterion>;
 export const GoalBriefTask = z.object({
   key: BriefKey,
   title: Title,
-  /** The plain-words what the Board shows; absent shows the title. */
-  headline: Headline.default(''),
   /** One sentence on why the task matters. */
   why: Why.default(''),
   description: z.string().default(''),
@@ -247,8 +245,6 @@ export type DigestWaitingOnSomeone = z.infer<typeof DigestWaitingOnSomeone>;
 export const DigestNext = z.object({
   taskId: TaskId,
   title: z.string(),
-  /** The task's headline; empty when it has none, and the desktop shows `title`. */
-  headline: z.string(),
   /** The open tasks it waits on; empty when it is ready now. */
   waitsOn: z.array(z.object({ taskId: TaskId, title: z.string() })),
 });

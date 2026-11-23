@@ -40,7 +40,13 @@ export function StatusMark({
   const allOff = text === DecisionStatus.AllOff;
   return (
     <Group gap={6} wrap="nowrap">
-      <Badge {...STATUS_BADGE[text]}>{text}</Badge>
+      <Badge
+        {...STATUS_BADGE[text]}
+        style={{ minWidth: 'max-content' }}
+        styles={{ label: { overflow: 'visible', textOverflow: 'clip' } }}
+      >
+        {text}
+      </Badge>
       {keyed || allOff ? null : (
         <Text size="xs" c="dimmed">
           · no key
@@ -51,7 +57,7 @@ export function StatusMark({
 }
 
 /**
- * Every decision under its group, with its status, model, Sure enough and last 30 days. A row, or Enter on
+ * Every decision under its group, with its status, model, Sure Enough and last 30 days. A row, or Enter on
  * its name, opens the decision. The master switch and the daemon's kill switch both read as all off.
  */
 export function DecisionsTable({
@@ -60,15 +66,12 @@ export function DecisionsTable({
   shadow,
   models,
   onOpen,
-  withStatus = true,
 }: {
   readonly status: JudgeStatusDto;
   readonly stats: DecisionStatsListDto | undefined;
   readonly shadow: readonly ShadowAgreementDto[] | undefined;
   readonly models: readonly DecisionModelDto[] | undefined;
   readonly onOpen: (decision: AskedDecision) => void;
-  /** The Status column; off where the page is not the place that switches decisions on. */
-  readonly withStatus?: boolean;
 }) {
   const { config } = status;
   const allOn = config.enabled && !status.off;
@@ -85,6 +88,7 @@ export function DecisionsTable({
     {
       accessor: 'label',
       title: 'Decision',
+      noWrap: true,
       render: (row) =>
         ofDecision(row, (d) => (
           <UnstyledButton
@@ -100,20 +104,16 @@ export function DecisionsTable({
           </UnstyledButton>
         )),
     },
-    ...(withStatus
-      ? [
-          {
-            accessor: 'status',
-            title: 'Status',
-            noWrap: true,
-            render: (row: Row) =>
-              ofDecision(row, (d) => {
-                const text = decisionStatus(DECISIONS[d].mode, config.decisions[d].enabled, allOn);
-                return <StatusMark text={text} keyed={keyed} />;
-              }),
-          },
-        ]
-      : []),
+    {
+      accessor: 'status',
+      title: 'Status',
+      noWrap: true,
+      render: (row: Row) =>
+        ofDecision(row, (d) => {
+          const text = decisionStatus(DECISIONS[d].mode, config.decisions[d].enabled, allOn);
+          return <StatusMark text={text} keyed={keyed} />;
+        }),
+    },
     {
       accessor: 'model',
       title: 'Model',
@@ -129,7 +129,7 @@ export function DecisionsTable({
     },
     {
       accessor: 'last30',
-      title: 'Last 30 days',
+      title: 'Last 30 Days',
       noWrap: true,
       render: (row) =>
         ofDecision(row, (d) =>
@@ -149,7 +149,7 @@ export function DecisionsTable({
       idAccessor="id"
       withTableBorder
       borderRadius="md"
-      verticalSpacing="sm"
+      verticalSpacing="xs"
       horizontalSpacing="md"
       highlightOnHover
       onRowClick={({ record }) => {
@@ -166,6 +166,7 @@ export function DecisionsTable({
             <Table.Th
               scope="rowgroup"
               colSpan={columns.length}
+              py={4}
               fz="xs"
               fw={600}
               c="dimmed"

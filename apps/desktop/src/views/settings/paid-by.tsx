@@ -10,7 +10,7 @@ import { cantRunDecisions } from './accounts/used-by';
 import { ConnectionStatus, ConnectionTone } from './connection-status';
 import { useFocusTarget } from './focus-target';
 import { SettingsSectionKey } from './sections';
-import { SettingRow } from './setting-row';
+import { HintedRow } from './hinted-row';
 
 function AccountLink({
   account,
@@ -92,9 +92,9 @@ export function PaidBy({
   const canDecide = live.some((a) => powersDecisions(a.kind));
   return (
     <div ref={ref}>
-      <SettingRow
+      <HintedRow
         label="Paid By"
-        description="The account whose API answers 10db’s decisions: OpenRouter, an Anthropic API key or Bedrock. A plan login has no API for quick decisions."
+        hint="The account whose API answers 10db’s decisions: OpenRouter, an Anthropic API key or Bedrock. A plan login has no API for quick decisions."
       >
         {accounts.isPending ? (
           <Loader size="sm" aria-label="Loading accounts" />
@@ -103,8 +103,9 @@ export function PaidBy({
             Accounts could not be loaded. Check that the daemon is running.
           </Text>
         ) : canDecide ? (
-          <Stack gap={4}>
+          <Group gap="md" wrap="nowrap" align="center">
             <AccountSelect
+              w={240}
               aria-label="Paid By"
               placeholder="Pick an account"
               accounts={live}
@@ -120,7 +121,7 @@ export function PaidBy({
             {status.account === null ? null : (
               <PaidByState account={status.account} off={status.off} />
             )}
-          </Stack>
+          </Group>
         ) : (
           <Stack gap="xs" align="flex-end">
             <Text size="sm">No account can run decisions yet.</Text>
@@ -133,7 +134,7 @@ export function PaidBy({
             </Button>
           </Stack>
         )}
-      </SettingRow>
+      </HintedRow>
       <AddAccountModal
         opened={adding}
         initialKind={AccountKind.OpenRouter}

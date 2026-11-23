@@ -8,8 +8,7 @@ import { isConverted } from './proposed-groups';
 export function proposalTitle(row: ShapeProposalDto): string {
   switch (row.kind) {
     case 'task':
-      // As the Board does: a task is named by its headline, a few plain words, when it has one.
-      return row.body.headline === '' ? row.body.title : row.body.headline;
+      return row.body.title;
     case 'goal':
     case 'landing':
       return row.body.title;

@@ -39,15 +39,16 @@ favors legibility and calm over decoration.
   Task. The builder can collapse the human columns (Icebox among them) and Done with the chevron in
   the column's header, and open a rail again with the chevron on it; the choice is remembered per
   project in this browser (`localStorage`, `tendb.board-collapsed.<project id>`), not on the daemon.
-  A card's face, top to bottom: the goal's title (small, dimmed, when the task is in a goal); the headline,
-  or the title when the headline is empty (weight 500, at most three lines); the why (dimmed, `xs`, at most
+  A card's face, top to bottom: the goal's title (small, dimmed, when the task is in a goal); the task's
+  title (weight 500, at most three lines); the why (dimmed, `xs`, at most
   two lines, only when there is one); a status line (see Card state); and a row of indicators, only when
   the task has one. Areas, the criteria count, the landing line, the placement badge, the pull request and
   CI links, "Review sent back" and the shipped-at-limit line are not on the face: the task drawer holds
   them, and the card's screen-reader summary still speaks them. The indicator row is one component that
-  takes a list of small labelled badges, so a new kind is another entry in the list: a shared branch (the
-  batch has more than one task), CI passed or failed on a shipped pull request, waits on (the titles of the
-  unfinished dependencies are its tooltip) and Cancelled.
+  takes a list of small labelled badges, and it holds only where the task stands beyond its status line:
+  the goal it serves, CI failed on a shipped pull request, waits on (the titles of the unfinished
+  dependencies are its tooltip) and Cancelled. Rigor, kinds, a passing CI, a shared branch and the
+  Workbench are the drawer's. A done card keeps the plain border: its column says it.
 - **Board depth:** depth comes from tone, not lines, and every tone is a Selenized background. A column
   with cards is a recessed tray (`--tendb-color-column`) under a header band of its own tone, with a soft
   `bg_1` edge; an empty column or rail is an unfilled dashed slot. Cards are the raised tone
@@ -77,14 +78,13 @@ favors legibility and calm over decoration.
   with no kind, or one this build doesn't know, gets a generic line. The raw reason is the line's tooltip
   on the card and in Factory, and is shown under the line in the drawer.
 - **Task drawer:** a side panel, `min(640px, 50vw)` wide and never wider, so the Board stays visible beside
-  it. Top to bottom: the headline (the title when there is none) with the why under it (no line when there
-  is none; with no headline a dimmed "Add a headline" link opens Edit); **one status line** (the run's state,
+  it. Top to bottom: the title with the why under it (no line when there
+  is none); **one status line** (the run's state,
   or the column's name once the run has finished; where the required checks stand; the Pull request and CI
   job links; the run actions Retry, Start over, Cancel Run, Close task, Start, Remove, Run Next and Hold);
   an alert only when the task needs the builder or has failed; then the tabs **Overview** (the default),
   **Reviews** (with a count of rounds) and **Edit**. There is no column badge and no separate links row.
-  Overview reads What it promises (the criteria; the title above them only when there is a headline, so the
-  title shows once outside Edit), Waits on (one task a line), Delivery (branch and Abandon) and the latest
+  Overview reads What it promises (the criteria), Waits on (one task a line), Delivery (branch and Abandon) and the latest
   review. Only Edit holds the form and the sticky Cancel / Save Changes bar, so the drawer reads as a
   record when the builder came only to look; closing it with an unsaved edit still asks first. A Hold the
   daemon would refuse stays as a disabled button with its reason in a tooltip, and the reason never names
@@ -119,7 +119,7 @@ favors legibility and calm over decoration.
   and "About this goal", and one dimmed `xs` footer line with the team and the cost. There are no label/value
   rows. The team names each persona once with its distinct `model@effort` ("Implementer opus@high,
   sonnet@medium · Reviewer opus@medium").
-- **A task row** is a state dot, the headline (the title when it has none), its state, a pull request link
+- **A task row** is a state dot, the title, its state, a pull request link
   and the last activity. Only a running row adds its step ("Implement 2/4 · sonnet") and context gauge; a
   failed row says "Failed" and Retry is in Needs you; the first ready task the digest names as next says
   "Ready · next", and a task that waits says "Waits on 2". Tasks that share a branch each carry a "Shared
@@ -227,7 +227,7 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   border and a shadow as well. A control sits on `bg1` in both schemes (`theme.ts`).
 - **Drawers:** one slide-out kind, `SurfaceDrawer` (`apps/desktop/src/shell/surface-drawer.tsx`), from the
   content's right edge, inside the box: half the column, 480 to 760 px, all of it under 640 px, in the
-  content's tone with a 1 px `bg2` left edge, 24 px insets, no eyebrow and a 16 px / 600 title. It slides in over 150 ms (at once with reduced motion), is not modal, and closes with
+  content's tone with a 1 px `bg2` left edge and the sidebar sheet's shadow cast left onto the view, 24 px insets, no eyebrow and a 16 px / 600 title. It slides in over 150 ms (at once with reduced motion), is not modal, and closes with
   Esc inside it or its ×.
 - **Loading:** a page draws its header first, since the title and byline are known before the data. After 300 ms
   of waiting, quiet placeholder rows in the shape of what is coming take the content's place

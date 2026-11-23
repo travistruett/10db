@@ -13,6 +13,7 @@ import {
   Modal,
   Select,
   Stack,
+  Text,
   TextInput,
   Tooltip,
 } from '@mantine/core';
@@ -159,15 +160,20 @@ function RouteForm({
         />
       ) : (
         <Chip.Group multiple value={categories} onChange={setCategories}>
-          <Group gap="xs">
-            {Object.values(QuestionCategory).map((category) => (
-              <Tooltip key={category} label={QUESTION_CATEGORY_HINTS[category].hint}>
-                <Chip value={category} size="xs">
-                  {categoryWord(category)}
-                </Chip>
-              </Tooltip>
-            ))}
-          </Group>
+          <Stack gap={4}>
+            <Text size="sm" fw={500}>
+              Questions
+            </Text>
+            <Group gap="xs">
+              {Object.values(QuestionCategory).map((category) => (
+                <Tooltip key={category} label={QUESTION_CATEGORY_HINTS[category].hint}>
+                  <Chip value={category} size="xs">
+                    {categoryWord(category)}
+                  </Chip>
+                </Tooltip>
+              ))}
+            </Group>
+          </Stack>
         </Chip.Group>
       )}
       <Select

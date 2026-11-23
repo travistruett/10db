@@ -69,7 +69,6 @@ interface WorkstreamFacts {
 export interface ReporterFacts {
   readonly task: {
     readonly title: string;
-    readonly headline: string;
     readonly acceptanceCriteria: readonly string[];
   };
   /** The issue: Linear's key (`AMP-119`), Linear's own id, and its page. */
@@ -156,7 +155,6 @@ export function readReporterFacts(
   return {
     task: {
       title: task.title,
-      headline: task.headline,
       acceptanceCriteria: task.acceptanceCriteria,
     },
     link,
@@ -218,7 +216,6 @@ export function reporterBrief(facts: ReporterFacts): string {
       'task',
       [
         `Task: ${task.title}`,
-        task.headline === '' ? null : `In short: ${task.headline}`,
         task.acceptanceCriteria.length === 0
           ? null
           : `Acceptance criteria:\n${task.acceptanceCriteria.map((c) => `- ${c}`).join('\n')}`,

@@ -1,9 +1,10 @@
 /* The layer a drawer slides in on: it covers the content column and lets every click through except the
-   drawer's own. */
+   drawer's own. It clips rather than hides: a hidden overflow can still be scrolled, and WebKit scrolls it
+   to reveal the drawer when focus moves in mid-slide, so the drawer jumps across the view and snaps back. */
 .layer {
   position: absolute;
   inset: 0;
-  overflow: hidden;
+  overflow: clip;
   pointer-events: none;
   z-index: 15;
 }
@@ -18,7 +19,8 @@
   pointer-events: auto;
   background: var(--mantine-color-body);
   border-left: 1px solid var(--mantine-color-default-border);
-  box-shadow: 0 1px 2px light-dark(rgba(0, 0, 0, 0.06), rgba(0, 0, 0, 0.35));
+  /* The sidebar sheet's shadow, cast left onto the view, so the drawer reads as above it. */
+  box-shadow: -8px 0 24px light-dark(rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.25));
   animation: slide-in 150ms ease-out;
 }
 
@@ -35,11 +37,16 @@
   padding: 10px 16px 0 24px;
 }
 
+/* Content that reaches the drawer's edges (a sticky footer) offsets itself by the inset. */
+.drawer {
+  --surface-drawer-inset: 24px;
+}
+
 .body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 12px 24px 24px;
+  padding: 12px var(--surface-drawer-inset) var(--surface-drawer-inset);
 }
 
 @keyframes slide-in {

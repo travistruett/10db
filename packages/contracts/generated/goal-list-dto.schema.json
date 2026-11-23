@@ -526,9 +526,6 @@
                       "title": {
                         "type": "string"
                       },
-                      "headline": {
-                        "type": "string"
-                      },
                       "waitsOn": {
                         "type": "array",
                         "items": {
@@ -552,7 +549,6 @@
                     "required": [
                       "taskId",
                       "title",
-                      "headline",
                       "waitsOn"
                     ]
                   },

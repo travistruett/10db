@@ -17,16 +17,14 @@ export function LinearCard() {
       mark={<IconListDetails size={20} stroke={1.5} aria-hidden />}
       name="Linear"
       focusName="linear"
+      help="Sign in inside Claude Code (/mcp, or the claude.ai Linear connector) or in Codex (Settings › Trust)."
     >
       {linear.isError ? (
         <Alert color="red" title="Couldn't read the Linear sign-ins">
           {linear.error.message}
         </Alert>
       ) : (
-        <StateText>
-          Sign in inside Claude Code (/mcp, or the claude.ai Linear connector) or in Codex (Settings
-          › Trust).
-        </StateText>
+        <StateText>Signs in through Claude Code or Codex.</StateText>
       )}
       {list.length === 0 ? null : (
         <ProjectRows>

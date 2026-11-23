@@ -112,7 +112,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   // API so that it carries a Linear link, whose issue the reporter then writes to once the task is done.
   await page.getByRole('button', { name: 'New Task' }).click();
   const taskDialog = page.getByRole('dialog', { name: 'New Task' });
-  await taskDialog.getByLabel('Title').fill(OTHER);
+  await taskDialog.getByLabel('Title', { exact: true }).fill(OTHER);
   await expectAccessible(page, 'new task, dark');
   await taskDialog
     .getByLabel('Acceptance Criteria', { exact: true })
@@ -341,7 +341,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await open(page, 'Settings');
   await expectAccessible(page, 'settings, overview, dark');
   await chooseScope(page, 'This Project');
-  await page.getByRole('link', { name: /Board columns/ }).click();
+  await page.getByRole('link', { name: /Board Columns/ }).click();
   await page.getByLabel('New Column').fill('Exploring');
   const addColumn = page.getByRole('button', { name: 'Add Column' });
   await addColumn.click();

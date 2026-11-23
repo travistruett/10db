@@ -1,17 +1,14 @@
 import {
   areaLabel,
   BoardStatus,
-  Rigor,
   TaskStatus,
   type BatchDto,
-  type KindDto,
   type TaskDto,
   type TaskId,
   type WorkstreamDto,
 } from '@10db/contracts';
 import { Box, Group, Paper, Stack, Text, Tooltip } from '@mantine/core';
 import { ciResult } from './ci-line';
-import { kindBadge, rigorBadge } from './sizing-source';
 import { IndicatorRow, type Indicator } from './indicator-row';
 import type { StartNote } from './start-note';
 import { reviewSentBackLine, shippedAtLimitLine, taskState, type TaskState } from './task-state';
@@ -30,16 +27,10 @@ export interface TaskCardProps {
   readonly peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title' | 'status' | 'boardStatus'>>;
   /** A Start asked for and not yet answered, or refused; it takes the place of the task's own line. */
   readonly startNote?: StartNote | null | undefined;
-  /** The builder's kinds: a card's kind badges read their labels here. */
-  readonly kinds?: readonly KindDto[] | undefined;
-  /** The project's default rigor: a card shows its rigor only when it is not this one. */
-  readonly defaultRigor?: Rigor | undefined;
   /** A queued task's place in line, counting from 1. */
   readonly place?: number | undefined;
   /** The title of the goal the task belongs to, shown as a short badge; none under a Goal filter. */
   readonly goalTitle?: string | undefined;
-  /** How many tasks share the task's batch (`batchTaskCount`); more than one shows the shared-branch indicator. */
-  readonly batchTaskCount?: number | undefined;
 }
 
 /**
@@ -125,22 +116,19 @@ function shortGoalTitle(title: string): string {
 }
 
 /**
- * The card's indicators, in the order they show (readable board spec §4). Each kind is derived from data
- * the card already has; a later kind is one more entry here.
+ * The card's indicators, in the order they show: the goal it serves, then only what says where it stands
+ * (it waits on another task, its CI failed, it was cancelled). Rigor, kinds, a passing CI, a shared branch
+ * and the Workbench are the drawer's to say.
  */
 function indicatorsOf(
   task: TaskDto,
   peers: TaskCardProps['peers'],
   batch: BatchDto | undefined,
   batches: readonly BatchDto[],
-  sharedWith: number,
   goalTitle: string | undefined,
-  kinds: readonly KindDto[],
-  defaultRigor: Rigor,
 ): Indicator[] {
   const waits = waitsOn(task, peers);
   const ci = ciResult(batch, batches);
-  const rigor = rigorBadge(task, defaultRigor);
   return [
     goalTitle
       ? {
@@ -150,50 +138,19 @@ function indicatorsOf(
           tooltip: goalTitle,
         }
       : null,
-    batch?.passId != null
-      ? {
-          kind: 'workbench',
-          label: 'UI Workbench',
-          color: 'gray',
-          tooltip: 'A page open in the UI Workbench, worked on there',
-        }
-      : null,
-    sharedWith > 1
-      ? {
-          kind: 'shared-branch',
-          label: 'Shared Branch',
-          color: 'gray',
-          tooltip: `${String(sharedWith)} tasks share this branch`,
-        }
-      : null,
-    ci
-      ? {
-          kind: 'ci',
-          label: ci === 'passed' ? 'CI passed' : 'CI failed',
-          color: ci === 'passed' ? 'green' : 'red',
-        }
-      : null,
+    ci === 'failed' ? { kind: 'ci', label: 'CI failed', color: 'red' } : null,
     waits.length > 0
       ? { kind: 'waits-on', label: 'Waits On', color: 'gray', tooltip: waits.join(', ') }
       : null,
     task.status === TaskStatus.Cancelled
       ? { kind: 'cancelled', label: 'Cancelled', color: 'gray' }
       : null,
-    // The project's default rigor is the baseline every card has; one someone set or sized is worth saying, with who.
-    rigor === null
-      ? null
-      : { kind: 'rigor', label: rigor.label, color: 'gray', tooltip: rigor.tooltip },
-    ...task.kinds.map((k) => {
-      const badge = kindBadge(kinds.find((kind) => kind.key === k.key)?.label ?? k.key, k.source);
-      return { kind: `kind-${k.key}`, label: badge.label, color: 'gray', tooltip: badge.tooltip };
-    }),
   ].filter((indicator) => indicator !== null);
 }
 
 /**
- * A board card (readable board spec §5): the headline (the title when there is none), the why, a
- * status line only when the task needs the builder or has failed, then the indicator row, which
- * starts with the goal's badge.
+ * A board card: what (the title), why, and where it stands: a status line only when the task needs the
+ * builder or has failed, then the indicator row (its goal, and what holds it up).
  * Everything else about the task is in its drawer; `cardSummary` still speaks it.
  */
 export function TaskCard({
@@ -206,28 +163,21 @@ export function TaskCard({
   startNote = null,
   place,
   goalTitle,
-  batchTaskCount = 1,
-  kinds = [],
-  defaultRigor = Rigor.Standard,
 }: TaskCardProps) {
   const state = startNote
     ? noteState(startNote)
     : taskState(workstream, batch, gateCommand, place, batches, task);
   // The border takes the state's DESIGN.md color whatever the line says, thicker when it is the builder's
-  // turn: no fill, no stripe, no animation. Queued keeps the plain border.
-  const colored = state !== null && state.color !== 'gray' && state.plainBorder !== true;
+  // turn: no fill, no stripe, no animation. Queued keeps the plain border, and so does a done task: its
+  // column says it, and a column of green borders would be the Board's loudest.
+  const colored =
+    state !== null &&
+    state.color !== 'gray' &&
+    state.plainBorder !== true &&
+    task.status !== TaskStatus.Done;
   const waiting = colored && state.color === 'yellow';
   const line = state !== null && LINE_COLORS.has(state.color) ? state : null;
-  const indicators = indicatorsOf(
-    task,
-    peers,
-    batch,
-    batches,
-    batchTaskCount,
-    goalTitle,
-    kinds,
-    defaultRigor,
-  );
+  const indicators = indicatorsOf(task, peers, batch, batches, goalTitle);
   return (
     <Paper
       withBorder
@@ -248,9 +198,9 @@ export function TaskCard({
       }
     >
       <Stack gap="xs">
-        {/* The card's menu sits over the top-right corner, outside this element; the headline leaves room. */}
+        {/* The card's menu sits over the top-right corner, outside this element. */}
         <Text size="sm" fw={500} pr={28} lineClamp={3}>
-          {task.headline || task.title}
+          {task.title}
         </Text>
         {task.why ? (
           <Text size="xs" c="dimmed" lineClamp={2} data-testid="task-card-why">

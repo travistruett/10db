@@ -95,7 +95,6 @@ function goalBrief(goal: PlanGoal): GoalBrief {
     tasks: goal.tasks.map((t) => ({
       key: t.key,
       title: t.title,
-      headline: t.headline,
       why: t.why,
       description: t.description,
       criteria: t.criteria,

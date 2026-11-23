@@ -57,14 +57,13 @@ const CONTROL_CHARACTER = /\p{Cc}/u;
  * A task or batch title: one line, since in pull-request delivery it becomes the pull request's
  * title, and GitHub refuses one with a newline only after the branch is pushed.
  */
+export const TITLE_MAX = 200;
 export const Title = z
   .string()
   .min(1)
-  .max(200)
+  .max(TITLE_MAX)
   .refine((t) => !CONTROL_CHARACTER.test(t), 'no control characters such as newlines or tabs');
 
-/** The longest task headline: a few plain words the desktop names the task by. */
-export const HEADLINE_MAX = 80;
 /** The longest task why: one sentence. */
 export const WHY_MAX = 200;
 
@@ -79,11 +78,6 @@ function oneLine(field: string, max: number) {
     );
 }
 
-/**
- * A task's headline: the plain-words what ("Odd files can't freeze 10db"). Empty means none, and the
- * desktop shows the title instead. Git never sees it; the title stays the pull request's.
- */
-export const Headline = oneLine('headline', HEADLINE_MAX);
 /** Why a task matters, in one sentence; empty means none. */
 export const Why = oneLine('why', WHY_MAX);
 
@@ -820,7 +814,6 @@ export type ProjectPatch = z.infer<typeof ProjectPatch>;
 
 export const TaskInput = z.object({
   title: Title,
-  headline: Headline.default(''),
   why: Why.default(''),
   description: z.string().default(''),
   acceptanceCriteria: z.array(z.string().min(1)).min(1),
@@ -844,10 +837,8 @@ export type TaskConfig = z.output<typeof TaskInput>;
 export const TaskDto = z.object({
   id: TaskId,
   projectId: ProjectId,
-  /** The precise promise; the source of the batch, pull request and commit titles. */
+  /** The task's one name: the plain-words what, shown everywhere and the source of the pull request title. */
   title: z.string(),
-  /** The plain-words what; empty when none was written, and the desktop shows the title. */
-  headline: z.string(),
   /** One sentence on why the task matters; empty when none was written. */
   why: z.string(),
   description: z.string(),
@@ -919,8 +910,6 @@ export type TaskDto = z.infer<typeof TaskDto>;
 /** The fields of a task the builder can change; each is optional in a patch. */
 export const TaskPatchFields = z.object({
   title: Title,
-  /** An empty string clears it. */
-  headline: Headline,
   /** An empty string clears it. */
   why: Why,
   description: z.string(),
@@ -1067,8 +1056,6 @@ export const WorkstreamDto = z.object({
   id: WorkstreamId,
   taskId: TaskId,
   taskTitle: z.string(),
-  /** The task's headline; empty when it has none, and the desktop shows `taskTitle`. */
-  taskHeadline: z.string(),
   projectId: ProjectId,
   /** The batch it runs in; null in local delivery. */
   batchId: BatchId.nullable(),

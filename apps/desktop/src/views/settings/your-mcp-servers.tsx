@@ -2,6 +2,7 @@ import {
   McpSignInState,
   YourMcpServerState,
   YourMcpSource,
+  type McpSignInOwnClaudeDto,
   type McpSignInRowDto,
   type McpSignInTerminalDto,
   type YourMcpServerDto,
@@ -9,9 +10,11 @@ import {
 import {
   ActionIcon,
   Alert,
+  Anchor,
   Badge,
   Button,
   Code,
+  Collapse,
   CopyButton,
   Group,
   Modal,
@@ -131,31 +134,13 @@ function TerminalEntry({ entry }: { readonly entry: McpSignInTerminalDto }) {
   );
 }
 
-/** A server's details: where it comes from, what it runs, what it sets and sends. */
-function ServerText({
-  server,
-  signIns,
-}: {
-  readonly server: YourMcpServerDto;
-  readonly signIns: readonly McpSignInRowDto[];
-}) {
+/** What a server sets, sends and filters: the facts behind its one-line summary. */
+function ServerDetails({ server }: { readonly server: YourMcpServerDto }) {
   const codexUnused = server.oauth
     .map((entry) => entry.name)
     .filter((name) => CODEX_UNUSED_OAUTH.includes(name));
-  const sourceLabel =
-    server.source === YourMcpSource.Plugin && server.pluginId !== null
-      ? `Comes with ${server.pluginId}`
-      : SOURCE_LABELS[server.source];
   return (
     <Stack gap={2}>
-      <Text size="sm" c="dimmed">
-        {sourceLabel}
-      </Text>
-      {server.transport === null ? null : (
-        <Text size="xs" c="dimmed" style={{ wordBreak: 'break-all' }}>
-          {runs(server)}
-        </Text>
-      )}
       {server.envNames.length === 0 ? null : (
         <Text size="xs" c="dimmed">
           Sets {server.envNames.join(', ')}
@@ -177,9 +162,6 @@ function ServerText({
           Codex sessions don't use: {codexUnused.join(', ')}
         </Text>
       )}
-      {signIns.map((row) => (
-        <SignInLine key={row.accountId} row={row} />
-      ))}
       {server.headerNames.length === 0 ? null : (
         <Text size="xs" c="dimmed">
           Sends headers {server.headerNames.join(', ')}
@@ -205,11 +187,82 @@ function ServerText({
           Codex only: {server.codexOnly.join(', ')}
         </Text>
       )}
+    </Stack>
+  );
+}
+
+/** Whether a server has anything to show beyond its summary. */
+function hasDetails(server: YourMcpServerDto): boolean {
+  return (
+    server.envNames.length > 0 ||
+    server.oauth.length > 0 ||
+    server.headerNames.length > 0 ||
+    server.cwd !== null ||
+    server.enabledTools !== null ||
+    server.disabledTools.length > 0 ||
+    server.codexOnly.length > 0
+  );
+}
+
+/** A server's summary: where it comes from and what it runs, its sign-ins, and a Details fold. */
+function ServerText({
+  server,
+  signIns,
+  ownClaudeCode,
+}: {
+  readonly server: YourMcpServerDto;
+  readonly signIns: readonly McpSignInRowDto[];
+  /** The default-folder Claude plan accounts, when the server is one a sign-in matters for. */
+  readonly ownClaudeCode: readonly McpSignInOwnClaudeDto[];
+}) {
+  const [open, setOpen] = useState(false);
+  const sourceLabel =
+    server.source === YourMcpSource.Plugin && server.pluginId !== null
+      ? `Comes with ${server.pluginId}`
+      : SOURCE_LABELS[server.source];
+  return (
+    <Stack gap={2}>
+      <Text size="sm" c="dimmed">
+        {sourceLabel}
+      </Text>
+      {server.transport === null ? null : (
+        <Text size="xs" c="dimmed" style={{ wordBreak: 'break-all' }}>
+          {runs(server)}
+        </Text>
+      )}
+      {signIns.map((row) => (
+        <SignInLine key={row.accountId} row={row} />
+      ))}
+      {ownClaudeCode.map((account) => (
+        // 10db holds no sign-in state for these: Claude Code keeps it in its own store.
+        <Text key={account.accountId} size="xs" c="dimmed">
+          {account.accountLabel}: Signs in through your own Claude Code (<Code>/mcp</Code>)
+        </Text>
+      ))}
       {server.reason === null ? null : (
         <Text size="xs" c="red">
           {server.reason}
         </Text>
       )}
+      {hasDetails(server) ? (
+        <>
+          <Anchor
+            component="button"
+            type="button"
+            size="xs"
+            aria-expanded={open}
+            onClick={() => {
+              setOpen((was) => !was);
+            }}
+            style={{ alignSelf: 'flex-start' }}
+          >
+            {open ? 'Hide Details' : 'Details'}
+          </Anchor>
+          <Collapse expanded={open}>
+            <ServerDetails server={server} />
+          </Collapse>
+        </>
+      ) : null}
     </Stack>
   );
 }
@@ -277,7 +330,10 @@ export function YourMcpServers() {
   if (data === undefined) return null;
   const master = data.switches.yourMcpServers;
   return (
-    <SettingsCard title="Your MCP Servers">
+    <SettingsCard
+      title="Your MCP Servers"
+      description="Approve each server once, then switch it on or off."
+    >
       {data.mcpNotice === null ? null : (
         <Text size="sm" c="dimmed" px="md" py="sm">
           {data.mcpNotice}
@@ -299,6 +355,11 @@ export function YourMcpServers() {
               <ServerText
                 server={server}
                 signIns={(signIns.data?.rows ?? []).filter((row) => row.key === server.key)}
+                ownClaudeCode={
+                  signIns.data?.candidates.includes(server.key) === true
+                    ? signIns.data.ownClaudeCode
+                    : []
+                }
               />
             }
           >

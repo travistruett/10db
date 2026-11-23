@@ -100,3 +100,14 @@ describe('a sign-in', () => {
     expect(JSON.stringify(events)).not.toContain('https://');
   });
 });
+
+describe('which servers a sign-in matters for', () => {
+  it('leaves out only a server that sends its own Authorization header', async () => {
+    const figma = remote('figma', { 'X-Figma-Plugin-Bundle': 'claude-code/1.0' });
+    const keyed = remote('keyed', { authorization: 'Bearer secret' });
+    plan = planOf({ figma, keyed });
+    const listed = await service().list();
+    expect(listed.candidates).toEqual([figma.key]);
+    expect(listed.rows.map((row) => row.name)).toEqual(['figma']);
+  });
+});

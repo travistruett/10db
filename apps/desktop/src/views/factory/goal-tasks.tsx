@@ -20,7 +20,7 @@ export interface GoalTasksProps {
 }
 
 /**
- * The goal's tasks as one list. Each row is a state dot, the headline, its state, a pull request
+ * The goal's tasks as one list. Each row is a state dot, the title, its state, a pull request
  * link and the last activity; only a running row adds its step, model and context. A row opens the
  * task's drawer on the Board. A failed run is retried from Needs you, and a run is cancelled from its
  * card or drawer, so a row has no buttons of its own.

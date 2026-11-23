@@ -61,28 +61,28 @@ The bridge reads no other 10db variable.
 
 ## What the tools do
 
-| Tool            | Does                                                                                                                                                                       |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `list_projects` | Projects with their areas, hazards, isolate list, board columns (ids for `move_task`), default rigor and delivery.                                                         |
-| `list_kinds`    | The kinds a task can have, each with its key, its lowest rigor and what it changes (review, own copy, Inbox).                                                              |
-| `list_tasks`    | A project's **open** tasks. Finished and removed tasks are left out.                                                                                                       |
-| `create_task`   | Makes a task from a title, headline, why, description, criteria, areas, dependencies, rigor, kinds and landing; returns its id. A rigor below a kind's minimum is refused. |
-| `edit_task`     | Changes a task's title, headline, why, description, criteria, rigor, kinds, areas or landing (areas and landing only before it starts).                                    |
-| `remove_task`   | Removes a task that has not started, or one whose every run was cancelled, in no pass and with no saved work.                                                              |
-| `start_task`    | Starts a **Ready** task, resumes a held one, or with `fresh` starts a failed one over; any other is refused (see below).                                                   |
-| `move_task`     | Moves a task to a board column (parking it), or with `to: null` back to Planned.                                                                                           |
-| `run_next`      | Puts a started task that is waiting for a lane first in line for the next free lane (see below).                                                                           |
-| `list_inbox`    | Open Inbox cards: id, kind, project, title, time. Answer them in the app.                                                                                                  |
-| `start_shape`   | Moves a brainstorm into Shape: a conversation whose first message is your summary, with inline text files (256 KB in all, never paths).                                    |
+| Tool            | Does                                                                                                                                                             |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_projects` | Projects with their areas, hazards, isolate list, board columns (ids for `move_task`), default rigor and delivery.                                               |
+| `list_kinds`    | The kinds a task can have, each with its key, its lowest rigor and what it changes (review, own copy, Inbox).                                                    |
+| `list_tasks`    | A project's **open** tasks. Finished and removed tasks are left out.                                                                                             |
+| `create_task`   | Makes a task from a title, why, description, criteria, areas, dependencies, rigor, kinds and landing; returns its id. A rigor below a kind's minimum is refused. |
+| `edit_task`     | Changes a task's title, why, description, criteria, rigor, kinds, areas or landing (areas and landing only before it starts).                                    |
+| `remove_task`   | Removes a task that has not started, or one whose every run was cancelled, in no pass and with no saved work.                                                    |
+| `start_task`    | Starts a **Ready** task, resumes a held one, or with `fresh` starts a failed one over; any other is refused (see below).                                         |
+| `move_task`     | Moves a task to a board column (parking it), or with `to: null` back to Planned.                                                                                 |
+| `run_next`      | Puts a started task that is waiting for a lane first in line for the next free lane (see below).                                                                 |
+| `list_inbox`    | Open Inbox cards: id, kind, project, title, time. Answer them in the app.                                                                                        |
+| `start_shape`   | Moves a brainstorm into Shape: a conversation whose first message is your summary, with inline text files (256 KB in all, never paths).                          |
 
 The knowledge tools are in [Decisions and principles](#decisions-and-principles).
 
 `create_task` refuses what the New Task form refuses, with the same words ("Add at least one acceptance
 criterion", "Choose at least one area", and the API's messages for an unknown area or a title with a line break).
-The drafting guidance asks for a `headline` (the plain words the Board names it by, one line of at most 80
-characters) and a `why` (one sentence, at most 200) on every task. The API still takes both as
-optional and empty by default, and either one too long or with a line break is refused in the API's words, which name
-the field. Git never sees them: the title stays the pull request's.
+The drafting guidance asks for a title that is the plain-words what (a few words, one line) and a `why` (one
+sentence, at most 200) on every task. The title is the task's one name, shown everywhere and the pull request's title;
+10db adds the commit prefix. The API still takes `why` as optional and empty by default, and a title or why too long or
+with a line break is refused in the API's words, which name the field.
 `landing` (`{kind:'base'}`, `{kind:'branch', branch}` or `{kind:'hold'}`) says where the task's pull request goes;
 omitted, a new task gets the project's default. A branch origin lacks is refused in the API's words on both tools, and
 `edit_task` refuses a landing change once the task has started.

@@ -1,25 +1,9 @@
-import {
-  EffectiveRigorSource,
-  TaskKindSource,
-  type Rigor,
-  type TaskDto,
-  type TaskKind,
-} from '@10db/contracts';
-import { rigorLabel } from '../settings/rigor-labels';
+import { EffectiveRigorSource, TaskKindSource, type TaskDto, type TaskKind } from '@10db/contracts';
 
 type SizedRigor = Pick<
   TaskDto,
   'effectiveRigor' | 'effectiveRigorSource' | 'effectiveRigorReason' | 'sizedByRules'
 >;
-
-/** How a source reads beside a rigor or a kind: "Careful · judged". The project's default has no word. */
-const SOURCE_WORD: Readonly<Record<EffectiveRigorSource, string | null>> = {
-  [EffectiveRigorSource.Judge]: 'judged',
-  [EffectiveRigorSource.Rules]: 'rules',
-  [EffectiveRigorSource.Agent]: 'agent',
-  [EffectiveRigorSource.Builder]: 'you',
-  [EffectiveRigorSource.Default]: null,
-};
 
 const RIGOR_FALLBACK: Readonly<Record<EffectiveRigorSource, string>> = {
   [EffectiveRigorSource.Judge]: 'Rigor the judge chose',
@@ -36,27 +20,6 @@ const RIGOR_FALLBACK: Readonly<Record<EffectiveRigorSource, string>> = {
 function rigorExplanation(task: SizedRigor): string {
   const why = task.effectiveRigorReason ?? RIGOR_FALLBACK[task.effectiveRigorSource];
   return task.sizedByRules ? `${why} · Sized by rules` : why;
-}
-
-/**
- * The card's rigor badge, or null when the task runs at its project's default with nothing to say: the label
- * names the rigor and who sized it ("Careful · judged"), and the tooltip is the reason.
- */
-export function rigorBadge(
-  task: SizedRigor,
-  defaultRigor: Rigor,
-): { readonly label: string; readonly tooltip: string } | null {
-  if (
-    task.effectiveRigorSource === EffectiveRigorSource.Default &&
-    task.effectiveRigor === defaultRigor
-  )
-    return null;
-  const word = SOURCE_WORD[task.effectiveRigorSource];
-  const name = rigorLabel(task.effectiveRigor);
-  return {
-    label: word === null ? name : `${name} · ${word}`,
-    tooltip: rigorExplanation(task),
-  };
 }
 
 /**

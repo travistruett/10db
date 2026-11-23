@@ -1,4 +1,9 @@
-import { SegmentedControl, useComputedColorScheme, useMantineColorScheme } from '@mantine/core';
+import {
+  Group,
+  SegmentedControl,
+  useComputedColorScheme,
+  useMantineColorScheme,
+} from '@mantine/core';
 import { SettingRow, SettingsCard } from './setting-row';
 
 const SCHEMES = [
@@ -13,13 +18,14 @@ export function AppearanceSection() {
   return (
     <SettingsCard>
       <SettingRow label="Theme" description="The window's title bar follows it too.">
-        <SegmentedControl
-          aria-label="Theme"
-          fullWidth
-          value={scheme}
-          data={[...SCHEMES]}
-          onChange={setColorScheme}
-        />
+        <Group justify="flex-end">
+          <SegmentedControl
+            aria-label="Theme"
+            value={scheme}
+            data={[...SCHEMES]}
+            onChange={setColorScheme}
+          />
+        </Group>
       </SettingRow>
     </SettingsCard>
   );

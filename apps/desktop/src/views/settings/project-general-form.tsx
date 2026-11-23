@@ -181,7 +181,7 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
 
   return (
     <Stack gap="xl">
-      <SettingsCard>
+      <SettingsCard title="Project">
         <SettingRow label="Name">
           <TextInput
             aria-label="Name"
@@ -192,6 +192,41 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
             }}
           />
         </SettingRow>
+        <SettingRow
+          label="App Address"
+          description="Where your dev server answers."
+          help="Where your dev server answers, such as http://localhost:5173. The UI Workbench's Open in Browser opens a page's route here, and pictures of pages are taken here; an https server with a self-signed certificate gets no pictures."
+        >
+          <TextInput
+            aria-label="App Address"
+            placeholder="http://localhost:5173"
+            styles={MONO_INPUT}
+            value={values.appUrl}
+            error={errors.appUrl}
+            onChange={(e) => {
+              set({ appUrl: e.currentTarget.value });
+            }}
+          />
+        </SettingRow>
+        <SettingRow
+          label="Preview Command"
+          description="Starts your dev server while pages are open."
+          help="Starts your dev server at the app address while pages are open in the UI Workbench, and stops it once they are finished or abandoned, so you never run it yourself. It runs under the gate's sandbox, which needs Allow localhost."
+        >
+          <TextInput
+            aria-label="Preview Command"
+            placeholder="pnpm dev (optional)"
+            styles={MONO_INPUT}
+            value={values.previewCommand}
+            error={errors.previewCommand}
+            onChange={(e) => {
+              set({ previewCommand: e.currentTarget.value });
+            }}
+          />
+        </SettingRow>
+      </SettingsCard>
+
+      <SettingsCard title="Checks">
         <SettingRow
           label="Gate Command"
           description={
@@ -212,10 +247,12 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         </SettingRow>
         <SettingRow
           label="Check After Each Step"
-          description="Optional. Runs after each step instead of the gate command; the gate command still runs before the push."
+          description="Runs after each step in place of the gate."
+          help="Runs after each step instead of the gate command; the gate command still runs before the push."
         >
           <TextInput
             aria-label="Check After Each Step"
+            placeholder="Optional"
             styles={MONO_INPUT}
             value={values.changedCheckCommand}
             error={errors.changedCheckCommand}
@@ -226,7 +263,8 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         </SettingRow>
         <SettingRow
           label="Pre-Check Command"
-          description="Runs on the Mac in place of the gate when the pull request's base branch has required checks on GitHub. Leave it empty to keep running the gate."
+          description="Stands in for the gate when GitHub has required checks."
+          help="Runs on the Mac in place of the gate when the pull request's base branch has required checks on GitHub. Leave it empty to keep running the gate."
         >
           <TextInput
             aria-label="Pre-Check Command"
@@ -238,45 +276,17 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
             }}
           />
         </SettingRow>
-        <SettingRow
-          label="App Address"
-          description="Where your dev server answers, such as http://localhost:5173. The UI Workbench's Open in Browser opens a page's route here, and pictures of pages are taken here; an https server with a self-signed certificate gets no pictures."
-        >
-          <TextInput
-            aria-label="App Address"
-            placeholder="http://localhost:5173"
-            styles={MONO_INPUT}
-            value={values.appUrl}
-            error={errors.appUrl}
-            onChange={(e) => {
-              set({ appUrl: e.currentTarget.value });
-            }}
-          />
-        </SettingRow>
-        <SettingRow
-          label="Preview Command"
-          description="Optional. Starts your dev server at the app address while pages are open in the UI Workbench, and stops it once they are finished or abandoned, so you never run it yourself. It runs under the gate's sandbox, which needs Allow loopback."
-        >
-          <TextInput
-            aria-label="Preview Command"
-            placeholder="pnpm dev"
-            styles={MONO_INPUT}
-            value={values.previewCommand}
-            error={errors.previewCommand}
-            onChange={(e) => {
-              set({ previewCommand: e.currentTarget.value });
-            }}
-          />
-        </SettingRow>
       </SettingsCard>
 
       <SettingsCard title="Pictures of Pages">
         <SettingRow
           label="Dev Login Command"
-          description="Optional. Prints an address on the app that signs a browser in, for pictures of pages that need a sign-in. It runs under the gate's sandbox."
+          description="Prints an address that signs a browser in."
+          help="Prints an address on the app that signs a browser in, for pictures of pages that need a sign-in. It runs under the gate's sandbox."
         >
           <Textarea
             aria-label="Dev Login Command"
+            placeholder="Optional"
             autosize
             minRows={1}
             styles={MONO_INPUT}
@@ -289,7 +299,9 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         </SettingRow>
         <SettingRow
           label="Screenshot Matrix"
-          description="Each page is pictured in each viewport and theme: at most 4 pictures a route."
+          description="Each page is pictured in each viewport and theme."
+          help="At most 4 pictures a route."
+          stacked
         >
           <ScreensMatrixField
             value={values.screens}
@@ -301,7 +313,8 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         </SettingRow>
         <SettingRow
           label="Pictures in Pull Requests"
-          description="A UI Workbench pull request shows each signed-off page before and after. The pictures are pushed to a 10db-pictures branch on GitHub, so anyone who can see the repository can see them, data on the page included."
+          description="Shows each signed-off page before and after."
+          help="A UI Workbench pull request shows each signed-off page before and after. The pictures are pushed to a 10db-pictures branch on GitHub, so anyone who can see the repository can see them, data on the page included."
         >
           <Group justify="flex-end">
             <Switch
@@ -366,7 +379,12 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
             label="When Checks Pass"
             description={
               values.landing === ProjectLanding.Hold
-                ? 'Pull requests wait for you to merge them. A task can choose to merge.'
+                ? 'Pull requests wait for you to merge them.'
+                : 'GitHub merges each pull request once its checks pass.'
+            }
+            help={
+              values.landing === ProjectLanding.Hold
+                ? 'A task can choose to merge.'
                 : `GitHub merges each pull request into ${(values.landing === ProjectLanding.Branch ? values.landingBranch.trim() : values.baseBranch.trim()) || 'the base branch'} by itself once its required checks pass. A task can choose another branch, or hold.`
             }
           >
@@ -391,7 +409,8 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         {pullRequests && values.landing === ProjectLanding.Branch ? (
           <SettingRow
             label="New Tasks Land In"
-            description="A branch on origin, such as an integration branch. Each new task starts out landing there; a task can choose another place."
+            description="A branch on origin where new tasks land."
+            help="A branch on origin, such as an integration branch. Each new task starts out landing there; a task can choose another place."
           >
             <TextInput
               aria-label="New Tasks Land In"
@@ -408,11 +427,12 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         {showPrFields ? (
           <SettingRow
             label="Pull Request Title"
-            description="Optional. Starts every title, as a commit type and scope: feat(desktop). Left empty, 10db writes <type>(<scope>): <subject> from the batch's tasks and the paths it changed."
+            description="Starts every title, such as feat(desktop)."
+            help="Left empty, 10db writes <type>(<scope>): <subject> from the batch's tasks and the paths it changed."
           >
             <TextInput
               aria-label="Pull Request Title"
-              placeholder="feat(app)"
+              placeholder="feat(app) (optional)"
               styles={MONO_INPUT}
               value={values.prTitlePrefix}
               error={errors.prTitlePrefix}
@@ -443,7 +463,12 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         {pullRequests ? (
           <SettingRow
             label="Default for New Tasks"
-            description={`${
+            description={
+              values.workspaceMode === WorkspaceMode.Worktree
+                ? 'Each task works in its own copy of the repository.'
+                : 'Tasks change files in your checkout.'
+            }
+            help={`${
               values.workspaceMode === WorkspaceMode.Worktree
                 ? 'Separate copy: each new task works in its own copy of the repository under ~/.10db/worktrees, so any tasks can run together. Your checkout is left alone. You see the work in its pull request.'
                 : 'Your folder: new tasks change files in your checkout, so you can watch them land in your editor and dev server. While they run, 10db switches this checkout to a new branch cut from the base branch, and it needs the checkout clean (no uncommitted changes) to start. When the batch ships, closes or is abandoned, 10db switches the checkout back to where it was, as long as it is still on that branch with nothing uncommitted. Otherwise 10db leaves it where it is, and a card says why unless you moved it yourself.'
@@ -471,7 +496,8 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         {pullRequests ? (
           <SettingRow
             label="Separate Copy for These Areas"
-            description="Area and hazard names, such as migrations or deps. A new task that names one is proposed a separate copy, and its card says why. Changing the list moves no task that already exists."
+            description="Area and hazard names that get their own copy."
+            help="Area and hazard names, such as migrations or deps. A new task that names one is proposed a separate copy, and its card says why. Changing the list moves no task that already exists."
           >
             <TagsInput
               aria-label="Separate Copy for These Areas"
@@ -570,7 +596,7 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
             </SettingRow>
             <SettingRow
               label="Spending Limit per Task"
-              description="Leave empty for no limit. Models that cost more per task aren't used."
+              description="Models that cost more per task aren't used."
             >
               <NumberInput
                 aria-label="Spending Limit per Task"
@@ -587,7 +613,8 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
             </SettingRow>
             <SettingRow
               label="Commands That Don't Ask"
-              description="One per line, such as pnpm test. Tasks run these without asking you; 10db still checks each one."
+              description="One per line, such as pnpm test."
+              help="Tasks run these without asking you; 10db still checks each one."
               stacked
             >
               <Textarea
@@ -605,7 +632,8 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
             </SettingRow>
             <SettingRow
               label="Allow localhost"
-              description="For tests that start a local server. Opens every local port to tasks, not just this project's."
+              description="For tests that start a local server."
+              help="Opens every local port to tasks, not just this project's."
             >
               <Group justify="flex-end">
                 <Switch
@@ -619,7 +647,8 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
             </SettingRow>
             <SettingRow
               label="Allow Docker"
-              description="For gates and tasks that run docker compose. Docker can mount any host folder into a container, so a gate or task with Docker can reach outside the sandbox."
+              description="For gates and tasks that run docker compose."
+              help="Docker can mount any host folder into a container, so a gate or task with Docker can reach outside the sandbox."
             >
               <Group justify="flex-end">
                 <Switch

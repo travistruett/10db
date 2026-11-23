@@ -1,7 +1,7 @@
-import { HEADLINE_MAX, WHY_MAX } from '@10db/contracts';
+import { TITLE_MAX, WHY_MAX } from '@10db/contracts';
 import { TextInput } from '@mantine/core';
 
-// Readable board spec §3, §4: a task's headline and why, written in the New Task form and the drawer.
+// A task's title and why, written in the New Task form and the drawer.
 // Both are one line; the daemon refuses a newline, and `maxLength` stops the length at the field.
 
 interface FieldProps {
@@ -9,13 +9,14 @@ interface FieldProps {
   readonly onChange: (value: string) => void;
 }
 
-/** The plain-words what: optional, at most 80 characters. The Board falls back to the title. */
-export function HeadlineField({ value, onChange }: FieldProps) {
+/** The task's one name: the plain-words what, shown everywhere and the pull request's title. */
+export function TitleField({ value, onChange }: FieldProps) {
   return (
     <TextInput
-      label="Headline"
-      description="Optional. A few plain words saying what the task does, such as “Odd files can't freeze 10db”."
-      maxLength={HEADLINE_MAX}
+      label="Title"
+      description="What it does, in a few plain words."
+      placeholder="Such as “Odd files can't freeze 10db”"
+      maxLength={TITLE_MAX}
       value={value}
       onChange={(e) => {
         onChange(e.currentTarget.value);
@@ -29,7 +30,8 @@ export function WhyField({ value, onChange }: FieldProps) {
   return (
     <TextInput
       label="Why"
-      description="Optional. One sentence on why it matters, when the headline doesn't say."
+      description="Why it matters, in one sentence."
+      placeholder="Optional"
       maxLength={WHY_MAX}
       value={value}
       onChange={(e) => {

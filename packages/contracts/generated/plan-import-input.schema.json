@@ -1090,11 +1090,6 @@
                           "minLength": 1,
                           "maxLength": 200
                         },
-                        "headline": {
-                          "default": "",
-                          "type": "string",
-                          "maxLength": 80
-                        },
                         "why": {
                           "default": "",
                           "type": "string",
@@ -1223,11 +1218,6 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 200
-                  },
-                  "headline": {
-                    "default": "",
-                    "type": "string",
-                    "maxLength": 80
                   },
                   "why": {
                     "default": "",
