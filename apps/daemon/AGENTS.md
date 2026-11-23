@@ -11,7 +11,8 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
 - `TENDB_BENCHMARKS=off` keeps a daemon from reading the Artificial Analysis key and from calling AA
   (`aaKeyReaderFromEnv`: the sync records `no_key`), and with it from reading OpenRouter's scores and speeds
   (`daemonOptionsFromEnv` leaves `openRouterSync` off). Only the installed app's daemon syncs; the e2e web
-  server, the live acceptance daemon and `scripts/dev.sh` set it, and `tests/repo/src/benchmarks-off.test.ts`
+  server, the live acceptance daemon and `scripts/dev.sh` set it (`dev.sh` as a default, so
+  `TENDB_BENCHMARKS=on pnpm dev:window` turns it on for one run, as it does `TENDB_SLACK` and `TENDB_JUDGE`), and `tests/repo/src/benchmarks-off.test.ts`
   checks they do. A new launcher of a throwaway daemon sets it too.
 - `TENDB_CATALOGUE=off` keeps a daemon from fetching the model catalogue from models.dev
   (`catalogueSync` in `daemonOptionsFromEnv`); the stored copy and the release snapshot are still read. It also turns

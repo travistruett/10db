@@ -3,9 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { readRepoFile, repoRoot } from './workspace';
 
 // Only the installed app's daemon may call Artificial Analysis: its free quota is shared by the
-// builder's key, and a throwaway daemon with no prior sync would spend it.
+// builder's key, and a throwaway daemon with no prior sync would spend it. A script may default a
+// switch to off (`${TENDB_SLACK:-off}`) so the builder can turn it on for one run.
 describe('daemons that are not the installed app', () => {
-  const OFF = /TENDB_BENCHMARKS\s*[:=]\s*['"]?off\b/;
+  const OFF = /TENDB_BENCHMARKS(\s*[:=]\s*['"]?|:-)off\b/;
 
   it.each([
     ['the e2e web server', 'apps/desktop/e2e/playwright.config.ts'],
@@ -49,7 +50,7 @@ describe('daemons that are not the installed app', () => {
   });
 
   // The judge sends task text and diffs to OpenRouter on the builder's key and spends it.
-  const JUDGE_OFF = /TENDB_JUDGE\s*[:=]\s*['"]?off\b/;
+  const JUDGE_OFF = /TENDB_JUDGE(\s*[:=]\s*['"]?|:-)off\b/;
 
   it.each([
     ['the e2e web server', 'apps/desktop/e2e/playwright.config.ts'],
@@ -60,7 +61,7 @@ describe('daemons that are not the installed app', () => {
   });
 
   // The reply watch and the sender message real people on the builder's bot token.
-  const SLACK_OFF = /TENDB_SLACK\s*[:=]\s*['"]?off\b/;
+  const SLACK_OFF = /TENDB_SLACK(\s*[:=]\s*['"]?|:-)off\b/;
 
   it.each([
     ['the e2e web server', 'apps/desktop/e2e/playwright.config.ts'],
