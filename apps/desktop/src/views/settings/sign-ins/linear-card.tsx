@@ -17,7 +17,7 @@ export function LinearCard() {
       mark={<IconListDetails size={20} stroke={1.5} aria-hidden />}
       name="Linear"
       focusName="linear"
-      help="Connect Linear sets up Linear's server for the project's account. On Codex it signs in in your browser; on Claude Code you finish with /mcp. A project's update note is in its Settings › General."
+      help="Connect Linear sets up Linear's server for the project's account. On Codex it signs in in your browser; on Claude Code you finish with /mcp. A project's update note is on its Settings › Linear page."
     >
       {linear.isError ? (
         <Alert color="red" title="Couldn't read the Linear sign-ins">
