@@ -227,7 +227,7 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   border and a shadow as well. A control sits on `bg1` in both schemes (`theme.ts`).
 - **Drawers:** one slide-out kind, `SurfaceDrawer` (`apps/desktop/src/shell/surface-drawer.tsx`), from the
   content's right edge, inside the box: half the column, 480 to 760 px, all of it under 640 px, in the
-  content's tone with a 1 px `bg2` left edge, 24 px insets, no eyebrow and a 16 px / 600 title. It slides in over 150 ms (at once with reduced motion), is not modal, and closes with
+  content's tone with a 1 px `bg2` left edge and the sidebar sheet's shadow cast left onto the view, 24 px insets, no eyebrow and a 16 px / 600 title. It slides in over 150 ms (at once with reduced motion), is not modal, and closes with
   Esc inside it or its ×.
 - **Loading:** a page draws its header first, since the title and byline are known before the data. After 300 ms
   of waiting, quiet placeholder rows in the shape of what is coming take the content's place

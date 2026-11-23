@@ -9,12 +9,20 @@ interface FieldProps {
   readonly onChange: (value: string) => void;
 }
 
-/** The plain-words what: optional, at most 80 characters. The Board falls back to the title. */
-export function HeadlineField({ value, onChange }: FieldProps) {
+/**
+ * The plain-words what, at most 80 characters: the headline, which the form calls Title because it is the
+ * name the builder sees everywhere. `placeholder` shows what stands in when it is empty.
+ */
+export function HeadlineField({
+  value,
+  onChange,
+  placeholder = "Such as “Odd files can't freeze 10db”",
+}: FieldProps & { readonly placeholder?: string }) {
   return (
     <TextInput
-      label="Headline"
-      description="Optional. A few plain words saying what the task does, such as “Odd files can't freeze 10db”."
+      label="Title"
+      description="What it does, in a few plain words."
+      placeholder={placeholder}
       maxLength={HEADLINE_MAX}
       value={value}
       onChange={(e) => {
@@ -29,8 +37,23 @@ export function WhyField({ value, onChange }: FieldProps) {
   return (
     <TextInput
       label="Why"
-      description="Optional. One sentence on why it matters, when the headline doesn't say."
+      description="Why it matters, in one sentence."
+      placeholder="Optional"
       maxLength={WHY_MAX}
+      value={value}
+      onChange={(e) => {
+        onChange(e.currentTarget.value);
+      }}
+    />
+  );
+}
+
+/** The task's title as git sees it (pull request, commit, branch); empty takes the Title. */
+export function PullRequestTitleField({ value, onChange }: FieldProps) {
+  return (
+    <TextInput
+      label="Pull Request Title"
+      description="What git sees. Empty uses the Title."
       value={value}
       onChange={(e) => {
         onChange(e.currentTarget.value);

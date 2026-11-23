@@ -1,5 +1,6 @@
-import { Anchor, Text } from '@mantine/core';
-import { useState } from 'react';
+import { ActionIcon, Anchor, Text, Tooltip } from '@mantine/core';
+import { IconGitPullRequest } from '@tabler/icons-react';
+import { useState, type MouseEvent, type ReactNode } from 'react';
 import { isTauri, openInBrowser } from '../../desktop/tauri';
 
 /**
@@ -12,36 +13,57 @@ export function ExternalLink({
   label,
   size = 'sm',
   inText = false,
+  icon,
 }: {
   readonly url: string;
   readonly label: string;
   readonly size?: 'xs' | 'sm';
   /** Inside a line of text, where only an underline tells the link from the words around it. */
   readonly inText?: boolean;
+  /** Drawn as this icon alone, named and tipped by its label, for a toolbar of links out. */
+  readonly icon?: ReactNode;
 }) {
   const [openFailure, setOpenFailure] = useState<string | null>(null);
+  const open = (event: MouseEvent<HTMLAnchorElement>): void => {
+    // A browser opens the tab itself; the desktop app's webview would follow nothing.
+    if (!isTauri()) return;
+    event.preventDefault();
+    setOpenFailure(null);
+    openInBrowser(url).catch((failure: unknown) => {
+      setOpenFailure(
+        `Couldn't open ${url}: ${failure instanceof Error ? failure.message : String(failure)}`,
+      );
+    });
+  };
   return (
     <>
-      <Anchor
-        href={url}
-        target="_blank"
-        rel="noreferrer"
-        size={size}
-        underline={inText ? 'always' : 'hover'}
-        onClick={(event) => {
-          // A browser opens the tab itself; the desktop app's webview would follow nothing.
-          if (!isTauri()) return;
-          event.preventDefault();
-          setOpenFailure(null);
-          openInBrowser(url).catch((failure: unknown) => {
-            setOpenFailure(
-              `Couldn't open ${url}: ${failure instanceof Error ? failure.message : String(failure)}`,
-            );
-          });
-        }}
-      >
-        {label}
-      </Anchor>
+      {icon === undefined ? (
+        <Anchor
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          size={size}
+          underline={inText ? 'always' : 'hover'}
+          onClick={open}
+        >
+          {label}
+        </Anchor>
+      ) : (
+        <Tooltip label={label} withArrow>
+          <ActionIcon
+            component="a"
+            href={url}
+            target="_blank"
+            rel="noreferrer"
+            variant="subtle"
+            color="gray"
+            aria-label={label}
+            onClick={open}
+          >
+            {icon}
+          </ActionIcon>
+        </Tooltip>
+      )}
       {openFailure ? (
         <Text size="sm" c="red">
           {openFailure}
@@ -51,7 +73,21 @@ export function ExternalLink({
   );
 }
 
-/** A batch's pull request. */
-export function PullRequestLink({ url }: { readonly url: string }) {
-  return <ExternalLink url={url} label="Pull Request" />;
+/** A batch's pull request; `button` draws it as its icon, for a toolbar of links out. */
+export function PullRequestLink({
+  url,
+  button = false,
+}: {
+  readonly url: string;
+  readonly button?: boolean;
+}) {
+  return button ? (
+    <ExternalLink
+      url={url}
+      label="Pull Request"
+      icon={<IconGitPullRequest size={18} stroke={1.5} />}
+    />
+  ) : (
+    <ExternalLink url={url} label="Pull Request" />
+  );
 }

@@ -5,14 +5,14 @@ import {
   type ProjectDto,
   type TaskDto,
 } from '@10db/contracts';
-import { Box, Code, List, MultiSelect, Stack, Text, Textarea, TextInput } from '@mantine/core';
+import { Box, Code, List, MultiSelect, Stack, Text, Textarea } from '@mantine/core';
 import { useEffect, useId, useState, type SyntheticEvent } from 'react';
 import { useCreateTask } from '../../daemon/queries';
 import { criteriaLines } from './areas-text';
 import { LabelWithHelp } from './field-help';
 import { draftFor, landingFromDraft, type LandingDraft } from './landing-draft';
 import { LandingField } from './landing-field';
-import { HeadlineField, WhyField } from './task-words-fields';
+import { HeadlineField, PullRequestTitleField, WhyField } from './task-words-fields';
 
 const CRITERIA_PLACEHOLDER =
   'One per line, for example:\nSearch shows results in under a second with 10,000 tasks';
@@ -68,6 +68,10 @@ export function NewTaskForm({
   const submit = (event: SyntheticEvent<HTMLFormElement>): void => {
     event.preventDefault();
     const acceptanceCriteria = criteriaLines(criteriaText);
+    if (title.trim() === '' && headline.trim() === '') {
+      setFormError('Give the task a title');
+      return;
+    }
     const refusal = newTaskRefusal({ acceptanceCriteria, areas });
     if (refusal !== null) {
       setFormError(refusal);
@@ -83,7 +87,8 @@ export function NewTaskForm({
     setLandingError(null);
     create.mutate(
       {
-        title: title.trim(),
+        // An empty pull request title takes the Title.
+        title: title.trim() || headline.trim(),
         headline: headline.trim(),
         why: why.trim(),
         description: description.trim(),
@@ -111,13 +116,6 @@ export function NewTaskForm({
     <form id={formId} onSubmit={submit} noValidate>
       <Stack>
         <HeadlineField value={headline} onChange={setHeadline} />
-        <TextInput
-          label="Title"
-          value={title}
-          onChange={(e) => {
-            setTitle(e.currentTarget.value);
-          }}
-        />
         <WhyField value={why} onChange={setWhy} />
         <Textarea
           label="Description"
@@ -192,6 +190,7 @@ export function NewTaskForm({
           searchable
           clearable
         />
+        <PullRequestTitleField value={title} onChange={setTitle} />
         {pullRequests ? (
           <LandingField
             baseBranch={project.baseBranch}

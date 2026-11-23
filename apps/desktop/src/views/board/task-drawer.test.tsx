@@ -41,7 +41,7 @@ describe('TaskDrawer', () => {
     acceptanceCriteria: ['A FIFO is skipped', 'A huge file is skipped'],
   };
 
-  it('opens on Overview: headline and why, one status line, the tabs, then what it promises and the shared branch', async () => {
+  it('opens on Overview: one status line, headline and why, the tabs, then what it promises and the shared branch', async () => {
     server.use(...baseHandlers());
     const batch = batchDto({ prUrl: 'https://github.com/acme/widgets/pull/9' });
     const ws = workstreamDto({ batchId: batch.id, state: 'QUEUED' });
@@ -51,7 +51,6 @@ describe('TaskDrawer', () => {
     const headline = within(d).getByRole('heading', { name: "Odd files can't freeze 10db" });
     const why = within(d).getByText('A FIFO could hang every lane.');
     const status = within(d).getByTestId('status-line');
-    expect(within(status).getByRole('link', { name: 'Pull Request' })).toBeTruthy();
     const tabs = within(d).getByRole('tablist');
     const promises = within(d).getByText('What It Promises');
     const title = within(d).getByText(FIFO);
@@ -62,7 +61,7 @@ describe('TaskDrawer', () => {
         .getAllByRole('listitem')
         .map((li) => li.textContent),
     ).toEqual(['A FIFO is skipped', 'A huge file is skipped']);
-    const inOrder = [headline, why, status, tabs, promises, title, abandon];
+    const inOrder = [status, headline, why, tabs, promises, title, abandon];
     for (let i = 1; i < inOrder.length; i += 1) {
       const before = inOrder[i - 1];
       const after = inOrder[i];
@@ -71,7 +70,7 @@ describe('TaskDrawer', () => {
         `element ${String(i)} follows element ${String(i - 1)}`,
       ).toBe(true);
     }
-    // The pull request link is on the status line alone: not again in the shared branch.
+    // The pull request link is in the drawer's toolbar alone: not again in the shared branch.
     expect(within(d).getAllByRole('link', { name: 'Pull Request' })).toHaveLength(1);
     // The form is on the Edit tab, and the tab selected is Overview.
     expect(within(d).getByRole('tab', { name: 'Overview' }).getAttribute('aria-selected')).toBe(
