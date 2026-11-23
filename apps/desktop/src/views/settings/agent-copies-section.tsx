@@ -72,16 +72,16 @@ export function AgentCopiesSection() {
                 <Text size="sm" fw={500}>
                   {agent.label}
                 </Text>
-                <Group gap="sm" wrap="nowrap">
-                  <Text size="sm" ff="monospace">
+                <Group gap="sm" wrap="nowrap" align="center">
+                  <Text size="sm" ff="monospace" lh={1}>
                     {agent.pinned}
                   </Text>
                   {newer === null ? (
-                    <VersionBadge label="Latest" color="teal" />
+                    <VersionBadge label="Up to Date" color="teal" />
                   ) : (
                     <Tooltip label="Comes with a 10db update once 10db is tested on it" withArrow>
                       <span>
-                        <VersionBadge label={`${newer} Out`} color="gray" />
+                        <VersionBadge label={`Latest: ${newer}`} color="gray" />
                       </span>
                     </Tooltip>
                   )}
