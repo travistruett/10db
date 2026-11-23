@@ -1,5 +1,6 @@
 import { Box, Divider, Group, Paper, Stack, Text, Title } from '@mantine/core';
 import { Children, Fragment, useEffect, useId, useRef, type ReactNode } from 'react';
+import { HelpTip } from './help-tip';
 
 /** A titled card of settings rows, with a hairline between rows. */
 export function SettingsCard({
@@ -13,7 +14,7 @@ export function SettingsCard({
   const rows = Children.toArray(children);
   return (
     <Stack gap="xs">
-      {title ? <Title order={5}>{title}</Title> : null}
+      {title ? <Title order={4}>{title}</Title> : null}
       <Paper withBorder radius="md">
         {rows.map((row, i) => (
           <Fragment key={i}>
@@ -30,6 +31,8 @@ export interface SettingRowProps {
   readonly label: string;
   /** One line on what the setting does, in the builder's words. */
   readonly description?: ReactNode;
+  /** The full explanation, behind an info button beside the label, when one line is not enough. */
+  readonly help?: ReactNode;
   /** The control; it carries the label for assistive tech (`aria-label`). */
   readonly children: ReactNode;
   /** A control too wide for the right column, such as a list, goes under the text instead. */
@@ -40,7 +43,13 @@ export interface SettingRowProps {
 const CONTROL = 'textarea, input:not([type="hidden"]), [role="radiogroup"]';
 
 /** One setting: its name and one line on the left, its control on the right. */
-export function SettingRow({ label, description, children, stacked = false }: SettingRowProps) {
+export function SettingRow({
+  label,
+  description,
+  help,
+  children,
+  stacked = false,
+}: SettingRowProps) {
   const descriptionId = useId();
   const row = useRef<HTMLDivElement>(null);
   // Mantine's inputs overwrite an `aria-describedby` passed to them with their own ids, so the row
@@ -54,9 +63,12 @@ export function SettingRow({ label, description, children, stacked = false }: Se
   });
   const text = (
     <Box flex={1} miw={0}>
-      <Text size="sm" fw={500}>
-        {label}
-      </Text>
+      <Group gap={2} wrap="nowrap">
+        <Text size="sm" fw={500}>
+          {label}
+        </Text>
+        {help ? <HelpTip label={label}>{help}</HelpTip> : null}
+      </Group>
       {description ? (
         <Text size="xs" c="dimmed" id={descriptionId}>
           {description}
