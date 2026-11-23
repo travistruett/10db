@@ -82,7 +82,7 @@ export type SignInResult =
   | { readonly ok: true; readonly state: StorageState }
   | { readonly ok: false; readonly problem: string };
 
-const NEEDS_DOCKER = 'The dev login needs Docker: turn on Allow Docker in Settings › General';
+const NEEDS_DOCKER = 'The dev login needs Docker: turn on Allow Docker in Settings › Sandbox';
 
 /** What went wrong with a dev login's run, in the status line's words; null for one that passed. */
 export function devLoginProblem(

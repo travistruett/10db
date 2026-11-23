@@ -1,6 +1,7 @@
 export const SettingsSectionKey = {
   Overview: 'overview',
   General: 'general',
+  PagesAndPictures: 'pages-and-pictures',
   BoardColumns: 'board-columns',
   Planning: 'planning',
   Areas: 'areas',
@@ -63,14 +64,16 @@ const { Project, App } = SettingsScope;
 /** Project sections first, then app-wide ones; each scope in the order the sidebar lists it. */
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   GENERAL_SECTION,
+  section(SettingsSectionKey.PagesAndPictures, Project, 'Project', 'Pages and Pictures'),
   section(SettingsSectionKey.BoardColumns, Project, 'Project', 'Board Columns'),
   section(SettingsSectionKey.Planning, Project, 'Planning', 'Planning'),
   section(SettingsSectionKey.Areas, Project, 'Planning', 'Areas and Hazards'),
   section(SettingsSectionKey.RoutingRules, Project, 'Planning', 'Who Answers'),
-  section(SettingsSectionKey.Billing, Project, 'Agents', 'Billing'),
   section(SettingsSectionKey.Team, Project, 'Agents', 'Playbook'),
+  section(SettingsSectionKey.Billing, Project, 'Agents', 'Billing'),
   section(SettingsSectionKey.ProjectTrust, Project, 'Agents', 'Trust'),
-  section(SettingsSectionKey.NetworkHosts, Project, 'Agents', 'Network Hosts'),
+  // The key keeps the address the section had as Network Hosts, so an old link still lands here.
+  section(SettingsSectionKey.NetworkHosts, Project, 'Agents', 'Sandbox'),
   section(SettingsSectionKey.Overview, App, null, 'Overview'),
   section(SettingsSectionKey.Accounts, App, 'AI', 'Accounts'),
   section(SettingsSectionKey.Playbook, App, 'AI', 'Playbook'),

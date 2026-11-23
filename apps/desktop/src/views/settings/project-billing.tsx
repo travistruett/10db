@@ -1,10 +1,12 @@
 import { AccountId, USAGE_HANDOFF_MAX, USAGE_HANDOFF_MIN, type ProjectDto } from '@10db/contracts';
 import { NumberInput, Stack, Text } from '@mantine/core';
 import { useState } from 'react';
+import { SaveBar } from '../../shell/save-bar';
 import { useAccounts } from '../../daemon/account-queries';
 import { usePatchProject } from '../../daemon/queries';
 import { AccountSelect } from './account-select';
 import { cantRunAgents } from './accounts/used-by';
+import { asNumber, useProjectFields } from './project-fields-state';
 import { SettingRow, SettingsCard } from './setting-row';
 
 const MIN_PCT = Math.round(USAGE_HANDOFF_MIN * 100);
@@ -12,11 +14,13 @@ const MAX_PCT = Math.round(USAGE_HANDOFF_MAX * 100);
 
 /**
  * Which account pays for the project, and the fallback 10db moves it to near a usage limit
- * (accounts spec §6, §7). Work in flight follows a move at each lane's next session.
+ * (accounts spec §6, §7). Work in flight follows a move at each lane's next session. The spending limit
+ * is a typed field and saves with the bar below.
  */
 export function ProjectBilling({ project }: { readonly project: ProjectDto }) {
   const accounts = useAccounts().data ?? [];
   const patch = usePatchProject(project.id);
+  const limit = useProjectFields(project);
   const [handoffPct, setHandoffPct] = useState<string | number>(
     Math.round(project.usageHandoffAt * 100),
   );
@@ -92,12 +96,36 @@ export function ProjectBilling({ project }: { readonly project: ProjectDto }) {
             }}
           />
         </SettingRow>
+        <SettingRow
+          label="Spending Limit per Task"
+          description="Models that cost more per task aren't used."
+        >
+          <NumberInput
+            aria-label="Spending Limit per Task"
+            min={0}
+            decimalScale={2}
+            prefix="$"
+            placeholder="No limit"
+            value={limit.values.budgetCeiling}
+            error={limit.errors.budgetCeiling}
+            onChange={(v) => {
+              limit.set({ budgetCeiling: asNumber(v) });
+            }}
+          />
+        </SettingRow>
       </SettingsCard>
       {patch.error ? (
         <Text size="sm" c="red" role="alert">
           {`Couldn't change the project's accounts: ${patch.error.message}`}
         </Text>
       ) : null}
+      <SaveBar
+        error={limit.saveError}
+        note={limit.note}
+        saving={limit.saving}
+        onReset={limit.reset}
+        onSave={limit.save}
+      />
     </Stack>
   );
 }
