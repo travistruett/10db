@@ -155,7 +155,10 @@ function FigmaButtons({
         </Text>
       </Group>
     );
-  if ((attachment.figma?.fileUrl ?? null) === null)
+  const linked = (attachment.figma?.fileUrl ?? null) !== null;
+  // A project's first send is one plain button; once the project has a Figma file, every mock-up has one
+  // Figma menu, which also offers a new file in case the stored one was lost.
+  if (!linked && attachment.figma?.fileStored !== true)
     return (
       <>
         <Button
@@ -167,18 +170,6 @@ function FigmaButtons({
         >
           Open in Figma
         </Button>
-        {attachment.figma?.fileStored === true ? (
-          <Anchor
-            component="button"
-            type="button"
-            fz={12}
-            c="dimmed"
-            aria-label={`Send to a new Figma file: ${title}`}
-            onClick={sendToNewFile}
-          >
-            Send to a New Figma File
-          </Anchor>
-        ) : null}
         {error}
       </>
     );
@@ -197,21 +188,27 @@ function FigmaButtons({
           </Button>
         </Menu.Target>
         <Menu.Dropdown>
-          <Menu.Item
-            onClick={() => {
-              open.mutate(attachment.id);
-            }}
-          >
-            Open Frame in Figma
-          </Menu.Item>
-          <Menu.Item
-            onClick={() => {
-              press.mutate({ attachmentId: attachment.id, action: 'bring-back' });
-            }}
-          >
-            Bring Back from Figma
-          </Menu.Item>
-          <Menu.Item onClick={send}>Send Again to Figma</Menu.Item>
+          {linked ? (
+            <>
+              <Menu.Item
+                onClick={() => {
+                  open.mutate(attachment.id);
+                }}
+              >
+                Open Frame in Figma
+              </Menu.Item>
+              <Menu.Item
+                onClick={() => {
+                  press.mutate({ attachmentId: attachment.id, action: 'bring-back' });
+                }}
+              >
+                Bring Back from Figma
+              </Menu.Item>
+              <Menu.Item onClick={send}>Send Again to Figma</Menu.Item>
+            </>
+          ) : (
+            <Menu.Item onClick={send}>Open in Figma</Menu.Item>
+          )}
           <Menu.Item onClick={sendToNewFile}>Send to a New Figma File</Menu.Item>
         </Menu.Dropdown>
       </Menu>
