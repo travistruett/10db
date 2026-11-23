@@ -68,6 +68,8 @@ export type ShapeApiServices = Pick<
   | 'reviewShape'
   | 'designReviewShape'
   | 'approveShapeAttachment'
+  | 'figmaShapeAttachment'
+  | 'openFigmaFrame'
   | 'dismissShapeFinding'
 >;
 
@@ -234,6 +236,9 @@ export function createShapeServices(deps: {
     approveShapeAttachment: (shapeId, attachmentId, input) => {
       shape.approveAttachment(shapeId, attachmentId, input.approved);
     },
+    figmaShapeAttachment: (shapeId, attachmentId, input) =>
+      shape.figma(shapeId, attachmentId, input),
+    openFigmaFrame: (shapeId, attachmentId) => shape.openFigmaFrame(shapeId, attachmentId),
     dismissShapeFinding: (shapeId, findingId, input) => {
       shape.dismissFinding(shapeId, findingId, input.how);
     },

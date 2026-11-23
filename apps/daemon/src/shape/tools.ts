@@ -23,6 +23,7 @@ import type { StateStore } from '../events';
 import type { ShapeToolHandlers } from '../mcp';
 import type { ScreenService } from '../screens';
 import { attach } from './attach';
+import { createFigmaTools } from './figma';
 import { reconcileDraft } from './rounds';
 import { stampReview, type ShapeReviewTurn } from './review-turn';
 import { reportFinding, resolveFinding, writeSpec } from './review';
@@ -42,6 +43,8 @@ export interface ShapeToolDeps {
     /** The service's `see` with the limits of the conversation's account already given. */
     see(shapeId: ShapeId, input: SeeScreenInput): ReturnType<ScreenService['see']>;
   };
+  /** The `fetch` that posts a mock-up to Figma and reads its assets; the real one by default. */
+  readonly figmaFetch?: typeof fetch;
   /** Takes the planning rules the calling session is owed, once (`ChatLive.planRules`). */
   readonly owedRules?: (conversationId: ConversationId, sessionId: SessionId) => string | null;
   /** Whether the calling session runs no subagents (`ChatLive.inSession`). */
@@ -112,6 +115,10 @@ export function createShapeToolHandlers(
   chat: ShapeToolChat,
 ): ShapeToolHandlers {
   const { screens } = deps;
+  const figma = createFigmaTools(
+    { state: deps.state, fetch: deps.figmaFetch ?? fetch },
+    chat.projectId,
+  );
   const planNow = (): ShapeId | null => planOfChat(deps.state.db, chat.chatId);
   const line = (shapeId: ShapeId, body: string): void => {
     deps.state.write((ctx) => {
@@ -177,6 +184,8 @@ export function createShapeToolHandlers(
         }),
     attach: (input) =>
       withPlan((shapeId) => deps.state.write((ctx) => attach(ctx, shapeId, input))),
+    send_mockup_to_figma: (input) => withPlan((shapeId) => figma.send(shapeId, input)),
+    file_figma_version: (input) => withPlan((shapeId) => figma.fileVersion(shapeId, input)),
     write_spec: (input) =>
       withPlan((shapeId) => deps.state.write((ctx) => writeSpec(ctx, shapeId, input))),
     report_finding: (input) => {

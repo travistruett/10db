@@ -16,8 +16,10 @@ import {
   listShapeLinks,
   listShapeProposals,
   type DbReader,
+  type ShapeAttachmentRow,
   type WriteContext,
 } from '@10db/db';
+import { frameOf } from './figma';
 
 // Shape spec §10.3. The session attaches a Mermaid diagram, a chart or an HTML mockup to a proposed
 // task or goal, or to one this conversation converted. The schema already refused a chart that names a
@@ -87,6 +89,13 @@ function attachmentOf(kind: string, body: string): ShapeAttachment | null {
   return parsed.success ? parsed.data : null;
 }
 
+/** The frame link a mock-up shows; null for any other attachment and for a mock-up never sent. */
+function figmaLinkOf(db: DbReader, row: ShapeAttachmentRow): { fileUrl: string } | null {
+  if (row.kind !== 'mockup') return null;
+  const frame = frameOf(db, row.id);
+  return frame === null ? null : { fileUrl: frame.fileUrl };
+}
+
 /** The view's attachments: diagrams, charts and mockups, oldest first. */
 export function attachmentsOf(db: DbReader, shapeId: ShapeId): ShapeAttachmentDto[] {
   return listShapeAttachments(db, shapeId).flatMap((row) => {
@@ -101,6 +110,7 @@ export function attachmentsOf(db: DbReader, shapeId: ShapeId): ShapeAttachmentDt
             taskId: row.taskId,
             attachment,
             approved: row.approvedAt !== null,
+            figma: figmaLinkOf(db, row),
           },
         ];
   });

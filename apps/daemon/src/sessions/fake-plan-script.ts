@@ -1,5 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { FAKE_FIGMA_ASSET_URL, FAKE_FIGMA_SUBMIT_URL } from './fake-figma-fetch';
 import type { FakeShapeBehaviour } from './fake-session';
 
 /** How the planning rules owed to a session that began without a plan start. */
@@ -20,6 +21,10 @@ const REVIEW_EFFORT = /^- effortKey (\S+)/gm;
 const REHEARSE_TASK = /^- effortKey (\S+) · taskKey (\S+) · taskHash (\S+)/gm;
 /** A Design review turn lists `- effortKey <e> · taskKey <t>` for each task it compares. */
 const DESIGN_TASK = /^- effortKey (\S+) · taskKey (\S+)/gm;
+/** The Figma presses name the mock-up: `- attachmentId <id> · key <key>`. */
+const FIGMA_ATTACHMENT = /^- attachmentId (\S+)/m;
+/** What the scripted agent reads back from a frame: one image, by Figma's asset link. */
+const FIGMA_HTML = `<main><h1>Dense board, from Figma</h1><img src="${FAKE_FIGMA_ASSET_URL}" alt=""></main>`;
 /** "mock it up" attaches a small mockup to the scripted goal's first task. */
 const MOCK_IT_UP = /\bmock it up\b/i;
 const MOCKUP_HTML = '<main><h1>Dense board</h1><p>Cards sit closer together.</p></main>';
@@ -220,6 +225,16 @@ export function scriptedShapeBehaviour(): FakeShapeBehaviour {
             finding: { kind: 'question', text: 'Which screen does this change first?' },
           });
         return { text: `Read ${String(tasks.length)}.` };
+      }
+      // The two Figma presses: the script calls 10db's tools as the agent would after its Figma server's.
+      if (trimmed.startsWith('Open in Figma:') || trimmed.startsWith('Bring back from Figma:')) {
+        const attachmentId = FIGMA_ATTACHMENT.exec(trimmed)?.[1] ?? '';
+        const opening = trimmed.startsWith('Open in Figma:');
+        const answer = opening
+          ? await call('send_mockup_to_figma', { attachmentId, submitUrl: FAKE_FIGMA_SUBMIT_URL })
+          : await call('file_figma_version', { attachmentId, html: FIGMA_HTML });
+        if (answer.isError) return { text: `Figma refused: ${answer.text}` };
+        return { text: opening ? 'Sent to Figma.' : 'Brought back from Figma.' };
       }
       if (MOCK_IT_UP.test(text)) {
         const answer = await call('attach', {

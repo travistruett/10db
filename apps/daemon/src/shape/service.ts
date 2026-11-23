@@ -9,6 +9,7 @@ import {
   shapeFileRefusal,
   NotFoundError,
   parseItemBody,
+  FigmaAction,
   ShapeEventKind,
   ShapeMessageAuthor,
   ShapeMessageKind,
@@ -28,6 +29,7 @@ import {
   type ShapeFileDto,
   type ShapeFindingId,
   type ShapeAcceptId,
+  type FigmaPressInput,
   type ShapeAttachmentId,
   type ShapeId,
   type ShapeMessageDto,
@@ -53,6 +55,7 @@ import {
   insertShapeFile,
   insertShapeMessage,
   listConversationsOfProfile,
+  listShapeAttachments,
   listPushedTurnStarters,
   listQueuedTurnStarters,
   listShapes,
@@ -88,6 +91,8 @@ import {
 import { convertProposals, type ConvertOutcome, type JoiningProblem } from './convert';
 import { checkDroppedFile, readyToKeep, storeFile } from './dropped-files';
 import { dropNote, editNote, restoreNote, rowLabel, unpinNote } from './edit-notes';
+import { bringBackNote, openInFigmaNote } from './figma-press';
+import { fileOf, frameOf, isFigmaDesignUrl, openWithSystem } from './figma';
 import { designTargets, runDesignReview } from './design-review';
 import { createPlanParts, type PlanParts, type PlanTurnState } from './plan-parts';
 import type { ShapeJev } from './jev';
@@ -174,6 +179,10 @@ export interface ShapeServiceDeps {
   readonly hold?: Hold;
   /** Draws a mock-up and shoots the app's pages for a Design review; absent, the press is refused. */
   readonly pictures?: Pick<Pictures, 'shootNow' | 'drawMockup'>;
+  /** The `fetch` the Figma tools use; see `ShapeToolDeps.figmaFetch`. */
+  readonly figmaFetch?: ShapeToolDeps['figmaFetch'];
+  /** Opens a page in the builder's browser; `/usr/bin/open` by default. */
+  readonly openUrl?: (url: string) => Promise<void>;
 }
 
 /** A file as the input hands it over: the name the browser reported, and its bytes. */
@@ -236,6 +245,18 @@ export interface ShapeService {
   ): Promise<{ status: 'started' | 'running' | 'nothing'; tasks: number }>;
   /** Approves a mock-up as the design target, or takes the approval back; a note tells the session. */
   approveAttachment(shapeId: ShapeId, attachmentId: ShapeAttachmentId, approved: boolean): void;
+  /**
+   * Open in Figma or Bring Back from Figma on a mock-up: a note and the ask for the session, queued as a
+   * review press is. `running` while another Figma press waits or its turn runs. Throws InvalidError for
+   * a Bring Back on a mock-up never sent, and NotFoundError for an attachment that is no mock-up of the plan.
+   */
+  figma(
+    shapeId: ShapeId,
+    attachmentId: ShapeAttachmentId,
+    input: FigmaPressInput,
+  ): { status: 'started' | 'running' };
+  /** Opens a mock-up's stored Figma frame in the builder's browser. Throws InvalidError when it has none. */
+  openFigmaFrame(shapeId: ShapeId, attachmentId: ShapeAttachmentId): Promise<void>;
   /**
    * Reopens a conversation with an event as a note (spec §12): the note is a transcript row a
    * proposal may cite, and with each converted row's current state it reaches the next turn. Starts no
@@ -384,6 +405,12 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         parseItemBody(item.kind, item.body).kind === kind,
     );
   };
+  /** A mock-up of the plan, by id; NotFoundError for any other attachment. */
+  const mockupOfPlan = (shapeId: ShapeId, attachmentId: ShapeAttachmentId) => {
+    const row = listShapeAttachments(state.db, shapeId).find((a) => a.id === attachmentId);
+    if (row?.kind !== 'mockup') throw new NotFoundError('mock-up', attachmentId);
+    return row;
+  };
   const say = (
     shapeId: ShapeId,
     author: ShapeMessageAuthor,
@@ -468,6 +495,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
               },
             }),
         world: worldOfShape,
+        ...(deps.figmaFetch === undefined ? {} : { figmaFetch: deps.figmaFetch }),
         ...(deps.owedRules === undefined ? {} : { owedRules: deps.owedRules }),
         ...(deps.reviewOf === undefined ? {} : { reviewOf: deps.reviewOf }),
         ...(deps.noSubagents === undefined ? {} : { noSubagents: deps.noSubagents }),
@@ -735,6 +763,54 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       }
       engine.queued(conversationOf(shapeId));
       return { status: 'started', tasks: targets.length };
+    },
+
+    figma(shapeId, attachmentId, input) {
+      const mockup = mockupOfPlan(shapeId, attachmentId);
+      const { projectId } = getShape(state.db, shapeId);
+      const kind =
+        input.action === FigmaAction.Open
+          ? ShapeMessageKind.FigmaOpen
+          : ShapeMessageKind.FigmaBringBack;
+      if (
+        pressPending(shapeId, ShapeEventKind.FigmaOpen) ||
+        pressPending(shapeId, ShapeEventKind.FigmaBringBack)
+      )
+        return { status: 'running' };
+      const frame = frameOf(state.db, mockup.id);
+      let press;
+      if (input.action === FigmaAction.Open) {
+        press = openInFigmaNote(
+          mockup,
+          getProject(state.db, projectId).name,
+          // A mock-up sent before keeps its frame's file; else the project's draft file.
+          (frame ?? fileOf(state.db, projectId))?.fileKey ?? null,
+        );
+      } else {
+        if (frame === null)
+          throw new InvalidError(
+            'That mock-up was never sent to Figma, so there is no frame to bring back.',
+          );
+        press = bringBackNote(mockup, frame);
+      }
+      state.write((ctx) =>
+        insertShapeMessage(ctx, shapeId, {
+          author: ShapeMessageAuthor.Note,
+          kind,
+          body: press.note,
+          prompt: press.instruction,
+        }),
+      );
+      engine.queued(conversationOf(shapeId));
+      return { status: 'started' };
+    },
+
+    async openFigmaFrame(shapeId, attachmentId) {
+      const mockup = mockupOfPlan(shapeId, attachmentId);
+      const frame = frameOf(state.db, mockup.id);
+      if (frame === null || !isFigmaDesignUrl(frame.fileUrl))
+        throw new InvalidError('That mock-up has no Figma frame to open.');
+      await (deps.openUrl ?? openWithSystem)(frame.fileUrl);
     },
 
     approveAttachment(shapeId, attachmentId, approved) {

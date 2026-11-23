@@ -131,6 +131,7 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/slack': 'No screen draws a setting.',
   '/projects/:projectId/integrations': 'No screen draws a setting.',
   '/settings/sign-ins/linear': 'No screen draws a setting.',
+  '/settings/sign-ins/figma': 'No screen draws a setting.',
   '/slack/members': "The workspace's people are read from Slack, and no screen draws them.",
   '/stakeholders/timers': 'No screen draws a setting.',
   '/tasks/:taskId/question-routes': 'No screen draws who answers a task.',

@@ -218,6 +218,8 @@ import type {
   SlackTokenInput,
   ProjectIntegrationsDto,
   ProjectIntegrationsInput,
+  FigmaPressInput,
+  FigmaSignInsDto,
   LinearSignInsDto,
   LinearPostDto,
   LinearReporterSettings,
@@ -642,6 +644,14 @@ export interface ApiServices extends PlanRecordServices {
     attachmentId: ShapeAttachmentId,
     input: ShapeApprovalInput,
   ): void;
+  /** Open in Figma or Bring Back from Figma on a mock-up: queues the ask for the plan's session. */
+  figmaShapeAttachment(
+    shapeId: ShapeId,
+    attachmentId: ShapeAttachmentId,
+    input: FigmaPressInput,
+  ): { status: 'started' | 'running' };
+  /** Opens a mock-up's Figma frame in the builder's browser. */
+  openFigmaFrame(shapeId: ShapeId, attachmentId: ShapeAttachmentId): Promise<void>;
   /** Plan review on the given rows (or all); `tasks` counts the goals and loose tasks it reads. */
   reviewShape(shapeId: ShapeId, input: ShapeRehearseInput): ShapeRehearseResult;
   /** Design review on the given rows (or all): answers once the pictures are taken and the turn is queued. */
@@ -908,6 +918,7 @@ export interface ApiServices extends PlanRecordServices {
   ): Promise<ProjectIntegrationsDto>;
   /** How each agent account reaches Linear, from what is already read; it starts no probe. */
   linearSignIns(): Promise<LinearSignInsDto>;
+  figmaSignIns(): Promise<FigmaSignInsDto>;
   /** The workspace's people, optionally filtered; read from Slack at most every ten minutes. */
   listSlackMembers(query: string): Promise<SlackMemberDto[]>;
   getStakeholderTimers(): StakeholderTimersDto;
