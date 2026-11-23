@@ -7,7 +7,7 @@ import {
   SortDirection,
   type PrincipleItem,
 } from '@10db/contracts';
-import { MultiSelect, Stack, Text } from '@mantine/core';
+import { MultiSelect, Text } from '@mantine/core';
 import type { DataTableColumn, DataTableSortStatus } from 'mantine-datatable';
 import { useState, type ReactNode } from 'react';
 import { useKnowledgePrinciples, type KnowledgeFilter } from '../../daemon/knowledge-queries';
@@ -62,12 +62,15 @@ export function PrincipleList({
   controls,
   onTrace,
   actions,
+  openId,
 }: {
   readonly filter: KnowledgeFilter;
   readonly controls: ListControls;
   readonly onTrace: (record: TracedRecord) => void;
   /** The row's menu. */
   readonly actions: (principle: PrincipleItem) => ReactNode;
+  /** The record open in the drawer. */
+  readonly openId: string | null;
 }) {
   const [sort, setSort] = useState<DataTableSortStatus<PrincipleItem> | null>(null);
   const [kinds, setKinds] = useState<readonly PrincipleKind[]>([]);
@@ -98,21 +101,16 @@ export function PrincipleList({
       filtering: firstColumnFiltering(controls),
       filter: <ShelfSearchFilter controls={controls} />,
       render: (p) => (
-        <Stack gap={4}>
-          <OpenRecordText
-            label={p.statement}
-            onOpen={() => {
-              open(p);
-            }}
-          >
+        <OpenRecordText
+          label={p.statement}
+          onOpen={() => {
+            open(p);
+          }}
+        >
+          <Text size="sm" lineClamp={2}>
             {p.statement}
-          </OpenRecordText>
-          {p.rationale ? (
-            <Text size="xs" c="dimmed" lineClamp={2}>
-              {p.rationale}
-            </Text>
-          ) : null}
-        </Stack>
+          </Text>
+        </OpenRecordText>
       ),
     },
     {
@@ -187,6 +185,7 @@ export function PrincipleList({
         records={rows}
         columns={columns}
         idOf={(p) => p.id}
+        openId={openId}
         onOpen={open}
         sort={sort ?? BY_KIND}
         onSort={setSort}

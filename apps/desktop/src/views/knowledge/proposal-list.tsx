@@ -111,9 +111,11 @@ export function ProposalList({
               open(row);
             }}
           >
-            {row.principle.statement}
+            <Text size="sm" lineClamp={2}>
+              {row.principle.statement}
+            </Text>
           </OpenRecordText>
-          <Text size="xs" c="dimmed" lineClamp={2} style={{ whiteSpace: 'pre-wrap' }}>
+          <Text size="xs" c="dimmed" lineClamp={1}>
             {row.proposal.body}
           </Text>
         </Stack>
