@@ -594,7 +594,7 @@ export function startCodexSession(spec: AgentSessionSpec, deps: CodexSessionDeps
         .filter((name) => states[name] === McpAuthState.NotSignedIn)
         .map(
           (name) =>
-            `Note from 10db: ${name} isn't signed in for this account. Sign in in Settings › Trust. It is not in this session; don't look for its tools.`,
+            `Note from 10db: ${name} isn't signed in for this account. The builder signs in to it under Settings › Trust. It is not in this session; don't look for its tools.`,
         );
     } catch (error) {
       if (error instanceof SessionOver) throw error;

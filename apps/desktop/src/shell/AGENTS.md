@@ -84,7 +84,7 @@ content column (the nearest positioned box when drawn without a frame), 480 to 7
 640 px. It is not modal (`role=dialog`, `aria-modal=false`, no overlay); focus moves in on opening and back on
 closing; Esc with focus inside, or ×, closes it. With `closeOnClickOutside` (the Board's task drawer) a press on
 the content beside it closes it too, except on an element marked `data-keeps-drawer` (a task card, which opens its
-own task instead) or outside the content box (menus, dialogs, the sidebar). Use it for every side panel (Changes, an Inbox item, a Board
+own task instead) or outside the content box (menus, dialogs, the sidebar). With `showing` (what it shows, such as a record id), focus lost when its body redraws under a link comes back to it, so Esc still closes it. Use it for every side panel (Changes, an Inbox item, a Board
 task); never Mantine's `Drawer`.
 
 ## Tests

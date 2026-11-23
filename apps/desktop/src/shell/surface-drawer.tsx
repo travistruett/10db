@@ -28,6 +28,7 @@ export function SurfaceDrawer({
   widthPx,
   actions,
   closeOnClickOutside = false,
+  showing,
   children,
 }: {
   readonly opened: boolean;
@@ -42,6 +43,8 @@ export function SurfaceDrawer({
   readonly actions?: ReactNode;
   /** A press on the content beside the drawer closes it. */
   readonly closeOnClickOutside?: boolean;
+  /** What it shows, such as a record's id: when it changes while open, focus that was lost comes back in. */
+  readonly showing?: string;
   readonly children: ReactNode;
 }): ReactNode {
   const { drawerHost } = useFrameSlots();
@@ -58,6 +61,13 @@ export function SurfaceDrawer({
     };
     // The drawer's element is drawn again once the frame's layer is there, so focus follows it.
   }, [opened, drawerHost]);
+
+  // A link inside that opens something else redraws the body under the focus, which falls to the page,
+  // where Esc no longer reaches the drawer: focus comes back to the drawer.
+  useEffect(() => {
+    if (!opened || showing === undefined) return;
+    if (!drawer.current?.contains(document.activeElement)) drawer.current?.focus();
+  }, [opened, showing]);
 
   useEffect(() => {
     if (!opened || !closeOnClickOutside) return;

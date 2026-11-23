@@ -31,7 +31,7 @@ import {
   PrincipleActions,
   ProposalActions,
 } from './record-actions';
-import { ProvenanceDrawer } from './provenance-drawer';
+import { itemOf, ProvenanceDrawer } from './provenance-drawer';
 import { scopeAreas } from './knowledge-areas';
 
 /** Long enough to skip a request per keystroke, short enough to feel live. */
@@ -249,6 +249,7 @@ function ProjectKnowledge({
                 filter={filterFor(principleShelf)}
                 controls={principleControls}
                 onTrace={setTraced}
+                openId={traced?.id ?? null}
                 actions={(principle) => (
                   <PrincipleActions project={project} principle={principle} />
                 )}
@@ -268,6 +269,7 @@ function ProjectKnowledge({
               filter={filterFor(decisionShelf)}
               controls={decisionControls}
               onTrace={setTraced}
+              openId={traced?.id ?? null}
               actions={(decision) => <DecisionActions project={project} decision={decision} />}
             />
           </Stack>
@@ -276,6 +278,15 @@ function ProjectKnowledge({
       <ProvenanceDrawer
         record={traced}
         onTrace={setTraced}
+        actions={(provenance) => {
+          const item = itemOf(provenance);
+          if (item === null) return null;
+          return item.kind === KnowledgeItemKind.Decision ? (
+            <DecisionActions project={project} decision={item} />
+          ) : (
+            <PrincipleActions project={project} principle={item} />
+          );
+        }}
         onClose={() => {
           setTraced(null);
           // The id must not reopen the drawer, least of all in another project once the switcher moves.

@@ -260,6 +260,9 @@ export const ProvenanceDto = z.object({
   kind: z.enum(['decision', 'principle']),
   /** The record in words: a principle's statement, or a decision's question and choice. */
   text: z.string(),
+  /** The record whole, for the view that opens it: one of the two, by `kind`. */
+  decision: DecisionDto.nullable(),
+  principle: PrincipleDto.nullable(),
   state: z.enum(KnowledgeState),
   sourceKind: z.enum(SourceKind),
   /** The `sources` row's own JSON, as stored. */
