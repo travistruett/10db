@@ -230,7 +230,7 @@ function LiveSystems({ projectId }: { readonly projectId: ProjectDto['id'] }) {
   const saved = live.data?.liveSystems;
   const shown = set.isPending ? set.variables : (saved ?? []);
   return (
-    <SettingsCard>
+    <SettingsCard title="Live Systems">
       <SettingRow
         label="Live Systems"
         description="Hosts and profiles the judge treats as live."
@@ -323,7 +323,7 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
   if (trust.isError) return <Alert color="red">{trust.error.message}</Alert>;
   return (
     <Stack gap="lg">
-      <SettingsCard title="Switches">
+      <SettingsCard title="What Comes Along">
         {TRUST_ROWS.map((row) => (
           <SettingRow
             key={row.key}
@@ -382,11 +382,7 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
       {mcpServers.length === 0 ? null : (
         <SettingsCard title="Your MCP Servers">
           {mcpServers.map((server) => (
-            <SettingRow
-              key={server.key}
-              label={server.name}
-              description="Applies from the next session."
-            >
+            <SettingRow key={server.key} label={server.name}>
               <SegmentedControl
                 aria-label={server.name}
                 fullWidth
