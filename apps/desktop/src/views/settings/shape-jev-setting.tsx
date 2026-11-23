@@ -4,7 +4,7 @@ import { Link } from '@tanstack/react-router';
 import { useJudgeStatus } from '../../daemon/judge-queries';
 import { useSetShapeJev, useShapeJev } from '../../daemon/shape-measures-queries';
 import { SettingsSectionKey } from './sections';
-import { SettingRow, SettingsCard } from './setting-row';
+import { SettingRow } from './setting-row';
 
 export const SHAPE_JEV_LABEL = 'Send brainstorm messages to fast models';
 
@@ -18,49 +18,48 @@ export function ShapeJevSetting({ project }: { readonly project: ProjectDto }) {
   const judge = useJudgeStatus();
   const account = judge.data?.account ?? null;
   return (
-    <SettingsCard>
-      <SettingRow
-        label={SHAPE_JEV_LABEL}
-        description={
-          account === null
-            ? 'Sends your brainstorm messages, not code, to the account decisions run on, so a fast model can notice when you are ready to propose, state a decision, or ask a question for someone else.'
-            : `Sends your brainstorm messages, not code, to the account decisions run on (OpenRouter · ${account.label}), so a fast model can notice when you are ready to propose, state a decision, or ask a question for someone else. A brainstorm can hold a client's details; leave this off if that matters.`
-        }
-      >
-        <Stack gap={4} align="flex-end">
-          <Switch
-            aria-label={SHAPE_JEV_LABEL}
-            checked={setting.data?.enabled ?? false}
-            // A switch that is on can always be turned off; only turning it on needs an account.
-            disabled={
-              setting.data === undefined ||
-              set.isPending ||
-              (account === null && !setting.data.enabled)
-            }
-            onChange={(event) => {
-              set.mutate(event.currentTarget.checked);
-            }}
-          />
-          {judge.data !== undefined && account === null ? (
-            <Text size="xs" c="dimmed">
-              Pick an account for decisions first.{' '}
-              <Anchor
-                size="xs"
-                renderRoot={(props) => (
-                  <Link
-                    {...props}
-                    to="/settings/$section"
-                    params={{ section: SettingsSectionKey.Decisions }}
-                    search={{ focus: 'paid-by' }}
-                  />
-                )}
-              >
-                Open Decisions
-              </Anchor>
-            </Text>
-          ) : null}
-        </Stack>
-      </SettingRow>
-    </SettingsCard>
+    <SettingRow
+      label={SHAPE_JEV_LABEL}
+      description="Sends brainstorm messages, not code, to a fast model."
+      help={
+        account === null
+          ? 'Sends your brainstorm messages, not code, to the account decisions run on, so a fast model can notice when you are ready to propose, state a decision, or ask a question for someone else.'
+          : `Sends your brainstorm messages, not code, to the account decisions run on (OpenRouter · ${account.label}), so a fast model can notice when you are ready to propose, state a decision, or ask a question for someone else. A brainstorm can hold a client's details; leave this off if that matters.`
+      }
+    >
+      <Stack gap={4} align="flex-end">
+        <Switch
+          aria-label={SHAPE_JEV_LABEL}
+          checked={setting.data?.enabled ?? false}
+          // A switch that is on can always be turned off; only turning it on needs an account.
+          disabled={
+            setting.data === undefined ||
+            set.isPending ||
+            (account === null && !setting.data.enabled)
+          }
+          onChange={(event) => {
+            set.mutate(event.currentTarget.checked);
+          }}
+        />
+        {judge.data !== undefined && account === null ? (
+          <Text size="xs" c="dimmed">
+            Pick an account for decisions first.{' '}
+            <Anchor
+              size="xs"
+              renderRoot={(props) => (
+                <Link
+                  {...props}
+                  to="/settings/$section"
+                  params={{ section: SettingsSectionKey.Decisions }}
+                  search={{ focus: 'paid-by' }}
+                />
+              )}
+            >
+              Open Decisions
+            </Anchor>
+          </Text>
+        ) : null}
+      </Stack>
+    </SettingRow>
   );
 }
