@@ -25,7 +25,8 @@ import { useAskSomeone } from '../../daemon/people';
 import { useTasks, useWorkstreams } from '../../daemon/queries';
 import { QUESTION_CATEGORY_HINTS } from '@10db/contracts';
 import { SettingsSectionKey } from '../settings/sections';
-import { categoryWord, recipientsOf } from './route-line';
+import { useProjectIntegrations } from '../../daemon/sign-in-queries';
+import { categoryWord, reachLabel, recipientsOf } from './route-line';
 
 /** The kinds of question a stakeholder can answer; the others stay with the builder or the lane's own rules. */
 const STAKEHOLDER_CATEGORIES = [
@@ -36,10 +37,6 @@ const STAKEHOLDER_CATEGORIES = [
 
 const Scope = { Task: 'task', Goal: 'goal', Project: 'project' } as const;
 type Scope = (typeof Scope)[keyof typeof Scope];
-
-function personLabel(person: PersonDto): string {
-  return `${person.name} · ${person.slack === null ? 'not on Slack' : 'Slack'}`;
-}
 
 /** The task and goal a card belongs to, read from the run it came from. */
 function useCardScope(item: InboxItemDto): { taskId: TaskId | null; goalId: GoalId | null } {
@@ -152,6 +149,7 @@ function AskForm({
   readonly onDone: () => void;
 }) {
   const ask = useAskSomeone();
+  const slack = useProjectIntegrations(item.projectId).data?.slack;
   const { taskId, goalId } = useCardScope(item);
   const candidates = people.filter((p) => !p.isBuilder);
   const current = recipientsOf(item, people)[0];
@@ -196,7 +194,7 @@ function AskForm({
         // Inside the popover, so choosing an option is not a click outside it, which would close it.
         comboboxProps={{ withinPortal: false }}
         placeholder="Who should answer?"
-        data={candidates.map((p) => ({ value: p.id, label: personLabel(p) }))}
+        data={candidates.map((p) => ({ value: p.id, label: reachLabel(p, slack) }))}
         value={personId}
         onChange={setPersonId}
       />

@@ -21,7 +21,8 @@ import { useState } from 'react';
 import { useGoals } from '../../daemon/goal-queries';
 import { usePeople, useSetRoutingRules } from '../../daemon/people';
 import { useTasks } from '../../daemon/queries';
-import { categoryWord } from '../inbox/route-line';
+import { useProjectIntegrations } from '../../daemon/sign-in-queries';
+import { categoryWord, reachLabel } from '../inbox/route-line';
 import { ruleInputs } from './route-rows';
 
 const Scope = {
@@ -62,6 +63,7 @@ function RouteForm({
   readonly onClose: () => void;
 }) {
   const people = usePeople();
+  const slack = useProjectIntegrations(project.id).data?.slack;
   const goals = useGoals(project.id);
   const tasks = useTasks(project.id);
   const save = useSetRoutingRules(project.id);
@@ -180,7 +182,7 @@ function RouteForm({
         label="Person"
         data={(people.data ?? [])
           .filter((p) => !p.isBuilder)
-          .map((p) => ({ value: p.id, label: p.name }))}
+          .map((p) => ({ value: p.id, label: reachLabel(p, slack) }))}
         value={personId}
         onChange={setPersonId}
       />

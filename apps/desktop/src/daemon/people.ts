@@ -4,8 +4,8 @@ import {
   PersonDto,
   QuestionRouteDto,
   RoutingRuleDto,
-  SlackConnectionDto,
   SlackMemberDto,
+  SlackStatusDto,
   StakeholderSendDto,
   StakeholderTimersDto,
   type AskSomeoneInput,
@@ -15,6 +15,7 @@ import {
   type ProjectId,
   type RoutingRulesInput,
   type SendInput,
+  type SlackTokenInput,
   type TaskId,
 } from '@10db/contracts';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -74,11 +75,11 @@ export function useRemovePerson() {
   });
 }
 
-export function useSlackConnection() {
+export function useSlackStatus() {
   const { client } = useDaemon();
   return useQuery({
     queryKey: SLACK_KEY,
-    queryFn: async () => readJson(await client.slack.$get(), SlackConnectionDto),
+    queryFn: async () => readJson(await client.slack.$get(), SlackStatusDto),
   });
 }
 
@@ -87,40 +88,53 @@ export function useSetSlackToken() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (token: string) =>
-      readJson(await client.slack.token.$put({ json: { token } }), SlackConnectionDto),
+    mutationFn: async (input: SlackTokenInput) =>
+      readJson(await client.slack.token.$put({ json: input }), SlackStatusDto),
     // The variable is the bot token: nothing keeps it once the call settles.
     gcTime: 0,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: SLACK_KEY }),
   });
 }
 
-export function useRemoveSlackToken() {
+export function useRemoveSlackWorkspace() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async () => readJson(await client.slack.token.$delete(), SlackConnectionDto),
+    mutationFn: async (teamId: string) =>
+      readJson(
+        await client.slack.workspaces[':teamId'].$delete({ param: { teamId } }),
+        SlackStatusDto,
+      ),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: SLACK_KEY }),
   });
 }
 
-export function useSlackMembers(query: string, enabled: boolean) {
+export function useSlackMembers(teamId: string | null, query: string, enabled: boolean) {
   const { client } = useDaemon();
   return useQuery({
-    queryKey: [...SLACK_KEY, 'members', query],
-    enabled,
+    queryKey: [...SLACK_KEY, 'members', teamId, query],
+    enabled: enabled && teamId !== null,
     queryFn: async () =>
-      readJson(await client.slack.members.$get({ query: { query } }), MemberList),
+      readJson(
+        await client.slack.members.$get({ query: { teamId: teamId ?? '', query } }),
+        MemberList,
+      ),
   });
 }
 
 /**
- * The connected workspace's member with this id, read from the whole list (the daemon keeps it), or
- * null while Slack is not connected or the list has not loaded.
+ * The workspace's member with this id, read from the whole list (the daemon keeps it), or null while
+ * the workspace is not connected or the list has not loaded.
  */
-export function useSlackMember(userId: string | null): SlackMemberDto | null {
-  const connection = useSlackConnection();
-  const members = useSlackMembers('', userId !== null && connection.data?.state === 'connected');
+export function useSlackMember(
+  teamId: string | null,
+  userId: string | null,
+): SlackMemberDto | null {
+  const status = useSlackStatus();
+  const connected = status.data?.workspaces.some(
+    (w) => w.teamId === teamId && w.state === 'connected',
+  );
+  const members = useSlackMembers(teamId, '', userId !== null && connected === true);
   return members.data?.find((m) => m.userId === userId) ?? null;
 }
 

@@ -49,7 +49,7 @@ function routeTo(category: string, handles: ('mark' | 'ana')[], areaScoped = tru
       insertPerson(ctx, {
         handle,
         name,
-        slack: { teamId: 'T1', userId, sendMode: 'review', dailyLimit: 10 },
+        slack: [{ teamId: 'T1', userId, sendMode: 'review', dailyLimit: 10 }],
       }),
     ).value;
   const people = { mark: person('mark', 'Mark', 'U1'), ana: person('ana', 'Ana', 'U2') };
@@ -239,7 +239,7 @@ describe('a question no route sends to a person', () => {
       insertPerson(ctx, {
         handle: 'mark',
         name: 'Mark',
-        slack: { teamId: 'T1', userId: 'U1', sendMode: 'review', dailyLimit: 10 },
+        slack: [{ teamId: 'T1', userId: 'U1', sendMode: 'review', dailyLimit: 10 }],
       }),
     ).value;
     engine.store.write((ctx) =>

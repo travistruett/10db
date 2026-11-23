@@ -1,5 +1,6 @@
 import {
   ProjectSlackSetting,
+  SendState,
   SlackWorkspaces,
   type ProjectId,
   type ProjectSlackDto,
@@ -8,11 +9,12 @@ import {
 import {
   deleteContactsOutsideWorkspaces,
   getAppSetting,
+  liveSendsWhere,
   setAppSetting,
   type DbReader,
   type WriteContext,
 } from '@10db/db';
-import { LEGACY_SLACK_BOT_ACCOUNT, slackBotAccount, type Keychain } from '../environment';
+import { LEGACY_SLACK_BOT_ACCOUNT, type Keychain } from '../environment';
 import type { StateStore } from '../events';
 
 const WORKSPACES_SETTING = 'slack.workspaces';
@@ -25,35 +27,59 @@ export function readSlackWorkspaces(db: DbReader): SlackWorkspace[] {
 }
 
 export function writeSlackWorkspaces(ctx: WriteContext, workspaces: SlackWorkspace[]): void {
-  setAppSetting(ctx, WORKSPACES_SETTING, workspaces);
+  // Only the fields that are set: an absent one is not a Json value.
+  setAppSetting(
+    ctx,
+    WORKSPACES_SETTING,
+    workspaces.map((w) => ({
+      teamId: w.teamId,
+      teamName: w.teamName,
+      ...(w.botUserId === undefined ? {} : { botUserId: w.botUserId }),
+      ...(w.botName === undefined ? {} : { botName: w.botName }),
+      ...(w.botSince === undefined ? {} : { botSince: w.botSince }),
+    })),
+  );
 }
 
-/** The token of the signed-in workspace, or null with none. Reads the Keychain without blocking the loop. */
-export function slackTokenReader(
-  state: StateStore,
-  keychain: Keychain,
-): () => Promise<string | null> {
-  return async () => {
-    const workspace = readSlackWorkspaces(state.db)[0];
-    return workspace === undefined ? null : keychain.readAsync(slackBotAccount(workspace.teamId));
-  };
+/** Adds the workspace, or renames its entry; its bot fields are kept (`recordBot` writes them). */
+export function saveSlackWorkspace(
+  ctx: WriteContext,
+  workspace: { teamId: string; teamName: string },
+): void {
+  const all = readSlackWorkspaces(ctx.tx);
+  const known = all.some((w) => w.teamId === workspace.teamId);
+  writeSlackWorkspaces(
+    ctx,
+    known
+      ? all.map((w) => (w.teamId === workspace.teamId ? { ...w, teamName: workspace.teamName } : w))
+      : [...all, workspace],
+  );
 }
 
-/** What Slack is for a project: its stored choice, else the only workspace while there is exactly one. */
-export function projectSlack(db: DbReader, projectId: ProjectId): ProjectSlackDto {
-  const workspaces = readSlackWorkspaces(db);
+/** Drops the entry, bot record included. */
+export function removeSlackWorkspace(ctx: WriteContext, teamId: string): void {
+  writeSlackWorkspaces(
+    ctx,
+    readSlackWorkspaces(ctx.tx).filter((w) => w.teamId !== teamId),
+  );
+}
+
+/** The stored binding as written, signed in or not; null for no setting or Off. */
+export function boundTeam(db: DbReader, projectId: ProjectId): string | null {
   const stored = ProjectSlackSetting.safeParse(getAppSetting(db, projectSetting(projectId)));
-  const auto = !stored.success;
-  const teamId = stored.success
-    ? stored.data.teamId
-    : workspaces.length === 1
-      ? (workspaces[0]?.teamId ?? null)
-      : null;
-  const workspace = workspaces.find((w) => w.teamId === teamId);
-  // A stored workspace that is no longer signed in sends nowhere.
-  return workspace === undefined
-    ? { teamId: null, teamName: null, auto }
-    : { teamId: workspace.teamId, teamName: workspace.teamName, auto };
+  return stored.success ? stored.data.teamId : null;
+}
+
+/** The effective binding: the stored workspace while it is signed in; no setting, null, or signed out is Off. */
+export function projectSlack(db: DbReader, projectId: ProjectId): ProjectSlackDto {
+  const teamId = boundTeam(db, projectId);
+  const workspace = readSlackWorkspaces(db).find((w) => w.teamId === teamId);
+  // What is out counts on every path, Off and a signed-out workspace included: a change takes it back.
+  const out = liveSendsWhere(db, { projectId }).filter(
+    (s) => s.state === SendState.Sending || s.state === SendState.Sent,
+  ).length;
+  if (workspace === undefined) return { teamId: null, teamName: null, out };
+  return { teamId: workspace.teamId, teamName: workspace.teamName, out };
 }
 
 export function setProjectSlack(

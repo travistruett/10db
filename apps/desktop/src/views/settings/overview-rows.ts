@@ -8,7 +8,8 @@ import {
   type CatalogueStatusDto,
   type GithubStatusDto,
   type SelfUpdateStatusDto,
-  type SlackConnectionDto,
+  type SlackStatusDto,
+  type SlackWorkspaceState,
 } from '@10db/contracts';
 import { shortAgo } from '../factory/short-ago';
 import { fromNow } from '../../shell/relative';
@@ -100,21 +101,29 @@ export function githubState(status: GithubStatusDto): RowState {
   }
 }
 
+const SLACK_STUCK: Partial<Record<SlackWorkspaceState, string>> = {
+  refused: 'token refused',
+  unreachable: "can't be reached",
+  none: 'not connected',
+};
 const SLACK_WITHOUT = 'Questions for other people stay in your Inbox; nothing is sent.';
 
-export function slackState(connection: SlackConnectionDto): RowState {
-  switch (connection.state) {
-    case 'connected':
-      return ready(ConnectionTone.Works, `${connection.teamName ?? 'Slack'} · posts as @10db`);
-    case 'none':
-      return ready(ConnectionTone.NeedsYou, 'Not connected', SLACK_WITHOUT);
-    case 'refused':
-      return ready(ConnectionTone.NeedsYou, 'Token refused', SLACK_WITHOUT);
-    case 'unreachable':
-      return ready(ConnectionTone.NeedsYou, "Can't be reached", SLACK_WITHOUT);
-    case 'off':
-      return ready(ConnectionTone.Off, 'Off: 10db was started with TENDB_SLACK=off');
-  }
+export function slackState(status: SlackStatusDto): RowState {
+  if (status.off) return ready(ConnectionTone.Off, 'Off: 10db was started with TENDB_SLACK=off');
+  if (status.workspaces.length === 0)
+    return ready(ConnectionTone.NeedsYou, 'Not connected', SLACK_WITHOUT);
+  const stuck = status.workspaces.find((w) => w.state !== 'connected' && w.state !== 'checking');
+  if (stuck !== undefined)
+    return ready(
+      ConnectionTone.NeedsYou,
+      `${stuck.teamName}: ${SLACK_STUCK[stuck.state] ?? 'not connected'}`,
+      SLACK_WITHOUT,
+    );
+  const names = status.workspaces.map((w) => w.teamName).join(', ');
+  return ready(
+    ConnectionTone.Works,
+    `${names} · posts as @${status.workspaces[0]?.botName ?? '10db'}`,
+  );
 }
 
 const AA_WITHOUT =

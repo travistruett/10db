@@ -12,7 +12,7 @@ import {
   type PersonId,
   type PersonInput,
 } from '@10db/contracts';
-import { asc, eq, notInArray } from 'drizzle-orm';
+import { and, asc, eq, notInArray } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
 
@@ -94,27 +94,40 @@ export function listPersonas(
 type PersonRow = typeof schema.people.$inferSelect;
 type ContactRow = typeof schema.personContacts.$inferSelect;
 
-const slackOf = (c: ContactRow | undefined | null): PersonDto['slack'] =>
-  c
-    ? {
-        teamId: c.teamId,
-        userId: c.userId,
-        dmChannelId: c.dmChannelId,
-        sendMode: c.sendMode,
-        dailyLimit: c.dailyLimit,
-      }
-    : null;
+const slackOf = (contacts: readonly ContactRow[]): PersonDto['slack'] =>
+  contacts.map((c) => ({
+    teamId: c.teamId,
+    userId: c.userId,
+    dmChannelId: c.dmChannelId,
+    sendMode: c.sendMode,
+    dailyLimit: c.dailyLimit,
+  }));
 
-const personDto = (row: PersonRow, contact: ContactRow | undefined | null): PersonDto => ({
+const personDto = (row: PersonRow, contacts: readonly ContactRow[]): PersonDto => ({
   ...row,
-  slack: slackOf(contact),
+  slack: slackOf(contacts),
 });
 
-function contactOf(db: DbReader, personId: PersonId): ContactRow | undefined {
+/** Oldest first; ids are sortable by creation. */
+const byAge = (a: ContactRow, b: ContactRow): number =>
+  a.createdAt === b.createdAt ? a.id.localeCompare(b.id) : a.createdAt.localeCompare(b.createdAt);
+
+function contactsOf(db: DbReader, personId: PersonId): ContactRow[] {
   return db
     .select()
     .from(schema.personContacts)
     .where(eq(schema.personContacts.personId, personId))
+    .all()
+    .sort(byAge);
+}
+
+function contactOf(db: DbReader, personId: PersonId, teamId: string): ContactRow | undefined {
+  return db
+    .select()
+    .from(schema.personContacts)
+    .where(
+      and(eq(schema.personContacts.personId, personId), eq(schema.personContacts.teamId, teamId)),
+    )
     .get();
 }
 
@@ -133,37 +146,48 @@ export function deleteContactsOutsideWorkspaces(
   return rows.all().length;
 }
 
-/** Writes the person's Slack contact: none removes it; a change of Slack user forgets the DM channel. */
-function writeContact(ctx: WriteContext, personId: PersonId, slack: PersonInput['slack']): void {
-  const existing = contactOf(ctx.tx, personId);
-  if (!slack) {
-    if (existing)
+/**
+ * Writes the person's Slack contacts: a workspace left out is deleted, a new one inserted, and an
+ * existing one keeps its row; a changed Slack user there forgets the DM channel and cursor.
+ */
+function writeContacts(ctx: WriteContext, personId: PersonId, list: PersonInput['slack']): void {
+  const wanted = list ?? [];
+  const teams = new Set(wanted.map((c) => c.teamId));
+  for (const existing of contactsOf(ctx.tx, personId)) {
+    if (!teams.has(existing.teamId))
+      ctx.tx.delete(schema.personContacts).where(eq(schema.personContacts.id, existing.id)).run();
+  }
+  for (const slack of wanted) {
+    const fields = {
+      userId: slack.userId,
+      sendMode: slack.sendMode ?? SendMode.Review,
+      dailyLimit: slack.dailyLimit === undefined ? 10 : slack.dailyLimit,
+      updatedAt: ctx.now,
+    };
+    const existing = contactOf(ctx.tx, personId, slack.teamId);
+    if (!existing) {
       ctx.tx
-        .delete(schema.personContacts)
-        .where(eq(schema.personContacts.personId, personId))
+        .insert(schema.personContacts)
+        .values({
+          id: mintId('PersonContact'),
+          personId,
+          teamId: slack.teamId,
+          ...fields,
+          createdAt: ctx.now,
+        })
         .run();
-    return;
-  }
-  const fields = {
-    teamId: slack.teamId,
-    userId: slack.userId,
-    sendMode: slack.sendMode ?? SendMode.Review,
-    dailyLimit: slack.dailyLimit === undefined ? 10 : slack.dailyLimit,
-    updatedAt: ctx.now,
-  };
-  if (!existing) {
+      continue;
+    }
     ctx.tx
-      .insert(schema.personContacts)
-      .values({ id: mintId('PersonContact'), personId, ...fields, createdAt: ctx.now })
+      .update(schema.personContacts)
+      .set(
+        existing.userId === fields.userId
+          ? fields
+          : { ...fields, dmChannelId: null, dmCursor: null },
+      )
+      .where(eq(schema.personContacts.id, existing.id))
       .run();
-    return;
   }
-  const sameUser = existing.userId === fields.userId && existing.teamId === fields.teamId;
-  ctx.tx
-    .update(schema.personContacts)
-    .set(sameUser ? fields : { ...fields, dmChannelId: null, dmCursor: null })
-    .where(eq(schema.personContacts.personId, personId))
-    .run();
 }
 
 export function insertPerson(
@@ -181,7 +205,7 @@ export function insertPerson(
     updatedAt: ctx.now,
   };
   ctx.tx.insert(schema.people).values(row).run();
-  writeContact(ctx, row.id, input.slack ?? null);
+  writeContacts(ctx, row.id, input.slack);
   ctx.emit({ type: EventType.PersonSaved, entityType: 'person', entityId: row.id });
   return getPerson(ctx.tx, row.id);
 }
@@ -197,7 +221,7 @@ export function updatePerson(ctx: WriteContext, id: PersonId, input: PersonInput
     .set({ handle: input.handle, name: input.name, updatedAt: ctx.now })
     .where(eq(schema.people.id, id))
     .run();
-  writeContact(ctx, id, input.slack ?? null);
+  writeContacts(ctx, id, input.slack);
   ctx.emit({ type: EventType.PersonSaved, entityType: 'person', entityId: id });
   return { ...getPerson(ctx.tx, id), isBuilder: current.isBuilder };
 }
@@ -242,32 +266,31 @@ export function removePerson(ctx: WriteContext, id: PersonId): void {
 export function getPerson(db: DbReader, id: PersonId): PersonDto {
   const row = db.select().from(schema.people).where(eq(schema.people.id, id)).get();
   if (!row) throw new NotFoundError('person', id);
-  return personDto(row, contactOf(db, id));
+  return personDto(row, contactsOf(db, id));
 }
 
 export function findPersonByHandle(db: DbReader, handle: string): PersonDto | undefined {
   const row = db.select().from(schema.people).where(eq(schema.people.handle, handle)).get();
-  return row && personDto(row, contactOf(db, row.id));
+  return row && personDto(row, contactsOf(db, row.id));
 }
 
 export function listPeople(db: DbReader): PersonDto[] {
-  const contacts = new Map(
-    db
-      .select()
-      .from(schema.personContacts)
-      .all()
-      .map((c) => [c.personId, c]),
-  );
+  const contacts = new Map<PersonId, ContactRow[]>();
+  for (const c of db.select().from(schema.personContacts).all()) {
+    const list = contacts.get(c.personId) ?? [];
+    list.push(c);
+    contacts.set(c.personId, list);
+  }
   return db
     .select()
     .from(schema.people)
     .orderBy(asc(schema.people.handle))
     .all()
-    .map((row) => personDto(row, contacts.get(row.id)));
+    .map((row) => personDto(row, (contacts.get(row.id) ?? []).sort(byAge)));
 }
 
-function requireContact(db: DbReader, personId: PersonId): ContactRow {
-  const contact = contactOf(db, personId);
+function requireContact(db: DbReader, personId: PersonId, teamId: string): ContactRow {
+  const contact = contactOf(db, personId, teamId);
   if (!contact) throw new NotFoundError('Slack contact', personId);
   return contact;
 }
@@ -275,27 +298,48 @@ function requireContact(db: DbReader, personId: PersonId): ContactRow {
 function touchContact(
   ctx: WriteContext,
   personId: PersonId,
+  teamId: string,
   set: Partial<typeof schema.personContacts.$inferInsert>,
 ): void {
-  requireContact(ctx.tx, personId);
+  const contact = requireContact(ctx.tx, personId, teamId);
   ctx.tx
     .update(schema.personContacts)
     .set({ ...set, updatedAt: ctx.now })
-    .where(eq(schema.personContacts.personId, personId))
+    .where(eq(schema.personContacts.id, contact.id))
     .run();
   ctx.emit({ type: EventType.PersonSaved, entityType: 'person', entityId: personId });
 }
 
-/** The DM channel 10db learned for the person on the first send. */
-export function setDmChannel(ctx: WriteContext, personId: PersonId, channelId: string): void {
-  touchContact(ctx, personId, { dmChannelId: channelId });
+/** The DM channel 10db learned for the person on the first send in a workspace. */
+export function setDmChannel(
+  ctx: WriteContext,
+  personId: PersonId,
+  teamId: string,
+  channelId: string,
+): void {
+  touchContact(ctx, personId, teamId, { dmChannelId: channelId });
 }
 
-/** The newest `ts` of the person's DM the reply watch has read; null before the first read. */
-export function getDmCursor(db: DbReader, personId: PersonId): string | null {
-  return requireContact(db, personId).dmCursor;
+/** The newest `ts` of the person's DM in a workspace the reply watch has read; null before the first read. */
+export function getDmCursor(db: DbReader, personId: PersonId, teamId: string): string | null {
+  return requireContact(db, personId, teamId).dmCursor;
 }
 
-export function setDmCursor(ctx: WriteContext, personId: PersonId, ts: string): void {
-  touchContact(ctx, personId, { dmCursor: ts });
+export function setDmCursor(
+  ctx: WriteContext,
+  personId: PersonId,
+  teamId: string,
+  ts: string,
+): void {
+  touchContact(ctx, personId, teamId, { dmCursor: ts });
+}
+
+/** Forgets the DM channel and cursor of every contact in a workspace; returns how many changed. */
+export function clearTeamDmChannels(ctx: WriteContext, teamId: string): number {
+  return ctx.tx
+    .update(schema.personContacts)
+    .set({ dmChannelId: null, dmCursor: null, updatedAt: ctx.now })
+    .where(eq(schema.personContacts.teamId, teamId))
+    .returning({ id: schema.personContacts.id })
+    .all().length;
 }

@@ -9,7 +9,7 @@ import { useBenchmarkStatus } from '../../daemon/benchmark-queries';
 import { useGithubStatus } from '../../daemon/github-queries';
 import { useJudgeStatus } from '../../daemon/judge-queries';
 import { useCatalogueStatus } from '../../daemon/model-queries';
-import { useSlackConnection } from '../../daemon/people';
+import { useSlackStatus } from '../../daemon/people';
 import { useProjects, useSystemCheck } from '../../daemon/queries';
 import { useSelfUpdate } from '../../daemon/self-update-queries';
 import { useNow } from '../../shell/relative';
@@ -94,7 +94,7 @@ function useOverviewRows(): OverviewRow[] {
   const projects = useProjects();
   const judge = useJudgeStatus();
   const github = useGithubStatus();
-  const slack = useSlackConnection();
+  const slack = useSlackStatus();
   const benchmarks = useBenchmarkStatus();
   const catalogue = useCatalogueStatus();
   const system = useSystemCheck();

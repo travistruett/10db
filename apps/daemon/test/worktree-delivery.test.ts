@@ -35,6 +35,7 @@ import {
   tempDir,
   waitForAsync,
 } from './fixtures';
+import { saveSlackWorkspace, setProjectSlack } from '../src/stakeholders';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
 
 const TITLES = ['Alpha', 'Beta', 'Gamma'] as const;
@@ -129,12 +130,17 @@ async function start(gateCommand = 'true', maxLanes = 3) {
     prTitlePrefix: 'feat(app)',
     workspaceMode: 'worktree',
   });
+  // A question reaches a person only through a workspace the project is bound to.
+  running.state.write((ctx) => {
+    saveSlackWorkspace(ctx, { teamId: 'T1', teamName: 'Acme' });
+    setProjectSlack(ctx, project.id, 'T1');
+  });
   // A lane nobody watches answers a question left with the builder at once; one routed to a person
   // with Slack still waits for them, which is what holds the three lanes open together here.
   const person = await api.post('/people', PersonDto, {
     handle: 'ana',
     name: 'Ana',
-    slack: { teamId: 'T1', userId: 'U1', sendMode: 'review', dailyLimit: 10 },
+    slack: [{ teamId: 'T1', userId: 'U1', sendMode: 'review', dailyLimit: 10 }],
   });
   await api.put(`/projects/${project.id}/routing-rules`, z.unknown(), {
     rules: [{ category: 'design', area: null, personId: person.id }],

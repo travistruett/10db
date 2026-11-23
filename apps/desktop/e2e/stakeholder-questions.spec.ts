@@ -54,6 +54,19 @@ function seedQuestion(project: string): void {
           { label: 'Seven days', description: '' },
           { label: 'The whole billing period', description: '' },
         ],
+        // Two signed-in workspaces and Dana, who has a contact in Globex only. Slack is off in this daemon,
+        // so they are listed and nothing reaches them.
+        workspaces: [
+          { teamId: 'T-ACME', teamName: 'Acme' },
+          { teamId: 'T-GLOBEX', teamName: 'Globex' },
+        ],
+        people: [
+          {
+            handle: 'dana',
+            name: 'Dana Ruiz',
+            slack: [{ teamId: 'T-GLOBEX', userId: 'U-DANA', sendMode: 'review', dailyLimit: 10 }],
+          },
+        ],
       }),
     ],
     { cwd: resolve(import.meta.dirname, '../../daemon'), stdio: 'inherit' },
@@ -92,6 +105,25 @@ test('routes a question to someone outside Slack from its card, and the table sh
   await expect(page).toHaveURL(/\/settings\/integrations/);
   await expect(page.getByText('Off: 10db was started with TENDB_SLACK=off')).toBeVisible();
   await expect(page.getByText('Off: 10db was started with TENDB_BENCHMARKS=off')).toBeVisible();
+  // Both workspaces are listed under the Off line, read-only: no menu on a row, no Add Workspace.
+  const slackCard = page.getByRole('group', { name: 'Slack', exact: true });
+  await expect(slackCard.getByText('Acme · posts as @10db')).toBeVisible();
+  await expect(slackCard.getByText('Globex · posts as @10db')).toBeVisible();
+  await expect(slackCard.getByRole('button', { name: /options/ })).toHaveCount(0);
+  await expect(slackCard.getByRole('button', { name: 'Add Workspace' })).toHaveCount(0);
+  // The project's Slack reads Off; choosing Acme is kept across a reload.
+  const projectSlack = slackCard.getByRole('combobox', { name: 'Slack for e2e' });
+  await expect(projectSlack).toHaveValue('Off');
+  await projectSlack.click();
+  await page.getByRole('option', { name: 'Acme' }).click();
+  await expect(projectSlack).toHaveValue('Acme');
+  await page.reload();
+  await expect(
+    page.getByRole('group', { name: 'Slack', exact: true }).getByRole('combobox', {
+      name: 'Slack for e2e',
+    }),
+  ).toHaveValue('Acme');
+  // The project stays on Acme: the question below is routed with it bound.
   await expectAccessible(page, 'integrations, dark');
   await page.goto('/settings/project-integrations');
   await expect(page).toHaveURL(/\/settings\/integrations/);
@@ -111,6 +143,23 @@ test('routes a question to someone outside Slack from its card, and the table sh
   await expect(priya).toContainText('You pass it on');
   await expectAccessible(page, 'people, dark');
 
+  // Dana has a contact in Globex only: one chip, and a modal with that one contact that offers Acme.
+  const dana = page.getByRole('row', { name: /Dana Ruiz/ });
+  await expect(dana).toContainText('Globex');
+  await expect(dana).not.toContainText('Acme');
+  await page.getByRole('button', { name: 'Edit Dana Ruiz' }).click();
+  const danaModal = page.getByRole('dialog', { name: 'Edit Dana Ruiz' });
+  await expect(danaModal.getByText('Globex', { exact: true })).toBeVisible();
+  await expect(danaModal.getByRole('radio', { name: 'Show Me Each Message First' })).toBeChecked();
+  await expect(
+    danaModal.getByRole('textbox', { name: 'New questions a day in Globex' }),
+  ).toBeVisible();
+  await expect(danaModal.getByRole('button', { name: 'Add Acme' })).toBeVisible();
+  await expect(danaModal.getByRole('button', { name: 'Add Globex' })).toHaveCount(0);
+  await expectAccessible(page, 'person modal with a contact per workspace, dark');
+  await danaModal.getByRole('button', { name: 'Cancel' }).click();
+  await expect(danaModal).toBeHidden();
+
   // The question card offers Ask Someone; Priya, Product, on the whole project.
   // Earlier specs leave cards that fill the panel's first page, so the list is narrowed to the question.
   await page.goto(`/inbox?q=${encodeURIComponent(QUESTION)}`);
@@ -119,7 +168,20 @@ test('routes a question to someone outside Slack from its card, and the table sh
   await expect(questionRow).toBeVisible();
   await questionRow.click();
   await page.getByRole('button', { name: 'Ask Someone', exact: true }).click();
-  const ask = page.getByRole('dialog');
+  let ask = page.getByRole('dialog');
+  // The project is bound to Acme, where Dana has no contact: she is listed, and the card copies for her.
+  await ask.getByRole('combobox', { name: 'Person' }).click();
+  await expect(page.getByRole('option', { name: "Dana Ruiz · not in Acme's Slack" })).toBeVisible();
+  await page.getByRole('option', { name: /Dana Ruiz/ }).click();
+  await ask.getByRole('checkbox', { name: /Always send these kinds/ }).uncheck();
+  await ask.getByRole('button', { name: 'Ask Dana Ruiz' }).click();
+  await expect(page.getByRole('button', { name: 'Copy for Dana Ruiz' })).toBeVisible();
+  await expect(page.getByText("Dana Ruiz isn't in Acme's Slack", { exact: false })).toBeVisible();
+  await expectAccessible(page, 'inbox, routed to a person not in the project workspace, dark');
+
+  // Change it to Priya, who is not in Slack at all.
+  await page.getByRole('button', { name: 'Change', exact: true }).click();
+  ask = page.getByRole('dialog');
   await ask.getByRole('combobox', { name: 'Person' }).click();
   await page.getByRole('option', { name: /Priya Shah/ }).click();
   // The card's own kind is ticked already.

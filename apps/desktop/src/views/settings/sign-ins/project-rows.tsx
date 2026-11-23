@@ -5,11 +5,12 @@ import {
   type LinearSignInRowDto,
   type ProjectDto,
 } from '@10db/contracts';
-import { Divider, Group, Stack, Switch, Text } from '@mantine/core';
+import { Divider, Group, Select, Stack, Switch, Text } from '@mantine/core';
 import { useState, type ReactNode } from 'react';
 import { ConnectionStatus, ConnectionTone } from '../connection-status';
 import { ConnectServiceButton } from './connect-service-button';
-import { useSlackConnection } from '../../../daemon/people';
+import { useSlackStatus } from '../../../daemon/people';
+import { ConfirmModal } from '../../../shell/confirm-modal';
 import {
   useProjectIntegrations,
   useSetLinearReporter,
@@ -50,24 +51,45 @@ export function ProjectRows({ children }: { readonly children: ReactNode }) {
   );
 }
 
-/** A project's Slack: one switch for sending its questions through the signed-in workspace. */
+const SLACK_OFF = 'off';
+
+/** A project's Slack: the signed-in workspace its questions go through, or Off. */
 export function SlackProjectRow({ project }: { readonly project: ProjectDto }) {
   const integrations = useProjectIntegrations(project.id);
   const save = useSetProjectIntegrations(project.id);
-  const connection = useSlackConnection();
-  const signedIn = connection.data?.teamId ?? null;
+  const status = useSlackStatus();
+  // The workspace a pending change would move the project to; null is Off.
+  const [asked, setAsked] = useState<{ readonly teamId: string | null } | null>(null);
   const slack = integrations.data?.slack;
+  const workspaces = status.data?.workspaces ?? [];
+  const change = (teamId: string | null) => {
+    save.mutate({ slack: { teamId } });
+  };
   return (
     <ProjectRow
       name={project.name}
       control={
         slack === undefined ? undefined : (
-          <Switch
+          <Select
             aria-label={`Slack for ${project.name}`}
-            checked={slack.teamId !== null}
+            size="xs"
+            w={180}
+            allowDeselect={false}
             disabled={save.isPending}
-            onChange={(event) => {
-              save.mutate({ slack: { teamId: event.currentTarget.checked ? signedIn : null } });
+            data={[
+              ...workspaces.map((w) => ({ value: w.teamId, label: w.teamName })),
+              { value: SLACK_OFF, label: 'Off' },
+            ]}
+            value={slack.teamId ?? SLACK_OFF}
+            onChange={(value) => {
+              if (value === null) return;
+              const teamId = value === SLACK_OFF ? null : value;
+              if (teamId === slack.teamId) return;
+              // Decided on a fresh count: a question may have gone out since the page last read it.
+              void integrations.refetch().then((fresh) => {
+                if ((fresh.data?.slack.out ?? slack.out) > 0) setAsked({ teamId });
+                else change(teamId);
+              });
             }}
           />
         )
@@ -78,6 +100,21 @@ export function SlackProjectRow({ project }: { readonly project: ProjectDto }) {
           {save.error.message}
         </Text>
       ) : null}
+      <ConfirmModal
+        opened={asked !== null}
+        title={`Change Slack for ${project.name}?`}
+        confirmLabel={asked?.teamId === null ? 'Turn Off' : 'Change'}
+        onCancel={() => {
+          setAsked(null);
+        }}
+        onConfirm={() => {
+          if (asked !== null) change(asked.teamId);
+          setAsked(null);
+        }}
+      >
+        {slack?.out ?? 0} {slack?.out === 1 ? 'question' : 'questions'} out in{' '}
+        {slack?.teamName == null ? 'Slack' : `${slack.teamName}'s Slack`} come back to you.
+      </ConfirmModal>
     </ProjectRow>
   );
 }

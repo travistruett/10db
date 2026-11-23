@@ -192,6 +192,8 @@ As in the Linear spec's "Sign-ins and bindings", with these changes:
 - **Linear's sign-in** is listed per account that can reach it: a Claude plan's claude.ai connector, or a
   configured `mcp.linear.app` server on any account (Codex accounts through their `CODEX_HOME`).
 - **Slack:** test data is deleted, not migrated, and the token lives under its workspace's team id from the start.
+  - Amended by `docs/architecture/decisions/2026-11-23-a-projects-slack-workspace-is-its-own.md`: several workspaces
+    can be signed in, each with its own token, and each project picks one or Off.
 - **Settings layout:**
   - All Projects: Accounts (each with its harness and whether it can power Decisions), Decisions, Models,
     Sign-ins (renamed from Integrations), People, and the rest unchanged.

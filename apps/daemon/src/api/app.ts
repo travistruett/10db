@@ -68,6 +68,7 @@ import {
   AskSomeoneInput,
   PersonId,
   SendInput,
+  SlackMembersQuery,
   SlackTokenInput,
   LinearReporterSettings,
   ConnectableService,
@@ -1613,7 +1614,11 @@ export function createApp(deps: ApiDeps) {
       validator('json', (value): SlackTokenInput => SlackTokenInput.parse(value)),
       async (c) => c.json(await deps.services.setSlackToken(c.req.valid('json'))),
     )
-    .delete('/slack/token', async (c) => c.json(await deps.services.removeSlackToken()))
+    .delete('/slack/workspaces/:teamId', async (c) =>
+      c.json(
+        await deps.services.removeSlackWorkspace(z.string().min(1).parse(c.req.param('teamId'))),
+      ),
+    )
     .get('/projects/:projectId/integrations', async (c) =>
       c.json(await deps.services.projectIntegrations(ProjectId.parse(c.req.param('projectId')))),
     )
@@ -1655,8 +1660,13 @@ export function createApp(deps: ApiDeps) {
     )
     .get('/settings/sign-ins/linear', async (c) => c.json(await deps.services.linearSignIns()))
     .get('/settings/sign-ins/figma', async (c) => c.json(await deps.services.figmaSignIns()))
-    .get('/slack/members', async (c) =>
-      c.json(await deps.services.listSlackMembers(c.req.query('query') ?? '')),
+    .get(
+      '/slack/members',
+      validator('query', (value): SlackMembersQuery => SlackMembersQuery.parse(value)),
+      async (c) => {
+        const { teamId, query } = c.req.valid('query');
+        return c.json(await deps.services.listSlackMembers(teamId, query));
+      },
     )
     .get('/stakeholders/timers', (c) => c.json(deps.services.getStakeholderTimers()))
     .put(

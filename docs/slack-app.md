@@ -177,10 +177,11 @@ up. Paste the answers, with the token and ids removed, at the end of
 
 ## 4. In 10db (once built)
 
-1. **Settings › Sign-ins**: on the Slack card, paste the `xoxb-` token and press **Connect**. 10db checks it
-   with Slack, and the card asks you to finish setup: under **Which one is you?**, pick yourself and press
-   **That's Me**, so every message carries your name. The card, titled by the workspace, then reads
-   "posts as @10db · you're @you".
+1. **Settings › Integrations**: on the Slack card, paste the `xoxb-` token and press **Connect**. 10db checks it
+   with Slack and lists the workspace. Under its row, **Which one is you?**: pick yourself and press
+   **That's Me**, so every message carries your name. The row then reads
+   "Acme · posts as @10db · you're @you". Then, under the workspace's row, choose which projects send through it
+   with each project's **Slack** field (Off sends nothing).
 2. **Settings › People › Add Person**: find your stakeholder among the workspace's members. Under "Before 10db
    messages them", keep **Show me each message first** for now: you see every message before it goes. "Up to
    10 new questions a day" can be set to **No limit**; it counts only a new question that starts a thread,
@@ -213,8 +214,20 @@ from another organisation only when it shares a Slack Connect channel with them,
 also depends on the other organisation's settings, which Slack doesn't document. That follow-up starts with a
 check like section 3's against such a person.
 
+## More than one workspace
+
+Each workspace has its own app: make one for every workspace from the same manifest (section 1), install it
+there, and press **Add Workspace** under the rows on the Slack card. Paste that app's token and the workspace
+joins the list. A project names one workspace, or Off. A stakeholder is reached through the workspace their
+project names, so they need a contact there (People).
+
+- **Replace Token**, in a row's menu, swaps that workspace's token, for a new token of the same app. A token from
+  another workspace's app is refused with the workspace it belongs to; use Add Workspace for that one.
+- Making the app again is a new bot, even in the same workspace. 10db notices the new bot, and its questions
+  still open in that workspace come back to you, since the stakeholder's thread belongs to the old bot.
+
 ## Disconnecting
 
-**Disconnect**, in the Slack card's menu in **Settings › Sign-ins**, stops 10db from sending and reading at once. To revoke it for
+**Disconnect**, in a workspace's menu on the Slack card in **Settings › Integrations**, stops 10db from sending and reading in that workspace at once; its projects send nothing until it is connected again. To revoke it for
 good, open the app at <https://api.slack.com/apps> and press **Uninstall App** under Install App (or delete the
 app): the token stops working everywhere.

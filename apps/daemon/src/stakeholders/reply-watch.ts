@@ -2,7 +2,7 @@ import {
   ConflictError,
   InboxState,
   JudgeDecision,
-  RoutedBy,
+  SendFailure,
   type InboxItemId,
   type PersonId,
 } from '@10db/contracts';
@@ -11,10 +11,7 @@ import {
   getJudgeConfig,
   getStakeholderTimers,
   markAnswered,
-  BUILDER_HANDLE,
-  failSend,
   markApprovalSeen,
-  setInboxRecipients,
   markLoneReplyPending,
   setProposal,
   threadStarts,
@@ -53,11 +50,13 @@ import { reminderLine } from './lines';
 import { scanOutbound } from './outbound-scan';
 import { readReply } from './read-reply';
 import type { StakeholderSends } from './sends';
-import type { SlackConnection } from './slack-connection';
+import { failSendsToBuilder, recordBot } from './send-returns';
+import type { SlackConnections } from './slack-connection';
+import { boundTeam } from './slack-workspaces';
 import { blocksOf } from './slack-text';
 import { dueTimers } from './timers';
 import { matchReply, type MatchState } from './reply-match';
-import { loadMatchState, saveMatchState } from './reply-match-store';
+import { saveMatchState } from './reply-match-store';
 
 /** How often open conversations are read. */
 export const REPLY_INTERVAL_MS = 60_000;
@@ -76,14 +75,18 @@ const GONE: ReadonlySet<string> = new Set([
 
 export interface ReplyWatchDeps {
   readonly state: StateStore;
-  /** Null when Slack is off: nothing is read. */
-  readonly slack: SlackClient | null;
+  /** The workspace this watch reads. */
+  readonly teamId: string;
+  /** The workspace's own client. */
+  readonly slack: SlackClient;
   readonly inbox: Pick<InboxService, 'answerAs'>;
   readonly judge: Judge;
   readonly sends: Pick<StakeholderSends, 'recoverSending' | 'closingTextFor'>;
   readonly clock: Clock;
   readonly log: Logger;
-  readonly connection: SlackConnection;
+  readonly connections: SlackConnections;
+  /** Shared by every watch; saved after each tick. */
+  readonly matched: MatchState;
   readonly intervalMs?: number;
 }
 
@@ -92,7 +95,7 @@ export interface ReplyWatch {
   /** Stops scheduling and waits for the tick in flight. */
   stop(): Promise<void>;
   tick(): Promise<void>;
-  /** The token was set again: checks it and reads on from each send's cursor. */
+  /** The token was set again: waits for the tick in flight, checks the token and reads on from each send's cursor. */
   reconnect(): Promise<void>;
 }
 
@@ -133,9 +136,10 @@ function questionLabel(db: DbReader, open: OpenSendRow): string {
 }
 
 export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
-  const { state, slack, clock, log, connection } = deps;
+  const { state, slack, clock, log, connections, teamId, matched } = deps;
   const interval = deps.intervalMs ?? REPLY_INTERVAL_MS;
   let running = false;
+  let stopped = false;
   let paused = false;
   let timer: Timer | null = null;
   let inFlight: Promise<void> = Promise.resolve();
@@ -145,14 +149,19 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
   let botUserId: string | null = null;
   /** The newest counted message each send's last tick read: a message no newer than it means quiet. */
   const quiet = new Map<string, string>();
-  const matched: MatchState = loadMatchState(state);
   const handledMentions = new Set<string>();
 
   async function identity(client: SlackClient): Promise<string> {
     if (botUserId !== null) return botUserId;
     const found = await client.authTest();
+    // A token for another team than this watch's is a refusal; no bot is recorded on this team's entry.
+    if (found.teamId !== teamId) throw new SlackError('auth.test', 'invalid_auth');
     botUserId = found.botUserId;
-    connection.set('connected', { identity: found });
+    // A check never recovers: a bot that changed under a saved token was recorded with that token.
+    state.write((ctx) => {
+      recordBot(ctx, found, 'check');
+    });
+    connections.set(teamId, 'connected', { identity: found });
     return botUserId;
   }
 
@@ -436,8 +445,16 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
   /** Posts the reminder once, unless the thread already holds it; a reminder that comes due is re-checked first. */
   async function remind(client: SlackClient, r: Reading): Promise<void> {
     const timers = getStakeholderTimers(state.db);
-    const fresh = openSends(state.db).find((o) => o.id === r.open.id);
+    const fresh = openSends(state.db, teamId).find((o) => o.id === r.open.id);
     if (!fresh || dueTimers(fresh, timers, clock.now()) !== 'remind') return;
+    // A send in another team than the stored binding is taken back, never reminded (only a race leaves one).
+    const owner = getInboxItem(state.db, fresh.inboxItemId);
+    if (fresh.teamId !== boundTeam(state.db, owner.projectId)) {
+      state.write((ctx) => {
+        failSendsToBuilder(ctx, [fresh], SendFailure.WorkspaceChanged);
+      });
+      return;
+    }
     const already = r.messages.some(
       (m) =>
         m.metadata?.eventType === 'tendb_send' &&
@@ -477,14 +494,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
       const { code } = error;
       log.warn({ code, sends: affected.map((o) => o.id) }, 'a conversation could not be read');
       state.write((ctx) => {
-        for (const o of affected) {
-          failSend(ctx, o.id, code);
-          setInboxRecipients(ctx, o.inboxItemId, {
-            assignees: [BUILDER_HANDLE],
-            routedBy: RoutedBy.Builder,
-            suggestion: null,
-          });
-        }
+        failSendsToBuilder(ctx, affected, code);
       });
       return null;
     }
@@ -493,16 +503,16 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
   async function once(client: SlackClient): Promise<void> {
     try {
       const bot = await identity(client);
-      await deps.sends.recoverSending();
-      const opens = openSends(state.db);
+      await deps.sends.recoverSending(teamId);
+      const opens = openSends(state.db, teamId);
       for (const r of await reading(client, opens, bot)) {
         const stillOpen = getInboxItem(state.db, r.open.inboxItemId).state === InboxState.Open;
         if (stillOpen) await guard([r.open], () => process(client, r, bot));
-        if (openSends(state.db).some((o) => o.id === r.open.id))
+        if (openSends(state.db, teamId).some((o) => o.id === r.open.id))
           await guard([r.open], () => remind(client, r));
       }
       failures = 0;
-      if (connection.get().state !== 'connected') connection.set('connected');
+      if (connections.get(teamId)?.state !== 'connected') connections.set(teamId, 'connected');
     } catch (error) {
       classify(error);
     }
@@ -514,10 +524,10 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
       return;
     }
     if (slackRefusedToken(error)) {
-      connection.set('refused', { error: error.code });
+      connections.set(teamId, 'refused', { error: error.code });
       paused = true;
     } else if (error.code === 'no_token') {
-      connection.set('none');
+      connections.set(teamId, 'none');
       paused = true;
     } else if (error.code === 'ratelimited') {
       notBefore = clock.now().getTime() + (error.retryAfterSeconds ?? 30) * 1000;
@@ -525,7 +535,8 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
       // A timeout, a 5xx, a malformed reply or any error Slack gives that is not about one conversation:
       // the tick failed, and enough in a row make Slack unreachable.
       failures += 1;
-      if (failures >= UNREACHABLE_AFTER) connection.set('unreachable', { error: error.code });
+      if (failures >= UNREACHABLE_AFTER)
+        connections.set(teamId, 'unreachable', { error: error.code });
     }
   }
 
@@ -533,7 +544,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
   const isPaused = (): boolean => paused;
 
   async function tick(): Promise<void> {
-    if (slack === null || paused) return;
+    if (paused) return;
     const now = clock.now().getTime();
     if (now < notBefore) return;
     const slept = now - lastTickAt > SLEPT_AFTER_INTERVALS * interval;
@@ -565,20 +576,27 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
   return {
     tick,
     start() {
-      if (running || slack === null) return;
+      if (running) return;
       running = true;
       // The connection is checked at once, so it never reads "none" for an interval after a restart.
       inFlight = check(slack).finally(schedule);
     },
     async stop() {
       running = false;
+      stopped = true;
       timer?.cancel();
       timer = null;
       await inFlight;
     },
     async reconnect() {
-      if (slack === null) return;
-      await check(slack);
+      // A tick in flight read with the old token; its outcome must not overwrite this check's.
+      inFlight = inFlight.then(() => check(slack));
+      await inFlight;
+      // A watch made for a new workspace starts reading here.
+      if (!running && !stopped) {
+        running = true;
+        schedule();
+      }
     },
   };
 }

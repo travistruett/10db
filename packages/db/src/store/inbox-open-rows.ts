@@ -22,8 +22,8 @@ const sends = schema.stakeholderSends;
 
 /** Where a card belongs in Open, given what is connected. */
 export interface InboxPlacement {
-  /** Slack is connected: a sent, unreturned card is Waiting's, not Open's. */
-  readonly waitingOut: boolean;
+  /** Workspaces connected now: a sent, unreturned card whose send is in one of them is Waiting's, not Open's. */
+  readonly connectedTeams: readonly string[];
 }
 
 interface OpenRow {
@@ -48,14 +48,20 @@ export function openRowsPage(
   const where: (SQL | undefined)[] = [eq(items.state, InboxState.Open)];
   if (q.project !== undefined) where.push(eq(items.projectId, q.project));
   if (q.kind !== undefined) where.push(eq(items.kind, q.kind));
-  if (placement.waitingOut)
+  if (placement.connectedTeams.length > 0)
     where.push(
       not(
         exists(
           db
             .select({ one: sql`1` })
             .from(sends)
-            .where(and(eq(sends.inboxItemId, items.id), sendIsOut)),
+            .where(
+              and(
+                eq(sends.inboxItemId, items.id),
+                sendIsOut,
+                inArray(sends.teamId, [...placement.connectedTeams]),
+              ),
+            ),
         ),
       ),
     );

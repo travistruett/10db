@@ -5,6 +5,8 @@ import {
   InboxState,
   InvalidError,
   RoutedBy,
+  SendFailure,
+  contactIn,
   isParkChoice,
   type AskSomeoneInput,
   type InboxItemDto,
@@ -17,11 +19,11 @@ import {
 } from '@10db/contracts';
 import {
   BUILDER_HANDLE,
+  COPY_FOR_KEY,
   SEED_BUILDER_NAME,
   closeSend,
   dropDraft,
   everSent,
-  failSend,
   getInboxItem,
   getPerson,
   insertDraft,
@@ -42,6 +44,7 @@ import {
   setRoutingRules,
   targetTaskIds,
   updateDraft,
+  updateInboxItem,
   type DbReader,
   type WriteContext,
 } from '@10db/db';
@@ -50,11 +53,14 @@ import type { StateStore } from '../events';
 import type { Logger } from '../log';
 import { SlackError, tsMillis, type SlackClient, type SlackMessage } from '../slack';
 import { closingLine, type ClosingReason } from './closing-lines';
+import type { SlackClients } from './slack-clients';
+import { readSlackWorkspaces } from './slack-workspaces';
 import { draftContext, draftFor, previewDraft } from './drafts';
 import { OPTION_LETTERS } from './letters';
 import { scanOutbound } from './outbound-scan';
 import { neutralizeAngles } from './escape';
 import { blocksOf } from './slack-text';
+import { failSendsToBuilder } from './send-returns';
 import { holdFor } from './send-holds';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -66,16 +72,18 @@ const SEND_METADATA = 'tendb_send';
 
 export interface SendsDeps {
   readonly state: StateStore;
-  /** Null when Slack is off or has no token: every draft stays as it is. */
-  readonly slack: SlackClient | null;
+  /** Null when TENDB_SLACK=off: every draft stays as it is. */
+  readonly slack: SlackClients | null;
   readonly clock: Clock;
   readonly log: Logger;
   /** Parks the sessions waiting on a card that moved to someone else (`Runner.parkFor`). */
   readonly parkFor?: (id: InboxItemId) => void;
-  /** Whether the bot token is stored; Send is a 409 with the draft kept when it is not. */
-  readonly hasToken?: () => Promise<boolean>;
-  /** Whether a project sends through a Slack workspace; one that does not keeps its drafts in the Inbox. */
-  readonly slackFor?: (projectId: ProjectId) => boolean;
+  /** Whether a workspace's bot token is stored; Send is a 409 with the draft kept when it is not. */
+  readonly hasToken?: (teamId: string) => Promise<boolean>;
+  /** The effective binding (`projectSlack`): what a draft is made in; null keeps drafts in the Inbox. */
+  readonly slackFor: (projectId: ProjectId) => string | null;
+  /** The stored binding (`boundTeam`): a reserved send in another team is taken back, never posted. */
+  readonly boundTo: (projectId: ProjectId) => string | null;
 }
 
 export const SLACK_OFF_FOR_PROJECT = 'Slack is off for this project';
@@ -89,8 +97,8 @@ export interface StakeholderSends {
   takeBack(cardId: InboxItemId): Promise<void>;
   /** The builder keeps waiting on a card that came back: both timers start again from now. */
   keepWaiting(cardId: InboxItemId): void;
-  /** Looks for the post of every send that was mid-flight, and posts the ones it finds none for. */
-  recoverSending(): Promise<void>;
+  /** Sends of this workspace that were mid-flight: found posts are recorded, the rest posted. */
+  recoverSending(teamId: string): Promise<void>;
   /** The closing line a card settled by the builder is owed in a conversation, or null when it is not settled. */
   closingTextFor(cardId: InboxItemId): string | null;
   /** A card changed: closes its send, and says so in the thread, when the builder settled it. */
@@ -107,6 +115,9 @@ const searchFrom = (iso: string): string =>
 
 export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
   const { state, slack, clock, log } = deps;
+
+  /** The client of one workspace; null when Slack is off or the workspace is not signed in. */
+  const clientOf = (teamId: string | null): SlackClient | null => slack?.clientFor(teamId) ?? null;
 
   const nowIso = (): string => clock.now().toISOString();
 
@@ -128,15 +139,23 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
     });
   }
 
-  function threadFor(card: InboxItemDto, people: readonly PersonDto[], db: DbReader = state.db) {
+  /** The thread a follow-up joins; one from before the workspace's bot was recorded is never joined. */
+  function threadFor(
+    card: InboxItemDto,
+    people: readonly PersonDto[],
+    teamId: string,
+    db: DbReader = state.db,
+  ) {
     const [taskId] = targetTaskIds(db, card.targets);
-    return taskId === undefined
-      ? null
-      : latestThreadFor(
-          db,
-          people.map((p) => p.id),
-          taskId,
-        );
+    if (taskId === undefined) return null;
+    const botSince = readSlackWorkspaces(db).find((w) => w.teamId === teamId)?.botSince ?? null;
+    return latestThreadFor(
+      db,
+      people.map((p) => p.id),
+      taskId,
+      teamId,
+      botSince,
+    );
   }
 
   /** Sends whose post this process is making now: a tick must not look for them or post them again. */
@@ -153,24 +172,47 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
   function redraftFailed(card: InboxItemDto): StakeholderSendDto | null {
     const failed = sendForCard(state.db, card.id);
     if (failed?.state !== 'failed' || card.state !== InboxState.Open) return null;
-    const again = state.write((ctx) => {
+    const outcome = state.write((ctx) => {
       const people = failed.people.flatMap((p) =>
         p.recipient && p.personId ? [getPerson(ctx.tx, p.personId)] : [],
       );
-      // Composed again, not copied: the builder's name or the card may have changed since.
-      const fresh = previewDraft(ctx.tx, card, people);
+      const teamId = deps.slackFor(card.projectId);
+      if (teamId === null) throw new ConflictError(SLACK_OFF_FOR_PROJECT);
       setInboxRecipients(ctx, card.id, {
         assignees: people.map((p) => p.handle),
         routedBy: RoutedBy.Builder,
         suggestion: null,
       });
-      return insertDraft(ctx, {
-        inboxItemId: card.id,
-        recipients: people.map((p) => p.id),
-        text: fresh.text,
-        hits: fresh.hits,
-      });
+      const unreachable = people.filter((p) => contactIn(p, teamId) === null);
+      if (unreachable.length > 0) {
+        // As anyone unreachable: the card is the builder's, with Copy for them.
+        setInboxRecipients(ctx, card.id, {
+          assignees: [BUILDER_HANDLE],
+          routedBy: RoutedBy.Builder,
+          suggestion: null,
+        });
+        updateInboxItem(ctx, card.id, {
+          detail: { ...card.detail, [COPY_FOR_KEY]: people.map((p) => p.handle) },
+        });
+        return { missing: unreachable.map((p) => p.name) };
+      }
+      // Composed again, not copied: the builder's name or the card may have changed since.
+      const fresh = previewDraft(ctx.tx, card, people);
+      return {
+        draft: insertDraft(ctx, {
+          inboxItemId: card.id,
+          teamId,
+          recipients: people.map((p) => p.id),
+          text: fresh.text,
+          hits: fresh.hits,
+        }),
+      };
     });
+    if ('missing' in outcome)
+      throw new ConflictError(
+        `${outcome.missing.join(', ')} has no Slack contact in this project's workspace; copy the message for them`,
+      );
+    const again = outcome.draft;
     deps.parkFor?.(card.id);
     return again;
   }
@@ -201,25 +243,34 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
       const card = getInboxItem(ctx.tx, cardId);
       const draft = liveSend(cardId, ctx.tx);
       if (draft?.state !== 'draft' || card.state !== InboxState.Open) return null;
+      // A project with Slack off keeps its draft in the Inbox, and the card says why before Send is pressed.
+      const teamId = deps.slackFor(card.projectId);
+      if (teamId === null) {
+        setHeldBy(ctx, draft.id, 'slack_off');
+        return null;
+      }
+      if (draft.teamId !== teamId) {
+        // A binding change drafts again in the same write; only a race leaves a draft in another team.
+        log.warn({ cardId, draftTeam: draft.teamId, teamId }, 'a draft is in another workspace');
+        return null;
+      }
       const people = recipientsOf(draft, ctx.tx);
-      const thread = threadFor(card, people, ctx.tx);
+      const thread = threadFor(card, people, teamId, ctx.tx);
       const since = new Date(clock.now().getTime() - DAY_MS).toISOString();
       const held = holdFor({
         hits: draft.hits,
         thread,
-        recipients: people.map((p) => ({
-          sendMode: p.slack?.sendMode ?? 'review',
-          dailyLimit: p.slack?.dailyLimit ?? null,
-          everSent: everSent(ctx.tx, p.id),
-          newThreads: newThreadsSince(ctx.tx, p.id, since),
-        })),
+        recipients: people.map((p) => {
+          const contact = contactIn(p, teamId);
+          return {
+            sendMode: contact?.sendMode ?? 'review',
+            dailyLimit: contact?.dailyLimit ?? null,
+            everSent: contact !== null && everSent(ctx.tx, p.id, teamId),
+            newThreads: contact === null ? 0 : newThreadsSince(ctx.tx, p.id, teamId, since),
+          };
+        }),
       });
       // A message from a builder who is still called "You" would read "You's build": he reviews it.
-      // A project with Slack off keeps its draft in the Inbox, and the card says why before Send is pressed.
-      if (deps.slackFor?.(card.projectId) === false) {
-        setHeldBy(ctx, draft.id, 'slack_off');
-        return null;
-      }
       const reason = held ?? (builderUnnamed(card, ctx.tx) ? 'review' : null);
       setHeldBy(ctx, draft.id, reason);
       if (reason !== null) return null;
@@ -236,16 +287,13 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
 
   /** Opens the conversation of a reserved send if it has none, then posts it. */
   async function continueSending(sendId: StakeholderSendDto['id']): Promise<void> {
-    const client = slack;
-    if (client === null || inFlight.has(sendId)) return;
+    if (slack === null || inFlight.has(sendId)) return;
     inFlight.add(sendId);
     try {
       const row = sendingSends(state.db).find((x) => x.id === sendId);
       if (!row) return;
       const { inboxItemId, text } = sendSummary(state.db, sendId);
       const card = getInboxItem(state.db, inboxItemId);
-      // A project with Slack off posts nothing; the send waits until it is bound again.
-      if (deps.slackFor?.(card.projectId) === false) return;
       if (card.state !== InboxState.Open) {
         // The card closed before anything was posted: there is nothing to open and nothing to say.
         const reason = closeReasonOf(card, true) ?? 'cancelled';
@@ -254,11 +302,24 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
         });
         return;
       }
+      // A send reserved in another team than the stored binding is taken back, never posted.
+      if (row.teamId !== deps.boundTo(card.projectId)) {
+        fail(sendId, inboxItemId, SendFailure.WorkspaceChanged);
+        return;
+      }
+      // A workspace that is not signed in leaves the send waiting, as a missing token does.
+      const client = clientOf(row.teamId);
+      if (client === null || row.teamId === null) return;
       let channelId = row.channelId;
       if (channelId === null) {
         const found = sendForCard(state.db, inboxItemId);
         try {
-          const opened = await channelFor(client, found ? recipientsOf(found) : [], null);
+          const opened = await channelFor(
+            client,
+            found ? recipientsOf(found) : [],
+            row.teamId,
+            null,
+          );
           state.write((ctx) => {
             setSendChannel(ctx, sendId, opened);
           });
@@ -283,26 +344,29 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
   async function channelFor(
     client: SlackClient,
     people: readonly PersonDto[],
+    teamId: string,
     thread: { channelId: string } | null,
   ): Promise<string> {
     if (thread) return thread.channelId;
-    const [only] = people;
-    if (people.length === 1 && only?.slack) {
-      if (only.slack.dmChannelId !== null) return only.slack.dmChannelId;
-      const channel = await client.openDm(only.slack.userId);
+    const contacts = people.map((p) => ({ person: p, contact: contactIn(p, teamId) }));
+    const [only] = contacts;
+    if (contacts.length === 1 && only?.contact) {
+      const { person, contact } = only;
+      // A bot change cleared the channel it had, so a stale one is never used.
+      if (contact.dmChannelId !== null) return contact.dmChannelId;
+      const channel = await client.openDm(contact.userId);
       state.write((ctx) => {
-        setDmChannel(ctx, only.id, channel);
+        setDmChannel(ctx, person.id, teamId, channel);
       });
       return channel;
     }
-    return client.openGroup(people.flatMap((p) => p.slack?.userId ?? []));
+    return client.openGroup(contacts.flatMap((c) => c.contact?.userId ?? []));
   }
 
   /** Marks a send failed and gives its card back to the builder. */
   function fail(sendId: StakeholderSendDto['id'], cardId: InboxItemId, code: string): void {
     state.write((ctx) => {
-      failSend(ctx, sendId, code);
-      toBuilder(ctx, cardId);
+      failSendsToBuilder(ctx, [{ id: sendId, inboxItemId: cardId }], code);
     });
   }
 
@@ -311,19 +375,15 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
    * metadata, and records the ids. A connection that fails before the post leaves the draft; one that
    * fails during it leaves the send `sending` for `recoverSending`; a refusal fails the send.
    */
-  async function post(cardId: InboxItemId): Promise<void> {
-    const client = slack;
+  async function post(cardId: InboxItemId, teamId: string, client: SlackClient): Promise<void> {
     const draft = liveSend(cardId);
-    if (client === null || (await deps.hasToken?.()) === false)
-      throw new ConflictError('Slack is not connected');
     if (draft?.state !== 'draft') throw new ConflictError('There is no draft to send');
     const card = getInboxItem(state.db, cardId);
-    if (deps.slackFor?.(card.projectId) === false) throw new ConflictError(SLACK_OFF_FOR_PROJECT);
     const people = recipientsOf(draft);
-    const thread = threadFor(card, people);
+    const thread = threadFor(card, people, teamId);
     let channelId: string;
     try {
-      channelId = await channelFor(client, people, thread);
+      channelId = await channelFor(client, people, teamId, thread);
     } catch (error) {
       const code = slackCode(error);
       if (TRANSPORT.test(code) || code === 'no_token')
@@ -335,8 +395,7 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
           threadTs: thread?.threadTs ?? null,
           startedAt: nowIso(),
         });
-        failSend(ctx, draft.id, code);
-        toBuilder(ctx, cardId);
+        failSendsToBuilder(ctx, [{ id: draft.id, inboxItemId: cardId }], code);
       });
       return;
     }
@@ -398,12 +457,42 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
     at: string = nowIso(),
   ): Promise<void> {
     const permalink = await client.permalink(channelId, messageTs).catch(() => null);
-    state.write((ctx) => {
-      markSent(ctx, sendId, { channelId, threadTs, messageTs, permalink, at });
-    });
+    try {
+      state.write((ctx) => {
+        markSent(ctx, sendId, { channelId, threadTs, messageTs, permalink, at });
+      });
+    } catch (error) {
+      if (!(error instanceof ConflictError)) throw error;
+      // The post landed after a change of workspace or bot failed its send: it is never recorded sent and
+      // never drafted again, and the thread is told the question was taken back.
+      const failed = sendForCard(state.db, cardId);
+      if (
+        failed?.id !== sendId ||
+        (failed.error !== SendFailure.WorkspaceChanged && failed.error !== SendFailure.BotChanged)
+      )
+        throw error;
+      await sayTakenBack(client, cardId, channelId, threadTs);
+      return;
+    }
     const card = getInboxItem(state.db, cardId);
     const reason = closeReasonOf(card, true);
     if (reason !== null) await closeAndSay(sendId, card, reason);
+  }
+
+  /** Says in a thread that its question was taken back; a Slack error is logged, never retried. */
+  async function sayTakenBack(
+    client: SlackClient,
+    cardId: InboxItemId,
+    channelId: string,
+    threadTs: string,
+  ): Promise<void> {
+    const card = getInboxItem(state.db, cardId);
+    const line = closingLine('taken_back', draftContext(state.db, card).builderName, null);
+    try {
+      await client.post({ channel: channelId, text: line, blocks: blocksOf(line), threadTs });
+    } catch (error) {
+      log.warn({ err: error, cardId }, 'a closing line could not be posted');
+    }
   }
 
   /** Why the builder's side closed a send, from the card as it stands; null when it did not. */
@@ -449,13 +538,26 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
   ): Promise<void> {
     const closed = state.write((ctx) => {
       const live = sendForCard(ctx.tx, card.id);
-      if (live?.id !== sendId || live.state !== 'sent') return false;
+      if (live?.id !== sendId || live.state !== 'sent') return null;
+      // A send in another team than the stored binding is taken back, and its thread is told so.
+      if (
+        live.teamId !== deps.boundTo(card.projectId) &&
+        getInboxItem(ctx.tx, card.id).state === InboxState.Open
+      ) {
+        failSendsToBuilder(
+          ctx,
+          [{ id: sendId, inboxItemId: card.id }],
+          SendFailure.WorkspaceChanged,
+        );
+        return { teamId: live.teamId, reason: 'taken_back' as const };
+      }
       closeSend(ctx, sendId, reason);
-      return true;
+      return { teamId: live.teamId, reason };
     });
-    if (!closed || slack === null || deps.slackFor?.(card.projectId) === false) return;
+    const slackClient = clientOf(closed?.teamId ?? null);
+    if (closed === null || slackClient === null) return;
     const builder = draftContext(state.db, card).builderName;
-    const line = closingLine(reason, builder, letterOf(card));
+    const line = closingLine(closed.reason, builder, letterOf(card));
     const said = new Set<string>();
     for (;;) {
       // The threads are read again after each post, so a conversation that moved is not missed.
@@ -465,7 +567,7 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
       if (!next) return;
       said.add(`${next.channelId}/${next.threadTs}`);
       try {
-        await slack.post({
+        await slackClient.post({
           channel: next.channelId,
           text: line,
           blocks: blocksOf(line),
@@ -481,17 +583,21 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
     afterDraft,
 
     async send(cardId, input) {
-      if (slack === null || (await deps.hasToken?.()) === false)
-        throw new ConflictError('Slack is not connected');
+      if (slack === null) throw new ConflictError('Slack is not connected');
       const card = getInboxItem(state.db, cardId);
-      if (deps.slackFor?.(card.projectId) === false) throw new ConflictError(SLACK_OFF_FOR_PROJECT);
+      const teamId = deps.slackFor(card.projectId);
+      if (teamId === null) throw new ConflictError(SLACK_OFF_FOR_PROJECT);
+      const client = slack.clientFor(teamId);
+      if (client === null || (await deps.hasToken?.(teamId)) === false)
+        throw new ConflictError('Slack is not connected');
       const stored = liveSend(cardId) ?? redraftFailed(card);
       if (card.state !== InboxState.Open || stored?.state !== 'draft')
         throw new ConflictError('There is no draft to send');
-      if (builderUnnamed(card))
-        throw new ConflictError(
-          'Pick yourself in Settings › Integrations before you send a question',
-        );
+      if (stored.teamId !== teamId) {
+        // A binding change drafts again in the same write; only a race leaves a draft in another team.
+        log.warn({ cardId, draftTeam: stored.teamId, teamId }, 'a draft is in another workspace');
+        throw new ConflictError('This draft is for another Slack workspace');
+      }
       const draft = input.text === undefined ? recomposed(card, stored) : stored;
       const hits: OutboundHit[] =
         input.text === undefined
@@ -510,7 +616,7 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
           updateDraft(ctx, draft.id, { text, hits, byBuilder: true });
         });
       }
-      await post(cardId);
+      await post(cardId, teamId, client);
       return sendForCard(state.db, cardId) ?? draft;
     },
 
@@ -605,18 +711,20 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
       });
     },
 
-    async recoverSending() {
-      const client = slack;
+    async recoverSending(teamId) {
+      // A workspace that is not signed in leaves its sends waiting, as a missing token does.
+      const client = clientOf(teamId);
       if (client === null) return;
-      for (const pending of sendingSends(state.db)) {
+      for (const pending of sendingSends(state.db, teamId)) {
         if (inFlight.has(pending.id)) continue;
-        const owner = getInboxItem(state.db, sendSummary(state.db, pending.id).inboxItemId);
-        if (deps.slackFor?.(owner.projectId) === false) continue;
+        const send = sendSummary(state.db, pending.id);
+        const owner = getInboxItem(state.db, send.inboxItemId);
+        const moved = pending.teamId !== deps.boundTo(owner.projectId);
         if (pending.channelId === null) {
+          // Nothing was posted yet; continueSending takes a moved send back.
           await continueSending(pending.id);
           continue;
         }
-        const send = sendSummary(state.db, pending.id);
         inFlight.add(pending.id);
         try {
           const messages =
@@ -628,7 +736,17 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
                   searchFrom(pending.startedAt),
                 );
           const found = messages.find((m) => namesSend(m, pending.id));
-          if (found) {
+          if (moved) {
+            // Only a race leaves this: the send is taken back, and a post that did land is told so.
+            fail(pending.id, send.inboxItemId, SendFailure.WorkspaceChanged);
+            if (found)
+              await sayTakenBack(
+                client,
+                send.inboxItemId,
+                pending.channelId,
+                pending.threadTs ?? found.ts,
+              );
+          } else if (found) {
             // The send dates from the message itself, not from when a restart found it.
             await landed(
               client,

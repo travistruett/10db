@@ -154,7 +154,7 @@ import { taskSession } from '../chat';
 import type { Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
-import type { SlackConnection } from '../stakeholders';
+import type { SlackConnections } from '../stakeholders';
 import {
   createTurnFiles,
   goalPassPages,
@@ -288,8 +288,8 @@ export function createServices(deps: {
   readonly runner: Runner;
   readonly scheduler: Scheduler;
   readonly inbox: InboxService;
-  /** Where the Slack connection stands: Open leaves out what Waiting holds only while it is connected. */
-  readonly slackConnection: Pick<SlackConnection, 'get'>;
+  /** Where each Slack workspace stands: Open leaves out what Waiting holds only while its workspace is connected. */
+  readonly slackConnections: Pick<SlackConnections, 'connectedTeams'>;
   readonly keepAwake: KeepAwake;
   readonly agentSkill: AgentSkill;
   /** The one gate in front of new lanes, for Factory's note. */
@@ -767,7 +767,9 @@ export function createServices(deps: {
     },
     listInbox: ({ states }) => listInbox(db, states ? { states } : {}),
     pageInbox: (query) =>
-      pageInbox(db, query, { waitingOut: deps.slackConnection.get().state === 'connected' }),
+      pageInbox(db, query, {
+        connectedTeams: deps.slackConnections.connectedTeams(),
+      }),
     pageActivity: (query) => pageActivity(db, query),
     inboxCardContext: (id) => inboxCardContext(db, id, CARD_CONTEXT_MESSAGES),
     answerInbox(id, answer) {

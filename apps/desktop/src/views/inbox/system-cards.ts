@@ -1,7 +1,7 @@
 import {
   AgentCopyState,
   type AgentCopy,
-  type SlackConnectionDto,
+  type SlackStatusDto,
   type SystemCheckDto,
   type ToolName,
 } from '@10db/contracts';
@@ -38,7 +38,11 @@ export type SystemCard =
       readonly key: string;
       readonly message: string;
     }
-  | { readonly kind: typeof SystemCardKind.SlackRefused; readonly key: string };
+  | {
+      readonly kind: typeof SystemCardKind.SlackRefused;
+      readonly key: string;
+      readonly teamName: string;
+    };
 
 /**
  * The Inbox's 10db cards: only what the builder has to act on. A copy being downloaded clears by itself and
@@ -47,10 +51,15 @@ export type SystemCard =
  */
 export function systemCards(
   check: SystemCheckDto | undefined,
-  slack?: SlackConnectionDto,
+  slack?: SlackStatusDto,
 ): SystemCard[] {
-  const refused: SystemCard[] =
-    slack?.state === 'refused' ? [{ kind: SystemCardKind.SlackRefused, key: 'slack-refused' }] : [];
+  const refused: SystemCard[] = (slack?.workspaces ?? [])
+    .filter((workspace) => workspace.state === 'refused')
+    .map((workspace) => ({
+      kind: SystemCardKind.SlackRefused,
+      key: `slack-refused:${workspace.teamId}`,
+      teamName: workspace.teamName,
+    }));
   if (!check) return refused;
   const agents = check.agents ?? [];
   const cards: SystemCard[] = [...refused];

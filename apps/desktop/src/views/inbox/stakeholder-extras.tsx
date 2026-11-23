@@ -4,12 +4,13 @@ import { useState } from 'react';
 import {
   useCompose,
   useKeepWaiting,
-  useSlackConnection,
+  useSlackStatus,
   useStakeholderTimers,
 } from '../../daemon/people';
+import { useProjectIntegrations } from '../../daemon/sign-in-queries';
 import { AskSomeone } from './ask-someone';
 import { plainMessage } from './plain-message';
-import { copyPeople, joinNames, routeLine, StakeholderMode } from './route-line';
+import { copyPeople, copyReason, joinNames, routeLine, StakeholderMode } from './route-line';
 import { TakeBackModal } from './take-back-modal';
 
 /** The route line of a card that is not showing a draft: why this person, and Change. */
@@ -57,13 +58,12 @@ export function ComposedMessage({
     recipients.map((p) => p.id),
     recipients.length > 0,
   );
-  const names = joinNames(recipients.map((p) => p.name));
+  const slack = useProjectIntegrations(item.projectId).data?.slack;
+  const why = joinNames(recipients.map((p) => `${p.name} ${copyReason(p, slack)}`));
   return (
     <Stack gap="xs">
       <Group justify="space-between" wrap="nowrap" gap="md">
-        <Text size="sm">
-          {`${names} ${recipients.length > 1 ? "aren't" : "isn't"} on Slack. Copy this to them, then pick their answer below.`}
-        </Text>
+        <Text size="sm">{`${why}. Copy this to them, then pick their answer below.`}</Text>
         <CopyForPeople item={item} recipients={recipients} />
       </Group>
       {compose.isSuccess ? (
@@ -166,7 +166,7 @@ const OUTAGE_NOTICES: Readonly<Record<string, string>> = {
  * disagree, or Slack can't be read. Answer Myself is the card's own options below.
  */
 export function SentNotice({ item }: { readonly item: InboxItemDto }) {
-  const connection = useSlackConnection();
+  const status = useSlackStatus();
   const timers = useStakeholderTimers();
   const keepWaiting = useKeepWaiting();
   const [takingBack, setTakingBack] = useState(false);
@@ -228,7 +228,10 @@ export function SentNotice({ item }: { readonly item: InboxItemDto }) {
       </Alert>
     );
   }
-  const state = connection.data?.state;
+  const workspace = status.data?.workspaces.find((w) => w.teamId === send.teamId);
+  // The send's own workspace: another one being down says nothing about this question.
+  const state =
+    status.data === undefined ? undefined : status.data.off ? 'off' : (workspace?.state ?? 'none');
   const notice = state === undefined ? undefined : OUTAGE_NOTICES[state];
   return notice === undefined ? null : (
     <Alert color="yellow" variant="light">

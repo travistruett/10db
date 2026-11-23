@@ -1,5 +1,5 @@
 import { useInboxCount } from '../../daemon/inbox-queries';
-import { useSlackConnection } from '../../daemon/people';
+import { useSlackStatus } from '../../daemon/people';
 import { useSystemCheck } from '../../daemon/queries';
 import { systemCards } from './system-cards';
 
@@ -8,7 +8,7 @@ import { systemCards } from './system-cards';
  * cards above them. It reads 0 while the count loads, so the badge waits rather than show a wrong number.
  */
 export function useOpenInboxCount(): number {
-  const connection = useSlackConnection();
+  const slack = useSlackStatus();
   const rows = useInboxCount('open') ?? 0;
-  return rows + systemCards(useSystemCheck().data, connection.data).length;
+  return rows + systemCards(useSystemCheck().data, slack.data).length;
 }

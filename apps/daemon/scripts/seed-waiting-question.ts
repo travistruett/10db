@@ -34,7 +34,7 @@ const mark = store.write((ctx) =>
   insertPerson(ctx, {
     handle: 'mark',
     name: 'Mark Ellis',
-    slack: { teamId: 'T1', userId: 'U1', sendMode: 'review', dailyLimit: 10 },
+    slack: [{ teamId: 'T1', userId: 'U1', sendMode: 'review', dailyLimit: 10 }],
   }),
 ).value;
 const task = store.write((ctx) =>
@@ -71,7 +71,13 @@ const card = store.write((ctx) =>
   }),
 ).value;
 const send = store.write((ctx) =>
-  insertDraft(ctx, { inboxItemId: card.id, recipients: [mark.id], text: 'Hi', hits: [] }),
+  insertDraft(ctx, {
+    inboxItemId: card.id,
+    teamId: 'T1',
+    recipients: [mark.id],
+    text: 'Hi',
+    hits: [],
+  }),
 ).value;
 store.write((ctx) => {
   markSending(ctx, send.id, { textSha256: 'seeded', threadTs: null, startedAt: sentAt });

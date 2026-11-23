@@ -124,19 +124,20 @@ import { createFigmaSignIns } from './figma-sign-ins';
 import { createReporterLaunch } from './reporter-launch';
 import { createStakeholderApiServices } from './stakeholder-services';
 import {
+  boundTeam,
   cleanUpSlackSignIns,
-  createReplyWatch,
-  createSlackConnection,
+  createReplyWatches,
+  createSlackClients,
+  createSlackConnections,
   createStakeholderSends,
   createTimerWatch,
   createTriage,
   draftOnOpen,
   projectSlack,
   routedAway,
-  slackTokenReader,
   sweepDrafts,
+  type SlackClients,
 } from '../stakeholders';
-import { createSlackClient, type SlackClient } from '../slack';
 import { createTrustServices } from './trust-services';
 import {
   backupDatabase,
@@ -204,6 +205,7 @@ import {
   createLauncher,
   exportAwsCredentials,
   REQUIRED_TOOLS,
+  slackBotAccount,
   unavailableKeychain,
   type AgentTools,
   type Keychain,
@@ -987,22 +989,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     log: logger,
   });
   // Slack is reached only when the entry point turned it on, and only with the bot token in the Keychain.
-  const slackClient: SlackClient | null =
+  const slackClients: SlackClients | null =
     opts.slack === true
-      ? createSlackClient({
+      ? createSlackClients({
+          state,
+          keychain: judgeKeychain,
           fetch: opts.fetch ?? fetch,
-          token: slackTokenReader(state, judgeKeychain),
           clock,
           timeoutMs: SLACK_TIMEOUT_MS,
         })
       : null;
   const sends = createStakeholderSends({
     state,
-    slack: slackClient,
+    slack: slackClients,
     clock,
     log: logger.child({ component: 'stakeholder-sends' }),
-    hasToken: async () => (await slackTokenReader(state, judgeKeychain)()) !== null,
-    slackFor: (projectId) => projectSlack(state.db, projectId).teamId !== null,
+    hasToken: async (teamId) => (await judgeKeychain.readAsync(slackBotAccount(teamId))) !== null,
+    slackFor: (projectId) => projectSlack(state.db, projectId).teamId,
+    boundTo: (projectId) => boundTeam(state.db, projectId),
     parkFor: (id) => {
       runner?.parkFor(id);
     },
@@ -2152,23 +2156,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   await sweepUnlistedRuns(skippedDeps);
   // A card a crash left waiting for triage takes the lane's rule, a routed card without its message gets
-  // one, and a send that was mid-post is looked for in Slack.
+  // one. A send that was mid-post is looked for by its workspace's reply watch.
   for (const after of state.write((ctx) => sweepDrafts(ctx, draftOpts))) after();
   // Slack tokens are kept by workspace: the old single item and contacts of no signed-in workspace go.
-  if (slackClient !== null) cleanUpSlackSignIns({ state, keychain: judgeKeychain, log: logger });
-  const slackConnection = createSlackConnection({
+  if (slackClients !== null) cleanUpSlackSignIns({ state, keychain: judgeKeychain, log: logger });
+  const slackConnections = createSlackConnections({ state, off: slackClients === null });
+  const replyWatches = createReplyWatches({
     state,
-    initial: slackClient === null ? 'off' : 'none',
-  });
-  const replyWatch = createReplyWatch({
-    state,
-    slack: slackClient,
+    slack: slackClients,
     inbox,
     judge,
     sends,
     clock,
     log: logger.child({ component: 'reply-watch' }),
-    connection: slackConnection,
+    connections: slackConnections,
   });
   // The timers need no Slack: a card comes back to the builder even while Slack is down.
   const timerWatch = createTimerWatch({
@@ -2582,7 +2583,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   };
   const services = createServices({
     state,
-    slackConnection,
+    slackConnections,
     github: {
       githubStatus: github.githubStatus,
       startGithubSignin: github.startGithubSignin,
@@ -2645,12 +2646,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     stakeholders: createStakeholderApiServices({
       state,
       keychain: judgeKeychain,
-      slack: slackClient,
+      slack: slackClients,
       sends,
-      connection: slackConnection,
+      connections: slackConnections,
       clock,
       fetch: opts.fetch ?? fetch,
-      reconnect: () => replyWatch.reconnect(),
+      watches: replyWatches,
+      draftOpts,
       githubLogin: () => Promise.resolve(github.cachedLogin()),
       linear: linearImport,
       reporter: {
@@ -3113,9 +3115,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   createdScheduler.requestTick();
   loadGuard.start();
   prWatch.start();
-  // After recovery: a send left mid-post is looked for in Slack, then replies and timers are watched.
-  void sends.recoverSending();
-  replyWatch.start();
+  // After recovery: each workspace's watch first looks for the posts its sends left mid-flight, then reads replies.
+  replyWatches.start();
   timerWatch.start();
   // Tasks made while the daemon was down are sized now; the judge is asked about the last day's only.
   sizing.sweep();
@@ -3155,7 +3156,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       unsubscribeKeptWork();
       unsubscribePrWatch();
       await prWatch.stop();
-      await Promise.all([replyWatch.stop(), timerWatch.stop()]);
+      await Promise.all([replyWatches.stop(), timerWatch.stop()]);
       retiredLandingsAbort.abort();
       pageLabelsAbort.abort();
       await Promise.all([retiredLandings, pageLabels]);

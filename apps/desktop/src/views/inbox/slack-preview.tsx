@@ -1,4 +1,10 @@
-import type { InboxItemDto, OutboundHit, PersonDto, StakeholderSendDto } from '@10db/contracts';
+import {
+  contactIn,
+  type InboxItemDto,
+  type OutboundHit,
+  type PersonDto,
+  type StakeholderSendDto,
+} from '@10db/contracts';
 import { Alert, Anchor, Button, Group, Kbd, Paper, Stack, Text, Textarea } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -98,7 +104,9 @@ export function SlackPreview({
   const limitHeld = send.heldBy === 'limit';
   // A held message cannot go as it is: opening Edit changes nothing, and only different text is scanned again.
   const blocked = send.heldBy === 'scan' && (edited === null || edited === send.text);
-  const limit = people.find((p) => p.id === send.people[0]?.personId)?.slack?.dailyLimit ?? null;
+  const recipient = people.find((p) => p.id === send.people[0]?.personId);
+  const limit =
+    (recipient === undefined ? null : contactIn(recipient, send.teamId))?.dailyLimit ?? null;
   // A failed card falls back to the builder; the line names who the message was for.
   const sentPeople = sentTo(send, people);
   const line = routeLine(item, people, sentPeople.length > 0 ? sentPeople : undefined);

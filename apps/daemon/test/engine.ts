@@ -85,14 +85,19 @@ import { resolveGh } from '../src/github';
 import { startSignOff } from '../src/pass';
 import { createJudge, type Judge } from '../src/judge';
 import {
-  createReplyWatch,
-  createSlackConnection,
+  createReplyWatches,
+  createSlackConnections,
   createStakeholderSends,
   createTimerWatch,
+  boundTeam,
   createTriage,
   draftOnOpen,
+  projectSlack,
   routedAway,
-  type ReplyWatch,
+  saveSlackWorkspace,
+  setProjectSlack,
+  type ReplyWatches,
+  type SlackClients,
   type StakeholderSends,
   type TimerWatch,
 } from '../src/stakeholders';
@@ -152,7 +157,7 @@ export function routeQuestionsAway(engine: Pick<TestEngine, 'state' | 'project'>
     const person = insertPerson(ctx, {
       handle: 'stakeholder',
       name: 'Stakeholder',
-      slack: { teamId: 'T1', userId: 'U9', sendMode: 'review', dailyLimit: 10 },
+      slack: [{ teamId: 'T1', userId: 'U9', sendMode: 'review', dailyLimit: 10 }],
     });
     setRoutingRules(ctx, engine.project.id, {
       rules: Object.values(QuestionCategory).map((category) => ({
@@ -178,7 +183,7 @@ export interface TestEngine {
   readonly laneLive: LiveRegistry;
   /** The stakeholder sends, over the fake Slack the engine was given (none: every draft stays). */
   readonly sends: StakeholderSends;
-  readonly replyWatch: ReplyWatch;
+  readonly replyWatches: ReplyWatches;
   readonly timerWatch: TimerWatch;
   readonly runner: Runner;
   readonly adapter: FakeAdapter;
@@ -249,6 +254,9 @@ function fullFlowSteps(riskTags: readonly string[], criteria: number): StepRole[
     ...(long ? [StepRole.Qa] : []),
   ];
 }
+
+/** The workspace the engine's fake Slack stands for; people with a contact in it are reachable. */
+const FAKE_TEAM = 'T1';
 
 /** A judge that is off: every decision keeps today's rule. */
 export const offJudge: Judge = {
@@ -351,11 +359,17 @@ export async function createTestEngine(
         logger: silentLogger,
       })
     : offJudge;
+  // The fake Slack is the one workspace, T1, which the engine's project is bound to.
+  const fakeClients: SlackClients | null = setup.slack
+    ? { clientFor: (teamId) => (teamId === FAKE_TEAM ? (setup.slack ?? null) : null) }
+    : null;
   const sends = createStakeholderSends({
     state,
-    slack: setup.slack ?? null,
+    slack: fakeClients,
     clock,
     log: silentLogger,
+    slackFor: (projectId) => projectSlack(state.db, projectId).teamId,
+    boundTo: (projectId) => boundTeam(state.db, projectId),
     parkFor: (id) => {
       runner?.parkFor(id);
     },
@@ -448,19 +462,16 @@ export async function createTestEngine(
       answerAccountCard?.(item, answer);
     },
   });
-  const slackConnection = createSlackConnection({
+  const slackConnections = createSlackConnections({ state, off: !setup.slack });
+  const replyWatches = createReplyWatches({
     state,
-    initial: setup.slack ? 'connected' : 'off',
-  });
-  const replyWatch = createReplyWatch({
-    state,
-    slack: setup.slack ?? null,
+    slack: fakeClients,
     inbox,
     judge: triageJudge,
     sends,
     clock,
     log: silentLogger,
-    connection: slackConnection,
+    connections: slackConnections,
   });
   const timerWatch = createTimerWatch({ state, clock, log: silentLogger });
   const pauses = createAccountPauses({
@@ -626,6 +637,11 @@ export async function createTestEngine(
     ],
     ...project,
   });
+  // Bound with or without a fake client: a routed question is drafted for people with a contact in T1.
+  state.write((ctx) => {
+    saveSlackWorkspace(ctx, { teamId: FAKE_TEAM, teamName: 'Fake' });
+    setProjectSlack(ctx, seeded.id, FAKE_TEAM);
+  });
   const engine: TestEngine = {
     store,
     state,
@@ -635,7 +651,7 @@ export async function createTestEngine(
     frames,
     laneLive,
     sends,
-    replyWatch,
+    replyWatches,
     timerWatch,
     runner: created,
     adapter,

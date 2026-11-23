@@ -33,6 +33,8 @@ const ConversationMessage = z.object({
 export const StakeholderSendDto = z.object({
   id: StakeholderSendId,
   inboxItemId: InboxItemId,
+  /** The workspace the send was drafted in; null only on a send migrated without one. */
+  teamId: z.string().nullable(),
   state: z.enum(SendState),
   people: z.array(SendPersonDto),
   text: z.string(),
@@ -57,18 +59,22 @@ export const StakeholderSendDto = z.object({
 });
 export type StakeholderSendDto = z.infer<typeof StakeholderSendDto>;
 
-/** The Slack connection as the daemon last saw it; never the token. */
-export const SlackConnectionDto = z.object({
-  state: z.enum(['off', 'none', 'connected', 'refused', 'unreachable']),
-  teamId: z.string().nullable(),
-  teamName: z.string().nullable(),
-  botUserId: z.string().nullable(),
-  checkedAt: z.iso.datetime().nullable(),
-  error: z.string().nullable(),
-});
-export type SlackConnectionDto = z.infer<typeof SlackConnectionDto>;
+/** Failure codes a send records in `error`. */
+export const SendFailure = {
+  WorkspaceChanged: 'workspace_changed',
+  BotChanged: 'bot_changed',
+  NoWorkspace: 'no_workspace',
+} as const;
+export type SendFailure = (typeof SendFailure)[keyof typeof SendFailure];
 
-/** A member of the connected workspace, offered when the builder adds a person. */
+/** `GET /slack/members`: the people of one signed-in workspace, optionally filtered. */
+export const SlackMembersQuery = z.object({
+  teamId: z.string().min(1),
+  query: z.string().default(''),
+});
+export type SlackMembersQuery = z.infer<typeof SlackMembersQuery>;
+
+/** A member of a signed-in workspace, offered when the builder adds a person. */
 export const SlackMemberDto = z.object({
   userId: z.string(),
   teamId: z.string(),
@@ -117,6 +123,8 @@ export const SlackTokenInput = z.strictObject({
     .min(1)
     .max(512)
     .regex(SECRET_CHARACTERS, 'printable ASCII with no spaces, double quotes or backslashes'),
+  /** Replaces that workspace's token, and refuses a token from another team. */
+  teamId: z.string().min(1).optional(),
 });
 export type SlackTokenInput = z.infer<typeof SlackTokenInput>;
 
@@ -124,9 +132,45 @@ export type SlackTokenInput = z.infer<typeof SlackTokenInput>;
 export const ComposePreviewDto = z.object({ text: z.string(), hits: z.array(OutboundHit) });
 export type ComposePreviewDto = z.infer<typeof ComposePreviewDto>;
 
-/** One signed-in Slack workspace; its bot token is in the Keychain under the workspace's team id. */
-export const SlackWorkspace = z.strictObject({ teamId: z.string().min(1), teamName: z.string() });
+/** One signed-in workspace; its bot token is in the Keychain under `slack-bot:<teamId>`. */
+export const SlackWorkspace = z.strictObject({
+  teamId: z.string().min(1),
+  teamName: z.string(),
+  /** The bot on record; absent until the first record (stored before this, or connected again). */
+  botUserId: z.string().min(1).optional(),
+  botName: z.string().min(1).optional(),
+  /** When this bot was recorded: threads sent before it are never joined. */
+  botSince: z.iso.datetime().optional(),
+});
 export type SlackWorkspace = z.infer<typeof SlackWorkspace>;
+
+export const SlackWorkspaceState = {
+  Checking: 'checking',
+  Connected: 'connected',
+  Refused: 'refused',
+  Unreachable: 'unreachable',
+  None: 'none',
+} as const;
+export type SlackWorkspaceState = (typeof SlackWorkspaceState)[keyof typeof SlackWorkspaceState];
+
+/** One workspace as its watch last found it; never the token. `none`: its token is gone from the Keychain. */
+export const SlackWorkspaceStatusDto = z.strictObject({
+  teamId: z.string(),
+  teamName: z.string(),
+  botUserId: z.string().nullable(),
+  botName: z.string().nullable(),
+  state: z.enum(SlackWorkspaceState),
+  checkedAt: z.iso.datetime().nullable(),
+  error: z.string().nullable(),
+});
+export type SlackWorkspaceStatusDto = z.infer<typeof SlackWorkspaceStatusDto>;
+
+/** `GET /slack`: every signed-in workspace; `off` when the daemon runs with TENDB_SLACK=off. */
+export const SlackStatusDto = z.strictObject({
+  off: z.boolean(),
+  workspaces: z.array(SlackWorkspaceStatusDto),
+});
+export type SlackStatusDto = z.infer<typeof SlackStatusDto>;
 
 /** The `slack.workspaces` setting: every signed-in workspace. */
 export const SlackWorkspaces = z.array(SlackWorkspace);
@@ -136,11 +180,12 @@ export type SlackWorkspaces = z.infer<typeof SlackWorkspaces>;
 export const ProjectSlackSetting = z.strictObject({ teamId: z.string().min(1).nullable() });
 export type ProjectSlackSetting = z.infer<typeof ProjectSlackSetting>;
 
-/** What Slack is for a project: its workspace, and whether that is the automatic binding to the only one. */
+/** What Slack is for a project: its workspace, or nulls for Off, and how many of its questions are out now. */
 export const ProjectSlackDto = z.strictObject({
   teamId: z.string().nullable(),
   teamName: z.string().nullable(),
-  auto: z.boolean(),
+  /** Sends of the project's cards that are sending or sent: what a change of workspace takes back. */
+  out: z.number().int().min(0),
 });
 export type ProjectSlackDto = z.infer<typeof ProjectSlackDto>;
 

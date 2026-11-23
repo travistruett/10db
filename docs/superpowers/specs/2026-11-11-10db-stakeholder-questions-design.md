@@ -169,6 +169,9 @@ thread (§8.3).
 
 ## 5. People and contacts
 
+> Amended by `docs/architecture/decisions/2026-11-23-a-projects-slack-workspace-is-its-own.md`: a person has one contact per signed-in workspace, and a project reaches them through its own workspace only.
+
+
 **Designed.**
 
 - **A person** is a `people` row, as today, with its unique `handle` (cards store the assignee by handle). Settings
@@ -690,6 +693,9 @@ A reply is untrusted input to a session with tools. It answers one question and 
 
 ### 9.1 The app
 
+> Amended by `docs/architecture/decisions/2026-11-23-a-projects-slack-workspace-is-its-own.md`: each signed-in workspace has its own app, bot and token; a project is bound to one of them or to Off.
+
+
 The builder makes a Slack app from a manifest in the workspace where Mark is: single-workspace, never
 distributed, token rotation off. The full click-by-click guide is `docs/slack-app.md`.
 
@@ -713,6 +719,9 @@ distributed, token rotation off. The full click-by-click guide is `docs/slack-ap
   Marketplace app, which can't use Socket Mode.
 
 ### 9.2 The connection in 10db
+
+> Amended by `docs/architecture/decisions/2026-11-23-a-projects-slack-workspace-is-its-own.md`: the connection is one per workspace, each with its own state and reply watch.
+
 
 - The bot token is kept in the Keychain (account `slack-bot`, slice 2 adds `slack-app`). `auth.test` checks it
   and gives the workspace's name and id and the bot's user id, shown in Settings.
@@ -744,6 +753,9 @@ surfaces change a lot (the card, the Inbox's Waiting tab, Settings › Integrati
 task drawer, the Board card, Factory's goal). Sketches below; the visual mockups are linked from the plan.
 
 ### 10.1 Settings › Integrations and Settings › People (global)
+
+> Amended by `docs/architecture/decisions/2026-11-23-a-projects-slack-workspace-is-its-own.md`: People shows a chip and a modal block per workspace, and the Slack card lists every workspace.
+
 
 Setting up Slack happens once, so it has its own section; People is only the people.
 

@@ -743,6 +743,20 @@
       "when": 1795411119095,
       "tag": "0105_amazing_lizard",
       "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "6",
+      "when": 1795469370329,
+      "tag": "0106_slack_workspaces",
+      "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "6",
+      "when": 1795469373198,
+      "tag": "0107_slack_workspaces_backfill",
+      "breakpoints": true
     }
   ]
 }
