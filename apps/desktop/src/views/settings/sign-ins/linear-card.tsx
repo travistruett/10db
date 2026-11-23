@@ -17,7 +17,7 @@ export function LinearCard() {
       mark={<IconListDetails size={20} stroke={1.5} aria-hidden />}
       name="Linear"
       focusName="linear"
-      help="Sign in inside Claude Code (/mcp, or the claude.ai Linear connector) or in Codex (Settings › Trust). Update Linear Issues: a task made from a Linear issue comments on it and moves its status as the task runs."
+      help="Claude Code: sign in with /mcp, or use the claude.ai Linear connector. Codex: add Linear's server (codex mcp add), then sign in under Settings › Trust › Your MCP Servers. Update Linear Issues: a task made from a Linear issue comments on it and moves its status as the task runs."
     >
       {linear.isError ? (
         <Alert color="red" title="Couldn't read the Linear sign-ins">
