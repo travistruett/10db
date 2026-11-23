@@ -53,6 +53,7 @@ function signInCandidates(plan: Pick<YourMcpPlan, 'remote'>): SignInCandidate[] 
             url: remote.url,
             server: {
               connect: { type: remote.type, url: remote.url, headers: null },
+              claudeName: remote.claudeName,
               claudeOAuth: remote.oauth,
               codex: remote.codex,
             },

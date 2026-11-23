@@ -14,3 +14,8 @@
   switch is on. A server with an `oauth` block is passed on to Claude as the entry declares it
   (`yourMcpForSession`); no token is read here or anywhere
   (`docs/architecture/decisions/2026-11-14-mcp-sign-ins-stay-in-each-agents-own-store.md`).
+- A plugin's server has two names. 10db's, `plugin_<plugin>_<server>` (`yourMcpName`), is what Trust, Codex and
+  tool names use. A Claude session registers it as Claude Code does, `plugin:<plugin>:<server>`
+  (`claudePluginServerName`, carried as `claudeName`), because Claude Code files an MCP sign-in under
+  `<registered name>|<sha256 of type, url and headers>`: under any other name the builder's own sign-in is not
+  found and the server reads `needs-auth`. Its tools are `mcp__plugin_<plugin>_<server>__*` either way.

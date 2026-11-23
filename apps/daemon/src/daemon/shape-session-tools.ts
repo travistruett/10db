@@ -225,7 +225,7 @@ function sessionReads(deps: Omit<SessionReadDeps, 'laneSandbox'>) {
           const planned = yours.stdio[name];
           return planned === undefined
             ? []
-            : [[name, { connect, claudeOAuth: null, codex: planned.codex }]];
+            : [[name, { connect, claudeName: null, claudeOAuth: null, codex: planned.codex }]];
         }),
       ),
       ...Object.fromEntries(
@@ -233,6 +233,7 @@ function sessionReads(deps: Omit<SessionReadDeps, 'laneSandbox'>) {
           name,
           {
             connect: { type: remote.type, url: remote.url, headers: remote.headers },
+            claudeName: remote.claudeName,
             claudeOAuth: remote.oauth,
             codex: remote.codex,
           },

@@ -42,6 +42,8 @@ export type DeclaredYourServer =
 export interface YourMcpEntry {
   readonly key: YourMcpServerKey;
   readonly name: string;
+  /** The name a Claude session registers it under, when not `name`: a plugin's server, as Claude Code names it. */
+  readonly claudeName: string | null;
   readonly source: YourMcpSource;
   readonly pluginId: string | null;
   /** Null only when the entry didn't parse. */
@@ -266,6 +268,7 @@ export function entriesOf(
     entries.push({
       key: yourMcpServerKey(source, name),
       name,
+      claudeName: null,
       source,
       pluginId: null,
       declared: parsed.declared,
