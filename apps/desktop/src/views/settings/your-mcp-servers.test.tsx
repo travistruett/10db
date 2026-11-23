@@ -72,8 +72,8 @@ describe("Settings › Trust: the builder's MCP servers", () => {
     const { approved } = serve([github]);
     renderApp('/settings/trust');
     expect(await screen.findByText('New')).toBeTruthy();
-    expect(screen.getByText('Runs npx -y pkg')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Details for github' }));
+    expect(await screen.findByText('Runs npx -y pkg')).toBeTruthy();
     expect(screen.getByText('Sets PATH, TOKEN')).toBeTruthy();
     expect(screen.getByText('PATH=/usr/bin')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Approve github' }));
