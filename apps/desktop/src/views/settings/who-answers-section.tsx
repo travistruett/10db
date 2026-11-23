@@ -11,8 +11,9 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core';
-import { IconTrash } from '@tabler/icons-react';
+import { IconRoute, IconTrash } from '@tabler/icons-react';
 import { useState } from 'react';
+import { EmptyState } from '../../shell/empty-state';
 import { useGoals } from '../../daemon/goal-queries';
 import { useJudgeStatus } from '../../daemon/judge-queries';
 import { usePeople, useRoutingRules, useSetRoutingRules } from '../../daemon/people';
@@ -82,9 +83,18 @@ export function WhoAnswersSection({ project }: { readonly project: ProjectDto })
         </Alert>
       ) : null}
       {rules.isSuccess && rows.length === 0 ? (
-        <Text size="sm" c="dimmed">
-          No routes yet, so every question comes to you.
-        </Text>
+        <EmptyState
+          icon={IconRoute}
+          title="No Routes Yet"
+          action={{
+            label: 'Add Route',
+            onClick: () => {
+              setAdding(true);
+            },
+          }}
+        >
+          Every question comes to you until a route sends it to someone else.
+        </EmptyState>
       ) : null}
       {rules.isSuccess && rows.length > 0 ? (
         <Table.ScrollContainer minWidth={560}>
