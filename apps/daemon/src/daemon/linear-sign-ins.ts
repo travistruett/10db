@@ -19,7 +19,9 @@ const LINEAR_HOST = 'mcp.linear.app';
 /** What to tell the builder when an account has no Linear, by the provider table of the Linear design. */
 const HINT_CLAUDE_PLAN = 'Sign in to Linear in Claude Code: `/mcp`.';
 const HINT_CLAUDE_OTHER = "Add Linear's server to Claude Code, then `/mcp`.";
-const HINT_CODEX = 'Sign in in Settings › Trust.';
+const HINT_CODEX_ADD =
+  "Add Linear's server to Codex (codex mcp add linear --url https://mcp.linear.app/mcp), then sign in to it under Settings › Trust › Your MCP Servers.";
+const HINT_CODEX_SIGN_IN = 'Sign in to Linear under Settings › Trust › Your MCP Servers.';
 const NOT_CHECKED = 'Your Linear sign-in is checked when the agent first uses it.';
 const NOT_READ = "Couldn't read this account's claude.ai connectors.";
 
@@ -67,14 +69,20 @@ export function createLinearSignIns(deps: {
           const own = codexRows.filter(
             (r) => r.accountId === account.id && servers.includes(r.name),
           );
+          // With no Linear server configured, Trust has nothing to sign in to yet.
           if (own.length === 0)
-            return { ...base, via: LinearVia.None, signedIn: null, note: HINT_CODEX };
+            return {
+              ...base,
+              via: LinearVia.None,
+              signedIn: null,
+              note: servers.length === 0 ? HINT_CODEX_ADD : HINT_CODEX_SIGN_IN,
+            };
           const signedIn = own.some((r) => r.state === McpSignInState.SignedIn);
           return {
             ...base,
             via: LinearVia.Server,
             signedIn,
-            note: signedIn ? null : HINT_CODEX,
+            note: signedIn ? null : HINT_CODEX_SIGN_IN,
           };
         }
         if (account.kind === AccountKind.ClaudeSubscription) {

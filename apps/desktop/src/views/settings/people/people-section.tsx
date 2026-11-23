@@ -129,6 +129,8 @@ export function PeopleSection() {
   const [editing, setEditing] = useState<PersonDto | null | undefined>(undefined);
   const [removing, setRemoving] = useState<PersonDto | null>(null);
   const rows = [...(people.data ?? [])].sort((a, b) => Number(b.isBuilder) - Number(a.isBuilder));
+  // While only the builder is listed the empty state holds Add Person, so the page has one.
+  const onlyYou = people.isSuccess && rows.every((p) => p.isBuilder);
 
   return (
     <Stack gap="xl">
@@ -137,13 +139,15 @@ export function PeopleSection() {
           <Text c="dimmed" size="sm">
             Who answers your projects' questions, and how 10db reaches each one.
           </Text>
-          <Button
-            onClick={() => {
-              setEditing(null);
-            }}
-          >
-            Add Person
-          </Button>
+          {onlyYou ? null : (
+            <Button
+              onClick={() => {
+                setEditing(null);
+              }}
+            >
+              Add Person
+            </Button>
+          )}
         </Group>
         <ConnectSlack builder={rows.find((p) => p.isBuilder)} />
         {people.isPending ? <Loader size="sm" /> : null}
@@ -218,7 +222,7 @@ export function PeopleSection() {
             </Table.ScrollContainer>
           </Paper>
         ) : null}
-        {people.isSuccess && rows.every((p) => p.isBuilder) ? (
+        {onlyYou ? (
           <EmptyState
             icon={IconUsers}
             title="Only you answer questions"
