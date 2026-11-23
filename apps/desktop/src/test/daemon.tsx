@@ -286,7 +286,7 @@ export function baseHandlers(
         }),
       ),
     ),
-    // People, Integrations, the Inbox and Who Answers read who the builder can ask and how Slack stands.
+    // People, Integrations, the Inbox and Question Routing read who the builder can ask and how Slack stands.
     http.get(daemonUrl('/people', base), () => HttpResponse.json([BUILDER_PERSON])),
     http.get(daemonUrl('/slack', base), () => HttpResponse.json(slackConnection())),
     http.get(daemonUrl('/stakeholders/timers', base), () =>

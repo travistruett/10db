@@ -1,6 +1,18 @@
 import type { FoundHostDto, ProjectDto, ProjectId } from '@10db/contracts';
-import { Button, Divider, Group, List, Paper, Stack, Text, TextInput, Title } from '@mantine/core';
-import { IconWorld } from '@tabler/icons-react';
+import {
+  ActionIcon,
+  Button,
+  Divider,
+  Group,
+  List,
+  Paper,
+  Stack,
+  Text,
+  TextInput,
+  Title,
+  Tooltip,
+} from '@mantine/core';
+import { IconTrash, IconWand, IconWorld } from '@tabler/icons-react';
 import { useState } from 'react';
 import { EmptyState } from '../../shell/empty-state';
 import {
@@ -127,6 +139,24 @@ export function NetworkHostsSection({ project }: { readonly project: ProjectDto 
               <Button type="submit" loading={allow.isPending}>
                 Add Host
               </Button>
+              <Tooltip
+                position="left"
+                multiline
+                w={240}
+                label="Look Again: read the project's files for hosts they name that aren't allowed yet."
+              >
+                <ActionIcon
+                  variant="default"
+                  size="input-sm"
+                  aria-label="Look Again"
+                  loading={scan.isPending}
+                  onClick={() => {
+                    scan.mutate();
+                  }}
+                >
+                  <IconWand size={18} stroke={1.5} />
+                </ActionIcon>
+              </Tooltip>
             </Group>
           </form>
         </Group>
@@ -169,17 +199,19 @@ export function NetworkHostsSection({ project }: { readonly project: ProjectDto 
                         </Text>
                       ) : null}
                     </Stack>
-                    <Button
-                      size="compact-sm"
-                      variant="default"
-                      aria-label={`Remove ${entry.host}`}
-                      loading={remove.isPending && remove.variables === entry.host}
-                      onClick={() => {
-                        remove.mutate(entry.host);
-                      }}
-                    >
-                      Remove
-                    </Button>
+                    <Tooltip label="Remove">
+                      <ActionIcon
+                        variant="subtle"
+                        color="gray"
+                        aria-label={`Remove ${entry.host}`}
+                        loading={remove.isPending && remove.variables === entry.host}
+                        onClick={() => {
+                          remove.mutate(entry.host);
+                        }}
+                      >
+                        <IconTrash size={16} stroke={1.5} />
+                      </ActionIcon>
+                    </Tooltip>
                   </Group>
                 </List.Item>
               ))}
@@ -188,36 +220,27 @@ export function NetworkHostsSection({ project }: { readonly project: ProjectDto 
         )}
       </Stack>
 
-      <Stack gap="xs">
-        <Group justify="space-between" align="flex-start" wrap="nowrap">
+      {scan.isIdle ? null : (
+        <Stack gap="xs">
           <Stack gap={2}>
             <Title order={4}>Found in Project Files</Title>
             <Text size="sm" c="dimmed">
               Hosts the files name that aren&apos;t allowed yet.
             </Text>
           </Stack>
-          <Button
-            variant="default"
-            loading={scan.isPending}
-            onClick={() => {
-              scan.mutate();
-            }}
-          >
-            Look Again
-          </Button>
-        </Group>
-        {scan.isError ? (
-          <Text size="sm" c="red" role="alert">
-            Couldn't read the project's files: {scan.error.message}
-          </Text>
-        ) : null}
-        {scan.isSuccess ? (
-          <FoundHosts
-            projectId={project.id}
-            found={scan.data.filter((entry) => !list.some((h) => h.host === entry.host))}
-          />
-        ) : null}
-      </Stack>
+          {scan.isError ? (
+            <Text size="sm" c="red" role="alert">
+              Couldn't read the project's files: {scan.error.message}
+            </Text>
+          ) : null}
+          {scan.isSuccess ? (
+            <FoundHosts
+              projectId={project.id}
+              found={scan.data.filter((entry) => !list.some((h) => h.host === entry.host))}
+            />
+          ) : null}
+        </Stack>
+      )}
     </Stack>
   );
 }

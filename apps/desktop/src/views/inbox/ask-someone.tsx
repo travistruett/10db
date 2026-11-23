@@ -229,7 +229,7 @@ function AskForm({
             }}
           />
           <Text size="xs" c="dimmed">
-            Saved in Who Answers.
+            Saved in Question Routing.
           </Text>
         </>
       ) : null}

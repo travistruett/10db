@@ -23,7 +23,7 @@ import { AddRouteModal } from './add-route-modal';
 import { HelpHint } from './help-hint';
 import { RouteScope, routeRows, ruleInputs } from './route-rows';
 
-/** Settings › Who Answers: who a question goes to, by scope, most specific first. */
+/** Settings › Question Routing: who a question goes to, by scope, most specific first. */
 export function WhoAnswersSection({ project }: { readonly project: ProjectDto }) {
   const rules = useRoutingRules(project.id);
   const people = usePeople();
