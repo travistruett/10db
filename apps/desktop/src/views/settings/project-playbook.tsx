@@ -1,8 +1,9 @@
 import { RIGORS, type ProjectDto, type Rigor } from '@10db/contracts';
-import { Select, Stack, Text, Title } from '@mantine/core';
+import { Select, Stack, Text } from '@mantine/core';
 import { usePatchProject } from '../../daemon/queries';
 import { PlaybookTable } from './playbook-table';
 import { rigorLabel } from './rigor-labels';
+import { SectionHeading } from './section-heading';
 import { SettingRow, SettingsCard } from './setting-row';
 
 const isRigor = (value: string): value is Rigor => RIGORS.some((r) => r === value);
@@ -14,11 +15,11 @@ const isRigor = (value: string): value is Rigor => RIGORS.some((r) => r === valu
 export function ProjectPlaybook({ project }: { readonly project: ProjectDto }) {
   const patch = usePatchProject(project.id);
   return (
-    <Stack gap="lg">
+    <Stack gap="xl">
       <SettingsCard>
         <SettingRow
           label="Default Rigor"
-          description="The rigor a task gets when nothing sets its own. A kind's minimum can raise it."
+          description="The rigor a task gets when nothing sets its own."
         >
           <Select
             aria-label="Default Rigor"
@@ -38,14 +39,12 @@ export function ProjectPlaybook({ project }: { readonly project: ProjectDto }) {
           {`Couldn't save: ${patch.error.message}`}
         </Text>
       ) : null}
-      <Stack gap="xs" component="section" aria-label="Project playbook">
-        <Title order={4} size="md" fw={600}>
-          Playbook
-        </Title>
-        <Text size="xs" c="dimmed">
-          Cells show what each step resolves to on this project&apos;s account. A field you set here
-          applies to this project only; Use global follows All Projects › Models.
-        </Text>
+      <Stack gap="sm" component="section" aria-label="Project playbook">
+        <SectionHeading
+          title="Playbook"
+          line="What each step runs on this project's account."
+          help="A field you set here applies to this project only. Use Global follows All Projects › Models."
+        />
         <PlaybookTable projectId={project.id} accountId={project.accountId} />
       </Stack>
     </Stack>

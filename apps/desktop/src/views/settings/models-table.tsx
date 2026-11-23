@@ -271,6 +271,8 @@ export function ModelsTable({
       borderRadius="md"
       verticalSpacing="sm"
       horizontalSpacing="md"
+      // Too narrow a frame scrolls the table sideways instead of wrapping a name.
+      styles={{ table: { minWidth: 820 } }}
       highlightOnHover
       {...pagerProps(paging, TABLE_PAGE_SIZES)}
       {...(families.length === 0 ? { minHeight: 160 } : {})}

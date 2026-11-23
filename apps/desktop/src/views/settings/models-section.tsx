@@ -1,44 +1,15 @@
 import type { AccountId } from '@10db/contracts';
-import {
-  ActionIcon,
-  Anchor,
-  Button,
-  Group,
-  Select,
-  Stack,
-  Tabs,
-  Text,
-  Tooltip,
-} from '@mantine/core';
-import { PAGE_TABS_CLASS_NAMES } from '../../shell/page-tabs';
+import { ActionIcon, Anchor, Button, Group, Select, Stack, Text, Tooltip } from '@mantine/core';
 import { TitleRow } from '../../shell/title-row';
 import { Link } from '@tanstack/react-router';
 import { IconRefresh } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
-import { useJudgeStatus } from '../../daemon/judge-queries';
-import { useCatalogueStatus, useRefreshModels } from '../../daemon/model-queries';
+import { useRefreshModels } from '../../daemon/model-queries';
 import { PageLoading, PageLoadingShape } from '../../shell/page-loading';
-import { useNow } from '../../shell/relative';
 import { AgentsView } from './agents-view';
-import { ArtificialAnalysisCredit } from './artificial-analysis-credit';
-import { ArtificialAnalysisStatusLine } from './artificial-analysis-status-line';
-import { DecisionsModelsView } from './decisions-models-view';
-import { catalogueLine } from './model-format';
-import { OpenRouterStatusLine } from './openrouter-status-line';
+import { DataSources, DataSourcesWarning } from './data-sources';
 import { SettingsSectionKey } from './sections';
-
-/** The two views of the page: the agents' models by account, and the models behind 10db's own decisions. */
-const ModelsView = { Agents: 'agents', Decisions: 'decisions' } as const;
-type ModelsView = (typeof ModelsView)[keyof typeof ModelsView];
-
-const VIEW_LABELS = [
-  { value: ModelsView.Agents, label: 'Agents' },
-  { value: ModelsView.Decisions, label: 'Decisions' },
-] as const;
-
-const isModelsView = (value: string): value is ModelsView =>
-  Object.values(ModelsView).some((view) => view === value);
 
 const ACCOUNT_LABEL = (
   <Text size="xs" c="dimmed">
@@ -46,149 +17,71 @@ const ACCOUNT_LABEL = (
   </Text>
 );
 
-/** The account decisions are paid by, shown where the Agents view has its account; it is changed in Settings › Decisions. */
-function PaidByAccount() {
-  const judge = useJudgeStatus();
-  const paidBy = judge.data?.account ?? null;
-  const placeholder = judge.isPending
-    ? 'Reading…'
-    : judge.isError
-      ? judge.error.message
-      : 'No account picked';
-  return (
-    // WebKit shows no tooltip on a disabled control, so the hint sits on a wrapper around it.
-    <Tooltip label="Change it under Settings › Decisions" position="bottom">
-      <span>
-        <Select
-          aria-label="Account"
-          size="xs"
-          w={240}
-          leftSection={
-            <Text size="xs" c="dimmed">
-              Paid By
-            </Text>
-          }
-          leftSectionWidth={72}
-          leftSectionPointerEvents="none"
-          data={paidBy === null ? [] : [{ value: paidBy.id, label: paidBy.label }]}
-          value={paidBy?.id ?? null}
-          placeholder={placeholder}
-          disabled
-        />
-      </span>
-    </Tooltip>
-  );
-}
-
 /**
- * Settings › Models: a title, a switch between the Agents and Decisions views and the account the page reads,
- * above the view chosen. The Agents account stays chosen across a switch; Decisions shows the account decisions
- * are paid by, which is changed in Settings › Decisions. A failure of the Agents view hides only that view.
+ * Settings › Models: a title, the account the page reads, a refresh and the data sources, above the agents'
+ * models. A failure of the Agents view hides only that view.
  */
 export function ModelsSection() {
-  const now = useNow();
   const accounts = useAccounts();
-  const [view, setView] = useState<ModelsView>(ModelsView.Agents);
   const [chosen, setChosen] = useState<AccountId | null>(null);
   const live = (accounts.data ?? []).filter((a) => !a.archived);
-  // The Agents view always has an account: the one chosen, else the default, else the first live one.
+  // The page always has an account: the one chosen, else the default, else the first live one.
   const account =
     live.find((a) => a.id === chosen) ?? live.find((a) => a.isDefault) ?? live[0] ?? null;
-  const status = useCatalogueStatus();
   const refresh = useRefreshModels();
-  const agents = view === ModelsView.Agents;
-
-  const accountSelect = agents ? (
-    <Select
-      aria-label="Account"
-      size="xs"
-      w={240}
-      leftSection={ACCOUNT_LABEL}
-      leftSectionWidth={72}
-      leftSectionPointerEvents="none"
-      allowDeselect={false}
-      data={live.map((a) => ({ value: a.id, label: a.label }))}
-      value={account?.id ?? null}
-      placeholder={accounts.isPending ? 'Reading accounts…' : 'No account'}
-      disabled={live.length === 0}
-      onChange={(value) => {
-        const next = live.find((a) => a.id === value);
-        if (next) setChosen(next.id);
-      }}
-    />
-  ) : (
-    <PaidByAccount />
-  );
 
   const header = (
-    <Stack gap={4}>
+    <>
       <TitleRow
         title="Models"
         actions={
           <>
-            {agents && refresh.isError ? (
+            {refresh.isError ? (
               <Text size="xs" c="red" role="alert">
                 {refresh.error.message}
               </Text>
             ) : null}
-            {accountSelect}
-            {agents ? (
-              <Tooltip
-                label="Fetch prices from models.dev and re-read every account's model list"
-                position="left"
+            <DataSources />
+            <Select
+              aria-label="Account"
+              size="xs"
+              w={240}
+              leftSection={ACCOUNT_LABEL}
+              leftSectionWidth={72}
+              leftSectionPointerEvents="none"
+              allowDeselect={false}
+              data={live.map((a) => ({ value: a.id, label: a.label }))}
+              value={account?.id ?? null}
+              placeholder={accounts.isPending ? 'Reading accounts…' : 'No account'}
+              disabled={live.length === 0}
+              onChange={(value) => {
+                const next = live.find((a) => a.id === value);
+                if (next) setChosen(next.id);
+              }}
+            />
+            <Tooltip
+              label="Fetch prices from models.dev and re-read every account's model list"
+              position="left"
+            >
+              <ActionIcon
+                variant="default"
+                size="input-xs"
+                aria-label="Refresh Models"
+                loading={refresh.isPending}
+                onClick={() => {
+                  refresh.mutate();
+                }}
               >
-                <ActionIcon
-                  variant="default"
-                  size="input-xs"
-                  aria-label="Refresh Models"
-                  loading={refresh.isPending}
-                  onClick={() => {
-                    refresh.mutate();
-                  }}
-                >
-                  <IconRefresh size={16} stroke={1.5} />
-                </ActionIcon>
-              </Tooltip>
-            ) : null}
+                <IconRefresh size={16} stroke={1.5} />
+              </ActionIcon>
+            </Tooltip>
           </>
         }
       />
-      <Tabs
-        classNames={PAGE_TABS_CLASS_NAMES}
-        value={view}
-        onChange={(value) => {
-          if (value !== null && isModelsView(value)) setView(value);
-        }}
-      >
-        <Tabs.List aria-label="Models view">
-          {VIEW_LABELS.map(({ value, label }) => (
-            <Tabs.Tab key={value} value={value}>
-              {label}
-            </Tabs.Tab>
-          ))}
-        </Tabs.List>
-      </Tabs>
-      {agents ? (
-        // One dim line that wraps: the catalogue and its credit, then where the scores come from. They stay
-        // text because they carry links (Add Key, Paid by) and AA's credit, which a tooltip cannot hold.
-        <Group gap="xs" align="baseline">
-          <Text size="xs" c="dimmed">
-            {status.data !== undefined
-              ? catalogueLine(status.data, now)
-              : status.isError
-                ? 'The catalogue status could not be read.'
-                : 'Reading the catalogue…'}{' '}
-            <ArtificialAnalysisCredit />
-          </Text>
-          <ArtificialAnalysisStatusLine />
-          <OpenRouterStatusLine />
-        </Group>
-      ) : null}
-    </Stack>
+    </>
   );
 
   const body = () => {
-    if (!agents) return <DecisionsModelsView />;
     if (accounts.isPending)
       return <PageLoading shape={PageLoadingShape.List} label="Reading accounts" />;
     // A failed background read keeps the accounts already shown, as during a daemon restart.
@@ -230,8 +123,9 @@ export function ModelsSection() {
   };
 
   return (
-    <Stack gap="lg">
+    <Stack gap="xl">
       {header}
+      <DataSourcesWarning />
       {body()}
     </Stack>
   );
