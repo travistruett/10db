@@ -5,7 +5,7 @@ import { useLinearSignIns } from '../../../daemon/sign-in-queries';
 import { IntegrationCard, StateText } from './integration-card';
 import { LinearProjectRow, ProjectRows } from './project-rows';
 
-/** Settings › Integrations › Linear: one row per project with its Update Linear Issues switch. */
+/** Settings › Integrations › Linear: one row per project with its Linear switch. */
 export function LinearCard() {
   const linear = useLinearSignIns();
   const projects = useProjects();
@@ -17,7 +17,7 @@ export function LinearCard() {
       mark={<IconListDetails size={20} stroke={1.5} aria-hidden />}
       name="Linear"
       focusName="linear"
-      help="Connect Linear sets up Linear's server for the project's account. On Codex it signs in in your browser; on Claude Code you finish with /mcp. Update Linear Issues: a task made from a Linear issue comments on it and moves its status as the task runs."
+      help="Connect Linear sets up Linear's server for the project's account. On Codex it signs in in your browser; on Claude Code you finish with /mcp. A project's update note is on its Settings › Linear page."
     >
       {linear.isError ? (
         <Alert color="red" title="Couldn't read the Linear sign-ins">
@@ -25,7 +25,7 @@ export function LinearCard() {
         </Alert>
       ) : (
         <StateText>
-          Signs in through Claude Code or Codex. A task from a Linear issue can keep it updated.
+          On: a task made from a Linear issue comments on it and moves its status.
         </StateText>
       )}
       {list.length === 0 ? null : (

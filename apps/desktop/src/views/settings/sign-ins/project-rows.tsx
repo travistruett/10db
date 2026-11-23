@@ -1,18 +1,13 @@
-import { LinearVia, type LinearSignInRowDto, type ProjectDto } from '@10db/contracts';
 import {
-  ActionIcon,
-  Collapse,
-  Divider,
-  Group,
-  Select,
-  Stack,
-  Switch,
-  Text,
-  Textarea,
-  Tooltip,
-} from '@mantine/core';
-import { IconChevronDown, IconChevronUp } from '@tabler/icons-react';
+  FigmaVia,
+  LinearVia,
+  type FigmaSignInRowDto,
+  type LinearSignInRowDto,
+  type ProjectDto,
+} from '@10db/contracts';
+import { Divider, Group, Select, Stack, Switch, Text } from '@mantine/core';
 import { useState, type ReactNode } from 'react';
+import { ConnectionStatus, ConnectionTone } from '../connection-status';
 import { ConnectServiceButton } from './connect-service-button';
 import { useSlackStatus } from '../../../daemon/people';
 import { ConfirmModal } from '../../../shell/confirm-modal';
@@ -122,8 +117,8 @@ export function SlackProjectRow({ project }: { readonly project: ProjectDto }) {
 }
 
 /**
- * A project's Linear: when its account reaches Linear, or might, the Update Linear Issues switch and the note the
- * reporter follows; when the account definitely has none, or its server isn't signed in, Connect Linear.
+ * A project's Linear: when its account reaches Linear, or might, its on/off switch (on, a task from a Linear issue
+ * keeps the issue updated); when the account definitely has none, or its server isn't signed in, Connect Linear.
  */
 export function LinearProjectRow({
   project,
@@ -135,7 +130,6 @@ export function LinearProjectRow({
 }) {
   const integrations = useProjectIntegrations(project.id);
   const save = useSetLinearReporter(project.id);
-  const [editing, setEditing] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const linear = integrations.data?.linear;
   if (linear === undefined) return <ProjectRow name={project.name} />;
@@ -172,55 +166,20 @@ export function LinearProjectRow({
         }
       />
     );
-  const noteLabel = `${editing ? 'Hide' : 'Edit'} How To Update Linear for ${project.name}`;
   return (
     <ProjectRow
       name={project.name}
       control={
-        <Group gap="xs" wrap="nowrap">
-          <Tooltip label={editing ? 'Hide Update Note' : 'Edit Update Note'} withArrow>
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              aria-label={noteLabel}
-              aria-expanded={editing}
-              onClick={() => {
-                setEditing((was) => !was);
-              }}
-            >
-              {editing ? <IconChevronUp size={16} /> : <IconChevronDown size={16} />}
-            </ActionIcon>
-          </Tooltip>
-          <Switch
-            aria-label={`Update Linear Issues for ${project.name}`}
-            label="Update Linear Issues"
-            labelPosition="left"
-            checked={linear.on}
-            disabled={save.isPending}
-            onChange={(event) => {
-              save.mutate({ on: event.currentTarget.checked, note: linear.note });
-            }}
-          />
-        </Group>
-      }
-    >
-      <Collapse expanded={editing}>
-        <Textarea
-          // Keyed by the saved note, so a save from elsewhere replaces what the field shows.
-          key={linear.note}
-          size="xs"
-          autosize
-          minRows={2}
-          label="How To Update Linear"
-          aria-label={`How To Update Linear for ${project.name}`}
-          placeholder="Optional: how updates to Linear should read"
-          defaultValue={linear.note}
-          onBlur={(event) => {
-            const note = event.currentTarget.value;
-            if (note !== linear.note) save.mutate({ on: linear.on, note });
+        <Switch
+          aria-label={`Linear for ${project.name}`}
+          checked={linear.on}
+          disabled={save.isPending}
+          onChange={(event) => {
+            save.mutate({ on: event.currentTarget.checked, note: linear.note });
           }}
         />
-      </Collapse>
+      }
+    >
       {/* The switch already says off; only the Trust reason needs a line. */}
       {linear.blockedBy === null || !linear.on ? null : (
         <Text size="xs" c="dimmed">
@@ -233,5 +192,57 @@ export function LinearProjectRow({
         </Text>
       ) : null}
     </ProjectRow>
+  );
+}
+
+/**
+ * A project's Figma: Connect Figma when its account definitely has none, or its server isn't signed in; otherwise
+ * a quiet connected state. An account whose connectors were not read may have Figma, so it is not asked to connect.
+ */
+export function FigmaProjectRow({
+  project,
+  row,
+}: {
+  readonly project: ProjectDto;
+  /** The project's account's way to Figma. */
+  readonly row: FigmaSignInRowDto | undefined;
+}) {
+  const [connecting, setConnecting] = useState(false);
+  if (row === undefined) return <ProjectRow name={project.name} />;
+  const needsConnect =
+    (row.via === FigmaVia.None && !row.unchecked) ||
+    (row.via === FigmaVia.Server && row.signedIn === false);
+  if (needsConnect || connecting)
+    return (
+      <ProjectRow
+        name={project.name}
+        control={
+          <ConnectServiceButton
+            service="figma"
+            projectId={project.id}
+            accountId={row.accountId}
+            serverKey={row.serverKey}
+            signedIn={row.signedIn}
+            onStarted={() => {
+              setConnecting(true);
+            }}
+            onFinished={() => {
+              setConnecting(false);
+            }}
+          />
+        }
+      />
+    );
+  if (row.via === FigmaVia.None) return <ProjectRow name={project.name} />;
+  return (
+    <ProjectRow
+      name={project.name}
+      control={
+        <ConnectionStatus
+          tone={ConnectionTone.Works}
+          label={row.via === FigmaVia.Connector ? 'Through claude.ai' : 'Connected'}
+        />
+      }
+    />
   );
 }

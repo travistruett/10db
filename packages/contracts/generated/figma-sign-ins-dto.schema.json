@@ -36,6 +36,17 @@
           },
           "unchecked": {
             "type": "boolean"
+          },
+          "serverKey": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?:claude_json|codex_config|plugin:[A-Za-z0-9%._~!*'()-]+):[A-Za-z0-9%._~!*'()-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -44,7 +55,8 @@
           "via",
           "signedIn",
           "note",
-          "unchecked"
+          "unchecked",
+          "serverKey"
         ],
         "additionalProperties": false
       }

@@ -42,6 +42,7 @@ function world(opts: { readonly codex: boolean; readonly servers: Record<string,
   const claudeJson = join(home, '.claude.json');
   writeFileSync(claudeJson, JSON.stringify({ mcpServers: opts.servers }));
   mkdirSync(join(home, '.codex'), { recursive: true });
+  mkdirSync(join(home, '.claude/plugins'), { recursive: true });
 
   const calls: string[][] = [];
   const started: StartMcpSignIn[] = [];
@@ -98,7 +99,7 @@ function world(opts: { readonly codex: boolean; readonly servers: Record<string,
   });
   const stateOf = (name: string): YourMcpServerDto['state'] | undefined =>
     trust.projectMcpServers(project.id).servers.find((s) => s.name === name)?.state;
-  return { connector, project, calls, started, stateOf };
+  return { connector, project, calls, started, stateOf, home };
 }
 
 /** Connect Linear approves the server it added and no other, and a repeat adds and approves nothing. */
@@ -131,4 +132,30 @@ it('signs a Codex account in to the Linear server Claude Code already has, addin
   expect(calls).toHaveLength(0);
   expect(started).toHaveLength(1);
   expect(started[0]?.key).toMatch(/^claude_json:linear$/);
+});
+
+/** A plugin that brings Figma but is off in Claude Code is named for turning on; no second server is added. */
+it('refuses to add Figma beside a switched-off plugin that brings it, writing nothing', async () => {
+  const { connector, project, calls, home } = world({ codex: false, servers: {} });
+  const plugin = join(home, '.claude/plugins/cache/m/figma/1.0.0');
+  mkdirSync(join(plugin, '.claude-plugin'), { recursive: true });
+  writeFileSync(join(plugin, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'figma' }));
+  writeFileSync(
+    join(plugin, '.mcp.json'),
+    JSON.stringify({ mcpServers: { figma: { type: 'http', url: 'https://mcp.figma.com/mcp' } } }),
+  );
+  writeFileSync(
+    join(home, '.claude/plugins/installed_plugins.json'),
+    JSON.stringify({
+      version: 2,
+      plugins: { 'figma@m': [{ scope: 'user', installPath: plugin, version: '1.0.0' }] },
+    }),
+  );
+  writeFileSync(
+    join(home, '.claude/settings.json'),
+    JSON.stringify({ enabledPlugins: { 'figma@m': false } }),
+  );
+
+  await expect(connector.connect('figma', project.id)).rejects.toThrow('Settings › Trust');
+  expect(calls).toHaveLength(0);
 });

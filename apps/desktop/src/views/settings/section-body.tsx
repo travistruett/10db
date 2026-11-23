@@ -21,6 +21,7 @@ import { ScopeLine } from './scope-line';
 import { ProjectAreas } from './project-areas';
 import { ProjectBilling } from './project-billing';
 import { ProjectGeneralForm } from './project-general-form';
+import { ProjectLinear } from './project-linear';
 import { ProjectPagesForm } from './project-pages-form';
 import { SandboxSection } from './sandbox-section';
 import { ProjectTrustSection } from './project-trust-section';
@@ -67,6 +68,13 @@ export function SectionBody({
         <>
           {heading}
           {project ? <ProjectPagesForm key={project.id} project={project} /> : <NoProject />}
+        </>
+      );
+    case SettingsSectionKey.Linear:
+      return (
+        <>
+          {heading}
+          {project ? <ProjectLinear key={project.id} project={project} /> : <NoProject />}
         </>
       );
     case SettingsSectionKey.Overview:

@@ -266,14 +266,15 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   ).toBeVisible();
   await page.keyboard.press('Escape');
 
-  // Settings › Integrations: Update Linear Issues is on for the project; turning it off leaves the switch off.
+  // Settings › Integrations: Linear is on for the project; turning it off leaves the switch off.
   await page.goto('/settings/integrations');
   const reportSwitch = page.getByRole('switch', {
-    name: 'Update Linear Issues for e2e',
+    name: 'Linear for e2e',
     exact: true,
   });
   await expect(reportSwitch).toBeChecked();
-  await reportSwitch.click();
+  // A switch with no visible label has its track over the input: click the label that holds both, as a person does.
+  await reportSwitch.locator('xpath=..').click();
   await expect(reportSwitch).not.toBeChecked();
   await open(page, 'Board');
 

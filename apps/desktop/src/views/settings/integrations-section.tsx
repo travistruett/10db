@@ -46,14 +46,14 @@ export function IntegrationsSection() {
       <Text c="dimmed" size="sm">
         Outside services 10db uses that aren't models. Model access is in Accounts.
       </Text>
-      <CardGroup title="Connected By 10db" description="Signed in once, for every project.">
+      <CardGroup title="Used by 10db" description="10db signs in once and uses these itself.">
         <GithubCard />
         <SlackCard />
         <AaCard />
       </CardGroup>
       <CardGroup
-        title="Through Your Agent"
-        description="Uses your agent's own sign-in; 10db stores no login."
+        title="Agent Connectors"
+        description="Each agent account signs in; tasks use these as MCP servers."
         help={
           <HelpText>
             These turn on when the project's agent is signed in to the service through its MCP
