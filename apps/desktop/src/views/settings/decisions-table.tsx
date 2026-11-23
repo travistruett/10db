@@ -183,8 +183,7 @@ export function DecisionsTable({
             <Table.Th
               scope="rowgroup"
               colSpan={columns.length}
-              pt="sm"
-              pb={4}
+              py={8}
               fz="sm"
               fw={700}
               bg="var(--mantine-color-default-hover)"
