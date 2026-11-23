@@ -121,7 +121,7 @@ function RowShell({
           <ActionIcon
             aria-label={`Remove ${noun} ${String(number)}`}
             variant="subtle"
-            color="red"
+            color="gray"
             mr="md"
             onClick={onRemove}
           >
