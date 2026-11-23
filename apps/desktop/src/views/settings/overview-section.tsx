@@ -1,5 +1,6 @@
 import type { AccountDto } from '@10db/contracts';
-import { Anchor, Divider, Paper, Skeleton, Stack, Text, Title } from '@mantine/core';
+import { Alert, Button, Divider, Group, Paper, Skeleton, Stack, Text, Title } from '@mantine/core';
+import { IconAlertTriangle, IconCircleCheck } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { Fragment } from 'react';
@@ -198,39 +199,47 @@ function SummaryLine({ summary }: { readonly summary: Summary }) {
       return <Skeleton height={20} width={260} />;
     case 'ok':
       return (
-        <Text>
-          {summary.count === 1
-            ? 'The 1 connection works.'
-            : `All ${String(summary.count)} connections work.`}
-        </Text>
+        <Group gap="xs">
+          <IconCircleCheck size={18} color="var(--mantine-color-teal-6)" aria-hidden />
+          <Text size="sm">
+            {summary.count === 1
+              ? 'The 1 connection works.'
+              : `All ${String(summary.count)} connections work.`}
+          </Text>
+        </Group>
       );
     case 'needs':
       return (
-        <Text>
-          {summary.names.length === 1
-            ? '1 needs you: '
-            : `${String(summary.names.length)} need you: `}
-          {summary.names.map((name, i) => (
-            <Fragment key={summary.ids[i]}>
-              {i > 0 ? ', ' : null}
-              <Anchor
-                // Inside a line of text, so it is underlined rather than told apart by color alone.
-                underline="always"
+        <Alert
+          variant="light"
+          color="yellow"
+          icon={<IconAlertTriangle size={18} />}
+          title={
+            summary.rows.length === 1
+              ? '1 connection needs you'
+              : `${String(summary.rows.length)} connections need you`
+          }
+        >
+          <Group gap="xs">
+            {summary.rows.map((row) => (
+              <Button
+                key={row.id}
+                size="compact-sm"
+                variant="default"
                 renderRoot={(props) => (
                   <Link
                     {...props}
                     to="/settings/$section"
-                    params={{ section: SettingsSectionKey.Overview }}
-                    search={{ focus: summary.ids[i] ?? '' }}
+                    params={{ section: row.link.section }}
+                    search={row.link.focus === null ? {} : { focus: row.link.focus }}
                   />
                 )}
               >
-                {name}
-              </Anchor>
-            </Fragment>
-          ))}
-          .
-        </Text>
+                {row.name}
+              </Button>
+            ))}
+          </Group>
+        </Alert>
       );
   }
 }

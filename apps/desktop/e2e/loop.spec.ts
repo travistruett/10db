@@ -266,9 +266,12 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   ).toBeVisible();
   await page.keyboard.press('Escape');
 
-  // Settings › Integrations: Report To Linear is on for the project; turning it off leaves the switch off.
+  // Settings › Integrations: Update Linear Issues is on for the project; turning it off leaves the switch off.
   await page.goto('/settings/integrations');
-  const reportSwitch = page.getByRole('switch', { name: 'Report To Linear for e2e', exact: true });
+  const reportSwitch = page.getByRole('switch', {
+    name: 'Update Linear Issues for e2e',
+    exact: true,
+  });
   await expect(reportSwitch).toBeChecked();
   await reportSwitch.click();
   await expect(reportSwitch).not.toBeChecked();

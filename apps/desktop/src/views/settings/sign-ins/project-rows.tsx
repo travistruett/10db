@@ -86,7 +86,7 @@ export function SlackProjectRow({ project }: { readonly project: ProjectDto }) {
 }
 
 /**
- * A project's Linear: when its account reaches Linear, or might, the Report To Linear switch and the note the
+ * A project's Linear: when its account reaches Linear, or might, the Update Linear Issues switch and the note the
  * reporter follows; when the account definitely has none, the row's hint.
  */
 export function LinearProjectRow({
@@ -135,8 +135,8 @@ export function LinearProjectRow({
             </ActionIcon>
           </Tooltip>
           <Switch
-            aria-label={`Report To Linear for ${project.name}`}
-            label="Report To Linear"
+            aria-label={`Update Linear Issues for ${project.name}`}
+            label="Update Linear Issues"
             labelPosition="left"
             checked={linear.on}
             disabled={save.isPending}
