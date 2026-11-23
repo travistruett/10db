@@ -35,6 +35,7 @@ import {
   tempDir,
   waitForAsync,
 } from './fixtures';
+import { saveSlackWorkspace, setProjectSlack } from '../src/stakeholders';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
 
 const TITLES = ['Alpha', 'Beta', 'Gamma'] as const;
@@ -128,6 +129,11 @@ async function start(gateCommand = 'true', maxLanes = 3) {
     delivery: 'pull_request',
     prTitlePrefix: 'feat(app)',
     workspaceMode: 'worktree',
+  });
+  // A question reaches a person only through a workspace the project is bound to.
+  running.state.write((ctx) => {
+    saveSlackWorkspace(ctx, { teamId: 'T1', teamName: 'Acme' });
+    setProjectSlack(ctx, project.id, 'T1');
   });
   // A lane nobody watches answers a question left with the builder at once; one routed to a person
   // with Slack still waits for them, which is what holds the three lanes open together here.
