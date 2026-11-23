@@ -3096,6 +3096,25 @@
           },
           "approved": {
             "type": "boolean"
+          },
+          "figma": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "fileUrl": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "fileUrl"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -3104,7 +3123,8 @@
           "goalId",
           "taskId",
           "attachment",
-          "approved"
+          "approved",
+          "figma"
         ]
       }
     },

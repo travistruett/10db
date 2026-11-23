@@ -71,6 +71,8 @@ export const ShapeEventKind = {
   Rehearse: 'rehearse',
   Review: 'review',
   DesignReview: 'design_review',
+  FigmaOpen: 'figma_open',
+  FigmaBringBack: 'figma_bring_back',
   Edit: 'edit',
   Event: 'event',
   Screen: 'screen',
