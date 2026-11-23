@@ -16,6 +16,7 @@ it('names the base branch the form shows in the merge choice', async () => {
   );
   renderApp('/settings/general');
   await screen.findByLabelText('Name');
-  expect(screen.getByRole('radio', { name: 'Merge Into develop' })).toBeTruthy();
+  const choice = screen.getByRole<HTMLInputElement>('combobox', { name: 'When Checks Pass' });
+  expect(choice.value).toBe('Merge Into develop');
   expect(screen.getByText('GitHub merges each pull request once its checks pass.')).toBeTruthy();
 });

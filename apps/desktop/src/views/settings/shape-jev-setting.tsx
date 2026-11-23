@@ -1,12 +1,12 @@
 import type { ProjectDto } from '@10db/contracts';
-import { Anchor, Stack, Switch, Text } from '@mantine/core';
-import { Link } from '@tanstack/react-router';
+import { Alert, Button, Group, Stack, Switch, Text } from '@mantine/core';
+import { useNavigate } from '@tanstack/react-router';
 import { useJudgeStatus } from '../../daemon/judge-queries';
 import { useSetShapeJev, useShapeJev } from '../../daemon/shape-measures-queries';
 import { SettingsSectionKey } from './sections';
 import { SettingRow } from './setting-row';
 
-export const SHAPE_JEV_LABEL = 'Send brainstorm messages to fast models';
+export const SHAPE_JEV_LABEL = 'Send Brainstorm Messages to Fast Models';
 
 /**
  * Shape spec §9: a project's opt-in for Jev's Shape decisions. Off by default; while off, Shape makes
@@ -41,25 +41,37 @@ export function ShapeJevSetting({ project }: { readonly project: ProjectDto }) {
             set.mutate(event.currentTarget.checked);
           }}
         />
-        {judge.data !== undefined && account === null ? (
-          <Text size="xs" c="dimmed">
-            Pick an account for decisions first.{' '}
-            <Anchor
-              size="xs"
-              renderRoot={(props) => (
-                <Link
-                  {...props}
-                  to="/settings/$section"
-                  params={{ section: SettingsSectionKey.Decisions }}
-                  search={{ focus: 'paid-by' }}
-                />
-              )}
-            >
-              Open Decisions
-            </Anchor>
-          </Text>
-        ) : null}
       </Stack>
     </SettingRow>
+  );
+}
+
+/** Above the planning card while no account runs decisions: the switch below stays off until one is picked. */
+export function ShapeJevNeedsAccount() {
+  const judge = useJudgeStatus();
+  const navigate = useNavigate();
+  if (judge.data?.account !== null) return null;
+  return (
+    <Alert variant="light" color="yellow" title="Decisions have no account yet">
+      <Group justify="space-between" wrap="nowrap" gap="md">
+        <Text size="sm">
+          Pick an account for decisions before sending brainstorm messages to a fast model.
+        </Text>
+        <Button
+          size="xs"
+          variant="default"
+          style={{ flex: 'none' }}
+          onClick={() => {
+            void navigate({
+              to: '/settings/$section',
+              params: { section: SettingsSectionKey.Decisions },
+              search: { focus: 'paid-by' },
+            });
+          }}
+        >
+          Open Decisions
+        </Button>
+      </Group>
+    </Alert>
   );
 }

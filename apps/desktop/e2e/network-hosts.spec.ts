@@ -51,7 +51,7 @@ test('a builder allows two hosts, is refused localhost and removes them', async 
   await page.goto('/settings/network-hosts');
   await expect(page.locator('html')).toHaveAttribute('data-mantine-color-scheme', 'dark');
   const card = page.getByRole('main');
-  await expect(card.getByText('No hosts are allowed yet.')).toBeVisible();
+  await expect(card.getByText('No Hosts Allowed Yet')).toBeVisible();
 
   const field = page.getByRole('textbox', { name: 'Host' });
   for (const host of ['index.crates.io', 'static.crates.io']) {
@@ -72,5 +72,5 @@ test('a builder allows two hosts, is refused localhost and removes them', async 
     await page.getByRole('button', { name: `Remove ${host}` }).click();
     await expect(page.getByRole('listitem').filter({ hasText: host })).toHaveCount(0);
   }
-  await expect(card.getByText('No hosts are allowed yet.')).toBeVisible();
+  await expect(card.getByText('No Hosts Allowed Yet')).toBeVisible();
 });

@@ -1,35 +1,43 @@
 import { BrowserState, type ProjectId } from '@10db/contracts';
-import { Stack, Text } from '@mantine/core';
+import { Group, Text } from '@mantine/core';
 import { usePicturesStatus } from '../../daemon/screen-queries';
+import { ConnectionStatus, ConnectionTone } from './connection-status';
+import { HelpHint } from './help-hint';
 
 // Workbench spec §10: how the browser that takes a project's pictures stands, and its last sign-in.
 
-const BROWSER_WORDS = {
-  [BrowserState.Off]: 'not started yet',
-  [BrowserState.Fetching]: 'downloading',
-  [BrowserState.Ready]: 'ready',
-  [BrowserState.Refused]: 'unavailable',
-} as const satisfies Record<BrowserState, string>;
+const BROWSER_STATUS = {
+  [BrowserState.Off]: { tone: ConnectionTone.Off, label: 'Picture Browser Not Started' },
+  [BrowserState.Fetching]: { tone: ConnectionTone.NeedsYou, label: 'Picture Browser Downloading' },
+  [BrowserState.Ready]: { tone: ConnectionTone.Works, label: 'Picture Browser Ready' },
+  [BrowserState.Refused]: { tone: ConnectionTone.NeedsYou, label: 'Picture Browser Unavailable' },
+} as const satisfies Record<BrowserState, { tone: ConnectionTone; label: string }>;
 
+/** The picture browser's state as a dot and words for the card's action slot; problems sit behind an info button. */
 export function PicturesStatus({ projectId }: { readonly projectId: ProjectId }) {
   const status = usePicturesStatus(projectId);
   if (status.data === undefined) return null;
   const { browser, signIn } = status.data;
+  const { tone, label } = BROWSER_STATUS[browser.state];
+  const signInLine =
+    signIn === null
+      ? null
+      : signIn.problem === null
+        ? 'Last sign-in: signed in'
+        : `Last sign-in: ${signIn.problem}`;
+  const details = [browser.problem, signInLine].filter((line) => line !== null);
   return (
-    <Stack gap={2} px="md" py="sm">
-      <Text size="sm" c={browser.state === BrowserState.Refused ? 'red' : 'dimmed'}>
-        {`Browser for pictures: ${BROWSER_WORDS[browser.state]}`}
-      </Text>
-      {browser.problem === null ? null : (
-        <Text size="xs" c="dimmed">
-          {browser.problem}
-        </Text>
+    <Group gap={2} wrap="nowrap">
+      <ConnectionStatus tone={tone} label={label} />
+      {details.length === 0 ? null : (
+        <HelpHint label="the picture browser">
+          {details.map((line) => (
+            <Text key={line} size="sm">
+              {line}
+            </Text>
+          ))}
+        </HelpHint>
       )}
-      {signIn === null ? null : (
-        <Text size="xs" c={signIn.problem === null ? 'dimmed' : 'red'}>
-          {signIn.problem === null ? 'Last sign-in: signed in' : `Last sign-in: ${signIn.problem}`}
-        </Text>
-      )}
-    </Stack>
+    </Group>
   );
 }

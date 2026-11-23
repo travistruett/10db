@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useSetSmallProposalLimit, useSmallProposalLimit } from '../../daemon/proposal-queries';
 import { SettingRow } from './setting-row';
 
-export const SMALL_PROPOSAL_LIMIT_LABEL = 'Size limit for small proposals';
+export const SMALL_PROPOSAL_LIMIT_LABEL = 'Size Limit for Small Proposals';
 
 /**
  * How large a lane's new-task proposal can be, in characters of title and body, for 10db to file it to
