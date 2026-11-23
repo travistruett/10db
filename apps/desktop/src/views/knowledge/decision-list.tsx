@@ -82,7 +82,7 @@ export function DecisionList({
       filter: <ShelfSearchFilter controls={controls} />,
       render: (d) => (
         <OpenRecordText
-          label={d.question}
+          label={`${d.question} → ${d.choice}`}
           onOpen={() => {
             open(d);
           }}

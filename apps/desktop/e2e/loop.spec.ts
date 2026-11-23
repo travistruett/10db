@@ -294,7 +294,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   const decisions = page.getByRole('table', { name: 'Decisions' });
   await expect(decisions.getByText('hello.txt')).toBeVisible();
   await expectAccessible(page, 'knowledge, decisions, dark');
-  await decisions.getByRole('button', { name: 'Open Which greeting file?' }).click();
+  await decisions.getByRole('button', { name: 'Open Which greeting file? → hello.txt' }).click();
   const provenance = page.getByRole('dialog', { name: 'Decision' });
   await expect(provenance.getByText('The gate looks for it.')).toBeVisible();
   await expect(provenance.getByText('Claude Code')).toBeVisible();
