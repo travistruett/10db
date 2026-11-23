@@ -65,11 +65,11 @@ const { Project, App } = SettingsScope;
 /** Project sections first, then app-wide ones; each scope in the order the sidebar lists it. */
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   GENERAL_SECTION,
-  section(SettingsSectionKey.PagesAndPictures, Project, 'Project', 'Pages and Pictures'),
+  section(SettingsSectionKey.PagesAndPictures, Project, 'Project', 'App Preview'),
   section(SettingsSectionKey.BoardColumns, Project, 'Project', 'Board Columns'),
   section(SettingsSectionKey.Planning, Project, 'Planning', 'Planning'),
   section(SettingsSectionKey.Areas, Project, 'Planning', 'Areas and Hazards'),
-  section(SettingsSectionKey.RoutingRules, Project, 'Planning', 'Who Answers'),
+  section(SettingsSectionKey.RoutingRules, Project, 'Planning', 'Question Routing'),
   section(SettingsSectionKey.Linear, Project, 'Planning', 'Linear'),
   section(SettingsSectionKey.Team, Project, 'Agents', 'Playbook'),
   section(SettingsSectionKey.Billing, Project, 'Agents', 'Billing'),

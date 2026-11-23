@@ -25,7 +25,7 @@ export const FIELD_HOMES: Readonly<Record<keyof GeneralValues, FieldHome>> = {
   landing: { label: 'When Checks Pass', section: General },
   landingBranch: { label: 'New Tasks Land In', section: General },
   prTitlePrefix: { label: 'Pull Request Title', section: General },
-  allowedCommands: { label: "Commands That Don't Ask", section: NetworkHosts },
+  allowedCommands: { label: 'Allowed Commands', section: NetworkHosts },
   sandboxLoopback: { label: 'Allow localhost', section: NetworkHosts },
   sandboxDocker: { label: 'Allow Docker', section: NetworkHosts },
   prPictures: { label: 'Pictures in Pull Requests', section: PagesAndPictures },
