@@ -550,12 +550,25 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
     }, interval);
   }
 
+  /** Asks Slack who the token is now, so the connection says where it stands. */
+  async function check(client: SlackClient): Promise<void> {
+    botUserId = null;
+    failures = 0;
+    try {
+      await identity(client);
+      paused = false;
+    } catch (error) {
+      classify(error);
+    }
+  }
+
   return {
     tick,
     start() {
       if (running || slack === null) return;
       running = true;
-      schedule();
+      // The connection is checked at once, so it never reads "none" for an interval after a restart.
+      inFlight = check(slack).finally(schedule);
     },
     async stop() {
       running = false;
@@ -565,14 +578,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
     },
     async reconnect() {
       if (slack === null) return;
-      botUserId = null;
-      failures = 0;
-      try {
-        await identity(slack);
-        paused = false;
-      } catch (error) {
-        classify(error);
-      }
+      await check(slack);
     },
   };
 }
