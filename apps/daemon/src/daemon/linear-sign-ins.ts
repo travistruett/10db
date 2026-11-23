@@ -13,6 +13,7 @@ import { listAccounts } from '@10db/db';
 import type { McpSignIns } from '../accounts';
 import type { StateStore } from '../events';
 import type { YourMcpPlan } from '../session-setup';
+import { harnessReadsServer } from './connect-service';
 
 const LINEAR_HOST = 'mcp.linear.app';
 
@@ -47,18 +48,24 @@ export function createLinearSignIns(deps: {
 }): { list(): Promise<LinearSignInsDto> } {
   return {
     async list() {
-      const servers = Object.entries(deps.plan().remote)
-        .filter(([, remote]) => isLinearServer(remote.url))
-        .map(([name]) => name);
+      const linear = Object.entries(deps.plan().remote).filter(([, remote]) =>
+        isLinearServer(remote.url),
+      );
+      /** The Linear servers an account's agent reads: Claude Code's file and plugins, or Codex's file. */
+      const serversOf = (harness: Provider): string[] =>
+        linear
+          .filter(([, remote]) => harnessReadsServer(harness, remote.key))
+          .map(([name]) => name);
       const accounts = listAccounts(deps.state.db).flatMap((account) => {
         const harness = harnessOf(account);
         return harness === null ? [] : [{ ...account, harness }];
       });
       const codexRows =
-        servers.length > 0 && accounts.some((a) => a.harness === Provider.Codex)
+        serversOf(Provider.Codex).length > 0 && accounts.some((a) => a.harness === Provider.Codex)
           ? (await deps.mcpSignIns.list()).rows
           : [];
       const rows = accounts.map((account): LinearSignInRowDto => {
+        const servers = serversOf(account.harness);
         const base = {
           accountId: account.id,
           accountLabel: account.label,

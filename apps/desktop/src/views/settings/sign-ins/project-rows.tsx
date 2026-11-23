@@ -121,7 +121,8 @@ export function LinearProjectRow({
             accountId={row.accountId}
             serverKey={row.serverKey}
             signedIn={row.signedIn}
-            // The builder pressed Connect on this project, so its Linear updates are on once Linear works.
+            // A Codex account's updates turn on in the daemon when its sign-in ends; a Claude Code sign-in
+            // is the builder's, so the project's updates turn on once they say it's done.
             onConnected={() => {
               if (!linear.on) save.mutate({ on: true, note: linear.note });
             }}
@@ -130,6 +131,7 @@ export function LinearProjectRow({
             }}
             onFinished={() => {
               setConnecting(false);
+              void integrations.refetch();
             }}
           />
         }

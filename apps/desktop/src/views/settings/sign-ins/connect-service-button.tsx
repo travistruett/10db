@@ -8,8 +8,10 @@ import {
   type AccountId,
 } from '@10db/contracts';
 import { Button, CopyButton, Group, Stack, Text } from '@mantine/core';
+import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef } from 'react';
 import { useConnectService } from '../../../daemon/sign-in-queries';
+import { SettingsSectionKey } from '../sections';
 import { useMcpSignIns, useStartMcpSignIn } from '../../../daemon/trust-queries';
 
 /**
@@ -34,7 +36,7 @@ export function ConnectServiceButton({
   readonly serverKey: YourMcpServerKey | null;
   /** Whether the account's sign-in to the service is done, when known. */
   readonly signedIn: boolean | null;
-  /** The service works for the account, or only Claude Code's `/mcp` is left: the caller's own follow-on step. */
+  /** The builder says a sign-in done in Claude Code worked: the caller's own follow-on step. A Codex account's is the daemon's. */
   readonly onConnected?: () => void;
   /** Connect was pressed: the caller keeps this component on screen until it finishes. */
   readonly onStarted: () => void;
@@ -46,45 +48,58 @@ export function ConnectServiceButton({
   const signIns = useMcpSignIns();
   const reopen = useStartMcpSignIn();
   const next = connect.data?.next;
-  const connected = useRef(false);
+  const finished = useRef(false);
+  const navigate = useNavigate();
   const row = signIns.data?.rows.find((r) => r.accountId === accountId && r.key === serverKey);
 
-  // Each follow-on runs once: when the service works, or at once for a Claude Code account.
+  // A Codex account is done once its sign-in is; the daemon has run the service's follow-on by then.
   const done =
-    next === ConnectNext.SignedIn ||
-    next === ConnectNext.ClaudeCode ||
-    (next === ConnectNext.SigningIn && signedIn === true);
+    next === ConnectNext.SignedIn || (next === ConnectNext.SigningIn && signedIn === true);
   useEffect(() => {
-    if (!done || connected.current) return;
-    connected.current = true;
-    onConnected?.();
-    if (next !== ConnectNext.ClaudeCode) onFinished();
-  }, [done, next, onConnected, onFinished]);
+    if (!done || finished.current) return;
+    finished.current = true;
+    onFinished();
+  }, [done, onFinished]);
 
   const press = (): void => {
-    connected.current = false;
+    finished.current = false;
     onStarted();
     connect.mutate(projectId);
   };
 
-  if (next === ConnectNext.ClaudeCode)
+  if (next === ConnectNext.ClaudeCode) {
+    // A Claude plan account in its own folder signs in from a terminal, as Trust's servers list says.
+    const terminal = signIns.data?.terminal.find((t) => t.accountId === accountId);
+    const command = terminal?.command ?? '/mcp';
     return (
       <Stack gap={4} align="flex-end">
-        <Text size="sm">Finish in Claude Code: run /mcp and sign in to {label}.</Text>
+        <Text size="sm">
+          {terminal === undefined
+            ? `Finish in Claude Code: run /mcp and sign in to ${label}.`
+            : `Finish in your terminal: run the command, then /mcp and sign in to ${label}.`}
+        </Text>
         <Group gap="xs">
-          <CopyButton value="/mcp">
+          <CopyButton value={command}>
             {({ copied, copy }) => (
               <Button size="compact-xs" variant="default" onClick={copy}>
-                {copied ? 'Copied' : 'Copy /mcp'}
+                {copied ? 'Copied' : terminal === undefined ? 'Copy /mcp' : 'Copy Command'}
               </Button>
             )}
           </CopyButton>
-          <Button size="compact-xs" variant="subtle" onClick={onFinished}>
+          <Button
+            size="compact-xs"
+            variant="subtle"
+            onClick={() => {
+              onConnected?.();
+              onFinished();
+            }}
+          >
             Done
           </Button>
         </Group>
       </Stack>
     );
+  }
   if (next === ConnectNext.SigningIn && !done)
     return (
       <Stack gap={4} align="flex-end">
@@ -97,17 +112,19 @@ export function ConnectServiceButton({
             Signing In in Your Browser…
           </Text>
         )}
-        <Button
-          size="compact-xs"
-          variant="default"
-          loading={reopen.isPending || connect.isPending}
-          onClick={() => {
-            if (row?.state === McpSignInState.Failed) press();
-            else if (row) reopen.mutate({ accountId, key: row.key });
-          }}
-        >
-          {row?.state === McpSignInState.Failed ? 'Try Again' : 'Open Page Again'}
-        </Button>
+        {row === undefined ? null : (
+          <Button
+            size="compact-xs"
+            variant="default"
+            loading={reopen.isPending || connect.isPending}
+            onClick={() => {
+              if (row.state === McpSignInState.Failed) press();
+              else reopen.mutate({ accountId, key: row.key });
+            }}
+          >
+            {row.state === McpSignInState.Failed ? 'Try Again' : 'Open Page Again'}
+          </Button>
+        )}
         {reopen.isError ? (
           <Text size="xs" c="red">
             {reopen.error.message}
@@ -122,9 +139,25 @@ export function ConnectServiceButton({
           {connect.error.message}
         </Text>
       ) : null}
-      <Button size="compact-sm" loading={connect.isPending} onClick={press}>
-        {connect.isError ? 'Try Again' : `Connect ${label}`}
-      </Button>
+      <Group gap="xs">
+        {connect.isError && connect.error.message.includes('Settings › Trust') ? (
+          <Button
+            size="compact-sm"
+            variant="default"
+            onClick={() => {
+              void navigate({
+                to: '/settings/$section',
+                params: { section: SettingsSectionKey.Trust },
+              });
+            }}
+          >
+            Open Trust
+          </Button>
+        ) : null}
+        <Button size="compact-sm" loading={connect.isPending} onClick={press}>
+          {connect.isError ? 'Try Again' : `Connect ${label}`}
+        </Button>
+      </Group>
     </Stack>
   );
 }

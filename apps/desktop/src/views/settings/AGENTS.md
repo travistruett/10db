@@ -33,9 +33,11 @@ Decision Models (`decision-models-view.tsx`, Settings › Models › Decision Mo
   `mcp add --transport http --scope user`; a different server already named `linear` is never overwritten),
   approves that server as Trust's Approve does, and, on Codex, starts the account's sign-in. The row then shows
   "Signing In in Your Browser…" with Open Page Again (`mcp_sign_in.changed` refetches), and Update Linear Issues
-  turns on for that project, once Linear works, through the button's `onConnected`; the other projects on the
-  account show their switch off. On Claude Code the row shows "Finish in Claude Code: run /mcp and sign in to
-  Linear." with Copy /mcp and Done, and re-reads on window focus. Provider parity: Codex is one click; a Claude
+  turns on for that project when the sign-in ends (the daemon does it, so leaving the page doesn't lose it); the other
+  projects on the account show their switch off. On Claude Code the row shows "Finish in Claude Code: run /mcp and
+  sign in to Linear." with Copy /mcp (a Claude plan account in its own folder gets Trust's terminal command instead)
+  and Done, which turns the switch on through `onConnected`; the card re-reads on window focus. A refusal that
+  names a Trust switch (a server sessions wouldn't load) shows in red with Open Trust. Provider parity: Codex is one click; a Claude
   plan, API key or Bedrock account is one click plus `/mcp` in Claude Code. A new service is one entry in
   `CONNECTABLE_SERVICES` (daemon), one in `ConnectableService` and its label (contracts), and its card using the
   component), Figma (`figma-card.tsx`: under "Through Your Agent", one line saying the Figma plugin in

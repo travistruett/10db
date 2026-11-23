@@ -14,7 +14,6 @@ import {
   type TrustOverrides,
   type TrustSettingsDto,
   type TrustSwitches,
-  type YourMcpServerDto,
 } from '@10db/contracts';
 import {
   deleteTrustGrant,
@@ -51,6 +50,7 @@ import {
 } from '../session-setup';
 import { projectLiveSystems, setProjectLiveSystems } from '../trust';
 import { accountJudges } from './account-judges';
+import type { ProjectMcpServers } from './connect-service';
 
 export type TrustServices = Pick<
   ApiServices,
@@ -116,8 +116,8 @@ export function createTrustServices(deps: {
 }): TrustServices & {
   /** The builder's servers as a session on the app-wide switches would plan them. */
   readonly appMcpPlan: () => YourMcpPlan;
-  /** The builder's servers as Settings › Trust lists them on the app-wide switches, read now. */
-  readonly appMcpServers: () => YourMcpServerDto[];
+  /** The builder's servers as a project's sessions would see them, on its effective switches, read now. */
+  readonly projectMcpServers: (projectId: ProjectId) => ProjectMcpServers;
 } {
   const db = deps.state.db;
   const onInvalid = warnInvalidTrust(deps.log);
@@ -157,8 +157,10 @@ export function createTrustServices(deps: {
     return { servers, fileProblems, entries, approvals };
   };
 
-  const appMcpServers = (): YourMcpServerDto[] =>
-    yourServers(appTrustSwitches(db, onInvalid)).servers;
+  const projectMcpServers = (projectId: ProjectId): ProjectMcpServers => {
+    const switches = trustSwitchesFor(db, projectId, onInvalid);
+    return { servers: yourServers(switches).servers, on: switches.yourMcpServers };
+  };
 
   const appMcpPlan = (): YourMcpPlan => {
     const switches = appTrustSwitches(db, onInvalid);
@@ -271,7 +273,7 @@ export function createTrustServices(deps: {
 
   return {
     appMcpPlan,
-    appMcpServers,
+    projectMcpServers,
     trustSettings,
     async setTrustSwitches(switches) {
       deps.state.write((ctx) => {

@@ -28,6 +28,7 @@ import {
   type ProjectDto,
   type AccountId,
   type Effort,
+  type ConnectableService,
   type ProjectId,
   type ShapeId,
   type SystemCheckDto,
@@ -114,6 +115,7 @@ import {
   dismissReporterPosts,
   reporterConversations,
   reporterHooks,
+  reporterSettings,
   subscribeLinearEvents,
 } from '../linear';
 import { createServiceConnector } from './connect-service';
@@ -2456,7 +2458,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       deliver: (taskId, messageId, how) => createdRunner.deliverMessage(taskId, messageId, how),
     },
   });
-  const { appMcpPlan, appMcpServers, ...trust } = createTrustServices({
+  const { appMcpPlan, projectMcpServers, ...trust } = createTrustServices({
     state,
     builderHome,
     laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
@@ -2485,15 +2487,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     mcpSignIns,
     connectorNames: (account) => adapter.cachedConnectorNames?.(account),
   });
-  const connector = createServiceConnector({
-    state,
-    servers: appMcpServers,
-    approve: (input) => trust.approveYourMcpServer(input),
-    mcpSignIns,
-    agents: () => opts.agents ?? null,
-    loginEnv: () => launcher.projectEnv(),
-    builderHome,
-  });
   const figmaSignIns = createFigmaSignIns({
     state,
     plan: appMcpPlan,
@@ -2509,6 +2502,25 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     conversations: reporterConversations(state),
     signIns: linearSignIns,
     inbox,
+  });
+  /** Each service's own next step once it works for a project. Linear: the project reports to it. */
+  const whenConnectedWorks: Record<ConnectableService, (projectId: ProjectId) => void> = {
+    linear: (projectId) => {
+      linearReporter.setSettings(projectId, { ...reporterSettings(db, projectId), on: true });
+    },
+  };
+  const connector = createServiceConnector({
+    state,
+    mcp: projectMcpServers,
+    bus,
+    whenWorks: (service, projectId) => {
+      whenConnectedWorks[service](projectId);
+    },
+    approve: (input) => trust.approveYourMcpServer(input),
+    mcpSignIns,
+    agents: () => opts.agents ?? null,
+    loginEnv: () => launcher.projectEnv(),
+    builderHome,
   });
   exploreEngine.register(
     ConversationOwnerKind.Reporter,
