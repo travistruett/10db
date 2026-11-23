@@ -181,7 +181,7 @@ export function blockedHostsNote(hosts: readonly string[], run: BlockedRun): str
     lines.push(
       `10db: The ${name} was blocked from reaching ${joined(allowable)}: ` +
         `${one ? 'it is' : 'they are'} not among the project's allowed network hosts. ` +
-        `Allow ${one ? 'it' : 'them'} for the project, from the Inbox or in Settings › Network hosts, ` +
+        `Allow ${one ? 'it' : 'them'} for the project, from the Inbox or in Settings › Sandbox, ` +
         `then ${then}.`,
     );
   }

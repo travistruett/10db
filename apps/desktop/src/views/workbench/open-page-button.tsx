@@ -46,7 +46,7 @@ export function OpenPageIcon({
   );
 }
 
-/** Why the page could not be opened, with a link to Settings › General, where the app address is set. */
+/** Why the page could not be opened, with a link to Settings › Pages and Pictures, where the app address is set. */
 export function OpenPageRefusal({ refusal }: { readonly refusal: string }) {
   return (
     <Text size="xs" c="red">
@@ -57,11 +57,11 @@ export function OpenPageRefusal({ refusal }: { readonly refusal: string }) {
           <Link
             {...props}
             to="/settings/$section"
-            params={{ section: SettingsSectionKey.General }}
+            params={{ section: SettingsSectionKey.PagesAndPictures }}
           />
         )}
       >
-        Settings › General
+        Settings › Pages and Pictures
       </Anchor>
     </Text>
   );

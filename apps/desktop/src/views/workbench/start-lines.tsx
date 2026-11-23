@@ -18,23 +18,32 @@ export interface StartLinesProps {
 const plural = (count: number, one: string, many: string) =>
   `${String(count)} ${count === 1 ? one : many}`;
 
-/** A lack in words, and whether Settings › General is where it is fixed. */
+/** A lack in words, and the settings section where it is fixed; null where nothing there fixes it. */
 function lackLine(
   lack: PassLackDto,
   project: ProjectViewDto,
-): { readonly text: string; readonly settings: boolean } {
+): { readonly text: string; readonly section: SettingsSectionKey | null } {
   switch (lack.kind) {
     case PassLackKind.DockerOff:
-      return { text: 'Docker is off: the gate needs it.', settings: true };
+      return {
+        text: 'Docker is off: the gate needs it.',
+        section: SettingsSectionKey.NetworkHosts,
+      };
     case PassLackKind.AheadOfBase:
       return {
         text: `${lack.branch ?? 'This branch'} has ${plural(lack.count ?? 0, 'commit', 'commits')} origin/${project.baseBranch} lacks: the pull request will carry them.`,
-        settings: false,
+        section: null,
       };
     case PassLackKind.NoAppUrl:
-      return { text: 'No app address: Open in Browser has nowhere to go.', settings: true };
+      return {
+        text: 'No app address: Open in Browser has nowhere to go.',
+        section: SettingsSectionKey.PagesAndPictures,
+      };
     case PassLackKind.NoChangedCheck:
-      return { text: 'No changed-files check: turns run unchecked.', settings: true };
+      return {
+        text: 'No changed-files check: turns run unchecked.',
+        section: SettingsSectionKey.General,
+      };
   }
 }
 
@@ -76,15 +85,11 @@ export function StartLines({ ticks, start, project }: StartLinesProps) {
       {lacks.map((lack) => (
         <Group key={lack.text} gap="xs" wrap="nowrap">
           <Line>{lack.text}</Line>
-          {lack.settings ? (
+          {lack.section !== null ? (
             <Anchor
               size="sm"
               renderRoot={(props) => (
-                <Link
-                  {...props}
-                  to="/settings/$section"
-                  params={{ section: SettingsSectionKey.General }}
-                />
+                <Link {...props} to="/settings/$section" params={{ section: lack.section }} />
               )}
             >
               Open Settings

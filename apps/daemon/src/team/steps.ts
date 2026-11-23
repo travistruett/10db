@@ -102,7 +102,7 @@ export function planForStart(db: DbReader, taskId: TaskId): StepPlanDto {
       return `Step ${String(i + 1)} (${step?.role ?? '?'}, need ${need}) has no profile within the budget ceiling of $${String(ceiling)}: ${step?.reason ?? 'unknown'}`;
     });
     throw new InvalidError(
-      `${named.join('. ')}. Raise the ceiling or lower the need in Settings › Models.`,
+      `${named.join('. ')}. Raise the ceiling or lower the need, or raise Spending Limit per Task in Settings › Billing.`,
     );
   }
   if (plan.steps.length === 0) throw new InvalidError('The plan resolved to no steps');

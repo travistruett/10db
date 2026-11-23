@@ -117,8 +117,7 @@ function mayRunHazard(command: string, hazards: readonly HazardDef[]): string | 
 }
 
 /** What an unattended lane is told of a docker call while the project has Docker off. */
-export const DOCKER_OFF =
-  'Docker is off for this project. Turning it on is Settings › Project › Docker.';
+export const DOCKER_OFF = 'Docker is off for this project. Turning it on is Settings › Sandbox.';
 
 const DOCKER_PROGRAMS: ReadonlySet<string> = new Set(['docker', 'docker-compose', 'podman']);
 
