@@ -10,7 +10,8 @@ import {
   type TaskDto,
   type TaskId,
 } from '@10db/contracts';
-import { Button, Code, Group, Stack, Text } from '@mantine/core';
+import { Button, Code, Divider, Group, Paper, Stack, Text } from '@mantine/core';
+import { IconSparkles } from '@tabler/icons-react';
 import { Fragment, useState, type ReactNode } from 'react';
 import { PendingOpenLine } from '../sessions/pending-open-line';
 import { whenBusyChats } from '../sessions/when-busy';
@@ -46,7 +47,7 @@ export interface StartPassProps {
 /** How many found pages the line names; the rest are counted. */
 const FOUND_PAGES_SHOWN = 3;
 
-/** "Sessions /sessions found in code", or the first few of several and a count of the rest. */
+/** "Sessions /sessions are in the code but not in the project yet", the first few of several and a count of the rest. */
 function foundPagesLine(pages: readonly PageRow[]): ReactNode {
   const shown = pages.slice(0, FOUND_PAGES_SHOWN).map((page, i) => (
     <Fragment key={page.name}>
@@ -64,7 +65,7 @@ function foundPagesLine(pages: readonly PageRow[]): ReactNode {
   return (
     <>
       {shown}
-      {more > 0 ? ` and ${String(more)} more` : null} found in code
+      {more > 0 ? ` and ${String(more)} more` : null} are in the code but not in the project yet.
     </>
   );
 }
@@ -106,17 +107,20 @@ export function StartPass(props: StartPassProps) {
         now={now}
       />
       {setUp == null || setUp.newPages.length === 0 ? null : (
-        <Group gap="xs" role="status">
-          <Text size="sm" c="dimmed">
-            {foundPagesLine(setUp.newPages)}
-            {' · '}
-          </Text>
-          <Button variant="subtle" size="compact-sm" px={0} onClick={setUp.onOpen}>
-            Review
-          </Button>
-        </Group>
+        <Paper withBorder radius="md" px="md" py="sm" role="status">
+          <Group justify="space-between" gap="md" wrap="nowrap">
+            <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
+              <IconSparkles size={16} stroke={1.5} style={{ flexShrink: 0 }} aria-hidden />
+              <Text size="sm">{foundPagesLine(setUp.newPages)}</Text>
+            </Group>
+            <Button variant="default" size="xs" onClick={setUp.onOpen} style={{ flexShrink: 0 }}>
+              Review
+            </Button>
+          </Group>
+        </Paper>
       )}
-      <Group justify="space-between" align="flex-end" gap="lg" wrap="nowrap" data-start-bar>
+      <Divider />
+      <Group justify="space-between" align="center" gap="lg" wrap="nowrap" data-start-bar>
         <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
           <StartLines ticks={ticks} start={start} project={project} />
           {refusal === null ? null : (
