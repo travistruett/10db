@@ -1,4 +1,5 @@
 import type { DaemonEnv } from '../env';
+import { slackApiAt } from '../slack';
 import type { DaemonOptions } from './start';
 
 /** The daemon options the entry point takes from its environment. */
@@ -19,6 +20,7 @@ export type EnvDaemonOptions = Pick<
   | 'catalogueSync'
   | 'pictures'
   | 'laneBrief'
+  | 'fetch'
 >;
 
 /**
@@ -57,6 +59,9 @@ export function daemonOptionsFromEnv(env: DaemonEnv): EnvDaemonOptions {
     ...(env.TENDB_BENCHMARKS === 'off' ? { benchmarksOff: true } : {}),
     openRouterSync: env.TENDB_JUDGE !== 'off' && env.TENDB_BENCHMARKS !== 'off',
     slack: slackOnFromEnv(env),
+    ...(env.TENDB_SLACK_API === undefined
+      ? {}
+      : { fetch: slackApiAt(env.TENDB_SLACK_API, globalThis.fetch) }),
     ...(env.TENDB_DISK === 'off' ? {} : { disk: {} }),
     catalogueSync: env.TENDB_CATALOGUE !== 'off',
     pictures: { kind: 'pinned' },

@@ -41,11 +41,18 @@ export function ProjectRow({
   );
 }
 
-/** The projects of a card: a thin divider above the first, then one row each. */
-export function ProjectRows({ children }: { readonly children: ReactNode }) {
+/** The projects of a card: a thin divider, an optional heading saying what the rows choose, then one row each. */
+export function ProjectRows({
+  heading,
+  children,
+}: {
+  readonly heading?: ReactNode;
+  readonly children: ReactNode;
+}) {
   return (
     <Stack gap={0}>
-      <Divider mb={4} />
+      <Divider mb={heading === undefined ? 4 : 'sm'} />
+      {heading}
       {children}
     </Stack>
   );

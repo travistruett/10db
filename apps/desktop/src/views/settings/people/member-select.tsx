@@ -12,11 +12,16 @@ export function MemberSelect({
   value,
   onPick,
   label,
+  ariaLabel,
+  placeholder = 'Search by name, title or email',
   teamId,
 }: {
   readonly value: SlackMemberDto | null;
   readonly onPick: (member: SlackMemberDto | null) => void;
-  readonly label: string;
+  /** A visible label; without one, `ariaLabel` names the field. */
+  readonly label?: string;
+  readonly ariaLabel?: string;
+  readonly placeholder?: string;
   /** The workspace whose people are searched. */
   readonly teamId: string | null;
 }) {
@@ -29,7 +34,8 @@ export function MemberSelect({
   return (
     <Select
       label={label}
-      placeholder="Search by name, title or email"
+      aria-label={ariaLabel}
+      placeholder={placeholder}
       searchable
       clearable
       data={data}

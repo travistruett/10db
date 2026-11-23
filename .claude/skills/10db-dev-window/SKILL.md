@@ -29,6 +29,10 @@ checkout's Vite server, so a saved edit shows at once. What it does:
 4. Close it once the work is reviewed: `pkill -f target/debug/tendb-desktop` ends the window, and the script then
    stops the rest.
 
+Slack is off in the Dev window. `TENDB_FAKE_SLACK=on pnpm dev:window` turns it on against a fake Slack
+(`scripts/fake-slack.mjs`): connect with the token `xoxb-fake-acme` or `xoxb-fake-globex`, and a question sent
+to someone there is answered in its thread 20 s later.
+
 Changing `src-tauri/tauri.conf.json` (the traffic lights, the window's size) takes a restart of the window; a
 change to the UI does not.
 
