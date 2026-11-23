@@ -1,5 +1,6 @@
 import type { ProjectDto } from '@10db/contracts';
-import { Text } from '@mantine/core';
+import { Badge, Text } from '@mantine/core';
+import { ProjectTile } from '../../shell/project-tile';
 import { TitleRow } from '../../shell/title-row';
 import { AccountsSection } from './accounts/accounts-section';
 import { AgentSkillSection } from './agent-skill-section';
@@ -31,6 +32,22 @@ import { SessionsSection } from './sessions-section';
 import { SelfUpdateSection } from './self-update-section';
 import { TrustSection } from './trust-section';
 
+/** What a settings page applies to, beside its title: the project with its tile, or All Projects. */
+function ScopeBadge({ tile, children }: { readonly tile?: string; readonly children: string }) {
+  return (
+    <Badge
+      variant="light"
+      color="gray"
+      tt="none"
+      fw={500}
+      size="md"
+      leftSection={tile === undefined ? undefined : <ProjectTile name={tile} size={14} />}
+    >
+      {children}
+    </Badge>
+  );
+}
+
 function NoProject() {
   return <Text c="dimmed">Create a project on the board first.</Text>;
 }
@@ -47,11 +64,11 @@ export function SectionBody({
     <TitleRow
       title={section.label}
       meta={
-        section.scope === SettingsScope.App
-          ? 'All Projects'
-          : project === null
-            ? undefined
-            : `This Project · ${project.name}`
+        section.scope === SettingsScope.App ? (
+          <ScopeBadge>All Projects</ScopeBadge>
+        ) : project === null ? undefined : (
+          <ScopeBadge tile={project.name}>{project.name}</ScopeBadge>
+        )
       }
     />
   );
@@ -139,7 +156,7 @@ export function SectionBody({
           {heading}
           {project ? (
             <ScopeLine>
-              {`For ${project.name} only. As App follows All Projects › Trust. Changes apply from the next session.`}
+              Default follows All Projects › Trust. Changes apply from the next session.
             </ScopeLine>
           ) : null}
           {project ? <ProjectTrustSection key={project.id} project={project} /> : <NoProject />}

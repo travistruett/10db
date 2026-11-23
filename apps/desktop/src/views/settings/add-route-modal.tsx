@@ -17,12 +17,14 @@ import {
   TextInput,
   Tooltip,
 } from '@mantine/core';
+import { IconPlus } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useGoals } from '../../daemon/goal-queries';
 import { usePeople, useSetRoutingRules } from '../../daemon/people';
 import { useTasks } from '../../daemon/queries';
 import { useProjectIntegrations } from '../../daemon/sign-in-queries';
 import { categoryWord, reachLabel } from '../inbox/route-line';
+import { PersonModal } from './people/person-modal';
 import { ruleInputs } from './route-rows';
 
 const Scope = {
@@ -74,6 +76,15 @@ function RouteForm({
   const [categories, setCategories] = useState<string[]>([]);
   const [topic, setTopic] = useState('');
   const [personId, setPersonId] = useState<string | null>(null);
+  const [addingPerson, setAddingPerson] = useState(false);
+  // Who was listed when Add Person opened: the one added then is chosen.
+  const [known, setKnown] = useState<ReadonlySet<string> | null>(null);
+  const others = (people.data ?? []).filter((p) => !p.isBuilder);
+  const added = known === null ? undefined : others.find((p) => !known.has(p.id));
+  if (added !== undefined && !addingPerson) {
+    setKnown(null);
+    setPersonId(added.id);
+  }
 
   const isTopic = scope === Scope.Topic;
   const scoped =
@@ -178,13 +189,36 @@ function RouteForm({
           </Stack>
         </Chip.Group>
       )}
-      <Select
-        label="Person"
-        data={(people.data ?? [])
-          .filter((p) => !p.isBuilder)
-          .map((p) => ({ value: p.id, label: reachLabel(p, slack) }))}
-        value={personId}
-        onChange={setPersonId}
+      <Stack gap={6}>
+        <Select
+          label="Person"
+          placeholder={others.length === 0 ? 'No one to route to yet' : 'Choose who answers'}
+          data={others.map((p) => ({ value: p.id, label: reachLabel(p, slack) }))}
+          nothingFoundMessage="No one yet. Add a person below."
+          value={personId}
+          onChange={setPersonId}
+        />
+        <Group>
+          <Button
+            size="compact-sm"
+            variant="subtle"
+            leftSection={<IconPlus size={14} stroke={1.5} />}
+            onClick={() => {
+              setKnown(new Set(others.map((p) => p.id)));
+              setAddingPerson(true);
+            }}
+          >
+            Add Person
+          </Button>
+        </Group>
+      </Stack>
+      <PersonModal
+        person={null}
+        people={people.data ?? []}
+        opened={addingPerson}
+        onClose={() => {
+          setAddingPerson(false);
+        }}
       />
       {save.isError ? (
         <Alert color="red" variant="light">

@@ -55,7 +55,7 @@ export function useScreenPicture(screenId: TaskScreenId) {
   });
 }
 
-/** Settings › Pages and Pictures: the browser for pictures and the project's last sign-in. */
+/** Settings › App Preview: the browser for pictures and the project's last sign-in. */
 export function usePicturesStatus(projectId: ProjectId) {
   const { client } = useDaemon();
   return useQuery({

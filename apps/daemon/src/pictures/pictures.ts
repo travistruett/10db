@@ -186,7 +186,7 @@ export interface Pictures {
    * `BEFORE_WAIT_MS`. Resolves at once for a task that takes no pictures or has started.
    */
   awaitBefore(task: TaskDto, signal: AbortSignal): Promise<void>;
-  /** Settings › Pages and Pictures' status line for a project. */
+  /** Settings › App Preview's status line for a project. */
   status(projectId: ProjectId): PicturesStatusDto;
   /**
    * Shots of the routes as they are now, for a design check: the first viewport and theme of the
@@ -450,8 +450,8 @@ export function startPictures(deps: PicturesDeps): Pictures {
         ctx,
         taskId,
         signedIn
-          ? `${ELSEWHERE_NOTICE} instead of ${route}, even after signing in again, so no picture of it was kept. Check the dev login command in Settings › Pages and Pictures.`
-          : `${ELSEWHERE_NOTICE} instead of ${route}, so no picture of it was kept. If the page needs a sign-in, set a dev login command in Settings › Pages and Pictures.`,
+          ? `${ELSEWHERE_NOTICE} instead of ${route}, even after signing in again, so no picture of it was kept. Check the dev login command in Settings › App Preview.`
+          : `${ELSEWHERE_NOTICE} instead of ${route}, so no picture of it was kept. If the page needs a sign-in, set a dev login command in Settings › App Preview.`,
       );
     });
   }
@@ -808,7 +808,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
       case 'overlay':
         return `the app shows its error overlay: ${shot.overlayText ?? 'no text'}`;
       case 'elsewhere':
-        return 'the page lands on another page of the app (a sign-in, perhaps): set a dev login command in Settings › Pages and Pictures';
+        return 'the page lands on another page of the app (a sign-in, perhaps): set a dev login command in Settings › App Preview';
       case 'no_answer':
         return 'the app did not answer';
       case 'clean':
