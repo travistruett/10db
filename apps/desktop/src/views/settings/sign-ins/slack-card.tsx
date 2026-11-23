@@ -4,15 +4,15 @@ import {
   Alert,
   Button,
   Group,
-  List,
   Menu,
   PasswordInput,
   Skeleton,
   Stack,
   Text,
+  ThemeIcon,
 } from '@mantine/core';
-import { IconBrandSlack, IconDots } from '@tabler/icons-react';
-import { useState } from 'react';
+import { IconBrandSlack, IconCopy, IconDots } from '@tabler/icons-react';
+import { useState, type ReactNode } from 'react';
 import { useProjects } from '../../../daemon/queries';
 import {
   usePeople,
@@ -61,44 +61,64 @@ function StateLine({
   }
 }
 
+/** One numbered setup step: its number in a circle, a short title, and what the step needs under it. */
+function SetupStep({
+  n,
+  title,
+  children,
+}: {
+  readonly n: number;
+  readonly title: string;
+  readonly children?: ReactNode;
+}) {
+  return (
+    <Group gap="sm" wrap="nowrap" align="flex-start">
+      <ThemeIcon size={22} radius="xl" variant="light" color="gray" style={{ flex: 'none' }}>
+        <Text size="xs" fw={600}>
+          {n}
+        </Text>
+      </ThemeIcon>
+      <Stack gap={6} style={{ flex: 1 }} miw={0} pt={2}>
+        <Text size="sm">{title}</Text>
+        {children}
+      </Stack>
+    </Group>
+  );
+}
+
 /** The three steps that connect Slack, ending in the token field. */
 function SetupSteps() {
   const setToken = useSetSlackToken();
   const [copied, setCopied] = useState(false);
   return (
-    <Stack gap="sm">
-      <List type="ordered" size="sm" spacing="xs">
-        <List.Item>
-          <Group gap="sm">
-            <Button
-              size="xs"
-              variant="default"
-              onClick={() => {
-                void navigator.clipboard.writeText(SLACK_MANIFEST).then(() => {
-                  setCopied(true);
-                });
-              }}
-            >
-              Copy Manifest
-            </Button>
-            <ExternalLink url={SLACK_APPS_URL} label="Open Slack Apps ↗" />
-            {copied ? (
-              <Text size="xs" c="dimmed">
-                Copied
-              </Text>
-            ) : null}
-          </Group>
-        </List.Item>
-        <List.Item>
-          Create the app from the manifest and install it in your workspace
-          <Text span size="xs" c="dimmed">
-            {' '}
-            (a workspace that needs approval sends a request first).
+    <Stack gap="md" pt={4}>
+      <SetupStep n={1} title="Copy 10db's app manifest.">
+        <Group gap="sm">
+          <Button
+            size="xs"
+            variant="default"
+            leftSection={<IconCopy size={14} />}
+            onClick={() => {
+              void navigator.clipboard.writeText(SLACK_MANIFEST).then(() => {
+                setCopied(true);
+              });
+            }}
+          >
+            {copied ? 'Copied' : 'Copy Manifest'}
+          </Button>
+        </Group>
+      </SetupStep>
+      <SetupStep n={2} title="Create an app from it in Slack and install it in your workspace.">
+        <Group gap="sm">
+          <ExternalLink url={SLACK_APPS_URL} label="Open Slack Apps ↗" />
+          <Text size="xs" c="dimmed">
+            A workspace that needs approval sends a request first.
           </Text>
-        </List.Item>
-        <List.Item>Paste the Bot User OAuth Token below and press Connect.</List.Item>
-      </List>
-      <TokenField setter={setToken} />
+        </Group>
+      </SetupStep>
+      <SetupStep n={3} title="Paste its Bot User OAuth Token.">
+        <TokenField setter={setToken} />
+      </SetupStep>
     </Stack>
   );
 }

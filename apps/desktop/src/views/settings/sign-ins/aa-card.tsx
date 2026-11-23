@@ -1,6 +1,15 @@
 import type { BenchmarkStatusDto } from '@10db/contracts';
-import { Button, Group, PasswordInput, Skeleton, Stack, Text } from '@mantine/core';
-import { IconGauge } from '@tabler/icons-react';
+import {
+  ActionIcon,
+  Button,
+  Group,
+  PasswordInput,
+  Skeleton,
+  Stack,
+  Text,
+  Tooltip,
+} from '@mantine/core';
+import { IconDeviceFloppy, IconGauge, IconRefresh, IconTrash } from '@tabler/icons-react';
 import { useState } from 'react';
 import { removeBenchmarkKey, sendBenchmarkKey } from '../../../daemon/benchmark-secret';
 import {
@@ -97,10 +106,15 @@ function Actions({ status }: { readonly status: BenchmarkStatusDto }) {
           if (key.trim() !== '') void submit();
         }}
       >
-        <Group align="flex-start" gap="sm" wrap="nowrap">
+        <Group align="flex-start" gap="xs" wrap="nowrap">
           <PasswordInput
             aria-label={KEY_FIELD}
-            placeholder="Paste your key"
+            // The key itself is never shown again: a set key reads as dots until one is pasted over it.
+            placeholder={
+              status.keyConfigured
+                ? '••••••••••••  Paste a new key to replace it'
+                : 'Paste your key'
+            }
             autoComplete="off"
             style={{ flex: 1 }}
             value={key}
@@ -110,36 +124,58 @@ function Actions({ status }: { readonly status: BenchmarkStatusDto }) {
               setPhase('idle');
             }}
           />
-          <Button type="submit" loading={busy} disabled={key.trim() === ''}>
-            {status.keyConfigured ? 'Replace Key' : 'Set Key'}
-          </Button>
+          {status.keyConfigured ? (
+            <Group gap={4} wrap="nowrap" mih={36}>
+              <Tooltip label="Replace Key" withArrow>
+                <ActionIcon
+                  type="submit"
+                  size="lg"
+                  variant="subtle"
+                  color="gray"
+                  aria-label="Replace Key"
+                  loading={busy}
+                  disabled={key.trim() === ''}
+                >
+                  <IconDeviceFloppy size={18} stroke={1.5} />
+                </ActionIcon>
+              </Tooltip>
+              <Tooltip label="Sync Now" withArrow>
+                <ActionIcon
+                  size="lg"
+                  variant="subtle"
+                  color="gray"
+                  aria-label="Sync Now"
+                  loading={sync.isPending}
+                  disabled={status.syncing}
+                  onClick={() => {
+                    sync.mutate();
+                  }}
+                >
+                  <IconRefresh size={18} stroke={1.5} />
+                </ActionIcon>
+              </Tooltip>
+              <Tooltip label="Remove Key" withArrow>
+                <ActionIcon
+                  size="lg"
+                  variant="subtle"
+                  color="red"
+                  aria-label="Remove Key"
+                  disabled={busy}
+                  onClick={() => {
+                    setRemoving(true);
+                  }}
+                >
+                  <IconTrash size={18} stroke={1.5} />
+                </ActionIcon>
+              </Tooltip>
+            </Group>
+          ) : (
+            <Button type="submit" loading={busy} disabled={key.trim() === ''}>
+              Set Key
+            </Button>
+          )}
         </Group>
       </form>
-      {status.keyConfigured ? (
-        <Group gap="sm">
-          <Button
-            variant="default"
-            size="xs"
-            loading={sync.isPending}
-            disabled={status.syncing}
-            onClick={() => {
-              sync.mutate();
-            }}
-          >
-            Sync Now
-          </Button>
-          <Button
-            variant="default"
-            size="xs"
-            disabled={busy}
-            onClick={() => {
-              setRemoving(true);
-            }}
-          >
-            Remove Key
-          </Button>
-        </Group>
-      ) : null}
       {sync.isError ? (
         <Text size="xs" c="dimmed">
           {sync.error.message}

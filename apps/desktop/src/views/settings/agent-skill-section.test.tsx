@@ -30,7 +30,7 @@ describe('AgentSkillSection', () => {
       ...baseHandlers(),
     );
     renderWithDaemon(<AgentSkillSection />);
-    expect(await screen.findByText('Installed, current')).toBeTruthy();
+    expect(await screen.findByText('Current')).toBeTruthy();
     expect(screen.getByText('Agents in any repo can use 10db')).toBeTruthy();
     expect(screen.getByText(new RegExp(CLAUDE_LINK))).toBeTruthy();
     expect(screen.getByText(new RegExp(CODEX_LINK))).toBeTruthy();
