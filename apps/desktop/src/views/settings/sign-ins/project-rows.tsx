@@ -5,18 +5,7 @@ import {
   type LinearSignInRowDto,
   type ProjectDto,
 } from '@10db/contracts';
-import {
-  ActionIcon,
-  Collapse,
-  Divider,
-  Group,
-  Stack,
-  Switch,
-  Text,
-  Textarea,
-  Tooltip,
-} from '@mantine/core';
-import { IconChevronDown, IconChevronUp } from '@tabler/icons-react';
+import { Divider, Group, Stack, Switch, Text } from '@mantine/core';
 import { useState, type ReactNode } from 'react';
 import { ConnectionStatus, ConnectionTone } from '../connection-status';
 import { ConnectServiceButton } from './connect-service-button';
@@ -94,8 +83,8 @@ export function SlackProjectRow({ project }: { readonly project: ProjectDto }) {
 }
 
 /**
- * A project's Linear: when its account reaches Linear, or might, the Update Linear Issues switch and the note the
- * reporter follows; when the account definitely has none, or its server isn't signed in, Connect Linear.
+ * A project's Linear: when its account reaches Linear, or might, its on/off switch (on, a task from a Linear issue
+ * keeps the issue updated); when the account definitely has none, or its server isn't signed in, Connect Linear.
  */
 export function LinearProjectRow({
   project,
@@ -107,7 +96,6 @@ export function LinearProjectRow({
 }) {
   const integrations = useProjectIntegrations(project.id);
   const save = useSetLinearReporter(project.id);
-  const [editing, setEditing] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const linear = integrations.data?.linear;
   if (linear === undefined) return <ProjectRow name={project.name} />;
@@ -144,55 +132,20 @@ export function LinearProjectRow({
         }
       />
     );
-  const noteLabel = `${editing ? 'Hide' : 'Edit'} How To Update Linear for ${project.name}`;
   return (
     <ProjectRow
       name={project.name}
       control={
-        <Group gap="xs" wrap="nowrap">
-          <Tooltip label={editing ? 'Hide Update Note' : 'Edit Update Note'} withArrow>
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              aria-label={noteLabel}
-              aria-expanded={editing}
-              onClick={() => {
-                setEditing((was) => !was);
-              }}
-            >
-              {editing ? <IconChevronUp size={16} /> : <IconChevronDown size={16} />}
-            </ActionIcon>
-          </Tooltip>
-          <Switch
-            aria-label={`Update Linear Issues for ${project.name}`}
-            label="Update Linear Issues"
-            labelPosition="left"
-            checked={linear.on}
-            disabled={save.isPending}
-            onChange={(event) => {
-              save.mutate({ on: event.currentTarget.checked, note: linear.note });
-            }}
-          />
-        </Group>
-      }
-    >
-      <Collapse expanded={editing}>
-        <Textarea
-          // Keyed by the saved note, so a save from elsewhere replaces what the field shows.
-          key={linear.note}
-          size="xs"
-          autosize
-          minRows={2}
-          label="How To Update Linear"
-          aria-label={`How To Update Linear for ${project.name}`}
-          placeholder="Optional: how updates to Linear should read"
-          defaultValue={linear.note}
-          onBlur={(event) => {
-            const note = event.currentTarget.value;
-            if (note !== linear.note) save.mutate({ on: linear.on, note });
+        <Switch
+          aria-label={`Linear for ${project.name}`}
+          checked={linear.on}
+          disabled={save.isPending}
+          onChange={(event) => {
+            save.mutate({ on: event.currentTarget.checked, note: linear.note });
           }}
         />
-      </Collapse>
+      }
+    >
       {/* The switch already says off; only the Trust reason needs a line. */}
       {linear.blockedBy === null || !linear.on ? null : (
         <Text size="xs" c="dimmed">

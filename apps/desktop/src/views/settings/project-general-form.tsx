@@ -1,5 +1,6 @@
 import { Delivery, ProjectLanding, WorkspaceMode, type ProjectDto } from '@10db/contracts';
 import { NumberInput, SegmentedControl, Select, Stack, TagsInput, TextInput } from '@mantine/core';
+import { LinearNoteCard } from './linear-note-card';
 import { asNumber, MONO_INPUT, useProjectFields } from './project-fields-state';
 import { ProjectSaveBar } from './project-save-bar';
 import { SettingRow, SettingsCard } from './setting-row';
@@ -223,6 +224,8 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
           </SettingRow>
         ) : null}
       </SettingsCard>
+
+      <LinearNoteCard project={project} />
 
       <SettingsCard title="Running Tasks">
         <SettingRow
