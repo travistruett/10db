@@ -1,6 +1,7 @@
 import { Group, Paper, Stack, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { useFocusTarget } from '../focus-target';
+import { HelpHint, HelpText } from '../help-hint';
 
 /**
  * One outside service on Settings › Integrations: the service's mark and name on the left, at most one control
@@ -11,12 +12,15 @@ export function IntegrationCard({
   mark,
   name,
   control,
+  help,
   focusName,
   children,
 }: {
   readonly mark: ReactNode;
   readonly name: string;
   readonly control?: ReactNode;
+  /** The long version of the card's note, behind an info button beside the name. */
+  readonly help?: string;
   readonly focusName: string;
   /** The state line, then anything the card needs under it. */
   readonly children?: ReactNode;
@@ -29,6 +33,11 @@ export function IntegrationCard({
           <Group gap="sm" wrap="nowrap">
             {mark}
             <Text fw={600}>{name}</Text>
+            {help ? (
+              <HelpHint label={name}>
+                <HelpText>{help}</HelpText>
+              </HelpHint>
+            ) : null}
           </Group>
           {control}
         </Group>

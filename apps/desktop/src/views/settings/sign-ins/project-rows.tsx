@@ -1,6 +1,17 @@
 import { LinearVia, type LinearSignInRowDto, type ProjectDto } from '@10db/contracts';
-import { Divider, Group, Stack, Switch, Text, Textarea } from '@mantine/core';
-import type { ReactNode } from 'react';
+import {
+  ActionIcon,
+  Collapse,
+  Divider,
+  Group,
+  Stack,
+  Switch,
+  Text,
+  Textarea,
+  Tooltip,
+} from '@mantine/core';
+import { IconChevronDown, IconChevronUp } from '@tabler/icons-react';
+import { useState, type ReactNode } from 'react';
 import { useSlackConnection } from '../../../daemon/people';
 import {
   useProjectIntegrations,
@@ -88,6 +99,7 @@ export function LinearProjectRow({
 }) {
   const integrations = useProjectIntegrations(project.id);
   const save = useSetLinearReporter(project.id);
+  const [editing, setEditing] = useState(false);
   const linear = integrations.data?.linear;
   if (linear === undefined) return <ProjectRow name={project.name} />;
   // Only a definite none hides the switch: an account whose connectors were not read yet may have Linear.
@@ -103,36 +115,55 @@ export function LinearProjectRow({
         }
       />
     );
+  const noteLabel = `${editing ? 'Hide' : 'Edit'} How To Update Linear for ${project.name}`;
   return (
     <ProjectRow
       name={project.name}
       control={
-        <Switch
-          aria-label={`Report To Linear for ${project.name}`}
-          label="Report To Linear"
-          labelPosition="left"
-          checked={linear.on}
-          disabled={save.isPending}
-          onChange={(event) => {
-            save.mutate({ on: event.currentTarget.checked, note: linear.note });
-          }}
-        />
+        <Group gap="xs" wrap="nowrap">
+          <Tooltip label={editing ? 'Hide Update Note' : 'Edit Update Note'} withArrow>
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              aria-label={noteLabel}
+              aria-expanded={editing}
+              onClick={() => {
+                setEditing((was) => !was);
+              }}
+            >
+              {editing ? <IconChevronUp size={16} /> : <IconChevronDown size={16} />}
+            </ActionIcon>
+          </Tooltip>
+          <Switch
+            aria-label={`Report To Linear for ${project.name}`}
+            label="Report To Linear"
+            labelPosition="left"
+            checked={linear.on}
+            disabled={save.isPending}
+            onChange={(event) => {
+              save.mutate({ on: event.currentTarget.checked, note: linear.note });
+            }}
+          />
+        </Group>
       }
     >
-      <Textarea
-        // Keyed by the saved note, so a save from elsewhere replaces what the field shows.
-        key={linear.note}
-        size="xs"
-        autosize
-        minRows={2}
-        label="How To Update Linear"
-        aria-label={`How To Update Linear for ${project.name}`}
-        defaultValue={linear.note}
-        onBlur={(event) => {
-          const note = event.currentTarget.value;
-          if (note !== linear.note) save.mutate({ on: linear.on, note });
-        }}
-      />
+      <Collapse expanded={editing}>
+        <Textarea
+          // Keyed by the saved note, so a save from elsewhere replaces what the field shows.
+          key={linear.note}
+          size="xs"
+          autosize
+          minRows={2}
+          label="How To Update Linear"
+          aria-label={`How To Update Linear for ${project.name}`}
+          placeholder="Optional: how updates to Linear should read"
+          defaultValue={linear.note}
+          onBlur={(event) => {
+            const note = event.currentTarget.value;
+            if (note !== linear.note) save.mutate({ on: linear.on, note });
+          }}
+        />
+      </Collapse>
       {/* The switch already says off; only the Trust reason needs a line. */}
       {linear.blockedBy === null || !linear.on ? null : (
         <Text size="xs" c="dimmed">
