@@ -98,86 +98,88 @@ export function PeopleSection() {
   const rows = [...(people.data ?? [])].sort((a, b) => Number(b.isBuilder) - Number(a.isBuilder));
 
   return (
-    <Stack gap="lg">
-      <Stack gap="xs">
-        <Text c="dimmed" size="sm">
-          The people who answer your projects' questions, and how 10db reaches each one.
-        </Text>
+    <Stack gap="xl">
+      <Stack gap="sm">
+        <Group justify="space-between" align="flex-end" wrap="nowrap">
+          <Text c="dimmed" size="sm">
+            Who answers your projects' questions, and how 10db reaches each one.
+          </Text>
+          <Button
+            onClick={() => {
+              setEditing(null);
+            }}
+          >
+            Add Person
+          </Button>
+        </Group>
         <ConnectSlackLine builder={rows.find((p) => p.isBuilder)} />
+        {people.isPending ? <Loader size="sm" /> : null}
+        {people.isError ? (
+          <Alert color="red" title="Couldn't load people">
+            {people.error.message}
+          </Alert>
+        ) : null}
+        {people.isSuccess ? (
+          <Table.ScrollContainer minWidth={640}>
+            <Table verticalSpacing="sm">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th>Name</Table.Th>
+                  <Table.Th>How It's Sent</Table.Th>
+                  <Table.Th>Answers</Table.Th>
+                  <Table.Th aria-label="Actions" />
+                </Table.Tr>
+              </Table.Thead>
+              <Table.Tbody>
+                {rows.map((person) => (
+                  <Table.Tr key={person.id}>
+                    <Table.Td>
+                      <Group gap="xs" wrap="nowrap">
+                        <Text size="sm" style={{ whiteSpace: 'nowrap' }}>
+                          {rowName(person)}
+                        </Text>
+                        <ReachChip person={person} />
+                      </Group>
+                    </Table.Td>
+                    <Table.Td style={{ whiteSpace: 'nowrap' }}>{howSent(person)}</Table.Td>
+                    <Table.Td>
+                      <PersonAnswers person={person} />
+                    </Table.Td>
+                    <Table.Td>
+                      <Group gap="xs" justify="flex-end" wrap="nowrap">
+                        <Button
+                          size="compact-xs"
+                          variant="default"
+                          aria-label={`Edit ${person.name}`}
+                          onClick={() => {
+                            setEditing(person);
+                          }}
+                        >
+                          Edit
+                        </Button>
+                        {person.isBuilder ? null : (
+                          <Button
+                            size="compact-xs"
+                            variant="subtle"
+                            color="red"
+                            aria-label={`Remove ${person.name}`}
+                            loading={remove.isPending && remove.variables === person.id}
+                            onClick={() => {
+                              setRemoving(person);
+                            }}
+                          >
+                            Remove
+                          </Button>
+                        )}
+                      </Group>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </Table.ScrollContainer>
+        ) : null}
       </Stack>
-      {people.isPending ? <Loader size="sm" /> : null}
-      {people.isError ? (
-        <Alert color="red" title="Couldn't load people">
-          {people.error.message}
-        </Alert>
-      ) : null}
-      {people.isSuccess ? (
-        <Table>
-          <Table.Thead>
-            <Table.Tr>
-              <Table.Th>Name</Table.Th>
-              <Table.Th>How It's Sent</Table.Th>
-              <Table.Th>Answers</Table.Th>
-              <Table.Th>
-                <Group justify="flex-end">
-                  <Button
-                    size="xs"
-                    onClick={() => {
-                      setEditing(null);
-                    }}
-                  >
-                    Add Person
-                  </Button>
-                </Group>
-              </Table.Th>
-            </Table.Tr>
-          </Table.Thead>
-          <Table.Tbody>
-            {rows.map((person) => (
-              <Table.Tr key={person.id}>
-                <Table.Td>
-                  <Group gap="xs">
-                    <Text size="sm">{rowName(person)}</Text>
-                    <ReachChip person={person} />
-                  </Group>
-                </Table.Td>
-                <Table.Td>{howSent(person)}</Table.Td>
-                <Table.Td>
-                  <PersonAnswers person={person} />
-                </Table.Td>
-                <Table.Td>
-                  <Group gap="xs" justify="flex-end" wrap="nowrap">
-                    <Button
-                      size="xs"
-                      variant="subtle"
-                      aria-label={`Edit ${person.name}`}
-                      onClick={() => {
-                        setEditing(person);
-                      }}
-                    >
-                      Edit
-                    </Button>
-                    {person.isBuilder ? null : (
-                      <Button
-                        size="xs"
-                        variant="subtle"
-                        color="red"
-                        aria-label={`Remove ${person.name}`}
-                        loading={remove.isPending && remove.variables === person.id}
-                        onClick={() => {
-                          setRemoving(person);
-                        }}
-                      >
-                        Remove
-                      </Button>
-                    )}
-                  </Group>
-                </Table.Td>
-              </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
-      ) : null}
       {remove.isError ? (
         <Alert color="red" variant="light">
           {remove.error.message}

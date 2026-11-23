@@ -1,5 +1,5 @@
 import { KeepAwakeMode } from '@10db/contracts';
-import { SegmentedControl } from '@mantine/core';
+import { Group, SegmentedControl } from '@mantine/core';
 import { useKeepAwake, useSetKeepAwake } from '../../daemon/queries';
 import { SettingRow, SettingsCard } from './setting-row';
 
@@ -27,15 +27,16 @@ export function KeepAwakeSection() {
           status.data?.active ? 'Keeping the Mac awake now.' : 'Not keeping the Mac awake now.'
         }
       >
-        <SegmentedControl
-          aria-label="Keep the Mac Awake"
-          fullWidth
-          value={status.data?.mode ?? ''}
-          data={MODES.map((mode) => ({ value: mode, label: SHORT_LABEL[mode] }))}
-          onChange={(value) => {
-            if (isMode(value)) setMode.mutate(value);
-          }}
-        />
+        <Group justify="flex-end">
+          <SegmentedControl
+            aria-label="Keep the Mac Awake"
+            value={status.data?.mode ?? ''}
+            data={MODES.map((mode) => ({ value: mode, label: SHORT_LABEL[mode] }))}
+            onChange={(value) => {
+              if (isMode(value)) setMode.mutate(value);
+            }}
+          />
+        </Group>
       </SettingRow>
     </SettingsCard>
   );

@@ -240,7 +240,7 @@ export function OverviewSection() {
   const rows = useOverviewRows();
   const summary = summarise(rows);
   return (
-    <Stack gap="lg">
+    <Stack gap="xl">
       <SummaryLine summary={summary} />
       {GROUPS.map((group) => {
         const inGroup = rows.filter((row) => row.group === group);

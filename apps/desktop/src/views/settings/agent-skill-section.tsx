@@ -6,10 +6,12 @@ import {
 } from '@10db/contracts';
 import { Group, Stack, Switch, Text } from '@mantine/core';
 import { useAgentSkill, useSetAgentSkill } from '../../daemon/queries';
+import { HelpText } from './help-hint';
 import { SettingRow, SettingsCard } from './setting-row';
 
 const LABEL = 'Agents in any repo can use 10db';
-const DESCRIPTION =
+const DESCRIPTION = 'Links the 10db-task skill for Claude Code and Codex.';
+const HELP =
   '10db keeps its 10db-task skill in ~/.10db/skills and links it for Claude Code and Codex, so an agent in any repo can file and read tasks.';
 
 type Link = AgentSkillStatus['links'][number];
@@ -55,7 +57,7 @@ export function AgentSkillSection() {
   const installable = status?.installable === true;
   return (
     <SettingsCard>
-      <SettingRow label={LABEL} description={DESCRIPTION}>
+      <SettingRow label={LABEL} description={DESCRIPTION} help={<HelpText>{HELP}</HelpText>}>
         <Group justify="flex-end">
           <Switch
             aria-label={LABEL}
