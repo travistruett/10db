@@ -54,6 +54,19 @@ function seedQuestion(project: string): void {
           { label: 'Seven days', description: '' },
           { label: 'The whole billing period', description: '' },
         ],
+        // Two signed-in workspaces and Dana, who has a contact in Globex only. Slack is off in this daemon,
+        // so they are listed and nothing reaches them.
+        workspaces: [
+          { teamId: 'T-ACME', teamName: 'Acme' },
+          { teamId: 'T-GLOBEX', teamName: 'Globex' },
+        ],
+        people: [
+          {
+            handle: 'dana',
+            name: 'Dana Ruiz',
+            slack: [{ teamId: 'T-GLOBEX', userId: 'U-DANA', sendMode: 'review', dailyLimit: 10 }],
+          },
+        ],
       }),
     ],
     { cwd: resolve(import.meta.dirname, '../../daemon'), stdio: 'inherit' },
@@ -92,6 +105,35 @@ test('routes a question to someone outside Slack from its card, and the table sh
   await expect(page).toHaveURL(/\/settings\/integrations/);
   await expect(page.getByText('Off: 10db was started with TENDB_SLACK=off')).toBeVisible();
   await expect(page.getByText('Off: 10db was started with TENDB_BENCHMARKS=off')).toBeVisible();
+  // Both workspaces are listed under the Off line, read-only: no menu on a row, no Add Workspace.
+  const slackCard = page.getByRole('group', { name: 'Slack', exact: true });
+  await expect(slackCard.getByText('Acme · posts as @10db')).toBeVisible();
+  await expect(slackCard.getByText('Globex · posts as @10db')).toBeVisible();
+  await expect(slackCard.getByRole('button', { name: /options/ })).toHaveCount(0);
+  await expect(slackCard.getByRole('button', { name: 'Add Workspace' })).toHaveCount(0);
+  // The project's Slack reads Off; choosing Acme is kept across a reload.
+  const projectSlack = slackCard.getByRole('combobox', { name: 'Slack for e2e' });
+  await expect(projectSlack).toHaveValue('Off');
+  await projectSlack.click();
+  await page.getByRole('option', { name: 'Acme' }).click();
+  await expect(projectSlack).toHaveValue('Acme');
+  await page.reload();
+  await expect(
+    page.getByRole('group', { name: 'Slack', exact: true }).getByRole('combobox', {
+      name: 'Slack for e2e',
+    }),
+  ).toHaveValue('Acme');
+  // Back to Off: the question below is routed with Slack off for its project.
+  await page
+    .getByRole('group', { name: 'Slack', exact: true })
+    .getByRole('combobox', { name: 'Slack for e2e' })
+    .click();
+  await page.getByRole('option', { name: 'Off' }).click();
+  await expect(
+    page.getByRole('group', { name: 'Slack', exact: true }).getByRole('combobox', {
+      name: 'Slack for e2e',
+    }),
+  ).toHaveValue('Off');
   await expectAccessible(page, 'integrations, dark');
   await page.goto('/settings/project-integrations');
   await expect(page).toHaveURL(/\/settings\/integrations/);

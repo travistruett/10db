@@ -20,12 +20,12 @@ Decision Models (`decision-models-view.tsx`, Settings › Models › Decision Mo
   `daemon/people.ts` holds every query for people, Slack, timers, routes and the send actions. Settings ›
   Integrations (key `integrations`, All Projects; `integrations-section.tsx`, cards in `views/settings/sign-ins/`; the old
   `sign-ins` and `project-integrations` addresses are retired and land on it) is the one page for outside services,
-  one card per service: GitHub, Slack (titled by its workspace once signed in; its card connects it with a
-  manifest in `slack-manifest.ts`, which a repo test keeps equal to `docs/slack-app.md`, binds the builder to their
-  Slack member ("Which One Is You?", `which-is-you.tsx`) and keeps Change Who You Are and Disconnect (which asks
-  first, `shell/confirm-modal.tsx`) in its menu; signed in, it lists one row per project with that project's switch,
-  `GET/PUT /projects/:id/integrations`: on binds the signed-in workspace, off keeps the project's sends in the
-  Inbox), Linear (`linear-card.tsx`: one line saying how agents reach Linear from `GET /settings/sign-ins/linear`,
+  one card per service: GitHub, Slack (one row per signed-in workspace from `useSlackStatus`, each with a menu of
+  Change Who You Are, Replace Token and Disconnect (which asks first, `shell/confirm-modal.tsx`); Add Workspace shows
+  the three setup steps with the manifest in `slack-manifest.ts`, which a repo test keeps equal to
+  `docs/slack-app.md`; "Which One Is You?" (`which-is-you.tsx`) is per workspace; below the rows, one Select per
+  project, `GET/PUT /projects/:id/integrations`: a workspace by name binds it, Off keeps the project's sends in the
+  Inbox, and a change with questions out asks first), Linear (`linear-card.tsx`: one line saying how agents reach Linear from `GET /settings/sign-ins/linear`,
   one per account only when the accounts differ, then one row per project, `project-rows.tsx`: its team with
   Unlink, the key field and Link, the check in flight with Cancel, the ended check, or its account's hint when the
   account has a definite no Linear), Figma (`figma-card.tsx`: under "Through Your Agent", one line saying the Figma plugin in

@@ -1,29 +1,34 @@
-import { SendMode, type PersonDto, type SlackMemberDto } from '@10db/contracts';
+import { SendMode, contactIn, type PersonDto, type SlackMemberDto } from '@10db/contracts';
 import { Alert, Button, Group, Stack, Text } from '@mantine/core';
 import { useState } from 'react';
-import { useSavePerson, useSlackConnection } from '../../../daemon/people';
+import { useSavePerson } from '../../../daemon/people';
 import { MemberSelect } from '../people/member-select';
 import { DEFAULT_DAILY_LIMIT } from '../people/person-modal';
 
+/** The name a builder has until a Slack member's real name replaces it. */
+const UNNAMED_BUILDER = 'You';
+
 /**
- * Binds the builder to their own Slack member; messages name the builder, so connecting is unfinished
- * until this is done, and the member's name becomes the builder's. A first pick is a callout to finish
- * setup; changing it later is the same field, plainly, with Cancel.
+ * Binds the builder to their own member in one workspace, so messages there name the builder. The first pick
+ * (the builder still named "You") is a callout and renames the builder to the member's name; a later one is a
+ * plain optional field and keeps the name; changing a pick is the same field with Cancel. Nothing waits on it.
  */
 export function WhichIsYou({
   builder,
+  teamId,
   changing,
   onDone,
 }: {
   readonly builder: PersonDto;
-  /** The builder has a member already and chose Change Who You Are. */
+  /** The workspace this one is for. */
+  readonly teamId: string;
+  /** The builder has a member here already and chose Change Who You Are. */
   readonly changing: boolean;
   readonly onDone: () => void;
 }) {
   const save = useSavePerson();
-  // TODO(slack-workspaces): the workspace of the row this opens from.
-  const teamId = useSlackConnection().data?.teamId ?? null;
   const [picked, setPicked] = useState<SlackMemberDto | null>(null);
+  const first = builder.name === UNNAMED_BUILDER;
   const form = (
     <Stack gap="xs">
       <Group align="flex-end" gap="sm" wrap="nowrap">
@@ -45,23 +50,23 @@ export function WhichIsYou({
           loading={save.isPending}
           onClick={() => {
             if (picked === null) return;
+            const kept = contactIn(builder, teamId);
+            const contact = {
+              teamId,
+              userId: picked.userId,
+              sendMode: kept?.sendMode ?? SendMode.Review,
+              dailyLimit: kept ? kept.dailyLimit : DEFAULT_DAILY_LIMIT,
+            };
             save.mutate(
               {
                 id: builder.id,
                 input: {
                   handle: builder.handle,
-                  name: picked.realName,
-                  // TODO(slack-workspaces): one contact per workspace; today the first is replaced.
-                  slack: [
-                    {
-                      teamId: picked.teamId,
-                      userId: picked.userId,
-                      sendMode: builder.slack[0]?.sendMode ?? SendMode.Review,
-                      dailyLimit: builder.slack[0]
-                        ? builder.slack[0].dailyLimit
-                        : DEFAULT_DAILY_LIMIT,
-                    },
-                  ],
+                  name: first ? picked.realName : builder.name,
+                  slack:
+                    kept === null
+                      ? [...builder.slack, contact]
+                      : builder.slack.map((c) => (c.teamId === teamId ? contact : c)),
                 },
               },
               { onSuccess: onDone },
@@ -71,6 +76,11 @@ export function WhichIsYou({
           That's Me
         </Button>
       </Group>
+      {!changing && !first ? (
+        <Text size="xs" c="dimmed">
+          Optional
+        </Text>
+      ) : null}
       {save.isError ? (
         <Text size="xs" c="red">
           {save.error.message}
@@ -78,13 +88,11 @@ export function WhichIsYou({
       ) : null}
     </Stack>
   );
-  if (changing) return form;
+  if (changing || !first) return form;
   return (
     <Alert color="yellow" variant="light" p="sm">
       <Stack gap="xs">
-        <Text size="sm">
-          Finish setup: pick yourself so messages carry your name. Until then, none can be sent.
-        </Text>
+        <Text size="sm">Pick yourself so messages carry your name.</Text>
         {form}
       </Stack>
     </Alert>

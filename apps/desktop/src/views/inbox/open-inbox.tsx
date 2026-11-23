@@ -13,7 +13,7 @@ import { createPortal } from 'react-dom';
 import { DaemonRequestError } from '../../daemon/client';
 import { dropCard, refreshCard as refreshCardEverywhere } from '../../daemon/inbox-live';
 import { useInboxRows, type InboxRow } from '../../daemon/inbox-queries';
-import { usePeople, useSlackConnection } from '../../daemon/people';
+import { usePeople, useSlackStatus } from '../../daemon/people';
 import { useDaemon } from '../../daemon/provider';
 import { queryKeys, useAnswerInbox, useSystemCheck } from '../../daemon/queries';
 import { useFrameSlots } from '../../shell/frame-slots';
@@ -85,8 +85,8 @@ export function OpenInbox({
 }) {
   const now = useNow();
   const open = useInboxRows(inboxList(search, new Date(now)));
-  const connection = useSlackConnection();
-  const systemChecks = systemCards(useSystemCheck().data, connection.data);
+  const slack = useSlackStatus();
+  const systemChecks = systemCards(useSystemCheck().data, slack.data);
   // 10db's own cards are not in the daemon's list, so a search or a kind would otherwise leave them showing.
   const ownCards = search.q === undefined && search.kind === undefined ? systemChecks : [];
   const answer = useAnswerInbox();

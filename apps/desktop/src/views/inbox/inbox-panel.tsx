@@ -2,7 +2,7 @@ import { InboxListState } from '@10db/contracts';
 import { Box, Group, SegmentedControl, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { useInboxCount } from '../../daemon/inbox-queries';
-import { useSlackConnection } from '../../daemon/people';
+import { useSlackStatus } from '../../daemon/people';
 import { Panel } from '../../shell/panel';
 import { useOpenInboxCount } from './inbox-count';
 import { InboxFilterMenu } from './inbox-filter-menu';
@@ -53,9 +53,12 @@ export function InboxPanel({
 }): ReactNode {
   const open = useOpenInboxCount();
   const waiting = useInboxCount('waiting');
-  const slack = useSlackConnection();
+  const slack = useSlackStatus();
   // Nothing in Waiting needs the builder, so its count is neutral, and it is told only while Slack can fill it.
-  const showWaiting = slack.data?.state === 'connected' && waiting !== undefined && waiting > 0;
+  const showWaiting =
+    slack.data?.workspaces.some((w) => w.state === 'connected') === true &&
+    waiting !== undefined &&
+    waiting > 0;
   return (
     <Panel
       section="inbox"

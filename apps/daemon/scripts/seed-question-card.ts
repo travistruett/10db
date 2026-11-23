@@ -1,17 +1,20 @@
-import { InboxKind, ProjectId, QuestionCategory, Urgency } from '@10db/contracts';
-import { createStore, insertInboxItem, openDatabase } from '@10db/db';
+import { InboxKind, PersonInput, ProjectId, QuestionCategory, Urgency } from '@10db/contracts';
+import { createStore, insertInboxItem, insertPerson, openDatabase, setAppSetting } from '@10db/db';
 import { z } from 'zod';
 
 /**
  * Seeds one open question card for the stakeholder-questions end-to-end check. A lane would raise it
  * through `ask_human`; the check is about routing it from the card, so the row is written straight into
- * the database file of a daemon that is idle. Usage: seed-question-card.ts <database> <json>
+ * the database file of a daemon that is idle. It may also sign in Slack workspaces (the `slack.workspaces`
+ * setting, with no token) and add people with their contacts. Usage: seed-question-card.ts <database> <json>
  */
 const Seed = z.object({
   projectId: ProjectId,
   title: z.string().min(1),
   body: z.string(),
   options: z.array(z.object({ label: z.string().min(1), description: z.string() })).min(1),
+  workspaces: z.array(z.object({ teamId: z.string().min(1), teamName: z.string() })).default([]),
+  people: z.array(PersonInput).default([]),
 });
 
 const [databasePath, json] = process.argv.slice(2);
@@ -33,3 +36,8 @@ store.write((ctx) =>
     targets: [],
   }),
 );
+if (seed.workspaces.length > 0)
+  store.write((ctx) => {
+    setAppSetting(ctx, 'slack.workspaces', seed.workspaces);
+  });
+for (const person of seed.people) store.write((ctx) => insertPerson(ctx, person));
