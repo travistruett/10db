@@ -160,6 +160,14 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
 - **Create buttons:** a button that makes a new thing in a list (Add Page, Add Task) is `CreateButton`
   (`shell/create-button.tsx`): a dashed slot with a + tile and the thing's name. Hovered, it fills, its border
   firms up and its + turns primary; pressed, it sinks a pixel. Never restyle a `Button` with a dashed border by hand.
+- **Empty states:** a place with nothing to show yet is `EmptyState` (`shell/empty-state.tsx`): a dashed box with a
+  gray icon in a circle, a short title, one dimmed line on why, and, when something fills it, that action as a
+  light `Button` with an icon. The action is never a link inside the sentence.
+- **Segmented controls:** every `SegmentedControl` takes one look from the theme (`segmented-control.module.css`):
+  a track in the window's base tone, an indicator one tone up, dimmed labels and a bright, semibold active one,
+  so the choice reads as a control on any surface. A switch that decides what a whole page shows (Models'
+  Agent Models | Decision Models) heads the page in a bordered band in the base tone, with its one line and its
+  account.
 - **Buttons:** one filled primary per group. A standalone secondary action is `variant="default"`
   (bordered, neutral); `subtle` only inside dense rows and menus; never `outline` beside a filled
   primary, where its colored border competes with it.

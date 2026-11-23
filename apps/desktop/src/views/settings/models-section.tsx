@@ -34,10 +34,12 @@ const isModelClass = (value: string): value is ModelClass =>
 function DecisionBilling() {
   const status = useJudgeStatus();
   const account = status.data?.account ?? null;
+  // With no account paying, the empty state below carries the one action.
+  if (account === null) return null;
   return (
     <Group gap="xs" wrap="nowrap">
       <Text size="sm" c="dimmed">
-        {account === null ? 'No account pays yet' : `Paid by ${account.label}`}
+        Paid by {account.label}
       </Text>
       <Button
         size="xs"
@@ -51,7 +53,7 @@ function DecisionBilling() {
           />
         )}
       >
-        {account === null ? 'Choose' : 'Change'}
+        Change
       </Button>
     </Group>
   );
