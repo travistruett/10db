@@ -31,9 +31,10 @@ import { WhichIsYou } from './which-is-you';
 /** "Acme · posts as @10db · you're @Travis": the connection in one line. */
 function ConnectedLine({ teamName }: { readonly teamName: string | null }) {
   const builder = usePeople().data?.find((p) => p.isBuilder);
-  const member = useSlackMember(builder?.slack?.userId ?? null);
+  const member = useSlackMember(builder?.slack[0]?.userId ?? null);
   const parts = [...(teamName === null ? [] : [teamName]), 'posts as @10db'];
-  if (builder?.slack) parts.push(`you're @${member?.name ?? builder.name}`);
+  if (builder !== undefined && builder.slack.length > 0)
+    parts.push(`you're @${member?.name ?? builder.name}`);
   return <StateText>{parts.join(' · ')}</StateText>;
 }
 
@@ -193,7 +194,7 @@ export function SlackCard() {
   const state = data?.state;
   const live = state === 'connected' || state === 'unreachable' || state === 'refused';
   const builder = people.data?.find((p) => p.isBuilder);
-  const bound = builder !== undefined && builder.slack !== null;
+  const bound = builder !== undefined && builder.slack.length > 0;
 
   // The card appears once its state is read, so a link's focus lands on its controls.
   if (!data && !connection.isError) return <Skeleton height={90} radius="md" />;

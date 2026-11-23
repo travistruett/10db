@@ -8,6 +8,7 @@ import {
   type InboxItemId,
   type OutboundHit,
   type PersonId,
+  type ProjectId,
   type StakeholderSendDto,
   type StakeholderSendId,
   type TaskId,
@@ -34,6 +35,7 @@ export interface SendPersonInput {
 export interface OpenSendRow {
   readonly id: StakeholderSendId;
   readonly inboxItemId: InboxItemId;
+  readonly teamId: string | null;
   readonly people: readonly SendPersonInput[];
   readonly channelId: string;
   readonly threadTs: string;
@@ -78,6 +80,7 @@ function toDto(db: DbReader, row: SendRow): StakeholderSendDto {
   return {
     id: row.id,
     inboxItemId: row.inboxItemId,
+    teamId: row.teamId,
     state: row.state,
     people: peopleOf(db, row.id),
     text: row.text,
@@ -141,11 +144,15 @@ function change(
   });
 }
 
-/** The draft for a card, one recipient row each; a card has at most one send. */
+/**
+ * The draft for a card, one recipient row each; a card has at most one send. Reads each recipient's
+ * contact in `teamId`; InvalidError when one has none.
+ */
 export function insertDraft(
   ctx: WriteContext,
   input: {
     readonly inboxItemId: InboxItemId;
+    readonly teamId: string;
     readonly recipients: readonly PersonId[];
     readonly text: string;
     readonly hits: readonly OutboundHit[];
@@ -159,9 +166,14 @@ export function insertDraft(
       })
       .from(schema.personContacts)
       .innerJoin(schema.people, eq(schema.people.id, schema.personContacts.personId))
-      .where(eq(schema.personContacts.personId, personId))
+      .where(
+        and(
+          eq(schema.personContacts.personId, personId),
+          eq(schema.personContacts.teamId, input.teamId),
+        ),
+      )
       .get();
-    if (!row) throw new InvalidError(`${personId} has no Slack contact`);
+    if (!row) throw new InvalidError(`${personId} has no Slack contact in this workspace`);
     return { personId, ...row };
   });
   const id = mintId('StakeholderSend');
@@ -170,6 +182,7 @@ export function insertDraft(
     .values({
       id,
       inboxItemId: input.inboxItemId,
+      teamId: input.teamId,
       state: SendState.Draft,
       text: input.text,
       hits: [...input.hits],
@@ -512,6 +525,7 @@ function toOpen(db: DbReader, row: SendRow): OpenSendRow | null {
   return {
     id: row.id,
     inboxItemId: row.inboxItemId,
+    teamId: row.teamId,
     people: peopleOf(db, row.id),
     channelId,
     threadTs,
@@ -587,12 +601,17 @@ export function threadStarts(db: DbReader, channelId: string, threadTs: string):
     });
 }
 
-/** Every send waiting for an answer, oldest first. */
-export function openSends(db: DbReader): OpenSendRow[] {
+/** Every send waiting for an answer, oldest first; with `teamId`, only that workspace's. */
+export function openSends(db: DbReader, teamId?: string): OpenSendRow[] {
   return db
     .select()
     .from(schema.stakeholderSends)
-    .where(eq(schema.stakeholderSends.state, SendState.Sent))
+    .where(
+      and(
+        eq(schema.stakeholderSends.state, SendState.Sent),
+        teamId === undefined ? undefined : eq(schema.stakeholderSends.teamId, teamId),
+      ),
+    )
     .orderBy(asc(schema.stakeholderSends.sentAt), asc(schema.stakeholderSends.id))
     .all()
     .flatMap((row) => toOpen(db, row) ?? []);
@@ -616,9 +635,13 @@ export function draftSends(db: DbReader): { id: StakeholderSendId; inboxItemId: 
     .all();
 }
 
-/** Sends whose post was started and not finished, for the recovery pass. */
-export function sendingSends(db: DbReader): {
+/** Sends whose post was started and not finished, for the recovery pass; with `teamId`, one workspace's. */
+export function sendingSends(
+  db: DbReader,
+  teamId?: string,
+): {
   id: StakeholderSendId;
+  teamId: string | null;
   channelId: string | null;
   threadTs: string | null;
   startedAt: string;
@@ -626,25 +649,73 @@ export function sendingSends(db: DbReader): {
   return db
     .select()
     .from(schema.stakeholderSends)
-    .where(eq(schema.stakeholderSends.state, SendState.Sending))
+    .where(
+      and(
+        eq(schema.stakeholderSends.state, SendState.Sending),
+        teamId === undefined ? undefined : eq(schema.stakeholderSends.teamId, teamId),
+      ),
+    )
     .all()
     .flatMap((r) =>
       r.startedAt === null
         ? []
-        : [{ id: r.id, channelId: r.channelId, threadTs: r.threadTs, startedAt: r.startedAt }],
+        : [
+            {
+              id: r.id,
+              teamId: r.teamId,
+              channelId: r.channelId,
+              threadTs: r.threadTs,
+              startedAt: r.startedAt,
+            },
+          ],
     );
+}
+
+/** Draft, sending and sent sends of a workspace or of a project's cards, with the team each was drafted in. */
+export function liveSendsWhere(
+  db: DbReader,
+  filter: { readonly teamId: string } | { readonly projectId: ProjectId },
+): { id: StakeholderSendId; inboxItemId: InboxItemId; state: SendState; teamId: string | null }[] {
+  const scope =
+    'teamId' in filter
+      ? eq(schema.stakeholderSends.teamId, filter.teamId)
+      : eq(schema.inboxItems.projectId, filter.projectId);
+  return db
+    .select({
+      id: schema.stakeholderSends.id,
+      inboxItemId: schema.stakeholderSends.inboxItemId,
+      state: schema.stakeholderSends.state,
+      teamId: schema.stakeholderSends.teamId,
+    })
+    .from(schema.stakeholderSends)
+    .innerJoin(schema.inboxItems, eq(schema.inboxItems.id, schema.stakeholderSends.inboxItemId))
+    .where(
+      and(
+        inArray(schema.stakeholderSends.state, [
+          SendState.Draft,
+          SendState.Sending,
+          SendState.Sent,
+        ]),
+        scope,
+      ),
+    )
+    .all();
 }
 
 /**
  * The thread a question for these people on this task joins: the newest thread whose recipients are
- * exactly these people and whose card was asked by a run of the task. `reviewed` says the builder
- * released a hold in it, so a follow-up skips review.
+ * exactly these people and whose card was asked by a run of the task. Only threads of sends in `teamId`
+ * sent at or after `since` (the workspace's `botSince`; null: none joinable) count. `reviewed` says the
+ * builder released a hold in it, so a follow-up skips review.
  */
 export function latestThreadFor(
   db: DbReader,
   recipients: readonly PersonId[],
   taskId: TaskId,
+  teamId: string,
+  since: string | null,
 ): { channelId: string; threadTs: string; reviewed: boolean } | null {
+  if (since === null) return null;
   const wanted = [...recipients].sort().join(',');
   const rows = db
     .select({ send: schema.stakeholderSends, targets: schema.inboxItems.targets })
@@ -654,6 +725,8 @@ export function latestThreadFor(
       and(
         inArray(schema.stakeholderSends.state, [SendState.Sent, SendState.Answered]),
         isNotNull(schema.stakeholderSends.threadTs),
+        eq(schema.stakeholderSends.teamId, teamId),
+        gte(schema.stakeholderSends.sentAt, since),
       ),
     )
     .orderBy(desc(schema.stakeholderSends.sentAt), desc(schema.stakeholderSends.id))
@@ -688,8 +761,13 @@ function taskOf(db: DbReader, workstreamId: WorkstreamId): TaskId | undefined {
     .get()?.taskId;
 }
 
-/** New threads sent to a person since `since`; a failed send, a follow-up, a move or a reminder is never one. */
-export function newThreadsSince(db: DbReader, personId: PersonId, since: string): number {
+/** New threads sent to a person in a workspace since `since`; a failed send, a follow-up, a move or a reminder is never one. */
+export function newThreadsSince(
+  db: DbReader,
+  personId: PersonId,
+  teamId: string,
+  since: string,
+): number {
   const row = db
     .select({ n: sql<number>`count(*)` })
     .from(schema.stakeholderSends)
@@ -702,6 +780,7 @@ export function newThreadsSince(db: DbReader, personId: PersonId, since: string)
         eq(schema.stakeholderSendPeople.personId, personId),
         eq(schema.stakeholderSendPeople.recipient, true),
         eq(schema.stakeholderSends.newThread, true),
+        eq(schema.stakeholderSends.teamId, teamId),
         // A send counts from the moment it is reserved, so two cards decided at once cannot both pass.
         ne(schema.stakeholderSends.state, SendState.Draft),
         ne(schema.stakeholderSends.state, SendState.Failed),
@@ -715,8 +794,8 @@ export function newThreadsSince(db: DbReader, personId: PersonId, since: string)
   return row?.n ?? 0;
 }
 
-/** Whether anything was ever sent to this person; the first send is always reviewed. */
-export function everSent(db: DbReader, personId: PersonId): boolean {
+/** Whether anything was ever sent to this person in a workspace; the first send there is always reviewed. */
+export function everSent(db: DbReader, personId: PersonId, teamId: string): boolean {
   const row = db
     .select({ id: schema.stakeholderSends.id })
     .from(schema.stakeholderSends)
@@ -729,6 +808,7 @@ export function everSent(db: DbReader, personId: PersonId): boolean {
         eq(schema.stakeholderSendPeople.personId, personId),
         eq(schema.stakeholderSendPeople.recipient, true),
         isNotNull(schema.stakeholderSends.sentAt),
+        eq(schema.stakeholderSends.teamId, teamId),
       ),
     )
     .get();

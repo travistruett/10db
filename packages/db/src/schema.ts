@@ -1090,25 +1090,28 @@ export const routingRules = sqliteTable(
   ],
 );
 
-/** How to reach a person in Slack, one row per person (stakeholder questions spec §5). */
-export const personContacts = sqliteTable('person_contacts', {
-  id: text('id').$type<PersonContactId>().primaryKey(),
-  personId: text('person_id')
-    .$type<PersonId>()
-    .notNull()
-    .unique()
-    .references(() => people.id),
-  teamId: text('team_id').notNull(),
-  userId: text('user_id').notNull(),
-  dmChannelId: text('dm_channel_id'),
-  sendMode: text('send_mode').$type<SendMode>().notNull(),
-  /** New questions a day; null is no limit. */
-  dailyLimit: integer('daily_limit'),
-  /** The `ts` the reply watch has read this person's DM through. */
-  dmCursor: text('dm_cursor'),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-});
+/** How to reach a person in Slack, one row per person and workspace (stakeholder questions spec §5). */
+export const personContacts = sqliteTable(
+  'person_contacts',
+  {
+    id: text('id').$type<PersonContactId>().primaryKey(),
+    personId: text('person_id')
+      .$type<PersonId>()
+      .notNull()
+      .references(() => people.id),
+    teamId: text('team_id').notNull(),
+    userId: text('user_id').notNull(),
+    dmChannelId: text('dm_channel_id'),
+    sendMode: text('send_mode').$type<SendMode>().notNull(),
+    /** New questions a day; null is no limit. */
+    dailyLimit: integer('daily_limit'),
+    /** The `ts` the reply watch has read this person's DM through. */
+    dmCursor: text('dm_cursor'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('person_contacts_person_team').on(t.personId, t.teamId)],
+);
 
 /** One question card's conversation in Slack: its draft, its message, and what came back. */
 export const stakeholderSends = sqliteTable(
@@ -1119,6 +1122,8 @@ export const stakeholderSends = sqliteTable(
       .$type<InboxItemId>()
       .notNull()
       .references(() => inboxItems.id),
+    /** The workspace the send was drafted in; null only on a send migrated without one. */
+    teamId: text('team_id'),
     state: text('state').$type<SendState>().notNull(),
     text: text('text').notNull(),
     hits: text('hits', { mode: 'json' }).$type<OutboundHit[]>().notNull(),

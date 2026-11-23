@@ -43,14 +43,16 @@ function rowName(person: PersonDto): string {
 
 function howSent(person: PersonDto): string {
   if (person.isBuilder) return '—';
-  if (person.slack === null) return 'You pass it on';
-  return person.slack.sendMode === 'auto' ? 'Sent on Its Own' : 'Shown to You First';
+  // TODO(slack-workspaces): the contact in the project's workspace; today the first.
+  const contact = person.slack[0];
+  if (contact === undefined) return 'You pass it on';
+  return contact.sendMode === 'auto' ? 'Sent on Its Own' : 'Shown to You First';
 }
 
 /** How 10db reaches someone, as a small chip: "Slack @Mark Ellis", or "Not on Slack". */
 function ReachChip({ person }: { readonly person: PersonDto }) {
-  const member = useSlackMember(person.slack?.userId ?? null);
-  if (person.slack === null)
+  const member = useSlackMember(person.slack[0]?.userId ?? null);
+  if (person.slack.length === 0)
     return person.isBuilder ? null : (
       <Badge variant="default" size="sm" tt="none" fw={500}>
         Not on Slack
@@ -74,7 +76,7 @@ function ConnectSlack({ builder }: { readonly builder: PersonDto | undefined }) 
   const state = useSlackConnection().data?.state;
   const navigate = useNavigate();
   if (state === undefined || state === 'unreachable' || builder === undefined) return null;
-  const unfinished = state === 'connected' && builder.slack === null;
+  const unfinished = state === 'connected' && builder.slack.length === 0;
   if (state === 'connected' && !unfinished) return null;
   return (
     <Alert

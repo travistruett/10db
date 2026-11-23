@@ -25,7 +25,18 @@ export function readSlackWorkspaces(db: DbReader): SlackWorkspace[] {
 }
 
 export function writeSlackWorkspaces(ctx: WriteContext, workspaces: SlackWorkspace[]): void {
-  setAppSetting(ctx, WORKSPACES_SETTING, workspaces);
+  // Only the fields that are set: an absent one is not a Json value.
+  setAppSetting(
+    ctx,
+    WORKSPACES_SETTING,
+    workspaces.map((w) => ({
+      teamId: w.teamId,
+      teamName: w.teamName,
+      ...(w.botUserId === undefined ? {} : { botUserId: w.botUserId }),
+      ...(w.botName === undefined ? {} : { botName: w.botName }),
+      ...(w.botSince === undefined ? {} : { botSince: w.botSince }),
+    })),
+  );
 }
 
 /** The token of the signed-in workspace, or null with none. Reads the Keychain without blocking the loop. */
@@ -43,7 +54,7 @@ export function slackTokenReader(
 export function projectSlack(db: DbReader, projectId: ProjectId): ProjectSlackDto {
   const workspaces = readSlackWorkspaces(db);
   const stored = ProjectSlackSetting.safeParse(getAppSetting(db, projectSetting(projectId)));
-  const auto = !stored.success;
+  // TODO(slack-workspaces): the automatic binding to the only workspace goes in card 2.
   const teamId = stored.success
     ? stored.data.teamId
     : workspaces.length === 1
@@ -52,8 +63,8 @@ export function projectSlack(db: DbReader, projectId: ProjectId): ProjectSlackDt
   const workspace = workspaces.find((w) => w.teamId === teamId);
   // A stored workspace that is no longer signed in sends nowhere.
   return workspace === undefined
-    ? { teamId: null, teamName: null, auto }
-    : { teamId: workspace.teamId, teamName: workspace.teamName, auto };
+    ? { teamId: null, teamName: null, out: 0 }
+    : { teamId: workspace.teamId, teamName: workspace.teamName, out: 0 };
 }
 
 export function setProjectSlack(

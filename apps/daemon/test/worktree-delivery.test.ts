@@ -134,7 +134,7 @@ async function start(gateCommand = 'true', maxLanes = 3) {
   const person = await api.post('/people', PersonDto, {
     handle: 'ana',
     name: 'Ana',
-    slack: { teamId: 'T1', userId: 'U1', sendMode: 'review', dailyLimit: 10 },
+    slack: [{ teamId: 'T1', userId: 'U1', sendMode: 'review', dailyLimit: 10 }],
   });
   await api.put(`/projects/${project.id}/routing-rules`, z.unknown(), {
     rules: [{ category: 'design', area: null, personId: person.id }],

@@ -48,11 +48,11 @@ export function stakeholderMode(item: InboxItemDto, people: readonly PersonDto[]
   if (item.send?.state === SendState.Failed) return StakeholderMode.Failed;
   // Sending, sent or answered: the Waiting tab and Resolved show it, not this card.
   if (item.send !== null && item.send.state !== SendState.Closed) return StakeholderMode.None;
-  if (item.send === null && copyFor.length > 0 && copyFor.every((p) => p.slack === null))
+  if (item.send === null && copyFor.length > 0 && copyFor.every((p) => p.slack.length === 0))
     return StakeholderMode.Copy;
   const recipients = recipientsOf(item, people);
   if (recipients.length === 0) return StakeholderMode.Unrouted;
-  return recipients.every((p) => p.slack === null)
+  return recipients.every((p) => p.slack.length === 0)
     ? StakeholderMode.Copy
     : StakeholderMode.Unrouted;
 }

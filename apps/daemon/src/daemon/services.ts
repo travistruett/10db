@@ -220,6 +220,12 @@ import { suggestSettings } from './suggest-settings';
 import { checkoutConflictsWithRoot } from './worktree-root';
 
 /** An account that is still in use: an archived one is as good as unknown to a read that prices on it. */
+/** The one connection's team when it is connected, else none. */
+// TODO(slack-workspaces): replaced by the per-workspace states.
+function connectedTeam(connection: ReturnType<SlackConnection['get']>): string[] {
+  return connection.state === 'connected' && connection.teamId !== null ? [connection.teamId] : [];
+}
+
 function liveAccount(db: DbReader, id: AccountId): AccountDto {
   const account = getAccount(db, id);
   if (account.archived) throw new NotFoundError('account', id);
@@ -767,7 +773,10 @@ export function createServices(deps: {
     },
     listInbox: ({ states }) => listInbox(db, states ? { states } : {}),
     pageInbox: (query) =>
-      pageInbox(db, query, { waitingOut: deps.slackConnection.get().state === 'connected' }),
+      pageInbox(db, query, {
+        // TODO(slack-workspaces): every connected workspace, from the per-workspace watches.
+        connectedTeams: connectedTeam(deps.slackConnection.get()),
+      }),
     pageActivity: (query) => pageActivity(db, query),
     inboxCardContext: (id) => inboxCardContext(db, id, CARD_CONTEXT_MESSAGES),
     answerInbox(id, answer) {

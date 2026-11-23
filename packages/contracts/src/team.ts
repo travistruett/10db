@@ -69,7 +69,15 @@ export type SlackContactInput = z.infer<typeof SlackContactInput>;
 export const PersonInput = z.object({
   handle: HyphenatedKey,
   name: z.string().min(1).max(80),
-  slack: SlackContactInput.nullable().default(null),
+  /** One contact per workspace; a workspace left out has its contact removed. */
+  slack: z
+    .array(SlackContactInput)
+    .max(20)
+    .default([])
+    .refine(
+      (list) => new Set(list.map((c) => c.teamId)).size === list.length,
+      'One contact per workspace',
+    ),
 });
 export type PersonInput = z.input<typeof PersonInput>;
 
@@ -79,11 +87,21 @@ export const PersonDto = z.object({
   name: z.string(),
   /** The person running this app; cards nobody else owns go to them. */
   isBuilder: z.boolean(),
-  slack: SlackContactDto.nullable().default(null),
+  /** Every contact the person has, signed-in workspace or not, oldest first. */
+  slack: z.array(SlackContactDto).default([]),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
 });
 export type PersonDto = z.infer<typeof PersonDto>;
+
+/** The person's contact in this workspace; null for no workspace (Off) or none there. */
+export function contactIn(
+  person: Pick<PersonDto, 'slack'>,
+  teamId: string | null,
+): SlackContactDto | null {
+  if (teamId === null) return null;
+  return person.slack.find((c) => c.teamId === teamId) ?? null;
+}
 
 /**
  * A rule names one category or one topic, and the scope it holds in: the project, a goal or a task.

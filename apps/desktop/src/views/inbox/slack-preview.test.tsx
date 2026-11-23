@@ -7,7 +7,7 @@ import { inboxItemDto } from '../../test/fixtures';
 import { findText, getText, serveOpenRows } from '../../test/inbox-page-fixtures';
 import { BUILDER_PERSON, personDto, sendDto, slackContact } from '../../test/people-fixtures';
 
-const mark = personDto({ name: 'Mark', handle: 'mark', slack: slackContact('U1') });
+const mark = personDto({ name: 'Mark', handle: 'mark', slack: [slackContact('U1')] });
 
 describe('a card with a draft', () => {
   it('opens on what Mark will get, with the draft text, and not on the options', async () => {

@@ -30,11 +30,11 @@ interface FormState {
 
 function initial(person: PersonDto | null, slackReady: boolean): FormState {
   return {
-    byName: person === null ? !slackReady : !person.isBuilder && person.slack === null,
+    byName: person === null ? !slackReady : !person.isBuilder && person.slack.length === 0,
     member: null,
     name: person?.name ?? '',
-    sendMode: person?.slack?.sendMode ?? SendMode.Review,
-    dailyLimit: person?.slack ? person.slack.dailyLimit : DEFAULT_DAILY_LIMIT,
+    sendMode: person?.slack[0]?.sendMode ?? SendMode.Review,
+    dailyLimit: person?.slack[0] ? person.slack[0].dailyLimit : DEFAULT_DAILY_LIMIT,
   };
 }
 
@@ -72,13 +72,14 @@ function PersonForm({
   const connection = useSlackConnection();
   const slackReady = connection.data?.state === 'connected';
   const team = connection.data?.teamName ?? 'Slack';
-  const current = useSlackMember(person?.slack?.userId ?? null);
+  const current = useSlackMember(person?.slack[0]?.userId ?? null);
   const [form, setForm] = useState<FormState>(() => initial(person, slackReady));
   const set = (change: Partial<FormState>): void => {
     setForm((was) => ({ ...was, ...change }));
   };
   const isBuilder = person?.isBuilder === true;
-  const kept = person?.slack ?? null;
+  // TODO(slack-workspaces): the contact in the project's workspace; today the first.
+  const kept = person?.slack[0] ?? null;
   const member = form.member ?? current;
   // Someone in Slack needs a member; the builder may have none yet.
   const reachable = form.byName || form.member !== null || kept !== null || isBuilder;
@@ -101,7 +102,7 @@ function PersonForm({
     const input: PersonInput = {
       handle: person?.handle ?? uniqueHandle(form.name, taken),
       name: form.name.trim(),
-      slack: contact,
+      slack: contact === null ? [] : [contact],
     };
     save.mutate({ id: person?.id ?? null, input }, { onSuccess: onClose });
   };

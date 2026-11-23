@@ -27,8 +27,11 @@ function world() {
   return { clock, state, keychain };
 }
 
-const withContact = (handle: string, teamId: string) =>
-  ({ handle, name: handle, slack: { teamId, userId: `U-${handle}` } }) as const;
+const withContact = (handle: string, teamId: string) => ({
+  handle,
+  name: handle,
+  slack: [{ teamId, userId: `U-${handle}` }],
+});
 
 describe('Slack sign-ins by workspace', () => {
   it('stores the token under its team id and clears the old item and contacts of no signed-in workspace', async () => {
@@ -70,7 +73,7 @@ describe('Slack sign-ins by workspace', () => {
 
     expect(keychain.read(LEGACY_SLACK_BOT_ACCOUNT)).toBeNull();
     expect(keychain.read(slackBotAccount('T-NEW'))).toBe('xoxb-new');
-    expect(listPeople(state.db).map((p) => [p.handle, p.slack !== null])).toEqual(
+    expect(listPeople(state.db).map((p) => [p.handle, p.slack.length > 0])).toEqual(
       expect.arrayContaining([
         ['bo', true],
         ['ana', false],
@@ -85,7 +88,7 @@ describe('Slack sign-ins by workspace', () => {
     });
     // Disconnected (no workspaces) and no old item: nothing is deleted.
     cleanUpSlackSignIns({ state, keychain, log: silentLogger });
-    expect(listPeople(state.db).every((p) => p.slack !== null)).toBe(true);
+    expect(listPeople(state.db).every((p) => p.slack.length > 0)).toBe(true);
 
     // A Keychain that throws neither stops the start nor deletes anything.
     const locked = {
@@ -97,6 +100,6 @@ describe('Slack sign-ins by workspace', () => {
     expect(() => {
       cleanUpSlackSignIns({ state, keychain: locked, log: silentLogger });
     }).not.toThrow();
-    expect(listPeople(state.db).every((p) => p.slack !== null)).toBe(true);
+    expect(listPeople(state.db).every((p) => p.slack.length > 0)).toBe(true);
   });
 });

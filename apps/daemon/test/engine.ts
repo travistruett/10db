@@ -152,7 +152,7 @@ export function routeQuestionsAway(engine: Pick<TestEngine, 'state' | 'project'>
     const person = insertPerson(ctx, {
       handle: 'stakeholder',
       name: 'Stakeholder',
-      slack: { teamId: 'T1', userId: 'U9', sendMode: 'review', dailyLimit: 10 },
+      slack: [{ teamId: 'T1', userId: 'U9', sendMode: 'review', dailyLimit: 10 }],
     });
     setRoutingRules(ctx, engine.project.id, {
       rules: Object.values(QuestionCategory).map((category) => ({

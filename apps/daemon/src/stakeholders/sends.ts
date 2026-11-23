@@ -130,12 +130,16 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
 
   function threadFor(card: InboxItemDto, people: readonly PersonDto[], db: DbReader = state.db) {
     const [taskId] = targetTaskIds(db, card.targets);
-    return taskId === undefined
+    // TODO(slack-workspaces): the send's workspace and its `botSince`; today the first contact and the epoch.
+    const teamId = people[0]?.slack[0]?.teamId;
+    return taskId === undefined || teamId === undefined
       ? null
       : latestThreadFor(
           db,
           people.map((p) => p.id),
           taskId,
+          teamId,
+          new Date(0).toISOString(),
         );
   }
 
@@ -164,8 +168,12 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
         routedBy: RoutedBy.Builder,
         suggestion: null,
       });
+      // TODO(slack-workspaces): the project's effective workspace.
+      const teamId = people[0]?.slack[0]?.teamId;
+      if (teamId === undefined) throw new InvalidError('The recipients have no Slack contact');
       return insertDraft(ctx, {
         inboxItemId: card.id,
+        teamId,
         recipients: people.map((p) => p.id),
         text: fresh.text,
         hits: fresh.hits,
@@ -207,12 +215,17 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
       const held = holdFor({
         hits: draft.hits,
         thread,
-        recipients: people.map((p) => ({
-          sendMode: p.slack?.sendMode ?? 'review',
-          dailyLimit: p.slack?.dailyLimit ?? null,
-          everSent: everSent(ctx.tx, p.id),
-          newThreads: newThreadsSince(ctx.tx, p.id, since),
-        })),
+        // TODO(slack-workspaces): the contact in the send's own workspace; today the first.
+        recipients: people.map((p) => {
+          const contact = p.slack[0];
+          return {
+            sendMode: contact?.sendMode ?? 'review',
+            dailyLimit: contact?.dailyLimit ?? null,
+            everSent: contact !== undefined && everSent(ctx.tx, p.id, contact.teamId),
+            newThreads:
+              contact === undefined ? 0 : newThreadsSince(ctx.tx, p.id, contact.teamId, since),
+          };
+        }),
       });
       // A message from a builder who is still called "You" would read "You's build": he reviews it.
       // A project with Slack off keeps its draft in the Inbox, and the card says why before Send is pressed.
@@ -287,15 +300,17 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
   ): Promise<string> {
     if (thread) return thread.channelId;
     const [only] = people;
-    if (people.length === 1 && only?.slack) {
-      if (only.slack.dmChannelId !== null) return only.slack.dmChannelId;
-      const channel = await client.openDm(only.slack.userId);
+    // TODO(slack-workspaces): the contact in the send's own workspace; today the first.
+    const contact = only?.slack[0];
+    if (people.length === 1 && only !== undefined && contact !== undefined) {
+      if (contact.dmChannelId !== null) return contact.dmChannelId;
+      const channel = await client.openDm(contact.userId);
       state.write((ctx) => {
-        setDmChannel(ctx, only.id, channel);
+        setDmChannel(ctx, only.id, contact.teamId, channel);
       });
       return channel;
     }
-    return client.openGroup(people.flatMap((p) => p.slack?.userId ?? []));
+    return client.openGroup(people.flatMap((p) => p.slack[0]?.userId ?? []));
   }
 
   /** Marks a send failed and gives its card back to the builder. */

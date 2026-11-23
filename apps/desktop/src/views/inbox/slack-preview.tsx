@@ -98,7 +98,8 @@ export function SlackPreview({
   const limitHeld = send.heldBy === 'limit';
   // A held message cannot go as it is: opening Edit changes nothing, and only different text is scanned again.
   const blocked = send.heldBy === 'scan' && (edited === null || edited === send.text);
-  const limit = people.find((p) => p.id === send.people[0]?.personId)?.slack?.dailyLimit ?? null;
+  // TODO(slack-workspaces): the contact in the project's workspace; today the first.
+  const limit = people.find((p) => p.id === send.people[0]?.personId)?.slack[0]?.dailyLimit ?? null;
   // A failed card falls back to the builder; the line names who the message was for.
   const sentPeople = sentTo(send, people);
   const line = routeLine(item, people, sentPeople.length > 0 ? sentPeople : undefined);

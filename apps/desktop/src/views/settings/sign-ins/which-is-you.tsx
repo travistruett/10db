@@ -44,12 +44,17 @@ export function WhichIsYou({
                 input: {
                   handle: builder.handle,
                   name: picked.realName,
-                  slack: {
-                    teamId: picked.teamId,
-                    userId: picked.userId,
-                    sendMode: builder.slack?.sendMode ?? SendMode.Review,
-                    dailyLimit: builder.slack ? builder.slack.dailyLimit : DEFAULT_DAILY_LIMIT,
-                  },
+                  // TODO(slack-workspaces): one contact per workspace; today the first is replaced.
+                  slack: [
+                    {
+                      teamId: picked.teamId,
+                      userId: picked.userId,
+                      sendMode: builder.slack[0]?.sendMode ?? SendMode.Review,
+                      dailyLimit: builder.slack[0]
+                        ? builder.slack[0].dailyLimit
+                        : DEFAULT_DAILY_LIMIT,
+                    },
+                  ],
                 },
               },
               { onSuccess: onDone },

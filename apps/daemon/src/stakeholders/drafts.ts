@@ -164,8 +164,12 @@ export function draftFor(
     );
     updateInboxItem(ctx, card.id, { detail: Object.keys(rest).length > 0 ? rest : null });
   }
+  // TODO(slack-workspaces): the project's effective workspace; today the first recipient's only contact.
+  const teamId = recipients[0]?.slack[0]?.teamId;
+  if (teamId === undefined) return toBuilder(true);
   insertDraft(ctx, {
     inboxItemId: card.id,
+    teamId,
     recipients: recipients.map((p) => p.id),
     text: message.text,
     hits: message.hits,

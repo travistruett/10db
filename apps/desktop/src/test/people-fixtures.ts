@@ -7,7 +7,7 @@ export function personDto(overrides: Partial<PersonDto> & { readonly name: strin
     id: mintId('Person'),
     handle: overrides.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
     isBuilder: false,
-    slack: null,
+    slack: [],
     createdAt: AT,
     updatedAt: AT,
     ...overrides,
@@ -47,6 +47,7 @@ export function sendDto(over: Record<string, unknown> = {}): StakeholderSendDto 
   return StakeholderSendDto.parse({
     id: mintId('StakeholderSend'),
     inboxItemId: mintId('InboxItem'),
+    teamId: 'T1',
     state: 'draft',
     people: [{ personId: mintId('Person'), userId: 'U1', name: 'Mark', recipient: true }],
     text: "Travis's 10db build of *Demo* has a question for you.",

@@ -38,7 +38,7 @@ const Scope = { Task: 'task', Goal: 'goal', Project: 'project' } as const;
 type Scope = (typeof Scope)[keyof typeof Scope];
 
 function personLabel(person: PersonDto): string {
-  return `${person.name} · ${person.slack === null ? 'not on Slack' : 'Slack'}`;
+  return `${person.name} · ${person.slack.length === 0 ? 'not on Slack' : 'Slack'}`;
 }
 
 /** The task and goal a card belongs to, read from the run it came from. */
