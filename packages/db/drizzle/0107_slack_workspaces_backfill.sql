@@ -16,7 +16,7 @@ UPDATE stakeholder_sends SET team_id = (
 --> statement-breakpoint
 -- A live send that still has no workspace can never be posted or read: hand its card to the builder, as a
 -- failed send does. Done before the sends change state, since it selects them by their null team.
-UPDATE inbox_items SET assignees = '["me"]', routed_by = 'builder', route_suggestion = NULL,
+UPDATE inbox_items SET assignee = 'me', assignees = '["me"]', routed_by = 'builder', route_suggestion = NULL,
   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE id IN (
   SELECT inbox_item_id FROM stakeholder_sends

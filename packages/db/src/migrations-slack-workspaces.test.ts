@@ -168,20 +168,28 @@ describe('the migrations that bind Slack to a workspace', () => {
       rows(
         z.object({
           id: z.string(),
+          assignee: z.string(),
           assignees: z.string(),
           routed_by: z.string(),
           suggested: z.number(),
         }),
-        'SELECT id, assignees, routed_by, route_suggestion IS NOT NULL AS suggested FROM inbox_items ORDER BY id',
+        'SELECT id, assignee, assignees, routed_by, route_suggestion IS NOT NULL AS suggested FROM inbox_items ORDER BY id',
       ),
     ).toEqual([
       {
         id: 'inb_1',
+        assignee: 'mark',
         assignees: '["mark"]',
         routed_by: 'rule',
         suggested: 1,
       },
-      { id: 'inb_2', assignees: '["me"]', routed_by: 'builder', suggested: 0 },
+      {
+        id: 'inb_2',
+        assignee: 'me',
+        assignees: '["me"]',
+        routed_by: 'builder',
+        suggested: 0,
+      },
     ]);
   });
 });
