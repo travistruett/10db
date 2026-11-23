@@ -50,7 +50,7 @@ import { StartPass } from './start-pass';
 import type { WorkbenchSearch } from './workbench-search';
 
 /**
- * The start page's header, the same while it loads, when it fails and once drawn. Pages and Pictures
+ * The start page's header, the same while it loads, when it fails and once drawn. App Preview
  * opens the project's settings for the pages: where the app runs and how its pictures are taken.
  */
 function StartPageHeader({
@@ -75,7 +75,7 @@ function StartPageHeader({
               />
             )}
           >
-            Pages and Pictures
+            App Preview
           </Button>
         }
       />

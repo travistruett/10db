@@ -206,9 +206,9 @@ test('routes a question to someone outside Slack from its card, and the table sh
   // Other cards may be open; this one is gone.
   await expect(page.getByRole('option', { name: new RegExp(QUESTION) })).toHaveCount(0);
 
-  // Who Answers shows the route the card wrote.
+  // Question Routing shows the route the card wrote.
   await page.goto('/settings/routing-rules');
-  await expect(page.getByRole('heading', { name: 'Who Answers', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Question Routing', level: 1 })).toBeVisible();
   const row = page.getByRole('row', { name: /Priya Shah/ });
   await expect(row).toContainText('Project');
   await expect(row).toContainText('Product');

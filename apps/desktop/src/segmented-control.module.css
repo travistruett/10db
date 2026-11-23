@@ -1,7 +1,8 @@
-/* Every segmented control: a track in the window's base tone and an indicator one tone up, in both schemes,
-   so the choice reads as a control on any surface. Doubled selectors beat Mantine's own single-class rules. */
+/* Every segmented control: a track a shade darker than whatever it sits on and an indicator one tone up, in
+   both schemes, so the choice reads as the same control on the page, a card or a panel. Doubled selectors
+   beat Mantine's own single-class rules. */
 .root.root {
-  background: var(--mantine-color-body);
+  background: light-dark(rgb(0 0 0 / 6%), rgb(0 0 0 / 22%));
 }
 
 .indicator.indicator {

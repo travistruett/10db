@@ -76,8 +76,8 @@ test('a builder allows two hosts, is refused localhost and removes them', async 
   }
   await expect(card.getByText('No Hosts Allowed Yet')).toBeVisible();
 
-  // Pages and Pictures holds where the app runs and how its pictures are taken.
+  // App Preview holds where the app runs and how its pictures are taken.
   await page.goto('/settings/pages-and-pictures');
   await expect(page.getByRole('textbox', { name: 'App Address' })).toBeVisible();
-  await expectAccessible(page, 'pages and pictures');
+  await expectAccessible(page, 'app preview');
 });
