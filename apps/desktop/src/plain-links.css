@@ -1,0 +1,12 @@
+/*
+ * A router link drawn without Mantine's Anchor has no class, and the browser paints it its own blue and,
+ * once visited, purple. It takes the theme's link color instead, underlined on hover as an Anchor is.
+ */
+a:not([class]) {
+  color: var(--mantine-color-anchor);
+  text-decoration: none;
+}
+
+a:not([class]):hover {
+  text-decoration: underline;
+}

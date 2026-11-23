@@ -341,7 +341,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await open(page, 'Settings');
   await expectAccessible(page, 'settings, overview, dark');
   await chooseScope(page, 'This Project');
-  await page.getByRole('link', { name: /Board columns/ }).click();
+  await page.getByRole('link', { name: /Board Columns/ }).click();
   await page.getByLabel('New Column').fill('Exploring');
   const addColumn = page.getByRole('button', { name: 'Add Column' });
   await addColumn.click();

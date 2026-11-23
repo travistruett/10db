@@ -83,7 +83,7 @@ function toPatch(
   const where =
     typeof index === 'number' && (list === 'areas' || list === 'hazards')
       ? `${list === 'areas' ? 'Area' : 'Hazard'} ${String(index + 1)}${field === 'globs' ? ' paths' : field === 'name' ? ' name' : field === 'route' ? ' route' : field === 'label' ? ' label' : ''}`
-      : 'Areas and hazards';
+      : 'Areas and Hazards';
   return { error: `${where}: ${issue?.message ?? 'is not valid'}` };
 }
 

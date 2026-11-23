@@ -27,7 +27,7 @@ function SettingsLink() {
         <Link {...props} to="/settings/$section" params={{ section: SettingsSectionKey.Areas }} />
       )}
     >
-      Settings › Areas and hazards
+      Settings › Areas and Hazards
     </Anchor>
   );
 }
