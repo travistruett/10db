@@ -17,6 +17,7 @@ import {
   IconPlug,
   IconPuzzle,
   IconListCheck,
+  IconPlaylist,
   IconRoute,
   IconSettings,
   IconUserPlus,
@@ -55,6 +56,7 @@ const SECTION_ICON: Readonly<Record<SettingsSectionKey, typeof IconSettings>> = 
   [SettingsSectionKey.ProjectTrust]: IconLock,
   [SettingsSectionKey.Sessions]: IconMessages,
   [SettingsSectionKey.Accounts]: IconKey,
+  [SettingsSectionKey.Playbook]: IconPlaylist,
   [SettingsSectionKey.Decisions]: IconBolt,
   [SettingsSectionKey.Models]: IconCpu,
 };

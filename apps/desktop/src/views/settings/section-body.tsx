@@ -14,6 +14,7 @@ import { PeopleSection } from './people/people-section';
 import { PlannedRemainder } from './planned-section';
 import { WhoAnswersSection } from './who-answers-section';
 import { ModelsSection } from './models-section';
+import { PlaybookSection } from './playbook-section';
 import { NetworkHostsSection } from './network-hosts-section';
 import { OverviewSection } from './overview-section';
 import { PlanningSection } from './planning-section';
@@ -202,8 +203,11 @@ export function SectionBody({
           <DecisionsSection />
         </>
       );
+    case SettingsSectionKey.Playbook:
+      // The page carries its own title, so the Account select sits beside it.
+      return <PlaybookSection />;
     case SettingsSectionKey.Models:
-      // The page carries its own title, so the Account select and the refresh button sit beside it.
+      // The page carries its own title, so the data sources and the refresh button sit beside it.
       return <ModelsSection />;
     case SettingsSectionKey.Team:
       return (
@@ -211,7 +215,7 @@ export function SectionBody({
           {heading}
           {project ? (
             <ScopeLine>
-              {`For ${project.name} only. Use global follows All Projects › Models.`}
+              {`For ${project.name} only. Use global follows All Projects › Playbook.`}
             </ScopeLine>
           ) : null}
           {project ? <ProjectPlaybook key={project.id} project={project} /> : <NoProject />}

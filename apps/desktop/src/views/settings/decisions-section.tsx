@@ -11,14 +11,15 @@ import {
 } from '../../daemon/judge-queries';
 import { useShapeMeasures } from '../../daemon/shape-measures-queries';
 import { DecisionDrawer } from './decision-drawer';
-import { DecisionsModelsView } from './decisions-models-view';
 import { HintedRow } from './hinted-row';
 import { statsFor } from './decision-numbers';
 import { DecisionsTable } from './decisions-table';
 import { PaidBy } from './paid-by';
 import { RecentDecisions } from './recent-decisions';
+import { ModelClass } from './focus-target';
+import { SettingsSectionKey } from './sections';
 
-const DecisionsTab = { Overview: 'overview', Models: 'models', Recent: 'recent' } as const;
+const DecisionsTab = { Decisions: 'decisions', Recent: 'recent' } as const;
 type DecisionsTab = (typeof DecisionsTab)[keyof typeof DecisionsTab];
 
 const UNREACHABLE = "Couldn't reach the daemon.";
@@ -27,14 +28,14 @@ function failureText(error: unknown): string {
   return error instanceof DaemonRequestError ? error.message : UNREACHABLE;
 }
 
-/** Settings › Decisions: Overview (the master switch, who pays, every decision), Models (time and cost) and Recent calls. */
+/** Settings › Decisions: who decides. The master switch, who pays and every decision, then the Recent calls. */
 export function DecisionsSection() {
   const status = useJudgeStatus();
   const patch = usePatchJudge();
   const stats = useDecisionStats();
   const shadow = useShapeMeasures();
   const [open, setOpen] = useState<AskedDecision | null>(null);
-  const [tab, setTab] = useState<DecisionsTab>(DecisionsTab.Overview);
+  const [tab, setTab] = useState<DecisionsTab>(DecisionsTab.Decisions);
   const keyed =
     status.data !== undefined && !status.data.off && status.data.account?.secretSet === true;
   const models = useDecisionModels(keyed);
@@ -48,21 +49,15 @@ export function DecisionsSection() {
     <Tabs
       value={tab}
       onChange={(next) => {
-        if (
-          next === DecisionsTab.Overview ||
-          next === DecisionsTab.Models ||
-          next === DecisionsTab.Recent
-        )
-          setTab(next);
+        if (next === DecisionsTab.Decisions || next === DecisionsTab.Recent) setTab(next);
       }}
       keepMounted={false}
     >
       <Tabs.List mb="lg">
-        <Tabs.Tab value={DecisionsTab.Overview}>Overview</Tabs.Tab>
-        <Tabs.Tab value={DecisionsTab.Models}>Models</Tabs.Tab>
+        <Tabs.Tab value={DecisionsTab.Decisions}>Decisions</Tabs.Tab>
         <Tabs.Tab value={DecisionsTab.Recent}>Recent</Tabs.Tab>
       </Tabs.List>
-      <Tabs.Panel value={DecisionsTab.Overview}>
+      <Tabs.Panel value={DecisionsTab.Decisions}>
         <Stack gap="xl">
           <Stack gap="sm">
             <Text size="sm" c="dimmed">
@@ -113,15 +108,21 @@ export function DecisionsSection() {
               models={modelList}
               onOpen={setOpen}
             />
+            <Anchor
+              size="xs"
+              renderRoot={(props) => (
+                <Link
+                  {...props}
+                  to="/settings/$section"
+                  params={{ section: SettingsSectionKey.Models }}
+                  search={{ class: ModelClass.Decision }}
+                />
+              )}
+            >
+              Compare decision models in Models
+            </Anchor>
           </Stack>
         </Stack>
-      </Tabs.Panel>
-      <Tabs.Panel value={DecisionsTab.Models}>
-        <DecisionsModelsView
-          onPickAccount={() => {
-            setTab(DecisionsTab.Overview);
-          }}
-        />
       </Tabs.Panel>
       <Tabs.Panel value={DecisionsTab.Recent}>
         <RecentDecisions {...(modelList === undefined ? {} : { models: modelList })} />

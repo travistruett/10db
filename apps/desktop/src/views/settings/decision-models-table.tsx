@@ -1,5 +1,6 @@
 import type { DecisionModelDto, JudgeDecision } from '@10db/contracts';
-import { Text, UnstyledButton } from '@mantine/core';
+import { Anchor, Text, UnstyledButton } from '@mantine/core';
+import { Link } from '@tanstack/react-router';
 import { DataTable, type DataTableColumn, type DataTableSortStatus } from 'mantine-datatable';
 import { useState } from 'react';
 import { withColumnHeader } from '../../shell/column-header';
@@ -8,6 +9,7 @@ import { DECISIONS } from './decision-catalogue';
 import { formatDecisionUsd } from './decision-numbers';
 import { NO_DATA } from './model-format';
 import { decisionSourceText } from './number-source';
+import { SettingsSectionKey } from './sections';
 import { SourcedNumber } from './sourced-number';
 
 const SortColumn = { Name: 'name', Cost: 'cost', Time: 'time', Answers: 'answers' } as const;
@@ -30,7 +32,7 @@ export const timeText = (model: DecisionModelDto): string =>
 
 const TABULAR = () => ({ fontVariantNumeric: 'tabular-nums' });
 
-/** Every decision model with what a decision on it costs and takes, who uses it and how often it answered. */
+/** Every decision model with what a call on it costs and takes, who uses it and how often it answered. */
 export function DecisionModelsTable({
   models,
   usedBy,
@@ -122,13 +124,13 @@ export function DecisionModelsTable({
         </div>
       ),
     }),
-    numeric(SortColumn.Cost, 'Cost per Million Decisions', (m) => (
+    numeric(SortColumn.Cost, 'Cost per Million Calls', (m) => (
       <SourcedNumber
         text={costText(m)}
         source={m.costSource === null ? null : decisionSourceText(m.costSource)}
       />
     )),
-    numeric(SortColumn.Time, 'Time per Decision', (m) => (
+    numeric(SortColumn.Time, 'Time per Call', (m) => (
       <SourcedNumber
         text={timeText(m)}
         source={m.timeSource === null ? null : decisionSourceText(m.timeSource)}
@@ -140,10 +142,27 @@ export function DecisionModelsTable({
       noWrap: true,
       render: (m) => {
         const names = (usedBy.get(m.id) ?? []).map((d) => DECISIONS[d].label).join(', ');
+        if (names === '') return null;
         return (
-          <Text size="xs" truncate maw={240} title={names}>
+          <Anchor
+            size="xs"
+            truncate
+            maw={240}
+            title={names}
+            // The row's own click opens the drawer; the link goes to where the model is set.
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+            renderRoot={(props) => (
+              <Link
+                {...props}
+                to="/settings/$section"
+                params={{ section: SettingsSectionKey.Decisions }}
+              />
+            )}
+          >
             {names}
-          </Text>
+          </Anchor>
         );
       },
     },
@@ -151,7 +170,7 @@ export function DecisionModelsTable({
   ];
   return (
     <DataTable<DecisionModelDto>
-      aria-label="All decision models"
+      aria-label="Decision models"
       records={shown}
       columns={columns}
       idAccessor="id"

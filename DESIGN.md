@@ -61,7 +61,7 @@ favors legibility and calm over decoration.
   so it never reads as a card.
 - **Page panels:** a Settings page's tables and charts can sit on the raised panel tone
   (`--tendb-color-panel`, `bg_1` in both schemes) through `RaisedPanel` or a table's `backgroundColor`, so
-  they stand off the page body. Settings › Models uses it; other pages adopt it one at a time.
+  they stand off the page body. Settings › Playbook and Models use it; other pages adopt it one at a time.
 - **Card state:** the card's border takes the status color (blue running, yellow waiting on you, orange
   paused, red failed, green done); a queued card's border is its own tone, so it shows none. No fill, no left stripe, no pulsing. A
   card waiting on the builder is the most prominent: a full 2 px yellow border. The card writes the state

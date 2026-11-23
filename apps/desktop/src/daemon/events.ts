@@ -146,7 +146,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // The Models page lists profiles and what each account offers.
   model_profile: [CANDIDATES, modelKeys.all],
   account_models: [modelKeys.all],
-  // Settings › Models reads the playbook and the kinds, and the picks follow both; a kind also changes which
+  // Settings › Playbook reads the playbook and the kinds, and the picks follow both; a kind also changes which
   // rigors a task may take and what its card shows.
   playbook: [playbookKeys.all, modelKeys.all],
   kind: [KINDS_KEY, modelKeys.all, ['tasks'], CANDIDATES],

@@ -18,10 +18,7 @@ import {
   type ModelFilter,
   type ModelSort,
 } from './model-order';
-import { KindsSection } from './kinds-section';
-import { MoveReportNote } from './move-report-note';
 import { ModelsTable } from './models-table';
-import { PlaybookTable } from './playbook-table';
 import { rigorLabel } from './rigor-labels';
 import { RaisedPanel } from './raised-panel';
 import { RightsizingChart } from './rightsizing-chart';
@@ -44,10 +41,10 @@ const isRigor = (value: string): value is Rigor => RIGORS.some((r) => r === valu
 const roleLabel = (role: StepRole): string => ROLES.find((r) => r.role === role)?.label ?? role;
 
 /**
- * Models › Agents: the playbook and the kinds on one account, then Intelligence against cost per task with the
- * picks of one rigor drawn on it, then every model the account runs. A model's detail is in the drawer.
+ * Models › Agent Models: Intelligence against cost per task on one account with the picks of one rigor drawn
+ * on it, then every model the account runs. A model's detail is in the drawer.
  */
-export function AgentsView({ account }: { readonly account: AccountDto }) {
+export function AgentModelsView({ account }: { readonly account: AccountDto }) {
   const now = useNow();
   const accountId = account.id;
   const models = useModels(accountId);
@@ -112,16 +109,6 @@ export function AgentsView({ account }: { readonly account: AccountDto }) {
   const note = costNote(account, offers.data ?? []);
   return (
     <Stack gap="xl">
-      <MoveReportNote />
-      <Stack gap="sm" component="section" aria-label="Playbook section">
-        <SectionHeading
-          title="Playbook"
-          line={`What each step runs on ${account.label}.`}
-          help="Each rigor runs the steps in its row. A cell shows the model and effort it resolves to, and the setting behind it. Open a cell to change it, or a rigor to change its steps."
-        />
-        <PlaybookTable projectId={null} accountId={accountId} />
-      </Stack>
-      <KindsSection />
       <Stack gap="sm">
         <Group justify="space-between" align="flex-start" wrap="nowrap">
           <SectionHeading
@@ -172,7 +159,7 @@ export function AgentsView({ account }: { readonly account: AccountDto }) {
         </RaisedPanel>
       </Stack>
       <Stack gap="sm">
-        <SectionHeading title="All Models" line={`Every model ${account.label} runs.`} />
+        <SectionHeading title="Agent Models" line={`Every model ${account.label} runs.`} />
         {everyModel.length === 0 ? (
           <Text c="dimmed">
             No models yet. They appear once an account has been read; the refresh button reads every

@@ -1,5 +1,6 @@
 import { ModelStatus, type ModelRowDto } from '@10db/contracts';
-import { Group, Text, Tooltip, UnstyledButton } from '@mantine/core';
+import { Anchor, Group, Text, Tooltip, UnstyledButton } from '@mantine/core';
+import { Link } from '@tanstack/react-router';
 import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { DataTable, type DataTableColumn, type DataTableSortStatus } from 'mantine-datatable';
 import { useState, type ReactNode } from 'react';
@@ -11,6 +12,7 @@ import { ModelSearchFilter, TierFilter } from './model-filters';
 import { formatCost, formatScore, NO_DATA } from './model-format';
 import type { ModelFamily } from './model-families';
 import { STATUS_LABEL, TIER_LABEL } from './model-labels';
+import { SettingsSectionKey } from './sections';
 import {
   isNewModel,
   ModelColumn,
@@ -97,7 +99,7 @@ function ModelCell({
 }
 
 /**
- * The model list as a calm table. Model, Intelligence, Cost per task and Steps run sort; the Model and Tier
+ * The model list as a calm table. Model, Intelligence, Cost per Task and Steps Run sort; the Model and Tier
  * headers filter it. A row, or Enter on its name, opens the drawer. `usedBy` names the roles whose pick a model
  * is, and `costNote` says what the cost per task is at, in that column's header.
  */
@@ -214,7 +216,7 @@ export function ModelsTable({
       />
     )),
     {
-      ...numeric(ModelColumn.CostPerTask, 'Cost per task', (row) => (
+      ...numeric(ModelColumn.CostPerTask, 'Cost per Task', (row) => (
         <SourcedNumber
           text={formatCost(row.costPerTaskUsd)}
           source={
@@ -226,7 +228,7 @@ export function ModelsTable({
       )),
       title: (
         <Tooltip label={costNote} multiline maw={260} withArrow>
-          <span>Cost per task</span>
+          <span>Cost per Task</span>
         </Tooltip>
       ),
     },
@@ -243,9 +245,24 @@ export function ModelsTable({
         return (
           <Group gap={6} wrap="nowrap" maw={220}>
             {own === '' ? null : (
-              <Text size="xs" truncate title={own}>
+              <Anchor
+                size="xs"
+                truncate
+                title={own}
+                // The row's own click opens the drawer; the link goes to where the steps are set.
+                onClick={(event) => {
+                  event.stopPropagation();
+                }}
+                renderRoot={(props) => (
+                  <Link
+                    {...props}
+                    to="/settings/$section"
+                    params={{ section: SettingsSectionKey.Playbook }}
+                  />
+                )}
+              >
                 {own}
-              </Text>
+              </Anchor>
             )}
             {hidden === '' ? null : (
               <Text size="xs" c="dimmed" truncate title={`${hidden}, on an older version`}>
@@ -256,7 +273,7 @@ export function ModelsTable({
         );
       },
     },
-    numeric(ModelColumn.StepsRun, 'Steps run', (row) => row.stepsRun),
+    numeric(ModelColumn.StepsRun, 'Steps Run', (row) => row.stepsRun),
   ];
   return (
     <DataTable<ModelRowDto>

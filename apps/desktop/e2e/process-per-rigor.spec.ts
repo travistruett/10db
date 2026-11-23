@@ -7,7 +7,7 @@ import { expectAccessible } from './expect-accessible';
 import { auth, createProject } from './shape-project';
 
 // Each rigor's process through the real daemon and the fake agent (script-book.json, keyed by task
-// title): the row drawer on Settings › Models, then a Critical task that waits for the builder's
+// title): the row drawer on Settings › Playbook, then a Critical task that waits for the builder's
 // approval of its plan, with Send Back. Core flows 7 and 10; each task has its own project.
 
 const Id = z.looseObject({ id: z.string() });
@@ -70,7 +70,7 @@ test('a rigor row shows its process in its drawer, and an edit changes the row h
   // Alone, the window opens on the first run until a project exists.
   const projectId = await createProject(request, 'prr-settings');
   await page.setViewportSize({ width: 1280, height: 900 });
-  await openPage(page, '/settings/models', projectId);
+  await openPage(page, '/settings/playbook', projectId);
   const main = page.getByRole('main');
   const standard = main.getByRole('button', { name: 'Standard steps' });
   await expect(standard).toContainText('1 round · resumed fix');
@@ -88,7 +88,7 @@ test('a rigor row shows its process in its drawer, and an edit changes the row h
   ).toBeChecked();
   // The drawer fades in as it slides; axe would measure contrast mid-fade.
   await expect(critical).toHaveCSS('opacity', '1');
-  await expectAccessible(page, 'settings models, critical process drawer');
+  await expectAccessible(page, 'settings playbook, critical process drawer');
   await critical.getByRole('button', { name: 'Done' }).click();
   await expect(critical).toBeHidden();
 
