@@ -89,10 +89,15 @@ import {
   createSlackConnections,
   createStakeholderSends,
   createTimerWatch,
+  boundTeam,
   createTriage,
   draftOnOpen,
+  projectSlack,
   routedAway,
+  saveSlackWorkspace,
+  setProjectSlack,
   type ReplyWatches,
+  type SlackClients,
   type StakeholderSends,
   type TimerWatch,
 } from '../src/stakeholders';
@@ -251,6 +256,9 @@ function fullFlowSteps(riskTags: readonly string[], criteria: number): StepRole[
 }
 
 /** A judge that is off: every decision keeps today's rule. */
+/** The workspace the engine's fake Slack stands for; people with a contact in it are reachable. */
+const FAKE_TEAM = 'T1';
+
 export const offJudge: Judge = {
   off: true,
   ready: () => Promise.resolve(false),
@@ -351,11 +359,17 @@ export async function createTestEngine(
         logger: silentLogger,
       })
     : offJudge;
+  // The fake Slack is the one workspace, T1, which the engine's project is bound to.
+  const fakeClients: SlackClients | null = setup.slack
+    ? { clientFor: (teamId) => (teamId === FAKE_TEAM ? (setup.slack ?? null) : null) }
+    : null;
   const sends = createStakeholderSends({
     state,
-    slack: setup.slack ?? null,
+    slack: fakeClients,
     clock,
     log: silentLogger,
+    slackFor: (projectId) => projectSlack(state.db, projectId).teamId,
+    boundTo: (projectId) => boundTeam(state.db, projectId),
     parkFor: (id) => {
       runner?.parkFor(id);
     },
@@ -449,10 +463,9 @@ export async function createTestEngine(
     },
   });
   const slackConnections = createSlackConnections({ state, off: !setup.slack });
-  const fakeSlack = setup.slack;
   const replyWatches = createReplyWatches({
     state,
-    slack: fakeSlack ? { clientFor: () => fakeSlack } : null,
+    slack: fakeClients,
     inbox,
     judge: triageJudge,
     sends,
@@ -623,6 +636,11 @@ export async function createTestEngine(
       { name: 'ui', globs: ['src/ui/**'] },
     ],
     ...project,
+  });
+  // Bound with or without a fake client: a routed question is drafted for people with a contact in T1.
+  state.write((ctx) => {
+    saveSlackWorkspace(ctx, { teamId: FAKE_TEAM, teamName: 'Fake' });
+    setProjectSlack(ctx, seeded.id, FAKE_TEAM);
   });
   const engine: TestEngine = {
     store,

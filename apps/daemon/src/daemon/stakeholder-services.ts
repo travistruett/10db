@@ -3,6 +3,7 @@ import {
   EventType,
   SlackWorkspaceState,
   InvalidError,
+  type InboxItemId,
   type ProjectId,
   type ProjectIntegrationsDto,
   type SlackMemberDto,
@@ -21,6 +22,7 @@ import type { ApiServices } from '../api';
 import type { Clock } from '../clock';
 import { KeychainError, slackBotAccount, type Keychain } from '../environment';
 import type { StateStore } from '../events';
+import type { Logger } from '../log';
 import { createSlackClient, SlackError, type SlackClient } from '../slack';
 import {
   previewDraft,
@@ -29,7 +31,7 @@ import {
   recordBot,
   removeSlackWorkspace,
   saveSlackWorkspace,
-  setProjectSlack,
+  rebindProjectSlack,
   type ReplyWatches,
   type SlackClients,
   type SlackConnections,
@@ -107,6 +109,8 @@ export function createStakeholderApiServices(deps: {
   readonly githubLogin: () => Promise<string | null>;
   readonly linear: LinearImport;
   readonly reporter: Pick<LinearReporter, 'setSettings'>;
+  /** What a draft made by a binding change runs after its write commits. */
+  readonly draftOpts: { readonly afterDraft: (id: InboxItemId) => void; readonly log: Logger };
 }): StakeholderApiServices {
   const integrationsOf = async (projectId: ProjectId): Promise<ProjectIntegrationsDto> => {
     getProject(deps.state.db, projectId);
@@ -193,9 +197,11 @@ export function createStakeholderApiServices(deps: {
       // Only a signed-in workspace can be chosen; null is the builder's "off".
       if (teamId !== null && !readSlackWorkspaces(deps.state.db).some((w) => w.teamId === teamId))
         throw new InvalidError('That Slack workspace is not signed in');
-      deps.state.write((ctx) => {
-        setProjectSlack(ctx, projectId, teamId);
-      });
+      // What was out in another workspace is taken back, and drafts are made again, in this one write.
+      const after = deps.state.write((ctx) =>
+        rebindProjectSlack(ctx, projectId, teamId, deps.draftOpts),
+      );
+      for (const step of after) step();
       return integrationsOf(projectId);
     },
 

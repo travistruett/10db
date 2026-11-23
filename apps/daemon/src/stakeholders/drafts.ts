@@ -7,6 +7,7 @@ import {
   type InboxItemId,
   type OutboundHit,
   type PersonDto,
+  contactIn,
 } from '@10db/contracts';
 import {
   BUILDER_HANDLE,
@@ -35,6 +36,7 @@ import {
 import type { Logger } from '../log';
 import { composeSlackQuestion } from './compose';
 import { scanOutbound } from './outbound-scan';
+import { projectSlack } from './slack-workspaces';
 import { fallbackHandles } from './triage';
 
 export interface DraftDeps {
@@ -42,6 +44,8 @@ export interface DraftDeps {
   /** The goal the card's task belongs to; the message names it, else the project. */
   readonly goalTitle: string | null;
   readonly builderName: string;
+  /** The project's effective workspace (`projectSlack`): what a draft is made in; null when Slack is off for it. */
+  readonly teamId: string | null;
   /** Called after the write commits: sends at once when nothing holds the draft. */
   readonly afterDraft: (id: InboxItemId) => void;
   readonly log: Logger;
@@ -51,14 +55,17 @@ export interface DraftDeps {
 
 const LIVE_SEND: readonly SendState[] = [SendState.Draft, SendState.Sending, SendState.Sent];
 
-/** The people a card goes to, other than the builder, in routing order; null when one has no way to be reached. */
-function recipientsOf(db: DbReader, card: InboxItemDto): PersonDto[] | null {
+/**
+ * The people a card goes to, other than the builder, in routing order; null when one has no way to be reached:
+ * no workspace to send in, or no contact in it.
+ */
+function recipientsOf(db: DbReader, card: InboxItemDto, teamId: string | null): PersonDto[] | null {
   const people: PersonDto[] = [];
   for (const handle of card.assignees) {
     if (handle === BUILDER_HANDLE) continue;
     const person = findPersonByHandle(db, handle);
     if (person?.isBuilder === true) continue;
-    if (!person?.slack) return null;
+    if (!person || contactIn(person, teamId) === null) return null;
     people.push(person);
   }
   return people;
@@ -78,13 +85,14 @@ function hitsFor(card: InboxItemDto, text: string): OutboundHit[] {
 export function draftContext(
   db: DbReader,
   card: InboxItemDto,
-): Pick<DraftDeps, 'projectName' | 'goalTitle' | 'builderName'> {
+): Pick<DraftDeps, 'projectName' | 'goalTitle' | 'builderName' | 'teamId'> {
   const [taskId] = targetTaskIds(db, card.targets);
   const task = taskId === undefined ? null : getTask(db, taskId);
   return {
     projectName: getProject(db, card.projectId).name,
     goalTitle: task?.goalId ? getGoal(db, task.goalId).title : null,
     builderName: listPeople(db).find((p) => p.isBuilder)?.name ?? 'The builder',
+    teamId: projectSlack(db, card.projectId).teamId,
   };
 }
 
@@ -123,7 +131,8 @@ export function draftFor(
   if (card.kind !== InboxKind.Question || card.state !== InboxState.Open) return null;
   if (card.routedBy === RoutedBy.TriagePending) return null;
   if (sendForCard(ctx.tx, card.id) !== null && isLive(ctx, card.id)) return null;
-  const recipients = recipientsOf(ctx.tx, card);
+  const { teamId } = deps;
+  const recipients = recipientsOf(ctx.tx, card, teamId);
   if (recipients?.length === 0) return null;
   const toBuilder = (failedCompose: boolean): null => {
     setInboxRecipients(ctx, card.id, {
@@ -137,7 +146,7 @@ export function draftFor(
       updateInboxItem(ctx, card.id, { detail: { ...card.detail, [DRAFT_FAILED_KEY]: true } });
     return null;
   };
-  if (recipients === null) {
+  if (recipients === null || teamId === null) {
     toBuilder(false);
     // Kept on the card, so the message can be copied for them and the choice survives a reload.
     const wanted = card.assignees.filter((h) => h !== BUILDER_HANDLE);
@@ -164,9 +173,6 @@ export function draftFor(
     );
     updateInboxItem(ctx, card.id, { detail: Object.keys(rest).length > 0 ? rest : null });
   }
-  // TODO(slack-workspaces): the project's effective workspace; today the first recipient's only contact.
-  const teamId = recipients[0]?.slack[0]?.teamId;
-  if (teamId === undefined) return toBuilder(true);
   insertDraft(ctx, {
     inboxItemId: card.id,
     teamId,
@@ -258,7 +264,9 @@ export function sweepDrafts(
       );
       continue;
     }
-    const wanted = (recipientsOf(ctx.tx, card) ?? []).map((p) => p.id).sort();
+    const wanted = (recipientsOf(ctx.tx, card, projectSlack(ctx.tx, card.projectId).teamId) ?? [])
+      .map((p) => p.id)
+      .sort();
     const send = sendForCard(ctx.tx, card.id);
     const have = (send?.people ?? [])
       .flatMap((p) => (p.recipient && p.personId !== null ? p.personId : []))

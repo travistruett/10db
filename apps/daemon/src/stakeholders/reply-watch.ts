@@ -2,6 +2,7 @@ import {
   ConflictError,
   InboxState,
   JudgeDecision,
+  SendFailure,
   type InboxItemId,
   type PersonId,
 } from '@10db/contracts';
@@ -51,6 +52,7 @@ import { readReply } from './read-reply';
 import type { StakeholderSends } from './sends';
 import { failSendsToBuilder, recordBot } from './send-returns';
 import type { SlackConnections } from './slack-connection';
+import { boundTeam } from './slack-workspaces';
 import { blocksOf } from './slack-text';
 import { dueTimers } from './timers';
 import { matchReply, type MatchState } from './reply-match';
@@ -445,6 +447,14 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
     const timers = getStakeholderTimers(state.db);
     const fresh = openSends(state.db, teamId).find((o) => o.id === r.open.id);
     if (!fresh || dueTimers(fresh, timers, clock.now()) !== 'remind') return;
+    // A send in another team than the stored binding is taken back, never reminded (only a race leaves one).
+    const owner = getInboxItem(state.db, fresh.inboxItemId);
+    if (fresh.teamId !== boundTeam(state.db, owner.projectId)) {
+      state.write((ctx) => {
+        failSendsToBuilder(ctx, [fresh], SendFailure.WorkspaceChanged);
+      });
+      return;
+    }
     const already = r.messages.some(
       (m) =>
         m.metadata?.eventType === 'tendb_send' &&
@@ -493,8 +503,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
   async function once(client: SlackClient): Promise<void> {
     try {
       const bot = await identity(client);
-      // TODO(slack-workspaces): recoverSending takes this watch's team once sends are per workspace.
-      await deps.sends.recoverSending();
+      await deps.sends.recoverSending(teamId);
       const opens = openSends(state.db, teamId);
       for (const r of await reading(client, opens, bot)) {
         const stillOpen = getInboxItem(state.db, r.open.inboxItemId).state === InboxState.Open;
