@@ -1,6 +1,7 @@
 export { OUTBOUND_PATTERNS, SECRET_PATTERN_NAMES, scanOutbound } from './outbound-scan';
 export { createTriage } from './triage';
 export { draftOnOpen, previewDraft, sweepDrafts } from './drafts';
+export { rebindProjectSlack } from './project-binding';
 export { createStakeholderSends, type StakeholderSends } from './sends';
 export { createReplyWatches, type ReplyWatches } from './reply-watches';
 export { createSlackClients, type SlackClients } from './slack-clients';
@@ -9,6 +10,7 @@ export { recordBot } from './send-returns';
 export { createTimerWatch, type TimerWatch } from './timer-watch';
 export { routedAway } from './routed-away';
 export {
+  boundTeam,
   cleanUpSlackSignIns,
   projectSlack,
   readSlackWorkspaces,

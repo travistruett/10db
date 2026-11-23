@@ -12,3 +12,12 @@
   saved token that names a different bot is a recovery (`recoverFromBotChange`: DM channels and cursors cleared,
   sending and sent sends failed `bot_changed`); a watch's check never recovers. Every place that hands a failed
   send's card back to the builder uses `failSendsToBuilder`.
+- A draft is made from the effective binding (`projectSlack`): the recipients' contacts in that workspace, or no draft
+  and Copy for when the project is Off or anyone has no contact there. A reserved send checks the stored binding
+  (`boundTeam`) before every Slack call: another team means it is taken back (`workspace_changed`), a workspace not
+  signed in means it waits.
+- A change of binding is one write (`rebindProjectSlack`, no Slack call): sending and sent sends elsewhere are failed,
+  drafts elsewhere are dropped and drafted again for the same people. A post that lands after its send was failed
+  (`workspace_changed`, `bot_changed`) is never recorded sent or drafted again; its thread is told it was taken back
+  with the send's own client.
+- A follow-up joins only threads sent at or after the workspace's `botSince`; older ones are never joined.

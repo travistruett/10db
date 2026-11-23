@@ -914,7 +914,10 @@ export interface ApiServices extends PlanRecordServices {
     projectId: ProjectId,
     input: LinearReporterSettings,
   ): Promise<ProjectIntegrationsDto>;
-  /** Binds a project to a signed-in Slack workspace, or turns Slack off for it with a null team. */
+  /**
+   * Binds a project to a signed-in Slack workspace, or turns Slack off for it with a null team. The change takes back
+   * what is out in another workspace (those cards go to the builder) and drafts again for the same people.
+   */
   setProjectIntegrations(
     projectId: ProjectId,
     input: ProjectIntegrationsInput,

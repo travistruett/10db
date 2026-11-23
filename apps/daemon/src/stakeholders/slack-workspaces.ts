@@ -74,10 +74,11 @@ export function boundTeam(db: DbReader, projectId: ProjectId): string | null {
 export function projectSlack(db: DbReader, projectId: ProjectId): ProjectSlackDto {
   const teamId = boundTeam(db, projectId);
   const workspace = readSlackWorkspaces(db).find((w) => w.teamId === teamId);
-  if (workspace === undefined) return { teamId: null, teamName: null, out: 0 };
+  // What is out counts on every path, Off and a signed-out workspace included: a change takes it back.
   const out = liveSendsWhere(db, { projectId }).filter(
     (s) => s.state === SendState.Sending || s.state === SendState.Sent,
   ).length;
+  if (workspace === undefined) return { teamId: null, teamName: null, out };
   return { teamId: workspace.teamId, teamName: workspace.teamName, out };
 }
 
