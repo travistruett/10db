@@ -220,10 +220,6 @@ function toSdkConnector(connector: ClaudeConnector): McpServerConfig {
   return entry as McpServerConfig;
 }
 
-/**
- * The repo's approved servers, then the builder's own, then the claude.ai connectors, then 10db's, keyed by
- * name. 10db's is written last, so it keeps its name. `connectors` is what `connectorsForSession` kept.
- */
 /** The builder's servers by the name Claude registers each under, to 10db's name for it. */
 function registeredYourNames(
   servers: Readonly<Record<string, YourSessionServer>>,
@@ -233,6 +229,10 @@ function registeredYourNames(
   );
 }
 
+/**
+ * The repo's approved servers, then the builder's own, then the claude.ai connectors, then 10db's, keyed by
+ * name. 10db's is written last, so it keeps its name. `connectors` is what `connectorsForSession` kept.
+ */
 export function buildMcpServers(
   spec: Pick<AgentSessionCore, 'projectMcpServers' | 'yourMcpServers' | 'mcp'>,
   connectors: readonly ClaudeConnector[] = [],
@@ -1020,7 +1020,6 @@ function startSession(
       } else {
         connectors = connectorsForSession(read, [
           ...Object.keys(spec.projectMcpServers),
-          ...Object.keys(spec.yourMcpServers),
           ...registeredYourNames(spec.yourMcpServers).keys(),
           CLAUDE_MCP_SERVER,
         ]);

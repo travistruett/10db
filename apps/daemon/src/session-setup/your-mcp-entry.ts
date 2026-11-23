@@ -42,7 +42,7 @@ export type DeclaredYourServer =
 export interface YourMcpEntry {
   readonly key: YourMcpServerKey;
   readonly name: string;
-  /** The name a Claude session registers it under, when not `name`: a plugin's server, as Claude Code names it. */
+  /** The name a Claude session registers it under, when not `name`: a plugin's remote server, as Claude Code names it. */
   readonly claudeName: string | null;
   readonly source: YourMcpSource;
   readonly pluginId: string | null;

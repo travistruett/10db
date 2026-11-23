@@ -140,7 +140,11 @@ export function readPluginMcp(
     entries.push({
       key: yourMcpServerKey(YourMcpSource.Plugin, serverName, plugin.id),
       name,
-      claudeName: claudePluginServerName(plugin.id, serverName),
+      // Only a remote server signs in, so only it is registered under Claude Code's name.
+      claudeName:
+        declared === null || declared.transport === 'stdio'
+          ? null
+          : claudePluginServerName(plugin.id, serverName),
       source: YourMcpSource.Plugin,
       pluginId: plugin.id,
       declared,
