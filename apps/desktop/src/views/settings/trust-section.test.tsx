@@ -7,9 +7,6 @@ import { TRUST_ROWS } from './trust-rows';
 
 // Trust spec §9: Settings › Trust switches what comes along into each session, app-wide.
 
-const CODEX_WEB_LIVE =
-  "Codex searches the web live on OpenAI's servers, so 10db's judge doesn't see a search or page URL before it is fetched.";
-
 function serve() {
   let settings: TrustSettingsDto = {
     switches: TRUST_DEFAULTS,
@@ -34,7 +31,7 @@ function serve() {
 }
 
 describe('Settings › Trust', () => {
-  it('shows every row on, with its per-provider note, and sends a change', async () => {
+  it('shows every row on, with its description, and sends a change', async () => {
     const { put } = serve();
     renderApp('/settings/trust');
     for (const row of TRUST_ROWS) {
@@ -43,11 +40,8 @@ describe('Settings › Trust', () => {
         expect(toggle).toHaveProperty('disabled', false);
       });
       expect(toggle).toHaveProperty('checked', true);
-      expect(screen.getByText(row.providers)).toBeTruthy();
-      expect(row.description.endsWith('Applies from the next session.')).toBe(true);
+      expect(screen.getByText(row.description)).toBeTruthy();
     }
-    // With Web on, the row says Codex searches live on OpenAI's servers; off, it says nothing of it.
-    expect(screen.getByText(CODEX_WEB_LIVE)).toBeTruthy();
     fireEvent.click(screen.getByRole('switch', { name: 'Web' }));
     await waitFor(() => {
       expect(put).toEqual([{ ...TRUST_DEFAULTS, web: false }]);
@@ -55,6 +49,5 @@ describe('Settings › Trust', () => {
     await waitFor(() => {
       expect(screen.getByRole('switch', { name: 'Web' })).toHaveProperty('checked', false);
     });
-    expect(screen.queryByText(CODEX_WEB_LIVE)).toBeNull();
   });
 });

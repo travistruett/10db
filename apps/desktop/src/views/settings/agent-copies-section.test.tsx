@@ -35,10 +35,6 @@ describe('Settings › Updates agents', () => {
     expect(
       within(section).getByText(/Runs 2\.1\.302, the release 10db is verified on\./),
     ).toBeTruthy();
-    expect(
-      within(section).getByText(
-        /2\.1\.319 is out\. Nothing to do: a 10db update moves to it once it has passed its live test on 2\.1\.319\./,
-      ),
-    ).toBeTruthy();
+    expect(within(section).getByText(/2\.1\.319 is out\./)).toBeTruthy();
   });
 });

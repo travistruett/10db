@@ -128,7 +128,7 @@ export function SectionBody({
           {heading}
           {project ? (
             <ScopeLine>
-              {`For ${project.name} only. Anything set to As app follows All Projects › Trust.`}
+              {`For ${project.name} only. As App follows All Projects › Trust. Changes apply from the next session.`}
             </ScopeLine>
           ) : null}
           {project ? <ProjectTrustSection key={project.id} project={project} /> : <NoProject />}
@@ -138,7 +138,9 @@ export function SectionBody({
       return (
         <>
           {heading}
-          <ScopeLine>For every project. A project can override this in its own Trust.</ScopeLine>
+          <ScopeLine>
+            For every project; a project can override it. Changes apply from the next session.
+          </ScopeLine>
           <TrustSection />
         </>
       );

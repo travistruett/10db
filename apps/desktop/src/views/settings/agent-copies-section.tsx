@@ -1,7 +1,8 @@
 import { AgentCopyState, ToolName, type AgentCopy } from '@10db/contracts';
-import { Stack, Text, Title } from '@mantine/core';
+import { Group, Stack, Text, Title } from '@mantine/core';
 import { useId } from 'react';
 import { useSystemCheck } from '../../daemon/queries';
+import { HelpHint, HelpText } from './help-hint';
 import { SettingRow, SettingsCard } from './setting-row';
 
 const TITLE = 'Claude Code and Codex';
@@ -32,17 +33,28 @@ export function AgentCopiesSection() {
     agent.tool === ToolName.Claude ? check.claudeCode.warning : check.codex.warning;
   return (
     <Stack gap="xs" role="region" aria-labelledby={titleId}>
-      <Title order={5} id={titleId}>
-        {TITLE}
-      </Title>
+      <Stack gap={2}>
+        <Group gap={4} wrap="nowrap">
+          <Title order={5} id={titleId}>
+            {TITLE}
+          </Title>
+          <HelpHint label={TITLE}>
+            <HelpText>
+              Nothing here needs you: 10db doesn't move its pin by itself. A 10db update that has
+              passed its live test on a newer release moves it.
+            </HelpText>
+          </HelpHint>
+        </Group>
+        <Text size="xs" c="dimmed">
+          The releases 10db runs, and a newer one when it is out.
+        </Text>
+      </Stack>
       <SettingsCard>
         {agents.map((agent) => {
           const newer = agent.newerRelease;
           const lines = [
             `Runs ${agent.pinned}, the release 10db is verified on.`,
-            newer === null
-              ? null
-              : `${newer} is out. Nothing to do: a 10db update moves to it once it has passed its live test on ${newer}.`,
+            newer === null ? null : `${newer} is out.`,
             stateNote(agent),
             warningOf(agent),
           ].filter((line) => line !== null);

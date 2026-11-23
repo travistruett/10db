@@ -1,5 +1,6 @@
 import { Group, Switch } from '@mantine/core';
 import { useLanePermissions, useSetLanePermissions } from '../../daemon/queries';
+import { HelpText } from './help-hint';
 import { SettingRow, SettingsCard } from './setting-row';
 
 const LABEL = "Lanes decide routine permissions with Claude Code's auto mode";
@@ -11,7 +12,17 @@ export function LanePermissionsSection() {
     <SettingsCard>
       <SettingRow
         label={LABEL}
-        description="Plain commands, reads and builds run without a card. Dependency changes, background loops that never end, new network hosts for Claude Code's own tools, and reads outside the allowed paths still ask you. Applies from the next session."
+        description="Routine commands, reads and builds run without a card."
+        help={
+          <>
+            <HelpText>
+              Plain commands, reads and builds run without a card. Dependency changes, background
+              loops that never end, new network hosts for Claude Code's own tools, and reads outside
+              the allowed paths still ask you.
+            </HelpText>
+            <HelpText>Applies from the next session.</HelpText>
+          </>
+        }
       >
         <Group justify="flex-end">
           <Switch

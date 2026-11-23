@@ -1,5 +1,5 @@
 import type { StakeholderTimersDto } from '@10db/contracts';
-import { Alert, Box, Group, Loader, NumberInput, Stack, Switch, Text } from '@mantine/core';
+import { Alert, Group, Loader, NumberInput, Stack, Switch, Text } from '@mantine/core';
 import { useState } from 'react';
 import { useSetStakeholderTimers, useStakeholderTimers } from '../../../daemon/people';
 import { SettingRow, SettingsCard } from '../setting-row';
@@ -39,10 +39,13 @@ export function StakeholderTimers() {
   const back = typed.back ?? current.returnAfterHours;
   return (
     <Stack gap="xs">
-      <SettingsCard title="When Someone Hasn't Answered">
+      <SettingsCard
+        title="When Someone Hasn't Answered"
+        description="Hours are real time: a timer due while the Mac sleeps fires on wake."
+      >
         <SettingRow
           label="Remind Them After"
-          description="One reminder in their thread. Turn it off to never nudge."
+          description="One reminder in their thread; off never nudges."
         >
           <Group gap="sm" justify="flex-end" wrap="nowrap">
             <Switch
@@ -81,7 +84,7 @@ export function StakeholderTimers() {
         </SettingRow>
         <SettingRow
           label="Bring It Back to You After"
-          description="The question comes back to your Inbox, where you answer it or keep waiting."
+          description="The question returns to your Inbox."
         >
           <Group gap="sm" justify="flex-end" wrap="nowrap">
             <NumberInput
@@ -105,11 +108,6 @@ export function StakeholderTimers() {
             <Hours />
           </Group>
         </SettingRow>
-        <Box px="md" py="sm">
-          <Text size="xs" c="dimmed">
-            Hours are real time: a timer that comes due while your Mac sleeps fires when it wakes.
-          </Text>
-        </Box>
       </SettingsCard>
       {save.isError ? (
         <Alert color="red" variant="light">

@@ -13,6 +13,7 @@ import {
   useSetSelfUpdateWait,
 } from '../../daemon/self-update-queries';
 import { absoluteTime } from '../../shell/relative';
+import { HelpText } from './help-hint';
 import { SettingsSectionKey } from './sections';
 import { SettingRow, SettingsCard } from './setting-row';
 import { updateWaitsFor } from './update-waits-for';
@@ -81,7 +82,14 @@ export function SelfUpdateSection() {
     <SettingsCard>
       <SettingRow
         label={SELF_UPDATE_SWITCH}
-        description={`When main has new commits and no task is mid-session, install its newest finished build and restart. Queued and waiting tasks carry on. It follows the repository this app was built from, whatever your projects are. ${running ?? ''}`.trim()}
+        description={`Installs main's newest build when no task is mid-session. ${running ?? ''}`.trim()}
+        help={
+          <HelpText>
+            When main has new commits and no task is mid-session, 10db installs its newest finished
+            build and restarts. Queued and waiting tasks carry on. It follows the repository this
+            app was built from, whatever your projects are.
+          </HelpText>
+        }
       >
         <Switch
           aria-label={SELF_UPDATE_SWITCH}
@@ -123,7 +131,14 @@ export function SelfUpdateSection() {
       {data !== undefined ? (
         <SettingRow
           label="Pause Lanes for a Waiting Update"
-          description="When a newer build has waited this many minutes for an idle moment, 10db stops starting new steps and lets the running ones finish, then installs and restarts. Nothing running is stopped. 0 pauses at once."
+          description="Minutes a waiting build may wait before lanes pause."
+          help={
+            <HelpText>
+              When a newer build has waited this many minutes for an idle moment, 10db stops
+              starting new steps and lets the running ones finish, then installs and restarts.
+              Nothing running is stopped. 0 pauses at once.
+            </HelpText>
+          }
         >
           <WaitLimit key={data.waitMinutes} minutes={data.waitMinutes} />
         </SettingRow>
@@ -150,6 +165,7 @@ export function SelfUpdateSection() {
           {canInstallNow ? (
             <Button
               variant="default"
+              size="xs"
               loading={installNow.isPending}
               onClick={() => {
                 installNow.mutate();
