@@ -4,7 +4,8 @@ import {
   type DecisionModelDto,
   type JudgeCallDto,
 } from '@10db/contracts';
-import { Select, Stack, Text } from '@mantine/core';
+import { ActionIcon, Select, Stack, Text, Title, Tooltip } from '@mantine/core';
+import { IconExternalLink } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 import { DataTable, type DataTableColumn, type DataTableSortStatus } from 'mantine-datatable';
 import { useState } from 'react';
@@ -84,6 +85,7 @@ export function RecentDecisions({
     head({
       accessor: 'decision',
       title: 'Decision',
+      noWrap: true,
       hidden: decision !== undefined,
       filtering: decisionFilter !== null,
       filter: (
@@ -110,14 +112,20 @@ export function RecentDecisions({
       noWrap: true,
       render: (call) => modelName(call.model, models),
     },
-    { accessor: 'answer', title: 'Answer (sure)', render: (call) => answerText(call) },
+    {
+      accessor: 'answer',
+      title: 'Answer (Sure)',
+      noWrap: true,
+      render: (call) => answerText(call),
+    },
     head({
       accessor: 'outcome',
-      title: 'What 10db did',
+      title: 'What 10db Did',
+      noWrap: true,
       filtering: outcome !== null,
       filter: (
         <Select
-          aria-label="What 10db did"
+          aria-label="What 10db Did"
           size="xs"
           w={240}
           allowDeselect={false}
@@ -135,13 +143,21 @@ export function RecentDecisions({
     {
       accessor: 'taskId',
       title: 'Task',
+      textAlign: 'center',
+      width: 64,
       render: (call) =>
         call.taskId === null ? null : (
-          <Text size="xs" component="span">
-            <Link to="/board" search={{ task: call.taskId }}>
-              Open on the Board
-            </Link>
-          </Text>
+          <Tooltip label="Open on the Board" withArrow>
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              size="sm"
+              aria-label="Open on the Board"
+              renderRoot={(props) => <Link {...props} to="/board" search={{ task: call.taskId }} />}
+            >
+              <IconExternalLink size={14} stroke={1.5} />
+            </ActionIcon>
+          </Tooltip>
         ),
     },
   ];
@@ -149,9 +165,7 @@ export function RecentDecisions({
   const filtered = decisionFilter !== null || outcome !== null;
   return (
     <Stack gap="xs">
-      <Text component="h5" fw={600} size="sm" m={0}>
-        Recent Decisions
-      </Text>
+      <Title order={decision === undefined ? 4 : 5}>Recent Decisions</Title>
       <DataTable<JudgeCallDto>
         aria-label={
           decision === undefined

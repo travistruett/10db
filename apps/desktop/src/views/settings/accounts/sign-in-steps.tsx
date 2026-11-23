@@ -44,16 +44,15 @@ function TerminalSteps({ account }: { readonly account: AccountDto }) {
             {({ copied, copy }) => (
               <Tooltip label={copied ? 'Copied' : 'Copy command'} withArrow>
                 <ActionIcon
-                  size="md"
                   variant="subtle"
                   color={copied ? 'green' : 'gray'}
                   aria-label={copied ? 'Copied' : 'Copy command'}
                   onClick={copy}
                 >
                   {copied ? (
-                    <IconCheck size={20} stroke={1.5} />
+                    <IconCheck size={16} stroke={1.5} />
                   ) : (
-                    <IconCopy size={20} stroke={1.5} />
+                    <IconCopy size={16} stroke={1.5} />
                   )}
                 </ActionIcon>
               </Tooltip>

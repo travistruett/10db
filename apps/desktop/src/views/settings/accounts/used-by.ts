@@ -46,6 +46,11 @@ export function usedByText(used: readonly string[]): string {
   return used.length === 0 ? 'Used by nothing' : `Used by: ${used.join(', ')}`;
 }
 
+/** The short form a table cell shows for `accountUsedBy`; the full list goes in a tooltip. */
+export function usedByCount(used: readonly string[]): string {
+  return used.length === 0 ? '—' : `${String(used.length)} ${used.length === 1 ? 'use' : 'uses'}`;
+}
+
 /** Billing's rule for an account select: a project's account must have a harness to run its sessions. */
 export function cantRunAgents(
   account: Pick<AccountDto, 'kind' | 'label' | 'settings'>,

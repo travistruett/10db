@@ -17,6 +17,7 @@ import {
   Stack,
   Table,
   Text,
+  Tooltip,
   UnstyledButton,
 } from '@mantine/core';
 import { IconPlus } from '@tabler/icons-react';
@@ -35,7 +36,7 @@ import { settingsSearch } from '../focus-target';
 import { MARK_OF_KIND, RowMarkIcon } from '../row-mark';
 import { ACCOUNT_STATUS_LABEL, AccountStatus, accountStatus } from './account-status';
 import { capShare, formatTokens, formatUsd } from './usage-text';
-import { accountUsedBy, harnessLine, usedByText } from './used-by';
+import { accountUsedBy, harnessLine, usedByCount, usedByText } from './used-by';
 
 /** The same tones Overview's account rows use: ready works, anything missing needs the builder, archived is off. */
 const STATUS_TONE: Readonly<Record<AccountStatus, ConnectionTone>> = {
@@ -44,6 +45,13 @@ const STATUS_TONE: Readonly<Record<AccountStatus, ConnectionTone>> = {
   [AccountStatus.NeedsSecret]: ConnectionTone.NeedsYou,
   [AccountStatus.Archived]: ConnectionTone.Off,
 };
+
+const NO_WRAP = { whiteSpace: 'nowrap' } as const;
+/** A badge is never cut to its first letters, as the Factory's state badges aren't. */
+const WHOLE_BADGE = {
+  style: { minWidth: 'max-content' },
+  styles: { label: { overflow: 'visible', textOverflow: 'clip' } },
+} as const;
 
 function UsageCell({ account }: { readonly account: AccountDto }) {
   const usage = useAccountUsage(account.id);
@@ -88,7 +96,7 @@ function AccountRow({
   return (
     <Table.Tr>
       <Table.Td>
-        <Stack gap={4}>
+        <Stack gap={2}>
           <Group gap="xs" wrap="nowrap">
             <RowMarkIcon mark={MARK_OF_KIND[account.kind]} />
             <UnstyledButton
@@ -97,37 +105,60 @@ function AccountRow({
                 onOpen(account);
               }}
             >
-              <Text size="sm" fw={500}>
+              <Text size="sm" fw={500} style={NO_WRAP}>
                 {account.label}
               </Text>
             </UnstyledButton>
             {account.isDefault ? (
-              <Badge size="sm" variant="light" color="gray">
+              <Badge size="sm" variant="light" color="gray" {...WHOLE_BADGE}>
                 Default
               </Badge>
             ) : null}
           </Group>
           {harnessOf(account) !== null && account.kind !== AccountKind.OpenRouter ? (
-            <Text size="xs" c="dimmed">
+            <Text size="xs" c="dimmed" style={NO_WRAP}>
               {account.expectedIdentity ?? 'No identity yet'}
             </Text>
           ) : null}
-          <Text size="xs" c="dimmed">
-            {usedByText(usedBy)}
-            {` · ${harnessLine(account)}`}
-          </Text>
-          <Text size="xs" c="dimmed">
-            {powersDecisions(account.kind)
-              ? 'Can answer decisions'
-              : `Can't answer decisions: ${PLAN_LOGIN_CANT_DECIDE}`}
-          </Text>
           {account.archived || harnessOf(account) === null ? null : (
             <AccountPause account={account} />
           )}
         </Stack>
       </Table.Td>
       <Table.Td>
-        <Text size="sm">{ACCOUNT_KIND_LABEL[account.kind]}</Text>
+        <Text size="sm" style={NO_WRAP}>
+          {ACCOUNT_KIND_LABEL[account.kind]}
+        </Text>
+        <Text size="xs" c="dimmed" style={NO_WRAP}>
+          {harnessOf(account) === null ? 'No harness yet' : harnessLine(account)}
+        </Text>
+      </Table.Td>
+      <Table.Td>
+        <Tooltip label={usedByText(usedBy)} multiline maw={320} withArrow>
+          <Text size="sm" {...(usedBy.length === 0 ? { c: 'dimmed' } : {})} style={NO_WRAP}>
+            {usedByCount(usedBy)}
+          </Text>
+        </Tooltip>
+      </Table.Td>
+      <Table.Td>
+        <Tooltip
+          label={
+            powersDecisions(account.kind)
+              ? 'Can answer decisions'
+              : `Can't answer decisions: ${PLAN_LOGIN_CANT_DECIDE}`
+          }
+          multiline
+          maw={320}
+          withArrow
+        >
+          <Text
+            size="sm"
+            {...(powersDecisions(account.kind) ? {} : { c: 'dimmed' })}
+            style={NO_WRAP}
+          >
+            {powersDecisions(account.kind) ? 'Yes' : 'No'}
+          </Text>
+        </Tooltip>
       </Table.Td>
       <Table.Td>
         <ConnectionStatus tone={STATUS_TONE[status]} label={ACCOUNT_STATUS_LABEL[status]} />
@@ -209,33 +240,37 @@ export function AccountsSection() {
           Add Account
         </Button>
       </Group>
-      {/* The account column takes the spare width; the rest are fixed, and usage sits right like any number. */}
-      <Table aria-label="Accounts" verticalSpacing="sm">
-        <Table.Thead>
-          <Table.Tr>
-            <Table.Th>Account</Table.Th>
-            <Table.Th w={220}>Kind</Table.Th>
-            <Table.Th w={140}>Status</Table.Th>
-            <Table.Th w={220} ta="right">
-              This Month
-            </Table.Th>
-          </Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
-          {live.map((a) => (
-            <AccountRow
-              key={a.id}
-              account={a}
-              usedBy={accountUsedBy(a, projects.data ?? [], judge.data)}
-              onOpen={(account) => {
-                returnToAdd.current = false;
-                setSelected(account.id);
-                setOpened(true);
-              }}
-            />
-          ))}
-        </Table.Tbody>
-      </Table>
+      {/* No column wraps: the table scrolls sideways before a name or status breaks. Usage sits right like any number. */}
+      <Table.ScrollContainer minWidth={860}>
+        <Table aria-label="Accounts" verticalSpacing="sm">
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Account</Table.Th>
+              <Table.Th>Kind</Table.Th>
+              <Table.Th>Used By</Table.Th>
+              <Table.Th>Decisions</Table.Th>
+              <Table.Th>Status</Table.Th>
+              <Table.Th w={200} ta="right">
+                This Month
+              </Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {live.map((a) => (
+              <AccountRow
+                key={a.id}
+                account={a}
+                usedBy={accountUsedBy(a, projects.data ?? [], judge.data)}
+                onOpen={(account) => {
+                  returnToAdd.current = false;
+                  setSelected(account.id);
+                  setOpened(true);
+                }}
+              />
+            ))}
+          </Table.Tbody>
+        </Table>
+      </Table.ScrollContainer>
       {archived.length > 0 ? <ArchivedList accounts={archived} /> : null}
       <AddAccountModal
         opened={adding}
