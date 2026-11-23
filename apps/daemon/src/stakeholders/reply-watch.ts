@@ -152,6 +152,8 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
   async function identity(client: SlackClient): Promise<string> {
     if (botUserId !== null) return botUserId;
     const found = await client.authTest();
+    // A token for another team than this watch's is a refusal; no bot is recorded on this team's entry.
+    if (found.teamId !== teamId) throw new SlackError('auth.test', 'invalid_auth');
     botUserId = found.botUserId;
     // A check never recovers: a bot that changed under a saved token was recorded with that token.
     state.write((ctx) => {
@@ -579,8 +581,8 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
     },
     async reconnect() {
       // A tick in flight read with the old token; its outcome must not overwrite this check's.
+      inFlight = inFlight.then(() => check(slack));
       await inFlight;
-      await check(slack);
       // A watch made for a new workspace starts reading here.
       if (!running && !stopped) {
         running = true;

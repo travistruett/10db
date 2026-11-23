@@ -42,9 +42,10 @@ function world() {
   const clock = new ManualClock();
   const { store, close } = createTestStore(() => clock.now());
   closers.push(close);
-  const state = createStateStore(store, createEventBus());
+  const bus = createEventBus();
+  const state = createStateStore(store, bus);
   const keychain = createMemoryKeychain();
-  return { clock, state, store, keychain };
+  return { clock, state, store, keychain, bus };
 }
 
 const withContact = (handle: string, teamId: string) => ({
@@ -196,6 +197,29 @@ describe('Slack sign-ins by workspace', () => {
     );
     expect(w.keychain.read(slackBotAccount('T-A'))).toBe('xoxb-a');
     expect(readSlackWorkspaces(w.state.db)).toEqual(before);
+  });
+
+  it('Disconnect removes only that workspace and announces it so the Inbox refreshes', async () => {
+    const w = world();
+    const slack = fakeSlack({
+      'xoxb-a': { teamId: 'T-A', teamName: 'Alpha', botUserId: 'UA' },
+      'xoxb-b': { teamId: 'T-B', teamName: 'Beta', botUserId: 'UB' },
+    });
+    const api = services(w, slack.fetch);
+    await api.setSlackToken({ token: 'xoxb-a' });
+    await api.setSlackToken({ token: 'xoxb-b' });
+    const events: string[] = [];
+    w.bus.subscribe((e) => {
+      events.push(`${e.type}:${e.entityId}`);
+    });
+
+    const left = await api.removeSlackWorkspace('T-A');
+
+    expect(left.workspaces.map((x) => x.teamId)).toEqual(['T-B']);
+    expect(w.keychain.read(slackBotAccount('T-A'))).toBeNull();
+    expect(w.keychain.read(slackBotAccount('T-B'))).toBe('xoxb-b');
+    expect(events).toContain('slack.connection.changed:T-A');
+    await expect(api.removeSlackWorkspace('T-A')).rejects.toThrow('not signed in');
   });
 
   it('a token from a new bot clears that workspace only and returns its sent questions to the builder', async () => {

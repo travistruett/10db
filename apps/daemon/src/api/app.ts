@@ -1615,7 +1615,9 @@ export function createApp(deps: ApiDeps) {
       async (c) => c.json(await deps.services.setSlackToken(c.req.valid('json'))),
     )
     .delete('/slack/workspaces/:teamId', async (c) =>
-      c.json(await deps.services.removeSlackWorkspace(c.req.param('teamId'))),
+      c.json(
+        await deps.services.removeSlackWorkspace(z.string().min(1).parse(c.req.param('teamId'))),
+      ),
     )
     .get('/projects/:projectId/integrations', async (c) =>
       c.json(await deps.services.projectIntegrations(ProjectId.parse(c.req.param('projectId')))),

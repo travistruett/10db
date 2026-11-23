@@ -1,5 +1,7 @@
 import {
   ConflictError,
+  EventType,
+  SlackWorkspaceState,
   InvalidError,
   type ProjectId,
   type ProjectIntegrationsDto,
@@ -198,12 +200,21 @@ export function createStakeholderApiServices(deps: {
     },
 
     async removeSlackWorkspace(teamId) {
+      if (!readSlackWorkspaces(deps.state.db).some((w) => w.teamId === teamId))
+        throw new ConflictError('That Slack workspace is not signed in');
       // Contacts and project bindings stay: the workspace can be signed in again.
       await keychainConflict(() => {
         deps.keychain.remove(slackBotAccount(teamId));
       });
       deps.state.write((ctx) => {
         removeSlackWorkspace(ctx, teamId);
+        // Its sent cards leave Waiting: the Inbox refreshes on this event.
+        ctx.emit({
+          type: EventType.SlackConnectionChanged,
+          entityType: 'slack',
+          entityId: teamId,
+          data: { state: SlackWorkspaceState.None },
+        });
       });
       members.delete(teamId);
       deps.connections.drop(teamId);
