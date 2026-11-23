@@ -2508,6 +2508,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     linear: (projectId) => {
       linearReporter.setSettings(projectId, { ...reporterSettings(db, projectId), on: true });
     },
+    // Figma has no per-project switch: the builder starts every send from a mock-up.
+    figma: () => undefined,
   };
   const connector = createServiceConnector({
     state,

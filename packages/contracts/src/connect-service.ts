@@ -2,12 +2,13 @@ import { z } from 'zod';
 import { ProjectId } from './ids';
 
 /** The services Connect can set up for a project's account: an MCP server added, approved and signed in. */
-export const ConnectableService = z.enum(['linear']);
+export const ConnectableService = z.enum(['linear', 'figma']);
 export type ConnectableService = z.infer<typeof ConnectableService>;
 
 /** What the builder reads on each service's button. */
 export const CONNECTABLE_SERVICE_LABELS: Readonly<Record<ConnectableService, string>> = {
   linear: 'Linear',
+  figma: 'Figma',
 };
 
 /** `POST /settings/connect/:service`: the project whose account is connected. */

@@ -13,6 +13,7 @@ import { listAccounts } from '@10db/db';
 import type { McpSignIns } from '../accounts';
 import type { StateStore } from '../events';
 import type { YourMcpPlan } from '../session-setup';
+import { harnessReadsServer } from './connect-service';
 
 const FIGMA_HOST = 'mcp.figma.com';
 
@@ -57,21 +58,33 @@ export function createFigmaSignIns(deps: {
       const figma = Object.entries(deps.plan().remote).filter(([, remote]) =>
         isFigmaServer(remote.url),
       );
-      const servers = figma.map(([name]) => name);
+      /** The Figma servers an account's agent reads: Claude Code's file and plugins, or Codex's file. */
+      const serversOf = (harness: Provider): string[] =>
+        figma.filter(([, remote]) => harnessReadsServer(harness, remote.key)).map(([name]) => name);
       // Only a plugin's server carries a Claude name of its own (`plugin:<plugin>:<server>`).
-      const serverNote = figma.every(([, remote]) => remote.claudeName !== null)
-        ? VIA_PLUGIN
-        : VIA_SERVER;
+      const noteOf = (harness: Provider): string =>
+        figma
+          .filter(([, remote]) => harnessReadsServer(harness, remote.key))
+          .every(([, remote]) => remote.claudeName !== null)
+          ? VIA_PLUGIN
+          : VIA_SERVER;
       const accounts = listAccounts(deps.state.db).flatMap((account) => {
         const harness = harnessOf(account);
         return harness === null ? [] : [{ ...account, harness }];
       });
       const codexRows =
-        servers.length > 0 && accounts.some((a) => a.harness === Provider.Codex)
+        serversOf(Provider.Codex).length > 0 && accounts.some((a) => a.harness === Provider.Codex)
           ? (await deps.mcpSignIns.list()).rows
           : [];
       const rows = accounts.map((account): FigmaSignInRowDto => {
-        const base = { accountId: account.id, accountLabel: account.label, unchecked: false };
+        const servers = serversOf(account.harness);
+        const serverNote = noteOf(account.harness);
+        const base = {
+          accountId: account.id,
+          accountLabel: account.label,
+          unchecked: false,
+          serverKey: null,
+        };
         if (account.harness === Provider.Codex) {
           const own = codexRows.filter(
             (r) => r.accountId === account.id && servers.includes(r.name),
@@ -84,6 +97,7 @@ export function createFigmaSignIns(deps: {
             via: FigmaVia.Server,
             signedIn,
             note: signedIn ? VIA_CODEX : NOT_SIGNED_IN_CODEX,
+            serverKey: own[0]?.key ?? null,
           };
         }
         if (account.kind === AccountKind.ClaudeSubscription) {
