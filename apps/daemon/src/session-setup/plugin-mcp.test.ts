@@ -31,4 +31,14 @@ describe('readPluginMcp', () => {
     write('.mcp.json', { mcpServers: { gh: { command: 'x', args: ['--k=${TOKEN}'] } } });
     expect(read()[0]?.refusal).toContain('Its argument 1 uses ${…}');
   });
+
+  it('a plugin’s remote server keeps 10db’s name and is registered with Claude under Claude Code’s', () => {
+    write('.mcp.json', {
+      mcpServers: { figma: { type: 'http', url: 'https://mcp.figma.com/mcp' } },
+    });
+    expect(read('figma@claude-plugins-official')[0]).toMatchObject({
+      name: 'plugin_figma_figma',
+      claudeName: 'plugin:figma:figma',
+    });
+  });
 });

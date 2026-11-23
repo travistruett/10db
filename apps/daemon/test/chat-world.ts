@@ -348,6 +348,7 @@ export function chatWorld(
               yourMcpServers: {
                 docs: {
                   connect: { type: 'http', url: 'https://docs.example/mcp', headers: null },
+                  claudeName: null,
                   claudeOAuth: null,
                   codex: {
                     enabledTools: null,

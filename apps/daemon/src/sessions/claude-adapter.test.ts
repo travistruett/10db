@@ -56,8 +56,11 @@ function keyedSpec(): LaneSessionSpec {
 function fakeQuery(
   messages: readonly SDKMessage[],
   account: AccountInfo,
-): { query: QueryFn; inputs: SDKUserMessage[] } {
+  /** The server names the builder's sign-ins are filed under; any other remote server needs a sign-in. */
+  signedIn: readonly string[] = [],
+): { query: QueryFn; inputs: SDKUserMessage[]; registered: string[] } {
   const inputs: SDKUserMessage[] = [];
+  const registered: string[] = [];
   const query: QueryFn = ({ prompt, options }) => {
     let inputDone: () => void = () => undefined;
     const inputEnded = new Promise<void>((resolve) => {
@@ -86,15 +89,23 @@ function fakeQuery(
     return Object.assign(stream(), {
       interrupt: () => Promise.resolve(undefined),
       accountInfo: () => Promise.resolve(account),
-      setMcpServers: (servers: Record<string, McpServerConfig>) =>
-        Promise.resolve({ added: Object.keys(servers), removed: [], errors: {} }),
+      setMcpServers: (servers: Record<string, McpServerConfig>) => {
+        registered.push(...Object.keys(servers));
+        return Promise.resolve({ added: Object.keys(servers), removed: [], errors: {} });
+      },
       supportedModels: () => Promise.resolve([]),
-      mcpServerStatus: () => Promise.resolve([]),
+      mcpServerStatus: () =>
+        Promise.resolve(
+          registered.map((name) => ({
+            name,
+            status: name === '10db' || signedIn.includes(name) ? 'connected' : 'needs-auth',
+          })),
+        ),
       getContextUsage: () =>
         Promise.resolve({ totalTokens: 30_000, maxTokens: 200_000, percentage: 15 }),
     }) as unknown as Query;
   };
-  return { query, inputs };
+  return { query, inputs, registered };
 }
 
 describe('the account check', () => {
@@ -121,5 +132,58 @@ describe('the account check', () => {
       refusal: { problem: 'wrong_credentials' },
     });
     expect(fake.inputs).toEqual([]);
+  });
+});
+
+describe("the builder's plugin servers", () => {
+  it("registers a plugin's remote server under Claude Code's name, where its sign-in is filed", async () => {
+    const fake = fakeQuery(
+      [initMessage()],
+      { apiProvider: 'firstParty', subscriptionType: 'Claude Max', email: 'builder@example.com' },
+      ['plugin:figma:figma'],
+    );
+    const adapter = createClaudeAdapter({
+      claudePath: '/usr/local/bin/claude',
+      pluginDir: '/harness',
+      logger: silentLogger,
+      query: fake.query,
+      allowUnsandboxed: true,
+      stopGraceMs: 1_000,
+      signInCheck: () => Promise.resolve('signed_in'),
+    });
+    const spec: LaneSessionSpec = {
+      ...keyedSpec(),
+      account: { ...keyedSpec().account, kind: 'claude_subscription', label: 'Claude plan' },
+      yourMcpServers: {
+        plugin_figma_figma: {
+          connect: {
+            type: 'http',
+            url: 'https://mcp.figma.com/mcp',
+            headers: { 'X-Figma-Plugin-Bundle': 'figma_prod@2_2_211' },
+          },
+          claudeName: 'plugin:figma:figma',
+          claudeOAuth: null,
+          codex: {
+            enabledTools: null,
+            disabledTools: [],
+            startupTimeoutSec: null,
+            toolTimeoutSec: null,
+          },
+        },
+      },
+    };
+    const session = adapter.open(spec);
+    const events: SessionEvent[] = [];
+    const drained = (async () => {
+      for await (const event of session.events) events.push(event);
+    })();
+    const deadline = Date.now() + 5_000;
+    while (fake.inputs.length === 0 && Date.now() < deadline)
+      await new Promise((resolve) => setImmediate(resolve));
+    await session.stop();
+    await drained;
+    expect(fake.registered).toContain('plugin:figma:figma');
+    expect(fake.registered).not.toContain('plugin_figma_figma');
+    expect(JSON.stringify(fake.inputs[0]?.message)).not.toContain("isn't signed in");
   });
 });

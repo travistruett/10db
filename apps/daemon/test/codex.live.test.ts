@@ -657,6 +657,7 @@ function yourSessionServers(
       name,
       {
         connect,
+        claudeName: null,
         claudeOAuth: null,
         codex: {
           enabledTools: null,
@@ -1192,6 +1193,7 @@ describe.skipIf(!live)(
       const launch = launcher.session(world.account, MODEL, []);
       const remote = {
         connect: { type: 'http' as const, url: server.url, headers: null },
+        claudeName: null,
         claudeOAuth: null,
         codex: {
           enabledTools: null,

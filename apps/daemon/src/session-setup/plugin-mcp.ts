@@ -8,7 +8,7 @@ import {
   type YourMcpEntry,
 } from './your-mcp-entry';
 import { yourMcpConfigHash } from './your-mcp-hash';
-import { yourMcpName } from './your-mcp-name';
+import { claudePluginServerName, yourMcpName } from './your-mcp-name';
 
 /** An installed plugin whose servers are read. */
 export interface PluginToRead {
@@ -84,8 +84,9 @@ function declaredServers(installPath: string): Record<string, unknown> {
 }
 
 /**
- * A plugin's MCP servers as entries. Each is named as Claude Code names it, `plugin_<plugin>_<server>`, so
- * the builder's instructions that name a tool still match. A plugin is the builder's own install, so its
+ * A plugin's MCP servers as entries. Each is named `plugin_<plugin>_<server>`, so the builder's instructions
+ * that name a tool still match, and a Claude session registers it as Claude Code does (`claudeName`), where
+ * the builder's sign-in is filed. A plugin is the builder's own install, so its
  * servers need no approval, but they take the same refusals as the builder's files and run through 10db's
  * launch, never as a checkout's.
  */
@@ -108,6 +109,7 @@ export function readPluginMcp(
       {
         key: yourMcpServerKey(YourMcpSource.Plugin, 'all', plugin.id),
         name: yourMcpName(plugin.id, '').replace(/_$/, ''),
+        claudeName: null,
         source: YourMcpSource.Plugin,
         pluginId: plugin.id,
         declared: null,
@@ -138,6 +140,11 @@ export function readPluginMcp(
     entries.push({
       key: yourMcpServerKey(YourMcpSource.Plugin, serverName, plugin.id),
       name,
+      // Only a remote server signs in, so only it is registered under Claude Code's name.
+      claudeName:
+        declared === null || declared.transport === 'stdio'
+          ? null
+          : claudePluginServerName(plugin.id, serverName),
       source: YourMcpSource.Plugin,
       pluginId: plugin.id,
       declared,

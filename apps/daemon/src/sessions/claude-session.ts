@@ -220,6 +220,15 @@ function toSdkConnector(connector: ClaudeConnector): McpServerConfig {
   return entry as McpServerConfig;
 }
 
+/** The builder's servers by the name Claude registers each under, to 10db's name for it. */
+function registeredYourNames(
+  servers: Readonly<Record<string, YourSessionServer>>,
+): Map<string, string> {
+  return new Map(
+    Object.entries(servers).map(([name, server]) => [server.claudeName ?? name, name]),
+  );
+}
+
 /**
  * The repo's approved servers, then the builder's own, then the claude.ai connectors, then 10db's, keyed by
  * name. 10db's is written last, so it keeps its name. `connectors` is what `connectorsForSession` kept.
@@ -236,7 +245,10 @@ export function buildMcpServers(
       ]),
     ),
     ...Object.fromEntries(
-      Object.entries(spec.yourMcpServers).map(([name, server]) => [name, toYourSdkServer(server)]),
+      Object.entries(spec.yourMcpServers).map(([name, server]) => [
+        server.claudeName ?? name,
+        toYourSdkServer(server),
+      ]),
     ),
     ...Object.fromEntries(
       connectors.map((connector) => [connector.name, toSdkConnector(connector)]),
@@ -1008,7 +1020,7 @@ function startSession(
       } else {
         connectors = connectorsForSession(read, [
           ...Object.keys(spec.projectMcpServers),
-          ...Object.keys(spec.yourMcpServers),
+          ...registeredYourNames(spec.yourMcpServers).keys(),
           CLAUDE_MCP_SERVER,
         ]);
       }
@@ -1034,12 +1046,16 @@ function startSession(
       resolvePreflight(false);
       return;
     }
-    const yourNames = Object.keys(spec.yourMcpServers);
+    // Claude names the builder's servers as they were registered; notes and logs use 10db's names.
+    const registered = registeredYourNames(spec.yourMcpServers);
+    const yourNames = [...registered.values()];
     const repoLeftOut = leftOut.filter(
       (name) =>
-        name !== CLAUDE_MCP_SERVER && !yourNames.includes(name) && !connectorNames.includes(name),
+        name !== CLAUDE_MCP_SERVER && !registered.has(name) && !connectorNames.includes(name),
     );
-    const yourFailed = yourNames.filter((name) => leftOut.includes(name));
+    const yourFailed = [...registered]
+      .filter(([claudeName]) => leftOut.includes(claudeName))
+      .map(([, name]) => name);
     const yourNeedAuth: string[] = [];
     const connectorsNeedAuth: string[] = [];
     if (yourNames.length > 0 || connectorNames.length > 0) {
@@ -1050,9 +1066,10 @@ function startSession(
           if (server.status === 'needs-auth') connectorsNeedAuth.push(server.name);
           continue;
         }
-        if (!yourNames.includes(server.name) || yourFailed.includes(server.name)) continue;
-        if (server.status === 'needs-auth') yourNeedAuth.push(server.name);
-        else if (server.status === 'failed') yourFailed.push(server.name);
+        const name = registered.get(server.name);
+        if (name === undefined || yourFailed.includes(name)) continue;
+        if (server.status === 'needs-auth') yourNeedAuth.push(name);
+        else if (server.status === 'failed') yourFailed.push(name);
       }
       if (halted()) {
         resolvePreflight(false);

@@ -24,14 +24,15 @@ export function claudeTakeoverMcp(spec: Servers): {
 } {
   const servers: Record<string, unknown> = {};
   const leftOut: string[] = [];
-  const take = (name: string, entry: () => unknown): void => {
-    if (McpServerName.safeParse(name).success) servers[name] = entry();
+  const take = (name: string, entry: () => unknown, registeredAs: string = name): void => {
+    if (McpServerName.safeParse(name).success) servers[registeredAs] = entry();
     else leftOut.push(name);
   };
   for (const [name, server] of Object.entries(spec.projectMcpServers))
     take(name, () => toSdkMcpServer(server));
+  // A plugin's server goes in under Claude Code's own name, where the builder's sign-in is filed.
   for (const [name, server] of Object.entries(spec.yourMcpServers))
-    take(name, () => toYourSdkServer(server));
+    take(name, () => toYourSdkServer(server), server.claudeName ?? name);
   return { servers, leftOut };
 }
 

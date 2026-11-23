@@ -157,6 +157,7 @@ function makeReporter(): LinearReporter {
           yourMcpServers: {
             linear: {
               connect: { type: 'http', url: 'https://mcp.linear.app/mcp', headers: null },
+              claudeName: null,
               claudeOAuth: null,
               codex: {
                 enabledTools: null,
