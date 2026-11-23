@@ -1,5 +1,6 @@
 import { ProjectId } from '@10db/contracts';
 import {
+  ActionIcon,
   Box,
   Button,
   Combobox,
@@ -10,8 +11,8 @@ import {
   useCombobox,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { IconAdjustments, IconCheck, IconChevronDown, IconPlus } from '@tabler/icons-react';
-import { Link } from '@tanstack/react-router';
+import { IconChevronDown, IconPlus, IconSettings } from '@tabler/icons-react';
+import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { NewProjectModal } from './new-project-modal';
 import { ProjectTile } from './project-tile';
@@ -26,8 +27,8 @@ const tildePath = (path: string) => path.replace(/^\/Users\/[^/]+/u, '~');
 
 /**
  * The current project, switched from the rail: a row with its tile and name below the rail's labels, or just the
- * tile when the rail is icons only. The dropdown lists the projects and leads to Project Settings and
- * "New Project"; it opens below the row, or to the tile's right.
+ * tile when the rail is icons only. The dropdown lists the projects, the current one tinted, each with a gear that
+ * opens its settings (switching to it first), and "New Project"; it opens below the row, or to the tile's right.
  */
 export function ProjectSwitcher() {
   const { projects, project, select } = useSelectedProject();
@@ -35,6 +36,7 @@ export function ProjectSwitcher() {
   const { labels } = useRailMode();
   const [search, setSearch] = useState('');
   const [creating, creator] = useDisclosure(false);
+  const navigate = useNavigate();
   const combobox = useCombobox({
     onDropdownClose: () => {
       combobox.resetSelectedOption();
@@ -112,7 +114,12 @@ export function ProjectSwitcher() {
               <Combobox.Empty>No project matches</Combobox.Empty>
             ) : (
               shown.map((p) => (
-                <Combobox.Option value={p.id} key={p.id} active={p.id === project?.id}>
+                <Combobox.Option
+                  value={p.id}
+                  key={p.id}
+                  active={p.id === project?.id}
+                  className={classes['projectOption']}
+                >
                   <Group gap="sm" wrap="nowrap">
                     <ProjectTile name={p.name} />
                     <Box flex={1} miw={0}>
@@ -123,35 +130,38 @@ export function ProjectSwitcher() {
                         {tildePath(p.repoPath)}
                       </Text>
                     </Box>
-                    {p.id === project?.id ? <IconCheck size={16} stroke={1.5} /> : null}
+                    <ActionIcon
+                      component="span"
+                      role="button"
+                      variant="subtle"
+                      color="gray"
+                      aria-label={`${p.name} settings`}
+                      className={classes['projectGear']}
+                      // The option selects on mouse down; the gear opens settings instead.
+                      onMouseDown={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                      }}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        combobox.closeDropdown();
+                        guard.attempt(() => {
+                          if (p.id !== project?.id) select(p.id);
+                          void navigate({
+                            to: '/settings/$section',
+                            params: { section: SettingsSectionKey.General },
+                          });
+                        });
+                      }}
+                    >
+                      <IconSettings size={16} stroke={1.5} />
+                    </ActionIcon>
                   </Group>
                 </Combobox.Option>
               ))
             )}
           </Combobox.Options>
           <Combobox.Footer p="sm">
-            <Button
-              renderRoot={(props) => (
-                <Link
-                  {...props}
-                  to="/settings/$section"
-                  params={{ section: SettingsSectionKey.General }}
-                />
-              )}
-              variant="subtle"
-              color="gray"
-              c="var(--mantine-color-text)"
-              size="sm"
-              fullWidth
-              justify="flex-start"
-              mb={4}
-              leftSection={<IconAdjustments size={14} stroke={1.5} />}
-              onClick={() => {
-                combobox.closeDropdown();
-              }}
-            >
-              Project Settings
-            </Button>
             <Button
               variant="default"
               size="sm"
