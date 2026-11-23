@@ -61,7 +61,7 @@ export interface SkippedCardDeps {
 function clearedBy(kind: SkipKind): string {
   switch (kind) {
     case SkipKind.DockerOff:
-      return 'turn Docker on in Settings › Project';
+      return 'turn Docker on in Settings › Sandbox';
     case SkipKind.SecretRead:
       return 'turn on Agents may read .env files';
     case SkipKind.UnreadHazard:

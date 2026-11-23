@@ -1,17 +1,43 @@
 import type { ProjectDto } from '@10db/contracts';
-import { Group, Stack, Switch, Textarea, TextInput } from '@mantine/core';
-import { SaveBar } from '../../shell/save-bar';
+import { Button, Group, Stack, Switch, Textarea, TextInput } from '@mantine/core';
+import { Link } from '@tanstack/react-router';
+import { useWorkbenchSetup } from '../../daemon/pass-queries';
+import { CountBadge } from '../../shell/count-badge';
+import { setUpCount } from '../workbench/setup/setup-rules';
 import { PicturesStatus } from './pictures-status';
 import { MONO_INPUT, useProjectFields } from './project-fields-state';
 import { ScreensMatrixField } from './screens-matrix-field';
+import { ProjectSaveBar } from './project-save-bar';
 import { SettingRow, SettingsCard } from './setting-row';
+
+/** Opens the Workbench setup, badged with how many suggestions it holds. */
+function ReviewSuggestions({ project }: { readonly project: ProjectDto }) {
+  const setup = useWorkbenchSetup(project.id);
+  const count = setup.data === undefined ? 0 : setUpCount(setup.data, project.leftOutPages);
+  return (
+    <Button
+      variant="default"
+      rightSection={count === 0 ? null : <CountBadge count={count} />}
+      renderRoot={(props) => <Link {...props} to="/workbench" search={{ setup: true }} />}
+    >
+      Review Suggestions
+    </Button>
+  );
+}
 
 /** Where the app runs and how pictures of its pages are taken, saved as one patch of what changed. */
 export function ProjectPagesForm({ project }: { readonly project: ProjectDto }) {
-  const { values, errors, note, set, save, reset, saving, saveError } = useProjectFields(project);
+  const fields = useProjectFields(project, [
+    'appUrl',
+    'previewCommand',
+    'devLoginCommand',
+    'screens',
+    'prPictures',
+  ]);
+  const { values, errors, set } = fields;
   return (
     <Stack gap="xl">
-      <SettingsCard title="Your App">
+      <SettingsCard title="Your App" action={<ReviewSuggestions project={project} />}>
         <SettingRow
           label="App Address"
           description="Where your dev server answers."
@@ -96,7 +122,7 @@ export function ProjectPagesForm({ project }: { readonly project: ProjectDto }) 
         </SettingRow>
       </SettingsCard>
 
-      <SaveBar error={saveError} note={note} saving={saving} onReset={reset} onSave={save} />
+      <ProjectSaveBar fields={fields} />
     </Stack>
   );
 }

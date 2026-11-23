@@ -42,7 +42,7 @@ import type { AddressProbe } from './loopback-probe';
 // object store, never HEAD or the checkout, which a lane can write; besides that, one look at what
 // listens on this Mac and one probe of each likely address. Nothing of the repository runs.
 
-/** Shown with the Allow Docker suggestion, as Settings › General says it. */
+/** Shown with the Allow Docker suggestion, as Settings › Sandbox says it. */
 export const DOCKER_NOTE =
   'Docker can mount any host folder into a container, so a gate or task with Docker can reach outside the sandbox.';
 

@@ -1,8 +1,8 @@
 import type { ProjectDto } from '@10db/contracts';
 import { Group, Stack, Switch, Textarea } from '@mantine/core';
-import { SaveBar } from '../../shell/save-bar';
 import { NetworkHostsSection } from './network-hosts-section';
 import { MONO_INPUT, useProjectFields } from './project-fields-state';
+import { ProjectSaveBar } from './project-save-bar';
 import { SettingRow, SettingsCard } from './setting-row';
 
 /**
@@ -10,7 +10,8 @@ import { SettingRow, SettingsCard } from './setting-row';
  * the hosts they may reach, which save as each is added or removed.
  */
 export function SandboxSection({ project }: { readonly project: ProjectDto }) {
-  const { values, errors, note, set, save, reset, saving, saveError } = useProjectFields(project);
+  const fields = useProjectFields(project, ['sandboxLoopback', 'sandboxDocker', 'allowedCommands']);
+  const { values, errors, set } = fields;
   return (
     <Stack gap="xl">
       <SettingsCard title="Permissions">
@@ -67,7 +68,7 @@ export function SandboxSection({ project }: { readonly project: ProjectDto }) {
 
       <NetworkHostsSection project={project} />
 
-      <SaveBar error={saveError} note={note} saving={saving} onReset={reset} onSave={save} />
+      <ProjectSaveBar fields={fields} />
     </Stack>
   );
 }

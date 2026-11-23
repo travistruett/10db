@@ -616,7 +616,7 @@ export interface ApiServices extends PlanRecordServices {
   taskDesignCheck(taskId: TaskId): TaskDesignCheckDto;
   /** A design check's mock-up picture, or one of its page shots by position; NotFoundError when none. */
   designCheckPicture(checkId: DesignCheckId, part: 'mockup' | number): Uint8Array<ArrayBuffer>;
-  /** Settings › General: the browser for pictures and the project's last sign-in. */
+  /** Settings › Pages and Pictures: the browser for pictures and the project's last sign-in. */
   picturesStatus(projectId: ProjectId): PicturesStatusDto;
   /** Restart Preview: runs the project's preview command again, its restarts forgotten. */
   restartPreview(projectId: ProjectId): Promise<void>;

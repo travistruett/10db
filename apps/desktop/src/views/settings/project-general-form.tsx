@@ -1,7 +1,7 @@
 import { Delivery, ProjectLanding, WorkspaceMode, type ProjectDto } from '@10db/contracts';
 import { NumberInput, SegmentedControl, Select, Stack, TagsInput, TextInput } from '@mantine/core';
-import { SaveBar } from '../../shell/save-bar';
 import { asNumber, MONO_INPUT, useProjectFields } from './project-fields-state';
+import { ProjectSaveBar } from './project-save-bar';
 import { SettingRow, SettingsCard } from './setting-row';
 
 /** Said under the default, whichever it is: the default moves no task and needs no idle project. */
@@ -17,7 +17,25 @@ const landingChoice = (value: string): ProjectLanding =>
 
 /** The project's name, checks, delivery and how many tasks run at once: saved as one patch of what changed. */
 export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }) {
-  const { values, errors, note, set, save, reset, saving, saveError } = useProjectFields(project);
+  const fields = useProjectFields(project, [
+    'name',
+    'gateCommand',
+    'changedCheckCommand',
+    'precheckCommand',
+    'maxLanes',
+    'handoffPct',
+    'nudgePct',
+    'humanWaitMinutes',
+    'delivery',
+    'baseBranch',
+    'landing',
+    'landingBranch',
+    'prTitlePrefix',
+    'workspaceMode',
+    'worktreeSeed',
+    'isolate',
+  ]);
+  const { values, errors, set } = fields;
   const pullRequests = values.delivery === Delivery.PullRequest;
   // checkGeneral checks the pull-request fields whatever the delivery, so one with an error stays shown.
   const showPrFields =
@@ -336,7 +354,7 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         </SettingRow>
       </SettingsCard>
 
-      <SaveBar error={saveError} note={note} saving={saving} onReset={reset} onSave={save} />
+      <ProjectSaveBar fields={fields} />
     </Stack>
   );
 }

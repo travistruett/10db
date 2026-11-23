@@ -140,7 +140,7 @@ function closeFinished(before: PassDto | null, after: PassDto | null): PassDto |
 export function WorkbenchScreen(props: WorkbenchScreenProps) {
   const { project, live, start, tasks, inbox, search, goalPages, now, newPages } = props;
   const { onSelect, renderWorkspace, actions } = props;
-  const [dialog, setDialog] = useState<Dialog>(null);
+  const [dialog, setDialog] = useState<Dialog>(search.setup === true ? 'setup' : null);
   // The live pass last read, and the one whose close finished while it was on screen, which the picker
   // confirms in a line until another pass opens.
   const [lastPass, setLastPass] = useState<PassDto | null>(null);

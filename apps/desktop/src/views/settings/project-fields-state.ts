@@ -1,5 +1,6 @@
 import type { ProjectDto } from '@10db/contracts';
 import { useEffect, useRef, useState } from 'react';
+import { FIELD_HOMES } from './general-field-homes';
 import { useDaemon } from '../../daemon/provider';
 import { usePatchProject } from '../../daemon/queries';
 import {
@@ -88,12 +89,14 @@ function daemonPortOf(url: string): number | null {
 /** Monospace for the typed value only; `ff` on an input would set its label in monospace too. */
 export const MONO_INPUT = { input: { fontFamily: 'var(--mantine-font-family-monospace)' } };
 
+const isGeneralField = (name: string): name is keyof GeneralValues => name in FIELD_HOMES;
+
 /**
  * A page's typed settings, held as one set of values and saved as one patch of what changed. Every page
  * holds the full set but shows only its own fields; a field it does not show stays at the project's value
  * and adds nothing to the patch.
  */
-export function useProjectFields(project: ProjectDto) {
+export function useProjectFields(project: ProjectDto, shown: readonly (keyof GeneralValues)[]) {
   const patch = usePatchProject(project.id);
   const { connection } = useDaemon();
   const [values, setValues] = useState<GeneralValues>(() => generalValues(project));
@@ -150,9 +153,17 @@ export function useProjectFields(project: ProjectDto) {
     setNote(null);
   }
 
+  // A field the page does not show can still fail a check; Save then needs to say where it is.
+  const hiddenField = Object.keys(errors).find(
+    (name): name is keyof GeneralValues => isGeneralField(name) && !shown.includes(name),
+  );
+  const dirty = JSON.stringify(values) !== JSON.stringify(generalValues(project));
+
   return {
     values,
     errors,
+    dirty,
+    hiddenField: hiddenField ?? null,
     note,
     set,
     save,
