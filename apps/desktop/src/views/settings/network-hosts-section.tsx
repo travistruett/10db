@@ -1,7 +1,7 @@
 import type { FoundHostDto, ProjectDto, ProjectId } from '@10db/contracts';
 import { Button, Divider, Group, List, Paper, Stack, Text, TextInput, Title } from '@mantine/core';
 import { IconWorld } from '@tabler/icons-react';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import { EmptyState } from '../../shell/empty-state';
 import {
   useAllowNetworkHost,
@@ -82,7 +82,6 @@ export function NetworkHostsSection({ project }: { readonly project: ProjectDto 
   const remove = useRemoveNetworkHost(project.id);
   const scan = useScanNetworkHosts(project.id);
   const [host, setHost] = useState('');
-  const hostInput = useRef<HTMLInputElement>(null);
   const list = hosts.data ?? [];
 
   function add() {
@@ -117,7 +116,6 @@ export function NetworkHostsSection({ project }: { readonly project: ProjectDto 
           >
             <Group align="flex-start" gap="xs" wrap="nowrap">
               <TextInput
-                ref={hostInput}
                 aria-label="Host"
                 placeholder="index.crates.io or *.crates.io"
                 w={260}
@@ -142,16 +140,7 @@ export function NetworkHostsSection({ project }: { readonly project: ProjectDto 
             Couldn't load the hosts: {hosts.error.message}
           </Text>
         ) : hosts.isSuccess && list.length === 0 ? (
-          <EmptyState
-            icon={IconWorld}
-            title="No Hosts Allowed Yet"
-            action={{
-              label: 'Add a Host',
-              onClick: () => {
-                hostInput.current?.focus();
-              },
-            }}
-          >
+          <EmptyState icon={IconWorld} title="No Hosts Allowed Yet">
             Tasks and checks reach only the hosts you allow.
           </EmptyState>
         ) : (
