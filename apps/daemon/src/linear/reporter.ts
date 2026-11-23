@@ -224,7 +224,11 @@ export function createLinearReporter(
     }
     // An unchecked row is a maybe (after a restart) and goes ahead.
     if (row?.via === LinearVia.None && !row.unchecked) {
-      fail(due, row.note ?? "This account's agent has no Linear.");
+      fail(
+        due,
+        row.note ??
+          "This account's agent has no Linear. Connect Linear under Settings › Integrations.",
+      );
       refreshCard(task.projectId);
       arm(taskId);
       return;

@@ -25,7 +25,7 @@ export function KindBadge({ kind }: { readonly kind: PrincipleKind }) {
   );
 }
 
-/** A row's text, which opens where the record came from: the keyboard's way to what a row click does. */
+/** A row's text, which opens the record: the keyboard's way to what a row click does. */
 export function OpenRecordText({
   label,
   children,
@@ -38,15 +38,15 @@ export function OpenRecordText({
 }) {
   return (
     <UnstyledButton
-      aria-label={`Where ${label} came from`}
+      aria-label={`Open ${label}`}
       onClick={(event) => {
         // The row's own click does the same; one opening is enough.
         event.stopPropagation();
         onOpen();
       }}
-      style={{ textAlign: 'left' }}
+      style={{ textAlign: 'left', display: 'block', width: '100%' }}
     >
-      <Text size="sm">{children}</Text>
+      {children}
     </UnstyledButton>
   );
 }
@@ -83,6 +83,7 @@ export function KnowledgeTable<T>({
   onSort,
   paging,
   empty,
+  openId,
 }: {
   readonly label: string;
   readonly storeKey: string;
@@ -95,6 +96,8 @@ export function KnowledgeTable<T>({
   /** The daemon's page; without one the table lists every record it is given. */
   readonly paging?: TablePage;
   readonly empty: ReactNode;
+  /** The record open in the drawer, whose row stays marked. */
+  readonly openId?: string | null;
 }) {
   const { effectiveColumns, columnsToggle, setColumnsToggle } = useDataTableColumns<T>({
     key: storeKey,
@@ -153,8 +156,18 @@ export function KnowledgeTable<T>({
             onRowClick: ({ record }: { record: T }) => {
               onOpen(record);
             },
+            // A press on another row opens that record instead of closing the open one's drawer.
+            customRowAttributes: () => ({ 'data-keeps-drawer': '' }),
           }
         : {})}
+      {...(openId === undefined
+        ? {}
+        : {
+            rowStyle: (record: T) =>
+              idOf(record) === openId
+                ? { background: 'var(--mantine-color-default-hover)' }
+                : undefined,
+          })}
       {...pagerProps(paging, PAGE_SIZES)}
     />
   );

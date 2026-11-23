@@ -13,13 +13,11 @@ import { listAccounts } from '@10db/db';
 import type { McpSignIns } from '../accounts';
 import type { StateStore } from '../events';
 import type { YourMcpPlan } from '../session-setup';
+import { harnessReadsServer } from './connect-service';
 
 const LINEAR_HOST = 'mcp.linear.app';
 
-/** What to tell the builder when an account has no Linear, by the provider table of the Linear design. */
-const HINT_CLAUDE_PLAN = 'Sign in to Linear in Claude Code: `/mcp`.';
-const HINT_CLAUDE_OTHER = "Add Linear's server to Claude Code, then `/mcp`.";
-const HINT_CODEX = 'Sign in in Settings › Trust.';
+/** A row the Connect Linear button settles has no note; only a row 10db can't read says why. */
 const NOT_CHECKED = 'Your Linear sign-in is checked when the agent first uses it.';
 const NOT_READ = "Couldn't read this account's claude.ai connectors.";
 
@@ -50,31 +48,43 @@ export function createLinearSignIns(deps: {
 }): { list(): Promise<LinearSignInsDto> } {
   return {
     async list() {
-      const servers = Object.entries(deps.plan().remote)
-        .filter(([, remote]) => isLinearServer(remote.url))
-        .map(([name]) => name);
+      const linear = Object.entries(deps.plan().remote).filter(([, remote]) =>
+        isLinearServer(remote.url),
+      );
+      /** The Linear servers an account's agent reads: Claude Code's file and plugins, or Codex's file. */
+      const serversOf = (harness: Provider): string[] =>
+        linear
+          .filter(([, remote]) => harnessReadsServer(harness, remote.key))
+          .map(([name]) => name);
       const accounts = listAccounts(deps.state.db).flatMap((account) => {
         const harness = harnessOf(account);
         return harness === null ? [] : [{ ...account, harness }];
       });
       const codexRows =
-        servers.length > 0 && accounts.some((a) => a.harness === Provider.Codex)
+        serversOf(Provider.Codex).length > 0 && accounts.some((a) => a.harness === Provider.Codex)
           ? (await deps.mcpSignIns.list()).rows
           : [];
       const rows = accounts.map((account): LinearSignInRowDto => {
-        const base = { accountId: account.id, accountLabel: account.label, unchecked: false };
+        const servers = serversOf(account.harness);
+        const base = {
+          accountId: account.id,
+          accountLabel: account.label,
+          unchecked: false,
+          serverKey: null,
+        };
         if (account.harness === Provider.Codex) {
           const own = codexRows.filter(
             (r) => r.accountId === account.id && servers.includes(r.name),
           );
+          // With no Linear server configured or approved, there is nothing to sign in to yet.
           if (own.length === 0)
-            return { ...base, via: LinearVia.None, signedIn: null, note: HINT_CODEX };
-          const signedIn = own.some((r) => r.state === McpSignInState.SignedIn);
+            return { ...base, via: LinearVia.None, signedIn: null, note: null, serverKey: null };
           return {
             ...base,
             via: LinearVia.Server,
-            signedIn,
-            note: signedIn ? null : HINT_CODEX,
+            signedIn: own.some((r) => r.state === McpSignInState.SignedIn),
+            note: null,
+            serverKey: own[0]?.key ?? null,
           };
         }
         if (account.kind === AccountKind.ClaudeSubscription) {
@@ -83,8 +93,7 @@ export function createLinearSignIns(deps: {
             return { ...base, via: LinearVia.Connector, signedIn: null, note: null };
           if (servers.length > 0)
             return { ...base, via: LinearVia.Server, signedIn: null, note: null };
-          const note =
-            names === undefined ? NOT_CHECKED : names === null ? NOT_READ : HINT_CLAUDE_PLAN;
+          const note = names === undefined ? NOT_CHECKED : names === null ? NOT_READ : null;
           return {
             ...base,
             via: LinearVia.None,
@@ -95,7 +104,7 @@ export function createLinearSignIns(deps: {
         }
         return servers.length > 0
           ? { ...base, via: LinearVia.Server, signedIn: null, note: null }
-          : { ...base, via: LinearVia.None, signedIn: null, note: HINT_CLAUDE_OTHER };
+          : { ...base, via: LinearVia.None, signedIn: null, note: null };
       });
       return { rows };
     },

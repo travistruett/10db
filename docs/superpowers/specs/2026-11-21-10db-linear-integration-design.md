@@ -120,11 +120,15 @@ The Linear side runs through MCP. Connectors from claude.ai exist only on a Clau
 (`docs/superpowers/plans/2026-11-14-10db-oauth-mcp-servers.md:44`, `:80-83`); elsewhere Linear is a server
 entry the builder configures.
 
-| Account | Linear reached through | Tools look like | Signed out: the card says |
+| Account | Linear reached through | Tools look like | Signed out: the project's row shows |
 |---|---|---|---|
-| Claude plan | the claude.ai Linear connector, or an `mcp.linear.app` entry in Claude Code's config | `mcp__claude_ai_Linear__*` or `mcp__<entry>__*` | "Sign in to Linear in Claude Code: `/mcp`." |
-| Claude API key or Bedrock | an `mcp.linear.app` entry in Claude Code's config, signed in with `/mcp` | `mcp__<entry>__*` | "Add Linear's server to Claude Code, then `/mcp`." |
-| ChatGPT/Codex plan | `codex mcp add` for `mcp.linear.app` | the entry's tools | "Sign in in Settings › Trust." |
+| Claude plan | the claude.ai Linear connector, or an `mcp.linear.app` entry in Claude Code's config | `mcp__claude_ai_Linear__*` or `mcp__<entry>__*` | Connect Linear: the daemon adds the entry with the pinned Claude Code (`mcp add --transport http --scope user`) and approves it; the builder finishes with `/mcp` in Claude Code. |
+| Claude API key or Bedrock | an `mcp.linear.app` entry in Claude Code's config, signed in with `/mcp` | `mcp__<entry>__*` | The same Connect Linear and the same `/mcp`. |
+| ChatGPT/Codex plan | an `mcp.linear.app` entry in `~/.codex/config.toml` | the entry's tools | Connect Linear does everything: the pinned Codex adds the entry (`mcp add linear --url`), 10db approves it and opens the account's OAuth sign-in in the browser. |
+
+Connect Linear is one click per project (`POST /settings/connect/linear`, a table of connectable services in
+`apps/daemon/src/daemon/connect-service.ts`); a step that already holds is skipped. It turns Update Linear Issues
+on for the project once Linear works, and leaves the account's other projects' switches off.
 
 - The guard knows a tool is Linear's by its server: the claude.ai connector by name, a configured entry by its
   URL's host, `mcp.linear.app`. The plan confirms how each provider names them.

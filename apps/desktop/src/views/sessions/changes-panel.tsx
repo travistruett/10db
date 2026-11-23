@@ -141,7 +141,11 @@ export function ChangesPanel({ changes, pullRequest, onQuote }: ChangesPanelProp
           {data === undefined ? '' : `against ${data.baseHead.slice(0, 7)}`}
         </Text>
       </Group>
-      <ScrollArea style={{ flex: 1, minHeight: 0 }}>
+      <ScrollArea
+        style={{ flex: 1, minHeight: 0 }}
+        // The keyboard reaches the list even when it holds only text, as while it loads.
+        viewportProps={{ tabIndex: 0, role: 'group', 'aria-label': 'Changes' }}
+      >
         {changes.isPending ? (
           <Text size="sm" c="dimmed" role="status">
             Reading the changes…

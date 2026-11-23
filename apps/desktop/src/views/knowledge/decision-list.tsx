@@ -46,12 +46,15 @@ export function DecisionList({
   controls,
   onTrace,
   actions,
+  openId,
 }: {
   readonly filter: KnowledgeFilter;
   readonly controls: ListControls;
   readonly onTrace: (record: TracedRecord) => void;
   /** The row's menu. */
   readonly actions: (decision: DecisionItem) => ReactNode;
+  /** The record open in the drawer. */
+  readonly openId: string | null;
 }) {
   const [sort, setSort] = useState<DataTableSortStatus<DecisionItem> | null>(null);
   const past = controls.shelf === KnowledgeShelf.Past;
@@ -78,22 +81,21 @@ export function DecisionList({
       filtering: firstColumnFiltering(controls),
       filter: <ShelfSearchFilter controls={controls} />,
       render: (d) => (
-        <Stack gap={4}>
-          <OpenRecordText
-            label={d.question}
-            onOpen={() => {
-              open(d);
-            }}
-          >
-            {d.question}
-          </OpenRecordText>
-          <Text size="sm" fw={500}>
-            {d.choice}
-          </Text>
-          <Text size="xs" c="dimmed" lineClamp={2}>
-            {d.rationale}
-          </Text>
-        </Stack>
+        <OpenRecordText
+          label={`${d.question} → ${d.choice}`}
+          onOpen={() => {
+            open(d);
+          }}
+        >
+          <Stack component="span" gap={2}>
+            <Text component="span" size="sm" lineClamp={1}>
+              {d.question}
+            </Text>
+            <Text component="span" size="xs" c="dimmed" lineClamp={1}>
+              {d.choice}
+            </Text>
+          </Stack>
+        </OpenRecordText>
       ),
     },
     {
@@ -145,6 +147,7 @@ export function DecisionList({
         records={rows}
         columns={columns}
         idOf={(d) => d.id}
+        openId={openId}
         onOpen={open}
         sort={sort ?? NEWEST}
         onSort={setSort}

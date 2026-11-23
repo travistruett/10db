@@ -104,6 +104,7 @@ export function stubServices(overrides: Partial<ApiServices> = {}): ApiServices 
     approveYourMcpServer: none,
     mcpSignIns: none,
     linearSignIns: none,
+    connectService: none,
     figmaSignIns: none,
     startMcpSignIn: none,
     projectTrust: none,

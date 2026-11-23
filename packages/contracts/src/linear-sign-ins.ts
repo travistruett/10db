@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AccountId } from './ids';
+import { YourMcpServerKey } from './your-mcp';
 
 /** How an account reaches Linear: a claude.ai connector, a server of the builder's, or not at all. */
 export const LinearVia = { Connector: 'connector', Server: 'server', None: 'none' } as const;
@@ -13,6 +14,8 @@ export const LinearSignInRowDto = z.strictObject({
   /** The server's sign-in state when `via` is `server`; null when it is not read. */
   signedIn: z.boolean().nullable(),
   note: z.string().nullable(),
+  /** A Codex account's Linear server, for reading its sign-in under Settings › Trust; null where there is none. */
+  serverKey: YourMcpServerKey.nullable(),
   /** True when the account's connectors were not read (or the read failed): `none` is then a maybe, not a no. */
   unchecked: z.boolean(),
 });

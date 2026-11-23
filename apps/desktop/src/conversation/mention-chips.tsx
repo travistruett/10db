@@ -13,7 +13,10 @@ export function MentionChips({
       {paths.length === 0 ? null : (
         <Group gap={4} pt={6} aria-label="Mentioned files">
           {paths.map((path) => (
-            <Code key={path}>{path}</Code>
+            // A long path wraps rather than scrolls, so the chip never becomes a scroll box.
+            <Code key={path} style={{ whiteSpace: 'normal', overflowWrap: 'anywhere' }}>
+              {path}
+            </Code>
           ))}
         </Group>
       )}

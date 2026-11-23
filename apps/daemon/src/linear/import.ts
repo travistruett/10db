@@ -28,7 +28,10 @@ export function createLinearImport(deps: {
     const accountId = getProject(deps.state.db, projectId).accountId;
     const row = (await deps.signIns.list()).rows.find((r) => r.accountId === accountId);
     if (row?.via === LinearVia.None && !row.unchecked)
-      throw new ConflictError(row.note ?? "This project's account has no Linear sign-in.");
+      throw new ConflictError(
+        row.note ??
+          "This project's account has no Linear sign-in. Connect Linear under Settings › Integrations.",
+      );
   };
 
   return {

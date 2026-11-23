@@ -28,6 +28,7 @@ import {
   type ProjectDto,
   type AccountId,
   type Effort,
+  type ConnectableService,
   type ProjectId,
   type ShapeId,
   type SystemCheckDto,
@@ -114,8 +115,10 @@ import {
   dismissReporterPosts,
   reporterConversations,
   reporterHooks,
+  reporterSettings,
   subscribeLinearEvents,
 } from '../linear';
+import { createServiceConnector } from './connect-service';
 import { createLinearSignIns } from './linear-sign-ins';
 import { createFigmaSignIns } from './figma-sign-ins';
 import { createReporterLaunch } from './reporter-launch';
@@ -2455,7 +2458,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       deliver: (taskId, messageId, how) => createdRunner.deliverMessage(taskId, messageId, how),
     },
   });
-  const { appMcpPlan, ...trust } = createTrustServices({
+  const { appMcpPlan, projectMcpServers, ...trust } = createTrustServices({
     state,
     builderHome,
     laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
@@ -2499,6 +2502,25 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     conversations: reporterConversations(state),
     signIns: linearSignIns,
     inbox,
+  });
+  /** Each service's own next step once it works for a project. Linear: the project reports to it. */
+  const whenConnectedWorks: Record<ConnectableService, (projectId: ProjectId) => void> = {
+    linear: (projectId) => {
+      linearReporter.setSettings(projectId, { ...reporterSettings(db, projectId), on: true });
+    },
+  };
+  const connector = createServiceConnector({
+    state,
+    mcp: projectMcpServers,
+    bus,
+    whenWorks: (service, projectId) => {
+      whenConnectedWorks[service](projectId);
+    },
+    approve: (input) => trust.approveYourMcpServer(input),
+    mcpSignIns,
+    agents: () => opts.agents ?? null,
+    loginEnv: () => launcher.projectEnv(),
+    builderHome,
   });
   exploreEngine.register(
     ConversationOwnerKind.Reporter,
@@ -2605,6 +2627,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     trust,
     mcpSignIns,
     linearSignIns,
+    connector,
     figmaSignIns,
     judge: createJudgeServices({
       state,
@@ -2628,7 +2651,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       reconnect: () => replyWatch.reconnect(),
       githubLogin: () => Promise.resolve(github.cachedLogin()),
       linear: linearImport,
-      reporter: linearReporter,
+      reporter: {
+        // Turning updates off also drops a Connect still waiting on a sign-in, which would turn them back on.
+        setSettings: (projectId, input) => {
+          if (!input.on) connector.forget('linear', projectId);
+          linearReporter.setSettings(projectId, input);
+        },
+      },
     }),
     shape: createShapeServices({
       shape,
