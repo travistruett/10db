@@ -63,26 +63,33 @@ export function formatDecisionUsd(usd: number): string {
   return USD.format(usd);
 }
 
-const plural = (n: number, noun: string): string => `${String(n)} ${noun}${n === 1 ? '' : 's'}`;
+/** A decision's last 30 days as table cells: its calls, what came of them, and what they cost. */
+export interface ThirtyDayCells {
+  readonly calls: string;
+  /** How many it acted on, or for a shadow decision how far its scoring has got. */
+  readonly outcome: string;
+  readonly cost: string;
+}
 
 export function lastThirtyDays(
   stats: DecisionStatsDto | undefined,
   mode: DecisionMode,
   agreement: ShadowAgreementDto | undefined,
-): string {
-  if (stats === undefined) return '—';
-  const calls = stats.calls === 0 ? 'No calls' : plural(stats.calls, 'call');
+): ThirtyDayCells {
+  const none = { calls: '—', outcome: '—', cost: '—' };
+  if (stats === undefined) return none;
+  const calls = String(stats.calls);
+  const cost = stats.calls === 0 ? '—' : formatDecisionUsd(stats.costUsd);
   if (mode === DecisionMode.Shadow) {
     // Without the agreement read, nothing is known about how many are scored.
-    if (agreement === undefined) return `${calls} · —`;
-    const progress =
+    if (agreement === undefined) return { calls, outcome: '—', cost };
+    const outcome =
       agreement.scored >= SHADOW_MIN_SCORED
         ? `${String(agreement.agreed)} of ${String(agreement.scored)} agreed`
         : `${String(agreement.scored)} of ${String(SHADOW_MIN_SCORED)} scored`;
-    return `${calls} · ${progress}`;
+    return { calls, outcome, cost };
   }
-  if (stats.calls === 0) return calls;
-  return `${calls} · ${String(stats.acted)} acted · ${formatDecisionUsd(stats.costUsd)}`;
+  return { calls, outcome: stats.calls === 0 ? '—' : `${String(stats.acted)} acted`, cost };
 }
 
 export interface ThresholdPreview {

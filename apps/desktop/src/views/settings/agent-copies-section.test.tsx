@@ -30,11 +30,9 @@ describe('Settings › Updates agents', () => {
       ...baseHandlers(),
     );
     renderApp('/settings/updates');
-    const section = await screen.findByRole('region', { name: 'Claude Code and Codex' });
+    const section = await screen.findByRole('region', { name: 'Harnesses' });
     expect(within(section).getByText('Claude Code')).toBeTruthy();
-    expect(
-      within(section).getByText(/Runs 2\.1\.302, the release 10db is verified on\./),
-    ).toBeTruthy();
-    expect(within(section).getByText(/2\.1\.319 is out\./)).toBeTruthy();
+    expect(within(section).getByText('2.1.302')).toBeTruthy();
+    expect(within(section).getByText('2.1.319 Out')).toBeTruthy();
   });
 });

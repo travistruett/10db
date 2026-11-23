@@ -3,7 +3,18 @@ import {
   SELF_UPDATE_SWITCH,
   type SelfUpdateStatusDto,
 } from '@10db/contracts';
-import { Anchor, Button, NumberInput, Switch, Text } from '@mantine/core';
+import {
+  ActionIcon,
+  Anchor,
+  Button,
+  Group,
+  HoverCard,
+  NumberInput,
+  Stack,
+  Switch,
+  Text,
+} from '@mantine/core';
+import { IconAlertCircle } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
 import {
@@ -91,43 +102,53 @@ export function SelfUpdateSection() {
           </HelpText>
         }
       >
-        <Switch
-          aria-label={SELF_UPDATE_SWITCH}
-          checked={data?.enabled ?? false}
-          disabled={data === undefined || set.isPending}
-          onChange={(event) => {
-            set.mutate(event.currentTarget.checked);
-          }}
-        />
-      </SettingRow>
-      {blocker !== null ? (
-        <Text
-          size="sm"
-          c="red"
-          px="md"
-          py="sm"
-          role="alert"
-          aria-label="Why 10db will not update itself"
-        >
-          {blocker.message}
-        </Text>
-      ) : null}
-      {blocker?.message.includes(SIGN_IN_SENTENCE) ? (
-        <Anchor
-          size="sm"
-          px="md"
-          renderRoot={(props) => (
-            <Link
-              {...props}
-              to="/settings/$section"
-              params={{ section: SettingsSectionKey.Integrations }}
-              search={{ focus: 'github' }}
-            />
+        <Group justify="flex-end" gap="xs" wrap="nowrap">
+          {blocker === null ? null : (
+            <HoverCard width={300} position="bottom-end" withArrow shadow="md">
+              <HoverCard.Target>
+                <ActionIcon
+                  variant="subtle"
+                  color="red"
+                  aria-label="Why 10db will not update itself"
+                >
+                  <IconAlertCircle size={18} />
+                </ActionIcon>
+              </HoverCard.Target>
+              <HoverCard.Dropdown>
+                <Stack gap="xs">
+                  <Text size="sm" role="alert">
+                    {blocker.message}
+                  </Text>
+                  {blocker.message.includes(SIGN_IN_SENTENCE) ? (
+                    <Anchor
+                      size="sm"
+                      renderRoot={(props) => (
+                        <Link
+                          {...props}
+                          to="/settings/$section"
+                          params={{ section: SettingsSectionKey.Integrations }}
+                          search={{ focus: 'github' }}
+                        />
+                      )}
+                    >
+                      Open Integrations
+                    </Anchor>
+                  ) : null}
+                </Stack>
+              </HoverCard.Dropdown>
+            </HoverCard>
           )}
-        >
-          Open Integrations
-        </Anchor>
-      ) : null}
+          <Switch
+            aria-label={SELF_UPDATE_SWITCH}
+            checked={data?.enabled ?? false}
+            // A blocked update can't run whatever the switch says, so the switch waits for the blocker to go.
+            disabled={data === undefined || set.isPending || blocker !== null}
+            onChange={(event) => {
+              set.mutate(event.currentTarget.checked);
+            }}
+          />
+        </Group>
+      </SettingRow>
       {data !== undefined ? (
         <SettingRow
           label="Pause Lanes for a Waiting Update"

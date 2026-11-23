@@ -33,9 +33,12 @@ const STATUS_BADGE = {
 export function StatusMark({
   text,
   keyed,
+  brief = false,
 }: {
   readonly text: DecisionStatus;
   readonly keyed: boolean;
+  /** In a list under the page's own all-off switch, all off reads as plain Off. */
+  readonly brief?: boolean;
 }) {
   const allOff = text === DecisionStatus.AllOff;
   return (
@@ -45,7 +48,7 @@ export function StatusMark({
         style={{ minWidth: 'max-content' }}
         styles={{ label: { overflow: 'visible', textOverflow: 'clip' } }}
       >
-        {text}
+        {brief && allOff ? DecisionStatus.Off : text}
       </Badge>
       {keyed || allOff ? null : (
         <Text size="xs" c="dimmed">
@@ -57,7 +60,8 @@ export function StatusMark({
 }
 
 /**
- * Every decision under its group, with its status, model, Sure Enough and last 30 days. A row, or Enter on
+ * Every decision under its group heading, with its status, model, Sure Enough, and its last 30 days in three
+ * columns (calls, outcome, cost). A row, or Enter on
  * its name, opens the decision. The master switch and the daemon's kill switch both read as all off.
  */
 export function DecisionsTable({
@@ -82,6 +86,12 @@ export function DecisionsTable({
     { kind: 'group', id: `group:${group}`, label: DECISION_GROUP_LABEL[group] },
     ...decisions.map((decision): Row => ({ kind: 'decision', id: decision, decision })),
   ]);
+  const thirty = (d: AskedDecision) =>
+    lastThirtyDays(
+      statsFor(stats, d),
+      DECISIONS[d].mode,
+      shadow?.find((a) => a.decision === d),
+    );
   const ofDecision = (row: Row, then: (d: AskedDecision) => React.ReactNode) =>
     row.kind === 'decision' ? then(row.decision) : null;
   const columns: DataTableColumn<Row>[] = [
@@ -111,7 +121,7 @@ export function DecisionsTable({
       render: (row: Row) =>
         ofDecision(row, (d) => {
           const text = decisionStatus(DECISIONS[d].mode, config.decisions[d].enabled, allOn);
-          return <StatusMark text={text} keyed={keyed} />;
+          return <StatusMark text={text} keyed={keyed} brief />;
         }),
     },
     {
@@ -128,17 +138,24 @@ export function DecisionsTable({
         ofDecision(row, (d) => `${String(Math.round(config.decisions[d].floor * 100))}%`),
     },
     {
-      accessor: 'last30',
-      title: 'Last 30 Days',
+      accessor: 'calls',
+      title: 'Calls (30d)',
+      textAlign: 'right',
       noWrap: true,
-      render: (row) =>
-        ofDecision(row, (d) =>
-          lastThirtyDays(
-            statsFor(stats, d),
-            DECISIONS[d].mode,
-            shadow?.find((a) => a.decision === d),
-          ),
-        ),
+      render: (row) => ofDecision(row, (d) => thirty(d).calls),
+    },
+    {
+      accessor: 'outcome',
+      title: 'Outcome',
+      noWrap: true,
+      render: (row) => ofDecision(row, (d) => thirty(d).outcome),
+    },
+    {
+      accessor: 'cost',
+      title: 'Cost',
+      textAlign: 'right',
+      noWrap: true,
+      render: (row) => ofDecision(row, (d) => thirty(d).cost),
     },
   ];
   return (
@@ -150,14 +167,14 @@ export function DecisionsTable({
       withTableBorder
       borderRadius="md"
       verticalSpacing="xs"
-      horizontalSpacing="md"
+      horizontalSpacing="sm"
       highlightOnHover
       onRowClick={({ record }) => {
         if (record.kind === 'decision') onOpen(record.decision);
       }}
       rowStyle={(record) =>
         record.kind === 'group'
-          ? { background: 'var(--mantine-color-body)', cursor: 'default' }
+          ? { background: 'var(--mantine-color-default-hover)', cursor: 'default' }
           : { cursor: 'pointer' }
       }
       rowFactory={({ record, rowProps, children }) =>
@@ -166,12 +183,11 @@ export function DecisionsTable({
             <Table.Th
               scope="rowgroup"
               colSpan={columns.length}
-              py={4}
-              fz="xs"
-              fw={600}
-              c="dimmed"
-              tt="uppercase"
-              bg="var(--mantine-color-body)"
+              pt="sm"
+              pb={4}
+              fz="sm"
+              fw={700}
+              bg="var(--mantine-color-default-hover)"
             >
               {record.label}
             </Table.Th>
