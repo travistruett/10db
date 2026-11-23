@@ -362,12 +362,26 @@ export function SlackCard() {
       {data && !off && workspaces.length === 0 ? <SetupSteps adding={false} /> : null}
       {data && !off && workspaces.length > 0 ? (
         adding ? (
-          <SetupSteps
-            adding
-            onConnected={() => {
-              setAdding(false);
-            }}
-          />
+          <Stack gap="xs">
+            <SetupSteps
+              adding
+              onConnected={() => {
+                setAdding(false);
+              }}
+            />
+            <Group>
+              <Button
+                size="xs"
+                variant="subtle"
+                color="gray"
+                onClick={() => {
+                  setAdding(false);
+                }}
+              >
+                Cancel
+              </Button>
+            </Group>
+          </Stack>
         ) : (
           <Group>
             <Button

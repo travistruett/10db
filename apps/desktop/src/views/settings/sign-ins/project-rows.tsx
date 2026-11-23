@@ -85,8 +85,11 @@ export function SlackProjectRow({ project }: { readonly project: ProjectDto }) {
               if (value === null) return;
               const teamId = value === SLACK_OFF ? null : value;
               if (teamId === slack.teamId) return;
-              if (slack.out > 0) setAsked({ teamId });
-              else change(teamId);
+              // Decided on a fresh count: a question may have gone out since the page last read it.
+              void integrations.refetch().then((fresh) => {
+                if ((fresh.data?.slack.out ?? slack.out) > 0) setAsked({ teamId });
+                else change(teamId);
+              });
             }}
           />
         )
@@ -110,7 +113,7 @@ export function SlackProjectRow({ project }: { readonly project: ProjectDto }) {
         }}
       >
         {slack?.out ?? 0} {slack?.out === 1 ? 'question' : 'questions'} out in{' '}
-        {slack?.teamName ?? 'its'}'s Slack come back to you.
+        {slack?.teamName == null ? 'Slack' : `${slack.teamName}'s Slack`} come back to you.
       </ConfirmModal>
     </ProjectRow>
   );

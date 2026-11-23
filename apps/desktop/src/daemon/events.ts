@@ -153,7 +153,8 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // and every count is read again.
   slack: [SLACK_KEY, queryKeys.inbox, ['inbox-rows']],
   stakeholder_timers: [TIMERS_KEY],
-  stakeholder_send: [queryKeys.inbox, ['workstreams'], goalKeys.all],
+  // A send going out or coming back changes how many questions a project has out, which its Slack Select reads.
+  stakeholder_send: [queryKeys.inbox, ['workstreams'], goalKeys.all, PROJECT_INTEGRATIONS_KEY],
   // The Models page lists profiles and what each account offers.
   model_profile: [CANDIDATES, modelKeys.all],
   account_models: [modelKeys.all],
