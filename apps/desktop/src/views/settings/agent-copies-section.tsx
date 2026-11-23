@@ -1,11 +1,11 @@
 import { AgentCopyState, ToolName, type AgentCopy } from '@10db/contracts';
-import { Group, Stack, Text, Title } from '@mantine/core';
+import { Badge, Box, Group, Stack, Text, Title, Tooltip } from '@mantine/core';
 import { useId } from 'react';
 import { useSystemCheck } from '../../daemon/queries';
 import { HelpHint, HelpText } from './help-hint';
-import { SettingRow, SettingsCard } from './setting-row';
+import { SettingsCard } from './setting-row';
 
-const TITLE = 'Claude Code and Codex';
+const TITLE = 'Harnesses';
 
 /** Where the copy stands, when it is not simply ready; a refused one has its card in the Inbox. */
 function stateNote(agent: AgentCopy): string | null {
@@ -19,10 +19,23 @@ function stateNote(agent: AgentCopy): string | null {
   }
 }
 
+function VersionBadge({ label, color }: { readonly label: string; readonly color: string }) {
+  return (
+    <Badge
+      variant="light"
+      color={color}
+      style={{ minWidth: 'max-content' }}
+      styles={{ label: { overflow: 'visible', textOverflow: 'clip' } }}
+    >
+      {label}
+    </Badge>
+  );
+}
+
 /**
- * The release of Claude Code and Codex 10db runs, and a newer one when it is out. Nothing here asks the
- * builder to act: 10db doesn't move its pin by itself, and a 10db update that has passed the live test on
- * the newer release moves it.
+ * The release of Claude Code and Codex 10db runs, and a newer one when it is out: one row each, the pinned
+ * version on the right with a badge. Nothing here asks the builder to act: 10db doesn't move its pin by itself,
+ * and a 10db update that has passed the live test on the newer release moves it.
  */
 export function AgentCopiesSection() {
   const check = useSystemCheck().data;
@@ -35,41 +48,51 @@ export function AgentCopiesSection() {
     <Stack gap="xs" role="region" aria-labelledby={titleId}>
       <Stack gap={2}>
         <Group gap={4} wrap="nowrap">
-          <Title order={5} id={titleId}>
+          <Title order={4} id={titleId}>
             {TITLE}
           </Title>
           <HelpHint label={TITLE}>
             <HelpText>
-              Nothing here needs you: 10db doesn't move its pin by itself. A 10db update that has
-              passed its live test on a newer release moves it.
+              10db runs each agent on the release it has tested. A newer release reaches you in a
+              10db update, once 10db has passed its live test on it; nothing here needs you.
             </HelpText>
           </HelpHint>
         </Group>
         <Text size="xs" c="dimmed">
-          The releases 10db runs, and a newer one when it is out.
+          The Claude Code and Codex releases 10db runs your sessions on.
         </Text>
       </Stack>
       <SettingsCard>
         {agents.map((agent) => {
           const newer = agent.newerRelease;
-          const lines = [
-            `Runs ${agent.pinned}, the release 10db is verified on.`,
-            newer === null ? null : `${newer} is out.`,
-            stateNote(agent),
-            warningOf(agent),
-          ].filter((line) => line !== null);
+          const notes = [stateNote(agent), warningOf(agent)].filter((line) => line !== null);
           return (
-            <SettingRow
-              key={agent.tool}
-              label={agent.label}
-              description={
-                <Text size="sm" c="dimmed" component="span">
-                  {lines.join(' ')}
+            <Box key={agent.tool} px="md" py="sm">
+              <Group justify="space-between" wrap="nowrap" gap="md">
+                <Text size="sm" fw={500}>
+                  {agent.label}
                 </Text>
-              }
-            >
-              <span />
-            </SettingRow>
+                <Group gap="sm" wrap="nowrap">
+                  <Text size="sm" ff="monospace">
+                    {agent.pinned}
+                  </Text>
+                  {newer === null ? (
+                    <VersionBadge label="Latest" color="teal" />
+                  ) : (
+                    <Tooltip label="Comes with a 10db update once 10db is tested on it" withArrow>
+                      <span>
+                        <VersionBadge label={`${newer} Out`} color="gray" />
+                      </span>
+                    </Tooltip>
+                  )}
+                </Group>
+              </Group>
+              {notes.length === 0 ? null : (
+                <Text size="xs" c="dimmed">
+                  {notes.join(' ')}
+                </Text>
+              )}
+            </Box>
           );
         })}
       </SettingsCard>

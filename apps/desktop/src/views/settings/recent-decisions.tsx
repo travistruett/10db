@@ -50,8 +50,8 @@ const NEWEST_FIRST: DataTableSortStatus<JudgeCallDto> = {
 const noSort = (): void => undefined;
 
 /**
- * The judge's calls, newest first, in a fixed-height table the daemon pages and filters by decision and
- * outcome. With a `decision`, the table is that decision's own and has no Decision column.
+ * The judge's calls, newest first, in a table as tall as its page of rows (the page scrolls, not the table),
+ * which the daemon pages and filters by decision and outcome. With a `decision`, the table is that decision's own and has no Decision column.
  */
 export function RecentDecisions({
   decision,
@@ -176,7 +176,6 @@ export function RecentDecisions({
         fetching={page.isPending}
         columns={columns}
         idAccessor="id"
-        maxHeight={420}
         withTableBorder
         borderRadius="md"
         verticalSpacing="sm"
