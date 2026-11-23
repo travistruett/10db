@@ -195,3 +195,18 @@
     0 0 0 2px var(--mantine-color-default),
     0 0 0 3px var(--mantine-color-default-border);
 }
+
+/* The switcher's current project is tinted; a row's gear shows on the current one and on hover. */
+.projectOption[data-combobox-active] {
+  background: var(--mantine-color-default-hover);
+}
+
+.projectGear {
+  opacity: 0;
+}
+
+.projectOption:hover .projectGear,
+.projectOption[data-combobox-active] .projectGear,
+.projectGear:focus-visible {
+  opacity: 1;
+}

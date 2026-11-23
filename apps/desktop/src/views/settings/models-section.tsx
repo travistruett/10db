@@ -1,13 +1,4 @@
-import {
-  ActionIcon,
-  Button,
-  Group,
-  Paper,
-  SegmentedControl,
-  Stack,
-  Text,
-  Tooltip,
-} from '@mantine/core';
+import { ActionIcon, Button, Group, SegmentedControl, Stack, Text, Tooltip } from '@mantine/core';
 import { TitleRow } from '../../shell/title-row';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { IconCpu, IconPlus, IconRefresh } from '@tabler/icons-react';
@@ -147,46 +138,32 @@ export function ModelsSection() {
     return <AgentModelsView account={account} />;
   };
 
-  const classLine = (
-    <Group justify="space-between" align="center" wrap="nowrap">
-      <Text size="sm" c="dimmed">
-        {modelClass === ModelClass.Agent
-          ? 'Run your Plan, Build and Review sessions.'
-          : 'Make 10db’s quick yes/no calls.'}
-      </Text>
-      {modelClass === ModelClass.Agent ? (
-        <ViewedAccountSelect viewed={viewed} />
-      ) : (
-        <DecisionBilling />
-      )}
-    </Group>
-  );
-
   return (
     <Stack gap="xl">
       {header}
       <DataSourcesWarning />
-      {/* The class switch heads the page in a band of its own, so the page below plainly belongs to it. */}
-      <Paper radius="md" p="md" bg="var(--mantine-color-body)" withBorder>
-        <Stack gap="sm">
-          <SegmentedControl
-            aria-label="Kind of model"
-            w="fit-content"
-            data={CLASS_OPTIONS}
-            value={modelClass}
-            onChange={(value) => {
-              if (isModelClass(value))
-                void navigate({
-                  to: '/settings/$section',
-                  params: { section: SettingsSectionKey.Models },
-                  search: (previous) => ({ ...previous, class: value }),
-                  replace: true,
-                });
-            }}
-          />
-          {classLine}
-        </Stack>
-      </Paper>
+      {/* The class switch and what bills that class, on one line above the page it heads. */}
+      <Group justify="space-between" align="center" wrap="nowrap">
+        <SegmentedControl
+          aria-label="Kind of model"
+          data={CLASS_OPTIONS}
+          value={modelClass}
+          onChange={(value) => {
+            if (isModelClass(value))
+              void navigate({
+                to: '/settings/$section',
+                params: { section: SettingsSectionKey.Models },
+                search: (previous) => ({ ...previous, class: value }),
+                replace: true,
+              });
+          }}
+        />
+        {modelClass === ModelClass.Agent ? (
+          <ViewedAccountSelect viewed={viewed} />
+        ) : (
+          <DecisionBilling />
+        )}
+      </Group>
       {modelClass === ModelClass.Agent ? agentBody() : <DecisionModelsView />}
     </Stack>
   );

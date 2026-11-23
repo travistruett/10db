@@ -20,10 +20,11 @@ Decision Models (`decision-models-view.tsx`, Settings › Models › Decision Mo
   `daemon/people.ts` holds every query for people, Slack, timers, routes and the send actions. Settings ›
   Integrations (key `integrations`, All Projects; `integrations-section.tsx`, cards in `views/settings/sign-ins/`; the old
   `sign-ins` and `project-integrations` addresses are retired and land on it) is the one page for outside services,
-  one card per service: GitHub, Slack (one row per signed-in workspace from `useSlackStatus`, each with a menu of
-  Change Who You Are, Replace Token and Disconnect (which asks first, `shell/confirm-modal.tsx`); Add Workspace shows
-  the three setup steps with the manifest in `slack-manifest.ts`, which a repo test keeps equal to
-  `docs/slack-app.md`; "Which One Is You?" (`which-is-you.tsx`) is per workspace; below the rows, one Select per
+  one card per service: GitHub, Slack (one row per signed-in workspace from `useSlackStatus`, each with Connected, a
+  person icon that opens "Which One Is You in <Workspace>?" (`which-is-you.tsx`, a modal; a yellow dot until the
+  builder has picked), and a menu of Replace Token and Disconnect (which asks first, `shell/confirm-modal.tsx`); Add
+  Workspace shows the three setup steps with the manifest in `slack-manifest.ts`, which a repo test keeps equal to
+  `docs/slack-app.md`; below the rows, under a Projects heading, one Select per
   project, `GET/PUT /projects/:id/integrations`: a workspace by name binds it, Off keeps the project's sends in the
   Inbox, and a change with questions out asks first), Linear (`linear-card.tsx`) and Figma (`figma-card.tsx`): one line, then one row per project
   (`project-rows.tsx`). Where the project's account definitely has no way to the service, or its server isn't
