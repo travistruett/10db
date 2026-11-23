@@ -26,8 +26,19 @@ Decision Models (`decision-models-view.tsx`, Settings › Models › Decision Mo
   `GET/PUT /projects/:id/integrations`: on binds the signed-in workspace, off keeps the project's sends in the
   Inbox), Linear (`linear-card.tsx`: one line saying how agents reach Linear from `GET /settings/sign-ins/linear`,
   one per account only when the accounts differ, then one row per project, `project-rows.tsx`: its team with
-  Unlink, the key field and Link, the check in flight with Cancel, the ended check, or its account's hint when the
-  account has a definite no Linear), Figma (`figma-card.tsx`: under "Through Your Agent", one line saying the Figma plugin in
+  Unlink, the key field and Link, the check in flight with Cancel, the ended check, or `ConnectServiceButton`
+  (`connect-service-button.tsx`, generic over `ConnectableService`) when the account has a definite no Linear or its
+  server isn't signed in: Connect Linear posts `POST /settings/connect/:service` `{ projectId }`, and the daemon
+  adds the service's server to the builder's own agent config (the pinned Codex `mcp add --url`, or Claude Code
+  `mcp add --transport http --scope user`; a different server already named `linear` is never overwritten),
+  approves that server as Trust's Approve does, and, on Codex, starts the account's sign-in. The row then shows
+  "Signing In in Your Browser…" with Open Page Again (`mcp_sign_in.changed` refetches), and Update Linear Issues
+  turns on for that project, once Linear works, through the button's `onConnected`; the other projects on the
+  account show their switch off. On Claude Code the row shows "Finish in Claude Code: run /mcp and sign in to
+  Linear." with Copy /mcp and Done, and re-reads on window focus. Provider parity: Codex is one click; a Claude
+  plan, API key or Bedrock account is one click plus `/mcp` in Claude Code. A new service is one entry in
+  `CONNECTABLE_SERVICES` (daemon), one in `ConnectableService` and its label (contracts), and its card using the
+  component), Figma (`figma-card.tsx`: under "Through Your Agent", one line saying the Figma plugin in
   Claude Code or Codex manages access, and a row only for a project whose account has no way to Figma
   (`FigmaVia.None`, from `GET /settings/sign-ins/figma`); no switch, since the builder starts every send from a
   mock-up) and Artificial Analysis. Settings › People (`views/settings/people/`) is only the people, with

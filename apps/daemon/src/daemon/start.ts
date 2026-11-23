@@ -116,6 +116,7 @@ import {
   reporterHooks,
   subscribeLinearEvents,
 } from '../linear';
+import { createServiceConnector } from './connect-service';
 import { createLinearSignIns } from './linear-sign-ins';
 import { createFigmaSignIns } from './figma-sign-ins';
 import { createReporterLaunch } from './reporter-launch';
@@ -2455,7 +2456,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       deliver: (taskId, messageId, how) => createdRunner.deliverMessage(taskId, messageId, how),
     },
   });
-  const { appMcpPlan, ...trust } = createTrustServices({
+  const { appMcpPlan, appMcpServers, ...trust } = createTrustServices({
     state,
     builderHome,
     laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
@@ -2483,6 +2484,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     plan: appMcpPlan,
     mcpSignIns,
     connectorNames: (account) => adapter.cachedConnectorNames?.(account),
+  });
+  const connector = createServiceConnector({
+    state,
+    servers: appMcpServers,
+    approve: (input) => trust.approveYourMcpServer(input),
+    mcpSignIns,
+    agents: () => opts.agents ?? null,
+    loginEnv: () => launcher.projectEnv(),
+    builderHome,
   });
   const figmaSignIns = createFigmaSignIns({
     state,
@@ -2605,6 +2615,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     trust,
     mcpSignIns,
     linearSignIns,
+    connector,
     figmaSignIns,
     judge: createJudgeServices({
       state,

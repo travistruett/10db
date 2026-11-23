@@ -78,6 +78,7 @@ export * from './shape-preview';
 export * from './shape-review';
 export * from './shape-screens';
 export * from './shape-view';
+export * from './connect-service';
 export * from './linear-sign-ins';
 export * from './figma';
 export * from './linear-posts';
