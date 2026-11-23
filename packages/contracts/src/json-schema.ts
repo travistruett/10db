@@ -280,6 +280,7 @@ import {
   SlackTokenInput,
   StakeholderSendDto,
 } from './slack';
+import { ConnectServiceDto } from './connect-service';
 import { LinearSignInsDto } from './linear-sign-ins';
 import { FigmaPressInput, FigmaSignInsDto } from './figma';
 import { LinearPostDto, LinearReporterSettings } from './linear-posts';
@@ -524,6 +525,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'project-integrations-dto': ProjectIntegrationsDto,
   'project-integrations-input': ProjectIntegrationsInput,
   'linear-sign-ins-dto': LinearSignInsDto,
+  'connect-service-dto': ConnectServiceDto,
   'figma-sign-ins-dto': FigmaSignInsDto,
   'figma-press-input': FigmaPressInput,
   'linear-post-dto': LinearPostDto,

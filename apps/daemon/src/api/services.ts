@@ -221,6 +221,8 @@ import type {
   FigmaPressInput,
   FigmaSignInsDto,
   LinearSignInsDto,
+  ConnectableService,
+  ConnectServiceDto,
   LinearPostDto,
   LinearReporterSettings,
   StakeholderSendDto,
@@ -918,6 +920,8 @@ export interface ApiServices extends PlanRecordServices {
   ): Promise<ProjectIntegrationsDto>;
   /** How each agent account reaches Linear, from what is already read; it starts no probe. */
   linearSignIns(): Promise<LinearSignInsDto>;
+  /** Adds, approves and signs in a service's server for the project's account; ConflictError says which step can't run. */
+  connectService(service: ConnectableService, projectId: ProjectId): Promise<ConnectServiceDto>;
   figmaSignIns(): Promise<FigmaSignInsDto>;
   /** The workspace's people, optionally filtered; read from Slack at most every ten minutes. */
   listSlackMembers(query: string): Promise<SlackMemberDto[]>;

@@ -12,6 +12,7 @@ import {
 } from '@mantine/core';
 import { IconChevronDown, IconChevronUp } from '@tabler/icons-react';
 import { useState, type ReactNode } from 'react';
+import { ConnectServiceButton } from './connect-service-button';
 import { useSlackConnection } from '../../../daemon/people';
 import {
   useProjectIntegrations,
@@ -87,7 +88,7 @@ export function SlackProjectRow({ project }: { readonly project: ProjectDto }) {
 
 /**
  * A project's Linear: when its account reaches Linear, or might, the Update Linear Issues switch and the note the
- * reporter follows; when the account definitely has none, the row's hint.
+ * reporter follows; when the account definitely has none, or its server isn't signed in, Connect Linear.
  */
 export function LinearProjectRow({
   project,
@@ -100,18 +101,39 @@ export function LinearProjectRow({
   const integrations = useProjectIntegrations(project.id);
   const save = useSetLinearReporter(project.id);
   const [editing, setEditing] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const linear = integrations.data?.linear;
   if (linear === undefined) return <ProjectRow name={project.name} />;
-  // Only a definite none hides the switch: an account whose connectors were not read yet may have Linear.
-  const none = row?.via === LinearVia.None && !row.unchecked;
-  if (none)
+  // Only a definite none, or a server not signed in, hides the switch: an account whose connectors were not
+  // read yet may have Linear.
+  const needsConnect =
+    row !== undefined &&
+    ((row.via === LinearVia.None && !row.unchecked) ||
+      (row.via === LinearVia.Server && row.signedIn === false));
+  if (row !== undefined && (needsConnect || connecting))
     return (
       <ProjectRow
         name={project.name}
         control={
-          <Text size="sm" c="dimmed" ta="right" maw={420}>
-            {row.note ?? "This project's account has no Linear sign-in."}
-          </Text>
+          <ConnectServiceButton
+            service="linear"
+            projectId={project.id}
+            accountId={row.accountId}
+            serverKey={row.serverKey}
+            signedIn={row.signedIn}
+            // A Codex account's updates turn on in the daemon when its sign-in ends; a Claude Code sign-in
+            // is the builder's, so the project's updates turn on once they say it's done.
+            onConnected={() => {
+              if (!linear.on) save.mutate({ on: true, note: linear.note });
+            }}
+            onStarted={() => {
+              setConnecting(true);
+            }}
+            onFinished={() => {
+              setConnecting(false);
+              void integrations.refetch();
+            }}
+          />
         }
       />
     );
