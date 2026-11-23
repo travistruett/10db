@@ -294,8 +294,9 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   const decisions = page.getByRole('table', { name: 'Decisions' });
   await expect(decisions.getByText('hello.txt')).toBeVisible();
   await expectAccessible(page, 'knowledge, decisions, dark');
-  await decisions.getByRole('button', { name: /^Where .* came from$/ }).click();
-  const provenance = page.getByRole('dialog', { name: 'Where It Came From' });
+  await decisions.getByRole('button', { name: 'Open Which greeting file? → hello.txt' }).click();
+  const provenance = page.getByRole('dialog', { name: 'Decision' });
+  await expect(provenance.getByText('The gate looks for it.')).toBeVisible();
   await expect(provenance.getByText('Claude Code')).toBeVisible();
   await expect(provenance.getByText('keep it hello.txt')).toBeVisible();
   await expectAccessible(page, 'knowledge, provenance, dark');
@@ -491,9 +492,9 @@ test('records, edits, retires and withdraws knowledge, and a reload loses nothin
   // Each version's provenance links to the other.
   await principles
     .getByRole('row', { name: /Never sleep in tests/ })
-    .getByRole('button', { name: /^Where .* came from$/ })
+    .getByRole('button', { name: /^Open / })
     .click();
-  const drawer = page.getByRole('dialog', { name: 'Where It Came From' });
+  const drawer = page.getByRole('dialog', { name: 'Principle' });
   await expect(drawer.getByText('The app')).toBeVisible();
   await drawer.getByRole('button', { name: 'Replaced by: Tests never sleep' }).click();
   await expect(
