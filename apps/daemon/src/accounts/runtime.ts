@@ -11,6 +11,7 @@ import {
   getAccountRow,
   getProject,
   listActiveProjects,
+  listProjects,
   type AccountRow,
 } from '@10db/db';
 import type { Clock } from '../clock';
@@ -172,7 +173,7 @@ export function createAccountRuntime(opts: {
           // The raise it offers follows the spend too, so the option and detail are rewritten with the body.
           const { body, options = [], detail } = capCard(account, cap);
           const foldKey = accountFoldKey(account.id, AccountPauseReason.MonthlyCap);
-          for (const project of listActiveProjects(db)) {
+          for (const project of listProjects(db)) {
             if (project.accountId !== account.id) continue;
             const open = findOpenByFoldKey(db, project.id, foldKey);
             if (open) opts.inbox.reword(open.id, body, { options, detail });

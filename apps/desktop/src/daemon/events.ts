@@ -69,8 +69,14 @@ const KNOWLEDGE: readonly QueryKey[] = [['knowledge'], ['proposals'], ['provenan
 export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // 10db adds to a project's hazards by itself, so the page that lists the additions follows the project.
   // Your folder's holders, a chat's wait among them, change with a hold event, which is the project's.
+  // Archiving or restoring one also moves what the app lists across projects: cards, sessions, lanes, activity.
   project: [
     queryKeys.projects,
+    queryKeys.inbox,
+    ['inbox-rows'],
+    chatKeys.all,
+    ...WORK,
+    activityKeys.all,
     CANDIDATES,
     HAZARD_ASSESSMENT_KEY,
     folderKeys.all,

@@ -10,11 +10,13 @@ import { createMemoryKeychain, createTempRepo, tempDir } from './fixtures';
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
+let other: { path: string; cleanup(): void };
 let daemon: RunningDaemon;
 
 beforeEach(async () => {
   data = tempDir('project archive');
   repo = createTempRepo();
+  other = createTempRepo();
   daemon = await startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
@@ -30,6 +32,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await daemon.stop();
   repo.cleanup();
+  other.cleanup();
   data.cleanup();
 });
 
@@ -49,6 +52,13 @@ describe('archiving a project through the API', () => {
       defaultRigor: 'light',
       areas: [{ name: 'src', globs: ['src/**'] }],
     });
+    const second = await api.post('/projects', ProjectDto, {
+      name: 'second',
+      repoPath: other.path,
+      gateCommand: 'true',
+      defaultRigor: 'light',
+      areas: [{ name: 'src', globs: ['src/**'] }],
+    });
     const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
       title: 'Alpha',
       acceptanceCriteria: ['it works'],
@@ -61,13 +71,13 @@ describe('archiving a project through the API', () => {
     const refused = await post(`/projects/${project.id}/archive`);
     expect(refused.status).toBe(409);
     expect(await refused.text()).toContain('1 task in progress');
-    expect(await api.get('/projects', z.array(ProjectDto))).toHaveLength(1);
+    expect(await api.get('/projects', z.array(ProjectDto))).toHaveLength(2);
 
     daemon.state.write((ctx) => {
       transitionWorkstream(ctx, lane.id, { to: 'CANCELLED', fence: null });
     });
     expect((await post(`/projects/${project.id}/archive`)).status).toBe(204);
-    expect(await api.get('/projects', z.array(ProjectDto))).toEqual([]);
+    expect((await api.get('/projects', z.array(ProjectDto))).map((p) => p.id)).toEqual([second.id]);
     expect((await api.get('/projects/archived', z.array(ProjectDto))).map((p) => p.id)).toEqual([
       project.id,
     ]);
@@ -86,7 +96,21 @@ describe('archiving a project through the API', () => {
     expect(again.status).toBe(409);
     expect(await again.text()).toContain('restore it from Settings');
 
+    // New work in an archived project is refused until it is restored.
+    const blocked = await fetch(`${daemon.url}/projects/${project.id}/tasks`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${daemon.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Beta', acceptanceCriteria: ['it works'], areas: ['src'] }),
+    });
+    expect(blocked.status).toBe(409);
+    expect(await blocked.text()).toContain('is archived');
+
+    // The last active project is never archived, so the app never lands on first run with nothing to restore.
+    const last = await post(`/projects/${second.id}/archive`);
+    expect(last.status).toBe(409);
+    expect(await last.text()).toContain('is your only project');
+
     expect((await post(`/projects/${project.id}/restore`)).status).toBe(204);
-    expect(await api.get('/projects', z.array(ProjectDto))).toHaveLength(1);
+    expect(await api.get('/projects', z.array(ProjectDto))).toHaveLength(2);
   });
 });

@@ -3,7 +3,9 @@ import {
   chatsWithLiveSession,
   findOpenPass,
   getProject,
+  listActiveProjects,
   listUnfinishedBatches,
+  listWatchedPullRequests,
   listWorkstreams,
   type DbReader,
 } from '@10db/db';
@@ -29,6 +31,8 @@ function runningInProject(db: DbReader, projectId: ProjectId): string[] {
     RUNNING_BATCH_STATES.includes(b.state),
   ).length;
   if (batches > 0) running.push(plural(batches, 'batch being shipped', 'batches being shipped'));
+  const prs = listWatchedPullRequests(db).filter((b) => b.projectId === projectId).length;
+  if (prs > 0) running.push(plural(prs, 'pull request still open', 'pull requests still open'));
   const chats = chatsWithLiveSession(db, projectId).length;
   if (chats > 0)
     running.push(plural(chats, 'chat with a live session', 'chats with a live session'));
@@ -39,9 +43,22 @@ function runningInProject(db: DbReader, projectId: ProjectId): string[] {
 
 /** Archiving stops 10db's activity in the project, so it refuses while anything still runs. */
 export function refuseArchiveWhileRunning(db: DbReader, projectId: ProjectId): void {
+  const project = getProject(db, projectId);
+  // Archiving the last active project would leave the app on first run with no way to restore it.
+  if (!project.archivedAt && listActiveProjects(db).every((p) => p.id === projectId))
+    throw new ConflictError(
+      `${project.name} is your only project. Add another before archiving it.`,
+    );
   const running = runningInProject(db, projectId);
   if (running.length === 0) return;
   throw new ConflictError(
-    `${getProject(db, projectId).name} can't be archived while it has ${running.join(', ')}. Stop that work first.`,
+    `${project.name} can't be archived while it has ${running.join(', ')}. Stop that work first.`,
   );
+}
+
+/** New work in an archived project is refused: the builder restores it first. */
+export function refuseArchived(db: DbReader, projectId: ProjectId): void {
+  const project = getProject(db, projectId);
+  if (project.archivedAt)
+    throw new ConflictError(`${project.name} is archived. Restore it from Settings › Overview.`);
 }

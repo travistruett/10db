@@ -208,6 +208,8 @@ export function createLinearReporter(
     if (stopped || flights.has(taskId)) return;
     if (pendingLinearPosts(state.db, { taskId }).length === 0) return;
     const task = getTask(state.db, taskId);
+    // An archived project's owed posts wait: no session starts for it.
+    if (getProject(state.db, task.projectId).archivedAt !== null) return;
     const blocked = reporterBlockedBy(state.db, task.projectId);
     if (blocked !== null) {
       dropProject(task.projectId);

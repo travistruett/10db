@@ -94,6 +94,7 @@ import {
   archiveProject,
   listActiveProjects,
   listArchivedProjects,
+  listProjects,
   restoreProject,
   listProjectViews,
   listRoutingRules,
@@ -204,7 +205,7 @@ import {
 } from '../team';
 import type { Pictures } from '../pictures';
 import type { Preview } from '../preview';
-import { refuseArchiveWhileRunning } from '../projects';
+import { refuseArchived, refuseArchiveWhileRunning } from '../projects';
 import type { TaskThread } from '../conversation';
 import type { GithubApiServices } from './github-services';
 import type { JudgeApiServices } from './judge-services';
@@ -492,6 +493,7 @@ export function createServices(deps: {
     },
     listTasks: (projectId) => listTasks(db, projectId),
     async createTask(projectId, input, rigorSource) {
+      refuseArchived(db, projectId);
       await refuseMissingLandingBranch(getProject(db, projectId), input.landing);
       const task = deps.state.write((ctx) => {
         const known = listKinds(ctx.tx);
@@ -515,6 +517,7 @@ export function createServices(deps: {
     holdTask: (taskId) => deps.state.write((ctx) => holdTask(ctx, taskId)),
     settleSizing: (taskIds) => deps.sizing.settled(taskIds, deps.sizingWaitMs),
     startTask(taskId, input) {
+      refuseArchived(db, getTask(db, taskId).projectId);
       // A held task already has its run, and its batch and worktree if it has them: it only queues again.
       const held = latestWorkstreamOf(db, taskId);
       if (held?.state === WorkstreamState.Held) {
@@ -557,11 +560,15 @@ export function createServices(deps: {
       deps.scheduler.requestTick();
       return result;
     },
-    startBatch: (projectId, input) => deps.starter.startBatch(projectId, input),
+    startBatch(projectId, input) {
+      refuseArchived(db, projectId);
+      return deps.starter.startBatch(projectId, input);
+    },
     // The store lists oldest first; the API answers newest first.
     listBatches: (projectId) => listBatches(db, { projectId }).reverse(),
-    openPass: (projectId, input) =>
-      openWhenBusy(deps.openWhenBusy, {
+    openPass(projectId, input) {
+      refuseArchived(db, projectId);
+      return openWhenBusy(deps.openWhenBusy, {
         projectId,
         name: input.name,
         chatId: null,
@@ -595,7 +602,8 @@ export function createServices(deps: {
           deps.scheduler.requestTick();
           return { ...opened, dirt: [...opened.dirt], waiting: [...opened.waiting] };
         },
-      }),
+      });
+    },
     cancelPendingOpen: (projectId) => deps.openWhenBusy.pendingOpens.cancel(projectId),
     passView: (passId) => passView(db, passId),
     async takeOutPage(passId, taskId, input) {
@@ -789,7 +797,10 @@ export function createServices(deps: {
       deps.scheduler.requestTick();
       return ws;
     },
-    listInbox: ({ states }) => listInbox(db, states ? { states } : {}),
+    listInbox({ states }) {
+      const live = new Set(listActiveProjects(db).map((p) => p.id));
+      return listInbox(db, states ? { states } : {}).filter((i) => live.has(i.projectId));
+    },
     pageInbox: (query) =>
       pageInbox(db, query, {
         connectedTeams: deps.slackConnections.connectedTeams(),
@@ -1095,7 +1106,7 @@ export function createServices(deps: {
       inspectFolder(
         {
           git: deps.git,
-          projects: listActiveProjects(db),
+          projects: listProjects(db),
           protectedRoots: deps.protectedRoots,
           registryHosts: findRegistryHosts,
         },

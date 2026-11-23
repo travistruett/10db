@@ -1,5 +1,5 @@
 import { StatusKind, type AccountId } from '@10db/contracts';
-import { findOpenByFoldKey, listAccounts, listActiveProjects, type DbReader } from '@10db/db';
+import { findOpenByFoldKey, listAccounts, listProjects, type DbReader } from '@10db/db';
 import type { Clock } from '../clock';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
@@ -43,7 +43,7 @@ export function createModelListWait(deps: {
 }): ModelListWait {
   const waiting = new Map<AccountId, Waiting>();
   // A card an earlier version raised for this wait and left open would say for good that an account waits.
-  for (const project of listActiveProjects(deps.db)) {
+  for (const project of listProjects(deps.db)) {
     for (const account of listAccounts(deps.db, { includeArchived: true })) {
       const card = findOpenByFoldKey(deps.db, project.id, statusKey(account.id));
       if (card !== undefined) deps.inbox.withdraw(card.id);

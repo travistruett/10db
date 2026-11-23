@@ -39,6 +39,7 @@ import {
 } from 'drizzle-orm';
 import type { Json } from '../json';
 import * as schema from '../schema';
+import { ofActiveProject } from './projects';
 import type { DbReader, WriteContext } from './store';
 import { detachFromBatch, listWorkstreams, transitionWorkstream } from './workstreams';
 
@@ -472,7 +473,7 @@ export function recordPullRequestStatus(
  * The batches whose pull request the watcher still follows, oldest first: one with a pull request url
  * whose state was never read, or reads open or unknown. Merged and closed are final. A shipped batch is
  * followed, and a Workbench pass's batch while it is open or failed too (spec §5.5): its pull request
- * is opened before the pass closes.
+ * is opened before the pass closes. An archived project's batches are left out.
  */
 export function listWatchedPullRequests(db: DbReader): BatchDto[] {
   return db
@@ -480,6 +481,7 @@ export function listWatchedPullRequests(db: DbReader): BatchDto[] {
     .from(schema.batches)
     .where(
       and(
+        ofActiveProject(schema.batches.projectId),
         or(
           eq(schema.batches.state, BatchState.Shipped),
           and(

@@ -130,7 +130,12 @@ function projectRefusal(
   for (const project of projects) {
     const checkout = realOrResolved(project.repoPath);
     if (samePath(root, checkout))
-      return refuse(FolderRefusalReason.AlreadyAProject, `${project.name} is already a project.`);
+      return refuse(
+        FolderRefusalReason.AlreadyAProject,
+        project.archivedAt
+          ? `${project.name} is already a project, archived: restore it from Settings › Overview.`
+          : `${project.name} is already a project.`,
+      );
     if (equalOrUnder(root, checkout))
       return refuse(
         FolderRefusalReason.InsideAProject,

@@ -16,7 +16,7 @@ import {
   findOpenByFoldKey,
   getBatch,
   getPass,
-  listActiveProjects,
+  listProjects,
   listWatchedPullRequests,
   patchBatch,
   recordPullRequestStatus,
@@ -397,7 +397,7 @@ export function createPrWatch(input: {
    * is open, so look in every project, not only the ones this round read.
    */
   function ghCardProjects(db: DbReader): ProjectId[] {
-    return listActiveProjects(db)
+    return listProjects(db)
       .map((project) => project.id)
       .filter((id) => findOpenByFoldKey(db, id, prCardKey.ghUnavailable) !== undefined);
   }

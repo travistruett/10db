@@ -1,1 +1,1 @@
-export { refuseArchiveWhileRunning } from './archive-refusal';
+export { refuseArchived, refuseArchiveWhileRunning } from './archive-refusal';

@@ -1,6 +1,8 @@
 import { ProjectDto, type ProjectId } from '@10db/contracts';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
+import { activityKeys } from './activity-queries';
+import { chatKeys } from './chat-queries';
 import { readJson } from './client';
 import { useDaemon } from './provider';
 import { queryKeys } from './queries';
@@ -16,6 +18,21 @@ export function useArchivedProjects() {
   });
 }
 
+/** Archiving or restoring moves every list that spans projects, not only the project lists. */
+function invalidateAcrossProjects(queryClient: QueryClient): Promise<unknown> {
+  return Promise.all(
+    [
+      queryKeys.projects,
+      queryKeys.inbox,
+      ['inbox-rows'],
+      chatKeys.all,
+      ['workstreams'],
+      ['tasks'],
+      activityKeys.all,
+    ].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+  );
+}
+
 /** Archives a project; a refusal throws with the daemon's message, which names what is still running. */
 export function useArchiveProject(projectId: ProjectId) {
   const { client } = useDaemon();
@@ -28,7 +45,7 @@ export function useArchiveProject(projectId: ProjectId) {
         z.unknown(),
       );
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
+    onSuccess: () => invalidateAcrossProjects(queryClient),
   });
 }
 
@@ -42,6 +59,6 @@ export function useRestoreProject() {
         z.unknown(),
       );
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
+    onSuccess: () => invalidateAcrossProjects(queryClient),
   });
 }

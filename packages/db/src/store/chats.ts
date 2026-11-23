@@ -85,7 +85,7 @@ export function chatOfConversation(db: DbReader, conversationId: ConversationId)
   );
 }
 
-/** The project's chats whose conversation has an agent session starting, running, waiting on a card or stopping. */
+/** The project's chats whose conversation has an agent session starting, running, waiting on a card, stopping or paused on its account (it resumes later). */
 export function chatsWithLiveSession(db: DbReader, projectId: ProjectId): ChatRow[] {
   return db
     .select({ chat: schema.chats })
@@ -100,6 +100,7 @@ export function chatsWithLiveSession(db: DbReader, projectId: ProjectId): ChatRo
           ConversationState.Running,
           ConversationState.WaitingCard,
           ConversationState.Stopping,
+          ConversationState.PausedAccount,
         ]),
       ),
     )

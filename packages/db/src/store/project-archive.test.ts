@@ -39,7 +39,7 @@ afterEach(() => {
 });
 
 describe('archiving a project', () => {
-  it('hides it and its Inbox items, keeps its rows, and restore brings it back', () => {
+  it('hides it, keeps its rows, and restore brings it back', () => {
     const keep = seedProject(store, { name: 'keep' });
     const gone = seedProject(store, { name: 'gone' });
     for (const project of [keep, gone]) card(project.id);
@@ -53,7 +53,8 @@ describe('archiving a project', () => {
     expect(listProjects(store.db).map((p) => p.id)).toEqual([gone.id, keep.id]);
     expect(listArchivedProjects(store.db).map((p) => p.id)).toEqual([gone.id]);
     expect(getProject(store.db, gone.id).archivedAt).not.toBeNull();
-    expect(listInbox(store.db).map((i) => i.projectId)).toEqual([keep.id]);
+    // Recovery and card logic read the whole Inbox, so an archived project's cards stay in it.
+    expect(listInbox(store.db)).toHaveLength(2);
     expect(listInbox(store.db, { projectId: gone.id })).toHaveLength(1);
 
     store.write((ctx) => {
