@@ -1,29 +1,6 @@
-import { ActionIcon, Box, Group, HoverCard, Text } from '@mantine/core';
-import { IconInfoCircle } from '@tabler/icons-react';
+import { Box, Group, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
-
-/** A small info icon that opens the longer help for a label on hover or focus. */
-export function InfoHint({
-  label,
-  children,
-}: {
-  /** What the help is about, for assistive tech. */
-  readonly label: string;
-  readonly children: ReactNode;
-}) {
-  return (
-    <HoverCard width={320} withArrow shadow="md" openDelay={150}>
-      <HoverCard.Target>
-        <ActionIcon variant="subtle" color="gray" size="sm" aria-label={`About ${label}`}>
-          <IconInfoCircle size={14} stroke={1.5} />
-        </ActionIcon>
-      </HoverCard.Target>
-      <HoverCard.Dropdown>
-        <Text size="sm">{children}</Text>
-      </HoverCard.Dropdown>
-    </HoverCard>
-  );
-}
+import { HelpHint } from './help-hint';
 
 /** One setting on a line: its label with an info icon on the left, its control on the right. */
 export function HintedRow({
@@ -41,7 +18,7 @@ export function HintedRow({
         <Text size="sm" fw={500} style={{ whiteSpace: 'nowrap' }}>
           {label}
         </Text>
-        <InfoHint label={label}>{hint}</InfoHint>
+        <HelpHint label={label}>{hint}</HelpHint>
       </Group>
       <Box style={{ flex: 'none' }}>{children}</Box>
     </Group>

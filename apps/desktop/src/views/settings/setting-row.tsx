@@ -27,7 +27,7 @@ export function SettingsCard({
         <Group justify="space-between" align="flex-end" wrap="nowrap">
           <Stack gap={2}>
             <Group gap={4} wrap="nowrap">
-              <Title order={5}>{title}</Title>
+              <Title order={4}>{title}</Title>
               {help ? <HelpHint label={title}>{help}</HelpHint> : null}
             </Group>
             {description ? (

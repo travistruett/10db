@@ -1,6 +1,6 @@
-import { ActionIcon, Group, HoverCard, Stack, Text, Title } from '@mantine/core';
-import { IconInfoCircle } from '@tabler/icons-react';
+import { Group, Stack, Text, Title } from '@mantine/core';
 import type { ReactNode } from 'react';
+import { HelpHint } from './help-hint';
 
 /**
  * A section's heading: its title with an optional info button whose card holds the longer explanation, one
@@ -26,24 +26,7 @@ export function SectionHeading({
           <Title order={4} size="md" fw={600}>
             {title}
           </Title>
-          {help === undefined ? null : (
-            <HoverCard width={360} shadow="md" position="bottom-start" withArrow>
-              <HoverCard.Target>
-                <ActionIcon
-                  type="button"
-                  variant="subtle"
-                  color="gray"
-                  size="sm"
-                  aria-label={`About ${title.toLowerCase()}`}
-                >
-                  <IconInfoCircle size={14} aria-hidden />
-                </ActionIcon>
-              </HoverCard.Target>
-              <HoverCard.Dropdown>
-                <Text size="sm">{help}</Text>
-              </HoverCard.Dropdown>
-            </HoverCard>
-          )}
+          {help === undefined ? null : <HelpHint label={title}>{help}</HelpHint>}
         </Group>
         {line === undefined ? null : (
           <Text size="xs" c="dimmed">

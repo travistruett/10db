@@ -26,7 +26,9 @@ export function HelpHint({
         </ActionIcon>
       </HoverCard.Target>
       <HoverCard.Dropdown>
-        <Stack gap="xs">{children}</Stack>
+        <Stack gap="xs" fz="sm">
+          {children}
+        </Stack>
       </HoverCard.Dropdown>
     </HoverCard>
   );

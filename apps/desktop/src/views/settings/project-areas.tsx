@@ -1,45 +1,11 @@
 import { hazardScope, HazardScope, ProjectPatch, type ProjectDto } from '@10db/contracts';
-import {
-  ActionIcon,
-  Alert,
-  Button,
-  Checkbox,
-  Code,
-  Group,
-  Stack,
-  Text,
-  Textarea,
-  TextInput,
-} from '@mantine/core';
+import { Accordion, Alert, Button, Group, Stack, Text, Title } from '@mantine/core';
 import { useState } from 'react';
 import { usePatchProject } from '../../daemon/queries';
-import { AreaRoleFields, roleFields, type RoleChoice } from './area-role-fields';
+import { AreaRow, HazardRow, lines, type AreaDraft, type HazardDraft } from './area-rows';
+import { roleFields } from './area-role-fields';
 import { HazardAdditions } from './hazard-additions';
-import { describePathPattern } from './path-pattern';
-
-interface PathsDraft {
-  readonly name: string;
-  readonly paths: string;
-}
-interface AreaDraft extends PathsDraft {
-  /** The project's catch-all: a file no other area holds falls in it. At most one area. */
-  readonly catchAll: boolean;
-  readonly role: RoleChoice;
-  /** A page's route; kept while the role changes, sent only for a page. */
-  readonly route: string;
-  /** A page's label; kept while the role changes, sent only for a page. */
-  readonly label: string;
-}
-interface HazardDraft extends PathsDraft {
-  readonly perCopy: boolean;
-  readonly commands: string;
-}
-
-const lines = (text: string): string[] =>
-  text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line !== '');
+import { HelpHint } from './help-hint';
 
 const areaDrafts = (project: ProjectDto): AreaDraft[] =>
   project.areas.map((a) => ({
@@ -87,28 +53,14 @@ function toPatch(
   return { error: `${where}: ${issue?.message ?? 'is not valid'}` };
 }
 
-function PathExamples({ paths }: { readonly paths: string }) {
-  return (
-    <Stack gap={2}>
-      {lines(paths).map((glob, index) => {
-        const { words, example } = describePathPattern(glob);
-        return (
-          <Text key={`${String(index)}-${glob}`} size="xs" c="dimmed">
-            <Code>{glob}</Code>
-            {` ${words}. Example: ${example}`}
-          </Text>
-        );
-      })}
-    </Stack>
-  );
-}
-
 /** Add, rename, remove and edit the project's areas and hazards, saved in one patch to the project. */
 export function ProjectAreas({ project }: { readonly project: ProjectDto }) {
   const patch = usePatchProject(project.id);
   const [areas, setAreas] = useState(() => areaDrafts(project));
   const [hazards, setHazards] = useState(() => hazardDrafts(project));
   const [problem, setProblem] = useState<string | null>(null);
+  const [openAreas, setOpenAreas] = useState<string[]>([]);
+  const [openHazards, setOpenHazards] = useState<string[]>([]);
   // 10db adds to the hazards by itself, so the project can change while this page is open. Drafts the
   // builder has not touched follow it; edited ones stay, with a note that Save would replace the change.
   const stored = JSON.stringify([areaDrafts(project), hazardDrafts(project)]);
@@ -151,85 +103,38 @@ export function ProjectAreas({ project }: { readonly project: ProjectDto }) {
     setHazards((all) => all.map((h, i) => (i === index ? { ...h, ...next } : h)));
   };
 
+  /** Rows that stay open after one is removed keep their place in the shifted list. */
+  const afterRemoval = (open: string[], index: number): string[] =>
+    open
+      .filter((v) => v !== String(index))
+      .map((v) => (Number(v) > index ? String(Number(v) - 1) : v));
+
   return (
-    <Stack>
+    <Stack gap="xl">
       <Stack gap="xs">
-        <Text fw={600}>Areas</Text>
-        <Text size="sm" c="dimmed">
-          An area is a part of the project. Tasks in different areas can run at the same time, and a
-          task may change only the files of the areas it names. Paths are folder patterns, one per
-          line: <Code>src/api/**</Code> means everything inside src/api/.
-        </Text>
-        {areas.map((area, index) => (
-          <Stack key={index} gap={4}>
-            <Group align="flex-start" wrap="nowrap">
-              <TextInput
-                aria-label={`Area ${String(index + 1)} name`}
-                placeholder="name"
-                value={area.name}
-                onChange={(e) => {
-                  setArea(index, { name: e.currentTarget.value });
-                }}
-              />
-              <Textarea
-                aria-label={`Area ${String(index + 1)} paths`}
-                placeholder="src/api/**"
-                autosize
-                minRows={1}
-                style={{ flex: 1 }}
-                value={area.paths}
-                onChange={(e) => {
-                  setArea(index, { paths: e.currentTarget.value });
-                }}
-              />
-              <ActionIcon
-                aria-label={`Remove area ${String(index + 1)}`}
-                variant="subtle"
-                color="red"
-                onClick={() => {
-                  setAreas((all) => all.filter((_, i) => i !== index));
-                }}
-              >
-                ×
-              </ActionIcon>
+        <Group justify="space-between" align="flex-start" wrap="nowrap">
+          <Stack gap={2}>
+            <Group gap={4}>
+              <Title order={4}>Areas</Title>
+              <HelpHint label="Areas">
+                <Text size="sm" mb={4}>
+                  An area is a part of the project. Tasks in different areas can run at the same
+                  time, and a task may change only the files of the areas it names.
+                </Text>
+                <Text size="sm">
+                  Paths are folder patterns, one per line: <code>src/api/**</code> means everything
+                  inside src/api/.
+                </Text>
+              </HelpHint>
             </Group>
-            <Text size="xs">
-              {area.name.trim() === ''
-                ? 'Name this area.'
-                : area.catchAll
-                  ? `Tasks in "${area.name.trim()}" may change every file no other area holds.`
-                  : `Tasks in "${area.name.trim()}" may change files in ${
-                      lines(area.paths)
-                        .map((g) => describePathPattern(g).words)
-                        .join('; ') || 'no paths yet'
-                    }.`}
+            <Text size="sm" c="dimmed">
+              The parts of the project that tasks claim.
             </Text>
-            <Checkbox
-              size="xs"
-              aria-label={`Area ${String(index + 1)} is the catch-all`}
-              label="Catch-all: holds every file no other area holds, such as a new package, app or folder, so a task that adds one can still change it. A file another area holds is never in the catch-all. Only one area can be."
-              checked={area.catchAll}
-              onChange={(e) => {
-                setCatchAll(index, e.currentTarget.checked);
-              }}
-            />
-            <AreaRoleFields
-              index={index + 1}
-              name={area.name}
-              role={area.role}
-              route={area.route}
-              label={area.label}
-              onChange={(next) => {
-                setArea(index, next);
-              }}
-            />
-            <PathExamples paths={area.paths} />
           </Stack>
-        ))}
-        <Group>
           <Button
-            variant="light"
+            variant="default"
             onClick={() => {
+              setOpenAreas((open) => [...open, String(areas.length)]);
               setAreas((all) => [
                 ...all,
                 { name: '', paths: '', catchAll: false, role: '', route: '', label: '' },
@@ -239,15 +144,53 @@ export function ProjectAreas({ project }: { readonly project: ProjectDto }) {
             Add Area
           </Button>
         </Group>
+        {areas.length === 0 ? <Text c="dimmed">No areas.</Text> : null}
+        <Accordion multiple variant="separated" value={openAreas} onChange={setOpenAreas}>
+          {areas.map((area, index) => (
+            <AreaRow
+              key={index}
+              index={index}
+              area={area}
+              onChange={(next) => {
+                setArea(index, next);
+              }}
+              onCatchAll={(catchAll) => {
+                setCatchAll(index, catchAll);
+              }}
+              onRemove={() => {
+                setOpenAreas((open) => afterRemoval(open, index));
+                setAreas((all) => all.filter((_, i) => i !== index));
+              }}
+            />
+          ))}
+        </Accordion>
       </Stack>
 
       <Stack gap="xs">
-        <Text fw={600}>Hazards</Text>
-        <Text size="sm" c="dimmed">
-          A hazard is a set of files only one task changes at a time, such as lockfiles or
-          migrations. A task that touches one, or runs one of its commands, waits for the task that
-          holds it.
-        </Text>
+        <Group justify="space-between" align="flex-start" wrap="nowrap">
+          <Stack gap={2}>
+            <Group gap={4}>
+              <Title order={4}>Hazards</Title>
+              <HelpHint label="Hazards">
+                A hazard is a set of files only one task changes at a time, such as lockfiles or
+                migrations. A task that touches one, or runs one of its commands, waits for the task
+                that holds it.
+              </HelpHint>
+            </Group>
+            <Text size="sm" c="dimmed">
+              Files and commands that tasks take turns on.
+            </Text>
+          </Stack>
+          <Button
+            variant="default"
+            onClick={() => {
+              setOpenHazards((open) => [...open, String(hazards.length)]);
+              setHazards((all) => [...all, { name: '', paths: '', commands: '', perCopy: false }]);
+            }}
+          >
+            Add Hazard
+          </Button>
+        </Group>
         <HazardAdditions project={project} />
         {outdated ? (
           <Alert color="yellow" title="The hazards changed while you were editing">
@@ -266,79 +209,22 @@ export function ProjectAreas({ project }: { readonly project: ProjectDto }) {
           </Alert>
         ) : null}
         {hazards.length === 0 ? <Text c="dimmed">No hazards.</Text> : null}
-        {hazards.map((hazard, index) => (
-          <Stack key={index} gap={4}>
-            <Group align="flex-start" wrap="nowrap">
-              <TextInput
-                aria-label={`Hazard ${String(index + 1)} name`}
-                placeholder="name"
-                value={hazard.name}
-                onChange={(e) => {
-                  setHazard(index, { name: e.currentTarget.value });
-                }}
-              />
-              <Textarea
-                aria-label={`Hazard ${String(index + 1)} paths`}
-                placeholder="**/package.json"
-                autosize
-                minRows={1}
-                style={{ flex: 1 }}
-                value={hazard.paths}
-                onChange={(e) => {
-                  setHazard(index, { paths: e.currentTarget.value });
-                }}
-              />
-              <Textarea
-                aria-label={`Hazard ${String(index + 1)} commands`}
-                placeholder="pnpm add"
-                autosize
-                minRows={1}
-                style={{ flex: 1 }}
-                value={hazard.commands}
-                onChange={(e) => {
-                  setHazard(index, { commands: e.currentTarget.value });
-                }}
-              />
-              <ActionIcon
-                aria-label={`Remove hazard ${String(index + 1)}`}
-                variant="subtle"
-                color="red"
-                onClick={() => {
-                  setHazards((all) => all.filter((_, i) => i !== index));
-                }}
-              >
-                ×
-              </ActionIcon>
-            </Group>
-            <Text size="xs">
-              {hazard.name.trim() === ''
-                ? 'Name this hazard.'
-                : `Only one task at a time may change these files${
-                    lines(hazard.commands).length > 0 ? ' or run these commands' : ''
-                  }${hazard.perCopy ? ' in the same copy of the project' : ''}. Commands go one per line, as the start of a command such as "pnpm add".`}
-            </Text>
-            <Checkbox
-              size="xs"
-              aria-label={`Hazard ${String(index + 1)} is held per copy`}
-              label="Held per copy: tasks working in separate copies of the project (worktrees) may change these files at the same time, and a clash is settled when their pull requests merge. Leave it off for something every copy shares, such as a database or a port."
-              checked={hazard.perCopy}
-              onChange={(e) => {
-                setHazard(index, { perCopy: e.currentTarget.checked });
+        <Accordion multiple variant="separated" value={openHazards} onChange={setOpenHazards}>
+          {hazards.map((hazard, index) => (
+            <HazardRow
+              key={index}
+              index={index}
+              hazard={hazard}
+              onChange={(next) => {
+                setHazard(index, next);
+              }}
+              onRemove={() => {
+                setOpenHazards((open) => afterRemoval(open, index));
+                setHazards((all) => all.filter((_, i) => i !== index));
               }}
             />
-            <PathExamples paths={hazard.paths} />
-          </Stack>
-        ))}
-        <Group>
-          <Button
-            variant="light"
-            onClick={() => {
-              setHazards((all) => [...all, { name: '', paths: '', commands: '', perCopy: false }]);
-            }}
-          >
-            Add Hazard
-          </Button>
-        </Group>
+          ))}
+        </Accordion>
       </Stack>
 
       {problem ? (
