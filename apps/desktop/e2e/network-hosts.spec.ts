@@ -51,7 +51,7 @@ test('a builder allows two hosts, is refused localhost and removes them', async 
   await page.goto('/settings/network-hosts');
   await expect(page.locator('html')).toHaveAttribute('data-mantine-color-scheme', 'dark');
   const card = page.getByRole('main');
-  await expect(card.getByText('No hosts are allowed yet.')).toBeVisible();
+  await expect(card.getByText('No Hosts Allowed Yet')).toBeVisible();
   // The project's sandbox permissions sit above the hosts.
   await expect(page.getByRole('switch', { name: 'Allow Docker' })).toBeVisible();
 
@@ -74,7 +74,7 @@ test('a builder allows two hosts, is refused localhost and removes them', async 
     await page.getByRole('button', { name: `Remove ${host}` }).click();
     await expect(page.getByRole('listitem').filter({ hasText: host })).toHaveCount(0);
   }
-  await expect(card.getByText('No hosts are allowed yet.')).toBeVisible();
+  await expect(card.getByText('No Hosts Allowed Yet')).toBeVisible();
 
   // Pages and Pictures holds where the app runs and how its pictures are taken.
   await page.goto('/settings/pages-and-pictures');
