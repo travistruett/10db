@@ -64,7 +64,7 @@ export function EditAccountForm({ account }: { readonly account: AccountDto }) {
 
   return (
     <form onSubmit={(e) => void submit(e)} noValidate>
-      <Stack gap="md">
+      <Stack gap="sm">
         <AccountFields
           values={values}
           onChange={(next) => {
@@ -87,7 +87,7 @@ export function EditAccountForm({ account }: { readonly account: AccountDto }) {
           </Alert>
         ) : null}
         <Group justify="flex-end">
-          <Button size="md" type="submit" disabled={unchanged} loading={patchAccount.isPending}>
+          <Button type="submit" disabled={unchanged} loading={patchAccount.isPending}>
             Save Changes
           </Button>
         </Group>

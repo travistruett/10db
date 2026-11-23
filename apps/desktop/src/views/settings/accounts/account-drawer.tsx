@@ -1,16 +1,16 @@
 import {
-  accountDisplayName,
   needsSecret,
   harnessOf,
   signsInWithLogin,
   type AccountDto,
   type AccountId,
 } from '@10db/contracts';
-import { Drawer, Stack, Text, Title } from '@mantine/core';
+import { Badge, Drawer, Group, Stack, Text, Title } from '@mantine/core';
 import { useCallback, useState } from 'react';
 import { useAccounts } from '../../../daemon/account-queries';
 import { useJudgeStatus } from '../../../daemon/judge-queries';
 import { useProjects } from '../../../daemon/queries';
+import { ACCOUNT_KIND_LABEL } from '../account-kind-label';
 import { AccountPause } from './account-pause';
 import { ArchiveAccount } from './archive-account';
 import { EditAccountForm } from './edit-account-form';
@@ -21,8 +21,20 @@ import { TestAccount } from './test-account';
 import { accountUsedBy, harnessLine, usedByText } from './used-by';
 import { UsageByProject } from './usage-by-project';
 
+/** A badge is never cut to its first letters, as the Factory's state badges aren't. */
+const WHOLE_BADGE = {
+  style: { minWidth: 'max-content' },
+  styles: { label: { overflow: 'visible', textOverflow: 'clip' } },
+} as const;
+
 function noop() {
   // No caller needs to know.
+}
+
+/** What the first section is about: a login, a stored secret, or the identity a profile runs as. */
+function sectionTitle(account: AccountDto): string {
+  if (signsInWithLogin(account.kind)) return 'Sign-In';
+  return needsSecret(account.kind, account.settings) ? 'Secret' : 'Identity';
 }
 
 function AccountDrawerBody({
@@ -49,16 +61,18 @@ function AccountDrawerBody({
   return (
     <Stack gap="lg">
       <Stack gap={2}>
-        <Text size="sm">{usedByText(accountUsedBy(account, projects.data ?? [], judge.data))}</Text>
+        <Text size="xs" c="dimmed">
+          {usedByText(accountUsedBy(account, projects.data ?? [], judge.data))}
+        </Text>
         {agents ? null : (
-          <Text size="sm" c="dimmed">
+          <Text size="xs" c="dimmed">
             {harnessLine(account)}
           </Text>
         )}
       </Stack>
       {account.archived || !agents ? null : <AccountPause account={account} />}
       <Stack gap="xs">
-        <Title order={4}>{agents ? 'Identity' : 'Key'}</Title>
+        <Title order={4}>{sectionTitle(account)}</Title>
         {signsInWithLogin(account.kind) && !account.archived ? (
           <SignInSteps account={account} onConnected={onConnected} />
         ) : null}
@@ -130,7 +144,23 @@ export function AccountDrawer({
       {...(onClosed ? { onExitTransitionEnd: onClosed } : {})}
       position="right"
       size="md"
-      title={account ? accountDisplayName(account) : 'Account'}
+      title={
+        account ? (
+          <Group component="span" gap="xs" wrap="nowrap">
+            <span>{account.label}</span>
+            <Badge size="sm" variant="light" color="gray" {...WHOLE_BADGE}>
+              {ACCOUNT_KIND_LABEL[account.kind]}
+            </Badge>
+            {account.isDefault ? (
+              <Badge size="sm" variant="light" color="gray" {...WHOLE_BADGE}>
+                Default
+              </Badge>
+            ) : null}
+          </Group>
+        ) : (
+          'Account'
+        )
+      }
       closeButtonProps={{ 'aria-label': 'Close' }}
     >
       {account ? (

@@ -56,7 +56,6 @@ function TierSelect({
         ];
   return (
     <Select
-      size="md"
       label={label}
       data={[{ value: AUTOMATIC, label: 'Automatic' }, ...groups, ...unlisted]}
       value={current === '' ? AUTOMATIC : `${MODEL_PREFIX}${current}`}

@@ -1,6 +1,5 @@
 import { AccountKind, isMetered, type AccountId } from '@10db/contracts';
 import { SegmentedControl, Stack, Text, TextInput } from '@mantine/core';
-import { ACCOUNT_KIND_LABEL } from '../account-kind-label';
 import type { AccountFormValues } from './account-form-values';
 import { TierOverrides } from './tier-overrides';
 
@@ -30,36 +29,25 @@ export function AccountFields({
       onChange({ ...values, [field]: e.currentTarget.value });
     };
   return (
-    <Stack gap="md">
-      {mode === 'edit' ? (
-        <TextInput
-          size="md"
-          label="Kind"
-          description="Fixed when the account is created."
-          readOnly
-          value={ACCOUNT_KIND_LABEL[values.kind]}
-        />
-      ) : null}
+    <Stack gap="sm">
       <TextInput
-        size="md"
         label="Label"
-        description="How this account is named in pickers and lists."
+        description="The name pickers and lists show."
         value={values.label}
         error={errors['label']}
         onChange={text('label')}
       />
       <TextInput
-        size="md"
         label="Paid By"
-        description="Who pays for this account, such as a client. Leave empty if you do."
+        description="Who pays, such as a client"
+        placeholder="Optional"
         value={values.payer}
         error={errors['payer']}
         onChange={text('payer')}
       />
       <TextInput
-        size="md"
         label="Lane Cap"
-        description="The most sessions that run on this account at once."
+        description="Most sessions running at once"
         inputMode="numeric"
         value={values.laneCap}
         error={errors['laneCap']}
@@ -67,9 +55,9 @@ export function AccountFields({
       />
       {metered ? (
         <TextInput
-          size="md"
           label="Monthly Cap (USD)"
-          description="10db stops starting sessions on this account at this spend each month. Leave empty for no cap."
+          description="Sessions stop starting at this spend each month"
+          placeholder="Optional"
           inputMode="decimal"
           value={values.monthlyCapUsd}
           error={errors['monthlyCapUsd']}
@@ -79,9 +67,9 @@ export function AccountFields({
       {mode === 'create' &&
       (values.kind === AccountKind.AnthropicApiKey || values.kind === AccountKind.Bedrock) ? (
         <TextInput
-          size="md"
           label="Organization"
-          description="The organization Claude Code must report for this account's key. Leave empty to set it later."
+          description="What Claude Code must report for this key"
+          placeholder="Optional"
           value={values.organization}
           error={errors['organization']}
           onChange={text('organization')}
@@ -90,9 +78,8 @@ export function AccountFields({
       {values.kind === AccountKind.Bedrock ? (
         <>
           <TextInput
-            size="md"
             label="Region"
-            description="The AWS region Bedrock runs in, such as us-west-2."
+            description="Such as us-west-2"
             value={values.region}
             error={errors['region']}
             onChange={text('region')}
@@ -102,7 +89,6 @@ export function AccountFields({
               Sign In With
             </Text>
             <SegmentedControl
-              size="md"
               aria-label="Sign In With"
               value={values.bedrockAuth}
               data={[
@@ -122,9 +108,8 @@ export function AccountFields({
           </Stack>
           {values.bedrockAuth === 'profile' ? (
             <TextInput
-              size="md"
               label="AWS Profile"
-              description="The profile name in your AWS config that sessions use."
+              description="From your AWS config"
               value={values.awsProfile}
               error={errors['awsProfile']}
               onChange={(e) => {

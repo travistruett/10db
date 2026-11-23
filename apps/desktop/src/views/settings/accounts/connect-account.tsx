@@ -79,7 +79,6 @@ export function ConnectAccount({
           Waiting for you to sign in in your browser. This page updates when you are done.
         </Text>
         <Button
-          size="md"
           variant="default"
           loading={stopping}
           onClick={() => {
@@ -105,7 +104,6 @@ export function ConnectAccount({
         </Alert>
         <Group>
           <Button
-            size="md"
             loading={connect.isPending}
             onClick={() => {
               start(() => {
@@ -116,7 +114,6 @@ export function ConnectAccount({
             Replace This Login
           </Button>
           <Button
-            size="md"
             variant="default"
             disabled={connect.isPending}
             onClick={() => {
@@ -155,7 +152,6 @@ export function ConnectAccount({
         </Stack>
       )}
       <Button
-        size="md"
         loading={connect.isPending}
         disabled={elsewhere !== null || stopping}
         onClick={() => {
