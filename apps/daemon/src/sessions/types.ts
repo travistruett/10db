@@ -88,6 +88,11 @@ export type SessionMcpServer = SandboxedMcpServer | RemoteMcpServer;
 export interface YourSessionServer {
   /** A stdio server is 10db's launch from the builder's home; a remote one is its url and headers. */
   readonly connect: YourMcpServer | RemoteMcpServer;
+  /**
+   * The name a Claude session registers it under, when not 10db's: a plugin's remote server, as Claude Code
+   * names it, so the builder's own sign-in is found. Codex and every 10db surface use 10db's name.
+   */
+  readonly claudeName: string | null;
   /** Claude Code's `oauth` block for a remote server, as the approval covered it. */
   readonly claudeOAuth: ClaudeOAuth | null;
   readonly codex: CodexServerExtras;

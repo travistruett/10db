@@ -47,6 +47,8 @@ export interface YourStdioPlan {
 export interface YourRemotePlan {
   /** The declaration the server was planned from. */
   readonly key: YourMcpServerKey;
+  /** The name a Claude session registers it under, when not the plan's own (`YourMcpEntry.claudeName`). */
+  readonly claudeName: string | null;
   readonly type: 'http' | 'sse';
   readonly url: string;
   readonly headers: Readonly<Record<string, string>> | null;
@@ -174,6 +176,7 @@ function remotePlan(
   }
   return {
     key: entry.key,
+    claudeName: entry.claudeName,
     type: server.transport,
     url,
     headers: Object.keys(headers).length === 0 ? null : headers,

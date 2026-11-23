@@ -27,6 +27,7 @@ const NO_EXTRAS = {
 } as const;
 const remote = (name: string, headers: Record<string, string> | null) => ({
   key: yourMcpServerKey(YourMcpSource.ClaudeJson, name),
+  claudeName: null,
   type: 'http' as const,
   url: `https://${name}.example/mcp`,
   headers,

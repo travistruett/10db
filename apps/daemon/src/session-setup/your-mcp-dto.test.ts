@@ -43,6 +43,7 @@ describe('yourMcpServerDtos', () => {
     const github: YourMcpEntry = {
       key: yourMcpServerKey(YourMcpSource.ClaudeJson, 'github'),
       name: 'github',
+      claudeName: null,
       source: YourMcpSource.ClaudeJson,
       pluginId: null,
       declared,
