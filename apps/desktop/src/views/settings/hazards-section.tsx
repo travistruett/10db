@@ -4,15 +4,26 @@ import { DataTable, type DataTableColumn } from 'mantine-datatable';
 import { useState } from 'react';
 import { useLookAgainAtHazards } from '../../daemon/hazard-queries';
 import { ConfirmModal } from '../../shell/confirm-modal';
-import { HazardAdditions } from './hazard-additions';
+import { FoundByTendb, HazardLookStatus } from './hazard-additions';
 import { HazardDrawer } from './hazard-drawer';
 import { SectionHeading } from './section-heading';
-import { PathLines, Pill, RowActions } from './table-cells';
+import { Pill, RowActions } from './table-cells';
 import { useListPatch } from './use-list-patch';
 
 type Hazard = ProjectDto['hazards'][number];
 
-/** The project's hazards as a table, with what 10db found by itself under it. */
+const count = (n: number, one: string, many: string): string =>
+  `${String(n)} ${n === 1 ? one : many}`;
+
+/** "70 commands · 22 paths": what a hazard covers, in brief; its drawer lists them. */
+function coverage(hazard: Hazard): string {
+  return [
+    count(hazard.commands.length, 'command', 'commands'),
+    count(hazard.globs.length, 'path', 'paths'),
+  ].join(' · ');
+}
+
+/** The project's hazards as a table of names and what each covers, with what 10db found by itself under it. */
 export function HazardsSection({ project }: { readonly project: ProjectDto }) {
   const [editing, setEditing] = useState<Hazard | null>(null);
   const [adding, setAdding] = useState(false);
@@ -60,16 +71,14 @@ export function HazardsSection({ project }: { readonly project: ProjectDto }) {
         ),
     },
     {
-      accessor: 'commands',
-      title: 'Commands',
+      accessor: 'covers',
+      title: 'Covers',
       noWrap: true,
-      textAlign: 'right',
-      render: (hazard) => String(hazard.commands.length),
-    },
-    {
-      accessor: 'globs',
-      title: 'Paths',
-      render: (hazard) => <PathLines paths={hazard.globs} />,
+      render: (hazard) => (
+        <Text size="sm" c="dimmed">
+          {coverage(hazard)}
+        </Text>
+      ),
     },
     {
       accessor: 'actions',
@@ -121,7 +130,7 @@ export function HazardsSection({ project }: { readonly project: ProjectDto }) {
           </Group>
         }
       />
-      <HazardAdditions project={project} look={look} />
+      <HazardLookStatus project={project} look={look} />
       <DataTable<Hazard>
         aria-label="Hazards"
         records={project.hazards}
@@ -140,6 +149,7 @@ export function HazardsSection({ project }: { readonly project: ProjectDto }) {
           open(record);
         }}
       />
+      <FoundByTendb project={project} />
       {adding || editing !== null ? (
         <HazardDrawer
           key={editing?.name ?? 'new'}

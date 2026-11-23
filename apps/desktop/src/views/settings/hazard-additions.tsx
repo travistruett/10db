@@ -1,14 +1,28 @@
 import { HazardEntryKind, type HazardAdditionDto, type ProjectDto } from '@10db/contracts';
-import { Alert, Button, Group, Stack, Text } from '@mantine/core';
+import {
+  ActionIcon,
+  Alert,
+  Code,
+  Collapse,
+  Group,
+  Stack,
+  Text,
+  Tooltip,
+  UnstyledButton,
+} from '@mantine/core';
+import { IconArrowBackUp, IconChevronRight } from '@tabler/icons-react';
+import { DataTable, type DataTableColumn } from 'mantine-datatable';
+import { useState } from 'react';
 import {
   useHazardAssessment,
   useUndoHazardAddition,
   type useLookAgainAtHazards,
 } from '../../daemon/hazard-queries';
+import { Pill } from './table-cells';
 
-const KIND_WORDS: Readonly<Record<HazardEntryKind, string>> = {
-  [HazardEntryKind.Command]: 'the command',
-  [HazardEntryKind.Glob]: 'the path pattern',
+const KIND_LABELS: Readonly<Record<HazardEntryKind, string>> = {
+  [HazardEntryKind.Command]: 'Command',
+  [HazardEntryKind.Glob]: 'Path pattern',
 };
 
 /** Where 10db found an addition: the file, and the line when a line named it. */
@@ -20,45 +34,11 @@ export function foundIn(addition: HazardAdditionDto): string {
 const plural = (n: number, one: string, many: string): string =>
   `${String(n)} ${n === 1 ? one : many}`;
 
-function Addition({
-  addition,
-  onUndo,
-  undoing,
-}: {
-  readonly addition: HazardAdditionDto;
-  readonly onUndo: () => void;
-  readonly undoing: boolean;
-}) {
-  return (
-    <Group justify="space-between" align="flex-start" wrap="nowrap">
-      <Stack gap={0}>
-        <Text size="sm">
-          {`Added ${KIND_WORDS[addition.kind]} ${addition.value} to "${addition.hazard}": ${addition.reason}`}
-        </Text>
-        <Text size="xs" c="dimmed">
-          {foundIn(addition)}
-        </Text>
-      </Stack>
-      <Button
-        variant="default"
-        size="compact-sm"
-        aria-label={`Undo ${addition.value}`}
-        disabled={undoing}
-        onClick={onUndo}
-      >
-        Undo
-      </Button>
-    </Group>
-  );
-}
-
 /**
- * What 10db worked out about the project's hazards from its repository and added by itself, each
- * with the reason and the file it came from and an Undo, and the result of the heading's Look Again,
- * which reads the project's main checkout once more. Removals are never applied here; they wait on
- * one Inbox card.
+ * What Look Again found, and how many removals wait on the Inbox: lines under the Hazards heading. Removals are
+ * never applied here; they wait on one Inbox card.
  */
-export function HazardAdditions({
+export function HazardLookStatus({
   project,
   look,
 }: {
@@ -66,13 +46,12 @@ export function HazardAdditions({
   readonly look: ReturnType<typeof useLookAgainAtHazards>;
 }) {
   const assessment = useHazardAssessment(project.id);
-  const undo = useUndoHazardAddition(project.id);
-  const additions = assessment.data?.additions ?? [];
-  const waiting = look.data?.ok === true ? look.data.assessment.pendingRemovals : 0;
-  const pending = assessment.data?.pendingRemovals ?? 0;
-
+  const waiting = Math.max(
+    look.data?.ok === true ? look.data.assessment.pendingRemovals : 0,
+    assessment.data?.pendingRemovals ?? 0,
+  );
   return (
-    <Stack gap="xs">
+    <>
       {look.data?.ok === true ? (
         <Text size="sm">
           {look.data.added === 0
@@ -90,28 +69,118 @@ export function HazardAdditions({
           {look.error.message}
         </Alert>
       ) : null}
-      {Math.max(waiting, pending) > 0 ? (
+      {waiting > 0 ? (
         <Text size="sm">
-          {Math.max(waiting, pending) === 1
+          {waiting === 1
             ? '1 change is waiting in the Inbox for your yes.'
-            : `${String(Math.max(waiting, pending))} changes are waiting in the Inbox for your yes.`}
+            : `${String(waiting)} changes are waiting in the Inbox for your yes.`}
         </Text>
       ) : null}
-      {additions.length > 0 ? (
-        <Text size="sm" fw={500}>
-          Found by 10db
-        </Text>
-      ) : null}
-      {additions.map((addition) => (
-        <Addition
-          key={addition.id}
-          addition={addition}
-          undoing={undo.isPending}
-          onUndo={() => {
-            undo.mutate(addition.id);
-          }}
+    </>
+  );
+}
+
+/**
+ * What 10db worked out about the project's hazards from its repository and added by itself, folded to one line
+ * under the Hazards table. Opened, a table: the hazard each went to, the command or pattern, why, and where it
+ * was found, each with an Undo.
+ */
+export function FoundByTendb({ project }: { readonly project: ProjectDto }) {
+  const assessment = useHazardAssessment(project.id);
+  const undo = useUndoHazardAddition(project.id);
+  const [opened, setOpened] = useState(false);
+  const additions = assessment.data?.additions ?? [];
+  if (additions.length === 0) return null;
+  const columns: DataTableColumn<HazardAdditionDto>[] = [
+    {
+      accessor: 'hazard',
+      title: 'Added To',
+      noWrap: true,
+      render: (addition) => <Pill>{addition.hazard}</Pill>,
+    },
+    {
+      accessor: 'value',
+      title: 'Command or Path',
+      render: (addition) => (
+        <Stack gap={2}>
+          <Code style={{ width: 'fit-content' }}>{addition.value}</Code>
+          <Text size="xs" c="dimmed">
+            {KIND_LABELS[addition.kind]}
+          </Text>
+        </Stack>
+      ),
+    },
+    {
+      accessor: 'reason',
+      title: 'Why',
+      render: (addition) => (
+        <Stack gap={2}>
+          <Text size="sm">{addition.reason}</Text>
+          <Text size="xs" c="dimmed">
+            {foundIn(addition)}
+          </Text>
+        </Stack>
+      ),
+    },
+    {
+      accessor: 'undo',
+      title: '',
+      width: 52,
+      textAlign: 'right',
+      render: (addition) => (
+        <Tooltip label="Undo">
+          <ActionIcon
+            variant="subtle"
+            color="gray"
+            aria-label={`Undo ${addition.value}`}
+            disabled={undo.isPending}
+            onClick={() => {
+              undo.mutate(addition.id);
+            }}
+          >
+            <IconArrowBackUp size={16} stroke={1.5} />
+          </ActionIcon>
+        </Tooltip>
+      ),
+    },
+  ];
+  return (
+    <Stack gap="xs">
+      <UnstyledButton
+        aria-expanded={opened}
+        onClick={() => {
+          setOpened((o) => !o);
+        }}
+      >
+        <Group gap={6} wrap="nowrap">
+          <IconChevronRight
+            size={14}
+            stroke={1.8}
+            style={{
+              transform: opened ? 'rotate(90deg)' : undefined,
+              transition: 'transform 120ms',
+            }}
+          />
+          <Text size="sm" fw={500}>
+            Found by 10db
+          </Text>
+          <Text size="sm" c="dimmed">
+            {plural(additions.length, 'addition', 'additions')}
+          </Text>
+        </Group>
+      </UnstyledButton>
+      <Collapse expanded={opened}>
+        <DataTable<HazardAdditionDto>
+          aria-label="Found by 10db"
+          records={additions}
+          columns={columns}
+          withTableBorder
+          backgroundColor="var(--tendb-color-panel)"
+          borderRadius="md"
+          verticalSpacing="xs"
+          horizontalSpacing="md"
         />
-      ))}
+      </Collapse>
       {undo.error ? (
         <Alert color="red" title="Couldn't undo that">
           {undo.error.message}
