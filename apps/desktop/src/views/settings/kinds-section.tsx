@@ -71,15 +71,11 @@ export function KindsSection() {
       accessor: 'label',
       title: 'Kind',
       noWrap: true,
+      // The key a task carries is the drawer's to show; here the name is enough.
       render: (kind) => (
-        <Stack gap={0}>
-          <Text size="sm" fw={600}>
-            {kind.label}
-          </Text>
-          <Text size="xs" c="dimmed">
-            {kind.key}
-          </Text>
-        </Stack>
+        <Text size="sm" fw={600}>
+          {kind.label}
+        </Text>
       ),
     },
     {
