@@ -23,6 +23,7 @@ export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
     id: mintId('Project'),
     name: 'Demo',
     repoPath: '/tmp/demo',
+    archivedAt: null,
     gateCommand: 'true',
     changedCheckCommand: null,
     precheckCommand: null,
